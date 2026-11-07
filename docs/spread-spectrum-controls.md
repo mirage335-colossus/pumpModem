@@ -262,8 +262,9 @@ bound `b`, draws at or above `floor(2^32/b)*b` are rejected before modulo
 selection, avoiding modulo bias. Unused reserve bytes are skipped, never lent
 to another cycle or cryptographic role. All 64-bit byte arithmetic is checked;
 exhaustion fails explicitly instead of wrapping or replaying an earlier order.
-`FakeFhssV1` remains available for diagnostic vectors only; existing keyfiles,
-FCC/EU/List selections and configured lists need no migration.
+`FakeFhssV1` remains available for diagnostic vectors only. FCC/EU/List
+selections and configured lists need no migration. Keyfiles must use the
+current `DPMKEY04` format; older keyfile versions are rejected.
 
 Only the requested cycle is constructed, even on a distant or backward seek.
 The cache holds one order (at most 200 indices), with an immutable key, epoch and

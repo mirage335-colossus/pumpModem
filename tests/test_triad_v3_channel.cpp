@@ -1,3 +1,4 @@
+#include "triad_crypto_fixture.hpp"
 #include "datapump/triad_modem_v3.hpp"
 #include "channel_perturbation.hpp"
 #include "channel_spread.hpp"
@@ -32,7 +33,7 @@ Crypto fixture_key() {
     Bytes bytes(32);
     for (std::size_t i = 0; i < bytes.size(); ++i)
         bytes[i] = static_cast<std::uint8_t>(i * 13 + 17);
-    return Crypto(bytes);
+    return triad_test_key(bytes);
 }
 
 Format fixture_format() {

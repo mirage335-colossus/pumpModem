@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 // Diagnostic only: two causal trackers, independent hop phases and actual waveform.
 // Reports failures rather than treating the conditional Q=0 model as qualification.
 // Explicit zero diffusion matches tracker declarations; retain mismatch evidence separately.
@@ -22,7 +23,7 @@ helper::IndependentFrequencyAperture aperture(const helper::ToneFrequencyObserva
 void run(double cn0,unsigned seed) {
     modem::Config c;c.sample_rate=8000;c.carrier_hz=1500;c.bandwidth_hz=200;c.spreading_factor=128;c.pulse_shaping=false;
     c.oscillator_search=modem::OscillatorSearchConfig{{100,0},{100,0},30000000,3};
-    transfer::Options opt;opt.modem=c;opt.timestamp=1800000000;opt.key=Crypto(std::array<std::uint8_t,32>{});
+    transfer::Options opt;opt.modem=c;opt.timestamp=1800000000;opt.key=fixture_crypto::key(std::array<std::uint8_t,32>{0xa5},std::array<std::uint8_t,32>{});
     Bytes bits(512);for(std::size_t i=0;i<bits.size();++i)bits[i]=(i*7+i/3)%2;
     auto source=transfer::binary_transmitter(bits,opt);
     helper::Options h;h.power_w=40;h.data_power_w=4;h.callsign="N0CALL";h.timecode=true;

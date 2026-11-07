@@ -10,7 +10,9 @@
 #include <functional>
 #include <cmath>
 #include <optional>
+#include <memory>
 namespace datapump::audio {
+namespace detail {class EntropyCaptureOwner;}
 struct Device {std::string id,description;};
 std::vector<Device> devices();
 // Modem callbacks and supplied/returned PCM use logical_rate. The sound card
@@ -89,6 +91,9 @@ struct Options {
     bool exclusive=false;
     CaptureMonitor capture_monitor={};
     CaptureDiscontinuity capture_discontinuity={};
+    // Internal, unforgeable ownership token for the short keyfile input capture.
+    // A normal capture leaves this empty. It does not grant a source of entropy.
+    std::shared_ptr<const detail::EntropyCaptureOwner> entropy_capture_owner;
     std::function<void(const CaptureSampleMap&)> capture_sample_map={};
     // Follow adjusted system seconds without changing the logical PCM/cipher
     // sequence. A provider must report its timing quality separately; estimated

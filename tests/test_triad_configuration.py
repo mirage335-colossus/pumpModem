@@ -267,6 +267,13 @@ def topology_and_independent_modulation_checks():
 
 
 def main():
+    mode = rows(invoke('--mode', 'fixture-key-mode'))
+    check(mode == [{'schema': 'triad-fixture-key-mode-v1',
+                    'fixture_key_mode': 'v4-dual-lane'}],
+          'candidate fixture unexpectedly selected a legacy key mode')
+    configured = rows(invoke('--mode', 'configure', *COMMON))[0]
+    check(configured['fixture_key_mode'] == 'v4-dual-lane',
+          'configuration omitted the current fixture key mode')
     provenance_precision_checks()
     center_aligned_fhss_checks()
     topology_and_independent_modulation_checks()

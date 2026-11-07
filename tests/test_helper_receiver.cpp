@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/helper_receiver.hpp"
 #include "datapump/helper_carrier.hpp"
 #include "datapump/helper_filter.hpp"
@@ -21,9 +22,49 @@
 
 using namespace datapump;
 namespace {
+// Separate, public synthetic test inputs; never used for production keys.
+static datapump::Crypto fixture_key(std::span<const std::uint8_t> aes) {
+    const std::array<std::uint8_t,32> serpent{0xa5};
+    return fixture_crypto::key(serpent,aes);
+}
+
 constexpr double tau=2*std::numbers::pi;
 void check(bool condition,const std::source_location where=std::source_location::current()) {
     if(!condition)throw std::runtime_error(std::string(where.file_name())+":"+std::to_string(where.line())+" failed");
+}
+void dual_root_workspace_reservation() {
+    const std::array<std::uint8_t,32> aes{0x63};
+    const auto key=fixture_key(aes);
+    // The receiver keeps at most the first supplied key even when the caller's
+    // vector has excess capacity. Its bound includes the separate root storage.
+    helper::Receiver public_receiver(2500,20,{});
+    helper::Receiver waveform_receiver(2500,20,{Crypto(aes)});
+    helper::Receiver private_receiver(2500,20,{key});
+    std::vector<Crypto> keys;
+    keys.reserve(64);
+    for(unsigned i=0;i<8;++i) {
+        auto seed=aes;seed[0]=static_cast<std::uint8_t>(i);
+        keys.push_back(fixture_key(seed));
+    }
+    helper::Receiver compact_receiver(2500,20,std::move(keys));
+    std::vector<Crypto> too_many(9,key);
+    bool excess_declined=false;
+    try {helper::Receiver invalid(2500,20,std::move(too_many));}
+    catch(const Error& error) {
+        excess_declined=std::string_view(error.what()).find("receive-key count")!=std::string_view::npos;
+    }
+    check(excess_declined);
+    for(const std::uint32_t rate:{8000U,96000U}) {
+        const auto required=helper::AuxiliaryMetadataReceiver::workspace_required(rate);
+        const auto pilot=2100+helper::auxiliary_pilot_spacing_hz;
+        bool unfunded=false;
+        try {helper::AuxiliaryMetadataReceiver receiver(rate,2100,pilot,{key},{},required-1);}
+        catch(const Error& error) {
+            unfunded=std::string_view(error.what()).find("not prepaid")!=std::string_view::npos;
+        }
+        check(unfunded);
+        helper::AuxiliaryMetadataReceiver receiver(rate,2100,pilot,{key},{},required);
+    }
 }
 struct Result {std::vector<helper::Reference> updates;};
 // Isolated auxiliary component, extracted from the actual two-tone Generator.
@@ -577,7 +618,7 @@ void auxiliary_punctuation_clock() {
 }
 void timecodes_and_corruption() {
     std::array<std::uint8_t,32> master{};
-    const Crypto key(master);master[0]=1;const Crypto wrong(master);
+    const auto key=fixture_key(master);master[0]=1;const auto wrong=fixture_key(master);
     const auto clear=run(true,"",2100,.2,.034,137,0,true,true);
     std::size_t decoded=0;
     for(const auto& r:clear.updates)if(r.metadata) {
@@ -621,7 +662,7 @@ void encrypted_auxiliary_with_utc_anchor() {
     constexpr std::uint32_t rate=48000;
     constexpr double auxiliary=2100,pilot=auxiliary+helper::auxiliary_pilot_spacing_hz;
     constexpr std::uint64_t epoch=1800000000;
-    std::array<std::uint8_t,32> master{};const Crypto key(master);
+    std::array<std::uint8_t,32> master{};const auto key=fixture_key(master);
     helper::Options options;options.power_w=100;options.callsign="N0CALL";options.timecode=true;
     helper::Generator generator(options,{pilot,.7,.1,100,auxiliary},epoch,true,key);
     helper::AuxiliaryMetadataReceiver receiver(rate,auxiliary,pilot,{key},{},
@@ -889,7 +930,7 @@ void weak_timecode_frequency(std::optional<bool> only={}) {
     // real carrier; this vector does not promise useful acquisition latency.
     constexpr std::uint32_t rate=48000;
     constexpr double expected=6380,frequency=6380.37,amplitude=.01,cn0=20.7609125906;
-    const Crypto key{std::array<std::uint8_t,32>{}};
+    const auto key=fixture_key(std::array<std::uint8_t,32>{});
     for(const bool signal:{false,true}) {
         if(only&&signal!=*only)continue;
       for(const auto fixture:{FrequencyFixture::legacy_auxiliary,FrequencyFixture::current_high_pilot,
@@ -940,7 +981,7 @@ LinkResult shifted_helper_frequency(bool signal,std::size_t chunk) {
     constexpr std::uint32_t rate=48000;
     constexpr double expected=2262.5,offset=30,ppm=100,amplitude=.01,cn0=39.7403126773;
     constexpr double frequency=expected*(1+ppm*1e-6)+offset;
-    const Crypto key{std::array<std::uint8_t,32>{}};
+    const auto key=fixture_key(std::array<std::uint8_t,32>{});
     helper::Options options;options.power_w=1500;options.timecode=true;
     AuxiliaryFixture generator(options,expected,amplitude,0,1800000000,true,key,true);
     helper::FrequencyPrecisionOptions precision;
@@ -1005,10 +1046,11 @@ int main(int argc,char** argv) {
         check(argc<=2);std::cout<<std::unitbuf;
         const std::string_view which=argc==2?argv[1]:"all";
         if(which=="all") {
-            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();two_tone_auxiliary_metadata();nonintegral_rate_punctuation();metadata_does_not_cross_dwells();metadata_frozen_work();auxiliary_punctuation_clock();timecodes_and_corruption();encrypted_auxiliary_with_utc_anchor();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();realistic_frequency();current_frequency_waveforms();weak_timecode_frequency();shifted_frequency();chunks_and_gaps();
+            dual_root_workspace_reservation();clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();two_tone_auxiliary_metadata();nonintegral_rate_punctuation();metadata_does_not_cross_dwells();metadata_frozen_work();auxiliary_punctuation_clock();timecodes_and_corruption();encrypted_auxiliary_with_utc_anchor();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();realistic_frequency();current_frequency_waveforms();weak_timecode_frequency();shifted_frequency();chunks_and_gaps();
         } else if(which=="strong") {
             clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();two_tone_auxiliary_metadata();nonintegral_rate_punctuation();metadata_does_not_cross_dwells();metadata_frozen_work();auxiliary_punctuation_clock();timecodes_and_corruption();encrypted_auxiliary_with_utc_anchor();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();chunks_and_gaps();
-        } else if(which=="pair")paired_marker_identity_and_missing_return();
+        } else if(which=="workspace")dual_root_workspace_reservation();
+        else if(which=="pair")paired_marker_identity_and_missing_return();
         else if(which=="two_tone"){two_tone_auxiliary_metadata();nonintegral_rate_punctuation();metadata_does_not_cross_dwells();metadata_frozen_work();auxiliary_punctuation_clock();}
         else if(which=="three_tone")three_tone_auxiliary_metadata();
         else if(which=="realistic")realistic_frequency();

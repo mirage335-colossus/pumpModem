@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/live.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/helper_carrier.hpp"
@@ -26,6 +27,12 @@
 
 using namespace datapump;
 namespace {
+// Separate, public synthetic test inputs; never used for production keys.
+static datapump::Crypto fixture_key(std::span<const std::uint8_t> aes) {
+    const std::array<std::uint8_t,32> serpent{0xa5};
+    return fixture_crypto::key(serpent,aes);
+}
+
 void check(bool value,const char* reason){if(!value)throw Error(reason);}
 std::uint64_t number(const std::string& line,std::string_view key) {
     const auto field='"'+std::string(key)+"\":";const auto at=line.find(field);
@@ -119,7 +126,7 @@ live::Settings settings(bool independent_clock=false) {
     c.oscillator_search=modem::OscillatorSearchConfig{{independent_clock?100.:0.,0},{2,0},7e6,3};
     std::array<std::uint8_t,32> secret{};
     for(std::size_t i=0;i<secret.size();++i)secret[i]=static_cast<std::uint8_t>(7+11*i);
-    value.transfer.key=Crypto(secret);value.transfer.timestamp=0;value.transfer.search_seconds=0;
+    value.transfer.key=fixture_key(secret);value.transfer.timestamp=0;value.transfer.search_seconds=0;
     value.transfer.clock_sync.reset();value.transfer.audio_timing_error_seconds=.07;
     value.transfer.automatic_receive_profiles=false;value.transfer.recovery_options.enabled=false;
     value.dsp_workspace_bytes=value.transfer.dsp_workspace_bytes=128ULL*1024*1024;

@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/helper_carrier.hpp"
 #include "datapump/modem.hpp"
 #include "datapump/types.hpp"
@@ -18,6 +19,12 @@
 
 namespace h=datapump::helper;
 namespace {
+// Separate, public synthetic test inputs; never used for production keys.
+static datapump::Crypto fixture_key(std::span<const std::uint8_t> aes) {
+    const std::array<std::uint8_t,32> serpent{0xa5};
+    return fixture_crypto::key(serpent,aes);
+}
+
 constexpr double tau=2*std::numbers::pi;
 void require(bool value,const char* message) {if(!value)throw std::runtime_error(message);}
 template<class F>void rejects(F f) {
@@ -83,7 +90,7 @@ void power_and_placement() {
     // Mean modulation energy and gain can change with the new record, but
     // matching options must never shift the independently placed tones.
     std::array<std::uint8_t,32> placement_key_bytes{};placement_key_bytes[0]=37;
-    const datapump::Crypto placement_key(placement_key_bytes);
+    const auto placement_key=fixture_key(placement_key_bytes);
     for(const auto gating:{false,true})for(const auto geometry:
             std::array<std::array<double,2>,2>{{{1725,200},{4000,3000}}}) {
         const h::PlacementBand band{geometry[0],geometry[1],0,gating};
@@ -135,7 +142,7 @@ void power_and_placement() {
 void active_average_and_continuous_pilots() {
     constexpr std::uint32_t rate=48000;
     std::array<std::uint8_t,32> key_bytes{};key_bytes[0]=23;
-    const datapump::Crypto key(key_bytes);
+    const auto key=fixture_key(key_bytes);
     for(const auto gating:{false,true})for(const auto callsign:{"","N0CALL","ABCDEFGHIJKLMNOP"})for(const auto encrypted:{false,true})for(const auto measured:{false,true}) {
         h::Options options;options.power_w=40;options.data_power_w=4;options.callsign=callsign;
         h::PowerReference reference;reference.epoch=1800000000;reference.begin_seconds=.013L;reference.end_seconds=1.189L;
@@ -271,7 +278,7 @@ void timecode_generation() {
         "combined metadata did not carry both callsign and time phase");
     std::array<std::uint8_t,32> master{};
     for(std::size_t i=0;i<master.size();++i)master[i]=static_cast<std::uint8_t>(3*i+1);
-    const datapump::Crypto key(master);
+    const auto key=fixture_key(master);
     const std::array<datapump::Crypto,1> keys{key};
     const h::Generator encrypted(options,plan,epoch,true,key);
     const auto encrypted_packet=packet_at(encrypted,0);
@@ -526,7 +533,7 @@ void spectrum() {
     // punctuation or modulation sidebands. 2.5Hz FFT bins at10240Hz.
     std::array<std::uint8_t,32> master{};
     for(std::size_t i=0;i<master.size();++i)master[i]=static_cast<std::uint8_t>(i+23);
-    const datapump::Crypto key(master);
+    const auto key=fixture_key(master);
     struct MetadataCase {std::string_view callsign;bool encrypted,timecode;};
     for(const auto& test:std::array<MetadataCase,5>{{{"",false,false},{"",false,true},{"",true,true},
             {"N0CALL",false,true},{"ABCDEFGHIJKLMNOP",false,true}}}) {

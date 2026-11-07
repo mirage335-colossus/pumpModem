@@ -20,7 +20,8 @@ The extra wait is a cryptographically selected whole number from zero through
 the limit, inclusive. Without a communication key its effective value is zero;
 the saved limit remains available when encryption is enabled. The wait stream
 has its own versioned cryptographic domain and uses the actual symbol UTC
-address. Existing stream domains and keyfiles retain their meanings.
+address. Current keyfile and confidentiality-suite requirements are described
+in the [cryptography guide](crypto.md).
 
 Symbol_Burst does not use dwell times or introduce ramps. FHSS remains a separate
 layer with its existing power ramps and hop timing. This implementation rejects

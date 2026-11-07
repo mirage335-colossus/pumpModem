@@ -14,6 +14,8 @@ def complex_values(data):
     return [complex(real, imag) for real, imag in struct.iter_unpack('<dd', data)]
 
 BINARY = Path(sys.argv.pop(1)).resolve() if len(sys.argv) > 1 and not sys.argv[1].startswith('-') else None
+KEY_FIXTURE = (Path(sys.argv.pop(1)).resolve() if len(sys.argv) > 1 and not sys.argv[1].startswith('-')
+               else BINARY.with_name('test_triad_keyfile_fixture') if BINARY else None)
 COMMON = ['--case', 'hf', '--sample-rate', '6000', '--rate', '100', '--added-symbols', '1',
           '--epoch', '1793850000', '--key-seed', '72001', '--seed', '7', '--seconds', '8',
           '--control', 'flat', '--oscillator-effects', 'off', '--arrival-seconds', '0',
@@ -298,12 +300,85 @@ class PullSourceTests(unittest.TestCase):
         self.assertIn(b'requires --key-file', failed.stderr)
         with tempfile.TemporaryDirectory() as directory:
             key = Path(directory)/'key'; key.write_bytes(bytes(range(32)))
-            proc = subprocess.Popen([str(BINARY), *args, '--stream-server', '--key-file', str(key)],
-                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            json.loads(proc.stdout.readline()); descriptor=json.loads(proc.stdout.readline())
-            self.assertEqual(descriptor['key_source'], 'raw-key-file')
-            out, error = proc.communicate(b'next 16385\n', timeout=10)
-            self.assertNotEqual(proc.returncode, 0)
+            old = subprocess.run([str(BINARY), *args, '--stream-server', '--key-file', str(key)],
+                                 input=b'', capture_output=True, timeout=10)
+            self.assertNotEqual(old.returncode, 0, 'single-lane raw key must be rejected')
+            self.assertIn(b'invalid keyfile length', old.stderr)
+            key.write_bytes(bytes(range(128)))
+            raw = subprocess.run([str(BINARY), *args, '--stream-server', '--key-file', str(key)],
+                                 input=b'', capture_output=True, timeout=10)
+            self.assertNotEqual(raw.returncode, 0, 'raw dual-lane key must be rejected')
+            self.assertIn(b'unsupported keyfile format', raw.stderr)
+        # The generator is linked only into this test target. Its deterministic
+        # synthetic audio and keyfiles are public fixtures, not operational keys.
+        self.assertIsNotNone(KEY_FIXTURE, 'test-only keyfile generator is required')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            single, multi = root/'single.key', root/'multi.key'
+            subprocess.run([str(KEY_FIXTURE), str(single), 'single'], check=True, timeout=90)
+            def accepted(key, *extra, data_offset=None, sample_rate=None):
+                # The bounded basis command can inspect the DATA coordinate
+                # directly, without rendering the 38-second lead-in.
+                command = (f'basis {data_offset} 4096 1\n'
+                           f'0 0 {data_offset/sample_rate} 0 0 0 0\nquit\n').encode() if data_offset is not None else b'quit\n'
+                proc = subprocess.run([str(BINARY), *args, '--stream-server', '--key-file', str(key), *extra],
+                                      input=command, capture_output=True, timeout=180)
+                self.assertEqual(proc.returncode, 0, proc.stderr.decode(errors='replace'))
+                lines = proc.stdout.split(b'\n', 3)
+                self.assertEqual(len(lines), 4, 'keyfile startup omitted its descriptor or block')
+                descriptor = json.loads(lines[1])
+                self.assertEqual(descriptor['key_source'], 'keyfile')
+                if data_offset is None:
+                    self.assertTrue(json.loads(lines[2])['stopped'])
+                    return descriptor
+                self.assertEqual(descriptor['data_offset_samples'], data_offset)
+                self.assertEqual(descriptor['sample_rate_hz'], sample_rate)
+                header = json.loads(lines[2])
+                self.assertEqual((header['count'], header['columns'], header['first_sample']), (4096, 1, data_offset))
+                self.assertGreaterEqual(len(lines[3]), 16*4096, 'truncated DATA basis block')
+                data = lines[3][:16*4096]
+                self.assertTrue(any(value != 0 for value in complex_values(data)), 'DATA basis was silent')
+                return data
+            descriptor = accepted(single)
+            subprocess.run([str(KEY_FIXTURE), str(multi), 'multi'], check=True, timeout=90)
+            for name_args, diagnostic in (((), b'--key-name is required'),
+                                          (('--key-name', 'Missing'), b'named key is not present')):
+                failed = subprocess.run([str(BINARY), *args, '--stream-server', '--key-file', str(multi), *name_args],
+                                        input=b'', capture_output=True, timeout=90)
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertIn(diagnostic, failed.stderr)
+            coordinate = dict(data_offset=descriptor['data_offset_samples'], sample_rate=descriptor['sample_rate_hz'])
+            first = accepted(multi, '--key-name', 'First', **coordinate)
+            first_again = accepted(multi, '--key-name', 'First', **coordinate)
+            second = accepted(multi, '--key-name', 'Second', **coordinate)
+            self.assertEqual(first, first_again, 'named selection was not reproducible')
+            self.assertNotEqual(first, second, 'named selection reused another entry\'s waveform')
+            with multi.open('r+b') as handle:
+                handle.seek(-1, 2); original = handle.read(1)
+                handle.seek(-1, 2); handle.write(bytes([original[0] ^ 1]))
+            damaged = subprocess.run([str(BINARY), *args, '--stream-server', '--key-file', str(multi), '--key-name', 'Second'],
+                                     input=b'', capture_output=True, timeout=90)
+            self.assertNotEqual(damaged.returncode, 0)
+            self.assertIn(b'authentication failed', damaged.stderr)
+            # Production pad policy is >1 GiB. Sparse fixtures exercise the
+            # real loader and are never used as operational key material.
+            pad, wrong, padded = root/'pad', root/'wrong-pad', root/'padded.key'
+            for path, last in ((pad, b'\x01'), (wrong, b'\x02')):
+                with path.open('wb') as handle:
+                    handle.seek(1024*1024*1024); handle.write(last)
+            subprocess.run([str(KEY_FIXTURE), str(padded), 'single', str(pad)], check=True, timeout=180)
+            missing = subprocess.run([str(BINARY), *args, '--stream-server', '--key-file', str(padded)],
+                                     input=b'', capture_output=True, timeout=90)
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn(b'requires an optional external pad', missing.stderr)
+            bad_pad = subprocess.run([str(BINARY), *args, '--stream-server', '--key-file', str(padded), '--pad', str(wrong)],
+                                     input=b'', capture_output=True, timeout=180)
+            self.assertNotEqual(bad_pad.returncode, 0)
+            self.assertIn(b'authentication failed', bad_pad.stderr)
+            accepted(padded, '--pad', str(pad))
+        with Source() as source:
+            _, error = source.process.communicate(b'next 16385\n', timeout=10)
+            self.assertNotEqual(source.process.returncode, 0)
             self.assertIn(b'COUNT', error)
         with Source() as source:
             source.process.stdin.write(b'basis 0 4 1\n0 7 0 0 0 0 0\n')

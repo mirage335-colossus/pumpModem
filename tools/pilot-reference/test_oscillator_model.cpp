@@ -169,7 +169,9 @@ void decreasing_then_increasing_scatter(bool positive=false) {
 void actual_channel(double cn0,unsigned seed) {
     modem::Config cfg;cfg.sample_rate=8000;cfg.carrier_hz=1500;cfg.bandwidth_hz=200;cfg.spreading_factor=128;cfg.pulse_shaping=false;
     cfg.oscillator_search=modem::OscillatorSearchConfig{{100,0},{2,0},7e6,3};
-    transfer::Options options;options.modem=cfg;options.timestamp=1800000000;options.key=Crypto(std::array<std::uint8_t,32>{});
+    transfer::Options options;options.modem=cfg;options.timestamp=1800000000;
+    std::array<std::uint8_t,64> serpent{},aes{};serpent.fill(0xa7);
+    options.key=Crypto::from_independent_roots(serpent,aes);
     Bytes bits(64);for(std::size_t i=0;i<bits.size();++i)bits[i]=(i*7+i/3)%2;auto source=transfer::binary_transmitter(bits,options);
     helper::Options helper;helper.power_w=40;helper.data_power_w=4;helper.callsign="N0CALL";helper.timecode=true;
     const auto plan=helper::plan(helper,helper::placement_band(cfg),120000000,0,modem::outer_dsss_transmit_gain(cfg));
@@ -200,7 +202,9 @@ void actual_channel(double cn0,unsigned seed) {
 void actual_rf_drift(double cn0,int side,double slew,unsigned seed) {
     modem::Config cfg;cfg.sample_rate=8000;cfg.carrier_hz=1500;cfg.bandwidth_hz=200;cfg.spreading_factor=128;cfg.pulse_shaping=false;
     cfg.oscillator_search=modem::OscillatorSearchConfig{{100,0},{2,0},7e6,3};
-    transfer::Options options;options.modem=cfg;options.timestamp=1800000000;options.key=Crypto(std::array<std::uint8_t,32>{});
+    transfer::Options options;options.modem=cfg;options.timestamp=1800000000;
+    std::array<std::uint8_t,64> serpent{},aes{};serpent.fill(0xa7);
+    options.key=Crypto::from_independent_roots(serpent,aes);
     Bytes bits(64);for(std::size_t i=0;i<bits.size();++i)bits[i]=(i*7+i/3)%2;auto source=transfer::binary_transmitter(bits,options);
     helper::Options helper;helper.power_w=40;helper.data_power_w=4;helper.callsign="N0CALL";helper.timecode=true;
     const auto plan=helper::plan(helper,helper::placement_band(cfg),120000000,0,modem::outer_dsss_transmit_gain(cfg));

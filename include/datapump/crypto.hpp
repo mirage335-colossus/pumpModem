@@ -7,6 +7,9 @@
 #include <optional>
 #include <memory>
 #include <span>
+#include <functional>
+#include <stop_token>
+#include <string_view>
 
 namespace datapump {
 
@@ -39,12 +42,20 @@ private:
 // offset is a byte position within that epoch's stream, not wall-clock time.
 class Crypto {
 public:
+    // AES-only waveform/MAC seed. This constructor cannot encrypt user data.
     explicit Crypto(std::span<const std::uint8_t> master_key);
     ~Crypto();
     Crypto(const Crypto&) noexcept;
     Crypto& operator=(const Crypto&);
 
+    // Low-latency random waveform/MAC seed; confidentiality remains unavailable.
     static Crypto random();
+    // Explicit, independently supplied 64-byte roots. Serpent material never
+    // enters an AES cipher, waveform or mac() derivation and AES material never
+    // enters a Serpent derivation. AES root bytes 0..31 seed the existing five
+    // waveform/MAC purpose keys. Deterministic callers must provide both roots.
+    static Crypto from_independent_roots(std::span<const std::uint8_t> serpent_root,
+                                        std::span<const std::uint8_t> aes_root);
     // Domains share the existing purpose/epoch key. The high counter bytes
     // are zero for Payload, ASCII "preamble" for Preamble, and ASCII
     // "suppress" for Suppression, "pat-v2-0" / "pat-v2-1" for the two
@@ -95,6 +106,15 @@ public:
     Bytes mac(std::span<const std::uint8_t> message) const;
     bool verify(std::span<const std::uint8_t> message,
                 std::span<const std::uint8_t> tag) const;
+    // Authentication for confidential user data: independently keyed full
+    // HMAC-SHA256 tags from both lanes are XORed. This result is never used
+    // to derive an AES waveform or confidentiality key.
+    Bytes confidentiality_mac(std::span<const std::uint8_t> message) const;
+    bool verify_confidentiality(std::span<const std::uint8_t> message,
+                                std::span<const std::uint8_t> tag) const;
+    // Key-bank identity only. Includes both confidentiality lanes where
+    // available, with a distinct domain for AES-only waveform keys.
+    Bytes identity_fingerprint(std::span<const std::uint8_t> context) const;
 
 private:
     friend struct KeyringAccess;
@@ -107,17 +127,54 @@ private:
 inline constexpr std::uint64_t keyfile_header_bytes = 128ULL * 1024 * 1024;
 inline constexpr std::uint64_t minimum_keyfile_pad_bytes = 1024ULL * 1024 * 1024 + 1;
 
-void create_keyfile(const std::filesystem::path& path,
-                    const std::optional<std::filesystem::path>& pad = std::nullopt);
+// A fresh physical-audio provider streams selected mono samples at provider
+// rate until complete(). Calls must be externally serialized; the provider
+// must unsubscribe and drain its callback before returning. The sink keeps only
+// bounded transient scratch and health samples, cleansed at teardown; it makes
+// no recording. This is supplementary entropy,
+// not an entropy estimate or a claim about device noise.
+class AudioEntropySink final {
+public:
+    ~AudioEntropySink();
+    AudioEntropySink(const AudioEntropySink&) = delete;
+    AudioEntropySink& operator=(const AudioEntropySink&) = delete;
+    void add_samples(std::span<const float> mono, std::uint32_t sample_rate);
+    bool complete() const noexcept;
+private:
+    friend struct KeyringAccess;
+    AudioEntropySink();
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+using KeyfileAudioSource = std::function<void(AudioEntropySink&, std::stop_token)>;
+class AudioEntropyUnavailable : public Error {
+public:
+    using Error::Error;
+};
+struct KeyfileGenerationOptions {
+    KeyfileAudioSource audio;
+    std::stop_token stop;
+    std::function<void(std::string_view)> progress;
+    bool allow_audio_fallback=false;
+};
+struct KeyfileGenerationResult {
+    bool audio_used=false;
+    std::string warning;
+};
+
+[[nodiscard]] KeyfileGenerationResult create_keyfile(const std::filesystem::path& path,
+                    const std::optional<std::filesystem::path>& pad = std::nullopt,
+                    const KeyfileGenerationOptions& generation = {});
 Crypto load_keyfile(const std::filesystem::path& path,
                     const std::optional<std::filesystem::path>& pad = std::nullopt);
 
 struct KeyEntry { std::string name; Crypto key; };
-// Version 3 stores multiple independent named key sets in one authenticated,
-// encrypted payload behind the same 128 MiB random header. Legacy v1 files
-// load as one entry named "Default". No plaintext key export is exposed.
-void create_keyring(const std::filesystem::path& path, const std::vector<std::string>& names,
-                    const std::optional<std::filesystem::path>& pad = std::nullopt);
+// Version 4 stores independently derived cipher roots in an authenticated
+// cascade behind the 128 MiB random header. Older formats are rejected.
+// No plaintext key export is exposed.
+[[nodiscard]] KeyfileGenerationResult create_keyring(const std::filesystem::path& path, const std::vector<std::string>& names,
+                    const std::optional<std::filesystem::path>& pad = std::nullopt,
+                    const KeyfileGenerationOptions& generation = {});
 std::vector<KeyEntry> load_keyring(const std::filesystem::path& path,
                     const std::optional<std::filesystem::path>& pad = std::nullopt);
 
@@ -128,13 +185,15 @@ struct KeyfilePolicy {
     std::uint64_t header_bytes;
     std::uint64_t minimum_pad_bytes;
 };
-void create_keyfile(const std::filesystem::path& path, const KeyfilePolicy& policy,
-                    const std::optional<std::filesystem::path>& pad = std::nullopt);
+[[nodiscard]] KeyfileGenerationResult create_keyfile(const std::filesystem::path& path, const KeyfilePolicy& policy,
+                    const std::optional<std::filesystem::path>& pad = std::nullopt,
+                    const KeyfileGenerationOptions& generation = {});
 Crypto load_keyfile(const std::filesystem::path& path, const KeyfilePolicy& policy,
                     const std::optional<std::filesystem::path>& pad = std::nullopt);
-void create_keyring(const std::filesystem::path& path, const std::vector<std::string>& names,
+[[nodiscard]] KeyfileGenerationResult create_keyring(const std::filesystem::path& path, const std::vector<std::string>& names,
                     const KeyfilePolicy& policy,
-                    const std::optional<std::filesystem::path>& pad = std::nullopt);
+                    const std::optional<std::filesystem::path>& pad = std::nullopt,
+                    const KeyfileGenerationOptions& generation = {});
 std::vector<KeyEntry> load_keyring(const std::filesystem::path& path, const KeyfilePolicy& policy,
                     const std::optional<std::filesystem::path>& pad = std::nullopt);
 } // namespace testing

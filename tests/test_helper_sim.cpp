@@ -14,13 +14,12 @@
 using namespace datapump;
 namespace {
 void check(bool value,const char* message) {if(!value)throw Error(message);}
-// Moving fixed presentation storage must not grow either mode's reserved
-// share, or the existing total plot/channel budget.
+// Both Helper reservations fit within the existing total plot/channel budget.
 static_assert(modem::SampledSimulationChannel::workspace_bound==80*1024);
 static_assert(modem::SampledSimulationChannel::auxiliary_workspace_bound+
-    modem::SampledSimulationChannel::helper_cohort_workspace_bound==23*1024);
+    modem::SampledSimulationChannel::helper_cohort_workspace_bound==23*1024+256);
 static_assert(modem::SampledSimulationChannel::auxiliary_workspace_bound+
-    modem::SampledSimulationChannel::physical_helper_cohort_workspace_bound==26*1024);
+    modem::SampledSimulationChannel::physical_helper_cohort_workspace_bound==26*1024+256);
 modem::Config config(std::uint32_t rate=8000) {
     modem::Config c;c.sample_rate=rate;c.carrier_hz=rate==8000?1500:500;
     c.bandwidth_hz=rate==8000?1000:200;c.spreading_factor=64;c.stream_epoch=1800000000;

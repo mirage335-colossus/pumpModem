@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/helper_filter.hpp"
 #include "datapump/live.hpp"
@@ -19,6 +20,12 @@
 using namespace datapump;
 using namespace std::chrono_literals;
 namespace {
+// Separate, public synthetic test inputs; never used for production keys.
+static datapump::Crypto fixture_key(std::span<const std::uint8_t> aes) {
+    const std::array<std::uint8_t,32> serpent{0xa5};
+    return fixture_crypto::key(serpent,aes);
+}
+
 constexpr std::uint64_t epoch=1800000000;
 void check(bool value,const char* reason){if(!value)throw Error(reason);}
 std::atomic<bool> admitted=false,committed=false,replayed=false;
@@ -40,7 +47,7 @@ live::Settings settings(bool beacon) {
     value.transfer.timestamp=epoch;value.transfer.search_seconds=2;
     value.transfer.automatic_receive_profiles=false;value.transfer.recovery_options.enabled=false;
     std::array<std::uint8_t,32> key{};for(std::size_t i=0;i<key.size();++i)key[i]=i*11+7;
-    value.transfer.key=Crypto(key);
+    value.transfer.key=fixture_key(key);
     auto& c=value.transfer.modem;c.sample_rate=12000;c.carrier_hz=1000;c.bandwidth_hz=200;
     c.spreading_factor=64;c.pulse_shaping=false;c.scramble=true;c.receiver_strategy=modem::ReceiverStrategy::complex_only;
     c.oscillator_search=modem::OscillatorSearchConfig{

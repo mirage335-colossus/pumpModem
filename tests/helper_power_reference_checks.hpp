@@ -1,5 +1,6 @@
 #pragma once
 #include "../src/helper_power_reference.hpp"
+#include "fixture_crypto.hpp"
 #include <cmath>
 #include <chrono>
 #include <iostream>
@@ -50,7 +51,7 @@ inline void test_helper_power_reference() {
     {
         auto narrow=actual;narrow.sample_rate=6000;narrow.bandwidth_hz=1;
         narrow.integration_seconds=0;narrow.stream_phase_samples=0;narrow.pulse_shaping=true;
-        narrow.scramble=true;narrow.data_key.emplace(Bytes(32,0x52));
+        narrow.scramble=true;narrow.data_key=fixture_crypto::key(Bytes(32,0xa7),Bytes(32,0x52));
         modem::StreamingTransmitter inspected(modem::RawBits{{0}},narrow,8*1024*1024,capture);
         modem::StreamingTransmitter clean(modem::RawBits{{0}},narrow,8*1024*1024,capture);
         const auto narrow_reference=helper::transmit_power_reference(narrow,inspected,narrow.stream_epoch,
@@ -84,7 +85,7 @@ inline void test_helper_power_reference() {
         "Symbol_Burst reference averaged its long null intervals");
 
     auto scheduled=actual;scheduled.stream_phase_samples=0;scheduled.integration_seconds=1.5;
-    scheduled.scramble=true;scheduled.data_key.emplace(Bytes(32,0x67));
+    scheduled.scramble=true;scheduled.data_key=fixture_crypto::key(Bytes(32,0xa7),Bytes(32,0x67));
     auto schedule=std::make_shared<modem::SchedHopPlan>();
     schedule->time_multiplier=10000;schedule->group_hops=1;
     schedule->clock_error_seconds=schedule->peer_clock_error_seconds=.001;
@@ -120,7 +121,7 @@ inline void test_helper_power_reference() {
         "power reference failed to advance past a guarded scheduled group end");
 
     auto hopping=actual;hopping.stream_phase_samples=0;hopping.integration_seconds=1.5;
-    hopping.pulse_shaping=true;hopping.scramble=true;hopping.data_key.emplace(Bytes(32,0x73));
+    hopping.pulse_shaping=true;hopping.scramble=true;hopping.data_key=fixture_crypto::key(Bytes(32,0xa7),Bytes(32,0x73));
     auto plan=std::make_shared<modem::FhssPlan>();
     plan->channels=2;plan->shifts[0]=30000000;plan->shifts[1]=31000000;
     plan->dwell_seconds=.4;plan->power_ramps=plan->mandatory_ramps=plan->smooth_ramps=true;

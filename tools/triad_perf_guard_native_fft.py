@@ -139,6 +139,18 @@ class NativeFFTWorkloads:
             if path.is_symlink() or not path.is_file():
                 raise ValueError("missing or symlinked measurement input: " + str(path))
             result[name] = native.file_sha(path)
+        header = "reference:tools/triad_fixture_key.hpp"
+        driver = paths.get("reference:tools/triad-long.cpp")
+        if result.get(header) == fixtures.ABSENT_SOURCE and driver is not None and "triad_fixture_key.hpp" in driver.read_text():
+            raise ValueError("historical triad driver includes missing fixture key header")
+        serpent = [result.get("reference:" + name) == fixtures.ABSENT_SOURCE
+                   for name in ("src/serpent.cpp", "include/datapump/serpent.hpp")]
+        if any(serpent) and not all(serpent):
+            raise ValueError("historical source has incomplete Serpent implementation")
+        if all(serpent):
+            for name, path in paths.items():
+                if name.startswith("reference:") and path.suffix in (".cpp", ".hpp", ".h", ".cc") and path.is_file() and "serpent.hpp" in path.read_text():
+                    raise ValueError("historical source includes missing Serpent header")
         return result
 
     def _check_sources(self):

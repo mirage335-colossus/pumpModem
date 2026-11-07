@@ -7,10 +7,11 @@
 #include <openssl/evp.h>
 #include <openssl/kdf.h>
 #include <openssl/params.h>
-#include <openssl/rand.h>
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
+#include <cmath>
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
@@ -42,41 +43,29 @@
 #endif
 
 namespace datapump {
-// Payload roots are immutable after construction. Only the reference count is
-// mutable; distinct Crypto values can therefore share a root across workers.
-// A legacy waveform-only Crypto keeps a null pointer and allocates no root.
+// The two immutable lanes are independently derived and never concatenated as
+// input to any cipher-key KDF. Value copies share only storage ownership.
 struct Crypto::ConfidentialityMaterial {
     mutable std::atomic<std::size_t> owners{1};
-    std::array<std::uint8_t,64> bytes;
-    explicit ConfidentialityMaterial(std::span<const std::uint8_t,64> input) noexcept {
-        std::copy(input.begin(),input.end(),bytes.begin());
+    std::array<std::uint8_t,64> serpent;
+    std::array<std::uint8_t,64> aes;
+    ConfidentialityMaterial(std::span<const std::uint8_t,64> s,
+                            std::span<const std::uint8_t,64> a) noexcept {
+        std::copy(s.begin(),s.end(),serpent.begin());
+        std::copy(a.begin(),a.end(),aes.begin());
     }
-    ~ConfidentialityMaterial(){OPENSSL_cleanse(bytes.data(),bytes.size());}
+    ~ConfidentialityMaterial(){OPENSSL_cleanse(serpent.data(),serpent.size());OPENSSL_cleanse(aes.data(),aes.size());}
     void retain() const noexcept {owners.fetch_add(1,std::memory_order_relaxed);}
     void release() const noexcept {
         if(owners.fetch_sub(1,std::memory_order_acq_rel)==1)delete this;
     }
 };
-// Only the authenticated keyfile codec serializes complete purpose-key sets.
-// The public API exposes operations, never raw secret material.
 struct KeyringAccess {
-    static constexpr std::size_t legacy_bytes=5*32;
-    static constexpr std::size_t bytes=legacy_bytes+64;
-    static void encode(const Crypto& key,std::span<std::uint8_t> output) {
-        for(std::size_t i=0;i<5;++i) std::copy(key.keys_[i].begin(),key.keys_[i].end(),output.begin()+static_cast<std::ptrdiff_t>(i*32));
-        root(key,std::span<std::uint8_t,64>(output.data()+legacy_bytes,64));
-    }
-    static Crypto decode(std::span<const std::uint8_t> input) {
-        Crypto key;
-        for(std::size_t i=0;i<5;++i) std::copy_n(input.begin()+static_cast<std::ptrdiff_t>(i*32),32,key.keys_[i].begin());
-        if(input.size()==bytes){
-            key.confidentiality_=new Crypto::ConfidentialityMaterial(
-                std::span<const std::uint8_t,64>(input.data()+legacy_bytes,64));
-        }
-        return key;
-    }
-    static void root(const Crypto& key,std::span<std::uint8_t,64> output);
-    static Crypto fresh(std::span<const std::uint8_t> material);
+    static constexpr std::size_t bytes=128;
+    static void encode(const Crypto& key,std::span<std::uint8_t> output);
+    static Crypto decode(std::span<const std::uint8_t> input);
+    static std::span<const std::uint8_t,64> root(const Crypto& key,bool serpent);
+    static void collect_audio(const KeyfileGenerationOptions&,std::span<std::uint8_t,64>);
 };
 namespace {
 using View = std::span<const std::uint8_t>;
@@ -92,11 +81,9 @@ struct FileCloser {
 using File = std::unique_ptr<std::FILE, FileCloser>;
 
 constexpr std::string_view hkdf_salt = "datapump/v1/hkdf-sha256";
-constexpr std::string_view keyfile_hash_domain = "datapump/v1/keyfile-hash";
 constexpr std::array<std::string_view, 5> purpose_labels{
     "datapump/v1/data", "datapump/v1/dsss", "datapump/v1/scrambler",
     "datapump/v1/fhss", "datapump/v1/mac"};
-constexpr std::array<std::uint8_t, 8> keyfile_magic{'D', 'P', 'M', 'K', 'E', 'Y', '0', '1'};
 constexpr std::size_t prefix_size = 48;
 constexpr std::size_t chunk_size = 65536;
 constexpr testing::KeyfilePolicy normal_policy{keyfile_header_bytes, minimum_keyfile_pad_bytes};
@@ -117,14 +104,6 @@ View view(std::string_view text) {
 }
 void require(bool condition, const char* message) {
     if (!condition) throw Error(message);
-}
-void random_fill(std::span<std::uint8_t> data) {
-    for (std::size_t offset = 0; offset < data.size();) {
-        const auto count = std::min(data.size() - offset, static_cast<std::size_t>(std::numeric_limits<int>::max()));
-        require(RAND_priv_bytes(data.data() + offset, static_cast<int>(count)) == 1,
-                "OpenSSL random generation failed");
-        offset += count;
-    }
 }
 // Obtain bytes directly from the platform CSPRNG, bypassing OpenSSL's default
 // AES-CTR DRBG for confidentiality roots and new keyfile construction.
@@ -189,7 +168,7 @@ Secret<32> hkdf(View input, View info) {
 }
 
 Secret<64> cascade_kdf(View input,View info) {
-    constexpr std::string_view salt="datapump/cascade/v1/hkdf-sha512";
+    constexpr std::string_view salt="datapump/cascade/v2/hkdf-sha512";
     Kdf algorithm(EVP_KDF_fetch(nullptr,"HKDF",nullptr),EVP_KDF_free);
     require(static_cast<bool>(algorithm),"OpenSSL HKDF unavailable");
     KdfContext context(EVP_KDF_CTX_new(algorithm.get()),EVP_KDF_CTX_free);
@@ -205,6 +184,25 @@ Secret<64> cascade_kdf(View input,View info) {
     Secret<64> result;
     require(EVP_KDF_derive(context.get(),result.bytes.data(),result.bytes.size(),params)==1,"OpenSSL SHA512 HKDF derivation failed");
     return result;
+}
+
+template<std::size_t N> Secret<N> hmac_digest(View key,View message,const char* name) {
+    Mac algorithm(EVP_MAC_fetch(nullptr,"HMAC",nullptr),EVP_MAC_free);
+    require(static_cast<bool>(algorithm),"OpenSSL HMAC unavailable");
+    MacContext context(EVP_MAC_CTX_new(algorithm.get()),EVP_MAC_CTX_free);
+    char digest[16]{};require(std::strlen(name)<sizeof(digest),"invalid HMAC digest");std::strcpy(digest,name);
+    OSSL_PARAM params[]{OSSL_PARAM_construct_utf8_string(OSSL_MAC_PARAM_DIGEST,digest,0),OSSL_PARAM_construct_end()};
+    require(context && EVP_MAC_init(context.get(),key.data(),key.size(),params)==1 && EVP_MAC_update(context.get(),message.data(),message.size())==1,"OpenSSL HMAC initialization failed");
+    Secret<N> result;std::size_t count=0;
+    require(EVP_MAC_final(context.get(),result.bytes.data(),&count,result.bytes.size())==1 && count==result.bytes.size(),"OpenSSL HMAC finalization failed");return result;
+}
+Bytes hmac_sha256(View key,View message) {
+    const auto tag=hmac_digest<32>(key,message,"SHA256");return Bytes(tag.bytes.begin(),tag.bytes.end());
+}
+
+Bytes keyfile_auth_input(View prefix,View outer) {
+    const auto label=view("datapump/v4/keyfile-auth/");Bytes input(label.begin(),label.end());input.insert(input.end(),prefix.begin(),prefix.end());
+    const auto old=input.size();input.resize(old+8);put_u64(std::span(input).subspan(old,8),outer.size());input.insert(input.end(),outer.begin(),outer.end());return input;
 }
 
 Bytes contextual_info(std::string_view domain,View context,View salt={}) {
@@ -255,27 +253,6 @@ void serpent_cbc(std::span<std::uint8_t> data,View key,View iv,bool encrypt) {
     serpent_cbc_prepared(data,serpent,iv,encrypt);
 }
 
-class Hash {
-public:
-    Hash() : context_(EVP_MD_CTX_new(), EVP_MD_CTX_free) {
-        require(context_ && EVP_DigestInit_ex(context_.get(), EVP_sha256(), nullptr) == 1,
-                "OpenSSL SHA256 initialization failed");
-    }
-    void update(View data) {
-        require(EVP_DigestUpdate(context_.get(), data.data(), data.size()) == 1,
-                "OpenSSL SHA256 update failed");
-    }
-    Secret<32> finish() {
-        Secret<32> result;
-        unsigned int size = 0;
-        require(EVP_DigestFinal_ex(context_.get(), result.bytes.data(), &size) == 1 && size == 32,
-                "OpenSSL SHA256 finalization failed");
-        return result;
-    }
-private:
-    MdContext context_;
-};
-
 class Hash512 {
 public:
     Hash512():context_(EVP_MD_CTX_new(),EVP_MD_CTX_free) {
@@ -314,20 +291,6 @@ void require_end(std::ifstream& input) {
     char extra;
     input.get(extra);
     require(input.eof() && !input.bad(), "unexpected trailing bytes or read error");
-}
-template<class H> void hash_pad(H& hash, const std::optional<std::filesystem::path>& pad, std::uint64_t length) {
-    if (!pad) return;
-    std::ifstream input(*pad, std::ios::binary);
-    require(static_cast<bool>(input), "cannot open pad for reading");
-    Secret<chunk_size> buffer;
-    while (length != 0) {
-        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(length, buffer.bytes.size()));
-        auto part = std::span(buffer.bytes).first(count);
-        read_exact(input, part);
-        hash.update(part);
-        length -= count;
-    }
-    require_end(input);
 }
 
 File exclusive_output(const std::filesystem::path& path) {
@@ -370,118 +333,6 @@ void flush_file(File& output) {
     require(std::fclose(output.release()) == 0, "keyfile close failed");
 }
 
-std::array<std::uint8_t, 48> wrap_key(View key, View nonce, View prefix, View master) {
-    CipherContext context(EVP_CIPHER_CTX_new(), EVP_CIPHER_CTX_free);
-    require(context && EVP_EncryptInit_ex(context.get(), EVP_aes_256_gcm(), nullptr, key.data(), nonce.data()) == 1,
-            "OpenSSL keyfile encryption initialization failed");
-    int size = 0;
-    require(EVP_EncryptUpdate(context.get(), nullptr, &size, prefix.data(), static_cast<int>(prefix.size())) == 1,
-            "OpenSSL keyfile associated data failed");
-    std::array<std::uint8_t, 48> result{};
-    require(EVP_EncryptUpdate(context.get(), result.data(), &size, master.data(), static_cast<int>(master.size())) == 1 && size == 32,
-            "OpenSSL keyfile encryption failed");
-    int final_size = 0;
-    require(EVP_EncryptFinal_ex(context.get(), result.data() + 32, &final_size) == 1 && final_size == 0,
-            "OpenSSL keyfile encryption finalization failed");
-    require(EVP_CIPHER_CTX_ctrl(context.get(), EVP_CTRL_GCM_GET_TAG, 16, result.data() + 32) == 1,
-            "OpenSSL keyfile authentication failed");
-    return result;
-}
-Secret<32> unwrap_key(View key, View nonce, View prefix, View wrapped) {
-    CipherContext context(EVP_CIPHER_CTX_new(), EVP_CIPHER_CTX_free);
-    require(context && EVP_DecryptInit_ex(context.get(), EVP_aes_256_gcm(), nullptr, key.data(), nonce.data()) == 1,
-            "OpenSSL keyfile decryption initialization failed");
-    int size = 0;
-    require(EVP_DecryptUpdate(context.get(), nullptr, &size, prefix.data(), static_cast<int>(prefix.size())) == 1,
-            "OpenSSL keyfile associated data failed");
-    Secret<32> master;
-    require(EVP_DecryptUpdate(context.get(), master.bytes.data(), &size, wrapped.data(), 32) == 1 && size == 32,
-            "OpenSSL keyfile decryption failed");
-    require(EVP_CIPHER_CTX_ctrl(context.get(), EVP_CTRL_GCM_SET_TAG, 16,
-                                const_cast<std::uint8_t*>(wrapped.data() + 32)) == 1,
-            "OpenSSL keyfile tag initialization failed");
-    std::array<std::uint8_t, 16> final{};
-    require(EVP_DecryptFinal_ex(context.get(), final.data(), &size) == 1 && size == 0,
-            "keyfile authentication failed: wrong pad or corrupted keyfile");
-    return master;
-}
-
-void create_keyfile_impl(const std::filesystem::path& path, const testing::KeyfilePolicy& policy,
-                         const std::optional<std::filesystem::path>& pad) {
-    validate_policy(policy);
-    const auto pad_length = pad_size(pad, policy);
-    std::array<std::uint8_t, prefix_size> prefix{};
-    std::copy(keyfile_magic.begin(), keyfile_magic.end(), prefix.begin());
-    put_u64(std::span(prefix).subspan(8, 8), policy.header_bytes);
-    put_u64(std::span(prefix).subspan(16, 8), pad_length);
-    prefix[24] = pad ? 1 : 0;
-    random_fill(std::span(prefix).subspan(32, 12));
-    Hash hash;
-    hash.update(view(keyfile_hash_domain));
-    hash.update(prefix);
-    auto output = exclusive_output(path);
-    // Failures leave an incomplete, owner-only file. Never remove a path after
-    // failure: another process may have replaced that name in the meantime.
-    write_exact(output.get(), prefix);
-    Secret<chunk_size> buffer;
-    auto remaining = policy.header_bytes;
-    while (remaining != 0) {
-        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(remaining, buffer.bytes.size()));
-        auto part = std::span(buffer.bytes).first(count);
-        random_fill(part);
-        write_exact(output.get(), part);
-        hash.update(part);
-        remaining -= count;
-    }
-    hash_pad(hash, pad, pad_length);
-    auto digest = hash.finish();
-    auto wrapping_key = hkdf(digest.bytes, view("datapump/v1/keyfile-wrap"));
-    Secret<32> master;
-    random_fill(master.bytes);
-    const auto wrapped = wrap_key(wrapping_key.bytes, std::span(prefix).subspan(32, 12), prefix, master.bytes);
-    write_exact(output.get(), wrapped);
-    flush_file(output);
-}
-
-Crypto load_keyfile_impl(const std::filesystem::path& path, const testing::KeyfilePolicy& policy,
-                         const std::optional<std::filesystem::path>& pad) {
-    validate_policy(policy);
-    const auto length = regular_file_size(path);
-    require(length == prefix_size + policy.header_bytes + 48, "invalid keyfile length or header size");
-    std::ifstream input(path, std::ios::binary);
-    require(static_cast<bool>(input), "cannot open keyfile for reading");
-    std::array<std::uint8_t, prefix_size> prefix{};
-    read_exact(input, prefix);
-    require(std::equal(keyfile_magic.begin(), keyfile_magic.end(), prefix.begin()), "unsupported keyfile format");
-    require(get_u64(std::span(prefix).subspan(8, 8)) == policy.header_bytes, "invalid keyfile header length");
-    require(prefix[24] <= 1 && std::all_of(prefix.begin() + 25, prefix.begin() + 32, [](auto b) { return b == 0; }) &&
-            std::all_of(prefix.begin() + 44, prefix.end(), [](auto b) { return b == 0; }), "unsupported keyfile flags");
-    const bool needs_pad = prefix[24] == 1;
-    require(needs_pad == pad.has_value(), needs_pad ? "this keyfile requires a pad" : "this keyfile does not use a pad");
-    const auto pad_length = pad_size(pad, policy);
-    require(get_u64(std::span(prefix).subspan(16, 8)) == pad_length, "pad length does not match keyfile");
-    Hash hash;
-    hash.update(view(keyfile_hash_domain));
-    hash.update(prefix);
-    Secret<chunk_size> buffer;
-    auto remaining = policy.header_bytes;
-    while (remaining != 0) {
-        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(remaining, buffer.bytes.size()));
-        auto part = std::span(buffer.bytes).first(count);
-        read_exact(input, part);
-        hash.update(part);
-        remaining -= count;
-    }
-    std::array<std::uint8_t, 48> wrapped{};
-    read_exact(input, wrapped);
-    require_end(input);
-    hash_pad(hash, pad, pad_length);
-    auto digest = hash.finish();
-    auto wrapping_key = hkdf(digest.bytes, view("datapump/v1/keyfile-wrap"));
-    auto master = unwrap_key(wrapping_key.bytes, std::span(prefix).subspan(32, 12), prefix, wrapped);
-    return Crypto(master.bytes);
-}
-
 struct SecretBytes {
     Bytes bytes;
     explicit SecretBytes(std::size_t count):bytes(count){}
@@ -511,13 +362,36 @@ void put32(std::span<std::uint8_t> output,std::uint32_t value) {
 std::uint32_t get32(View input) {
     std::uint32_t value=0;for(unsigned i=0;i<4;++i)value=(value<<8)|input[i];return value;
 }
-constexpr std::array<std::uint8_t,8> ring_magic{'D','P','M','K','E','Y','0','2'};
-constexpr std::array<std::uint8_t,8> cascade_ring_magic{'D','P','M','K','E','Y','0','3'};
-constexpr std::string_view ring_hash_domain="datapump/v2/keyfile-hash";
-constexpr std::string_view ring_wrap_domain="datapump/v2/keyfile-wrap";
-constexpr std::string_view cascade_ring_hash_domain="datapump/v3/keyfile-hash-sha512";
-constexpr std::string_view cascade_ring_wrap_domain="datapump/v3/keyfile-wrap-serpent-aes";
+constexpr std::array<std::uint8_t,8> cascade_ring_magic{'D','P','M','K','E','Y','0','4'};
+constexpr std::string_view serpent_ring_hash_domain="datapump/v4/serpent/keyfile-hash-sha512";
+constexpr std::string_view aes_ring_hash_domain="datapump/v4/aes/keyfile-hash-sha512";
 
+void cancelled(std::stop_token stop) {require(!stop.stop_requested(),"Keyfile generation cancelled");}
+void progress(const KeyfileGenerationOptions& options,std::string_view text) {
+    cancelled(options.stop);if(options.progress)options.progress(text);
+}
+// Each byte belongs to exactly one wrapping lane. Offsets, lengths and the
+// authenticated public prefix bind the partition; the optional secret pad uses
+// the same independently framed partition rather than one digest split in two.
+void hash_partition(Hash512& serpent,Hash512& aes,View bytes,std::uint64_t offset) {
+    Secret<chunk_size> even,odd;
+    std::size_t se=0,ae=0;
+    for(std::size_t i=0;i<bytes.size();++i)
+        if(((offset+i)&1U)==0)even.bytes[se++]=bytes[i];else odd.bytes[ae++]=bytes[i];
+    serpent.update(std::span(even.bytes).first(se));aes.update(std::span(odd.bytes).first(ae));
+}
+void hash_partitioned_pad(Hash512& serpent,Hash512& aes,
+                          const std::optional<std::filesystem::path>& pad,std::uint64_t length,
+                          std::stop_token stop={}) {
+    const auto marker=view("pad/");serpent.update(marker);aes.update(marker);
+    std::array<std::uint8_t,8> size{};put_u64(size,length);serpent.update(size);aes.update(size);
+    if(!pad)return;
+    std::ifstream input(*pad,std::ios::binary);require(static_cast<bool>(input),"cannot open pad for reading");
+    Secret<chunk_size> buffer;std::uint64_t offset=0;
+    while(offset<length){cancelled(stop);const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(length-offset,buffer.bytes.size()));
+        auto part=std::span(buffer.bytes).first(count);read_exact(input,part);hash_partition(serpent,aes,part,offset);offset+=count;execution::checkpoint();}
+    require_end(input);
+}
 Bytes wrap_payload(View key,View nonce,View prefix,View plain) {
     CipherContext context(EVP_CIPHER_CTX_new(),EVP_CIPHER_CTX_free);
     require(context && EVP_EncryptInit_ex(context.get(),EVP_aes_256_gcm(),nullptr,key.data(),nonce.data())==1,"keyring encryption initialization failed");
@@ -541,24 +415,51 @@ void unwrap_payload(View key,View nonce,View prefix,View encrypted,std::span<std
 }
 
 std::array<std::uint8_t,16> keyfile_serpent_iv(View key,View nonce) {
-    Bytes info;const auto label=view("datapump/v3/keyfile-serpent-iv/");
+    Bytes info;const auto label=view("datapump/v4/serpent/keyfile-iv/");
     info.insert(info.end(),label.begin(),label.end());info.insert(info.end(),nonce.begin(),nonce.end());
     const auto derived=cascade_kdf(key,info);std::array<std::uint8_t,16> iv{};
     std::copy_n(derived.bytes.begin(),16,iv.begin());return iv;
 }
 
-Secret<64> timed_keyfile_entropy() {
-    Secret<128> collections;
-    system_random_fill(std::span(collections.bytes).first(64));
+struct EntropyLanes {Secret<64> serpent,aes;KeyfileGenerationResult result;};
+EntropyLanes timed_keyfile_entropy(const KeyfileGenerationOptions& options) {
+    Secret<128> serpent_os,aes_os;
+    progress(options,"Collecting independent operating-system entropy");
+    system_random_fill(std::span(aes_os.bytes).first(64));
+    system_random_fill(std::span(serpent_os.bytes).first(64));
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(1);
-    // The execution abstraction parks only this task in the browser fiber
-    // scheduler, preserving other live work while key generation waits.
-    do {execution::sleep_until(deadline);} while(std::chrono::steady_clock::now()<deadline);
-    system_random_fill(std::span(collections.bytes).last(64));
-    return cascade_kdf(collections.bytes,view("datapump/v3/timed-keyfile-entropy"));
+    Secret<64> audio;KeyfileGenerationResult collection;
+    progress(options,"Collecting three seconds of audio entropy");
+    try {
+        if(!options.audio)throw AudioEntropyUnavailable("no audio entropy provider is configured");
+        KeyringAccess::collect_audio(options,audio.bytes);collection.audio_used=true;
+    } catch(const AudioEntropyUnavailable& error) {
+        cancelled(options.stop);
+        if(!options.allow_audio_fallback)throw;
+        collection.warning="Audio entropy unavailable; keyfile generated using separate operating-system entropy only: "+std::string(error.what());
+        if(options.progress)options.progress(collection.warning);
+    }
+    do {cancelled(options.stop);execution::sleep_until(std::min(deadline,std::chrono::steady_clock::now()+std::chrono::milliseconds(25)));}
+        while(std::chrono::steady_clock::now()<deadline);
+    cancelled(options.stop);
+    system_random_fill(std::span(aes_os.bytes).last(64));
+    system_random_fill(std::span(serpent_os.bytes).last(64));
+    // HMAC keyed by the OS-only Serpent conditioner prevents predictable or
+    // adversarial audio from replacing otherwise secret OS source material.
+    const auto os_serpent=cascade_kdf(serpent_os.bytes,view("datapump/v4/serpent/os-entropy"));
+    Secret<128> audio_input;
+    const auto label=view("datapump/v4/serpent/audio-mix/");
+    std::copy(label.begin(),label.end(),audio_input.bytes.begin());
+    audio_input.bytes[label.size()]=collection.audio_used?1:0;
+    std::copy(audio.bytes.begin(),audio.bytes.end(),audio_input.bytes.begin()+static_cast<std::ptrdiff_t>(label.size()+1));
+    EntropyLanes result;
+    result.serpent.bytes=hmac_digest<64>(os_serpent.bytes,std::span(audio_input.bytes).first(label.size()+1+audio.bytes.size()),"SHA512").bytes;
+    const auto ak=cascade_kdf(aes_os.bytes,view("datapump/v4/aes/keyfile-entropy"));
+    result.aes.bytes=ak.bytes;result.result=std::move(collection);return result;
 }
-void create_keyring_impl(const std::filesystem::path& path,const std::vector<std::string>& names,
-                        const testing::KeyfilePolicy& policy,const std::optional<std::filesystem::path>& pad) {
+KeyfileGenerationResult create_keyring_impl(const std::filesystem::path& path,const std::vector<std::string>& names,
+                        const testing::KeyfilePolicy& policy,const std::optional<std::filesystem::path>& pad,
+                        const KeyfileGenerationOptions& generation) {
     validate_policy(policy);
     require(!names.empty() && names.size()<=128,"keyring must contain 1..128 named key sets");
     std::set<std::string> unique;std::size_t length=0;
@@ -568,82 +469,84 @@ void create_keyring_impl(const std::filesystem::path& path,const std::vector<std
         length+=2+name.size()+KeyringAccess::bytes;
     }
     const auto pad_length=pad_size(pad,policy);
-    // Reserve the filename before entropy collection. Failed work leaves an
-    // incomplete owner-only file, never an overwritten existing keyfile.
+    require(static_cast<bool>(generation.audio) || generation.allow_audio_fallback,"Keyfile generation requires fresh audio input");
+    cancelled(generation.stop);
     auto output=exclusive_output(path);
-    auto entropy=timed_keyfile_entropy();
-    SecretBytes plaintext(length);
-    std::size_t offset=0,index=0;
+    auto entropy=timed_keyfile_entropy(generation);
+    SecretBytes plaintext(length);std::size_t offset=0,index=0;
     for(const auto& name:names) {
+        cancelled(generation.stop);
         plaintext.bytes[offset++]=0;plaintext.bytes[offset++]=static_cast<std::uint8_t>(name.size());
         std::copy(name.begin(),name.end(),plaintext.bytes.begin()+static_cast<std::ptrdiff_t>(offset));offset+=name.size();
-        Bytes info;const auto label=view("datapump/v3/key-entry/");info.insert(info.end(),label.begin(),label.end());
-        info.resize(info.size()+8);put_u64(std::span(info).last(8),index++);
-        auto material=cascade_kdf(entropy.bytes,info);
-        const auto key=KeyringAccess::fresh(material.bytes);
+        std::array<std::uint8_t,8> ordinal{};put_u64(ordinal,index++);
+        const auto si=contextual_info("datapump/v4/serpent/key-entry/",ordinal);
+        const auto ai=contextual_info("datapump/v4/aes/key-entry/",ordinal);
+        const auto serpent=cascade_kdf(entropy.serpent.bytes,si),aes=cascade_kdf(entropy.aes.bytes,ai);
+        const auto key=Crypto::from_independent_roots(serpent.bytes,aes.bytes);
         KeyringAccess::encode(key,std::span(plaintext.bytes).subspan(offset,KeyringAccess::bytes));offset+=KeyringAccess::bytes;
     }
     std::array<std::uint8_t,prefix_size> prefix{};
     std::copy(cascade_ring_magic.begin(),cascade_ring_magic.end(),prefix.begin());
     put_u64(std::span(prefix).subspan(8,8),policy.header_bytes);
-    put_u64(std::span(prefix).subspan(16,8),pad_length);prefix[24]=pad?1:0;
+    put_u64(std::span(prefix).subspan(16,8),pad_length);prefix[24]=static_cast<std::uint8_t>((pad?1:0)|(entropy.result.audio_used?2:0));
     put32(std::span(prefix).subspan(28,4),static_cast<std::uint32_t>(names.size()));
     system_random_fill(std::span(prefix).subspan(32,12));
     put32(std::span(prefix).subspan(44,4),static_cast<std::uint32_t>(length));
-    Hash512 hash;hash.update(view(cascade_ring_hash_domain));hash.update(prefix);
-    write_exact(output.get(),prefix);
-    Secret<chunk_size> buffer;
-    for(auto remaining=policy.header_bytes;remaining;) {
-        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(remaining,buffer.bytes.size()));
-        auto part=std::span(buffer.bytes).first(count);system_random_fill(part);hash.update(part);write_exact(output.get(),part);remaining-=count;
+    Hash512 serpent_hash,aes_hash;serpent_hash.update(view(serpent_ring_hash_domain));aes_hash.update(view(aes_ring_hash_domain));
+    serpent_hash.update(prefix);aes_hash.update(prefix);write_exact(output.get(),prefix);
+    progress(generation,"Writing independently protected keyfile");
+    Secret<chunk_size> buffer;std::uint64_t written=0;
+    while(written<policy.header_bytes) {
+        cancelled(generation.stop);
+        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(policy.header_bytes-written,buffer.bytes.size()));
+        auto part=std::span(buffer.bytes).first(count);system_random_fill(part);hash_partition(serpent_hash,aes_hash,part,written);write_exact(output.get(),part);written+=count;
         execution::checkpoint();
     }
-    hash_pad(hash,pad,pad_length);auto hashed=hash.finish();auto wrapping=cascade_kdf(hashed.bytes,view(cascade_ring_wrap_domain));
-    auto inner_iv=keyfile_serpent_iv(std::span(wrapping.bytes).first(32),std::span(prefix).subspan(32,12));
-    serpent_ctr_xor(plaintext.bytes,std::span(wrapping.bytes).first(32),inner_iv);
-    const auto encrypted=wrap_payload(std::span(wrapping.bytes).last(32),std::span(prefix).subspan(32,12),prefix,plaintext.bytes);
-    write_exact(output.get(),encrypted);flush_file(output);
+    hash_partitioned_pad(serpent_hash,aes_hash,pad,pad_length,generation.stop);
+    const auto sd=serpent_hash.finish(),ad=aes_hash.finish();
+    const auto sw=cascade_kdf(sd.bytes,view("datapump/v4/serpent/keyfile-wrap"));
+    const auto aw=cascade_kdf(ad.bytes,view("datapump/v4/aes/keyfile-wrap"));
+    auto inner_iv=keyfile_serpent_iv(std::span(sw.bytes).first(32),std::span(prefix).subspan(32,12));
+    serpent_ctr_xor(plaintext.bytes,std::span(sw.bytes).first(32),inner_iv);
+    const auto encrypted=wrap_payload(std::span(aw.bytes).first(32),std::span(prefix).subspan(32,12),prefix,plaintext.bytes);
+    const auto auth_key=cascade_kdf(sd.bytes,view("datapump/v4/serpent/keyfile-auth"));
+    const auto auth_input=keyfile_auth_input(prefix,encrypted);
+    const auto tag=hmac_sha256(std::span(auth_key.bytes).first(32),auth_input);
+    cancelled(generation.stop);write_exact(output.get(),encrypted);write_exact(output.get(),tag);flush_file(output);
+    return entropy.result;
 }
-
 std::vector<KeyEntry> load_keyring_impl(const std::filesystem::path& path,const testing::KeyfilePolicy& policy,
                                       const std::optional<std::filesystem::path>& pad) {
-    validate_policy(policy);
-    const auto length=regular_file_size(path);
-    require(length>=prefix_size,"invalid keyfile length");
+    validate_policy(policy);const auto length=regular_file_size(path);require(length>=prefix_size,"invalid keyfile length");
     std::ifstream input(path,std::ios::binary);require(static_cast<bool>(input),"cannot open keyfile");
     std::array<std::uint8_t,prefix_size> prefix{};read_exact(input,prefix);
-    if(std::equal(keyfile_magic.begin(),keyfile_magic.end(),prefix.begin()))return {{"Default",load_keyfile_impl(path,policy,pad)}};
-    const bool cascade=std::equal(cascade_ring_magic.begin(),cascade_ring_magic.end(),prefix.begin());
-    require(cascade || std::equal(ring_magic.begin(),ring_magic.end(),prefix.begin()),"unsupported keyfile format");
-    const auto entry_bytes=cascade?KeyringAccess::bytes:KeyringAccess::legacy_bytes;
+    require(std::equal(cascade_ring_magic.begin(),cascade_ring_magic.end(),prefix.begin()),"unsupported keyfile format; generate a version 4 keyfile");
+    constexpr auto entry_bytes=KeyringAccess::bytes;
     require(get_u64(std::span(prefix).subspan(8,8))==policy.header_bytes,"invalid keyfile header size");
-    require(prefix[24]<=1 && prefix[25]==0 && prefix[26]==0 && prefix[27]==0,"unsupported keyring flags");
+    require(prefix[24]<=3 && prefix[25]==0 && prefix[26]==0 && prefix[27]==0,"unsupported keyring flags");
     const auto count=get32(std::span(prefix).subspan(28,4)),payload_length=get32(std::span(prefix).subspan(44,4));
     require(count>=1 && count<=128 && payload_length>=count*(2+1+entry_bytes) && payload_length<=count*(2+64+entry_bytes),"invalid keyring dimensions");
-    require(length==prefix_size+policy.header_bytes+payload_length+16,"invalid keyring length");
-    require((prefix[24]!=0)==pad.has_value(),prefix[24]?"this keyfile requires an optional external pad (CLI --pad)":"this keyfile does not use a pad");
-    const auto pad_length=pad_size(pad,policy);
-    require(get_u64(std::span(prefix).subspan(16,8))==pad_length,"pad length does not match keyfile");
-    Hash hash;Hash512 hash512;
-    if(cascade){hash512.update(view(cascade_ring_hash_domain));hash512.update(prefix);}
-    else {hash.update(view(ring_hash_domain));hash.update(prefix);}
-    Secret<chunk_size> buffer;
-    for(auto remaining=policy.header_bytes;remaining;) {
-        const auto size=static_cast<std::size_t>(std::min<std::uint64_t>(remaining,buffer.bytes.size()));
-        auto part=std::span(buffer.bytes).first(size);read_exact(input,part);
-        if(cascade)hash512.update(part);else hash.update(part);remaining-=size;
+    require(length==prefix_size+policy.header_bytes+payload_length+48,"invalid keyring length");
+    require(((prefix[24]&1U)!=0)==pad.has_value(),(prefix[24]&1U)?"this keyfile requires an optional external pad (CLI --pad)":"this keyfile does not use a pad");
+    const auto pad_length=pad_size(pad,policy);require(get_u64(std::span(prefix).subspan(16,8))==pad_length,"pad length does not match keyfile");
+    Hash512 serpent_hash,aes_hash;serpent_hash.update(view(serpent_ring_hash_domain));aes_hash.update(view(aes_ring_hash_domain));
+    serpent_hash.update(prefix);aes_hash.update(prefix);Secret<chunk_size> buffer;
+    for(std::uint64_t read=0;read<policy.header_bytes;) {
+        const auto size=static_cast<std::size_t>(std::min<std::uint64_t>(policy.header_bytes-read,buffer.bytes.size()));
+        auto part=std::span(buffer.bytes).first(size);read_exact(input,part);hash_partition(serpent_hash,aes_hash,part,read);read+=size;
     }
-    Bytes encrypted(payload_length+16);read_exact(input,encrypted);require_end(input);
+    Bytes encrypted(payload_length+16);read_exact(input,encrypted);std::array<std::uint8_t,32> tag{};read_exact(input,tag);require_end(input);
+    hash_partitioned_pad(serpent_hash,aes_hash,pad,pad_length);
+    const auto sd=serpent_hash.finish(),ad=aes_hash.finish();
+    const auto sw=cascade_kdf(sd.bytes,view("datapump/v4/serpent/keyfile-wrap"));
+    const auto aw=cascade_kdf(ad.bytes,view("datapump/v4/aes/keyfile-wrap"));
+    const auto auth_key=cascade_kdf(sd.bytes,view("datapump/v4/serpent/keyfile-auth"));
+    const auto expected=hmac_sha256(std::span(auth_key.bytes).first(32),keyfile_auth_input(prefix,encrypted));
+    require(CRYPTO_memcmp(expected.data(),tag.data(),tag.size())==0,"keyring authentication failed: wrong pad or corrupted keyfile");
     SecretBytes plaintext(payload_length);
-    if(cascade) {
-        hash_pad(hash512,pad,pad_length);auto hashed=hash512.finish();auto wrapping=cascade_kdf(hashed.bytes,view(cascade_ring_wrap_domain));
-        unwrap_payload(std::span(wrapping.bytes).last(32),std::span(prefix).subspan(32,12),prefix,encrypted,plaintext.bytes);
-        auto inner_iv=keyfile_serpent_iv(std::span(wrapping.bytes).first(32),std::span(prefix).subspan(32,12));
-        serpent_ctr_xor(plaintext.bytes,std::span(wrapping.bytes).first(32),inner_iv);
-    } else {
-        hash_pad(hash,pad,pad_length);auto hashed=hash.finish();auto wrapping=hkdf(hashed.bytes,view(ring_wrap_domain));
-        unwrap_payload(wrapping.bytes,std::span(prefix).subspan(32,12),prefix,encrypted,plaintext.bytes);
-    }
+    unwrap_payload(std::span(aw.bytes).first(32),std::span(prefix).subspan(32,12),prefix,encrypted,plaintext.bytes);
+    auto inner_iv=keyfile_serpent_iv(std::span(sw.bytes).first(32),std::span(prefix).subspan(32,12));
+    serpent_ctr_xor(plaintext.bytes,std::span(sw.bytes).first(32),inner_iv);
     std::vector<KeyEntry> entries;entries.reserve(count);std::set<std::string> names;std::size_t offset=0;
     for(std::uint32_t i=0;i<count;++i) {
         require(plaintext.bytes.size()-offset>=2,"truncated key entry");
@@ -655,24 +558,75 @@ std::vector<KeyEntry> load_keyring_impl(const std::filesystem::path& path,const 
     }
     require(offset==plaintext.bytes.size(),"trailing keyring data");return entries;
 }
+
 } // namespace
 
-void KeyringAccess::root(const Crypto& key,std::span<std::uint8_t,64> output) {
-    if(key.confidentiality_)std::copy(key.confidentiality_->bytes.begin(),key.confidentiality_->bytes.end(),output.begin());
-    else {
-        Secret<64> legacy;
-        std::copy(key.keys_[0].begin(),key.keys_[0].end(),legacy.bytes.begin());
-        std::copy(key.keys_[4].begin(),key.keys_[4].end(),legacy.bytes.begin()+32);
-        const auto derived=cascade_kdf(legacy.bytes,view("datapump/cascade/v1/legacy-root"));
-        std::copy(derived.bytes.begin(),derived.bytes.end(),output.begin());
+struct AudioEntropySink::Impl {
+    Hash512 hash;
+    std::uint32_t rate=0;
+    std::uint64_t frames=0,target=0,clipped=0,repeat=0;
+    std::array<std::uint32_t,32> distinct{};
+    std::size_t distinct_count=0;
+    std::uint32_t previous=0;
+    bool finalized=false;
+    std::exception_ptr failure;
+    Impl(){hash.update(view("datapump/v4/serpent/physical-audio/float32-mono-be/"));}
+    ~Impl(){OPENSSL_cleanse(distinct.data(),sizeof(distinct));OPENSSL_cleanse(&previous,sizeof(previous));}
+    void add(std::span<const float> mono,std::uint32_t sample_rate) {
+        if(failure)std::rethrow_exception(failure);
+        try {
+        require(!finalized,"audio entropy sink already finalized");
+        if(!(sample_rate>=4000 && sample_rate<=384000))throw AudioEntropyUnavailable("audio entropy sample rate is unsupported");
+        if(!rate){rate=sample_rate;target=std::uint64_t{rate}*3;
+            std::array<std::uint8_t,16> format{};put_u64(std::span(format).first(8),rate);put_u64(std::span(format).last(8),1);hash.update(format);}
+        if(!(rate==sample_rate))throw AudioEntropyUnavailable("audio entropy input format changed");
+        Secret<1024> canonical;std::size_t used=0;
+        for(const auto sample:mono) {
+            if(frames==target)break;
+            if(!(std::isfinite(sample) && std::abs(sample)<=1.0F))throw AudioEntropyUnavailable("audio entropy input contains invalid samples");
+            const auto bits=std::bit_cast<std::uint32_t>(sample);
+            if(frames && bits==previous)++repeat;else repeat=1;
+            if(!(repeat<=std::max<std::uint64_t>(1,rate/10)))throw AudioEntropyUnavailable("audio entropy input is silent or constant");
+            previous=bits;if(std::abs(sample)>=.999F)++clipped;
+            if(distinct_count<distinct.size() && std::find(distinct.begin(),distinct.begin()+static_cast<std::ptrdiff_t>(distinct_count),bits)==distinct.begin()+static_cast<std::ptrdiff_t>(distinct_count))
+                distinct[distinct_count++]=bits;
+            for(unsigned byte=0;byte<4;++byte)canonical.bytes[used++]=static_cast<std::uint8_t>(bits>>(24-8*byte));
+            ++frames;
+            if(used==canonical.bytes.size()){hash.update(canonical.bytes);used=0;}
+        }
+        if(used)hash.update(std::span(canonical.bytes).first(used));
+        if(frames==target){if(!(distinct_count>=distinct.size()))throw AudioEntropyUnavailable("audio entropy input has insufficient sample variation");
+            if(!(clipped*100<frames*95))throw AudioEntropyUnavailable("audio entropy input is clipped");}
+        }catch(...){failure=std::current_exception();throw;}
     }
+    Secret<64> finish() {
+        if(failure)std::rethrow_exception(failure);
+        if(!(!finalized && target && frames==target))throw AudioEntropyUnavailable("fresh audio entropy capture was incomplete");
+        if(!(distinct_count>=distinct.size() && clipped*100<frames*95))throw AudioEntropyUnavailable("audio entropy input is unusable");
+        std::array<std::uint8_t,8> count{};put_u64(count,frames);hash.update(count);finalized=true;return hash.finish();
+    }
+};
+AudioEntropySink::AudioEntropySink():impl_(std::make_unique<Impl>()){}
+AudioEntropySink::~AudioEntropySink()=default;
+void AudioEntropySink::add_samples(std::span<const float> mono,std::uint32_t sample_rate){impl_->add(mono,sample_rate);}
+bool AudioEntropySink::complete() const noexcept {return !impl_->failure && impl_->target && impl_->frames==impl_->target;}
+void KeyringAccess::collect_audio(const KeyfileGenerationOptions& options,std::span<std::uint8_t,64> output) {
+    AudioEntropySink sink;cancelled(options.stop);options.audio(sink,options.stop);cancelled(options.stop);
+    const auto digest=sink.impl_->finish();std::copy(digest.bytes.begin(),digest.bytes.end(),output.begin());
 }
-Crypto KeyringAccess::fresh(std::span<const std::uint8_t> material) {
-    auto modem=cascade_kdf(material,view("datapump/v3/modem-root"));
-    Crypto key(std::span(modem.bytes).first(32));
-    const auto root=cascade_kdf(material,view("datapump/v3/confidentiality-root"));
-    key.confidentiality_=new Crypto::ConfidentialityMaterial(root.bytes);
-    return key;
+
+std::span<const std::uint8_t,64> KeyringAccess::root(const Crypto& key,bool serpent) {
+    require(key.confidentiality_!=nullptr,"Confidentiality requires independently supplied Serpent and AES roots");
+    return serpent?std::span<const std::uint8_t,64>(key.confidentiality_->serpent):std::span<const std::uint8_t,64>(key.confidentiality_->aes);
+}
+void KeyringAccess::encode(const Crypto& key,std::span<std::uint8_t> output) {
+    require(output.size()==bytes,"invalid key entry extent");
+    const auto s=root(key,true),a=root(key,false);
+    std::copy(s.begin(),s.end(),output.begin());std::copy(a.begin(),a.end(),output.begin()+64);
+}
+Crypto KeyringAccess::decode(std::span<const std::uint8_t> input) {
+    require(input.size()==bytes,"invalid key entry extent");
+    return Crypto::from_independent_roots(input.first(64),input.last(64));
 }
 
 Crypto::Crypto(std::span<const std::uint8_t> master_key) {
@@ -709,41 +663,38 @@ std::size_t Crypto::confidentiality_storage_bytes() const noexcept {
     return confidentiality_?sizeof(ConfidentialityMaterial):0;
 }
 Crypto Crypto::random() {
-    Secret<64> material;
-    system_random_fill(material.bytes);
-    return KeyringAccess::fresh(material.bytes);
+    Secret<32> material;system_random_fill(material.bytes);return Crypto(material.bytes);
+}
+Crypto Crypto::from_independent_roots(View serpent_root,View aes_root) {
+    require(serpent_root.size()==64 && aes_root.size()==64,"independent cipher roots must each contain exactly 64 bytes");
+    Crypto key(aes_root.first(32));
+    key.confidentiality_=new ConfidentialityMaterial(
+        std::span<const std::uint8_t,64>(serpent_root.data(),64),std::span<const std::uint8_t,64>(aes_root.data(),64));
+    return key;
 }
 
 Bytes Crypto::confidentiality_stream(std::uint64_t timestamp,std::uint64_t offset,std::size_t count) const {
+    const auto sroot=KeyringAccess::root(*this,true),aroot=KeyringAccess::root(*this,false);
     require(count==0 || count-1<=std::numeric_limits<std::uint64_t>::max()-offset,"confidentiality byte offset would overflow");
     if(!count)return {};
-    Secret<64> root;KeyringAccess::root(*this,root.bytes);
-    const auto label=view("datapump/cascade/v1/stream/");Bytes info(label.begin(),label.end());
-    info.resize(info.size()+8);put_u64(std::span(info).last(8),timestamp);
-    auto material=cascade_kdf(root.bytes,info);
+    auto info=[&](std::string_view label){Bytes bytes(label.begin(),label.end());bytes.resize(bytes.size()+8);put_u64(std::span(bytes).last(8),timestamp);return bytes;};
+    const auto sm=cascade_kdf(sroot,info("datapump/cascade/v2/serpent/stream/"));
+    const auto am=cascade_kdf(aroot,info("datapump/cascade/v2/aes/stream/"));
     std::array<std::uint8_t,16> serpent_counter{},aes_counter{};
-    const auto sc=view("data-s01"),ac=view("data-a01");
+    const auto sc=view("data-s02"),ac=view("data-a02");
     std::copy(sc.begin(),sc.end(),serpent_counter.begin());std::copy(ac.begin(),ac.end(),aes_counter.begin());
     put_u64(std::span(serpent_counter).last(8),offset/16);put_u64(std::span(aes_counter).last(8),offset/16);
     const auto skip=static_cast<std::size_t>(offset%16);
-    // A bounded leading block preserves random access without retaining a
-    // duration-sized stream. AES remains a bulk EVP operation.
     require(count<=std::numeric_limits<std::size_t>::max()-skip,"confidentiality allocation would overflow");
     Bytes zeros(count+skip,0);
-    auto masked=aes_cipher(zeros,std::span(material.bytes).last(32),aes_counter,EVP_aes_256_ctr(),true);
+    auto masked=aes_cipher(zeros,std::span(am.bytes).first(32),aes_counter,EVP_aes_256_ctr(),true);
     if(skip)masked.erase(masked.begin(),masked.begin()+static_cast<std::ptrdiff_t>(skip));
-    serpent_ctr_xor(masked,std::span(material.bytes).first(32),serpent_counter,skip);
-    return masked;
+    serpent_ctr_xor(masked,std::span(sm.bytes).first(32),serpent_counter,skip);return masked;
 }
-
 Crypto Crypto::confidentiality_child(std::span<const std::uint8_t> context) const {
-    SecretBytes authentication(32);authentication.bytes=mac(context);
-    Crypto child(authentication.bytes);
-    Secret<64> root;KeyringAccess::root(*this,root.bytes);
-    const auto info=contextual_info("datapump/cascade/v1/child/",context);
-    const auto material=cascade_kdf(root.bytes,info);
-    child.confidentiality_=new ConfidentialityMaterial(material.bytes);
-    return child;
+    const auto sm=cascade_kdf(KeyringAccess::root(*this,true),contextual_info("datapump/cascade/v2/serpent/child/",context));
+    const auto am=cascade_kdf(KeyringAccess::root(*this,false),contextual_info("datapump/cascade/v2/aes/child/",context));
+    return Crypto::from_independent_roots(sm.bytes,am.bytes);
 }
 
 
@@ -753,7 +704,7 @@ struct ConfidentialityCbc::Impl {
     CipherContext encrypt_context{EVP_CIPHER_CTX_new(),EVP_CIPHER_CTX_free};
     CipherContext decrypt_context{EVP_CIPHER_CTX_new(),EVP_CIPHER_CTX_free};
     explicit Impl(View material):serpent(std::span<const std::uint8_t,32>(material.data(),32)) {
-        constexpr std::string_view salt="datapump/cascade/v1/hkdf-sha512";
+        constexpr std::string_view salt="datapump/cascade/v2/hkdf-sha512";
         Kdf algorithm(EVP_KDF_fetch(nullptr,"HKDF",nullptr),EVP_KDF_free);
         require(static_cast<bool>(algorithm),"OpenSSL HKDF unavailable");
         KdfContext extract(EVP_KDF_CTX_new(algorithm.get()),EVP_KDF_CTX_free);
@@ -770,7 +721,7 @@ struct ConfidentialityCbc::Impl {
         require(static_cast<bool>(hmac),"OpenSSL HMAC unavailable");
         iv_template=MacContext(EVP_MAC_CTX_new(hmac.get()),EVP_MAC_CTX_free);
         OSSL_PARAM mac_params[]{OSSL_PARAM_construct_utf8_string(OSSL_MAC_PARAM_DIGEST,digest,0),OSSL_PARAM_construct_end()};
-        const auto prefix=view("datapump/cascade/v1/cbc/serpent-iv/");
+        const auto prefix=view("datapump/cascade/v2/cbc/serpent-iv/");
         require(iv_template && EVP_MAC_init(iv_template.get(),prk.bytes.data(),prk.bytes.size(),mac_params)==1 &&
             EVP_MAC_update(iv_template.get(),prefix.data(),prefix.size())==1,"IV HKDF expansion initialization failed");
         std::array<std::uint8_t,16> iv{};
@@ -816,17 +767,18 @@ Bytes ConfidentialityCbc::encrypt(View input,View iv) {return impl_->crypt(input
 Bytes ConfidentialityCbc::decrypt(View input,View iv) {return impl_->crypt(input,iv,false);}
 std::unique_ptr<ConfidentialityCbc> Crypto::prepare_confidentiality_cbc(View context,View salt) const {
     require(salt.size()==32,"invalid confidentiality CBC salt");
-    Secret<64> root;KeyringAccess::root(*this,root.bytes);
-    auto material=cascade_kdf(root.bytes,contextual_info("datapump/cascade/v1/cbc/",context,salt));
+    const auto sm=cascade_kdf(KeyringAccess::root(*this,true),contextual_info("datapump/cascade/v2/serpent/cbc/",context,salt));
+    const auto am=cascade_kdf(KeyringAccess::root(*this,false),contextual_info("datapump/cascade/v2/aes/cbc/",context,salt));
+    Secret<64> material;std::copy_n(sm.bytes.begin(),32,material.bytes.begin());std::copy_n(am.bytes.begin(),32,material.bytes.begin()+32);
     return std::unique_ptr<ConfidentialityCbc>(new ConfidentialityCbc(material.bytes));
 }
 namespace {
 Bytes confidentiality_cbc(const Crypto& crypto,View input,View context,View salt,View iv,bool encrypt) {
     require(salt.size()==32 && iv.size()==16 && !input.empty() && input.size()%16==0,"invalid confidentiality CBC geometry");
-    Secret<64> root;KeyringAccess::root(crypto,root.bytes);
-    const auto info=contextual_info("datapump/cascade/v1/cbc/",context,salt);
-    auto material=cascade_kdf(root.bytes,info);
-    const auto iv_label=view("datapump/cascade/v1/cbc/serpent-iv/");Bytes iv_info(iv_label.begin(),iv_label.end());iv_info.insert(iv_info.end(),iv.begin(),iv.end());
+    const auto sm=cascade_kdf(KeyringAccess::root(crypto,true),contextual_info("datapump/cascade/v2/serpent/cbc/",context,salt));
+    const auto am=cascade_kdf(KeyringAccess::root(crypto,false),contextual_info("datapump/cascade/v2/aes/cbc/",context,salt));
+    Secret<64> material;std::copy_n(sm.bytes.begin(),32,material.bytes.begin());std::copy_n(am.bytes.begin(),32,material.bytes.begin()+32);
+    const auto iv_label=view("datapump/cascade/v2/cbc/serpent-iv/");Bytes iv_info(iv_label.begin(),iv_label.end());iv_info.insert(iv_info.end(),iv.begin(),iv.end());
     auto serpent_iv=cascade_kdf(std::span(material.bytes).first(32),iv_info);
     if(encrypt){
         SecretBytes inner(input.size());std::copy(input.begin(),input.end(),inner.bytes.begin());
@@ -975,30 +927,60 @@ Bytes Crypto::mac(std::span<const std::uint8_t> message) const {
             "OpenSSL HMAC finalization failed");
     return result;
 }
+Bytes Crypto::confidentiality_mac(View message) const {
+    const auto sk=cascade_kdf(KeyringAccess::root(*this,true),view("datapump/cascade/v2/serpent/auth/"));
+    const auto ak=cascade_kdf(KeyringAccess::root(*this,false),view("datapump/cascade/v2/aes/auth/"));
+    auto result=hmac_digest<32>(std::span(sk.bytes).first(32),message,"SHA256");
+    const auto other=hmac_digest<32>(std::span(ak.bytes).first(32),message,"SHA256");
+    for(std::size_t i=0;i<result.bytes.size();++i)result.bytes[i]^=other.bytes[i];
+    return Bytes(result.bytes.begin(),result.bytes.end());
+}
+bool Crypto::verify_confidentiality(View message,View tag) const {
+    if(tag.size()!=32)return false;
+    const auto expected=confidentiality_mac(message);return CRYPTO_memcmp(expected.data(),tag.data(),tag.size())==0;
+}
+Bytes Crypto::identity_fingerprint(View context) const {
+    return confidentiality_?confidentiality_mac(contextual_info("datapump/v4/identity/confidentiality/",context)):
+        mac(contextual_info("datapump/v4/identity/waveform/",context));
+}
+
 bool Crypto::verify(std::span<const std::uint8_t> message, std::span<const std::uint8_t> tag) const {
     if (tag.size() != 32) return false;
     const auto expected = mac(message);
     return CRYPTO_memcmp(expected.data(), tag.data(), expected.size()) == 0;
 }
 
-void create_keyfile(const std::filesystem::path& path, const std::optional<std::filesystem::path>& pad) {
-    create_keyring_impl(path, {"Default"}, normal_policy, pad);
+KeyfileGenerationResult create_keyfile(const std::filesystem::path& path,const std::optional<std::filesystem::path>& pad,
+                    const KeyfileGenerationOptions& generation) {
+    return create_keyring_impl(path,{"Default"},normal_policy,pad,generation);
 }
-Crypto load_keyfile(const std::filesystem::path& path, const std::optional<std::filesystem::path>& pad) {
-    return load_keyring_impl(path, normal_policy, pad).front().key;
+Crypto load_keyfile(const std::filesystem::path& path,const std::optional<std::filesystem::path>& pad) {
+    return load_keyring_impl(path,normal_policy,pad).front().key;
 }
-void create_keyring(const std::filesystem::path& path,const std::vector<std::string>& names,const std::optional<std::filesystem::path>& pad) {create_keyring_impl(path,names,normal_policy,pad);}
-std::vector<KeyEntry> load_keyring(const std::filesystem::path& path,const std::optional<std::filesystem::path>& pad) {return load_keyring_impl(path,normal_policy,pad);}
+KeyfileGenerationResult create_keyring(const std::filesystem::path& path,const std::vector<std::string>& names,
+                    const std::optional<std::filesystem::path>& pad,const KeyfileGenerationOptions& generation) {
+    return create_keyring_impl(path,names,normal_policy,pad,generation);
+}
+std::vector<KeyEntry> load_keyring(const std::filesystem::path& path,const std::optional<std::filesystem::path>& pad) {
+    return load_keyring_impl(path,normal_policy,pad);
+}
 namespace testing {
-void create_keyfile(const std::filesystem::path& path, const KeyfilePolicy& policy,
-                    const std::optional<std::filesystem::path>& pad) {
-    create_keyfile_impl(path, policy, pad);
+KeyfileGenerationResult create_keyfile(const std::filesystem::path& path,const KeyfilePolicy& policy,
+                    const std::optional<std::filesystem::path>& pad,const KeyfileGenerationOptions& generation) {
+    return create_keyring_impl(path,{"Default"},policy,pad,generation);
 }
-Crypto load_keyfile(const std::filesystem::path& path, const KeyfilePolicy& policy,
+Crypto load_keyfile(const std::filesystem::path& path,const KeyfilePolicy& policy,
                     const std::optional<std::filesystem::path>& pad) {
-    return load_keyring_impl(path, policy, pad).front().key;
+    return load_keyring_impl(path,policy,pad).front().key;
 }
-void create_keyring(const std::filesystem::path& path,const std::vector<std::string>& names,const KeyfilePolicy& policy,const std::optional<std::filesystem::path>& pad) {create_keyring_impl(path,names,policy,pad);}
-std::vector<KeyEntry> load_keyring(const std::filesystem::path& path,const KeyfilePolicy& policy,const std::optional<std::filesystem::path>& pad) {return load_keyring_impl(path,policy,pad);}
+KeyfileGenerationResult create_keyring(const std::filesystem::path& path,const std::vector<std::string>& names,
+                    const KeyfilePolicy& policy,const std::optional<std::filesystem::path>& pad,
+                    const KeyfileGenerationOptions& generation) {
+    return create_keyring_impl(path,names,policy,pad,generation);
+}
+std::vector<KeyEntry> load_keyring(const std::filesystem::path& path,const KeyfilePolicy& policy,
+                    const std::optional<std::filesystem::path>& pad) {
+    return load_keyring_impl(path,policy,pad);
+}
 } // namespace testing
 } // namespace datapump

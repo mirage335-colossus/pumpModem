@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -76,20 +77,36 @@ class SourceSnapshotTests(unittest.TestCase):
                     path = root / name
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text(name)
-            for name in guard.SERPENT_SOURCES:
+            for name in guard.SERPENT_SOURCES | guard.FIXTURE_SOURCES:
                 path = roots[0] / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(name)
             snapshot = guard.source_snapshot(*roots, {})
             self.assertEqual(guard.verify_snapshot(snapshot)["status"], "passed")
-            for name in guard.CRYPTO_SOURCES | guard.SERPENT_SOURCES:
+            for name in guard.CRYPTO_SOURCES | guard.SERPENT_SOURCES | guard.FIXTURE_SOURCES:
                 self.assertIn("candidate:" + name, snapshot["sha256"])
-            for name in guard.SERPENT_SOURCES:
+            for name in guard.SERPENT_SOURCES | guard.FIXTURE_SOURCES:
                 self.assertIn("reference:" + name, snapshot["absent_paths"])
+            historical_driver = roots[1] / "tools/triad-long.cpp"
+            historical_driver.parent.mkdir(parents=True, exist_ok=True)
+            historical_driver.write_text('#include "triad_fixture_key.hpp"\n')
+            with self.assertRaisesRegex(ValueError, "includes missing fixture"):
+                guard.source_snapshot(*roots, {})
+            historical_driver.unlink()
             new_path = roots[1] / "src/serpent.cpp"
             new_path.write_text("introduced")
             self.assertIn("reference:src/serpent.cpp", guard.verify_snapshot(snapshot)["changed"])
             new_path.unlink()
+            header = roots[1] / "tools/triad_fixture_key.hpp"
+            header.parent.mkdir(parents=True, exist_ok=True)
+            header.write_text("introduced")
+            self.assertIn("reference:tools/triad_fixture_key.hpp", guard.verify_snapshot(snapshot)["changed"])
+            header.unlink()
+            header.symlink_to("missing")
+            self.assertIn("reference:tools/triad_fixture_key.hpp", guard.verify_snapshot(snapshot)["changed"])
+            with self.assertRaisesRegex(ValueError, "symlinked source dependency"):
+                guard.source_snapshot(*roots, {})
+            header.unlink()
             (roots[0] / "src/crypto.cpp").write_text("changed")
             self.assertIn("candidate:src/crypto.cpp", guard.verify_snapshot(snapshot)["changed"])
             (roots[1] / "src/crypto.cpp").unlink()
@@ -98,6 +115,48 @@ class SourceSnapshotTests(unittest.TestCase):
             (roots[0] / "src/serpent.cpp").unlink()
             with self.assertRaisesRegex(ValueError, "missing required candidate"):
                 guard.source_snapshot(*roots, {})
+
+    def test_fixture_key_ancestor_symlink_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            roots = [base / name for name in ("candidate", "reference")]
+            for root in roots:
+                for name in guard.CRYPTO_SOURCES | guard.SERPENT_SOURCES | guard.FIXTURE_SOURCES:
+                    path = root / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(name)
+            snapshot = guard.source_snapshot(*roots, {})
+            path = roots[1] / "tools/triad_fixture_key.hpp"
+            path.unlink()
+            (roots[1] / "tools").rmdir()
+            (roots[1] / "tools").symlink_to(base / "missing-tools", target_is_directory=True)
+            self.assertIn("reference:tools/triad_fixture_key.hpp", guard.verify_snapshot(snapshot)["changed"])
+            with self.assertRaisesRegex(ValueError, "symlinked source dependency"):
+                guard.source_snapshot(*roots, {})
+
+
+class FixtureModeTests(unittest.TestCase):
+    def test_only_explicit_historical_reference_accepts_legacy_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            candidate, reference = root / "candidate", root / "reference"
+            def driver(path, mode):
+                payload = json.dumps({"schema": "triad-fixture-key-mode-v1", "fixture_key_mode": mode})
+                path.write_text("#!/bin/sh\nprintf '%s\\n' '" + payload + "'\n")
+                path.chmod(0o755)
+            driver(candidate, "v4-dual-lane")
+            driver(reference, "legacy-reference")
+            def probe(legacy, output):
+                return guard.verify_fixture_modes(candidate, reference, legacy_reference=legacy,
+                    deadline=time.monotonic() + 10, output=root / output)
+            with self.assertRaisesRegex(ValueError, "reference fixture key mode"):
+                probe(False, "default")
+            modes = probe(True, "explicit")
+            self.assertEqual(modes["candidate"]["mode"], "v4-dual-lane")
+            self.assertEqual(modes["reference"]["mode"], "legacy-reference")
+            driver(candidate, "legacy-reference")
+            with self.assertRaisesRegex(ValueError, "candidate fixture key mode"):
+                probe(True, "candidate-legacy")
 
 
 class GuardExecutionTests(unittest.TestCase):
@@ -273,7 +332,9 @@ class GuardExecutionTests(unittest.TestCase):
 class GuardRunTests(unittest.TestCase):
     def _args(self, directory, extra=()):
         root = Path(directory)
-        (root / "binary").write_text("fixture binary")
+        binary = root / "binary"
+        binary.write_text("#!/bin/sh\nprintf '%s\\n' '{\"schema\":\"triad-fixture-key-mode-v1\",\"fixture_key_mode\":\"v4-dual-lane\"}'\n")
+        binary.chmod(0o755)
         return guard.parse_args(["--reference-root", str(root), "--candidate-root", str(root),
             "--binary", str(root / "binary"), "--reference-binary", str(root / "binary"),
             "--skip-hardware-probes", "--output", str(root / "output"), *extra])
@@ -303,6 +364,19 @@ class GuardRunTests(unittest.TestCase):
         self.assertEqual(report["qualification_status"], "not_evaluated_by_fast_guard")
         self.assertEqual(report["hypothesis_count"], 1)
         self.assertEqual(report["suite_alpha"], .01)
+
+    def test_run_rejects_legacy_mode_without_physical_alignment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = self._args(directory)
+            args.legacy_reference_fixture = True
+            report = guard.run(args, factories=[("fake", lambda context: FakeAdapter({"a": {}}))])
+        self.assertEqual(report["exit_code"], 2)
+        self.assertIn("requires physical-bit-alignment", report["execution_error"]["message"])
+
+    def test_cli_rejects_legacy_mode_without_physical_alignment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(SystemExit):
+                self._args(directory, ["--legacy-reference-fixture"])
 
     def test_cleanup_failure_is_blocking_without_mislabelling_a_slowdown(self):
         with tempfile.TemporaryDirectory() as directory:

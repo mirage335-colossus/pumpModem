@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "resource_test_margin.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/pattern_code.hpp"
@@ -39,7 +40,7 @@ void shared_confidentiality_workspace() {
     legacy.scramble=legacy.dsss=true;
     legacy.data_key.emplace(Bytes(32,0x49));
     auto shared=legacy;
-    shared.data_key=Crypto::random();
+    shared.data_key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x49));
     const auto identity=shared.data_key->confidentiality_storage_id();
     const auto charge=shared.data_key->confidentiality_storage_bytes();
     if(!identity || !charge || legacy.data_key->confidentiality_storage_bytes())

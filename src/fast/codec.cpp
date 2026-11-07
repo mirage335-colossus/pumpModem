@@ -112,10 +112,10 @@ struct Keys {
     std::unique_ptr<ConfidentialityCbc> encryption;
     Keys(const Profile& p,const Crypto& crypto,std::span<const std::uint8_t> salt) {
         if(salt.size()!=32)throw Error("Invalid fixed fast salt width");
-        SecretBytes base(crypto.mac(label(domain(p,"DataPump/fast/v1/serpent-aes/root","DataPump/fast/capacity/v2/serpent-aes/root"))));
+        SecretBytes base(crypto.confidentiality_mac(label(domain(p,"DataPump/fast/v1/serpent-aes-v4/root","DataPump/fast/capacity/v2/serpent-aes-v4/root"))));
         SecretBytes prk(hmac(salt,base.bytes));
         const auto profile=profile_id(p);
-        auto context=label(domain(p,"DataPump/fast/v1/serpent-aes-cbc/v1", "DataPump/fast/capacity/v2/serpent-aes-cbc/v1"));
+        auto context=label(domain(p,"DataPump/fast/v1/serpent-aes-v4/cbc", "DataPump/fast/capacity/v2/serpent-aes-v4/cbc"));
         append(context,profile);
         encryption=crypto.prepare_confidentiality_cbc(context,salt);
         auto info=label(domain(p,"DataPump/fast/v1/HMAC-SHA256","DataPump/fast/capacity/v2/HMAC-SHA256"));append(info,profile);info.push_back(1);
@@ -125,7 +125,7 @@ struct Keys {
 };
 Bytes tag_input(const Profile& p,std::span<const std::uint8_t> salt,std::uint64_t ordinal,
                 std::span<const std::uint8_t> body) {
-    auto canonical=label(domain(p,"DataPump/fast/v1/serpent-aes/group","DataPump/fast/capacity/v2/serpent-aes/group"));append(canonical,profile_id(p));append(canonical,salt);
+    auto canonical=label(domain(p,"DataPump/fast/v1/serpent-aes-v4/group","DataPump/fast/capacity/v2/serpent-aes-v4/group"));append(canonical,profile_id(p));append(canonical,salt);
     ordinal_bytes(canonical,ordinal);append(canonical,body);return canonical;
 }
 Bytes seal(const Profile& p,const Keys& keys,std::span<const std::uint8_t> salt,std::uint64_t ordinal,
@@ -166,11 +166,11 @@ Bytes public_open(const Profile& p,std::span<const std::uint8_t> salt,std::uint6
 }
 Bytes bootstrap_tag(const Profile& p,const std::optional<Crypto>& crypto,std::span<const std::uint8_t> salt,
                     SourceEncoding encoding=SourceEncoding::raw) {
-    auto canonical=label(crypto?domain(p,"DataPump/fast/v1/serpent-aes/bootstrap","DataPump/fast/capacity/v2/serpent-aes/bootstrap"):domain(p,"DataPump/fast/v1/public/bootstrap","DataPump/fast/capacity/v2/public/bootstrap"));
+    auto canonical=label(crypto?domain(p,"DataPump/fast/v1/serpent-aes-v4/bootstrap","DataPump/fast/capacity/v2/serpent-aes-v4/bootstrap"):domain(p,"DataPump/fast/v1/public/bootstrap","DataPump/fast/capacity/v2/public/bootstrap"));
     append(canonical,profile_id(p));
     if(encoding==SourceEncoding::xz)append(canonical,label("/source/xz/v1"));
     append(canonical,salt);
-    return crypto?crypto->mac(canonical):checksum(canonical);
+    return crypto?crypto->confidentiality_mac(canonical):checksum(canonical);
 }
 Bytes rs_interleave(const Profile& p,std::span<const std::uint8_t> systematic) {
     const std::size_t rows=p.interleave_depth*2U,k=k_bytes(p);

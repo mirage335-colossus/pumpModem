@@ -76,8 +76,9 @@ area produced by Serpent-256-CBC followed by AES-256-CBC, and a 32-byte
 HMAC-SHA256. The plaintext width is the largest multiple of
 16 fitting after the IV and tag. Remaining RS data bytes are canonical zero
 alignment fill, which the receiver checks. The HMAC covers profile, salt,
-ordinal, IV, and ciphertext. Keys and tags use `DataPump/fast/capacity/v2/...`
-domains distinct from v1. The Serpent IV is separately derived from the outer
+ordinal, IV, and ciphertext. Encrypted keys and tags use
+`DataPump/fast/capacity/v2/serpent-aes-v4/...` domains distinct from classic
+and older encrypted suites. Public checksum domains are unchanged. The Serpent IV is separately derived from the outer
 IV. Keyed and public modes remain matching local choices; encrypted peers must
 both support the cascade, and there is no wire negotiation or automatic fallback.
 

@@ -1,3 +1,4 @@
+#include "fast_test_key.hpp"
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/modem.hpp"
 #include "datapump/resampler.hpp"
@@ -16,7 +17,7 @@ Profile previous_wire_profile() {
     auto p=classic_profile(Channel::wire);p.constellation=16;p.code_rate=CodeRate::three_quarters;
     p.robust=true;p.interleave_depth=16;p.amplitude=.5;return p;
 }
-Crypto key(unsigned offset=0) {Bytes bytes(32);for(unsigned i=0;i<bytes.size();++i)bytes[i]=static_cast<std::uint8_t>(i+offset);return Crypto(bytes);}
+Crypto key(unsigned offset=0) {return fast_test::sequence_key(offset);}
 Bytes fixture(std::size_t count) {
     Bytes source(count);std::mt19937 rng(7194);
     for(auto& byte:source)byte=static_cast<std::uint8_t>(rng());

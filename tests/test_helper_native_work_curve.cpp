@@ -7,6 +7,7 @@
 #include "live_helper_prior.hpp"
 #include "live_receiver_admission.hpp"
 #include "receiver_oscillator_policy.hpp"
+#include "fixture_crypto.hpp"
 #include <iomanip>
 #include <map>
 #include <array>
@@ -18,7 +19,7 @@ using namespace datapump;
 namespace {
 void check(bool ok,const char* text){if(!ok)throw std::runtime_error(text);}
 live::Settings b_settings() {
-    live::Settings value;auto& o=value.transfer;o.key.emplace(Bytes(32,0x74));o.search_seconds=3;
+    live::Settings value;auto& o=value.transfer;o.key=fixture_crypto::key(Bytes(32,0xa7),Bytes(32,0x74));o.search_seconds=3;
     o.dsp_workspace_bytes=value.dsp_workspace_bytes=128*1024*1024;
     o.audio_timing_error_seconds=0; // Match --audio-error0ms before resolving the production hop calendar.
     o.modem=tuning::resolve(360,40,tuning::PatternMode::auto_keystream,true,1500,10,

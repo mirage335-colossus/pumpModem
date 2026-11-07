@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/live.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_correlator.hpp"
@@ -135,8 +136,8 @@ live::Settings settings(bool private_union) {
     value.transfer.receive_targets_db_hz={12,8};
     if(private_union) {
         // TX stays public/None; these are independently loaded receive keys.
-        value.receive_keys.emplace_back(Bytes(32,0x68));
-        value.receive_keys.emplace_back(Bytes(32,0x67));
+        value.receive_keys.push_back(fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x68)));
+        value.receive_keys.push_back(fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x67)));
     }
     value.content_limit=value.transfer.content_limit=1024*1024;
     value.dsp_workspace_bytes=value.transfer.dsp_workspace_bytes=64*1024*1024;
@@ -206,7 +207,7 @@ std::uint64_t private_retirement_end(const live::Settings& value,std::uint64_t l
 void prepare_capture(CaptureScript& capture,const live::Settings& value,bool secret) {
     auto options=value.transfer;
     const bool amplitude=options.modem.receiver_strategy==modem::ReceiverStrategy::amplitude_only;
-    if(secret)options.key.emplace(Bytes(32,0x67));
+    if(secret)options.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x67));
     const auto padding=modem::pattern_pulse_padding_samples(options.modem);
     options.timestamp=epoch+padding/rate;options.modem.stream_phase_samples=padding%rate;
     const auto config=transfer::seeded_config(options,options.timestamp);
@@ -827,7 +828,7 @@ std::string paced_json_string(std::string_view text) {
 void prepare_paced_capture(CaptureScript& capture,const live::Settings& value,bool keyed,bool on) {
     constexpr std::size_t maximum_pcm=262144;
     capture.bits="0010010010010010";capture.paced=true;
-    auto options=value.transfer;if(keyed)options.key.emplace(Bytes(32,0x67));
+    auto options=value.transfer;if(keyed)options.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x67));
     const auto padding=modem::pattern_pulse_padding_samples(options.modem);
     options.timestamp=epoch+padding/rate;options.modem.stream_phase_samples=padding%rate;
     const auto config=transfer::seeded_config(options,options.timestamp);

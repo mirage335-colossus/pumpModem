@@ -189,6 +189,24 @@ reported as unavailable rather than silently counted as tested. Measure the
 external command wall time when assessing end-to-end latency; the internal
 budget does not include dependency installation/build or the final report write.
 
+The guard probes and records the fixture key mode of both source-bound binaries.
+The candidate must report `v4-dual-lane`. A reference using the historical
+single-root fixture must be an explicitly constructed isolated reference source
+overlay, with its own fixture header and a driver reporting `legacy-reference`;
+pass both `--legacy-reference-fixture` and `--physical-bit-alignment` for that
+comparison. The overlay and executables are hashed in the guard evidence. The
+alignment still compares complete physical inputs and retains the full measured
+work; the flag does not permit a legacy candidate or bypass those checks. A
+binary without the fixture-mode probe cannot be used in this guard.
+
+The CI fast guard uses the immutable pre-cascade reference
+`b1d1b30f8bcdc09526d60b66bd260b3c7031b0e1` in a separate checkout, then
+overlays the current test driver and a reference-only legacy fixture header.
+The guard records the source and binary identities and aligns the complete
+physical inputs. Explicit qualification retains its existing separate
+`242ea15fa032ee117b9113a7f3cd07cc6e9f0254` reference; a successful fast guard
+does not establish that qualification's compatibility with the new cipher.
+
 Both guards screen complete named workload geometries. FFT captures and
 persistent worker setup are reused where valid; sampled-family screens measure
 each complete generation/receiver pipeline directly. Native simulations

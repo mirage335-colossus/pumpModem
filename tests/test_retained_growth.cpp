@@ -1,4 +1,5 @@
 #include "datapump/transfer.hpp"
+#include "fixture_crypto.hpp"
 #include "datapump/boundary_sync.hpp"
 #include "datapump/fhss_schedule.hpp"
 #include "datapump/sched_hop.hpp"
@@ -110,7 +111,8 @@ void decoded_output_is_separate() {
 }
 void repeated_failures_and_calendar_shapes() {
     auto configured=options();configured.fec=FecMode::off;
-    const std::array<std::uint8_t,32> master{};configured.key.emplace(master);
+    const std::array<std::uint8_t,32> master{};
+    configured.key=fixture_crypto::key(Bytes(32,0xd3),master);
     Message source;source.data.assign(128,'X');
     auto wire=transfer::message_wire_bits(source,configured);
     constexpr auto cadence=boundary_sync::marker_bits+boundary_sync::interval_bits;

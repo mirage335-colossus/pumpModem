@@ -2,6 +2,7 @@
 #include "datapump/helper_tone_tracker.hpp"
 #include "datapump/helper_segmented_precision.hpp"
 #include "datapump/transfer.hpp"
+#include "fixture_crypto.hpp"
 #include "../src/live_helper_pilot_stage.hpp"
 #include <algorithm>
 #include <array>
@@ -24,7 +25,7 @@ Measurements channel_case(double cn0,unsigned seed,bool wide=false,bool noise_on
     config.spreading_factor=128;config.pulse_shaping=false;
     config.oscillator_search=modem::OscillatorSearchConfig{{100,phase_noise},{wide?100.:2.,phase_noise},wide?3e7:7e6,3};
     transfer::Options options;options.modem=config;options.timestamp=1800000000;
-    options.key=Crypto(std::array<std::uint8_t,32>{});
+    options.key=fixture_crypto::key(Bytes(32,0xa7),Bytes(32,0));
     Bytes bits(64);for(std::size_t i=0;i<bits.size();++i)bits[i]=(i*7+i/3)%2;
     auto source=transfer::binary_transmitter(bits,options);
     helper::Options helper;helper.power_w=40;helper.data_power_w=4;helper.callsign="N0CALL";helper.timecode=true;

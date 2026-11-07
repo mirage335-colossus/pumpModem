@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/symbol_burst.hpp"
@@ -25,7 +26,7 @@ transfer::Options configuration(bool encrypted,unsigned factor=1) {
     config.pulse_shaping=encrypted; // Explicitly cover the independent P=0 render path.
     config.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
     config.symbol_burst={1,3};
-    if(encrypted)options.key.emplace(Bytes(32,0x67));
+    if(encrypted)options.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x67));
     auto prepared=transfer::seeded_config(options,options.timestamp);
     const modem::SymbolBurstPlan plan(prepared);
     const auto slot=plan.first_slot({options.timestamp,0});

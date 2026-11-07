@@ -113,11 +113,26 @@ else()
   target_sources(datapump PRIVATE src/execution.cpp)
   # Platform audio is selected only at a native composition boundary. The
   # common modem/application and the pipe/Wasm targets cannot pull it in.
-  add_library(datapump_audio_native OBJECT EXCLUDE_FROM_ALL src/audio.cpp src/audio_policy.cpp)
+  add_library(datapump_audio_native OBJECT EXCLUDE_FROM_ALL src/audio.cpp src/audio_policy.cpp src/audio_entropy.cpp)
+  if(WIN32)
+    target_sources(datapump_audio_native PRIVATE src/audio_entropy_process_win.cpp)
+  else()
+    target_sources(datapump_audio_native PRIVATE src/audio_entropy_process.cpp)
+  endif()
+  target_compile_definitions(datapump_audio_native PRIVATE DATAPUMP_AUDIO_ENTROPY_ENABLED=1 DATAPUMP_AUDIO_ENTROPY_PROCESS=1)
   target_link_libraries(datapump_audio_native PRIVATE datapump ${CMAKE_DL_LIBS})
   if(WIN32)
     target_link_libraries(datapump_audio_native PRIVATE winmm)
     target_link_libraries(datapump PRIVATE advapi32)
+  endif()
+  # A fresh device open may block in a native driver even after cancellation.
+  # Keep that work in a separate, terminable process.  Compile its audio
+  # provider without the parent broker so the helper cannot spawn itself.
+  add_executable(datapump-audio-entropy EXCLUDE_FROM_ALL
+    src/audio_entropy_helper.cpp src/audio.cpp src/audio_policy.cpp)
+  target_link_libraries(datapump-audio-entropy PRIVATE datapump ${CMAKE_DL_LIBS})
+  if(WIN32)
+    target_link_libraries(datapump-audio-entropy PRIVATE winmm)
   endif()
 endif()
 if(MSVC)
@@ -177,6 +192,12 @@ else()
   target_compile_options(datapump_fast PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 set(datapump_executables)
+set(DATAPUMP_INSTALL_AUDIO_HELPER OFF)
+if(NOT DATAPUMP_BUILD_WASM AND (DATAPUMP_BUILD_CLI OR DATAPUMP_BUILD_GUI OR
+    DATAPUMP_BUILD_TUI OR DATAPUMP_BUILD_FB OR DATAPUMP_BUILD_FRAMEBUFFER_LIBRARY))
+  set(DATAPUMP_INSTALL_AUDIO_HELPER ON)
+  list(APPEND datapump_executables datapump-audio-entropy)
+endif()
 if(DATAPUMP_BUILD_CLI)
   target_compile_definitions(pump PRIVATE DATAPUMP_VERSION="${DATAPUMP_VERSION}")
   if(MSVC)
@@ -270,7 +291,9 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_executable(test_gui_fast_live tests/test_gui_fast_live.cpp)
   target_link_libraries(test_gui_fast_live PRIVATE datapump_gui_application datapump)
   add_test(NAME gui_fast_live COMMAND test_gui_fast_live)
+  add_test(NAME gui_fast_keygen COMMAND test_gui_fast_live --keygen-staging)
   set_tests_properties(gui_fast_live PROPERTIES LABELS "gui")
+  set_tests_properties(gui_fast_keygen PROPERTIES LABELS "gui;fast" TIMEOUT 90)
   add_test(NAME vendored_lzma_source COMMAND ${CMAKE_COMMAND}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/vendored_lzma.cmake)
   add_executable(benchmark_receiver EXCLUDE_FROM_ALL tools/benchmark_receiver.cpp)
@@ -1204,8 +1227,72 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
     endif()
     add_test(NAME windows_audio_contract COMMAND test_windows_audio)
   endif()
+  # Broker exercises an injected capture provider; it does not open a device.
+  # The production native and host audio objects each own their own broker.
+  add_executable(test_audio_entropy EXCLUDE_FROM_ALL tests/test_audio_entropy.cpp src/audio_entropy.cpp)
+  target_compile_definitions(test_audio_entropy PRIVATE DATAPUMP_AUDIO_ENTROPY_TESTING=1)
+  target_link_libraries(test_audio_entropy PRIVATE datapump Threads::Threads)
+  add_test(NAME audio_entropy COMMAND test_audio_entropy)
+  set_tests_properties(audio_entropy PROPERTIES LABELS "regular;frontends" TIMEOUT 90)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Run the real parent adapter against a test-only sibling helper. The
+    # fixture cannot be selected by a production executable.
+    set(_entropy_test_dir "${CMAKE_CURRENT_BINARY_DIR}/audio-entropy-adapter-test")
+    add_executable(audio_entropy_fake_helper EXCLUDE_FROM_ALL tests/audio_entropy_fake_helper.cpp)
+    set_target_properties(audio_entropy_fake_helper PROPERTIES
+      OUTPUT_NAME datapump-audio-entropy RUNTIME_OUTPUT_DIRECTORY "${_entropy_test_dir}")
+    add_executable(test_audio_entropy_process EXCLUDE_FROM_ALL
+      tests/test_audio_entropy_process.cpp src/audio_entropy_process.cpp)
+    target_include_directories(test_audio_entropy_process PRIVATE include src)
+    target_link_libraries(test_audio_entropy_process PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+    # Intercept only this test executable's OS calls; production retains the
+    # real syscall and entropy interfaces.
+    target_link_options(test_audio_entropy_process PRIVATE "-Wl,--wrap=syscall,--wrap=getrandom")
+    set_target_properties(test_audio_entropy_process PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_entropy_test_dir}")
+    add_dependencies(test_audio_entropy_process audio_entropy_fake_helper)
+    add_test(NAME audio_entropy_process COMMAND test_audio_entropy_process)
+    set_tests_properties(audio_entropy_process PROPERTIES LABELS "regular;frontends" TIMEOUT 60)
+    # Exercise the production broker and process adapter together with a
+    # separately located synthetic child; no production executable can select it.
+    set(_entropy_e2e_dir "${CMAKE_CURRENT_BINARY_DIR}/audio-entropy-e2e-test")
+    add_executable(audio_entropy_e2e_helper EXCLUDE_FROM_ALL tests/audio_entropy_e2e_helper.cpp)
+    set_target_properties(audio_entropy_e2e_helper PROPERTIES
+      OUTPUT_NAME datapump-audio-entropy RUNTIME_OUTPUT_DIRECTORY "${_entropy_e2e_dir}")
+    add_executable(test_audio_entropy_e2e EXCLUDE_FROM_ALL tests/test_audio_entropy_e2e.cpp
+      src/audio_entropy.cpp src/audio_entropy_process.cpp)
+    target_compile_definitions(test_audio_entropy_e2e PRIVATE DATAPUMP_AUDIO_ENTROPY_PROCESS=1)
+    target_include_directories(test_audio_entropy_e2e PRIVATE include src)
+    target_link_libraries(test_audio_entropy_e2e PRIVATE datapump Threads::Threads ${CMAKE_DL_LIBS})
+    set_target_properties(test_audio_entropy_e2e PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${_entropy_e2e_dir}")
+    add_dependencies(test_audio_entropy_e2e audio_entropy_e2e_helper)
+    add_test(NAME audio_entropy_e2e COMMAND test_audio_entropy_e2e)
+    set_tests_properties(audio_entropy_e2e PROPERTIES LABELS "regular;frontends" TIMEOUT 60)
+    # The helper's actual isolation filter runs over a synthetic capture
+    # provider so process-creation restrictions are verified without hardware.
+    add_executable(test_audio_entropy_helper_filter EXCLUDE_FROM_ALL
+      src/audio_entropy_helper.cpp tests/audio_entropy_filter_capture_stub.cpp)
+    target_include_directories(test_audio_entropy_helper_filter PRIVATE include src)
+    target_link_libraries(test_audio_entropy_helper_filter PRIVATE Threads::Threads)
+  endif()
+  add_executable(test_interval_auth_v4 EXCLUDE_FROM_ALL tests/test_interval_auth_v4.cpp)
+  target_link_libraries(test_interval_auth_v4 PRIVATE datapump)
+  add_test(NAME interval_auth_v4 COMMAND test_interval_auth_v4)
+  set_tests_properties(interval_auth_v4 PROPERTIES LABELS "regular" TIMEOUT 30)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT BUILD_SHARED_LIBS)
+    # Wrap only the test binary's OS RNG to exercise failures and round order.
+    add_executable(test_keyfile_entropy EXCLUDE_FROM_ALL tests/test_keyfile_entropy.cpp)
+    target_link_libraries(test_keyfile_entropy PRIVATE datapump)
+    target_link_options(test_keyfile_entropy PRIVATE "-Wl,--wrap=getrandom")
+    add_test(NAME keyfile_entropy COMMAND test_keyfile_entropy)
+    set_tests_properties(keyfile_entropy PROPERTIES LABELS "regular" TIMEOUT 30)
+  endif()
   find_package(Python3 QUIET COMPONENTS Interpreter)
   if(Python3_FOUND)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      add_test(NAME audio_entropy_helper_filter COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_audio_entropy_filter.py $<TARGET_FILE:test_audio_entropy_helper_filter>)
+      set_tests_properties(audio_entropy_helper_filter PROPERTIES LABELS "regular;frontends" TIMEOUT 30)
+    endif()
     add_test(NAME background_noise_cli COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_background_noise_cli.py $<TARGET_FILE:background_noise>)
     set_tests_properties(background_noise_cli PROPERTIES LABELS "triad" TIMEOUT 30)
@@ -1230,10 +1317,13 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_helper_plan_long.py $<TARGET_FILE:triad_helper_export>)
     set_tests_properties(triad_helper_plan_long PROPERTIES LABELS "triad-helper" TIMEOUT 30)
     add_custom_target(test_triad_helper_plan_long DEPENDS triad_helper_export)
+    add_executable(test_triad_keyfile_fixture EXCLUDE_FROM_ALL tests/triad_keyfile_fixture.cpp)
+    target_link_libraries(test_triad_keyfile_fixture PRIVATE datapump)
     add_test(NAME triad_stream_source COMMAND ${Python3_EXECUTABLE}
-      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_stream_source.py $<TARGET_FILE:triad_helper_export>)
-    set_tests_properties(triad_stream_source PROPERTIES LABELS "triad-helper" TIMEOUT 45)
-    add_custom_target(test_triad_stream_source DEPENDS triad_helper_export)
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_stream_source.py $<TARGET_FILE:triad_helper_export>
+      $<TARGET_FILE:test_triad_keyfile_fixture>)
+    set_tests_properties(triad_stream_source PROPERTIES LABELS "triad-helper" TIMEOUT 600)
+    add_custom_target(test_triad_stream_source DEPENDS triad_helper_export test_triad_keyfile_fixture)
     add_test(NAME triad_pattern_probe COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_pattern_probe.py $<TARGET_FILE:triad_pattern_probe>)
     set_tests_properties(triad_pattern_probe PROPERTIES LABELS "triad" TIMEOUT 60)
@@ -1360,7 +1450,7 @@ if(NOT DATAPUMP_BUILD_WASM)
   foreach(_target IN LISTS _datapump_native_targets)
     get_target_property(_type ${_target} TYPE)
     if(_type STREQUAL "EXECUTABLE")
-      if(_target STREQUAL "background_noise" OR _target STREQUAL "test_background_noise" OR _target STREQUAL "test_audio_output" OR _target STREQUAL "test_serpent" OR
+      if(_target STREQUAL "datapump-audio-entropy" OR _target STREQUAL "audio_entropy_fake_helper" OR _target STREQUAL "audio_entropy_e2e_helper" OR _target STREQUAL "test_audio_entropy_e2e" OR _target STREQUAL "test_audio_entropy_process" OR _target STREQUAL "test_audio_entropy_helper_filter" OR _target STREQUAL "background_noise" OR _target STREQUAL "test_background_noise" OR _target STREQUAL "test_audio_output" OR _target STREQUAL "test_serpent" OR _target STREQUAL "test_audio_entropy" OR _target STREQUAL "test_keyfile_entropy" OR _target STREQUAL "test_triad_keyfile_fixture" OR
           _target STREQUAL "test_triad_modem" OR _target STREQUAL "test_triad_v2" OR
           _target STREQUAL "test_triad_statistics" OR _target STREQUAL "test_triad_v3_source" OR _target STREQUAL "test_triad_shaping" OR
           _target STREQUAL "test_triad_clock_follow" OR _target STREQUAL "test_continuous_clock" OR _target STREQUAL "test_triad_mapped_basis" OR
@@ -1379,12 +1469,18 @@ if(NOT DATAPUMP_BUILD_WASM)
         # native capability/clock defaults, compiled with the fixture's platform
         # definitions, without accidentally replacing or duplicating its mock.
         target_sources(${_target} PRIVATE src/audio_policy.cpp)
+        if(_target IN_LIST _datapump_mock_audio_tests)
+          # Mock providers still need the broker symbol used by keyfile UI;
+          # their capture implementation remains the fixture's own.
+          target_sources(${_target} PRIVATE src/audio_entropy.cpp)
+        endif()
         if(_target STREQUAL "test_live_profiles")
           # This synthetic provider supplies dated capture on every host.
           target_compile_definitions(${_target} PRIVATE DATAPUMP_TEST_UTC_CAPTURE_PROVIDER=1)
         endif()
       else()
         target_link_libraries(${_target} PRIVATE datapump_audio_native)
+        add_dependencies(${_target} datapump-audio-entropy)
       endif()
     endif()
   endforeach()
@@ -1393,6 +1489,7 @@ if(NOT DATAPUMP_BUILD_WASM)
   foreach(_target datapump_framebuffer datapump_terminal_ui)
     if(TARGET ${_target})
       target_link_libraries(${_target} PRIVATE datapump_audio_native)
+      add_dependencies(${_target} datapump-audio-entropy)
     endif()
   endforeach()
 endif()

@@ -275,7 +275,8 @@
         "src/crypto.cpp",
         "include/datapump/crypto.hpp",
         "src/serpent.cpp",
-        "include/datapump/serpent.hpp"
+        "include/datapump/serpent.hpp",
+        "tools/triad_fixture_key.hpp"
       ],
       "cheap_functional_tests": [
         "tests/test_triad_v3_source.cpp::geometry_checks",

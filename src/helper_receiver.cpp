@@ -1953,6 +1953,10 @@ Receiver::Receiver(double expected,double width,std::vector<Crypto> keys,
     // Do not inherit an unbounded caller vector capacity into the workspace.
     std::vector<Crypto> compact;
     if(!keys.empty())compact.push_back(keys.front());
+    // The by-value input may have a much larger capacity than the compact
+    // retained key. Release it before allocating the receiver implementation;
+    // the incoming vector itself is supplied and funded by the caller.
+    std::vector<Crypto>().swap(keys);
     // Account for both the retained metadata and a replacement decoded before
     // it is moved into that slot. Match the codec's bounded append sequence,
     // rather than assuming a particular standard library string capacity.

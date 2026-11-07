@@ -1,6 +1,7 @@
 #include "datapump/live.hpp"
 #include "datapump/tuning.hpp"
 #include "../src/search_parallel.hpp"
+#include <array>
 #include <atomic>
 #include <charconv>
 #include <chrono>
@@ -12,6 +13,13 @@
 #include <thread>
 
 namespace {
+// Fixed public benchmark lanes; preserve the original AES waveform seed while
+// supplying separately selected Serpent material for payload masking.
+datapump::Crypto benchmark_key() {
+    std::array<std::uint8_t,64> serpent{},aes{};
+    serpent.fill(0xa6);aes.fill(0x37);
+    return datapump::Crypto::from_independent_roots(serpent,aes);
+}
 template<class Number> Number argument(std::string_view text,const char* name) {
     if(text.starts_with('+')) {
         text.remove_prefix(1);
@@ -42,7 +50,7 @@ int main(int argc,char** argv) {
         constexpr std::uint64_t epoch=1800000000;
         live::Settings settings;settings.simulation=true;
         settings.transfer.modem=tuning::resolve(bandwidth,target,tuning::PatternMode::auto_pattern,true).config;
-        settings.transfer.key.emplace(Bytes(32,0x37));settings.transfer.timestamp=epoch;
+        settings.transfer.key=benchmark_key();settings.transfer.timestamp=epoch;
         settings.transfer.search_seconds=radius;
         settings.simulation_snr_db=30;
         settings.simulation_clock_error_ppm=100;

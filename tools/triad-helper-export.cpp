@@ -1,3 +1,4 @@
+#include "triad_fixture_key.hpp"
 // Isolated sampled fixture: production Helper transmitter + encrypted triad v3.
 // No ordinary Robust receive path is instantiated here.
 #include "datapump/helper_carrier.hpp"
@@ -24,7 +25,6 @@
 #include <memory>
 #include <map>
 #include <sstream>
-#include <openssl/crypto.h>
 #include <numbers>
 #include <optional>
 #include <random>
@@ -70,6 +70,8 @@ struct Options {
     std::string stream_kind = "channel";
     bool clock_follow_bounded = false;
     std::filesystem::path key_file;
+    std::optional<std::string> key_name;
+    std::optional<std::filesystem::path> key_pad;
     std::string helper_components = "full";
     std::string channel_evolution = "legacy";
     std::optional<double> random_doppler_width_hz, delay_excursion_ms, delay_knot_seconds;
@@ -150,7 +152,7 @@ Options parse(int argc, char** argv) {
                 "  --plan-only checks long integer geometry without generating waveform samples or templates.\n"
                 "  Sampled exports retain a2GiB budget; whole-active calibration has a4194304-sample budget.\n"
                 "  [--power-reference whole-active|legacy-window|bounded-tiles] [--power-plan-only]\n"
-                "  [--stream-server --stream-kind emitted|channel --key-file RAW_32_BYTE_KEY | --key-seed TEST_SEED]\n"
+                "  [--stream-server --stream-kind emitted|channel --key-file KEYFILE [--key-name NAME] [--pad PATH] | --key-seed TEST_SEED]\n"
                 "  [--now] Streaming defaults to the current epoch and bounded-tiles calibration.\n"
                 "  [--clock-follow-bounded] Opt-in slow DATA-only emitted stream; accepts clock TARGET_SECONDS.\n"
                 "  [--base-oscillator ID] [--shift-oscillator ID] [--ramp-seconds POSITIVE]\n"
@@ -175,6 +177,8 @@ Options parse(int argc, char** argv) {
         else if (arg == "--seed") o.seed = integer(next(), "seed");
         else if (arg == "--key-seed") { o.key_seed = integer(next(), "key seed"); o.explicit_key_seed = true; }
         else if (arg == "--key-file") o.key_file = std::string(next());
+        else if (arg == "--key-name") o.key_name = std::string(next());
+        else if (arg == "--pad") o.key_pad = std::filesystem::path(std::string(next()));
         else if (arg == "--stream-server") o.stream_server = true;
         else if (arg == "--stream-kind") o.stream_kind = next();
         else if (arg == "--clock-follow-bounded") o.clock_follow_bounded = true;
@@ -273,6 +277,8 @@ Options parse(int argc, char** argv) {
         throw std::invalid_argument("stream server requires --key-file or explicit --key-seed for a reproducible test fixture");
     if (!o.key_file.empty() && o.explicit_key_seed)
         throw std::invalid_argument("--key-file and --key-seed are mutually exclusive");
+    if (o.key_file.empty() && (o.key_name || o.key_pad))
+        throw std::invalid_argument("--key-name and --pad require --key-file");
     if (o.scenario != "hf" && o.scenario != "eme") throw std::invalid_argument("case must be hf or eme");
     if (!o.explicit_data_if && o.scenario == "eme") o.data_if_hz = 4000;
     if (o.ramp_seconds && *o.ramp_seconds <= 0)
@@ -361,21 +367,19 @@ Crypto fixture_key(std::uint64_t seed) {
     std::mt19937 engine(seq);
     std::array<std::uint8_t, 32> material{};
     for (auto& b : material) b = static_cast<std::uint8_t>(engine());
-    return Crypto(material);
+    return datapump::triad::fixture::key(material);
 }
 
 Crypto selected_key(const Options& o) {
     if (o.key_file.empty()) return fixture_key(o.key_seed);
-    std::ifstream input(o.key_file, std::ios::binary);
-    std::array<std::uint8_t, 32> bytes{};
-    input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-    if (input.gcount() != 32 || input.peek() != std::char_traits<char>::eof()) {
-        OPENSSL_cleanse(bytes.data(), bytes.size());
-        throw std::invalid_argument("key file must contain exactly 32 raw bytes");
+    const auto entries=load_keyring(o.key_file,o.key_pad);
+    if (o.key_name) {
+        const auto found=std::find_if(entries.begin(),entries.end(),[&](const KeyEntry& entry){return entry.name==*o.key_name;});
+        if(found==entries.end())throw std::invalid_argument("named key is not present in keyfile");
+        return found->key;
     }
-    Crypto result(bytes);
-    OPENSSL_cleanse(bytes.data(), bytes.size());
-    return result;
+    if(entries.size()!=1)throw std::invalid_argument("--key-name is required for a keyfile with multiple entries");
+    return entries.front().key;
 }
 
 struct Case {
@@ -1132,7 +1136,9 @@ int run(const Options& o) {
     if (o.power_plan_only) {
         std::cout << std::setprecision(17)
             << "{\"schema\":\"triad-helper-power-plan-v1\",\"sample_rate_hz\":" << sample_rate
-            << ",\"key_seed\":" << o.key_seed << ",\"public_epoch_seconds\":" << f.epoch
+            << ",\"key_source\":\"" << (o.key_file.empty()?"explicit-test-fixture-seed":"keyfile") << "\",\"key_seed\":";
+        if(o.key_file.empty())std::cout<<o.key_seed;else std::cout<<"null";
+        std::cout << ",\"public_epoch_seconds\":" << f.epoch
             << ",\"format\":{\"inner_rate_hz\":" << f.inner_rate_hz << ",\"added_symbols\":" << f.added_symbols
             << ",\"pattern_revision\":\"" << pattern_revision_name(f.pattern_revision)
             << "\",\"added_amplitude_depth\":" << f.added_amplitude_depth
@@ -1379,7 +1385,7 @@ int run(const Options& o) {
             << ",\"mapped_basis_supported\":true,\"mapped_basis_maximum_offset_samples\":1048576"
             << ",\"workspace_budget_bytes\":" << stream_budget << ",\"fixed_workspace_bytes\":" << fixed_bytes
             << ",\"stream_kind\":"; json_string(std::cout, o.stream_kind);
-        std::cout << ",\"key_source\":"; json_string(std::cout, o.key_file.empty() ? "explicit-test-fixture-seed" : "raw-key-file");
+        std::cout << ",\"key_source\":"; json_string(std::cout, o.key_file.empty() ? "explicit-test-fixture-seed" : "keyfile");
         std::cout << ",\"power\":{"; data_power_json(std::cout, o, data_reference, data_calibration_gain, data_gain);
         std::cout << "},\"basis_scope\":\"Public DATA pattern only; arrival is absolute seconds in the requested observation coordinate. Fixed key/epoch per session; all three carriers retained.\""
             << ",\"scope\":\"Bounded pull source, not a receiver or real-time guarantee. Emitted kind has no channel or thermal noise. Physical null and full-duration power accuracy require qualification.\"}\n" << std::flush;
@@ -1683,8 +1689,9 @@ int run(const Options& o) {
         << ",\"helper_component_control\":";
     json_string(manifest, o.helper_components);
     manifest << ",\"helper_component_control_scope\":\"full is the unchanged production waveform; partial modes are source-only metrology/fault diagnostics, with full production power calibration and all channel effects retained\""
-        << ",\"public_epoch_seconds\":" << f.epoch << ",\"key_seed\":" << o.key_seed
-        << ",\"encrypted_source\":true,\"encrypted_helper_metadata\":true,\"helper_callsign\":\"TRIAD\""
+        << ",\"public_epoch_seconds\":" << f.epoch << ",\"key_source\":\"" << (o.key_file.empty()?"explicit-test-fixture-seed":"keyfile") << "\",\"key_seed\":";
+    if(o.key_file.empty())manifest<<o.key_seed;else manifest<<"null";
+    manifest << ",\"encrypted_source\":true,\"encrypted_helper_metadata\":true,\"helper_callsign\":\"TRIAD\""
         << ",\"format\":{\"inner_rate_hz\":" << f.inner_rate_hz << ",\"added_symbols\":" << f.added_symbols
         << ",\"symbol_ordinal\":" << f.symbol_ordinal
         << ",\"pattern_revision\":\"" << pattern_revision_name(f.pattern_revision)

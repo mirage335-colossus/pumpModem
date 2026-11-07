@@ -646,18 +646,22 @@ local action. Filenames are bounded UTF-8 basenames, with no path separators.
   --time 1800000002 --search-seconds 2 --json
 ```
 
-The keyfile has a 128MiB random header whose hash derives the key that encrypts
-the appended named collection. Each entry stores all five purpose keys. The GUI
-selects one for transmission and tries loaded keys on reception; CLI selection uses
-`--key-name Portable`. Legacy single-key files load as `Default`.
+The current keyfile has a 128 MiB random header and an authenticated encrypted
+collection of named key sets. Each set has separate Serpent and AES confidentiality
+material. Generation collects operating-system randomness and attempts fresh audio
+input; the audio contributes only to the Serpent lane. If input is unavailable or
+unusable, a clear warning identifies the OS-only fallback. The GUI selects one
+key for transmission and tries loaded keys on reception; CLI selection uses
+`--key-name Portable`. Older keyfile versions are rejected.
 Optional external pads remain a CLI feature using `--pad path` at creation and load.
 Keyfiles contain only this application's symmetric key sets. Never put
 signing keys or other applications' secrets in this format.
 
-AES-256-CTR masks every wire bit, including markers, source bytes, HMAC and RS
-parity. Only encrypted byte intervals carry HMAC-SHA256; exact raw-bit signaling
-has no MAC. Independent HKDF-derived keys separate the Data, MAC, DSSS and
-Scrambler purposes; the keyfile retains its compatible five-key layout.
+Serpent-256-CTR and AES-256-CTR together mask every wire bit, including markers,
+source bytes, authentication tags and RS parity. Only encrypted byte intervals
+carry a 32-byte tag combining independent HMAC-SHA256 lanes; exact raw-bit
+signaling has no MAC. AES-based streams for waveform generation,
+spreading and hopping remain purpose-separated.
 Symbol-start epoch/ordinal addresses bind interval MACs and preserve cipher
 positions through missing symbols and drains. Automatically
 timed hardware output schedules the first payload symbol on a whole second.
@@ -665,7 +669,7 @@ Receive time defaults to capture start; recordings require a suitable epoch and
 finite search window. This is not a nanosecond-resolution absolute-time receiver.
 
 Both peers need the same current waveform, fixed-interval format and local
-source/FEC profile. Existing keyfiles remain usable. Reusing a key and schedule
+source/FEC profile and cipher suite. Reusing a key and schedule
 position reveals XOR relationships between plaintexts and permits replay within
 accepted clock windows. A canonical address is not a fresh nonce or durable replay
 state. Independent interval MACs authenticate received segments, not an intended

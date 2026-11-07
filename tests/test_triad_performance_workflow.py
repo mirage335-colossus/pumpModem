@@ -121,6 +121,29 @@ class TriadPerformanceWorkflowTests(unittest.TestCase):
         self.assertEqual(len(re.findall(r"(?m)^  [A-Za-z0-9_-]+:\n    name:", self.performance)), 1)
         self.assertNotIn("matrix:", self.performance)
 
+    def test_guard_uses_an_isolated_immutable_reference_and_aligned_inputs(self):
+        checkout = step_section(self.performance, "Checkout immutable fast guard reference source")
+        prepare = step_section(self.performance, "Prepare isolated fast guard reference drivers")
+        build = step_section(self.performance, "Build isolated fast guard reference drivers")
+        guard = step_section(self.performance, "Guard isolated receiver performance against confirmed large slowdowns")
+        qualification = step_section(self.performance, "Explicit one-time qualification producer")
+        self.assertIn("GUARD_BASELINE_REF: b1d1b30f8bcdc09526d60b66bd260b3c7031b0e1", self.performance)
+        self.assertIn("ref: ${{ env.GUARD_BASELINE_REF }}", checkout)
+        self.assertIn("path: guard-reference", checkout)
+        self.assertIn("if: ${{ inputs.qualify != true }}", checkout)
+        self.assertIn("reference must start as a clean immutable checkout", prepare)
+        self.assertIn("prepare_reference_driver(candidate, reference)", prepare)
+        self.assertIn("unexpected changed fast guard production source", prepare)
+        self.assertIn("fixture_header_sha256", prepare)
+        self.assertIn("fixture-key-mode", build)
+        self.assertIn("binary_sha256", build)
+        self.assertIn("--candidate-root candidate --reference-root guard-reference", guard)
+        self.assertIn("--reference-binary guard-reference/build/dev-cli/triad_long", guard)
+        self.assertIn("--planner-reference-binary guard-reference/build/dev-cli/triad_planner_perf", guard)
+        self.assertIn("--legacy-reference-fixture --physical-bit-alignment", guard)
+        self.assertIn("--candidate-root candidate --reference-root reference", qualification)
+        self.assertIn("--reference-binary reference/build/dev-cli/triad_long", qualification)
+
     def test_one_harness_discovery_includes_guard_checks_before_any_timings(self):
         name = "Check native performance trace and harness contracts"
         block = step_section(self.performance, name)

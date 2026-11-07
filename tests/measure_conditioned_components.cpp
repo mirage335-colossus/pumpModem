@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "conditioned_reference_factory.hpp"
 #include "live_receiver_admission.hpp"
 #include "live_helper_prior.hpp"
@@ -15,7 +16,7 @@ namespace {
 void check(bool ok,const char* text){if(!ok)throw std::runtime_error(text);}
 live::Settings b_settings() {
     live::Settings value;auto& o=value.transfer;
-    o.key.emplace(Bytes(32,0x74));o.search_seconds=3;o.dsp_workspace_bytes=128*1024*1024;
+    o.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x74));o.search_seconds=3;o.dsp_workspace_bytes=128*1024*1024;
     value.dsp_workspace_bytes=o.dsp_workspace_bytes;
     o.modem=tuning::resolve(360,40,tuning::PatternMode::auto_keystream,true,1500,10,
         modem::OuterDsssVersion::interleaved_v2).config;

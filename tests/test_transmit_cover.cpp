@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/transfer.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
@@ -676,7 +677,7 @@ void deferred_calendar(unsigned factor=1) {
             check(hops.arrival_ordinal(sample+static_cast<long double>(plan->offset_seconds)*1003,1003)==expected,"UTC arrival offset changed hop identity");
         }
     }
-    transfer::Options o;o.timestamp=1800000321;o.key.emplace(Bytes(32,0x65));
+    transfer::Options o;o.timestamp=1800000321;o.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x65));
     auto& c=o.modem;c.sample_rate=4096*factor;c.carrier_hz=1024*factor;c.bandwidth_hz=2048;c.integration_seconds=.0625;
     c.dsss_factor=factor;c.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
     c.scramble=true;
@@ -1034,7 +1035,7 @@ void mandatory_gate_rejection() {
     c.fake_hopping=modem::resolve_fhss_pulse_power(p,c);
     check(c.fake_hopping->mandatory_ramps && !c.fake_hopping->power_ramps && !c.fake_hopping->power_fallback_reason.empty(),
         "unusable pulse support was not identified");
-    bool unresolved=false;transfer::Options production;production.key.emplace(Bytes(32,0x65));
+    bool unresolved=false;transfer::Options production;production.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x65));
     production.modem=c;production.modem.fake_hopping=std::make_shared<modem::FhssPlan>(p);
     try{transfer::binary_transmitter(Bytes{1},production);}catch(const Error& e){unresolved=std::string_view(e.what()).find("resolved mandatory power plan")!=std::string_view::npos;}
     check(unresolved,"unresolved production API plan bypassed mandatory ramps");
@@ -1105,7 +1106,7 @@ void continuation_cover_regression() {
         std::vector<std::size_t> source_chunk_sizes;
         std::uint64_t valid_end=0;
     };
-    transfer::Options options;options.timestamp=tx_epoch;options.key.emplace(Bytes(32,0x61));
+    transfer::Options options;options.timestamp=tx_epoch;options.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x61));
     options.content_limit=1024*1024;options.search_seconds=1;options.fec=FecMode::rs20;
     auto& modem_config=options.modem;
     modem_config.sample_rate=8000;modem_config.carrier_hz=1500;modem_config.bandwidth_hz=1000;

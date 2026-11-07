@@ -21,7 +21,7 @@ modem::Config configuration() {
     c.oscillator_search=modem::OscillatorSearchConfig{{100,0},{2,0},7e6,3};return c;
 }
 helper::Options helper_options(){helper::Options h;h.power_w=40;h.data_power_w=4;h.callsign="N0CALL";h.timecode=true;return h;}
-transfer::Options source_options(const modem::Config& c){transfer::Options o;o.modem=c;o.timestamp=1800000000;o.key=Crypto(std::array<std::uint8_t,32>{});return o;}
+transfer::Options source_options(const modem::Config& c){transfer::Options o;o.modem=c;o.timestamp=1800000000;std::array<std::uint8_t,64> serpent{},aes{};serpent.fill(0xa7);o.key=Crypto::from_independent_roots(serpent,aes);return o;}
 modem::ChannelConfig impairment(const modem::Config& c,const helper::Options& h,int side,double cn0=60) {
     modem::ChannelConfig i;i.clock_error_ppm=100;i.frequency_offset_hz=side*7.3;i.seed=5181;
     i.snr_db=cn0-10*std::log10(c.sample_rate/2.)-10*std::log10(h.power_w/h.data_power_w)-

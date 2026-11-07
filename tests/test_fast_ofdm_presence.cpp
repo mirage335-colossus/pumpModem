@@ -1,3 +1,4 @@
+#include "fast_test_key.hpp"
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/modem.hpp"
 #include "datapump/fast/preset.hpp"
@@ -235,7 +236,7 @@ void current_preset_keyed_file(double reference_snr,unsigned expected_depth) {
     datapump::Bytes original(20000);
     for(std::size_t i=0;i<original.size();++i)original[i]=static_cast<std::uint8_t>(i*19);
     original.back()=0;
-    const datapump::Crypto key(datapump::Bytes(32,0x37));
+    const auto key=fast_test::key(datapump::Bytes(32,0x37));
     auto encoder=testing::deterministic_encoder(p,key,byte_source(original),947311);
     // Exercise the real streaming codec reader: the physical transmitter asks
     // for complete locally fixed cycles, including bootstrap and final padding.

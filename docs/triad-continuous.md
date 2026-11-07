@@ -204,8 +204,9 @@ the qualified two-hour run and inexpensive equivalence guards cover this path.
 For hardware, select `--mode transmit` or `--mode receive`; capture requires
 `--noise-variance`. Use `--limit-seconds` only for a prefix diagnostic: the
 report remains incomplete and cannot admit the bit. Do not put the operational
-key on a command line. Native streaming requires either a raw 32-byte key file
-or an explicit `--key-seed`, which is for reproducible test fixtures only. If
+key on a command line. Native streaming requires either a current-format
+keyfile, optionally specifying `--key-name` and `--pad`, or an explicit
+`--key-seed`, which is for reproducible test fixtures only. If
 no epoch is supplied, streaming binds the keyed source to the system clock at
 session creation and keeps that epoch for the complete bit.
 

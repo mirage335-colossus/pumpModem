@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BASELINE = "242ea15fa032ee117b9113a7f3cd07cc6e9f0254"
 SOURCE_FILES = (
     "src/crypto.cpp", "include/datapump/crypto.hpp",
-    "src/serpent.cpp", "include/datapump/serpent.hpp",
+    "src/serpent.cpp", "include/datapump/serpent.hpp", "tools/triad_fixture_key.hpp",
     "include/datapump/triad_modem_v3.hpp", "src/channel_perturbation.hpp",
     "src/channel_spread.hpp", "src/triad_gaussian_fading.hpp", "src/triad_modem_v3.cpp",
     "src/triad_receiver_v3.cpp", "src/triad_simulation_stream.cpp", "src/tuning.cpp",
@@ -35,7 +35,8 @@ SOURCE_FILES = (
     "tools/triad_gaussian_state.py", "tools/triad_gaussian_window.py",
     "tools/triad_group_acquire.py", "tools/triad_noise_likelihood.py", "tools/triad_state_workspace.py")
 SCHEMA = "triad-performance-v2"
-OPTIONAL_HISTORICAL_FILES = frozenset(("src/serpent.cpp", "include/datapump/serpent.hpp"))
+OPTIONAL_HISTORICAL_FILES = frozenset(("src/serpent.cpp", "include/datapump/serpent.hpp",
+                                       "tools/triad_fixture_key.hpp"))
 
 
 class SuiteError(RuntimeError):
@@ -89,6 +90,23 @@ def extract_baseline(repository, ref, destination):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(payload)
         hashes[name] = hashlib.sha256(payload).hexdigest()
+    if hashes.get("tools/triad_fixture_key.hpp") == "absent":
+        driver = (Path(destination) / "tools/triad-long.cpp").read_text()
+        if "triad_fixture_key.hpp" in driver:
+            raise SuiteError("historical triad driver includes missing fixture key header")
+    serpent = [hashes[name] == "absent" for name in ("src/serpent.cpp", "include/datapump/serpent.hpp")]
+    if any(serpent) and not all(serpent):
+        raise SuiteError("historical source has incomplete Serpent implementation")
+    if all(serpent):
+        for name in SOURCE_FILES:
+            path = Path(destination) / name
+            if path.suffix in (".cpp", ".hpp", ".h", ".cc") and path.is_file() and "serpent.hpp" in path.read_text():
+                raise SuiteError("historical source includes missing Serpent header")
+        cmake = subprocess.run(["git", "-C", str(repository), "show", ref + ":CMakeLists.txt"],
+                               capture_output=True, timeout=10, check=True).stdout
+        hashes["CMakeLists.txt"] = hashlib.sha256(cmake).hexdigest()
+        if b"serpent.cpp" in cmake:
+            raise SuiteError("historical build requires missing Serpent source")
     return {"commit": ref, "source_sha256": hashes}
 
 

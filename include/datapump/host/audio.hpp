@@ -44,7 +44,8 @@ public:
     std::vector<Event> take_events();
     void close();
     void capture(std::uint32_t logical_rate,const audio::CaptureCallback& callback,
-                 std::stop_token stop,audio::StreamFormatCallback format,audio::CaptureMonitor monitor={});
+                 std::stop_token stop,audio::StreamFormatCallback format,audio::CaptureMonitor monitor={},
+                 audio::CaptureMonitor fresh_input_monitor={});
     void playback(std::uint32_t logical_rate,const audio::PlaybackCallback& callback,
                   std::stop_token stop,audio::StreamFormatCallback format,
                   audio::ChannelMode channels,audio::Options options);

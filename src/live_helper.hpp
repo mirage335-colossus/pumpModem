@@ -495,7 +495,7 @@ inline HelperReceiveEnvelopeBound helper_receive_envelope_bound(const Settings& 
     std::vector<Bytes> fingerprints;
     if(settings.permits_plaintext())keys.emplace_back();
     const auto add_key=[&](const Crypto& key) {
-        const auto fingerprint=key.mac(Bytes{'D','P','-','R','X','-','B','A','N','K'});
+        const auto fingerprint=key.identity_fingerprint(Bytes{'D','P','-','R','X','-','B','A','N','K'});
         if(std::find(fingerprints.begin(),fingerprints.end(),fingerprint)==fingerprints.end()) {
             fingerprints.push_back(fingerprint);keys.emplace_back(key);
         }

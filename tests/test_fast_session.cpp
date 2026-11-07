@@ -1,3 +1,4 @@
+#include "fast_test_key.hpp"
 #include "datapump/fast/session.hpp"
 #include "../src/fast/session_state.hpp"
 #include "datapump/fast/codec.hpp"
@@ -114,7 +115,7 @@ void fast_cancel() {
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".bin");
     {std::ofstream file(path,std::ios::binary);std::string bytes(65536,'x');file.write(bytes.data(),static_cast<std::streamsize>(bytes.size()));}
     struct Remove {std::filesystem::path path;~Remove(){std::error_code ec;std::filesystem::remove(path,ec);}} cleanup{path};
-    fast::Session session;fast::Settings s;s.device="fixture";s.key=Crypto::random();session.configure(s);
+    fast::Session session;fast::Settings s;s.device="fixture";s.key=fast_test::key(Bytes(32,0x72));session.configure(s);
     check(s.mono&&s.channel_mode==audio::ChannelMode::left_mono,"Default cable API settings must drive the left output channel");
     const auto before=fixture::played.load();session.transmit(path);
     await([&]{return fixture::played>before;},"fast playback did not start");
@@ -138,7 +139,7 @@ void text_audio_roundtrip() {
         s.channel_mode=encrypted?audio::ChannelMode::right_mono:audio::ChannelMode::stereo;
         s.mono=encrypted; // Explicit local routing overrides stay usable.
         s.transmit_gain=encrypted?1.75:.1;s.exclusive=encrypted&&audio::exclusive_supported();
-        if(encrypted)s.key=Crypto(Bytes(32,37));
+        if(encrypted)s.key=fast_test::key(Bytes(32,37));
         fixture::reset({},true,true);
         const auto path=std::filesystem::temp_directory_path()/("datapump-fast-session-file-"+
             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".bin");
@@ -198,7 +199,7 @@ void text_audio_roundtrip() {
               stopping_after_end.physical_complete&&stopping_after_end.file==received.file&&
               stopping_after_end.authenticated==received.authenticated&&stopping_after_end.status==received.status,
               "A stop during teardown revoked an already published physical-end result");
-        if(encrypted)s.key.reset();else s.key=Crypto(Bytes(32,38));
+        if(encrypted)s.key.reset();else s.key=fast_test::key(Bytes(32,38));
         rx.configure(s);
         check(rx.poll().encrypted==encrypted&&rx.poll().authenticated==encrypted,
               "changing the next transfer's mode relabelled completed content");

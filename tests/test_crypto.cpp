@@ -1,5 +1,9 @@
 #include "datapump/crypto.hpp"
 #include "datapump/execution.hpp"
+#include "fixture_keyfile.hpp"
+#include "v4_crypto_vectors.hpp"
+#include <openssl/evp.h>
+#include <cmath>
 
 #include <algorithm>
 #include <atomic>
@@ -44,6 +48,15 @@ struct TempDir {
     ~TempDir() { std::error_code ec; std::filesystem::remove_all(path, ec); }
 };
 
+Crypto independent_key(std::uint8_t serpent_first=128,std::uint8_t aes_first=0) {
+    Bytes s(64),a(64);for(std::size_t i=0;i<64;++i){s[i]=static_cast<std::uint8_t>(128+i);a[i]=static_cast<std::uint8_t>(i);}
+    s[0]=serpent_first;a[0]=aes_first;return Crypto::from_independent_roots(s,a);
+}
+Bytes xor_bytes(Bytes first,std::span<const std::uint8_t> second) {
+    check(first.size()==second.size(),"test XOR width mismatch");
+    for(std::size_t i=0;i<first.size();++i)first[i]^=second[i];
+    return first;
+}
 void test_streams() {
     Bytes master(32);
     for (std::size_t i = 0; i < master.size(); ++i) master[i] = static_cast<std::uint8_t>(i);
@@ -66,10 +79,11 @@ void test_streams() {
         check(std::equal(slice.begin(), slice.end(), all.begin() + offset), "random access stream mismatch");
     }
     auto plain = bytes("clipboard text\nsecond line");
-    auto encrypted = crypto.xor_data(plain, 1720000000, 19);
+    const auto confidential=independent_key();
+    auto encrypted = confidential.xor_data(plain, 1720000000, 19);
     check(plain != encrypted, "encryption did not alter data");
-    check(plain == crypto.xor_data(encrypted, 1720000000, 19), "CTR round trip failed");
-    check(crypto.xor_data({}, 0).empty(), "empty stream failed");
+    check(plain == confidential.xor_data(encrypted, 1720000000, 19), "CTR round trip failed");
+    check(confidential.xor_data({}, 0).empty(), "empty stream failed");
     rejects([&] { crypto.stream(static_cast<StreamPurpose>(99), 0, 0, 1); }, "invalid purpose accepted");
     rejects([&] { crypto.stream(StreamPurpose::Data, 0, std::numeric_limits<std::uint64_t>::max(), 2); },
             "stream offset wrapped");
@@ -203,8 +217,9 @@ void test_authentication() {
     check(crypto.verify({}, crypto.mac({})), "empty-message MAC failed");
     // Chosen plaintext and intentional CTR reuse reveal only reused stream
     // positions, not a usable MAC for changed plaintext.
-    auto cipher = crypto.xor_data(first, 99);
-    const auto stream = crypto.xor_data(Bytes(first.size()), 99);
+    const auto confidential=independent_key();
+    auto cipher = confidential.xor_data(first, 99);
+    const auto stream = confidential.xor_data(Bytes(first.size()), 99);
     for (std::size_t i = 0; i < cipher.size(); ++i) cipher[i] ^= stream[i];
     check(cipher == first, "known plaintext reuse fixture failed");
     cipher.back() ^= 1;
@@ -326,12 +341,12 @@ void test_keyfiles() {
     TempDir dir;
     const testing::KeyfilePolicy policy{4096, 8193};
     const auto key = dir.path / "key.dpkey";
-    testing::create_keyfile(key, policy);
-    check(std::filesystem::file_size(key) == 48 + policy.header_bytes + 32 + 16, "wrong keyfile length");
+    (void)testing::create_keyfile(key, policy,std::nullopt,fixture_keyfile::generation());
+    check(std::filesystem::file_size(key) == 48 + policy.header_bytes + 2 + 7 + 128 + 16 + 32, "wrong keyfile length");
     const auto original = read_file(key);
     const auto probe = testing::load_keyfile(key, policy).stream(StreamPurpose::Data, 50, 5, 128);
     check(probe == testing::load_keyfile(key, policy).stream(StreamPurpose::Data, 50, 5, 128), "keyfile round trip failed");
-    rejects([&] { testing::create_keyfile(key, policy); }, "keyfile overwrite accepted");
+    rejects([&] { (void)testing::create_keyfile(key, policy,std::nullopt,fixture_keyfile::generation()); }, "keyfile overwrite accepted");
     check(read_file(key) == original, "overwrite changed existing keyfile");
     rejects([&] { load_keyfile(key); }, "production loader accepted reduced header");
 #ifndef _WIN32
@@ -340,7 +355,7 @@ void test_keyfiles() {
           std::filesystem::perms::none, "keyfile permissions are too broad");
     const auto link = dir.path / "link.dpkey";
     std::filesystem::create_symlink(key, link);
-    rejects([&] { testing::create_keyfile(link, policy); }, "symlink keyfile overwrite accepted");
+    rejects([&] { (void)testing::create_keyfile(link, policy,std::nullopt,fixture_keyfile::generation()); }, "symlink keyfile overwrite accepted");
     check(read_file(key) == original, "symlink target was changed");
 #endif
     for (std::size_t position : {std::size_t(0), std::size_t(15), std::size_t(31),
@@ -366,15 +381,15 @@ void test_keyfiles() {
     write_file(pad, Bytes(8193, 0x7b));
     write_file(wrong_pad, Bytes(8193, 0x7c));
     const auto padded = dir.path / "padded.dpkey";
-    testing::create_keyfile(padded, policy, pad);
+    (void)testing::create_keyfile(padded, policy, pad,fixture_keyfile::generation());
     const auto padded_probe = testing::load_keyfile(padded, policy, pad).mac(bytes("probe"));
     check(padded_probe == testing::load_keyfile(padded, policy, pad).mac(bytes("probe")), "pad round trip failed");
     rejects([&] { testing::load_keyfile(padded, policy); }, "required pad was optional");
     rejects([&] { testing::load_keyfile(padded, policy, wrong_pad); }, "wrong pad accepted");
     rejects([&] { testing::load_keyfile(key, policy, pad); }, "unexpected pad silently ignored");
     write_file(wrong_pad, Bytes(8192, 0x7c));
-    rejects([&] { testing::create_keyfile(dir.path / "short-pad.dpkey", policy, wrong_pad); }, "short pad accepted");
-    rejects([&] { create_keyfile(dir.path / "prod-short-pad.dpkey", pad); }, "production accepted pad under 1GiB");
+    rejects([&] { (void)testing::create_keyfile(dir.path / "short-pad.dpkey", policy, wrong_pad,fixture_keyfile::generation()); }, "short pad accepted");
+    rejects([&] { (void)create_keyfile(dir.path / "prod-short-pad.dpkey", pad,fixture_keyfile::generation()); }, "production accepted pad under 1GiB");
     check(!std::filesystem::exists(dir.path / "prod-short-pad.dpkey"), "invalid pad left output file");
     write_file(pad, Bytes(8194, 0x7b));
     rejects([&] { testing::load_keyfile(padded, policy, pad); }, "changed pad length accepted");
@@ -384,7 +399,7 @@ void test_keyfiles() {
     const auto streamed_key = dir.path / "streamed.dpkey";
     Bytes pad_data(2 * 65536 + 17, 0x51);
     write_file(streamed_pad, pad_data);
-    testing::create_keyfile(streamed_key, policy, streamed_pad);
+    (void)testing::create_keyfile(streamed_key, policy, streamed_pad,fixture_keyfile::generation());
     check(testing::load_keyfile(streamed_key, policy, streamed_pad).mac({}).size() == 32,
           "multi-chunk pad round trip failed");
     pad_data.back() ^= 1;
@@ -396,52 +411,135 @@ void test_production_keyfile() {
     TempDir dir;
     const auto path = dir.path / "production.dpkey";
     const auto started=std::chrono::steady_clock::now();
-    create_keyfile(path);
+    const auto generated=create_keyfile(path,std::nullopt,fixture_keyfile::generation());
+    check(generated.audio_used && generated.warning.empty(),"production keyfile lost audio provenance");
     check(std::chrono::steady_clock::now()-started>=std::chrono::seconds(1),"keyfile entropy collections were not separated by one second");
-    check(std::filesystem::file_size(path) == keyfile_header_bytes + 297, "production v3 header/entry dimensions changed");
+    check(std::filesystem::file_size(path) == keyfile_header_bytes + 233, "production v4 header/entry dimensions changed");
     std::ifstream input(path,std::ios::binary);std::array<char,8> magic{};input.read(magic.data(),magic.size());
-    check(std::string_view(magic.data(),magic.size())=="DPMKEY03","production still writes an AES-only legacy keyfile");
+    check(std::string_view(magic.data(),magic.size())=="DPMKEY04","production still writes an AES-only legacy keyfile");
     const auto first = load_keyfile(path).mac(bytes("production round trip"));
     check(first == load_keyfile(path).mac(bytes("production round trip")), "production keyfile failed");
 }
 
 void test_confidentiality() {
-    Bytes master(32);for(std::size_t i=0;i<master.size();++i)master[i]=static_cast<std::uint8_t>(i);
-    const Crypto key(master);constexpr std::uint64_t epoch=1720000000;
+    using namespace v4_vectors;
+    const auto key=independent_key(),changed_s=independent_key(129),changed_a=independent_key(128,1);
+    const Crypto waveform(Bytes(32));
+    constexpr std::uint64_t epoch=1720000000,end=std::numeric_limits<std::uint64_t>::max();
     const auto all=key.confidentiality_stream(epoch,0,2048);
-    // Independent Python hashlib/HMAC RFC5869, libgcrypt Serpent-256 ECB,
-    // cryptography AES-256 ECB and manually constructed big-endian counters.
-    const auto expected=from_hex("232cc52c6338012f1f82d5a25d9ac2ee38e5165bf6d011f24d36fccfd5a50f20"
-                                 "5635839527f4e77d3d45b9925d1c911243302a8535a3d6b8a9c05a8b082f046e");
-    check(std::equal(expected.begin(),expected.end(),all.begin()),"cascade independent format vector mismatch");
-    check(all!=key.stream(StreamPurpose::Data,epoch,0,all.size()),"confidentiality uses the AES-only modem stream");
-    for(const auto offset:{0U,1U,15U,16U,17U,255U,511U}){
+    // Independent Python hashlib/HMAC, libgcrypt Serpent and cryptography AES;
+    // no DataPump implementation is used to generate these frozen components.
+    check(Bytes(all.begin(),all.begin()+64)==from_hex(streams_0_64_cascade),"v4 stream KAT mismatch");
+    check(xor_bytes(from_hex(streams_0_64_aes),from_hex(streams_0_64_serpent))==from_hex(streams_0_64_cascade),"independent stream components disagree");
+    check(key.confidentiality_stream(epoch,1,31)==from_hex(streams_1_31_cascade) &&
+          key.confidentiality_stream(epoch,15,34)==from_hex(streams_15_34_cascade) &&
+          key.confidentiality_stream(epoch,39,24)==from_hex(streams_39_24_cascade),"v4 unaligned stream KAT mismatch");
+    check(key.confidentiality_stream(epoch,end-31,32)==from_hex(streams_18446744073709551584_32_cascade),"v4 final stream KAT mismatch");
+    // Changing one lane must leave the independently known opposite component
+    // unchanged; these checks also catch accidentally hashing both roots.
+    check(xor_bytes(changed_s.confidentiality_stream(epoch,0,32),from_hex(lane_variations_serpent_changed_stream_aes))==from_hex(lane_variations_serpent_changed_stream_serpent),"Serpent lane changed or cross-fed AES stream");
+    check(xor_bytes(changed_a.confidentiality_stream(epoch,0,32),from_hex(lane_variations_aes_changed_stream_serpent))==from_hex(lane_variations_aes_changed_stream_aes),"AES lane changed or cross-fed Serpent stream");
+    check(key.mac({})==changed_s.mac({}),"Serpent root changed waveform MAC");
+    const auto expected_waveform=Crypto(std::span<const std::uint8_t>(from_hex(aes_root)).first(32));
+    for(auto purpose:{StreamPurpose::Data,StreamPurpose::Dsss,StreamPurpose::Scrambler,StreamPurpose::Fhss})
+        check(key.stream(purpose,epoch,0,1024)==changed_s.stream(purpose,epoch,0,1024) &&
+              key.stream(purpose,epoch,0,1024)==expected_waveform.stream(purpose,epoch,0,1024),"Serpent root changed AES waveform streams");
+    for(auto offset:{0U,1U,15U,16U,17U,255U,511U}) {
         const auto part=key.confidentiality_stream(epoch,offset,127);
-        check(std::equal(part.begin(),part.end(),all.begin()+offset),"cascade random access changed with block boundaries");
+        check(std::equal(part.begin(),part.end(),all.begin()+offset),"cascade random access changed across blocks");
     }
     check(all!=key.confidentiality_stream(epoch+1,0,all.size()),"cascade epochs overlap");
-    check(all!=Crypto(Bytes(32,7)).confidentiality_stream(epoch,0,all.size()),"cascade roots overlap");
-    constexpr auto end=std::numeric_limits<std::uint64_t>::max();
-    check(key.confidentiality_stream(epoch,end-31,32)==from_hex("888c674cf1faa3ef89d9aaa49f8dd586f88f24dc0e46edd01b83c5422bd0a520"),"cascade independent final-counter vector mismatch");
-    const auto tail=key.confidentiality_stream(epoch,end-30,31);
-    check(tail.back()==key.confidentiality_stream(epoch,end,1).front(),"cascade final-byte random access changed");
     check(key.confidentiality_stream(epoch,end,0).empty(),"empty cascade stream failed");
     rejects([&]{key.confidentiality_stream(epoch,end,2);},"cascade offset wrapped");
-    const auto first=key.confidentiality_child(bytes("first")),second=key.confidentiality_child(bytes("second"));
-    check(first.confidentiality_stream(epoch,0,64)!=second.confidentiality_stream(epoch,0,64),"cascade child domains overlap");
-    const auto legacy_child=Crypto(key.mac(bytes("first")));
-    check(first.mac({})==legacy_child.mac({}) && first.stream(StreamPurpose::Scrambler,epoch,0,64)==legacy_child.stream(StreamPurpose::Scrambler,epoch,0,64),"confidentiality child changed modem or MAC derivation");
-    check(first.confidentiality_stream(epoch,0,64)!=legacy_child.confidentiality_stream(epoch,0,64),"cascade child collapsed to the MAC root");
-    const auto salt=Bytes(32,0x39),iv=Bytes(16,0x83),context=bytes("test/cbc/domain");
-    Bytes plain(1024);for(std::size_t i=0;i<plain.size();++i)plain[i]=static_cast<std::uint8_t>(i);
+    const auto child=key.confidentiality_child(from_hex(child_context));
+    const auto expected_child=Crypto::from_independent_roots(from_hex(child_serpent_root),from_hex(child_aes_root));
+    check(child.confidentiality_stream(epoch,0,64)==expected_child.confidentiality_stream(epoch,0,64) && child.mac({})==expected_child.mac({}),"independent child root vector mismatch");
+    const auto sch=changed_s.confidentiality_child(from_hex(child_context));
+    const auto ach=changed_a.confidentiality_child(from_hex(child_context));
+    const auto sch_expected=Crypto::from_independent_roots(from_hex(lane_variations_serpent_changed_child_serpent_root),from_hex(lane_variations_serpent_changed_child_aes_root));
+    const auto ach_expected=Crypto::from_independent_roots(from_hex(lane_variations_aes_changed_child_serpent_root),from_hex(lane_variations_aes_changed_child_aes_root));
+    check(sch.confidentiality_stream(epoch,0,64)==sch_expected.confidentiality_stream(epoch,0,64) && sch.mac({})==child.mac({}),"child lane cross-feed from Serpent");
+    check(ach.confidentiality_stream(epoch,0,64)==ach_expected.confidentiality_stream(epoch,0,64),"child lane cross-feed from AES");
+    check(child.confidentiality_stream(epoch,0,64)!=key.confidentiality_child(bytes("other")).confidentiality_stream(epoch,0,64),"child contexts overlap");
+    const auto context=from_hex(cbc_context),salt=from_hex(cbc_salt),iv=from_hex(cbc_iv),plain=from_hex(cbc_plaintext);
     const auto encrypted=key.encrypt_confidentiality_cbc(plain,context,salt,iv);
-    check(encrypted.size()==plain.size() && encrypted!=plain && key.decrypt_confidentiality_cbc(encrypted,context,salt,iv)==plain,"CBC cascade roundtrip failed");
-    check(encrypted!=key.encrypt_confidentiality_cbc(plain,bytes("other"),salt,iv),"CBC contexts overlap");
+    check(encrypted==from_hex(cbc_ciphertext) && key.decrypt_confidentiality_cbc(encrypted,context,salt,iv)==plain,"v4 independent CBC vector mismatch");
+    check(changed_s.encrypt_confidentiality_cbc(plain,context,salt,iv)==from_hex(lane_variations_serpent_changed_cbc_ciphertext) &&
+          changed_a.encrypt_confidentiality_cbc(plain,context,salt,iv)==from_hex(lane_variations_aes_changed_cbc_ciphertext),"CBC lane-isolation vectors mismatch");
+    // Independently remove the outer AES layer with its frozen key to inspect
+    // the inner Serpent ciphertext, including the same inner under changed A.
+    const auto inner=[](const Bytes& cipher,const Bytes& akey,const Bytes& wire_iv) {
+        auto* ctx=EVP_CIPHER_CTX_new();check(ctx!=nullptr,"test AES context allocation failed");
+        Bytes result(cipher.size()+16);int n=0,last=0;
+        const bool ok=EVP_DecryptInit_ex(ctx,EVP_aes_256_cbc(),nullptr,akey.data(),wire_iv.data())==1 &&
+            EVP_CIPHER_CTX_set_padding(ctx,0)==1 && EVP_DecryptUpdate(ctx,result.data(),&n,cipher.data(),static_cast<int>(cipher.size()))==1 &&
+            EVP_DecryptFinal_ex(ctx,result.data()+n,&last)==1;
+        EVP_CIPHER_CTX_free(ctx);check(ok,"test AES layer removal failed");result.resize(static_cast<std::size_t>(n+last));return result;
+    };
+    check(inner(encrypted,from_hex(cbc_aes_key),iv)==from_hex(cbc_inner),"Serpent CBC inner vector mismatch");
+    check(inner(changed_a.encrypt_confidentiality_cbc(plain,context,salt,iv),from_hex(lane_variations_aes_changed_cbc_aes_key),iv)==from_hex(cbc_inner),"changing AES changed inner Serpent CBC");
+    check(inner(changed_s.encrypt_confidentiality_cbc(plain,context,salt,iv),from_hex(cbc_aes_key),iv)==from_hex(lane_variations_serpent_changed_cbc_inner),"changing Serpent changed AES CBC derivation");
     rejects([&]{key.encrypt_confidentiality_cbc(Bytes(15),context,salt,iv);},"CBC accepted partial block");
     rejects([&]{key.encrypt_confidentiality_cbc(plain,context,Bytes(31),iv);},"CBC accepted wrong salt width");
     rejects([&]{key.decrypt_confidentiality_cbc(encrypted,context,salt,Bytes(15));},"CBC accepted wrong IV width");
-    Crypto copied=key;Crypto assigned(Bytes(32,9));assigned=first;
-    check(copied.confidentiality_stream(epoch,0,64)==key.confidentiality_stream(epoch,0,64) && assigned.confidentiality_stream(epoch,0,64)==first.confidentiality_stream(epoch,0,64),"cascade copy lost key material");
+    for(auto count:{0U,1U})rejects([&]{waveform.confidentiality_stream(epoch,0,count);},"waveform-only key acquired confidentiality stream");
+    rejects([&]{waveform.confidentiality_child({});},"waveform-only key acquired confidentiality child");
+    rejects([&]{waveform.prepare_confidentiality_cbc(context,salt);},"waveform-only key acquired CBC");
+    rejects([&]{waveform.confidentiality_mac({});},"waveform-only key acquired confidentiality MAC");
+    rejects([&]{Crypto::from_independent_roots(Bytes(63),Bytes(64));},"short Serpent root accepted");
+    rejects([&]{Crypto::from_independent_roots(Bytes(64),Bytes(65));},"long AES root accepted");
+    Crypto copied=key;Crypto assigned(Bytes(32,9));assigned=child;
+    check(copied.confidentiality_stream(epoch,0,64)==key.confidentiality_stream(epoch,0,64) && assigned.confidentiality_stream(epoch,0,64)==child.confidentiality_stream(epoch,0,64),"copy lost independent roots");
+}
+void test_confidentiality_authentication_and_identity() {
+    using namespace v4_vectors;
+    const auto key=independent_key(),changed_s=independent_key(129),changed_a=independent_key(128,1);
+    const auto message=from_hex(mac_message),tag=key.confidentiality_mac(message);
+    check(tag==from_hex(mac_combined) && key.verify_confidentiality(message,tag),"dual MAC independent vector mismatch");
+    check(xor_bytes(tag,from_hex(mac_aes))==from_hex(mac_serpent),"dual MAC component vector mismatch");
+    check(xor_bytes(changed_s.confidentiality_mac(message),from_hex(lane_variations_serpent_changed_mac_aes))==from_hex(lane_variations_serpent_changed_mac_serpent),"Serpent auth lane cross-fed AES");
+    check(xor_bytes(changed_a.confidentiality_mac(message),from_hex(lane_variations_aes_changed_mac_serpent))==from_hex(lane_variations_aes_changed_mac_aes),"AES auth lane cross-fed Serpent");
+    check(!key.verify_confidentiality(message,from_hex(mac_aes)) && !key.verify_confidentiality(message,from_hex(mac_serpent)),"single known auth lane forged combined MAC");
+    check(!changed_s.verify_confidentiality(message,tag) && !changed_a.verify_confidentiality(message,tag),"changed lane accepted old MAC");
+    auto changed=message;changed[0]^=1;check(!key.verify_confidentiality(changed,tag),"modified message accepted");
+    auto damaged=tag;damaged[0]^=1;check(!key.verify_confidentiality(message,damaged),"modified dual tag accepted");
+    check(!key.verify_confidentiality(message,std::span(tag).first(31)),"truncated dual tag accepted");
+    damaged.push_back(0);check(!key.verify_confidentiality(message,damaged),"oversized dual tag accepted");
+    check(key.verify_confidentiality({},key.confidentiality_mac({})),"empty dual MAC failed");
+    const auto context=from_hex(identity_context);
+    const auto waveform=Crypto(std::span<const std::uint8_t>(from_hex(aes_root)).first(32));
+    check(key.identity_fingerprint(context)==from_hex(identity_confidentiality) && waveform.identity_fingerprint(context)==from_hex(identity_waveform),"identity independent vectors mismatch");
+    check(key.identity_fingerprint(context)!=changed_s.identity_fingerprint(context),"same AES different Serpent keys share identity");
+    check(key.identity_fingerprint(context)==independent_key().identity_fingerprint(context),"equal key values have unequal identities");
+    check(key.identity_fingerprint(context)!=waveform.identity_fingerprint(context),"waveform and dual identities overlap");
+    check(key.identity_fingerprint(context)!=key.identity_fingerprint(bytes("other")),"identity contexts overlap");
+}
+void test_audio_entropy_failures() {
+    TempDir dir;const testing::KeyfilePolicy policy{64,8193};unsigned index=0;
+    const auto attempt=[&](KeyfileAudioSource source,bool fallback=false) {
+        KeyfileGenerationOptions options;options.audio=std::move(source);options.allow_audio_fallback=fallback;
+        return testing::create_keyfile(dir.path/std::to_string(index++),policy,std::nullopt,options);
+    };
+    rejects([&]{attempt({});},"missing audio accepted without explicit fallback");
+    rejects([&]{attempt([](AudioEntropySink& sink,std::stop_token){const std::array<float,1> a{.125F};sink.add_samples(a,4000);});},"short audio accepted");
+    rejects([&]{attempt([](AudioEntropySink& sink,std::stop_token){const std::array<float,512> a{};sink.add_samples(a,4000);});},"constant audio accepted");
+    rejects([&]{attempt([](AudioEntropySink& sink,std::stop_token){const std::array<float,1> a{std::numeric_limits<float>::quiet_NaN()};sink.add_samples(a,4000);});},"NaN audio accepted");
+    rejects([&]{attempt([](AudioEntropySink& sink,std::stop_token){const std::array<float,1> a{1.1F};sink.add_samples(a,4000);});},"out-of-range audio accepted");
+    rejects([&]{attempt([](AudioEntropySink& sink,std::stop_token){const std::array<float,1> a{.125F};sink.add_samples(a,3999);});},"unsupported rate accepted");
+    rejects([&]{attempt([](AudioEntropySink& sink,std::stop_token){const std::array<float,1> a{.125F};sink.add_samples(a,4000);sink.add_samples(a,8000);});},"changed rate accepted");
+    rejects([&]{attempt([](AudioEntropySink& sink,std::stop_token){std::vector<float> a(12000);for(std::size_t i=0;i<a.size();++i)a[i]=(i&1)?.125F:.25F;sink.add_samples(a,4000);});},"insufficient variation accepted");
+    rejects([&]{attempt([](AudioEntropySink& sink,std::stop_token){std::vector<float> a(12000);for(std::size_t i=0;i<a.size();++i)a[i]=1.0F-static_cast<float>(i%32)*0.000001F;sink.add_samples(a,4000);});},"clipped audio accepted");
+    // A provider cannot swallow an invalid sample and resume to conceal it.
+    rejects([&]{attempt([](AudioEntropySink& sink,std::stop_token){const std::array<float,1> a{2.0F};try{sink.add_samples(a,4000);}catch(const Error&){};});},"swallowed sink failure accepted");
+    const auto missing=attempt({},true);check(!missing.audio_used && !missing.warning.empty(),"missing audio downgrade was silent");
+    const auto unusable=attempt([](AudioEntropySink&,std::stop_token){throw AudioEntropyUnavailable("test device unavailable");},true);
+    check(!unusable.audio_used && unusable.warning.find("test device unavailable")!=std::string::npos,"typed unavailable downgrade lost warning");
+    rejects([&]{attempt([](AudioEntropySink&,std::stop_token){throw Error("test internal conditioner failure");},true);},"internal error silently downgraded");
+    std::stop_source cancellation;auto options=fixture_keyfile::generation();options.stop=cancellation.get_token();options.allow_audio_fallback=true;cancellation.request_stop();
+    rejects([&]{(void)testing::create_keyfile(dir.path/"cancelled",policy,std::nullopt,options);},"pre-cancelled generation continued");
+    check(!std::filesystem::exists(dir.path/"cancelled"),"pre-cancelled generation created output");
+    std::stop_source during;options.stop=during.get_token();options.audio=[&](AudioEntropySink&,std::stop_token){during.request_stop();throw AudioEntropyUnavailable("cancelled capture");};
+    rejects([&]{(void)testing::create_keyfile(dir.path/"cancelled-during",policy,std::nullopt,options);},"cancelled capture silently downgraded");
 }
 
 void test_shared_confidentiality_lifetime() {
@@ -452,9 +550,9 @@ void test_shared_confidentiality_lifetime() {
     Bytes expected;
     const void* identity=nullptr;
     {
-        const auto parent=legacy.confidentiality_child(bytes("shared/lifetime"));
+        const auto parent=independent_key().confidentiality_child(bytes("shared/lifetime"));
         identity=parent.confidentiality_storage_id();
-        check(identity!=nullptr && parent.confidentiality_storage_bytes()>=64,
+        check(identity!=nullptr && parent.confidentiality_storage_bytes()>=128,
               "independent root has no accounted storage");
         expected=parent.confidentiality_stream(73,15,65);
         auto copied=parent;
@@ -484,7 +582,7 @@ void test_shared_confidentiality_lifetime() {
 void test_prepared_confidentiality_cbc() {
     static_assert(!std::is_copy_constructible_v<ConfidentialityCbc>);
     static_assert(!std::is_copy_assignable_v<ConfidentialityCbc>);
-    const Crypto legacy(Bytes(32,0x71));
+    const auto legacy=independent_key();
     const auto independent=legacy.confidentiality_child(bytes("prepared/independent-root"));
     const auto context_a=bytes("test/prepared/cbc/profile-a"),context_b=bytes("test/prepared/cbc/profile-b");
     const Bytes salt_a(32,0x39),salt_b(32,0x93);
@@ -517,7 +615,7 @@ void test_prepared_confidentiality_cbc() {
         check(prepared_a->encrypt(plain,iv)==expected && prepared_a->decrypt(expected,iv)==plain,"invalid call damaged prepared CBC state");
     }
     rejects([&]{legacy.prepare_confidentiality_cbc(context_a,Bytes(31));},"prepared CBC accepted short salt");
-    const auto owned=[&]{const Crypto temporary(Bytes(32,0x71));return temporary.prepare_confidentiality_cbc(context_a,salt_a);}();
+    const auto owned=[&]{const auto temporary=independent_key();return temporary.prepare_confidentiality_cbc(context_a,salt_a);}();
     const Bytes plain(32,0x12),iv(16,0x34);
     check(owned->encrypt(plain,iv)==legacy.encrypt_confidentiality_cbc(plain,context_a,salt_a,iv),"prepared CBC retained expired Crypto reference");
 }
@@ -534,6 +632,8 @@ int main() {
         test_fresh_fhss_domain();
         test_authentication();
         test_confidentiality();
+        test_confidentiality_authentication_and_identity();
+        test_audio_entropy_failures();
         test_shared_confidentiality_lifetime();
         test_prepared_confidentiality_cbc();
         test_keyfiles();

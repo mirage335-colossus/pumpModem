@@ -1,3 +1,4 @@
+#include "triad_crypto_fixture.hpp"
 #include "datapump/triad_modem_v3.hpp"
 #include "datapump/triad_statistics.hpp"
 #include <algorithm>
@@ -12,7 +13,7 @@ namespace v=datapump::triad::v3;
 namespace {
 void check(bool value,const char* message){if(!value)throw std::runtime_error(message);}
 template<class Work>void rejects(Work work,const char* message){bool rejected=false;try{work();}catch(const std::exception&){rejected=true;}check(rejected,message);}
-Crypto key(){std::array<std::uint8_t,32> bytes{};for(std::size_t i=0;i<bytes.size();++i)bytes[i]=static_cast<std::uint8_t>(11+7*i);return Crypto(bytes);}
+Crypto key(){std::array<std::uint8_t,32> bytes{};for(std::size_t i=0;i<bytes.size();++i)bytes[i]=static_cast<std::uint8_t>(11+7*i);return triad_test_key(bytes);}
 v::Format format(){v::Format result;result.inner_rate_hz=360;result.added_symbols=10;result.sample_rate=4800;result.bit_seconds=8;return result;}
 v::ReceiverConfig config(const v::Format& f){v::ReceiverConfig result;result.format=f;v::Candidate zero,one;one.source_bit=1;result.candidates={zero,one};result.log_family_hypotheses=std::log(2.);result.complex_noise_variance=.001;result.block_samples=397;result.maximum_chunk_samples=257;result.threads=2;return result;}
 v::ReceiverReport clean(const Crypto& crypto,std::size_t chunk,bool missing=false,

@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/live.hpp"
 #include "datapump/resampler.hpp"
@@ -342,7 +343,7 @@ void rolling_helper_waits_and_drains_after_loss() {
     auto& c=settings.transfer.modem;c=config();c.bandwidth_hz=200;c.spreading_factor=64;
     c.pulse_shaping=false;c.scramble=true;c.receiver_strategy=modem::ReceiverStrategy::automatic;
     c.oscillator_search=modem::OscillatorSearchConfig{{.01,0},{1,0},1e6,3};
-    std::array<std::uint8_t,32> secret{};secret[0]=29;settings.transfer.key=Crypto(secret);
+    std::array<std::uint8_t,32> secret{};secret[0]=29;settings.transfer.key=fixture_crypto::key(std::array<std::uint8_t,32>{0xa5},secret);
     settings.transfer.timestamp=0;settings.transfer.search_seconds=0;
     settings.simulation_snr_db=40;settings.simulation_clock_error_ppm=0;
     settings.simulation_frequency_offset_hz=1;settings.simulation_phase_noise_degrees_per_sqrt_second=0;

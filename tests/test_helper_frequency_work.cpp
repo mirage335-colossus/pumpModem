@@ -1,6 +1,7 @@
 #include "datapump/helper_receiver.hpp"
 #include "datapump/helper_carrier.hpp"
 #include "datapump/types.hpp"
+#include "fixture_crypto.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -71,7 +72,7 @@ public:
     static constexpr double expected=2450.3125,offset=.58,ppm=.0001,amplitude=.01;
     static constexpr double physical_sigma=.0070710678118654753*std::numbers::pi/180;
     helper::Options options;
-    Crypto key{std::array<std::uint8_t,32>{}};
+    Crypto key=fixture_crypto::key(Bytes(32,0xa5),std::array<std::uint8_t,32>{});
     helper::Generator generator;
     helper::Receiver receiver;
     std::mt19937_64 noise_rng{1},phase_rng{1^0xa0761d6478bd642fULL};

@@ -8,6 +8,7 @@
 #include "../src/audio_trace.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/crypto.hpp"
+#include "fixture_keyfile.hpp"
 #include "datapump/helper_filter.hpp"
 #include "datapump/pattern_search.hpp"
 #include "datapump/tuning.hpp"
@@ -192,7 +193,8 @@ struct EphemeralKey {
             std::to_string(audio::trace::identity()));
         require(std::filesystem::create_directory(directory),"could not create a unique ephemeral key directory");
         path=directory/"named-key.bin";
-        try {create_keyring(path,{"Default"});options.keyfile=path;}
+        try {const auto generated=create_keyring(path,{"Default"},std::nullopt,fixture_keyfile::generation());
+            require(generated.audio_used,"keyfile fixture did not collect synthetic audio");options.keyfile=path;}
         catch(...) {std::error_code ignored;std::filesystem::remove(path,ignored);std::filesystem::remove(directory,ignored);throw;}
     }
     ~EphemeralKey() {

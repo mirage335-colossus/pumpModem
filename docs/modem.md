@@ -13,8 +13,8 @@ bypass interval coding, markers, padding, FEC and MAC. See [protocol.md](protoco
 Pattern transport is the only supported waveform. Explicit
 `Config::pattern_symbols = false` or multi-bit APSK profiles are rejected.
 The old fixed training prefix, repeated spreading templates and final-symbol
-zero padding have been removed. Existing keyfiles remain usable, but peers
-must use the new private waveform.
+zero padding have been removed. Encrypted peers must use the current keyfile
+format, cipher suite and private waveform.
 
 This is a reference implementation. Modeled pattern log evidence is not a
 calibrated probability, measured SNR, near-capacity throughput result, radio

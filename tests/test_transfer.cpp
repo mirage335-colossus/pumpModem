@@ -5,6 +5,7 @@
 #include "datapump/pattern_code.hpp"
 #include "datapump/fhss_schedule.hpp"
 #include "datapump/symbol_schedule.hpp"
+#include "fixture_crypto.hpp"
 #include "../src/transmit_timing.hpp"
 #include <algorithm>
 #include <array>
@@ -21,7 +22,7 @@ transfer::Options options(bool encrypted=false) {
     transfer::Options value;value.modem.sample_rate=8000;value.modem.bandwidth_hz=1000;
     value.modem.carrier_hz=1500;value.modem.spreading_factor=16;value.modem.pulse_shaping=false;
     value.search_seconds=0;value.timestamp=1800000000;value.content_limit=1024*1024;
-    if(encrypted)value.key.emplace(Bytes(32,0x37));return value;
+    if(encrypted)value.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x37));return value;
 }
 Message sample(std::size_t count=44) {
     Message result;result.data.resize(count);
@@ -171,7 +172,7 @@ void keys_and_unknown_slots() {
               repaired.content.fec_stats.parity.missing_bits==1 && repaired.content.fec_stats.parity.repaired_bytes==1,
               "missing parity must report an RS repair without reducing known data accuracy");
         if(encrypted) {
-            auto wrong=value;wrong.key.emplace(Bytes(32,0x73));check(!consume(wire,wrong).content_validated,"wrong key rejected");
+            auto wrong=value;wrong.key=fixture_crypto::key(Bytes(32,0xd4),Bytes(32,0x73));check(!consume(wire,wrong).content_validated,"wrong key rejected");
             wrong=value;++wrong.timestamp;check(!consume(wire,wrong).content_validated,"wrong canonical epoch rejected");
             wrong=value;wrong.compression=true;check(!consume(wire,wrong).content_validated,"source profile bound to MAC");
         }

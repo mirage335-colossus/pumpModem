@@ -6,8 +6,9 @@ or command is executed. Files are not automatically opened. The native GUI calls
 the C++ transfer service without a shell; saving requires a local explicit path.
 The byte transport has no packet header, remote integer length, filename/type,
 packet ID, repeat flag, bootstrap CRC, or automatic legacy parser fallback.
-Existing keyfiles remain usable, but peers must use the same fixed-interval wire
-format and local profile. See [protocol](protocol.md).
+Encrypted peers must use the current keyfile format, matching cipher suite,
+fixed-interval wire format and local profile. Older keyfile formats are rejected.
+See [protocol](protocol.md) and [cryptography](crypto.md).
 
 ## Received-text boundary
 
@@ -97,8 +98,9 @@ checksum. Anyone can generate valid public RS codewords; neither marker confiden
 nor successful correction makes public content trustworthy. Public source-format
 validation is likewise not proof of origin or harmlessness.
 
-Encrypted intervals use the existing independently keyed HMAC-SHA256. Their fixed
-layout is data area, 32-byte HMAC, then optional RS parity. The HMAC binds the local
+Encrypted intervals use a 32-byte tag formed by XORing HMAC-SHA256 values under
+separately derived Serpent- and AES-lane authentication keys. Their fixed
+layout is data area, tag, then optional RS parity. The tag binds the local
 FEC/source profile, a versioned domain, the canonical `(epoch, ordinal)` address
 of the interval's first coded symbol, and the complete fixed data area. RS protects
 the data and tag together; MAC verification follows correction. Missing timing

@@ -1,3 +1,4 @@
+#include "triad_crypto_fixture.hpp"
 #include "datapump/triad_modem_v3.hpp"
 #include "datapump/pattern_pulse.hpp"
 
@@ -24,7 +25,7 @@ Crypto fixture_key() {
     std::array<std::uint8_t, 32> bytes{};
     for (std::size_t i = 0; i < bytes.size(); ++i)
         bytes[i] = static_cast<std::uint8_t>(17 * i + 3);
-    return Crypto(bytes);
+    return triad_test_key(bytes);
 }
 
 // Reconstruct the documented public coordinates rather than asking the
@@ -62,7 +63,9 @@ void legacy_pattern_goldens() {
         {{{.92083693362741337,-.40973791737129933},{-.056530910543517901,.61736394551964202},{-.56479148686767888,-.34058254135501675}},
          {{-.061416002977603718,.0750100172430751},{-.60084949570568813,-.2107339651649458},{1.0867734238532554,.055204529796408719}}}
     };
-    auto key=fixture_key();
+    std::array<std::uint8_t, 32> legacy_seed{};
+    for (std::size_t i=0;i<legacy_seed.size();++i) legacy_seed[i]=static_cast<std::uint8_t>(17*i+3);
+    const Crypto key(legacy_seed);
     for(unsigned mode=0;mode<3;++mode){
         Format f;f.pattern_revision=PatternRevision::LegacyV1;
         if(mode==1){f.inner_rate_hz=360;f.added_symbols=1;f.sample_rate=960;f.bit_seconds=8;

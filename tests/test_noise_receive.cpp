@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/streaming_modem.hpp"
@@ -56,7 +57,7 @@ std::vector<float> encrypted_reference(const modem::Config& c, std::size_t count
     std::array<std::uint8_t, 32> root{};
     for (std::size_t i = 0; i < root.size(); ++i)
         root[i] = static_cast<std::uint8_t>(97 + 7 * i);
-    options.key.emplace(root);
+    options.key=fixture_crypto::key(Bytes(32,0xd3),root);
     std::mt19937_64 random(19873);
     Bytes bits(count / static_cast<std::size_t>(modem::symbol_sample_count(c)) + 1);
     for (auto& bit : bits) bit = static_cast<std::uint8_t>(random() & 1U);

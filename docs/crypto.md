@@ -5,7 +5,7 @@ portable Serpent-256 implementation for the confidentiality cascade. Waveform,
 spreading and hop streams retain AES-256-CTR.
 
 The time-indexed streams below belong to regular mode and are unchanged by
-Fast. [Fast cryptography](fast-mode.md#cryptography-and-exact-source-bytes) uses
+Fast. [Fast cryptography](fast-mode.md#integrity-physical-completion-and-bounded-storage) uses
 separately derived Serpent-256-CBC and AES-256-CBC layers with HMAC, a
 per-transfer random salt and fresh per-group IVs when encryption is enabled. It
 reuses the keyfile loader, never
@@ -20,17 +20,18 @@ exactly eight bytes in network order. `HKDF(ikm, info)` means RFC 5869 HKDF with
 SHA256, extract-and-expand, output length 32, and salt
 `datapump/v1/hkdf-sha256`.
 
-The legacy 32-byte master derives the following purpose keys. New named sets
-retain these purpose roles and separately store 64 bytes of confidentiality
-root material:
+The AES-only waveform constructor takes a 32-byte seed and derives the
+following purpose keys. A current named key set has separate 64-byte Serpent and
+AES roots; the first 32 bytes of its AES root supply that waveform seed. A
+waveform-only key cannot be used for message confidentiality.
 
 | Purpose | HKDF info |
 | --- | --- |
-| Legacy Data purpose | `datapump/v1/data` |
+| Data-purpose waveform and cover | `datapump/v1/data` |
 | DSSS | `datapump/v1/dsss` |
 | Scrambler | `datapump/v1/scrambler` |
 | Reserved keyfile purpose (FHSS) | `datapump/v1/fhss` |
-| Authentication | `datapump/v1/mac` |
+| Waveform MAC | `datapump/v1/mac` |
 
 Each stream purpose derives `epoch_key = HKDF(purpose_key,
 "datapump/v1/epoch/" || BE64(timestamp))`. A timestamp is an unsigned whole-second
@@ -256,7 +257,7 @@ and their owned cryptographic storage is cleansed on release.
 
 Noise keeps the selected carrier, chip rate, waveform shaping and normal signal
 level, using encrypted pattern modulation even when the saved mode is Tone.
-A bounded source masks all-zero dummy bits with the confidentiality stream and
+A bounded source masks all-zero dummy bits with the AES Data-purpose stream and
 feeds the resulting bits into the ordinary `PatternCode` and `PatternTransmitter`.
 This preserves the two pattern alternatives, symbol boundaries, private
 Scrambler/DSSS mapping, pulse shaping and normal settling waveform. It does not
@@ -281,25 +282,31 @@ indistinguishability or RF interference measurement is claimed.
 
 `xor_data` XORs arbitrary bytes at an explicitly selected epoch with the
 confidentiality stream. This stream applies separate Serpent-256-CTR and
-AES-256-CTR layers, equivalent to XORing the two separately keyed keystreams. Each
-epoch derives 64 bytes with HKDF-SHA512 using the confidentiality root and
-`datapump/cascade/v1/stream/` followed by BE64(epoch); the first and last
-32 bytes key Serpent and AES respectively. The counters use the respective
-eight-byte prefixes `data-s01` and `data-a01`, followed by BE64(floor(offset/16));
-partial blocks start at offset modulo 16. Byte-position overflow is rejected.
-The HKDF-SHA512 salt is `datapump/cascade/v1/hkdf-sha512`. These layers add no
-wire bits and retain random access at original physical positions. Confidentiality
-stream addresses must not be reused. Encrypted peers need the upgraded software;
-previously recorded AES-only transmissions are not retroactively protected.
+AES-256-CTR layers, equivalent to XORing the two separately keyed keystreams.
+Each epoch derives the Serpent key from its own root using HKDF-SHA512 with info
+`datapump/cascade/v2/serpent/stream/ || BE64(epoch)` and the AES key separately
+from its own root with `datapump/cascade/v2/aes/stream/ || BE64(epoch)`. Each
+uses the first 32 bytes of its own 64-byte output. The HKDF-SHA512 salt is
+`datapump/cascade/v2/hkdf-sha512`; neither lane's secret enters the other's
+derivation. Counters use the respective eight-byte prefixes `data-s02` and
+`data-a02`, followed by BE64(floor(offset/16)); partial blocks start at offset
+modulo 16. Byte-position overflow is rejected. Child and Fast CBC keys are also
+derived separately within each lane. These layers add no wire bits and retain
+random access at original physical positions. Confidentiality stream addresses
+must not be reused. Encrypted peers need the same current suite; previous
+ciphertext is not retroactively protected.
 
 On-air pattern transport uses `xor_binary_bits`: each symbol consumes
 Data bit `ordinal` from its symbol-start epoch, most-significant bit first
 within each byte. Data and
 pattern addressing advance on the sample schedule whether preceding symbols
 decoded or not. A 512-byte cache bounds Data mask scratch storage.
-`mac` computes the full 32-byte HMAC-SHA256 using its independent key;
-verification requires all 32
-bytes and compares with `CRYPTO_memcmp`.
+For interval confidentiality, `confidentiality_mac` XORs the two full
+HMAC-SHA256 values computed with separate Serpent- and AES-lane authentication
+keys. Verification compares all 32 bytes with `CRYPTO_memcmp`. The separate
+AES-only `mac` operation remains available for waveform derivation and for the
+waveform-only identity fallback. Confidentiality-bearing key sets instead use a
+domain-separated `confidentiality_mac` for their identity fingerprint.
 
 Every source interval carries exactly 128 coded bytes. A 24-byte marker made
 from two copies of the 96-bit recovery word precedes each interval; there is no
@@ -314,10 +321,10 @@ positions:
 | RS60 | 80 | 48 | 32 | 48 |
 
 Only encrypted intervals contain an integrity tag. For each keyed interval,
-transfer computes the HMAC over the following exact concatenation:
+transfer computes the two-lane tag over the following exact concatenation:
 
 ```text
-ASCII("DP-INTERVAL") || 0x02 || U8(fec) || U8(compressed)
+ASCII("DP-INTERVAL") || 0x04 || U8(fec) || U8(compressed)
     || BE64(epoch) || BE64(ordinal) || fixed_data_area
 ```
 
@@ -403,119 +410,103 @@ subsecond phase and stream-symbol index to recover the matching Data positions.
 Recovering later bits does not reconstruct wholly missing intervals or prove
 that reception includes the complete original source.
 
-## Named key sets: keyfile version 3
+## Named key sets: keyfile version 4
 
-New CLI and GUI keyfiles use `DPMKEY03`. Two 64-byte operating-system CSPRNG
-collections are made at least one monotonic second apart, once per keyring, and
-combined using domain-separated HKDF-SHA512. Per-entry material derives the
-existing purpose keys and a separate 64-byte confidentiality root. This is a
-best effort to collect fresh randomness: the delay does not prove independent
-entropy, hardware RNG use or 512-bit security. An operating-system RNG may
-itself depend on AES: for example, the Windows `BCryptGenRandom` default
-provider documents a CTR_DRBG. Two calls do not establish that the underlying
-generator collected fresh independent entropy between them. Audio is not
-collected. An OS randomness failure fails key generation rather than falling
-back silently.
+New CLI and GUI keyfiles use `DPMKEY04`; versions `DPMKEY01`, `DPMKEY02` and
+`DPMKEY03` are rejected. V4 stores separately derived Serpent and AES roots per
+named entry. It does not reconstruct a missing confidentiality lane from old
+Data or MAC keys. Both peers must use the current suite and the same keyfile.
 
-The platform calls are Linux `getrandom`, Windows `BCryptGenRandom`, browser
-`__wasi_random_get` through the WebCrypto adapter, and `getentropy` on the
-other supported POSIX systems. Browser requests are limited to 65,536 bytes
-and header generation cooperatively checkpoints between chunks. The pinned
-WebAssembly SDK build and complete browser key-generation and failure-recovery
-paths have not yet been verified for this change; native results do not qualify
-those paths.
+Generation gathers separate 64-byte operating-system CSPRNG inputs for the
+Serpent and AES lanes in each of two rounds, at least one monotonic second
+apart. It also attempts to collect three seconds of selected mono audio at the
+provider's input rate, after a short capture warm-up. The received Float32
+samples are framed and hashed incrementally; samples are not recorded to disk
+or written to logs. The audio digest is mixed only into the Serpent lane with
+HMAC-SHA512 keyed by that lane's OS-derived secret. The AES lane's keys,
+including waveform-purpose and lane authentication keys, never use the audio
+digest or Serpent root; the combined authentication tag uses both lanes.
+Serpent and AES entry, child, epoch, CBC and authentication keys are derived
+within their respective lanes rather than splitting a combined KDF output.
+Specifically, with `HKDF512` denoting HKDF-SHA512 and salt
+`datapump/cascade/v2/hkdf-sha512`, the two rounds `S0,S1` and `A0,A1` are
+conditioned as:
 
-The v3 prefix has the same bounded structure as v2 described below. Each entry
-contains the name, five 32-byte purpose keys and a 64-byte confidentiality
-root. SHA-512 of the domain `datapump/v3/keyfile-hash-sha512`, prefix, random
-header and optional pad is expanded with HKDF-SHA512 and the info
-`datapump/v3/keyfile-wrap-serpent-aes`. The first half supplies the inner
-Serpent-CTR key; its IV is derived from that key and the stored nonce with
-`datapump/v3/keyfile-serpent-iv/`. AES-256-GCM uses the other half, the stored
-nonce and the complete prefix as associated data. Authentication is checked
-before the inner layer is opened. As with older files, a complete unpadded file
-contains everything needed to recover its keys; the format is not password
-protection.
-
-Versions 1 and 2 remain readable. Their cascade root is derived from the old
-Data and MAC purpose keys with the `datapump/cascade/v1/legacy-root` domain;
-it cannot add entropy to their original 256-bit master. Both peers must use
-the upgraded ciphertext scheme even when they retain an older keyfile.
-Generate and exchange a new keyfile to use the new key-generation chain.
-
-## Legacy named key sets: keyfile version 2
-
-Version 2 keyfiles use `DPMKEY02`. The GUI and CLI load all named sets from one
-file. Each set stores the complete five 32-byte purpose keys, in the order data,
-DSSS, scrambler, FHSS, MAC; restoring a set reproduces those exact keys.
-
-```sh
-pump keygen --output shared.key --key-names 'Home,Portable,Emergency'
-pump keys --keyfile shared.key
-pump simulate --text 'hello' --keyfile shared.key --key-name Portable --json
+```text
+S_os = HKDF512(S0 || S1, "datapump/v4/serpent/os-entropy")
+S    = HMAC-SHA512(S_os, "datapump/v4/serpent/audio-mix/" || U8(audio_used) || audio_digest64)
+A    = HKDF512(A0 || A1, "datapump/v4/aes/keyfile-entropy")
 ```
 
-The 48-byte prefix retains the version-1 header length, optional pad length and
-flag, and nonce positions. Bytes 25–27 are zero; bytes 28–31 contain the number
-of entries (BE32, 1–128); bytes 44–47 contain the encrypted payload length
-(BE32). The prefix is followed by exactly 128 MiB of random header, the encrypted
-key-set payload, and a 16-byte GCM tag. Each plaintext entry is a BE16 name length,
-1–64 bytes of printable UTF-8 name, then 160 bytes of purpose keys. Names must be
-unique. Parsing rejects impossible counts/lengths before allocation, and releases
-keys only after authentication and complete validation.
+When audio is unavailable and fallback is explicitly allowed, `audio_used` is
+zero and `audio_digest64` is all zero. Entry roots are then separately derived
+from `S` and `A` using lane-specific, indexed domains.
 
-```
-digest = SHA256("datapump/v2/keyfile-hash" || prefix48 || random_header || pad)
-wrapping_key = HKDF(digest, "datapump/v2/keyfile-wrap")
-```
+The capture checks reject unsupported or changing sample rates, nonfinite or
+out-of-range samples, obvious constant input, insufficient variation and
+extreme clipping. These are checks for unusable input, not an entropy estimate
+or proof of unpredictability. The native monitor is taken before the project's
+resampler; an operating system, audio device or browser may already process its
+input. Browser deliveries can include upstream queued samples, so warm-up and
+cadence do not prove that each sample was acquired after a request. A microphone,
+loopback or adversarial audio source need not provide independent noise.
 
-HKDF retains the salt defined above. AES-256-GCM authenticates the entire prefix
-as associated data and encrypts the complete named collection. Temporary
-plaintext key-set buffers are cleansed even when loading fails. The optional
-external pad is retained for old workflows through the CLI; ordinary keyfiles
-need only the single file. The GUI has no separate pad field.
+The GUI and CLI attempt the selected audio input and clearly warn when
+unavailable or unusable audio causes an OS-only fallback. Cancellation and OS
+randomness failures abort generation. An OS-only result retains separate OS
+inputs for the two lanes but has no audio contribution. The C++ creation API
+allows this fallback only when explicitly requested and returns whether audio
+was used along with any warning. A current-format keyfile records whether audio
+contributed; this flag is not an entropy estimate.
 
-Version-1 keyfiles remain readable as one set named `Default`. The legacy C++
-`load_keyfile` entry point selects the first set from any supported version. New code
-can use `load_keyring` to receive all sets. Creation remains exclusive: a new
-collection is written to a new pathname; there is no in-place keyfile editor.
+These measures are best effort: a delay does not prove fresh independent
+entropy, hardware RNG use or 512-bit security. An operating-system generator
+may itself depend on AES; for example, Windows `BCryptGenRandom` documents a
+CTR_DRBG. If OS output is exposed, protection from the audio contribution
+depends on the captured input retaining unpredictability and on the conditioner
+and key-handling assumptions. Predictable audio is mixed with the OS material,
+not substituted for it. Reuse of cipher addresses is still unsafe.
 
-## Legacy keyfile binary layout (version 1)
+The platform random calls are Linux `getrandom`, Windows `BCryptGenRandom`,
+browser `__wasi_random_get` through the WebCrypto adapter, and `getentropy` on
+other supported POSIX systems. Browser requests are limited to 65,536 bytes and
+header generation cooperatively checkpoints between chunks. Browser and native
+audio availability, permissions and provider behavior are separate from the
+cryptographic construction; see the [validation record](validation.md) for
+what has actually been tested.
 
-Integer fields are big-endian. No padding or trailing bytes are allowed.
+The 48-byte prefix contains `DPMKEY04`, the header and optional pad lengths,
+flags, entry count, a random 12-byte nonce and the payload length. The low flag
+bit indicates a required pad; the next bit records that audio was used. Each
+plaintext entry consists of a BE16 name length, 1–64 printable UTF-8 name bytes,
+then a 64-byte Serpent root and a 64-byte AES root. Names are unique, and 1–128
+entries are allowed. The prefix is followed by the random header, ciphertext,
+a 16-byte AES-GCM tag and a 32-byte Serpent-lane authentication tag. Dimensions,
+flags, exact length and the optional pad are checked before key entries are
+returned.
 
-| Offset | Length | Contents |
-| --- | ---: | --- |
-| 0 | 8 | ASCII `DPMKEY01` |
-| 8 | 8 | Random header length, exactly 134217728 for production |
-| 16 | 8 | Pad length, zero when absent |
-| 24 | 1 | Pad flag: 0 absent, 1 required |
-| 25 | 7 | Reserved, all zero |
-| 32 | 12 | Random AES-GCM nonce |
-| 44 | 4 | Reserved, all zero |
-| 48 | 134217728 | Cryptographically random header |
-| 134217776 | 32 | Encrypted master key |
-| 134217808 | 16 | AES-GCM tag |
+The public prefix is bound into both wrapping derivations. Even-indexed header
+and pad bytes feed the Serpent hash; odd-indexed bytes feed the AES hash, with
+pad lengths framed in both. SHA-512 and separate HKDF-SHA512 domains derive the
+two wrapping keys. Serpent-CTR is the inner layer; AES-256-GCM is the outer
+layer, authenticating the prefix as associated data. A separate Serpent-lane
+HMAC-SHA256 covers the framed prefix and outer ciphertext including its GCM
+tag; the loader verifies it before opening the AES and Serpent layers. A
+complete unpadded file contains everything needed to recover its keys; this is
+not password protection.
 
-The wrapping key derivation is:
+More precisely, the Serpent authentication key is the first 32 bytes of
+`HKDF512(S_digest, "datapump/v4/serpent/keyfile-auth")`. Its authenticated
+input is `ASCII("datapump/v4/keyfile-auth/") || prefix48 || BE64(outer_size) ||
+outer`, where `outer` includes the AES-GCM tag. The GCM tag is checked before
+Serpent decoding and before any key entry is released.
 
-```
-digest = SHA256("datapump/v1/keyfile-hash" || prefix48 || random_header || pad)
-wrapping_key = HKDF(digest, "datapump/v1/keyfile-wrap")
-```
-
-AES-256-GCM uses that wrapping key, the stored 12-byte random nonce, and the
-complete 48-byte prefix as associated data. Its plaintext is the 32-byte master
-secret; its tag is 16 bytes. A pad, when supplied, must contain at least
-1073741825 bytes, and its entire contents are hashed with a 64KiB working
-buffer. A file created with a pad cannot be opened without that pad or with a
-different length/content. Providing a pad for an unpadded file also fails.
-Malformed flags, changed headers, ciphertext/tag corruption, truncation, and
-trailing data are rejected.
-
-The explicit `datapump::testing` helpers use smaller fixture policies. Production
-entry points always enforce the 128MiB header and greater-than-1GiB pad sizes;
-they reject reduced test keyfiles. No normal CLI setting lowers these limits.
+The optional pad must contain at least 1,073,741,825 bytes, and its complete
+contents are read with bounded working storage. A padded file requires the
+same pad; a pad cannot be supplied for an unpadded file. Corruption, truncation,
+trailing data and unsupported flags are rejected. The explicit
+`datapump::testing` helpers use smaller fixture policies; production entry
+points enforce the 128 MiB header and greater-than-1 GiB pad sizes.
 
 Creation uses exclusive file creation and refuses existing paths and symlinks.
 POSIX creation uses mode 0600. Windows uses a protected owner-only DACL and

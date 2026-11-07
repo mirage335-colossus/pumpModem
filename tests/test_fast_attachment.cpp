@@ -1,3 +1,4 @@
+#include "fast_test_key.hpp"
 #include "datapump/fast/attachment.hpp"
 #include "datapump/fast/compression.hpp"
 #include <algorithm>
@@ -24,7 +25,7 @@ Bytes envelope(std::string_view name,const Bytes& payload) {
 std::shared_ptr<const ReceivedFile> receive(const Bytes& source,bool capacity,bool encrypted,
         std::uint64_t quota=1024*1024,bool raw=false,bool expect_success=true) {
     auto profile=capacity?capacity_profile(Channel::wire):classic_profile(Channel::wire);profile.interleave_depth=1;
-    const auto key=encrypted?std::optional<Crypto>(Crypto(Bytes(32,93))):std::nullopt;
+    const auto key=encrypted?std::optional<Crypto>(fast_test::key(Bytes(32,93))):std::nullopt;
     auto encoded=raw?source:prepare_xz_source(byte_source(source),attachment::source_limit(quota)).encoded;
     const auto encoding=raw?SourceEncoding::raw:SourceEncoding::xz;
     StreamEncoder tx(profile,key,byte_source(encoded),encoding);

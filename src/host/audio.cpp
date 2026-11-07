@@ -2,6 +2,9 @@
 #include "datapump/audio_output.hpp"
 #include "datapump/resampler.hpp"
 #include "datapump/execution.hpp"
+#ifdef DATAPUMP_AUDIO_ENTROPY_ENABLED
+#include "datapump/audio_entropy.hpp"
+#endif
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -33,6 +36,9 @@ struct AudioEndpoint::Impl {
     std::string failure,playback_failure;
     std::deque<std::vector<float>> capture_queue;
     std::size_t capture_frames=0,event_frames=0;
+    // Supplementary keyfile collection observes newly received host packets,
+    // never the potentially older application capture queue.
+    audio::CaptureMonitor fresh_input_monitor;
     std::deque<Event> events;
     std::uint64_t playback_stream=0,cancelling_stream=0,sent=0,played=0;
     double scheduled_epoch=0;
@@ -75,17 +81,26 @@ void AudioEndpoint::configure(std::uint64_t generation,std::uint32_t rate) {
     p.capture_queue.clear();p.capture_frames=0;p.events.clear();p.event_frames=0;p.changed.notify_all();
 }
 void AudioEndpoint::capture_samples(std::uint64_t generation,std::uint64_t stream,std::uint64_t position,std::span<const float> samples) {
-    check_pcm(samples);auto& p=*impl_;std::lock_guard lock(p.mutex);p.valid(generation);
+    auto& p=*impl_;std::lock_guard lock(p.mutex);p.valid(generation);
     if(!p.rate)throw Error("host audio is not configured");
-    if(samples.size()>std::numeric_limits<std::uint64_t>::max()-position)throw Error("host audio position overflow");
     if(!stream || stream>p.next_stream)throw Error("invalid capture stream");
     // Retired subscriptions may still have bounded PCM in flight. Never join
     // their timeline to a new receiver, or interpret the pause as silence.
     if(!p.capturing || stream!=p.capture_stream)return;
+    try {
+        check_pcm(samples);
+        if(samples.size()>std::numeric_limits<std::uint64_t>::max()-position)throw Error("host audio position overflow");
+    } catch(const Error&) {
+        // A malformed packet from the active source revokes the whole capture.
+        // Otherwise a caller could replace it with plausible samples and make
+        // an entropy request appear to have observed an uninterrupted source.
+        p.fail("invalid host capture samples");throw;
+    }
     if(p.input_seen && position!=p.input_position) {p.fail("host capture discontinuity");throw Error(p.failure);}
     p.input_seen=true;p.input_position=position+samples.size();
     if(samples.size()>max_queue_frames-p.capture_frames) {p.fail("host capture overrun");throw Error(p.failure);}
     p.capture_queue.emplace_back(samples.begin(),samples.end());p.capture_frames+=samples.size();p.changed.notify_all();
+    if(p.fresh_input_monitor)p.fresh_input_monitor(samples,p.rate);
 }
 void AudioEndpoint::playback_ready(std::uint64_t generation,std::uint64_t stream) {
     auto& p=*impl_;std::lock_guard lock(p.mutex);p.valid(generation);
@@ -128,7 +143,7 @@ std::vector<AudioEndpoint::Event> AudioEndpoint::take_events() {
     p.event_frames=0;p.changed.notify_all();return result;
 }
 void AudioEndpoint::close(){auto& p=*impl_;std::lock_guard lock(p.mutex);p.closed=true;p.changed.notify_all();}
-void AudioEndpoint::capture(std::uint32_t logical,const audio::CaptureCallback& callback,std::stop_token stop,audio::StreamFormatCallback format,audio::CaptureMonitor monitor) {
+void AudioEndpoint::capture(std::uint32_t logical,const audio::CaptureCallback& callback,std::stop_token stop,audio::StreamFormatCallback format,audio::CaptureMonitor monitor,audio::CaptureMonitor fresh_input_monitor) {
     auto& p=*impl_;std::uint64_t generation,stream;std::uint32_t rate;
     {
         std::unique_lock lock(p.mutex);
@@ -136,10 +151,11 @@ void AudioEndpoint::capture(std::uint32_t logical,const audio::CaptureCallback& 
         generation=p.generation;p.valid(generation,stop);rate=p.rate;
         if(p.capturing)throw Error("host capture is already in use");
         p.capturing=true;stream=++p.next_stream;p.capture_stream=stream;
+        p.fresh_input_monitor=std::move(fresh_input_monitor);
         p.input_seen=false;p.input_position=0;p.capture_queue.clear();p.capture_frames=0;
         p.event({Kind::capture_start,generation,stream,p.input_position,rate,audio::ChannelMode::left_mono,1,{}});
     }
-    const auto finish=[&]{std::lock_guard lock(p.mutex);p.capturing=false;p.capture_queue.clear();p.capture_frames=0;
+    const auto finish=[&]{std::lock_guard lock(p.mutex);p.capturing=false;p.fresh_input_monitor={};p.capture_queue.clear();p.capture_frames=0;
         if(!p.closed && p.events.size()<128)p.event({Kind::capture_stop,generation,stream,p.input_position,rate,audio::ChannelMode::left_mono,1,{}});
         if(!p.closed)p.retired();};
     try {
@@ -272,7 +288,15 @@ void capture(std::uint32_t rate,const std::string& id,const CaptureCallback& cb,
             if(notify)notify(value);
         };
     }
+#ifdef DATAPUMP_AUDIO_ENTROPY_ENABLED
+    detail::CaptureEntropyRegistration entropy(id,options.entropy_capture_owner,options.exclusive);
+    // Existing observers retain their serialized pre-resampling delivery.
+    // Only the supplementary entropy tap runs at fresh host-packet ingress.
+    try {host::audio_endpoint().capture(rate,cb,stop,std::move(format),std::move(options.capture_monitor),entropy.monitor());}
+    catch(...) {entropy.failed(std::current_exception());throw;}
+#else
     host::audio_endpoint().capture(rate,cb,stop,std::move(format),std::move(options.capture_monitor));
+#endif
 }
 void playback(std::uint32_t rate,const std::string& id,const PlaybackCallback& cb,std::stop_token stop,StreamFormatCallback format,bool mono){playback(rate,id,cb,stop,std::move(format),output_channels(mono),{});}
 void playback(std::uint32_t rate,const std::string& id,const PlaybackCallback& cb,std::stop_token stop,StreamFormatCallback format,ChannelMode channels){playback(rate,id,cb,stop,std::move(format),channels,{});}

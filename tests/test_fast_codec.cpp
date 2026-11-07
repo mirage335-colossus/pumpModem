@@ -1,3 +1,4 @@
+#include "fast_test_key.hpp"
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/ldpc.hpp"
 #include "datapump/fast/outer_rs.hpp"
@@ -26,7 +27,7 @@ Bytes unhex(std::string_view hex) {
     Bytes bytes;for(std::size_t i=0;i<hex.size();i+=2)bytes.push_back(static_cast<std::uint8_t>(std::stoul(std::string(hex.substr(i,2)),nullptr,16)));
     return bytes;
 }
-Crypto key(unsigned seed=0) {Bytes bytes(32);for(unsigned i=0;i<32;++i)bytes[i]=static_cast<std::uint8_t>(i+seed);return Crypto(bytes);}
+Crypto key(unsigned seed=0) {return fast_test::sequence_key(seed);}
 SourceReader memory_source(Bytes data) {
     return [data=std::move(data),position=std::size_t{0}](std::span<std::uint8_t> out)mutable {
         const auto count=std::min(out.size(),data.size()-position);
@@ -140,16 +141,48 @@ void independent_vectors() {
         "7bda7137b963b932229faad89a5486185e22bec842ae8138a56c41d8d4bd85f828a6f048fa25d698e9c0295e75cc294965e"
         "8c7d6c8815c1f3001358aa670dcd4beda505f2f8769fb5af14116fd25b1");
     const auto crypto=key();
+    rejects([&]{fast::testing::seal_group(p,Crypto(Bytes(32,0x37)),salt,7,iv,plain);},
+            "waveform-only AES key must not silently enable confidentiality");
     rejects([&]{fast::testing::open_group(p,crypto,salt,7,legacy_crypto);},"AES-only encrypted group rejected by cascade suite");
     auto group=fast::testing::seal_group(p,crypto,salt,7,iv,plain);
-    const auto expected_crypto=unhex(
+    const auto v3_crypto=unhex(
         "000102030405060708090a0b0c0d0e0f16360a0b50ac0054bc0d09be5752d9c396f192763c6bcb1dddb313b54430bfa6"
         "7ade3c569bc97161c14bce9b8c755297a3cc55f55486487cde5d285ca77aa6c10554940e8acd3feb4fac12703088e67a"
         "44ac4188fa483e325280a674fd6702c9b024a09e805e7c5def7b84448a39d3a7e702e7802fe8710aa1c9b305503fa06"
         "57394f1e27c355e21b66c6b6e74b5e6cd328f6c466b16b6d148dfb6b4bae46018a6f392d84a864b3c1e1b57f8af28c"
         "817f85d9be0f529d8576c83107db53472defbca4b69258eb6a68814413aff8e2ba7");
+    rejects([&]{fast::testing::open_group(p,crypto,salt,7,v3_crypto);},
+            "previous cascade group rejected before decryption");
+    const auto expected_crypto=unhex(
+        "000102030405060708090a0b0c0d0e0f3761f474b5d876c204057899bad34893"
+        "0377efa37db86141bfa5a6e1762f35c7342a32015ad18d7344c4ba284e6656b"
+        "e05b6e1111fa5086da2868096594f7aecb99a078debde448b9ec2bd1c32a450"
+        "7c1c5c458e09e4fd6b2731906e6f4883c85477d8733018a975d95e1fbb1b640"
+        "9e52b6f907c50f8873a0ea57132fd18d74c3b4c0f3d69a944fb5dcfcd3329f"
+        "9a1bd614a02b3aeede12e9ebe7322f15818330fc351d2d9025e0bb500e911b"
+        "3782a023349f02763f443941c59efd66b205359d9b5a5283b31f3117a620a8a"
+        "af3074c0");
     check(group==expected_crypto,"independent Serpent/AES CBC, HKDF and group HMAC vector");
     check(fast::testing::open_group(p,crypto,salt,7,group)==plain,"authenticated vector decryption");
+    std::array<std::uint8_t,64> serpent_root{},aes_root{};
+    for(std::size_t i=0;i<serpent_root.size();++i) {
+        serpent_root[i]=static_cast<std::uint8_t>(128+i);
+        aes_root[i]=static_cast<std::uint8_t>(i);
+    }
+    auto altered_serpent=serpent_root;altered_serpent[0]^=1;
+    auto altered_aes=aes_root;altered_aes[63]^=1;
+    const auto wrong_serpent=Crypto::from_independent_roots(altered_serpent,aes_root);
+    const auto wrong_aes=Crypto::from_independent_roots(serpent_root,altered_aes);
+    rejects([&]{fast::testing::open_group(p,wrong_serpent,salt,7,group);},"wrong Serpent lane rejected");
+    rejects([&]{fast::testing::open_group(p,wrong_aes,salt,7,group);},"wrong AES lane rejected");
+    for(const auto forged_tag:{
+            "a313cf7a23e75d20eaeb1755f780aacfbb5c81ff66324a58b79a48d0fbd94957",
+            "d4e37cbceaeddb58569038175771cfead1f2c121fd85c2fdcf33b90c5739adb5"}) {
+        auto forged=group;const auto tag=unhex(forged_tag);
+        std::copy(tag.begin(),tag.end(),forged.end()-32);
+        rejects([&]{fast::testing::open_group(p,crypto,salt,7,forged);},
+                "single-lane group forgery rejected");
+    }
     rejects([&]{fast::testing::open_group(p,crypto,salt,8,group);},"reordered group rejected");
     rejects([&]{fast::testing::open_group(p,key(1),salt,7,group);},"wrong key rejected");
     auto wrong=p;wrong.constellation=64;
@@ -166,10 +199,27 @@ void independent_vectors() {
     Bytes capacity_plain(ciphertext_bytes(capacity));
     for(std::size_t i=0;i<capacity_plain.size();++i)capacity_plain[i]=static_cast<std::uint8_t>(i);
     const auto capacity_group=fast::testing::seal_group(capacity,crypto,salt,7,iv,capacity_plain);
-    check(sha256(capacity_group)==unhex("1b893cda1f4806a28f4ad8786aa4524d074adb78f15c400a4650b522c9210e7a"),
+    check(sha256(capacity_group)==unhex("0f14d41d2c7a51cad0720c7cf2c758135da38e715c10d0c84559bca317b03d9f"),
           "independent capacity Serpent/AES CBC group vector");
     check(fast::testing::open_group(capacity,crypto,salt,7,capacity_group)==capacity_plain,
           "independent capacity vector decryption");
+    // Independent previous-suite tag over IV || zero ciphertext: it was valid
+    // for the old capacity group domain, and must fail before v4 decrypts it.
+    Bytes v3_capacity(capacity_group.size(),0);
+    std::copy(iv.begin(),iv.end(),v3_capacity.begin());
+    const auto v3_capacity_tag=unhex("01b4a98261981b2a57c20b0deedbc7b710ef02d03bb94f949f5560ccefb208b8");
+    std::copy(v3_capacity_tag.begin(),v3_capacity_tag.end(),
+              v3_capacity.begin()+static_cast<std::ptrdiff_t>(16+ciphertext_bytes(capacity)));
+    rejects([&]{fast::testing::open_group(capacity,crypto,salt,7,v3_capacity);},
+            "previous capacity cascade group rejected before decryption");
+    Bytes v3_capacity_bootstrap=salt;
+    const auto v3_capacity_bootstrap_tag=unhex("a2426858c805f794f7ce08508431f442c69d04e430a8dea4d36c5ee4dee37c80");
+    v3_capacity_bootstrap.insert(v3_capacity_bootstrap.end(),v3_capacity_bootstrap_tag.begin(),v3_capacity_bootstrap_tag.end());
+    v3_capacity_bootstrap.resize(capacity_group.size());
+    StreamDecoder v3_capacity_rx(capacity,crypto);
+    feed(v3_capacity_rx,code_systematic(capacity,v3_capacity_bootstrap,0));
+    check(v3_capacity_rx.snapshot().failed && !v3_capacity_rx.result(),
+          "previous capacity cascade bootstrap fails closed");
     // Independently frozen full stream fingerprint, including bootstrap MAC,
     // RS polynomial/interleave column order, termination and physical fill.
     p.interleave_depth=1;
@@ -181,10 +231,26 @@ void independent_vectors() {
     legacy_bootstrap.insert(legacy_bootstrap.end(),legacy_tag.begin(),legacy_tag.end());legacy_bootstrap.resize(224);
     StreamDecoder legacy_rx(p,crypto);feed(legacy_rx,code_systematic(p,legacy_bootstrap));
     check(legacy_rx.snapshot().failed && !legacy_rx.result(),"AES-only encrypted bootstrap fails closed");
-    const std::string domain="DataPump/fast/v1/serpent-aes/bootstrap";Bytes canonical(domain.begin(),domain.end());
+    const std::string v3_domain="DataPump/fast/v1/serpent-aes/bootstrap";
+    Bytes v3_canonical(v3_domain.begin(),v3_domain.end());
+    v3_canonical.insert(v3_canonical.end(),context.begin(),context.end());
+    v3_canonical.insert(v3_canonical.end(),salt.begin(),salt.end());
+    Bytes v3_bootstrap=salt;const auto v3_tag=crypto.mac(v3_canonical);
+    v3_bootstrap.insert(v3_bootstrap.end(),v3_tag.begin(),v3_tag.end());v3_bootstrap.resize(224);
+    StreamDecoder v3_rx(p,crypto);feed(v3_rx,code_systematic(p,v3_bootstrap));
+    check(v3_rx.snapshot().failed && !v3_rx.result(),"previous cascade bootstrap fails closed");
+    const std::string domain="DataPump/fast/v1/serpent-aes-v4/bootstrap";Bytes canonical(domain.begin(),domain.end());
     canonical.insert(canonical.end(),context.begin(),context.end());
     canonical.insert(canonical.end(),salt.begin(),salt.end());
-    Bytes bootstrap=salt;const auto tag=crypto.mac(canonical);bootstrap.insert(bootstrap.end(),tag.begin(),tag.end());bootstrap.resize(224);
+    for(const auto forged_tag:{
+            "ec8b840a8e949ebc787c8271a9d05fa95c1d3574288ac54c173456601dd238ab",
+            "aaa6e9c2764c9d7c362c6ed37374116ac962ca09b65b6ca20541b7129b574dcc"}) {
+        Bytes forged=salt;const auto one_lane=unhex(forged_tag);
+        forged.insert(forged.end(),one_lane.begin(),one_lane.end());forged.resize(224);
+        StreamDecoder rx(p,crypto);feed(rx,code_systematic(p,forged));
+        check(rx.snapshot().failed && !rx.result(),"single-lane bootstrap forgery rejected");
+    }
+    Bytes bootstrap=salt;const auto tag=crypto.confidentiality_mac(canonical);bootstrap.insert(bootstrap.end(),tag.begin(),tag.end());bootstrap.resize(224);
     auto fixed_wire=code_systematic(p,bootstrap);std::fill(plain.begin(),plain.end(),0);
     const Bytes source{0,0xff,0x42};std::size_t position=0;
     for(auto byte:source)for(int bit=8;bit>=0;--bit,++position)
@@ -193,7 +259,7 @@ void independent_vectors() {
     fixed_wire.insert(fixed_wire.end(),coded.begin(),coded.end());
     Bytes digest(32);unsigned digest_size=0;
     check(EVP_Digest(fixed_wire.data(),fixed_wire.size(),digest.data(),&digest_size,EVP_sha256(),nullptr)==1 && digest_size==32,"wire fingerprint hashing");
-    check(digest==unhex("f4ce3920c702d537c2bf00913d2d7fe8373214d6762cdf04ea1777a1a3f296cb"),"independent full fixed-cadence wire vector");
+    check(digest==unhex("2ebcc2b87024961429c955ecbaefdefd57ec27c632bca4f68a95b951e23c12ac"),"independent full fixed-cadence wire vector");
     StreamDecoder fixed_rx(p,crypto);feed(fixed_rx,fixed_wire);fixed_rx.finish(true);
     check(fixed_rx.result() && Bytes(fixed_rx.result()->bytes().begin(),fixed_rx.result()->bytes().end())==source,"independent full wire vector decode");
 
@@ -1095,6 +1161,7 @@ void streamed(std::size_t total,bool encrypted=true,bool capacity=false) {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc>1 && std::string_view(argv[1])=="--vectors") {independent_vectors();std::cout<<"fast independent vectors passed\n";return 0;}
         if(argc>1 && std::string_view(argv[1])=="--compact") {compact_capacity_contracts();std::cout<<"compact acoustic capacity contracts passed\n";return 0;}
         if(argc>1 && std::string_view(argv[1])=="--parallel") {capacity_parallel_decode();return 0;}
         if(argc>1 && std::string_view(argv[1])=="--continuation") {

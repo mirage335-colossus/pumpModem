@@ -2,6 +2,7 @@
 #include "datapump/helper_receiver.hpp"
 #include "datapump/modem.hpp"
 #include "helper_auxiliary_fixture.hpp"
+#include "fixture_crypto.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -26,7 +27,7 @@ Summary strong_reference(double physical_sigma,double modeled_sigma,double chirp
     constexpr std::uint32_t rate=24000;
     constexpr double expected=2450.3125,offset=.58,delay=.03719;
     helper::Options options;options.power_w=15000;options.timecode=true;
-    const Crypto key{std::array<std::uint8_t,32>{}};
+    const auto key=fixture_crypto::key(Bytes(32,0xa5),std::array<std::uint8_t,32>{});
     test::AuxiliaryFixture generator(options,expected,.7,0,1800000000,true,key);
     helper::FrequencyPrecisionOptions precision;
     precision.phase_noise_radians_per_sqrt_second=modeled_sigma;
@@ -122,7 +123,7 @@ void off_basis_punctuation() {
     constexpr double expected=5275;
     std::array<std::uint8_t,32> seed{};
     for(std::size_t i=0;i<seed.size();++i)seed[i]=static_cast<std::uint8_t>(i+1);
-    const Crypto key{seed};
+    const auto key=fixture_crypto::key(Bytes(32,0xa5),seed);
     helper::Options options;options.power_w=15000;options.data_power_w=4;options.ratio_limit_db=90;
     auto placement=helper::plan(options,1500,1800,rate,0,.5);
     const auto sigma=std::hypot(.5,.05)*std::numbers::pi/180;

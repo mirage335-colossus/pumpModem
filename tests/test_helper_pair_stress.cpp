@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/helper_carrier.hpp"
 #include "datapump/live.hpp"
@@ -45,7 +46,7 @@ live::Settings settings() {
     c.spreading_factor=128;c.pulse_shaping=false;c.receiver_strategy=modem::ReceiverStrategy::automatic;
     c.oscillator_search=modem::OscillatorSearchConfig{{100,0},{2,0},7e6,3};
     std::array<std::uint8_t,32> secret{};for(std::size_t i=0;i<secret.size();++i)secret[i]=static_cast<std::uint8_t>(7+11*i);
-    s.transfer.key=Crypto(secret);s.transfer.timestamp=0;s.transfer.search_seconds=0;
+    s.transfer.key=fixture_crypto::key(std::array<std::uint8_t,32>{0xa5},secret);s.transfer.timestamp=0;s.transfer.search_seconds=0;
     s.transfer.clock_sync.reset();s.transfer.audio_timing_error_seconds=.07;
     s.transfer.automatic_receive_profiles=false;s.transfer.recovery_options.enabled=false;
     s.dsp_workspace_bytes=s.transfer.dsp_workspace_bytes=128ULL*1024*1024;s.content_limit=1024*1024;

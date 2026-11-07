@@ -1,11 +1,15 @@
 #include "datapump/host/audio.hpp"
+#include "datapump/audio_entropy.hpp"
 #include <atomic>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <future>
+#include <filesystem>
 #include <iostream>
 #include <limits>
+#include <mutex>
 #include <numbers>
 #include <thread>
 
@@ -125,7 +129,7 @@ void gap_and_close() {
     fails([&]{endpoint.capture_samples(1,stream,129,pcm);});
     require(capture.wait_for(2s)==std::future_status::ready,"capture gap failed to unblock receiver");capture.get();
     require(frames==128,"capture gap manufactured silence or accepted a broken timeline");
-    endpoint.configure(2,44100);fails([&]{endpoint.capture_samples(1,stream,0,pcm);});pcm[0]=std::numeric_limits<float>::quiet_NaN();fails([&]{endpoint.capture_samples(2,stream,0,pcm);});
+    endpoint.configure(2,44100);fails([&]{endpoint.capture_samples(1,stream,0,pcm);});pcm[0]=std::numeric_limits<float>::quiet_NaN();endpoint.capture_samples(2,stream,0,pcm);
     AudioEndpoint waiting;auto blocked=std::async(std::launch::async,[&]{fails([&]{waiting.capture(8000,[](auto){return true;},{},{});});});waiting.close();require(blocked.wait_for(2s)==std::future_status::ready,"close failed to wake unconfigured capture");blocked.get();
 }
 void minimum_hardware_rate() {
@@ -178,6 +182,105 @@ void capture_monitor_pair() {
     require(observed.raw.size()>=2048 && observed.raw.size()<=pcm.size() &&
             std::equal(observed.raw.begin(),observed.raw.end(),pcm.begin()),"host monitor changed or repeated raw out-of-band input");
 }
+// The entropy subscriber is gated at host-packet ingress, not at the later
+// resampler drain. Keep the receiver blocked while old input is queued, then
+// subscribe and deliver new input; draining the old queue must not feed it.
+void fresh_ingress_excludes_queued_input() {
+    AudioEndpoint endpoint;endpoint.configure(1,8000);
+    std::promise<void> entered,release;
+    auto released=release.get_future().share();
+    std::atomic<bool> subscribed=false,first=true;
+    std::vector<float> normal,received,fresh;
+    auto task=std::async(std::launch::async,[&]{
+        endpoint.capture(8000,[&](std::span<const float> input){
+            received.insert(received.end(),input.begin(),input.end());
+            if(first.exchange(false)){entered.set_value();released.wait();}
+            return received.size()<640;
+        },{},{},[&](std::span<const float> input,std::uint32_t rate){
+            require(rate==8000,"host ordinary monitor received a changed rate");
+            normal.insert(normal.end(),input.begin(),input.end());
+        },[&](std::span<const float> input,std::uint32_t rate){
+            require(rate==8000,"fresh ingress monitor received a changed rate");
+            if(subscribed.load())fresh.insert(fresh.end(),input.begin(),input.end());
+        });
+    });
+    struct Cleanup { AudioEndpoint& endpoint;std::promise<void>& release;
+        ~Cleanup(){try{release.set_value();}catch(const std::future_error&){}endpoint.close();}
+    } cleanup{endpoint,release};
+    std::uint64_t stream=0;
+    until(endpoint,[&](const auto& e){if(e.kind!=AudioEndpoint::Kind::capture_start)return false;stream=e.stream;return true;});
+    const std::vector<float> first_packet(128,.125f),old_a(128,.25f),old_b(128,-.25f),new_a(128,.5f),new_b(128,-.5f);
+    endpoint.capture_samples(1,stream,0,first_packet);
+    const bool entered_in_time=entered.get_future().wait_for(2s)==std::future_status::ready;
+    if(!entered_in_time){release.set_value();endpoint.close();task.wait();throw std::runtime_error("host receiver did not reach queue gate");}
+    endpoint.capture_samples(1,stream,128,old_a);
+    endpoint.capture_samples(1,stream,256,old_b);
+    subscribed=true;
+    endpoint.capture_samples(1,stream,384,new_a);
+    endpoint.capture_samples(1,stream,512,new_b);
+    const auto expected_fresh=[&]{std::vector<float> result=new_a;result.insert(result.end(),new_b.begin(),new_b.end());return result;}();
+    const bool fresh_before_drain=fresh==expected_fresh;
+    release.set_value();
+    if(task.wait_for(2s)!=std::future_status::ready){endpoint.close();task.wait();throw std::runtime_error("host receiver did not drain queued samples");}
+    task.get();
+    std::vector<float> expected=first_packet;
+    for(const auto* block:{&old_a,&old_b,&new_a,&new_b})expected.insert(expected.end(),block->begin(),block->end());
+    require(fresh_before_drain && fresh==expected_fresh,"fresh ingress monitor consumed queued, duplicate, or missing input");
+    require(normal==expected && received==expected,"fresh ingress monitor changed normal capture or its packet order");
+    // A stale packet after capture ends is not delivered to the retired tap.
+    endpoint.capture_samples(1,stream,640,new_a);
+    require(fresh==expected_fresh,"retired ingress monitor received a stale packet");
+}
+
+void fresh_ingress_rejects_invalid_and_discontinuous_packets() {
+    for(unsigned kind=0;kind<3;++kind) {
+        AudioEndpoint endpoint;endpoint.configure(1,8000);
+        std::atomic<std::size_t> observed=0,delivered=0;
+        auto task=std::async(std::launch::async,[&]{
+            fails([&]{endpoint.capture(8000,[&](std::span<const float> input){delivered+=input.size();return true;},{},{},{},
+                [&](std::span<const float> input,std::uint32_t rate){require(rate==8000,"fresh ingress rate changed");observed+=input.size();});});
+        });
+        struct Cleanup {AudioEndpoint& endpoint;~Cleanup(){endpoint.close();}} cleanup{endpoint};
+        std::uint64_t stream=0;
+        until(endpoint,[&](const auto& e){if(e.kind!=AudioEndpoint::Kind::capture_start)return false;stream=e.stream;return true;});
+        std::vector<float> valid(128,.25f),invalid=valid;invalid[0]=std::numeric_limits<float>::quiet_NaN();
+        if(kind) {
+            endpoint.capture_samples(1,stream,0,valid);
+            const auto deadline=std::chrono::steady_clock::now()+2s;
+            while(delivered<valid.size() && std::chrono::steady_clock::now()<deadline)std::this_thread::sleep_for(1ms);
+            require(delivered==valid.size(),"valid host input was not delivered");
+        }
+        if(kind==2)fails([&]{endpoint.capture_samples(1,stream,129,valid);});
+        else fails([&]{endpoint.capture_samples(1,stream,kind?128:0,invalid);});
+        fails([&]{endpoint.capture_samples(1,stream,kind?128:0,valid);});
+        if(task.wait_for(2s)!=std::future_status::ready)throw std::runtime_error("bad input did not stop the receiver");
+        task.get();
+        require(observed==(kind?valid.size():0),"invalid or discontinuous input reached the fresh entropy tap");
+    }
+}
+void fresh_ingress_rejects_overrun() {
+    AudioEndpoint endpoint;endpoint.configure(1,8000);
+    std::promise<void> entered,release;auto released=release.get_future().share();
+    std::atomic<std::size_t> observed=0;
+    auto task=std::async(std::launch::async,[&]{
+        fails([&]{endpoint.capture(8000,[&](auto){entered.set_value();released.wait();return true;},{},{},{},
+            [&](auto input,auto){observed+=input.size();});});
+    });
+    struct Cleanup {AudioEndpoint& endpoint;std::promise<void>& release;
+        ~Cleanup(){try{release.set_value();}catch(const std::future_error&){}endpoint.close();}
+    } cleanup{endpoint,release};
+    std::uint64_t stream=0;
+    until(endpoint,[&](const auto& e){if(e.kind!=AudioEndpoint::Kind::capture_start)return false;stream=e.stream;return true;});
+    const std::vector<float> block(4000,.25f);
+    endpoint.capture_samples(1,stream,0,block);
+    require(entered.get_future().wait_for(2s)==std::future_status::ready,"host overrun gate did not start");
+    for(unsigned i=1;i<=48;++i)endpoint.capture_samples(1,stream,4000ULL*i,block);
+    const auto before=observed.load();
+    fails([&]{endpoint.capture_samples(1,stream,4000ULL*49,block);});
+    require(observed==before,"overrun packet reached the fresh entropy tap");
+    release.set_value();
+    require(task.wait_for(2s)==std::future_status::ready,"overrun did not stop the receiver");task.get();
+}
 void capture_restart() {
     AudioEndpoint endpoint;endpoint.configure(1,48000);std::vector<float> pcm(128,.25f);
     std::uint64_t retired=0;
@@ -186,7 +289,10 @@ void capture_restart() {
         auto task=std::async(std::launch::async,[&]{endpoint.capture(48000,[&](auto in){frames+=in.size();return false;},{},{});});
         std::uint64_t stream=0;until(endpoint,[&](const auto& e){if(e.kind!=AudioEndpoint::Kind::capture_start)return false;stream=e.stream;return true;});
         require(stream>retired,"capture subscription was reused");
-        if(retired)endpoint.capture_samples(1,retired,128,pcm);
+        if(retired) {
+            auto invalid=pcm;invalid[0]=std::numeric_limits<float>::quiet_NaN();
+            endpoint.capture_samples(1,retired,128,invalid);
+        }
         endpoint.capture_samples(1,stream,10000ULL*round,pcm);
         require(task.wait_for(2s)==std::future_status::ready,"restarted capture did not accept its own timeline");task.get();
         require(frames==128,"retired capture crossed subscription boundary");
@@ -267,5 +373,93 @@ void paced_capture_stops() {
         require(error==(interrupted?"fixture input interrupted":"audio operation cancelled"),"paced capture reported the wrong stop reason");
     }
 }
+// Exercise the actual host wrapper and broker with the receiver held behind a
+// queue gate. Old samples cannot satisfy the broker while fresh ingress can;
+// afterwards the regular receiver and raw monitor still get their input.
+void keyfile_entropy_with_host_capture() {
+    auto& endpoint=audio_endpoint(); // minimum_hardware_rate configured generation 1 at 8 kHz.
+    const auto path=std::filesystem::temp_directory_path()/
+        ("datapump-host-entropy-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    require(std::filesystem::create_directory(path),"could not create entropy test directory");
+    struct DirectoryCleanup {std::filesystem::path path;~DirectoryCleanup(){std::error_code error;std::filesystem::remove_all(path,error);}} directory{path};
+    const testing::KeyfilePolicy policy{4096,8193};
+    std::promise<void> entered,release;auto released=release.get_future().share();
+    std::stop_source capture_stop,key_stop;
+    std::vector<float> received,monitored,expected;
+    std::atomic<bool> first=true;
+    audio::Options capture_options;
+    capture_options.capture_monitor=[&](std::span<const float> input,std::uint32_t rate){
+        require(rate==8000,"physical monitor rate changed");monitored.insert(monitored.end(),input.begin(),input.end());
+    };
+    auto capture=std::async(std::launch::async,[&]{
+        audio::capture(8000,"default",[&](std::span<const float> input){
+            received.insert(received.end(),input.begin(),input.end());
+            if(first.exchange(false)){entered.set_value();released.wait();}
+            return received.size()<16400;
+        },capture_stop.get_token(),{},capture_options);
+    });
+    struct Cleanup {AudioEndpoint& endpoint;std::promise<void>& release;std::stop_source& capture;std::stop_source& key;
+        ~Cleanup(){key.request_stop();capture.request_stop();try{release.set_value();}catch(const std::future_error&){}endpoint.close();}
+    } cleanup{endpoint,release,capture_stop,key_stop};
+    std::uint64_t stream=0;
+    until(endpoint,[&](const auto& e){if(e.kind!=AudioEndpoint::Kind::capture_start)return false;stream=e.stream;return true;});
+    std::uint64_t position=0;const std::vector<float> old(400,.25f);
+    auto send=[&](const std::vector<float>& packet){endpoint.capture_samples(1,stream,position,packet);position+=packet.size();expected.insert(expected.end(),packet.begin(),packet.end());};
+    send(old);
+    require(entered.get_future().wait_for(2s)==std::future_status::ready,"host receiver did not enter entropy test gate");
+    for(unsigned i=1;i<40;++i)send(old);
+
+    // Cancellation is never silently converted to OS-only generation.
+    std::promise<void> cancel_started;
+    KeyfileGenerationOptions cancelled;cancelled.allow_audio_fallback=true;cancelled.stop=key_stop.get_token();
+    auto source=audio::keyfile_audio_source("default");
+    cancelled.audio=[&](AudioEntropySink& sink,std::stop_token stop){cancel_started.set_value();source(sink,stop);};
+    auto cancelled_task=std::async(std::launch::async,[&]{fails([&]{(void)testing::create_keyring(path/"cancelled",{"test"},policy,std::nullopt,cancelled);});});
+    require(cancel_started.get_future().wait_for(2s)==std::future_status::ready,"cancelled collection did not start");
+    std::this_thread::sleep_for(100ms);
+    key_stop.request_stop();
+    require(cancelled_task.wait_for(2s)==std::future_status::ready,"cancelled collection failed to detach");cancelled_task.get();
+
+    std::promise<void> started;
+    KeyfileGenerationOptions generation;generation.audio=[&](AudioEntropySink& sink,std::stop_token stop){started.set_value();source(sink,stop);};
+    generation.stop=capture_stop.get_token();
+    auto key=std::async(std::launch::async,[&]{return testing::create_keyring(path/"fresh",{"test"},policy,std::nullopt,generation);});
+    require(started.get_future().wait_for(2s)==std::future_status::ready,"keyfile collection did not start");
+    std::uint32_t rng=0x9e3779b9u;
+    const auto start=std::chrono::steady_clock::now();
+    for(unsigned packet=0;packet<180 && key.wait_for(0ms)!=std::future_status::ready;++packet) {
+        std::vector<float> fresh(400);
+        for(auto& value:fresh){rng^=rng<<13;rng^=rng>>17;rng^=rng<<5;value=static_cast<float>(rng%100000)/100000.f-.5f;}
+        std::this_thread::sleep_until(start+50ms*packet);send(fresh);
+    }
+    require(key.wait_for(2s)==std::future_status::ready,"fresh host entropy collection stalled");
+    const auto result=key.get();require(result.audio_used && result.warning.empty(),"fresh host audio was not used for the keyfile");
+    release.set_value();
+    require(capture.wait_for(5s)==std::future_status::ready,"receiver failed to drain after keyfile collection");capture.get();
+    require(received.size()==16400 && monitored.size()>=received.size(),"host capture lost queued frames");
+    require(std::equal(received.begin(),received.end(),expected.begin()) &&
+            std::equal(monitored.begin(),monitored.end(),expected.begin()),"host keyfile tap changed receiver or monitor data");
+
+    // An invalid active packet must terminate a borrowed collection, and the
+    // user's OS-only fallback must report that audio was not used.
+    auto broken_capture=std::async(std::launch::async,[&]{
+        fails([&]{audio::capture(8000,"default",[](auto){return true;},capture_stop.get_token(),{},{});});
+    });
+    std::uint64_t broken_stream=0;
+    until(endpoint,[&](const auto& e){if(e.kind!=AudioEndpoint::Kind::capture_start)return false;broken_stream=e.stream;return true;});
+    std::promise<void> broken_started;
+    KeyfileGenerationOptions fallback;fallback.allow_audio_fallback=true;fallback.stop=capture_stop.get_token();
+    fallback.audio=[&](AudioEntropySink& sink,std::stop_token stop){broken_started.set_value();source(sink,stop);};
+    auto fallback_key=std::async(std::launch::async,[&]{return testing::create_keyring(path/"fallback",{"test"},policy,std::nullopt,fallback);});
+    require(broken_started.get_future().wait_for(2s)==std::future_status::ready,"fallback collection did not start");
+    std::this_thread::sleep_for(100ms);
+    auto invalid=old;invalid.front()=std::numeric_limits<float>::quiet_NaN();
+    fails([&]{endpoint.capture_samples(1,broken_stream,0,invalid);});
+    require(broken_capture.wait_for(2s)==std::future_status::ready,"malformed capture did not end");broken_capture.get();
+    require(fallback_key.wait_for(3s)==std::future_status::ready,"malformed capture did not unblock key generation");
+    const auto fallback_result=fallback_key.get();
+    require(!fallback_result.audio_used && fallback_result.warning.find("operating-system entropy only")!=std::string::npos,
+        "audio fallback did not report OS-only entropy after the malformed source");
 }
-int main(){try{playback(8000);playback(44100);playback(48000);playback(8000,true);playback(44100,true);playback(48000,true);full_rate_background_noise();minimum_hardware_rate();gap_and_close();capture_monitor_pair();capture_restart();stopped_capture();cancellation();failed_output_keeps_capture();paced_capture_stops();std::cout<<"Host audio bounds, continuity, resampling, readiness, drain, cancellation and output recovery passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+}
+int main(){try{playback(8000);playback(44100);playback(48000);playback(8000,true);playback(44100,true);playback(48000,true);full_rate_background_noise();minimum_hardware_rate();gap_and_close();capture_monitor_pair();fresh_ingress_excludes_queued_input();fresh_ingress_rejects_invalid_and_discontinuous_packets();fresh_ingress_rejects_overrun();capture_restart();stopped_capture();cancellation();failed_output_keeps_capture();paced_capture_stops();keyfile_entropy_with_host_capture();std::cout<<"Host audio bounds, continuity, resampling, readiness, drain, cancellation and output recovery passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

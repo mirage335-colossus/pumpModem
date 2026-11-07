@@ -3,6 +3,7 @@
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_search.hpp"
+#include "fixture_crypto.hpp"
 #include <algorithm>
 #include <array>
 #include <iostream>
@@ -16,7 +17,7 @@ transfer::Options options(bool keyed=false) {
     result.dsp_workspace_bytes=8*1024*1024;result.content_limit=65536;
     result.modem.sample_rate=8000;result.modem.bandwidth_hz=2000;result.modem.carrier_hz=1800;
     result.modem.spreading_factor=8;result.modem.pulse_shaping=false;
-    if(keyed)result.key.emplace(Bytes(32,91));return result;
+    if(keyed)result.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,91));return result;
 }
 Message message() { Message sent;sent.data.assign(44,'e');sent.data.back()=0;return sent; }
 struct Harness {

@@ -15,6 +15,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import re
 import shutil
 import statistics
 import subprocess
@@ -29,6 +30,8 @@ ANCHOR_SCHEMA = "triad-performance-resource-anchor-v2"
 CONTRACT = "complete-grouped-export-separate-memory-regimes-interpolation-v2"
 REGIMES = ("paired", "sequential")
 MIB = 1024 * 1024
+REQUIRED_CRYPTO_SOURCES = ("src/crypto.cpp", "include/datapump/crypto.hpp", "CMakeLists.txt")
+SERPENT_SOURCES = ("src/serpent.cpp", "include/datapump/serpent.hpp")
 FILES = ("group_gram.c128", "group_mean.c128", "intervals.u64", "valid_rows.u64",
          "signal_energy.f64", "group_observation.c128", "received_energy.f64")
 
@@ -82,16 +85,75 @@ def implementation_identity():
             "config_sha256": file_sha(CONFIG_PATH)}
 
 
-def binary_identity(binary, source_root, threads=1):
+def binary_identity(binary, source_root, threads=1, *, source_role="candidate"):
     from triad_perf_native import environment_identity
     if threads != 1:
         raise ResourcePerformanceError("native grouped exporter is currently serial; use --threads 1")
+    if source_role not in ("candidate", "reference"):
+        raise ResourcePerformanceError("invalid source role for native resource identity")
     root = Path(source_root).resolve()
+    fixture_name = "tools/triad_fixture_key.hpp"
+    fixture_path = root / fixture_name
+    driver_path = root / "tools/triad-long.cpp"
+    # Only components within the selected root are restricted. The root may
+    # itself be selected through a host symlink, but neither a present file
+    # nor an absent historical fixture may pass through an in-tree symlink.
+    component = root
+    for part in Path(fixture_name).parts:
+        component = component / part
+        if component.is_symlink():
+            raise ResourcePerformanceError("symlinked native fixture source: " + str(component))
+    if driver_path.is_symlink() or not driver_path.is_file():
+        raise ResourcePerformanceError("missing or symlinked native driver source: " + str(driver_path))
+    if fixture_path.is_file():
+        fixture_hash = file_sha(fixture_path)
+    elif source_role == "reference" and not fixture_path.exists():
+        # A historical checkout may predate this header, but an updated
+        # reference-driver overlay that includes it must bind its bytes too.
+        if re.search(rb'(?m)^\s*#\s*include\s*[<"](?:[^>"\n]*/)?triad_fixture_key\.hpp[>"]',
+                     driver_path.read_bytes()):
+            raise ResourcePerformanceError("reference driver requires missing native fixture source: " + str(fixture_path))
+        fixture_hash = "absent"
+    else:
+        raise ResourcePerformanceError("missing or nonregular native fixture source: " + str(fixture_path))
     paths = [root / "tools/triad-long.cpp"]
     paths += sorted((root / "src").glob("triad*.cpp"))
     paths += sorted((root / "include/datapump").glob("triad*.hpp"))
+    declared = {str(p.relative_to(root)): file_sha(p) for p in paths if p.is_file()}
+    declared[fixture_name] = fixture_hash
+    for name in (*REQUIRED_CRYPTO_SOURCES, *SERPENT_SOURCES):
+        path = root / name
+        component = root
+        for part in Path(name).parts:
+            component = component / part
+            if component.is_symlink():
+                raise ResourcePerformanceError("symlinked native crypto source: " + str(component))
+        if path.is_file():
+            declared[name] = file_sha(path)
+        elif source_role == "reference" and name in SERPENT_SOURCES and not path.exists():
+            declared[name] = "absent"
+        else:
+            raise ResourcePerformanceError("missing or nonregular native crypto source: " + str(path))
+    if fixture_hash == "absent" and any(
+            re.search(rb'(?m)^\s*#\s*include\s*[<"](?:[^>"\n]*/)?triad_fixture_key\.hpp[>"]',
+                      (root / name).read_bytes())
+            for name, value in declared.items()
+            if value != "absent" and Path(name).suffix in (".cpp", ".hpp")):
+        raise ResourcePerformanceError("reference source requires missing native fixture source")
+    serpent_absent = [declared[name] == "absent" for name in SERPENT_SOURCES]
+    if any(serpent_absent):
+        # Historical revisions can lack both sources. Every declared C++
+        # source and the build declaration must agree with that absence.
+        source_requires_serpent = any(
+            re.search(rb'(?m)^\s*#\s*include\s*[<"](?:[^>"\n]*/)?serpent\.hpp[>"]',
+                      (root / name).read_bytes())
+            for name, value in declared.items()
+            if value != "absent" and Path(name).suffix in (".cpp", ".hpp"))
+        build_requires_serpent = b"serpent.cpp" in (root / "CMakeLists.txt").read_bytes()
+        if not all(serpent_absent) or source_requires_serpent or build_requires_serpent:
+            raise ResourcePerformanceError("reference crypto requires missing or incomplete Serpent sources")
     return {"binary_sha256": file_sha(binary), "environment": environment_identity(threads),
-            "declared_source_sha256": {str(p.relative_to(root)): file_sha(p) for p in paths if p.is_file()},
+            "declared_source_sha256": declared,
             "source_binding_scope": "Exact executable bytes; declared checkout hashes are provenance, not a reconstructed compiler dependency closure.",
             "arithmetic": "native complex128/float64", "backend": "cpu"}
 
@@ -100,7 +162,7 @@ def ensure_unchanged(implementation, identities, binaries, roots, threads):
     if implementation_identity() != implementation:
         raise ResourcePerformanceError("performance adapter/dependency changed during resource measurements")
     for name in identities:
-        if binary_identity(binaries[name], roots[name], threads) != identities[name]:
+        if binary_identity(binaries[name], roots[name], threads, source_role=name) != identities[name]:
             raise ResourcePerformanceError("native binary/source/environment changed during resource measurements: " + name)
 
 
@@ -501,7 +563,7 @@ def routine(binary, reference_binary, source_root, reference_root, anchor, outpu
     start = time.monotonic(); out = Path(output); out.mkdir(parents=True, exist_ok=True)
     implementation = implementation_identity()
     policy = AdaptivePolicy(stopping_rule="decision", **regression_profile(profile))
-    identities = {name: binary_identity(path, root, threads) for name, path, root in
+    identities = {name: binary_identity(path, root, threads, source_role=name) for name, path, root in
                   (("reference", reference_binary, reference_root), ("candidate", binary, source_root))}
     # Fresh pilots locate each binary's real branch. Historical brackets never
     # silently force a new executable into the wrong resource regime.
@@ -586,7 +648,7 @@ def direct(binary, reference_binary, source_root, reference_root, output, *, anc
     policy = AdaptivePolicy(stopping_rule="decision", **regression_profile(profile))
     binaries = {"reference": reference_binary, "candidate": binary}
     roots = {"reference": reference_root, "candidate": source_root}
-    identities = {name: binary_identity(binaries[name], roots[name], threads) for name in binaries}
+    identities = {name: binary_identity(binaries[name], roots[name], threads, source_role=name) for name in binaries}
     # This one public workload is shared. In particular, a historical reference
     # may predate configure's explicit geometry fields; its actual completed
     # export still has to match the same frozen counters and physical bytes.
@@ -670,7 +732,7 @@ def validate_report(report, *, anchor_path=None, binary, reference_binary, sourc
         if not verify_seal(report) or report.get("schema") != SCHEMA or report.get("mode") != mode:
             issues.append("resource report integrity/schema mismatch")
         policy = AdaptivePolicy(stopping_rule="decision", **regression_profile(profile))
-        identities = {name: binary_identity(path, root, threads) for name, path, root in
+        identities = {name: binary_identity(path, root, threads, source_role=name) for name, path, root in
                       (("reference", reference_binary, reference_root), ("candidate", binary, source_root))}
         if (report["implementation"] != implementation_identity() or report["config"] != config or
                 report["identities"] != identities or digest(report["policy"]) != digest(asdict(policy)) or

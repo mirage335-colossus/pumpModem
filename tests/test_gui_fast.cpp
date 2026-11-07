@@ -6,6 +6,7 @@
 #include "datapump/types.hpp"
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/preset.hpp"
+#include "fixture_keyfile.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -628,7 +629,8 @@ void retained_key_and_result_presentation() {
     check(acquisitions==0,"Encrypted missing-key action reached audio acquisition");
     const auto path=std::filesystem::temp_directory_path()/("datapump-fast-gui-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".key");
     struct Cleanup {std::filesystem::path path;~Cleanup(){std::error_code e;std::filesystem::remove(path,e);}} cleanup{path};
-    create_keyring(path,{"GUI retained key"});
+    const auto generated=create_keyring(path,{"GUI retained key"},std::nullopt,fixture_keyfile::generation());
+    check(generated.audio_used,"Fast GUI key fixture did not collect synthetic audio");
     controller.activate(C::fast_open_key);const auto request=controller.take_services();check(request.size()==1,"Encrypted key service unavailable");
     controller.complete_service({request.front().id,false,path.string(),{}});
     const auto end=std::chrono::steady_clock::now()+std::chrono::seconds(5);

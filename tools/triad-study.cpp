@@ -1,3 +1,4 @@
+#include "triad_fixture_key.hpp"
 #include "datapump/triad_modem.hpp"
 #include "datapump/triad_simulation.hpp"
 #include "search_fft.hpp"
@@ -73,7 +74,7 @@ Options options(int argc,char**argv) {
 Crypto fixture_key(unsigned variant=0) {
     Bytes bytes(32);
     for(std::size_t i=0;i<bytes.size();++i)bytes[i]=static_cast<std::uint8_t>(i*7+3+variant);
-    return Crypto(bytes);
+    return datapump::triad::fixture::key(bytes);
 }
 struct Scenario {
     std::string name;

@@ -30,6 +30,10 @@ the original test (SHA-256
 Only a file writer replaces the receive checks. It was compiled against the
 preserved historical application source archive:
 
+This generator is a historical-source recipe, not a current build target. Its
+one-root key setup predates the independent confidentiality lanes and must not
+be used to regenerate the recording with the current keyfile/cipher API.
+
 - Base revision: `2e7f3fa61480fbcb82a2a08afd72cf6643cb8bc3`.
 - Source overlay: `e2b951fc5bcec3eddbb3d3bb4e334fc69aea7e6f72c7297df3a7d52029e5e8ef`.
 - Archive SHA-256: `16aebe2a1c6dd068284f087f80e6b6ea5ffc5a2a2f60484f1654fea3a772de16`.

@@ -1,3 +1,4 @@
+#include "fast_test_key.hpp"
 #include "resource_test_margin.hpp"
 #include "datapump/fast/modem.hpp"
 #include "datapump/fast/codec.hpp"
@@ -147,7 +148,7 @@ void noisy_startup_gain() {
     auto p=config();p.constellation=64;p.interleave_depth=4;
     Bytes source(30000);std::mt19937 rng(712);
     for(auto& byte:source)byte=static_cast<std::uint8_t>(rng());
-    Crypto crypto(Bytes(32,0x4d));
+    auto crypto=fast_test::key(Bytes(32,0x4d));
     auto encoder=fast::testing::deterministic_encoder(p,crypto,byte_source(source),713);
     std::vector<Bytes> bits;
     for(;;) {

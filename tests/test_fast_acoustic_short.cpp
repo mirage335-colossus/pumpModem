@@ -1,3 +1,4 @@
+#include "fast_test_key.hpp"
 #include "resource_test_margin.hpp"
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/compression.hpp"
@@ -109,7 +110,7 @@ struct Fixture {
     Fixture(bool encrypted,bool attachment,bool short_text=false):
         source(attachment?random_content():text_content(short_text)),
         filename(attachment?"café-2.5KiB.bin":""),
-        key(encrypted?std::optional<Crypto>(Crypto(Bytes(32,0x69))):std::nullopt) {
+        key(encrypted?std::optional<Crypto>(fast_test::key(Bytes(32,0x69))):std::nullopt) {
         const auto prepared=attachment?
             prepare_xz_attachment(byte_source(source),filename,memory_quota):
             prepare_xz_source(byte_source(source),memory_quota);

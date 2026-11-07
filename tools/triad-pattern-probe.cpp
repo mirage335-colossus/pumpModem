@@ -1,3 +1,4 @@
+#include "triad_fixture_key.hpp"
 #include "datapump/triad_modem_v3.hpp"
 #include "datapump/triad_shaping.hpp"
 #include "datapump/triad_clock_follow.hpp"
@@ -149,7 +150,7 @@ datapump::Crypto fixture_key(std::uint64_t seed) {
         const auto word = mix(seed + i);
         for (unsigned j = 0; j < 8; ++j) bytes[i*8+j] = static_cast<std::uint8_t>(word >> (8*j));
     }
-    return datapump::Crypto(bytes);
+    return datapump::triad::fixture::key(bytes);
 }
 
 void write_values(std::ofstream& stream, const Complex* values, std::size_t count) {

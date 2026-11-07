@@ -1,3 +1,4 @@
+#include "fixture_keyfile.hpp"
 #include "../src/gui/gui_smoke.hpp"
 #include "../src/gui/application.hpp"
 #include "../src/gui/gui_smoke_pending.hpp"
@@ -211,7 +212,7 @@ void helper_controls() {
             ("datapump-helper-gui-key-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         ~HelperKeyring(){std::error_code ignored;std::filesystem::remove(path,ignored);}
     } fixture;
-    create_keyring(fixture.path,{"Helper privacy"});
+    check(create_keyring(fixture.path,{"Helper privacy"},std::nullopt,fixture_keyfile::generation()).audio_used,"fixture audio entropy was not used");
     controller.activate(ui::Command::open_keyfile);
     const auto requests=controller.take_services();
     check(requests.size()==1,"Helper privacy fixture did not request a keyfile");
@@ -357,7 +358,7 @@ void airtime_and_close() {
             ("datapump-airtime-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         ~KeyFixture(){std::error_code ignored;std::filesystem::remove(path,ignored);}
     } fixture;
-    create_keyring(fixture.path,{"synthetic airtime cancellation"});
+    check(create_keyring(fixture.path,{"synthetic airtime cancellation"},std::nullopt,fixture_keyfile::generation()).audio_used,"fixture audio entropy was not used");
     auto patch=launch_command::parse("--pattern auto-keystream --tx-dbm 36.020599913279625 --path-loss-db 120 --noise-dbm-hz -164 --oscillator gpsdo-xo --rf-oscillator gpsdo-ocxo --shift 1e6 --search-margin 3 --reference independent --target-snr 60 --rate 1200 --carrier 1.009e6 --dsp-workspace 50% --clock-sync GPS_0.1ms-1ms_region-0ms_offset --audio-error 50ms --dsss-factor 10 --live-duplex yes --fhss fake-0.4s-200");
     patch.keyfile=fixture.path.string();
     Controller same({false,true,patch});same.edit(F::message,"quick brown");
@@ -807,7 +808,7 @@ void lpi_estimate_controls() {
             ("datapump-lpi-keys-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         ~TemporaryKeyring(){std::error_code ignored;std::filesystem::remove(path,ignored);}
     } fixture;
-    create_keyring(fixture.path,{"LPI estimate"});
+    check(create_keyring(fixture.path,{"LPI estimate"},std::nullopt,fixture_keyfile::generation()).audio_used,"fixture audio entropy was not used");
     controller.activate(C::open_keyfile);
     const auto requests=controller.take_services();
     check(requests.size()==1,"LPI fixture did not open its keyfile chooser");
@@ -1325,7 +1326,7 @@ void fake_hop_display(bool list_only=false) {
         ~Fixture(){std::error_code ec;std::filesystem::remove(path,ec);}
     } fixture;
     std::filesystem::create_directories(fixture.path.parent_path());
-    create_keyring(fixture.path,{"FHSS display synthetic key"});
+    check(create_keyring(fixture.path,{"FHSS display synthetic key"},std::nullopt,fixture_keyfile::generation()).audio_used,"fixture audio entropy was not used");
     for(const auto* preference:{"fake-fcc","fake-eu","fake-list"}) {
     if(list_only&&std::string_view(preference)!="fake-list")continue;
     Controller controller({true,true});
@@ -1837,7 +1838,7 @@ void planner_examples() {
             ("datapump-planner-examples-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         ~Fixture(){std::error_code ignored;std::filesystem::remove(path,ignored);}
     } fixture;
-    create_keyring(fixture.path,{"First synthetic key","Chosen synthetic key"});
+    check(create_keyring(fixture.path,{"First synthetic key","Chosen synthetic key"},std::nullopt,fixture_keyfile::generation()).audio_used,"fixture audio entropy was not used");
     controller.activate(C::open_keyfile);const auto services=controller.take_services();
     check(services.size()==1,"Example fixture key chooser missing");
     controller.complete_service({services.front().id,false,fixture.path.string(),{}});
@@ -1955,7 +1956,7 @@ void dsss_voice_carrier_controls() {
             ("datapump DSSS voice key's "+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         ~TemporaryKeyring(){std::error_code ignored;std::filesystem::remove(path,ignored);}
     } fixture;
-    create_keyring(fixture.path,{"DSSS voice passband","none"});
+    check(create_keyring(fixture.path,{"DSSS voice passband","none"},std::nullopt,fixture_keyfile::generation()).audio_used,"fixture audio entropy was not used");
     Controller controller({true,true});
     check(controller.field(F::dsss_version).selected=="off"&&
         controller.settings().transfer.modem.outer_dsss_version==modem::OuterDsssVersion::legacy_v1,
@@ -2394,7 +2395,7 @@ void tone_key_controls() {
             ("datapump-tone-keys-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         ~TemporaryKeyring(){std::error_code ignored;std::filesystem::remove(path,ignored);}
     } fixture;
-    create_keyring(fixture.path,{"Tone policy"});
+    check(create_keyring(fixture.path,{"Tone policy"},std::nullopt,fixture_keyfile::generation()).audio_used,"fixture audio entropy was not used");
     Controller controller({true,true});
     controller.edit(F::carrier,"2.7 kHz");
     const auto load=[&] {

@@ -1,3 +1,4 @@
+#include "triad_crypto_fixture.hpp"
 #include "datapump/triad_modem.hpp"
 #include "datapump/triad_simulation.hpp"
 #include <algorithm>
@@ -23,7 +24,7 @@ template<class F> void rejects(F f, const char* message) {
 Crypto fixture_key() {
     Bytes bytes(32);
     for (std::size_t i=0;i<bytes.size();++i) bytes[i]=static_cast<std::uint8_t>(i*7+3);
-    return Crypto(bytes);
+    return triad_test_key(bytes);
 }
 void format_checks(const Crypto& key) {
     Format f;

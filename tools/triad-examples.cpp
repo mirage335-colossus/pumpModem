@@ -1,3 +1,4 @@
+#include "triad_fixture_key.hpp"
 #include "datapump/triad_modem_v2.hpp"
 #include "datapump/triad_simulation.hpp"
 #include "search_fft.hpp"
@@ -159,7 +160,7 @@ Crypto key_for(std::uint64_t seed, unsigned trial) {
     Bytes bytes(32);
     for (std::size_t i = 0; i < bytes.size(); ++i)
         bytes[i] = static_cast<std::uint8_t>((i * 7 + 3 + (seed >> ((i % 8) * 8)) + trial * 29) & 255U);
-    return Crypto(bytes);
+    return datapump::triad::fixture::key(bytes);
 }
 
 std::string bits_text(std::span<const std::uint8_t> bits) {

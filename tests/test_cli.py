@@ -51,6 +51,17 @@ class StreamCLI(unittest.TestCase):
         self.assertNotIn(b'pack/unpack',helptext)
         for command in ('pack','unpack'):
             self.run_pump(command,'--text','x',ok=False)
+    def test_keygen_warns_when_selected_audio_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            key = pathlib.Path(directory) / 'os-only.key'
+            result = self.run_pump('keygen', '--output', key, '--device',
+                                   'datapump-test-nonexistent-input-9fd2')
+            warning = result.stderr.decode(errors='replace').lower()
+            self.assertIn('warning:', warning)
+            self.assertIn('operating-system entropy only', warning)
+            self.assertIn('datapump-test-nonexistent-input-9fd2', warning)
+            self.assertEqual(self.run_pump('keys', '--keyfile', key).stdout.strip(), b'Default')
+
     def test_background_noise_output_scope(self):
         self.assertIn(b'--background-noise-bits',self.run_pump('--help').stdout)
         for args in (('simulate','--text','e'),('estimate','--text','e'),

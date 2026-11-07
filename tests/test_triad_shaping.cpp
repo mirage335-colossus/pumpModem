@@ -1,3 +1,4 @@
+#include "triad_crypto_fixture.hpp"
 #include "datapump/triad_shaping.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "search_fft.hpp"
@@ -120,7 +121,7 @@ datapump::Crypto source_key(unsigned seed){
     std::array<std::uint8_t,32> key{};
     std::uint32_t state=seed;
     for(auto& value:key){state=1664525U*state+1013904223U;value=static_cast<std::uint8_t>(state>>24);}
-    return datapump::Crypto(key);
+    return triad_test_key(key);
 }
 struct Evidence {
     double e0=0,e1=0,difference=0;

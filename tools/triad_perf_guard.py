@@ -37,6 +37,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "triad-performance-fast-guard-run-v2"
 CRYPTO_SOURCES = {"src/crypto.cpp", "include/datapump/crypto.hpp"}
 SERPENT_SOURCES = {"src/serpent.cpp", "include/datapump/serpent.hpp"}
+FIXTURE_SOURCES = {"tools/triad_fixture_key.hpp"}
 
 
 def _json_default(value):
@@ -92,29 +93,53 @@ def source_snapshot(candidate, reference, binaries):
     """Record existing declared files; historical roots may predate harness tests."""
     matrix = complete.read_json(ROOT / "tools/triad-performance-coverage.json")
     families = complete.read_json(ROOT / "tools/triad-performance-families.json")
-    names = {"CMakeLists.txt"} | CRYPTO_SOURCES | SERPENT_SOURCES
+    names = {"CMakeLists.txt"} | CRYPTO_SOURCES | SERPENT_SOURCES | FIXTURE_SOURCES
     for row in matrix["rows"]:
         names.update(row["source_files"])
         names.update(test.split("::", 1)[0] for test in row["cheap_functional_tests"]
                      if test.startswith(("tests/", "tools/")))
     for case in families["cases"]:
         names.update("tools/" + name for name in case["dependencies"])
-    paths, missing, absent_paths = {}, {}, {}
-    for label, root in (("candidate", Path(candidate)), ("reference", Path(reference))):
+    paths, missing, absent_paths, source_roots = {}, {}, {}, {}
+    for label, root in (("candidate", Path(candidate).resolve()), ("reference", Path(reference).resolve())):
         absent = []
         selected = names | {str(p.relative_to(root)) for p in (root / "cmake").rglob("*.cmake")}
         for name in sorted(selected):
-            path = (root / name).resolve()
-            if not path.is_relative_to(root):
+            path = root / name
+            component = root
+            for part in Path(name).parts:
+                component = component / part
+                if component.is_symlink():
+                    raise ValueError("symlinked source dependency: " + name)
+            if not path.resolve().is_relative_to(root):
                 raise ValueError("source dependency escapes root: " + name)
+            source_roots[label + ":" + name] = str(root)
             if path.is_file():
                 paths[label + ":" + name] = path
             else:
-                if name in CRYPTO_SOURCES or (name in SERPENT_SOURCES and label == "candidate"):
+                if name in CRYPTO_SOURCES or (name in (SERPENT_SOURCES | FIXTURE_SOURCES) and label == "candidate"):
                     raise ValueError("missing required " + label + " source dependency: " + name)
-                if name in SERPENT_SOURCES:
+                if name in (SERPENT_SOURCES | FIXTURE_SOURCES):
+                    if path.exists():
+                        raise ValueError("historical source dependency is not a file: " + name)
                     absent_paths[label + ":" + name] = str(path)
                 absent.append(name)
+        if label == "reference" and "tools/triad_fixture_key.hpp" in absent:
+            driver = root / "tools/triad-long.cpp"
+            if driver.is_file() and "triad_fixture_key.hpp" in driver.read_text():
+                raise ValueError("historical triad driver includes missing fixture key header")
+        if label == "reference":
+            serpent_absent = SERPENT_SOURCES.intersection(absent)
+            if serpent_absent and serpent_absent != SERPENT_SOURCES:
+                raise ValueError("historical source has incomplete Serpent implementation")
+            if serpent_absent:
+                cmake = root / "CMakeLists.txt"
+                if cmake.is_file() and "serpent.cpp" in cmake.read_text():
+                    raise ValueError("historical build requires missing Serpent source")
+                for name in selected - SERPENT_SOURCES:
+                    path = root / name
+                    if path.suffix in (".cpp", ".hpp", ".h", ".cc") and path.is_file() and "serpent.hpp" in path.read_text():
+                        raise ValueError("historical source includes missing Serpent header")
         missing[label] = absent
     # Bind the actual execution closure, not unrelated offline statistical
     # research scripts that happen to share a filename prefix.
@@ -134,18 +159,33 @@ def source_snapshot(candidate, reference, binaries):
     return {"sha256": {name: _sha(path) for name, path in paths.items()},
             "paths": {name: str(path) for name, path in paths.items()},
             "absent_paths": absent_paths,
+            "source_roots": source_roots,
             "missing_declared_historical_files": missing,
             "scope": "current files bound before/after; loaded worker dependencies and full-work checks are additionally verified by each adapter"}
 
 
 def verify_snapshot(snapshot):
     changed = []
+    def source_symlink(name, filename):
+        root_name = snapshot.get("source_roots", {}).get(name)
+        if root_name is None:
+            return False
+        root, path = Path(root_name), Path(filename)
+        try:
+            parts = path.relative_to(root).parts
+        except ValueError:
+            return True
+        for part in parts:
+            root = root / part
+            if root.is_symlink():
+                return True
+        return False
     for name, filename in snapshot["paths"].items():
         path = Path(filename)
-        if not path.is_file() or _sha(path) != snapshot["sha256"][name]:
+        if source_symlink(name, filename) or not path.is_file() or _sha(path) != snapshot["sha256"][name]:
             changed.append(name)
     for name, filename in snapshot.get("absent_paths", {}).items():
-        if Path(filename).exists():
+        if source_symlink(name, filename) or Path(filename).exists():
             changed.append(name)
     return {"status": "passed" if not changed else "failed", "changed": changed}
 
@@ -492,6 +532,8 @@ def parse_args(argv=None):
     parser.add_argument("--planner-bounds-workspace", type=Path)
     parser.add_argument("--physical-bit-alignment", action="store_true",
                         help="pair source-only physical alternatives across cipher revisions; preserves encryption and full work")
+    parser.add_argument("--legacy-reference-fixture", action="store_true",
+                        help="allow only an explicitly built archived legacy-reference fixture driver")
     parser.add_argument("--functional-defaults", action="store_true")
     parser.add_argument("--functional-command", action="append", default=[], metavar="ARGV_JSON")
     parser.add_argument("--native-coverage", type=Path)
@@ -524,6 +566,8 @@ def parse_args(argv=None):
         parser.error("workflow-job-index must be in [0,workflow-job-count)")
     if bool(args.planner_binary) != bool(args.planner_reference_binary):
         parser.error("native planner checks require both planner binaries")
+    if args.legacy_reference_fixture and not args.physical_bit_alignment:
+        parser.error("legacy-reference-fixture requires physical-bit-alignment")
     commands = []
     for value in args.functional_command:
         try:
@@ -535,6 +579,26 @@ def parse_args(argv=None):
         commands.append(command)
     args.functional_command = commands
     return args
+
+
+def verify_fixture_modes(binary, reference_binary, *, legacy_reference, deadline, output):
+    """Bind explicit fixture modes to the already snapshotted executables."""
+    modes = {}
+    for label, executable in (("candidate", binary), ("reference", reference_binary)):
+        expected = "legacy-reference" if label == "reference" and legacy_reference else "v4-dual-lane"
+        result = complete.execute([str(executable), "--mode", "fixture-key-mode"],
+                                  cwd=ROOT, directory=output / label,
+                                  deadline=deadline, env=complete.child_environment(1))
+        if result["status"] != "passed":
+            raise ValueError(label + " fixture key mode probe failed: " + result["status"])
+        try:
+            payload = json.loads(Path(result["stdout"]).read_text())
+        except (OSError, ValueError) as error:
+            raise ValueError(label + " fixture key mode probe returned invalid JSON") from error
+        if payload != {"schema": "triad-fixture-key-mode-v1", "fixture_key_mode": expected}:
+            raise ValueError(label + " fixture key mode does not match required " + expected)
+        modes[label] = {"mode": expected, "probe": result}
+    return modes
 
 
 def run(args, *, factories=None, entry_started=None):
@@ -558,6 +622,8 @@ def run(args, *, factories=None, entry_started=None):
     try:
         if os.name != "posix":
             raise ValueError("bounded child-process cleanup requires POSIX")
+        if args.legacy_reference_fixture and not args.physical_bit_alignment:
+            raise ValueError("legacy-reference-fixture requires physical-bit-alignment")
         candidate = args.candidate_root.resolve(strict=True)
         reference = args.reference_root.resolve(strict=True)
         binary = args.binary.resolve(strict=True)
@@ -574,6 +640,9 @@ def run(args, *, factories=None, entry_started=None):
         binaries = {"candidate": binary, "reference": reference_binary,
                     "candidate_planner": args.planner_binary, "reference_planner": args.planner_reference_binary}
         snapshot = source_snapshot(candidate, reference, binaries)
+        snapshot["fixture_key_modes"] = verify_fixture_modes(
+            binary, reference_binary, legacy_reference=args.legacy_reference_fixture,
+            deadline=deadline, output=output / "fixture-key-modes")
         context = {"candidate_root": candidate, "reference_root": reference, "binary": binary,
             "reference_binary": reference_binary, "fixture_cache": (args.fixture_cache or output / "fixtures").resolve(),
             "device": device, "precision": args.precision, "threads": args.threads,

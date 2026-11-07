@@ -295,14 +295,14 @@ struct Smoke::Impl {
             require(key_reception,"Production keyfile generation stopped continuous reception");
             key_size=std::filesystem::file_size(key_path);
             require(key_size>keyfile_header_bytes&&controller.enabled(C::show_key_folder),"Generated keyfile was not the production format or lost its folder action");
-            first_key_id=keys.selected;first_key_mac=controller.settings().transfer.key->mac(file_bytes);
+            first_key_id=keys.selected;first_key_mac=controller.settings().transfer.key->identity_fingerprint(file_bytes);
             controller.select(F::key,"key:None");
-            require(controller.settings().transfer.key&&controller.settings().transfer.key->mac(file_bytes)!=first_key_mac,"Named None selected plaintext or the wrong key identity");
+            require(controller.settings().transfer.key&&controller.settings().transfer.key->identity_fingerprint(file_bytes)!=first_key_mac,"Named None selected plaintext or the wrong key identity");
             controller.select(F::key,first_key_id);
-            require(controller.settings().transfer.key->mac(file_bytes)==first_key_mac,"Key selection did not restore its original key identity");
+            require(controller.settings().transfer.key->identity_fingerprint(file_bytes)==first_key_mac,"Key selection did not restore its original key identity");
             generate(controller,"Replacement");
             require(controller.field(F::key).enabled&&std::filesystem::file_size(key_path)==key_size&&
-                    controller.settings().transfer.key->mac(file_bytes)==first_key_mac&&
+                    controller.settings().transfer.key->identity_fingerprint(file_bytes)==first_key_mac&&
                     controller.field(F::status).text.find("exist")!=std::string::npos,"Generating over an existing keyfile was not safely refused");
             controller.activate(C::show_key_folder);const auto folder=take(controller,ui::ServiceKind::open_folder);
             require(folder.value==folder_uri(std::filesystem::absolute(key_path).parent_path()),"Key folder service did not preserve its native path");
@@ -313,13 +313,13 @@ struct Smoke::Impl {
         case Phase::reloaded:
             if(!controller.field(F::key).enabled||!controller.estimate())break;
             require(controller.field(F::key).selected==first_key_id&&controller.settings().transfer.key&&
-                    controller.settings().transfer.key->mac(file_bytes)==first_key_mac,"Loading a production keyfile did not restore and auto-select its first key");
+                    controller.settings().transfer.key->identity_fingerprint(file_bytes)==first_key_mac,"Loading a production keyfile did not restore and auto-select its first key");
             controller.activate(C::open_keyfile);respond(controller,ui::ServiceKind::open_file,path_text(directory/"missing.key"));
             phase=Phase::key_failed;break;
         case Phase::key_failed:
             if(!controller.enabled(C::acknowledge_key_failure))break;
             require(!controller.enabled(C::transmit)&&controller.field(F::key).selected==first_key_id&&
-                    controller.settings().receive_keys.size()==2&&controller.settings().transfer.key->mac(file_bytes)==first_key_mac,
+                    controller.settings().receive_keys.size()==2&&controller.settings().transfer.key->identity_fingerprint(file_bytes)==first_key_mac,
                     "Failed key load discarded the working keyring or permitted unacknowledged transmission");
             controller.select(F::key,first_key_id);
             require(controller.enabled(C::acknowledge_key_failure),"Unchanged key selection silently acknowledged a failed load");
@@ -353,7 +353,7 @@ struct Smoke::Impl {
                     "Stop noise failed to return to continuous reception without replay");
             require(controller.field(F::message).text==message&&controller.revision()==noise_revision&&
                     controller.inspection()==noise_inspection&&controller.field(F::key).selected==first_key_id&&
-                    controller.settings().transfer.key&&controller.settings().transfer.key->mac(file_bytes)==first_key_mac&&
+                    controller.settings().transfer.key&&controller.settings().transfer.key->identity_fingerprint(file_bytes)==first_key_mac&&
                     controller.settings().receive_keys.size()==2&&controller.inbox().items().empty()&&
                     controller.signals().lines().empty()&&!controller.enabled(C::paste_previous),
                     "Noise changed the draft, prepared inspection, saved keys or message history");
@@ -463,7 +463,7 @@ struct Smoke::Impl {
         case Phase::binary_ready: {
             if(!controller.enabled(C::transmit))break;
             const auto& model=controller.inspection();
-            require(controller.settings().transfer.key&&controller.settings().transfer.key->mac(file_bytes)==first_key_mac,
+            require(controller.settings().transfer.key&&controller.settings().transfer.key->identity_fingerprint(file_bytes)==first_key_mac,
                     "Binary-edited message did not retain the selected production key");
             require(model&&model->binary&&!model->stream_layout&&inspection_field(*model,"Meaningful bits")=="32",
                     "Binary edit did not prepare its exact raw bit count without a stream");

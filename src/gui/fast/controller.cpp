@@ -6,6 +6,7 @@
 #include "../utf8_policy.hpp"
 #include "../plot_render.hpp"
 #include "datapump/audio.hpp"
+#include "datapump/audio_entropy.hpp"
 #include "plots.hpp"
 #include "datapump/fast/session.hpp"
 #include "datapump/fast/codec.hpp"
@@ -85,10 +86,12 @@ struct Controller::Impl {
     bool closing=false,key_loading=false;
     C pending_start=C::none;
     std::chrono::steady_clock::time_point acquire_deadline;
-    struct Loaded {std::vector<KeyEntry> keys;std::filesystem::path path;std::string error;bool saved=false;std::uint64_t completion_id=0;};
+    struct Loaded {std::vector<KeyEntry> keys;std::filesystem::path path;std::string error,warning;bool saved=false,generated=false,created=false;std::uint64_t completion_id=0;};
+    std::optional<Loaded> pending_generated;
     execution::Task worker;
     execution::Mutex mutex;
     std::optional<Loaded> loaded;
+    std::optional<std::string> key_progress;
     struct Pending {C command;std::shared_ptr<const fast::ReceivedFile> file;};
     std::map<std::uint64_t,Pending> pending;
     std::vector<ui::ServiceRequest> services;
@@ -432,12 +435,50 @@ struct Controller::Impl {
         const auto id=++service_id;pending.emplace(id,Pending{command,command==C::fast_save?selected_file():nullptr});
         services.push_back({id,kind,std::move(title),std::move(value)});
     }
+    void show_key_path(const std::filesystem::path& path,const std::string& warning,const std::string& suffix={}) {
+        f(F::fast_key_path).text=(warning.empty()?std::string():"WARNING: OS-only entropy — ")+path_text(path)+suffix;
+    }
+    void apply_loaded_key(Loaded result) {
+        keys=std::move(result.keys);key_path=std::move(result.path);
+        auto& key=f(F::fast_key);key.options.clear();key.selected.clear();
+        for(std::size_t i=0;i<keys.size();++i)key.options.push_back({std::to_string(i),keys[i].name});
+        settings.key.reset();
+        if(!keys.empty()) {key.selected="0";settings.key=keys.front().key;}
+        settings_changed();show_key_path(key_path,result.warning);
+        f(F::fast_status).text=result.warning.empty()?"Fast key ready. Enter text, select a file, or listen.":"WARNING: "+result.warning;
+    }
+    void discard_pending_key() {
+        if(!pending_generated)return;
+        show_key_path(pending_generated->path,pending_generated->warning," (saved; selection cancelled)");
+        pending_generated.reset();
+    }
     void load(std::filesystem::path path,bool generate,std::uint64_t completion_id=0) {
-        key_loading=true;f(F::fast_status).text=generate?"Generating fast keyfile…":"Loading fast keyfile…";
-        worker=execution::Task([this,path=std::move(path),generate,completion_id] {
-            Loaded result;result.path=path;result.completion_id=completion_id;
-            try {if(generate)create_keyring(path,{"Fast"});result.keys=load_keyring(path);}
-            catch(const std::exception& e) {result.error=e.what();}
+        discard_pending_key();
+        key_loading=true;f(F::fast_status).text=generate?"Collecting microphone input and generating fast keyfile…":"Loading fast keyfile…";
+        const auto input_device=f(F::fast_device).selected.empty()?std::string("default"):f(F::fast_device).selected;
+        const bool exclusive=f(F::fast_exclusive).checked;
+        worker=execution::Task([this,path=std::move(path),generate,completion_id,input_device,exclusive](std::stop_token stop) {
+            Loaded result;result.path=path;result.completion_id=completion_id;result.generated=generate;
+            try {
+                if(stop.stop_requested())throw Error("Operation cancelled");
+                if(generate) {
+                    KeyfileGenerationOptions generation;
+                    generation.audio=audio::keyfile_audio_source(input_device,exclusive);
+                    generation.stop=stop;
+                    generation.allow_audio_fallback=true;
+                    generation.progress=[this](std::string_view stage) {
+                        std::lock_guard lock(mutex);key_progress=std::string(stage);
+                    };
+                    result.warning=create_keyring(path,{"Fast"},std::nullopt,generation).warning;
+                    result.created=true;
+                }
+                if(stop.stop_requested())throw Error("Operation cancelled");
+                result.keys=load_keyring(path);
+            }
+            catch(const std::exception& e) {
+                result.error=e.what();
+                if(generate&&!result.created)result.error+=". If an incomplete output file exists, remove it or choose a new filename before retrying.";
+            }
             std::lock_guard lock(mutex);loaded=std::move(result);
         });
     }
@@ -447,26 +488,48 @@ Controller::~Controller() {close();}
 void Controller::poll() {
     auto& p=*impl_;
     std::optional<Impl::Loaded> loaded;
-    {std::lock_guard lock(p.mutex);loaded.swap(p.loaded);}
+    std::optional<std::string> key_progress;
+    {std::lock_guard lock(p.mutex);loaded.swap(p.loaded);key_progress.swap(p.key_progress);}
     if(loaded) {
         p.key_loading=false;if(p.worker.joinable())p.worker.join();
-        if(loaded->completion_id)p.service_completions.push_back({loaded->completion_id,loaded->error});
+        if(loaded->completion_id) {
+            auto completion_error=loaded->error;
+            if(loaded->created&&!completion_error.empty())completion_error="Keyfile saved but not loaded: "+completion_error;
+            if(!loaded->warning.empty()&&!completion_error.empty())completion_error+=". WARNING: "+loaded->warning;
+            p.service_completions.push_back({loaded->completion_id,std::move(completion_error)});
+        }
         if(!p.closing) {
-            if(!loaded->error.empty())report_error(loaded->error);
+            if(!loaded->error.empty()) {
+                if(loaded->created) {
+                    p.show_key_path(loaded->path,loaded->warning," (saved; load failed)");
+                    loaded->error="Keyfile saved but not loaded: "+loaded->error;
+                    if(!loaded->warning.empty())loaded->error+=". WARNING: "+loaded->warning;
+                }
+                report_error(loaded->error);
+            }
             else if(loaded->saved)p.f(F::fast_status).text="Saved complete received bytes.";
             else {
-                p.keys=std::move(loaded->keys);p.key_path=std::move(loaded->path);
-                auto& key=p.f(F::fast_key);key.options.clear();key.selected.clear();
-                for(std::size_t i=0;i<p.keys.size();++i)key.options.push_back({std::to_string(i),p.keys[i].name});
-                if(!p.keys.empty()) {key.selected="0";p.settings.key=p.keys.front().key;}
-                p.settings_changed();p.f(F::fast_key_path).text=path_text(p.key_path);
-                p.f(F::fast_status).text="Fast key ready. Enter text, select a file, or listen.";
+                const auto current=p.session.poll();
+                if(loaded->generated&&current.active&&current.listening) {
+                    p.pending_generated=std::move(*loaded);
+                    p.show_key_path(p.pending_generated->path,p.pending_generated->warning," (saved; selection pending)");
+                    p.f(F::fast_status).text="Keyfile saved; selection pending until reception ends. Open the saved keyfile to switch now.";
+                } else p.apply_loaded_key(std::move(*loaded));
             }
         }
         ++p.revision;
     }
     const auto snapshot=p.session.poll();
     p.observe_snapshot(snapshot);
+    if(!p.closing&&p.pending_generated&&!snapshot.active&&!p.session.active()) {
+        auto ready=std::move(*p.pending_generated);p.pending_generated.reset();
+        p.apply_loaded_key(std::move(ready));++p.revision;
+    } else if(!p.closing&&p.pending_generated&&snapshot.error.empty()) {
+        p.f(F::fast_status).text="Keyfile saved; selection pending until reception ends. Open the saved keyfile to switch now.";
+    }
+    if(key_progress&&!loaded&&!p.closing&&p.key_loading) {
+        p.f(F::fast_status).text=*key_progress+"…";++p.revision;
+    }
     if(!p.closing&&p.pending_start!=C::none&&!snapshot.active&&!p.key_loading) {
         try {
             if(p.acquire_audio()) {
@@ -506,7 +569,7 @@ void Controller::set_shellcode_mode(bool enabled) {
     }
     p.refresh_history();++p.revision;p.refresh();
 }
-void Controller::close() {auto& p=*impl_;if(p.closing)return;p.closing=true;p.pending_start=C::none;p.session.close();p.pending.clear();p.services.clear();p.refresh();}
+void Controller::close() {auto& p=*impl_;if(p.closing)return;p.closing=true;p.pending_start=C::none;p.worker.request_stop();p.session.close();p.pending_generated.reset();p.pending.clear();p.services.clear();p.refresh();}
 bool Controller::ready_to_close() const {return impl_->closing&&!impl_->key_loading&&impl_->session.ready_to_close();}
 bool Controller::active() const {return impl_->session.active()||impl_->pending_start!=C::none;}
 void Controller::set_devices(const std::vector<audio::Device>& devices) {
@@ -586,7 +649,7 @@ void Controller::select(F field,std::string id) {
             p.settings.channel_mode=id=="left"?audio::ChannelMode::left_mono:id=="right"?audio::ChannelMode::right_mono:audio::ChannelMode::stereo;
             p.settings.mono=id!="stereo";p.f(field).checked=p.settings.mono;
         }
-        else if(field==F::fast_key)p.settings.key=p.keys.at(std::stoul(id)).key;
+        else if(field==F::fast_key) {p.discard_pending_key();p.settings.key=p.keys.at(std::stoul(id)).key;}
         else if(field==F::fast_source||field==F::fast_qr_brightness) {} // Independent local presentation fields.
         else return;
         p.f(field).selected=std::move(id);p.sync_profile_fields();p.estimate_key.clear();if(field!=F::fast_source&&field!=F::fast_mono&&field!=F::fast_qr_brightness)p.settings_changed();++p.revision;p.refresh();
@@ -600,6 +663,7 @@ void Controller::toggle(F field,bool value) {
         p.settings_changed();++p.revision;p.refresh();return;
     }
     if(field==F::fast_encryption&&p.f(field).enabled) {
+        if(p.f(field).checked!=value)p.discard_pending_key();
         p.f(field).checked=value;p.settings_changed();++p.revision;p.refresh();
     }
 }

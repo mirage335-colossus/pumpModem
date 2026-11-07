@@ -3,6 +3,7 @@
 #include "datapump/boundary_sync.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "fixture_crypto.hpp"
 #include "../src/transfer_pending.hpp"
 #include <algorithm>
 #include <iostream>
@@ -16,7 +17,7 @@ transfer::Options options(bool keyed=false) {
     transfer::Options value;value.modem.sample_rate=8000;value.modem.bandwidth_hz=1000;
     value.modem.carrier_hz=1500;value.modem.spreading_factor=16;value.modem.pulse_shaping=false;
     value.search_seconds=0;value.timestamp=1800000000;value.content_limit=65536;value.compression=false;
-    if(keyed)value.key.emplace(Bytes(32,0x37));
+    if(keyed)value.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x37));
     return value;
 }
 Message message(std::size_t size) {
@@ -608,9 +609,9 @@ void diagnostics_accounting() {
     check(receiver.working_bytes()<empty,"complete physical state must release diagnostic allocations");
 }
 void shared_confidentiality_accounting() {
-    auto legacy=options(true);legacy.modem.data_key.emplace(Bytes(32,0x4a));
+    auto legacy=options();legacy.key.emplace(Bytes(32,0x37));legacy.modem.data_key.emplace(Bytes(32,0x4a));
     transfer::StreamReceiver baseline(legacy,legacy.timestamp);
-    auto shared=legacy;shared.key=Crypto::random();shared.modem.data_key=shared.key;
+    auto shared=legacy;shared.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x37));shared.modem.data_key=shared.key;
     const auto first=shared.key->confidentiality_storage_id();
     const auto charge=shared.key->confidentiality_storage_bytes();
     transfer::StreamReceiver aliased(shared,shared.timestamp);
@@ -619,7 +620,7 @@ void shared_confidentiality_accounting() {
           !aliased.shared_confidentiality_storage_charge(nullptr) &&
           !aliased.shared_confidentiality_storage_charge(&baseline),
           "stream receiver must account aliased confidentiality roots exactly once");
-    shared.modem.data_key=Crypto::random();
+    shared.modem.data_key=fixture_crypto::key(Bytes(32,0xd4),Bytes(32,0x4a));
     const auto second=shared.modem.data_key->confidentiality_storage_id();
     const auto second_charge=shared.modem.data_key->confidentiality_storage_bytes();
     transfer::StreamReceiver distinct(shared,shared.timestamp);
@@ -699,6 +700,36 @@ void exhaustive_recovery_preserves_physical_end_and_source() {
         const auto& stats=recovered.content.fec_stats;
         check(stats.data.missing_bits+stats.integrity.missing_bits+stats.parity.missing_bits==49,
               "guessed bits must remain missing in accepted correction diagnostics");
+    }
+    // Remask an authentic coded interval for each incorrect receiver key so
+    // the RS word remains valid and rejection exercises interval authentication.
+    auto sender=options(true);sender.fec=FecMode::rs60;
+    auto plain=transfer::message_wire_bits(message(17),sender);
+    transfer::xor_binary_bits(plain,sender);
+    for(const bool wrong_serpent:{false,true}) {
+        auto receiver_options=sender;
+        receiver_options.key=fixture_crypto::key(Bytes(32,wrong_serpent?0xd4:0xd3),
+                                                 Bytes(32,wrong_serpent?0x37:0x38));
+        receiver_options.recovery_options.workers=2;
+        receiver_options.recovery_options.extra_errors=0;
+        receiver_options.recovery_options.budget=std::chrono::seconds(5);
+        auto wire=plain;transfer::xor_binary_bits(wire,receiver_options);
+        for(std::size_t byte=0;byte<49;++byte)wire[192+byte*8]=modem::missing_pattern_bit;
+        transfer::StreamReceiver receiver(receiver_options,receiver_options.timestamp);
+        const auto pending=receiver.push(chunk(wire,0));
+        check(pending.observed_bits==wire.size() && pending.missing_symbols==49 &&
+              !pending.stream_complete && !pending.recovery && !pending.content_validated &&
+              pending.content.message.data.empty(),
+              "incorrect individual key lane must preserve progress and defer recovery until physical end");
+        auto complete=receiver.push(chunk({},wire.size(),100,true));
+        check(complete.stream_complete && !complete.content_validated && complete.recovery &&
+              complete.recovery_progress.state==transfer::RecoveryState::ready,
+              "incorrect individual key lane must start recovery only after physical end");
+        const auto recovered=transfer::recover_received(std::move(complete));
+        check(recovered.stream_complete && !recovered.content_validated && !recovered.content.authenticated &&
+              recovered.content.message.data.empty() && recovered.observed_bits==wire.size() &&
+              recovered.missing_symbols==49 && recovered.recovery_progress.state==transfer::RecoveryState::exhausted,
+              "recovery must reject an authentic interval when either individual key lane is wrong");
     }
     auto value=options();value.recovery_options.retained_bits=1024;
     auto wire=transfer::message_wire_bits(message(17),value);

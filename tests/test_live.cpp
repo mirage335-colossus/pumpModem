@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/live.hpp"
 #include "datapump/fhss_schedule.hpp"
 #include "cpu_work_budget.hpp"
@@ -687,7 +688,7 @@ void short_keyed_stream_survives_epoch_refresh() {
     });
     auto value=settings();value.transfer.timestamp=0;
     value.transfer.modem=tuning::resolve(3600,80,tuning::PatternMode::auto_pattern,true,1500).config;
-    value.transfer.key.emplace(Bytes(32,0x45));value.receive_keys.emplace_back(Bytes(32,0x46));
+    value.transfer.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x45));value.receive_keys.push_back(fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x46)));
     session.start(value);const std::string expected="01001000011001010110110001110000";
     Bytes bits;for(auto digit:expected)bits.push_back(static_cast<std::uint8_t>(digit-'0'));session.transmit_bits(bits);
     testing::CpuWorkBudget budget(30s,"admitted keyed epoch refresh");bool jumped=false,computed=false;
@@ -724,7 +725,7 @@ void keyed_acquisition_survives_early_epoch_refresh() {
     value.transfer.receive_pattern_mode=tuning::PatternMode::auto_pattern;
     value.transfer.receive_targets_db_hz={32,55};
     value.transfer.modem=tuning::resolve(3600,32,tuning::PatternMode::auto_pattern,true,1500).config;
-    value.transfer.key.emplace(Bytes(32,0x45));value.receive_keys.emplace_back(Bytes(32,0x46));
+    value.transfer.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x45));value.receive_keys.push_back(fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x46)));
     value.dsp_workspace_bytes=128*1024*1024;value.transfer.dsp_workspace_bytes=value.dsp_workspace_bytes;
     const std::string expected="01001000011001010110110001110000";
     Bytes bits;for(auto digit:expected)bits.push_back(static_cast<std::uint8_t>(digit-'0'));
@@ -976,7 +977,7 @@ void transmit_capture_tracks_generation_and_replay() {
     // assertion, using a safe dwell calendar instead of ungated square pulses.
     value.transfer.modem.bandwidth_hz=256;value.transfer.modem.pulse_shaping=true;
     value.transfer.modem.scramble=value.transfer.modem.dsss=true;
-    value.transfer.key.emplace(Bytes(32,0x67));
+    value.transfer.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x67));
     auto hopping=std::make_shared<modem::FhssPlan>();hopping->channels=3;hopping->dwell_seconds=.4;
     hopping->shifts[0]=1e6;hopping->shifts[1]=1.01e6;hopping->shifts[2]=1.033e6;
     value.transfer.modem.fake_hopping=transfer::transmit_hopping(*hopping,value.transfer);
@@ -1093,8 +1094,8 @@ void continuous_noise_lifecycle() {
         auto value=settings();value.transfer.timestamp=0;
         value.transfer.modem.integration_seconds=5;
         if(mode==1) {
-            value.transfer.key.emplace(Bytes(32,0x5c));
-            value.receive_keys.emplace_back(Bytes(32,0x6d));
+            value.transfer.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x5c));
+            value.receive_keys.push_back(fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x6d)));
             value.transfer.modem.scramble=value.transfer.modem.dsss=true;
         } else if(mode==2) {
             value.transfer.modem.spreading_mode=modem::SpreadingMode::tone;
@@ -1294,7 +1295,7 @@ live::Settings media_clock_settings() {
     value.transfer.modem.bandwidth_hz=128;value.transfer.modem.spreading_factor=16;
     value.transfer.modem.scramble=true;value.transfer.modem.dsss=false;
     std::array<std::uint8_t,32> material{};material.fill(0x61);
-    value.transfer.key=Crypto(material);
+    value.transfer.key=fixture_crypto::key(Bytes(32,0xd3),material);
     return value;
 }
 bool completed_media_clock_raw(const live::Snapshot& snapshot,std::span<const std::uint8_t> bits) {

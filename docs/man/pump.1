@@ -98,6 +98,14 @@ Create a symmetric keyfile at
 .BR \-\-output .
 The file contains a 128 MiB random header and an encrypted named key collection.
 It is created with owner-only access and must not already exist.
+Key generation collects fresh audio from the selected input as a supplemental
+entropy source. Use
+.BI \-\-device " id"
+to select an audio input; the default device is used if omitted. If the input
+is unavailable or unusable, generation uses operating-system randomness and
+prints a warning. Cancellation and operating-system random-source failures
+stop generation. Audio supplements separate operating-system randomness;
+sample variation does not prove entropy strength.
 .TP
 .B keys
 List the names in
@@ -629,7 +637,7 @@ Create and inspect a shared keyfile:
 .PP
 .nf
 .RS
-pump keygen \-\-output shared.key \-\-key\-names Home,Portable
+pump keygen \-\-output shared.key \-\-key\-names Home,Portable \-\-device default
 pump keys \-\-keyfile shared.key
 .RE
 .fi

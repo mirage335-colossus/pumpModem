@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/live.hpp"
 #include "../src/audio_trace.hpp"
 #include "../src/pattern_permutation_cache.hpp"
@@ -93,7 +94,7 @@ live::Settings settings(bool helper_enabled) {
     value.transfer.timestamp=1800000000;value.transfer.search_seconds=0;
     value.transfer.recovery_options.enabled=false;
     std::array<std::uint8_t,32> secret{};for(std::size_t i=0;i<secret.size();++i)secret[i]=static_cast<std::uint8_t>(i*11+7);
-    value.transfer.key=Crypto(secret);
+    value.transfer.key=fixture_crypto::key(std::array<std::uint8_t,32>{0xa5},secret);
     value.simulation_snr_db=40;value.simulation_clock_error_ppm=0;
     value.simulation_frequency_offset_hz=2.17;value.simulation_phase_noise_degrees_per_sqrt_second=0;
     value.simulation_seed=5181;value.dsp_workspace_bytes=64*1024*1024;value.content_limit=1024*1024;
@@ -1572,7 +1573,7 @@ void gps_clock_actual_source() {
     for(const double b_ppm:{-550.,550.}) {
         helper::Options options;options.power_w=40;options.data_power_w=4;
         test::AuxiliaryFixture generator(options,2062.5,.6,0,epoch,true,
-                                        Crypto(std::array<std::uint8_t,32>{}),true);
+                                        fixture_crypto::key(std::array<std::uint8_t,32>{0xa5},std::array<std::uint8_t,32>{}),true);
         audio::Resampler converter(rate,rate,true);converter.initialize_timing(0,b_ppm*1e-6);
         converter.set_output_transform([&](float,long double seconds,std::uint32_t fs) {
             return generator.mix(seconds+.137L,fs);

@@ -22,6 +22,7 @@
 #include "text_policy.hpp"
 #include "binary_editor.hpp"
 #include "datapump/audio.hpp"
+#include "datapump/audio_entropy.hpp"
 #include "datapump/runtime.hpp"
 #include "datapump/simulation_estimate.hpp"
 #include "datapump/tuning.hpp"
@@ -108,7 +109,7 @@ double number(const std::string& text,const char* name) {
 planner::ReceiveBanks receive_banks(const live::Settings& settings) {
     std::vector<Bytes> tags;
     const auto add=[&](const Crypto& key) {
-        auto tag=key.mac(Bytes{'D','P','-','R','X','-','B','A','N','K'});
+        auto tag=key.identity_fingerprint(Bytes{'D','P','-','R','X','-','B','A','N','K'});
         if(std::find(tags.begin(),tags.end(),tag)==tags.end())tags.push_back(std::move(tag));
     };
     if(settings.transfer.key)add(*settings.transfer.key);
@@ -332,11 +333,13 @@ struct Controller::Impl {
         std::shared_ptr<const Bytes> file;
         std::filesystem::path path;
         bool image=false,generate=false,created=false;
-        std::string error;
+        std::string error, key_warning;
     };
+    std::string key_warning;
     execution::Task worker;
     execution::Mutex mutex;
     std::optional<Prepared> prepared,prepared_preview;
+    std::optional<std::string> key_progress;
     enum class Purpose { open_key,generate_names,generate_path,attach,save,clipboard,folder,
         planner_target,planner_power,planner_loss,planner_noise };
     struct Pending { Purpose purpose; std::shared_ptr<const Bytes> bytes; std::vector<std::string> names; std::uint64_t attachment_revision=0; };
@@ -495,6 +498,7 @@ struct Controller::Impl {
         for(std::size_t i=0;i<keys.size();++i)state.options.push_back({"key:"+keys[i].name,labels[i+1]});
         state.selected=std::move(selected);
         f(UiField::key_path).text=key_path.empty()?"None":path_text(key_path.filename());
+        if(!key_warning.empty()) f(UiField::key_path).text="WARNING: OS-only entropy — "+f(UiField::key_path).text;
     }
     Message message() const {
         Message value;
@@ -2023,7 +2027,26 @@ struct Controller::Impl {
             result.completion_id=std::exchange(pending_key_completion,0);
             result.key_settings=std::exchange(pending_key_settings,std::nullopt);
             result.key_simulation_off=pending_key_simulation_off;
-            start_worker([](Prepared& value,std::stop_token stop) { if(stop.stop_requested()) throw Error("Operation cancelled"); if(value.generate) { create_keyring(value.path,value.names); value.created=true; } value.keys=load_keyring(value.path); },std::move(result));
+            // Capture the selected physical input before entering the worker;
+            // changes to later GUI settings cannot redirect this key operation.
+            const auto input_device=f(UiField::device).text.empty()?std::string("default"):f(UiField::device).text;
+            const bool exclusive=f(UiField::exclusive).checked;
+            start_worker([this,input_device,exclusive](Prepared& value,std::stop_token stop) {
+                if(stop.stop_requested()) throw Error("Operation cancelled");
+                if(value.generate) {
+                    KeyfileGenerationOptions generation;
+                    generation.audio=audio::keyfile_audio_source(input_device,exclusive);
+                    generation.stop=stop;
+                    generation.allow_audio_fallback=true;
+                    generation.progress=[this](std::string_view stage) {
+                        std::lock_guard lock(mutex);key_progress=std::string(stage);
+                    };
+                    value.key_warning=create_keyring(value.path,value.names,std::nullopt,generation).warning;
+                    value.created=true;
+                }
+                if(stop.stop_requested()) throw Error("Operation cancelled");
+                value.keys=load_keyring(value.path);
+            },std::move(result));
         } else if(pending_file) {
             result.kind=PrepKind::file; result.path=*pending_file; result.revision=attachment_revision; pending_file.reset();
             start_worker([](Prepared& value,std::stop_token) {
@@ -2145,14 +2168,22 @@ struct Controller::Impl {
     }
     void accept(Prepared result,bool finished=true) {
         if(finished) {if(worker.joinable())worker.join();preparing=false;}
-        if(result.cancelled) {
+        if(result.cancelled&&result.kind!=PrepKind::keys) {
             // TX may interrupt an optional curve sweep after its selected
             // values were published. Resume the same current request afterward.
             if(result.kind==PrepKind::planner&&planner_model&&planner_identity==result.planner_pending)
                 pending_planner=PlannerRequest{result.planner_pending->inputs,result.planner_pending};
             return;
         }
-        if(result.completion_id)service_completions.push_back({result.completion_id,result.error});
+        if(result.cancelled&&result.error.empty())result.error="Operation cancelled";
+        if(result.kind==PrepKind::keys&&result.generate&&!result.created&&!result.error.empty())
+            result.error+=". If an incomplete output file exists, remove it or choose a new filename before retrying.";
+        if(result.completion_id) {
+            auto completion_error=result.error;
+            if(result.created&&!completion_error.empty()) completion_error="Keyfile saved but not loaded: "+completion_error;
+            if(!result.key_warning.empty()&&!completion_error.empty()) completion_error+=". WARNING: "+result.key_warning;
+            service_completions.push_back({result.completion_id,std::move(completion_error)});
+        }
         if(result.kind==PrepKind::keys) key_loading=pending_key.has_value();
         if(result.kind==PrepKind::file) file_loading=pending_file.has_value();
         if(result.kind==PrepKind::file&&result.revision!=attachment_revision) return;
@@ -2169,8 +2200,16 @@ struct Controller::Impl {
         if(!result.error.empty()) {
             if(result.kind==PrepKind::keys) {
                 key_failed=true;
-                f(UiField::key_path).text=result.key_settings?(key_path.empty()?"None":path_text(key_path.filename())):
-                    result.created?"Keyfile saved; load failed":"Keyfile operation failed";
+                if(result.key_settings) {
+                    f(UiField::key_path).text=key_path.empty()?"None":path_text(key_path.filename());
+                    if(!key_warning.empty())f(UiField::key_path).text="WARNING: OS-only entropy — "+f(UiField::key_path).text;
+                } else {
+                    f(UiField::key_path).text=result.created?
+                        (result.key_warning.empty()?"Keyfile saved; load failed":"WARNING: OS-only entropy; keyfile saved, load failed"):
+                        (key_warning.empty()?"Keyfile operation failed":"WARNING: OS-only entropy; keyfile operation failed");
+                }
+                if(result.created) result.error="Keyfile saved but not loaded: "+result.error;
+                if(!result.key_warning.empty()) result.error+=". WARNING: "+result.key_warning;
             }
             if(result.kind==PrepKind::estimate) { if(result.revision==revision) { estimated_revision=revision; estimate_error=result.error; if(planner_draft)planner_model.reset(); simulation_estimate_status("Unavailable"); lpi_estimate_status("Unavailable"); ordinary_airtime=result.error; f(UiField::inspection).text=result.error; } }
             else if(result.kind!=PrepKind::devices) notice(result.error,10);
@@ -2180,7 +2219,7 @@ struct Controller::Impl {
             if(result.key_settings) {
                 try {
                     configure(false,false,std::nullopt,&*result.key_settings,result.key_simulation_off,&result.keys,&result.path);
-                    key_failed=false;sync_launch_command(true);
+                    key_failed=false;key_warning.clear();key_fields(f(UiField::key).selected);sync_launch_command(true);
                     notice("Keyfile and settings loaded; selected transmit key and receive bank retained.");
                 } catch(const std::exception& error) {
                     audio::trace::record("gui_settings_import_failure",[&](audio::trace::Fields& fields) {
@@ -2194,13 +2233,14 @@ struct Controller::Impl {
                     });
                     key_failed=true;
                     f(UiField::key_path).text=key_path.empty()?"None":path_text(key_path.filename());
+                    if(!key_warning.empty())f(UiField::key_path).text="WARNING: OS-only entropy — "+f(UiField::key_path).text;
                     notice(std::string("Settings not applied: ")+error.what(),10);
                 }
                 return;
             }
-            key_failed=false; keys=std::move(result.keys); key_path=result.path;
+            key_failed=false; keys=std::move(result.keys); key_path=result.path; key_warning=std::move(result.key_warning);
             key_fields(keys.empty()?"none":"key:"+keys.front().name);encryption_changed();configure();
-            notice(tone()?"Key entries loaded. Tone modes keep encryption off.":result.created?"New keyfile saved and loaded. First key entry selected.":"Encryption key entries loaded. First key entry selected.");
+            notice(!key_warning.empty()?"WARNING: "+key_warning:tone()?"Key entries loaded. Tone modes keep encryption off.":result.created?"New keyfile saved and loaded. First key entry selected.":"Encryption key entries loaded. First key entry selected.",10);
         } else if(result.kind==PrepKind::file&&!pending_file) {
             attachment=std::move(result.file); attachment_path=result.path; attachment_image=result.image;
             set_repeatable(false);
@@ -2407,7 +2447,7 @@ struct Controller::Impl {
         if(!names.empty()&&(std::filesystem::exists(path)||std::filesystem::is_symlink(path))) throw Error("Choose a new filename; existing keyfiles are never overwritten");
         pending_key=std::move(path); pending_names=std::move(names); key_loading=true; key_failed=false;
         pending_key_completion=completion_id;
-        f(UiField::key_path).text=pending_names.empty()?"Loading key entries...":"Generating 128 MiB keyfile..."; dirty(); notice(f(UiField::key_path).text,10);
+        f(UiField::key_path).text=pending_names.empty()?"Loading key entries...":"Collecting microphone input and generating keyfile..."; dirty(); notice(f(UiField::key_path).text,10);
     }
     void apply_launch(launch_command::Patch values,bool simulation_off=true) {
         if(values.fhss_list_file) {
@@ -2567,7 +2607,7 @@ struct Controller::Impl {
         case Command::open_keyfile: request(Purpose::open_key,ui::ServiceKind::open_file,"Choose encryption keyfile"); break;
         case Command::generate_keyfile: request(Purpose::generate_names,ui::ServiceKind::prompt,"Key entry names, separated by commas","Default"); break;
         case Command::show_key_folder: { const auto folder=std::filesystem::absolute(key_path).parent_path(); if(!std::filesystem::is_directory(folder)) throw Error("The keyfile folder is no longer available"); request(Purpose::folder,ui::ServiceKind::open_folder,"Show keyfile folder",folder_uri(folder)); break; }
-        case Command::acknowledge_key_failure: key_failed=false; f(UiField::key_path).text=key_path.empty()?"None":path_text(key_path.filename()); notice("Current key selection retained."); break;
+        case Command::acknowledge_key_failure: key_failed=false; key_fields(f(UiField::key).selected); notice("Current key selection retained."); break;
         case Command::save_file: { const auto* file=selected_file(); request(Purpose::save,ui::ServiceKind::save_file,"Save decoded source",file->message.filename.empty()?"received.bin":received_text(file->message.filename),std::make_shared<const Bytes>(file->message.data)); break; }
         case Command::copy_signal: {
             const auto index=*selected_signal(); if(const auto raw=signals.copy_bits(index)) request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy received binary bits",*raw);
@@ -2681,11 +2721,15 @@ void Controller::set_shellcode_mode(bool value) {
 void Controller::start() { auto& p=*impl_; if(!p.started&&!p.closing) { p.session.start(p.settings); p.started=true; } }
 void Controller::poll() {
     auto& p=*impl_; std::optional<Impl::Prepared> prepared,airtime;
-    { std::lock_guard lock(p.mutex); prepared.swap(p.prepared);airtime.swap(p.prepared_preview); }
+    std::optional<std::string> key_progress;
+    { std::lock_guard lock(p.mutex); prepared.swap(p.prepared);airtime.swap(p.prepared_preview);key_progress.swap(p.key_progress); }
     try {
         if(!p.closing && !p.transmit_requested && !p.snapshot.transmitting &&
            p.receive_targets_due && Clock::now()>=*p.receive_targets_due)p.configure();
         if(airtime&&!p.closing)p.accept(std::move(*airtime),false);
+        if(key_progress&&!prepared&&!p.closing&&p.key_loading) {
+            p.f(UiField::key_path).text=*key_progress+"...";++p.revision;
+        }
         if(prepared) {
             if(p.closing) {
                 if(p.worker.joinable()) p.worker.join(); p.preparing=false;

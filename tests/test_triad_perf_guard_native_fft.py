@@ -145,8 +145,17 @@ class GuardWorkloadTests(unittest.TestCase):
         for relative in guard.fixtures.OPTIONAL_HISTORICAL_FILES:
             self.assertEqual(adapter.sources["reference:" + relative], guard.fixtures.ABSENT_SOURCE)
         adapter._check_sources()
-        (self.context["reference_root"] / "src/serpent.cpp").write_text("appeared")
+        (self.context["reference_root"] / "tools/triad_fixture_key.hpp").write_text("appeared")
         with self.assertRaisesRegex(ValueError, "changed during guard"):
+            adapter._check_sources()
+        (self.context["reference_root"] / "tools/triad_fixture_key.hpp").unlink()
+        driver = self.context["reference_root"] / "tools/triad-long.cpp"
+        driver.write_text('#include "triad_fixture_key.hpp"\n')
+        with self.assertRaisesRegex(ValueError, "includes missing fixture"):
+            self.adapter()
+        driver.write_text("restored")
+        (self.context["reference_root"] / "src/serpent.cpp").write_text("appeared")
+        with self.assertRaisesRegex(ValueError, "incomplete Serpent implementation"):
             adapter._check_sources()
         (self.context["reference_root"] / "src/serpent.cpp").unlink()
         (self.context["reference_root"] / "src/serpent.cpp").symlink_to("missing")

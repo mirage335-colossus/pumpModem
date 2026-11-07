@@ -37,7 +37,10 @@ SOURCE_FILES = (
     "src/crypto.cpp",
     "include/datapump/crypto.hpp",
 )
-OPTIONAL_HISTORICAL_FILES = ("src/serpent.cpp", "include/datapump/serpent.hpp")
+# New source is required in a candidate, but older explicit reference trees
+# can predate these files.  Bind absence so appearance changes the identity.
+OPTIONAL_HISTORICAL_FILES = ("src/serpent.cpp", "include/datapump/serpent.hpp",
+                             "tools/triad_fixture_key.hpp")
 ABSENT_SOURCE = "absent"
 
 
@@ -55,13 +58,32 @@ def _sha256(path: Path) -> str:
 
 def _source_hashes(source_root: Path, plan_path: Path, *, allow_historical_missing: bool = False) -> dict[str, str]:
     """Hash the selected candidate source tree plus the harness's input plan."""
+    for relative in SOURCE_FILES + OPTIONAL_HISTORICAL_FILES + ("CMakeLists.txt",):
+        component = source_root
+        for part in Path(relative).parts:
+            component = component / part
+            if component.is_symlink():
+                raise FixtureError("symlinked source dependency: " + relative)
     hashes = {relative: _sha256(source_root / relative) for relative in SOURCE_FILES}
     for relative in OPTIONAL_HISTORICAL_FILES:
         path = source_root / relative
         if not path.is_file() and allow_historical_missing and not path.exists():
+            if relative == "tools/triad_fixture_key.hpp" and "triad_fixture_key.hpp" in (source_root / "tools/triad-long.cpp").read_text():
+                raise FixtureError("historical triad driver includes missing fixture key header")
             hashes[relative] = ABSENT_SOURCE
         else:
             hashes[relative] = _sha256(path)
+    serpent = [hashes[name] == ABSENT_SOURCE for name in ("src/serpent.cpp", "include/datapump/serpent.hpp")]
+    if any(serpent) and not all(serpent):
+        raise FixtureError("historical source has incomplete Serpent implementation")
+    if all(serpent) and any("serpent.hpp" in (source_root / name).read_text() for name in SOURCE_FILES):
+        raise FixtureError("historical source includes missing Serpent header")
+    cmake = source_root / "CMakeLists.txt"
+    if cmake.exists() and not cmake.is_file():
+        raise FixtureError("build declaration is not a file")
+    hashes["CMakeLists.txt"] = _sha256(cmake) if cmake.is_file() else ABSENT_SOURCE
+    if all(serpent) and cmake.is_file() and "serpent.cpp" in cmake.read_text():
+        raise FixtureError("historical build requires missing Serpent source")
     hashes["plan"] = _sha256(plan_path)
     hashes["case_config"] = _sha256(CONFIG_PATH)
     return hashes
@@ -275,6 +297,11 @@ def prepare_cases(binary: str | os.PathLike[str], output_root: str | os.PathLike
         normalized_args = _normalize_args(export_argv)
         source_hashes = _source_hashes(provenance_root, selected["path"],
                                        allow_historical_missing=allow_historical_missing)
+        def verify_identity():
+            if (_sha256(native) != binary_hash or
+                _source_hashes(provenance_root, selected["path"],
+                               allow_historical_missing=allow_historical_missing) != source_hashes):
+                raise FixtureError(f"{fixture_case['id']}: source or binary changed during fixture preparation")
         identity = {
             "schema": config["schema"],
             "binary_sha256": binary_hash,
@@ -289,6 +316,7 @@ def prepare_cases(binary: str | os.PathLike[str], output_root: str | os.PathLike
         hashes = _valid_cache(cache_dir, key, source_hashes) if cache_dir.is_dir() else None
         cache_hit = hashes is not None
         configuration = _configure(native, fixture_case, selected, config["limits"], deadline)
+        verify_identity()
         manifest = None
         if hashes is not None:
             manifest = json.loads((cache_dir / "workspace" / "manifest.json").read_text())
@@ -303,6 +331,7 @@ def prepare_cases(binary: str | os.PathLike[str], output_root: str | os.PathLike
                     raise FixtureError(f"{fixture_case['id']}: export exited {proc.returncode}: {proc.stderr[-1600:]}")
                 hashes = _workspace_hashes(workspace)
                 manifest = json.loads((workspace / "manifest.json").read_text())
+                verify_identity()
                 receipt = {
                     "schema": "triad-physical-fixture-cache-v1",
                     "cache_key": key,

@@ -73,6 +73,25 @@ endif()
 file(COPY_FILE "${scratch}/original-pump" "${victim}")
 # A self-consistent inventory is insufficient when a required manual is absent.
 file(READ "${relocated}/manifest.sha256" complete_manifest)
+# The helper is a private sibling executable, but remains required for new
+# native packages even when its absence is reflected in the inventory.
+set(audio_helper "datapump-audio-entropy")
+if(WIN32)
+  string(APPEND audio_helper ".exe")
+endif()
+if(EXISTS "${relocated}/bin/${audio_helper}")
+  file(RENAME "${relocated}/bin/${audio_helper}" "${scratch}/${audio_helper}")
+  string(REPLACE "." "\\." audio_helper_pattern "${audio_helper}")
+  string(REGEX REPLACE "[0-9a-f]+  bin/${audio_helper_pattern}\n" "" without_helper "${complete_manifest}")
+  file(WRITE "${relocated}/manifest.sha256" "${without_helper}")
+  execute_process(COMMAND "${CMAKE_COMMAND}" "-DPACKAGE_ROOT=${relocated}" -DVERIFY_ONLY=ON -P "${verifier}"
+    RESULT_VARIABLE missing_helper OUTPUT_VARIABLE output ERROR_VARIABLE error)
+  if(missing_helper EQUAL 0 OR NOT error MATCHES "lacks its audio entropy helper")
+    message(FATAL_ERROR "Native package verification accepted a missing audio entropy helper")
+  endif()
+  file(RENAME "${scratch}/${audio_helper}" "${relocated}/bin/${audio_helper}")
+  file(WRITE "${relocated}/manifest.sha256" "${complete_manifest}")
+endif()
 # A self-consistent manifest must not conceal a dropped, enabled frontend.
 foreach(frontend datapump-tui datapump-fb datapump-worker)
   set(binary_name "${frontend}")

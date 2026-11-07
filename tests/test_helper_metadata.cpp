@@ -42,17 +42,22 @@ void time_phase() {
 void encrypted_records() {
     std::array<std::uint8_t,32> master{};
     for(unsigned i=0;i<master.size();++i)master[i]=static_cast<std::uint8_t>(i);
-    const datapump::Crypto key(master);
+    std::array<std::uint8_t,64> serpent{},aes{};
+    for(unsigned i=0;i<serpent.size();++i) {serpent[i]=static_cast<std::uint8_t>(64+i);aes[i]=master[i%master.size()];}
+    const auto key=datapump::Crypto::from_independent_roots(serpent,aes);
     const std::array<datapump::Crypto,1> keys{key};
+    const datapump::Crypto waveform_only(master);
+    rejects([&]{h::metadata_packet(0,"N0CALL",&waveform_only);});
     struct Vector {std::uint64_t dwell,ticks;std::array<std::uint32_t,9> symbols;};
     // Independent Python hashlib/hmac HKDF, libgcrypt Serpent ECB and
     // cryptography AES-CTR. The oracle also reproduced the former AES vector.
+    // See tests/fixtures/helper-metadata-v4/generate-vectors.py.
     const std::array<Vector,5> vectors{{
-        {0,0,{0,8950,6882,4127,2605,795,11865,4767,15419}},
-        {14,367002,{11292,2046,7714,14722,8636,3849,16076,1586,9959}},
-        {15,393216,{12098,5374,9448,2857,5174,9401,12862,4989,407}},
-        {162,4246733,{15980,7974,6209,14199,11168,7889,7736,7461,5208}},
-        {4500000000ULL,117964800000000ULL,{8822,6043,2296,4904,9885,10665,8317,7178,15401}}
+        {0,0,{0,5650,14103,1674,1701,4133,8458,15472,2685}},
+        {14,367002,{11292,14625,14434,9962,5225,14843,67,11965,10120}},
+        {15,393216,{12098,11813,7442,9669,7099,15361,3122,5418,5021}},
+        {162,4246733,{15980,5790,5173,4701,12104,12889,6867,14125,4889}},
+        {4500000000ULL,117964800000000ULL,{8822,10298,13668,11446,15698,2186,3683,14209,1754}}
     }};
     for(const auto& vector:vectors) {
         const auto packet=h::metadata_packet(vector.ticks,"N0CALL",&key);

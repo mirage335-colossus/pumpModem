@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "../src/live_receptions.hpp"
 #include "../src/live_helper_frontend.hpp"
 #include "datapump/types.hpp"
@@ -617,7 +618,7 @@ LiveTailResult live_tail(bool helper_on,int kind=0,bool explicit_oscillator=fals
     // timing lanes which cannot claim narrowed acquisition from scalar RF.
     if(explicit_oscillator)c.oscillator_search=modem::OscillatorSearchConfig{{.01,0},{1,0},1e6,3};
     std::array<std::uint8_t,32> secret{};for(std::size_t i=0;i<secret.size();++i)secret[i]=static_cast<std::uint8_t>(i*11+7);
-    value.transfer.key=Crypto(secret);value.transfer.timestamp=0;value.transfer.search_seconds=0;
+    value.transfer.key=fixture_crypto::key(std::array<std::uint8_t,32>{0xa5},secret);value.transfer.timestamp=0;value.transfer.search_seconds=0;
     value.transfer.recovery_options.enabled=false;value.simulation_snr_db=30;
     value.simulation_clock_error_ppm=0;value.simulation_frequency_offset_hz=0;
     value.simulation_phase_noise_degrees_per_sqrt_second=0;value.simulation_seed=5181;

@@ -1,3 +1,4 @@
+#include "fast_test_key.hpp"
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/ldpc.hpp"
 #include "datapump/fast/modem.hpp"
@@ -40,7 +41,7 @@ void defaults_and_codec() {
             std::cout<<channel_name(channel)<<" encrypted="<<encrypted<<" old_bps="<<previous.source_bps
                 <<" new_bps="<<next.source_bps<<" speedup="<<next.source_bps/previous.source_bps<<'\n';
             std::optional<Crypto> crypto;
-            if(encrypted)crypto.emplace(Bytes(32,0x71));
+            if(encrypted)crypto.emplace(fast_test::key(Bytes(32,0x71)));
             const auto source=source_bytes();StreamEncoder tx(p,crypto,byte_source(source));
             StreamDecoder rx(p,crypto);std::array<std::uint8_t,physical_interval_bits> bits{};
             std::array<float,physical_interval_bits> soft{};
@@ -62,7 +63,7 @@ void sampled_radio(Channel channel,double snr_db,bool impaired=false) {
     // One frame instead of four keeps this sampled regression bounded; the
     // default four-frame interleaver and complete source path are tested above.
     p.interleave_depth=1;
-    const auto source=source_bytes();const Crypto crypto(Bytes(32,0x36));
+    const auto source=source_bytes();const auto crypto=fast_test::key(Bytes(32,0x36));
     auto encoder=fast::testing::deterministic_encoder(p,crypto,byte_source(source),7100);
     auto transmit_profile=p;
     if(impaired)transmit_profile.carrier_hz+=3;

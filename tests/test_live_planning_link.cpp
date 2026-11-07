@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 // This executable must link only datapump: no audio objects, policies, mocks,
 // provider traps or stubs. Its successful link is the primary regression gate.
 #include "datapump/live.hpp"
@@ -309,7 +310,7 @@ void public_compact_workspace_admission() {
 }
 void ordinary_settings_follow_live_admission() {
     transfer::Options options;options.timestamp=1800000000;options.search_seconds=6;
-    options.key.emplace(Bytes(32,0x63));
+    options.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x63));
     auto& c=options.modem;c.sample_rate=512;c.bandwidth_hz=4;c.carrier_hz=128;
     c.pattern_symbols=true;c.constellation_bits=1;c.spreading_factor=512;c.scramble=true;
     c.receiver_strategy=modem::ReceiverStrategy::amplitude_only;
@@ -407,7 +408,7 @@ void pure_estimator_consumer() {
     live::Settings settings;auto& options=settings.transfer;
     options.timestamp=1800000000;options.search_seconds=6;options.audio_timing_error_seconds=0;
     options.dsp_workspace_bytes=2609192632ULL;settings.dsp_workspace_bytes=options.dsp_workspace_bytes;
-    options.key.emplace(Bytes(32,0x43));options.receive_targets_db_hz={8};options.automatic_receive_profiles=true;
+    options.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x43));options.receive_targets_db_hz={8};options.automatic_receive_profiles=true;
     options.receive_pattern_mode=tuning::PatternMode::auto_keystream;
     options.modem=tuning::resolve(36,8,options.receive_pattern_mode,true,1500,10,
         modem::OuterDsssVersion::interleaved_v2).config;

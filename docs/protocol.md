@@ -9,8 +9,9 @@ There are no packets, received integer lengths, variable modem headers, packet
 IDs, repeat flags, bootstrap CRCs, or whole-stream integrity footers. An optional
 attachment prefix is ordinary source content interpreted by the application.
 Both peers select the same waveform, FEC, source codec and key locally. There is no over-air negotiation or old-packet fallback.
-Existing keyfiles remain usable. The fixed short dictionary retains its original
-bit codes; the interval transport is incompatible with the previous packets.
+Encrypted peers use the current keyfile format and cipher suite; older keyfiles
+are rejected. The fixed short dictionary retains its original bit codes; the
+interval transport is incompatible with the previous packets.
 
 These are compatibility requirements for ongoing development, including the
 short paths and per-bit pending view. See the
@@ -365,7 +366,8 @@ with a fresh pair at each canonical symbol address. This changes private wavefor
 without adding a transmitted flag, nonce, MAC or any other bits. Both peers must
 use the same implementation; existing parameter lists need no new setting.
 
-Only keyed intervals carry HMAC-SHA256. The MAC covers a fixed versioned domain,
+Only keyed intervals carry an authentication tag. The 32-byte tag is the XOR of
+HMAC-SHA256 values under separately derived Serpent- and AES-lane keys. It covers a fixed versioned domain,
 the local FEC/source profile, the canonical `(epoch, ordinal)` address of the
 first coded symbol after the marker, and the entire fixed data area. The address
 comes from `symbol_stream_address`, shared with Data masking, and can be acquired

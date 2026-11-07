@@ -151,7 +151,9 @@ void numeric_scatter_support(){
 }
 void run(double cn0,int side,unsigned seed){
     modem::Config c;c.sample_rate=8000;c.carrier_hz=1500;c.bandwidth_hz=200;c.spreading_factor=128;c.pulse_shaping=false;c.oscillator_search=modem::OscillatorSearchConfig{{100,0},{2,0},7e6,3};
-    helper::Options h;h.power_w=40;h.data_power_w=4;h.callsign="N0CALL";h.timecode=true;transfer::Options options;options.modem=c;options.timestamp=1800000000;options.key=Crypto(std::array<std::uint8_t,32>{});
+    helper::Options h;h.power_w=40;h.data_power_w=4;h.callsign="N0CALL";h.timecode=true;transfer::Options options;options.modem=c;options.timestamp=1800000000;
+    std::array<std::uint8_t,64> serpent{},aes{};serpent.fill(0xa7);
+    options.key=Crypto::from_independent_roots(serpent,aes);
     Bytes bits(64);for(std::size_t i=0;i<bits.size();++i)bits[i]=(i*7+i/3)%2;auto source=transfer::binary_transmitter(bits,options);
     const auto plan=helper::plan(h,helper::placement_band(c),120000000,0,modem::outer_dsss_transmit_gain(c));
     modem::ChannelConfig impairment;impairment.clock_error_ppm=100;impairment.frequency_offset_hz=side*7.3;impairment.seed=seed;impairment.phase_noise_degrees_per_sqrt_second=.5;

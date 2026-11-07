@@ -1804,6 +1804,8 @@ struct Session::Impl {
     }
     void configure(const Settings& requested) {
         auto value = normalized(requested);
+        // Deliberately group equal AES waveform roots even if Serpent changes:
+        // changing confidentiality alone must not bypass the TX reuse guard.
         const auto key=value.transfer.key?value.transfer.key->mac(Bytes{'D','P','-','T','X','-','E','P','O','C','H','-','G','U','A','R','D'}):Bytes{};
         std::lock_guard lock(mutex);
         // These fixed display buffers share plot_workspace. Prepare before any
@@ -3810,7 +3812,7 @@ struct Session::Impl {
         std::vector<Bytes> fingerprints;
         if (value.permits_plaintext()) keys.emplace_back();
         const auto add = [&](const Crypto& key) {
-            const auto fingerprint = key.mac(Bytes{'D','P','-','R','X','-','B','A','N','K'});
+            const auto fingerprint = key.identity_fingerprint(Bytes{'D','P','-','R','X','-','B','A','N','K'});
             if (std::find(fingerprints.begin(), fingerprints.end(), fingerprint) == fingerprints.end()) {
                 fingerprints.push_back(fingerprint); keys.emplace_back(key);
             }
@@ -3894,7 +3896,7 @@ struct Session::Impl {
                 }
             }
             if(bank.input_views_qualified) {
-                const auto tag=key?key->mac(Bytes{'D','P','-','R','X','-','B','A','N','K'}):Bytes{};
+                const auto tag=key?key->identity_fingerprint(Bytes{'D','P','-','R','X','-','B','A','N','K'}):Bytes{};
                 for(const auto& old:bank.receivers())if(!old.helper_input_view && old.key_tag==tag &&
                     !(old.helper_flags&Receiver::helper_payload_dependency) && old.presentations.empty() &&
                     old.bursts.empty() && old.modem->cold_acquisition_only() &&
@@ -4084,7 +4086,7 @@ struct Session::Impl {
                         continue;
                     }
                 }
-                const auto tag = key ? key->mac(Bytes{'D','P','-','R','X','-','B','A','N','K'}) : Bytes{};
+                const auto tag = key ? key->identity_fingerprint(Bytes{'D','P','-','R','X','-','B','A','N','K'}) : Bytes{};
                 if(!preserve_cold_catalogue && !input_view && !raw_cohort_audit && bank.helper_audits && bank.input_views_qualified &&
                    admitted_input_profile_coverage(bank,profile,tag,epoch))continue;
                 if(!preserve_cold_catalogue && !input_view && !raw_cohort_audit && bank.helper_audits && bank.input_views_qualified)
@@ -5205,7 +5207,7 @@ struct Session::Impl {
                         std::uint32_t sample_rate,std::uint64_t version,
                         std::optional<helper::OccupiedBand> ordinary_band,modem::Config receive_config,
                         bool allow_wide_input):
-            tracker(frequency,std::min(100.,width)),receiver(frequency,std::min(100.,width),keys,ordinary_band,
+            tracker(frequency,std::min(100.,width)),receiver(frequency,std::min(100.,width),std::move(keys),ordinary_band,
                 detail::helper_precision_options(receive_config)),
             generation(version),rate(sample_rate),expected(frequency),observer_hz(frequency),observer_width(std::min(100.,width)),
             wide_input_allowed(allow_wide_input) {
@@ -6713,7 +6715,7 @@ struct Session::Impl {
                 const auto profiles=value.transfer.automatic_receive_profiles?
                     tuning::receive_profiles(value.transfer.modem,value.transfer.receive_targets_db_hz,
                         value.transfer.receive_pattern_mode,key!=nullptr):std::vector<modem::Config>{value.transfer.modem};
-                const auto tag=key?key->mac(Bytes{'D','P','-','R','X','-','B','A','N','K'}):Bytes{};
+                const auto tag=key?key->identity_fingerprint(Bytes{'D','P','-','R','X','-','B','A','N','K'}):Bytes{};
                 for(const auto& profile:profiles) {
                     if(!profile.pattern_symbols || !profile.oscillator_search || profile.symbol_burst.enabled() ||
                        modem::scheduled_bursts(profile) || profile.sample_rate!=rate)return false;
@@ -7842,7 +7844,7 @@ struct Session::Impl {
             std::vector<Bytes> fingerprints;fingerprints.reserve(8);
             const auto add=[&](const Crypto& key) {
                 if(keys.size()==8)return;
-                const auto fingerprint=key.mac(Bytes{'D','P','-','H','E','L','P','E','R','-','R','X'});
+                const auto fingerprint=key.identity_fingerprint(Bytes{'D','P','-','H','E','L','P','E','R','-','R','X'});
                 if(std::find(fingerprints.begin(),fingerprints.end(),fingerprint)==fingerprints.end()) {
                     keys.push_back(key);fingerprints.push_back(fingerprint);
                 }
@@ -8276,7 +8278,7 @@ struct Session::Impl {
             std::vector<Bytes> fingerprints;fingerprints.reserve(8);
             const auto add_key=[&](const Crypto& key) {
                 if(keys.size()==8)return;
-                const auto fingerprint=key.mac(Bytes{'D','P','-','H','E','L','P','E','R','-','R','X'});
+                const auto fingerprint=key.identity_fingerprint(Bytes{'D','P','-','H','E','L','P','E','R','-','R','X'});
                 if(std::find(fingerprints.begin(),fingerprints.end(),fingerprint)==fingerprints.end()) {
                     keys.push_back(key);fingerprints.push_back(fingerprint);
                 }
@@ -9407,7 +9409,11 @@ struct Session::Impl {
                     // presence/frequency; punctuation and metadata are optional.
                     const auto width=std::min(100.,std::max(20.,seed->frequency_half_width_hz));
                     work.tracker=helper::Tracker(seed->frequency_hz,width);
-                    work.receiver=helper::Receiver(seed->frequency_hz,width,work.keys,{},detail::helper_precision_options(work.frequency_state->config));
+                    // The precision receiver uses only the first key. Avoid
+                    // copying the entire optional key bank during reseeding.
+                    std::vector<Crypto> receiver_keys;
+                    if(!work.keys.empty())receiver_keys.push_back(work.keys.front());
+                    work.receiver=helper::Receiver(seed->frequency_hz,width,std::move(receiver_keys),{},detail::helper_precision_options(work.frequency_state->config));
                     work.observer_hz=seed->frequency_hz;work.observer_width=width;
                     work.clear_references();work.first_reference_end=UINT64_MAX;work.coarse_seeded=true;
                     work.narrow_first_raw=seed->end_sample;
@@ -11162,7 +11168,7 @@ struct Session::Impl {
                         // a family, while duplicate loaded keys are not extra banks.
                         std::vector<Bytes> fingerprints;
                         const auto add_family=[&](const Crypto& key) {
-                            const auto fingerprint=key.mac(Bytes{'D','P','-','R','X','-','B','A','N','K'});
+                            const auto fingerprint=key.identity_fingerprint(Bytes{'D','P','-','R','X','-','B','A','N','K'});
                             if(std::find(fingerprints.begin(),fingerprints.end(),fingerprint)==fingerprints.end())
                                 fingerprints.push_back(fingerprint);
                         };
@@ -12324,7 +12330,7 @@ struct Session::Impl {
         keys.insert(keys.end(),value.receive_keys.begin(),value.receive_keys.end());
         if(keys.empty())return;
         for(const auto& key:keys) {
-            const auto tag=key.mac(Bytes{'D','P','-','R','X','-','B','A','N','K'});
+            const auto tag=key.identity_fingerprint(Bytes{'D','P','-','R','X','-','B','A','N','K'});
             for(const auto& c:profiles) {
                 if(!c.scheduled_hopping || !c.scheduled_hopping->enabled() || c.scheduled_hopping->continuous() ||
                    c.sample_rate!=nominal.sample_rate)return;

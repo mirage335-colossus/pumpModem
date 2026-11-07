@@ -1,3 +1,4 @@
+#include "triad_crypto_fixture.hpp"
 #include "datapump/triad_modem_v3.hpp"
 #include <algorithm>
 #include <bit>
@@ -15,7 +16,7 @@ namespace {
 constexpr long double tau=2*std::numbers::pi_v<long double>;
 void check(bool value,const char* message){if(!value)throw std::runtime_error(message);}
 template<class F>void rejects(F work){bool rejected=false;try{work();}catch(const datapump::Error&){rejected=true;}check(rejected,"invalid mapped basis accepted");}
-datapump::Crypto key(){std::array<std::uint8_t,32> bytes{};for(std::size_t i=0;i<bytes.size();++i)bytes[i]=static_cast<std::uint8_t>(17*i+3);return datapump::Crypto(bytes);}
+datapump::Crypto key(){std::array<std::uint8_t,32> bytes{};for(std::size_t i=0;i<bytes.size();++i)bytes[i]=static_cast<std::uint8_t>(17*i+3);return triad_test_key(bytes);}
 v::Format format(){v::Format f;f.sample_rate=6000;f.inner_rate_hz=36;f.added_symbols=10;f.bit_seconds=32;return f;}
 
 // Frozen operation ordering from the pre-mapped shaped_basis. This checks the

@@ -4,6 +4,7 @@
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/recovery.hpp"
 #include "datapump/transfer.hpp"
+#include <openssl/evp.h>
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -15,6 +16,7 @@
 #include <iostream>
 #include <limits>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -24,6 +26,9 @@
 // c++ -std=c++20 -O3 -DNDEBUG -Iinclude tools/benchmark_robust_mitigations.cpp
 //   build/dev/libdatapump.a build/dev/third_party/xz/liblzma.a
 //   -lcrypto -lpthread -ldl -o build/cpu-hardening/robust-current
+// When compiling this benchmark against an explicitly selected historical
+// reference archive whose Crypto API predates independent roots, add
+// -DDATAPUMP_HISTORICAL_REFERENCE. Never set it for a candidate build.
 // Run the two binaries alternately with competing tests/builds stopped. Output
 // one CSV row per independent sample; all per-operation times include receiver
 // construction, planning, result checking, and teardown, but exclude TX setup.
@@ -37,6 +42,17 @@ using datapump::Error;
 using namespace datapump::transfer;
 using Clock=std::chrono::steady_clock;
 std::uint64_t checksum=0;
+// Historical selection is explicit and applies only to this benchmark
+// fixture; it does not load old keyfiles or change the production API.
+datapump::Crypto benchmark_key() {
+#ifdef DATAPUMP_HISTORICAL_REFERENCE
+    return datapump::Crypto(Bytes(32,0x37));
+#else
+    std::array<std::uint8_t,64> serpent{},aes{};
+    serpent.fill(0xa6);aes.fill(0x37);
+    return datapump::Crypto::from_independent_roots(serpent,aes);
+#endif
+}
 void require(bool condition,std::string_view text) {if(!condition)throw Error(std::string(text));}
 unsigned number(std::string_view text) {
     unsigned value=0;const auto parsed=std::from_chars(text.data(),text.data()+text.size(),value);
@@ -150,7 +166,7 @@ datapump::modem::PatternBurst chunk(std::span<const std::uint8_t> value,std::siz
     result.complete=complete;result.score=100;return result;
 }
 Workload stream_work(std::string name,bool compressed,bool damaged) {
-    auto settings=options();settings.key.emplace(Bytes(32,0x37));settings.compression=compressed;
+    auto settings=options();settings.key=benchmark_key();settings.compression=compressed;
     datapump::Message message;message.data.resize(compressed?65536:256);
     constexpr std::string_view text="Data Pump benchmark 0123456789 abcdefghijklmnopqrstuvwxyz ";
     for(std::size_t i=0;i<message.data.size();++i)message.data[i]=static_cast<std::uint8_t>(text[i%text.size()]);
@@ -160,6 +176,15 @@ Workload stream_work(std::string name,bool compressed,bool damaged) {
         for(std::size_t i=0;i<10;++i)wire[start+192+8*(3+7*i)]^=1;
         for(std::size_t i=100;i<106;++i)std::fill_n(wire.begin()+static_cast<std::ptrdiff_t>(start+192+8*i),8,2);
     }
+    // The fixture keys and message are public synthetic inputs. Record the
+    // actual masked bits outside timing so cross-version results are not
+    // mistaken for matched inputs merely because their decoded sizes agree.
+    std::array<unsigned char,32> digest{};unsigned digest_size=0;
+    require(EVP_Digest(wire.data(),wire.size(),digest.data(),&digest_size,EVP_sha256(),nullptr)==1 &&
+            digest_size==digest.size(),"Stream fixture fingerprint failed");
+    std::ostringstream fingerprint;fingerprint<<std::hex<<std::setfill('0');
+    for(const auto byte:digest)fingerprint<<std::setw(2)<<static_cast<unsigned>(byte);
+    std::cerr<<"fixture_wire_sha256="<<name<<':'<<fingerprint.str()<<'\n';
     const auto retained=wire.size();
     return {std::move(name),1,retained,0,[settings,message,wire=std::move(wire)] {
         StreamReceiver receiver(settings,settings.timestamp);
@@ -277,6 +302,11 @@ int main(int argc,char** argv) {
         const std::string_view filter=smoke?(argc>2?argv[2]:""):(argc>3?argv[3]:"");
         require(samples>=1&&samples<=101,"samples must be in 1..101");
         require(smoke||(min_ms>=10&&min_ms<=10000),"min_ms must be in 10..10000");
+#ifdef DATAPUMP_HISTORICAL_REFERENCE
+        std::cerr<<"confidentiality_fixture=historical-single-root\n";
+#else
+        std::cerr<<"confidentiality_fixture=independent-lanes\n";
+#endif
         std::vector<Workload> workloads;
         workloads.push_back(short_work("short_dictionary_1bit_truncated",{0},{},true));
         workloads.push_back(short_work("short_dictionary_3bits_e",{0,0,1},{'e'}));

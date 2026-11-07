@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/live.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "../src/transmit_epoch_guard.hpp"
@@ -49,7 +50,7 @@ live::Settings slow_settings() {
     settings.device="epoch guard test";
     settings.transfer.timestamp=epoch;
     settings.transfer.search_seconds=0;
-    settings.transfer.key.emplace(Bytes(32,0x5a));
+    settings.transfer.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x5a));
     auto& config=settings.transfer.modem;
     config.sample_rate=64;config.bandwidth_hz=.02;config.carrier_hz=16;
     config.spreading_factor=16;config.scramble=true;
@@ -537,9 +538,16 @@ void shaped_future_exposure() {
     check(session.snapshot().transmit_key_lock_seconds>590,
           "turning encryption off erased the selected key's earlier exposure");
 
+    auto other_serpent=fast;
+    other_serpent.transfer.key=fixture_crypto::key(Bytes(32,0xd4),Bytes(32,0x5a));
+    session.configure(other_serpent);
+    check(session.snapshot().transmit_key_lock_seconds>590,
+          "changing only Serpent bypassed the AES waveform epoch-reuse guard");
+    rejected([&]{session.transmit_bits(Bytes{0});},"same AES waveform root bypassed the transmit lock");
+
     // A different key needs no multi-key receiver search and has its own
     // transmit history; reloading identical material restores its old lock.
-    auto other=fast;other.transfer.key.emplace(Bytes(32,0x77));
+    auto other=fast;other.transfer.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x77));
     session.configure(other);
     check(session.snapshot().transmit_key_lock_seconds==0,"unrelated key inherited a lock");
     session.configure(fast);
@@ -811,6 +819,7 @@ std::vector<float> record(double,std::uint32_t,const std::string&,std::size_t,st
 int main(int argc,char** argv) {
     try {
         if(argc==2 && std::string(argv[1])=="--protected-stop") {protected_stop_status();return 0;}
+        if(argc==2 && std::string(argv[1])=="--independent-roots") {shaped_future_exposure();return 0;}
         if(argc==2 && std::string(argv[1])=="--scheduled") {scheduled_timing_and_exposure();scheduled_tuning_utc();scheduled_disabled_decoder();return 0;}
         protected_stop_status();private_discontinuity();graceful_drain();tuning_profile();tuning_utc();scheduled_tuning_utc();boundary_accounting();scheduled_timing_and_exposure();scheduled_disabled_decoder();shaped_future_exposure();queued_request_rechecks();normal_quiet_override();
         unkeyed_slow_quiet_override();

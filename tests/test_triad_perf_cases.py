@@ -148,6 +148,18 @@ class PerformanceCaseTests(unittest.TestCase):
                     cases.prepare_cases("/bin/true", root / "cache", source_root=root,
                                         allow_historical_missing=True)
             legacy = cases._source_hashes(root, plan, allow_historical_missing=True)
+            (root / "src/serpent.cpp").write_text("partial")
+            with self.assertRaisesRegex(cases.FixtureError, "incomplete Serpent"):
+                cases._source_hashes(root, plan, allow_historical_missing=True)
+            (root / "src/serpent.cpp").unlink()
+            (root / "src/crypto.cpp").write_text('#include "datapump/serpent.hpp"')
+            with self.assertRaisesRegex(cases.FixtureError, "includes missing Serpent"):
+                cases._source_hashes(root, plan, allow_historical_missing=True)
+            (root / "src/crypto.cpp").write_text("source")
+            (root / "CMakeLists.txt").write_text("src/serpent.cpp")
+            with self.assertRaisesRegex(cases.FixtureError, "build requires missing Serpent"):
+                cases._source_hashes(root, plan, allow_historical_missing=True)
+            (root / "CMakeLists.txt").unlink()
             for relative in cases.OPTIONAL_HISTORICAL_FILES:
                 self.assertEqual(legacy[relative], cases.ABSENT_SOURCE)
                 path = root / relative
@@ -155,11 +167,52 @@ class PerformanceCaseTests(unittest.TestCase):
                 path.write_text("serpent")
             current = cases._source_hashes(root, plan)
             self.assertNotEqual(cases._json_hash(legacy), cases._json_hash(current))
+            fixture = root / "tools/triad_fixture_key.hpp"
+            self.assertIn("tools/triad_fixture_key.hpp", current)
+            fixture.write_text("changed fixture key derivation")
+            self.assertNotEqual(cases._json_hash(current), cases._json_hash(cases._source_hashes(root, plan)))
+            fixture.unlink()
+            with self.assertRaises(FileNotFoundError):
+                cases._source_hashes(root, plan)
+            self.assertEqual(cases._source_hashes(root, plan, allow_historical_missing=True)[
+                "tools/triad_fixture_key.hpp"], cases.ABSENT_SOURCE)
+            driver = root / "tools/triad-long.cpp"
+            driver.write_text('#include "triad_fixture_key.hpp"\n')
+            with self.assertRaisesRegex(cases.FixtureError, "includes missing fixture"):
+                cases._source_hashes(root, plan, allow_historical_missing=True)
+            driver.write_text("historical driver")
+            fixture.symlink_to("missing")
+            with self.assertRaisesRegex(cases.FixtureError, "symlinked source dependency"):
+                cases._source_hashes(root, plan, allow_historical_missing=True)
+            fixture.unlink()
+            fixture.write_text("restored fixture")
             (root / "src/crypto.cpp").write_text("changed")
             self.assertNotEqual(cases._json_hash(current), cases._json_hash(cases._source_hashes(root, plan)))
             (root / "include/datapump/crypto.hpp").unlink()
             with self.assertRaises(FileNotFoundError):
                 cases._source_hashes(root, plan)
+
+    def test_prepare_rejects_source_mutation_during_configure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for relative in cases.SOURCE_FILES + cases.OPTIONAL_HISTORICAL_FILES:
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("source")
+            plan = root / "plan.json"
+            plan.write_text("{}")
+            case = {"id": "example"}
+            selected = {"path": plan, "row": {"case": {}}, "trial": {}}
+            def configure(*args):
+                (root / "tools/triad_fixture_key.hpp").write_text("changed")
+                return {}
+            with patch.object(cases, "_config", return_value={"limits": {}, "schema": "test"}), \
+                 patch.object(cases, "scenarios", return_value=[case]), \
+                 patch.object(cases, "_plan", return_value=({}, selected)), \
+                 patch.object(cases, "_native_argv", return_value=["/bin/true"]), \
+                 patch.object(cases, "_configure", side_effect=configure):
+                with self.assertRaisesRegex(cases.FixtureError, "changed during fixture preparation"):
+                    cases.prepare_cases("/bin/true", root / "cache", source_root=root)
 
 
 if __name__ == "__main__":

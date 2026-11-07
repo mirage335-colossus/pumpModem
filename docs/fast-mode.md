@@ -394,15 +394,19 @@ before decryption. Missing, reordered or mixed-transfer groups cannot silently
 join source prefixes. Public checksums detect corruption but can be rewritten
 by an adversary; they do not authenticate.
 
-Capacity uses `DataPump/fast/capacity/v2/...` domains and a `datapump/fast/v2`
-profile context; classic retains `DataPump/fast/v1/...` and its frozen context.
-The cipher layers use separate, domain-separated keys, and authentication uses
-a separate key. Capacity context
+Encrypted capacity uses `DataPump/fast/capacity/v2/serpent-aes-v4/...`
+domains and a `datapump/fast/v2` profile context; encrypted classic uses
+`DataPump/fast/v1/serpent-aes-v4/...` and its classic profile context. Public
+checksum domains remain separate. The cipher layers derive their keys from
+separate Serpent and AES roots. Bootstrap authentication XORs the full
+HMAC-SHA256 outputs under independently derived lane keys. The same two-lane
+construction roots the salted group authentication key; each group then carries
+a full HMAC-SHA256 under that key. Capacity context
 also binds marker and pilot spacing. Device sample rate and local output level
 are excluded because they do not choose peer wire geometry. Public/encrypted
 mode remains a matching local choice; a failed key or tag never triggers a
 public fallback. The encrypted cascade requires upgraded peers on both ends;
-the earlier AES-only encrypted Fast format is not automatically selected.
+earlier encrypted Fast suites are not automatically selected.
 
 Integrity-checked source areas accumulate in bounded RAM without interpretation.
 **Six seconds of fully scored physical absence** is the only end event.
@@ -493,7 +497,8 @@ manufacturing completion. `--format capacity|classic`, `--qam`, `--apsk`,
 and `--stereo` select local settings. Capacity requires `--rs 0.3%`, accepts
 `--marker-spacing 1..16` and `--pilot-spacing 16..1024`, and supports LDPC rates
 3/4, 7/9, 8/9 and 9/10. `--apsk` selects classic unless contradicted by an explicit
-format. Existing named/pad-backed keyfiles remain available.
+format. Current-format named keyfiles and optional pad-backed keyfiles remain available;
+older keyfile versions are rejected.
 `fast-info` reports local geometry and selected protection without loading a key.
 Completed receive output contains metadata only; JSON distinguishes
 `encrypted`, `authenticated`, and `checksum_groups`. The former `text_preview`

@@ -89,6 +89,18 @@ normal full regression requirements still apply. The TUI and framebuffer have
 separate presentation/interaction implementations behind the common application.
 See [frontend interfaces](frontend-interfaces.md) for dependencies and the small
 single-framebuffer engine API.
+
+Native application builds also place `datapump-audio-entropy` beside their
+executables. On supported platforms, keyfile generation uses this private helper
+when it needs to open a fresh audio input, so a blocked device driver can be
+stopped. Where isolated capture is unsupported, it can still borrow a suitable
+active capture or proceed with the warned operating-system-only fallback. Native
+portable packages include and verify the helper. An application embedding the framebuffer or
+terminal library must place the helper beside its own executable; if it is
+unavailable, keyfile generation can continue with operating-system randomness
+and displays a warning. The browser worker and WebAssembly compositions use
+their host audio provider and do not launch this native helper.
+
 Portable native Linux producers explicitly run `python3 tools/prepare-native-sdl.py
 /absolute/new/preparation-directory --jobs N`, then configure with
 `-DDATAPUMP_NATIVE_SDL_ROOT=/absolute/new/preparation-directory/install` (or that

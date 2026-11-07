@@ -62,7 +62,11 @@ double equivalent_bandwidth(const Profile& p) {
 bool run(const Profile& p,std::uint64_t bytes,std::uint64_t seed,double snr) {
     const auto started=std::chrono::steady_clock::now();
     const auto cpu_started=std::clock();
-    const Crypto crypto(Bytes(32,0x71));
+    // Deterministic, separate synthetic roots for this regression only.
+    std::array<std::uint8_t,64> aes_root{}, serpent_root{};
+    aes_root.fill(0x71);
+    for(std::size_t i=0;i<serpent_root.size();++i) serpent_root[i]=static_cast<std::uint8_t>(0x80U+i);
+    const Crypto crypto=Crypto::from_independent_roots(serpent_root,aes_root);
     const auto source=[=]() -> SourceReader {
         return [=,offset=std::uint64_t{0}](std::span<std::uint8_t> output) mutable {
             const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(bytes-offset,output.size()));

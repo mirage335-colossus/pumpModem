@@ -576,8 +576,9 @@ threshold changes. The source now accepts optional public-band nuisance fitting
 over all public receive profiles and full requested RF/audio-clock coverage,
 using at most 27 DFT nuisance frequencies. Raw tone admission retains authority;
 only an already accepted publication can be refined, and unsuitable fits retain
-the raw estimate. The 9 KiB receiver/project-scratch bound is unchanged, with
-external runtime allocations separate. Current build and selected focused checks
+the raw estimate. The receiver/project-scratch bound is 9 KiB plus 256 bytes,
+including the separately retained dual-root confidentiality material; external
+runtime allocations remain separate. Current build and selected focused checks
 passed, without qualified current full-receiver, refined-precision or false-alarm
 claims. Private compact stable/loss checks
 do not override its repeated-audit failure or the current backend gate.

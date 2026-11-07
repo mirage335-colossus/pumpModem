@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/resampler.hpp"
 #include "datapump/transfer.hpp"
 #include "datapump/tuning.hpp"
@@ -91,7 +92,7 @@ void pattern_roundtrip(bool keyed,double bandwidth=1200) {
         keyed,bandwidth==3600?std::optional<double>{1500}:std::nullopt).config;
     if(bandwidth==3600)check(options.modem.carrier_hz==1500,
           "the 3.6 kHz radio plan must retain its 1500 Hz carrier across audio cards");
-    if(keyed) { std::array<std::uint8_t,32> seed{};seed[0]=0x5c;options.key=Crypto(seed); }
+    if(keyed) { std::array<std::uint8_t,32> seed{};seed[0]=0x5c;options.key=fixture_crypto::key(Bytes(32,0xd3),seed); }
     const auto symbol=modem::symbol_sample_count(options.modem);
     const auto internal=options.modem.sample_rate;
     const auto cross_cards=[&](std::vector<float> pcm) {

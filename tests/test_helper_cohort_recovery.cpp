@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/live.hpp"
 #include "../src/live_simulation_clock.hpp"
 #include "../src/audio_trace.hpp"
@@ -13,6 +14,12 @@
 
 using namespace datapump;
 namespace {
+// Separate, public synthetic test inputs; never used for production keys.
+static datapump::Crypto fixture_key(std::span<const std::uint8_t> aes) {
+    const std::array<std::uint8_t,32> serpent{0xa5};
+    return fixture_crypto::key(serpent,aes);
+}
+
 void check(bool value,const char* reason) {if(!value)throw Error(reason);}
 struct Fault {
     bool fail_audit;
@@ -47,7 +54,7 @@ void run(bool fail_audit) {
     config.oscillator_search=modem::OscillatorSearchConfig{{0,0},{.1,0},1e8,1};
     std::array<std::uint8_t,32> secret{};
     for(std::size_t i=0;i<secret.size();++i)secret[i]=static_cast<std::uint8_t>(7+11*i);
-    settings.transfer.key=Crypto(secret);settings.transfer.timestamp=0;settings.transfer.search_seconds=0;
+    settings.transfer.key=fixture_key(secret);settings.transfer.timestamp=0;settings.transfer.search_seconds=0;
     settings.transfer.automatic_receive_profiles=false;settings.transfer.recovery_options.enabled=false;
     settings.dsp_workspace_bytes=settings.transfer.dsp_workspace_bytes=64*1024*1024;
     settings.content_limit=1024*1024;settings.simulation_snr_db=50;
@@ -120,7 +127,7 @@ void stop_during_refresh() {
     c.sample_rate=4000;c.carrier_hz=1000;c.bandwidth_hz=200;c.spreading_factor=16;c.pulse_shaping=false;
     c.receiver_strategy=modem::ReceiverStrategy::automatic;
     c.oscillator_search=modem::OscillatorSearchConfig{{0,0},{.1,0},1e8,1};
-    std::array<std::uint8_t,32> secret{};secret.fill(0x63);settings.transfer.key=Crypto(secret);
+    std::array<std::uint8_t,32> secret{};secret.fill(0x63);settings.transfer.key=fixture_key(secret);
     settings.transfer.timestamp=0;settings.transfer.search_seconds=1;
     settings.transfer.automatic_receive_profiles=false;settings.transfer.recovery_options.enabled=false;
     settings.dsp_workspace_bytes=settings.transfer.dsp_workspace_bytes=64*1024*1024;

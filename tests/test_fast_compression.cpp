@@ -1,3 +1,4 @@
+#include "fast_test_key.hpp"
 #include "datapump/fast/compression.hpp"
 #include <algorithm>
 #include <array>
@@ -84,7 +85,7 @@ void source_domain_isolation() {
     for(bool capacity:{false,true})for(bool encrypted:{false,true})for(bool tx_xz:{false,true}) {
         auto profile=capacity?capacity_profile(Channel::wire):classic_profile(Channel::wire);
         profile.interleave_depth=1;
-        const auto key=encrypted?std::optional<Crypto>(Crypto(Bytes(32,47))):std::nullopt;
+        const auto key=encrypted?std::optional<Crypto>(fast_test::key(Bytes(32,47))):std::nullopt;
         StreamEncoder encoder(profile,key,byte_source(compressed),tx_xz?SourceEncoding::xz:SourceEncoding::raw);
         StreamDecoder decoder(profile,key,1024*1024,tx_xz?SourceEncoding::raw:SourceEncoding::xz);
         std::array<std::uint8_t,physical_interval_bits> bits{};
@@ -107,7 +108,7 @@ void physical_completion() {
     for(bool capacity:{false,true})for(bool encrypted:{false,true})for(unsigned corruption=0;corruption<3;++corruption) {
         auto profile=capacity?capacity_profile(Channel::wire):classic_profile(Channel::wire);
         profile.interleave_depth=1;
-        const auto key=encrypted?std::optional<Crypto>(Crypto(Bytes(32,41))):std::nullopt;
+        const auto key=encrypted?std::optional<Crypto>(fast_test::key(Bytes(32,41))):std::nullopt;
         auto content=compressed;
         if(corruption==1)content.pop_back();
         if(corruption==2)content.push_back(0);

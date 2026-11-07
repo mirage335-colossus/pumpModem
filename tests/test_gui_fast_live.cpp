@@ -1,6 +1,8 @@
 #include "fast/controller.hpp"
 #include "bitmap.hpp"
 #include "datapump/audio.hpp"
+#include "datapump/audio_entropy.hpp"
+#include "fixture_keyfile.hpp"
 #include "datapump/types.hpp"
 #include <array>
 #include <atomic>
@@ -21,10 +23,12 @@ std::mutex mutex;
 std::vector<float> transmitted,input;
 std::size_t position=0;
 audio::ChannelMode last_channels=audio::ChannelMode::stereo;
-std::atomic<unsigned> capture_opens=0,capture_active=0;
+std::atomic<unsigned> capture_opens=0,capture_active=0,capture_registered=0;
 std::atomic<bool> capture_overlap=false;
 std::string last_device;
 std::string capture_error;
+// Enabled only in the key-generation regression; never linked into the app.
+std::atomic<int> keygen_samples{0};
 audio::Options last_options;
 }
 // Only hardware is replaced. The real Fast encoder, sampled modem, receiver,
@@ -45,6 +49,7 @@ void playback(std::uint32_t rate,const std::string&,const PlaybackCallback& sour
 void capture(std::uint32_t rate,const std::string&,const CaptureCallback& consume,
              std::stop_token stop,StreamFormatCallback format) {
     if(format)format({rate,rate,rate*.49,4096});
+    std::uint32_t sample_state=0x6d2b79f5U;
     while(!stop.stop_requested()) {
         std::vector<float> block;
         {std::lock_guard lock(fixture::mutex);
@@ -52,10 +57,18 @@ void capture(std::uint32_t rate,const std::string&,const CaptureCallback& consum
                 auto error=std::move(fixture::capture_error);fixture::capture_error.clear();
                 throw Error(error);
             }
-            const auto count=std::min<std::size_t>(rate/20,fixture::input.size()-fixture::position);
-            block.assign(fixture::input.begin()+static_cast<std::ptrdiff_t>(fixture::position),
-                         fixture::input.begin()+static_cast<std::ptrdiff_t>(fixture::position+count));
-            fixture::position+=count;}
+            if(const auto mode=fixture::keygen_samples.load()) {
+                block.resize(rate/20);
+                if(mode==1)for(auto& sample:block) {
+                    sample_state^=sample_state<<13;sample_state^=sample_state>>17;sample_state^=sample_state<<5;
+                    sample=static_cast<float>(static_cast<std::int32_t>(sample_state))/2147483648.0F*.01F;
+                }
+            } else {
+                const auto count=std::min<std::size_t>(rate/20,fixture::input.size()-fixture::position);
+                block.assign(fixture::input.begin()+static_cast<std::ptrdiff_t>(fixture::position),
+                             fixture::input.begin()+static_cast<std::ptrdiff_t>(fixture::position+count));
+                fixture::position+=count;
+            }}
         if(!block.empty()&&!consume(block))break;
         // Preserve real capture pacing: injecting eight times real-time audio
         // can overflow the production FIFO for reasons unrelated to the GUI.
@@ -72,7 +85,16 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
     struct Done {~Done(){--fixture::capture_active;}} done;
     {std::lock_guard lock(fixture::mutex);fixture::last_device=device;fixture::last_options=options;}
     ++fixture::capture_opens;
-    capture(rate,device,consume,stop,std::move(format));
+    detail::CaptureEntropyRegistration registration(device,options.entropy_capture_owner);
+    ++fixture::capture_registered;
+    struct Registered {~Registered(){--fixture::capture_registered;}} registered;
+    auto monitor=registration.monitor(options.capture_monitor);
+    try {
+        capture(rate,device,[&](std::span<const float> samples) {
+            if(monitor)monitor(samples,rate);
+            return consume(samples);
+        },stop,std::move(format));
+    } catch(...) {registration.failed(std::current_exception());throw;}
 }
 }
 namespace {
@@ -450,6 +472,62 @@ void incomplete_history_reason() {
     std::cout<<"Fast incomplete history retains capture failure after automatic relistening\n";
 }
 
+void generated_key_preserves_capture() {
+    using F=ui::Field;using C=ui::Command;
+    const auto unique=std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    const auto base=std::filesystem::temp_directory_path()/std::filesystem::path("datapump-fast-keygen-"+unique);
+    std::filesystem::create_directory(base);
+    struct Cleanup {std::filesystem::path path;~Cleanup(){std::error_code e;std::filesystem::remove_all(path,e);}} cleanup{base};
+    const auto old_key=base/"old.key",fresh_key=base/"fresh.key",fallback_key=base/"fallback.key";
+    check(create_keyring(old_key,{"Previous"},std::nullopt,fixture_keyfile::generation()).audio_used,
+          "Fast prior-key fixture did not use its synthetic audio");
+    fixture::keygen_samples=1;
+    struct Reset {~Reset(){fixture::keygen_samples=0;}} reset;
+    fast_ui::Controller controller([] {return true;});
+    controller.edit(F::fast_device,"fixture");controller.toggle(F::fast_encryption,true);
+    controller.activate(C::fast_open_key);auto requests=controller.take_services();
+    check(requests.size()==1,"Fast old key open service unavailable");
+    controller.complete_service({requests.front().id,false,path_text(old_key),{}});
+    auto deadline=std::chrono::steady_clock::now()+20s;
+    const auto wait=[&](auto predicate,const char* message) {
+        while(true) {
+            controller.poll();if(predicate())return;
+            check(std::chrono::steady_clock::now()<deadline,message);std::this_thread::sleep_for(10ms);
+        }
+    };
+    wait([&]{return controller.field(F::fast_key).options.size()==1&&
+        controller.field(F::fast_key).options.front().label=="Previous";},"Fast prior key not loaded");
+    controller.set_selected(true);
+    wait([&]{return fixture::capture_active==1&&fixture::capture_registered==1;},"Fast keygen fixture did not start listening");
+    const auto opens=fixture::capture_opens.load();
+    const auto generate=[&](const auto& path) {
+        controller.activate(C::fast_generate_key);auto pending=controller.take_services();
+        check(pending.size()==1,"Fast keygen save service unavailable");
+        controller.complete_service({pending.front().id,false,path_text(path),{}});
+        deadline=std::chrono::steady_clock::now()+45s;
+        wait([&]{return controller.field(F::fast_status).text.find("selection pending")!=std::string::npos;},
+             "Fast key generation did not finish with pending selection");
+        check(fixture::capture_active==1&&fixture::capture_opens==opens&&!fixture::capture_overlap,
+            "Fast key generation interrupted or duplicated active capture");
+        check(controller.field(F::fast_key).options.front().label=="Previous",
+            "Fast key generation replaced active receive key");
+    };
+    generate(fresh_key);
+    check(controller.field(F::fast_key_path).text.find("WARNING")==std::string::npos,
+          "Valid mock audio spuriously reported OS-only generation");
+    fixture::keygen_samples=2;
+    generate(fallback_key);
+    check(controller.field(F::fast_key_path).text.find("WARNING: OS-only entropy")!=std::string::npos,
+          "Fast audio fallback warning was not persistent in key presentation");
+    controller.set_selected(false);deadline=std::chrono::steady_clock::now()+10s;
+    wait([&]{return controller.field(F::fast_key).options.size()==1&&
+        controller.field(F::fast_key).options.front().label=="Fast";},"Pending Fast key was not applied after reception ended");
+    check(controller.field(F::fast_key_path).text.find("WARNING: OS-only entropy")!=std::string::npos,
+          "Fast fallback warning disappeared after pending selection");
+    controller.close();
+    wait([&]{return controller.ready_to_close();},"Fast keygen fixture did not close");
+}
+
 void completion_between_polls() {
     using F=ui::Field;using C=ui::Command;
     // Reuse the independent complete waveform produced and received by the
@@ -518,6 +596,7 @@ void completion_between_polls() {
 int main(int argc,char** argv) {
     try {
         if(argc==2&&std::string_view(argv[1])=="--incomplete-history") {incomplete_history_reason();return 0;}
+        if(argc==2&&std::string_view(argv[1])=="--keygen-staging") {generated_key_preserves_capture();return 0;}
         check(argc==1,"Unknown Fast GUI live test selector");
         audio_reconfiguration();continuous_console();completion_between_polls();
         incomplete_history_reason();

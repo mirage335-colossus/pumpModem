@@ -109,7 +109,7 @@ enum class FrequencyWorkDecline { none, grant_unavailable, coherence_unavailable
     stale_support, presence_unqualified, generation_changed };
 struct FrequencyWorkDescriptor {
     // actual_bytes includes heap plus separately charged optional worker scratch.
-    // The base Receiver 9KiB remains charged independently during overlap.
+    // The base Receiver workspace remains charged independently during overlap.
     std::size_t required_bytes=0,actual_bytes=0,heap_bytes=0,worker_scratch_bytes=0;
     std::size_t processed_cells=0,total_cells=0,processed_work_units=0;
     std::size_t maximum_work_units_per_advance=8,maximum_shape_subsets_per_mask=326;
@@ -159,7 +159,9 @@ class Receiver {
 public:
     // Receiver-owned storage plus project scratch; the pre-existing external
     // C/C++/libm/libgcc/OpenSSL runtime stack/provider allocations are separate.
-    static constexpr std::size_t workspace_bound=9*1024;
+    // Includes the compact retained metadata key and its independently rooted
+    // confidentiality material, in addition to the receiver and scratch.
+    static constexpr std::size_t workspace_bound=9*1024+256;
     static constexpr std::size_t optional_frequency_worker_scratch_bound=8*1024;
     // Only the first receive key is selected for compact encrypted time. No
     // helper metadata is authenticated or used here to adjust a clock/grid.

@@ -1,6 +1,7 @@
 #include "datapump/recovery.hpp"
 #include "datapump/boundary_sync.hpp"
 #include "datapump/crypto.hpp"
+#include "fixture_crypto.hpp"
 #include <iostream>
 #include <stdexcept>
 #include <thread>
@@ -14,12 +15,15 @@ Bytes as_bits(const Bytes& bytes) {
     Bytes bits;for(auto byte:bytes)for(unsigned i=0;i<8;++i)bits.push_back((byte>>(7-i))&1U);return bits;
 }
 IntervalOptions keyed(std::uint64_t address) {
-    Crypto key(Bytes(32,0x37));IntervalOptions result;result.fec=FecMode::rs60;
+    auto key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x37));IntervalOptions result;result.fec=FecMode::rs60;
     result.authenticator=[key,address](const Bytes& data) {
         Bytes message;for(unsigned i=0;i<8;++i)message.push_back(static_cast<std::uint8_t>(address>>(56-8*i)));
-        message.insert(message.end(),data.begin(),data.end());return key.mac(message);
+        message.insert(message.end(),data.begin(),data.end());return key.confidentiality_mac(message);
     };
-    result.verifier=[authenticate=result.authenticator](const Bytes& data,const Bytes& tag) {return authenticate(data)==tag;};
+    result.verifier=[key,address](const Bytes& data,const Bytes& tag) {
+        Bytes message;for(unsigned i=0;i<8;++i)message.push_back(static_cast<std::uint8_t>(address>>(56-8*i)));
+        message.insert(message.end(),data.begin(),data.end());return key.verify_confidentiality(message,tag);
+    };
     return result;
 }
 RecoveryInput fixture(bool encrypted=false) {

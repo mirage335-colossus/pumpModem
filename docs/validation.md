@@ -6,7 +6,146 @@ superseded status here; keep one latest [resource snapshot](ci-resource-results.
 and use Git history for comparisons. Detailed studies remain in the
 [evidence index](indexes/evidence.md).
 
-## Confidentiality cascade — development checkpoint
+## DPMKEY04 confidentiality cascade — development checkpoint
+
+The current uncommitted candidate replaces the earlier keyfile and encrypted
+wire suite with separate Serpent and AES confidentiality lanes, two-lane
+authentication and supplemental audio collection. Keyfile versions 01–03 are
+rejected. Both peers need the current encrypted suite; earlier recordings are
+not retroactively protected. See the [cryptography guide](crypto.md) for the
+construction, fallback and security assumptions.
+
+`./build.sh --cli build` passed. A native focused CTest selection passed 12/12
+in 116.56 seconds: `fast_codec`, `gui_fast_keygen`, `crypto`, `keyring`,
+`recovery`, `stream_receive`, `transfer`, `helper_metadata`, `audio_entropy`,
+`interval_auth_v4`, `keyfile_entropy` and `triad_stream_source`. The live
+identity selectors `live_resources`, `live_profiles` and `live_transmit_lock`
+also passed. The isolated triad group passed 29/29 in 39.90 seconds. An
+independent source review of the then-current integrated crypto,
+keyfile, authentication, audio and frontend boundaries found no unresolved
+blocking security defect; the later audio deadline repair received the separate
+review described below. These reviews do not measure source entropy or
+establish platform security. The host
+targeted build and CTest passed 1/1 in 7.91 seconds before the broker changes;
+the final-source host build and CTest passed 1/1 in 7.90 seconds,
+covering fresh ingress, malformed, discontinuous and overrun input, cancellation,
+paced generation and fallback warning. This was not a real browser or audio
+device. No `/dev/snd` was visible in this environment, so these results do not
+establish physical audio capture behavior. The Fast group initially passed
+34/37; `fast_radio` and `gui_fast` fixture repairs passed their 2/2 rerun. The
+third failure, `fast_cli`, exposed a default audio backend open that hung beyond
+the broker deadline; its subsequent repair is described below. All 37 Fast
+group cases have since passed individually, with those three repaired cases
+retested separately; the original group invocation remains a failure. The
+direct CLI suite completed 51 tests in 498.745 seconds with four failures and
+six errors. Several failures match retained baseline Helper geometry or batch
+behavior; at least the Helper WAV metadata error encountered the new audio-open
+hang. A subsequent full CLI rerun completed 51 tests in 119.848 seconds with
+five failures and one error, all in Helper tests. All six individually reproduce
+with identical messages and locations on the retained pre-upgrade binary; the
+[baseline log](../local-evidence/v4-final/cli-helper-baseline.log) records those
+checks. The repaired key generation and previously timed-out link and oscillator
+cases passed in the rerun. Both original suite results remain failed; no full
+CLI suite pass is claimed.
+
+The subsequent isolated native audio-helper repair built successfully in the
+shared application build. Adapter tests passed 14/14 and the real-helper filter
+passed. The original default-device, two-entry key generation completed in
+13 seconds with an OS-only warning, and the helper was observed to exit; no
+`/dev/snd` was available. The final shared retest passed 7/7 in 39.47 seconds:
+`audio_entropy`, `audio_entropy_process`, `audio_entropy_helper_filter`,
+`gui_fast_keygen`, `fast_cli`, `fast_radio` and `gui_fast`. That process test
+preceded a test-only linker-wrap revision; its updated 14-case suite passed
+standalone and the rebuilt shared process test passed in a 5/5 selection with
+four triad-helper tests, in 39.73 seconds. A standalone end-to-end test passed
+audio-used generation and reload through the real broker and helper process,
+and silent-input fallback with the expected warning and reload. Its registered
+CMake target passed isolated CTest 1/1 in 7.37 seconds and the test received an
+independent review. The source-matched adapter's 14 cases and an instrumented
+broker, process and crypto end-to-end test also passed under ASan/UBSan with
+leak detection disabled. These sanitizer checks used synthetic helpers, not the
+native helper executable. An independent review of the repair found no source
+blocker under the trusted helper and loader assumptions. These checks use
+synthetic input and do not demonstrate microphone operation or qualify Windows.
+
+A shared GUI and end-to-end selection passed 5/7: `gui_timing_advice`,
+`gui_fast_keygen`, `gui_launch_settings`, `audio_entropy_e2e` and
+`gui_scheduled_cold_start`. `gui_controller` failed a new retained-key path
+regression. `gui_link_planner` failed an interleave modeled-helper-level
+assertion. The original
+selection is failed. A subsequent selection passed 6/7 after the production
+retained-key path fix; `gui_link_planner` still failed on another waveform-only
+Helper test key. A fixture audit corrected that key and the planner's
+`--helper-only` selection passed. The complete `gui_link_planner` rerun then
+passed 1/1 in 76.82 seconds. All seven GUI and end-to-end cases have passed
+individually on their final relevant sources; the original 5/7 and 6/7
+invocations remain failures.
+
+The broader pre-fix contract run was interrupted (SIGINT, exit 130) after 391 of
+398 tests completed: 339 passed, 49 failed, two timed out and one was skipped.
+The timeouts were the 1,500-second `scheduled_parallel_preparation` and the
+90-second `helper_continuation_rows`; the skipped
+`helper_live_cable_calibration` lacked NumPy. Failures included the earlier CLI
+failures. Remaining serial stress tests were waiting 120 seconds apiece for a
+confirmed workspace failure. Source changed afterward, so this is an incomplete
+historical run, not a result for the current source or a complete contract
+outcome. CTest's temporary `LastTest.log.tmp` was overwritten, but the
+[retained output log](../local-evidence/v4-final/interrupted-contract.log)
+contains stdout through the 391 completed cases; the CLI logs also remain
+available. One confirmed regression was dual-root workspace
+accounting: a boundary required 9,270 bytes against a 9,216-byte allowance.
+The fix adds 256 bytes within the existing 80 KiB bound and received an
+independent review. Its standalone boundary selector and a direct
+`helper_receiver` workspace selector passed. After the fix, a serial selection
+passed 24/25 in 89.40 seconds, including five earlier RF/GPS failures, all
+selected observation, pair capture and stress, channel, live and planner
+resource cases, and `helper_frequency_work`. The remaining
+`helper_frequency_coverage` failure encountered the Helper tone-overlap guard
+also observed in the earlier v3 run with the same geometry. This focused
+selection does not complete the contract gate.
+
+A later 17-case serial selection passed 13/17 in 416.42 seconds. The previously
+timed-out `helper_continuation_rows` passed alone in 87.44 seconds, and the
+model-clear and rebase stress cases passed. Four cases failed:
+`live_duplex_spread`, `helper_payload_tail_attachment`,
+`helper_prior_edge_waveform` and `helper_receiver`. The attachment trace was
+size-limited and incomplete; `helper_receiver` progressed past the repaired
+workspace guard before its 24 dB-Hz auxiliary references assertion failed.
+Matching symptoms or assertions occurred in the prior v3 candidate log, which
+is not a pristine source-matched baseline. These results remain failures. All
+seven cases uncompleted in the interrupted run were subsequently exercised in
+this serial selection. In a final-source retest of 28 cases, the previously
+skipped synthetic cable calibration passed with NumPy available; all 27
+previously failed Helper cases failed again. The [retest log](../local-evidence/v4-final/helper-retest.log)
+records the results. All 27 emitted terminal failure text identical to their
+counterparts in the earlier v3 candidate. Different sources and binaries do not
+establish identical causes or a matched pristine baseline. These remain
+failures and the contract gate has not passed. The current-source
+`test_scheduled_parallel_preparation --ci-part 3` passed separately, covering
+the previously unfinished shared, partial, cancellation and no-false-end
+cases. Its [log](../local-evidence/v4-final/preparation-part3.log) is retained.
+This follow-up does not erase the original 1,500-second timeout or establish a
+complete aggregate pass.
+
+A source-matched representative triad diagnostic exited successfully with no
+confirmed regression or functional failure in its three cases. Single
+candidate-to-reference runtime ratios were 1.028× for flat, 1.044× for
+frequency-selective FHSS and 1.005× for added-max; no confirmations were
+triggered. The [diagnostic summary](../local-evidence/cascade-20261107/triad-guard-v4-diagnostic/summary.json)
+has no coverage receipts and the older hardware profile was incompatible.
+These single measurements provide neither a confidence estimate nor complete
+performance qualification.
+
+Results from the preceding checkpoint below do not establish qualification of
+this changed candidate. This is a development checkpoint, not a release or
+certification. Full performance calibration, physical devices and platform
+qualification remain outside the evidence recorded here.
+
+## Earlier confidentiality cascade — historical development checkpoint
+
+The following checkpoint predates the DPMKEY04 changes above and describes the
+then-current candidate only. Its results must not be treated as validation of
+the present keyfile, audio or authentication changes.
 
 This uncommitted development candidate is based on HEAD `b1d1b30f8bcdc09526d60b66bd260b3c7031b0e1`; HEAD alone does not identify its dirty source. A [post-run source and selected-binary manifest](../local-evidence/cascade-20261107/final-source-binaries.json) captures 81 changed or untracked non-ignored files and 13 binaries before this documentation update. It is a post-run snapshot, not independent before/after source-hash proof. This is a development checkpoint, not a release or certification.
 

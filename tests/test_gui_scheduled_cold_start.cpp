@@ -1,3 +1,4 @@
+#include "fixture_keyfile.hpp"
 #include "../src/gui/controller.hpp"
 #include "../src/audio_trace.hpp"
 #include "datapump/audio.hpp"
@@ -40,7 +41,7 @@ struct Files {
     std::filesystem::path dir=std::filesystem::temp_directory_path()/
         ("datapump-gui-cold-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::path key=dir/"synthetic.key",trace=dir/"cold.jsonl";bool passed=false;
-    Files(){check(std::filesystem::create_directory(dir),"fixture directory was not new");create_keyring(key,{"GUI cold-start synthetic"});}
+    Files(){check(std::filesystem::create_directory(dir),"fixture directory was not new");check(create_keyring(key,{"GUI cold-start synthetic"},std::nullopt,fixture_keyfile::generation()).audio_used,"fixture audio entropy was not used");}
     ~Files(){std::error_code ignored;std::filesystem::remove(key,ignored);
         if(passed){std::filesystem::remove(trace,ignored);std::filesystem::remove(dir,ignored);}
         else if(std::filesystem::exists(trace,ignored))std::cerr<<"Incomplete cold-start trace retained: "<<trace<<'\n';

@@ -1,5 +1,8 @@
 #include "datapump/audio.hpp"
 #include "datapump/audio_output.hpp"
+#ifdef DATAPUMP_AUDIO_ENTROPY_ENABLED
+#include "datapump/audio_entropy.hpp"
+#endif
 #include "audio_trace.hpp"
 #include <iostream>
 #include <syncstream>
@@ -1891,11 +1894,33 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
 
 #endif
 void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format) {
+#ifdef DATAPUMP_AUDIO_ENTROPY_ENABLED
+    // This overload historically opens the supplied endpoint directly. Only
+    // borrow it when the selected sharing policy would open the same route.
+    auto route=detail::CaptureRoute::direct_device;
+    try {
+        if(selected_endpoint(device,true,false)==(device.empty()?"default":device))
+            route=detail::CaptureRoute::selected_policy;
+    } catch(const Error&) {}
+    detail::CaptureEntropyRegistration entropy(device,{},false,route);
+    Options options;options.capture_monitor=entropy.monitor();options.capture_discontinuity=entropy.discontinuity();
+    try {capture_device(rate,device,on_chunk,stop,std::move(on_format),options.capture_monitor,options.capture_discontinuity,&options);}
+    catch(...) {entropy.failed(std::current_exception());throw;}
+#else
     capture_device(rate,device,on_chunk,stop,std::move(on_format));
+#endif
 }
 void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format,Options options) {
     check_cancelled(stop);validate_options(options);
+#ifdef DATAPUMP_AUDIO_ENTROPY_ENABLED
+    detail::CaptureEntropyRegistration entropy(device,options.entropy_capture_owner,options.exclusive);
+    options.capture_monitor=entropy.monitor(std::move(options.capture_monitor));
+    options.capture_discontinuity=entropy.discontinuity(std::move(options.capture_discontinuity));
+    try {capture_device(rate,selected_endpoint(device,true,options.exclusive),on_chunk,stop,std::move(on_format),options.capture_monitor,options.capture_discontinuity,&options);}
+    catch(...) {entropy.failed(std::current_exception());throw;}
+#else
     capture_device(rate,selected_endpoint(device,true,options.exclusive),on_chunk,stop,std::move(on_format),options.capture_monitor,options.capture_discontinuity,&options);
+#endif
 }
 void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels) {
     playback_device(rate,device,next_samples,stop,std::move(on_format),channels,1.0);

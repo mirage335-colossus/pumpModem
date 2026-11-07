@@ -47,6 +47,9 @@ jobs:
     timeout-minutes: ${{ inputs.qualify && 145 || 50 }}
     env:
       BASELINE_REF: 242ea15fa032ee117b9113a7f3cd07cc6e9f0254
+      # Last pre-cascade implementation with modem APIs compatible with the
+      # current aligned physical-input driver; qualification keeps BASELINE_REF.
+      GUARD_BASELINE_REF: b1d1b30f8bcdc09526d60b66bd260b3c7031b0e1
       CANDIDATE_REF: ${{ inputs.candidate_ref || github.sha }}
       PERFORMANCE_BUDGET_SECONDS: ${{ inputs.performance_budget_seconds }}
       QUALIFICATION_REQUESTED: ${{ inputs.qualify == true }}
@@ -85,6 +88,15 @@ jobs:
           ref: ${{ env.BASELINE_REF }}
           path: reference
 
+      - name: Checkout immutable fast guard reference source
+        if: ${{ inputs.qualify != true }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ env.GUARD_BASELINE_REF }}
+          path: guard-reference
+
       - name: Validate candidate and benchmark baseline identities
         shell: bash
         run: |
@@ -116,6 +128,13 @@ jobs:
                   raise SystemExit('qualification_budget_seconds must be finite and in (0, 3600]')
           PYBUDGET
           git cat-file -e "$BASELINE_REF^{commit}"
+          git cat-file -e "$GUARD_BASELINE_REF^{commit}"
+          if [[ "$QUALIFICATION_REQUESTED" != true ]]; then
+            [[ "$(git -C guard-reference rev-parse HEAD)" == "$GUARD_BASELINE_REF" ]] || {
+              echo '::error::Fast guard reference checkout does not match its immutable baseline.'
+              exit 2
+            }
+          fi
           printf 'candidate_sha=%s\nbaseline_sha=%s\n' "$actual" "$BASELINE_REF" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install narrow native build dependencies
@@ -217,13 +236,16 @@ jobs:
           key: triad-hardware-reference-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-profile.outputs.hardware_key }}
 
       - name: Configure baseline CLI and isolated receiver fixture
+        if: ${{ inputs.qualify == true }}
         working-directory: reference
         run: ./build.sh configure --cli --build-dir build/dev-cli -- -DBUILD_TESTING=ON -DDATAPUMP_COMPILER_CACHE=OFF
 
       - name: Build baseline native simulation and receiver
+        if: ${{ inputs.qualify == true }}
         run: cmake --build reference/build/dev-cli --config Release --target triad_long --parallel 2
 
       - name: Prepare identical planner test driver against immutable reference production
+        if: ${{ inputs.qualify == true }}
         run: |
           python - <<'PYPLANNER'
           import hashlib, json, sys
@@ -236,12 +258,14 @@ jobs:
           PYPLANNER
 
       - name: Build only the new baseline planner test target
+        if: ${{ inputs.qualify == true }}
         working-directory: reference
         run: |
           ./build.sh configure --cli --build-dir build/dev-cli -- -DBUILD_TESTING=ON -DDATAPUMP_COMPILER_CACHE=OFF
           cmake --build build/dev-cli --config Release --target triad_planner_perf --parallel 2
 
       - name: Verify reference receiver binary was preserved
+        if: ${{ inputs.qualify == true }}
         run: |
           python - <<'PYPLANNERBINARY'
           import hashlib, json
@@ -260,13 +284,89 @@ jobs:
         working-directory: candidate
         run: cmake --build build/dev-cli --config Release --target triad_long triad_planner_perf test_triad_statistics test_triad_v3_source test_triad_v3_channel test_triad_v3_receiver --parallel 2
 
+      - name: Prepare isolated fast guard reference drivers
+        if: ${{ inputs.qualify != true }}
+        run: |
+          python - <<'PYGUARDREF'
+          import hashlib, json, subprocess, sys
+          from pathlib import Path
+          reference = Path('guard-reference').resolve(strict=True)
+          candidate = Path('candidate').resolve(strict=True)
+          if subprocess.run(['git', '-C', str(reference), 'status', '--porcelain', '--untracked-files=all'],
+                            check=True, capture_output=True, text=True).stdout:
+              raise RuntimeError('fast guard reference must start as a clean immutable checkout')
+          header = reference / 'tools/triad_fixture_key.hpp'
+          if header.exists():
+              raise RuntimeError('historical reference unexpectedly provides a fixture header')
+          # This generated fixture exists only in the private historical checkout.
+          # It is never compiled into a candidate or an operational executable.
+          header.write_text('''#pragma once
+          #include "datapump/crypto.hpp"
+          #include <cstdint>
+          #include <span>
+          #include <string_view>
+          namespace datapump::triad::fixture {
+          inline constexpr std::string_view key_mode="legacy-reference";
+          inline Crypto key(std::span<const std::uint8_t> seed) { return Crypto(seed); }
+          }
+          ''')
+          driver = reference / 'tools/triad-long.cpp'
+          driver.write_bytes((candidate / 'tools/triad-long.cpp').read_bytes())
+          sys.path.insert(0, str(Path('tools').resolve()))
+          from triad_perf_planner import prepare_reference_driver
+          planner = prepare_reference_driver(candidate, reference)
+          if not planner['production_unchanged']:
+              raise RuntimeError('planner reference preparation changed production sources')
+          changed = subprocess.run(['git', '-C', str(reference), 'diff', '--name-only'],
+                                   check=True, capture_output=True, text=True).stdout.splitlines()
+          allowed = {'CMakeLists.txt', 'tools/triad-long.cpp', 'tools/triad-planner-perf.cpp'}
+          if set(changed) - allowed:
+              raise RuntimeError('unexpected changed fast guard production source: ' + ', '.join(changed))
+          digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+          receipt = {'schema': 'triad-fast-guard-reference-overlay-v1',
+                     'reference_commit': subprocess.run(['git', '-C', str(reference), 'rev-parse', 'HEAD'],
+                         check=True, capture_output=True, text=True).stdout.strip(),
+                     'driver_sha256': digest(driver), 'fixture_header_sha256': digest(header),
+                     'tracked_diff_sha256': hashlib.sha256(subprocess.run(
+                         ['git', '-C', str(reference), 'diff', '--binary'], check=True, capture_output=True).stdout).hexdigest(),
+                     'fixture_key_mode': 'legacy-reference', 'modified_tracked_files': changed,
+                     'planner_overlay': planner}
+          Path('build/triad-performance/guard-reference-overlay.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PYGUARDREF
+
+      - name: Build isolated fast guard reference drivers
+        if: ${{ inputs.qualify != true }}
+        working-directory: guard-reference
+        run: |
+          ./build.sh configure --cli --build-dir build/dev-cli -- -DBUILD_TESTING=ON -DDATAPUMP_COMPILER_CACHE=OFF
+          cmake --build build/dev-cli --config Release --target triad_long triad_planner_perf --parallel 2
+          ./build/dev-cli/triad_long --mode fixture-key-mode | python -c 'import json,sys; assert json.load(sys.stdin) == {"schema":"triad-fixture-key-mode-v1","fixture_key_mode":"legacy-reference"}'
+          python - <<'PYGUARDBUILD'
+          import hashlib, json, subprocess
+          from pathlib import Path
+          path = Path('../build/triad-performance/guard-reference-overlay.json')
+          receipt = json.loads(path.read_text())
+          digest = lambda data: hashlib.sha256(data).hexdigest()
+          if (subprocess.run(['git', 'rev-parse', 'HEAD'], check=True, capture_output=True, text=True).stdout.strip() != receipt['reference_commit'] or
+              digest(subprocess.run(['git', 'diff', '--binary'], check=True, capture_output=True).stdout) != receipt['tracked_diff_sha256'] or
+              digest(Path('tools/triad_fixture_key.hpp').read_bytes()) != receipt['fixture_header_sha256']):
+              raise RuntimeError('fast guard reference source changed during build')
+          receipt['binary_sha256'] = {name: hashlib.sha256(Path('build/dev-cli', name).read_bytes()).hexdigest()
+                                      for name in ('triad_long', 'triad_planner_perf')}
+          path.write_text(json.dumps(receipt, indent=2) + '\n')
+          PYGUARDBUILD
+
       # Fixtures are independent of report logs and are already validated
       # against source, binary, configuration and per-file SHA-256 receipts.
       - name: Compute immutable performance binary identities
         id: binary-key
         run: |
           candidate_sha=$(sha256sum candidate/build/dev-cli/triad_long | cut -d ' ' -f1)
-          reference_sha=$(sha256sum reference/build/dev-cli/triad_long | cut -d ' ' -f1)
+          if [[ "$QUALIFICATION_REQUESTED" == true ]]; then
+            reference_sha=$(sha256sum reference/build/dev-cli/triad_long | cut -d ' ' -f1)
+          else
+            reference_sha=$(sha256sum guard-reference/build/dev-cli/triad_long | cut -d ' ' -f1)
+          fi
           printf 'candidate=%s\nreference=%s\n' "$candidate_sha" "$reference_sha" >> "$GITHUB_OUTPUT"
 
       - name: Restore receiver performance anchors
@@ -403,17 +503,18 @@ jobs:
           # not fail CI; correctness, integrity and confirmed regressions do.
           python tools/triad_perf_guard.py \
             --profile ci --suite-alpha 0.01 --workflow-job-count 1 \
-            --candidate-root candidate --reference-root reference \
+            --candidate-root candidate --reference-root guard-reference \
             --binary candidate/build/dev-cli/triad_long \
-            --reference-binary reference/build/dev-cli/triad_long \
+            --reference-binary guard-reference/build/dev-cli/triad_long \
             --fixture-cache build/triad-performance/triad-performance-fixtures \
             --device cpu --precision fp32 --threads 2 --native-threads 1 \
             --budget-seconds "$PERFORMANCE_BUDGET_SECONDS" \
             --functional-defaults \
             --planner-binary candidate/build/dev-cli/triad_planner_perf \
-            --planner-reference-binary reference/build/dev-cli/triad_planner_perf \
+            --planner-reference-binary guard-reference/build/dev-cli/triad_planner_perf \
             --planner-bounds-workspace docs/validation-data/triad-v3/2026-11-03-performance-complete/controls/actual-delay-001/sampled-stats \
             --hardware-seconds 5 \
+            --legacy-reference-fixture --physical-bit-alignment \
             "${coverage_args[@]}" "${hardware_args[@]}" \
             --output build/triad-performance/guard 2>&1 | tee build/triad-performance/guard.log
 

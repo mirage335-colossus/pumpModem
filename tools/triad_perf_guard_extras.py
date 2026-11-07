@@ -127,7 +127,8 @@ class ExtraWorkloads:
                     "manifest_sha256": planner.file_sha(planner.MANIFEST),
                     "adapter_sha256": planner.file_sha(planner.__file__)}
         return {"implementation": resource.implementation_identity(), "physical_bit_alignment": self.physical_bit_alignment,
-                "sources": {side: resource.binary_identity(self.binaries[side], self.roots[side], self.threads)
+                "sources": {side: resource.binary_identity(self.binaries[side], self.roots[side], self.threads,
+                                                            source_role=side)
                             for side in SIDES}}
 
     def descriptors(self):

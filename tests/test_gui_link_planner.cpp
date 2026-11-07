@@ -1,4 +1,6 @@
 #include "application.hpp"
+#include "fixture_keyfile.hpp"
+#include "fixture_crypto.hpp"
 #include "controller.hpp"
 #include "document_layout.hpp"
 #include "link_planner_model.hpp"
@@ -94,7 +96,7 @@ void selected_plan_progress_and_support_equivalence() {
     inputs.receiver_timing_model={.05,2e-6,1./inputs.options.modem.sample_rate};
     for(const bool keyed:{false,true})for(const auto target:{-30.,0.,23.}) {
         auto options=inputs.options;
-        if(keyed)options.key=Crypto(Bytes(32,0x59));
+        if(keyed)options.key=fixture_crypto::key(Bytes(32,0xab),Bytes(32,0x59));
         modem::OscillatorSearchConfig oscillator;oscillator.lf={1e-5,.005};oscillator.rf=oscillator.lf;
         options.modem.oscillator_search=oscillator;
         options.modem=tuning::receive_profiles(options.modem,std::array{target},inputs.mode,keyed).front();
@@ -167,7 +169,7 @@ void earth_moon_earth_estimate() {
           contains_text(reference_page,existing->probability_model_limit),
           "Collapsed Existing-only EME must display its unqualified model scope");
     auto amplitude_inputs=inputs;amplitude_inputs.target_db_hz=-35.07209969647869;
-    amplitude_inputs.receiver_settings->receive_keys.emplace_back(Bytes(32,0x71));
+    amplitude_inputs.receiver_settings->receive_keys.push_back(fixture_crypto::key(Bytes(32,0xab),Bytes(32,0x71)));
     // This negative coverage fixture must not inherit the CI host's RAM size.
     // Keep the real EME preset's 75% forwarding assertion above independent.
     amplitude_inputs.options.dsp_workspace_bytes=2ULL*1024*1024*1024;
@@ -215,7 +217,7 @@ void independent_reference_values() {
     near(short_bit.bit_seconds,398.1072222222222,"-8 dB-Hz bit duration changed");
     near(short_bit.send_seconds,401.1161111111111,"One-bit example acquired framing or lost waveform tails");
     near(short_bit.finish_seconds,799.2233333333334,"One full absent symbol must follow the short-bit burst");
-    auto private_inputs=inputs;private_inputs.options.key.emplace(Bytes(32,0x37));
+    auto private_inputs=inputs;private_inputs.options.key=fixture_crypto::key(Bytes(32,0xab),Bytes(32,0x37));
     const auto private_short=planner::build(private_inputs);
     check(private_short.observer_available&&!private_short.observer_hypothetical,"Private observer model unavailable");
     near(private_short.observer_ratio,2928.958076042251,"Short-bit observer/receiver time anchor changed");
@@ -250,7 +252,7 @@ void exact_geometry_and_physical_finish() {
     inputs.wire_bits=3;const auto three=planner::build(inputs);
     check(three.available,"Exact three-bit draft must be plannable");
     near(three.send_seconds-one.send_seconds,2*one.bit_seconds,"Three bits were padded to a byte or given per-bit overhead");
-    auto private_inputs=inputs;private_inputs.options.key.emplace(Bytes(32,0x37));
+    auto private_inputs=inputs;private_inputs.options.key=fixture_crypto::key(Bytes(32,0xab),Bytes(32,0x37));
     const auto private_three=planner::build(private_inputs);private_inputs.wire_bits=1;
     const auto private_one=planner::build(private_inputs);
     check(private_three.observer_available&&private_one.observer_available,"private draft observer model unavailable");
@@ -618,7 +620,7 @@ void nearest_target_shares_receiver_budget() {
     (void)planner::nearest_fit_target(inputs,companions,planner::ReceiveBanks{true,0});
     check(companions==companion_copy&&inputs.target_db_hz==-47,
           "Rounding one request must not modify its companion targets or the caller's inputs");
-    inputs=gpsdo_islands();inputs.options.key.emplace(Bytes(32,0x37));
+    inputs=gpsdo_islands();inputs.options.key=fixture_crypto::key(Bytes(32,0xab),Bytes(32,0x37));
     inputs.mode=tuning::PatternMode::auto_keystream;
     inputs.options.modem=tuning::resolve(1,-47,inputs.mode,true,1500).config;
     inputs.options.dsp_workspace_bytes=16384ULL*1024*1024;
@@ -839,7 +841,7 @@ void separate_link_budget_and_observer_model() {
         check(contains_text(page,"Not applicable: no encrypted private pattern"),"Public planner omitted applicability");
         for(const auto* node:nodes(page))check(node->plot_name!="planner/observer-time","Public planner drew private observer axes");
     }
-    auto inputs=public_inputs;inputs.options.key.emplace(Bytes(32,0x37));
+    auto inputs=public_inputs;inputs.options.key=fixture_crypto::key(Bytes(32,0xab),Bytes(32,0x37));
     const auto reference=planner::build(inputs);
     inputs.tx_dbm=50;inputs.path_loss_db=200;inputs.noise_density_dbm_hz=-170;
     const auto different_link=planner::build(inputs);
@@ -847,7 +849,7 @@ void separate_link_budget_and_observer_model() {
     near(different_link.actual_cn0_db_hz,20,"Power/path/noise arithmetic is not independent of the timing target");
     near(different_link.observer_ratio,reference.observer_ratio,"Actual power must not change the normalized time comparison");
     near(different_link.bit_seconds,reference.bit_seconds,"Power/path/noise edits must not silently retune the preview");
-    inputs.options.key.emplace(Bytes(32,0x38));const auto keyed=planner::build(inputs);
+    inputs.options.key=fixture_crypto::key(Bytes(32,0xab),Bytes(32,0x38));const auto keyed=planner::build(inputs);
     check(keyed.available&&!keyed.observer_hypothetical,"A private-pattern preview must recognize its configured key");
     near(keyed.observer_ratio,reference.observer_ratio,"Key material must not change the normalized observer time");
     check(!public_inputs.options.key,"Planner build must not mutate the caller's encryption settings");
@@ -865,7 +867,7 @@ void quantization_fixed_modes_and_limits() {
     check(!fixed.fast_target&&!fixed.day_target&&!fixed.clock_target,
           "A fixed-length mode must not offer target-dependent timing milestones");
     near(fixed.bit_seconds,128./14400,"Fixed pattern length was replaced by automatic integration");
-    auto scheduled_inputs=inputs;scheduled_inputs.options.key.emplace(Bytes(32,0x41));
+    auto scheduled_inputs=inputs;scheduled_inputs.options.key=fixture_crypto::key(Bytes(32,0xab),Bytes(32,0x41));
     auto schedule=std::make_shared<modem::SchedHopPlan>();schedule->time_multiplier=10;
     scheduled_inputs.options.modem.scheduled_hopping=schedule;
     const auto scheduled=planner::build(scheduled_inputs);
@@ -986,7 +988,7 @@ void persistent_worker_curve_cache() {
     input.options.dsp_workspace_bytes/=2;verify_support_change("workspace");
     input.options.modem.oscillator_search=modem::OscillatorSearchConfig{};verify_support_change("oscillator");
     input.options.modem.frequency_search_multiplier=2;verify_support_change("frequency expansion");
-    input.options.key.emplace(std::array<std::uint8_t,32>{});verify_support_change("key");
+    input.options.key=fixture_crypto::key(Bytes(32,0xab),std::array<std::uint8_t,32>{});verify_support_change("key");
     input.mode=tuning::PatternMode::auto_keystream;verify_support_change("mode");
 }
 void prepare_plan(Application& app) {
@@ -1003,7 +1005,7 @@ void removing_key_withdraws_cached_observer() {
             ("datapump-observer-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         ~Keys(){std::error_code ignored;std::filesystem::remove(path,ignored);}
     } keys;
-    create_keyring(keys.path,{"observer"});
+    check(create_keyring(keys.path,{"observer"},std::nullopt,fixture_keyfile::generation()).audio_used,"Synthetic keyfile audio was not used");
     Launch launch{.simulation=true};launch.settings=launch_command::Patch{};
     launch.settings->keyfile=keys.path.string();
     Application app(launch);app.select_page(P::planner);
@@ -1285,7 +1287,7 @@ void target_fit_after_fhss_carrier_fallback() {
             ("datapump-target-carrier-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         ~Keys(){std::error_code ignored;std::filesystem::remove(path,ignored);}
     } keys;
-    create_keyring(keys.path,{"target carrier"});
+    check(create_keyring(keys.path,{"target carrier"},std::nullopt,fixture_keyfile::generation()).audio_used,"Synthetic keyfile audio was not used");
     launch_command::Patch patch;patch.keyfile=keys.path.string();patch.key_name="target carrier";
     patch.rate_hz=1000;patch.carrier_hz=1800;patch.target_db_hz=200;
     patch.short_target_db_hz=200;patch.long_target_db_hz=200;
@@ -1990,7 +1992,7 @@ void helper_reference_link_budget() {
     }
     auto spread=forty.inputs;
     spread.mode=tuning::PatternMode::auto_keystream;
-    spread.options.key=Crypto(Bytes(32,0x63));
+    spread.options.key=fixture_crypto::key(Bytes(32,0x96),Bytes(32,0x63));
     spread.options.modem.dsss_factor=10;
     spread.options.modem.pulse_shaping=false;
     spread.options.modem.carrier_hz=1725;
@@ -2128,7 +2130,7 @@ void helper_conditional_acquisition_plan() {
         // Retain the original128s/6000Hz receiver geometry while raising only
         // the audio carrier above the fixed helpers' gate/power guard.
         if(eme)input.options.modem.sample_rate=6000;
-        input.options.key.emplace(Bytes(32,0x57));
+        input.options.key=fixture_crypto::key(Bytes(32,0xab),Bytes(32,0x57));
         input.options.automatic_receive_profiles=true;input.options.receive_pattern_mode=input.mode;
         input.options.audio_timing_error_seconds=0;
         // Fixed byte allowances keep these geometry checks independent of host RAM.
@@ -2467,7 +2469,7 @@ void sustained_listening_plan_document() {
     inputs.channel.clock_error_ppm=0;inputs.channel.phase_noise_degrees_per_sqrt_second=0;
     inputs.options.modem=tuning::resolve(360,8,inputs.mode,true,1500,10,
         modem::OuterDsssVersion::interleaved_v2).config;
-    inputs.options.key.emplace(Bytes(32,0x59));inputs.options.search_seconds=6;
+    inputs.options.key=fixture_crypto::key(Bytes(32,0xab),Bytes(32,0x59));inputs.options.search_seconds=6;
     inputs.options.dsp_workspace_bytes=std::size_t{1024}*1024*1024;
     modem::OscillatorSearchConfig oscillator;
     oscillator.lf=tuning::oscillator_model(tuning::parse_oscillator_preset("gpsdo-xo"));
@@ -2501,7 +2503,7 @@ void rolling_epoch_selected_plan_document() {
     auto inputs=example();inputs.target_db_hz=40;inputs.mode=tuning::PatternMode::auto_keystream;
     inputs.channel.clock_error_ppm=0;inputs.channel.phase_noise_degrees_per_sqrt_second=0;
     inputs.options.modem=tuning::resolve(10,40,inputs.mode,true,7500,1000).config;
-    inputs.options.key.emplace(Bytes(32,0x47));inputs.options.search_seconds=6;
+    inputs.options.key=fixture_crypto::key(Bytes(32,0xab),Bytes(32,0x47));inputs.options.search_seconds=6;
     inputs.options.dsp_workspace_bytes=std::size_t{1024}*1024*1024;
     modem::OscillatorSearchConfig oscillator;oscillator.lf={.0001,.5};oscillator.rf={.0001,.005};
     oscillator.margin=3;oscillator.rf_shift_hz=1000000;inputs.options.modem.oscillator_search=oscillator;
@@ -2741,7 +2743,7 @@ void search_arithmetic_document_and_cache() {
     }
 }
 void document_semantics_layout_and_plots() {
-    auto input=example();input.options.key.emplace(Bytes(32,0x37));
+    auto input=example();input.options.key=fixture_crypto::key(Bytes(32,0xab),Bytes(32,0x37));
     input.target_db_hz=23; // Exercise layout with an affordable private RX reference.
     const auto model=planner::build(input);
     for(const float width:{220.f,460.f,720.f,740.f,900.f,1200.f}) {

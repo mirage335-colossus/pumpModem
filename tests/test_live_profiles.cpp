@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/audio.hpp"
 #include "../src/signal_view.hpp"
 #include "../src/audio_trace.hpp"
@@ -121,7 +122,7 @@ Waveform waveform(double target, std::string text, bool binary = false,
     options.modem = modem_config(target, configuration);
     options.timestamp = epoch;
     options.search_seconds = 0;
-    if (configuration.keyed) options.key.emplace(Bytes(32, 0x67));
+    if (configuration.keyed) options.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32, 0x67));
     Message message;
     message.data.assign(text.begin(), text.end());
     auto bits = transfer::message_wire_bits(message, options);
@@ -177,8 +178,8 @@ live::Settings settings(std::vector<double> targets, const Configuration& config
     value.transfer.receive_targets_db_hz = std::move(targets);
     value.transfer.receive_pattern_mode = configuration.mode;
     if (configuration.keyed) {
-        value.transfer.key.emplace(Bytes(32, 0x67));
-        value.receive_keys.emplace_back(Bytes(32, 0x68));
+        value.transfer.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32, 0x67));
+        value.receive_keys.push_back(fixture_crypto::key(Bytes(32,0xd3),Bytes(32, 0x68)));
     }
     value.content_limit = value.transfer.content_limit = 1024 * 1024;
     value.dsp_workspace_bytes = value.transfer.dsp_workspace_bytes = 32 * 1024 * 1024;
@@ -373,6 +374,55 @@ void run_case(const std::vector<double>& targets, double target, const std::stri
     observed.allow_revisions = allow_revisions;
     receive_wave(session, capture, expected, 0, observed);
     session.stop();
+}
+
+void independent_serpent_root_content_delivery() {
+    Configuration configuration;configuration.keyed=true;
+    const auto expected=waveform(55,"independent roots",false,configuration);
+    check(expected.interval,"independent-root delivery must exercise authenticated interval content");
+    auto value=settings({55},configuration);
+    const auto correct=*value.transfer.key;
+    value.transfer.key=fixture_crypto::key(Bytes(32,0xd4),Bytes(32,0x67));
+    value.receive_keys={*value.transfer.key,correct,
+        fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x67))};
+    value.transfer.automatic_receive_profiles=false;
+    const Bytes context{'d','e','l','i','v','e','r','y'};
+    check(value.transfer.key->mac(context)==correct.mac(context) &&
+          value.transfer.key->identity_fingerprint(context)!=correct.identity_fingerprint(context),
+          "delivery fixture must select the wrong Serpent root with the correct AES waveform root");
+    CaptureScript capture;capture.samples=expected.samples;capture.rate=expected.rate;
+    capture_script=&capture;
+    struct ResetCapture {~ResetCapture(){capture_script=nullptr;}} reset;
+    live::Session session([]{return static_cast<double>(epoch);});session.start(value);
+    testing::CpuWorkBudget budget(30s,"independent Serpent root content delivery");
+    std::optional<std::chrono::steady_clock::time_point> drained_at;
+    std::size_t received=0;bool drained=false;
+    while(budget.pending()) {
+        const auto snapshot=session.snapshot();
+        check(snapshot.error.empty(),"independent-root reception failed: "+snapshot.error);
+        check(!snapshot.receiver_health.failed(),"independent-root delivery lost receiver coverage");
+        check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,
+              "independent-root delivery exceeded its receiver workspace");
+        for(const auto& result:snapshot.received) {
+            ++received;
+            check(result.stream_complete && result.content_validated && result.content.authenticated,
+                  "wrong Serpent hypothesis published unauthenticated interval content");
+            check(std::string(result.content.message.data.begin(),result.content.message.data.end())==expected.text,
+                  "independent-root receiver delivered incorrect content");
+        }
+        const auto delivered=capture.delivered.load();
+        if(delivered<capture.samples.size() && delivered>=capture.released.load() && !snapshot.buffered_samples)
+            capture.released=delivered+std::min<std::size_t>(std::max<std::uint32_t>(8,capture.rate/10),
+                capture.samples.size()-delivered);
+        if(capture.delivered>=capture.samples.size() && !snapshot.buffered_samples && !snapshot.decoding_samples) {
+            if(!drained_at)drained_at=std::chrono::steady_clock::now();
+            if(std::chrono::steady_clock::now()-*drained_at>=250ms){drained=true;break;}
+        } else drained_at.reset();
+        std::this_thread::sleep_for(1ms);
+    }
+    session.stop();
+    check(drained,"independent-root controlled PCM capture did not drain");
+    check(received==1,"correct Serpent receive key was dropped or its content was published more than once");
 }
 
 void retired_public_streams_release_presentations(const std::vector<double>& targets) {
@@ -633,13 +683,13 @@ void captured_epoch_survives_delay() {
 }
 void modeled_arrival_window(bool modeled=true,bool fallback=false) {
     auto value=settings({});value.transfer.automatic_receive_profiles=false;
-    value.transfer.key.emplace(Bytes(32,0x67)); // Synthetic key required by the encrypted profile.
+    value.transfer.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x67)); // Synthetic key required by the encrypted profile.
     auto& config=value.transfer.modem;
     config.sample_rate=64;config.bandwidth_hz=2;config.carrier_hz=16;
     config.spreading_factor=64;config.integration_seconds=64;config.scramble=true;
     modem::OscillatorSearchConfig oscillator;oscillator.lf={.0001,0};oscillator.rf={.0001,0};
     config.oscillator_search=oscillator;
-    value.transfer.key.emplace(Bytes(32,0x67));value.receive_keys.clear();
+    value.transfer.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x67));value.receive_keys.clear();
     value.transfer.clock_sync=clock_sync::Policy{.001,.4,2.564};
     // This synthetic provider explicitly reports 100 ms uncertainty. Its
     // accepted engineering allowance must cover that value.
@@ -686,7 +736,7 @@ void modeled_arrival_window(bool modeled=true,bool fallback=false) {
 
 void default_hop_calendar(unsigned multiplier) {
     auto value=settings({});value.transfer.automatic_receive_profiles=false;
-    value.transfer.key.emplace(Bytes(32,0x67));value.receive_keys.clear();
+    value.transfer.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x67));value.receive_keys.clear();
     value.transfer.clock_sync.reset();value.transfer.audio_timing_error_seconds=0;
     auto& c=value.transfer.modem;c.sample_rate=128;c.bandwidth_hz=16;c.carrier_hz=32;
     c.integration_seconds=2;c.spreading_factor=64;c.scramble=true;
@@ -1517,7 +1567,7 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
 
 void outer_version_profile_identity() {
     auto value=settings({});value.transfer.automatic_receive_profiles=false;
-    value.transfer.key.emplace(Bytes(32,0x67)); // Synthetic key required by the encrypted profile.
+    value.transfer.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x67)); // Synthetic key required by the encrypted profile.
     auto& config=value.transfer.modem;
     config.bandwidth_hz=120;config.carrier_hz=1500;config.sample_rate=6000;
     config.scramble=config.dsss=true;config.dsss_factor=10;
@@ -1571,7 +1621,7 @@ bool live_exact_source_pool(const std::filesystem::path& requested_trace={}) {
     auto value=settings({});value.transfer.automatic_receive_profiles=false;
     // This isolated instrument has an explicit budget; ordinary cases retain 32 MiB.
     value.dsp_workspace_bytes=value.transfer.dsp_workspace_bytes=128U*1024U*1024U;
-    value.transfer.key.emplace(Bytes(32,0x73));value.receive_keys.clear();
+    value.transfer.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x73));value.receive_keys.clear();
     // The synthetic generator and capture share an exact clock and no device
     // lag. Supply that evidence when cropping away the physical TX prefix.
     value.transfer.clock_sync=clock_sync::Policy{0,0,0};
@@ -1702,8 +1752,12 @@ int main(int argc, char** argv) {
         const std::string suite = argc > 1 ? argv[1] : "all";
         std::optional<audio::trace::Scope> calendar_trace;
         if((suite=="hop_calendar" || suite=="public_amplitude") && argc>2)calendar_trace.emplace(argv[2]);
-        check(suite == "public_amplitude" || suite == "retired" || suite == "all" || suite == "hop_calendar" || suite == "exact_source" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "frontier_failure" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "duplex_spread" || suite == "hardware_channel" || suite == "hardware_fhss" || suite == "arrival_fallback" || suite == "tx_failure",
+        check(suite == "independent_roots" || suite == "public_amplitude" || suite == "retired" || suite == "all" || suite == "hop_calendar" || suite == "exact_source" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "frontier_failure" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "duplex_spread" || suite == "hardware_channel" || suite == "hardware_fhss" || suite == "arrival_fallback" || suite == "tx_failure",
               "unknown profile test suite");
+        if(suite=="all" || suite=="independent_roots") {
+            context="same-AES independent-Serpent content delivery";independent_serpent_root_content_delivery();
+            if(suite=="independent_roots")return 0;
+        }
         if(suite=="hardware_channel") {context="production hardware channel";hardware_channel_loopback();return 0;}
         if(suite=="hardware_fhss") {context="production FHSS channel";hardware_channel_loopback(true);return 0;}
         if(suite=="duplex_spread") {context="modeled virtual duplex";duplex_spread_loopback();return 0;}

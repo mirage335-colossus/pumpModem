@@ -1,3 +1,4 @@
+#include "triad_fixture_key.hpp"
 #include "datapump/continuous_clock.hpp"
 #include "datapump/triad_modem_v3.hpp"
 #include "datapump/triad_shaping.hpp"
@@ -151,7 +152,7 @@ std::uint64_t mix(std::uint64_t x) {x+=0x9e3779b97f4a7c15ULL;x=(x^(x>>30))*0xbf5
 double uniform(std::uint64_t seed,std::uint64_t index) {return (mix(seed^mix(index))>>11)*0x1.0p-53;}
 Crypto key(std::uint64_t seed) {
     std::seed_seq seq{static_cast<std::uint32_t>(seed),static_cast<std::uint32_t>(seed>>32),0U,0U};
-    std::mt19937 rng(seq);std::array<std::uint8_t,32> bytes{};for(auto& b:bytes)b=static_cast<std::uint8_t>(rng());return Crypto(bytes);
+    std::mt19937 rng(seq);std::array<std::uint8_t,32> bytes{};for(auto& b:bytes)b=static_cast<std::uint8_t>(rng());return datapump::triad::fixture::key(bytes);
 }
 std::string sha(const fs::path& path) {
     std::ifstream f(path,std::ios::binary);if(!f)return "unavailable";

@@ -20,7 +20,8 @@ int main(int argc,char** argv){constexpr unsigned rate=48000;constexpr double ta
  for(unsigned seed=1;seed<=seeds;++seed)for(double cn0:levels)for(bool mixture:{false,true})for(bool random_phase:{false,true}) {
   helper::ToneTrackerConfig tc{rate,pilot,9000,.01,.5,true};helper::ToneTracker tracker(tc,helper::ToneTracker::workspace_required(tc));
   modem::Config c;c.sample_rate=rate;c.carrier_hz=1500;c.bandwidth_hz=36;c.dsss_factor=10;c.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;c.spreading_factor=64;c.integration_seconds=14.2;c.training_seconds=2;c.scramble=true;c.memory_limit=64ULL*1024*1024;
-  Crypto key{std::array<std::uint8_t,32>{}};c.data_key=key;
+  std::array<std::uint8_t,64> serpent{},aes{};serpent.fill(0xa7);
+  Crypto key=Crypto::from_independent_roots(serpent,aes);c.data_key=key;
   modem::PatternTransmitter payload(Bytes{1,0,1,1,0,0,1,0},c,1800000000,0,false);
   helper::Options o;o.power_w=40;o.data_power_w=4;
   const auto gain=std::sqrt(.0045/modem::nominal_signal_power)/modem::outer_dsss_transmit_gain(c);

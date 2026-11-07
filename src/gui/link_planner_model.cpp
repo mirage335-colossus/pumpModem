@@ -623,7 +623,7 @@ auto curve_base_key(const transfer::Options& options,const modem::ChannelConfig&
 auto receiver_layout_key(const transfer::Options& options,const live::Settings* settings) {
     std::vector<Bytes> keys;
     const auto add=[&](const Crypto& key) {
-        auto tag=key.mac(Bytes{'D','P','-','R','X','-','B','A','N','K'});
+        auto tag=key.identity_fingerprint(Bytes{'D','P','-','R','X','-','B','A','N','K'});
         if(std::find(keys.begin(),keys.end(),tag)==keys.end())keys.push_back(std::move(tag));
     };
     if(settings) {

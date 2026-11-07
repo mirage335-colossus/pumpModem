@@ -5,6 +5,7 @@
 #include "datapump/pattern_code.hpp"
 #include "datapump/live.hpp"
 #include "live_helper_prior.hpp"
+#include "fixture_crypto.hpp"
 #include <array>
 #include <algorithm>
 #include <cmath>
@@ -50,7 +51,7 @@ transfer::Options options() {
     c.integration_seconds=1;c.receiver_strategy=modem::ReceiverStrategy::complex_only;
     c.oscillator_search.emplace();c.oscillator_search->lf={.05,0};c.oscillator_search->rf={1,0};
     c.oscillator_search->rf_shift_hz=30000000;c.oscillator_search->margin=3;
-    o.key.emplace(Bytes(32,0x73));c.scramble=true;o.search_seconds=3;o.dsp_workspace_bytes=256*1024*1024;
+    o.key=fixture_crypto::key(Bytes(32,0xa7),Bytes(32,0x73));c.scramble=true;o.search_seconds=3;o.dsp_workspace_bytes=256*1024*1024;
     return o;
 }
 void original_domain() {

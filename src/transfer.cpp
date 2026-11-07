@@ -112,15 +112,15 @@ IntervalOptions interval_options(const Options& options,std::uint64_t first_symb
     IntervalOptions result;result.fec=options.fec;
     if(options.key) {
         const auto address=burst?burst->address(first_symbol):modem::symbol_stream_address(options.modem,options.timestamp,options.modem.stream_phase_samples,first_symbol);
-        Bytes domain{'D','P','-','I','N','T','E','R','V','A','L',2,
+        Bytes domain{'D','P','-','I','N','T','E','R','V','A','L',4,
             static_cast<std::uint8_t>(options.fec),static_cast<std::uint8_t>(options.compression)};
         for(auto value:{address.epoch,address.ordinal})
             for(int i=7;i>=0;--i)domain.push_back(static_cast<std::uint8_t>(value>>(8*i)));
         result.authenticator=[key=*options.key,domain](const Bytes& data) {
-            auto context=domain;context.insert(context.end(),data.begin(),data.end());return key.mac(context);
+            auto context=domain;context.insert(context.end(),data.begin(),data.end());return key.confidentiality_mac(context);
         };
         result.verifier=[key=*options.key,domain](const Bytes& data,const Bytes& tag) {
-            auto context=domain;context.insert(context.end(),data.begin(),data.end());return key.verify(context,tag);
+            auto context=domain;context.insert(context.end(),data.begin(),data.end());return key.verify_confidentiality(context,tag);
         };
     }
     return result;

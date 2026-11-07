@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/live.hpp"
 #include "datapump/resampler.hpp"
 #include "datapump/channel.hpp"
@@ -20,6 +21,12 @@
 using namespace datapump;
 using namespace std::chrono_literals;
 namespace {
+// Separate, public synthetic test inputs; never used for production keys.
+static datapump::Crypto fixture_key(std::span<const std::uint8_t> aes) {
+    const std::array<std::uint8_t,32> serpent{0xa5};
+    return fixture_crypto::key(serpent,aes);
+}
+
 constexpr std::uint64_t epoch=1800000000;
 void check(bool value,const char* message) {if(!value)throw Error(message);}
 struct ReadObservation {
@@ -45,7 +52,7 @@ live::Settings settings() {
     live::Settings value;value.device="helper output fixture";value.full_duplex=true;
     value.transfer.timestamp=epoch;value.transfer.search_seconds=0;
     value.transfer.automatic_receive_profiles=false;value.transfer.recovery_options.enabled=false;
-    value.transfer.key.emplace(Bytes(32,0x63));
+    value.transfer.key=fixture_key(Bytes(32,0x63));
     auto& c=value.transfer.modem;
     // Keep the data band clear of the fixed550/950Hz helper tones. The
     // provider/fallback seam and ordinary source timing remain the same.

@@ -43,7 +43,7 @@ def fake_record(binary, config, seconds, seed, memory_mib, mode, directory, **kw
                             "timing_boundary": "synthetic complete target", "harness_wall_seconds": elapsed})
 
 
-def fake_identity(binary, root, threads=1):
+def fake_identity(binary, root, threads=1, *, source_role="candidate"):
     return {"binary_sha256": resource.digest(str(binary)), "source": str(root), "threads": threads}
 
 
@@ -54,9 +54,166 @@ def fake_geometry(binary, config, **kwargs):
             "sample_rate_hz": m["sample_rate"], "maximum_chunk_samples": config["chunk_samples"]}}
 
 
+def write_crypto_sources(root):
+    for name in (*resource.REQUIRED_CRYPTO_SOURCES, *resource.SERPENT_SOURCES):
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("test " + name)
+
+
 class ResourceTests(unittest.TestCase):
     def setUp(self):
         self.config = resource.load_config()
+
+    def test_fixture_header_identity_is_required_and_reference_absence_is_bound(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "source"
+            (root / "tools").mkdir(parents=True)
+            write_crypto_sources(root)
+            (root / "tools/triad-long.cpp").write_text("driver")
+            fixture = root / "tools/triad_fixture_key.hpp"
+            fixture.write_text("first fixture")
+            binary = Path(tmp) / "binary"
+            binary.write_bytes(b"test binary")
+            with patch("triad_perf_native.environment_identity", return_value={"test": True}):
+                candidate = resource.binary_identity(binary, root)
+                name = "tools/triad_fixture_key.hpp"
+                self.assertEqual(candidate["declared_source_sha256"][name], resource.file_sha(fixture))
+                fixture.write_text("changed fixture")
+                with patch.object(resource, "implementation_identity", return_value={"version": 1}):
+                    with self.assertRaisesRegex(resource.ResourcePerformanceError, "changed"):
+                        resource.ensure_unchanged({"version": 1}, {"candidate": candidate},
+                                                  {"candidate": binary}, {"candidate": root}, 1)
+                fixture.unlink()
+                with self.assertRaisesRegex(resource.ResourcePerformanceError, "missing or nonregular"):
+                    resource.binary_identity(binary, root)
+                reference = resource.binary_identity(binary, root, source_role="reference")
+                self.assertEqual(reference["declared_source_sha256"][name], "absent")
+                driver = root / "tools/triad-long.cpp"
+                driver.write_text('#include "triad_fixture_key.hpp"\n')
+                with self.assertRaisesRegex(resource.ResourcePerformanceError, "reference driver requires missing"):
+                    resource.binary_identity(binary, root, source_role="reference")
+                driver.write_text("driver")
+                (root / "include/datapump/crypto.hpp").write_text('#include "triad_fixture_key.hpp"\n')
+                with self.assertRaisesRegex(resource.ResourcePerformanceError, "reference source requires missing"):
+                    resource.binary_identity(binary, root, source_role="reference")
+                (root / "include/datapump/crypto.hpp").write_text("historical header")
+                fixture.write_text("later appearance")
+                with patch.object(resource, "implementation_identity", return_value={"version": 1}):
+                    with self.assertRaisesRegex(resource.ResourcePerformanceError, "changed"):
+                        resource.ensure_unchanged({"version": 1}, {"reference": reference},
+                                                  {"reference": binary}, {"reference": root}, 1)
+                with self.assertRaisesRegex(resource.ResourcePerformanceError, "invalid source role"):
+                    resource.binary_identity(binary, root, source_role="other")
+
+    def test_unchanged_recheck_propagates_explicit_source_roles(self):
+        roles = []
+        def identity(binary, root, threads=1, *, source_role="candidate"):
+            roles.append((str(binary), source_role))
+            return {"role": source_role}
+        with (patch.object(resource, "implementation_identity", return_value={"version": 1}),
+              patch.object(resource, "binary_identity", side_effect=identity)):
+            resource.ensure_unchanged({"version": 1},
+                                      {"reference": {"role": "reference"}, "candidate": {"role": "candidate"}},
+                                      {"reference": "ref-bin", "candidate": "candidate-bin"},
+                                      {"reference": "ref-root", "candidate": "candidate-root"}, 1)
+        self.assertEqual(roles, [("ref-bin", "reference"), ("candidate-bin", "candidate")])
+
+    def test_fixture_header_symlink_and_nonregular_paths_rejected_for_both_roles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "source"
+            (root / "tools").mkdir(parents=True)
+            write_crypto_sources(root)
+            (root / "tools/triad-long.cpp").write_text("driver")
+            binary = base / "binary"
+            binary.write_bytes(b"test binary")
+            fixture = root / "tools/triad_fixture_key.hpp"
+            external = base / "outside"
+            external.write_text("external fixture")
+            with patch("triad_perf_native.environment_identity", return_value={"test": True}):
+                for role in ("candidate", "reference"):
+                    fixture.symlink_to(external)
+                    with self.assertRaisesRegex(resource.ResourcePerformanceError, "symlinked"):
+                        resource.binary_identity(binary, root, source_role=role)
+                    fixture.unlink()
+                    fixture.mkdir()
+                    with self.assertRaisesRegex(resource.ResourcePerformanceError, "missing or nonregular"):
+                        resource.binary_identity(binary, root, source_role=role)
+                    fixture.rmdir()
+                # A symlink in the tools directory is not a legitimate absent
+                # historical file, even when the target header is missing.
+                (root / "tools/triad-long.cpp").unlink()
+                (root / "tools").rmdir()
+                external_dir = base / "external-tools"
+                external_dir.mkdir()
+                (external_dir / "triad-long.cpp").write_text("driver")
+                (root / "tools").symlink_to(external_dir, target_is_directory=True)
+                for role in ("candidate", "reference"):
+                    with self.assertRaisesRegex(resource.ResourcePerformanceError, "symlinked"):
+                        resource.binary_identity(binary, root, source_role=role)
+
+    def test_crypto_sources_are_bound_and_only_complete_historical_absence_allowed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "source"
+            (root / "tools").mkdir(parents=True)
+            (root / "tools/triad-long.cpp").write_text("driver")
+            (root / "tools/triad_fixture_key.hpp").write_text("fixture")
+            write_crypto_sources(root)
+            binary = Path(tmp) / "binary"
+            binary.write_bytes(b"test binary")
+            with patch("triad_perf_native.environment_identity", return_value={"test": True}):
+                candidate = resource.binary_identity(binary, root)
+                for name in (*resource.REQUIRED_CRYPTO_SOURCES, *resource.SERPENT_SOURCES):
+                    self.assertEqual(candidate["declared_source_sha256"][name], resource.file_sha(root / name))
+                    original = (root / name).read_text()
+                    (root / name).write_text(original + " changed")
+                    with patch.object(resource, "implementation_identity", return_value={"version": 1}):
+                        with self.assertRaisesRegex(resource.ResourcePerformanceError, "changed"):
+                            resource.ensure_unchanged({"version": 1}, {"candidate": candidate},
+                                                      {"candidate": binary}, {"candidate": root}, 1)
+                    (root / name).write_text(original)
+                for name in resource.SERPENT_SOURCES:
+                    (root / name).unlink()
+                with self.assertRaisesRegex(resource.ResourcePerformanceError, "missing or nonregular"):
+                    resource.binary_identity(binary, root)
+                historical = resource.binary_identity(binary, root, source_role="reference")
+                for name in resource.SERPENT_SOURCES:
+                    self.assertEqual(historical["declared_source_sha256"][name], "absent")
+                for name in resource.SERPENT_SOURCES:
+                    (root / name).write_text("newly appeared")
+                with patch.object(resource, "implementation_identity", return_value={"version": 1}):
+                    with self.assertRaisesRegex(resource.ResourcePerformanceError, "changed"):
+                        resource.ensure_unchanged({"version": 1}, {"reference": historical},
+                                                  {"reference": binary}, {"reference": root}, 1)
+                for name in resource.SERPENT_SOURCES:
+                    (root / name).unlink()
+                (root / resource.SERPENT_SOURCES[0]).write_text("partial")
+                with self.assertRaisesRegex(resource.ResourcePerformanceError, "incomplete Serpent"):
+                    resource.binary_identity(binary, root, source_role="reference")
+                (root / resource.SERPENT_SOURCES[0]).unlink()
+                (root / "src/crypto.cpp").write_text('#include "datapump/serpent.hpp"\n')
+                with self.assertRaisesRegex(resource.ResourcePerformanceError, "incomplete Serpent"):
+                    resource.binary_identity(binary, root, source_role="reference")
+                (root / "src/crypto.cpp").write_text("historical crypto")
+                (root / "tools/triad-long.cpp").write_text('#include "datapump/serpent.hpp"\n')
+                with self.assertRaisesRegex(resource.ResourcePerformanceError, "incomplete Serpent"):
+                    resource.binary_identity(binary, root, source_role="reference")
+                (root / "tools/triad-long.cpp").write_text("historical driver")
+                (root / "CMakeLists.txt").write_text("add_library(datapump src/serpent.cpp)")
+                with self.assertRaisesRegex(resource.ResourcePerformanceError, "incomplete Serpent"):
+                    resource.binary_identity(binary, root, source_role="reference")
+                (root / "CMakeLists.txt").write_text("historical build")
+                (root / "include/datapump/crypto.hpp").unlink()
+                with self.assertRaisesRegex(resource.ResourcePerformanceError, "missing or nonregular native crypto"):
+                    resource.binary_identity(binary, root, source_role="reference")
+                (root / "include/datapump/crypto.hpp").write_text("historical header")
+                external_src = Path(tmp) / "external-src"
+                (root / "src").rename(external_src)
+                (root / "src").symlink_to(external_src, target_is_directory=True)
+                for role in ("candidate", "reference"):
+                    with self.assertRaisesRegex(resource.ResourcePerformanceError, "symlinked native crypto"):
+                        resource.binary_identity(binary, root, source_role=role)
 
     def test_real_branch_counters_and_complete_work_required(self):
         paired, work = resource.work_record(manifest(), self.config, 7, "paired")

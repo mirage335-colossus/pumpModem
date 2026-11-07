@@ -2,6 +2,7 @@
 #include "datapump/helper_frontend.hpp"
 #include "datapump/helper_receiver.hpp"
 #include "datapump/types.hpp"
+#include "fixture_crypto.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -75,7 +76,7 @@ int main(int argc,char** argv) {
               "HF helper plan lost its adjacent pure pilot and auxiliary spacing");
         const auto coarse_expected=public_plan.frequency_hz;
         auto received_plan=public_plan;received_plan.helper_gain=amplitude;received_plan.data_gain=0;
-        const Crypto key{std::array<std::uint8_t,32>{}};
+        const auto key=fixture_crypto::key(Bytes(32,0xa5),std::array<std::uint8_t,32>{});
         helper::Generator generator(options,received_plan,1800000000,true,key);
         const auto truth=public_plan.frequency_hz*(1+clock_ppm*1e-6)+cfo;
         const helper::CoarseToneSearch::Config coarse_config{rate,coarse_expected,coarse_width,4096,3};

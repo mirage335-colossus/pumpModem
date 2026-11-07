@@ -79,6 +79,18 @@ host audio adapter over the same bounded PCM pipe interface; no such adapter or
 device-selection capability is supplied yet. The common application and modem
 would continue using the audio-provider interface.
 
+Keyfile generation can mix fresh microphone input with operating-system
+randomness. Use **Enable microphone and audio** before generating a keyfile;
+the hosted embedding application controls microphone permission. If input is
+unavailable or unusable, the completed operation warns that it used only
+operating-system randomness. The generated
+keyfile does not contain an audio recording. Audio can be processed by the
+browser or device despite the requested capture settings, so it is a
+supplementary source and its entropy is not assumed or quantified.
+The browser worker and Wasm application use this host audio path; neither
+launches the native `datapump-audio-entropy` helper used by native applications
+for a separately opened input device.
+
 The ordinary native audio provider cannot simply be enabled in the worker: its
 configured ALSA routes and PulseAudio/PipeWire fallbacks may use sockets. A direct
 server-hardware provider needs qualified hardware-only routing, portable dependency

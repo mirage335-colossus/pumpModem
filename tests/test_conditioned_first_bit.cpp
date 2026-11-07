@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 // PRIVATE finite-reference checks. No keyfiles/devices/GUI/full draft decoding.
 #include "conditioned_first_bit.hpp"
 #include "estimate_cancellation.hpp"
@@ -47,7 +48,7 @@ p::FirstBitRequest request() {
         modem::OuterDsssVersion::interleaved_v2).config;
     o.modem.stream_epoch=1800000006;o.modem.stream_phase_samples=0;
     std::array<std::uint8_t,32> key{};for(unsigned i=0;i<key.size();++i)key[i]=static_cast<std::uint8_t>(17+3*i);
-    o.key=Crypto(key);
+    o.key=fixture_crypto::key(Bytes(32,0xd3),key);
     auto hops=gui::fhss::resolve(gui::fhss::Preference::fcc,o.modem);check(hops.available,"Native B FakeFCC profile unavailable");
     modem::FhssPlan h;h.channels=hops.channels;h.dwell_seconds=hops.dwell_seconds;
     for(unsigned i=0;i<h.channels;++i)h.shifts[i]=hops.center(i)-o.modem.carrier_hz;

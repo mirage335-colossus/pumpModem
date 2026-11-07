@@ -3,6 +3,7 @@
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/transfer.hpp"
+#include "fixture_crypto.hpp"
 
 #include <algorithm>
 #include <array>
@@ -32,10 +33,11 @@ void unchanged_crypto_and_chip_vectors() {
     for(std::size_t i=0;i<aes.size();++i)aes[i]^=plaintext[i];
     check(aes==from_hex("28fe0eb519f6dca495ead29378b02fd720febc07ab11ea7e5201"),
           "pulse shaping must not change the frozen AES waveform-purpose stream");
-    const auto encrypted=key.xor_data(plaintext,epoch,19);
-    check(encrypted!=aes && key.xor_data(encrypted,epoch,19)==plaintext,
+    const auto confidentiality_key=fixture_crypto::key(Bytes(32,0xd3),seed);
+    const auto encrypted=confidentiality_key.xor_data(plaintext,epoch,19);
+    check(encrypted!=aes && confidentiality_key.xor_data(encrypted,epoch,19)==plaintext,
           "confidentiality uses a separate reversible cascade from the AES waveform stream");
-    transfer::Options shaped;shaped.key=key;shaped.timestamp=epoch;shaped.modem.dsss=true;
+    transfer::Options shaped;shaped.key=confidentiality_key;shaped.timestamp=epoch;shaped.modem.dsss=true;
     auto rectangular=shaped;rectangular.modem.pulse_shaping=false;
     Message message;message.kind=MessageKind::text;message.data=plaintext;message.local_id[0]=1;
     const auto bits=transfer::message_wire_bits(message,shaped);

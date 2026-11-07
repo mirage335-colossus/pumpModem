@@ -1,3 +1,4 @@
+#include "triad_fixture_key.hpp"
 #include "datapump/triad_modem_v3.hpp"
 
 #include <algorithm>
@@ -85,7 +86,7 @@ Crypto fixture_key() {
     Bytes bytes(32);
     for (std::size_t i = 0; i < bytes.size(); ++i)
         bytes[i] = static_cast<std::uint8_t>(37 + 19 * i);
-    return Crypto(bytes);
+    return datapump::triad::fixture::key(bytes);
 }
 
 struct Model {

@@ -363,6 +363,10 @@ Received content is kept in bounded RAM, with no receive cache or temporary
 source files on disk. Save needed content before clearing it or closing the
 application; older entries may be evicted at the memory limit.
 Saving received files and generating keyfiles do not overwrite existing files.
+Keyfile generation collects fresh input from the selected audio device as a
+supplement to operating-system randomness. If input is unavailable or unusable,
+the completed operation warns that it used only operating-system randomness.
+In a browser, enable microphone and audio first.
 .SH ENVIRONMENT
 .TP
 .B DISPLAY

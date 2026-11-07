@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "../src/gui/inspection_model.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/compression.hpp"
@@ -35,7 +36,7 @@ void fixed_stream_layout() {
     request.message.filename="private-name.txt";request.message.callsign="SECRET-CALL";request.message.grid="ZZ99";
     for(const auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60})for(const bool keyed:{false,true})for(const bool compressed:{false,true}) {
         request.options.fec=fec;request.options.compression=compressed;
-        if(keyed)request.options.key.emplace(Bytes(32,0x37));else request.options.key.reset();
+        if(keyed)request.options.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x37));else request.options.key.reset();
         const auto result=gui::inspect(request);
         const auto coded=transfer::message_bits(request.message,request.options);
         check(!result.binary && !result.lanes.empty() && !result.sections.empty(),"stream inspection is incomplete");
@@ -65,7 +66,7 @@ void fixed_stream_layout() {
         check(rendered.find("sole stream ending rule")!=std::string::npos,"inspection omitted physical end rule");
         check(result.constellations.empty(),"removed APSK training alphabet remains in the pattern inspector");
     }
-    request.options.key.emplace(Bytes(32,0x37));request.options.modem.scramble=true;
+    request.options.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x37));request.options.modem.scramble=true;
     const auto keyed=gui::inspect(request);
     check(field(keyed,"Data encryption")=="On" &&
           keyed.preamble_description.find("Data stream protects the prefix")!=std::string::npos &&
@@ -75,7 +76,7 @@ void fixed_stream_layout() {
 void tone_protection() {
     gui::InspectionRequest request;request.message.data=Bytes(80,0x42);
     request.options.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_tone,true).config;
-    request.options.key.emplace(Bytes(32,0x37));request.options.modem.data_key=request.options.key;
+    request.options.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x37));request.options.modem.data_key=request.options.key;
     request.options.modem.scramble=true;request.options.modem.dsss=true;
     request.options.modem.spreading_seed.fill(3);request.options.modem.dsss_seed.fill(9);
     const auto tone=gui::inspect(request);
@@ -90,7 +91,7 @@ void tone_protection() {
 void static_pattern_binding() {
     gui::InspectionRequest request;request.binary=Bytes{0,1};
     request.options.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_pattern,false).config;
-    request.options.modem.scramble=true;request.options.key.emplace(Bytes(32,0x57));
+    request.options.modem.scramble=true;request.options.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x57));
     const auto keyed=gui::inspect(request);
     check(keyed.pattern_space && keyed.pattern_space->bounded_pattern_preview && keyed.pattern_space->codewords.size()==2,
           "keyed inspection did not retain its two independent pattern rows");
@@ -106,7 +107,7 @@ void scheduled_representative_binding() {
         request.target_snr=split?3:32;
         request.options.modem=tuning::resolve(split?3.6:3600,request.target_snr,
             tuning::PatternMode::auto_keystream,true,1500.*factor,factor).config;
-        request.options.key.emplace(Bytes(32,0x57));
+        request.options.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x57));
         request.options.modem.data_key=request.options.key;
         request.options.modem.scheduled_hopping=std::make_shared<const modem::SchedHopPlan>(modem::SchedHopPlan{10,1});
         check(modem::packed_scheduled_symbols(request.options.modem)!=split,
@@ -120,7 +121,7 @@ void scheduled_representative_binding() {
               "scheduled representative illustration blocked exact keyed airtime inspection");
         check(request.options.modem.data_key->mac(Bytes{'p','r','e','v','i','e','w'})==original_tag,
               "representative inspection modified the communication schedule key");
-        request.options.key.emplace(Bytes(32,0x91));request.options.modem.data_key=request.options.key;
+        request.options.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x91));request.options.modem.data_key=request.options.key;
         request.options.modem.spreading_seed.fill(99);request.options.modem.dsss_seed.fill(143);
         const auto second=gui::inspect(request);
         check(second.pattern_space && first.pattern_space->codewords==second.pattern_space->codewords &&
@@ -154,7 +155,7 @@ void lpi_advisory() {
     check(field(public_pattern,"Data encryption")=="Off"&&!request.options.key&&
           !request.options.modem.scramble&&!request.options.modem.dsss,
           "observer applicability changed the public waveform");
-    request.options.key.emplace(Bytes(32,0x31));
+    request.options.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x31));
     const auto private_pattern=gui::inspect(request);
     request.observer_hopping=lpi::Hopping{};
     const auto hopped=gui::inspect(request);
@@ -307,7 +308,7 @@ void raw_and_short_sources() {
     request.message.kind=MessageKind::text;request.message.data=Bytes{'e'};
     for(const auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60})for(const bool keyed:{false,true}) {
         request.options.fec=fec;request.options.compression=true;
-        if(keyed)request.options.key.emplace(Bytes(32,0x37));else request.options.key.reset();
+        if(keyed)request.options.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x37));else request.options.key.reset();
         const auto tiny=gui::inspect(request);
         check(!tiny.stream_layout && tiny.estimate.wire_bits==3 && field(tiny,"FEC")=="Off" &&
               field(tiny,"Integrity")=="None" && field(tiny,"Compression")=="Fixed short-text dictionary" &&

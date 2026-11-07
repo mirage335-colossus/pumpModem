@@ -17,7 +17,9 @@ int main() {
  for(bool composite:{false,true}) {
   modem::Config c;c.sample_rate=rate;c.carrier_hz=1500;c.bandwidth_hz=36;c.spreading_factor=256;
   c.dsss_factor=10;c.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;c.integration_seconds=14.2;
-  c.training_seconds=2;c.scramble=true;c.memory_limit=64ULL*1024*1024;c.data_key=Crypto{std::array<std::uint8_t,32>{}};
+  c.training_seconds=2;c.scramble=true;c.memory_limit=64ULL*1024*1024;
+  std::array<std::uint8_t,64> serpent{},aes{};serpent.fill(0xa7);
+  c.data_key=Crypto::from_independent_roots(serpent,aes);
   helper::Options options;options.power_w=40;options.data_power_w=4;
   const auto geometry=helper::plan(options,helper::placement_band(c),rate);
   const auto pilot=geometry.frequency_hz,truth=pilot*clock_scale+offset;

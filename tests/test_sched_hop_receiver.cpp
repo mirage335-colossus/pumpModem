@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/pattern_correlator.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
@@ -382,7 +383,7 @@ void broad_short_profile_and_phase_cancellation() {
     // channel seed. A geometrically supported64-chip row failed clean full-bank
     // admission on the former half-chip lattice; do not replace its seed.
     transfer::Options options;options.modem=tuning::resolve(3600,55,tuning::PatternMode::auto_pattern,false,{}).config;
-    options.timestamp=1800000000;options.search_seconds=2;options.key.emplace(Bytes(32,0x67));
+    options.timestamp=1800000000;options.search_seconds=2;options.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x67));
     options.dsp_workspace_bytes=512ULL*1024*1024;options.content_limit=1024*1024;
     options.audio_timing_error_seconds=.05;
     auto& c=options.modem;c.sample_rate=2000;c.bandwidth_hz=16;c.carrier_hz=500;

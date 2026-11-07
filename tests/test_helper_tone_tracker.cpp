@@ -5,6 +5,7 @@
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/types.hpp"
+#include "fixture_crypto.hpp"
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -226,7 +227,7 @@ void actual_helper_cold_capture_before_payload() {
     constexpr Case cases[]={{30,.287,1200},{-30,.287,1200},{0,.137,2400},
         {5.859375,.017,1200},{-5.859375,.217,2400},{11.6015625,.399,1200},
         {29.296875,.071,2400},{.137,.311,1200}};
-    const Crypto key{std::array<std::uint8_t,32>{}}; // Public nonsecret fixture.
+    const auto key=fixture_crypto::key(Bytes(32,0xa5),std::array<std::uint8_t,32>{}); // Public nonsecret fixture.
     helper::Options options;options.power_w=40;options.data_power_w=4;
     const helper::ToneTrackerConfig config{rate,helper_hz,90.7,.01,.5};
     helper::TonePrecisionRequest precision;
@@ -594,7 +595,7 @@ void actual_two_tone_pilot_keeps_clock_unresolved() {
     data.dsss_factor=10;data.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
     data.spreading_factor=64;data.integration_seconds=14.2;data.training_seconds=2;data.scramble=true;
     data.memory_limit=64ULL*1024*1024;
-    const Crypto key{std::array<std::uint8_t,32>{}};data.data_key=key;
+    const auto key=fixture_crypto::key(Bytes(32,0xa5),std::array<std::uint8_t,32>{});data.data_key=key;
     modem::PatternTransmitter transmitter(Bytes{1,0,1,1,0,0,1,0},data,epoch,0,false);
     std::vector<float> payload(static_cast<std::size_t>(transmitter.total_samples()));
     std::size_t emitted=0;

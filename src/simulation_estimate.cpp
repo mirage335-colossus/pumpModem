@@ -3070,7 +3070,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         std::vector<Bytes> fingerprints;
         if(settings.permits_plaintext())families.emplace_back();
         const auto add_key=[&](const Crypto& key) {
-            const auto tag=key.mac(Bytes{'D','P','-','R','X','-','B','A','N','K'});
+            const auto tag=key.identity_fingerprint(Bytes{'D','P','-','R','X','-','B','A','N','K'});
             if(std::find(fingerprints.begin(),fingerprints.end(),tag)==fingerprints.end()) {
                 fingerprints.push_back(tag);families.emplace_back(key);
             }
@@ -3242,8 +3242,8 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         if(profile.symbol_burst.enabled())profile_options.key=profile.data_key;
         const auto same_key=[](const std::optional<Crypto>& a,const std::optional<Crypto>& b) {
             if(a.has_value()!=b.has_value())return false;
-            return !a||a->mac(Bytes{'D','P','-','R','X','-','B','A','N','K'})==
-                b->mac(Bytes{'D','P','-','R','X','-','B','A','N','K'});
+            return !a||a->identity_fingerprint(Bytes{'D','P','-','R','X','-','B','A','N','K'})==
+                b->identity_fingerprint(Bytes{'D','P','-','R','X','-','B','A','N','K'});
         };
         const auto matches=same_profile(config,profile)&&
             (!config.symbol_burst.enabled()||same_key(profile_options.key,options.key));
@@ -3257,6 +3257,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         // media, options, key/profile counts and matching wire bits are fixed.
         const auto training_samples=modem::training_sample_count(profile);
         const auto established_bits=matches?transmission.wire_bits:0;
+        // This cache describes the AES-generated physical calendar only.
         const auto calendar_tag=profile.symbol_burst.enabled()&&profile.data_key&&profile.symbol_burst.random_limit?
             profile.data_key->mac(Bytes{'D','P','-','S','B','-','C','A','L','-','C','O','S','T'}):Bytes{};
         const auto existing=std::find_if(work_entries.begin(),work_entries.end(),[&](const auto& entry) {

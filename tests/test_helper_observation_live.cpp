@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/audio.hpp"
 #include "datapump/helper_carrier.hpp"
 #include "datapump/live.hpp"
@@ -26,6 +27,12 @@
 using namespace datapump;
 using namespace std::chrono_literals;
 namespace {
+// Separate, public synthetic test inputs; never used for production keys.
+static datapump::Crypto fixture_key(std::span<const std::uint8_t> aes) {
+    const std::array<std::uint8_t,32> serpent{0xa5};
+    return fixture_crypto::key(serpent,aes);
+}
+
 void check(bool ok,const std::string& what){if(!ok)throw Error(what);}
 constexpr std::uint32_t raw_rate=48000,logical_rate=8000;
 constexpr std::uint64_t nominal_fade_first=12ULL*raw_rate;
@@ -67,7 +74,7 @@ live::Settings settings(bool weak) {
     c.spreading_factor=64;c.integration_seconds=weak?128:0;c.pulse_shaping=false;c.scramble=true;
     c.receiver_strategy=modem::ReceiverStrategy::automatic;
     c.oscillator_search=modem::OscillatorSearchConfig{{.01,0},{weak?.001:1.,0},1e6,3};
-    std::array<std::uint8_t,32> key{};key[0]=29;value.transfer.key=Crypto(key);
+    std::array<std::uint8_t,32> key{};key[0]=29;value.transfer.key=fixture_key(key);
     value.transfer.timestamp=0;value.transfer.search_seconds=0;value.transfer.clock_sync.reset();
     value.transfer.automatic_receive_profiles=false;value.transfer.recovery_options.enabled=false;
     value.dsp_workspace_bytes=value.transfer.dsp_workspace_bytes=64ULL*1024*1024;

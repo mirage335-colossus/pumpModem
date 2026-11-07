@@ -1,5 +1,6 @@
 #include "frequency_parse.hpp"
 #include "datapump/audio.hpp"
+#include "datapump/audio_entropy.hpp"
 #include "datapump/fast/cli.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/helper_receiver.hpp"
@@ -63,7 +64,7 @@ Usage: pump COMMAND [OPTIONS]
   analyze-link Bounded statistical link analysis as JSON; no PCM or decoder
   tx           Encode text/file to WAV (--output) or live audio (--device)
   rx           Decode a WAV (--input) or record live audio (--device --seconds)
-  keygen       Create an owner-only 128 MiB symmetric keyfile (--output)
+  keygen       Create an owner-only 128 MiB symmetric keyfile using audio input (--output)
   keys         List the named key sets in --keyfile
   devices      Enumerate local audio devices
   status-tx    Transmit exact few-bit callsign to WAV, without stream overhead
@@ -145,7 +146,7 @@ Modem:
   --progress            Emit timing-search progress to stderr
 
 Audio/simulation:
-  --device ID           OS audio endpoint; listen automatically uses default
+  --device ID           OS audio endpoint; listen and keygen default to default
   --background-noise-bits N       Full-rate DAC noise at N effective bits (0..16)
   --background-noise-obscured-bits N  Equivalent obscured bits (0..16)
   --background-noise-db N         Full-scale-sine suppression in dB (0..300)
@@ -290,7 +291,7 @@ public:
             reject({"text"},"is a transmit input; use --input for reception");
         }
         if(command!="rx") reject({"save"},"is only valid for rx");
-        if(command!="tx" && command!="rx" && command!="status-tx" && command!="listen") reject({"device"},"is only valid for live audio commands");
+        if(command!="tx" && command!="rx" && command!="status-tx" && command!="listen" && command!="keygen") reject({"device"},"is only valid for live audio commands or keygen");
         if(command!="keygen") reject({"key-names"},"is only valid for keygen");
         if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"simulation"},"is only valid for simulate/listen/analyze-link");
         if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"clock-error-ppm","phase-noise"},"is only valid for simulate/listen/analyze-link");
@@ -1677,8 +1678,20 @@ int main(int argc,char** argv) {
             std::string name;
             while(std::getline(input,name,',')) names.push_back(name);
             if(a.get("key-names").ends_with(',')) throw Error("key names must not be empty");
-            create_keyring(a.get("output"),names,a.has("pad")?std::optional<std::filesystem::path>(a.get("pad")):std::nullopt);
-            std::cerr<<"Created symmetric keyfile: "<<a.get("output")<<'\n';return 0;
+            std::cerr<<"Key generation uses audio input "<<a.get("device","default")<<".\n";
+            KeyfileGenerationOptions generation;
+            generation.audio=audio::keyfile_audio_source(a.get("device","default"));
+            generation.allow_audio_fallback=true;
+            generation.progress=[](std::string_view stage) {std::cerr<<stage<<"...\n";};
+            KeyfileGenerationResult result;
+            try {
+                result=create_keyring(a.get("output"),names,a.has("pad")?std::optional<std::filesystem::path>(a.get("pad")):std::nullopt,generation);
+            } catch(const std::exception& error) {
+                throw Error(std::string(error.what())+". If an incomplete output file exists, remove it or choose a new filename before retrying.");
+            }
+            std::cerr<<"Created symmetric keyfile: "<<a.get("output")<<'\n';
+            if(!result.warning.empty()) std::cerr<<"WARNING: "<<result.warning<<'\n';
+            return 0;
         }
         if(a.command=="keys") {
             if(!a.has("keyfile")) throw Error("keys requires --keyfile PATH");

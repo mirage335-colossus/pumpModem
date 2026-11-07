@@ -1,4 +1,5 @@
 #include "application.hpp"
+#include "fixture_keyfile.hpp"
 #include "controller.hpp"
 #include "launch_command.hpp"
 #include "fhss_profile.hpp"
@@ -33,7 +34,7 @@ void load(Controller& controller,const std::string& command) {
 void load_synthetic_key(Controller& controller) {
     struct Fixture {
         std::filesystem::path dir=std::filesystem::temp_directory_path()/"dp-fhss-list-20261011",path=dir/"synthetic-key.bin";
-        Fixture(){std::filesystem::create_directories(dir);create_keyring(path,{"FHSS synthetic key"});}
+        Fixture(){std::filesystem::create_directories(dir);check(create_keyring(path,{"FHSS synthetic key"},std::nullopt,fixture_keyfile::generation()).audio_used,"Synthetic keyfile audio was not used");}
         ~Fixture(){std::error_code ec;std::filesystem::remove(path,ec);std::filesystem::remove(dir,ec);}
     };
     static Fixture fixture;

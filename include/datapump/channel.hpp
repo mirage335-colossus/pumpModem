@@ -52,9 +52,9 @@ public:
     };
     static constexpr std::size_t workspace_bound=80*1024;
     // Fixed observation/presentation, including the two-record helper END
-    // retry owner. Transfer 256 bytes from each optional cohort allowance;
-    // both mode-specific combined reserves and the total remain unchanged.
-    static constexpr std::size_t auxiliary_workspace_bound=16*1024+256;
+    // retry owner and the Helper receiver's separate confidentiality material.
+    // The larger reservation remains within the fixed total channel workspace.
+    static constexpr std::size_t auxiliary_workspace_bound=16*1024+512;
     // Shared plot/channel reserve also holds the optional rolling helper
     // frontend. Both channel layouts prove this slack without shrinking any
     // ordinary receiver grant or increasing the existing workspace reserve.

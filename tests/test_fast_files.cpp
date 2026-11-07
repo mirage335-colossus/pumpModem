@@ -1,3 +1,4 @@
+#include "fast_test_key.hpp"
 #include "datapump/fast/file_transfer.hpp"
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/compression.hpp"
@@ -34,7 +35,7 @@ void put32(std::fstream& file,std::streamoff offset,std::uint32_t value) {
 }
 void test_files() {
     Directory directory;Settings settings;settings.profile=classic_profile(Channel::wire);settings.profile.constellation=4;
-    settings.profile.interleave_depth=1;settings.key=Crypto(Bytes(32,4));settings.quota_bytes=1024*1024;
+    settings.profile.interleave_depth=1;settings.key=fast_test::key(Bytes(32,4));settings.quota_bytes=1024*1024;
     const auto source=directory.path/"source.bin",wave=directory.path/"transfer.wav",destination=directory.path/"received.bin";
     const Bytes content{0,255,0x80,0,1,3,5,7,0,0};write(source,content);
     bool tx_progress=false,rx_progress=false;
@@ -51,7 +52,7 @@ void test_files() {
     rx.file->save(destination);check(std::filesystem::file_size(destination)==content.size(),"explicit save source size");
     rejects([&]{rx.file->save(destination);},"save must exclusively create destination");
     rejects([&]{transmit_wave(settings,source,wave);},"WAV generation must exclusively create destination");
-    auto wrong=settings;wrong.key=Crypto(Bytes(32,5));const auto bad=receive_wave(wrong,wave);
+    auto wrong=settings;wrong.key=fast_test::key(Bytes(32,5));const auto bad=receive_wave(wrong,wave);
     check(!bad.complete && !bad.file,"wrong key cannot release received WAV source");
 
     // The local WAV length remains valid after removing actual silence. Only
@@ -87,7 +88,7 @@ void text_wave_roundtrips() {
     const std::string text=std::string("Fast text: caf\xc3\xa9\nline two")+'\0'+std::string(" tail\0",6);
     const Bytes expected(text.begin(),text.end());
     for(bool encrypted:{false,true}) {
-        settings.key=encrypted?std::optional<Crypto>(Crypto(Bytes(32,4))):std::nullopt;
+        settings.key=encrypted?std::optional<Crypto>(fast_test::key(Bytes(32,4))):std::nullopt;
         const auto prefix=encrypted?"encrypted":"public";
         const auto wave=directory.path/(std::string(prefix)+"-text.wav");
         const auto tx=transmit_text_wave(settings,text,wave);
@@ -106,7 +107,7 @@ void text_wave_roundtrips() {
                         (rx.authenticated_groups==0 && rx.checksum_groups>0),
               "public checksum counts remain distinct from authenticated groups");
         auto opposite=settings;
-        opposite.key=encrypted?std::nullopt:std::optional<Crypto>(Crypto(Bytes(32,4)));
+        opposite.key=encrypted?std::nullopt:std::optional<Crypto>(fast_test::key(Bytes(32,4)));
         const auto mismatch=receive_wave(opposite,wave);
         check(!mismatch.complete && !mismatch.file && !mismatch.authenticated,
               "opposite locally selected encryption mode must fail without fallback");
@@ -142,7 +143,7 @@ void dense_s16_file() {
     Directory directory;
     Settings settings;settings.profile=classic_profile(Channel::wire);
     settings.profile.constellation=256;settings.profile.code_rate=CodeRate::seven_eighths;
-    settings.key=Crypto(Bytes(32,7));settings.quota_bytes=1024*1024;
+    settings.key=fast_test::key(Bytes(32,7));settings.quota_bytes=1024*1024;
     const auto source=directory.path/"dense.bin",wave=directory.path/"dense.wav";
     Bytes content(32768);
     for(std::size_t i=0;i<content.size();++i)content[i]=static_cast<std::uint8_t>(i);

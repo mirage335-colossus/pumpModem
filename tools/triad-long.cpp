@@ -1,3 +1,4 @@
+#include "triad_fixture_key.hpp"
 #include "datapump/triad_modem_v3.hpp"
 #include "diagnostic_iq_noise_options.hpp"
 #include "datapump/triad_statistics.hpp"
@@ -349,6 +350,7 @@ Options parse(int argc, char** argv) {
   --burst-wait-tiles N         Silent tile waits within this one-bit v3 observation.
   --seed N --epoch UTC | --now --trials N --signal-bit 0|1 --no-encrypt
   --mode source-bit-map       Performance-only source coefficient receipts; no channel/receiver.
+  --mode fixture-key-mode     Report the fixture key derivation mode without constructing keys.
   --mode capture-hash         Untimed complete received-input hash preflight; no receiver/scoring.
   --performance-tx-masks BITS --performance-rx-masks BITS --performance-signal-bits BITS
                               Frozen source-only maps and original-reference physical bits per trial.
@@ -536,7 +538,7 @@ Examples:
     }
     if (o.now) o.epoch = static_cast<std::uint64_t>(std::time(nullptr));
     if(o.mode=="resolve")o.mode="configure";
-    if (o.mode != "configure" && o.mode != "plan" && o.mode != "run" && o.mode != "export" && o.mode != "export-source-window" && o.mode != "export-sampled" && o.mode != "export-stats" && o.mode != "export-group-stats" && o.mode != "source-bit-map" && o.mode != "capture-hash") throw std::invalid_argument("mode must be configure, plan, run, export, export-source-window, export-sampled, export-stats, export-group-stats, or source-bit-map");
+    if (o.mode != "configure" && o.mode != "plan" && o.mode != "run" && o.mode != "export" && o.mode != "export-source-window" && o.mode != "export-sampled" && o.mode != "export-stats" && o.mode != "export-group-stats" && o.mode != "source-bit-map" && o.mode != "capture-hash" && o.mode != "fixture-key-mode") throw std::invalid_argument("mode must be configure, plan, run, export, export-source-window, export-sampled, export-stats, export-group-stats, source-bit-map, capture-hash, or fixture-key-mode");
     if(!o.performance_tx_masks.empty()||!o.performance_rx_masks.empty()||!o.performance_signal_bits.empty()) {
         const auto count=(o.mode=="run"||o.mode=="capture-hash")?o.trials:1U;
         if((o.mode!="run"&&o.mode!="export-stats"&&o.mode!="export-group-stats"&&o.mode!="capture-hash") ||
@@ -664,7 +666,7 @@ Crypto key_for(std::uint64_t seed, std::uint64_t trial) {
     std::mt19937 engine(seq);
     std::array<std::uint8_t,32> material{};
     for (auto& b : material) b = static_cast<std::uint8_t>(engine());
-    return Crypto(material);
+    return datapump::triad::fixture::key(material);
 }
 
 std::vector<double> grid(double low, double high, double step) {
@@ -1020,7 +1022,7 @@ void json_configuration(std::ostream& out,const Options& o,const Format& f,const
 void json_performance_geometry(std::ostream& out,const Options& o);
 void print_configuration(const Options& o) {
     const auto f=format_for(o);const auto g=geometry(f);
-    std::cout<<std::setprecision(17)<<"{\"mode\":\"configure\",\"configuration\":";
+    std::cout<<std::setprecision(17)<<"{\"mode\":\"configure\",\"fixture_key_mode\":\""<<datapump::triad::fixture::key_mode<<"\",\"configuration\":";
     json_configuration(std::cout,o,f,g);std::cout<<",\"performance_geometry\":";
     json_performance_geometry(std::cout,o);std::cout<<"}\n";
 }
@@ -1037,6 +1039,7 @@ std::uint8_t performance_source_bit(const Options& o,std::uint8_t physical,bool 
 void json_provenance(std::ostream& out,const Options& o,const Format& f,const Geometry& g,std::uint64_t trial=0) {
     const auto previous_precision=out.precision();
     out<<std::setprecision(std::numeric_limits<double>::max_digits10);
+    out<<",\"fixture_key_mode\":\""<<datapump::triad::fixture::key_mode<<'\"';
     if(!o.performance_tx_masks.empty()) {
         out<<",\"performance_physical_input\":{\"schema\":\"triad-performance-physical-bits-v1\",\"tx_mask\":"
            <<static_cast<unsigned>(performance_mask(o,true,trial))<<",\"rx_mask\":"<<static_cast<unsigned>(performance_mask(o,false,trial))
@@ -1666,7 +1669,7 @@ void source_bit_map(const Options& o) {
     for(unsigned trial=0;trial<o.trials;++trial){
         const auto key_seed=o.key_seed.value_or(o.seed)+trial;auto txkey=key_for(key_seed,0);
         auto rxkey=key_for(o.control=="wrong-key"?key_seed^0x6a09e667f3bcc909ULL:key_seed,0);
-        std::cout<<std::setprecision(17)<<"{\"schema\":\"triad-performance-source-bit-map-v1\",\"trial\":"<<trial
+        std::cout<<std::setprecision(17)<<"{\"schema\":\"triad-performance-source-bit-map-v1\",\"fixture_key_mode\":\""<<datapump::triad::fixture::key_mode<<"\",\"trial\":"<<trial
                  <<",\"key_seed\":"<<key_seed<<",\"epoch\":"<<base.epoch<<",\"encrypted\":"<<(base.encrypt?"true":"false")<<",\"tx\":";
         write(probe(transmitter_format(o,base),txkey));std::cout<<",\"rx\":[";
         bool first=true;for(const auto offset:o.epoch_offsets){if(!first)std::cout<<',';first=false;auto addressed=base;addressed.epoch=offset_epoch(base.epoch,offset);
@@ -2739,7 +2742,8 @@ void export_group_stats(const Options& o) {
 int main(int argc,char** argv) {
     try {
         const auto options=parse(argc,argv);
-        if(options.mode=="capture-hash")capture_hash(options);
+        if(options.mode=="fixture-key-mode")std::cout<<"{\"schema\":\"triad-fixture-key-mode-v1\",\"fixture_key_mode\":\""<<datapump::triad::fixture::key_mode<<"\"}\n";
+        else if(options.mode=="capture-hash")capture_hash(options);
         else if(options.mode=="source-bit-map")source_bit_map(options);
         else if(options.mode=="configure")print_configuration(options);
         else if(options.mode=="plan") print_plan(options);

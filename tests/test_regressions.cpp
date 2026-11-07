@@ -1,3 +1,4 @@
+#include "fixture_crypto.hpp"
 #include "datapump/transfer.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/channel.hpp"
@@ -168,7 +169,7 @@ void obscured_training_pcm_roundtrip() {
 void keyed_sampled_roundtrip() {
     auto value=options(2400,tuning::PatternMode::pattern_16);
     value.modem.sample_rate=8000;value.modem.spreading_factor=8;value.modem.pulse_shaping=false;
-    value.key.emplace(Bytes(32,0x59));value.fec=FecMode::rs60;
+    value.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x59));value.fec=FecMode::rs60;
     auto sent=payload();sent.data.resize(44);auto channel=ideal_channel();
     channel.snr_db=30;channel.delay_samples=137;channel.seed=0x1208;
     const auto result=transfer::simulate(sent,value,channel);

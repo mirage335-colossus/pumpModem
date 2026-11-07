@@ -1,3 +1,4 @@
+#include "triad_crypto_fixture.hpp"
 #include "datapump/triad_modem_v2.hpp"
 #include "datapump/triad_simulation.hpp"
 #include <algorithm>
@@ -23,7 +24,7 @@ template<class F> void rejects(F action, const char* message) {
 Crypto key() {
     Bytes bytes(32);
     for(std::size_t i=0;i<bytes.size();++i)bytes[i]=static_cast<std::uint8_t>(3+7*i);
-    return Crypto(bytes);
+    return triad_test_key(bytes);
 }
 v::SearchPrior aligned() {
     v::SearchPrior p;

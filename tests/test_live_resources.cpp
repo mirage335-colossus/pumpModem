@@ -1,6 +1,9 @@
+#include "fixture_crypto.hpp"
+#include "fixture_keyfile.hpp"
 #include "datapump/live.hpp"
 #include "../src/signal_view.hpp"
 #include "../src/live_scheduling.hpp"
+#include "../src/live_helper.hpp"
 #include "../src/audio_trace.hpp"
 #include <algorithm>
 #include <atomic>
@@ -183,8 +186,8 @@ void startup_spectrum_reference_survives_replay() {
 void default_workspace_admits_long_key_banks() {
     auto value=settings();value.transfer.modem.spreading_factor=16384;
     value.transfer.modem.scramble=value.transfer.modem.dsss=true;
-    value.transfer.key.emplace(Bytes(32,0x31));
-    value.receive_keys.emplace_back(Bytes(32,0x32));value.receive_keys.emplace_back(Bytes(32,0x33));
+    value.transfer.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x31));
+    value.receive_keys.push_back(fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x32)));value.receive_keys.push_back(fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x33)));
     live::Session session;session.start(value);
     const auto result=wait_for(session,[&](const auto& snapshot) {
         bounded(snapshot,value);no_reception(snapshot);return snapshot.samples_received>=800;
@@ -193,11 +196,56 @@ void default_workspace_admits_long_key_banks() {
     check(result.status.find("limited")==std::string::npos,"default workspace did not admit the requested long keyed search banks");
     check(!result.receiver_health.failed(),"healthy long keyed search bank reported receiver failure");
 }
+void independent_serpent_roots_preserve_receiver_banks() {
+    const auto first=fixture_crypto::key(Bytes(32,0x71),Bytes(32,0x52));
+    const auto equal=fixture_crypto::key(Bytes(32,0x71),Bytes(32,0x52));
+    const auto other=fixture_crypto::key(Bytes(32,0x72),Bytes(32,0x52));
+    const Bytes context{'b','a','n','k','-','t','e','s','t'};
+    check(first.mac(context)==other.mac(context),"receiver identity fixture must share the AES waveform root");
+    check(first.identity_fingerprint(context)==equal.identity_fingerprint(context) &&
+          first.identity_fingerprint(context)!=other.identity_fingerprint(context),
+          "receiver identity must compare root values and include the independent Serpent root");
+    constexpr std::uint64_t epoch=1800000000;
+    const auto receivers=[&](std::vector<Crypto> keys) {
+        auto value=settings();value.transfer.timestamp=epoch;value.transfer.search_seconds=0;
+        value.transfer.automatic_receive_profiles=false;value.transfer.key=first;
+        value.receive_keys=std::move(keys);value.dsp_workspace_bytes=16*1024*1024;
+        live::Session session([epoch]{return static_cast<double>(epoch);});session.start(value);
+        const auto result=wait_for(session,[&](const auto& snapshot) {
+            bounded(snapshot,value);no_reception(snapshot);
+            check(!snapshot.receiver_health.failed(),"independent-root bank lost receiver coverage");
+            return snapshot.samples_received>=800 && snapshot.receiver_bank_builds;
+        });
+        session.stop();return result.receiver_instances;
+    };
+    const auto one=receivers({first,equal});
+    const auto two=receivers({first,equal,other,other});
+    check(one>0 && two==2*one,
+          "Live must retain different Serpent roots sharing AES while collapsing equal complete keys");
+}
+void independent_serpent_roots_preserve_helper_bounds() {
+    auto value=settings();value.transfer.key=fixture_crypto::key(Bytes(32,0x71),Bytes(32,0x52));
+    value.transfer.automatic_receive_profiles=false;
+    const auto equal=fixture_crypto::key(Bytes(32,0x71),Bytes(32,0x52));
+    const auto other=fixture_crypto::key(Bytes(32,0x72),Bytes(32,0x52));
+    value.receive_keys={*value.transfer.key,equal};
+    const auto one=live::detail::helper_receive_envelope_bound(value);
+    value.receive_keys.push_back(other);value.receive_keys.push_back(other);
+    const auto two=live::detail::helper_receive_envelope_bound(value);
+    check(one.profiles==1 && two.profiles==2,
+          "Helper envelope must include each independent Serpent root and deduplicate equal complete keys");
+    check(one.fft_seconds==two.fft_seconds && one.absence_seconds==two.absence_seconds &&
+          one.pulse_seconds==two.pulse_seconds,
+          "different confidentiality roots must preserve equal AES waveform geometry");
+    value.receive_keys.emplace_back(Bytes(32,0x52));
+    const auto waveform=live::detail::helper_receive_envelope_bound(value);
+    check(waveform.profiles==3,"AES-only waveform identity must not alias a confidential key");
+}
 void noise_epochs_retire_with_bounded_workspace() {
     constexpr std::uint64_t origin=1800000000;
     std::atomic<std::uint64_t> epoch{origin};
     live::Session session([&]{return static_cast<double>(epoch.load());});
-    auto value=settings();value.transfer.key.emplace(Bytes(32,0x53));
+    auto value=settings();value.transfer.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x53));
     value.transfer.modem.scramble=value.transfer.modem.dsss=true;
     value.transfer.modem.spreading_factor=64;value.transfer.search_seconds=1;
     value.dsp_workspace_bytes=16*1024*1024;session.start(value);
@@ -224,8 +272,8 @@ void growing_stream_shares_receiver_workspace() {
         return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_milliseconds.load());
     });
     auto value=settings();value.transfer.timestamp=epoch;value.transfer.search_seconds=0;
-    value.dsp_workspace_bytes=12*1024*1024;value.transfer.key.emplace(Bytes(32,0x41));
-    value.receive_keys.emplace_back(Bytes(32,0x42));value.receive_keys.emplace_back(Bytes(32,0x43));
+    value.dsp_workspace_bytes=12*1024*1024;value.transfer.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x41));
+    value.receive_keys.push_back(fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x42)));value.receive_keys.push_back(fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x43)));
     session.start(value);
     const auto idle=wait_for(session,[&](const auto& snapshot){bounded(snapshot,value);return snapshot.samples_received>=800;});
     const auto sent=message(256);session.transmit(sent);auto peak=idle.dsp_buffered_bytes;
@@ -241,29 +289,30 @@ void growing_stream_shares_receiver_workspace() {
           received.received.front().content.message.data==sent.data,
           "inactive keyed hypotheses prevented the matching interval stream from sharing receiver storage");
 }
-void version_three_roots_share_bank_workspace() {
+void version_four_roots_share_bank_workspace() {
     struct Files {
         std::filesystem::path directory=std::filesystem::temp_directory_path()/
-            ("datapump-live-v3-roots-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+            ("datapump-live-v4-roots-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         Files(){check(std::filesystem::create_directory(directory),"root fixture directory already exists");}
         ~Files(){std::error_code ec;std::filesystem::remove_all(directory,ec);}
     } files;
     const testing::KeyfilePolicy policy{4096,8193};
     const auto keyfile=files.directory/"keys",tracefile=files.directory/"roots.jsonl";
-    testing::create_keyring(keyfile,{"first","replacement"},policy);
+    const auto generated=testing::create_keyring(keyfile,{"first","replacement"},policy,std::nullopt,fixture_keyfile::generation());
+    check(generated.audio_used,"keyfile fixture did not collect synthetic audio");
     {
         std::ifstream input(keyfile,std::ios::binary);std::array<char,8> magic{};
         input.read(magic.data(),magic.size());
-        check(std::string_view(magic.data(),magic.size())=="DPMKEY03","resource fixture did not load a real v3 keyring");
+        check(std::string_view(magic.data(),magic.size())=="DPMKEY04","resource fixture did not load a real v4 keyring");
     }
     const auto keys=testing::load_keyring(keyfile,policy);
     check(keys.size()==2 && keys[0].key.confidentiality_storage_id() &&
           keys[1].key.confidentiality_storage_id() &&
           keys[0].key.confidentiality_storage_id()!=keys[1].key.confidentiality_storage_id(),
-          "v3 resource keys did not retain distinct confidentiality allocations");
+          "v4 resource keys did not retain distinct confidentiality allocations");
     const auto root_bytes=keys[0].key.confidentiality_storage_bytes();
     check(root_bytes>0 && keys[1].key.confidentiality_storage_bytes()==root_bytes,
-          "v3 root allocation receipt is unavailable");
+          "v4 root allocation receipt is unavailable");
     {
         audio::trace::Scope trace(tracefile,false,[](const char* event) noexcept {
             return std::string_view(event)=="receiver_confidentiality_roots";
@@ -278,23 +327,23 @@ void version_three_roots_share_bank_workspace() {
         value.receive_keys={keys[0].key,keys[0].key};
         const auto transmit=[&] {
             wait_for(session,[&](const auto& snapshot) {
-                check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"v3 root bank exceeded its workspace");
-                check(!snapshot.receiver_health.failed(),"v3 root bank lost receiver coverage");
+                check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"v4 root bank exceeded its workspace");
+                check(!snapshot.receiver_health.failed(),"v4 root bank lost receiver coverage");
                 return snapshot.samples_received>=800;
             });
             const auto before=session.snapshot();std::vector<std::uint64_t> previous_signals;
             for(const auto& signal:before.signals)previous_signals.push_back(signal.id);
             session.transmit_bits(Bytes{0,0,1});
             wait_for(session,[&](const auto& snapshot) {
-                check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"v3 reception omitted root storage");
-                check(!snapshot.receiver_health.failed(),"v3 root reception lost coverage");
+                check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"v4 reception omitted root storage");
+                check(!snapshot.receiver_health.failed(),"v4 root reception lost coverage");
                 return snapshot.transmission_id!=before.transmission_id &&
                     snapshot.transmission_finished&&snapshot.simulation_replay;
             });
             replay_milliseconds+=3000;
             wait_for(session,[&](const auto& snapshot) {
-                check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"v3 replay exceeded its workspace");
-                check(!snapshot.receiver_health.failed(),"v3 physical completion lost receiver coverage");
+                check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"v4 replay exceeded its workspace");
+                check(!snapshot.receiver_health.failed(),"v4 physical completion lost receiver coverage");
                 return std::any_of(snapshot.signals.begin(),snapshot.signals.end(),[&](const auto& signal) {
                     return signal.complete && !signal.validated && !signal.missing_symbols &&
                         signal.received_bits==3 && (signal.binary?signal.text:signal.raw_bits)=="001" &&
@@ -317,7 +366,7 @@ void version_three_roots_share_bank_workspace() {
         };
         one|=witness(1);two|=witness(2);
     }
-    check(one&&two,"Live root reservation did not deduplicate aliases and refresh the real v3 key union");
+    check(one&&two,"Live root reservation did not deduplicate aliases and refresh the real v4 key union");
 }
 void long_raw_symbol_is_bounded_and_cancellable() {
     auto value=settings();value.transfer.modem.bandwidth_hz=1;
@@ -430,9 +479,11 @@ int main(int argc,char** argv) {
         {"idle workspace and plots",idle_workspace_and_plots},
         {"startup spectrum reference survives replay",startup_spectrum_reference_survives_replay},
         {"default workspace admits long key banks",default_workspace_admits_long_key_banks},
+        {"independent Serpent roots preserve receiver banks",independent_serpent_roots_preserve_receiver_banks},
+        {"independent Serpent roots preserve Helper bounds",independent_serpent_roots_preserve_helper_bounds},
         {"noise epochs retire with bounded workspace",noise_epochs_retire_with_bounded_workspace},
         {"growing stream shares receiver workspace",growing_stream_shares_receiver_workspace},
-        {"version three roots share bank workspace",version_three_roots_share_bank_workspace},
+        {"version four roots share bank workspace",version_four_roots_share_bank_workspace},
         {"long raw symbol is bounded and cancellable",long_raw_symbol_is_bounded_and_cancellable},
         {"reconfiguration discards cancelled work",reconfiguration_discards_cancelled_work},
     };
