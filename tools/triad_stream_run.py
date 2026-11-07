@@ -33,6 +33,7 @@ from triad_background_noise import add_arguments as add_background_noise_argumen
 from triad_background_noise import apply as apply_background_noise
 from triad_background_noise import enabled as background_noise_enabled
 from triad_background_noise import validate as validate_background_noise
+from triad_cpu import resolve_cpu_budget, configure_numerical_threads, initialize_numerical_worker
 
 
 def digest(path):
@@ -71,12 +72,26 @@ class StreamSession:
     """Persistent DDC and bounded scheduler; receiver construction runs on worker.
 
     Multiple workers require a factory returning private mutable receivers.
-    Numerical-library thread counts are configured once by the caller; FFT
-    workers are explicit so a pool does not silently multiply a hidden budget.
+    Automatic settings share one available CPU budget across at most two
+    mutable workspaces. Global numerical pools are configured on this
+    controlling thread before workers start. Do not construct concurrent
+    sessions with different global pool settings in the same process.
     """
     def __init__(self,original,slots,output,*,fixed_gain=.002,analog_gain=1.,
                  playback_offset_frames=0,receiver_factory=None,noise_inflation=1.,
-                 queue_capacity=2,pass_edge_hz=1450.,workers=1,fft_workers=2):
+                 queue_capacity=2,pass_edge_hz=1450.,workers=None,fft_workers=None,
+                 cpu_allocation=None):
+        self.cpu_allocation=resolve_cpu_budget(jobs=len(slots),workers=workers,threads=fft_workers,
+            linear_algebra_limit=2)
+        if cpu_allocation is None:
+            self.cpu_allocation['numerical_runtime']=configure_numerical_threads(self.cpu_allocation)
+        else:
+            # A CLI controller may configure before PCM preparation. Never
+            # silently adopt a different worker/thread plan afterward.
+            if any(cpu_allocation[k]!=self.cpu_allocation[k] for k in ('workers','threads')):
+                raise ValueError('configured CPU allocation differs from session')
+            self.cpu_allocation=copy.deepcopy(cpu_allocation)
+        workers=self.cpu_allocation['workers'];fft_workers=self.cpu_allocation['threads']
         self.output=Path(output);self.output.mkdir(parents=True,exist_ok=True)
         self.original=original
         self.frontend=StreamingAudioDDC(48000,int(original['sample_rate_hz']),
@@ -88,7 +103,7 @@ class StreamSession:
         self.noise_inflation=noise_inflation
         self.scheduler=StreamingWindowScheduler(requests,self._score,
             ring_capacity_samples=2*max(r.length for r in requests),queue_capacity=queue_capacity,
-            workers=workers)
+            workers=workers,worker_initializer=lambda:initialize_numerical_worker(self.cpu_allocation))
         self.ddc_cpu=0.;self.ddc_wall=0.;self.pcm_frames=0
         self.peaks=np.zeros(2);self.clips=np.zeros(2,np.int64)
         self.reads=[];self.read_count=0;self.started=time.perf_counter()
@@ -145,7 +160,7 @@ class StreamSession:
                 stereo_peak=self.peaks.tolist(),stereo_near_fullscale=self.clips.tolist(),
                 read_events=self.read_count,retained_read_events=self.reads,
                 read_events_truncated=self.read_count>len(self.reads)),pending_candidate_bits=pending,
-            message_completed=False,physical_null_qualified=False)
+            cpu_allocation=self.cpu_allocation,message_completed=False,physical_null_qualified=False)
 
 
 def prepare_pcm(directory,original,destination,*,fixed_gain=.002,observation_file=None):
@@ -271,9 +286,11 @@ def main():
     p.add_argument('--playback-offset-frames',type=int);p.add_argument('--realtime',action='store_true')
     p.add_argument('--record-pcm',action='store_true');p.add_argument('--chunk-frames',type=int,default=2400)
     p.add_argument('--max-seconds',type=float,default=600.);p.add_argument('--drain-timeout',type=float,default=180.)
-    p.add_argument('--threads',type=int,default=2);p.add_argument('--noise-inflation',type=float,default=1.)
-    p.add_argument('--workers',type=int,default=1,
-        help='bounded independent scoring workers; coordinate with numerical --threads and RAM')
+    p.add_argument('--threads',type=int,default=None,
+        help='numerical threads per scorer; default divides the available CPU allocation')
+    p.add_argument('--noise-inflation',type=float,default=1.)
+    p.add_argument('--workers',type=int,default=None,
+        help='independent scorers; automatic default uses at most two workspaces and shares the CPU budget')
     add_background_noise_arguments(p)
     a=p.parse_args()
     if (a.train is None)==(a.source_dir is None):p.error('supply a public train directory, positional or --source-dir')
@@ -286,7 +303,7 @@ def main():
     except ValueError as exc: p.error(str(exc))
     if a.replay_pcm and background_noise_enabled(a):p.error('--replay-pcm is recorded receiver input; background noise applies to transmissions only')
     if a.chunk_frames<1 or a.chunk_frames>65536:p.error('chunk frames must be1..65536')
-    if a.threads<1 or a.workers<1:p.error('threads and workers must be positive')
+    if any(v is not None and v<1 for v in (a.threads,a.workers)):p.error('threads and workers must be positive')
     for value in (a.fixed_gain,a.analog_gain,a.max_seconds,a.drain_timeout,a.noise_inflation):
         if not math.isfinite(value)or value<=0:p.error('gains, limits and noise inflation must be positive/finite')
     for value in (a.preroll_seconds,a.postroll_seconds):
@@ -294,10 +311,14 @@ def main():
     if a.mode=='live'and a.preroll_seconds<=0:p.error('live capture requires a nonzero preroll')
     if a.output.exists()and any(a.output.iterdir()):p.error('output directory must be new or empty')
     a.output.mkdir(parents=True,exist_ok=True)
-    import torch
-    torch.set_num_threads(a.threads);torch.set_num_interop_threads(1);torch.set_float32_matmul_precision('highest')
     c,w=time.process_time(),time.perf_counter()
     original,slots=load_slots(a.train)
+    allocation=resolve_cpu_budget(jobs=len(slots),workers=a.workers,threads=a.threads,
+        linear_algebra_limit=2)
+    allocation['numerical_runtime']=configure_numerical_threads(allocation)
+    a.workers,a.threads=allocation['workers'],allocation['threads']
+    import torch
+    torch.set_float32_matmul_precision('highest')
     pre=round(a.preroll_seconds*48000);post=round(a.postroll_seconds*48000)
     offset=a.playback_offset_frames if a.playback_offset_frames is not None else pre
     tx=a.tx_pcm or a.output/'tx.stereo.s16le'
@@ -318,7 +339,7 @@ def main():
     preparation=dict(cpu_seconds=time.process_time()-c,wall_seconds=time.perf_counter()-w)
     session=StreamSession(original,slots,a.output,fixed_gain=a.fixed_gain,analog_gain=a.analog_gain,
         playback_offset_frames=offset,noise_inflation=a.noise_inflation,workers=a.workers,
-        fft_workers=a.threads)
+        fft_workers=a.threads,cpu_allocation=allocation)
     failure=None;transport={}
     try:
         if a.mode=='live':transport=live_pcm(session,tx,a.output,device=a.device,preroll_frames=pre,
@@ -332,7 +353,9 @@ def main():
         bridge=bridge,preparation=preparation,transport=transport,stream=stream,
         fixed_gain=a.fixed_gain,analog_gain=a.analog_gain,public_playback_offset_frames=offset,
         scoring_workers=a.workers,numerical_threads=a.threads,
-        source_sha256={name:digest(Path(__file__).parent/name)for name in ('triad_stream_run.py','triad_stream_frontend.py','triad_stream_scheduler.py','triad_stream_slots.py','triad_background_noise.py')},
+        fft_threads=a.threads,linear_algebra_threads=allocation['linear_algebra_threads'],
+        cpu_allocation=allocation,
+        source_sha256={name:digest(Path(__file__).parent/name)for name in ('triad_stream_run.py','triad_stream_frontend.py','triad_stream_scheduler.py','triad_stream_slots.py','triad_background_noise.py','triad_cpu.py','build_capacity.py')},
         total_cpu_seconds=time.process_time()-c,total_wall_seconds=time.perf_counter()-w,
         failure=failure or transport.get('failure'),message_completed=False,physical_null_qualified=False,
         scope='Continuous PCM/DDC/ring/worker test with fixed public source windows; no evaluator truth input; conditional bit candidates only, no source text decode or completed-message claim.')

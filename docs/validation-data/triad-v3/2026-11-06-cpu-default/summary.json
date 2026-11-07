@@ -1,0 +1,385 @@
+{
+  "schema": "triad-auto-cpu-followup-v1",
+  "source_revision": "bb9171784074022a7563f9ec0f744836ac7a188d",
+  "trials": [
+    {
+      "name": "explicit2",
+      "cpu_allocation": {
+        "schema": "triad-cpu-budget-v1",
+        "available_cpus": 12,
+        "workers": 1,
+        "threads": 2,
+        "total_thread_budget": 2,
+        "unused_cpu_budget": 10,
+        "explicit_overcommit": false,
+        "jobs": 1,
+        "requested": {
+          "workers": null,
+          "threads": 2
+        },
+        "capacity": {
+          "available_cpus": 12,
+          "os_available_cpus": 12,
+          "quota_status": "visible",
+          "quota_limits": [],
+          "warnings": [],
+          "scope": "Process-visible logical CPUs and readable ancestor quotas; no CPU reserve. Hidden limits and future affinity changes are not inferred."
+        },
+        "policy": "One aggregate worker \u00d7 numerical-thread budget; automatic workspace fan-out is at most two. Explicit counts are preserved.",
+        "runtime": {
+          "threads": 2,
+          "torch_intraop_threads": 2,
+          "torch_interop_threads": 1,
+          "pools": [
+            {
+              "user_api": "blas",
+              "internal_api": "openblas",
+              "num_threads": 2,
+              "prefix": "libscipy_openblas",
+              "filepath": "/tmp/triad-weak-env/lib/python3.13/site-packages/numpy.libs/libscipy_openblas64_-f48b354e.so",
+              "version": "0.3.34.106.0",
+              "threading_layer": "pthreads",
+              "architecture": "Haswell"
+            },
+            {
+              "user_api": "blas",
+              "internal_api": "openblas",
+              "num_threads": 2,
+              "prefix": "libscipy_openblas",
+              "filepath": "/tmp/triad-weak-env/lib/python3.13/site-packages/scipy.libs/libscipy_openblas-5f890258.so",
+              "version": "0.3.31.dev",
+              "threading_layer": "pthreads",
+              "architecture": "Haswell"
+            },
+            {
+              "user_api": "openmp",
+              "internal_api": "openmp",
+              "num_threads": 2,
+              "prefix": "libgomp",
+              "filepath": "/tmp/triad-weak-env/lib/python3.13/site-packages/torch/lib/libgomp.so.1",
+              "version": null
+            }
+          ],
+          "warnings": [],
+          "scope": "Process-global limits applied by the main controller before receiver workers. Hardware utilization depends on runnable work."
+        }
+      },
+      "source_identity_unchanged": true,
+      "total_cpu_seconds": 13.498183915,
+      "wall_seconds": 11.137389517039992,
+      "maximum_queue_wait_seconds": 0.00023973302450031042,
+      "maximum_completion_delay_seconds": 11.137087987968698,
+      "completed": 1,
+      "overloads": 0,
+      "errors": 0,
+      "peak_rss_kib": 512728,
+      "all_decisions_and_scores_exact": true
+    },
+    {
+      "name": "auto-single",
+      "cpu_allocation": {
+        "schema": "triad-cpu-budget-v1",
+        "available_cpus": 12,
+        "workers": 1,
+        "threads": 12,
+        "total_thread_budget": 12,
+        "unused_cpu_budget": 0,
+        "explicit_overcommit": false,
+        "jobs": 1,
+        "requested": {
+          "workers": null,
+          "threads": null
+        },
+        "capacity": {
+          "available_cpus": 12,
+          "os_available_cpus": 12,
+          "quota_status": "visible",
+          "quota_limits": [],
+          "warnings": [],
+          "scope": "Process-visible logical CPUs and readable ancestor quotas; no CPU reserve. Hidden limits and future affinity changes are not inferred."
+        },
+        "policy": "One aggregate worker \u00d7 numerical-thread budget; automatic workspace fan-out is at most two. Explicit counts are preserved.",
+        "runtime": {
+          "threads": 12,
+          "torch_intraop_threads": 12,
+          "torch_interop_threads": 1,
+          "pools": [
+            {
+              "user_api": "blas",
+              "internal_api": "openblas",
+              "num_threads": 12,
+              "prefix": "libscipy_openblas",
+              "filepath": "/tmp/triad-weak-env/lib/python3.13/site-packages/numpy.libs/libscipy_openblas64_-f48b354e.so",
+              "version": "0.3.34.106.0",
+              "threading_layer": "pthreads",
+              "architecture": "Haswell"
+            },
+            {
+              "user_api": "blas",
+              "internal_api": "openblas",
+              "num_threads": 12,
+              "prefix": "libscipy_openblas",
+              "filepath": "/tmp/triad-weak-env/lib/python3.13/site-packages/scipy.libs/libscipy_openblas-5f890258.so",
+              "version": "0.3.31.dev",
+              "threading_layer": "pthreads",
+              "architecture": "Haswell"
+            },
+            {
+              "user_api": "openmp",
+              "internal_api": "openmp",
+              "num_threads": 12,
+              "prefix": "libgomp",
+              "filepath": "/tmp/triad-weak-env/lib/python3.13/site-packages/torch/lib/libgomp.so.1",
+              "version": null
+            }
+          ],
+          "warnings": [],
+          "scope": "Process-global limits applied by the main controller before receiver workers. Hardware utilization depends on runnable work."
+        }
+      },
+      "source_identity_unchanged": true,
+      "total_cpu_seconds": 82.98858174600001,
+      "wall_seconds": 17.039460707921535,
+      "maximum_queue_wait_seconds": 0.00021777104120701551,
+      "maximum_completion_delay_seconds": 17.038906691945158,
+      "completed": 1,
+      "overloads": 0,
+      "errors": 0,
+      "peak_rss_kib": 516104,
+      "all_decisions_and_scores_exact": true
+    },
+    {
+      "name": "auto-pipeline",
+      "cpu_allocation": {
+        "schema": "triad-cpu-budget-v1",
+        "available_cpus": 12,
+        "workers": 2,
+        "threads": 6,
+        "total_thread_budget": 12,
+        "unused_cpu_budget": 0,
+        "explicit_overcommit": false,
+        "jobs": 2,
+        "requested": {
+          "workers": null,
+          "threads": null
+        },
+        "capacity": {
+          "available_cpus": 12,
+          "os_available_cpus": 12,
+          "quota_status": "visible",
+          "quota_limits": [],
+          "warnings": [],
+          "scope": "Process-visible logical CPUs and readable ancestor quotas; no CPU reserve. Hidden limits and future affinity changes are not inferred."
+        },
+        "policy": "One aggregate worker \u00d7 numerical-thread budget; automatic workspace fan-out is at most two. Explicit counts are preserved.",
+        "runtime": {
+          "threads": 6,
+          "torch_intraop_threads": 6,
+          "torch_interop_threads": 1,
+          "pools": [
+            {
+              "user_api": "blas",
+              "internal_api": "openblas",
+              "num_threads": 6,
+              "prefix": "libscipy_openblas",
+              "filepath": "/tmp/triad-weak-env/lib/python3.13/site-packages/numpy.libs/libscipy_openblas64_-f48b354e.so",
+              "version": "0.3.34.106.0",
+              "threading_layer": "pthreads",
+              "architecture": "Haswell"
+            },
+            {
+              "user_api": "blas",
+              "internal_api": "openblas",
+              "num_threads": 6,
+              "prefix": "libscipy_openblas",
+              "filepath": "/tmp/triad-weak-env/lib/python3.13/site-packages/scipy.libs/libscipy_openblas-5f890258.so",
+              "version": "0.3.31.dev",
+              "threading_layer": "pthreads",
+              "architecture": "Haswell"
+            },
+            {
+              "user_api": "openmp",
+              "internal_api": "openmp",
+              "num_threads": 6,
+              "prefix": "libgomp",
+              "filepath": "/tmp/triad-weak-env/lib/python3.13/site-packages/torch/lib/libgomp.so.1",
+              "version": null
+            }
+          ],
+          "warnings": [],
+          "scope": "Process-global limits applied by the main controller before receiver workers. Hardware utilization depends on runnable work."
+        }
+      },
+      "source_identity_unchanged": false,
+      "total_cpu_seconds": 44.81711397,
+      "wall_seconds": 23.344580986071378,
+      "maximum_queue_wait_seconds": 0.0005329459672793746,
+      "maximum_completion_delay_seconds": 14.232262547011487,
+      "completed": 2,
+      "overloads": 0,
+      "errors": 0,
+      "peak_rss_kib": 596908,
+      "all_decisions_and_scores_exact": true
+    },
+    {
+      "name": "final-auto-single",
+      "cpu_allocation": {
+        "schema": "triad-cpu-budget-v1",
+        "available_cpus": 12,
+        "workers": 1,
+        "threads": 12,
+        "total_thread_budget": 12,
+        "linear_algebra_threads": 2,
+        "unused_cpu_budget": 0,
+        "explicit_overcommit": false,
+        "jobs": 1,
+        "requested": {
+          "workers": null,
+          "threads": null
+        },
+        "capacity": {
+          "available_cpus": 12,
+          "os_available_cpus": 12,
+          "quota_status": "visible",
+          "quota_limits": [],
+          "warnings": [],
+          "scope": "Process-visible logical CPUs and readable ancestor quotas; no CPU reserve. Hidden limits and future affinity changes are not inferred."
+        },
+        "policy": "One aggregate worker \u00d7 FFT-thread budget; automatic workspace fan-out is at most two. Small linear algebra is capped at two threads in automatic mode. Explicit thread counts are preserved for both stages.",
+        "runtime": {
+          "threads": 2,
+          "linear_algebra_threads": 2,
+          "fft_thread_budget": 12,
+          "torch_intraop_threads": 2,
+          "torch_interop_threads": 1,
+          "pools": [
+            {
+              "user_api": "blas",
+              "internal_api": "openblas",
+              "num_threads": 2,
+              "prefix": "libscipy_openblas",
+              "filepath": "/tmp/triad-weak-env/lib/python3.13/site-packages/numpy.libs/libscipy_openblas64_-f48b354e.so",
+              "version": "0.3.34.106.0",
+              "threading_layer": "pthreads",
+              "architecture": "Haswell"
+            },
+            {
+              "user_api": "blas",
+              "internal_api": "openblas",
+              "num_threads": 2,
+              "prefix": "libscipy_openblas",
+              "filepath": "/tmp/triad-weak-env/lib/python3.13/site-packages/scipy.libs/libscipy_openblas-5f890258.so",
+              "version": "0.3.31.dev",
+              "threading_layer": "pthreads",
+              "architecture": "Haswell"
+            },
+            {
+              "user_api": "openmp",
+              "internal_api": "openmp",
+              "num_threads": 2,
+              "prefix": "libgomp",
+              "filepath": "/tmp/triad-weak-env/lib/python3.13/site-packages/torch/lib/libgomp.so.1",
+              "version": null
+            }
+          ],
+          "warnings": [],
+          "scope": "Process-global linear-algebra limits applied before receiver workers; FFT calls use their separate explicit thread budget. Hardware utilization depends on runnable work."
+        }
+      },
+      "source_identity_unchanged": true,
+      "total_cpu_seconds": 14.706391284999999,
+      "wall_seconds": 12.133994406904094,
+      "maximum_queue_wait_seconds": 0.00021417404059320688,
+      "maximum_completion_delay_seconds": 12.133613938931376,
+      "completed": 1,
+      "overloads": 0,
+      "errors": 0,
+      "peak_rss_kib": 523424,
+      "all_decisions_and_scores_exact": true
+    },
+    {
+      "name": "final-auto-pipeline",
+      "cpu_allocation": {
+        "schema": "triad-cpu-budget-v1",
+        "available_cpus": 12,
+        "workers": 2,
+        "threads": 6,
+        "total_thread_budget": 12,
+        "linear_algebra_threads": 2,
+        "unused_cpu_budget": 0,
+        "explicit_overcommit": false,
+        "jobs": 2,
+        "requested": {
+          "workers": null,
+          "threads": null
+        },
+        "capacity": {
+          "available_cpus": 12,
+          "os_available_cpus": 12,
+          "quota_status": "visible",
+          "quota_limits": [],
+          "warnings": [],
+          "scope": "Process-visible logical CPUs and readable ancestor quotas; no CPU reserve. Hidden limits and future affinity changes are not inferred."
+        },
+        "policy": "One aggregate worker \u00d7 FFT-thread budget; automatic workspace fan-out is at most two. Small linear algebra is capped at two threads in automatic mode. Explicit thread counts are preserved for both stages.",
+        "runtime": {
+          "threads": 2,
+          "linear_algebra_threads": 2,
+          "fft_thread_budget": 6,
+          "torch_intraop_threads": 2,
+          "torch_interop_threads": 1,
+          "pools": [
+            {
+              "user_api": "blas",
+              "internal_api": "openblas",
+              "num_threads": 2,
+              "prefix": "libscipy_openblas",
+              "filepath": "/tmp/triad-weak-env/lib/python3.13/site-packages/numpy.libs/libscipy_openblas64_-f48b354e.so",
+              "version": "0.3.34.106.0",
+              "threading_layer": "pthreads",
+              "architecture": "Haswell"
+            },
+            {
+              "user_api": "blas",
+              "internal_api": "openblas",
+              "num_threads": 2,
+              "prefix": "libscipy_openblas",
+              "filepath": "/tmp/triad-weak-env/lib/python3.13/site-packages/scipy.libs/libscipy_openblas-5f890258.so",
+              "version": "0.3.31.dev",
+              "threading_layer": "pthreads",
+              "architecture": "Haswell"
+            },
+            {
+              "user_api": "openmp",
+              "internal_api": "openmp",
+              "num_threads": 2,
+              "prefix": "libgomp",
+              "filepath": "/tmp/triad-weak-env/lib/python3.13/site-packages/torch/lib/libgomp.so.1",
+              "version": null
+            }
+          ],
+          "warnings": [],
+          "scope": "Process-global linear-algebra limits applied before receiver workers; FFT calls use their separate explicit thread budget. Hardware utilization depends on runnable work."
+        }
+      },
+      "source_identity_unchanged": true,
+      "total_cpu_seconds": 28.449827121,
+      "wall_seconds": 22.78030013490934,
+      "maximum_queue_wait_seconds": 0.00040441309101879597,
+      "maximum_completion_delay_seconds": 12.33275608101394,
+      "completed": 2,
+      "overloads": 0,
+      "errors": 0,
+      "peak_rss_kib": 643076,
+      "all_decisions_and_scores_exact": true
+    }
+  ],
+  "final_checks": {
+    "passed": 72,
+    "failed": 0,
+    "test_wall_seconds": 0.508,
+    "real_worker_probe_passed": true
+  },
+  "timing_scope": "Fresh keyed bank, preparation and full saved-HF scoring; no ADC/DDC/TX simulation/imports. Individual measurements, not a confidence-qualified speedup.",
+  "transfer": "Final broad default explicitly selects the same LA2 limit as final timing runs. Later worker initializer enforces the same observed limits; identities also include actual LA thread count. Other receiver families use full budget without this heuristic."
+}

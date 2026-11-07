@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
@@ -17,6 +18,36 @@ from triad_control_clock import ControlClock, ClockReading
 
 
 class ContinuousTests(unittest.TestCase):
+    def test_cpu_default_and_explicit_large_limit_reach_physical_controller(self):
+        self.assertIsNone(parser().parse_args(['--report', '/tmp/unused']).threads)
+        for flags, expected in (([], 12), (['--threads', '65'], 65)):
+            with self.subTest(flags=flags), tempfile.TemporaryDirectory() as directory:
+                events = []
+                def configure(allocation):
+                    events.append('configure')
+                    self.assertEqual(allocation['threads'], expected)
+                    self.assertEqual(allocation['linear_algebra_threads'], expected)
+                    return dict(configured=True)
+                def physical(options, arguments):
+                    events.append('physical')
+                    self.assertEqual(options.threads, expected)
+                    self.assertEqual(options.cpu_allocation['runtime'], dict(configured=True))
+                    return dict(cpu_allocation=options.cpu_allocation)
+                with mock.patch('triad_cpu.detect_cpu_budget', return_value=dict(available_cpus=12)), \
+                     mock.patch('triad_continuous.configure_numerical_threads', side_effect=configure), \
+                     mock.patch('triad_physical_run.execute', side_effect=physical):
+                    result = execute(['--mode', 'receive', '--bank', 'not-opened.json',
+                        '--physical-noise-profile', 'not-opened-profile.json',
+                        '--report', str(Path(directory)/'report.json'), *flags])
+                self.assertEqual(events, ['configure', 'physical'])
+                self.assertEqual(result['cpu_allocation']['threads'], expected)
+        with tempfile.TemporaryDirectory() as directory, \
+             mock.patch('triad_continuous.configure_numerical_threads') as configure:
+            with self.assertRaisesRegex(ValueError, 'positive integer'):
+                execute(['--threads', '0', '--mode', 'transmit',
+                         '--report', str(Path(directory)/'report.json')])
+            configure.assert_not_called()
+
     def test_default_live_clock_and_public_tracking_policy(self):
         options = parser().parse_args(['--report', '/tmp/unused-triad-clock-report'])
         self.assertEqual(options.follow_system_clock, 'auto')

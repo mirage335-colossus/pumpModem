@@ -60,11 +60,15 @@ class StreamingWindowScheduler:
 
     def __init__(self, requests, score, *, start_sample=0,
                  ring_capacity_samples=None, queue_capacity=2,
-                 dtype=np.complex64, maximum_gap_records=128, workers=1):
+                 dtype=np.complex64, maximum_gap_records=128, workers=1,
+                 worker_initializer=None):
         self.start_sample=_integer(start_sample,'stream start sample')
         self.frontier=self.start_sample
         if not callable(score):raise ValueError('scorer must be callable')
+        if worker_initializer is not None and not callable(worker_initializer):
+            raise ValueError('worker initializer must be callable')
         self.score=score
+        self.worker_initializer=worker_initializer
         self.dtype=np.dtype(dtype)
         if self.dtype not in (np.dtype(np.complex64),np.dtype(np.complex128)):
             raise ValueError('storage dtype must be complex64 or complex128')
@@ -101,6 +105,7 @@ class StreamingWindowScheduler:
         self._closing=False
         self._started_wall=time.perf_counter();self._started_cpu=time.process_time()
         self._inflight=set()
+        self._worker_initializations=[]
         self._ingested=0;self._observed=0;self._invalid=0;self._gap_samples=0
         self._gap_records=[];self._gap_count=0
         self._queue_highwater=0;self._ring_highwater=0
@@ -115,6 +120,15 @@ class StreamingWindowScheduler:
     def _wall(self):return time.perf_counter()-self._started_wall
 
     def _worker(self):
+        initialization_error=None
+        try:
+            receipt=self.worker_initializer()if self.worker_initializer is not None else None
+            initialization=dict(status='ready',receipt=receipt)
+        except Exception as error:
+            initialization_error=type(error).__name__+': '+str(error)
+            initialization=dict(status='error',error=initialization_error)
+        with self._condition:
+            self._worker_initializations.append(dict(worker=threading.current_thread().name,**initialization))
         while True:
             with self._condition:
                 while not self._queue and not self._closing:self._condition.wait()
@@ -126,6 +140,8 @@ class StreamingWindowScheduler:
             cpu,thread_cpu,wall=time.process_time(),time.thread_time(),time.perf_counter()
             result=None
             try:
+                if initialization_error is not None:
+                    raise RuntimeError('worker initialization failed: '+initialization_error)
                 result=self.score(index,raw,valid)
                 outcome=dict(status='scored',result=result)
             except Exception as error:
@@ -252,6 +268,7 @@ class StreamingWindowScheduler:
                 queue_highwater=self._queue_highwater,workers=self.workers,
                 inflight_index=next(iter(self._inflight))if len(self._inflight)==1 else None,
                 inflight_indices=sorted(self._inflight),
+                worker_initializations=list(self._worker_initializations),
                 numeric_array_bound_bytes=(self.capacity+(self.queue_capacity+self.workers+1)*self.maximum_window)*(self.dtype.itemsize+1),
                 numeric_bound_scope='Ring plus queued, all worker and one producer window copy; excludes caller input, callback workspace/results and Python metadata',
                 elapsed_wall_seconds=self._wall(),process_cpu_seconds=time.process_time()-self._started_cpu,

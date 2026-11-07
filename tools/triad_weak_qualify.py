@@ -242,6 +242,7 @@ def trial(payload):
         c, w = time.process_time(), time.perf_counter()
         config = {k:v for k,v in protocol['receiver'].items() if k not in ('threads_per_process', 'coherences')}
         config['coherences'] = tuple(map(float, protocol['receiver']['coherences']))
+        config.setdefault('fft_workers', protocol['receiver']['threads_per_process'])
         rx = WeakReceiver(manifest, templates, epochs, **config)
         receipt['stages']['construction'] = dict(cpu_seconds=time.process_time()-c, wall_seconds=time.perf_counter()-w)
         result = rx.score(raw, valid)

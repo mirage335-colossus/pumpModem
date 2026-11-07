@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -13,6 +14,35 @@ from triad_stream_run import StreamSession,public_audio_windows,replay_pcm,prepa
 
 
 class StreamRunTests(unittest.TestCase):
+    def setUp(self):
+        self.runtime=mock.patch('triad_stream_run.configure_numerical_threads',return_value={'test':'no global changes'})
+        self.runtime.start();self.addCleanup(self.runtime.stop)
+        self.worker_runtime=mock.patch('triad_stream_run.initialize_numerical_worker',return_value={'test':'worker initialized'})
+        self.worker_runtime.start();self.addCleanup(self.worker_runtime.stop)
+
+    def test_default_session_shares_available_cpu_budget(self):
+        original,slots=self.fixtures()
+        with tempfile.TemporaryDirectory()as tmp,mock.patch('triad_cpu.detect_cpu_budget',return_value={'available_cpus':12}):
+            session=StreamSession(original,slots,tmp,receiver_factory=lambda *args:None)
+            self.assertEqual(session.scheduler.workers,2)
+            self.assertEqual(session.fft_workers,6)
+            result=session.finish(1)
+            self.assertEqual(result['cpu_allocation']['total_thread_budget'],12)
+        with tempfile.TemporaryDirectory()as tmp,mock.patch('triad_cpu.detect_cpu_budget',return_value={'available_cpus':12}):
+            session=StreamSession(original,slots[:1],tmp,receiver_factory=lambda *args:None)
+            self.assertEqual(session.scheduler.workers,1)
+            self.assertEqual(session.fft_workers,12)
+            session.finish(1)
+
+    def test_explicit_session_allocation_is_preserved(self):
+        original,slots=self.fixtures()
+        with tempfile.TemporaryDirectory()as tmp:
+            session=StreamSession(original,slots,tmp,receiver_factory=lambda *args:None,
+                workers=1,fft_workers=2)
+            self.assertEqual(session.scheduler.workers,1)
+            self.assertEqual(session.fft_workers,2)
+            session.finish(1)
+
     def fixtures(self):
         original=dict(sample_rate_hz=6000,channel=dict(nominal_conversion_if_hz=1725))
         slots=[]
@@ -34,16 +64,17 @@ class StreamRunTests(unittest.TestCase):
             200/6000-remainder/48000)
 
     def test_chunked_session_matches_continuous_frontend_and_writes_scores(self):
-        original,slots=self.fixtures();seen=[]
+        original,slots=self.fixtures();seen={}
         class Receiver:
+            def __init__(self,manifest):self.start=manifest['stream_window']['absolute_start_sample']
             def score(self,raw,valid):
-                seen.append(raw.copy())
+                seen[self.start]=raw.copy()
                 return dict(status='scored',bit=1,score=100.,margin=90.,timing={},
                     operational=dict(passes_conditional_bound=True))
         pcm=np.repeat((np.sin(np.arange(16000)*.217)*1000).astype('<i2')[:,None],2,axis=1)
         with tempfile.TemporaryDirectory()as tmp:
             session=StreamSession(original,slots,tmp,fixed_gain=.002,analog_gain=.84,
-                playback_offset_frames=0,receiver_factory=lambda *args:Receiver())
+                playback_offset_frames=0,receiver_factory=lambda manifest,*args:Receiver(manifest))
             f=StreamingAudioDDC(undo_fixed_gain=.002*.84)
             expected,mask,_=f.process(pcm[:,0].astype(np.float32)/32768.)
             for start in range(0,len(pcm),137):session.feed_stereo_s16(pcm[start:start+137].tobytes())
@@ -52,7 +83,7 @@ class StreamRunTests(unittest.TestCase):
             self.assertFalse(result['physical_null_qualified'])
             self.assertEqual(len(seen),2)
             for i,request in enumerate(session.scheduler.requests):
-                np.testing.assert_allclose(seen[i],expected[request.start_sample:request.end_sample],atol=3e-5)
+                np.testing.assert_allclose(seen[slots[i][0]['stream_window']['absolute_start_sample']],expected[request.start_sample:request.end_sample],atol=3e-5)
                 saved=json.loads((Path(tmp)/f'slot-{i}-receiver.json').read_text())
                 self.assertEqual(saved['bit'],1)
             self.assertEqual(result['capture']['frames'],16000)

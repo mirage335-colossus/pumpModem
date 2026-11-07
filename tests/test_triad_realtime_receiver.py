@@ -1,8 +1,10 @@
 """Adaptive-procedure accounting and admission contracts; no long campaign."""
 import copy
+import json
 from pathlib import Path
 import sys
 import unittest
+import tempfile
 from unittest import mock
 
 import numpy as np
@@ -11,10 +13,67 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_triad_dynamic_acquire import fixture
 from triad_realtime_receiver import (RealtimeReceiver, refinement_coordinates,
-                                      freeze_gate, admit)
+                                      freeze_gate, admit, main)
 
 
 class RealtimeContracts(unittest.TestCase):
+    def test_fft_budget_default_and_explicit_counts_are_in_policy(self):
+        m, source = fixture(True)
+        m['channel'].update(deterministic_cfo_bound_hz=5., spread_margin=1.,
+                            sample_clock_pair_ppm=10.)
+        m.update(schema='test', public_epoch_seconds=1000, key_seed=1)
+        with mock.patch('triad_cpu.detect_cpu_budget', return_value=dict(available_cpus=12)), \
+             mock.patch('triad_realtime_receiver.configure_numerical_threads') as configure, \
+             mock.patch('triad_realtime_receiver.FFTScreen') as screen:
+            screen.return_value.procedure_id = 'coarse-policy'
+            automatic = RealtimeReceiver(m, source, [0])
+            self.assertEqual(screen.call_args.kwargs['workers'], 12)
+            explicit = RealtimeReceiver(m, source, [0], fft_workers=3)
+            self.assertEqual(screen.call_args.kwargs['workers'], 3)
+            configure.assert_not_called()
+        self.assertEqual(automatic.policy['fft_workers'], 12)
+        self.assertEqual(explicit.policy['fft_workers'], 3)
+        self.assertNotEqual(automatic.procedure_id, explicit.procedure_id)
+
+    def test_cli_resolves_once_before_receiver_and_records_budget(self):
+        for flags, expected in (([], 12), (['--threads', '3'], 3)):
+            with self.subTest(flags=flags), tempfile.TemporaryDirectory() as directory:
+                destination = Path(directory)/'result.json'
+                result = dict(status='unresolved', reason='test', bit=None, score=None,
+                              margin=None, timing={})
+                with mock.patch('sys.argv', ['triad_realtime_receiver.py', 'capture',
+                        '--output', str(destination), *flags]), \
+                     mock.patch('triad_cpu.detect_cpu_budget', return_value=dict(available_cpus=12)), \
+                     mock.patch('triad_realtime_receiver.configure_numerical_threads',
+                                return_value={'configured': True}) as configure, \
+                     mock.patch('triad_realtime_receiver.load_public',
+                                return_value=({}, None, [], None, None)), \
+                     mock.patch('triad_realtime_receiver.RealtimeReceiver') as receiver, \
+                     mock.patch('builtins.print'):
+                    receiver.return_value.score.return_value = result
+                    main()
+                    self.assertEqual(configure.call_count, 1)
+                    self.assertEqual(receiver.call_args.kwargs['fft_workers'], expected)
+                allocation = json.loads(destination.read_text())['cpu_allocation']
+                self.assertEqual(allocation['threads'], expected)
+                self.assertEqual(allocation['linear_algebra_threads'], 2 if not flags else expected)
+
+    def test_gate_identity_includes_actual_linear_algebra_thread_count(self):
+        m, source = fixture(True)
+        m['channel'].update(deterministic_cfo_bound_hz=5., spread_margin=1.,
+                            sample_clock_pair_ppm=10.)
+        m.update(schema='test', public_epoch_seconds=1000, key_seed=1)
+        with mock.patch('triad_cpu.detect_cpu_budget', return_value=dict(available_cpus=12)), \
+             mock.patch('triad_realtime_receiver.FFTScreen') as screen, \
+             mock.patch('triad_realtime_receiver.torch.get_num_threads', side_effect=[2, 12]):
+            screen.return_value.procedure_id = 'same-FFT-policy'
+            automatic = RealtimeReceiver(m, source, [0], fft_workers=12)
+            explicit = RealtimeReceiver(m, source, [0], fft_workers=12)
+        self.assertEqual(automatic.policy['fft_workers'], explicit.policy['fft_workers'])
+        self.assertEqual(automatic.policy['linear_algebra_threads'], 2)
+        self.assertEqual(explicit.policy['linear_algebra_threads'], 12)
+        self.assertNotEqual(automatic.procedure_id, explicit.procedure_id)
+
     def test_clock_refinement_preserves_pattern_midpoint(self):
         m, _ = fixture(False)
         m['calendar']['arrival_prior_seconds'] = [-1., 1.]

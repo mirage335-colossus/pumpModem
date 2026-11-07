@@ -21,6 +21,7 @@ import time
 
 import numpy as np
 from scipy.special import logsumexp
+from triad_cpu import resolve_cpu_budget, configure_numerical_threads
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -551,7 +552,8 @@ def parser():
     p.add_argument('--chunk-samples', type=int, default=4096)
     p.add_argument('--coherences', default='0.5,2,inf')
     p.add_argument('--precision', choices=('fp32', 'fp64'), default='fp32')
-    p.add_argument('--threads', type=int, default=2)
+    p.add_argument('--threads', type=int,
+        help='numerical threads; default uses the available CPU allocation')
     p.add_argument('--memory-mib', type=int, default=256)
     p.add_argument('--alpha-per-day', type=float, default=1e-4)
     p.add_argument('--noise-variance', type=float, help='fixed receiver variance; required for physical capture')
@@ -590,8 +592,10 @@ def execute(argv=None):
     if a.receiver == 'auto':
         a.receiver = 'tracking' if a.mode == 'receive' else 'fixed'
     if a.report.exists(): raise FileExistsError(a.report)
-    if not 1 <= a.chunk_samples <= 8192 or not 1 <= a.threads <= 64:
-        raise ValueError('chunk must be 1..8192 and threads 1..64')
+    if not 1 <= a.chunk_samples <= 8192:
+        raise ValueError('chunk must be 1..8192')
+    a.cpu_allocation = resolve_cpu_budget(jobs=1, workers=1, threads=a.threads)
+    a.threads = a.cpu_allocation['threads']
     if not math.isfinite(a.block_seconds) or a.block_seconds <= 0:
         raise ValueError('positive finite block duration required')
     if not math.isfinite(a.tracking_cpu_ceiling) or a.tracking_cpu_ceiling <= 0:
@@ -608,6 +612,8 @@ def execute(argv=None):
     if (not 0 < a.clock_max_ppm <= 1000 or not 0 < a.clock_phase_max_ppm <= a.clock_max_ppm or
         not 0 < a.clock_slew_ppm_per_second <= 1000 or not math.isfinite(a.clock_phase_seconds) or a.clock_phase_seconds < 1):
         raise ValueError('invalid continuous audio clock limits')
+    if a.mode != 'transmit':
+        a.cpu_allocation['runtime'] = configure_numerical_threads(a.cpu_allocation)
     if a.physical_noise_profile is not None:
         from triad_physical_run import execute as execute_physical
         return execute_physical(a, native_args)
@@ -641,6 +647,7 @@ def execute(argv=None):
         admitted=False, physical_null_qualified=False,
         acquisition='public initial bank; evolving timing-state inference' if tracking else 'fixed public bank',
         receiver_algorithm=a.receiver, system_clock_policy=a.follow_system_clock,
+        cpu_allocation=a.cpu_allocation,
         multi_day_hardware_uptime_qualified=False,
         identities=[file_identity(p) for p in (a.native, Path(__file__),
             ROOT/'tools/triad_incremental_receiver.py', ROOT/'tools/triad_gaussian_state.py')])
@@ -689,7 +696,6 @@ def execute(argv=None):
                 import torch
                 from triad_incremental_receiver import IncrementalReceiver
                 from triad_operational_admission import operational_threshold
-                torch.set_num_threads(a.threads)
                 bank, coordinates, taps = load_bank(a.bank)
                 if a.mode == 'receive' and a.follow_system_clock == 'continuous':
                     total = disciplined_capture_extent(total, fs, a.clock_max_ppm*1e-6, coordinates, taps)

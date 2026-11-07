@@ -25,6 +25,7 @@ from triad_dynamic_joint import load_public
 from triad_dynamic_variants import ScanJointReceiver, core_projection_bands
 from triad_realtime_helper import estimate_helper
 from triad_realtime_fft import FFTScreen
+from triad_cpu import resolve_cpu_budget, configure_numerical_threads
 
 
 def _digest(value):
@@ -80,7 +81,7 @@ class RealtimeReceiver:
     def __init__(self, manifest, templates, epoch_offsets, *, precision='fp32',
                  output_sample_rate=1000, top_per_bit=2, clock_points=3,
                  maximum_refinement_candidates=64, helper_config=None,
-                 memory_limit_bytes=2*1024**3):
+                 memory_limit_bytes=2*1024**3, fft_workers=None):
         cpu, wall = time.process_time(), time.perf_counter()
         if precision not in ('fp32', 'fp64'):
             raise ValueError('precision must be fp32 or fp64')
@@ -92,6 +93,9 @@ class RealtimeReceiver:
         self.top_per_bit = int(top_per_bit)
         self.maximum_refinement_candidates = int(maximum_refinement_candidates)
         self.memory_limit_bytes = int(memory_limit_bytes)
+        # Only the controller configures process-global numerical libraries.
+        # Standalone construction still gives its FFT the available allocation.
+        fft_workers = resolve_cpu_budget(jobs=1, workers=1, threads=fft_workers)['threads']
         channel = manifest['channel']
         self.cfo_bound = float(channel['deterministic_cfo_bound_hz'])*float(channel['spread_margin'])
         self.clock_bound = float(channel['sample_clock_pair_ppm'])*float(channel['spread_margin'])
@@ -105,7 +109,7 @@ class RealtimeReceiver:
         self.helper_config = copy.deepcopy(helper_config)
         self.screen = FFTScreen(manifest, templates, self.epochs, clock_ppm=self.clocks,
             output_sample_rate=self.output_rate, precision=precision,
-            memory_limit_bytes=self.memory_limit_bytes)
+            memory_limit_bytes=self.memory_limit_bytes, workers=fft_workers)
         self.required, self.excluded = core_projection_bands(manifest, pilot_use='none',
             frequencies_hz=(-self.cfo_bound, self.cfo_bound),
             clock_ppm=(-self.clock_bound, self.clock_bound))
@@ -120,7 +124,8 @@ class RealtimeReceiver:
             output_rate=self.output_rate, top_per_bit=self.top_per_bit,
             clock_points=clock_points, clock_half_step_ppm=self.clock_half_step,
             maximum_refinement_candidates=self.maximum_refinement_candidates,
-            memory_limit_bytes=self.memory_limit_bytes,
+            memory_limit_bytes=self.memory_limit_bytes, fft_workers=fft_workers,
+            linear_algebra_threads=torch.get_num_threads(),
             helper_config=self.helper_config, block_seconds=.25,
             coherence_seconds=['0.5', 'inf'], pilot_phase_use='none',
             numeric_versions=dict(numpy=np.__version__, scipy=scipy.__version__,
@@ -231,16 +236,21 @@ def main():
     parser.add_argument('capture', type=Path)
     parser.add_argument('--templates', type=Path)
     parser.add_argument('--output', required=True, type=Path)
-    parser.add_argument('--threads', type=int, default=2)
+    parser.add_argument('--threads', type=int,
+                        help='numerical threads; default uses the available CPU allocation')
     parser.add_argument('--precision', choices=('fp32','fp64'), default='fp32')
     parser.add_argument('--gate', type=Path)
     args = parser.parse_args()
+    allocation = resolve_cpu_budget(jobs=1, workers=1, threads=args.threads,
+                                    linear_algebra_limit=2)
+    allocation['runtime'] = configure_numerical_threads(allocation)
     import torch
-    torch.set_num_threads(args.threads)
     torch.set_float32_matmul_precision('highest')
     m, templates, epochs, raw, valid = load_public(args.capture, args.templates)
-    receiver = RealtimeReceiver(m, templates, epochs, precision=args.precision)
+    receiver = RealtimeReceiver(m, templates, epochs, precision=args.precision,
+                                fft_workers=allocation['threads'])
     result = receiver.score(raw, valid)
+    result['cpu_allocation'] = allocation
     if args.gate:
         result['decision'] = admit(result, json.loads(args.gate.read_text()))
     args.output.parent.mkdir(parents=True, exist_ok=True)

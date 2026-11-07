@@ -196,7 +196,8 @@ class PreparedPhysical:
             basis, self.basis_report = make_basis(self.source, coordinates, taps, self.sample_rate,
                 template_backend=a.tracking_templates,
                 cache_bytes=min(32*1024**2, a.memory_mib*1024**2//8))
-            torch.set_num_threads(a.threads)
+            allocation = getattr(a, 'cpu_allocation', None) or {}
+            torch.set_num_threads(allocation.get('linear_algebra_threads', a.threads))
             self.receiver = PhysicalReceiver(sample_rate=self.sample_rate, samples=self.frames,
                 block_samples=geometry['block_samples'], basis=basis,
                 candidate_count=len(coordinates), required_bands_hz=geometry['required_bands_hz'],
@@ -264,7 +265,8 @@ def execute(a, native_args):
     began, cpu = time.perf_counter(), time.process_time()
     child = resource.getrusage(resource.RUSAGE_CHILDREN)
     result = dict(schema='triad-continuous-physical-v1', complete=False, admitted=False,
-        status='failed', physical_null_qualified=False)
+        status='failed', physical_null_qualified=False,
+        cpu_allocation=getattr(a, 'cpu_allocation', None))
     prepared = audio = output = None
     path = a.report.with_suffix('.stderr.log')
     try:

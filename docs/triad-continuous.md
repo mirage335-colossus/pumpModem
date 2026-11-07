@@ -1,5 +1,16 @@
 # Continuous three-carrier transmission and reception
 
+**CPU allocation:** receiver CLI thread counts now default to the process's
+affinity/quota-constrained CPU budget. The two-thread small-matrix heuristic
+used in the separately measured broad acquisition path is not applied to
+these fixed/tracking receivers. Explicit `--threads N` remains an override;
+more available threads are not a claim of speedup for every block geometry.
+See the [shared CPU policy](triad-weak-streaming.md#continuous-streaming-scope)
+and [measured follow-up](validation-data/triad-v3/2026-11-06-cpu-default/README.md).
+Install `threadpoolctl==3.6.0` in the receiver Python environment so already
+loaded numerical libraries receive the requested limits. Transmit-only runs
+still do not require PyTorch.
+
 **Physical admission:** the optional [native-ADC noise-profile path](triad-physical-admission.md)
 adds a conditional admission gate for a matching, independently checked cable
 profile. It scores a fixed public real-waveform bank before capture ASRC while

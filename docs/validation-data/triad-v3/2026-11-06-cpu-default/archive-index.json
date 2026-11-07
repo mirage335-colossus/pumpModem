@@ -1,0 +1,182 @@
+{
+  ".github/workflows/triad-performance.yml": {
+    "bytes": 40989,
+    "sha256": "70e28710b8c16298ed82cda693f605c1090f196921e4ba05a7847ad227cf4345"
+  },
+  "local-evidence/triad-cpu-default/auto-pipeline/bit-00-receiver.json": {
+    "bytes": 1006683,
+    "sha256": "086a78f7d03aa2cef26f56c20da0358e6e5a44ed3b3b94646bf1698a21b3f476"
+  },
+  "local-evidence/triad-cpu-default/auto-pipeline/bit-01-receiver.json": {
+    "bytes": 983384,
+    "sha256": "1e331b678abe9376130a3150aef3d406fab54b62989c8811d882e88f3f6c4f2f"
+  },
+  "local-evidence/triad-cpu-default/auto-pipeline/report.json": {
+    "bytes": 34623,
+    "sha256": "59004abf61abe769d7db736cc224a99ca707365b244f41ed0f2b1fd2170f2d04"
+  },
+  "local-evidence/triad-cpu-default/auto-pipeline.log": {
+    "bytes": 49,
+    "sha256": "c1e3ebd88da94d8faaa5a178d5815b6d2f955463133e30a6fe467676e30dec3b"
+  },
+  "local-evidence/triad-cpu-default/auto-single/bit-00-receiver.json": {
+    "bytes": 1006689,
+    "sha256": "dcc41de8edd79f71a2a7a9fe7141b48e621f8bfdc7474c272a2b4013166b8280"
+  },
+  "local-evidence/triad-cpu-default/auto-single/report.json": {
+    "bytes": 26579,
+    "sha256": "ec08e12619cf69b563b9f20cc3b34f3f0faca1329ecdde619a65e35b7d88dfbd"
+  },
+  "local-evidence/triad-cpu-default/auto-single.log": {
+    "bytes": 53,
+    "sha256": "ed0ecd2d3e17a6d9f0569bfbb55499c21cb91f4eb669102fb2e2da3183e2e43f"
+  },
+  "local-evidence/triad-cpu-default/explicit2/bit-00-receiver.json": {
+    "bytes": 1006731,
+    "sha256": "86f5b6aa6c6195cc0acad7e3bd58f2f0b1f87ac2b0a53e2cf8022d6201a27f08"
+  },
+  "local-evidence/triad-cpu-default/explicit2/report.json": {
+    "bytes": 26575,
+    "sha256": "80d5244a65a28ca0bc808f10d730809e8be959ba37b7bbcd4e3935418df10536"
+  },
+  "local-evidence/triad-cpu-default/explicit2.log": {
+    "bytes": 46,
+    "sha256": "3290a07585469a4a43e4d8ee7c74d3ea7ae1aae4268e2beb0ceeea61472a7ad6"
+  },
+  "local-evidence/triad-cpu-default/final-auto-pipeline/bit-00-receiver.json": {
+    "bytes": 1006707,
+    "sha256": "1554179bd09f14201a5deb1a85d21bf43681bd7dddd7ae7e045cc46e9b661f57"
+  },
+  "local-evidence/triad-cpu-default/final-auto-pipeline/bit-01-receiver.json": {
+    "bytes": 983447,
+    "sha256": "1e8b64d33ccd6860b57755a5a97f39bf783fc2dcfcec8409a73e17e8d9ef1900"
+  },
+  "local-evidence/triad-cpu-default/final-auto-pipeline/report.json": {
+    "bytes": 34822,
+    "sha256": "8c023adc461ca05e85218f9322811c25679513db75d85a3a5d896f401e579462"
+  },
+  "local-evidence/triad-cpu-default/final-auto-pipeline.log": {
+    "bytes": 55,
+    "sha256": "0d21e2b9ea79d43bd5441d4e38f814e10240f652e5b9d8505dd896b120d4f57e"
+  },
+  "local-evidence/triad-cpu-default/final-auto-single/bit-00-receiver.json": {
+    "bytes": 1006713,
+    "sha256": "119f94e49ba3f357b529cd0f5a5be5eb5ba4e6c251c319f545c66327e4c3c89c"
+  },
+  "local-evidence/triad-cpu-default/final-auto-single/report.json": {
+    "bytes": 26823,
+    "sha256": "50029d3af91a8d37f5e8c3f9573751f9343b72f80629a1212339cf92a9036487"
+  },
+  "local-evidence/triad-cpu-default/final-auto-single.log": {
+    "bytes": 60,
+    "sha256": "2ec5a4737b2e626336cd975d6d125443afcfd635b7ecef5519e7e74d6eddcc8d"
+  },
+  "local-evidence/triad-cpu-default/final-focused-corrected.log": {
+    "bytes": 442,
+    "sha256": "116ea7101ef3ea38d8aebc9de3c7b841b26f123bf5767e7b915bb8da4575c44d"
+  },
+  "local-evidence/triad-cpu-default/final-focused-tests.log": {
+    "bytes": 1497,
+    "sha256": "fd9407d0be72fc41af0dcdfc1cc1187283eadca100aa05f4b92e794d2e662154"
+  },
+  "local-evidence/triad-cpu-default/focused-tests.log": {
+    "bytes": 432,
+    "sha256": "790c6e6051604545061190ed0f9754d0f43bbfcbfe07e783007d5279bf49538f"
+  },
+  "local-evidence/triad-cpu-default/measure.py": {
+    "bytes": 1609,
+    "sha256": "368c1eefcef2aa5e8dc9230347d1bcb39ffba4058c9bce001d49883625a6af79"
+  },
+  "local-evidence/triad-cpu-default/measure_current.py": {
+    "bytes": 1783,
+    "sha256": "aa30a9f1c2b680fd0c4821b085826d617f9c54ac5216083d5818f94b27456ddb"
+  },
+  "local-evidence/triad-cpu-default/package.py": {
+    "bytes": 2799,
+    "sha256": "5d63a3f03db4f5e80dd6d58d0b6059375e0722f3ba43692324e09b453ef580e5"
+  },
+  "local-evidence/triad-cpu-default/worker-probe.json": {
+    "bytes": 10992,
+    "sha256": "21c3f7de5756ed7c7518109a9a3fb83cab6ab285051639a4eacd7c22ccf4fa16"
+  },
+  "local-evidence/triad-cpu-default/worker-probe.log": {
+    "bytes": 68,
+    "sha256": "4007b61d7765e1f9e62dc28e7d9da5da5a4881ad11d277dfc4a79eb4d3fd3c36"
+  },
+  "local-evidence/triad-cpu-default/worker_probe.py": {
+    "bytes": 1481,
+    "sha256": "98bcb684a782295fb9119cd280e17e3afdd1fd8c7575e47b3ec7fe15da1bd652"
+  },
+  "tests/test_triad_continuous.py": {
+    "bytes": 12677,
+    "sha256": "77620adda628d0499cfd243c1e505fcce89ceb6f8ba6f75c1985935f9439d510"
+  },
+  "tests/test_triad_cpu.py": {
+    "bytes": 15281,
+    "sha256": "15a48c91efd6f2d9c13d36454272d6228ea40388c2c9e23efdc42b86f141f8ce"
+  },
+  "tests/test_triad_physical_run.py": {
+    "bytes": 9541,
+    "sha256": "a551054a232bff5af8e4fb8dd2c1f3a4cb2782a2d4314ea7c536dbac4a9db8d4"
+  },
+  "tests/test_triad_realtime_receiver.py": {
+    "bytes": 10176,
+    "sha256": "fbef245defb77e86e5fc9b4cc2eddca56b666d316773ef548bde9ee063fe790e"
+  },
+  "tests/test_triad_receiver_cpu_limits.py": {
+    "bytes": 4359,
+    "sha256": "323d62afafb8d65c4f2e7aab6be273f07a3363c2d01b3cb1b99dfd410c768b04"
+  },
+  "tests/test_triad_stream_run.py": {
+    "bytes": 7102,
+    "sha256": "e3712d5fb9383f343eabb14e3091f2acbdf273486959ebfb810c91b3a612496c"
+  },
+  "tests/test_triad_stream_scheduler.py": {
+    "bytes": 10089,
+    "sha256": "4c5c038e9cb6bd3186ac1722dd9042f405f46789baada1a82b3bd0f2f6c723ca"
+  },
+  "tests/test_triad_weak_receiver.py": {
+    "bytes": 9190,
+    "sha256": "58ceb6b8efeaeb9c13018a0666bf40fdbbbdeb12cef766c915c5ff8adb56f8d6"
+  },
+  "tools/build_capacity.py": {
+    "bytes": 7998,
+    "sha256": "a22a7e47c96995048a03bf7394a05ae8284d9318691c1e51fd2d300507478c4e"
+  },
+  "tools/triad_continuous.py": {
+    "bytes": 53441,
+    "sha256": "5ee1342646e3c2c1efb6e69da45893aef99dc1e1d769840db2a750ce4d65bd40"
+  },
+  "tools/triad_cpu.py": {
+    "bytes": 10363,
+    "sha256": "51a82d23d069e131cad735b049a732a0937db3c4797d2f01188c30633c2b98d0"
+  },
+  "tools/triad_hf_noise_measure.py": {
+    "bytes": 14412,
+    "sha256": "947e3d453f1d5b6c8e5827e22573eb0cbb311861594963a6b112e33ea2a70df0"
+  },
+  "tools/triad_physical_run.py": {
+    "bytes": 16785,
+    "sha256": "7c81ddd8ef7a30d047a36d1ec6993f5c1b6b8e2b15bcb1d007fc74b05ac06b66"
+  },
+  "tools/triad_realtime_receiver.py": {
+    "bytes": 14276,
+    "sha256": "8574789ee02a874e8fa95d5b4842ca35faadf3a66bc9428d2e48f0885f6d8d04"
+  },
+  "tools/triad_stream_run.py": {
+    "bytes": 24414,
+    "sha256": "dbec607390b1e40cdaa71cba7c3fb3e2ac9a463007666aef4a807229e30cdcbe"
+  },
+  "tools/triad_stream_scheduler.py": {
+    "bytes": 17131,
+    "sha256": "8deb836681c4b644139952a54d9edd27873f52439966a2c21cd5702e120957cb"
+  },
+  "tools/triad_weak_qualify.py": {
+    "bytes": 23090,
+    "sha256": "3cc49a71a08cbf81d705c444a94e8ae07a65550256722cb6fae72102288858d4"
+  },
+  "tools/triad_weak_receiver.py": {
+    "bytes": 10370,
+    "sha256": "d83b93e6add382f668376a231cd2dcb82b5469a093b03f9e5510f2150614fbee"
+  }
+}

@@ -33,6 +33,14 @@ adapter. The native `triad-long` CLI remains part of complete-pipeline timing.
 
 ### Random-channel and joint-receiver extension
 
+Automatic CPU allocation is covered by `test_triad_cpu.py`,
+`test_triad_receiver_cpu_limits.py` and the streaming/continuous/standalone
+receiver tests. The [CPU-default follow-up](validation-data/triad-v3/2026-11-06-cpu-default/README.md)
+measures a saved full HF workload and a two-job cadence, checks actual worker
+pool limits, and preserves the failed indiscriminate-threading experiment.
+Frozen benchmark protocols retain explicit counts; changed automatic policies
+do not retroactively update historical timing anchors or qualify other hardware.
+
 The [random-channel study](triad-stochastic.md) adds explicit stochastic ray,
 moving-delay and selective-coefficient paths. Historical performance forecasts
 and green guard results do **not** qualify these additions. Keep their sampled

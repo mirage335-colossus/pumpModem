@@ -5,7 +5,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 import numpy as np
 
@@ -28,6 +28,33 @@ def receipt(frames=400):
 
 
 class PhysicalRunTests(unittest.TestCase):
+    def test_physical_preparation_preserves_separate_linear_algebra_budget(self):
+        cases = ((None, 3, 3),
+                 (dict(threads=12, linear_algebra_threads=2), 12, 2),
+                 (dict(threads=6, linear_algebra_threads=6), 6, 6))
+        for allocation, requested, expected in cases:
+            with self.subTest(allocation=allocation), tempfile.TemporaryDirectory() as td:
+                profile = Path(td)/'profile.json'; profile.write_text('{}')
+                a = parser().parse_args(['--mode', 'receive', '--report', str(Path(td)/'report'),
+                    '--bank', 'unused-bank', '--physical-noise-profile', str(profile),
+                    '--follow-system-clock', 'continuous', '--threads', str(requested)])
+                if allocation is not None:
+                    a.cpu_allocation = allocation
+                source = Mock(descriptor=dict(helper_enabled=False))
+                geometry = dict(sample_rate=48000, samples=100, block_samples=20,
+                                required_bands_hz=[[100, 200]])
+                with patch('triad_continuous.load_bank', return_value=({}, [[0,0,0,0]], [[0,0]])), \
+                     patch('triad_continuous.NativeStream', return_value=source), \
+                     patch('triad_physical_run.collect_binding', return_value=dict(hardware_rate_hz=48000)), \
+                     patch('triad_physical_run.observation_geometry', return_value=geometry), \
+                     patch('triad_physical_run.make_basis', return_value=(Mock(), Mock())), \
+                     patch('triad_physical_admission.load_profile', return_value=Mock(variance_proxy=1.)), \
+                     patch('triad_physical_admission.PhysicalReceiver'), \
+                     patch('torch.set_num_threads') as set_threads:
+                    prepared = PreparedPhysical(a, [], None)
+                    set_threads.assert_called_once_with(expected)
+                    prepared.close()
+
     def test_native_receipt_blocks_wrong_observation_and_incomplete_or_clipped(self):
         binding=dict(hardware_rate_hz=48000,hardware_channels=2,selected_channel=0)
         self.assertTrue(validate_receipt(receipt(), binding, 400))

@@ -129,6 +129,32 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(report['records'][0]['error_type'],'ValueError')
         self.assertEqual(report['records'][1]['result'],3.)
 
+    def test_worker_initializer_sets_thread_local_state_once(self):
+        state=threading.local();calls=[]
+        def initialize():
+            state.ready=True;calls.append(threading.get_ident())
+            return {'ready':True}
+        def score(i,x,v):
+            self.assertTrue(state.ready)
+            return i
+        scheduler=StreamingWindowScheduler([WindowRequest(str(i),i,1)for i in range(3)],
+            score,workers=2,queue_capacity=3,worker_initializer=initialize)
+        scheduler.append(np.ones(3,np.complex64));report=scheduler.close(timeout=1)
+        self.assertTrue(report['drained']);self.assertEqual(len(calls),2)
+        self.assertEqual(len(set(calls)),2)
+        self.assertTrue(all(r['status']=='scored'for r in report['records']))
+        self.assertTrue(all(r['status']=='ready'for r in report['worker_initializations']))
+
+    def test_worker_initializer_error_drains_without_running_unconfigured_work(self):
+        called=[]
+        def initialize():raise ValueError('pool limit unavailable')
+        scheduler=StreamingWindowScheduler([WindowRequest('x',0,1)],
+            lambda *args:called.append(1),worker_initializer=initialize)
+        scheduler.append(np.ones(1,np.complex64));report=scheduler.close(timeout=1)
+        self.assertTrue(report['drained']);self.assertFalse(called)
+        self.assertEqual(report['records'][0]['status'],'scorer_error')
+        self.assertIn('worker initialization failed',report['records'][0]['error'])
+
     def test_input_boundaries_global_integer_clock_and_bounded_gap_receipts(self):
         start=2**60+3;seen=[]
         scheduler=StreamingWindowScheduler([WindowRequest('late',start+4,2)],

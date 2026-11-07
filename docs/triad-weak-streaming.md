@@ -115,12 +115,44 @@ during ingestion, and explicitly reports invalid windows, overload, scorer
 errors and incomplete drain. Timing distinguishes wall time, process CPU and
 worker-thread CPU; process deltas from overlapping activities must not be added
 as if they were exclusive.
-The optional `workers` budget defaults to one; use `triad_stream_run.py
---workers 2 --threads 2` for the measured two-worker allocation. Each concurrent
-job owns its mutable receiver state. Queue and in-flight work remain bounded,
-and shutdown uses one shared deadline rather than a fresh timeout per worker.
-Process CPU is an aggregate across cores; more than one CPU-second per input
-second does not itself imply a wall-time backlog on this six-core host.
+The default CPU budget now uses all process-available logical CPUs, constrained
+by affinity and readable ancestor container quotas. `triad_cpu.py` reuses the
+project's resource detector without reserving a CPU. One available job receives
+the full FFT budget; multiple scheduled jobs divide an even budget between two
+private workspaces. Odd budgets use one workspace, avoiding unused capacity.
+On this 12-logical-CPU host that means one ×12 or two ×6 FFT workers. Automatic
+workspace replication is capped at two, rather than scaling memory per CPU.
+
+Small-matrix BLAS/PyTorch operations automatically retain at most two threads
+per job: measured indiscriminate 12-thread execution substantially increased
+CPU and wall time in refinement preparation. The full CPU budget remains
+available to bulk FFT work; utilization depends on runnable work. Explicit
+`--workers` and `--threads` remain exact overrides; explicit `--threads` also
+sets the linear-algebra count. Overcommit is reported, never silently introduced
+by automatic mode. Use `--workers 2 --threads 2` to reproduce the earlier frozen
+cadence experiment; its numbers are not silently relabeled as automatic-mode
+results. See the [automatic CPU follow-up](validation-data/triad-v3/2026-11-06-cpu-default/README.md).
+
+Install `threadpoolctl==3.6.0` alongside NumPy, SciPy and PyTorch. The controlling
+thread configures already-loaded numerical pools before starting receivers.
+Each scoring worker also applies the same fixed limit once, because some
+OpenMP implementations keep this setting thread-local. No job retunes global
+pools. Setting only environment variables after imports would be insufficient. Reports
+include detected capacity, FFT allocation and observed library pool sizes.
+Programmatic `WeakReceiver`/`RealtimeReceiver` constructors select their FFT
+budget without changing process-global BLAS/PyTorch settings: their controller
+must call `configure_numerical_threads` once and initialize their numerical
+worker threads with `initialize_numerical_worker`. `StreamSession` does this before
+starting its workers; do not concurrently construct sessions with different
+global numerical settings. Explicit frozen qualification protocols keep their
+declared budgets. Continuous fixed/tracking CLI reception also uses automatic
+CPU allocation; transmit-only operation does not acquire a PyTorch dependency.
+
+Each concurrent job owns its mutable receiver state. Queue and in-flight work
+remain bounded, and shutdown uses one shared deadline rather than a fresh
+timeout per worker. Process CPU is an aggregate across cores; more than one
+CPU-second per input second does not itself imply a wall-time backlog on this
+six-core host.
 
 `triad_stream_slots.py` adapts the native whole-bit fixture's public source
 calendar and per-slot templates. It moves analysis starts earlier to retain
@@ -200,6 +232,8 @@ python -m unittest discover -s tests -p 'test_triad_segmented_fft.py'
 python -m unittest discover -s tests -p 'test_triad_operational_admission.py'
 python -m unittest discover -s tests -p 'test_triad_stream*.py'
 python -m unittest discover -s tests -p 'test_triad_template_bank.py'
+python -m unittest discover -s tests -p 'test_triad_cpu.py'
+python -m unittest discover -s tests -p 'test_triad_receiver_cpu_limits.py'
 ```
 
 Independent native qualification is explicitly opt-in. Its protocol freezes

@@ -9,6 +9,14 @@ from triad_weak_receiver import WeakReceiver
 
 
 class WeakContracts(unittest.TestCase):
+    def test_default_fft_uses_available_cpu_budget(self):
+        m,t=self.inputs()
+        with mock.patch('triad_cpu.resolve_cpu_budget',return_value={'threads':7}),mock.patch('triad_weak_receiver.FFTScreen')as screen:
+            screen.return_value.procedure_id='geometry'
+            rx=WeakReceiver(m,t,[0])
+        self.assertEqual(screen.call_args.kwargs['workers'],7)
+        self.assertEqual(rx.policy['fft_workers'],7)
+
     def test_fft_thread_budget_is_explicit_and_fingerprinted(self):
         m,t=self.inputs()
         with mock.patch('triad_weak_receiver.FFTScreen')as screen:
@@ -18,6 +26,10 @@ class WeakContracts(unittest.TestCase):
             two=WeakReceiver(m,t,[0],fft_workers=2)
             self.assertEqual(screen.call_args.kwargs['workers'],2)
             self.assertNotEqual(one.procedure_id,two.procedure_id)
+            with mock.patch('triad_weak_receiver.torch.get_num_threads',return_value=7):
+                different_linear=WeakReceiver(m,t,[0],fft_workers=2)
+            self.assertNotEqual(two.procedure_id,different_linear.procedure_id)
+            self.assertEqual(different_linear.policy['linear_algebra_threads'],7)
         for bad in (0,-1,True,1.5):
             with self.assertRaisesRegex(ValueError,'FFT workers'):
                 WeakReceiver(m,t,[0],fft_workers=bad)

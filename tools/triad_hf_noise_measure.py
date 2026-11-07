@@ -153,9 +153,10 @@ def main():
     c, w = time.process_time(), time.perf_counter()
     session = StreamSession(original, slots, args.output/'receiver',
         fixed_gain=args.fixed_gain, analog_gain=args.analog_gain,
-        playback_offset_frames=48000, noise_inflation=plan['receiver_noise_inflation'])
+        playback_offset_frames=48000, noise_inflation=plan['receiver_noise_inflation'],
+        workers=1, fft_workers=args.threads)
     receiver = WeakReceiver(*session.slots[0], noise_inflation=plan['receiver_noise_inflation'],
-        admission_policy=session.slots[0][0].get('weak_admission_policy'))
+        admission_policy=session.slots[0][0].get('weak_admission_policy'), fft_workers=args.threads)
     session.receiver_factory = lambda *unused: receiver
     preparation = dict(cpu_seconds=time.process_time()-c, wall_seconds=time.perf_counter()-w)
     c, w, children = time.process_time(), time.perf_counter(), cpu_children()
