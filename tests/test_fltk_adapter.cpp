@@ -1348,6 +1348,7 @@ void extension_controls() {
 }
 void inline_document_editor() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    app.application.activate(ui::Command::unload_keys);
     auto* window=application_window();require(window,"Inline control fixture has no native window");
     const auto refresh=[] {
         const auto until=Clock::now()+std::chrono::milliseconds(140);

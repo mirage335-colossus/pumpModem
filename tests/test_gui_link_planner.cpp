@@ -127,6 +127,7 @@ void selected_plan_progress_and_support_equivalence() {
 
 void earth_moon_earth_estimate() {
     Controller controller({false,false});
+    controller.activate(ui::Command::unload_keys);
     controller.activate(ui::Command::planner_example_eme);
     const auto inputs=controller.link_plan()->inputs;
     check(controller.field(ui::Field::dsp_workspace).selected=="ram-75"&&inputs.dsp_workspace_percent==75&&
@@ -1029,7 +1030,7 @@ void removing_key_withdraws_cached_observer() {
 }
 void stable_planner_navigation_document() {
     using F=ui::Field;using C=ui::Command;using P=ui::Page;
-    Application app({.simulation=true});app.select_page(P::planner);
+    Application app({.simulation=true});app.activate(C::unload_keys);app.select_page(P::planner);
     app.edit(F::bandwidth,"3600 Hz");app.edit(F::carrier,"1500 Hz");
     app.select(F::simulation_oscillator,"gpsdo-ocxo");
     app.activate(C::planner_example_lpi);prepare_plan(app);
@@ -1152,6 +1153,7 @@ void asynchronous_planner_edits() {
 void controller_checked_navigation() {
     using F=ui::Field;using C=ui::Command;
     Controller controller;
+    controller.activate(C::unload_keys);
     controller.edit(F::bandwidth,"1 Hz");controller.edit(F::carrier,"1500 Hz");
     controller.select(F::simulation_oscillator,"gpsdo-xo");controller.edit(F::message,"e");prepare(controller);
     const auto inspection=controller.inspection();
@@ -1201,6 +1203,7 @@ void controller_checked_navigation() {
 void controller_target_alignment() {
     using F=ui::Field;
     Controller controller;
+    controller.activate(ui::Command::unload_keys);
     controller.edit(F::bandwidth,"1 Hz");controller.edit(F::carrier,"1500 Hz");
     controller.select(F::simulation_oscillator,"gpsdo-xo");controller.edit(F::short_bits,"00101");
     const auto expected=[&](double requested,double companion) {
@@ -1378,6 +1381,7 @@ void current_draft_and_modem_isolation() {
 void failed_draft_estimate_and_recovery() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
+    controller.activate(C::unload_keys);
     controller.edit(F::bandwidth,"3600");controller.edit(F::carrier,"1500");
     controller.edit(F::message,"e");
     controller.activate(C::planner_target);const auto requests=controller.take_services();
@@ -1699,6 +1703,7 @@ void one_warning_on_planner_page() {
 void all_target_dropdowns_and_native_planner_editor() {
     using F=ui::Field;using C=ui::Command;
     Controller controller;
+    controller.activate(C::unload_keys);
     controller.edit(F::short_bits,"00101");
     auto input=prepared_plan(controller)->inputs;input.options=controller.settings().transfer;input.target_db_hz=-18;
     const std::array companion{55.};
@@ -1721,6 +1726,7 @@ void all_target_dropdowns_and_native_planner_editor() {
     Application app({});
     // Planner controls belong to Robust; ordinary launches now default to Fast.
     app.select(F::fast_mode,"robust");
+    app.activate(C::unload_keys);
     app.toggle(F::developer_mode,true);
     const auto& screen=ui::console_screen();
     const auto editor=std::find_if(screen.begin(),screen.end(),[](const auto& c){return c.field==F::planner_target;});
@@ -1787,6 +1793,7 @@ void all_target_dropdowns_and_native_planner_editor() {
 void application_prompt_roundtrips() {
     using F=ui::Field;using C=ui::Command;
     Launch launch;launch.simulation=true;Application app(launch);
+    app.activate(C::unload_keys);
     app.edit(F::bandwidth,"3600");app.edit(F::carrier,"1500");app.edit(F::message,"e");
     const auto short_target=app.field(F::snr).text,long_target=app.field(F::long_snr).text;
     const auto receive_targets=app.field(F::receive_snr).text;

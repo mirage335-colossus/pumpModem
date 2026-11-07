@@ -15,8 +15,9 @@ Feature completeness is separate from performance and hardware qualification.
 Audio peers need matching waveform settings. Automatic profiles use binary
 pattern transport;
 nonempty text of up to 16 source bytes uses the fixed short dictionary, while
-longer text and all attachments use fixed 128-byte intervals. Encrypted peers
-must use the current keyfile format and cipher suite. These paths and per-bit pending reception are
+longer text and all attachments use fixed 128-byte intervals. Peers using
+file-backed keys must use the current keyfile format and cipher suite. These
+paths and per-bit pending reception are
 [development requirements](development.md).
 [Test execution results](validation.md) distinguish measured results from design
 and source-level checks.
@@ -37,6 +38,7 @@ unchanged.
 | Audio controls | All three GUIs select Left mono, Right mono or Stereo and playback-only TX volume from 0.01% to 175% (default 100%); levels above 100% can clip. Device selection uses the existing audio backend. Linux supports shared or explicitly exclusive access; Windows WinMM remains shared. Simulation and WAV exports retain their existing mono waveform and level. |
 | 256 MiB receive content | Bounded application cache with local reception identities and eviction. DSP has an independent ceiling. Fixed interval/marker/RS scratch drains into quota-limited source memory; post-end output has its own content quota. Reception uses no temporary files or disk cache. Neither number is a total process RSS cap. |
 | Large keyfile and pad | A production 128 MiB random header wraps an authenticated collection of 1..128 named key sets with separate confidentiality lanes. GUI opens, generates/saves in the background and shows the loaded file's folder. Generation collects operating-system randomness and attempts fresh audio input; unavailable or unusable audio is clearly reported when generation falls back to OS-only randomness. New files use exclusive creation and select the first named key. Older keyfile formats are rejected. Optional large pad support remains in CLI. No physical-erasure guarantee. |
+| Public amateur keyset | Robust GUI starts with **WARNING-Amateur**, a public built-in keyset for experimenting with the normal keyed paths; it gives no confidentiality or sender authentication. Loading a real keyfile replaces it. The Keyfile menu can load it again or unload the key bank. Existing epoch-reuse and live-guard limits apply. |
 | Compose convenience fields | GUI Callsign and Grid seed an editable `CQ CQ CQ DE <callsign> GRID <grid>. Please reply. ` greeting when Message is cleared; absent fields omit their corresponding clause, and both absent omit the greeting. Values are carried only in visible message text. Starting a text transmission clears to the current convenience text and enables Previous message - click to paste for exact message restoration, including its repeatable identifier. Editing the recalled message generates a fresh identifier. |
 | Repeatable messages | GUI Repeatable is ordinary visible `REPEATABLE-XXXXXXXX ` source text with local compose policy; it adds no modem flag or received command. Callsign/grid greetings also remain source text. |
 | Raw bits and fixed byte streams | Nonempty text of up to 16 source bytes uses the fixed short dictionary, with exact endpoints and no markers, padding, FEC or MAC. Explicit raw bits bypass dictionary encoding and preserve leading zeros and non-byte lengths. Text longer than 16 bytes and all attachments use marker + 128 coded bytes with fixed local FEC/source/key profiles. Fixed local geometry determines framing; received lengths never control modem boundaries, allocation or completion. Public intervals have no digest or authentication. Attachments use a bounded source prefix after physical end and source decoding. See [protocol](protocol.md). |

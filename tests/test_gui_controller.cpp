@@ -218,10 +218,10 @@ void helper_controls() {
     check(requests.size()==1,"Helper privacy fixture did not request a keyfile");
     controller.complete_service({requests.front().id,false,fixture.path.string(),{}});
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
-    while(!controller.settings().transfer.key&&std::chrono::steady_clock::now()<deadline) {
+    while(controller.field(F::key).selected!="key:Helper privacy"&&std::chrono::steady_clock::now()<deadline) {
         controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    check(controller.settings().transfer.key&&controller.field(F::helper_callsign).visible&&
+    check(controller.field(F::key).selected=="key:Helper privacy"&&controller.settings().transfer.key&&controller.field(F::helper_callsign).visible&&
           controller.field(F::helper_callsign).enabled,"Encryption hid or disabled Helper Callsign");
     controller.edit(F::helper_callsign,"KEYED-ID");
     check(controller.field(F::helper_callsign).text=="KEYED-ID"&&controller.settings().helper.callsign=="KEYED-ID",
@@ -362,7 +362,7 @@ void airtime_and_close() {
     auto patch=launch_command::parse("--pattern auto-keystream --tx-dbm 36.020599913279625 --path-loss-db 120 --noise-dbm-hz -164 --oscillator gpsdo-xo --rf-oscillator gpsdo-ocxo --shift 1e6 --search-margin 3 --reference independent --target-snr 60 --rate 1200 --carrier 1.009e6 --dsp-workspace 50% --clock-sync GPS_0.1ms-1ms_region-0ms_offset --audio-error 50ms --dsss-factor 10 --live-duplex yes --fhss fake-0.4s-200");
     patch.keyfile=fixture.path.string();
     Controller same({false,true,patch});same.edit(F::message,"quick brown");
-    wait_until(same,[&]{return same.settings().transfer.key&&same.estimate()&&
+    wait_until(same,[&]{return same.field(F::key).selected=="key:synthetic airtime cancellation"&&same.settings().transfer.key&&same.estimate()&&
         !same.field(F::simulation_cpu_time).text.ends_with("Calculating...");},std::chrono::seconds(10),"same-command key load or estimate stalled");
     if(!same.enabled(C::transmit)) {
         std::cerr<<"TX readiness: memory="<<same.estimate()->memory_supported<<" airtime="
@@ -378,12 +378,12 @@ void airtime_and_close() {
     auto slow=launch_command::parse("--pattern auto-keystream --tx-dbm 36.020599913279625 --path-loss-db 200 --noise-dbm-hz -164 --oscillator gpsdo-xo --shift 0 --search-margin 3 --reference independent --target-snr -38 --rate 0.1 --carrier 0.05 --dsp-workspace 50%");
     slow.keyfile=fixture.path.string();
     Controller costly({false,true,slow});costly.edit(F::short_bits,"1");
-    wait_until(costly,[&]{return costly.settings().transfer.key&&costly.estimate();},std::chrono::seconds(10),"airtime waited behind long-symbol probability trials");
+    wait_until(costly,[&]{return costly.field(F::key).selected=="key:synthetic airtime cancellation"&&costly.settings().transfer.key&&costly.estimate();},std::chrono::seconds(10),"airtime waited behind long-symbol probability trials");
     check(costly.field(F::simulation_cpu_time).text.ends_with("Calculating...")&&costly.enabled(C::transmit),
         "long-symbol airtime and TX readiness did not precede advisory computation");
     costly.close();wait_until(costly,[&]{return costly.ready_to_close();},std::chrono::seconds(2),"close waited for obsolete long-symbol probability trials");
     Controller replacing({false,true,slow});replacing.edit(F::short_bits,"1");
-    wait_until(replacing,[&]{return replacing.settings().transfer.key&&replacing.estimate();},std::chrono::seconds(10),"replacement fixture never published airtime");
+    wait_until(replacing,[&]{return replacing.field(F::key).selected=="key:synthetic airtime cancellation"&&replacing.settings().transfer.key&&replacing.estimate();},std::chrono::seconds(10),"replacement fixture never published airtime");
     replacing.activate(C::open_keyfile);const auto requests=replacing.take_services();
     check(requests.size()==1,"replacement keyfile chooser missing");
     replacing.complete_service({requests.front().id,false,fixture.path.string(),{}});
@@ -762,6 +762,7 @@ void shift_oscillator_controls() {
 void lpi_estimate_controls() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
+    controller.activate(C::unload_keys);
     const auto text=[&] {return controller.field(F::lpi_estimate).text;};
     std::string advisory_context="initial";
     unsigned advisory_comparison=0;
@@ -1340,10 +1341,10 @@ void fake_hop_display(bool list_only=false) {
     check(requests.size()==1,"FHSS key chooser missing");
     controller.complete_service({requests.front().id,false,fixture.path.string(),{}});
     const auto key_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
-    while(!controller.settings().transfer.key&&std::chrono::steady_clock::now()<key_deadline) {
+    while(controller.field(F::key).selected!="key:FHSS display synthetic key"&&std::chrono::steady_clock::now()<key_deadline) {
         controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    check(controller.settings().transfer.key.has_value(),"FHSS display key failed to load");
+    check(controller.field(F::key).selected=="key:FHSS display synthetic key"&&controller.settings().transfer.key.has_value(),"FHSS display key failed to load");
     controller.set_developer_mode(true);
     controller.edit(F::fhss_list,"1MHz\n1.01MHz\n1.033MHz");controller.activate(C::fhss_apply);
     controller.select(F::fhss,preference);
@@ -1823,9 +1824,206 @@ void rate_carrier_controls() {
           "Strong helper ratio did not produce a valid fixed-tone carrier plan");
 }
 
+void real_keyfile_selection() {
+    using F=ui::Field;using C=ui::Command;
+    struct Fixture {
+        std::filesystem::path dir=std::filesystem::temp_directory_path()/
+            ("datapump-controller-keyfiles-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        Fixture(){check(std::filesystem::create_directory(dir),"keyfile fixture directory already exists");}
+        ~Fixture(){std::error_code ignored;std::filesystem::remove_all(dir,ignored);}
+    } fixture;
+    const auto first_path=fixture.dir/"first",second_path=fixture.dir/"amateur",neutral_path=fixture.dir/"second";
+    (void)create_keyring(first_path,{"WARNING-Amateur","other"},std::nullopt,fixture_keyfile::generation());
+    (void)create_keyring(neutral_path,{"WARNING-Amateur"},std::nullopt,fixture_keyfile::generation());
+    check(std::filesystem::copy_file(neutral_path,second_path),"copying keyfile fixture failed");
+    // Load the oracle from a different basename, so any special handling of
+    // the real file named amateur cannot also affect the expected value.
+    const auto first=load_keyring(first_path),second=load_keyring(neutral_path);
+    check(first.size()==2&&second.size()==1,"production fixture keyrings did not load");
+    const auto identity=[](const Crypto& key) {
+        const std::array<std::uint8_t,4> context{'t','e','s','t'};
+        return key.identity_fingerprint(context);
+    };
+    check(identity(first[0].key)!=identity(first[1].key)&&identity(first[0].key)!=identity(second[0].key),
+          "independent keyfile entries unexpectedly match");
+    Controller controller({true,true});
+    const auto public_key=[&]() {
+        const auto& settings=controller.settings();
+        check(settings.transfer.key.has_value()&&settings.receive_keys.size()==1,
+              "amateur keyset did not provide one transmit and receive key");
+        check(identity(*settings.transfer.key)==identity(settings.receive_keys.front()),
+              "amateur transmit and receive keys differ");
+        check(controller.field(F::key).selected=="key:WARNING-Amateur",
+              "amateur key entry was not selected");
+        const auto& entries=controller.field(F::key).options;
+        check(std::any_of(entries.begin(),entries.end(),[](const auto& item){
+            return item.id=="key:WARNING-Amateur"&&item.label=="WARNING-Amateur";
+        }),"public key entry lost its warning label");
+        return identity(*settings.transfer.key);
+    };
+    const auto public_identity=public_key();
+    const std::array<std::uint8_t,64> public_root{};
+    const auto public_oracle=Crypto::from_independent_roots(public_root,public_root);
+    check(public_identity==identity(public_oracle),"built-in key did not use the documented public roots");
+    check(public_identity!=identity(first[0].key)&&public_identity!=identity(second[0].key),
+          "public keyset matched a real keyfile entry");
+    const auto& amateur=*controller.settings().transfer.key;
+    check(amateur.stream(StreamPurpose::Data,1234,0,64)==amateur.stream(StreamPurpose::Data,1234,0,64)&&
+          amateur.stream(StreamPurpose::Data,1234,0,64)!=amateur.stream(StreamPurpose::Data,1235,0,64)&&
+          amateur.confidentiality_stream(1234,0,64)!=amateur.confidentiality_stream(1235,0,64),
+          "public keyset did not use the normal deterministic epoch-dependent streams");
+    bool menu_label=false;
+    for(const auto& control:ui::console_screen())
+        if(control.command==C::load_amateur && control.menu==ui::Menu::keyfile &&
+           std::string_view(control.label)=="WARNING - Load Amateur")menu_label=true;
+    check(menu_label,"keyfile menu lost its public key warning");
+    bool conflicting_keyset=false;
+    try { (void)launch_command::parse("--keyset amateur --keyfile existing"); }
+    catch(const std::invalid_argument&) { conflicting_keyset=true; }
+    check(conflicting_keyset,"launch command accepted both a public keyset and a keyfile");
+    const auto exported=launch_command::parse(controller.field(F::planner_command).text);
+    check(exported.keyset=="amateur"&&!exported.keyfile,"launch command lost built-in keyset identity");
+    Controller restored({true,true,exported});
+    check(restored.settings().transfer.key && restored.settings().receive_keys.size()==1 &&
+          identity(*restored.settings().transfer.key)==public_identity,
+          "launch command did not restore the public keyset");
+    restored.select(F::key,"none");
+    const auto receive_only=launch_command::parse(restored.field(F::planner_command).text);
+    check(receive_only.keyset=="amateur"&&receive_only.tx_key=="none"&&
+          !restored.settings().transfer.key&&restored.settings().receive_keys.size()==1,
+          "disabling public transmission discarded its receive key");
+    Controller receive_copy({true,true,receive_only});
+    check(!receive_copy.settings().transfer.key&&receive_copy.settings().receive_keys.size()==1&&
+          identity(receive_copy.settings().receive_keys.front())==public_identity,
+          "launch command lost public receive-only state");
+    receive_copy.close();
+    restored.close();
+    Controller tone_controller({true,true});
+    tone_controller.select(F::pattern,"auto-tone");
+    check(!tone_controller.settings().transfer.key&&tone_controller.settings().receive_keys.empty(),
+          "tone mode did not suppress public-key processing");
+    const auto tone_export=launch_command::parse(tone_controller.field(F::planner_command).text);
+    check(tone_export.keyset=="amateur"&&tone_export.tx_key=="none",
+          "tone mode lost the public keyset provenance");
+    tone_controller.select(F::pattern,"auto-pattern");
+    check(!tone_controller.settings().transfer.key&&tone_controller.settings().receive_keys.size()==1&&
+          identity(tone_controller.settings().receive_keys.front())==public_identity,
+          "leaving tone mode lost the public receive bank or enabled transmission");
+    tone_controller.close();
+    controller.activate(C::unload_keys);
+    check(!controller.settings().transfer.key&&controller.settings().receive_keys.empty()&&
+          controller.field(F::key).selected=="none", "unload retained an active public key");
+    const auto empty_export=launch_command::parse(controller.field(F::planner_command).text);
+    check(empty_export.keyset=="none"&&!empty_export.keyfile,"launch command lost the unloaded state");
+    Controller empty_copy({true,true,empty_export});
+    check(!empty_copy.settings().transfer.key&&empty_copy.settings().receive_keys.empty(),
+          "launch command did not restore the unloaded state");
+    empty_copy.close();
+    controller.edit(F::planner_command,"--keyset amateur");
+    controller.activate(C::planner_load_command);
+    check(public_key()==public_identity&&controller.field(F::pattern).selected=="auto-keystream"&&
+          controller.settings().transfer.receive_pattern_mode==tuning::PatternMode::auto_keystream,
+          "launch public keyset left pattern selection inconsistent with receiver settings");
+    controller.edit(F::planner_command,"--keyset amateur --pattern auto-pattern");
+    controller.activate(C::planner_load_command);
+    check(controller.field(F::pattern).selected=="auto-pattern"&&
+          controller.settings().transfer.receive_pattern_mode==tuning::PatternMode::auto_pattern,
+          "explicit launch pattern was not preserved with public keys");
+    controller.activate(C::unload_keys);
+    controller.activate(C::load_amateur);
+    check(public_key()==public_identity,"reloading amateur changed its public key material");
+    const auto open=[&](const std::filesystem::path& path) {
+        controller.activate(C::open_keyfile);const auto requests=controller.take_services();
+        check(requests.size()==1,"keyfile chooser request missing");
+        controller.complete_service({requests.front().id,false,path.string(),{}});
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
+        while(controller.field(F::key_path).text=="Loading key entries..."&&std::chrono::steady_clock::now()<deadline) {
+            controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        check(controller.field(F::key_path).text!="Loading key entries...","keyfile chooser load timed out");
+    };
+    const auto verify=[&](const std::vector<KeyEntry>& expected,std::size_t selected) {
+        const auto& settings=controller.settings();
+        check(settings.transfer.key&&identity(*settings.transfer.key)==identity(expected[selected].key),
+              "transmit selection did not use the selected file entry");
+        check(settings.receive_keys.size()==expected.size(),"receive bank has the wrong number of file entries");
+        for(std::size_t i=0;i<expected.size();++i)
+            check(identity(settings.receive_keys[i])==identity(expected[i].key),
+                  "receive bank did not use the corresponding file entry");
+    };
+    launch_command::Patch startup;
+    startup.keyfile=second_path.string();startup.tx_key="named";startup.key_name="WARNING-Amateur";
+    Controller startup_file({true,true,startup});
+    check(!startup_file.settings().transfer.key&&startup_file.settings().receive_keys.empty()&&
+          startup_file.field(F::key).selected=="none",
+          "explicit startup file temporarily enabled the public key while loading");
+    const auto startup_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
+    while(startup_file.field(F::key_path).text=="Loading key entries..."&&std::chrono::steady_clock::now()<startup_deadline) {
+        startup_file.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(startup_file.settings().transfer.key&&startup_file.settings().receive_keys.size()==1&&
+          identity(*startup_file.settings().transfer.key)==identity(second[0].key)&&
+          identity(startup_file.settings().receive_keys.front())==identity(second[0].key),
+          "explicit startup file did not use its real transmit and receive key");
+    startup_file.close();
+    startup.keyfile=(fixture.dir/"missing-startup").string();
+    Controller startup_missing({true,true,startup});
+    check(!startup_missing.settings().transfer.key&&startup_missing.settings().receive_keys.empty(),
+          "missing startup file temporarily enabled the public key");
+    const auto missing_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
+    while(!startup_missing.enabled(C::acknowledge_key_failure)&&std::chrono::steady_clock::now()<missing_deadline) {
+        startup_missing.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(startup_missing.enabled(C::acknowledge_key_failure)&&!startup_missing.settings().transfer.key&&
+          startup_missing.settings().receive_keys.empty()&&startup_missing.field(F::key).selected=="none",
+          "failed startup file silently enabled the public key");
+    startup_missing.close();
+    const auto bandwidth=controller.field(F::bandwidth).text;
+    controller.edit(F::bandwidth,"unfinished");
+    controller.activate(C::unload_keys);
+    check(public_key()==public_identity,"invalid settings partially unloaded the public key");
+    open(first_path);
+    check(public_key()==public_identity,"invalid settings partially loaded a real keyfile");
+    if(controller.enabled(C::acknowledge_key_failure))controller.activate(C::acknowledge_key_failure);
+    controller.edit(F::bandwidth,bandwidth);
+    open(first_path);verify(first,0);
+    const auto& file_options=controller.field(F::key).options;
+    check(std::any_of(file_options.begin(),file_options.end(),[](const auto& item){
+        return item.id=="key:WARNING-Amateur"&&item.label=="1. WARNING-Amateur";
+    }),"real file with a public-looking entry lost its ordinary file label");
+    controller.edit(F::bandwidth,"unfinished");
+    controller.activate(C::load_amateur);
+    verify(first,0);
+    controller.edit(F::bandwidth,bandwidth);
+    controller.select(F::key,"key:other");verify(first,1);
+    open(second_path);verify(second,0);
+    check(controller.field(F::key_path).text==second_path.filename().string(),
+          "real file named amateur did not retain its file identity");
+    controller.activate(C::unload_keys);
+    check(!controller.settings().transfer.key&&controller.settings().receive_keys.empty()&&
+          controller.field(F::key).selected=="none","unloading a real file retained its keys");
+    open(second_path);verify(second,0);
+    controller.activate(C::open_keyfile);
+    const auto cancelled=controller.take_services();
+    check(cancelled.size()==1,"cancelled chooser request missing");
+    controller.complete_service({cancelled.front().id,true,{}, {}});
+    verify(second,0);
+    open(fixture.dir/"missing");
+    check(controller.enabled(C::acknowledge_key_failure),"unreadable keyfile did not report failure");
+    verify(second,0);
+    controller.activate(C::acknowledge_key_failure);
+    controller.activate(C::load_amateur);
+    check(public_key()==public_identity,"loading amateur did not replace the real keyfile");
+    controller.activate(C::unload_keys);
+    check(!controller.settings().transfer.key&&controller.settings().receive_keys.empty(),
+          "unload retained a receive key after a file transition");
+    open(second_path);verify(second,0);
+    controller.close();
+}
+
 void planner_examples() {
     using F=ui::Field;using C=ui::Command;
-    Controller controller({true,false});controller.edit(F::short_bits,"00101");
+    Controller controller({true,false});controller.activate(C::unload_keys);controller.edit(F::short_bits,"00101");
     const auto original=controller.field(F::planner_command).text;
     for(const auto command:{C::planner_example_spread,C::planner_example_weak,C::planner_example_sub9}) {
         controller.activate(command);
@@ -1986,10 +2184,10 @@ void dsss_voice_carrier_controls() {
     check(requests.size()==1,"DSSS voice fixture did not receive its keyfile chooser");
     controller.complete_service({requests.front().id,false,fixture.path.string(),{}});
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
-    while((!controller.settings().transfer.key||!controller.estimate())&&std::chrono::steady_clock::now()<deadline) {
+    while((controller.field(F::key).selected!="key:DSSS voice passband"||!controller.estimate())&&std::chrono::steady_clock::now()<deadline) {
         controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    check(controller.settings().transfer.key.has_value(),"DSSS voice fixture did not load its independent keys");
+    check(controller.field(F::key).selected=="key:DSSS voice passband"&&controller.settings().transfer.key.has_value(),"DSSS voice fixture did not load its independent keys");
     const auto wait_keys=[&](Controller& target) {
         const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(10);
         while(target.field(F::key_path).text=="Loading key entries..."&&std::chrono::steady_clock::now()<until) {
@@ -2210,6 +2408,7 @@ void dsss_voice_carrier_controls() {
 void sub_hertz_controls() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
+    controller.activate(C::unload_keys);
     const auto& rates=controller.field(F::bandwidth).options;
     for(const auto* value:{"0.001 Hz","0.01 Hz","0.1 Hz","10 Hz"})
         check(std::any_of(rates.begin(),rates.end(),[&](const auto& option){return option.id==value;}),
@@ -2657,7 +2856,17 @@ void repeatable_message_identity() {
 }
 void transmit_key_lock_controls() {
     using F=ui::Field;using C=ui::Command;
+    Controller public_controller({true,true});
+    public_controller.edit(F::message,"e");prepare(public_controller);
+    check(public_controller.settings().transfer.key.has_value(),"guard fixture lacks the default public key");
+    auto& public_timing=const_cast<live::Snapshot&>(public_controller.snapshot());
+    public_timing.transmit_key_lock_seconds=600.01;public_controller.poll();
+    check(public_controller.command_label(C::transmit)=="TX lock 10m01s"&&
+          !public_controller.enabled(C::transmit)&&public_controller.enabled(C::force_transmit),
+          "public keyset bypassed the existing transmit key guard");
+    public_controller.close();
     Controller controller({true,true});
+    controller.activate(C::unload_keys);
     controller.edit(F::message,"e");prepare(controller);
     const auto airtime=controller.field(F::airtime).text;
     const auto revision=controller.revision();
@@ -2788,9 +2997,10 @@ void transmit_key_lock_controls() {
     check(!controller.enabled(C::force_transmit)&&!controller.field(F::force_transmit).visible,
           "Closing left the override actionable");
 }
-void previous_message_controls() {
+void previous_message_controls(bool public_key=false,unsigned diagnostic_seconds=60) {
     using F=ui::Field; using C=ui::Command;
     Controller controller({true,true});
+    if(!public_key)controller.activate(C::unload_keys);
     controller.edit(F::callsign,"N0CALL");
     controller.edit(F::grid,"AB12cd");
     controller.toggle(F::repeatable,true);
@@ -2818,15 +3028,32 @@ void previous_message_controls() {
           "Typing the next message lost its repeatable marker or message body");
     // This checks exact delivery and composer state, not processing speed.
     // Sampled interval reception can exceed 15 seconds across compiler builds.
-    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(60);
+    const auto wait_start=std::chrono::steady_clock::now();
+    const auto deadline=wait_start+std::chrono::seconds(diagnostic_seconds);
     while((controller.inbox().items().empty()||!controller.snapshot().transmission_finished)&&
           std::chrono::steady_clock::now()<deadline) {
         controller.poll(); std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    check(!controller.inbox().items().empty(),"Convenience message did not arrive in simulation");
+    if(controller.inbox().items().empty()) {
+        const auto& snapshot=controller.snapshot();
+        throw Error("Convenience message did not arrive in simulation: status="+snapshot.status+
+            ", error="+snapshot.error+", finished="+std::to_string(snapshot.transmission_finished)+
+            ", transmitting="+std::to_string(snapshot.transmitting)+", replay="+std::to_string(snapshot.simulation_replay)+
+            ", fraction="+std::to_string(snapshot.transmission_fraction)+", seconds="+std::to_string(snapshot.transmission_seconds)+
+            ", compute_seconds="+std::to_string(snapshot.simulation_compute_seconds)+
+            ", inbox="+std::to_string(controller.inbox().items().size()));
+    }
     const auto& received=controller.inbox().items().front().message;
     check(received.data==sent&&received.callsign.empty()&&received.grid.empty()&&!received.repeatable,
           "Convenience values changed the transmitted bytes or leaked into packet metadata");
+    if(public_key&&diagnostic_seconds>60) {
+        const auto& snapshot=controller.snapshot();
+        std::cout<<"Public long reception: elapsed="<<std::chrono::duration<double>(std::chrono::steady_clock::now()-wait_start).count()
+                 <<" fraction="<<snapshot.transmission_fraction<<" seconds="<<snapshot.transmission_seconds
+                 <<" compute_seconds="<<snapshot.simulation_compute_seconds<<" finished="<<snapshot.transmission_finished
+                 <<" transmitting="<<snapshot.transmitting<<" replay="<<snapshot.simulation_replay
+                 <<" error="<<std::quoted(snapshot.error)<<" inbox="<<controller.inbox().items().size()<<" exact=1\n";
+    }
     check(controller.snapshot().transmission_finished&&
           controller.field(F::message).text==next_draft,
           "Late transmission completion cleared a newly typed draft");
@@ -3010,7 +3237,7 @@ BitmapImage render(const plots::PlotSnapshot& source) {
 void fixed_text_reception() {
     using F=ui::Field;using C=ui::Command;
     const std::string expected="A fixed\ninterval!";
-    Controller controller({true,true});controller.edit(F::message,expected);prepare(controller);
+    Controller controller({true,true});controller.activate(C::unload_keys);controller.edit(F::message,expected);prepare(controller);
     check(controller.inspection()->stream_layout && controller.estimate()->coded_bytes==128,
           "17-byte message uses the single fixed coded interval");
     controller.start();controller.activate(C::transmit);
@@ -3060,6 +3287,7 @@ void delayed_replay_interruption() {
         return origin+std::chrono::milliseconds(wall_ms.load());
     });
     Controller controller({true,true,std::nullopt,[clock]{return clock->now();}});
+    controller.activate(C::unload_keys);
     const std::string first="Replacement replay one.",second="Replacement replay two.";
     controller.edit(F::message,first);prepare(controller);controller.start();
     const auto wait_replay=[&](std::uint64_t previous=0) {
@@ -3132,6 +3360,12 @@ void delayed_replay_interruption() {
 }
 
 void receive_pattern_text(Controller& controller,const std::string& expected) {
+    // This preservation fixture checks the unmasked physical wire prefix.
+    controller.activate(ui::Command::unload_keys);
+    prepare(controller);
+    check(controller.settings().permits_plaintext()&&!controller.settings().transfer.key&&
+          controller.settings().receive_keys.empty(),
+          "unloaded keyset did not enable the true plaintext transmit and receive path");
     check(!controller.snapshot().transmit_trace.active,
           "A prepared draft became an actual generation trace before transmission");
     const auto expected_wire=controller.inspection()->binary?
@@ -3151,6 +3385,8 @@ void receive_pattern_text(Controller& controller,const std::string& expected) {
               controller.field(ui::Field::transmit_scope_caption).visible==active,
               "Auto-hide scope did not follow transmission and replay on the same progress poll");
         if(trace.active&&!trace.wire_bits.empty()) {
+            check(!trace.data_masked&&trace.data_key_bits.empty(),
+                  "plaintext transmission unexpectedly used Data key masking");
             if(!generated_seen&&active) {
                 const auto transmission_id=controller.snapshot().transmission_id;
                 const auto captured=controller.field(ui::Field::transmit_scope).records;
@@ -3186,6 +3422,28 @@ void receive_pattern_text(Controller& controller,const std::string& expected) {
     check(!controller.field(ui::Field::transmit_scope).visible&&
           !controller.field(ui::Field::transmit_scope_caption).visible,
           "Auto-hide left the completed transmission preview visible");
+}
+void amateur_sampled_reception() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller({true,true});
+    check(controller.field(F::key).selected=="key:WARNING-Amateur"&&controller.settings().transfer.key&&
+          controller.settings().receive_keys.size()==1,"sampled amateur fixture did not start with its public key");
+    controller.edit(F::message,"e");prepare(controller);controller.start();controller.activate(C::transmit);
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
+    bool received=false,generated=false;std::size_t pending=0;
+    while(std::chrono::steady_clock::now()<deadline) {
+        controller.poll();
+        generated=generated||controller.snapshot().transmit_trace.wire_bits.size()==3;
+        pending+=check_pending_snapshot(controller);
+        for(std::size_t i=0;i<controller.signals().lines().size();++i)
+            received=received||(controller.signals().copy_text(i)=="e"&&controller.signals().copy_raw_bits(i)=="001");
+        if(received&&controller.snapshot().transmission_finished&&!controller.snapshot().simulation_replay)break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    check(received&&generated&&pending>0&&controller.snapshot().transmission_finished&&
+          !controller.snapshot().simulation_replay,
+          "sampled public-key transmission did not expose pending bits and complete the exact received message");
+    controller.close();
 }
 void short_text_reception() {
     using F=ui::Field;
@@ -3483,6 +3741,7 @@ void binary_source_representation() {
 void receive_target_controls() {
     using F=ui::Field;
     Controller controller({true,true});
+    controller.activate(ui::Command::unload_keys);
     check(controller.field(F::receive_snr).text=="32, 55" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>({32,55}) &&
           controller.settings().transfer.automatic_receive_profiles,"automatic reception must cover both default TX targets");
     const auto tx=controller.settings().transfer.modem;
@@ -3573,6 +3832,7 @@ void receive_target_controls() {
 void message_target_selection() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
+    controller.activate(C::unload_keys);
     controller.start();
     const auto inspect_value=[&](std::string_view name) {
         const auto& fields=controller.inspection()->fields;
@@ -3816,6 +4076,11 @@ void bitmap_source_checks() {
 
 int main(int argc,char** argv) {
     try {
+        if(argc>1&&std::string_view(argv[1])=="--real-keyfile-selection") {real_keyfile_selection();std::cout<<"Real keyfile selection passed\n";return 0;}
+        if(argc>1&&std::string_view(argv[1])=="--amateur-sampled-reception") {amateur_sampled_reception();std::cout<<"Sampled amateur reception passed\n";return 0;}
+        if(argc>1&&std::string_view(argv[1])=="--plaintext-sampled-reception") {three_bit_text_reception();std::cout<<"Sampled plaintext reception passed\n";return 0;}
+        if(argc>1&&std::string_view(argv[1])=="--previous-message-amateur") {previous_message_controls(true);std::cout<<"Public previous-message checks passed\n";return 0;}
+        if(argc>1&&std::string_view(argv[1])=="--previous-message-amateur-completion") {previous_message_controls(true,240);std::cout<<"Public previous-message completion passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--helper-controls") {helper_controls();std::cout<<"Helper controls passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--tone-key-controls") {tone_key_controls();std::cout<<"Tone key controls passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--observer-only") {lpi_estimate_controls();std::cout<<"Observer controls passed\n";return 0;}
@@ -3858,6 +4123,7 @@ int main(int argc,char** argv) {
         pending_replay_batch();
         delayed_replay_interruption();
         rate_carrier_controls();
+        real_keyfile_selection();
         dsss_voice_carrier_controls();
         planner_examples();
         sub_hertz_controls();
@@ -3876,7 +4142,7 @@ int main(int argc,char** argv) {
         binary_editor_controls();
         three_bit_dispatch();
         short_raw_editor();short_raw_reception();
-        receive_target_controls();message_target_selection();short_text_reception();three_bit_text_reception();fixed_text_reception();byte_aligned_pattern_reception();
+        receive_target_controls();message_target_selection();amateur_sampled_reception();short_text_reception();three_bit_text_reception();fixed_text_reception();byte_aligned_pattern_reception();
         escaped_signal_message_paste();received_raw_text_boundary();binary_source_representation();workspace_controls();
         bitmap_source_checks();
         if(argc>1&&std::string_view(argv[1])=="--smoke") {

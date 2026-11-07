@@ -1571,6 +1571,7 @@ void menu_bindings() {
 }
 void declared_edits() {
     Application app({.simulation=true});
+    app.activate(ui::Command::unload_keys);
     auto editor=control(ui::Field::message);editor.multiline=false;editor.byte_limit=5;
     app.edit(editor,"valid");check(app.field(editor.field).text=="valid","Declared ordinary edit did not reach the shared field");
     app.edit(editor,"longer");
@@ -2061,6 +2062,7 @@ std::string document_text(const ui::DocumentNode& node) {
 void typed_short_text_inspection() {
     using F=ui::Field;using P=ui::Page;
     Application app({});app.select(ui::Field::fast_mode,"robust"); // Production defaults; no audio session is needed to inspect a draft.
+    app.activate(ui::Command::unload_keys); // Preserve the unkeyed inspection fixture.
     app.toggle(ui::Field::developer_mode,true);
     const auto& message=control(F::message);
     check(app.field(F::bandwidth).text=="3.6 kHz" && app.field(F::carrier).text=="1.725 kHz" &&

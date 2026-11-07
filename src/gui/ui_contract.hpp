@@ -43,7 +43,7 @@ enum class Command {
     fast_open_key, fast_generate_key, fast_choose_file, fast_transmit, fast_listen, fast_cancel, fast_save, fast_use_text, fast_clear_received, fast_copy_signal, fast_paste_signal, fast_toggle_qr_expanded,
     legacy_transmit,
     planner_example_spread, planner_example_weak, planner_example_sub9, planner_example_eme, fhss_apply,
-    toggle_waterfall_expanded, toggle_helper_waterfall_expanded
+    toggle_waterfall_expanded, toggle_helper_waterfall_expanded, load_amateur, unload_keys
 };
 enum class Bitmap {
     none, qr, waveform, waterfall, constellation, pattern_scores, pattern, pattern_distances,

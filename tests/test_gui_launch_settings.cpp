@@ -42,10 +42,10 @@ void load_synthetic_key(Controller& controller) {
     check(services.size()==1,"Synthetic key chooser missing");
     controller.complete_service({services.front().id,false,fixture.path.string(),{}});
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
-    while(!controller.settings().transfer.key&&std::chrono::steady_clock::now()<deadline) {
+    while(controller.field(F::key).selected!="key:FHSS synthetic key"&&std::chrono::steady_clock::now()<deadline) {
         controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    check(controller.settings().transfer.key.has_value(),"Synthetic FHSS key load failed");
+    check(controller.field(F::key).selected=="key:FHSS synthetic key"&&controller.settings().transfer.key.has_value(),"Synthetic FHSS key load failed");
 }
 void exact_scheduled_target_import() {
   for(const unsigned multiplier:{3U,5U}) {
@@ -105,6 +105,7 @@ void exact_scheduled_target_import() {
 }
 void generated_and_pasted_settings() {
     Controller controller({true,true});
+    controller.activate(C::unload_keys);
     const auto original=controller.field(F::planner_command).text;
     const auto initial=launch_command::parse(original);
     check(initial.pattern=="auto-pattern"&&initial.target_db_hz&&
@@ -381,6 +382,7 @@ void zero_shift_legacy_and_shared_round_trip() {
 }
 void clock_and_spread_controls() {
     Controller controller({true,true});
+    controller.activate(C::unload_keys);
     check(std::none_of(controller.field(F::clock_accuracy).options.begin(),controller.field(F::clock_accuracy).options.end(),
         [](const auto& option){return option.id.starts_with("GPS_")||option.label.starts_with("GPS_");}),
         "Clock sync menu must offer accuracy durations instead of composite serialized policies");
@@ -585,6 +587,7 @@ void arithmetic_settings() {
 }
 void symbol_burst_settings() {
     Controller controller({true,true});
+    controller.activate(C::unload_keys);
     const auto& burst=controller.field(F::symbol_burst);
     check(burst.selected=="off"&&burst.enabled&&burst.options.size()==6&&
         burst.options[0].id=="off"&&burst.options[1].id=="1"&&burst.options[2].id=="2"&&
@@ -656,7 +659,7 @@ void symbol_burst_settings() {
         !controller.settings().transfer.modem.scheduled_hopping&&controller.field(F::sched_hop).selected=="0"&&
         controller.settings().transfer.modem.symbol_burst==expected,
         "Incompatible active schedules must reject atomically");
-    auto requested=launch_command::parse("--pattern pattern-16 --rate 1200 --carrier 1500 --symbol-burst 5 --symbol-burst-random 3");
+    auto requested=launch_command::parse("--keyset none --pattern pattern-16 --rate 1200 --carrier 1500 --symbol-burst 5 --symbol-burst-random 3");
     Controller startup({false,false,requested});
     check(startup.settings().transfer.modem.symbol_burst==modem::SymbolBurstOptions{5,3}&&
         startup.field(F::symbol_burst).selected=="5"&&!startup.field(F::symbol_burst_random).enabled,
@@ -665,6 +668,7 @@ void symbol_burst_settings() {
 }
 void scheduled_hop_settings() {
     Controller controller;
+    controller.activate(C::unload_keys);
     const auto& burst=controller.field(F::sched_hop);
     check(burst.selected=="0"&&burst.options.size()==3&&
         burst.options[0].id=="0"&&burst.options[0].label=="0"&&
@@ -1056,7 +1060,7 @@ void fhss_list_settings() {
     const auto dir=std::filesystem::temp_directory_path()/"dp-fhss-list-20261011";
     std::filesystem::create_directories(dir);const auto path=dir/"frequencies with spaces.txt";
     {std::ofstream out(path);out<<"30 MHz\n30.006 MHz\n30.02 MHz\n";}
-    const auto file_patch=launch_command::parse("--oscillator gpsdo-xo --rf-oscillator gpsdo-ocxo --shift 30MHz --carrier 30.0015MHz --fhss fake-list --fhss-list-file '"+path.string()+"'");
+    const auto file_patch=launch_command::parse("--keyset none --oscillator gpsdo-xo --rf-oscillator gpsdo-ocxo --shift 30MHz --carrier 30.0015MHz --fhss fake-list --fhss-list-file '"+path.string()+"'");
     Controller startup({false,true,file_patch});
     check(!startup.link_plan()->inputs.fake_hopping.available&&!startup.link_plan()->inputs.observer_hopping&&
         startup.field(F::fhss).display_text.find("key required")!=std::string::npos,"Unkeyed CLI enabled FHSS");

@@ -6,6 +6,53 @@ superseded status here; keep one latest [resource snapshot](ci-resource-results.
 and use Git history for comparisons. Detailed studies remain in the
 [evidence index](indexes/evidence.md).
 
+## Public amateur keyset — development checkpoint
+
+The uncommitted Robust GUI candidate adds a built-in public keyset and preserves
+the ordinary keyfile and cipher paths. Its public material provides no
+confidentiality or sender authentication; the existing stream-address reuse
+and session-local transmit-guard limits still apply. This is development
+evidence, not release certification or a claim about physical links.
+
+The application build (`./build.sh --jobs 4`) passed. The GUI group
+(`./build.sh test gui --build-jobs 4 --jobs 1`) passed 40/40 before the final
+test-only plaintext assertions; focused public-keyset, real-keyfile and plaintext
+sampled checks passed afterward. A long public-keyset run failed at its
+60-second deadline while still computing; a separate run completed in 105.7
+seconds and recovered exact bytes. The first native FLTK group invocation
+(`xvfb-run -a ./build.sh test native --build-jobs 4 --jobs 1`) passed 2/3:
+`gui_workflow` and `gui_document_conformance` passed, while
+`gui_adapter_conformance` failed an `estimate_warning_colors` label assertion.
+The fixture was updated to explicitly unload keys for its unkeyed baseline.
+The second native group invocation also passed 2/3: those two cases passed and
+the earlier assertion passed, but `gui_adapter_conformance` then failed with
+`Planner worker did not prepare native navigation` after 198.11 seconds. After
+fixture corrections, the focused FLTK inline-editor check passed and the full
+adapter test passed separately in 177.59 seconds using
+`xvfb-run -a ctest --test-dir build/dev --output-on-failure -R '^gui_adapter_conformance$' -j 1`.
+All three native cases have thus passed individually, but neither earlier native
+group invocation passed. The initial Rev native workflow failed after 300 seconds
+with `INCOMPLETE GUI_SMOKE_BUDGET` at phase 15 (progress 0.882412). That phase
+uses TX None after a real file was loaded; the cause is not established. The Rev
+native group passed 4/5: adapter and platform conformance and coordinate checks
+at 1x and 2x passed; the workflow was incomplete as above. An isolated workflow
+rerun with the original 300-second deadline was also incomplete at phase 15
+(progress 0.853793). The native Rev group passed 5/5 in 658.57 seconds with
+`GUI_SMOKE_TIMEOUT=600` under Xvfb; workflow took 480.62 seconds and adapter
+conformance 161.38 seconds. The original deadline failures remain recorded.
+
+The contract run (`CCACHE_DIR="$PWD/build/ccache" ./build.sh test contract --cli
+--build-jobs 4 --jobs 2`) passed 362/399 and failed 37. Two tests hit their
+1,500-second deadlines (`scheduled_parallel_preparation` and
+`differential_receiver_probability`); other failures included unchanged Helper
+cases with geometry or behavior mismatches and unresolved admissions, and CLI
+failures. The [failure list](../local-evidence/amateur-keyset/contract-failures.txt)
+retains all failed names. A fresh-`TMPDIR` serial recheck of
+`helper_continuation_rows`, `helper_output_fallback` and
+`helper_payload_tail_live` passed the first two after their original failures;
+the last failed again. The original contract invocation remains failed; these
+results do not establish a complete regression pass or release qualification.
+
 ## DPMKEY04 confidentiality cascade — development checkpoint
 
 The current uncommitted candidate replaces the earlier keyfile and encrypted

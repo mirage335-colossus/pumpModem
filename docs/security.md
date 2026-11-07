@@ -6,9 +6,14 @@ or command is executed. Files are not automatically opened. The native GUI calls
 the C++ transfer service without a shell; saving requires a local explicit path.
 The byte transport has no packet header, remote integer length, filename/type,
 packet ID, repeat flag, bootstrap CRC, or automatic legacy parser fallback.
-Encrypted peers must use the current keyfile format, matching cipher suite,
-fixed-interval wire format and local profile. Older keyfile formats are rejected.
+Peers using file-backed keys must use the current keyfile format, matching cipher
+suite, fixed-interval wire format and local profile. Older keyfile formats are rejected.
 See [protocol](protocol.md) and [cryptography](crypto.md).
+
+The Robust GUI's default **WARNING-Amateur** keyset is public and offers no
+confidentiality or sender authentication. Its use of the normal cipher and MAC
+paths does not make its public key material secret. Loading a real keyfile
+replaces this keyset; failed loads retain the current key bank.
 
 ## Received-text boundary
 

@@ -26,8 +26,9 @@ struct Patch {
     std::optional<double> sched_frequency_search;
     // Inline list contents or a file reference; parser never opens files.
     std::optional<std::string> fhss_list,fhss_list_file;
-    // File references and named selection only; never serialize key material.
-    std::optional<std::string> keyfile,key_name,tx_key;
+    // File references, explicit public/empty bank and named selection only;
+    // never serialize key material. Omitted keyset preserves the current bank.
+    std::optional<std::string> keyfile,keyset,key_name,tx_key;
     std::optional<double> audio_timing_error_seconds;
     std::optional<bool> full_duplex;
     std::optional<unsigned> dsss_factor;

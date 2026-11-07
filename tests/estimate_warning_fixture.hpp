@@ -9,6 +9,8 @@ namespace datapump::gui::test {
 template<class Present,class Verify>
 void estimate_warning_fields(Application& application,Present present,Verify verify) {
     using F=ui::Field;
+    // Start with the unkeyed observer baseline before loading the real fixture.
+    application.activate(ui::Command::unload_keys);
     const auto await=[&](auto ready) {
         const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(8);
         do {present();if(ready())return;}while(std::chrono::steady_clock::now()<deadline);

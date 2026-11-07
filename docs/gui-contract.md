@@ -34,6 +34,21 @@ received rows survive mode changes, and admitted pending reception keeps being
 polled. Hidden controls cannot dispatch edits or actions. Native service replies
 retain their owner and mode generation and are cancelled if stale.
 
+The Robust controller starts with the built-in public keyset selected as
+**WARNING-Amateur**. Its fixed key material is included in the program: it
+provides no confidentiality or sender authentication. It uses the ordinary
+keyed waveform, cipher and timing paths for experimentation. The Keyfile menu
+offers **WARNING - Load Amateur**, which replaces the current key bank with the
+public keyset, and **Unload keys**, which removes both transmit and receive
+keys. A successfully loaded real keyfile replaces the public keyset; a failed
+load retains the current bank. Real files and their key names are always handled
+as files, including those named `amateur` or `WARNING-Amateur`.
+
+The existing live transmit guard still applies. Public key reuse at the same
+epoch and stream positions can reproduce a keystream across independent
+stations or sessions; the in-memory guard does not coordinate them. See the
+[stream reuse and guard details](crypto.md#time-indexed-streams).
+
 Fast opens **Console**. **Developer mode**, its conditional **Shellcode mode**
 checkbox and **Clear received** sit at the top right; the transmit airtime
 estimate sits beside the modem dropdown. Developer
@@ -159,9 +174,13 @@ At normal window widths, target controls, the compact native multiline
 below the target controls, then stack them when needed.
 The generated command exports the current link budget, Baseband/Shift models, clock
 reference, margin, waveform, rate, absolute Carrier, Shift, DSP allowance and
-independent preview target. With a loaded keyring it also exports the absolute
+independent preview target. With a file-backed keyring it also exports the absolute
 `--keyfile` path, `--tx-key named` and `--key-name` selection (or `--tx-key none`).
-No secret bytes are exported. All loaded ring entries remain receive keys. A real
+For the public keyset it exports `--keyset amateur`; for an unloaded bank it
+exports `--keyset none`. The keyset option cannot be combined with `--keyfile`.
+`--keyset none` also conflicts with `--key-name` and `--tx-key named`.
+`--tx-key none` disables TX independently of the receive bank. No secret bytes
+are exported. All loaded ring entries remain receive keys. A real
 key named `none` remains distinct from disabled TX encryption. Keyfile loading is
 asynchronous and transactional; missing files/names or invalid settings leave the
 previous ring/configuration intact. Commands use host-shell literal quoting. Its

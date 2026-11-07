@@ -6,10 +6,15 @@
 #include "datapump/fhss_schedule.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "fixture_crypto.hpp"
+#include "fixture_keyfile.hpp"
+#include "v4_crypto_vectors.hpp"
 #include "../src/transmit_timing.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <random>
@@ -177,6 +182,65 @@ void keys_and_unknown_slots() {
             wrong=value;wrong.compression=true;check(!consume(wire,wrong).content_validated,"source profile bound to MAC");
         }
     }
+}
+void keyfiles_feed_transmit_and_receive() {
+    const auto directory=std::filesystem::temp_directory_path()/
+        ("datapump-transfer-keyfiles-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    check(std::filesystem::create_directory(directory),"keyfile transfer fixture directory already exists");
+    struct Cleanup { std::filesystem::path path; ~Cleanup(){std::error_code ignored;std::filesystem::remove_all(path,ignored);} } cleanup{directory};
+    const auto hex=[](std::string_view text) {
+        Bytes out;for(std::size_t i=0;i<text.size();i+=2)out.push_back(static_cast<std::uint8_t>(std::stoul(std::string(text.substr(i,2)),nullptr,16)));
+        return out;
+    };
+    // This frozen file was produced by an independent Python/OpenSSL/libgcrypt
+    // oracle, and its roots are known independently of the keyfile loader.
+    auto file=hex(v4_vectors::keyring_prefix);file.insert(file.end(),4096,0x5a);
+    const auto ciphertext=hex(v4_vectors::keyring_outer_ciphertext_and_gcm_tag),tag=hex(v4_vectors::keyring_serpent_auth_tag);
+    file.insert(file.end(),ciphertext.begin(),ciphertext.end());file.insert(file.end(),tag.begin(),tag.end());
+    const auto first_path=directory/"first",second_path=directory/"amateur";
+    {std::ofstream output(first_path,std::ios::binary);output.write(reinterpret_cast<const char*>(file.data()),static_cast<std::streamsize>(file.size()));check(bool(output),"independent keyfile fixture write failed");}
+    const testing::KeyfilePolicy policy{4096,8193};
+    (void)testing::create_keyring(second_path,{"Fixture"},policy,std::nullopt,fixture_keyfile::generation());
+    const auto first=testing::load_keyring(first_path,policy),second=testing::load_keyring(second_path,policy);
+    const auto first_again=testing::load_keyring(first_path,policy),second_again=testing::load_keyring(second_path,policy);
+    check(first.size()==1 && second.size()==1 && first[0].name=="Fixture" && second[0].name=="Fixture",
+          "separate keyfiles with identical entry names must load independently");
+    const auto oracle=Crypto::from_independent_roots(hex(v4_vectors::serpent_root),hex(v4_vectors::aes_root));
+    const auto context=hex(v4_vectors::identity_context);
+    check(first[0].key.identity_fingerprint(context)==hex(v4_vectors::identity_confidentiality) &&
+          first[0].key.identity_fingerprint(context)==oracle.identity_fingerprint(context),
+          "loaded file must retain the independently known roots");
+    check(first[0].key.identity_fingerprint(context)!=second[0].key.identity_fingerprint(context),
+          "different files with the same entry name must retain different keys");
+    const auto sent=sample(44);
+    auto expected_options=options();expected_options.key=oracle;expected_options.compression=false;expected_options.fec=FecMode::rs20;
+    auto first_options=expected_options;first_options.key=first[0].key;
+    auto second_options=first_options;second_options.key=second[0].key;
+    auto first_receiver=first_options;first_receiver.key=first_again[0].key;
+    auto second_receiver=second_options;second_receiver.key=second_again[0].key;
+    const auto first_wire=transfer::message_wire_bits(sent,first_options),second_wire=transfer::message_wire_bits(sent,second_options);
+    check(first_wire==transfer::message_wire_bits(sent,expected_options) && first_wire!=second_wire,
+          "transmitted wire bits must use the selected file's actual key");
+    for(const auto& pair:{std::pair{first_wire,first_receiver},std::pair{second_wire,second_receiver}}) {
+        const auto received=consume(pair.first,pair.second);
+        check(received.stream_complete && received.content_validated && received.content.authenticated && received.content.message.data==sent.data,
+              "matching reloaded keyfile must receive the authenticated message");
+    }
+    check(!consume(first_wire,second_receiver).content_validated && !consume(second_wire,first_receiver).content_validated,
+          "different keyfiles must not authenticate each other's messages");
+    // Inspect emitted symbols, not just the source-side wire helper. Comparing
+    // against the independent root also catches a common TX/RX substitution.
+    auto tx=transfer::message_transmitter(sent,first_options);
+    const auto prefix=modem::training_sample_count(first_options.modem)+modem::pattern_pulse_padding_samples(first_options.modem);
+    const auto end=prefix+modem::symbol_sample_count(first_options.modem)*32;
+    std::array<float,317> samples{};
+    while(tx->samples_emitted()<end) {
+        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(),end-tx->samples_emitted()));
+        check(tx->read(std::span(samples).first(count))==count,"keyfile transmit trace ended early");
+    }
+    const auto trace=tx->transmit_trace();
+    check(trace.wire_bits.size()>=32 && std::equal(trace.wire_bits.begin(),trace.wire_bits.begin()+32,first_wire.begin()),
+          "actual transmitter symbols must use the independently verified loaded key");
 }
 void content_limits_and_streaming_storage() {
     auto value=options();value.compression=false;value.content_limit=65536;
@@ -603,4 +667,4 @@ void transmission_generation_trace() {
           "trace-aware memory admission must allow the actual bounded TX without changing airtime or wire geometry");
 }
 }
-int main(){try{representable_pattern_ceiling();fixed_pipeline_and_local_metadata();short_text_uses_exact_dictionary_bits();keys_and_unknown_slots();content_limits_and_streaming_storage();exact_raw_masking_and_scheduling();scheduled_playback_adapters();protection_and_cancellation();transmission_generation_trace();spreading_generation_trace();fresh_hopping_schedule();std::cout<<"stream transfer passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{representable_pattern_ceiling();fixed_pipeline_and_local_metadata();short_text_uses_exact_dictionary_bits();keys_and_unknown_slots();keyfiles_feed_transmit_and_receive();content_limits_and_streaming_storage();exact_raw_masking_and_scheduling();scheduled_playback_adapters();protection_and_cancellation();transmission_generation_trace();spreading_generation_trace();fresh_hopping_schedule();std::cout<<"stream transfer passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

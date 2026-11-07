@@ -13,6 +13,14 @@ the regular epoch keystream. Fast encryption is optional; its public SHA-256
 checksum mode provides neither secrecy nor authentication. Both peers choose
 the same mode locally, with no automatic fallback on authentication failure.
 
+The Robust GUI's built-in **WARNING-Amateur** keyset has fixed public key
+material included in the software. It exercises the same regular-mode cipher,
+waveform and synchronization machinery as a file-backed keyset, but cannot
+provide confidentiality or sender authentication. The existing transmit guard
+and address-reuse limits apply to it as well: independent stations or sessions
+using the same epoch and positions can reproduce a stream. The public keyset is
+not a fallback for a failed or mismatched real keyfile.
+
 ## Time-indexed streams
 
 All text labels below are ASCII bytes without a terminating zero. `BE64(x)` is
@@ -415,7 +423,8 @@ that reception includes the complete original source.
 New CLI and GUI keyfiles use `DPMKEY04`; versions `DPMKEY01`, `DPMKEY02` and
 `DPMKEY03` are rejected. V4 stores separately derived Serpent and AES roots per
 named entry. It does not reconstruct a missing confidentiality lane from old
-Data or MAC keys. Both peers must use the current suite and the same keyfile.
+Data or MAC keys. Both peers must use the current suite and the same file-backed
+keyset, or the same built-in public amateur keyset in the Robust GUI.
 
 Generation gathers separate 64-byte operating-system CSPRNG inputs for the
 Serpent and AES lanes in each of two rounds, at least one monotonic second

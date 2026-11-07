@@ -8,10 +8,12 @@ The modem transports opaque source bytes using one bit per pattern symbol.
 There are no packets, received integer lengths, variable modem headers, packet
 IDs, repeat flags, bootstrap CRCs, or whole-stream integrity footers. An optional
 attachment prefix is ordinary source content interpreted by the application.
-Both peers select the same waveform, FEC, source codec and key locally. There is no over-air negotiation or old-packet fallback.
-Encrypted peers use the current keyfile format and cipher suite; older keyfiles
-are rejected. The fixed short dictionary retains its original bit codes; the
-interval transport is incompatible with the previous packets.
+Both peers select the same waveform, FEC, source codec and key locally. There is
+no over-air negotiation or old-packet fallback. Peers using file-backed keys use
+the current keyfile format and cipher suite; older keyfiles are rejected. The
+Robust GUI also offers a built-in public keyset that provides no confidentiality
+or sender authentication. The fixed short dictionary retains its original bit
+codes; the interval transport is incompatible with the previous packets.
 
 These are compatibility requirements for ongoing development, including the
 short paths and per-bit pending view. See the

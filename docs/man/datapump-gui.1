@@ -85,6 +85,13 @@ Unspecified settings retain their startup defaults.
 Link power, path loss and noise describe the planner and simulated channel;
 they do not set a radio's RF output power.
 .TP
+.BI \-\-keyset " amateur|none"
+Select the built-in public amateur keyset or unload all keys. Cannot be combined
+with \-\-keyfile; \-\-keyset none also cannot be combined with \-\-key-name or
+\-\-tx-key named. With the amateur keyset, \-\-tx-key none disables transmission
+with that key while retaining it for reception. Omitting the option preserves
+the current key bank.
+.TP
 .BI \-\-tx\-dbm " DBM"
 Transmit power for the link budget, from \-200 to 100 dBm.
 Default: 3.
@@ -328,6 +335,19 @@ Explicit raw-bit input sends precisely its bits, preserving leading zeros and
 partial bytes. Neither short path adds a header, padding, FEC or MAC.
 Longer text and all attachments use fixed coding intervals.
 .PP
+The Robust controller starts with the built-in public keyset
+.BR WARNING\-Amateur .
+Its key material is included in the program and provides no confidentiality
+or sender authentication. It exercises the normal keyed cipher, waveform and
+timing paths. A successfully loaded real keyfile replaces it; a failed load
+retains the current keys. The Keyfile menu offers
+.B WARNING \- Load Amateur
+to replace the current bank with the public keyset, and
+.B Unload keys
+to remove the transmit and receive keys. The normal live transmit guard remains
+in effect, but it cannot coordinate independent stations or sessions using the
+same key, epoch and stream positions.
+.PP
 Pending Robust receptions expose each newly accepted bit in the same row,
 retaining the first 4096 diagnostic bits.
 Reception completes only when consecutive fully scored absent symbols cover
@@ -343,8 +363,10 @@ Received files are never opened or executed automatically.
 .PP
 Developer mode reveals advanced controls and inspection pages.
 The Robust Link planner previews a link independently of the live targets.
-Its Launch command includes the loaded keyfile path and named transmit key via
-\-\-keyfile, \-\-tx-key named and \-\-key-name (or \-\-tx-key none).
+Its Launch command includes a file-backed keyring's path and named transmit key
+via \-\-keyfile, \-\-tx-key named and \-\-key-name (or \-\-tx-key none).
+It uses \-\-keyset amateur for the built-in public key and \-\-keyset none for
+an unloaded bank. The keyset option cannot be combined with \-\-keyfile.
 It contains no key bytes; all ring entries remain receive keys. Missing files or
 key names leave the previous settings unchanged.
 Its Launch command can be copied for reuse; Load applies validated settings

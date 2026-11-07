@@ -576,7 +576,11 @@ void controller_self_check() {
         const auto binding=kind==1?static_cast<int>(control.command):kind==2?static_cast<int>(control.bitmap):static_cast<int>(control.field);
         require(identities.emplace(control.page,kind,binding,control.instance).second,"Screen declares a duplicate binding identity");
     }
-    require(controller.field(F::key).selected=="none","Empty key list selected an imaginary key");
+    require(controller.field(F::key).selected=="key:WARNING-Amateur"&&controller.settings().transfer.key&&
+            controller.settings().receive_keys.size()==1,"Public amateur key did not start loaded");
+    controller.activate(C::unload_keys);
+    require(controller.field(F::key).selected=="none"&&!controller.settings().transfer.key&&
+            controller.settings().receive_keys.empty(),"Empty key list selected an imaginary key");
     require(!controller.enabled(C::acknowledge_key_failure),"Key failure acknowledgement is available without a failure");
     controller.activate(C::open_keyfile);
     const auto requests=controller.take_services();

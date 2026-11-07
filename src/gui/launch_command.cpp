@@ -168,7 +168,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             flag=="--spread-preset"||flag=="--selective-perturbation"||flag=="--rf-oscillator"||flag=="--shift"||flag=="--rf-shift"||flag=="--rf-carrier"||flag=="--search-margin"||
             flag=="--reference"||flag=="--sideband"||flag=="--lf-reference"||
             flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--dsss-mode"||flag=="--search-arithmetic"||flag=="--receiver-strategy"||flag=="--receiver-cpu-budget"||flag=="--doppler"||flag=="--fhss"||flag=="--sched-hop"||flag=="--sched-hop-dilution"||flag=="--sched-frequency-search"||flag=="--fhss-list"||flag=="--fhss-list-file"||flag=="--live-duplex"||flag=="--hardware-channel-test"||
-            flag=="--keyfile"||flag=="--key-name"||flag=="--tx-key"||
+            flag=="--keyfile"||flag=="--keyset"||flag=="--key-name"||flag=="--tx-key"||
             flag=="--symbol-burst"||flag=="--symbol-burst-random"||
             flag=="--helper-power"||flag=="--helper-ratio-limit"||flag=="--helper-frequency"||flag=="--helper-callsign";
         if(!known)invalid("Unknown launch option: "+std::string(flag));
@@ -198,6 +198,10 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         else if(flag=="--dsp-workspace")result.workspace_percent=workspace(value);
         else if(flag=="--clock-sync")result.clock_sync=clock_sync::format(clock_sync::parse(value));
         else if(flag=="--keyfile")result.keyfile=value;
+        else if(flag=="--keyset") {
+            if(value!="amateur"&&value!="none")invalid("--keyset must be amateur or none.");
+            result.keyset=value;
+        }
         else if(flag=="--key-name")result.key_name=value;
         else if(flag=="--tx-key") {
             if(value!="none"&&value!="named")invalid("--tx-key must be none or named.");
@@ -303,6 +307,9 @@ Patch parse_arguments(std::span<const std::string> arguments) {
        !tuning::parse_oscillator_preset(*result.rf_oscillator).baseband_supported)
         invalid("An RF-only oscillator cannot describe the shared audio clock.");
     if(result.tx_key=="none"&&result.key_name)invalid("--key-name conflicts with --tx-key none.");
+    if(result.keyset&&result.keyfile)invalid("--keyset conflicts with --keyfile.");
+    if(result.keyset=="none"&&(result.key_name||result.tx_key=="named"))
+        invalid("--keyset none cannot select a transmit key.");
     if(result.helper_callsign)helper_callsign(*result.helper_callsign);
     if(result.dsss_mode=="interleave"&&(result.dsss_factor==1||result.dsss_version=="legacy"))
         invalid("Interleave mode requires a spreading factor above one and the interleave construction.");
@@ -368,6 +375,7 @@ std::string format(const Patch& settings) {
     if(settings.fhss_list_file)arguments.push_back("--fhss-list-file="+*settings.fhss_list_file);
     // Equal syntax preserves a filename or key name beginning with '--'.
     if(settings.keyfile)arguments.push_back("--keyfile="+*settings.keyfile);
+    if(settings.keyset)add("--keyset",*settings.keyset);
     if(settings.key_name)arguments.push_back("--key-name="+*settings.key_name);
     if(settings.tx_key)add("--tx-key",*settings.tx_key);
     // Validate programmatic exports as strictly as pasted text before returning

@@ -446,6 +446,7 @@
             throw std::runtime_error("Rev command Load did not preserve malformed input and existing settings");
     }
     void verify_inline_document_editor() {
+        application.activate(ui::Command::unload_keys);
         select_page(ui::Page::planner);
         const auto settle=[&] {
             for(unsigned frame=0;frame<4;++frame){apply();native_frame();}
