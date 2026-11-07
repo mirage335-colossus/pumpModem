@@ -144,6 +144,27 @@ class FamilyGuardTests(unittest.TestCase):
                 "complete_pipeline_wall_seconds": generation["wall_seconds"] + .75,
                 "fixture": guard.sample.fixture_evidence(paths)}
 
+    def test_physical_alignment_keeps_direct_jobs_and_strict_input_comparison(self):
+        self.context.update(physical_bit_alignment=True,family_screen_method="direct-full")
+        adapter=self.adapter();events=[]
+        alignment={"schema":guard.physical.SCHEMA,"trials":3,"physical_signal_bits":[1,1,1],"sources":{
+            "reference":{"tx_masks":[0,1,0],"rx_masks":[0,1,0]},
+            "candidate":{"tx_masks":[1,0,1],"rx_masks":[1,0,1]}}}
+        def prepare(*args,**kwargs):events.append("source-only");return alignment
+        def job(worker,*args,**kwargs):
+            events.append(worker.name)
+            expected=[guard.physical.arguments(alignment,worker.name,i) for i in range(3)]
+            self.assertEqual(kwargs.pop("physical_mask_arguments"),expected)
+            return self.job(worker,*args,**kwargs)
+        with patch.object(guard.physical,"prepare_pair",side_effect=prepare),patch.object(
+                guard.sample,"measure_job",side_effect=job),patch.object(
+                guard.physical,"validate_fixture_inputs",return_value={"all_binary_files":"equal"}) as inputs:
+            result=adapter.measure_pair("family:batch","aligned",123,order=("candidate","reference"))
+        self.assertEqual(events,["source-only","candidate","reference"])
+        self.assertEqual(len(self.jobs),2);inputs.assert_called_once()
+        self.assertEqual(result["details"]["metadata"]["physical_source_alignment"],alignment)
+        self.assertEqual(result["details"]["metadata"]["complete_input_agreement"],{"all_binary_files":"equal"})
+
     def test_descriptors_are_lazy_and_complete_full_geometry(self):
         adapter = self.adapter()
         self.assertEqual(len(adapter.descriptors()), 3)

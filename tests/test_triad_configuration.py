@@ -41,6 +41,21 @@ def check(condition, message):
         raise AssertionError(message)
 
 
+def provenance_precision_checks():
+    # capture-hash and run enter provenance with different ostream precision.
+    # Both must emit exact round-trip geometry, including this fractional ramp.
+    args = ["--rate", "1200", "--added", "1", "--sample-rate", "1024", "--fhss",
+            "--seconds", "8.8", "--phase-diffusion", "0", "--channel", "none",
+            "--epoch", "1793404800", "--seed", "71231", "--trials", "1", "--threads", "1",
+            "--performance-tx-masks", "0", "--performance-rx-masks", "0", "--performance-signal-bits", "0"]
+    timed = rows(invoke(*args, "--mode", "run"))[0]
+    preflight = rows(invoke(*args, "--mode", "capture-hash"))[0]
+    for key in ("source_format", "random_seed_roots", "sample_rate_numerator", "sample_rate_denominator"):
+        check(timed[key] == preflight[key], "producer provenance depends on caller precision: " + key)
+    check(timed["source_format"]["ramp_seconds"] == 2/3600,
+          "fractional FHSS ramp lost round-trip precision")
+
+
 def center_aligned_fhss_checks():
     check(not configure()["fhss_center_aligned"], "default source silently selected center alignment")
     options = ("--rate", "360", "--added", "1", "--sample-rate", "960", "--fhss")
@@ -252,6 +267,7 @@ def topology_and_independent_modulation_checks():
 
 
 def main():
+    provenance_precision_checks()
     center_aligned_fhss_checks()
     topology_and_independent_modulation_checks()
     observation_control_checks()

@@ -1,17 +1,13 @@
 #include "datapump/helper_metadata.hpp"
 
 #include <openssl/crypto.h>
-#include <openssl/evp.h>
 
 #include <algorithm>
 #include <limits>
-#include <memory>
 
 namespace datapump::helper {
 namespace {
-constexpr std::string_view key_label="datapump/helper-aux/v3/ctr-key";
-using Cipher=std::unique_ptr<EVP_CIPHER,decltype(&EVP_CIPHER_free)>;
-using Context=std::unique_ptr<EVP_CIPHER_CTX,decltype(&EVP_CIPHER_CTX_free)>;
+constexpr std::string_view key_label="datapump/helper-aux/v4/confidentiality";
 
 template<std::size_t N> struct Secret {
     std::array<std::uint8_t,N> bytes{};
@@ -58,37 +54,17 @@ std::optional<std::uint64_t> absolute_dwell(std::uint32_t phase,std::uint64_t an
     return dwell;
 }
 void crypt_characters(MetadataPacket& packet,const Crypto& crypto,std::uint64_t dwell) {
-    Cipher cipher(EVP_CIPHER_fetch(nullptr,"AES-256-CTR",nullptr),EVP_CIPHER_free);
-    if(!cipher||EVP_CIPHER_get_key_length(cipher.get())!=32||EVP_CIPHER_get_iv_length(cipher.get())!=16)
-        throw Error("Helper Carrier encrypted metadata requires AES-256-CTR support");
-    Secret<32> key;
-    {
-        const auto label=std::span(reinterpret_cast<const std::uint8_t*>(key_label.data()),key_label.size());
-        auto derived=crypto.mac(label);
-        const CleanBytes clean{derived};
-        if(derived.size()!=key.bytes.size())throw Error("Helper Carrier CTR key derivation failed");
-        std::copy(derived.begin(),derived.end(),key.bytes.begin());
-    }
-    std::array<std::uint8_t,16> iv{};
-    const auto bucket=dwell/15;
-    for(unsigned i=0;i<8;++i)iv[7-i]=static_cast<std::uint8_t>(bucket>>(8*i));
-    iv[11]=static_cast<std::uint8_t>(dwell%15);
-    Secret<14> input,output;
+    const auto label=std::span(reinterpret_cast<const std::uint8_t*>(key_label.data()),key_label.size());
+    const auto child=crypto.confidentiality_child(label);
+    auto mask=child.confidentiality_stream(dwell,0,14);
+    const CleanBytes clean{mask};
+    Secret<14> input;
     for(unsigned bit=0;bit<112;++bit)
         input.bytes[bit/8]|=static_cast<std::uint8_t>(
             ((packet.symbols[1+bit/14]>>(13-bit%14))&1U)<<(7-bit%8));
-    Context context(EVP_CIPHER_CTX_new(),EVP_CIPHER_CTX_free);
-    if(!context||EVP_EncryptInit_ex2(context.get(),cipher.get(),key.bytes.data(),iv.data(),nullptr)!=1)
-        throw Error("Helper Carrier CTR cipher initialization failed");
-    int written=0,final_size=0;
-    Secret<16> final;
-    if(EVP_EncryptUpdate(context.get(),output.bytes.data(),&written,input.bytes.data(),input.bytes.size())!=1||
-       written!=static_cast<int>(output.bytes.size())||
-       EVP_EncryptFinal_ex(context.get(),final.bytes.data(),&final_size)!=1||final_size!=0)
-        throw Error("Helper Carrier CTR cipher operation failed");
     std::fill(packet.symbols.begin()+1,packet.symbols.end(),0);
     for(unsigned bit=0;bit<112;++bit)
-        packet.symbols[1+bit/14]|=((output.bytes[bit/8]>>(7-bit%8))&1U)<<(13-bit%14);
+        packet.symbols[1+bit/14]|=(((input.bytes[bit/8]^mask[bit/8])>>(7-bit%8))&1U)<<(13-bit%14);
 }
 } // namespace
 

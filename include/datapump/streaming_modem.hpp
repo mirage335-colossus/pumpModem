@@ -235,6 +235,12 @@ public:
     ConstellationBatch take_payload_constellation();
     std::size_t working_bytes() const;
     std::size_t reserved_workspace_bytes() const;
+    // One immutable selected-key allocation is included in both workspace
+    // totals. A bank which separately retains and charges this exact identity
+    // may deduct only this published amount when summing receiver totals.
+    // Optional worker copies can remain conservatively charged as well.
+    const void* shared_confidentiality_storage_id() const noexcept;
+    std::size_t shared_confidentiality_storage_charge() const noexcept;
     // Joined native cold decoder/configured-bit floor; no worker grant.
     // The returned actual bound includes the outer StreamingReceiver shell.
     std::optional<PatternColdWorkspaceFloor> cold_workspace_floor() const noexcept;

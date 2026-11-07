@@ -144,7 +144,11 @@ most two tiles. Crypto child contexts are separated by purpose and include the
 format epoch, symbol ordinal, and tile index. The payload mask and inner,
 outer, cover, and permutation streams use distinct purpose labels. A receiver
 candidate with a different public epoch constructs its corresponding private
-pattern. An operational transmitter must set the epoch from its system-clock
+pattern. The payload bit uses the Serpent-256 and AES-256 confidentiality
+stream under a separately derived child context; pattern, cover, spreading and
+permutation generation retain AES streams. Both encrypted peers must use the
+upgraded implementation. Earlier AES-only recordings cannot be strengthened
+retroactively. An operational transmitter must set the epoch from its system-clock
 message time once and keep that address fixed through the bit; receiver clock
 updates must not reseed an in-progress message. `--now` selects the current
 epoch in the study CLI. The CLI's `--seed`/MT19937 key fixture is reproducible

@@ -842,12 +842,13 @@ wire format remains unchanged. Local settings select clear or encrypted metadata
 there is no encryption flag on the wire.
 
 With a selected station key, the time phase stays clear and the 112 character
-bits, including padding, use AES-256-CTR. The AES key is the station key's
-HMAC-SHA256 of ASCII `datapump/helper-aux/v3/ctr-key`, separating this stream
-from other protocol purposes. The 128-bit IV contains the absolute six-second
-Unix bucket as a big-endian 64-bit integer, the 400 ms dwell index within that
-bucket as a big-endian 32-bit integer, and a zero 32-bit block counter. The
-receiver reconstructs the absolute dwell from the clear phase and its capture-time
+bits, including padding, use the Serpent-256-CTR and AES-256-CTR confidentiality
+cascade. A confidentiality child of the station key uses the ASCII context
+`datapump/helper-aux/v4/confidentiality`; its stream is addressed by the absolute
+400 ms dwell as its epoch and byte offset zero. This domain separates Helper
+metadata from other data. Both peers must use the upgraded cipher suite; older
+AES-only Helper metadata is incompatible. The receiver reconstructs the absolute
+dwell from the clear phase and its capture-time
 UTC estimate, without searching across candidate clock errors; keyed decoding
 requires that estimate to be within approximately four seconds. Only the first
 selected receive key is used. Cipher failure rejects encrypted output before PCM

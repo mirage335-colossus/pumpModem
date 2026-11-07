@@ -548,7 +548,7 @@ void transmission_generation_trace() {
     for(std::size_t i=0;i<expected.size();++i) {
         const auto address=modem::symbol_stream_address(value.timestamp,value.modem.stream_phase_samples,
             i,modem::symbol_sample_count(value.modem),value.modem.sample_rate);
-        const auto key=value.key->stream(StreamPurpose::Data,address.epoch,address.ordinal/8,1);
+        const auto key=value.key->confidentiality_stream(address.epoch,address.ordinal/8,1);
         expected[i]^=(key[0]>>(7-address.ordinal%8))&1U;
     }
     check(expected==transfer::message_wire_bits(message,value),

@@ -33,10 +33,10 @@ BOUNDS_THREAD_ENV.update(OMP_DYNAMIC="FALSE", MKL_DYNAMIC="FALSE")
 BOUNDS_INHERITED_ENV = ("OMP_PROC_BIND", "OMP_PLACES", "GOMP_CPU_AFFINITY", "KMP_AFFINITY",
                         "KMP_BLOCKTIME", "OMP_WAIT_POLICY", "OPENBLAS_CORETYPE", "MKL_ENABLE_INSTRUCTIONS", "MKL_CBWR")
 DEPENDENCIES = (
-    "src/triad_statistics.cpp", "src/triad_modem_v3.cpp",
+    "src/triad_statistics.cpp", "src/triad_modem_v3.cpp", "src/triad_shaping.cpp",
     "include/datapump/triad_statistics.hpp", "include/datapump/triad_modem_v3.hpp",
     "include/datapump/triad_modem.hpp", "include/datapump/triad_simulation.hpp",
-    "include/datapump/crypto.hpp", "include/datapump/pattern_pulse.hpp",
+    "include/datapump/crypto.hpp", "include/datapump/pattern_pulse.hpp", "include/datapump/triad_shaping.hpp",
 )
 
 

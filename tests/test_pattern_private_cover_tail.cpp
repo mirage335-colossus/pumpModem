@@ -230,8 +230,15 @@ void awgn_preservation(const std::filesystem::path& prefix,bool weak,bool impair
     const auto h=modem::symbol_sample_count(config),chip=modem::pattern_chip_samples(config);
     const auto first=modem::training_sample_count(config)+128;
     check(chip==21 && (!weak || h==config.sample_rate),"preservation control geometry changed");
-    Bytes expected=weak?Bytes{1,0,1,1,0,0,1,0,0,1,0,0,1,1,0,1,1,0,1}:Bytes{1,0,1,1,0,0,1,0};
-    transfer::xor_binary_bits(expected,o);modem::PatternCode code(config,o.timestamp);
+    // Preserve the original physical receiver witnesses, including their
+    // selected private alternatives. These are the former AES-masked wire
+    // bits for the original source strings, independently reproduced with
+    // HKDF-SHA256/AES at each symbol address. Applying the current payload
+    // cipher here would change the preselected weak-signal PCM and could lose
+    // its original first-symbol/joint-confirmation witness. Payload-cipher
+    // vectors are checked separately by the crypto and transfer regressions.
+    Bytes expected=weak?Bytes{0,0,0,1,0,0,1,1,0,1,0,0,1,1,1,0,1,1,0}:Bytes{0,1,0,0,0,1,0,1};
+    modem::PatternCode code(config,o.timestamp);
     const auto rate=impaired?1.00015:1.;const auto cfo=impaired?.125*config.sample_rate/static_cast<double>(h):0.;
     const auto sigma=std::sqrt(modem::nominal_signal_power*std::pow(10.,-(weak?-11.:40.)/10));
     std::mt19937_64 noise(5181),phase(5181^0xa0761d6478bd642fULL);

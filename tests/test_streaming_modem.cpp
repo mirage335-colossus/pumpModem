@@ -2,6 +2,7 @@
 #include "datapump/streaming_modem.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "datapump/symbol_burst.hpp"
 #include "datapump/transfer.hpp"
 #include <algorithm>
 #include <array>
@@ -33,6 +34,49 @@ struct ReceivedStreams {
     }
 };
 
+void shared_confidentiality_workspace() {
+    auto legacy=modem::Config{};
+    legacy.scramble=legacy.dsss=true;
+    legacy.data_key.emplace(Bytes(32,0x49));
+    auto shared=legacy;
+    shared.data_key=Crypto::random();
+    const auto identity=shared.data_key->confidentiality_storage_id();
+    const auto charge=shared.data_key->confidentiality_storage_bytes();
+    if(!identity || !charge || legacy.data_key->confidentiality_storage_bytes())
+        throw std::runtime_error("confidentiality storage fixture must distinguish shared and inline-only keys");
+    modem::PatternCode old_code(legacy),shared_code(shared);
+    if(shared_code.working_bytes()!=old_code.working_bytes()+charge)
+        throw std::runtime_error("pattern code did not account its shared confidentiality root exactly once");
+    auto too_small=shared;too_small.memory_limit=old_code.working_bytes();
+    bool rejected=false;
+    try {modem::PatternCode insufficient(too_small);}catch(const Error&){rejected=true;}
+    if(!rejected)throw std::runtime_error("shared confidentiality allocation escaped the pattern code memory limit");
+    auto burst=shared;burst.symbol_burst={1,3};
+    modem::SymbolBurstPlan burst_plan(burst);
+    if(burst_plan.shared_confidentiality_storage_id()!=identity ||
+       burst_plan.shared_confidentiality_storage_charge()!=charge ||
+       burst_plan.working_bytes()!=sizeof(burst_plan)+charge)
+        throw std::runtime_error("standalone Symbol_Burst plan omitted its retained shared-key allocation");
+    for(const bool fallback:{false,true}) {
+        auto c=shared;c.integration_seconds=fallback?.3:7.3;c.stream_epoch=8312;
+        modem::PatternSearch search;search.frequency_offsets_hz={0};search.search_stream_phases=true;
+        search.start_offset_seconds=.0625;search.start_uncertainty_seconds=0;
+        const auto budget=static_cast<std::size_t>(fallback?256*1024:4*1024*1024);
+        modem::StreamingReceiver receiver(c,budget,search);
+        if(receiver.shared_confidentiality_storage_id()!=identity ||
+           receiver.shared_confidentiality_storage_charge()!=charge ||
+           receiver.working_bytes()<charge || receiver.reserved_workspace_bytes()<charge ||
+           receiver.working_bytes()>budget || receiver.reserved_workspace_bytes()>budget)
+            throw std::runtime_error("streaming receiver shared-key receipt is absent or outside its workspace totals");
+        receiver.trim_optional_workspace();
+        receiver.set_workspace_bytes(budget);
+        receiver.reset();
+        if(receiver.shared_confidentiality_storage_id()!=identity ||
+           receiver.shared_confidentiality_storage_charge()!=charge)
+            throw std::runtime_error("receiver reset changed the retained shared-key allocation receipt");
+    }
+}
+
 void generated_bits_use_the_ordinary_modem() {
     for(const bool shaped:{false,true})for(const bool inner_dsss:{false,true})for(const unsigned factor:{1U,10U,100U,1000U}) {
         transfer::Options options;
@@ -47,7 +91,17 @@ void generated_bits_use_the_ordinary_modem() {
         options.modem.stream_phase_samples=5573;
         auto config=transfer::seeded_config(options,options.timestamp);
         Bytes bits(93,0);
-        transfer::xor_binary_bits(bits,options);
+        // MaskedZeroBits is waveform-only tuning noise. Reconstruct its
+        // original AES mask independently of both the lazy generator and the
+        // message-confidentiality cascade, using absolute symbol sample times.
+        const auto symbol=modem::symbol_sample_count(config);
+        for(std::size_t i=0;i<bits.size();++i) {
+            const auto start=config.stream_phase_samples+static_cast<std::uint64_t>(i)*symbol;
+            const auto epoch=options.timestamp+start/config.sample_rate;
+            const auto ordinal=(start%config.sample_rate)/symbol;
+            const auto mask=options.key->stream(StreamPurpose::Data,epoch,ordinal/8,1);
+            bits[i]=static_cast<std::uint8_t>((mask[0]>>(7-ordinal%8))&1U);
+        }
         modem::PatternTransmitter ordinary(bits,config,options.timestamp);
         modem::PatternTransmitter generated(config,
             modem::PatternTransmitter::MaskedZeroBits{bits.size()},options.timestamp);
@@ -492,6 +546,7 @@ void interleaved_streaming_blocks() {
 
 int main() {
     try {
+        shared_confidentiality_workspace();
         generated_bits_use_the_ordinary_modem();
         continuous_private_noise();
         exact_suppression_noise();

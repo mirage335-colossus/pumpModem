@@ -249,6 +249,12 @@ Diagnostics StreamingReceiver::diagnostics()const{return impl_->pattern.diagnost
 ConstellationBatch StreamingReceiver::take_payload_constellation(){return {impl_->pattern.take_chip_constellation(),0};}
 std::size_t StreamingReceiver::working_bytes()const{return sizeof(StreamingReceiver)+sizeof(Impl)+impl_->pattern.working_bytes();}
 std::size_t StreamingReceiver::reserved_workspace_bytes()const{return sizeof(StreamingReceiver)+sizeof(Impl)+impl_->pattern.reserved_workspace_bytes();}
+const void* StreamingReceiver::shared_confidentiality_storage_id()const noexcept {
+    return impl_->config.data_key?impl_->config.data_key->confidentiality_storage_id():nullptr;
+}
+std::size_t StreamingReceiver::shared_confidentiality_storage_charge()const noexcept {
+    return impl_->config.data_key?impl_->config.data_key->confidentiality_storage_bytes():0;
+}
 std::optional<PatternColdWorkspaceFloor> StreamingReceiver::cold_workspace_floor()const noexcept {
     auto result=impl_->pattern.cold_workspace_floor();
     if(!result)return std::nullopt;

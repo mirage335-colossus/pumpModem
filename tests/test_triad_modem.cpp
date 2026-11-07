@@ -7,6 +7,7 @@
 #include <numbers>
 #include <set>
 #include <stdexcept>
+#include <string_view>
 
 using namespace datapump;
 using namespace datapump::triad;
@@ -119,9 +120,17 @@ void waveform_and_receivers(const Crypto& key) {
     rejects([&]{receive(tx.samples,bits.size(),f,key,p,Receiver::differential);},"tiny workspace silently omits search");
     p=SearchPrior{}; p.maximum_hypotheses=1;
     rejects([&]{receive(tx.samples,bits.size(),f,key,p,Receiver::differential);},"hypothesis cap silently truncates search");
+    // Compare against the clear bit alternatives selected by the documented
+    // payload domain. A one-time mask may legitimately contain zero bits.
+    constexpr std::string_view context="datapump/experimental-triad/v1/payload";
+    const auto mask=key.confidentiality_child(std::span<const std::uint8_t>(
+        reinterpret_cast<const std::uint8_t*>(context.data()),context.size()))
+        .confidentiality_stream(f.epoch,0,(bits.size()+7)/8);
+    auto masked_bits=bits;
+    for(std::size_t i=0;i<bits.size();++i)masked_bits[i]^=(mask[i/8]>>(i%8))&1U;
     f.encrypt=false;
-    const auto unmasked=transmit(bits,f,key);
-    check(unmasked.samples!=tx.samples,"encryption control did not alter samples");
+    const auto unmasked=transmit(masked_bits,f,key);
+    check(unmasked.samples==tx.samples,"encrypted payload differs from cascade-selected clear alternatives");
     f=Format{}; f.added_symbols=2; f.added_interleave=true;
     const auto added=transmit(bits,f,key);
     p=SearchPrior{}; p.frequency_half_width_hz=0;

@@ -607,6 +607,34 @@ void diagnostics_accounting() {
     receiver.push(chunk({},4,100,true));
     check(receiver.working_bytes()<empty,"complete physical state must release diagnostic allocations");
 }
+void shared_confidentiality_accounting() {
+    auto legacy=options(true);legacy.modem.data_key.emplace(Bytes(32,0x4a));
+    transfer::StreamReceiver baseline(legacy,legacy.timestamp);
+    auto shared=legacy;shared.key=Crypto::random();shared.modem.data_key=shared.key;
+    const auto first=shared.key->confidentiality_storage_id();
+    const auto charge=shared.key->confidentiality_storage_bytes();
+    transfer::StreamReceiver aliased(shared,shared.timestamp);
+    check(first && charge && aliased.working_bytes()==baseline.working_bytes()+charge &&
+          aliased.shared_confidentiality_storage_charge(first)==charge &&
+          !aliased.shared_confidentiality_storage_charge(nullptr) &&
+          !aliased.shared_confidentiality_storage_charge(&baseline),
+          "stream receiver must account aliased confidentiality roots exactly once");
+    shared.modem.data_key=Crypto::random();
+    const auto second=shared.modem.data_key->confidentiality_storage_id();
+    const auto second_charge=shared.modem.data_key->confidentiality_storage_bytes();
+    transfer::StreamReceiver distinct(shared,shared.timestamp);
+    check(second!=first && distinct.working_bytes()==baseline.working_bytes()+charge+second_charge &&
+          distinct.shared_confidentiality_storage_charge(first)==charge &&
+          distinct.shared_confidentiality_storage_charge(second)==second_charge,
+          "stream receiver must retain and charge both independently selected roots");
+    const Bytes bits{0,1};distinct.push(chunk(bits,0));distinct.push(chunk(bits,0,200));
+    check(distinct.shared_confidentiality_storage_charge(first)==charge &&
+          distinct.shared_confidentiality_storage_charge(second)==second_charge,
+          "candidate copies changed the receiver's shared-key accounting receipt");
+    distinct.discard(100,0);distinct.discard(200,0);
+    check(distinct.working_bytes()==baseline.working_bytes()+charge+second_charge,
+          "discarded receive candidates retained duplicate confidentiality allocations");
+}
 void few_bits_remain_visible_until_physical_end() {
     const Bytes bits{0,0,1};
     for(bool keyed:{false,true}) {
@@ -790,7 +818,7 @@ int main() {
          late_acquisition_preserves_error_correction();late_acquisition_authenticates_actual_coordinates();
          marker_preserves_recovery_when_all_parity_is_absent();
          exhaustive_recovery_preserves_physical_end_and_source();
-         shared_quota_cleanup_and_identity();retired_candidates_release_source_without_completion();retain_widest_validated_source();diagnostics_accounting();few_bits_remain_visible_until_physical_end();dictionary_interpretation_is_bounded_and_post_end();
+         shared_quota_cleanup_and_identity();retired_candidates_release_source_without_completion();retain_widest_validated_source();diagnostics_accounting();shared_confidentiality_accounting();few_bits_remain_visible_until_physical_end();dictionary_interpretation_is_bounded_and_post_end();
          dictionary_interpretation_preserves_timed_coordinates();std::cout<<"stream receive integration passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

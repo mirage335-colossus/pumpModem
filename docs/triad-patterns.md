@@ -3,7 +3,7 @@
 The default isolated v3 waveform is now `independent-apsk-v2`. Its two bit
 alternatives have independently keyed amplitude and phase sequences. Added
 Symbols uses two-phase, two-radius 4-APSK factors, followed by one common
-three-carrier power normalization. Ordinary Robust formats are unchanged.
+three-carrier power normalization. Ordinary Robust pattern generation is unchanged.
 The [qualification record](validation-data/triad-v3/2026-11-06-independent-patterns/README.md)
 separates measured sensitivity, envelope behavior and remaining limitations.
 
@@ -27,7 +27,9 @@ Base phases remain uniformly selected from eight phases. Cover and permutation
 streams are separately keyed and remain common where protected pulse boundaries
 require that the cover carry no bit information.
 
-This uses the existing HMAC/AES implementation, not a new cipher. The relevant
+These pattern streams use the existing HMAC/AES implementation. The separately
+derived payload mask uses the Serpent-256 and AES-256 confidentiality stream;
+it does not change pattern generation. The relevant
 design principle is separation of pseudorandom key material by context; see
 [NIST's PRF key-derivation guidance](https://csrc.nist.gov/pubs/sp/800/108/r1/upd1/final).
 The custom context serialization is documented here; this is not a claim of

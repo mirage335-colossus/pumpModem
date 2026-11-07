@@ -75,11 +75,23 @@ def export(binary, config, seconds, seed, memory_mib, mode, directory, **kwargs)
     m = resource_manifest(seconds, mode)
     regime, work = resource.work_record(m, config, memory_mib, mode)
     argv = resource.argv_for(binary, config, seconds, seed, memory_mib, Path(directory) / "synthetic")
-    return resource.sealed({"requested_seconds": seconds, "seed": seed, "argv": argv,
+    record = {"requested_seconds": seconds, "seed": seed, "argv": argv,
         "argv_sha256": resource.digest(argv), "full_test_wall_seconds": .7, "regime": regime,
         "work": work, "file_sizes": m["file_sizes"],
         "file_sha256": {name: resource.digest([name, seed, seconds]) for name in resource.FILES},
-        "native_execution": m["grouped_export_execution"], "timing_boundary": "synthetic complete target"})
+        "native_execution": m["grouped_export_execution"], "timing_boundary": "synthetic complete target"}
+    if kwargs.get("physical_mask_arguments") is not None:
+        record["physical_input_binding"] = binding(seed, kwargs["physical_mask_arguments"])
+    return resource.sealed(record)
+
+
+def binding(seed, args):
+    tx, rx, bit = map(int, args[1::2])
+    return dict(trial=0, seed=seed, key_seed=seed, channel_seed=seed, capture_samples=64*512+512,
+        source_samples=64*512, source_format={"ramp_seconds": 1/1800}, random_seed_roots={"noise": seed},
+        sample_rate_numerator=512, sample_rate_denominator=1,
+        performance_physical_input=dict(schema="triad-performance-physical-bits-v1", tx_mask=tx, rx_mask=rx,
+            signal_physical_bit=bit, signal_plaintext_bit=bit^tx))
 
 
 def geometry(binary, config, **kwargs):
@@ -201,6 +213,61 @@ class ExtrasTests(unittest.TestCase):
         receipt = json.loads((adapter.output / "resource-geometry.json").read_text())
         self.assertEqual(receipt["expected_geometry_source"], "candidate_configure")
         adapter.close()
+
+    def test_resource_alignment_preflights_both_modes_and_fresh_pairs_before_timers(self):
+        adapter = extras.ExtraWorkloads(dict(self.context, physical_bit_alignment=True))
+        self.assertTrue(all(d["workload"]["physical_bit_alignment"] for d in adapter.descriptors()
+                            if d["kind"] == "native-resource"))
+        events = []
+        def prepare(binaries, args, seed, trials, deadline, **kwargs):
+            events.append("map")
+            bit = int(extras.native._option(args, "--signal-bit", 0))
+            self.assertEqual(trials, 1); self.assertEqual(kwargs["input_bits"], [bit])
+            self.assertEqual(args[args.index("--seconds")+1], "64")
+            return dict(schema=extras.physical.SCHEMA, trials=1, seed=seed, order=list(kwargs["order"]),
+                wall_seconds=.02, physical_signal_bits=[1^bit], sources={"reference":dict(tx_masks=[1],rx_masks=[1]),
+                                                   "candidate":dict(tx_masks=[0],rx_masks=[0])})
+        def complete(binaries, args, seed, alignment, deadline, **kwargs):
+            events.append("complete")
+            return dict(wall_seconds=.03,sources={side:dict(rows=[binding(seed,extras.physical.arguments(alignment,side))])
+                                 for side in extras.SIDES})
+        def run(*args, **kwargs):
+            events.append(Path(args[0]).name)
+            self.assertIn("physical_mask_arguments", kwargs)
+            return export(*args, **kwargs)
+        with (patch.object(resource, "target_geometry", side_effect=geometry),
+              patch.object(extras.physical, "prepare_pair", side_effect=prepare) as maps,
+              patch.object(extras.physical, "complete_native_inputs", side_effect=complete) as inputs,
+              patch.object(resource, "run_export", side_effect=run)):
+            for mode in resource.REGIMES:
+                adapter.measure_pair("resource:"+mode, "screen", 100)
+            adapter.resource_config["args"] += ["--signal-bit", "0", "--signal-bit", "1"]
+            result = adapter.measure_pair("resource:paired", "fresh", 101,
+                order=("candidate","reference"), phase="confirmation")
+        self.assertEqual(maps.call_count,3); self.assertEqual(inputs.call_count,3)
+        self.assertEqual(events,["map","complete","reference","candidate"]*2+
+                                ["map","complete","candidate","reference"])
+        self.assertEqual(maps.call_args.kwargs["order"],("candidate","reference"))
+        self.assertEqual(result["candidate_seconds"],.7)
+        self.assertEqual(result["details"]["physical_input_preflight"]["alignment"]["physical_signal_bits"],[0])
+        self.assertEqual(result["details"]["confirmation_context"]["setup_seconds"],.05)
+        self.assertEqual(adapter.summary()["resource_cross_regime_functional"],"passed")
+        adapter.close()
+
+    def test_resource_alignment_rejects_changed_preflight_binding_and_nonboolean_flag(self):
+        with self.assertRaisesRegex(ValueError,"must be boolean"):
+            extras.ExtraWorkloads(dict(self.context,physical_bit_alignment=1))
+        adapter=extras.ExtraWorkloads(dict(self.context,physical_bit_alignment=True))
+        alignment=dict(schema=extras.physical.SCHEMA,trials=1,seed=100,order=list(extras.SIDES),physical_signal_bits=[0],
+            sources={side:dict(tx_masks=[0],rx_masks=[0]) for side in extras.SIDES})
+        complete=dict(sources={side:dict(rows=[binding(100,extras.physical.arguments(alignment,side))]) for side in extras.SIDES})
+        complete["sources"]["candidate"]["rows"][0]["source_format"]={"ramp_seconds":.1}
+        with (patch.object(resource,"target_geometry",side_effect=geometry),
+              patch.object(extras.physical,"prepare_pair",return_value=alignment),
+              patch.object(extras.physical,"complete_native_inputs",return_value=complete),
+              patch.object(resource,"run_export",side_effect=export)):
+            with self.assertRaisesRegex(ValueError,"source_format"):
+                adapter.measure_pair("resource:paired","bad",100)
 
     def test_actual_reference_and_candidate_geometry_mismatch_is_still_rejected(self):
         def candidate_only(binary, *args, **kwargs):

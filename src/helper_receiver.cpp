@@ -1965,7 +1965,8 @@ Receiver::Receiver(double expected,double width,std::vector<Crypto> keys,
     // Includes the finite-aperture process-kernel scratch. Focused compiler
     // stack-usage validation checks this bound for the qualified toolchain.
     constexpr std::size_t scratch_bound=3072;
-    if(sizeof(*this)+sizeof(Impl)+compact.capacity()*sizeof(Crypto)+scratch_bound+metadata_heap>workspace_bound)
+    const auto key_storage=compact.empty()?0:compact.front().confidentiality_storage_bytes();
+    if(sizeof(*this)+sizeof(Impl)+compact.capacity()*sizeof(Crypto)+key_storage+scratch_bound+metadata_heap>workspace_bound)
         throw Error("Helper Carrier precision receiver exceeds its bounded workspace");
     impl_=std::make_unique<Impl>(expected,width,std::move(compact),ordinary_band,precision,punctuation);
 }

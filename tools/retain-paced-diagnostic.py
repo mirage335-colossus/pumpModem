@@ -155,6 +155,7 @@ def main() -> int:
         "QR-LICENSE": root / "third_party/qrcodegen/LICENSE",
         "XZ-LICENSE": root / "third_party/xz/COPYING.0BSD",
         "XZ-SOURCE.md": root / "third_party/xz/README.datapump.md",
+        "BOTAN-LICENSE": root / "third_party/botan/LICENSE",
     }
     retained_notices = []
     for installed_name, origin in notice_sources.items():

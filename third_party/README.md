@@ -10,6 +10,7 @@ upgrade considerations.
 | Nayuki QR Code generator (C++) | 1.8.0 (`v1.8.0`) | [720f62bddb7226106071d4728c292cb1df519ceb](https://github.com/nayuki/QR-Code-generator/commit/720f62bddb7226106071d4728c292cb1df519ceb) | [qrcodegen/README.datapump.md](qrcodegen/README.datapump.md) |
 | XZ / liblzma | 5.8.4 (`v5.8.4`) | [d3e650e63c110e830fd5391e7f8b45df0b91d3da](https://github.com/tukaani-project/xz/commit/d3e650e63c110e830fd5391e7f8b45df0b91d3da) | [xz/README.datapump.md](xz/README.datapump.md) |
 | LDPC matrices | DVB-S2/S2X and IEEE 802.11 tables | `32357d8ad55a6a302c34e093759f0454e45cca56` (xdsopl); `05ee7f4af36ed5dacf52861315af68b8a17e71e0` (tavildar) | [ldpc/README.md](ldpc/README.md), including both retained licenses and independent vectors |
+| Botan Serpent scalar implementation | 3.8.1 | [c06967092edd9baa2b42f89135380912113ae209](https://github.com/randombit/botan/commit/c06967092edd9baa2b42f89135380912113ae209) | Adapted scalar paths in [src/serpent.cpp](../src/serpent.cpp); [BSD-2-Clause license](botan/LICENSE). The source records upstream files, attribution, and local adaptation. |
 | Rev (optional GUI) | `clean` snapshot | [d73faa7759b5cfd30d592057790ab458568b569b](https://github.com/ryanpmcguire/Rev/commit/d73faa7759b5cfd30d592057790ab458568b569b) | [rev/README.datapump.md](rev/README.datapump.md), including local fixes and unresolved upstream distribution terms |
 
 Hashes identify commits, not annotated tag objects. When upgrading, resolve

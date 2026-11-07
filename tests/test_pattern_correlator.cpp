@@ -1565,8 +1565,17 @@ void independent_epoch_recovers_fractional_symbol_phase(bool short_fallback,bool
     search.start_uncertainty_seconds=0;search.frequency_offsets_hz={0};
     std::vector<modem::PatternBurst> bursts;
     if(short_fallback) {
-        modem::PatternReceiver receiver(received,256*1024,search);
-        check(receiver.clock_windowed(),"fractional short-symbol fixture must use the streaming fallback");
+        modem::PatternReceiver initial(received,256*1024,search);
+        check(initial.clock_windowed(),"fractional short-symbol fixture must use the streaming fallback");
+        initial.trim_optional_workspace();initial.set_workspace_bytes(256*1024);
+        modem::PatternReceiver receiver(std::move(initial));
+        check(receiver.clock_windowed() && receiver.working_bytes()<=256*1024 &&
+              receiver.reserved_workspace_bytes()<=256*1024,
+              "moved fractional fallback must retain its complete bounded workspace");
+        check(receiver.acquisition_hypotheses().empty() && !receiver.cold_workspace_floor() &&
+              !receiver.source_identity(modem::PatternBurst{}),
+              "fallback queries must delegate without retaining an unused FFT generator");
+        (void)receiver.diagnostics();(void)receiver.fft_work();
         for(std::size_t offset=0;offset<samples.size();) {
             const auto count=std::min<std::size_t>(113,samples.size()-offset);
             receiver.push(std::span(samples).subspan(offset,count));offset+=count;

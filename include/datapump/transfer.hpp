@@ -159,6 +159,11 @@ public:
     // Releases source quota without interpreting source or fabricating END.
     void discard(std::uint64_t first_sample, std::uint64_t first_symbol);
     std::size_t working_bytes() const;
+    // The constructor's key and modem.data_key roots are the complete retained
+    // immutable root set; candidate options only copy those identities. This
+    // amount is already included once in working_bytes(), and lets an enclosing
+    // owner which separately charges that identity deduplicate its aggregation.
+    std::size_t shared_confidentiality_storage_charge(const void* identity) const noexcept;
     std::size_t source_buffer_bytes() const;
     // Additional retained non-encoded receiver storage beyond working_bytes(),
     // in that method's accounting units (including its fixed map-node allowance),

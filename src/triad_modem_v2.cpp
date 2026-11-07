@@ -16,6 +16,7 @@
 #include <numbers>
 #include <numeric>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <type_traits>
 
@@ -106,7 +107,10 @@ std::uint64_t shifted_epoch(std::uint64_t epoch,std::int64_t offset){
 }
 std::vector<std::uint8_t> masks(const Format& f,const Crypto& key,std::size_t count){
     std::vector<std::uint8_t> result(count);if(!f.encrypt)return result;
-    const auto stream=child(key,"payload").stream(StreamPurpose::Data,f.epoch,0,(count+7)/8);
+    constexpr std::string_view context="datapump/experimental-triad/v2/payload";
+    const auto payload=key.confidentiality_child(std::span<const std::uint8_t>(
+        reinterpret_cast<const std::uint8_t*>(context.data()),context.size()));
+    const auto stream=payload.confidentiality_stream(f.epoch,0,(count+7)/8);
     for(std::size_t bit=0;bit<count;++bit)result[bit]=(stream[bit/8]>>(bit%8))&1U;
     return result;
 }

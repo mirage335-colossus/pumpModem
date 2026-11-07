@@ -41,10 +41,11 @@ inline constexpr std::size_t metadata_max_characters=16;
 // authentication is carried. A record never crosses into the next dwell.
 //
 // With a selected key the phase remains clear and the 112 character bits use
-// AES-256-CTR. The independent AES key is the station key's HMAC-SHA256 of
-// "datapump/helper-aux/v3/ctr-key". Its IV is big-endian absolute six-second
-// bucket (64 bits), 400-ms dwell within that bucket (32 bits), block counter
-// zero (32 bits). Keyed timestamps must be nominal physical dwell starts.
+// the Serpent-256-CTR and AES-256-CTR confidentiality cascade. It uses a
+// confidentiality child with context "datapump/helper-aux/v4/confidentiality",
+// absolute 400-ms dwell as the stream epoch, and byte offset zero. Keyed
+// timestamps must be nominal physical dwell starts. Both peers must use this
+// cipher suite; earlier AES-only metadata is incompatible.
 // Use a station-specific key and one fixed character record per absolute
 // dwell: another sender or changed record in that same key/dwell reuses CTR.
 // Cipher failure throws before output and never falls back to clear text.

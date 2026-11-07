@@ -78,6 +78,7 @@ def implementation_identity():
             "adaptive_sha256": file_sha(Path(__file__).with_name("triad_perf_adaptive.py")),
             "native_environment_helper_sha256": file_sha(Path(__file__).with_name("triad_perf_native.py")),
             "hardware_environment_helper_sha256": file_sha(Path(__file__).with_name("triad_perf_hardware.py")),
+            "physical_input_helper_sha256": file_sha(Path(__file__).with_name("triad_perf_physical_bits.py")),
             "config_sha256": file_sha(CONFIG_PATH)}
 
 
@@ -148,11 +149,18 @@ def work_record(manifest, config, memory_mib, mode):
 
 
 def run_export(binary, config, seconds, seed, memory_mib, mode, directory, *, deadline=None, threads=1,
-               failure_path=None):
+               failure_path=None, physical_mask_arguments=None):
+    if physical_mask_arguments is not None:
+        masks = list(physical_mask_arguments)
+        if (len(masks) != 6 or masks[::2] != ["--performance-tx-masks", "--performance-rx-masks", "--performance-signal-bits"] or
+                any(masks[j] not in ("0", "1") for j in (1, 3, 5))):
+            raise ResourcePerformanceError("invalid resource physical input arguments")
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     output = Path(tempfile.mkdtemp(prefix="export-", dir=directory)) / "output"
     argv = argv_for(binary, config, seconds, seed, memory_mib, output, threads)
+    if physical_mask_arguments is not None:
+        argv += masks
     timeout = 120. if deadline is None else min(120., deadline - time.monotonic())
     if timeout <= 0:
         shutil.rmtree(output.parent)
@@ -167,8 +175,22 @@ def run_export(binary, config, seconds, seed, memory_mib, mode, directory, *, de
             error_type = (ResourceWorkRegimeError if "bounded scratch/source estimate exceeds --memory-mib" in result.stderr
                           else ResourcePerformanceError)
             raise error_type(f"native resource export exited {result.returncode}: {result.stderr[-1600:]}")
+        if (output.is_symlink() or not output.is_dir() or
+                (output / "manifest.json").is_symlink() or not (output / "manifest.json").is_file()):
+            raise ResourcePerformanceError("resource export contains unfinished, unexpected or unsafe files")
         manifest = json.loads((output / "manifest.json").read_text())
+        if physical_mask_arguments is not None:
+            metadata = manifest.get("performance_physical_input", {})
+            if (metadata.get("schema") != "triad-performance-physical-bits-v1" or
+                    metadata.get("tx_mask") != int(masks[1]) or metadata.get("rx_mask") != int(masks[3]) or
+                    metadata.get("signal_physical_bit") != int(masks[5]) or
+                    metadata.get("signal_plaintext_bit") != (int(masks[5]) ^ int(masks[1]))):
+                raise ResourcePerformanceError("resource export did not apply frozen physical maps")
         regime, work = work_record(manifest, config, memory_mib, mode)
+        expected_files = {"manifest.json", *FILES}
+        if ({path.name for path in output.iterdir()} != expected_files or
+                any((output / name).is_symlink() or not (output / name).is_file() for name in expected_files)):
+            raise ResourcePerformanceError("resource export contains unfinished, unexpected or unsafe files")
         hashes = {}
         if set(manifest["file_sizes"]) != set(FILES):
             raise ResourcePerformanceError("unknown grouped statistics file set")
@@ -184,6 +206,12 @@ def run_export(binary, config, seconds, seed, memory_mib, mode, directory, *, de
                   "file_sizes": manifest["file_sizes"], "manifest_sha256": file_sha(output / "manifest.json"),
                   "native_execution": manifest["grouped_export_execution"],
                   "output_semantics": "all emitted sufficient-statistic binary files retained by digest; no receiver scoring or GPU execution"}
+        if physical_mask_arguments is not None:
+            record["physical_input_binding"] = {
+                "trial": 0, "seed": manifest["legacy_seed"], "key_seed": manifest["key_seed"],
+                "channel_seed": manifest["channel_seed"], "capture_samples": manifest["sample_count"],
+                **{name: manifest[name] for name in ("source_samples", "source_format", "random_seed_roots",
+                    "sample_rate_numerator", "sample_rate_denominator", "performance_physical_input")}}
     except Exception as exc:
         if failure_path is not None:
             _save(failure_path, sealed({"status": "work_regime_invalid" if isinstance(exc, ResourceWorkRegimeError) else "error",

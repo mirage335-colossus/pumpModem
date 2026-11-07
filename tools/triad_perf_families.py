@@ -269,12 +269,16 @@ def remaining(deadline):
     return left
 
 
-def export_fixtures(binary, profile, seed, threads, directory, count, deadline):
+def export_fixtures(binary, profile, seed, threads, directory, count, deadline, *, physical_mask_arguments=None):
     """Measure fresh native processes, complete sampled tails, and export writes."""
     commands, paths, times = [], [], []
     for i in range(count):
         out = directory / f"capture-{i}"
         argv = native_arguments(binary, profile, seed + i, threads, out)
+        if physical_mask_arguments is not None:
+            if len(physical_mask_arguments) != count:
+                raise ValueError("physical mask capture count differs")
+            argv += physical_mask_arguments[i]
         start = time.perf_counter()
         completed = subprocess.run(argv, capture_output=True, text=True, timeout=remaining(deadline))
         elapsed = time.perf_counter()-start
@@ -282,6 +286,18 @@ def export_fixtures(binary, profile, seed, threads, directory, count, deadline):
             raise RuntimeError(f"native sampled export failed: {completed.stderr.strip()}")
         if not (out / "manifest.json").is_file():
             raise RuntimeError("native export returned without a finalized manifest")
+        if physical_mask_arguments is not None:
+            masks = physical_mask_arguments[i]
+            if (len(masks) != 6 or masks[0] != "--performance-tx-masks" or
+                    masks[2] != "--performance-rx-masks" or masks[4] != "--performance-signal-bits" or
+                    any(masks[j] not in ("0","1") for j in (1,3,5))):
+                raise ValueError("invalid sampled physical input arguments")
+            metadata = json.loads((out / "manifest.json").read_text())["performance_physical_input"]
+            if (metadata.get("schema") != "triad-performance-physical-bits-v1" or
+                    metadata.get("tx_mask") != int(masks[1]) or metadata.get("rx_mask") != int(masks[3]) or
+                    metadata.get("signal_physical_bit") != int(masks[5]) or
+                    metadata.get("signal_plaintext_bit") != (int(masks[5]) ^ int(masks[1]))):
+                raise ValueError("sampled export did not apply frozen physical maps")
         paths.append(out)
         commands.append(argv)
         times.append(elapsed)
@@ -314,11 +330,12 @@ def receive(worker, paths, case, device, precision, limit=None):
 
 
 def measure_job(worker, binary, profile, case, seed, native_threads, directory,
-                device, precision, deadline, *, limits=(None,)):
+                device, precision, deadline, *, limits=(None,), physical_mask_arguments=None):
     """Fresh sampled simulation plus complete receiver, or paired prefixes."""
     start = time.perf_counter()
+    kwargs = {} if physical_mask_arguments is None else {"physical_mask_arguments": physical_mask_arguments}
     paths, generation = export_fixtures(binary, profile, seed, native_threads, directory,
-                                         case.get("captures", 1), deadline)
+                                         case.get("captures", 1), deadline, **kwargs)
     receipts = [receive(worker, paths, case, device, precision, limit) for limit in limits]
     wall = time.perf_counter()-start
     return {"generation": generation, "receiver_runs": receipts,

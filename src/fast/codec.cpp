@@ -29,6 +29,13 @@ namespace {
 // Only corrupted received data may leave a recoverable hole. Allocation,
 // cryptographic-library and geometry errors remain fatal to this decoder.
 struct CorruptCycle : Error { using Error::Error; };
+struct SecretBytes {
+    Bytes bytes;
+    explicit SecretBytes(Bytes value):bytes(std::move(value)) {}
+    SecretBytes(const SecretBytes&) = delete;
+    SecretBytes& operator=(const SecretBytes&) = delete;
+    ~SecretBytes() { OPENSSL_cleanse(bytes.data(),bytes.size()); }
+};
 struct CloseFile { void operator()(std::FILE* f)const {if(f)std::fclose(f);} };
 using File = std::unique_ptr<std::FILE, CloseFile>;
 void write_file(std::FILE* f,std::span<const std::uint8_t> data) {
@@ -101,39 +108,30 @@ std::size_t capacity_data_bytes(const Profile& p) {return (capacity_info_bytes(p
 std::size_t systematic_bytes(const Profile& p) {return p.capacity_mode?capacity_data_bytes(p):k_bytes(p)*2;}
 const char* domain(const Profile& p,const char* legacy,const char* capacity) {return p.capacity_mode?capacity:legacy;}
 struct Keys {
-    Bytes encryption,authentication;
+    Bytes authentication;
+    std::unique_ptr<ConfidentialityCbc> encryption;
     Keys(const Profile& p,const Crypto& crypto,std::span<const std::uint8_t> salt) {
         if(salt.size()!=32)throw Error("Invalid fixed fast salt width");
-        auto base=crypto.mac(label(domain(p,"DataPump/fast/v1/root","DataPump/fast/capacity/v2/root")));
-        auto prk=hmac(salt,base);OPENSSL_cleanse(base.data(),base.size());
-        auto context=profile_id(p);
-        auto info=label(domain(p,"DataPump/fast/v1/AES-256-CBC","DataPump/fast/capacity/v2/AES-256-CBC"));append(info,context);info.push_back(1);
-        encryption=hmac(prk,info);
-        info=label(domain(p,"DataPump/fast/v1/HMAC-SHA256","DataPump/fast/capacity/v2/HMAC-SHA256"));append(info,context);info.push_back(1);
-        authentication=hmac(prk,info);OPENSSL_cleanse(prk.data(),prk.size());
+        SecretBytes base(crypto.mac(label(domain(p,"DataPump/fast/v1/serpent-aes/root","DataPump/fast/capacity/v2/serpent-aes/root"))));
+        SecretBytes prk(hmac(salt,base.bytes));
+        const auto profile=profile_id(p);
+        auto context=label(domain(p,"DataPump/fast/v1/serpent-aes-cbc/v1", "DataPump/fast/capacity/v2/serpent-aes-cbc/v1"));
+        append(context,profile);
+        encryption=crypto.prepare_confidentiality_cbc(context,salt);
+        auto info=label(domain(p,"DataPump/fast/v1/HMAC-SHA256","DataPump/fast/capacity/v2/HMAC-SHA256"));append(info,profile);info.push_back(1);
+        authentication=hmac(prk.bytes,info);
     }
-    ~Keys() {OPENSSL_cleanse(encryption.data(),encryption.size());OPENSSL_cleanse(authentication.data(),authentication.size());}
+    ~Keys() {OPENSSL_cleanse(authentication.data(),authentication.size());}
 };
-Bytes crypt(std::span<const std::uint8_t> input,const Bytes& key,std::span<const std::uint8_t> iv,bool encrypt) {
-    if(iv.size()!=16 || input.empty() || input.size()%16)throw Error("Invalid fixed fast cipher geometry");
-    std::unique_ptr<EVP_CIPHER_CTX,decltype(&EVP_CIPHER_CTX_free)> ctx(EVP_CIPHER_CTX_new(),&EVP_CIPHER_CTX_free);
-    Bytes output(input.size()+16);int count=0,tail=0;
-    if(!ctx || EVP_CipherInit_ex(ctx.get(),EVP_aes_256_cbc(),nullptr,key.data(),iv.data(),encrypt?1:0)!=1 ||
-       EVP_CIPHER_CTX_set_padding(ctx.get(),0)!=1 ||
-       EVP_CipherUpdate(ctx.get(),output.data(),&count,input.data(),static_cast<int>(input.size()))!=1 ||
-       EVP_CipherFinal_ex(ctx.get(),output.data()+count,&tail)!=1 || static_cast<std::size_t>(count+tail)!=input.size())
-        throw Error("Fast cipher operation failed");
-    output.resize(input.size());return output;
-}
 Bytes tag_input(const Profile& p,std::span<const std::uint8_t> salt,std::uint64_t ordinal,
                 std::span<const std::uint8_t> body) {
-    auto canonical=label(domain(p,"DataPump/fast/v1/group","DataPump/fast/capacity/v2/group"));append(canonical,profile_id(p));append(canonical,salt);
+    auto canonical=label(domain(p,"DataPump/fast/v1/serpent-aes/group","DataPump/fast/capacity/v2/serpent-aes/group"));append(canonical,profile_id(p));append(canonical,salt);
     ordinal_bytes(canonical,ordinal);append(canonical,body);return canonical;
 }
 Bytes seal(const Profile& p,const Keys& keys,std::span<const std::uint8_t> salt,std::uint64_t ordinal,
            std::span<const std::uint8_t> iv,std::span<const std::uint8_t> plain) {
     if(plain.size()!=ciphertext_bytes(p))throw Error("Invalid fixed fast plaintext width");
-    Bytes systematic(iv.begin(),iv.end());append(systematic,crypt(plain,keys.encryption,iv,true));
+    Bytes systematic(iv.begin(),iv.end());append(systematic,keys.encryption->encrypt(plain,iv));
     append(systematic,hmac(keys.authentication,tag_input(p,salt,ordinal,systematic)));
     if(p.capacity_mode)systematic.resize(systematic_bytes(p));
     return systematic;
@@ -147,7 +145,7 @@ Bytes open(const Profile& p,const Keys& keys,std::span<const std::uint8_t> salt,
     auto body=systematic.first(body_size);
     if(!same(systematic.subspan(body_size,32),hmac(keys.authentication,tag_input(p,salt,ordinal,body))))
         throw CorruptCycle("Fast stream integrity failed");
-    return crypt(body.subspan(16),keys.encryption,body.first(16),false);
+    return keys.encryption->decrypt(body.subspan(16),body.first(16));
 }
 Bytes public_tag(const Profile& p,std::span<const std::uint8_t> salt,std::uint64_t ordinal,
                  std::span<const std::uint8_t> plain) {
@@ -168,7 +166,7 @@ Bytes public_open(const Profile& p,std::span<const std::uint8_t> salt,std::uint6
 }
 Bytes bootstrap_tag(const Profile& p,const std::optional<Crypto>& crypto,std::span<const std::uint8_t> salt,
                     SourceEncoding encoding=SourceEncoding::raw) {
-    auto canonical=label(crypto?domain(p,"DataPump/fast/v1/bootstrap","DataPump/fast/capacity/v2/bootstrap"):domain(p,"DataPump/fast/v1/public/bootstrap","DataPump/fast/capacity/v2/public/bootstrap"));
+    auto canonical=label(crypto?domain(p,"DataPump/fast/v1/serpent-aes/bootstrap","DataPump/fast/capacity/v2/serpent-aes/bootstrap"):domain(p,"DataPump/fast/v1/public/bootstrap","DataPump/fast/capacity/v2/public/bootstrap"));
     append(canonical,profile_id(p));
     if(encoding==SourceEncoding::xz)append(canonical,label("/source/xz/v1"));
     append(canonical,salt);

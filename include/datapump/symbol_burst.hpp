@@ -146,7 +146,13 @@ public:
     }
     // Worst recurring service opportunity uses J=0, independently of key draws.
     std::uint64_t minimum_spacing_samples() const {return spacing_samples_for_additional_wait(0);}
-    std::size_t working_bytes() const {return sizeof(*this);}
+    std::size_t working_bytes() const {return sizeof(*this)+shared_confidentiality_storage_charge();}
+    const void* shared_confidentiality_storage_id() const noexcept {
+        return key_?key_->confidentiality_storage_id():nullptr;
+    }
+    std::size_t shared_confidentiality_storage_charge() const noexcept {
+        return key_?key_->confidentiality_storage_bytes():0;
+    }
 
 private:
     friend class SymbolBurstCursor;

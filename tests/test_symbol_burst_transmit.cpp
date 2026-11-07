@@ -94,7 +94,7 @@ void addresses_and_content() {
     for(std::size_t i=0;i<plain.size();++i) {
         const auto payload=cursor.at(i).payload_begin;
         const auto ordinal=payload.phase/plan.symbol_samples();
-        const auto mask=options.key->stream(StreamPurpose::Data,payload.epoch,ordinal/8,1);
+        const auto mask=options.key->confidentiality_stream(payload.epoch,ordinal/8,1);
         check(actual[i]==(plain[i]^((mask[0]>>(7-ordinal%8))&1)),"Burst Data mask used a logical or contiguous UTC address");
     }
     transfer::xor_binary_bits(actual,options);

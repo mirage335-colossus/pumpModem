@@ -790,6 +790,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serve", action="store_true")
     parser.add_argument("--source-root", type=Path, default=ROOT)
+    parser.add_argument("--historical-fixture-source", action="store_true",
+                        help="allow missing Serpent files in an explicitly historical fixture source tree")
     parser.add_argument("--threads", type=int, default=2)
     parser.add_argument("--reference-root", type=Path)
     parser.add_argument("--binary", type=Path)
@@ -837,7 +839,8 @@ def main(argv=None):
     workers, rows = {}, []
     try:
         cases = prepare_cases(args.binary.resolve(), args.fixture_cache.resolve(), profile="ci",
-                              deadline=deadline, source_root=args.source_root.resolve(), case_ids=args.cases)
+                              deadline=deadline, source_root=args.source_root.resolve(),
+                              allow_historical_missing=args.historical_fixture_source, case_ids=args.cases)
         if sorted(c["id"] for c in cases) != sorted(args.cases):
             raise ValueError("requested FFT cases missing or duplicated")
         for name, root in (("reference", args.reference_root), ("candidate", args.source_root)):

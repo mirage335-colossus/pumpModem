@@ -5,6 +5,7 @@
 #include <array>
 #include <filesystem>
 #include <optional>
+#include <memory>
 #include <span>
 
 namespace datapump {
@@ -18,14 +19,29 @@ enum class StreamDomain : std::uint8_t {
     SchedHopKeyV1, SchedHopUtcV1, SymbolBurstWaitV1
 };
 
-// A 256-bit shared secret with independently derived stream and MAC keys.
+// Per-transfer CBC setup. Not shared concurrently; each call resets IV/chain state.
+class ConfidentialityCbc final {
+public:
+    ~ConfidentialityCbc();
+    ConfidentialityCbc(const ConfidentialityCbc&) = delete;
+    ConfidentialityCbc& operator=(const ConfidentialityCbc&) = delete;
+    Bytes encrypt(std::span<const std::uint8_t> plaintext, std::span<const std::uint8_t> wire_iv);
+    Bytes decrypt(std::span<const std::uint8_t> ciphertext, std::span<const std::uint8_t> wire_iv);
+private:
+    friend class Crypto;
+    explicit ConfidentialityCbc(std::span<const std::uint8_t> material);
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+// Purpose-separated modem/MAC keys and separate confidentiality key material.
 // The timestamp is the same whole-second epoch for every modem layer;
 // offset is a byte position within that epoch's stream, not wall-clock time.
 class Crypto {
 public:
     explicit Crypto(std::span<const std::uint8_t> master_key);
     ~Crypto();
-    Crypto(const Crypto&) = default;
+    Crypto(const Crypto&) noexcept;
     Crypto& operator=(const Crypto&);
 
     static Crypto random();
@@ -54,6 +70,26 @@ public:
                  StreamDomain domain = StreamDomain::Payload) const;
     Bytes xor_data(std::span<const std::uint8_t> data, std::uint64_t timestamp,
                    std::uint64_t offset = 0) const;
+    // Successive Serpent-256-CTR and AES-256-CTR encryption layers. Modem
+    // waveform generators continue to use the AES-only stream() API above.
+    Bytes confidentiality_stream(std::uint64_t timestamp, std::uint64_t offset,
+                                 std::size_t count) const;
+    Crypto confidentiality_child(std::span<const std::uint8_t> context) const;
+    // Fixed-width Serpent-256-CBC inner / AES-256-CBC outer cascade. The
+    // caller authenticates IV and ciphertext before calling decrypt.
+    std::unique_ptr<ConfidentialityCbc> prepare_confidentiality_cbc(
+        std::span<const std::uint8_t> context, std::span<const std::uint8_t> salt) const;
+    Bytes encrypt_confidentiality_cbc(std::span<const std::uint8_t> plaintext,
+        std::span<const std::uint8_t> context, std::span<const std::uint8_t> salt,
+        std::span<const std::uint8_t> wire_iv) const;
+    Bytes decrypt_confidentiality_cbc(std::span<const std::uint8_t> ciphertext,
+        std::span<const std::uint8_t> context, std::span<const std::uint8_t> salt,
+        std::span<const std::uint8_t> wire_iv) const;
+    // Immutable confidentiality storage is shared by value copies. Workspace
+    // owners charge each non-null identity once, in addition to sizeof(Crypto).
+    // These values disclose allocation identity/size, never key bytes.
+    const void* confidentiality_storage_id() const noexcept;
+    std::size_t confidentiality_storage_bytes() const noexcept;
 
     // HMAC-SHA256 over exactly message. Include framed metadata in message.
     Bytes mac(std::span<const std::uint8_t> message) const;
@@ -63,7 +99,9 @@ public:
 private:
     friend struct KeyringAccess;
     Crypto() = default;
+    struct ConfidentialityMaterial;
     std::array<std::array<std::uint8_t, 32>, 5> keys_{};
+    const ConfidentialityMaterial* confidentiality_ = nullptr;
 };
 
 inline constexpr std::uint64_t keyfile_header_bytes = 128ULL * 1024 * 1024;
@@ -75,7 +113,7 @@ Crypto load_keyfile(const std::filesystem::path& path,
                     const std::optional<std::filesystem::path>& pad = std::nullopt);
 
 struct KeyEntry { std::string name; Crypto key; };
-// Version 2 stores multiple independent named key sets in one authenticated,
+// Version 3 stores multiple independent named key sets in one authenticated,
 // encrypted payload behind the same 128 MiB random header. Legacy v1 files
 // load as one entry named "Default". No plaintext key export is exposed.
 void create_keyring(const std::filesystem::path& path, const std::vector<std::string>& names,

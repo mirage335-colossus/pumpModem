@@ -710,11 +710,40 @@ struct Session::Impl {
         std::uint64_t captured_ingress=0;
         std::uint64_t admissions = 0, retirements = 0, builds = 0;
         std::size_t peak_receivers = 0;
+        struct ConfidentialityRoots {
+            struct Allocation { const void* identity=nullptr; std::size_t bytes=0; };
+            // Selected banks contain at most 129 keys. Retained owners can
+            // temporarily add old identities across a joined reconfiguration.
+            // Overflow retains a conservative per-observation charge instead
+            // of silently omitting storage or imposing a new key limit.
+            std::array<Allocation,256> allocations{};
+            std::size_t count=0,bytes=0;
+            bool exact=true;
+            void add(const void* identity,std::size_t allocation_bytes) {
+                if(!identity && !allocation_bytes)return;
+                if(!identity || !allocation_bytes)throw Error("invalid confidentiality storage receipt");
+                const auto end=allocations.begin()+static_cast<std::ptrdiff_t>(count);
+                const auto found=std::find_if(allocations.begin(),end,[&](const auto& item) {
+                    return item.identity==identity;
+                });
+                if(found!=end) {
+                    if(found->bytes!=allocation_bytes)throw Error("confidentiality storage receipt changed size");
+                    return;
+                }
+                if(allocation_bytes>SIZE_MAX-bytes)throw Error("confidentiality storage reservation overflow");
+                bytes+=allocation_bytes;
+                if(count<allocations.size())allocations[count++]={identity,allocation_bytes};
+                else exact=false;
+            }
+            void add(const Crypto& key) {
+                add(key.confidentiality_storage_id(),key.confidentiality_storage_bytes());
+            }
+        } confidentiality_roots;
         static constexpr std::size_t serialized_control_allowance_bytes=65536;
         // Includes the complete center array plus a 4 KiB frame/sort margin.
         static constexpr std::size_t helper_acquisition_scratch_bytes=
             modem::maximum_pattern_frequency_rate_hypotheses*sizeof(double)+4096;
-        std::size_t working_bytes = sizeof(detail::ReceptionHistory)+sizeof(source_curves)+sizeof(exact_source_samples)+sizeof(exact_source_generation)+sizeof(next_exact_source_trace)+sizeof(exact_source_points)+sizeof(point_source_generation)+sizeof(next_point_consumer)+sizeof(next_point_source_trace)+sizeof(permutations)+sizeof(temporal_plans)+sizeof(deferred_input)+sizeof(input_queued_at)+sizeof(shared_capture)+sizeof(future_capture)+sizeof(receiver_allocations)+sizeof(detail::ReceiverAllocationAccount)+sizeof(receiver_storage)+sizeof(native_peaks)+sizeof(modem::detail::NativePeakWorkspace)+sizeof(native_points)+sizeof(realtime_helper)+sizeof(realtime_locked)+sizeof(realtime_phase_corrected)+sizeof(realtime_expected_hz)+sizeof(realtime_residual_hz)+sizeof(realtime_offset_hz)+sizeof(realtime_data_active)+sizeof(realtime_data_available)+sizeof(realtime_data_witness_available)+sizeof(realtime_data_started)+sizeof(realtime_data_bound)+sizeof(realtime_data_current)+sizeof(realtime_data_history)+sizeof(realtime_data_history_reservation)+sizeof(realtime_data_capture_low)+sizeof(realtime_data_capture_high)+sizeof(realtime_clock)+sizeof(realtime_fft_jobs)+sizeof(realtime_skipped_jobs)+sizeof(helper_conditioning)+sizeof(helper_conditioning_attempted)+sizeof(helper_conditioning_probe)+sizeof(helper_last_frequency_sample)+sizeof(helper_fallback_replay_bytes)+sizeof(helper_fallback_budget)+sizeof(helper_cohort)+sizeof(helper_clock_context)+sizeof(helper_audits)+sizeof(helper_cohort_decline_reason)+sizeof(helper_frontend_reservation)+sizeof(helper_frontend_view_ceiling)+sizeof(helper_diagnostic_capacity)+sizeof(helper_frontend_serial)+sizeof(helper_optional_reservation)+sizeof(helper_optional_owned_bytes)+sizeof(input_view_intervals)+sizeof(helper_optional_work)+sizeof(realtime_score_history)+sizeof(helper_cold_input)+sizeof(helper_startup_attempted)+sizeof(helper_admission_frozen)+sizeof(realtime_observation_ready)+sizeof(realtime_precision_insufficient)+sizeof(helper_acquisition_scratch_reservation)+helper_acquisition_scratch_reservation+realtime_data_history_reservation+serialized_control_allowance_bytes;
+        std::size_t working_bytes = sizeof(confidentiality_roots)+sizeof(detail::ReceptionHistory)+sizeof(source_curves)+sizeof(exact_source_samples)+sizeof(exact_source_generation)+sizeof(next_exact_source_trace)+sizeof(exact_source_points)+sizeof(point_source_generation)+sizeof(next_point_consumer)+sizeof(next_point_source_trace)+sizeof(permutations)+sizeof(temporal_plans)+sizeof(deferred_input)+sizeof(input_queued_at)+sizeof(shared_capture)+sizeof(future_capture)+sizeof(receiver_allocations)+sizeof(detail::ReceiverAllocationAccount)+sizeof(receiver_storage)+sizeof(native_peaks)+sizeof(modem::detail::NativePeakWorkspace)+sizeof(native_points)+sizeof(realtime_helper)+sizeof(realtime_locked)+sizeof(realtime_phase_corrected)+sizeof(realtime_expected_hz)+sizeof(realtime_residual_hz)+sizeof(realtime_offset_hz)+sizeof(realtime_data_active)+sizeof(realtime_data_available)+sizeof(realtime_data_witness_available)+sizeof(realtime_data_started)+sizeof(realtime_data_bound)+sizeof(realtime_data_current)+sizeof(realtime_data_history)+sizeof(realtime_data_history_reservation)+sizeof(realtime_data_capture_low)+sizeof(realtime_data_capture_high)+sizeof(realtime_clock)+sizeof(realtime_fft_jobs)+sizeof(realtime_skipped_jobs)+sizeof(helper_conditioning)+sizeof(helper_conditioning_attempted)+sizeof(helper_conditioning_probe)+sizeof(helper_last_frequency_sample)+sizeof(helper_fallback_replay_bytes)+sizeof(helper_fallback_budget)+sizeof(helper_cohort)+sizeof(helper_clock_context)+sizeof(helper_audits)+sizeof(helper_cohort_decline_reason)+sizeof(helper_frontend_reservation)+sizeof(helper_frontend_view_ceiling)+sizeof(helper_diagnostic_capacity)+sizeof(helper_frontend_serial)+sizeof(helper_optional_reservation)+sizeof(helper_optional_owned_bytes)+sizeof(input_view_intervals)+sizeof(helper_optional_work)+sizeof(realtime_score_history)+sizeof(helper_cold_input)+sizeof(helper_startup_attempted)+sizeof(helper_admission_frozen)+sizeof(realtime_observation_ready)+sizeof(realtime_precision_insufficient)+sizeof(helper_acquisition_scratch_reservation)+helper_acquisition_scratch_reservation+realtime_data_history_reservation+serialized_control_allowance_bytes;
         double created_at = 0;
         std::optional<long double> public_amplitude_epoch_origin;
         std::uint64_t refreshed_sample=0;
@@ -1022,6 +1051,45 @@ struct Session::Impl {
             <<search.clock_half_width_ppm<<" ppm (requested "<<search.requested_clock_half_width_ppm<<")";
         bank.oscillator_limit=detail.str();
     }
+    static void set_confidentiality_roots(Bank& bank,const Bank::ConfidentialityRoots& roots) {
+        if(bank.confidentiality_roots.bytes>bank.working_bytes)
+            throw Error("confidentiality root reservation exceeds receiver bank");
+        const auto other=bank.working_bytes-bank.confidentiality_roots.bytes;
+        if(roots.bytes>SIZE_MAX-other)throw Error("confidentiality root bank accounting overflow");
+        bank.working_bytes=other+roots.bytes;
+        bank.confidentiality_roots=roots;
+    }
+    static void add_receiver_confidentiality_roots(Bank::ConfidentialityRoots& roots,
+                                                   const Receiver& receiver) {
+        if(receiver.options.key)roots.add(*receiver.options.key);
+        if(receiver.options.modem.data_key)roots.add(*receiver.options.modem.data_key);
+        if(receiver.modem)roots.add(receiver.modem->shared_confidentiality_storage_id(),
+            receiver.modem->shared_confidentiality_storage_charge());
+    }
+    static void reserve_confidentiality_roots(Bank& bank,const Settings& value) {
+        Bank::ConfidentialityRoots roots;
+        if(value.transfer.key)roots.add(*value.transfer.key);
+        if(value.transfer.modem.data_key)roots.add(*value.transfer.modem.data_key);
+        if(value.long_message_modem && value.long_message_modem->data_key)
+            roots.add(*value.long_message_modem->data_key);
+        for(const auto& key:value.receive_keys)roots.add(key);
+        if(bank.receiver_storage)for(const auto& receiver:bank.receivers())
+            add_receiver_confidentiality_roots(roots,receiver);
+        const auto changed=roots.bytes!=bank.confidentiality_roots.bytes ||
+            roots.count!=bank.confidentiality_roots.count || roots.exact!=bank.confidentiality_roots.exact;
+        if(bank.confidentiality_roots.bytes>bank.working_bytes)
+            throw Error("confidentiality root reservation exceeds receiver bank");
+        const auto other=bank.working_bytes-bank.confidentiality_roots.bytes;
+        const auto capacity=bank_capacity(value);
+        if(other>capacity || roots.bytes>capacity-other)
+            throw Error("confidentiality roots exceed receiver bank workspace");
+        set_confidentiality_roots(bank,roots);
+        if(changed)audio::trace::record("receiver_confidentiality_roots",[&](auto& f) {
+            f.add("revision",bank.revision);f.add("sample",bank.samples);
+            f.add("identities",roots.count);f.add("reserved_bytes",roots.bytes);
+            f.add("deduplicated_exactly",roots.exact);
+        });
+    }
     static std::size_t receiver_workspace(const Receiver& receiver) {
         // Reserve bounded diagnostic growth and control storage before
         // admitting a receiver, rather than reporting only its idle allocation.
@@ -1035,12 +1103,32 @@ struct Session::Impl {
         const std::weak_ptr<const detail::HelperInputView> empty_view;
         const bool view_identity_owned=receiver.realtime_constructor_view.owner_before(empty_view) ||
             empty_view.owner_before(receiver.realtime_constructor_view);
-        return receiver.modem->working_bytes() +
+        // The standalone numeric owner includes one primary root charge.
+        // Its Bank reserves that identity's allocation once for the retained
+        // union before charging this receiver. Other conservative worker-code
+        // charges remain included; no reference-count heuristic is involved.
+        const auto numeric=receiver.modem->working_bytes();
+        const auto shared_root=receiver.modem->shared_confidentiality_storage_charge();
+        if(shared_root>numeric)throw Error("receiver confidentiality charge exceeds numeric workspace");
+        auto content_bytes=receiver.content?receiver.content->working_bytes():0;
+        if(receiver.content) {
+            const auto first=receiver.options.key?receiver.options.key->confidentiality_storage_id():nullptr;
+            const auto second=receiver.options.modem.data_key?
+                receiver.options.modem.data_key->confidentiality_storage_id():nullptr;
+            const auto deduct=[&](const void* identity) {
+                if(!identity)return;
+                const auto charge=receiver.content->shared_confidentiality_storage_charge(identity);
+                if(charge>content_bytes)throw Error("content confidentiality charge exceeds receiver workspace");
+                content_bytes-=charge;
+            };
+            deduct(first);if(second!=first)deduct(second);
+        }
+        return numeric-shared_root +
             (view_identity_owned?sizeof(detail::HelperInputView)+4*sizeof(void*):0) + burst_bytes + receiver.history_ordinals.heap_bytes() +
             receiver.pattern_score_history.working_bytes()+receiver.key_tag.capacity()+
             receiver.options.receive_targets_db_hz.capacity()*sizeof(double)+owned_plan +
             receiver.presentations.size()*(sizeof(decltype(receiver.presentations)::value_type)+4*sizeof(void*)) +
-            (receiver.content?receiver.content->working_bytes():0) +
+            content_bytes +
             (receiver.helper_input_recipe?sizeof(detail::HelperInputRecipe)+4*sizeof(void*):0) +
             (receiver.source_curve_family?sizeof(modem::detail::SourceFamily):0);
     }
@@ -2301,6 +2389,9 @@ struct Session::Impl {
         }
         Receiver& receiver()noexcept{return pending->front();}
         void charge_receiver() {
+            auto roots=bank.confidentiality_roots;
+            add_receiver_confidentiality_roots(roots,receiver());
+            set_confidentiality_roots(bank,roots);
             bank.working_bytes+=receiver_workspace(receiver());owner_charged=true;
         }
         bool retained_union_available(std::size_t capacity,std::size_t input_samples) {
@@ -3607,6 +3698,7 @@ struct Session::Impl {
         {std::lock_guard state_lock(mutex);
             if(!current.running || !bank.revision || bank.revision!=receive_revision)
                 throw Error("receiver Bank admission belongs to an obsolete capture revision");}
+        reserve_confidentiality_roots(bank,value);
         bank.realtime_helper=bank.realtime_helper || helper::effective_helper_power(value.helper)>0;
         if(bank.realtime_helper) {
             if(!bank.helper_acquisition_scratch_reservation) {
@@ -4880,7 +4972,8 @@ struct Session::Impl {
             f.add("revision",bank.revision);f.add("sample",bank.samples);f.add("retired",retired);
             f.add("resident",bank.receivers().size());f.add("retirements",bank.retirements);
         });
-        bank.working_bytes=sizeof(detail::ReceptionHistory)+sizeof(bank.source_curves)+sizeof(bank.exact_source_samples)+
+        bank.working_bytes=sizeof(bank.confidentiality_roots)+bank.confidentiality_roots.bytes+
+            sizeof(detail::ReceptionHistory)+sizeof(bank.source_curves)+sizeof(bank.exact_source_samples)+
             sizeof(bank.exact_source_generation)+sizeof(bank.next_exact_source_trace)+sizeof(bank.exact_source_points)+
             sizeof(bank.point_source_generation)+sizeof(bank.next_point_consumer)+sizeof(bank.next_point_source_trace)+sizeof(bank.permutations)+sizeof(bank.temporal_plans)+
             sizeof(bank.deferred_input)+sizeof(bank.input_queued_at)+sizeof(bank.shared_capture)+sizeof(bank.future_capture)+
@@ -4900,6 +4993,7 @@ struct Session::Impl {
         if(bank.helper_history)bank.working_bytes+=bank.helper_history->bytes();
         if(bank.helper_conditioning)bank.working_bytes+=bank.helper_conditioning->bytes();
         bank.working_bytes+=bank.helper_fallback_replay_bytes;
+        reserve_confidentiality_roots(bank,value);
         if(new_epoch && !bank.burst_admission_frozen) {
             bank.burst_resume_pending=false;
             trace_receiver_acquisition_work(bank,false,"refresh_before_move");
@@ -5122,7 +5216,35 @@ struct Session::Impl {
             // views wait for a real Bank surplus grant. No DSP/128 guess is a
             // reservation, and a capture callback never allocates this grant.
         }
-        std::size_t frontend_bytes()const noexcept{return (realtime?sizeof(RealtimeState)+realtime->pilot_stage.workspace_bytes()+(realtime->tracker?realtime->tracker->workspace_bytes():0)+(realtime->oscillator?detail::LiveHelperOscillator::storage_required():0)+(realtime->paired_dwell?realtime->paired_dwell->workspace_bytes():0)+(realtime->pair_model?2*detail::HelperPairModel::storage_required():0)+(realtime->score?sizeof(detail::HelperScoreFrequencyProducer):0):0)+(coarse?coarse->workspace_bytes():0)+
+        std::size_t confidentiality_bytes()const noexcept {
+            // These are aliases of the selected station keys, already funded
+            // by the Bank root union or the fixed auxiliary receiver bound.
+            // Include their union again in the standalone frontend telemetry
+            // as a conservative retained-storage bound; copying these owners
+            // never creates another root allocation or a larger optional grant.
+            std::size_t bytes=0;
+            for(std::size_t i=0;i<keys.size();++i) {
+                const auto identity=keys[i].confidentiality_storage_id();
+                if(!identity)continue;
+                bool seen=false;
+                for(std::size_t j=0;j<i;++j)seen|=keys[j].confidentiality_storage_id()==identity;
+                if(!seen)bytes+=keys[i].confidentiality_storage_bytes();
+            }
+            const auto key_in_vector=[&](const void* identity) {
+                return std::any_of(keys.begin(),keys.end(),[&](const auto& key) {
+                    return key.confidentiality_storage_id()==identity;
+                });
+            };
+            const auto* first=frequency_state&&frequency_state->config.data_key?
+                &*frequency_state->config.data_key:nullptr;
+            const auto* second=realtime&&realtime->config.data_key?&*realtime->config.data_key:nullptr;
+            if(first && !key_in_vector(first->confidentiality_storage_id()))
+                bytes+=first->confidentiality_storage_bytes();
+            if(second && (!first || second->confidentiality_storage_id()!=first->confidentiality_storage_id()) &&
+               !key_in_vector(second->confidentiality_storage_id()))bytes+=second->confidentiality_storage_bytes();
+            return bytes;
+        }
+        std::size_t frontend_bytes()const noexcept{return confidentiality_bytes()+(realtime?sizeof(RealtimeState)+realtime->pilot_stage.workspace_bytes()+(realtime->tracker?realtime->tracker->workspace_bytes():0)+(realtime->oscillator?detail::LiveHelperOscillator::storage_required():0)+(realtime->paired_dwell?realtime->paired_dwell->workspace_bytes():0)+(realtime->pair_model?2*detail::HelperPairModel::storage_required():0)+(realtime->score?sizeof(detail::HelperScoreFrequencyProducer):0):0)+(coarse?coarse->workspace_bytes():0)+
             (frontend?frontend->bytes():0)+(continuity?sizeof(HelperContinuity):0)+
             (frequency_state?sizeof(FrontendFrequencyState)+
                 (frequency_state->current_links?sizeof(CurrentLinkOwners):0):0)+

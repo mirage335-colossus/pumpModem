@@ -24,8 +24,8 @@ std::uint64_t coordinate(long double x,const char* msg){
     return static_cast<std::uint64_t>(std::ceil(x));
 }
 void append64(Bytes& b,std::uint64_t v){for(int s=56;s>=0;s-=8)b.push_back(static_cast<std::uint8_t>(v>>s));}
-Crypto child(const Crypto& key,std::string_view purpose,const Format& f,std::uint64_t tile,
-             unsigned alternative=2){
+Bytes child_id(std::string_view purpose,const Format& f,std::uint64_t tile,
+               unsigned alternative=2){
     if(f.pattern_revision==PatternRevision::IndependentApskV2){
         const std::string_view prefix="datapump/experimental-triad/v3/independent-apsk-2/";
         Bytes id(prefix.begin(),prefix.end());
@@ -34,14 +34,18 @@ Crypto child(const Crypto& key,std::string_view purpose,const Format& f,std::uin
         // 0/1 identify independent encrypted alternatives; 2 is common cover,
         // payload masking or permutation. All variable fields are fixed-width.
         append64(id,alternative);append64(id,f.fhss_center_aligned?1:0);
-        return Crypto(key.mac(id));
+        return id;
     }
     const std::string_view prefix="datapump/experimental-triad/v3/tiled-1/";
     Bytes id(prefix.begin(),prefix.end());id.insert(id.end(),purpose.begin(),purpose.end());id.push_back(0);
     append64(id,f.epoch);append64(id,f.symbol_ordinal);append64(id,tile);
     if(f.fhss_center_aligned){const std::string_view alignment="/fhss-center-aligned";
         id.insert(id.end(),alignment.begin(),alignment.end());}
-    return Crypto(key.mac(id));
+    return id;
+}
+Crypto child(const Crypto& key,std::string_view purpose,const Format& f,std::uint64_t tile,
+             unsigned alternative=2){
+    return Crypto(key.mac(child_id(purpose,f,tile,alternative)));
 }
 std::uint64_t aligned_dwell_cells(const Format& f,double fine){
     require(f.fhss,"triad v3 center-aligned cells require FHSS");
@@ -258,8 +262,12 @@ struct PatternSource::Impl {
             const auto range=aligned_protected_range(f,geom.fine_chip_rate_hz);
             protected_first=range.first;protected_last=range.second;
         }
-        const auto mask=child(master,"payload",f,0).stream(StreamPurpose::Data,f.epoch,0,1);
-        bit=source_bit^(f.encrypt?(mask[0]&1U):0U);
+        bit=source_bit;
+        if(f.encrypt){
+            const auto payload=master.confidentiality_child(child_id("payload",f,0));
+            const auto mask=payload.confidentiality_stream(f.epoch,0,1);
+            bit^=mask[0]&1U;
+        }
     }
     bool active_tile(std::uint64_t physical_tile) const {
         return physical_tile%(format.burst_wait_tiles+1)==0&&

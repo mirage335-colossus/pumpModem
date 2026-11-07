@@ -267,7 +267,7 @@ the repository root, build and run the complete preservation-contract coverage:
 ```
 
 The `contract` CTest label and `datapump-tests-contract` build target select
-up to 39 suites, including the five scheduled-hop suites and supporting FFT,
+the contract-labeled suites, including the five scheduled-hop suites and supporting FFT,
 search-arithmetic, arrival-grid and GUI timing-advice coverage. The CLI suite is
 included when Python is available.
 See [the build guide](building.md) for direct CMake commands and other groups.

@@ -1,13 +1,14 @@
 # Symmetric cryptography and keyfiles
 
-The implementation uses OpenSSL 3 for all cryptographic primitives: HKDF-SHA256,
-AES-256-CTR, AES-256-CBC, HMAC-SHA256, AES-256-GCM, SHA256, and operating-system-seeded private
-random generation.
+The implementation uses OpenSSL 3 for HKDF, AES, HMAC and SHA, and a
+portable Serpent-256 implementation for the confidentiality cascade. Waveform,
+spreading and hop streams retain AES-256-CTR.
 
 The time-indexed streams below belong to regular mode and are unchanged by
 Fast. [Fast cryptography](fast-mode.md#cryptography-and-exact-source-bytes) uses
-separately derived AES-256-CBC/HMAC keys, a per-transfer random salt and fresh
-per-group IVs when encryption is enabled. It reuses the keyfile loader, never
+separately derived Serpent-256-CBC and AES-256-CBC layers with HMAC, a
+per-transfer random salt and fresh per-group IVs when encryption is enabled. It
+reuses the keyfile loader, never
 the regular epoch keystream. Fast encryption is optional; its public SHA-256
 checksum mode provides neither secrecy nor authentication. Both peers choose
 the same mode locally, with no automatic fallback on authentication failure.
@@ -19,11 +20,13 @@ exactly eight bytes in network order. `HKDF(ikm, info)` means RFC 5869 HKDF with
 SHA256, extract-and-expand, output length 32, and salt
 `datapump/v1/hkdf-sha256`.
 
-The master secret is exactly 32 random bytes. Independent purpose keys are:
+The legacy 32-byte master derives the following purpose keys. New named sets
+retain these purpose roles and separately store 64 bytes of confidentiality
+root material:
 
 | Purpose | HKDF info |
 | --- | --- |
-| Data encryption | `datapump/v1/data` |
+| Legacy Data purpose | `datapump/v1/data` |
 | DSSS | `datapump/v1/dsss` |
 | Scrambler | `datapump/v1/scrambler` |
 | Reserved keyfile purpose (FHSS) | `datapump/v1/fhss` |
@@ -37,10 +40,10 @@ it does not read the system clock. Pattern transport selects a new timestamp
 at symbol boundaries using the sample schedule below. Data, Scrambler and
 DSSS use that same symbol-start timestamp under each clock hypothesis.
 
-For byte offset `o`, the AES-256-CTR initial 128-bit counter is
+For byte offset `o`, the AES-only `Crypto::stream` initial 128-bit counter is
 `domain_pad || BE64(floor(o / 16))`. The optional final `Crypto::stream`
 argument selects `StreamDomain::Payload` by default, whose eight-byte pad is
-all zero, preserving existing payload output. `StreamDomain::Preamble` uses
+all zero, preserving this AES-only API's existing output. `StreamDomain::Preamble` uses
 the eight ASCII bytes `preamble`; `StreamDomain::Suppression` uses `suppress`.
 Private pattern candidates use `StreamDomain::PatternZeroV2` and
 `StreamDomain::PatternOneV2`, with ASCII pads `pat-v2-0` and `pat-v2-1`.
@@ -173,9 +176,10 @@ The v2 private alphabet is mandatory whenever pattern Scrambler or DSSS is
 active. Both peers must use it; there is no legacy toggle, on-air version bit,
 automatic fallback or additional receiver hypothesis. Existing parameter lists
 continue to select private operation through their key/Scrambler/DSSS settings.
-Public unkeyed patterns, Data masking, keyfiles, settling and suppression retain
-their existing formats. Raw and dictionary-short messages keep their exact bit
-counts; longer messages retain the fixed marker and interval format.
+Public unkeyed patterns, settling and suppression retain their existing
+formats. Payload confidentiality and new keyfiles use the cascade described
+below. Raw and dictionary-short messages keep their exact bit counts; longer
+messages retain the fixed marker and interval format.
 
 This removes the former public chip-mask substitution, including reuse of that
 transform at the next symbol. It is not a MAC for short messages, proof of sender
@@ -243,7 +247,7 @@ or a measured probability of interception.
 
 The GUI's **Transmit noise** action continuously modulates dummy bits through
 the regular encrypted pattern transmitter. Each start obtains fresh temporary
-master key material through `Crypto::random()` (OpenSSL `RAND_priv_bytes`).
+master key material through `Crypto::random()` (the operating-system CSPRNG).
 The usual purpose-separated Data, Scrambler and DSSS streams use the same
 derivation and addressing as ordinary encrypted transmission. Saved key
 material is not a noise input; temporary keys
@@ -252,8 +256,8 @@ and their owned cryptographic storage is cleansed on release.
 
 Noise keeps the selected carrier, chip rate, waveform shaping and normal signal
 level, using encrypted pattern modulation even when the saved mode is Tone.
-A bounded source masks all-zero dummy bits with the usual Data stream and feeds
-the resulting bits into the ordinary `PatternCode` and `PatternTransmitter`.
+A bounded source masks all-zero dummy bits with the confidentiality stream and
+feeds the resulting bits into the ordinary `PatternCode` and `PatternTransmitter`.
 This preserves the two pattern alternatives, symbol boundaries, private
 Scrambler/DSSS mapping, pulse shaping and normal settling waveform. It does not
 replace the payload with the preamble's noise distribution. No user content,
@@ -275,8 +279,20 @@ indistinguishability or RF interference measurement is claimed.
 
 ### Data, integrity and reuse
 
-`xor_data` XORs arbitrary bytes at an explicitly selected epoch with the Data
-stream. On-air pattern transport uses `xor_binary_bits`: each symbol consumes
+`xor_data` XORs arbitrary bytes at an explicitly selected epoch with the
+confidentiality stream. This stream applies separate Serpent-256-CTR and
+AES-256-CTR layers, equivalent to XORing the two separately keyed keystreams. Each
+epoch derives 64 bytes with HKDF-SHA512 using the confidentiality root and
+`datapump/cascade/v1/stream/` followed by BE64(epoch); the first and last
+32 bytes key Serpent and AES respectively. The counters use the respective
+eight-byte prefixes `data-s01` and `data-a01`, followed by BE64(floor(offset/16));
+partial blocks start at offset modulo 16. Byte-position overflow is rejected.
+The HKDF-SHA512 salt is `datapump/cascade/v1/hkdf-sha512`. These layers add no
+wire bits and retain random access at original physical positions. Confidentiality
+stream addresses must not be reused. Encrypted peers need the upgraded software;
+previously recorded AES-only transmissions are not retroactively protected.
+
+On-air pattern transport uses `xor_binary_bits`: each symbol consumes
 Data bit `ordinal` from its symbol-start epoch, most-significant bit first
 within each byte. Data and
 pattern addressing advance on the sample schedule whether preceding symbols
@@ -387,9 +403,49 @@ subsecond phase and stream-symbol index to recover the matching Data positions.
 Recovering later bits does not reconstruct wholly missing intervals or prove
 that reception includes the complete original source.
 
-## Named key sets: keyfile version 2
+## Named key sets: keyfile version 3
 
-New CLI keyfiles use `DPMKEY02`. The GUI and CLI load all named sets from one
+New CLI and GUI keyfiles use `DPMKEY03`. Two 64-byte operating-system CSPRNG
+collections are made at least one monotonic second apart, once per keyring, and
+combined using domain-separated HKDF-SHA512. Per-entry material derives the
+existing purpose keys and a separate 64-byte confidentiality root. This is a
+best effort to collect fresh randomness: the delay does not prove independent
+entropy, hardware RNG use or 512-bit security. An operating-system RNG may
+itself depend on AES: for example, the Windows `BCryptGenRandom` default
+provider documents a CTR_DRBG. Two calls do not establish that the underlying
+generator collected fresh independent entropy between them. Audio is not
+collected. An OS randomness failure fails key generation rather than falling
+back silently.
+
+The platform calls are Linux `getrandom`, Windows `BCryptGenRandom`, browser
+`__wasi_random_get` through the WebCrypto adapter, and `getentropy` on the
+other supported POSIX systems. Browser requests are limited to 65,536 bytes
+and header generation cooperatively checkpoints between chunks. The pinned
+WebAssembly SDK build and complete browser key-generation and failure-recovery
+paths have not yet been verified for this change; native results do not qualify
+those paths.
+
+The v3 prefix has the same bounded structure as v2 described below. Each entry
+contains the name, five 32-byte purpose keys and a 64-byte confidentiality
+root. SHA-512 of the domain `datapump/v3/keyfile-hash-sha512`, prefix, random
+header and optional pad is expanded with HKDF-SHA512 and the info
+`datapump/v3/keyfile-wrap-serpent-aes`. The first half supplies the inner
+Serpent-CTR key; its IV is derived from that key and the stored nonce with
+`datapump/v3/keyfile-serpent-iv/`. AES-256-GCM uses the other half, the stored
+nonce and the complete prefix as associated data. Authentication is checked
+before the inner layer is opened. As with older files, a complete unpadded file
+contains everything needed to recover its keys; the format is not password
+protection.
+
+Versions 1 and 2 remain readable. Their cascade root is derived from the old
+Data and MAC purpose keys with the `datapump/cascade/v1/legacy-root` domain;
+it cannot add entropy to their original 256-bit master. Both peers must use
+the upgraded ciphertext scheme even when they retain an older keyfile.
+Generate and exchange a new keyfile to use the new key-generation chain.
+
+## Legacy named key sets: keyfile version 2
+
+Version 2 keyfiles use `DPMKEY02`. The GUI and CLI load all named sets from one
 file. Each set stores the complete five 32-byte purpose keys, in the order data,
 DSSS, scrambler, FHSS, MAC; restoring a set reproduces those exact keys.
 
@@ -420,7 +476,7 @@ external pad is retained for old workflows through the CLI; ordinary keyfiles
 need only the single file. The GUI has no separate pad field.
 
 Version-1 keyfiles remain readable as one set named `Default`. The legacy C++
-`load_keyfile` entry point selects the first set from either version. New code
+`load_keyfile` entry point selects the first set from any supported version. New code
 can use `load_keyring` to receive all sets. Creation remains exclusive: a new
 collection is written to a new pathname; there is no in-place keyfile editor.
 

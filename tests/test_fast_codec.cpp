@@ -114,8 +114,8 @@ Bytes public_group(const Profile& p,std::span<const std::uint8_t> salt,std::uint
 }
 void independent_vectors() {
     // Frozen outputs generated independently using a Python shift register,
-    // hashlib/HMAC/HKDF and cryptography's AES implementation. Do not derive
-    // these expected values from the production encoder at test runtime.
+    // hashlib/HMAC/HKDF, libgcrypt Serpent and cryptography's AES. Do not
+    // derive these expected values from the production encoder at test runtime.
     const std::array<std::string_view,3> expected{
         "1101001111101100001101110110101001100010110000001110100110001111000101100111",
         "110011101100110101101000001100001110011011100100011",
@@ -132,14 +132,23 @@ void independent_vectors() {
     auto p=classic_profile(Channel::wire);p.constellation=16;p.code_rate=CodeRate::half;
     p.robust=true;p.interleave_depth=16;Bytes salt(32),iv(16),plain(176);
     std::iota(salt.begin(),salt.end(),32);std::iota(iv.begin(),iv.end(),0);std::iota(plain.begin(),plain.end(),0);
-    const auto expected_crypto=unhex(
+    // The pre-cascade encrypted format must never be accepted as the new one.
+    const auto legacy_crypto=unhex(
         "000102030405060708090a0b0c0d0e0f1e03c7f5409c338d0198fd87e3fffc4691e3b226d5c20647f492e61bd1b833a5"
         "1ecfb2010b4917049caec766959b2c3d5b2eb9ab03ce8caec1f67f5dda0d4dabb5f1b1e9645fa737da7e4809f01d9165"
         "8d43c52c440eb2a6073dd344e2e30582d8f22b0c79ff98200e5230b67707c79e38920bc6cbbb907444df1f55539556db69"
         "7bda7137b963b932229faad89a5486185e22bec842ae8138a56c41d8d4bd85f828a6f048fa25d698e9c0295e75cc294965e"
         "8c7d6c8815c1f3001358aa670dcd4beda505f2f8769fb5af14116fd25b1");
-    const auto crypto=key();auto group=fast::testing::seal_group(p,crypto,salt,7,iv,plain);
-    check(group==expected_crypto,"independent CBC/HKDF/group HMAC vector");
+    const auto crypto=key();
+    rejects([&]{fast::testing::open_group(p,crypto,salt,7,legacy_crypto);},"AES-only encrypted group rejected by cascade suite");
+    auto group=fast::testing::seal_group(p,crypto,salt,7,iv,plain);
+    const auto expected_crypto=unhex(
+        "000102030405060708090a0b0c0d0e0f16360a0b50ac0054bc0d09be5752d9c396f192763c6bcb1dddb313b54430bfa6"
+        "7ade3c569bc97161c14bce9b8c755297a3cc55f55486487cde5d285ca77aa6c10554940e8acd3feb4fac12703088e67a"
+        "44ac4188fa483e325280a674fd6702c9b024a09e805e7c5def7b84448a39d3a7e702e7802fe8710aa1c9b305503fa06"
+        "57394f1e27c355e21b66c6b6e74b5e6cd328f6c466b16b6d148dfb6b4bae46018a6f392d84a864b3c1e1b57f8af28c"
+        "817f85d9be0f529d8576c83107db53472defbca4b69258eb6a68814413aff8e2ba7");
+    check(group==expected_crypto,"independent Serpent/AES CBC, HKDF and group HMAC vector");
     check(fast::testing::open_group(p,crypto,salt,7,group)==plain,"authenticated vector decryption");
     rejects([&]{fast::testing::open_group(p,crypto,salt,8,group);},"reordered group rejected");
     rejects([&]{fast::testing::open_group(p,key(1),salt,7,group);},"wrong key rejected");
@@ -151,11 +160,29 @@ void independent_vectors() {
         auto damaged=group;damaged[index]^=1;
         rejects([&]{fast::testing::open_group(p,crypto,salt,7,damaged);},"IV/cipher/tag tamper rejected before plaintext");
     }
+    // Independently computed capacity-mode cascade fingerprint. This also
+    // exercises its larger group and canonical zero alignment fill.
+    const auto capacity=capacity_profile(Channel::wire);
+    Bytes capacity_plain(ciphertext_bytes(capacity));
+    for(std::size_t i=0;i<capacity_plain.size();++i)capacity_plain[i]=static_cast<std::uint8_t>(i);
+    const auto capacity_group=fast::testing::seal_group(capacity,crypto,salt,7,iv,capacity_plain);
+    check(sha256(capacity_group)==unhex("1b893cda1f4806a28f4ad8786aa4524d074adb78f15c400a4650b522c9210e7a"),
+          "independent capacity Serpent/AES CBC group vector");
+    check(fast::testing::open_group(capacity,crypto,salt,7,capacity_group)==capacity_plain,
+          "independent capacity vector decryption");
     // Independently frozen full stream fingerprint, including bootstrap MAC,
     // RS polynomial/interleave column order, termination and physical fill.
     p.interleave_depth=1;
-    const std::string domain="DataPump/fast/v1/bootstrap";Bytes canonical(domain.begin(),domain.end());
-    const auto context=profile_id(p);canonical.insert(canonical.end(),context.begin(),context.end());
+    const std::string legacy_domain="DataPump/fast/v1/bootstrap";
+    Bytes legacy_canonical(legacy_domain.begin(),legacy_domain.end());
+    const auto context=profile_id(p);legacy_canonical.insert(legacy_canonical.end(),context.begin(),context.end());
+    legacy_canonical.insert(legacy_canonical.end(),salt.begin(),salt.end());
+    Bytes legacy_bootstrap=salt;const auto legacy_tag=crypto.mac(legacy_canonical);
+    legacy_bootstrap.insert(legacy_bootstrap.end(),legacy_tag.begin(),legacy_tag.end());legacy_bootstrap.resize(224);
+    StreamDecoder legacy_rx(p,crypto);feed(legacy_rx,code_systematic(p,legacy_bootstrap));
+    check(legacy_rx.snapshot().failed && !legacy_rx.result(),"AES-only encrypted bootstrap fails closed");
+    const std::string domain="DataPump/fast/v1/serpent-aes/bootstrap";Bytes canonical(domain.begin(),domain.end());
+    canonical.insert(canonical.end(),context.begin(),context.end());
     canonical.insert(canonical.end(),salt.begin(),salt.end());
     Bytes bootstrap=salt;const auto tag=crypto.mac(canonical);bootstrap.insert(bootstrap.end(),tag.begin(),tag.end());bootstrap.resize(224);
     auto fixed_wire=code_systematic(p,bootstrap);std::fill(plain.begin(),plain.end(),0);
@@ -166,7 +193,7 @@ void independent_vectors() {
     fixed_wire.insert(fixed_wire.end(),coded.begin(),coded.end());
     Bytes digest(32);unsigned digest_size=0;
     check(EVP_Digest(fixed_wire.data(),fixed_wire.size(),digest.data(),&digest_size,EVP_sha256(),nullptr)==1 && digest_size==32,"wire fingerprint hashing");
-    check(digest==unhex("e52aca6df25bb57b988ca1bea41a53d530815f7f1015589dd01c7ffac04aa6b7"),"independent full fixed-cadence wire vector");
+    check(digest==unhex("f4ce3920c702d537c2bf00913d2d7fe8373214d6762cdf04ea1777a1a3f296cb"),"independent full fixed-cadence wire vector");
     StreamDecoder fixed_rx(p,crypto);feed(fixed_rx,fixed_wire);fixed_rx.finish(true);
     check(fixed_rx.result() && Bytes(fixed_rx.result()->bytes().begin(),fixed_rx.result()->bytes().end())==source,"independent full wire vector decode");
 

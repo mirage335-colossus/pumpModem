@@ -45,21 +45,22 @@ void encrypted_records() {
     const datapump::Crypto key(master);
     const std::array<datapump::Crypto,1> keys{key};
     struct Vector {std::uint64_t dwell,ticks;std::array<std::uint32_t,9> symbols;};
-    // Independent Python hashlib/hmac HKDF and openssl enc AES-256-CTR.
+    // Independent Python hashlib/hmac HKDF, libgcrypt Serpent ECB and
+    // cryptography AES-CTR. The oracle also reproduced the former AES vector.
     const std::array<Vector,5> vectors{{
-        {0,0,{0,1491,5608,132,9865,9169,8719,2903,15422}},
-        {14,367002,{11292,2927,3901,687,10437,15888,13137,1993,3797}},
-        {15,393216,{12098,7022,8672,4935,11867,3688,14963,8606,7113}},
-        {162,4246733,{15980,5171,2291,10937,10069,2000,4233,754,8194}},
-        {4500000000ULL,117964800000000ULL,{8822,4925,4670,4484,9231,15547,2791,12941,13150}}
+        {0,0,{0,8950,6882,4127,2605,795,11865,4767,15419}},
+        {14,367002,{11292,2046,7714,14722,8636,3849,16076,1586,9959}},
+        {15,393216,{12098,5374,9448,2857,5174,9401,12862,4989,407}},
+        {162,4246733,{15980,7974,6209,14199,11168,7889,7736,7461,5208}},
+        {4500000000ULL,117964800000000ULL,{8822,6043,2296,4904,9885,10665,8317,7178,15401}}
     }};
     for(const auto& vector:vectors) {
         const auto packet=h::metadata_packet(vector.ticks,"N0CALL",&key);
-        check(packet.symbols==vector.symbols,"CTR independent vector mismatch");
+        check(packet.symbols==vector.symbols,"cascade independent vector mismatch");
         check(!h::decode_metadata_packet(view(packet),keys),"keyed record decoded without capture clock");
         const auto decoded=h::decode_metadata_packet(view(packet),keys,vector.ticks);
         check(decoded&&decoded->kind==h::MetadataKind::encrypted_time&&decoded->callsign=="N0CALL"&&
-            decoded->time_ticks==packet.symbols[0]&&!decoded->authenticated,"CTR record did not decode");
+            decoded->time_ticks==packet.symbols[0]&&!decoded->authenticated,"cascade record did not decode");
     }
     // Exercise both sides of each six-second bucket and of the 8.125-second
     // phase wrap; the receiver calculates one absolute dwell, with no search.
@@ -69,15 +70,15 @@ void encrypted_records() {
         for(const auto offset:{-262144LL,-262143LL,-1LL,0LL,1LL,262143LL,262144LL}) {
             const auto anchor=static_cast<std::uint64_t>(static_cast<std::int64_t>(ticks)+offset);
             const auto decoded=h::decode_metadata_packet(view(packet),keys,anchor);
-            check(decoded&&decoded->callsign=="ABCDEFGHIJKLMNOP","CTR clock/bucket boundary disagreement");
+            check(decoded&&decoded->callsign=="ABCDEFGHIJKLMNOP","cascade clock/bucket boundary disagreement");
         }
     }
     // Distinguish changing absolute time from the repeating clear phase.
     const auto first=h::metadata_packet(0,"N0CALL",&key);
     const auto later=h::metadata_packet(130ULL*65536,"N0CALL",&key);
-    check(first.symbols[0]==later.symbols[0]&&first.symbols!=later.symbols,"CTR repeated with modulo time phase");
+    check(first.symbols[0]==later.symbols[0]&&first.symbols!=later.symbols,"cascade repeated with modulo time phase");
     check(h::metadata_packet(0,"N0CALL",&key).symbols!=h::metadata_packet(26214,"N0CALL",&key).symbols,
-        "CTR pad reused across adjacent dwells");
+        "cascade pad reused across adjacent dwells");
     rejects([&]{h::metadata_packet(1,"N0CALL",&key);});
     const auto empty=h::timecode_packet(0,&key);
     const auto empty_decoded=h::decode_metadata_packet(view(empty),keys,0);

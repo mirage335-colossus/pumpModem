@@ -352,8 +352,10 @@ TX: source areas -> keyed HMAC -> fixed RS -> markers -> Data mask -> patterns
 RX: patterns -> Data unmasking -> markers/erasures -> RS -> keyed HMAC -> memory buffer
 ```
 
-Encryption masks every marker, source, tag and parity bit at its original symbol
-position. Missing slots still consume positions. Nothing resets the cipher,
+The Serpent-256 and AES-256 confidentiality stream masks every marker, source,
+tag and parity bit at its original symbol position. Encrypted peers must use the
+upgraded implementation; older AES-only ciphertext is not upgraded retroactively.
+Missing slots still consume positions. Nothing resets the cipher,
 epoch or marker cadence merely because an interval is drained or a symbol lost.
 The selected non-tone key also enables private pattern templates; tone modes
 force private protections off. Purpose-separated keys retain the existing Data,

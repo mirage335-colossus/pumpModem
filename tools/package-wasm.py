@@ -18,6 +18,7 @@ SDK_NOTICES = ('OpenSSL-LICENSE.txt', 'Emscripten-LICENSE.txt', 'Emscripten-AUTH
                'dlmalloc-NOTICE.txt')
 PROJECT_NOTICES = {'DataPump-LICENSE': 'LICENSE', 'QR-LICENSE': 'third_party/qrcodegen/LICENSE',
                    'XZ-LICENSE': 'third_party/xz/COPYING.0BSD',
+                   'BOTAN-LICENSE': 'third_party/botan/LICENSE',
                    'LDPC-LICENSE': 'third_party/ldpc/LICENSE',
                    'LDPC-WIFI-LICENSE': 'third_party/ldpc/WIFI-LICENSE'}
 FORBIDDEN_IMPORT = re.compile(r'socket|sock_|connect|listen|accept|sendto|recvfrom|fetch|http|websocket|pthread|proxy', re.I)

@@ -1,11 +1,14 @@
 #include "datapump/live.hpp"
 #include "../src/signal_view.hpp"
 #include "../src/live_scheduling.hpp"
+#include "../src/audio_trace.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <string>
 #include <thread>
@@ -238,6 +241,84 @@ void growing_stream_shares_receiver_workspace() {
           received.received.front().content.message.data==sent.data,
           "inactive keyed hypotheses prevented the matching interval stream from sharing receiver storage");
 }
+void version_three_roots_share_bank_workspace() {
+    struct Files {
+        std::filesystem::path directory=std::filesystem::temp_directory_path()/
+            ("datapump-live-v3-roots-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        Files(){check(std::filesystem::create_directory(directory),"root fixture directory already exists");}
+        ~Files(){std::error_code ec;std::filesystem::remove_all(directory,ec);}
+    } files;
+    const testing::KeyfilePolicy policy{4096,8193};
+    const auto keyfile=files.directory/"keys",tracefile=files.directory/"roots.jsonl";
+    testing::create_keyring(keyfile,{"first","replacement"},policy);
+    {
+        std::ifstream input(keyfile,std::ios::binary);std::array<char,8> magic{};
+        input.read(magic.data(),magic.size());
+        check(std::string_view(magic.data(),magic.size())=="DPMKEY03","resource fixture did not load a real v3 keyring");
+    }
+    const auto keys=testing::load_keyring(keyfile,policy);
+    check(keys.size()==2 && keys[0].key.confidentiality_storage_id() &&
+          keys[1].key.confidentiality_storage_id() &&
+          keys[0].key.confidentiality_storage_id()!=keys[1].key.confidentiality_storage_id(),
+          "v3 resource keys did not retain distinct confidentiality allocations");
+    const auto root_bytes=keys[0].key.confidentiality_storage_bytes();
+    check(root_bytes>0 && keys[1].key.confidentiality_storage_bytes()==root_bytes,
+          "v3 root allocation receipt is unavailable");
+    {
+        audio::trace::Scope trace(tracefile,false,[](const char* event) noexcept {
+            return std::string_view(event)=="receiver_confidentiality_roots";
+        });
+        constexpr std::uint64_t epoch=1800000000;
+        std::atomic<std::int64_t> replay_milliseconds{0};
+        live::Session session([]{return static_cast<double>(epoch);},[&] {
+            return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_milliseconds.load());
+        });
+        auto value=settings();value.transfer.timestamp=epoch;value.transfer.search_seconds=0;
+        value.dsp_workspace_bytes=12*1024*1024;value.transfer.key=keys[0].key;
+        value.receive_keys={keys[0].key,keys[0].key};
+        const auto transmit=[&] {
+            wait_for(session,[&](const auto& snapshot) {
+                check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"v3 root bank exceeded its workspace");
+                check(!snapshot.receiver_health.failed(),"v3 root bank lost receiver coverage");
+                return snapshot.samples_received>=800;
+            });
+            const auto before=session.snapshot();std::vector<std::uint64_t> previous_signals;
+            for(const auto& signal:before.signals)previous_signals.push_back(signal.id);
+            session.transmit_bits(Bytes{0,0,1});
+            wait_for(session,[&](const auto& snapshot) {
+                check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"v3 reception omitted root storage");
+                check(!snapshot.receiver_health.failed(),"v3 root reception lost coverage");
+                return snapshot.transmission_id!=before.transmission_id &&
+                    snapshot.transmission_finished&&snapshot.simulation_replay;
+            });
+            replay_milliseconds+=3000;
+            wait_for(session,[&](const auto& snapshot) {
+                check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"v3 replay exceeded its workspace");
+                check(!snapshot.receiver_health.failed(),"v3 physical completion lost receiver coverage");
+                return std::any_of(snapshot.signals.begin(),snapshot.signals.end(),[&](const auto& signal) {
+                    return signal.complete && !signal.validated && !signal.missing_symbols &&
+                        signal.received_bits==3 && (signal.binary?signal.text:signal.raw_bits)=="001" &&
+                        std::find(previous_signals.begin(),previous_signals.end(),signal.id)==previous_signals.end();
+                });
+            });
+        };
+        session.start(value);transmit();
+        value.transfer.key=keys[1].key;
+        value.receive_keys={keys[0].key,keys[1].key,keys[1].key};
+        session.configure(value);transmit();session.stop();
+    }
+    std::ifstream input(tracefile);std::string line;bool one=false,two=false;
+    while(std::getline(input,line)) {
+        if(line.find("\"event\":\"receiver_confidentiality_roots\"")==std::string::npos)continue;
+        const auto witness=[&](std::size_t count) {
+            return line.find("\"identities\":"+std::to_string(count)+",")!=std::string::npos &&
+                line.find("\"reserved_bytes\":"+std::to_string(count*root_bytes)+",")!=std::string::npos &&
+                line.find("\"deduplicated_exactly\":1")!=std::string::npos;
+        };
+        one|=witness(1);two|=witness(2);
+    }
+    check(one&&two,"Live root reservation did not deduplicate aliases and refresh the real v3 key union");
+}
 void long_raw_symbol_is_bounded_and_cancellable() {
     auto value=settings();value.transfer.modem.bandwidth_hz=1;
     value.transfer.modem.spreading_mode=modem::SpreadingMode::pattern;value.transfer.modem.spreading_factor=16384;
@@ -351,6 +432,7 @@ int main(int argc,char** argv) {
         {"default workspace admits long key banks",default_workspace_admits_long_key_banks},
         {"noise epochs retire with bounded workspace",noise_epochs_retire_with_bounded_workspace},
         {"growing stream shares receiver workspace",growing_stream_shares_receiver_workspace},
+        {"version three roots share bank workspace",version_three_roots_share_bank_workspace},
         {"long raw symbol is bounded and cancellable",long_raw_symbol_is_bounded_and_cancellable},
         {"reconfiguration discards cancelled work",reconfiguration_discards_cancelled_work},
     };

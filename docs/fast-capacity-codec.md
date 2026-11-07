@@ -71,13 +71,15 @@ SHA-256 digest. The digest binds the v2 domain, complete local wire profile,
 transfer salt, cycle ordinal, and every byte of the source area. A public digest
 checks corruption and continuity; it is not authentication against an attacker.
 
-Keyed source cycles contain a random 16-byte IV, a fixed AES-256-CBC ciphertext
-area, and a 32-byte HMAC-SHA256. The plaintext width is the largest multiple of
+Keyed source cycles contain a random 16-byte outer IV, a fixed ciphertext
+area produced by Serpent-256-CBC followed by AES-256-CBC, and a 32-byte
+HMAC-SHA256. The plaintext width is the largest multiple of
 16 fitting after the IV and tag. Remaining RS data bytes are canonical zero
 alignment fill, which the receiver checks. The HMAC covers profile, salt,
 ordinal, IV, and ciphertext. Keys and tags use `DataPump/fast/capacity/v2/...`
-domains distinct from v1. Keyed and public modes remain matching local choices;
-there is no wire negotiation or automatic fallback.
+domains distinct from v1. The Serpent IV is separately derived from the outer
+IV. Keyed and public modes remain matching local choices; encrypted peers must
+both support the cascade, and there is no wire negotiation or automatic fallback.
 
 The first plaintext byte is a flag:
 

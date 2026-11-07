@@ -231,6 +231,61 @@ class ResourceTests(unittest.TestCase):
             self.assertEqual(list(Path(tmp).iterdir()), [])
             self.assertTrue(resource.verify_seal(result))
 
+    def test_physical_maps_are_applied_and_manifest_input_binding_is_retained(self):
+        masks = ["--performance-tx-masks", "1", "--performance-rx-masks", "0", "--performance-signal-bits", "0"]
+        metadata = {"schema": "triad-performance-physical-bits-v1", "tx_mask": 1, "rx_mask": 0,
+                    "signal_physical_bit": 0, "signal_plaintext_bit": 1}
+        def fake_run(argv, **kwargs):
+            self.assertEqual(argv[-6:], masks)
+            target = Path(argv[argv.index("--output") + 1]); target.mkdir()
+            for name in resource.FILES:
+                (target / name).write_bytes(b"12345678")
+            m = manifest()
+            m.update(legacy_seed=3, key_seed=3, channel_seed=3, source_format={"ramp_seconds": 1/1800},
+                     random_seed_roots={"noise": 3}, sample_rate_numerator=512, sample_rate_denominator=1,
+                     performance_physical_input=metadata)
+            (target / "manifest.json").write_text(json.dumps(m))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(resource.subprocess, "run", side_effect=fake_run):
+            result = resource.run_export("binary", self.config, 32, 3, 7, "paired", tmp,
+                                         physical_mask_arguments=masks)
+            self.assertEqual(result["physical_input_binding"]["performance_physical_input"], metadata)
+            self.assertEqual(result["physical_input_binding"]["capture_samples"], manifest()["sample_count"])
+            self.assertEqual(result["physical_input_binding"]["source_format"], {"ramp_seconds": 1/1800})
+            metadata["signal_plaintext_bit"] = 0
+            with self.assertRaisesRegex(resource.ResourcePerformanceError, "frozen physical maps"):
+                resource.run_export("binary", self.config, 32, 3, 7, "paired", tmp,
+                                    physical_mask_arguments=masks)
+        with patch.object(resource.subprocess, "run") as run:
+            for invalid in (masks[:-1], masks[:1]+["01"]+masks[2:], ["--seed", "1", *masks[2:]]):
+                with self.assertRaisesRegex(resource.ResourcePerformanceError, "physical input arguments"):
+                    resource.run_export("binary", self.config, 32, 3, 7, "paired", ".",
+                                        physical_mask_arguments=invalid)
+            run.assert_not_called()
+
+    def test_generated_export_rejects_symlinks_nonregular_and_unfinished_files(self):
+        for unsafe in ("manifest-link", "data-link", "directory", "partial", "unexpected", "missing"):
+            with self.subTest(unsafe=unsafe), tempfile.TemporaryDirectory() as tmp:
+                external=Path(tmp)/"external"; external.write_bytes(b"12345678")
+                def fake_run(argv, **kwargs):
+                    target=Path(argv[argv.index("--output")+1]); target.mkdir()
+                    for name in resource.FILES:
+                        (target/name).write_bytes(b"12345678")
+                    (target/"manifest.json").write_text(json.dumps(manifest()))
+                    if unsafe=="manifest-link":
+                        external.write_text(json.dumps(manifest()))
+                        (target/"manifest.json").unlink();(target/"manifest.json").symlink_to(external)
+                    elif unsafe=="data-link":
+                        (target/resource.FILES[0]).unlink();(target/resource.FILES[0]).symlink_to(external)
+                    elif unsafe=="directory":
+                        (target/resource.FILES[0]).unlink();(target/resource.FILES[0]).mkdir()
+                    elif unsafe=="missing":(target/resource.FILES[0]).unlink()
+                    else:(target/("unfinished.partial" if unsafe=="partial" else "other.txt")).write_text("unfinalized")
+                    return subprocess.CompletedProcess(argv,0,"","")
+                with patch.object(resource.subprocess,"run",side_effect=fake_run):
+                    with self.assertRaisesRegex(resource.ResourcePerformanceError,"unsafe files"):
+                        resource.run_export("binary",self.config,32,3,7,"paired",Path(tmp)/"exports")
+
     def test_direct_needs_no_forecast_anchor_and_freezes_shared_budgets(self):
         with tempfile.TemporaryDirectory() as tmp:
             calls = []

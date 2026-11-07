@@ -18,13 +18,15 @@ import time
 
 import triad_perf_planner as planner
 import triad_perf_resource as resource
+import triad_perf_physical_bits as physical
+import triad_perf_native as native
 
 SIDES = ("reference", "candidate")
 BUDGETS_MIB = {"paired": 5, "sequential": 4}
 RESOURCE_BOUNDARY = (
     "complete native grouped-statistics subprocess through exit: generation, "
     "two channel passes, grouped preparation, output writes and finalization; "
-    "configure probes, validation hashes and scratch cleanup excluded"
+    "configure probes, source mapping, complete-input preflight, validation hashes and scratch cleanup excluded"
 )
 
 
@@ -64,6 +66,9 @@ class ExtraWorkloads:
         self.output = Path(context["output"]) / "extras"
         self.deadline = context["deadline"]
         self.threads = context.get("native_threads", 1)
+        self.physical_bit_alignment = context.get("physical_bit_alignment", False)
+        if type(self.physical_bit_alignment) is not bool:
+            raise ValueError("physical_bit_alignment must be boolean")
         self.manifest = planner.manifest()
         self.resource_config = resource.load_config()
         self._closed = False
@@ -121,7 +126,7 @@ class ExtraWorkloads:
                     "inherited_environment_controls": {name: os.environ.get(name) for name in planner.BOUNDS_INHERITED_ENV},
                     "manifest_sha256": planner.file_sha(planner.MANIFEST),
                     "adapter_sha256": planner.file_sha(planner.__file__)}
-        return {"implementation": resource.implementation_identity(),
+        return {"implementation": resource.implementation_identity(), "physical_bit_alignment": self.physical_bit_alignment,
                 "sources": {side: resource.binary_identity(self.binaries[side], self.roots[side], self.threads)
                             for side in SIDES}}
 
@@ -131,7 +136,8 @@ class ExtraWorkloads:
             available, reason = self._available[kind]
             boundary = (RESOURCE_BOUNDARY if kind == "native-resource" else
                         self.manifest["bounds_timing_boundary" if kind == "gaussian-bounds" else "timing_boundary"])
-            work = (dict(self.resource_config, memory_mib=BUDGETS_MIB[case["mode"]], mode=case["mode"])
+            work = (dict(self.resource_config, memory_mib=BUDGETS_MIB[case["mode"]], mode=case["mode"],
+                         physical_bit_alignment=self.physical_bit_alignment)
                     if kind == "native-resource" else case)
             rows.append({"id": case_id, "kind": kind, "boundary": boundary,
                          "available": available,
@@ -163,13 +169,26 @@ class ExtraWorkloads:
         self._resource_setup()
         mode = case["mode"]
         budget = BUDGETS_MIB[mode]
+        alignment = complete = None
+        if self.physical_bit_alignment:
+            args = [*self.resource_config["args"], "--seconds", str(self.resource_config["target_seconds"]),
+                    "--memory-mib", str(budget)]
+            alignment = physical.prepare_pair(self.binaries, args, seed, 1, self.deadline,
+                    output=run_dir / "physical-inputs",
+                    input_bits=[int(native._option(args, "--signal-bit", 0))], order=order)
+            complete = physical.complete_native_inputs(self.binaries, args, seed, alignment, self.deadline,
+                    output=run_dir / "physical-inputs")
+            planner.write_json(run_dir / "physical-inputs.json", {"alignment": alignment, "complete": complete})
         records = {}
         for side in order:
+            kwargs = {} if alignment is None else {"physical_mask_arguments": physical.arguments(alignment, side)}
             row = resource.run_export(self.binaries[side], self.resource_config,
                     self.resource_config["target_seconds"], seed, budget, mode, run_dir,
                     deadline=self.deadline, threads=self.threads,
-                    failure_path=run_dir / (side + "-failure.json"))
+                    failure_path=run_dir / (side + "-failure.json"), **kwargs)
             planner.write_json(run_dir / (side + "-raw.json"), row)
+            if complete is not None:
+                physical.validate_native_input_binding({"native_results": [row["physical_input_binding"]]}, complete, side)
             resource.verify_counter_record(row, self.resource_config, mode=mode, memory_mib=budget,
                                            geometry=self._resource_geometry[side])
             if row["requested_seconds"] != self.resource_config["target_seconds"] or row["seed"] != seed:
@@ -195,6 +214,7 @@ class ExtraWorkloads:
             "expected_geometry_source": "candidate_configure",
             "actual_geometry_source": "each_complete_export_native_counters",
             "fixed_memory_mib": budget, "duration_model_used": False,
+            "physical_input_preflight": {"alignment": alignment, "complete": complete} if alignment else None,
             "cross_regime_parity": copy.deepcopy(self._cross_checks)}
 
     def measure_pair(self, case_id, run_id, seed, order=SIDES, phase="screen"):
@@ -264,7 +284,10 @@ class ExtraWorkloads:
                     } for side in SIDES},
                     "target_boundary_preserved": True,
                     "warmup_policy": "fresh-process-target-includes-startup",
-                    "setup_seconds": 0., "warmup_seconds": 0., "teardown_seconds": 0.,
+                    "setup_seconds": (sum(details["physical_input_preflight"][key]["wall_seconds"]
+                                          for key in ("alignment", "complete"))
+                                      if details.get("physical_input_preflight") else 0.),
+                    "warmup_seconds": 0., "teardown_seconds": 0.,
                     "cost_boundary": "startup and exit already included in each complete-process target; configure/validation overhead separate",
                     "period_wall_seconds": time.perf_counter() - period_started,
                 }

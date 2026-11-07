@@ -35,6 +35,7 @@ if(DATAPUMP_BUILD_WASM)
   list(APPEND _wasm_notices "${CMAKE_SOURCE_DIR}/LICENSE"
     "${CMAKE_SOURCE_DIR}/third_party/qrcodegen/LICENSE"
     "${CMAKE_SOURCE_DIR}/third_party/xz/COPYING.0BSD"
+    "${CMAKE_SOURCE_DIR}/third_party/botan/LICENSE"
     "${CMAKE_SOURCE_DIR}/third_party/ldpc/LICENSE" "${CMAKE_SOURCE_DIR}/third_party/ldpc/WIFI-LICENSE")
   add_custom_command(OUTPUT "${_wasm_page}"
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/package-wasm.py"

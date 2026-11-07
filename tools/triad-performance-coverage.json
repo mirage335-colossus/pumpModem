@@ -271,7 +271,11 @@
       ],
       "source_files": [
         "src/triad_modem_v3.cpp",
-        "include/datapump/triad_modem_v3.hpp"
+        "include/datapump/triad_modem_v3.hpp",
+        "src/crypto.cpp",
+        "include/datapump/crypto.hpp",
+        "src/serpent.cpp",
+        "include/datapump/serpent.hpp"
       ],
       "cheap_functional_tests": [
         "tests/test_triad_v3_source.cpp::geometry_checks",

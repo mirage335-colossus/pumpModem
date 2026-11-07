@@ -21,15 +21,20 @@ Bytes from_hex(std::string_view text) {
     return result;
 }
 void unchanged_crypto_and_chip_vectors() {
-    // The primitive ciphertext vector predates pulse shaping and symbol epoch
-    // rotation; that byte API is unchanged. Private chip vectors below use
-    // stable epoch-zero waveform roots and the current symbol-start schedule.
+    // The AES stream vector predates pulse shaping and symbol epoch rotation.
+    // Private chip vectors below use the unchanged epoch-zero waveform roots
+    // and the current symbol-start schedule; message masking is separate.
     Bytes seed(32);for(unsigned i=0;i<32;++i)seed[i]=static_cast<std::uint8_t>(i);
     const Crypto key(seed);constexpr std::uint64_t epoch=1720000000;
     const std::string plain="clipboard text\nsecond line";
     const Bytes plaintext(plain.begin(),plain.end());
-    check(key.xor_data(plaintext,epoch,19)==from_hex("28fe0eb519f6dca495ead29378b02fd720febc07ab11ea7e5201"),
-          "pulse shaping must not change the frozen plaintext-to-ciphertext mapping");
+    auto aes=key.stream(StreamPurpose::Data,epoch,19,plaintext.size());
+    for(std::size_t i=0;i<aes.size();++i)aes[i]^=plaintext[i];
+    check(aes==from_hex("28fe0eb519f6dca495ead29378b02fd720febc07ab11ea7e5201"),
+          "pulse shaping must not change the frozen AES waveform-purpose stream");
+    const auto encrypted=key.xor_data(plaintext,epoch,19);
+    check(encrypted!=aes && key.xor_data(encrypted,epoch,19)==plaintext,
+          "confidentiality uses a separate reversible cascade from the AES waveform stream");
     transfer::Options shaped;shaped.key=key;shaped.timestamp=epoch;shaped.modem.dsss=true;
     auto rectangular=shaped;rectangular.modem.pulse_shaping=false;
     Message message;message.kind=MessageKind::text;message.data=plaintext;message.local_id[0]=1;

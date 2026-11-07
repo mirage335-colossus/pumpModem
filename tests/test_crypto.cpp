@@ -1,11 +1,14 @@
 #include "datapump/crypto.hpp"
+#include "datapump/execution.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <string>
+#include <type_traits>
 
 using namespace datapump;
 
@@ -392,11 +395,133 @@ void test_keyfiles() {
 void test_production_keyfile() {
     TempDir dir;
     const auto path = dir.path / "production.dpkey";
+    const auto started=std::chrono::steady_clock::now();
     create_keyfile(path);
-    check(std::filesystem::file_size(path) == keyfile_header_bytes + 96, "production header is not 128MiB");
+    check(std::chrono::steady_clock::now()-started>=std::chrono::seconds(1),"keyfile entropy collections were not separated by one second");
+    check(std::filesystem::file_size(path) == keyfile_header_bytes + 297, "production v3 header/entry dimensions changed");
+    std::ifstream input(path,std::ios::binary);std::array<char,8> magic{};input.read(magic.data(),magic.size());
+    check(std::string_view(magic.data(),magic.size())=="DPMKEY03","production still writes an AES-only legacy keyfile");
     const auto first = load_keyfile(path).mac(bytes("production round trip"));
     check(first == load_keyfile(path).mac(bytes("production round trip")), "production keyfile failed");
 }
+
+void test_confidentiality() {
+    Bytes master(32);for(std::size_t i=0;i<master.size();++i)master[i]=static_cast<std::uint8_t>(i);
+    const Crypto key(master);constexpr std::uint64_t epoch=1720000000;
+    const auto all=key.confidentiality_stream(epoch,0,2048);
+    // Independent Python hashlib/HMAC RFC5869, libgcrypt Serpent-256 ECB,
+    // cryptography AES-256 ECB and manually constructed big-endian counters.
+    const auto expected=from_hex("232cc52c6338012f1f82d5a25d9ac2ee38e5165bf6d011f24d36fccfd5a50f20"
+                                 "5635839527f4e77d3d45b9925d1c911243302a8535a3d6b8a9c05a8b082f046e");
+    check(std::equal(expected.begin(),expected.end(),all.begin()),"cascade independent format vector mismatch");
+    check(all!=key.stream(StreamPurpose::Data,epoch,0,all.size()),"confidentiality uses the AES-only modem stream");
+    for(const auto offset:{0U,1U,15U,16U,17U,255U,511U}){
+        const auto part=key.confidentiality_stream(epoch,offset,127);
+        check(std::equal(part.begin(),part.end(),all.begin()+offset),"cascade random access changed with block boundaries");
+    }
+    check(all!=key.confidentiality_stream(epoch+1,0,all.size()),"cascade epochs overlap");
+    check(all!=Crypto(Bytes(32,7)).confidentiality_stream(epoch,0,all.size()),"cascade roots overlap");
+    constexpr auto end=std::numeric_limits<std::uint64_t>::max();
+    check(key.confidentiality_stream(epoch,end-31,32)==from_hex("888c674cf1faa3ef89d9aaa49f8dd586f88f24dc0e46edd01b83c5422bd0a520"),"cascade independent final-counter vector mismatch");
+    const auto tail=key.confidentiality_stream(epoch,end-30,31);
+    check(tail.back()==key.confidentiality_stream(epoch,end,1).front(),"cascade final-byte random access changed");
+    check(key.confidentiality_stream(epoch,end,0).empty(),"empty cascade stream failed");
+    rejects([&]{key.confidentiality_stream(epoch,end,2);},"cascade offset wrapped");
+    const auto first=key.confidentiality_child(bytes("first")),second=key.confidentiality_child(bytes("second"));
+    check(first.confidentiality_stream(epoch,0,64)!=second.confidentiality_stream(epoch,0,64),"cascade child domains overlap");
+    const auto legacy_child=Crypto(key.mac(bytes("first")));
+    check(first.mac({})==legacy_child.mac({}) && first.stream(StreamPurpose::Scrambler,epoch,0,64)==legacy_child.stream(StreamPurpose::Scrambler,epoch,0,64),"confidentiality child changed modem or MAC derivation");
+    check(first.confidentiality_stream(epoch,0,64)!=legacy_child.confidentiality_stream(epoch,0,64),"cascade child collapsed to the MAC root");
+    const auto salt=Bytes(32,0x39),iv=Bytes(16,0x83),context=bytes("test/cbc/domain");
+    Bytes plain(1024);for(std::size_t i=0;i<plain.size();++i)plain[i]=static_cast<std::uint8_t>(i);
+    const auto encrypted=key.encrypt_confidentiality_cbc(plain,context,salt,iv);
+    check(encrypted.size()==plain.size() && encrypted!=plain && key.decrypt_confidentiality_cbc(encrypted,context,salt,iv)==plain,"CBC cascade roundtrip failed");
+    check(encrypted!=key.encrypt_confidentiality_cbc(plain,bytes("other"),salt,iv),"CBC contexts overlap");
+    rejects([&]{key.encrypt_confidentiality_cbc(Bytes(15),context,salt,iv);},"CBC accepted partial block");
+    rejects([&]{key.encrypt_confidentiality_cbc(plain,context,Bytes(31),iv);},"CBC accepted wrong salt width");
+    rejects([&]{key.decrypt_confidentiality_cbc(encrypted,context,salt,Bytes(15));},"CBC accepted wrong IV width");
+    Crypto copied=key;Crypto assigned(Bytes(32,9));assigned=first;
+    check(copied.confidentiality_stream(epoch,0,64)==key.confidentiality_stream(epoch,0,64) && assigned.confidentiality_stream(epoch,0,64)==first.confidentiality_stream(epoch,0,64),"cascade copy lost key material");
+}
+
+void test_shared_confidentiality_lifetime() {
+    const Crypto legacy(Bytes(32,0x42));
+    check(legacy.confidentiality_storage_id()==nullptr && legacy.confidentiality_storage_bytes()==0,
+          "legacy waveform root allocated confidentiality storage");
+    auto survivor=legacy;
+    Bytes expected;
+    const void* identity=nullptr;
+    {
+        const auto parent=legacy.confidentiality_child(bytes("shared/lifetime"));
+        identity=parent.confidentiality_storage_id();
+        check(identity!=nullptr && parent.confidentiality_storage_bytes()>=64,
+              "independent root has no accounted storage");
+        expected=parent.confidentiality_stream(73,15,65);
+        auto copied=parent;
+        survivor=copied;
+        check(copied.confidentiality_storage_id()==identity && survivor.confidentiality_storage_id()==identity,
+              "copying duplicated immutable confidentiality material");
+        copied=survivor; // Assignment between aliases must retain before release.
+        copied=copied;
+        copied=legacy;
+        check(copied.confidentiality_storage_bytes()==0 && parent.confidentiality_stream(73,15,65)==expected,
+              "replacing one copy changed another owner's root");
+    }
+    check(survivor.confidentiality_storage_id()==identity && survivor.confidentiality_stream(73,15,65)==expected,
+          "confidentiality material expired with its original owner");
+    std::atomic<bool> valid{true};
+    std::array<execution::Task,4> workers;
+    for(auto& worker:workers)worker=execution::Task([&]{
+        for(unsigned i=0;i<64;++i){
+            auto copied=survivor;auto assigned=legacy;assigned=copied;
+            if(assigned.confidentiality_storage_id()!=identity || assigned.confidentiality_stream(73,15,65)!=expected)
+                valid.store(false,std::memory_order_relaxed);
+        }
+    });
+    for(auto& worker:workers)worker.join();
+    check(valid.load(std::memory_order_relaxed),"concurrent value copies changed immutable root material");
+}
+void test_prepared_confidentiality_cbc() {
+    static_assert(!std::is_copy_constructible_v<ConfidentialityCbc>);
+    static_assert(!std::is_copy_assignable_v<ConfidentialityCbc>);
+    const Crypto legacy(Bytes(32,0x71));
+    const auto independent=legacy.confidentiality_child(bytes("prepared/independent-root"));
+    const auto context_a=bytes("test/prepared/cbc/profile-a"),context_b=bytes("test/prepared/cbc/profile-b");
+    const Bytes salt_a(32,0x39),salt_b(32,0x93);
+    for(const auto* key:{&legacy,&independent}) {
+        auto prepared_a=key->prepare_confidentiality_cbc(context_a,salt_a);
+        auto prepared_b=key->prepare_confidentiality_cbc(context_b,salt_b);
+        // The original one-shot path independently repeats full HKDF/key setup.
+        // Compare different/repeated IVs and sizes while alternating directions
+        // and two transfer contexts, so no previous CBC chain can leak through.
+        for(const auto size:{16U,32U,176U,288U,1024U,4096U}) {
+            Bytes plain(size);for(std::size_t i=0;i<plain.size();++i)plain[i]=static_cast<std::uint8_t>(i*73+size);
+            for(const auto iv_id:{0U,1U,255U,0U,1U}) {
+                Bytes iv(16);for(std::size_t i=0;i<iv.size();++i)iv[i]=static_cast<std::uint8_t>(iv_id+i*29);
+                const auto expected_a=key->encrypt_confidentiality_cbc(plain,context_a,salt_a,iv);
+                const auto expected_b=key->encrypt_confidentiality_cbc(plain,context_b,salt_b,iv);
+                check(expected_a!=expected_b,"prepared CBC transfer contexts overlap");
+                check(prepared_a->decrypt(expected_a,iv)==key->decrypt_confidentiality_cbc(expected_a,context_a,salt_a,iv),"prepared CBC decrypt-before-encrypt differs from one-shot");
+                check(prepared_b->encrypt(plain,iv)==expected_b,"prepared CBC other transfer differs from one-shot");
+                check(prepared_a->encrypt(plain,iv)==expected_a,"prepared CBC repeated/interleaved encryption differs from one-shot");
+                check(prepared_b->decrypt(expected_b,iv)==plain,"prepared CBC other transfer decryption mismatch");
+                check(prepared_a->decrypt(expected_a,iv)==plain,"prepared CBC interleaved decryption mismatch");
+                check(prepared_a->encrypt(plain,iv)==expected_a,"prepared CBC repeated IV changes ciphertext");
+            }
+        }
+        const Bytes plain(32,0x61),iv(16,0x43);
+        const auto expected=key->encrypt_confidentiality_cbc(plain,context_a,salt_a,iv);
+        rejects([&]{prepared_a->encrypt(Bytes(15),iv);},"prepared CBC accepted partial block");
+        rejects([&]{prepared_a->decrypt(expected,Bytes(15));},"prepared CBC accepted short IV");
+        rejects([&]{prepared_a->encrypt({},iv);},"prepared CBC accepted empty input");
+        check(prepared_a->encrypt(plain,iv)==expected && prepared_a->decrypt(expected,iv)==plain,"invalid call damaged prepared CBC state");
+    }
+    rejects([&]{legacy.prepare_confidentiality_cbc(context_a,Bytes(31));},"prepared CBC accepted short salt");
+    const auto owned=[&]{const Crypto temporary(Bytes(32,0x71));return temporary.prepare_confidentiality_cbc(context_a,salt_a);}();
+    const Bytes plain(32,0x12),iv(16,0x34);
+    check(owned->encrypt(plain,iv)==legacy.encrypt_confidentiality_cbc(plain,context_a,salt_a,iv),"prepared CBC retained expired Crypto reference");
+}
+
 } // namespace
 
 int main() {
@@ -408,6 +533,9 @@ int main() {
         test_interleaved_dsss_domains();
         test_fresh_fhss_domain();
         test_authentication();
+        test_confidentiality();
+        test_shared_confidentiality_lifetime();
+        test_prepared_confidentiality_cbc();
         test_keyfiles();
         test_production_keyfile();
         std::cout << "crypto tests passed\n";

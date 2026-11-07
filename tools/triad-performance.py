@@ -26,6 +26,8 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = "242ea15fa032ee117b9113a7f3cd07cc6e9f0254"
 SOURCE_FILES = (
+    "src/crypto.cpp", "include/datapump/crypto.hpp",
+    "src/serpent.cpp", "include/datapump/serpent.hpp",
     "include/datapump/triad_modem_v3.hpp", "src/channel_perturbation.hpp",
     "src/channel_spread.hpp", "src/triad_gaussian_fading.hpp", "src/triad_modem_v3.cpp",
     "src/triad_receiver_v3.cpp", "src/triad_simulation_stream.cpp", "src/tuning.cpp",
@@ -33,6 +35,7 @@ SOURCE_FILES = (
     "tools/triad_gaussian_state.py", "tools/triad_gaussian_window.py",
     "tools/triad_group_acquire.py", "tools/triad_noise_likelihood.py", "tools/triad_state_workspace.py")
 SCHEMA = "triad-performance-v2"
+OPTIONAL_HISTORICAL_FILES = frozenset(("src/serpent.cpp", "include/datapump/serpent.hpp"))
 
 
 class SuiteError(RuntimeError):
@@ -74,6 +77,12 @@ def extract_baseline(repository, ref, destination):
         raise SuiteError("baseline-ref did not resolve to its exact commit")
     hashes = {}
     for name in SOURCE_FILES:
+        if name in OPTIONAL_HISTORICAL_FILES:
+            present = subprocess.run(["git", "-C", str(repository), "ls-tree", "--name-only", ref, "--", name],
+                                     capture_output=True, text=True, timeout=10, check=True).stdout.strip()
+            if not present:
+                hashes[name] = "absent"
+                continue
         payload = subprocess.run(["git", "-C", str(repository), "show", ref + ":" + name],
                                  capture_output=True, timeout=10, check=True).stdout
         target = Path(destination) / name

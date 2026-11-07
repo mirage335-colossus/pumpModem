@@ -34,7 +34,11 @@ SOURCE_FILES = (
     "include/datapump/triad_modem_v3.hpp",
     "include/datapump/pattern_pulse.hpp",
     "include/datapump/clock_sync.hpp",
+    "src/crypto.cpp",
+    "include/datapump/crypto.hpp",
 )
+OPTIONAL_HISTORICAL_FILES = ("src/serpent.cpp", "include/datapump/serpent.hpp")
+ABSENT_SOURCE = "absent"
 
 
 class FixtureError(RuntimeError):
@@ -49,9 +53,15 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _source_hashes(source_root: Path, plan_path: Path) -> dict[str, str]:
+def _source_hashes(source_root: Path, plan_path: Path, *, allow_historical_missing: bool = False) -> dict[str, str]:
     """Hash the selected candidate source tree plus the harness's input plan."""
     hashes = {relative: _sha256(source_root / relative) for relative in SOURCE_FILES}
+    for relative in OPTIONAL_HISTORICAL_FILES:
+        path = source_root / relative
+        if not path.is_file() and allow_historical_missing and not path.exists():
+            hashes[relative] = ABSENT_SOURCE
+        else:
+            hashes[relative] = _sha256(path)
     hashes["plan"] = _sha256(plan_path)
     hashes["case_config"] = _sha256(CONFIG_PATH)
     return hashes
@@ -228,13 +238,16 @@ def _valid_cache(directory: Path, key: str, source_hashes: dict[str, str]) -> di
 def prepare_cases(binary: str | os.PathLike[str], output_root: str | os.PathLike[str], *,
                   profile: str = "ci", deadline: float | None = None,
                   source_root: str | os.PathLike[str] | None = None,
+                  allow_historical_missing: bool = False,
                   case_ids: list[str] | None = None) -> list[dict[str, Any]]:
     """Create/reuse native sampled fixtures for the selected performance profile.
 
     ``deadline`` is an absolute ``time.monotonic()`` timestamp. ``source_root``
     selects the candidate implementation tree whose source hashes accompany
     the fixture; native binary and frozen input plans remain independently
-    bound. The returned dictionaries use the schema consumed by the performance
+    bound. Set ``allow_historical_missing`` only for a historical source tree
+    predating Serpent; its absence is explicitly recorded in the identity. The
+    returned dictionaries use the schema consumed by the performance
     receiver adapter.
     Native configure and export subprocesses are each limited to 60 seconds and
     to the remaining deadline. Input files are immutable after publication.
@@ -260,7 +273,8 @@ def prepare_cases(binary: str | os.PathLike[str], output_root: str | os.PathLike
         plan, selected = _plan(fixture_case, config)
         export_argv = _native_argv(native, fixture_case, selected, Path("{WORKSPACE}"), "export-sampled", config["limits"])
         normalized_args = _normalize_args(export_argv)
-        source_hashes = _source_hashes(provenance_root, selected["path"])
+        source_hashes = _source_hashes(provenance_root, selected["path"],
+                                       allow_historical_missing=allow_historical_missing)
         identity = {
             "schema": config["schema"],
             "binary_sha256": binary_hash,

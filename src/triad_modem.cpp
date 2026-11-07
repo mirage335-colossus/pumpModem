@@ -13,6 +13,7 @@
 #include <numbers>
 #include <numeric>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <type_traits>
 
@@ -47,8 +48,10 @@ std::uint64_t frame_epoch(const Format& f,unsigned frame) {
 }
 std::vector<std::uint8_t> masks(const Format& f,const Crypto& key,std::size_t bits) {
     std::vector<std::uint8_t> result(bits,0);if(!f.encrypt)return result;
-    const auto child=experiment_key(key,"payload");
-    const auto bytes=child.stream(StreamPurpose::Data,f.epoch,0,(bits+7)/8);
+    constexpr std::string_view context="datapump/experimental-triad/v1/payload";
+    const auto child=key.confidentiality_child(std::span<const std::uint8_t>(
+        reinterpret_cast<const std::uint8_t*>(context.data()),context.size()));
+    const auto bytes=child.confidentiality_stream(f.epoch,0,(bits+7)/8);
     for(std::size_t i=0;i<bits;++i)result[i]=(bytes[i/8]>>(i%8))&1U;
     return result;
 }

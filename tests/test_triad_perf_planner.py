@@ -28,6 +28,12 @@ def native(case, identity):
 
 
 class PlannerTests(unittest.TestCase):
+    def test_native_planner_dependencies_match_cmake_in_order(self):
+        cmake = (ROOT / "CMakeLists.txt").read_text()
+        prefix = "  set(_triad_planner_dependencies\n"
+        self.assertEqual(cmake.count(prefix), 1)
+        declaration = cmake.split(prefix, 1)[1].split(")", 1)[0]
+        self.assertEqual(tuple(declaration.split()), planner.DEPENDENCIES)
     def setUp(self):
         self.sources = {side: {"driver_sha256": "driver", "production_sha256": side}
                         for side in ("reference", "candidate")}

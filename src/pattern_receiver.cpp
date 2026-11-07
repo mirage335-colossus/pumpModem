@@ -212,7 +212,7 @@ struct PatternReceiver::Impl {
             symbol_calendar->first_rank(config.stream_epoch,phase);
     }
     std::unique_ptr<PatternCorrelator> fallback;
-    bool frequency_axis_selected=false;
+    bool frequency_axis_selected=false,fft_code_retired=false;
     std::size_t budget=0,fixed_reservation=0,arithmetic_reservation=0,configured_bit_limit=0,bin_samples=0,length=0,transform=0,hop=0;
     std::vector<Complex> ring,work,spectrum,product,reference;
     std::vector<detail::FftDriftAccumulator> drift_scratch;
@@ -433,10 +433,8 @@ struct PatternReceiver::Impl {
             if(search.amplitude_start_offset_seconds)search.start_offset_seconds=search.amplitude_start_offset_seconds;
             if(search.amplitude_start_uncertainty_seconds)search.start_uncertainty_seconds=*search.amplitude_start_uncertainty_seconds;
             if(search.amplitude_start_window)search.qualified_start_window=search.amplitude_start_window;
-            const auto wrapper=wrapper_bytes();
             search.amplitude_channel_limit=strategy.amplitude_channels;
-            if(wrapper>=bytes)throw Error("pattern workspace cannot retain amplitude control state");
-            fallback=std::make_unique<PatternCorrelator>(config,search,bytes-wrapper,
+            redirect_to_correlator(bytes,"pattern workspace cannot retain amplitude control state",
                 PatternCorrelatorOptions{.amplitude_only=true});
             return;
         }
@@ -448,9 +446,7 @@ struct PatternReceiver::Impl {
                 correction=utc_transmit_rate_limit(config);
             auto prepared=scheduled_complex_search(config,search,correction);
             search=std::move(prepared.search);
-            const auto wrapper=wrapper_bytes();
-            if(wrapper>=bytes)throw Error("pattern workspace cannot retain split-complex control state");
-            fallback=std::make_unique<PatternCorrelator>(config,search,bytes-wrapper);
+            redirect_to_correlator(bytes,"pattern workspace cannot retain split-complex control state");
             return;
         }
         if(strategy.backend==ReceiverBackend::frequency_axis) {
@@ -565,9 +561,7 @@ struct PatternReceiver::Impl {
         }
         if(search.compact_clock_search && !search.couple_clock_to_carrier && (!calendar_symbols() || burst_plan)) {
             construction_peaks.require_native();
-            const auto wrapper=wrapper_bytes();
-            if(wrapper>=bytes)throw Error("pattern workspace cannot retain correlator control state");
-            fallback=std::make_unique<PatternCorrelator>(config,search,bytes-wrapper);
+            redirect_to_correlator(bytes,"pattern workspace cannot retain correlator control state");
             return;
         }
         fft_workload=std::make_unique<PatternFftWork>();
@@ -786,9 +780,7 @@ struct PatternReceiver::Impl {
                 search.uncoupled_frequency_count=0;
                 // Preserve the existing late Correlator wrapper and grant.
                 timing_components=std::make_unique<TimingComponents>();
-                const auto wrapper=wrapper_bytes();
-                if(wrapper>=bytes)throw Error("pattern workspace cannot retain correlator control state");
-                fallback=std::make_unique<PatternCorrelator>(config,search,bytes-wrapper);
+                redirect_to_correlator(bytes,"pattern workspace cannot retain correlator control state");
                 if(fft_workload->timing_window==PatternFftWindowStatus::active)
                     fft_workload->timing_window=PatternFftWindowStatus::correlator_fallback;
                 local_search_fallback=true;
@@ -799,9 +791,7 @@ struct PatternReceiver::Impl {
             construction_peaks.require_native(native_construction_shortfall());
             // Preserve the existing late Correlator wrapper and grant.
             timing_components=std::make_unique<TimingComponents>();
-            const auto wrapper=wrapper_bytes();
-            if(wrapper>=bytes)throw Error("pattern workspace cannot retain correlator control state");
-            fallback=std::make_unique<PatternCorrelator>(config,search,bytes-wrapper);
+            redirect_to_correlator(bytes,"pattern workspace cannot retain correlator control state");
             if(fft_workload->timing_window==PatternFftWindowStatus::active)
                 fft_workload->timing_window=PatternFftWindowStatus::correlator_fallback;
             return;
@@ -4566,11 +4556,26 @@ struct PatternReceiver::Impl {
         return total+(helper_overlap()?helper_overlap()->working_bytes():0)+(diagnostic_tail?diagnostic_tail->working_bytes():0)+latest.bits.capacity()+scoring_reservation+(work.empty()?0:arithmetic_reservation)+native_active_bytes+native_plan_bytes();
     }
     std::size_t wrapper_bytes()const {
-        return (acquisition_mask.capacity()+helper_frequency_bytes())+sizeof(Impl)+sizeof(PatternReceiver)+code.working_bytes()+(fft_workload?sizeof(PatternFftWork):0)+(timing_components?sizeof(TimingComponents):0)+
+        return (acquisition_mask.capacity()+helper_frequency_bytes())+sizeof(Impl)+sizeof(PatternReceiver)+
+            (fft_code_retired?sizeof(PatternCode):code.working_bytes())+
+            (fft_workload?sizeof(PatternFftWork):0)+(timing_components?sizeof(TimingComponents):0)+
             search.frequency_offsets_hz.capacity()*sizeof(double)+search.clock_errors_ppm.capacity()*sizeof(double)+
             search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis)+
             packed_phases.capacity()*sizeof(std::uint64_t)+(packed_calendar?packed_calendar->working_bytes():0)+
             (burst_plan?burst_plan->working_bytes()+burst_cursor->working_bytes()+sizeof(BurstPolicy):0);
+    }
+    void redirect_to_correlator(std::size_t bytes,const char* shortage,
+            PatternCorrelatorOptions options={}) {
+        // The Correlator owns an independent PatternCode. Destroy the unused
+        // FFT generator before constructing that owner, so tight wrappers do
+        // not lose retained-bit capacity to duplicate template/key storage.
+        // A moved-from PatternCode is retained only for its safe destruction;
+        // all fallback processing delegates and accounting charges its handle.
+        {auto retired=std::move(code);}
+        fft_code_retired=true;
+        const auto wrapper=wrapper_bytes();
+        if(wrapper>=bytes)throw Error(shortage);
+        fallback=std::make_unique<PatternCorrelator>(config,search,bytes-wrapper,options);
     }
     bool cold_observation_eligible()const noexcept {
         const auto& s=*this;
@@ -4671,7 +4676,8 @@ PatternReceiver::PatternReceiver(Config c,std::size_t bytes,PatternSearch search
     audio::trace::record("pattern_receiver_engine",[&](auto& f) {
         f.add("epoch",impl_->config.stream_epoch);f.add("keyed",impl_->config.data_key.has_value());
         f.add("sample_origin",impl_->search.input_sample_origin);
-        f.add("symbol_samples",impl_->code.symbol_samples());f.add("chip_samples",impl_->code.chip_samples());
+        f.add("symbol_samples",symbol_sample_count(impl_->config));
+        f.add("chip_samples",pattern_chip_samples(impl_->config));
         f.add("engine",impl_->fallback?"PatternCorrelator fallback":"PatternReceiver FFT");
         if(!impl_->fallback) {
             f.add("sample_fit",impl_->sample_fit);f.add("real_rank",impl_->real_rank);

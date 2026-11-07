@@ -100,7 +100,7 @@ class PerformanceCaseTests(unittest.TestCase):
             root_a = Path(temporary) / "candidate-a"
             root_b = Path(temporary) / "candidate-b"
             for root in (root_a, root_b):
-                for relative in cases.SOURCE_FILES:
+                for relative in (*cases.SOURCE_FILES, *cases.OPTIONAL_HISTORICAL_FILES):
                     path = root / relative
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text("same candidate source\n")
@@ -113,6 +113,53 @@ class PerformanceCaseTests(unittest.TestCase):
             self.assertNotEqual(hashes_a[cases.SOURCE_FILES[0]], hashes_b[cases.SOURCE_FILES[0]])
             self.assertEqual(hashes_a["plan"], hashes_b["plan"])
             self.assertEqual(inspect.signature(cases.prepare_cases).parameters["source_root"].default, None)
+
+    def test_crypto_sources_bind_cache_and_legacy_absence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for relative in cases.SOURCE_FILES:
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("source")
+            plan = root / "plan.json"
+            plan.write_text("{}")
+            with self.assertRaises(FileNotFoundError):
+                cases._source_hashes(root, plan)
+
+    def test_prepare_cases_requires_explicit_historical_source_opt_in(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "historical"
+            for relative in cases.SOURCE_FILES:
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("source")
+            plan = root / "plan.json"
+            plan.write_text("{}")
+            case = {"id": "example"}
+            selected = {"path": plan, "row": {"case": {}}, "trial": {}}
+            with patch.object(cases, "_config", return_value={"limits": {}, "schema": "test"}), \
+                 patch.object(cases, "scenarios", return_value=[case]), \
+                 patch.object(cases, "_plan", return_value=({}, selected)), \
+                 patch.object(cases, "_native_argv", return_value=["/bin/true"]), \
+                 patch.object(cases, "_configure", side_effect=RuntimeError("reached configure")):
+                with self.assertRaises(FileNotFoundError):
+                    cases.prepare_cases("/bin/true", root / "cache", source_root=root)
+                with self.assertRaisesRegex(RuntimeError, "reached configure"):
+                    cases.prepare_cases("/bin/true", root / "cache", source_root=root,
+                                        allow_historical_missing=True)
+            legacy = cases._source_hashes(root, plan, allow_historical_missing=True)
+            for relative in cases.OPTIONAL_HISTORICAL_FILES:
+                self.assertEqual(legacy[relative], cases.ABSENT_SOURCE)
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("serpent")
+            current = cases._source_hashes(root, plan)
+            self.assertNotEqual(cases._json_hash(legacy), cases._json_hash(current))
+            (root / "src/crypto.cpp").write_text("changed")
+            self.assertNotEqual(cases._json_hash(current), cases._json_hash(cases._source_hashes(root, plan)))
+            (root / "include/datapump/crypto.hpp").unlink()
+            with self.assertRaises(FileNotFoundError):
+                cases._source_hashes(root, plan)
 
 
 if __name__ == "__main__":

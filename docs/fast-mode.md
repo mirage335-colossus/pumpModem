@@ -385,8 +385,10 @@ cable retain their five-tap equalizer. Existing classic peers can use
 
 Both formats use fresh 32-byte transfer salts and a fixed bootstrap cycle,
 protected by the selected FEC. A bootstrap has no length or profile fields.
-Public mode uses SHA-256; encrypted mode uses AES-256-CBC without cipher padding,
-fresh unpredictable 16-byte IVs, and encrypt-then-HMAC-SHA256. Tags bind the
+Public mode uses SHA-256; encrypted mode encrypts with Serpent-256-CBC followed
+by AES-256-CBC, without cipher padding, and uses encrypt-then-HMAC-SHA256. Each
+group carries a fresh unpredictable 16-byte outer IV; the inner IV is derived
+separately from it. Tags bind the
 local profile, salt, locally counted ordinal, IV and ciphertext and are verified
 before decryption. Missing, reordered or mixed-transfer groups cannot silently
 join source prefixes. Public checksums detect corruption but can be rewritten
@@ -394,11 +396,13 @@ by an adversary; they do not authenticate.
 
 Capacity uses `DataPump/fast/capacity/v2/...` domains and a `datapump/fast/v2`
 profile context; classic retains `DataPump/fast/v1/...` and its frozen context.
-HKDF-derived encryption and authentication keys are separate. Capacity context
+The cipher layers use separate, domain-separated keys, and authentication uses
+a separate key. Capacity context
 also binds marker and pilot spacing. Device sample rate and local output level
 are excluded because they do not choose peer wire geometry. Public/encrypted
 mode remains a matching local choice; a failed key or tag never triggers a
-public fallback. Regular encryption and key derivation remain unchanged.
+public fallback. The encrypted cascade requires upgraded peers on both ends;
+the earlier AES-only encrypted Fast format is not automatically selected.
 
 Integrity-checked source areas accumulate in bounded RAM without interpretation.
 **Six seconds of fully scored physical absence** is the only end event.

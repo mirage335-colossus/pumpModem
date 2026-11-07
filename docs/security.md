@@ -177,9 +177,10 @@ A long fade may terminate a receiving segment rather than the intended file.
 
 ## Keys, replay and private waveforms
 
-AES-256-CTR and HKDF purpose separation retain distinct Data, MAC, Scrambler,
-DSSS and FHSS roles. A symbol selects its start-second epoch for its
-entire duration; same-second ordinals and fixed seek caches preserve addresses
+Serpent-256-CTR and AES-256-CTR protect message confidentiality in separate
+layers; AES-256-CTR and purpose separation retain the Scrambler, DSSS and FHSS
+waveform roles, and MAC keys remain separate. A symbol selects its start-second
+epoch for its entire duration; same-second ordinals and fixed seek caches preserve addresses
 through missing bits and interval drains. A canonical schedule address is not a
 fresh nonce. Reusing key/epoch/ordinal positions exposes XOR relationships between
 plaintexts and permits replay within accepted timing windows. Local cooldowns do

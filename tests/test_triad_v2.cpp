@@ -6,6 +6,7 @@
 #include <map>
 #include <set>
 #include <stdexcept>
+#include <string_view>
 
 using namespace datapump;
 namespace t = datapump::triad;
@@ -170,8 +171,15 @@ void recovery_checks(const Crypto& crypto) {
     p=aligned();p.maximum_hypotheses=1;p.arrival_max_seconds=1;
     rejects([&]{v::receive(tx.samples,1,f,crypto,p,v::Receiver::coherent);},"search truncated to hypothesis cap");
 
+    constexpr std::string_view context="datapump/experimental-triad/v2/payload";
+    const auto mask=crypto.confidentiality_child(std::span<const std::uint8_t>(
+        reinterpret_cast<const std::uint8_t*>(context.data()),context.size()))
+        .confidentiality_stream(f.epoch,0,(bits.size()+7)/8);
+    auto masked_bits=bits;
+    for(std::size_t i=0;i<bits.size();++i)masked_bits[i]^=(mask[i/8]>>(i%8))&1U;
     f.encrypt=false;
-    check(v::transmit(bits,f,crypto).samples!=tx.samples,"encryption control ineffective");
+    check(v::transmit(masked_bits,f,crypto).samples==tx.samples,
+          "encrypted payload differs from cascade-selected clear alternatives");
     f=v::Format{};f.bits_per_frame=2;f.minimum_bit_energy_seconds=.2;f.burst_wait_frames=1;
     const std::vector<std::uint8_t> sequence{0,0,1};
     const auto burst=v::transmit(sequence,f,crypto);

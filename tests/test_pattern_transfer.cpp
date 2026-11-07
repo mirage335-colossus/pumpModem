@@ -109,7 +109,7 @@ void data_symbol_schedule_seeks() {
     for(std::size_t i=0;i<plain.size();++i)plain[i]=static_cast<std::uint8_t>((i/3+i/17)%2);
     auto encrypted=plain;transfer::xor_binary_bits(encrypted,value);
     for(std::size_t second=0;second<3;++second) {
-        const auto mask=value.key->stream(StreamPurpose::Data,value.timestamp+second,0,750);
+        const auto mask=value.key->confidentiality_stream(value.timestamp+second,0,750);
         const auto first=second*6000,last=std::min(first+6000,plain.size());
         for(auto i=first;i<last;++i) {
             const auto local=i-first;
@@ -145,7 +145,7 @@ void data_symbol_schedule_rebase() {
         for(std::size_t i=0;i<plain.size();++i) {
             const auto start=static_cast<std::uint64_t>(i)*samples;
             const auto epoch=value.timestamp+start/rate,ordinal=(start%rate)/samples;
-            const auto mask=value.key->stream(StreamPurpose::Data,epoch,ordinal/8,1);
+            const auto mask=value.key->confidentiality_stream(epoch,ordinal/8,1);
             check(encrypted[i]==(plain[i]^((mask.front()>>(7-ordinal%8))&1U)),
                   "short and hours-long Data symbols must use their own start-second masks");
         }

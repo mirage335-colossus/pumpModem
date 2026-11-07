@@ -14,10 +14,12 @@ import math
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import time
 
 import triad_perf_cases as fixtures
 import triad_perf_native as native
+import triad_perf_physical_bits as physical
 
 
 NATIVE_BOUNDARY = "external complete native CLI including generation, channel, preparation, receiver, startup and output"
@@ -63,6 +65,9 @@ class NativeFFTWorkloads:
                          "candidate": Path(context["binary"]).resolve()}
         self.threads = context.get("threads", 1)
         self.native_threads = context.get("native_threads", self.threads)
+        self.physical_bit_alignment = context.get("physical_bit_alignment", False)
+        if type(self.physical_bit_alignment) is not bool:
+            raise ValueError("physical_bit_alignment must be boolean")
         if any(type(v) is not int or v < 1 for v in (self.threads, self.native_threads)):
             raise ValueError("thread counts must be positive integers")
         self.device = context.get("device", "cpu")
@@ -85,21 +90,23 @@ class NativeFFTWorkloads:
         self._descriptors = None
         self._used_run_ids = set()
         self._source_paths = {}
+        self._source_roots = {}
         self._worker_context_sequence = 0
         self._worker_context = None
         for name, root in self.roots.items():
             for relative in self.api.SOURCE_FILES:
                 self._source_paths[name + ":" + relative] = root / relative
+                self._source_roots[name + ":" + relative] = root
             self._source_paths[name + ":binary"] = self.binaries[name]
         for relative in ("triad-performance.py", "triad_perf_native.py", "triad_perf_cases.py",
-                         "triad_perf_receiver.py", "triad-performance-native-cases.json",
+                         "triad_perf_receiver.py", "triad_perf_physical_bits.py", "triad-performance-native-cases.json",
                          "triad-performance-cases.json", Path(__file__).name):
             self._source_paths["adapter:" + relative] = Path(__file__).with_name(relative)
         config = fixtures._config()
         for recipe in self.fft_recipes:
             plan_path = (fixtures.CONFIG_PATH.parent / config["source_plans"][recipe["source_plan"]]).resolve()
             self._source_paths["plan:" + recipe["source_plan"]] = plan_path
-        self.sources = self._hash_paths(self._source_paths)
+        self.sources = self._hash_paths(self._source_paths, self._source_roots)
         self.lifecycle["source_and_build_hashes"] = self.sources
         self.lifecycle["build_binding_scope"] = "source and executable bytes bound independently; compilation provenance belongs to runner build receipt"
 
@@ -110,16 +117,32 @@ class NativeFFTWorkloads:
             raise TimeoutError("native/FFT guard deadline exhausted")
 
     @staticmethod
-    def _hash_paths(paths):
+    def _hash_paths(paths, source_roots=None):
         result = {}
         for name, path in paths.items():
+            root = (source_roots or {}).get(name)
+            if root is not None:
+                # Check only components inside the selected source root. The
+                # root itself was resolved at setup; host parents may use links.
+                relative = path.relative_to(root)
+                component = root
+                for part in relative.parts:
+                    component = component / part
+                    if component.is_symlink():
+                        raise ValueError("missing or symlinked measurement input: " + str(component))
+            # Older reference revisions predate the Serpent implementation.
+            # Bind that absence so an appearing file invalidates the run.
+            if (name in {"reference:" + relative for relative in fixtures.OPTIONAL_HISTORICAL_FILES}
+                    and not path.exists() and not path.is_symlink()):
+                result[name] = fixtures.ABSENT_SOURCE
+                continue
             if path.is_symlink() or not path.is_file():
                 raise ValueError("missing or symlinked measurement input: " + str(path))
             result[name] = native.file_sha(path)
         return result
 
     def _check_sources(self):
-        if self._hash_paths(self._source_paths) != self.sources:
+        if self._hash_paths(self._source_paths, self._source_roots) != self.sources:
             raise ValueError("source, adapter, configuration or binary changed during guard")
 
     def _event(self, kind, started, **details):
@@ -156,6 +179,7 @@ class NativeFFTWorkloads:
                     "geometry": {"target_seconds": case["target_seconds"], "batch_trials": case.get("batch_trials", 1),
                                  "arguments": case["args"], "native_threads": self.native_threads},
                     "case_sha256": native.digest(case), "source_identities": identities,
+                    "physical_bit_alignment": self.physical_bit_alignment,
                     "arithmetic": "native-fp64", "scope": case["scope"], "full_target": True})
             for recipe in self.fft_recipes:
                 rows.append({"id": "fft:" + recipe["id"], "kind": "fft", "boundary": FFT_BOUNDARY,
@@ -289,20 +313,43 @@ class NativeFFTWorkloads:
 
     def _native_pair(self, case, seed, order):
         results = {}
+        alignment = (physical.prepare_pair(self.binaries, [*case["args"], "--seconds", str(case["target_seconds"])],
+            seed, case.get("batch_trials", 1), self.deadline,
+            output=Path(self.context["output"])/"physical-inputs", order=order,
+            input_bits=[int(native._option(case["args"],"--signal-bit",0))]*case.get("batch_trials",1))
+            if self.physical_bit_alignment else None)
+        complete_inputs = None
+        if alignment is not None:
+            self.lifecycle.setdefault("physical_source_maps", []).append(copy.deepcopy(alignment))
+            complete_inputs = physical.complete_native_inputs(self.binaries,
+                [*case["args"], "--seconds", str(case["target_seconds"])], seed, alignment, self.deadline,
+                output=Path(self.context["output"])/"physical-inputs")
+            self.lifecycle.setdefault("complete_input_preflights", []).append(copy.deepcopy(complete_inputs))
         for name in order:
             self._remaining()
             try:
-                results[name] = native.run_native(self.binaries[name], case, case["target_seconds"], seed,
+                selected_case = (dict(case, args=[*case["args"], *physical.arguments(alignment, name)])
+                                 if alignment is not None else case)
+                results[name] = native.run_native(self.binaries[name], selected_case, case["target_seconds"], seed,
                     threads=self.native_threads, deadline=self.deadline,
                     timeout=max(1., self.deadline-time.monotonic()))
             except subprocess.TimeoutExpired as exc:
                 raise TimeoutError("native full target exceeded guard budget") from exc
             except native.NativePerformanceError as exc:
                 raise RuntimeError("native full target failed: " + str(exc)) from exc
+        raw_parent=Path(self.context["output"])/"native-observations"
+        raw_parent.mkdir(parents=True,exist_ok=True)
+        raw_directory=Path(tempfile.mkdtemp(prefix=case["id"]+"-",dir=raw_parent))
+        for name in order:
+            (raw_directory/(name+"-raw.json")).write_text(json.dumps(results[name],indent=2,allow_nan=False)+"\n")
+        if alignment is not None:
+            for name in order:
+                physical.validate_native_receipt(results[name], alignment, name)
+                physical.validate_native_input_binding(results[name], complete_inputs, name)
         try:
             agreement = native.compare_native_outputs(results["reference"], results["candidate"])
         except native.NativePerformanceError as exc:
-            raise ValueError("native paired correctness/work mismatch: " + str(exc)) from exc
+            raise ValueError("native paired correctness/work mismatch: " + str(exc) + "; raw=" + str(raw_directory)) from exc
         work = {}
         for name, result in results.items():
             if result["requested_seconds"] != case["target_seconds"] or result["batch_trials"] != case.get("batch_trials", 1):
@@ -318,7 +365,9 @@ class NativeFFTWorkloads:
         self._freeze_work(case["id"], work)
         return {name: row["full_test_wall_seconds"] for name, row in results.items()}, {
             "boundary": NATIVE_BOUNDARY, "raw": results, "agreement": agreement,
-            "work_identity_sha256": native.digest(work), "seed_applied_to_simulation": True}
+            "work_identity_sha256": native.digest(work), "seed_applied_to_simulation": True,
+            "physical_source_alignment": alignment, "complete_input_preflight": complete_inputs,
+            "raw_observation_directory":str(raw_directory)}
 
     def _warm_fft_context(self, case, precision):
         """Warm one complete target on each newly created confirmation worker."""

@@ -453,7 +453,7 @@ void mask_binary_bits(std::span<std::uint8_t> bits,const Options& input_options,
             const auto address=addresses?addresses->address(bit_offset+offset):modem::symbol_stream_address(value.modem,value.timestamp,value.modem.stream_phase_samples,bit_offset+offset);
             const auto byte=address.ordinal/8,begin=byte-byte%cache_size;
             if(!cached || address.epoch!=cached_epoch || begin!=cached_begin) {
-                mask=value.key->stream(StreamPurpose::Data,address.epoch,begin,cache_size);
+                mask=value.key->confidentiality_stream(address.epoch,begin,cache_size);
                 cached_epoch=address.epoch;cached_begin=begin;cached=true;
             }
             const auto key_bit=static_cast<std::uint8_t>((mask[static_cast<std::size_t>(byte-begin)]>>(7-address.ordinal%8))&1);
@@ -524,6 +524,19 @@ struct StreamReceiver::Impl {
         options.timestamp=timestamp;validate(options);
         if(!quota)quota=std::make_shared<ReceiveStorageQuota>(ReceiveStorageQuota{source_storage_limit(options.content_limit),0});
         if(quota->used>quota->limit)throw Error("Invalid receive source storage quota");
+    }
+    std::size_t shared_confidentiality_storage_charge(const void* identity) const noexcept {
+        if(!identity)return 0;
+        for(const auto* key:{&options.key,&options.modem.data_key})
+            if(*key && (*key)->confidentiality_storage_id()==identity)
+                return (*key)->confidentiality_storage_bytes();
+        return 0;
+    }
+    std::size_t confidentiality_storage_bytes() const noexcept {
+        const auto* first=options.key?options.key->confidentiality_storage_id():nullptr;
+        const auto* second=options.modem.data_key?options.modem.data_key->confidentiality_storage_id():nullptr;
+        return shared_confidentiality_storage_charge(first)+
+            (second!=first?shared_confidentiality_storage_charge(second):0);
     }
     ~Impl() {for(auto& [id,state]:states) {quota->used-=state->stored;quota->reserved-=state->source.capacity();}}
 
@@ -744,7 +757,8 @@ void StreamReceiver::discard(std::uint64_t first_sample,std::uint64_t first_symb
     s.states.erase(it);
 }
 std::size_t StreamReceiver::working_bytes()const {
-    auto bytes=sizeof(StreamReceiver)+sizeof(Impl)+impl_->options.receive_targets_db_hz.capacity()*sizeof(double);
+    auto bytes=sizeof(StreamReceiver)+sizeof(Impl)+impl_->confidentiality_storage_bytes()+
+        impl_->options.receive_targets_db_hz.capacity()*sizeof(double);
     for(const auto& [id,state]:impl_->states) {
         const auto& result=state->result;const auto& message=result.content.message;
         // Include map links, the actual diagnostic/preview allocations and
@@ -759,6 +773,9 @@ std::size_t StreamReceiver::working_bytes()const {
         bytes+=state->source.capacity();
     }
     return bytes;
+}
+std::size_t StreamReceiver::shared_confidentiality_storage_charge(const void* identity)const noexcept {
+    return impl_->shared_confidentiality_storage_charge(identity);
 }
 std::size_t StreamReceiver::source_buffer_bytes()const {
     std::size_t bytes=0;for(const auto& [id,state]:impl_->states)bytes+=state->source.capacity();

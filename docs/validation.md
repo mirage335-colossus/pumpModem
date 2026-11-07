@@ -1,10 +1,74 @@
 # Validation status
 
-Updated 1 November 2026. This page records current qualification, release status,
+Updated 7 November 2026. This page records current qualification, release status,
 coverage limits and useful historical anchors. It is not a session log. Replace
 superseded status here; keep one latest [resource snapshot](ci-resource-results.json)
 and use Git history for comparisons. Detailed studies remain in the
 [evidence index](indexes/evidence.md).
+
+## Confidentiality cascade — development checkpoint
+
+This uncommitted development candidate is based on HEAD `b1d1b30f8bcdc09526d60b66bd260b3c7031b0e1`; HEAD alone does not identify its dirty source. A [post-run source and selected-binary manifest](../local-evidence/cascade-20261107/final-source-binaries.json) captures 81 changed or untracked non-ignored files and 13 binaries before this documentation update. It is a post-run snapshot, not independent before/after source-hash proof. This is a development checkpoint, not a release or certification.
+
+The complete `./build.sh test fast --cli --jobs 2 --build-jobs 4` passed 36/36; the isolated `./build.sh test triad --cli --jobs 2 --build-jobs 4` passed 29/29 after its new source test was corrected to sample actual distinguishing payload and shared-cover cells. The final group was rerun after the final performance-driver changes. The earlier triad run failed that test (28/29); retain that result separately. The focused crypto, keyring, stream-receive, streaming-modem, live-resources, Helper-metadata and Fast-codec selection passed 7/7 after the shared-root rebuild. V3 keyring, independent Serpent/cascade vectors, key corruption, AES-only waveform checks and live root-accounting tests are within these focused scopes; they are not substitutes for platform or physical qualification.
+
+The final shared `contract` run on 7 November, 02:23–03:31 CST, finished 396 tests: 359 passed, 36 failed and one Helper live-cable calibration was skipped because its default Python lacked NumPy. The [full log](../local-evidence/cascade-20261107/final-contract-log.txt) and [failed-test list](../local-evidence/cascade-20261107/final-contract-failed.txt) are retained. Scheduled parallel preparation and differential-receiver calibration each timed out at 1,500 seconds. Preparation completed its default/FP32/FP64 comparisons, but its shared and later cases were incomplete. Calibration completed the 15 unshaped matrix cases and part of the shaped work; remaining shaped, null and default-window controls were incomplete. The skipped calibration later passed separately in 3.69 seconds with the scientific Python environment. `helper_continuation_rows` failed in the full run because a pre-existing verbose trace path could not be created; it passed separately in 88.40 seconds with a fresh `TMPDIR`. Neither follow-up changes the original failed or skipped result.
+
+The supported split follow-ups completed work omitted by the two timeouts. The
+[preparation part 3 run](../local-evidence/cascade-20261107/preparation-part3.log)
+passed the shared, small, tiled, cancellation and no-false-END cases. All four
+shaped-calibration shards completed their declared seed sets and their
+[aggregate](../local-evidence/cascade-20261107/calibration-shaped-aggregate.log)
+passed: the public and private cases admitted 41/64 and 40/64 respectively,
+with RMS error 0.00842595 and maximum error 0.010376. The separate
+[16-seed null controls](../local-evidence/cascade-20261107/calibration-null.log)
+and [keyed and unkeyed default-window checks](../local-evidence/cascade-20261107/calibration-default-window.log)
+also passed. The final timed-out run had completed all 15 unshaped matrix
+cases. These follow-ups establish their stated functional coverage; they do not
+replace or erase either full-run timeout or establish the original throughput
+limit.
+
+The preceding candidate's full contract run had 39/396 failures, including the same two 1,500-second timeouts. Its failed-test list is retained in [local evidence](../local-evidence/cascade-20261107/contract-failed.txt). A CTest inventory query overwrote that run's temporary detailed log, so it is not complete evidence. The final full run passed the three originally failing `pattern_private_cover_tail`, `pattern_correlator`, and `live` cases, but the full gate remains failed.
+
+Clean `b1d1b30` baseline-linked checks independently reproduced Helper prior-edge coverage, raw-frequency, joint-clock, selector-cache, score-provenance, conditioned-native, normal-loss, cohort-recovery and physical-tail failures, as well as the final-Helper-loss fixture, the isolated 24 dB-Hz auxiliary reference failure, `helper_planner_forecast`, and `live_duplex_spread`. Matched `-O3` baseline runs also reproduced the Helper-tail
+[live](../local-evidence/cascade-20261107/baseline-helper-tail-live.log) and
+[framed](../local-evidence/cascade-20261107/baseline-helper-tail-framed.log)
+admission failures. The [baseline attachment](../local-evidence/cascade-20261107/baseline-helper-tail-attachment.log)
+and candidate attachment cases each retained 1,842 pending bits without
+physical END; both traces reached their size limit, so only the visible
+observations match. A matched `--realtime-gap` run of the clean baseline and
+candidate also failed in both cases, with no qualified context or actual Live
+row; the [paired summary](../local-evidence/cascade-20261107/baseline-helper-realtime-gap.json)
+and [candidate output](../local-evidence/cascade-20261107/candidate-helper-realtime-gap.log)
+retain those results. These remain failed checks and do not prove every
+contract failure predates the candidate.
+
+A [controller key-loading probe](../local-evidence/cascade-20261107/controller-key-probe.log)
+loaded the v3 `Default` key with Helper off in about 0.16 seconds. With Helper
+on, the operation reported the fixed 550/950 Hz separation-guard rejection in
+about 0.16 seconds and left the key unset. The exact baseline controller case
+was not run; this probe does not establish baseline behavior or a successful
+Helper-enabled key load.
+
+The changed cipher initially altered a weak-signal cover witness; its corrected
+fixture freezes the original independently reproduced wire alternatives
+without removing receiver, progress or physical-end assertions. The focused
+rerun passed.
+
+Two new workspace regressions were identified and repaired: the 256 KiB independent-epoch fixture recovered only a suffix before fallback-state retirement but passed all three original cases afterward; a matched exact-clock 32 MiB Live witness passed on clean baseline, failed before shared-root accounting, and passed after the fix with no health or coverage failure. At its former failing admission, retained bank workspace was 261,536 bytes lower than before the fix. A [compact trace summary](../local-evidence/cascade-20261107/live-matched-summary.json) records the baseline, pre-fix and fixed witness. These are focused witnesses, not a full ordinary-receiver qualification.
+
+The paired Fast codec/Helper CPU checks compare a clean reference with the candidate over four balanced runs per arm; all 24 Fast runs recovered exact authenticated data and all eight Helper runs recovered the expected callsign; Helper metadata is unauthenticated. Median reference-to-candidate milliseconds: classic encode 9.99→10.23 and decode 169.08→167.31; capacity 19.08→19.55 and 31.25→31.05; compact 16.34→17.56 and 118.22→121.25. Helper processing was about 2→26 microseconds per 400 ms dwell. A separate 12-run comparison using v3 and legacy keys passed all three Fast profiles. Small samples and an outlier limit the precision of these comparisons; they exclude audio/WAV and keyfile I/O. Raw measurements are retained in [paired results](../local-evidence/cascade-20261107/final-cpu-pairs.json) and [v3 results](../local-evidence/cascade-20261107/final-v3-check.json).
+
+The [aligned CPU triad guard](../local-evidence/cascade-20261107/triad-guard-004/summary.json) completed 33/33 named screens and 17/17 functional commands with no confirmed regression and passed source integrity. Source-only alignment preserved the reference's physical alternatives; complete inputs and strict result checks were compared. Earlier blocked guard attempts remain retained. The guard is reject-only limited assurance, lacked native/Python instrumented coverage receipts and did not establish affirmative non-regression, GPU, ordinary-receiver or physical qualification.
+
+Two direct OS random collections separated by at least one second are best effort: they do not prove fresh independent entropy, hardware RNG use, or 512-bit security. Windows system randomness may itself use CTR_DRBG. A final [Debug ASan/UBSan selection](../local-evidence/cascade-20261107/sanitizer-focused.log)
+passed serpent, crypto, keyring, live-resources, streaming-modem, stream-receive,
+Helper-metadata and Fast-codec checks. The separate
+[independent-epoch selector](../local-evidence/cascade-20261107/sanitizer-independent-epoch.log)
+was rerun and passed; its [provenance](../local-evidence/cascade-20261107/sanitizer-independent-epoch-provenance.json)
+records the command, settings and post-run hashes. This is focused coverage,
+not the full sanitizer stage. Leak detection was disabled and
+LeakSanitizer remained unavailable under ptrace. Windows and the pinned browser/WebAssembly SDK, browser entropy failure recovery, full platform/SDK CI, GPU and device/radio qualification remain unverified. Existing AES-only recordings cannot gain retroactive confidentiality, and upgraded peers must agree on the new cipher.
 
 ## Separate experimental three-carrier modem
 

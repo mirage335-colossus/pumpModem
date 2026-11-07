@@ -35,6 +35,8 @@ from triad_perf_guard_policy import (GuardPolicy, PairObservation, BlockObservat
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "triad-performance-fast-guard-run-v2"
+CRYPTO_SOURCES = {"src/crypto.cpp", "include/datapump/crypto.hpp"}
+SERPENT_SOURCES = {"src/serpent.cpp", "include/datapump/serpent.hpp"}
 
 
 def _json_default(value):
@@ -90,14 +92,14 @@ def source_snapshot(candidate, reference, binaries):
     """Record existing declared files; historical roots may predate harness tests."""
     matrix = complete.read_json(ROOT / "tools/triad-performance-coverage.json")
     families = complete.read_json(ROOT / "tools/triad-performance-families.json")
-    names = {"CMakeLists.txt"}
+    names = {"CMakeLists.txt"} | CRYPTO_SOURCES | SERPENT_SOURCES
     for row in matrix["rows"]:
         names.update(row["source_files"])
         names.update(test.split("::", 1)[0] for test in row["cheap_functional_tests"]
                      if test.startswith(("tests/", "tools/")))
     for case in families["cases"]:
         names.update("tools/" + name for name in case["dependencies"])
-    paths, missing = {}, {}
+    paths, missing, absent_paths = {}, {}, {}
     for label, root in (("candidate", Path(candidate)), ("reference", Path(reference))):
         absent = []
         selected = names | {str(p.relative_to(root)) for p in (root / "cmake").rglob("*.cmake")}
@@ -108,6 +110,10 @@ def source_snapshot(candidate, reference, binaries):
             if path.is_file():
                 paths[label + ":" + name] = path
             else:
+                if name in CRYPTO_SOURCES or (name in SERPENT_SOURCES and label == "candidate"):
+                    raise ValueError("missing required " + label + " source dependency: " + name)
+                if name in SERPENT_SOURCES:
+                    absent_paths[label + ":" + name] = str(path)
                 absent.append(name)
         missing[label] = absent
     # Bind the actual execution closure, not unrelated offline statistical
@@ -127,6 +133,7 @@ def source_snapshot(candidate, reference, binaries):
             paths["binary:" + name] = Path(path)
     return {"sha256": {name: _sha(path) for name, path in paths.items()},
             "paths": {name: str(path) for name, path in paths.items()},
+            "absent_paths": absent_paths,
             "missing_declared_historical_files": missing,
             "scope": "current files bound before/after; loaded worker dependencies and full-work checks are additionally verified by each adapter"}
 
@@ -136,6 +143,9 @@ def verify_snapshot(snapshot):
     for name, filename in snapshot["paths"].items():
         path = Path(filename)
         if not path.is_file() or _sha(path) != snapshot["sha256"][name]:
+            changed.append(name)
+    for name, filename in snapshot.get("absent_paths", {}).items():
+        if Path(filename).exists():
             changed.append(name)
     return {"status": "passed" if not changed else "failed", "changed": changed}
 
@@ -480,6 +490,8 @@ def parse_args(argv=None):
     parser.add_argument("--planner-binary", type=Path)
     parser.add_argument("--planner-reference-binary", type=Path)
     parser.add_argument("--planner-bounds-workspace", type=Path)
+    parser.add_argument("--physical-bit-alignment", action="store_true",
+                        help="pair source-only physical alternatives across cipher revisions; preserves encryption and full work")
     parser.add_argument("--functional-defaults", action="store_true")
     parser.add_argument("--functional-command", action="append", default=[], metavar="ARGV_JSON")
     parser.add_argument("--native-coverage", type=Path)
@@ -566,6 +578,7 @@ def run(args, *, factories=None, entry_started=None):
             "reference_binary": reference_binary, "fixture_cache": (args.fixture_cache or output / "fixtures").resolve(),
             "device": device, "precision": args.precision, "threads": args.threads,
             "native_threads": args.native_threads, "deadline": deadline,
+            "physical_bit_alignment": args.physical_bit_alignment,
             "planner_binary": args.planner_binary.resolve() if args.planner_binary else None,
             "planner_reference_binary": args.planner_reference_binary.resolve() if args.planner_reference_binary else None,
             "planner_bounds_workspace": args.planner_bounds_workspace.resolve() if args.planner_bounds_workspace else None}

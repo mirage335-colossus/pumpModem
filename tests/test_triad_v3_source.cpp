@@ -9,6 +9,7 @@
 #include <iostream>
 #include <limits>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -24,6 +25,30 @@ Crypto fixture_key() {
     for (std::size_t i = 0; i < bytes.size(); ++i)
         bytes[i] = static_cast<std::uint8_t>(17 * i + 3);
     return Crypto(bytes);
+}
+
+// Reconstruct the documented public coordinates rather than asking the
+// transmitter which child it selected. This exercises both revision layouts.
+datapump::Bytes payload_context(const Format& f) {
+    const std::string_view prefix=f.pattern_revision==PatternRevision::IndependentApskV2
+        ? "datapump/experimental-triad/v3/independent-apsk-2/"
+        : "datapump/experimental-triad/v3/tiled-1/";
+    datapump::Bytes id(prefix.begin(),prefix.end());
+    const auto append64=[&](std::uint64_t value){
+        for(int shift=56;shift>=0;shift-=8)id.push_back(static_cast<std::uint8_t>(value>>shift));
+    };
+    constexpr std::string_view purpose="payload";
+    if(f.pattern_revision==PatternRevision::IndependentApskV2)append64(purpose.size());
+    id.insert(id.end(),purpose.begin(),purpose.end());
+    if(f.pattern_revision==PatternRevision::LegacyV1)id.push_back(0);
+    append64(f.epoch);append64(f.symbol_ordinal);append64(0);
+    if(f.pattern_revision==PatternRevision::IndependentApskV2){
+        append64(2);append64(f.fhss_center_aligned?1:0);
+    }else if(f.fhss_center_aligned){
+        constexpr std::string_view aligned="/fhss-center-aligned";
+        id.insert(id.end(),aligned.begin(),aligned.end());
+    }
+    return id;
 }
 
 void legacy_pattern_goldens() {
@@ -43,13 +68,62 @@ void legacy_pattern_goldens() {
         if(mode==1){f.inner_rate_hz=360;f.added_symbols=1;f.sample_rate=960;f.bit_seconds=8;
             f.fhss=true;f.fhss_center_aligned=true;f.quiet_seconds=.055;f.ramp_seconds=.006;}
         if(mode==2){f.bit_seconds=40;f.burst_wait_tiles=1;}
+        // These pre-cascade captures included the old AES-only data mask.
+        // Select the resulting clear alternative to keep testing the unchanged
+        // waveform generator without treating the old cipher as current.
+        const auto old_mask=Crypto(key.mac(payload_context(f))).stream(
+            datapump::StreamPurpose::Data,f.epoch,0,1)[0]&1U;
+        f.encrypt=false;
         for(unsigned bit=0;bit<2;++bit){
-            PatternSource source(f,key,bit);unsigned i=0;
+            PatternSource source(f,key,bit^old_mask);unsigned i=0;
             for(long double t:{.037L,.317L,.731L}){
                 const auto sample=source.geometry().calendar_origin_sample+t*source.geometry().tile_seconds*f.sample_rate;
                 check(std::abs(source.sample_at(sample)-expected[mode][bit][i++])<2e-12,
                       "legacy revision no longer matches frozen pre-migration waveform");
             }
+        }
+    }
+}
+
+void confidentiality_payload_checks() {
+    const auto key=fixture_key();
+    for(auto revision:{PatternRevision::LegacyV1,PatternRevision::IndependentApskV2}){
+        for(bool aligned:{false,true}){
+            Format f;f.pattern_revision=revision;f.epoch=1720000011;
+            if(aligned){f.inner_rate_hz=360;f.added_symbols=1;f.sample_rate=960;
+                f.bit_seconds=8;f.fhss=true;f.fhss_center_aligned=true;
+                f.quiet_seconds=.055;f.ramp_seconds=.006;}
+            bool seen[2]{};
+            // Search public ordinals for both mask values, then compare the
+            // actual encrypted source with the independently selected clear
+            // bit alternative at several non-guard coordinates.
+            for(std::uint64_t ordinal=0;ordinal<64 && !(seen[0]&&seen[1]);++ordinal){
+                f.symbol_ordinal=ordinal;
+                const auto context=payload_context(f);
+                const auto mask=key.confidentiality_child(context).confidentiality_stream(f.epoch,0,1)[0]&1U;
+                if(seen[mask])continue;
+                seen[mask]=true;
+                for(unsigned bit=0;bit<2;++bit){
+                    f.encrypt=true;PatternSource encrypted(f,key,bit);
+                    f.encrypt=false;PatternSource clear(f,key,bit^mask);
+                    PatternSource opposite(f,key,bit^mask^1U);
+                    unsigned differs=0,shared=0;
+                    // Sparse evenly spaced points can coincide with the FHSS
+                    // guards on every dwell. Walk actual cells instead, so the
+                    // comparison must cover both payload and shared cover.
+                    for(std::uint64_t index=0;index<encrypted.geometry().fine_cells &&
+                            (differs<8 || shared<8);++index){
+                        const auto expected=clear.pattern_coefficient_at(index);
+                        check(encrypted.pattern_coefficient_at(index)==expected,
+                              "triad payload did not use the confidentiality cascade at its canonical context");
+                        if(opposite.pattern_coefficient_at(index)!=expected)++differs;
+                        else ++shared;
+                    }
+                    check(differs>=8&&shared>=8,
+                          "triad payload comparison did not cover both payload and shared cover");
+                }
+            }
+            check(seen[0]&&seen[1],"triad confidentiality fixture did not exercise both mask values");
         }
     }
 }
@@ -564,6 +638,7 @@ void month_and_low_sample_rate_checks() {
 int main() {
     try {
         legacy_pattern_goldens();
+        confidentiality_payload_checks();
         independent_patterns_and_apsk();
         revision_random_access_checks();
         shared_geometry_bank_checks();

@@ -176,6 +176,9 @@ void require(bool condition, const char* message) {
 void cancelled(std::stop_token stop) {
     if (stop.stop_requested()) throw Error("pattern operation cancelled");
 }
+std::size_t confidentiality_storage_bytes(const Config& config) noexcept {
+    return config.data_key?config.data_key->confidentiality_storage_bytes():0;
+}
 struct NoiseTrace {
     std::array<std::uint8_t,8> input{}, output{}, key{};
     bool valid=false;
@@ -421,7 +424,7 @@ struct PatternCode::Impl {
         const bool version2=config.dsss_factor>1 && config.outer_dsss_version==OuterDsssVersion::interleaved_v2;
         const auto complete=static_cast<std::size_t>(symbol/chip);
         const bool scheduled=scheduled_bursts(config),burst=config.symbol_burst.enabled();
-        const auto fixed=sizeof(Impl)+sizeof(PatternCode)+((burst||scheduled||deferred_symbols(config)||(config.fake_hopping&&config.fake_hopping->matched_gaps))?sizeof(AddressCache):0)+(burst?sizeof(SymbolBurstPlan):0)+(config.dsss_factor>1?sizeof(StreamCache):0)+
+        const auto fixed=sizeof(Impl)+sizeof(PatternCode)+confidentiality_storage_bytes(config)+((burst||scheduled||deferred_symbols(config)||(config.fake_hopping&&config.fake_hopping->matched_gaps))?sizeof(AddressCache):0)+(burst?sizeof(SymbolBurstPlan):0)+(config.dsss_factor>1?sizeof(StreamCache):0)+
             (version2?sizeof(Interleaved)+Interleaved::setup_bytes+2*complete*sizeof(std::uint32_t):0);
         require(fixed<=config.memory_limit,"pattern code exceeds memory limit");
         if(burst||scheduled||deferred_symbols(config)||(config.fake_hopping&&config.fake_hopping->matched_gaps)) {
@@ -451,14 +454,14 @@ struct PatternCode::Impl {
                 const auto permutation=config.dsss_factor==10?StreamDomain::OuterDsss10PermutationV2:
                     config.dsss_factor==100?StreamDomain::OuterDsss100PermutationV2:StreamDomain::OuterDsss1000PermutationV2;
                 interleaved=std::make_unique<Interleaved>(complete,outer->key,domain,permutation);
-                require(sizeof(Impl)+sizeof(PatternCode)+(address_cache?sizeof(AddressCache):0)+sizeof(StreamCache)+interleaved->working_bytes()<=config.memory_limit,
+                require(sizeof(Impl)+sizeof(PatternCode)+confidentiality_storage_bytes(config)+(address_cache?sizeof(AddressCache):0)+sizeof(StreamCache)+interleaved->working_bytes()<=config.memory_limit,
                         "pattern code exceeds memory limit");
             }
         }
         require(config.stream_phase_samples < config.sample_rate,
                 "pattern stream phase must be within its first second");
         shaped=pattern_pulse_enabled(config);
-        require(sizeof(Impl) + sizeof(PatternCode) <= config.memory_limit,
+        require(sizeof(Impl) + sizeof(PatternCode) + confidentiality_storage_bytes(config) <= config.memory_limit,
                 "pattern code exceeds memory limit");
     }
     ~Impl() {
@@ -734,10 +737,16 @@ std::uint64_t PatternCode::chip_samples() const { return impl_->chip; }
 std::uint64_t PatternCode::chips_per_symbol() const { return impl_->chips; }
 std::uint64_t PatternCode::symbol_samples() const { return impl_->symbol; }
 std::size_t PatternCode::working_bytes() const {
-    return sizeof(PatternCode) + sizeof(Impl)+(impl_->address_cache?sizeof(Impl::AddressCache):0)+
+    // The selected Data key is copied into Config/calendar state, but all such
+    // copies retain the same immutable confidentiality allocation. Waveform
+    // cache keys derive from the existing 32-byte AES-purpose seeds and own no
+    // independent confidentiality storage, so this owner charges the root once.
+    return sizeof(PatternCode) + sizeof(Impl)+confidentiality_storage_bytes(impl_->config)+(impl_->address_cache?sizeof(Impl::AddressCache):0)+
         (impl_->address_cache&&impl_->address_cache->scheduled?impl_->address_cache->scheduled->working_bytes():0)+
         (impl_->address_cache&&impl_->address_cache->packed?impl_->address_cache->packed->working_bytes():0)+(impl_->trace?sizeof(Impl::TraceStorage):0)+
-        (impl_->address_cache&&impl_->address_cache->burst?impl_->address_cache->burst->working_bytes():0)+
+        // SymbolBurst's selected-key copy aliases Config's root charged above.
+        (impl_->address_cache&&impl_->address_cache->burst?impl_->address_cache->burst->working_bytes()-
+            impl_->address_cache->burst->shared_confidentiality_storage_charge():0)+
         (impl_->outer?sizeof(StreamCache):0)+(impl_->interleaved?impl_->interleaved->working_bytes():0);
 }
 void PatternCode::enable_transmit_trace(std::uint64_t first_chip) {

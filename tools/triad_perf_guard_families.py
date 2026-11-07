@@ -23,6 +23,7 @@ import tempfile
 import time
 
 import triad_perf_families as sample
+import triad_perf_physical_bits as physical
 from triad_perf_family_regression import numerical_agreement
 from triad_perf_lifecycle import group_plan
 from triad_perf_staged import _capture_signature
@@ -38,7 +39,7 @@ BOUNDARY = (
 HARNESS_FILES = (
     "triad_perf_guard_families.py", "triad_perf_families.py",
     "triad_perf_family_regression.py", "triad_perf_lifecycle.py",
-    "triad_perf_staged.py", "triad-performance.py", "triad_perf_hardware.py",
+    "triad_perf_staged.py", "triad-performance.py", "triad_perf_hardware.py", "triad_perf_physical_bits.py",
     "triad_perf_adaptive.py",
     "triad-performance-families.json",
 )
@@ -130,9 +131,14 @@ class FamilyWorkloads:
         self.precision = context.get("precision", "fp32")
         if self.precision not in ("fp32", "fp64"):
             raise ValueError("family precision must be fp32 or fp64")
+        self.physical_bit_alignment = context.get("physical_bit_alignment", False)
+        if type(self.physical_bit_alignment) is not bool:
+            raise ValueError("physical_bit_alignment must be boolean")
         self.screen_method = context.get("family_screen_method", "direct-full")
         if self.screen_method not in ("direct-full", "shared-composed-diagnostic"):
             raise ValueError("family_screen_method must be direct-full or shared-composed-diagnostic")
+        if self.physical_bit_alignment and self.screen_method != "direct-full":
+            raise ValueError("physical bit alignment requires direct full pipelines")
         self.threads = context.get("threads", 1)
         self.native_threads = context.get("native_threads", self.threads)
         for label in ("threads", "native_threads"):
@@ -188,6 +194,7 @@ class FamilyWorkloads:
                                for name in HARNESS_FILES},
             "manifest_sha256": sample.digest(self.manifest),
             "screen_method": self.screen_method,
+            "physical_bit_alignment": self.physical_bit_alignment,
         }
 
     def _check_identity(self):
@@ -207,6 +214,7 @@ class FamilyWorkloads:
                  "available": self._unavailable_reason(case) is None,
                  "reason": self._unavailable_reason(case),
                  "screen_method": self.screen_method,
+                 "physical_bit_alignment": self.physical_bit_alignment,
                  "screen_timing_method": ("direct_full" if self.screen_method == "direct-full"
                                           else "shared_composed_diagnostic"),
                  "screen_prediction_model_used": self.screen_method != "direct-full",
@@ -441,31 +449,48 @@ class FamilyWorkloads:
                       "requested_seed_used_for_generation": created,
                       "independent_complete_pipeline_observation": False}
 
+    def _physical_alignment(self, profile, seed, count, order):
+        if not self.physical_bit_alignment:
+            return None
+        receipt = physical.prepare_pair(self.binaries, ["--mode", profile["mode"], *profile["args"]],
+                                        seed, count, self.deadline, output=self.output/"physical-inputs",
+                                        input_bits=[(seed+i)%2 for i in range(count)], order=order, separate_captures=True)
+        self.ledger.setdefault("physical_source_maps", []).append(deepcopy(receipt))
+        return receipt
+
+    @staticmethod
+    def _physical_kwargs(alignment, name, count):
+        return ({} if alignment is None else {"physical_mask_arguments":
+            [physical.arguments(alignment, name, i) for i in range(count)]})
+
     def _direct_screen(self, key, case, seed, order):
         """Measure each complete pipeline once without a timing composition."""
         profile = self.manifest["fixtures"][case["fixture"]]
         self._claim_seed(seed, case["captures"], phase="screen", profile=profile, screen_case=key)
         pair, generation_work = {}, {}
+        alignment = self._physical_alignment(profile, seed, case["captures"], order)
         with tempfile.TemporaryDirectory(prefix="direct-screen-", dir=self.scratch.name) as tmp:
             for name in order:
                 directory = Path(tmp) / name
                 started = _stamp()
                 pair[name] = sample.measure_job(self.workers[name], self.binaries[name],
                     profile, case, seed, self.native_threads, directory, self.device,
-                    self.precision, self.deadline, limits=(None,))
+                    self.precision, self.deadline, limits=(None,),
+                    **self._physical_kwargs(alignment, name, case["captures"]))
                 pair[name]["invocation_started"] = started
                 pair[name]["invocation_finished"] = _stamp()
                 generation_work[name] = _capture_signature(
                     [directory / f"capture-{i}" for i in range(case["captures"])])
         if generation_work["reference"] != generation_work["candidate"]:
             raise ValueError("paired direct screen exports resolved different generation geometry")
+        input_agreement = physical.validate_fixture_inputs(pair) if alignment is not None else None
         return pair, {"method": "direct_full", "extrapolation": False,
                       "generation_shared": False, "actual_generation_seed": seed,
                       "requested_seed_used_for_generation": True,
                       "direct_complete_pipeline_observation": True,
                       "independent_complete_pipeline_observation": False,
                       "statistical_independence_claim": False,
-                      "generation_work": generation_work,
+                      "generation_work": generation_work, "physical_source_alignment": alignment, "complete_input_agreement": input_agreement,
                       "timing_scope": "one actual outer native generation/export and complete receiver request per source; reused worker setup excluded and separately charged"}
 
     def _confirmation(self, key, case, run_id, seed, order):
@@ -473,6 +498,7 @@ class FamilyWorkloads:
         self._claim_seed(seed, case["captures"], phase="confirmation", profile=profile)
         warm_seed = self._claim_warmup_seed(case["captures"], profile)
         warmups = {}
+        warm_alignment = self._physical_alignment(profile, warm_seed, case["captures"], order)
         with tempfile.TemporaryDirectory(prefix="warmup-", dir=self.scratch.name) as warm_tmp:
             for name in order:
                 sample.remaining(self.deadline)
@@ -481,7 +507,8 @@ class FamilyWorkloads:
                 warmups[name] = sample.measure_job(
                     self.workers[name], self.binaries[name], profile, case, warm_seed,
                     self.native_threads, directory, self.device, self.precision,
-                    self.deadline, limits=(None,))
+                    self.deadline, limits=(None,),
+                    **self._physical_kwargs(warm_alignment, name, case["captures"]))
                 elapsed = time.perf_counter() - started
                 sample.validate_measurement(case, warmups[name]["receiver_runs"][0]["receiver"], None)
                 context_worker = self._worker_context["workers"][name]
@@ -494,12 +521,14 @@ class FamilyWorkloads:
                         [directory / f"capture-{i}" for i in range(case["captures"])]),
                     "warmup_seed": warm_seed,
                 }
+        warm_input_agreement = physical.validate_fixture_inputs(warmups) if warm_alignment is not None else None
         warm_comparable, _ = comparison_pair(warmups, case)
         warm_signatures = {name: sample.complete_work_signature(warm_comparable[name]) for name in SOURCES}
         if warm_signatures["reference"] != warm_signatures["candidate"]:
             raise ValueError("family full-case warmup work differs across source revisions")
         warm_agreement = numerical_agreement(warm_comparable, self.precision)
         pair, generation_work = {}, {}
+        alignment = self._physical_alignment(profile, seed, case["captures"], order)
         with tempfile.TemporaryDirectory(prefix="fresh-", dir=self.scratch.name) as tmp:
             for name in order:
                 directory = Path(tmp) / name
@@ -508,15 +537,19 @@ class FamilyWorkloads:
                     self.workers[name], self.binaries[name],
                     self.manifest["fixtures"][case["fixture"]], case, seed,
                     self.native_threads, directory, self.device, self.precision,
-                    self.deadline, limits=(None,))
+                    self.deadline, limits=(None,),
+                    **self._physical_kwargs(alignment, name, case["captures"]))
                 pair[name]["invocation_started"] = invocation_started
                 pair[name]["invocation_finished"] = _stamp()
                 generation_work[name] = _capture_signature(
                     [directory / f"capture-{i}" for i in range(case["captures"])])
             if generation_work["reference"] != generation_work["candidate"]:
                 raise ValueError("paired fresh native exports resolved different generation geometry")
+        input_agreement = physical.validate_fixture_inputs(pair) if alignment is not None else None
         return pair, {"generation_shared": False, "actual_generation_seed": seed,
                       "generation_work": generation_work,
+                      "physical_source_alignment": alignment, "warmup_physical_source_alignment": warm_alignment,
+                      "complete_input_agreement": input_agreement, "warmup_complete_input_agreement": warm_input_agreement,
                       "warmup_seed": warm_seed, "warmup_work_signatures": warm_signatures,
                       "warmup_numerical_agreement": warm_agreement,
                       "independent_complete_pipeline_observation": True,

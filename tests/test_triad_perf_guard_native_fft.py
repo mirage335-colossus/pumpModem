@@ -138,6 +138,39 @@ class GuardWorkloadTests(unittest.TestCase):
         descriptors[0]["id"] = "mutated"
         self.assertNotEqual(adapter.descriptors()[0]["id"], "mutated")
 
+    def test_historical_serpent_absence_is_bound_and_candidate_stays_required(self):
+        for relative in guard.fixtures.OPTIONAL_HISTORICAL_FILES:
+            (self.context["reference_root"] / relative).unlink()
+        adapter = self.adapter()
+        for relative in guard.fixtures.OPTIONAL_HISTORICAL_FILES:
+            self.assertEqual(adapter.sources["reference:" + relative], guard.fixtures.ABSENT_SOURCE)
+        adapter._check_sources()
+        (self.context["reference_root"] / "src/serpent.cpp").write_text("appeared")
+        with self.assertRaisesRegex(ValueError, "changed during guard"):
+            adapter._check_sources()
+        (self.context["reference_root"] / "src/serpent.cpp").unlink()
+        (self.context["reference_root"] / "src/serpent.cpp").symlink_to("missing")
+        with self.assertRaisesRegex(ValueError, "missing or symlinked"):
+            self.adapter()
+        (self.context["reference_root"] / "src/serpent.cpp").unlink()
+        (self.context["candidate_root"] / "src/serpent.cpp").unlink()
+        with self.assertRaisesRegex(ValueError, "missing or symlinked"):
+            self.adapter()
+        (self.context["candidate_root"] / "src/serpent.cpp").write_text("restored")
+        (self.context["reference_root"] / "src/crypto.cpp").unlink()
+        with self.assertRaisesRegex(ValueError, "missing or symlinked.*crypto.cpp"):
+            self.adapter()
+
+    def test_source_ancestor_symlinks_are_rejected(self):
+        root = self.context["reference_root"]
+        adapter = self.adapter()
+        (root / "src").rename(root / "real-src")
+        (root / "src").symlink_to(root / "real-src", target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "symlinked.*reference/src"):
+            self.adapter()
+        with self.assertRaisesRegex(ValueError, "symlinked.*reference/src"):
+            adapter._check_sources()
+
     def test_native_full_batch_is_one_outer_observation_and_respects_order(self):
         adapter = self.adapter()
         calls = []
@@ -154,6 +187,34 @@ class GuardWorkloadTests(unittest.TestCase):
         self.assertTrue(result["details"]["full_target"])
         compare.assert_called_once()
         self.prepare_mock.assert_not_called()
+
+    def test_explicit_physical_alignment_preflights_before_one_four_trial_command(self):
+        self.context["physical_bit_alignment"]=True
+        adapter=self.adapter();events=[]
+        alignment={"schema":guard.physical.SCHEMA,"trials":4,"physical_signal_bits":[0,1,0,1],"sources":{
+            "reference":{"tx_masks":[0,1,0,1],"rx_masks":[1,0,1,0]},
+            "candidate":{"tx_masks":[1,1,0,0],"rx_masks":[0,1,1,0]}}}
+        complete={"bound":"all samples"}
+        def prepare(*args,**kwargs):events.append("source-only");return alignment
+        def preflight(*args,**kwargs):events.append("complete-input");return complete
+        def run(binary,case,seconds,seed,**kwargs):
+            side="candidate" if binary==self.context["binary"] else "reference"
+            events.append(side)
+            self.assertEqual(case["batch_trials"],4)
+            self.assertEqual(case["args"][-6:],guard.physical.arguments(alignment,side))
+            return self.native_result(case,seconds,seed,**kwargs)
+        with mock.patch.object(guard.physical,"prepare_pair",side_effect=prepare), mock.patch.object(
+                guard.physical,"complete_native_inputs",side_effect=preflight), mock.patch.object(
+                guard.physical,"validate_native_receipt") as binding, mock.patch.object(
+                guard.physical,"validate_native_input_binding") as full_binding, mock.patch.object(
+                guard.native,"run_native",side_effect=run), mock.patch.object(
+                guard.native,"compare_native_outputs",return_value={"eligible":True}) as strict:
+            result=adapter.measure_pair("native-flat","aligned",111,("candidate","reference"))
+        self.assertEqual(events,["source-only","complete-input","candidate","reference"])
+        self.assertEqual(binding.call_count,2);self.assertEqual(full_binding.call_count,2)
+        strict.assert_called_once()
+        self.assertEqual(result["details"]["physical_source_alignment"],alignment)
+        self.assertEqual(result["details"]["complete_input_preflight"],complete)
 
     def test_native_confirmation_has_real_invocation_owned_contexts(self):
         adapter=self.adapter()

@@ -992,7 +992,7 @@ void transmit_capture_tracks_generation_and_replay() {
     for(std::size_t i=0;i<key.size();++i) {
         const auto address=modem::symbol_stream_address(value.transfer.modem,value.transfer.timestamp,
             value.transfer.modem.stream_phase_samples,i);
-        const auto byte=value.transfer.key->stream(StreamPurpose::Data,address.epoch,address.ordinal/8,1).front();
+        const auto byte=value.transfer.key->confidentiality_stream(address.epoch,address.ordinal/8,1).front();
         key[i]=static_cast<std::uint8_t>((byte>>(7-address.ordinal%8))&1);
         plain[i]=static_cast<std::uint8_t>(wire[i]^key[i]);
     }

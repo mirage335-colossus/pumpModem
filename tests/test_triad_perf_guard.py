@@ -67,6 +67,39 @@ class FakeAdapter:
         return {"closed": self.closed, "calls": self.calls}
 
 
+class SourceSnapshotTests(unittest.TestCase):
+    def test_crypto_dependencies_and_historical_absence_are_bound(self):
+        with tempfile.TemporaryDirectory() as directory:
+            roots = [Path(directory) / name for name in ("candidate", "reference")]
+            for root in roots:
+                for name in guard.CRYPTO_SOURCES:
+                    path = root / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(name)
+            for name in guard.SERPENT_SOURCES:
+                path = roots[0] / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(name)
+            snapshot = guard.source_snapshot(*roots, {})
+            self.assertEqual(guard.verify_snapshot(snapshot)["status"], "passed")
+            for name in guard.CRYPTO_SOURCES | guard.SERPENT_SOURCES:
+                self.assertIn("candidate:" + name, snapshot["sha256"])
+            for name in guard.SERPENT_SOURCES:
+                self.assertIn("reference:" + name, snapshot["absent_paths"])
+            new_path = roots[1] / "src/serpent.cpp"
+            new_path.write_text("introduced")
+            self.assertIn("reference:src/serpent.cpp", guard.verify_snapshot(snapshot)["changed"])
+            new_path.unlink()
+            (roots[0] / "src/crypto.cpp").write_text("changed")
+            self.assertIn("candidate:src/crypto.cpp", guard.verify_snapshot(snapshot)["changed"])
+            (roots[1] / "src/crypto.cpp").unlink()
+            with self.assertRaisesRegex(ValueError, "missing required reference"):
+                guard.source_snapshot(*roots, {})
+            (roots[0] / "src/serpent.cpp").unlink()
+            with self.assertRaisesRegex(ValueError, "missing required candidate"):
+                guard.source_snapshot(*roots, {})
+
+
 class GuardExecutionTests(unittest.TestCase):
     def exercise(self, adapter, *, profile="ci", budget=1000.):
         policy = GuardPolicy(profile)
