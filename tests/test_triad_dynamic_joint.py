@@ -11,7 +11,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"tools"))
 from triad_dynamic_joint import (BlockProjection, DynamicJointReceiver,
-    ProjectedJointReceiver, public_spectral_bands)
+    ProjectedJointReceiver, public_spectral_bands, _sample_cubic, _sample_cubic_rows)
 
 
 def dense_evidence(basis, observation, variance, powers, coherence, block_samples, fs):
@@ -59,6 +59,45 @@ def fixture(helper=False):
     return m, templates
 
 
+def scalar_native_basis(manifest, source, epochs, candidates, pilot_use, start, stop):
+    """Frozen pre-reuse source construction, independent of grouped scheduling."""
+    m = manifest
+    fs, ch, cal, hp = m["sample_rate_hz"], m["channel"], m["calendar"], m["helper_plan"]
+    t = np.arange(start, stop, dtype=np.float64)/fs-cal["capture_lead_seconds"]
+    delay, doppler = ch["spread_delay_ms"]*.001, ch["spread_doppler_hz"]
+    rays = ((0., 0.), (delay, doppler)) if delay or doppler else ((0., 0.),)
+    result = np.zeros((3, len(candidates), len(rays), stop-start), np.complex128)
+    def smooth(x):
+        x = np.clip(x, 0., 1.)
+        return x*x*x*(10+x*(-15+6*x))
+    fractions = {"high": 1/(1+.501187233627272285+.125892541179416721),
+                 "low": .501187233627272285/(1+.501187233627272285+.125892541179416721)}
+    gain = hp["helper_gain"]*m["power"]["post_plan_composite_gain"]
+    for ci, (epoch, arrival, frequency, clock) in enumerate(candidates):
+        rotation = np.exp(2j*np.pi*np.remainder(frequency*t, 1.))
+        for ri, (ray_delay, ray_doppler) in enumerate(rays):
+            ts = (t-arrival-ray_delay)*(1+clock*1e-6)
+            pilot = np.zeros(stop-start, np.complex128)
+            if m.get("helper_enabled", True) and pilot_use != "none":
+                envelope = smooth((ts-cal["helper_start_seconds"])/.004)*smooth(
+                    (cal["helper_end_seconds"]-ts)/.004)
+                if hp.get("pilot_dwell_gating", False):
+                    local = np.remainder((m["public_epoch_seconds"]+epoch)%2+ts, .4)
+                    envelope *= smooth(np.minimum(local, .4-local)/.004)
+                for name in ("low", "high"):
+                    if pilot_use in ("both", name):
+                        tone = hp[name+"_hz"]-ch["nominal_conversion_if_hz"]
+                        pilot += gain*math.sqrt(fractions[name])*envelope*np.exp(
+                            2j*np.pi*np.remainder(tone*ts, 1.))
+            common = rotation*np.exp(2j*np.pi*np.remainder(ray_doppler*t, 1.))
+            result[0, ci, ri] = pilot*common
+            for bit in (0, 1):
+                data = _sample_cubic(source[epochs.index(epoch), bit],
+                                     (ts-cal["data_sample_offset"]/fs)*fs)
+                result[bit+1, ci, ri] = (data+pilot)*common
+    return result
+
+
 class JointTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -76,6 +115,71 @@ class JointTests(unittest.TestCase):
             BlockProjection.make(64, 64., ((-5., 10.),), ((9., 12.),))
         with self.assertRaisesRegex(ValueError, "block too short|bin width"):
             BlockProjection.make(8, 64., ((0., 1.),), ((2., 3.),))
+
+    def test_shared_cubic_rows_preserve_exact_endpoint_stencils(self):
+        rng = np.random.default_rng(813)
+        source = rng.normal(size=(2, 9))+1j*rng.normal(size=(2, 9))
+        position = np.array([-3., -2., -1.9999, -1., -.25, 0., .25, 7.9,
+                             8., 8.9, 9., 9.9999, 10., 11.])
+        expected = np.stack([_sample_cubic(row, position) for row in source])
+        np.testing.assert_array_equal(_sample_cubic_rows(source, position), expected)
+        self.assertEqual(_sample_cubic_rows(source, position[:0]).shape, (2, 0))
+
+    def test_grouped_source_matches_scalar_reference_with_pilots_and_clock(self):
+        m, one_epoch = fixture(True)
+        m["helper_plan"]["pilot_dwell_gating"] = True
+        source = np.concatenate((one_epoch, one_epoch[:, :, ::-1]), axis=0)
+        epochs = (0, 1)
+        # Duplicate source geometry with distinct CFO, fractional boundaries,
+        # a second epoch, both clock signs, and the complete delayed stencil.
+        coordinates = ((0, -.00913, -7.25, -250.), (0, -.00913, 2.75, -250.),
+                       (1, .00871, 2.75, 180.), (0, .00017, -7.25, 180.))
+        for pilot in ("both", "low", "high", "none"):
+            for precision in ("fp32", "fp64"):
+                with self.subTest(pilot=pilot, precision=precision):
+                    receiver = DynamicJointReceiver(m, source, epochs,
+                        candidate_coordinates=coordinates, block_seconds=.05,
+                        coherence_seconds=(.2, math.inf), pilot_use=pilot,
+                        # This is a source-construction oracle, including
+                        # gated-pilot skirts. Public exclusion feasibility is
+                        # independently exercised by the guard tests below.
+                        required_bands_hz=((-999., 999.),),
+                        auxiliary_exclusion_hz=(), precision=precision)
+                    oracle = lambda lo, hi: scalar_native_basis(
+                        m, source, epochs, coordinates, pilot, lo, hi)
+                    expected = oracle(0, 800)
+                    np.testing.assert_array_equal(receiver.source_basis(0, 800), expected)
+                    for start, stop in ((0, 150), (150, 251), (251, 504), (504, 800)):
+                        np.testing.assert_array_equal(receiver.source_basis(start, stop),
+                                                      expected[..., start:stop])
+                    reference = ProjectedJointReceiver(sample_rate=2000, samples=800,
+                        block_samples=100, basis=oracle,
+                        required_bands=receiver.required_bands_hz,
+                        excluded_bands=receiver.auxiliary_exclusion_hz,
+                        noise_variance=2., stationary_power=(.5, .5),
+                        coherence_seconds=(.2, math.inf), precision=precision,
+                        candidate_count=len(coordinates))
+                    raw = np.stack([expected[bit+1, 0].sum(0) for bit in (0, 1)])
+                    np.testing.assert_array_equal(receiver.score(raw)["bit_scores"],
+                                                  reference.score(raw)["bit_scores"])
+
+    def test_zero_basis_blocks_keep_times_and_covariance_transitions(self):
+        rng = np.random.default_rng(814)
+        basis = np.zeros((3, 1, 1, 48), np.complex128)
+        basis[1:, :, :, 12:24] = rng.normal(size=(2, 1, 1, 12))*.2
+        basis[1:, :, :, 36:48] = rng.normal(size=(2, 1, 1, 12))*.2
+        raw = rng.normal(size=48)+1j*rng.normal(size=48)
+        receiver = ProjectedJointReceiver(sample_rate=48, samples=48, block_samples=12,
+            basis=lambda lo, hi: basis[..., lo:hi], required_bands=((-23.99, 23.99),),
+            stationary_power=(1.,), coherence_seconds=(.15,), precision="fp64")
+        self.assertEqual(receiver.zero_basis_blocks, {0, 2})
+        self.assertEqual(len(receiver.blocks), 4)
+        centers = [(start+stop-1)/(2*48) for start, stop in
+                   ((0, 12), (12, 24), (24, 36), (36, 48))]
+        np.testing.assert_array_equal(receiver.elapsed, (0., *np.diff(centers)))
+        scores = receiver.score(raw)["hypothesis_log_evidence"][0, 0]
+        expected = dense_evidence(basis, raw, 1., (1.,), .15, 12, 48)[:, 0]
+        np.testing.assert_allclose(scores, expected, rtol=2e-10, atol=2e-10)
 
     def test_raw_joint_matches_independent_dense_covariance(self):
         rng = np.random.default_rng(810)

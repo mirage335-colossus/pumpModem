@@ -12,18 +12,25 @@ import json
 import numpy as np
 
 
-def load_slots(directory, *, pre_helper_seconds=1.):
+def load_slots(directory, *, pre_helper_seconds=1., templates=None):
     directory=Path(directory)
     original=json.loads((directory/'manifest.json').read_text())
     if original['schema']!='triad-helper-whole-bit-public-v1':
         raise ValueError('public whole-bit source calendar required')
     spec=original['templates'];shape=tuple(spec['shape'])
     slots=original['whole_bit_calendar']['slots']
-    if not spec['enabled'] or shape[:3]!=(len(slots),13,2):
+    if shape[:3]!=(len(slots),13,2) or len(shape)!=4 or shape[-1]<1:
         raise ValueError('complete public slot/epoch/bit templates required')
-    path=directory/spec['file']
-    if path.stat().st_size!=math.prod(shape)*16:raise ValueError('template file size differs')
-    templates=np.memmap(path,dtype='<c16',mode='r',shape=shape)
+    if templates is None:
+        if not spec['enabled']:raise ValueError('complete public slot/epoch/bit templates required')
+        path=directory/spec['file']
+        if path.stat().st_size!=math.prod(shape)*16:raise ValueError('template file size differs')
+        templates=np.memmap(path,dtype='<c16',mode='r',shape=shape)
+    else:
+        templates=np.asarray(templates)
+        if templates.shape!=shape or templates.dtype!=np.dtype(np.complex128):
+            raise ValueError('supplied templates must match the public complex128 bank shape')
+        if not np.isfinite(templates).all():raise ValueError('supplied templates must be finite')
     fs=original['sample_rate_hz'];cal=original['calendar']
     rows=int(cal['capture_samples'])
     if not math.isfinite(pre_helper_seconds) or pre_helper_seconds<0:

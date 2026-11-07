@@ -68,10 +68,15 @@ def public_audio_windows(slots,frontend,playback_offset_frames):
 
 
 class StreamSession:
-    """Persistent DDC and bounded scheduler; receiver construction runs on worker."""
+    """Persistent DDC and bounded scheduler; receiver construction runs on worker.
+
+    Multiple workers require a factory returning private mutable receivers.
+    Numerical-library thread counts are configured once by the caller; FFT
+    workers are explicit so a pool does not silently multiply a hidden budget.
+    """
     def __init__(self,original,slots,output,*,fixed_gain=.002,analog_gain=1.,
                  playback_offset_frames=0,receiver_factory=None,noise_inflation=1.,
-                 queue_capacity=2,pass_edge_hz=1450.):
+                 queue_capacity=2,pass_edge_hz=1450.,workers=1,fft_workers=2):
         self.output=Path(output);self.output.mkdir(parents=True,exist_ok=True)
         self.original=original
         self.frontend=StreamingAudioDDC(48000,int(original['sample_rate_hz']),
@@ -79,9 +84,11 @@ class StreamSession:
             undo_fixed_gain=fixed_gain*analog_gain)
         self.slots,requests=public_audio_windows(slots,self.frontend,playback_offset_frames)
         self.receiver_factory=receiver_factory
+        self.fft_workers=fft_workers
         self.noise_inflation=noise_inflation
         self.scheduler=StreamingWindowScheduler(requests,self._score,
-            ring_capacity_samples=2*max(r.length for r in requests),queue_capacity=queue_capacity)
+            ring_capacity_samples=2*max(r.length for r in requests),queue_capacity=queue_capacity,
+            workers=workers)
         self.ddc_cpu=0.;self.ddc_wall=0.;self.pcm_frames=0
         self.peaks=np.zeros(2);self.clips=np.zeros(2,np.int64)
         self.reads=[];self.read_count=0;self.started=time.perf_counter()
@@ -91,7 +98,8 @@ class StreamSession:
         if self.receiver_factory is None:
             from triad_weak_receiver import WeakReceiver
             receiver=WeakReceiver(*self.slots[index],noise_inflation=self.noise_inflation,
-                admission_policy=self.slots[index][0].get('weak_admission_policy'))
+                admission_policy=self.slots[index][0].get('weak_admission_policy'),
+                fft_workers=self.fft_workers)
         else:receiver=self.receiver_factory(*self.slots[index])
         preparation=dict(cpu_seconds=time.process_time()-c,wall_seconds=time.perf_counter()-w)
         result=receiver.score(raw,valid)
@@ -264,6 +272,8 @@ def main():
     p.add_argument('--record-pcm',action='store_true');p.add_argument('--chunk-frames',type=int,default=2400)
     p.add_argument('--max-seconds',type=float,default=600.);p.add_argument('--drain-timeout',type=float,default=180.)
     p.add_argument('--threads',type=int,default=2);p.add_argument('--noise-inflation',type=float,default=1.)
+    p.add_argument('--workers',type=int,default=1,
+        help='bounded independent scoring workers; coordinate with numerical --threads and RAM')
     add_background_noise_arguments(p)
     a=p.parse_args()
     if (a.train is None)==(a.source_dir is None):p.error('supply a public train directory, positional or --source-dir')
@@ -276,6 +286,7 @@ def main():
     except ValueError as exc: p.error(str(exc))
     if a.replay_pcm and background_noise_enabled(a):p.error('--replay-pcm is recorded receiver input; background noise applies to transmissions only')
     if a.chunk_frames<1 or a.chunk_frames>65536:p.error('chunk frames must be1..65536')
+    if a.threads<1 or a.workers<1:p.error('threads and workers must be positive')
     for value in (a.fixed_gain,a.analog_gain,a.max_seconds,a.drain_timeout,a.noise_inflation):
         if not math.isfinite(value)or value<=0:p.error('gains, limits and noise inflation must be positive/finite')
     for value in (a.preroll_seconds,a.postroll_seconds):
@@ -306,7 +317,8 @@ def main():
             stage='digital post-simulation audio baseband before DAC codes; the propagation model is already in the clean fixture')
     preparation=dict(cpu_seconds=time.process_time()-c,wall_seconds=time.perf_counter()-w)
     session=StreamSession(original,slots,a.output,fixed_gain=a.fixed_gain,analog_gain=a.analog_gain,
-        playback_offset_frames=offset,noise_inflation=a.noise_inflation)
+        playback_offset_frames=offset,noise_inflation=a.noise_inflation,workers=a.workers,
+        fft_workers=a.threads)
     failure=None;transport={}
     try:
         if a.mode=='live':transport=live_pcm(session,tx,a.output,device=a.device,preroll_frames=pre,
@@ -319,6 +331,7 @@ def main():
     report=dict(schema='triad-continuous-run-v1',mode=a.mode,train_manifest_sha256=digest(a.train/'manifest.json'),
         bridge=bridge,preparation=preparation,transport=transport,stream=stream,
         fixed_gain=a.fixed_gain,analog_gain=a.analog_gain,public_playback_offset_frames=offset,
+        scoring_workers=a.workers,numerical_threads=a.threads,
         source_sha256={name:digest(Path(__file__).parent/name)for name in ('triad_stream_run.py','triad_stream_frontend.py','triad_stream_scheduler.py','triad_stream_slots.py','triad_background_noise.py')},
         total_cpu_seconds=time.process_time()-c,total_wall_seconds=time.perf_counter()-w,
         failure=failure or transport.get('failure'),message_completed=False,physical_null_qualified=False,

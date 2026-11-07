@@ -10,6 +10,35 @@ from triad_stream_scheduler import StreamingWindowScheduler,WindowRequest
 
 
 class SchedulerTests(unittest.TestCase):
+    def test_parallel_workers_private_windows_and_bounded_drain(self):
+        entered=[threading.Event(),threading.Event()];release=threading.Event()
+        seen={}
+        def score(index,raw,valid):
+            if index<2:
+                entered[index].set()
+                if not release.wait(2):raise RuntimeError('test did not release worker')
+            seen[index]=raw.copy()
+            raw[:]=-123  # Must not corrupt the ring or another worker's copy.
+            return index
+        scheduler=StreamingWindowScheduler([WindowRequest(str(i),2*i,4)for i in range(3)],
+            score,ring_capacity_samples=8,queue_capacity=2,workers=2)
+        try:
+            scheduler.append(np.arange(6).astype(np.complex64))
+            self.assertTrue(all(event.wait(1)for event in entered))
+            snapshot=scheduler.snapshot()
+            self.assertEqual(snapshot['inflight_indices'],[0,1])
+            self.assertIsNone(snapshot['inflight_index'])
+            self.assertEqual(snapshot['numeric_array_bound_bytes'],(8+(2+2+1)*4)*9)
+            scheduler.append(np.arange(6,8).astype(np.complex64))
+            self.assertFalse(scheduler.close(timeout=0)['drained'])
+        finally:release.set();report=scheduler.close(timeout=2)
+        self.assertTrue(report['drained'])
+        self.assertEqual([r['result']for r in report['records']],[0,1,2])
+        for i,raw in seen.items():np.testing.assert_array_equal(raw,np.arange(2*i,2*i+4))
+        for workers in (0,-1,True,1.5):
+            with self.assertRaises(ValueError):
+                StreamingWindowScheduler([WindowRequest('bad',0,1)],score,workers=workers)
+
     def test_overlapping_windows_completion_order_and_large_chunk(self):
         seen=[]
         def score(index,raw,valid):

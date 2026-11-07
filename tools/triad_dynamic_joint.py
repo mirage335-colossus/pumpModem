@@ -165,6 +165,7 @@ class ProjectedJointReceiver:
         self.valid = valid.astype(bool, copy=True)
         self.valid.flags.writeable = False
         self.blocks = []
+        self.zero_basis_blocks = set()
         grams, centers = [], []
         self.erased_samples = int(samples-np.count_nonzero(self.valid))
         self.candidates = candidate_count
@@ -201,7 +202,9 @@ class ProjectedJointReceiver:
         scalar_bytes = len(layouts)*len(self.coherences)*(scalar_count*16+32)
         resident = base_bytes+gram_bytes+scalar_bytes+self.projected_modes*16+samples
         largest_block = max(stop-start for start, stop, *_ in layouts)
-        scratch = largest_block*scalar_count*self.taps*48
+        # Also allow the bounded interpolation/rotation scratch of the native
+        # basis adapter. It is released before the projection FFT is formed.
+        scratch = largest_block*(scalar_count*self.taps*48+256)
         # This precedes *every* potentially large source-basis callback.
         if resident+scratch > self.memory_limit_bytes:
             raise MemoryError("projected joint workspace exceeds declared memory budget before basis generation")
@@ -214,11 +217,18 @@ class ProjectedJointReceiver:
                     raw_basis.shape[1] != candidate_count or
                     not np.isfinite(raw_basis).all()):
                 raise ValueError("basis must be finite [H0/bit0/bit1,candidates,taps,raw rows]")
-            projected = projection.numpy(raw_basis)
-            if erased:
-                projected[:] = 0
-            gram = np.einsum("hctn,hcsn->hcts", projected.conj(), projected,
-                             optimize=True)/self.variance
+            if erased or not np.any(raw_basis):
+                # An exactly zero design has exactly zero sufficient
+                # statistics. Keep this block and its physical time in the
+                # state model; only its unnecessary FFT/Gram work disappears.
+                projected = np.zeros((*raw_basis.shape[:-1], len(projection.indices)),
+                                     np.complex128)
+                gram = np.zeros((3, candidate_count, self.taps, self.taps), np.complex128)
+                self.zero_basis_blocks.add(len(self.blocks))
+            else:
+                projected = projection.numpy(raw_basis)
+                gram = np.einsum("hctn,hcsn->hcts", projected.conj(), projected,
+                                 optimize=True)/self.variance
             grams.append(gram)
             centers.append((start+stop-1)/(2*self.sample_rate))
             tensor = torch.as_tensor(projected, dtype=self.dtype, device=self.device)
@@ -263,8 +273,8 @@ class ProjectedJointReceiver:
         elif not np.isfinite(data).all():
             raise ValueError("raw data contains nonfinite samples")
         output = []
-        for start, stop, projection, basis, indices, erased in self.blocks:
-            if erased:
+        for bi, (start, stop, projection, basis, indices, erased) in enumerate(self.blocks):
+            if erased or bi in self.zero_basis_blocks:
                 r = torch.zeros((data.shape[0], 3, self.candidates, self.taps),
                                 dtype=self.dtype, device=self.device)
             else:
@@ -319,6 +329,7 @@ class ProjectedJointReceiver:
         return dict(raw_samples=self.samples, blocks=len(self.blocks), taps=self.taps,
                     candidates=self.candidates, models=len(self.coherences),
                     projected_modes=self.projected_modes, erased_samples=self.erased_samples,
+                    zero_basis_blocks=len(self.zero_basis_blocks),
                     owned_bytes_estimate=self.owned_bytes_estimate,
                     preparation_peak_bytes_estimate=self.preparation_peak_bytes_estimate,
                     device=str(self.device), bulk_dtype=str(self.dtype),
@@ -344,6 +355,20 @@ def _sample_cubic(source, position):
         ix = center+shift
         valid = (ix >= 0) & (ix < len(source))
         result[valid] += weight[valid]*source[ix[valid]]
+    return result
+
+
+def _sample_cubic_rows(source, position):
+    """The same four-point interpolation, sharing geometry across source rows."""
+    center = np.floor(position).astype(np.int64)
+    u = position-center
+    weights = (-u*(u-1)*(u-2)/6, (u+1)*(u-1)*(u-2)/2,
+               -(u+1)*u*(u-2)/2, (u+1)*u*(u-1)/6)
+    result = np.zeros((source.shape[0], *position.shape), np.complex128)
+    for shift, weight in zip((-1, 0, 1, 2), weights):
+        ix = center+shift
+        valid = (ix >= 0) & (ix < source.shape[-1])
+        result[:, valid] += weight[valid]*source[:, ix[valid]]
     return result
 
 
@@ -512,13 +537,32 @@ class DynamicJointReceiver(ProjectedJointReceiver):
                      "low": .501187233627272285/(1+.501187233627272285+.125892541179416721)}
         epoch0 = int(m["public_epoch_seconds"])
 
+        # CFO does not change source coordinates. Preserve caller ordering,
+        # while sharing interpolation and pilot construction for candidates
+        # with the same epoch, arrival and sample-clock scale.
+        grouped = {}
+        for ci, (epoch, arrival, frequency, q) in enumerate(candidates):
+            grouped.setdefault((epoch, arrival, q), []).append((ci, frequency))
+        source_groups = tuple((epochs.index(epoch), epoch, arrival, 1+q*1e-6, members)
+                              for (epoch, arrival, q), members in grouped.items())
+
         def basis(start, stop):
             time_rx = np.arange(start, stop, dtype=np.float64)/fs-lead
             result = np.zeros((3, len(candidates), len(rays), stop-start), np.complex128)
-            for ci, (epoch, arrival, frequency, q) in enumerate(candidates):
-                scale = 1+q*1e-6
-                rotation = np.exp(2j*np.pi*np.remainder(frequency*time_rx, 1.))
+            if not len(time_rx):
+                return result
+            rotations, ray_rotations = {}, {}
+            for ei, epoch, arrival, scale, members in source_groups:
                 for ri, (ray_delay, ray_doppler) in enumerate(rays):
+                    # Cubic interpolation has a finite, zero-extended source
+                    # domain including its complete endpoint stencil. This
+                    # is not a nominal DATA gate: tails in source remain part
+                    # of the support and every delayed ray is checked.
+                    first = ((time_rx[0]-arrival-ray_delay)*scale-offset)*fs
+                    last = ((time_rx[-1]-arrival-ray_delay)*scale-offset)*fs
+                    has_data = last >= -2 and first < source.shape[-1]+1
+                    if not helper and not has_data:
+                        continue
                     ts = (time_rx-arrival-ray_delay)*scale
                     p = np.zeros(stop-start, np.complex128)
                     if helper:
@@ -531,11 +575,18 @@ class DynamicJointReceiver(ProjectedJointReceiver):
                                 tone = float(hp[name+"_hz"])-data_if
                                 p += helper_gain*math.sqrt(fractions[name])*envelope*np.exp(
                                     2j*np.pi*np.remainder(tone*ts, 1.))
-                    common = rotation*np.exp(2j*np.pi*np.remainder(ray_doppler*time_rx, 1.))
-                    result[0, ci, ri] = p*common
-                    for bit in (0, 1):
-                        data = _sample_cubic(source[epochs.index(epoch), bit], (ts-offset)*fs)
-                        result[bit+1, ci, ri] = (data+p)*common
+                    if has_data:
+                        data = _sample_cubic_rows(source[ei], (ts-offset)*fs)
+                    else:
+                        data = np.zeros((2, stop-start), np.complex128)
+                    if ri not in ray_rotations:
+                        ray_rotations[ri] = np.exp(2j*np.pi*np.remainder(ray_doppler*time_rx, 1.))
+                    for ci, frequency in members:
+                        if frequency not in rotations:
+                            rotations[frequency] = np.exp(2j*np.pi*np.remainder(frequency*time_rx, 1.))
+                        common = rotations[frequency]*ray_rotations[ri]
+                        result[0, ci, ri] = p*common
+                        result[1:, ci, ri] = (data+p)*common
             return result
 
         self.manifest = m

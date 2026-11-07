@@ -32,12 +32,15 @@ class WeakReceiver:
     def __init__(self, manifest, templates, epochs, *, precision='fp32',
                  block_seconds=.5, screen_mode='auto', noise_inflation=1.,
                  top_per_bit=2, coherences=DEFAULT_COHERENCES,
-                 memory_limit_bytes=2*1024**3, admission_policy=None):
+                 memory_limit_bytes=2*1024**3, admission_policy=None, fft_workers=2):
         c,w=time.process_time(),time.perf_counter()
         if not math.isfinite(noise_inflation) or noise_inflation<1:
             raise ValueError('noise inflation must be finite and at least one')
         if screen_mode not in ('auto','whole','segmented'):
             raise ValueError('unsupported acquisition screen')
+        if isinstance(fft_workers,(bool,np.bool_)) or not isinstance(fft_workers,(int,np.integer)) or fft_workers<1:
+            raise ValueError('FFT workers must be a positive integer')
+        fft_workers=int(fft_workers)
         allowed_admission = {'alpha_per_day', 'minimum_attempt_spacing_seconds',
                              'duration_alternatives', 'log_null_expectation_penalty'}
         supplied_admission = dict(manifest.get('weak_admission_policy', {})
@@ -66,7 +69,8 @@ class WeakReceiver:
         renewing=(float(ch.get('random_doppler_width_hz',0))>0 or
                   float(ch.get('delay_motion_doppler_bound_hz',0))>0)
         self.screen_mode=('segmented' if renewing else 'whole') if screen_mode=='auto' else screen_mode
-        common=dict(clock_ppm=self.clocks,precision=precision,memory_limit_bytes=memory_limit_bytes)
+        common=dict(clock_ppm=self.clocks,precision=precision,memory_limit_bytes=memory_limit_bytes,
+                    workers=fft_workers)
         self.screen=(SegmentedFFTScreen(self.manifest,templates,epochs,block_seconds=block_seconds,**common)
                      if self.screen_mode=='segmented' else FFTScreen(self.manifest,templates,epochs,**common))
         self.required,self.excluded=core_projection_bands(self.manifest,pilot_use='none',
@@ -82,7 +86,7 @@ class WeakReceiver:
             coherences=[str(x)for x in self.coherences],noise_inflation=noise_inflation,
             fixed_projection='original-prior DATA core; lossy receiver projection',
             final_grid=self.grid.__dict__,memory_limit_bytes=memory_limit_bytes,
-            admission_policy=self.admission_policy,
+            admission_policy=self.admission_policy,fft_workers=fft_workers,
             sources={n:hashlib.sha256((Path(__file__).parent/n).read_bytes()).hexdigest()for n in names})
         self.procedure_id=hashlib.sha256(json.dumps(dict(policy=self.policy,
             geometry=public_geometry(self.manifest),screen=self.screen.procedure_id,

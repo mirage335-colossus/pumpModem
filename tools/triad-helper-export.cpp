@@ -46,6 +46,19 @@ constexpr double thermal_n0_dbm_hz = -164;
 constexpr double spectral_skirt_allowance_hz = 200;
 constexpr std::uint64_t maximum_export_bytes = 2ULL * 1024 * 1024 * 1024;
 constexpr double tau = 2 * std::numbers::pi;
+constexpr std::size_t stream_chunk_samples = 4096;
+constexpr std::size_t template_bank_budget = 64 * 1024 * 1024;
+// Budget newly concurrent candidate caches and output rows. A single source
+// retains its existing bound even when it alone exceeds this batching budget.
+constexpr std::size_t template_bank_rows(std::size_t source_workspace) {
+    constexpr auto output_row_bytes = stream_chunk_samples * sizeof(Complex);
+    constexpr auto available = template_bank_budget - PatternSource::render_bank_scratch_bytes - output_row_bytes;
+    if (source_workspace > available - output_row_bytes) return 1;
+    return std::min<std::size_t>(26, available / (source_workspace + output_row_bytes));
+}
+static_assert(template_bank_rows(256 * 1024) == 26);
+static_assert(template_bank_rows(32 * 1024 * 1024) == 1);
+static_assert(template_bank_rows(std::numeric_limits<std::size_t>::max()) == 1);
 
 struct Options {
     PatternRevision pattern_revision = PatternRevision::IndependentApskV2;
@@ -66,7 +79,7 @@ struct Options {
     std::optional<double> rf_hz, spread_margin, selective_modulation_rate_hz;
     std::optional<double> data_power_w, helper_power_w;
     std::filesystem::path output;
-    std::uint64_t seed = 1, key_seed = 72001, epoch = 1793850000;
+    std::uint64_t seed = 1, key_seed = 72001, epoch = 1793850000, symbol_ordinal = 0;
     std::optional<std::uint64_t> burst_wait_tiles;
     unsigned whole_bit_count = 1, whole_bit_wait_count = 0;
     bool whole_bit_calendar = false;
@@ -151,7 +164,7 @@ Options parse(int argc, char** argv) {
                 "  [--receiver-tail-seconds 0..1]\n"
                 "  [--control selected|flat] [--data on|off] [--helper on|off]\n"
                 "  [--helper-components full|pilots|auxiliary|low|high] (source diagnostic only)\n"
-                "  [--arrival-seconds T] [--templates]\n"
+                "  [--arrival-seconds T] [--symbol-ordinal N] [--templates]\n"
                 "Default 18000 Hz complex samples; sample rate must be a multiple of 5.\n"
                 "Default DATA IF 1725 Hz HF, 4000 Hz legacy EME.\n"
                 "Physical C/N0 follows powers/loss/N0 unless\n"
@@ -173,6 +186,7 @@ Options parse(int argc, char** argv) {
         else if (arg.starts_with("--background-noise-"))
             throw std::invalid_argument("--background-noise-* denotes shared full-rate audio noise and is not a triad complex-I/Q option; use --diagnostic-iq-noise-* only for the narrower diagnostic (not a full-rate DAC/audio floor)");
         else if (arg == "--epoch") { o.epoch = integer(next(), "epoch"); o.explicit_epoch = true; }
+        else if (arg == "--symbol-ordinal") o.symbol_ordinal = integer(next(), "symbol ordinal");
         else if (arg == "--bit") {
             const auto bit = integer(next(), "source bit");
             if (bit > 1) throw std::invalid_argument("source bit must be 0 or 1");
@@ -284,6 +298,8 @@ Options parse(int argc, char** argv) {
         throw std::invalid_argument("burst wait tiles must be in [0,1000]");
     if (o.whole_bit_count < 1 || o.whole_bit_count > 16)
         throw std::invalid_argument("whole-bit count must be in [1,16]");
+    if (o.symbol_ordinal > UINT64_MAX - (o.whole_bit_count - 1))
+        throw std::invalid_argument("whole-bit symbol ordinal overflows");
     if (o.whole_bit_wait_count && !o.whole_bit_calendar)
         throw std::invalid_argument("whole-bit wait count requires explicit --whole-bit-count");
     if (o.whole_bit_calendar && o.plan_only)
@@ -414,6 +430,7 @@ Format format_for(const Options& o) {
     f.burst_wait_tiles = static_cast<unsigned>(o.burst_wait_tiles.value_or(0));
     f.encrypt = true;
     f.epoch = o.epoch;
+    f.symbol_ordinal = o.symbol_ordinal;
     return f;
 }
 
@@ -619,6 +636,7 @@ void print_plan_json(const Options& o, double data_if_hz,
         << ",\"scenario\":"; json_string(std::cout, o.scenario);
     std::cout << ",\"shaping\":"; json_string(std::cout, o.shaping);
     std::cout << ",\"format\":{\"inner_rate_hz\":" << f.inner_rate_hz
+        << ",\"symbol_ordinal\":" << f.symbol_ordinal
         << ",\"pattern_revision\":\"" << pattern_revision_name(f.pattern_revision)
         << "\",\"added_amplitude_depth\":" << f.added_amplitude_depth
         << ",\"added_symbols\":" << f.added_symbols << ",\"fine_chip_rate_hz\":" << g.fine_chip_rate_hz
@@ -642,6 +660,10 @@ void print_plan_json(const Options& o, double data_if_hz,
         << ",\"padded_source_samples\":" << g.source_samples
         << ",\"source_calendar_origin_sample\":" << g.calendar_origin_sample
         << ",\"bounded_source_workspace_bytes\":" << g.source_workspace_bytes
+        << ",\"template_bank_rows\":" << template_bank_rows(g.source_workspace_bytes)
+        << ",\"template_bank_budget_bytes\":" << template_bank_budget
+        << ",\"template_bank_single_source_fallback\":" << boolean(g.source_workspace_bytes >
+            template_bank_budget - PatternSource::render_bank_scratch_bytes - 2 * stream_chunk_samples * sizeof(Complex))
         << ",\"allocates_samples_or_templates\":false}"
         << ",\"spectral_certificate\":{\"placement_bandwidth_hz\":" << selected.spectrum.placement_bandwidth_hz
         << ",\"measured_bandwidth_hz\":" << selected.spectrum.measured_bandwidth_hz
@@ -1196,7 +1218,7 @@ int run(const Options& o) {
     }
     config.signal_gain = 1;
     config.complex_noise_variance = sample_rate / std::pow(10., cn0 / 10);
-    config.maximum_chunk_samples = 4096;
+    config.maximum_chunk_samples = stream_chunk_samples;
     // A fixed, public complete observation calendar prevents the random
     // arrival/clock realization from choosing the exported file length.
     const auto tx_min = 1 - base_half_ppm * 1e-6;
@@ -1223,7 +1245,7 @@ int run(const Options& o) {
     for (const auto& slot : whole_slots) {
         auto source_format = f;
         source_format.epoch = slot.pattern_begin.epoch;
-        source_format.symbol_ordinal = slot.index;
+        source_format.symbol_ordinal = f.symbol_ordinal + slot.index;
         whole_sources.push_back(std::make_unique<PatternSource>(source_format, key,
             static_cast<std::uint8_t>(o.bit ^ (slot.index & 1))));
     }
@@ -1341,6 +1363,7 @@ int run(const Options& o) {
             << ",\"noise_variance\":" << (o.stream_kind == "channel" ? config.complex_noise_variance : 0)
             << ",\"template_data_gain\":" << data_gain << ",\"data_if_hz\":" << data_if_hz
             << ",\"epoch\":" << candidate_format.epoch
+            << ",\"symbol_ordinal\":" << candidate_format.symbol_ordinal
             << ",\"pattern_revision\":\"" << pattern_revision_name(f.pattern_revision)
             << "\",\"added_amplitude_depth\":" << f.added_amplitude_depth
             << ",\"helper_enabled\":" << boolean(o.helper)
@@ -1470,10 +1493,15 @@ int run(const Options& o) {
                         throw std::invalid_argument("basis clock must be positive-rate and delay nonnegative");
                     requests.push_back(candidate);
                 }
+                const bool raw_bank = !mapped && std::all_of(requests.begin(), requests.end(), [](const Candidate& c) {
+                    return c.arrival_seconds == 0 && c.frequency_hz == 0 && c.clock_ppm == 0 &&
+                        c.channel.taps.front().delay_seconds == 0 && c.channel.taps.front().doppler_hz == 0;
+                });
+                const auto bank_scratch = raw_bank ? PatternSource::render_bank_scratch_bytes : 0;
                 const auto output_bytes = columns * rows * sizeof(Complex);
                 const auto map_bytes = mapped ? rows * sizeof(double) : 0;
                 // write_complex packs one further binary64 buffer. Include both.
-                if (fixed_bytes + template_bytes + 2 * output_bytes + map_bytes > stream_budget)
+                if (fixed_bytes + template_bytes + 2 * output_bytes + map_bytes + bank_scratch > stream_budget)
                     throw std::runtime_error("basis batch exceeds64MiB workspace budget");
                 std::vector<double> offsets;
                 if (mapped) {
@@ -1492,28 +1520,35 @@ int run(const Options& o) {
                     }
                 }
                 std::vector<Complex> output(columns * rows);
+                std::vector<PatternSource*> bank_sources;
+                if (raw_bank) bank_sources.reserve(columns);
                 for (std::size_t c = 0; c < columns; ++c) {
                     const auto& candidate = requests[c];
                     const auto address = std::make_pair(static_cast<int>(candidate.epoch_offset_seconds), static_cast<unsigned>(candidate.source_bit));
                     auto found = templates.find(address);
                     if (found == templates.end()) {
-                        if (templates.size() >= 26 || fixed_bytes + template_bytes + 2 * output_bytes + map_bytes + g.source_workspace_bytes > stream_budget)
+                        if (templates.size() >= 26 || fixed_bytes + template_bytes + 2 * output_bytes + map_bytes + bank_scratch + g.source_workspace_bytes > stream_budget)
                             throw std::runtime_error("template cache exceeds64MiB workspace budget");
                         auto format = candidate_format;
                         format.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(format.epoch) + candidate.epoch_offset_seconds);
                         auto source = std::make_unique<PatternSource>(format, key, candidate.source_bit);
                         template_bytes += source->working_bytes();
-                        if (fixed_bytes + template_bytes + 2 * output_bytes + map_bytes > stream_budget)
+                        if (fixed_bytes + template_bytes + 2 * output_bytes + map_bytes + bank_scratch > stream_budget)
                             throw std::runtime_error("template cache actual workspace exceeds64MiB budget");
                         found = templates.emplace(address, std::move(source)).first;
                     }
                     const auto destination = std::span(output).subspan(c * rows, rows);
-                    if (mapped) shaped_basis_mapped(*found->second, candidate, sample_rate, first, offsets, destination, center_hz);
-                    else shaped_basis(*found->second, candidate, sample_rate, first, rows, destination);
-                    for (auto& value : destination) value *= data_gain;
+                    if (raw_bank) bank_sources.push_back(found->second.get());
+                    else {
+                        if (mapped) shaped_basis_mapped(*found->second, candidate, sample_rate, first, offsets, destination, center_hz);
+                        else shaped_basis(*found->second, candidate, sample_rate, first, rows, destination);
+                    }
                 }
+                if (raw_bank) PatternSource::render_bank(bank_sources, static_cast<long double>(first), 1, rows, output);
+                for (auto& value : output) value *= data_gain;
                 std::cout << "{\"count\":" << rows << ",\"first_sample\":" << first
-                    << ",\"columns\":" << columns << ",\"workspace_bytes\":" << fixed_bytes + template_bytes + 2 * output_bytes + map_bytes
+                    << ",\"columns\":" << columns << ",\"workspace_bytes\":" << fixed_bytes + template_bytes + 2 * output_bytes + map_bytes + bank_scratch
+                    << ",\"shared_geometry_bank\":" << boolean(raw_bank)
                     << ",\"mapped\":" << boolean(mapped) << "}\n";
                 write_complex(std::cout, output);
                 std::cout.flush();
@@ -1538,23 +1573,39 @@ int run(const Options& o) {
 
     if (o.templates) {
         auto templates = output_file(o.output / "templates.c128", true);
+        // Keep [slot, epoch, bit, sample] file layout. Public geometry is shared
+        // within bounded source groups; extreme-rate private caches never cause
+        // the formerly single-source workspace to be multiplied unconditionally.
+        const auto bank_rows = template_bank_rows(g.source_workspace_bytes);
+        std::vector<Complex> bank_buffer(bank_rows * buffer.size());
         for (unsigned whole_bit = 0; whole_bit < o.whole_bit_count; ++whole_bit) {
-        for (int epoch_offset = -6; epoch_offset <= 6; ++epoch_offset) {
-            auto candidate_format = f;
-            candidate_format.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(
-                o.whole_bit_calendar ? whole_slots[whole_bit].pattern_begin.epoch : f.epoch) + epoch_offset);
-            if (o.whole_bit_calendar) candidate_format.symbol_ordinal = whole_bit;
-            for (std::uint8_t bit = 0; bit < 2; ++bit) {
-                PatternSource candidate(candidate_format, key, bit);
+            for (std::size_t bank_first = 0; bank_first < 26; bank_first += bank_rows) {
+                const auto rows = std::min<std::size_t>(bank_rows, 26 - bank_first);
+                std::vector<std::unique_ptr<PatternSource>> candidates;
+                std::vector<PatternSource*> bank_sources;
+                candidates.reserve(rows); bank_sources.reserve(rows);
+                for (std::size_t row = bank_first; row < bank_first + rows; ++row) {
+                    auto candidate_format = f;
+                    const auto epoch_offset = static_cast<int>(row / 2) - 6;
+                    candidate_format.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(
+                        o.whole_bit_calendar ? whole_slots[whole_bit].pattern_begin.epoch : f.epoch) + epoch_offset);
+                    if (o.whole_bit_calendar) candidate_format.symbol_ordinal = f.symbol_ordinal + whole_bit;
+                    candidates.push_back(std::make_unique<PatternSource>(candidate_format, key, static_cast<std::uint8_t>(row % 2)));
+                    bank_sources.push_back(candidates.back().get());
+                }
                 for (std::uint64_t first = 0; first < template_samples;) {
                     const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), template_samples - first));
-                    for (std::size_t i = 0; i < count; ++i)
-                        buffer[i] = candidate.sample_at(static_cast<long double>(first + i)) * data_gain;
-                    write_complex(templates, std::span(buffer).first(count));
+                    const auto output = std::span(bank_buffer).first(rows * count);
+                    PatternSource::render_bank(bank_sources, static_cast<long double>(first), 1, count, output);
+                    for (auto& value : output) value *= data_gain;
+                    for (std::size_t row = 0; row < rows; ++row) {
+                        const auto offset = ((26 * static_cast<std::uint64_t>(whole_bit) + bank_first + row) * template_samples + first) * 16;
+                        templates.seekp(static_cast<std::streamoff>(offset), std::ios::beg);
+                        write_complex(templates, output.subspan(row * count, count));
+                    }
                     first += count;
                 }
             }
-        }
         }
         templates.close();
     }
@@ -1635,6 +1686,7 @@ int run(const Options& o) {
         << ",\"public_epoch_seconds\":" << f.epoch << ",\"key_seed\":" << o.key_seed
         << ",\"encrypted_source\":true,\"encrypted_helper_metadata\":true,\"helper_callsign\":\"TRIAD\""
         << ",\"format\":{\"inner_rate_hz\":" << f.inner_rate_hz << ",\"added_symbols\":" << f.added_symbols
+        << ",\"symbol_ordinal\":" << f.symbol_ordinal
         << ",\"pattern_revision\":\"" << pattern_revision_name(f.pattern_revision)
         << "\",\"added_amplitude_depth\":" << f.added_amplitude_depth
         << ",\"added_interleave\":true,\"requested_bit_seconds\":" << f.bit_seconds
@@ -1667,12 +1719,12 @@ int run(const Options& o) {
             << ",\"wait_count\":" << o.whole_bit_wait_count << ",\"support_grid_seconds\":30"
             << ",\"minimum_support_separation_seconds\":" << (o.helper ? 76 : 60)
             << ",\"fresh_helper_lead_seconds\":" << (o.helper ? 38 : 0)
-            << ",\"key_addressing\":\"existing v3 integer-second epoch=floor(pattern UTC), symbol_ordinal=slot index; fractional phase preserved in placement, not added to the unchanged key format\""
+            << ",\"key_addressing\":\"existing v3 integer-second epoch=floor(pattern UTC), symbol_ordinal=base ordinal plus slot index; fractional phase preserved in placement, not added to the unchanged key format\""
             << ",\"emission\":\"complete independent keyed bit sources; alternating evaluator bits; one absolute-phase Helper generator and one continuous channel; only source is gated\",\"slots\":[";
         for (std::size_t i = 0; i < whole_slots.size(); ++i) {
             if (i) manifest << ',';
             const auto& slot = whole_slots[i];
-            manifest << "{\"symbol_ordinal\":" << slot.index
+            manifest << "{\"symbol_ordinal\":" << f.symbol_ordinal + slot.index
                 << ",\"key_epoch_seconds\":" << slot.pattern_begin.epoch
                 << ",\"pattern_phase_samples\":" << slot.pattern_begin.phase;
             const std::array<std::pair<const char*, HelperBurstCoordinate>, 6> coordinates{{

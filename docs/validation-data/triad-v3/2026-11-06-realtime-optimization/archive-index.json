@@ -1,0 +1,706 @@
+{
+  "include/datapump/triad_modem_v3.hpp": {
+    "bytes": 24921,
+    "sha256": "7d1169eddaf40440198b53c9141aac7787832d323720aec9a967f92aacf5c08a"
+  },
+  "local-evidence/triad-hf-current-cost/generation-protocol.json": {
+    "bytes": 1626,
+    "sha256": "e8bfd7214dffc754ef076e23366c105f76022a1457273678c0b0402ebb619b86"
+  },
+  "local-evidence/triad-hf-current-cost/measure.py": {
+    "bytes": 11108,
+    "sha256": "4ef6e0e5739990b6c95870e0d085bdbec4a51e25044e28df40a63651387b283c"
+  },
+  "local-evidence/triad-hf-current-cost/public/evaluator-truth.json": {
+    "bytes": 2941,
+    "sha256": "369844b5ea59c969ae6e5dc651a9fc2eb01b8126494e4773c6cbe82637f5a305"
+  },
+  "local-evidence/triad-hf-current-cost/public/manifest.json": {
+    "bytes": 13584,
+    "sha256": "88793e08d88a871dd9f9bdde1c495c78ea9b3915fd0c425e9fc8a8428312ab18"
+  },
+  "local-evidence/triad-hf-current-cost/signal0/evaluator-truth.json": {
+    "bytes": 2950,
+    "sha256": "407bc43d14706b8fbff8b895759e5cc88485bb6ee916650beefbcfb6e5283183"
+  },
+  "local-evidence/triad-hf-current-cost/signal0/manifest.json": {
+    "bytes": 13571,
+    "sha256": "0dd53fa73c39e7c47c5a30dd47e6eb1926b697636f3ba09acac901a6af01d595"
+  },
+  "local-evidence/triad-hf-current-cost/target8/bridge.json": {
+    "bytes": 2003,
+    "sha256": "28340e9c6e597f21b6565117e2550d3b412752c9eac060f3ca4829576f6985d8"
+  },
+  "local-evidence/triad-hf-current-cost/target8/invocation.json": {
+    "bytes": 871,
+    "sha256": "338897eba693dc0aa2fbc9f12735b09869bc4bf31587f474b13f3b12611e002d"
+  },
+  "local-evidence/triad-hf-current-cost/target8/noise-command.json": {
+    "bytes": 575,
+    "sha256": "24cc5ca484bcb73fa8a9e541a46dae9696239c17349a1518d8d11ac6d800560d"
+  },
+  "local-evidence/triad-hf-current-cost/target8/noise-plan.json": {
+    "bytes": 911,
+    "sha256": "05e4b667430fed7fe852aa4df24c966b5fb5294d680fa0489ae242786de921b2"
+  },
+  "local-evidence/triad-hf-current-cost/target8/noise.json": {
+    "bytes": 1388,
+    "sha256": "a00197d5d8cfc6577d26ac5ef3d5e022427b285c96e66c60cce4f519f7d505ff"
+  },
+  "local-evidence/triad-hf-current-cost/target8/receiver/slot-0-receiver.json": {
+    "bytes": 1600086,
+    "sha256": "9a883849add0843748d7e349720664ba43e22c17d668981ffe0a9c059157072f"
+  },
+  "local-evidence/triad-hf-current-cost/target8/report.json": {
+    "bytes": 337374,
+    "sha256": "80e05782f2445032c47e86973d21d0765cf383be4e7a025c0cbde825f433ca39"
+  },
+  "local-evidence/triad-hf-high-snr-cost/generation-protocol.json": {
+    "bytes": 1632,
+    "sha256": "29126852b51940f3940000fe9305ce44d037c55c6002880a3c9b5304ebc621eb"
+  },
+  "local-evidence/triad-hf-high-snr-cost/measure.py": {
+    "bytes": 11326,
+    "sha256": "3fbf3efba039a9951442437b70ca7fd7aa206f8c06ae9ace19732032edfd8729"
+  },
+  "local-evidence/triad-hf-high-snr-cost/physical0/bridge.json": {
+    "bytes": 1997,
+    "sha256": "27092de19078157f130df3bb657a49a96cb7685b898fefb09fdf4d1089834e75"
+  },
+  "local-evidence/triad-hf-high-snr-cost/physical0/invocation.json": {
+    "bytes": 2749,
+    "sha256": "0ddd8079a4786441af97472150d03c66ba8db230702a0648bc0818b9ac434f77"
+  },
+  "local-evidence/triad-hf-high-snr-cost/physical0/receiver/slot-0-receiver.json": {
+    "bytes": 1006016,
+    "sha256": "9595905a0f57463de14e9a43a9c80df3ce1480c1477541a42d7e57bfaf8c1a6a"
+  },
+  "local-evidence/triad-hf-high-snr-cost/physical0/report.json": {
+    "bytes": 261918,
+    "sha256": "9db6571e6de232734e889dd225febc4945365b76998854cd350ad356782fb2c7"
+  },
+  "local-evidence/triad-hf-high-snr-cost/public/evaluator-truth.json": {
+    "bytes": 2935,
+    "sha256": "0204f19fac9563dd6065fd89641151478459127b620fc40f5750cae3c4f23f88"
+  },
+  "local-evidence/triad-hf-high-snr-cost/public/manifest.json": {
+    "bytes": 13562,
+    "sha256": "c0aa01a3c69305206564138e248fbd4c9c74a957ed16fb64f3cae2f3c6d1d3d7"
+  },
+  "local-evidence/triad-hf-high-snr-cost/signal0/evaluator-truth.json": {
+    "bytes": 2953,
+    "sha256": "daa13b9aa7e6e79142d1a54099d3ea17932ce77266dd59d1076443474a7ed39d"
+  },
+  "local-evidence/triad-hf-high-snr-cost/signal0/manifest.json": {
+    "bytes": 13533,
+    "sha256": "163917da6f26ab8e041929a7e60ac562a16ce4423e9ccfba804bb45aca0bb4c5"
+  },
+  "local-evidence/triad-native-render-bank/benchmark-potential-overlap.json": {
+    "bytes": 3894,
+    "sha256": "64215941c6fcfa4eb085c6e210faed80406fe9e34fef6d4b197f64d8ff7f7687"
+  },
+  "local-evidence/triad-native-render-bank/benchmark-potential-overlap.log": {
+    "bytes": 2945,
+    "sha256": "cc9c6c8859086282dbca9d98b6d813ab008b963b78842ffcc6cc1898a06f2e25"
+  },
+  "local-evidence/triad-native-render-bank/benchmark.json": {
+    "bytes": 3883,
+    "sha256": "648596a740818b290420ed235d03c527586c1217c213cd47f60786dc2330b089"
+  },
+  "local-evidence/triad-native-render-bank/benchmark.log": {
+    "bytes": 2934,
+    "sha256": "0f37db6f75b2fdf5d4075d4552d15df31f1476fe6d0a51a14fe265ab914f1f97"
+  },
+  "local-evidence/triad-native-render-bank/benchmark.py": {
+    "bytes": 1985,
+    "sha256": "f1e146ab4490db74c1369b183e4ea5577eef222141623b550f0b79a1b252f61c"
+  },
+  "local-evidence/triad-native-render-bank/build-cache-repair.log": {
+    "bytes": 685,
+    "sha256": "77f3b821c3823e010fbd2366ffb577ea8ac6e70a6d7413de0b0244d1ee927800"
+  },
+  "local-evidence/triad-native-render-bank/build-memory-guard.log": {
+    "bytes": 937,
+    "sha256": "a3d1b9ebd9ecdbefdf42c1e4dcb6f4ffdae93a26e28fa46d9c66a1ba10f5716c"
+  },
+  "local-evidence/triad-native-render-bank/build.log": {
+    "bytes": 1411,
+    "sha256": "90c87536d80974a664a2da762451a71a3050a0d1a88d205a5c435e8a7628939d"
+  },
+  "local-evidence/triad-native-render-bank/configure.log": {
+    "bytes": 960,
+    "sha256": "edc28030e9f5d7a3a8ba4f07188ca3dcec408b0acc896d6b174860d5fb81b435"
+  },
+  "local-evidence/triad-native-render-bank/file-export-comparison.json": {
+    "bytes": 2054,
+    "sha256": "cf6903bd2c652b4d37f5ff40ffc74f0fce841c50d08b550bd1e96c9058ccead5"
+  },
+  "local-evidence/triad-native-render-bank/file-export-memory-guard-comparison.json": {
+    "bytes": 2168,
+    "sha256": "3af35d4937c0e21687c046784b34a4b65d9c611df85e6912427c87ad39adfabb"
+  },
+  "local-evidence/triad-native-render-bank/memory-guard-test-repaired.log": {
+    "bytes": 98,
+    "sha256": "a41e08b8782ccff561fc04da1c4aa92b79d00989913c15ae6639e0c2e9b7e03c"
+  },
+  "local-evidence/triad-native-render-bank/memory-guard-test.log": {
+    "bytes": 416,
+    "sha256": "615e8e30b0b1dc54adca62629dba5a92217470ea248467bb9a12ee508383d070"
+  },
+  "local-evidence/triad-native-render-bank/protocol-tests.log": {
+    "bytes": 109,
+    "sha256": "caf1d674fc618a65cc0d2cdb636629f629d30762d13984d535f2a117a1fa96b2"
+  },
+  "local-evidence/triad-native-render-bank/public-after/evaluator-truth.json": {
+    "bytes": 2935,
+    "sha256": "0204f19fac9563dd6065fd89641151478459127b620fc40f5750cae3c4f23f88"
+  },
+  "local-evidence/triad-native-render-bank/public-after/manifest.json": {
+    "bytes": 13599,
+    "sha256": "941fd0003de20816fb13e93e1df1008477797e548056f28e6ff32ba3d898ff0a"
+  },
+  "local-evidence/triad-native-render-bank/public-after-memory-guard/evaluator-truth.json": {
+    "bytes": 2935,
+    "sha256": "0204f19fac9563dd6065fd89641151478459127b620fc40f5750cae3c4f23f88"
+  },
+  "local-evidence/triad-native-render-bank/public-after-memory-guard/manifest.json": {
+    "bytes": 13599,
+    "sha256": "ed05a526199e075a8c9711fc42f086ae67ea9397a38d8879e60dd74639257663"
+  },
+  "local-evidence/triad-native-render-bank/source-tests.log": {
+    "bytes": 70,
+    "sha256": "f730703ed3f3c7f26a0869216dfa564b63ffc50572e7352ffd4d8be734148063"
+  },
+  "local-evidence/triad-realtime-improvement/baseline-profile/bridge.json": {
+    "bytes": 2008,
+    "sha256": "af6e6cf30fded6fa9dfedcc4667395a6cb51bd93999628fc485822af2c414c6d"
+  },
+  "local-evidence/triad-realtime-improvement/baseline-profile/invocation.json": {
+    "bytes": 2786,
+    "sha256": "3e663b0cc94bee53d50c2d70bb5109c15f9e2d9e6193f1e51ef4f4b1771e6d3b"
+  },
+  "local-evidence/triad-realtime-improvement/baseline-profile/receiver/slot-0-receiver.json": {
+    "bytes": 1006011,
+    "sha256": "8d196a2a5ed7650eee42c8422a78f417bae3eabdc1d69de369008618c07468cb"
+  },
+  "local-evidence/triad-realtime-improvement/baseline-profile/report.json": {
+    "bytes": 262020,
+    "sha256": "564017e67eef550ca41305e244d5245f79c97b9d6497e91471550431c432700a"
+  },
+  "local-evidence/triad-realtime-improvement/baseline-profile/score.pstats": {
+    "bytes": 98372,
+    "sha256": "0be796e3ac800c7dc76bbdeaf61480dbcfbc96311654d32936782e507a653acf"
+  },
+  "local-evidence/triad-realtime-improvement/baseline-profile-retry.log": {
+    "bytes": 1139,
+    "sha256": "5d055feffcd4814c0d8db088b78a6413681f63d9d0ab37aae74bea7196139479"
+  },
+  "local-evidence/triad-realtime-improvement/baseline-profile.log": {
+    "bytes": 625,
+    "sha256": "19f53e9fbbb61631e7d8130e8dd9b5f853edccf0c18f4123691f7cd86e9724de"
+  },
+  "local-evidence/triad-realtime-improvement/final-native-protocol.log": {
+    "bytes": 110,
+    "sha256": "e70720108797930ee3c5e6d92bc211d87a8d57bb426e71de30f000c600129e3e"
+  },
+  "local-evidence/triad-realtime-improvement/focused-python.log": {
+    "bytes": 477,
+    "sha256": "154e8f5c731af6bc8518a7aa018e0ffeccde00ec37844492e5940e6ffeeae107"
+  },
+  "local-evidence/triad-realtime-improvement/measure_profile.py": {
+    "bytes": 11749,
+    "sha256": "305165c686388b451fd836d667f7dc821dba28eba38df139d8d33c20f18e91df"
+  },
+  "local-evidence/triad-realtime-improvement/optimized-high0/bridge.json": {
+    "bytes": 2007,
+    "sha256": "90d2ac9d67102f13548bc24a304c4cedcc79463070183c37473ba2f7cd017471"
+  },
+  "local-evidence/triad-realtime-improvement/optimized-high0/invocation.json": {
+    "bytes": 2756,
+    "sha256": "3918299ab55841da99f4d85dc8086b4df01752d82d23f74389dcc2a41bb310fc"
+  },
+  "local-evidence/triad-realtime-improvement/optimized-high0/receiver/slot-0-receiver.json": {
+    "bytes": 1006967,
+    "sha256": "c90e677aae36089efb6c3a9d5d9738eba7a322cbff0e15afeeed3e6709ad2abe"
+  },
+  "local-evidence/triad-realtime-improvement/optimized-high0/report.json": {
+    "bytes": 261966,
+    "sha256": "5b14a5ce208bb31fd2f9e07c688ab3be768064828d7dfd81ce1ccdab6af374ef"
+  },
+  "local-evidence/triad-realtime-improvement/optimized-high0.log": {
+    "bytes": 1141,
+    "sha256": "aab32cf55f87433d6aba15b0d667cbcbb8cea6acc2cd1f9cf31cbc9b717c39dc"
+  },
+  "local-evidence/triad-realtime-improvement/optimized-weak0/bridge.json": {
+    "bytes": 190,
+    "sha256": "fc3011f130b28b5990e66cd74f529f01461b7a43db132a7a3fd8581ec7302445"
+  },
+  "local-evidence/triad-realtime-improvement/optimized-weak0/invocation.json": {
+    "bytes": 2932,
+    "sha256": "552a7a6285d0ac86ff4fbd490107e7bc75f09be7ddfb434d7a11b9db13456e31"
+  },
+  "local-evidence/triad-realtime-improvement/optimized-weak0/receiver/slot-0-receiver.json": {
+    "bytes": 1601044,
+    "sha256": "9b69495792c3412b018ce2f3cf52e75a675c420a718ac8b424a02311957c1268"
+  },
+  "local-evidence/triad-realtime-improvement/optimized-weak0/report.json": {
+    "bytes": 346494,
+    "sha256": "04db56cabc8e47327183dc792e2c28f75fde88cbc5250642fe45c6a6aaa63e5c"
+  },
+  "local-evidence/triad-realtime-improvement/optimized-weak0.log": {
+    "bytes": 1138,
+    "sha256": "c4abd715fddbe3a9998b24073f3629ed1b475160602e4e4474295eea9507ebc0"
+  },
+  "local-evidence/triad-realtime-improvement/package_evidence.py": {
+    "bytes": 3993,
+    "sha256": "2224d0a82f4c257b6214550e261f295d8fc4fc0e2acc2b4004b82422ba0a6716"
+  },
+  "local-evidence/triad-realtime-improvement/refinement/initial-test-failure.txt": {
+    "bytes": 906,
+    "sha256": "7f20931f57dff8039a9c1ecda5e85a272c14a65f81477406b6a23c1cca33b2e8"
+  },
+  "local-evidence/triad-realtime-improvement/refinement/joint-tests.log": {
+    "bytes": 111,
+    "sha256": "ec2e889f0389dc9ccbb3cda01fbdc759d5acc1c3c0a5229f8e29ee712853e713"
+  },
+  "local-evidence/triad-realtime-improvement/refinement/sparse-tests.log": {
+    "bytes": 104,
+    "sha256": "bfbc056a35d4f8e02168daee35a768fb736497f3a5ffd2892af4bf0955385137"
+  },
+  "local-evidence/triad-realtime-improvement/refinement/variant-tests.log": {
+    "bytes": 115,
+    "sha256": "ce6241e303bcb12fc9b05943c9cd4f8e23452bd9c6f7f4ad684fc9f01ae43a6e"
+  },
+  "local-evidence/triad-realtime-improvement/replay_measure.py": {
+    "bytes": 11646,
+    "sha256": "75e903354271c07e1225aa45d69d62ac230c027eeb21c3120f28d490827fe034"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-00/adjusted-public-manifest.json": {
+    "bytes": 15201,
+    "sha256": "c8f84becf4bf927e70b68e3dbf705c0db49e956d461e72c6152cb49cf814953b"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-00/evaluator-truth.json": {
+    "bytes": 2959,
+    "sha256": "71592e5991f07c83c20fc2459fc21732e794adbf21f7a77fb9d1606b1ec53e35"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-00/frontend/receipt.json": {
+    "bytes": 4384,
+    "sha256": "48624494fa2d38f00040fcb72205274694eaf10d4360281b6ca139e71dea0849"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-00/frontend/slot-0-receiver.json": {
+    "bytes": 760,
+    "sha256": "67f143dc12f5caba4f7c8c37237c3baffceb7cbb70598f810ba837cfc761bb53"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-00/manifest.json": {
+    "bytes": 13580,
+    "sha256": "561942d5277db78f82562c9e68e7f291787632b942f2b98ab99d3329cb70a599"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-00-generation.json": {
+    "bytes": 1290,
+    "sha256": "cc831d1d23f9e75d399452b895a32302ae82f700d5b0dda21b3a6950144db402"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-00-generation.log": {
+    "bytes": 179,
+    "sha256": "4c6913c68db4184fa779fbe7c48e654b9ab3d9f4a95f6edff6911f04a11345e8"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-01/adjusted-public-manifest.json": {
+    "bytes": 15203,
+    "sha256": "3b61e23dc452679d26633a8df9b8a46c840b3cc6400f66d30bb1e25933446222"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-01/evaluator-truth.json": {
+    "bytes": 2950,
+    "sha256": "d7669298b635495e14a5090a073eb11059eda3bf7dcfc7f72b904ea65f6655dc"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-01/frontend/receipt.json": {
+    "bytes": 4382,
+    "sha256": "e84533fb5f842486da6dffa2ba568db12f9fbb29f929ade041a16e7429c879dd"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-01/frontend/slot-0-receiver.json": {
+    "bytes": 761,
+    "sha256": "e1929afded3224f1b0d659a3c450987a0e530413376b329ccddd8213f46f07e8"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-01/manifest.json": {
+    "bytes": 13576,
+    "sha256": "ae0aa732a9be6af85723ad84b25b2116bf6c880a3ae60478faeca8f516ddae19"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-01-generation.json": {
+    "bytes": 1288,
+    "sha256": "06fd40685f34b97772aff71e84747ed7ba39989c4c7d751a02ae88d0cbabddff"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-01-generation.log": {
+    "bytes": 179,
+    "sha256": "e708eaa7f03054758d9d46f81fa9b8db164d1275bc5cfb36db6b746cdf652dd5"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-02/adjusted-public-manifest.json": {
+    "bytes": 15201,
+    "sha256": "f3f4f59d0de6de9c31c5045e96c854501ca09ebfa5e52c8bbbd7157f5c041709"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-02/evaluator-truth.json": {
+    "bytes": 2934,
+    "sha256": "0d68ce72ad7fa6ef6a21e1ccc50c9913cf8646fe34b1dfdcb25ca6ab178736f7"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-02/frontend/receipt.json": {
+    "bytes": 4384,
+    "sha256": "2785c8ec02ae0b2aafb819d7c84aa48b2317f937f1c5482450fe6c7954c28fe9"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-02/frontend/slot-0-receiver.json": {
+    "bytes": 759,
+    "sha256": "645b551b91429a0007f82d39ebcb890005399d6d656a4d457ce64857bf9cc6e5"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-02/manifest.json": {
+    "bytes": 13576,
+    "sha256": "aab46927b500385aea09587c61de7c2465f68255ee1a09ad5a5f3a9909a69be8"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-02-generation.json": {
+    "bytes": 1300,
+    "sha256": "ea8f1b3781780ba32e3931ed40001bc435d1b11fbc0a0c666d12ceef0a90816e"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-02-generation.log": {
+    "bytes": 179,
+    "sha256": "8cfa9922ce780873b8d9bbd2afbff15806bd4d4a9cf920cbfabbcca4cf9b76a8"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-03/adjusted-public-manifest.json": {
+    "bytes": 15200,
+    "sha256": "6592069ab262554a5431a4eca92ec05bf1cbe6835fb9d32aee7d2781ef6e26ac"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-03/evaluator-truth.json": {
+    "bytes": 2951,
+    "sha256": "241599a19014a569d538d469a9c17c5d75409e7e8f186ad6ed54dae83600e8b6"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-03/frontend/receipt.json": {
+    "bytes": 4384,
+    "sha256": "f298bf0404ff794e9b6d643cdf32f345018e12876dc290fe40a52d72a981961d"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-03/frontend/slot-0-receiver.json": {
+    "bytes": 758,
+    "sha256": "1370a8007910f825592dba332d56b345bf7fcb3e004572c67f99a097b8e707dd"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-03/manifest.json": {
+    "bytes": 13587,
+    "sha256": "366ad514417217ab1fbfb8207936ae563e583a5bdf143662c12ce1083f835d93"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-03-generation.json": {
+    "bytes": 1290,
+    "sha256": "ee680388a68dc25e0d5f4240dc4a79c4528b36e3f5354d18e9e79d2e9e044fc6"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-03-generation.log": {
+    "bytes": 179,
+    "sha256": "6d725c6b463da46fa9d670aa24240d8e8e54bc41ae0e8aeaed9225f3eb6a44f3"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-04/adjusted-public-manifest.json": {
+    "bytes": 15199,
+    "sha256": "a6bf609a87562758468c23469dee1f06ba64e4750823bedde94a7acdc0439775"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-04/evaluator-truth.json": {
+    "bytes": 2957,
+    "sha256": "aa53d8ee3d3eed61b8d96533a822d814740eb6b71f0c1e0a57ff78491c8b10f5"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-04/frontend/receipt.json": {
+    "bytes": 4383,
+    "sha256": "757da27814377714f16493019fdeabe4272466fef16df9270e2bca06c1ede6e8"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-04/frontend/slot-0-receiver.json": {
+    "bytes": 759,
+    "sha256": "8602b0e66ec97eadace4d018a3ff2abcf8259d559f309347f6e96a77014afa6a"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-04/manifest.json": {
+    "bytes": 13578,
+    "sha256": "5482d2f2cb05255b8c0eeb2128e0e3080dc234a3fc2b067c03f4e17b3b9bdd09"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-04-generation.json": {
+    "bytes": 1291,
+    "sha256": "1dd34ad46b70f1169e4bdb47ec6d2fd95984c37681cb9271b4a78b5a90b7fdb2"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-04-generation.log": {
+    "bytes": 179,
+    "sha256": "18fb9e000ac0f6cf559f67e92196d2cfc32c93fee60f7de5b542ad9855ecbb81"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-05/adjusted-public-manifest.json": {
+    "bytes": 15201,
+    "sha256": "2fac1e4d278e9bf3ea4e87bb87a0118a560338a837a0114a1ddb012459eb9b7f"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-05/evaluator-truth.json": {
+    "bytes": 2929,
+    "sha256": "2685ae43cb6373ef898d759f572df5138b9a7e55bc41d1bee71382af84d76adb"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-05/frontend/receipt.json": {
+    "bytes": 4383,
+    "sha256": "d78e61bb24c73bdd06e53d262c901b47ab01bbe0853cc4e24c18a0dd44c853cc"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-05/frontend/slot-0-receiver.json": {
+    "bytes": 759,
+    "sha256": "93390279fdc97ae2df0bde3bfc4422dc928c35aca2855fe4fb2b1e0101cdeb3c"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-05/manifest.json": {
+    "bytes": 13579,
+    "sha256": "ec2f7ca4104a094f8aa5b1e1f20c546c0ff7aa742bbce06cfc331e2ab74f87b8"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-05-generation.json": {
+    "bytes": 1299,
+    "sha256": "2d6a05cfbe4fe68c741a8976b36ee2e81b80b6c88af6425ef0227b119a32abe9"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-05-generation.log": {
+    "bytes": 179,
+    "sha256": "b012910132eda2a10ed682a4315266e8e7e0ebc31d9c33c1f5b3c0898e343b3e"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-06/adjusted-public-manifest.json": {
+    "bytes": 15197,
+    "sha256": "e15b0fd58412ab572c78b1e6c3baac4fc3b1c0b901c650bf185505247769429f"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-06/evaluator-truth.json": {
+    "bytes": 2952,
+    "sha256": "10d3acbf7056a9256042e7eb45e5f42d0b4be9cd38e3cb38effc4b57ddc01006"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-06/frontend/receipt.json": {
+    "bytes": 4383,
+    "sha256": "e817373b53a2302881925eb0cfc0559065e4b42ba695e4b1be59ca9d09186aa1"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-06/frontend/slot-0-receiver.json": {
+    "bytes": 760,
+    "sha256": "9660caa8ac6ef7acb58e178d9461c2ef0403692085f3859ef2318bf973d18f8b"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-06/manifest.json": {
+    "bytes": 13586,
+    "sha256": "ae4598a343bbf2027de6bf858bb7bfa6ef8c5ba15b8a1b134318e59d1c900a2a"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-06-generation.json": {
+    "bytes": 1300,
+    "sha256": "b557adb228fdfb4c0b49416948eb51d4adc6c54aa5bc2ca69c73b1b8ea2194f0"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-06-generation.log": {
+    "bytes": 179,
+    "sha256": "b74f6066a709273332d6cc7ccc7b943c0770a02c5ca1b43e690861c3fe431df7"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-07/adjusted-public-manifest.json": {
+    "bytes": 15202,
+    "sha256": "cc921b1ab6928ff23c212f688fa6551048bc6398a8a2a58e5aba8932cc235b04"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-07/evaluator-truth.json": {
+    "bytes": 2952,
+    "sha256": "ac2538d8fb807f8d25fc5086b48aa119121746fcbde81270236d6fda2db0c773"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-07/frontend/receipt.json": {
+    "bytes": 4384,
+    "sha256": "416b4a9d9ceec6cf2a7d9f879c4af55c3d02619116ac7a1d0b40f8457ce94f84"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-07/frontend/slot-0-receiver.json": {
+    "bytes": 759,
+    "sha256": "2a873ec1bf5ef6b9a62d9a0a22c8b14d7132f0b5457932ae401c6a37d932a9bc"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-07/manifest.json": {
+    "bytes": 13588,
+    "sha256": "6a416b1b6bf1f68963c209e59dca75b688a600f0638cc57b290e1f1d36a0ef68"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-07-generation.json": {
+    "bytes": 1299,
+    "sha256": "845c41d7d90d5f5d45714164d4651270606ed1aba3a24fa549ce7da95a34b20b"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/bit-07-generation.log": {
+    "bytes": 179,
+    "sha256": "9137e2171a146a041671485261010fb694cbb673f8f0f2785ea015c692c644c9"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/evaluation.json": {
+    "bytes": 123,
+    "sha256": "36e560525c94ddff8eca377404d1cd86776f86eaa5c2ad42c972684eb642e891"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/generate.py": {
+    "bytes": 1662,
+    "sha256": "4d0cffc28684c0295fdbeb5218a54af8ba8ba1fff3ec7cfd4b0487367ab2c418"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/generation-protocol.json": {
+    "bytes": 2291,
+    "sha256": "5c2c13333e3fac71343a544579aaafb996c99d0409667019c898c76a0b0ef03c"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/prepare_audio.py": {
+    "bytes": 2475,
+    "sha256": "c92687d4de29f7cbe92942c75b995315fef05cf802641a6808dc45eaa26c9bf4"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/protocol.json": {
+    "bytes": 13724,
+    "sha256": "7e01cf273e76dc20a9499ffb841b29388c33c196d674fcf46a71eeadc2b66fc2"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/result/bit-00-receiver.json": {
+    "bytes": 1006711,
+    "sha256": "70963e0a198d707e90c16f07cde7e027d16012d4bad207ca1a3af9f6fd3a0bae"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/result/bit-01-receiver.json": {
+    "bytes": 983457,
+    "sha256": "b2e27c39605c208b85cbad151a46ceef51f20aef77b96ba1ea6de2a4c3e5abb7"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/result/bit-02-receiver.json": {
+    "bytes": 1001596,
+    "sha256": "7259d41451bec398fa38ed53fe533d816ee2245c85013adb72d127aa56e561fd"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/result/bit-03-receiver.json": {
+    "bytes": 1021232,
+    "sha256": "41729c429d71c0eaffa18f1842b7c01edd50fc769b93e88cf8cb5d591577b706"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/result/bit-04-receiver.json": {
+    "bytes": 1020424,
+    "sha256": "71a6b10f8a1fbb3e996ed9674a8f75eaa5729dfb96aeee79727a80d95a9135ca"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/result/bit-05-receiver.json": {
+    "bytes": 997942,
+    "sha256": "6cfbc0fc4490eeedd43a845bb73e63853590888571b9477c6992933d003ca2ee"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/result/bit-06-receiver.json": {
+    "bytes": 996829,
+    "sha256": "741e6cf98b329847bbcd6ba1bcab708e46bf18b350f43466c9b9cbe5a2ddc9a9"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/result/bit-07-receiver.json": {
+    "bytes": 1016865,
+    "sha256": "8b87e06a3f16043942f952fd1ce6afaaba3188c65d733942dffdb5316c94027e"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/result/evaluation.json": {
+    "bytes": 243,
+    "sha256": "f6d9bbef51b28aab08cdc34a9dd1283bc13616d9a44159f412231ce26f398009"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/result/invocation.json": {
+    "bytes": 19894,
+    "sha256": "acbf74c13f1bc11417d94c47ddbf9ed94f4bb24f06fd421543c2c6bf2921b89d"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/result/receiver-campaign.json": {
+    "bytes": 60699,
+    "sha256": "d8400f0fd8572b5ffeb8c982f6e7f5447b5237ca03e0f4dad639942a4b9c6f80"
+  },
+  "local-evidence/triad-realtime-improvement/sustained-v1/result.log": {
+    "bytes": 375,
+    "sha256": "fd10346e153d11784cba46f7ccc344804c9f5851e2ae7c31d89c6b6f735a0fb9"
+  },
+  "local-evidence/triad-realtime-improvement/template-helper-integration.json": {
+    "bytes": 4414,
+    "sha256": "fcb55b5bb0edbd555633064f3d841ffafa023ee653e5d2a34e83ed5cd64ecd78"
+  },
+  "local-evidence/triad-realtime-improvement/template-identity-followup.json": {
+    "bytes": 55521,
+    "sha256": "2f302f59f604a86e7f0597793c322cfe917081c309d47ce0d47b1f945f02aeb0"
+  },
+  "local-evidence/triad-realtime-improvement/template-identity-followup.log": {
+    "bytes": 72,
+    "sha256": "9300e8a7bb1532f793167a0972ad506758c29ec811eecbd7eb66a0b1e1ba1d23"
+  },
+  "local-evidence/triad-realtime-improvement/triad-group-cache-fixed.log": {
+    "bytes": 6348,
+    "sha256": "05c6f244e24a649b8e8541c7737a696ada75f70aa1748dbf8219b6524d3690e6"
+  },
+  "local-evidence/triad-realtime-improvement/triad-group.log": {
+    "bytes": 2146,
+    "sha256": "75f69e443ee35a4e5fede5423ad3e5ec738c104d488901286a3c4b1f0b4f3411"
+  },
+  "local-evidence/triad-realtime-improvement/verify_template_identity.py": {
+    "bytes": 1679,
+    "sha256": "a7fdbabd0116b2cc69fc95bd805dbbe41ecfac7be251c81f2785f90280a545c0"
+  },
+  "src/triad_modem_v3.cpp": {
+    "bytes": 29489,
+    "sha256": "acf11ce6663cc46070cdf19a870d5c6487de6fb8eb6af8f8c4cd79bf5d360d04"
+  },
+  "tests/test_triad_dynamic_joint.py": {
+    "bytes": 17403,
+    "sha256": "1f6cf62a35d9c4d62c83b43ccf6ca92695b2eda8a02984cfb17a30180b0555f5"
+  },
+  "tests/test_triad_segmented_fft.py": {
+    "bytes": 10826,
+    "sha256": "f05286102663b658dc2e36d42dad5f6db522b9da9b1ea587cce78f1d09451ed0"
+  },
+  "tests/test_triad_stream_scheduler.py": {
+    "bytes": 8606,
+    "sha256": "d759453f8508f5c537643aa71ddb7aee2afd24fa83e9f981ba30005bfa440b8c"
+  },
+  "tests/test_triad_stream_source.py": {
+    "bytes": 16977,
+    "sha256": "9837ceb31ba9a22e57e8250cf4ff687c0db6f8b945c5ad374d486b3bb1aeaed6"
+  },
+  "tests/test_triad_template_bank.py": {
+    "bytes": 8657,
+    "sha256": "75a4ab1a337b900e68a6d6e3f7c6b267ff5e736b241d89ad03e08b12a77564f5"
+  },
+  "tests/test_triad_v3_source.cpp": {
+    "bytes": 33069,
+    "sha256": "0f97f89ba91b26970ca5065a143cc5945038b10b10254a8f2fefb592d0937e69"
+  },
+  "tests/test_triad_weak_receiver.py": {
+    "bytes": 8439,
+    "sha256": "6801bfc256d742e530692bbfe34fd878bea970edfbfd53a10ae9842e14c75f38"
+  },
+  "tests/test_triad_weak_throughput.py": {
+    "bytes": 2607,
+    "sha256": "0a5ba1f0db798b46b7671305d45ef0981106a099911c1375cca76a9265b06c2b"
+  },
+  "tools/triad-helper-export.cpp": {
+    "bytes": 127561,
+    "sha256": "f7591647e89077b05948e3c70845df29beb8673d8f14390ee11bca6bba697d18"
+  },
+  "tools/triad_continuous.py": {
+    "bytes": 53122,
+    "sha256": "95700e432d6bc7b7410b9e015364b53bcb47abe8bf3eca2d3a93f1ec08e97cd3"
+  },
+  "tools/triad_dynamic_joint.py": {
+    "bytes": 38075,
+    "sha256": "448a49411761fbe3a460302253db8be4f3029b558f35ca6f690d483c9f3d9d12"
+  },
+  "tools/triad_dynamic_scan.py": {
+    "bytes": 17807,
+    "sha256": "50ed9f86c28a6090123e7efe38c319b851ba00b0562e9a722346ad2a70e510ac"
+  },
+  "tools/triad_dynamic_variants.py": {
+    "bytes": 8886,
+    "sha256": "c20d1a7e0dc70629971ca04558a378c1c2222d9d457ebdb3bcc8343aa6eb8e76"
+  },
+  "tools/triad_gaussian_prepared.py": {
+    "bytes": 22456,
+    "sha256": "c88afdf459521393958c49d801517d79cd158cbe2291e4a48c3eff6931e42875"
+  },
+  "tools/triad_gaussian_state.py": {
+    "bytes": 15907,
+    "sha256": "7d13799a4f7838bed4797fea13626c041f40cdf405c597fcf3ad4bae720c7a6c"
+  },
+  "tools/triad_operational_admission.py": {
+    "bytes": 9336,
+    "sha256": "9cc99ce26c445c4c87d72600fc621b60ff9d0b61da9bed3e4f3174272904d0ea"
+  },
+  "tools/triad_realtime_fft.py": {
+    "bytes": 22269,
+    "sha256": "0580ba4e357c3535fc70fb02ef53cd7778b71b4590955149e0c23d3b82d8e1c2"
+  },
+  "tools/triad_realtime_receiver.py": {
+    "bytes": 13477,
+    "sha256": "413958f2fe71739b6c6b60656079f69fa5370b75b3ff96109d1109f4507a464e"
+  },
+  "tools/triad_segmented_fft.py": {
+    "bytes": 19412,
+    "sha256": "f298dc666ad2316a40c497cd84123b7199c2ef5a6b0485c135d7972f5652deff"
+  },
+  "tools/triad_stream_frontend.py": {
+    "bytes": 14090,
+    "sha256": "2ce6a976f147a7f12848a74ad7b6dae08bcbb146b9cd4ddd50e51782b1f88a0e"
+  },
+  "tools/triad_stream_run.py": {
+    "bytes": 22739,
+    "sha256": "be84ca2a6079439778c38980bba9ed0a407df3f41b114e1a2446572092cce7c9"
+  },
+  "tools/triad_stream_scheduler.py": {
+    "bytes": 16102,
+    "sha256": "9c4f323c4b6c1f04709b6ee6bddcfe82930975e759454eeeac48a691fc23db8c"
+  },
+  "tools/triad_stream_slots.py": {
+    "bytes": 3991,
+    "sha256": "6975902d86de19fcd7a1e03caeae4d185474acdb582dbda5e28fa94506d4d588"
+  },
+  "tools/triad_template_bank.py": {
+    "bytes": 9312,
+    "sha256": "1b559693485c19f2340b44e9077954e586c6f3af482087dac0ecd824c8eb9d6c"
+  },
+  "tools/triad_weak_helper.py": {
+    "bytes": 19689,
+    "sha256": "6fbe2e226378215c36809d3e9990203a02a19a27562694b35f34f1e2cebf4278"
+  },
+  "tools/triad_weak_receiver.py": {
+    "bytes": 10153,
+    "sha256": "3be7c7f17898c4a70e71dde86988c8a5cc2a619609fd17860e2b6a66bd7ad48e"
+  },
+  "tools/triad_weak_throughput.py": {
+    "bytes": 13603,
+    "sha256": "fd7273b9f216baeceeee20dd180d84b623ec1e5ee6e9b0e8a05c36d71c90832d"
+  }
+}

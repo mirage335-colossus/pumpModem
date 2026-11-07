@@ -1,0 +1,245 @@
+{
+  "schema": "triad-realtime-optimization-summary-v1",
+  "source_revision": "7ac6bc22daf3f4a1fde9dab75cc8414b8d120723",
+  "cpu": "AMD Ryzen 5 PRO 5650U, six physical cores",
+  "pairs": [
+    {
+      "name": "physical20",
+      "before_report_sha256": "9db6571e6de232734e889dd225febc4945365b76998854cd350ad356782fb2c7",
+      "after_report_sha256": "5b14a5ce208bb31fd2f9e07c688ab3be768064828d7dfd81ce1ccdab6af374ef",
+      "before_reception": {
+        "cpu_seconds": 26.399376371000002,
+        "child_cpu_seconds": 0.0,
+        "wall_seconds": 20.47426090098452,
+        "duration_denominators_seconds": {
+          "observed_audio": 97.94616666666667,
+          "analysis_window": 73.94616666666667,
+          "transmitted_helper_and_data": 49.8675,
+          "active_data": 11.600000000000001
+        },
+        "cpu_per_second_by_duration": {
+          "observed_audio": {
+            "prepared": 0.26952944938461093,
+            "including_workspace": 0.28381418206599884,
+            "including_import_loading_workspace": 0.3041453214946306
+          },
+          "analysis_window": {
+            "prepared": 0.35700804464959873,
+            "including_workspace": 0.3759290363800693,
+            "including_import_loading_workspace": 0.40285885926022763
+          },
+          "transmitted_helper_and_data": {
+            "prepared": 0.5293904120118315,
+            "including_workspace": 0.5574474593472704,
+            "including_import_loading_workspace": 0.5973804251265855
+          },
+          "active_data": {
+            "prepared": 2.2758083078448275,
+            "including_workspace": 2.3964233774999997,
+            "including_import_loading_workspace": 2.568092099137931
+          }
+        }
+      },
+      "after_reception": {
+        "cpu_seconds": 14.367049621,
+        "child_cpu_seconds": 0.0,
+        "wall_seconds": 11.838819751981646,
+        "duration_denominators_seconds": {
+          "observed_audio": 97.94616666666667,
+          "analysis_window": 73.94616666666667,
+          "transmitted_helper_and_data": 49.8675,
+          "active_data": 11.600000000000001
+        },
+        "cpu_per_second_by_duration": {
+          "observed_audio": {
+            "prepared": 0.14668312308632123,
+            "including_workspace": 0.1613228053505582,
+            "including_import_loading_workspace": 0.1805395393592058
+          },
+          "analysis_window": {
+            "prepared": 0.19429066128287018,
+            "including_workspace": 0.21368180518710683,
+            "including_import_loading_workspace": 0.23913553073970475
+          },
+          "transmitted_helper_and_data": {
+            "prepared": 0.2881044692635484,
+            "including_workspace": 0.3168586831102421,
+            "including_import_loading_workspace": 0.35460281369629515
+          },
+          "active_data": {
+            "prepared": 1.2385387604310343,
+            "including_workspace": 1.362150894827586,
+            "including_import_loading_workspace": 1.524409983793103
+          }
+        }
+      },
+      "after_workspace": {
+        "cpu_seconds": 1.4339007590000001,
+        "wall_seconds": 1.3481067860266194
+      },
+      "decisions_exact": {
+        "bit": true,
+        "score": true,
+        "margin": true,
+        "bit_scores": true,
+        "operational": true
+      },
+      "score": 1177.0226127560727,
+      "physical_null_qualified": false
+    },
+    {
+      "name": "target8",
+      "before_report_sha256": "80e05782f2445032c47e86973d21d0765cf383be4e7a025c0cbde825f433ca39",
+      "after_report_sha256": "04db56cabc8e47327183dc792e2c28f75fde88cbc5250642fe45c6a6aaa63e5c",
+      "before_reception": {
+        "cpu_seconds": 82.115666325,
+        "child_cpu_seconds": 0.0,
+        "wall_seconds": 59.01472326007206,
+        "duration_denominators_seconds": {
+          "observed_audio": 132.74966666666666,
+          "analysis_window": 108.74966666666667,
+          "transmitted_helper_and_data": 84.6675,
+          "active_data": 46.400000000000006
+        },
+        "cpu_per_second_by_duration": {
+          "observed_audio": {
+            "prepared": 0.6185753108607932,
+            "including_preparation": 0.6767764393306701
+          },
+          "analysis_window": {
+            "prepared": 0.7550889013452915,
+            "including_preparation": 0.8261344561577201
+          },
+          "transmitted_helper_and_data": {
+            "prepared": 0.9698605288333777,
+            "including_preparation": 1.061113729931792
+          },
+          "active_data": {
+            "prepared": 1.7697341880387931,
+            "including_preparation": 1.9362466967456897
+          }
+        },
+        "cpu_seconds_per_analog_second": 0.6185753108607932,
+        "cpu_with_audio_children_per_analog_second": 0.6185753108607932,
+        "including_preparation_per_analog_second": 0.6767764393306701,
+        "cold_including_import_load_preparation_per_analog_second": 0.6902856095307208
+      },
+      "after_reception": {
+        "cpu_seconds": 41.539377861,
+        "child_cpu_seconds": 0.0,
+        "wall_seconds": 33.36276598297991,
+        "duration_denominators_seconds": {
+          "observed_audio": 132.74966666666666,
+          "analysis_window": 108.74966666666667,
+          "transmitted_helper_and_data": 84.6675,
+          "active_data": 46.400000000000006
+        },
+        "cpu_per_second_by_duration": {
+          "observed_audio": {
+            "prepared": 0.31291511989483967,
+            "including_workspace": 0.37561834509314523,
+            "including_import_loading_workspace": 0.38963837952888764
+          },
+          "analysis_window": {
+            "prepared": 0.3819724614726788,
+            "including_workspace": 0.4585136822335087,
+            "including_import_loading_workspace": 0.4756278027181691
+          },
+          "transmitted_helper_and_data": {
+            "prepared": 0.4906177442466117,
+            "including_workspace": 0.5889297558685445,
+            "including_import_loading_workspace": 0.6109116839755513
+          },
+          "active_data": {
+            "prepared": 0.8952452125215515,
+            "including_workspace": 1.0746381488146548,
+            "including_import_loading_workspace": 1.11474924575431
+          }
+        }
+      },
+      "after_workspace": {
+        "cpu_seconds": 8.323832243999998,
+        "wall_seconds": 8.291498908074573
+      },
+      "decisions_exact": {
+        "bit": true,
+        "score": true,
+        "margin": true,
+        "bit_scores": true,
+        "operational": true
+      },
+      "score": 138.95581290787436,
+      "physical_null_qualified": false
+    }
+  ],
+  "cadence": {
+    "schema": "triad-computational-cadence-v1",
+    "workers": 2,
+    "queue_capacity": 2,
+    "cadence_seconds": 11.6,
+    "jobs": 8,
+    "offered_data_seconds": 92.8,
+    "parent_cpu_seconds": 107.198606771,
+    "waited_child_cpu_seconds": 4.387989,
+    "total_cpu_seconds": 111.586595771,
+    "wall_seconds": 91.46589289908297,
+    "cpu_seconds_per_offered_data_second": 1.202441764773707,
+    "inflight_capacity": 4,
+    "queue_highwater": 1,
+    "queue_highwater_scope": "Submitted not-yet-started jobs, including reserved worker slots during thread dispatch.",
+    "maximum_queue_wait_seconds": 0.0022991240257397294,
+    "maximum_completion_delay_seconds": 14.111584111000411,
+    "completed": 8,
+    "overloads": 0,
+    "errors": 0,
+    "timing_scope": "Aggregate process CPU plus one campaign-wide waited-child delta; includes fresh native bank and per-key preparation. Per-job child deltas can overlap and are not summed.",
+    "scope": "Independent complete receiver windows offered at a bit cadence; no claim of continuous waveform, live audio, full-message completion or physical-null qualification.",
+    "numerical_threads": 2,
+    "startup": {
+      "cpu_seconds": 1.4694130939999999,
+      "wall_seconds": 1.225670926971361,
+      "scope": "CLI imports/thread configuration and frozen input/source identity checks; no keyed bank reused from startup."
+    },
+    "source_identity_unchanged": true,
+    "input_identity_unchanged": true,
+    "native_identity_unchanged": true,
+    "peak_process_rss_kib": 699660,
+    "peak_rss_scope": "Parent process high-water RSS, excluding native subprocess peaks.",
+    "physical_null_qualified": false,
+    "message_completed": false
+  },
+  "evaluation": {
+    "correct_admissions": 8,
+    "wrong_admissions": 0,
+    "misses": 0,
+    "false_admissions": 0,
+    "unscored": 0,
+    "scope": "Conditional model decisions on the frozen finite cases; not a physical false-admission or reliability qualification."
+  },
+  "final_checks": {
+    "native_group": {
+      "passed": 28,
+      "failed": 0,
+      "wall_seconds": 46.59
+    },
+    "focused_python": {
+      "collected": 95,
+      "passed": 93,
+      "skipped": 2,
+      "skip_reasons": [
+        "CUDA unavailable",
+        "Optional additional native capture not requested"
+      ]
+    },
+    "native_protocol": {
+      "passed": 11,
+      "failed": 0
+    },
+    "final_native_identity": {
+      "all_eight_frozen_cases_accepted": true,
+      "baseline_bank_bitwise_equal": true
+    }
+  },
+  "final_native_sha256": "b793b9f32e302b285c1a77c5521340e3d83c64de336ea0b9d1d4779f84c7e318",
+  "interpretation": "Direct CPU measurements, not a calibrated future runtime bound. Fresh-window computational cadence, not contiguous-message/live qualification."
+}

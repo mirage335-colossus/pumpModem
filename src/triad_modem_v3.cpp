@@ -9,6 +9,7 @@
 #include <numeric>
 #include <optional>
 #include <string_view>
+#include <tuple>
 #include <utility>
 
 namespace datapump::triad::v3 {
@@ -380,5 +381,84 @@ Complex PatternSource::sample_at(long double sample){
 void PatternSource::render(std::uint64_t first,std::span<Complex> output){
     require(output.size()<=UINT64_MAX-first,"triad v3 render coordinate overflow");
     for(std::size_t i=0;i<output.size();++i)output[i]=sample_at(static_cast<long double>(first+i));
+}
+void PatternSource::render_bank(std::span<PatternSource* const> sources,
+        long double first_sample,long double sample_step,std::size_t count,
+        std::span<Complex> output){
+    require(std::isfinite(first_sample)&&std::isfinite(sample_step)&&sample_step>0,
+            "triad v3 bank requires a finite positive sample lattice");
+    require(!count||sources.size()<=std::numeric_limits<std::size_t>::max()/count,
+            "triad v3 render bank extent overflow");
+    require(output.size()==sources.size()*count,"triad v3 render bank output extent mismatch");
+    require(!count||std::isfinite(first_sample+(count-1)*sample_step),
+            "triad v3 render bank coordinate overflow");
+    for(auto* source:sources)require(source&&source->impl_,"triad v3 render bank has an empty source");
+    if(sources.empty()||!count)return;
+    // Deliberately compare all geometry inputs, not key-dependent controls.
+    // A conservative mismatch is an error rather than a silently wrong basis.
+    const auto geometry_inputs=[](const Format& f){return std::tie(f.inner_rate_hz,
+        f.added_symbols,f.sample_rate,f.sample_rate_denominator,f.bit_seconds,
+        f.minimum_inner_coefficients,f.fhss,f.fhss_center_aligned,f.dwell_seconds,
+        f.quiet_seconds,f.ramp_seconds,f.margin_seconds,f.burst_wait_tiles,f.pulse_shape);};
+    const auto& ref=*sources.front()->impl_;const auto& g=ref.geom;
+    for(auto* source:sources)require(geometry_inputs(source->impl_->format)==geometry_inputs(ref.format),
+            "triad v3 render bank geometry differs");
+    struct Point {
+        std::uint64_t first=0;
+        unsigned length=0;
+        std::array<double,17> weights{};
+        Chip rotations{};
+    };
+    static_assert(sizeof(Point)<=256,"render bank point exceeds declared scratch bound");
+    constexpr std::size_t block_size=256,maximum_cached_chips=4096;
+    std::array<Point,block_size> points;
+    std::vector<Chip> chips;chips.reserve(maximum_cached_chips);
+    for(std::size_t begin=0;begin<count;begin+=std::min(block_size,count-begin)){
+        const auto n=std::min(block_size,count-begin);
+        std::uint64_t minimum=UINT64_MAX,maximum=0;
+        for(std::size_t i=0;i<n;++i){
+            auto& point=points[i];point.length=0;
+            const auto sample=first_sample+(begin+i)*sample_step;
+            if(sample<0||sample>=g.source_samples)continue;
+            const long double t=(sample-ref.halo)/ref.sample_rate;
+            const auto envelope=ref.envelope(t);if(envelope==0)continue;
+            const auto offset=ref.center_offset();
+            const auto first=std::max(0.L,std::ceil(t*g.fine_chip_rate_hz-(8+offset)));
+            const auto last=std::min(static_cast<long double>(g.fine_cells)-1,
+                                    std::floor(t*g.fine_chip_rate_hz+(8-offset)));
+            if(last<first)continue;
+            point.first=static_cast<std::uint64_t>(first);
+            point.length=static_cast<unsigned>(last-first)+1;
+            require(point.length<=point.weights.size(),"triad v3 pulse bank support overflow");
+            minimum=std::min(minimum,point.first);maximum=std::max(maximum,point.first+point.length-1);
+            for(unsigned j=0;j<point.length;++j){
+                const auto pulse=shaping_pulse(ref.format.pulse_shape,static_cast<double>(
+                    t*g.fine_chip_rate_hz-(static_cast<long double>(point.first+j)+offset)));
+                point.weights[j]=carrier_gain*pulse*envelope;
+            }
+            for(unsigned c=0;c<3;++c){const auto cycles=(static_cast<int>(c)-1)*g.carrier_spacing_hz*t;
+                point.rotations[c]=std::polar(1.,static_cast<double>(tau*std::remainder(cycles,1.L)));}
+        }
+        const bool cached=minimum!=UINT64_MAX&&maximum-minimum<maximum_cached_chips;
+        for(std::size_t row=0;row<sources.size();++row){
+            auto& impl=*sources[row]->impl_;
+            if(cached){
+                chips.resize(static_cast<std::size_t>(maximum-minimum+1));
+                for(std::size_t j=0;j<chips.size();++j)chips[j]=impl.chip(minimum+j);
+            }
+            for(std::size_t i=0;i<n;++i){
+                const auto& point=points[i];Chip carriers{};
+                for(unsigned j=0;j<point.length;++j){
+                    const auto chip=cached?chips[static_cast<std::size_t>(point.first-minimum+j)]:impl.chip(point.first+j);
+                    // Same ordered coefficient accumulation and final rotations
+                    // as sample_at; no recurrence or pulse approximation.
+                    for(unsigned c=0;c<3;++c)carriers[c]+=chip[c]*point.weights[j];
+                }
+                Complex value{};
+                for(unsigned c=0;c<3;++c)value+=carriers[c]*point.rotations[c];
+                output[row*count+begin+i]=value;
+            }
+        }
+    }
 }
 } // namespace datapump::triad::v3

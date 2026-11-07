@@ -150,6 +150,75 @@ void revision_random_access_checks() {
     }
 }
 
+void shared_geometry_bank_checks() {
+    auto key=fixture_key();
+    std::vector<Format> formats(6);
+    formats[0].sample_rate=6000;formats[0].bit_seconds=11.6;
+    formats[0].pulse_shape=PulseShape::TaperedRrc;
+    formats[1].inner_rate_hz=360;formats[1].added_symbols=1;formats[1].sample_rate=6000;
+    formats[1].bit_seconds=8;formats[1].fhss=true;formats[1].fhss_center_aligned=true;
+    formats[1].quiet_seconds=.055;formats[1].ramp_seconds=.006;
+    formats[2].inner_rate_hz=359.3;formats[2].added_symbols=1;formats[2].sample_rate=6000;
+    formats[2].bit_seconds=17;
+    formats[3].bit_seconds=40;formats[3].burst_wait_tiles=1;
+    formats[4].inner_rate_hz=.01;formats[4].added_symbols=1;
+    formats[4].sample_rate=1;formats[4].sample_rate_denominator=100;formats[4].bit_seconds=100000;
+    formats[5].bit_seconds=38*86400.;
+    for(const auto& format:formats){
+        std::vector<PatternSource> bank;bank.reserve(4);
+        std::vector<PatternSource> references;references.reserve(4);
+        std::vector<PatternSource*> pointers;
+        for(unsigned row=0;row<4;++row){
+            auto f=format;f.epoch+=row;f.symbol_ordinal+=13*row;
+            f.pattern_revision=(row&1)?PatternRevision::LegacyV1:PatternRevision::IndependentApskV2;
+            f.added_interleave=(row&1)==0;f.encrypt=(row&2)==0;
+            bank.emplace_back(f,key,static_cast<std::uint8_t>(row%2));
+            references.emplace_back(f,key,static_cast<std::uint8_t>(row%2));
+            pointers.push_back(&bank.back());
+        }
+        const auto& g=bank.front().geometry();
+        const auto fs=effective_sample_rate(format);
+        for(const auto first:{-3.L,static_cast<long double>(g.calendar_origin_sample)+.375L,
+                static_cast<long double>(g.source_samples)/2+.25L,
+                static_cast<long double>(g.source_samples)-5.L,
+                static_cast<long double>(g.calendar_origin_sample)+1.5L*g.tile_seconds*fs}){
+            constexpr std::size_t rows=513;
+            std::vector<Complex> actual(pointers.size()*rows);
+            PatternSource::render_bank(pointers,first,1.0002L,rows,actual);
+            for(std::size_t row=0;row<pointers.size();++row)for(std::size_t i=0;i<rows;++i){
+                const auto expected=references[row].sample_at(first+i*1.0002L);
+                check(actual[row*rows+i]==expected,"shared pulse bank differs from scalar source");
+            }
+            // Integer-lattice split rendering is bit-identical at internal and
+            // caller chunk boundaries. Sparse steps exercise bounded fallback.
+            std::vector<Complex> whole(pointers.size()*19),left(pointers.size()*7),right(pointers.size()*12);
+            PatternSource::render_bank(pointers,first,1,19,whole);
+            PatternSource::render_bank(pointers,first,1,7,left);
+            PatternSource::render_bank(pointers,first+7,1,12,right);
+            for(std::size_t row=0;row<pointers.size();++row){
+                check(std::equal(left.begin()+row*7,left.begin()+(row+1)*7,whole.begin()+row*19)&&
+                      std::equal(right.begin()+row*12,right.begin()+(row+1)*12,whole.begin()+row*19+7),
+                      "shared pulse bank depends on rendering chunk boundaries");
+            }
+        }
+        std::array<Complex,8> sparse{};
+        PatternSource* one=&bank.front();
+        const auto step=static_cast<long double>(g.source_samples)/7;
+        PatternSource::render_bank(std::span(&one,1),0,step,sparse.size(),sparse);
+        for(std::size_t i=0;i<sparse.size();++i)
+            check(sparse[i]==references.front().sample_at(i*step),"sparse bank fallback differs");
+    }
+    Format f;PatternSource a(f,key,0);f.ramp_seconds=.03;PatternSource b(f,key,1);
+    std::array<PatternSource*,2> mismatch{&a,&b};std::array<Complex,2> output{};
+    bool rejected=false;try{PatternSource::render_bank(mismatch,0,1,1,output);}catch(const std::exception&){rejected=true;}
+    check(rejected,"shared pulse bank accepted different geometry");
+    for(long double step:{0.L,-1.L,std::numeric_limits<long double>::infinity()}){
+        rejected=false;try{PatternSource::render_bank(mismatch,0,step,1,output);}catch(const std::exception&){rejected=true;}
+        check(rejected,"shared pulse bank accepted invalid step");
+    }
+    check(PatternSource::render_bank_scratch_bytes<512*1024,"shared pulse bank scratch is not bounded");
+}
+
 void geometry_checks() {
     Format f;
     const auto g = geometry(f);
@@ -497,6 +566,7 @@ int main() {
         legacy_pattern_goldens();
         independent_patterns_and_apsk();
         revision_random_access_checks();
+        shared_geometry_bank_checks();
         geometry_checks();
         random_access_and_chunk_checks();
         protected_waveform_checks();

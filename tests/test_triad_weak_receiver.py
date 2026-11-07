@@ -9,6 +9,19 @@ from triad_weak_receiver import WeakReceiver
 
 
 class WeakContracts(unittest.TestCase):
+    def test_fft_thread_budget_is_explicit_and_fingerprinted(self):
+        m,t=self.inputs()
+        with mock.patch('triad_weak_receiver.FFTScreen')as screen:
+            screen.return_value.procedure_id='same-geometry'
+            one=WeakReceiver(m,t,[0],fft_workers=1)
+            self.assertEqual(screen.call_args.kwargs['workers'],1)
+            two=WeakReceiver(m,t,[0],fft_workers=2)
+            self.assertEqual(screen.call_args.kwargs['workers'],2)
+            self.assertNotEqual(one.procedure_id,two.procedure_id)
+        for bad in (0,-1,True,1.5):
+            with self.assertRaisesRegex(ValueError,'FFT workers'):
+                WeakReceiver(m,t,[0],fft_workers=bad)
+
     def inputs(self):
         m,t=fixture(True);m.update(schema='test',public_epoch_seconds=1000,key_seed=1)
         m['format']['bit_seconds']=1.

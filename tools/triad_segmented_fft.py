@@ -20,6 +20,23 @@ from triad_realtime_fft import (FFTScreen, _clock, _digest, _elapsed, _integer,
                                 _number, _quadratic_scores)
 
 
+def _correlation_fft_length(rows, policy):
+    """Pad valid-only correlation without changing any requested lag.
+
+    A complex ``next_fast_len`` can select repeated radix-11 lengths, which
+    were substantially slower for this batched workload on the reference CPU.
+    Real-fast lengths currently use the smaller 2/3/5 radices. A nearby power
+    of two may be cheaper still; cap that extra padding at ten percent. This
+    is a bounded portable heuristic, not a claim of universal FFT optimality.
+    The original length remains available for paired numerical/timing checks.
+    """
+    if policy == 'legacy':
+        return fft.next_fast_len(rows)
+    smooth = fft.next_fast_len(rows, real=True)
+    power_two = 1 << (rows-1).bit_length()
+    return power_two if power_two <= smooth+smooth//10 else smooth
+
+
 class SegmentedFFTScreen(FFTScreen):
     """Full arrival/epoch/clock bank, short coherent blocks and tiled FFTs.
 
@@ -29,10 +46,16 @@ class SegmentedFFTScreen(FFTScreen):
     preparation. No giant [workspace, block, ray, FFT] cache is retained.
     """
     def __init__(self, manifest, raw_templates, epoch_offsets, *, block_seconds=.5,
-                 workspace_batch_size=8, maximum_fft_products=250_000, **kwargs):
+                 workspace_batch_size=8, transform_batch_bytes=4*1024**2,
+                 fft_length_policy='bounded-smooth', maximum_fft_products=250_000,
+                 **kwargs):
         started = _clock()
         block_seconds = _number(block_seconds, 'block seconds', positive=True)
         self.workspace_batch_size = _integer(workspace_batch_size, 'workspace batch size')
+        self.transform_batch_bytes = _integer(transform_batch_bytes, 'transform batch bytes')
+        if fft_length_policy not in ('bounded-smooth', 'legacy'):
+            raise ValueError('FFT length policy must be bounded-smooth or legacy')
+        self.fft_length_policy = fft_length_policy
         super().__init__(manifest, raw_templates, epoch_offsets,
                          maximum_fft_products=maximum_fft_products, **kwargs)
         self.parent_procedure_id = self.procedure_id
@@ -41,7 +64,8 @@ class SegmentedFFTScreen(FFTScreen):
         self.maximum_frequency_step = 1/(4*self.block_seconds)
         self.blocks = [(start, min(start+self.block_rows, self.kernel_rows))
                        for start in range(0, self.kernel_rows, self.block_rows)]
-        self.block_nfft = tuple(fft.next_fast_len(stop-start+self.lag_count-1)
+        self.block_nfft = tuple(_correlation_fft_length(stop-start+self.lag_count-1,
+                                                       self.fft_length_policy)
                                 for start, stop in self.blocks)
         self.columns = np.asarray([w['columns'] for w in self.workspaces], dtype=self.dtype)
         self.orthonormal_columns = np.zeros_like(self.columns)
@@ -82,6 +106,10 @@ class SegmentedFFTScreen(FFTScreen):
             maximum_frequency_step_hz=self.maximum_frequency_step,
             frequency_grid='zero-anchored integer multiples of 1/(4 resolved block seconds); interval endpoints rounded outward',
             workspace_batch_size=self.workspace_batch_size,
+            transform_product_target_bytes=self.transform_batch_bytes,
+            transform_tiling='workspace/frequency ceilings and byte target; at least one complete ray design',
+            fft_length_policy=self.fft_length_policy,
+            fft_padding='real-fast length, or next power of two when at most ten percent larger; legacy retains complex next_fast_len',
             statistic='sum of independent block complex two-ray GLRT energies; proposal only',
             score_arithmetic='FP64 block basis orthonormalization before selected-precision FFT; FP64 squared-correlation sums',
             rank_policy='eigenvalue > max(1e-12 whole-pattern maximum,1e-10 block maximum)',
@@ -92,6 +120,17 @@ class SegmentedFFTScreen(FFTScreen):
             parent_procedure_id=self.parent_procedure_id,
             source_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()))
         self.preparation_timing = _elapsed(started)
+
+    def _batch_shape(self, nfft, frequency_count):
+        # Bound the product tensor rather than fixing a large transform count:
+        # precision and FFT length both change its cache/memory footprint.
+        # A complete ray design is indivisible; the public memory guard still
+        # accounts for its actual size when it exceeds this cache target.
+        design_bytes = len(self.rays)*nfft*np.dtype(self.dtype).itemsize
+        designs = max(1, self.transform_batch_bytes//design_bytes)
+        workspaces = min(len(self.workspaces), self.workspace_batch_size, designs)
+        frequencies = min(frequency_count, self.batch_size, max(1, designs//workspaces))
+        return workspaces, frequencies
 
     def _frequencies(self, frequencies_hz, frequency_intervals):
         if (frequencies_hz is None) == (frequency_intervals is None):
@@ -136,14 +175,19 @@ class SegmentedFFTScreen(FFTScreen):
         """Array/work envelope; an engineering allocation estimate, not RSS."""
         frequency_count = _integer(frequency_count, 'frequency count')
         nw, nr, nf = len(self.workspaces), len(self.rays), max(self.block_nfft)
-        wbatch, fbatch = min(nw, self.workspace_batch_size), min(frequency_count, self.batch_size)
+        wbatch, fbatch = self._batch_shape(nf, frequency_count)
         complex_bytes = np.dtype(self.dtype).itemsize
+        tiles = [(length, *self._batch_shape(length, frequency_count))
+                 for length in sorted(set(self.block_nfft))]
+        product_bytes = max(w*f*nr*length*complex_bytes for length,w,f in tiles)
+        maximum_fbatch = max(f for _,_,f in tiles)
         score_bytes = nw*frequency_count*self.lag_count*8
         transforms = (nw*nr+frequency_count)*nf*complex_bytes
-        product_scratch = 3*wbatch*fbatch*nr*nf*complex_bytes
-        quadratic_scratch = 8*fbatch*self.lag_count*16
+        product_scratch = 3*product_bytes
+        quadratic_scratch = 8*maximum_fbatch*self.lag_count*16
         peak = (self.resident_estimate+score_bytes+transforms+product_scratch+
                 quadratic_scratch+64*self.samples+32*self.crop_rows)
+        active_blocks = int(np.count_nonzero(np.any(self.ranks, axis=1)))
         return dict(epochs=len(self.epochs), clocks=len(self.clocks), bits=2, rays=nr,
             arrival_points=self.lag_count, frequency_points=frequency_count,
             synchronization_hypotheses=len(self.epochs)*len(self.clocks)*self.lag_count*frequency_count,
@@ -152,6 +196,15 @@ class SegmentedFFTScreen(FFTScreen):
             fft_products=nw*nr*frequency_count*len(self.blocks),
             fft_lengths=list(self.block_nfft), template_workspaces=nw,
             template_ffts=nw*nr*len(self.blocks), observation_ffts=frequency_count*len(self.blocks),
+            executed_fft_products=nw*nr*frequency_count*active_blocks,
+            executed_template_ffts=nw*nr*active_blocks,
+            executed_observation_ffts=frequency_count*active_blocks,
+            skipped_zero_rank_blocks=len(self.blocks)-active_blocks,
+            workspace_batch_size=wbatch, frequency_batch_size=fbatch,
+            maximum_transform_product_bytes=product_bytes,
+            fft_batch_shapes=[dict(fft_length=n, workspace_batch_size=w,
+                                   frequency_batch_size=f) for n,w,f in tiles],
+            fft_length_policy=self.fft_length_policy,
             active_block_designs=int(np.count_nonzero(self.ranks)),
             total_design_rank=int(self.ranks.sum()), score_array_bytes=score_bytes,
             estimated_peak_bytes=peak, source_support_complete=True, coarse_projection_only=True)
@@ -161,20 +214,27 @@ class SegmentedFFTScreen(FFTScreen):
         nw, nr = len(self.workspaces), len(self.rays)
         scores = np.zeros((nw, len(frequencies), self.lag_count), dtype=np.float64)
         for bi, ((start, stop), nfft) in enumerate(zip(self.blocks, self.block_nfft)):
+            if not np.any(self.ranks[bi]):
+                # These orthonormal columns are exactly zero. No observation,
+                # timing hypothesis or nonzero filter tail is discarded.
+                continue
             columns = self.orthonormal_columns[:, :, start:stop]
-            transforms = fft.fft(columns, n=nfft, axis=-1, workers=self.workers).conj()
+            transforms = fft.fft(columns, n=nfft, axis=-1, workers=self.workers)
+            np.conjugate(transforms, out=transforms)
             segment = observation[start:stop+self.lag_count-1]
             times = np.arange(len(segment), dtype=float)/self.output_fs
             spectra = np.empty((len(frequencies), nfft), dtype=self.dtype)
             for fi, frequency in enumerate(frequencies):
                 rotation = np.exp(-2j*np.pi*np.remainder(frequency*times, 1.)).astype(self.dtype)
                 spectra[fi] = fft.fft(segment*rotation, n=nfft, workers=self.workers)
-            for wf in range(0, nw, self.workspace_batch_size):
-                ws = min(wf+self.workspace_batch_size, nw)
-                for ff in range(0, len(frequencies), self.batch_size):
-                    fs = min(ff+self.batch_size, len(frequencies))
+            wbatch, fbatch = self._batch_shape(nfft, len(frequencies))
+            for wf in range(0, nw, wbatch):
+                ws = min(wf+wbatch, nw)
+                for ff in range(0, len(frequencies), fbatch):
+                    fs = min(ff+fbatch, len(frequencies))
                     products = spectra[ff:fs, None, None, :]*transforms[None, wf:ws]
-                    correlations = fft.ifft(products, axis=-1, workers=self.workers)[..., :self.lag_count]
+                    correlations = fft.ifft(products, axis=-1, workers=self.workers,
+                                            overwrite_x=True)[..., :self.lag_count]
                     for local, wi in enumerate(range(wf, ws)):
                         c = correlations[:, local]
                         energy = np.sum(c.real.astype(np.float64)**2+c.imag.astype(np.float64)**2, axis=1)

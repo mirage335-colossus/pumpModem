@@ -102,6 +102,37 @@ class Source:
 
 @unittest.skipIf(BINARY is None, 'native binary path required')
 class PullSourceTests(unittest.TestCase):
+    def test_template_bank_memory_plan_uses_single_source_fallback(self):
+        # Checked geometry only: exercise the large private-cache regime without
+        # allocating it or exporting millions of samples as a routine test.
+        common = [str(BINARY), *COMMON, '--plan-only', '--shaping', 'legacy',
+                  '--spread-preset', 'none', '--selective-perturbation', 'off']
+        ordinary = json.loads(subprocess.check_output(common))['geometry']
+        large = json.loads(subprocess.check_output(common + [
+            '--rate', '500000', '--sample-rate', '400000']))['geometry']
+        self.assertEqual(ordinary['template_bank_rows'], 26)
+        self.assertFalse(ordinary['template_bank_single_source_fallback'])
+        self.assertEqual(large['template_bank_rows'], 1)
+        self.assertTrue(large['template_bank_single_source_fallback'])
+        self.assertGreater(large['bounded_source_workspace_bytes'], large['template_bank_budget_bytes'])
+
+    def test_shared_raw_basis_bank_matches_scalar_mapped_reference_and_ordinals(self):
+        rows = [(bit, epoch, 0, 0, 0, 0, 0) for epoch in (-6, 0, 6) for bit in (0, 1)]
+        with Source(['--stream-kind', 'emitted', '--symbol-ordinal', '91']) as source:
+            self.assertEqual(source.descriptor['symbol_ordinal'], 91)
+            self.assertEqual(source.plan['format']['symbol_ordinal'], 91)
+            first, count = source.descriptor['source_samples']//3, 513
+            header, bank = source.basis(first, count, rows)
+            self.assertTrue(header['shared_geometry_bank'])
+            reference_header, reference = source.basis_map(first, list(range(count)), rows)
+            self.assertFalse(reference_header['shared_geometry_bank'])
+            self.assertEqual(bank, reference)
+            _, repeated = source.basis(first, count, rows)
+            self.assertEqual(bank, repeated)
+        with Source(['--stream-kind', 'emitted', '--symbol-ordinal', '92']) as source:
+            _, different = source.basis(first, count, rows)
+            self.assertNotEqual(bank, different)
+
     def test_mapped_basis_protocol_preserves_uniform_and_fractional_calendar(self):
         with Source(['--stream-kind', 'emitted']) as source:
             d = source.descriptor

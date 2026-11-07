@@ -37,7 +37,7 @@ class WindowRequest:
 
 
 class StreamingWindowScheduler:
-    """One ingesting producer, one asynchronous scorer, bounded numeric storage.
+    """One ingesting producer, bounded asynchronous scorers and numeric storage.
 
     ``score(index, raw, valid)`` receives a private complete window copy. Index
     is its index in the original public request list, not completion order.
@@ -54,11 +54,13 @@ class StreamingWindowScheduler:
     again after resolving a blocked callback to observe its eventual completion.
     Results are caller-owned compact objects: storing complete raw input in a
     callback result would defeat the documented numeric workspace bound.
+    With more than one worker the callback must own its mutable workspaces per
+    job. Shared immutable templates are safe; a single mutable receiver is not.
     """
 
     def __init__(self, requests, score, *, start_sample=0,
                  ring_capacity_samples=None, queue_capacity=2,
-                 dtype=np.complex64, maximum_gap_records=128):
+                 dtype=np.complex64, maximum_gap_records=128, workers=1):
         self.start_sample=_integer(start_sample,'stream start sample')
         self.frontier=self.start_sample
         if not callable(score):raise ValueError('scorer must be callable')
@@ -67,6 +69,7 @@ class StreamingWindowScheduler:
         if self.dtype not in (np.dtype(np.complex64),np.dtype(np.complex128)):
             raise ValueError('storage dtype must be complex64 or complex128')
         self.queue_capacity=_integer(queue_capacity,'queue capacity',positive=True)
+        self.workers=_integer(workers,'workers',positive=True)
         self.maximum_gap_records=_integer(maximum_gap_records,'maximum gap records',positive=True)
         self.requests=[]
         names=set();previous=None
@@ -97,7 +100,7 @@ class StreamingWindowScheduler:
         self._ingest_lock=threading.Lock()
         self._closing=False
         self._started_wall=time.perf_counter();self._started_cpu=time.process_time()
-        self._inflight=None
+        self._inflight=set()
         self._ingested=0;self._observed=0;self._invalid=0;self._gap_samples=0
         self._gap_records=[];self._gap_count=0
         self._queue_highwater=0;self._ring_highwater=0
@@ -105,8 +108,9 @@ class StreamingWindowScheduler:
             end_sample=r.end_sample,status='pending',valid_samples=None,result=None,
             ready_wall_seconds=None,submitted_wall_seconds=None,started_wall_seconds=None,
             finished_wall_seconds=None)for i,r in enumerate(self.requests)]
-        self._thread=threading.Thread(target=self._worker,name='triad-window-scorer',daemon=True)
-        self._thread.start()
+        self._threads=[threading.Thread(target=self._worker,
+            name='triad-window-scorer-'+str(i),daemon=True)for i in range(self.workers)]
+        for thread in self._threads:thread.start()
 
     def _wall(self):return time.perf_counter()-self._started_wall
 
@@ -116,7 +120,7 @@ class StreamingWindowScheduler:
                 while not self._queue and not self._closing:self._condition.wait()
                 if not self._queue:return
                 index,raw,valid=self._queue.popleft()
-                self._inflight=index
+                self._inflight.add(index)
                 record=self._records[index]
                 record.update(status='running',started_wall_seconds=self._wall())
             cpu,thread_cpu,wall=time.process_time(),time.thread_time(),time.perf_counter()
@@ -135,7 +139,7 @@ class StreamingWindowScheduler:
                     worker_thread_cpu_seconds=thread_delta)
                 record['queue_wait_seconds']=record['started_wall_seconds']-record['submitted_wall_seconds']
                 record['completion_backlog_seconds']=record['finished_wall_seconds']-record['ready_wall_seconds']
-                self._inflight=None
+                self._inflight.remove(index)
                 self._condition.notify_all()
             # Release private numerical copies before taking the next job.
             del raw,valid,result,outcome
@@ -245,13 +249,15 @@ class StreamingWindowScheduler:
                 gap_records_truncated=self._gap_count>len(self._gap_records),
                 ring_capacity_samples=self.capacity,ring_highwater_samples=self._ring_highwater,
                 queue_capacity=self.queue_capacity,queue_depth=len(self._queue),
-                queue_highwater=self._queue_highwater,inflight_index=self._inflight,
-                numeric_array_bound_bytes=(self.capacity+(self.queue_capacity+2)*self.maximum_window)*(self.dtype.itemsize+1),
-                numeric_bound_scope='Ring plus queued, worker and one producer window copy; excludes caller input, callback workspace/results and Python metadata',
+                queue_highwater=self._queue_highwater,workers=self.workers,
+                inflight_index=next(iter(self._inflight))if len(self._inflight)==1 else None,
+                inflight_indices=sorted(self._inflight),
+                numeric_array_bound_bytes=(self.capacity+(self.queue_capacity+self.workers+1)*self.maximum_window)*(self.dtype.itemsize+1),
+                numeric_bound_scope='Ring plus queued, all worker and one producer window copy; excludes caller input, callback workspace/results and Python metadata',
                 elapsed_wall_seconds=self._wall(),process_cpu_seconds=time.process_time()-self._started_cpu,
                 per_job_cpu_scope='Process CPU deltas include concurrent ingest and other process threads; do not sum them as exclusive worker cost. Worker thread CPU excludes numerical-library worker threads.',
                 maximum_completion_backlog_seconds=max(backlog,default=0.),
-                closing=self._closing,drained=self._closing and not self._thread.is_alive(),records=records)
+                closing=self._closing,drained=self._closing and not any(t.is_alive()for t in self._threads),records=records)
 
     def close(self,timeout=None):
         if timeout is not None and (not math.isfinite(float(timeout))or float(timeout)<0):
@@ -267,5 +273,7 @@ class StreamingWindowScheduler:
                                 available_samples=max(0,min(self.frontier,record['end_sample'])-record['start_sample']))
                     self._condition.notify_all()
         finally:self._ingest_lock.release()
-        self._thread.join(timeout)
+        deadline=None if timeout is None else time.perf_counter()+timeout
+        for thread in self._threads:
+            thread.join(None if deadline is None else max(0.,deadline-time.perf_counter()))
         return self.snapshot()

@@ -92,6 +92,17 @@ public:
     // This diagnostic uses the same bounded cache as rendered samples.
     std::array<Complex,3> pattern_coefficient_at(std::uint64_t fine_cell);
     void render(std::uint64_t first_sample, std::span<Complex> output);
+    // Render a bank on one uniform (possibly fractional) sample lattice. The
+    // sources may differ in key, epoch, ordinal, bit and pattern revision, but
+    // must have identical pulse/calendar geometry. Output is source-major:
+    // sources.size() rows of samples_per_source values. Shares only public
+    // pulse/NCO weights; keyed coefficients and bounded tile caches stay private.
+    // Additional scratch is bounded independently of duration and bank size.
+    static void render_bank(std::span<PatternSource* const> sources,
+                            long double first_sample, long double sample_step,
+                            std::size_t samples_per_source, std::span<Complex> output);
+    static constexpr std::size_t render_bank_scratch_bytes =
+        256 * 256 + 4096 * 3 * sizeof(Complex) + 4096;
     std::size_t working_bytes() const;
 private:
     struct Impl;

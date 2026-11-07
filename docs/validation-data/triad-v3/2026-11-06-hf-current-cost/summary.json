@@ -1,0 +1,231 @@
+{
+  "schema": "triad-hf-current-cost-summary-v1",
+  "measured_revision": "7ac6bc22daf3f4a1fde9dab75cc8414b8d120723",
+  "native_exporter_sha256": "76e059e8a17452a5e7955bd01544a8f030bf9b85b55b7437df622fd2142210f4",
+  "raw_keyed_template_cpu_estimate": 16.668134999999996,
+  "raw_keyed_template_wall_estimate": 16.685142523027025,
+  "raw_template_scope": "Single paired exporter difference; not an isolated API timer or confidence interval.",
+  "active_data_seconds": 46.4,
+  "one_bit_air_seconds": 84.8,
+  "fox_bits": 22,
+  "fox_air_seconds_estimate": 1059.2,
+  "trials": [
+    {
+      "name": "physical0",
+      "source_revision": "7ac6bc22daf3f4a1fde9dab75cc8414b8d120723",
+      "rx_cpu_seconds": 73.401339744,
+      "rx_wall_seconds": 52.11599827604368,
+      "workspace": {
+        "cpu_seconds": 7.851816844,
+        "wall_seconds": 7.7812249570852146
+      },
+      "imports": {
+        "cpu_seconds": 1.999046039,
+        "wall_seconds": 1.8001088349847123
+      },
+      "loading": {
+        "cpu_seconds": 0.0004806119999996028,
+        "wall_seconds": 0.0004795830463990569
+      },
+      "fresh_preparation_estimate_cpu_seconds": 26.519478494999998,
+      "fresh_preparation_estimate_wall_seconds": 26.26695589814335,
+      "cold_one_bit_total_cpu_seconds": 99.920818239,
+      "prepared_cpu_per_one_bit_air_second": 0.8655818366037736,
+      "cold_cpu_per_one_bit_air_second": 1.1783115358372642,
+      "prepared_cpu_per_data_second": 1.5819254255172415,
+      "cold_cpu_per_data_second": 2.153465910323276,
+      "receiver_stage_timing": {
+        "helper": {
+          "cpu_seconds": 1.5145062839999994,
+          "wall_seconds": 1.2416670270031318
+        },
+        "coarse": {
+          "cpu_seconds": 59.665317957,
+          "wall_seconds": 39.107871710904874
+        },
+        "refinement_preparation": {
+          "cpu_seconds": 9.158466496000003,
+          "wall_seconds": 8.697904171072878
+        },
+        "refinement_scoring": {
+          "cpu_seconds": 0.10835390600000494,
+          "wall_seconds": 0.08386497898027301
+        },
+        "total": {
+          "cpu_seconds": 70.456268596,
+          "wall_seconds": 49.14438390603755
+        }
+      },
+      "helper_original_cfo_count": 365,
+      "helper_selected_cfo_count": 15,
+      "bit": 0,
+      "expected_bit": 0,
+      "conditional_model_pass": true,
+      "log_e_lower_bound": 4195.570623793281,
+      "log_e_threshold": 21.493378688261398,
+      "fully_scored": true,
+      "physical_null_qualified": false,
+      "report_sha256": "073eec041a0f5223a6162a322e2c87ebc49da52319faff3d5e408a582bdc6eca",
+      "receiver_result_sha256": "8b40b2cf38ce4665d1f701ccab51b7e161e47e0dae5f5faf74fc245147885c27",
+      "fox_cpu_estimate": 2156.2679415869998,
+      "fox_cpu_per_air_second_estimate": 2.035751455425793
+    },
+    {
+      "name": "physical1",
+      "source_revision": "7ac6bc22daf3f4a1fde9dab75cc8414b8d120723",
+      "rx_cpu_seconds": 71.59184641,
+      "rx_wall_seconds": 50.9213532860158,
+      "workspace": {
+        "cpu_seconds": 9.409161251,
+        "wall_seconds": 9.333147573051974
+      },
+      "imports": {
+        "cpu_seconds": 2.1523653659999997,
+        "wall_seconds": 1.9213931639678776
+      },
+      "loading": {
+        "cpu_seconds": 0.0025332019999999567,
+        "wall_seconds": 0.0006350250914692879
+      },
+      "fresh_preparation_estimate_cpu_seconds": 28.232194818999996,
+      "fresh_preparation_estimate_wall_seconds": 27.940318285138346,
+      "cold_one_bit_total_cpu_seconds": 99.824041229,
+      "prepared_cpu_per_one_bit_air_second": 0.8442434718160378,
+      "cold_cpu_per_one_bit_air_second": 1.1771702975117926,
+      "prepared_cpu_per_data_second": 1.5429277243534483,
+      "cold_cpu_per_data_second": 2.151380198900862,
+      "receiver_stage_timing": {
+        "helper": {
+          "cpu_seconds": 1.690280082000001,
+          "wall_seconds": 1.4110160870477557
+        },
+        "coarse": {
+          "cpu_seconds": 58.113982478000004,
+          "wall_seconds": 38.248958774027415
+        },
+        "refinement_preparation": {
+          "cpu_seconds": 8.624050873000002,
+          "wall_seconds": 8.137827266007662
+        },
+        "refinement_scoring": {
+          "cpu_seconds": 0.1035331020000001,
+          "wall_seconds": 0.06858206004835665
+        },
+        "total": {
+          "cpu_seconds": 68.53291532,
+          "wall_seconds": 47.867447898956016
+        }
+      },
+      "helper_original_cfo_count": 365,
+      "helper_selected_cfo_count": 15,
+      "bit": 1,
+      "expected_bit": 1,
+      "conditional_model_pass": true,
+      "log_e_lower_bound": 2644.067274319239,
+      "log_e_threshold": 21.493378688261398,
+      "fully_scored": true,
+      "physical_null_qualified": false,
+      "report_sha256": "703c43270ca71311b501f3a31a3090521cf3691c4d90667d7862b75d5d5bfcf1",
+      "receiver_result_sha256": "65919f51ae54ba2ed8a9c96e20f278cb02f69abdacd70d214684e6675308d8be",
+      "fox_cpu_estimate": 2150.87603711,
+      "fox_cpu_per_air_second_estimate": 2.0306609111688068
+    },
+    {
+      "name": "target8",
+      "source_revision": "7ac6bc22daf3f4a1fde9dab75cc8414b8d120723",
+      "rx_cpu_seconds": 82.115666325,
+      "rx_wall_seconds": 59.01472326007206,
+      "workspace": {
+        "cpu_seconds": 7.726180404,
+        "wall_seconds": 7.69575061800424
+      },
+      "imports": {
+        "cpu_seconds": 1.792115779,
+        "wall_seconds": 1.5670372439781204
+      },
+      "loading": {
+        "cpu_seconds": 0.0012220620000000793,
+        "wall_seconds": 0.0006339129758998752
+      },
+      "fresh_preparation_estimate_cpu_seconds": 26.187653244999996,
+      "fresh_preparation_estimate_wall_seconds": 25.948564297985286,
+      "cold_one_bit_total_cpu_seconds": 108.30331957,
+      "prepared_cpu_per_one_bit_air_second": 0.9683451217570755,
+      "cold_cpu_per_one_bit_air_second": 1.2771617873820755,
+      "prepared_cpu_per_data_second": 1.7697341880387933,
+      "cold_cpu_per_data_second": 2.3341232665948275,
+      "receiver_stage_timing": {
+        "helper": {
+          "cpu_seconds": 3.8097069080000026,
+          "wall_seconds": 3.28875370696187
+        },
+        "coarse": {
+          "cpu_seconds": 65.127297369,
+          "wall_seconds": 43.130163828027435
+        },
+        "refinement_preparation": {
+          "cpu_seconds": 9.621517656999998,
+          "wall_seconds": 9.045612227986567
+        },
+        "refinement_scoring": {
+          "cpu_seconds": 0.12000759699999719,
+          "wall_seconds": 0.09263006900437176
+        },
+        "total": {
+          "cpu_seconds": 78.68686617499999,
+          "wall_seconds": 55.57196417695377
+        }
+      },
+      "helper_original_cfo_count": 365,
+      "helper_selected_cfo_count": 15,
+      "bit": 0,
+      "expected_bit": 0,
+      "conditional_model_pass": true,
+      "log_e_lower_bound": 117.54484061108323,
+      "log_e_threshold": 21.493378688261398,
+      "fully_scored": true,
+      "physical_null_qualified": false,
+      "report_sha256": "80e05782f2445032c47e86973d21d0765cf383be4e7a025c0cbde825f433ca39",
+      "receiver_result_sha256": "9a883849add0843748d7e349720664ba43e22c17d668981ffe0a9c059157072f",
+      "quiet_noise_metrology": [
+        {
+          "name": "DATA",
+          "band_hz": [
+            1450,
+            2000
+          ],
+          "measured_one_sided_pcm_psd": 6.331394809201033e-07,
+          "nominal_data_equivalent_cn0_db_hz": 8.005605954954353
+        },
+        {
+          "name": "low-pilot",
+          "band_hz": [
+            450,
+            650
+          ],
+          "measured_one_sided_pcm_psd": 6.813286843026717e-07,
+          "nominal_data_equivalent_cn0_db_hz": 7.687033179732828
+        },
+        {
+          "name": "high-pilot",
+          "band_hz": [
+            2300,
+            2500
+          ],
+          "measured_one_sided_pcm_psd": 6.562348086104044e-07,
+          "nominal_data_equivalent_cn0_db_hz": 7.850007284195301
+        },
+        {
+          "name": "upper-audio",
+          "band_hz": [
+            8000,
+            18000
+          ],
+          "measured_one_sided_pcm_psd": 5.941721091719753e-07,
+          "nominal_data_equivalent_cn0_db_hz": 8.281477294493353
+        }
+      ]
+    }
+  ],
+  "scope": "Local 5650U two numerical threads; software48kPCM to6kDDC; not physicalADC/ASRC, not arbitrarymessage completion; estimates are not confidence bounds."
+}

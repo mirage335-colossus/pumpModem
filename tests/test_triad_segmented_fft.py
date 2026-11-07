@@ -9,7 +9,7 @@ import numpy as np
 from scipy import fft
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
-from triad_segmented_fft import SegmentedFFTScreen
+from triad_segmented_fft import SegmentedFFTScreen, _correlation_fft_length
 from triad_realtime_fft import _quadratic_scores
 from test_triad_realtime_fft import fixture, waveform, screen as whole_screen
 
@@ -131,6 +131,59 @@ class SegmentedFFTTests(unittest.TestCase):
         self.assertEqual(work['observation_ffts'],len(a.blocks)*3)
         self.assertLess(work['estimated_peak_bytes'],a.memory_limit_bytes)
         with self.assertRaises(ValueError):screen(block_seconds=0)
+
+    def test_padding_and_tiling_preserve_all_scores(self):
+        rng = np.random.default_rng(83122)
+        for precision in ('fp32', 'fp64'):
+            reference = screen(precision=precision, fft_length_policy='legacy',
+                               transform_batch_bytes=2**30)
+            tiled = screen(precision=precision, transform_batch_bytes=1,
+                           workspace_batch_size=2)
+            y = (rng.normal(size=tiled.crop_rows)+1j*rng.normal(size=tiled.crop_rows)).astype(tiled.dtype)
+            frequencies = np.array([-tiled.maximum_frequency_step, 0., tiled.maximum_frequency_step])
+            expected = reference._score_grid(y, frequencies)
+            actual = tiled._score_grid(y, frequencies)
+            tolerance = 2e-6 if precision == 'fp32' else 4e-12
+            np.testing.assert_allclose(actual, expected, atol=tolerance, rtol=tolerance)
+            np.testing.assert_array_equal(actual.argmax(axis=-1), expected.argmax(axis=-1))
+            self.assertEqual(tiled._batch_shape(max(tiled.block_nfft), 3), (1, 1))
+            work = tiled.work(3)
+            self.assertEqual(work['maximum_transform_product_bytes'],
+                max(len(tiled.rays)*n*np.dtype(tiled.dtype).itemsize for n in tiled.block_nfft))
+            self.assertLessEqual(work['executed_fft_products'], work['fft_products'])
+            self.assertNotEqual(tiled.procedure_id, reference.procedure_id)
+
+    def test_bounded_padding_handles_radix_and_power_boundaries(self):
+        # The reference-host regression was a repeated radix-11 length; the
+        # choice changes padding only, while the independent SVD test above
+        # checks every requested linear-correlation lag in both precisions.
+        self.assertEqual(_correlation_fft_length(14582, 'legacy'), fft.next_fast_len(14582))
+        self.assertEqual(_correlation_fft_length(14582, 'bounded-smooth'), 16384)
+        for rows in (1, 2, 17, 511, 512, 513, 8192, 8193, 14582, 16384, 16385):
+            actual = _correlation_fft_length(rows, 'bounded-smooth')
+            smooth = fft.next_fast_len(rows, real=True)
+            self.assertGreaterEqual(actual, rows)
+            self.assertLessEqual(actual, smooth+smooth//10)
+        with self.assertRaisesRegex(ValueError, 'FFT length policy'):
+            screen(fft_length_policy='unknown')
+        with self.assertRaisesRegex(ValueError, 'transform batch bytes'):
+            screen(transform_batch_bytes=0)
+
+    def test_zero_rank_blocks_preserve_the_full_zero_projection(self):
+        m, source, epochs = fixture()
+        source[..., :100] = 0
+        s = screen(m, source, epochs, precision='fp64', block_seconds=.1)
+        work = s.work(1)
+        self.assertGreater(work['skipped_zero_rank_blocks'], 0)
+        rng = np.random.default_rng(2856)
+        y = rng.normal(size=s.crop_rows)+1j*rng.normal(size=s.crop_rows)
+        actual = s._score_grid(y, np.array([0.]))
+        # Force execution of the same exactly-zero represented projections;
+        # only rank bookkeeping changes, never columns or observations.
+        s.ranks[s.ranks == 0] = 1
+        full_zero_projection = s._score_grid(y, np.array([0.]))
+        np.testing.assert_array_equal(actual, full_zero_projection)
+        self.assertEqual(s.work(1)['skipped_zero_rank_blocks'], 0)
 
 
 if __name__=='__main__':unittest.main()

@@ -33,6 +33,13 @@ to make the next bounded development decision without replaying old campaigns
 by default.
 For its provisional weak-receiver duration model and automatic native-export
 wrapper, see the [duration-planning guide](triad-duration-planning.md).
+For excessive CPU cost in broad changing-channel acquisition, start with the
+[measured FFT/template/preparation improvements](validation-data/triad-v3/2026-11-06-realtime-optimization/README.md).
+Use the exact-reference unit checks and saved paired observations first. Do not
+substitute the faster known-alignment or persistent-ray receiver without
+qualifying the changed assumptions, or repeat full sampled/cable campaigns for
+unchanged arithmetic. The fresh-key cadence harness separates computational
+throughput from continuous-message and physical-admission claims.
 For bounded continuous source generation and incremental scheduled-bank
 reception, see the [continuous v3 execution guide](triad-continuous.md); its
 real-time and physical multi-day limits remain explicitly unqualified.

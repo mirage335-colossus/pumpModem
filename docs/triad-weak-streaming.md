@@ -22,6 +22,19 @@ measures a single scheduled bit after added full-audio noise; it does not
 qualify unrestricted packet streaming or a physical null.
 For automatic weak-receiver DATA duration planning and native fixture export,
 see the [provisional duration-planning guide](triad-duration-planning.md).
+The [current HF cost measurement](validation-data/triad-v3/2026-11-06-hf-current-cost/README.md)
+uses the current encrypted patterns and planner-selected 46.4-second DATA bit.
+It separates prepared RX cost, per-bit keyed preparation, one-bit airtime and
+the estimated 22-bit `fox` calendar; it does not qualify sustained arbitrary
+message throughput or physical admission.
+The [CPU optimization and cadence qualification](validation-data/triad-v3/2026-11-06-realtime-optimization/README.md)
+supersedes those runtime estimates for the optimized paths: paired complete RX
+CPU cost fell about 1.8–2.0 times, and fresh native template-bank generation
+about nine times. Eight independent fresh-key jobs offered at the 11.6-second
+DATA cadence kept up on the local six-core Ryzen with two bounded workers.
+This is computational throughput evidence, not a contiguous-message or physical
+admission qualification. Use its cheap exact-reference tests before repeating
+its approximately 92-second workload campaign.
 
 ## Acquisition without discarding complex evidence
 
@@ -102,6 +115,12 @@ during ingestion, and explicitly reports invalid windows, overload, scorer
 errors and incomplete drain. Timing distinguishes wall time, process CPU and
 worker-thread CPU; process deltas from overlapping activities must not be added
 as if they were exclusive.
+The optional `workers` budget defaults to one; use `triad_stream_run.py
+--workers 2 --threads 2` for the measured two-worker allocation. Each concurrent
+job owns its mutable receiver state. Queue and in-flight work remain bounded,
+and shutdown uses one shared deadline rather than a fresh timeout per worker.
+Process CPU is an aggregate across cores; more than one CPU-second per input
+second does not itself imply a wall-time backlog on this six-core host.
 
 `triad_stream_slots.py` adapts the native whole-bit fixture's public source
 calendar and per-slot templates. It moves analysis starts earlier to retain
@@ -135,6 +154,41 @@ study's sensitivity or timing evidence. The full public scheduled window is
 currently collected before scoring; templates are reusable inputs, but this
 harness does not yet overlap their generation with the Helper lead.
 
+## Avoid repeated preparation and unsuitable FFT shapes
+
+The segmented screen now defaults to bounded smooth FFT lengths, a small
+inverse-transform product tile and in-place private transform buffers. The
+`legacy` length policy remains an arithmetic comparison option. Zero-rank
+blocks do no FFT work; logical hypotheses and executed work are reported
+separately. Both bits, all declared timing/epoch/clock/frequency hypotheses,
+filtered tails and final admission policy are preserved. The explicit
+`fft_workers` setting belongs in the receiver policy identity.
+
+Dynamic preparation shares interpolation geometry across CFO alternatives and
+both bit patterns. Only exactly zero, zero-extended DATA support bypasses
+projection/Gram work. All block times remain in the Gaussian state model,
+including quiet gaps; do not remove state propagation when skipping zero
+arithmetic.
+
+Native `PatternSource::render_bank` shares pulse and oscillator geometry across
+keys using bounded chunks. File export limits simultaneously resident pattern
+caches; mapped/nonzero-coordinate stream requests retain the scalar path.
+`triad_template_bank.py` constructs one complete public keyed template bank
+directly in memory without generating a channel observation or temporary
+template file. It verifies the explicit fixture key/epoch and native format,
+calendar and gain against the manifest. This helper currently supports one
+public whole-bit fixture slot, not arbitrary production key loading.
+
+`triad_weak_throughput.py` measures fresh banks, per-key workspace preparation,
+Helper/acquisition/refinement and loading at a declared arrival cadence. It
+records aggregate parent plus child CPU, backlog, rejected jobs, identities and
+separate startup. Saved scoring windows are prepared through the maintained
+audio frontend beforehand; ADC, DDC and TX/channel simulation are outside its
+job timer. Run it under an external process-group deadline because cancelling
+a Python worker cannot interrupt a blocked native protocol read. See the
+dated report for the frozen command and the distinction between independent
+window throughput and a continuous transmitted message.
+
 ## Cheap checks first; occasional qualification separately
 
 Reuse the maintained numerical environment and existing native exporter build.
@@ -145,6 +199,7 @@ OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 python -m unittest discover -s tests -p
 python -m unittest discover -s tests -p 'test_triad_segmented_fft.py'
 python -m unittest discover -s tests -p 'test_triad_operational_admission.py'
 python -m unittest discover -s tests -p 'test_triad_stream*.py'
+python -m unittest discover -s tests -p 'test_triad_template_bank.py'
 ```
 
 Independent native qualification is explicitly opt-in. Its protocol freezes
