@@ -5,6 +5,33 @@ Use the [documentation index](docs/README.md) for maintained guidance. Check
 and [current Robust architecture](docs/robust-current.md) before changing those areas.
 Search `src/`, `include/`, `tests/` and `cmake/` first when locating implementation.
 
+## Prevent accumulation
+
+Remove obsolete implementations and their tests, copied source, old performance
+code, redundant historical evidence, abandoned experiments and stale builds as
+part of the work that supersedes them. Do not keep them as examples or for
+speculative future use. Preserve potentially useful alternative algorithms and
+test conclusions as concise findings, not as old implementations or campaigns.
+
+Treat experiments, captures, logs and generated outputs as temporary, including
+ignored files and cloud volumes. Keep only what serves a concrete current
+investigation, validation claim or required release record, and identify its
+purpose and cleanup trigger in the relevant existing guide or validation entry.
+When that purpose ends, distill applicable algorithm choices, negative results,
+assumptions and provenance into concise guidance, then remove redundant outputs.
+Do not keep whole campaigns merely because they might someday be useful, or
+archive obsolete implementations, copied source trees or standalone variants.
+Keep an indispensable dataset only when a specific current question cannot be
+answered by the summary; explain why. Preserve evidence needed for unresolved
+work, failed checks and release assurance until its purpose is resolved.
+
+Reuse compatible build profiles and caches that current work needs; retire
+abandoned profiles and stale outputs for removed targets after checking for
+active users. Do not routinely purge useful caches or other contributors' work.
+Apply the same lifecycle to local and remote storage. See the
+[development contract](docs/development.md#material-lifecycle) and
+[local output guidance](docs/building.md#local-output-retention).
+
 ## Robust architecture and intensive checks
 
 The canonical Robust transmitter/channel/Helper path is the native
@@ -56,27 +83,6 @@ When release assurance is in scope, follow [release validation](docs/releases.md
 and record current outcomes and limits in [validation](docs/validation.md).
 Certification binds to exact source and binary hashes; publication, certification,
 and promotion are separate operations.
-
-## Prevent accumulation
-
-Treat experiments, captures, logs and generated outputs as temporary, including
-ignored files and cloud volumes. Keep only what serves a concrete current
-investigation, validation claim or required release record, and identify its
-purpose and cleanup trigger in the relevant existing guide or validation entry.
-When that purpose ends, distill applicable algorithm choices, negative results,
-assumptions and provenance into concise guidance, then remove redundant outputs.
-Do not keep whole campaigns merely because they might someday be useful, or
-archive obsolete implementations, copied source trees or standalone variants.
-Keep an indispensable dataset only when a specific current question cannot be
-answered by the summary; explain why. Preserve evidence needed for unresolved
-work, failed checks and release assurance until its purpose is resolved.
-
-Reuse compatible build profiles and caches that current work needs; retire
-abandoned profiles and stale outputs for removed targets after checking for
-active users. Do not routinely purge useful caches or other contributors' work.
-Apply the same lifecycle to local and remote storage. See the
-[development contract](docs/development.md#material-lifecycle) and
-[local output guidance](docs/building.md#local-output-retention).
 
 Preserve unrelated edits and other contributors' work. Coordinate shared Git
 changes and timing-sensitive tests. Keep temporary evidence in ignored
