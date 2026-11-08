@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robust test list editor</title>
+<style>
+:root { color-scheme: light; font-family: system-ui, sans-serif; color: #17283a; background: #f2f5f7; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+header { background: #102a3a; color: #fff; padding: 28px max(24px, calc((100vw - 1200px)/2)); }
+header .eyebrow { color: #a7d8d0; font-size: .75rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+h1 { margin: 6px 0; font-size: clamp(1.6rem, 3vw, 2.25rem); letter-spacing: -.03em; }
+header p { margin: 0; color: #c5d4dc; line-height: 1.5; }
+main { max-width: 1248px; margin: auto; padding: 24px; }
+.toolbar { background: white; border: 1px solid #d9e2e7; border-radius: 12px; padding: 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; box-shadow: 0 4px 14px #1734450a; }
+button, .file-button { appearance: none; border: 1px solid #bdccd4; border-radius: 7px; background: white; color: #1a3544; font: inherit; font-size: .9rem; font-weight: 650; padding: 9px 14px; cursor: pointer; }
+button:hover, .file-button:hover { border-color: #0b7c73; background: #f0faf8; }
+button:focus-visible, input:focus-visible, select:focus-visible, .file-button:focus-within { outline: 3px solid #67bdb3; outline-offset: 2px; }
+button.primary, .file-button { background: #08786f; color: white; border-color: #08786f; }
+button.primary:hover, .file-button:hover { background: #075e58; color: white; }
+button:disabled { opacity: .45; cursor: default; }
+.file-button { position: relative; overflow: hidden; display: inline-block; }
+.file-button input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.toolbar .spacer { flex: 1; }
+.status { margin: 14px 2px 20px; color: #4a6270; font-size: .9rem; line-height: 1.5; }
+.status strong { color: #183748; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 24px 0 12px; }
+h2 { font-size: 1rem; margin: 0; }
+.hint { color: #5e7581; font-size: .83rem; margin: 0; }
+#blocks { display: grid; gap: 14px; }
+.empty { padding: 52px 20px; border: 1px dashed #a9bdc7; border-radius: 12px; text-align: center; color: #56707e; background: #f9fbfc; line-height: 1.6; }
+.card { border: 1px solid #d6e1e6; background: white; border-radius: 12px; box-shadow: 0 4px 14px #1734450a; overflow: hidden; }
+.card-head { display: flex; align-items: end; gap: 14px; padding: 16px 18px; background: #f9fbfc; border-bottom: 1px solid #e3eaed; }
+.number { align-self: center; color: #08786f; font-size: .75rem; font-weight: 750; letter-spacing: .08em; white-space: nowrap; }
+.title-field { flex: 1; min-width: 0; }
+label span, .field-label { display: block; color: #59707c; font-size: .72rem; font-weight: 700; letter-spacing: .035em; margin-bottom: 5px; }
+input[type=text], select { width: 100%; padding: 9px 10px; border: 1px solid #c5d3da; border-radius: 6px; background: #fff; color: #172f3d; font: inherit; font-size: .9rem; }
+input[type=text]:hover, select:hover { border-color: #89a6b2; }
+.custom-value { margin-top: 7px; }
+.remove { color: #a33a3a; border-color: #e3c7c7; white-space: nowrap; }
+.remove:hover { color: #842525; border-color: #bd7373; background: #fff5f5; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 15px 18px; padding: 18px; }
+.details { padding: 0 18px 16px; color: #627987; font-size: .8rem; }
+.details summary { cursor: pointer; }
+.details pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f4f7f8; padding: 12px; border-radius: 6px; color: #3d5664; }
+.field-help { display: block; margin-top: 5px; color: #5e7581; font-size: .75rem; line-height: 1.4; }
+@media (max-width: 540px) { main { padding: 16px; } header { padding: 24px 16px; } .card-head { flex-wrap: wrap; } .number { width: 100%; } .toolbar .spacer { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="eyebrow">DataPump / end-user tools</div>
+  <h1>Robust test list editor</h1>
+  <p>Organize the test scenarios in <code>_tests-RobustModem.md</code>.</p>
+</header>
+<main>
+  <div class="toolbar" aria-label="List actions">
+    <label class="file-button">Open list<input id="open" type="file" accept=".md,.txt,text/plain,text/markdown" aria-label="Open test list"></label>
+    <button id="add" type="button">+ Add block</button>
+    <button id="undo" type="button" disabled>Undo remove</button>
+    <div class="spacer"></div>
+    <button id="download" class="primary" type="button" disabled>Download list</button>
+  </div>
+  <p class="status" id="status" role="status" aria-live="polite"><strong>Open a list to begin.</strong> Choose the repository’s <code>_tests-RobustModem.md</code>, or add a block to start a new list. Downloads do not overwrite the original file.</p>
+  <div class="section-head"><h2>Test blocks <span id="count"></span></h2><p class="hint">Choose a value, or select Custom value… to type one.</p></div>
+  <div id="blocks"><div class="empty">No blocks yet.<br>Open the existing list or add a block.</div></div>
+</main>
+<script>
+'use strict';
+(() => {
+  const fields = ['Encryption', 'Helper Carrier Transmit Power', 'Transmit Power', 'Path loss', 'Clock sync / Region / Offset / Audio error', 'Base Oscillator', 'Shift Oscillator', 'Doppler/delay spread', 'Additional frequency selective amplitude modulation', 'Margin', 'DSSS', 'Spreading', 'FHSS', 'Symbol_burst', 'Rate', 'Baseband Carrier', 'Shift', 'Target SNR dB/1Hz'];
+  const fieldSet = new Set(fields);
+  const builtins = {
+    Encryption: ['Yes', 'No'], DSSS: ['Off', 'Interleave'], FHSS: ['Off'], Symbol_burst: ['Off'],
+    Rate: ['0.001 Hz', '0.01 Hz', '0.1 Hz', '1 Hz', '3.6 Hz', '10 Hz', '36 Hz', '100 Hz', '360 Hz', '1.2 kHz', '2.4 kHz', '3.6 kHz', '12 kHz', '18 kHz', '24 kHz', '1 MHz', '30 MHz'],
+    'Baseband Carrier': ['1.725 kHz', 'half of rate', '8.270kHz'],
+    Shift: ['0 Hz', '500 kHz', '1 MHz', '3.5 MHz', '7 MHz', '10 MHz', '14 MHz', '30 MHz', '5.8 GHz'],
+    'Clock sync / Region / Offset / Audio error': ['Clock sync 10ms, Region 1ms, Offset 0ms, Audio error 70ms bounded search', 'Default several seconds receiver search space'],
+    'Base Oscillator': ['Free-running crystal', 'GPSDO hobbyist XO (no oven)', 'GPSDO TXCO (no oven)', 'GPSDO OCXO'],
+    'Shift Oscillator': ['Baseband clock', 'Free-running crystal', 'CB SSB / ATS Mini V4 SSB: +/-20ppm/radio', 'IC-7100 +/-0.5 ppm/radio', 'GPSDO hobbyist XO (no oven)', 'GPSDO TXCO (no oven)', 'GPSDO OCXO'],
+    'Doppler/delay spread': ['None - 0 Hz 0 ms', 'Sub9 best 0.001Hz 0.005ms', 'Sub9 moderate 0.005Hz 0.05ms', 'Sub9 worst 0.05Hz 5ms', 'HF best 0.1Hz 0.5ms', 'HF moderate 10Hz 6ms', 'HF worst 30Hz 7ms', 'Aurora best 10Hz 3ms', 'Aurora worst 55Hz 11ms', 'EME focused 6Hz 0.5ms'],
+    'Additional frequency selective amplitude modulation': ['Off', ...['Slow', 'Fast', 'Each'].flatMap(speed => ['1%', '5%', '10%', '25%', '65%'].map(amount => `${speed} - ${amount}`))],
+    'Target SNR dB/1Hz': ['200', '140', '120', '100', '80', '60', '55', '40', '32', '20', '6', '-6', '-10', '-16', '-20', '-23', '-26', '-30', '-60']
+  };
+  const $ = id => document.getElementById(id);
+  let preamble = [], blocks = [], newline = '\n', filename = '_tests-RobustModem.md', baseline = '', started = false, removed = [];
+  const el = (tag, className, text) => { const n = document.createElement(tag); if (className) n.className = className; if (text !== undefined) n.textContent = text; return n; };
+  function linesOf(text) {
+    const lines = [];
+    const pattern = /([^\r\n]*)(\r\n|\r|\n|$)/g;
+    let match;
+    while ((match = pattern.exec(text)) && (match[0] !== '')) lines.push({ raw: match[1], eol: match[2] });
+    return lines;
+  }
+  function parse(text) {
+    const hasBom = text.startsWith('\ufeff');
+    const lines = linesOf(hasBom ? text.slice(1) : text), prefix = hasBom ? [{ raw: '\ufeff', eol: '' }] : [], found = [];
+    let current = null;
+    for (const line of lines) {
+      const heading = /^- (.*)$/.exec(line.raw);
+      if (heading) {
+        current = { heading: line, body: [] };
+        found.push(current);
+      } else if (current) current.body.push(line);
+      else prefix.push(line);
+    }
+    return { prefix, found, eol: (text.match(/\r\n|\r|\n/) || ['\n'])[0] };
+  }
+  function fieldOf(line) {
+    const tab = line.raw.indexOf('\t');
+    if (tab < 0) return null;
+    const name = line.raw.slice(tab + 1);
+    return fieldSet.has(name) ? { name, value: line.raw.slice(0, tab) } : null;
+  }
+  function serialize() {
+    const lineText = line => line.raw + line.eol;
+    return preamble.map(lineText).join('') + blocks.map(block => lineText(block.heading) + block.body.map(lineText).join('')).join('');
+  }
+  function dirty() { return started && serialize() !== baseline; }
+  function refreshStatus() {
+    const status = $('status'); status.replaceChildren();
+    if (!started) { status.textContent = 'Open the existing list or add a block to start a new list. Downloads do not overwrite the original file.'; return; }
+    const strong = el('strong', '', filename); status.append(strong, document.createTextNode(` · ${blocks.length} ${blocks.length === 1 ? 'block' : 'blocks'} · ${dirty() ? 'Edited' : 'Unchanged'}. Downloads do not overwrite the original file.`));
+    $('download').disabled = false;
+  }
+  function optionsFor(name) {
+    const values = new Set(builtins[name] || []);
+    blocks.forEach(block => block.body.forEach(line => { const f = fieldOf(line); if (f && f.name === name && f.value) values.add(f.value); }));
+    return values;
+  }
+  function render() {
+    $('count').textContent = `(${blocks.length})`;
+    $('undo').disabled = removed.length === 0;
+    const container = $('blocks'); container.replaceChildren();
+    if (!blocks.length) container.append(el('div', 'empty', 'No blocks yet. Open a list or add a block.'));
+    blocks.forEach((block, index) => {
+      const card = el('section', 'card');
+      const head = el('div', 'card-head');
+      head.append(el('div', 'number', `BLOCK ${String(index + 1).padStart(2, '0')}`));
+      const titleLabel = el('label', 'title-field'); titleLabel.append(el('span', '', 'BLOCK TITLE'));
+      const title = el('input'); title.type = 'text'; title.value = block.heading.raw.slice(2); title.setAttribute('aria-label', `Block ${index + 1} title`);
+      title.addEventListener('input', () => { block.heading.raw = '- ' + title.value; refreshStatus(); });
+      titleLabel.append(title); head.append(titleLabel);
+      const remove = el('button', 'remove', 'Remove'); remove.type = 'button'; remove.setAttribute('aria-label', `Remove block ${index + 1}`);
+      remove.addEventListener('click', () => { removed.push({ index: blocks.indexOf(block), block }); blocks.splice(blocks.indexOf(block), 1); render(); });
+      head.append(remove); card.append(head);
+      const grid = el('div', 'fields'), unknown = [], seen = new Set();
+      function showField(name, line) {
+        const wrapper = el('div');
+        const label = el('label'); label.append(el('span', '', name));
+        const select = el('select');
+        const blank = el('option', '', '—'); blank.value = ''; select.append(blank);
+        optionsFor(name).forEach(value => {
+          const option = el('option', '', (builtins[name] || []).includes(value) ? value : `${value} (from list)`);
+          option.value = value; select.append(option);
+        });
+        const customOption = el('option', '', 'Custom value…'); select.append(customOption);
+        const current = line ? fieldOf(line).value : '';
+        select.value = current;
+        const input = el('input', 'custom-value'); input.type = 'text'; input.value = current; input.hidden = true;
+        input.setAttribute('aria-label', `Custom ${name}`);
+        function applyValue(value) {
+          if (!line && value !== '') {
+            // Add missing fields before separator blanks, keeping all existing lines.
+            let at = block.body.length;
+            while (at > 0 && block.body[at - 1].raw === '') at--;
+            const before = at ? block.body[at - 1] : block.heading;
+            const hadEnd = !!before.eol;
+            if (!hadEnd) before.eol = newline;
+            line = { raw: '', eol: at < block.body.length || hadEnd ? newline : '' };
+            block.body.splice(at, 0, line);
+          }
+          if (line) line.raw = value + '\t' + name;
+          refreshStatus();
+        }
+        select.addEventListener('change', () => {
+          const custom = select.selectedIndex === select.options.length - 1;
+          input.hidden = !custom;
+          if (custom) { input.focus(); }
+          else { input.value = select.value; applyValue(select.value); }
+        });
+        input.addEventListener('input', () => applyValue(input.value));
+        label.append(select); wrapper.append(label, input);
+        if (name === 'Baseband Carrier') wrapper.append(el('small', 'field-help', '1.725 kHz supports optional in-band frequency/phase synchronization. Half of rate can reduce baseband oscillator error in specialized hardware. 8.270 kHz is for direct sub-9 kHz VLF.'));
+        grid.append(wrapper);
+      }
+      block.body.forEach(line => {
+        const f = fieldOf(line);
+        if (!f) { if (line.raw.trim()) unknown.push(line.raw); return; }
+        seen.add(f.name);
+        showField(f.name, line);
+      });
+      // These fields were introduced after the original list was written.
+      // Show them without changing an imported block until a value is supplied.
+      ['Baseband Carrier', 'Target SNR dB/1Hz'].forEach(name => { if (!seen.has(name)) showField(name, null); });
+      card.append(grid);
+      if (unknown.length) {
+        const detail = el('details', 'details'); detail.append(el('summary', '', `${unknown.length} other ${unknown.length === 1 ? 'line' : 'lines'} preserved`));
+        detail.append(el('pre', '', unknown.join('\n'))); card.append(detail);
+      }
+      container.append(card);
+    });
+    refreshStatus();
+  }
+  $('open').addEventListener('change', async event => {
+    const file = event.target.files[0]; event.target.value = '';
+    if (!file) return;
+    if (dirty() && !confirm('Discard the current edits and open another file?')) return;
+    try {
+      const bytes = await file.arrayBuffer();
+      const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+      const parsed = parse(text);
+      preamble = parsed.prefix; blocks = parsed.found; newline = parsed.eol; filename = file.name; baseline = text; started = true; removed = [];
+      render();
+      if (!blocks.length && text) alert('No block headings beginning with "- " were found. The original text will be preserved when downloaded.');
+    } catch (error) { alert('Could not open this file as UTF-8 text. The current list has not changed.'); }
+  });
+  $('add').addEventListener('click', () => {
+    if (!started) { started = true; baseline = ''; }
+    const lastBlock = blocks[blocks.length - 1];
+    const prior = lastBlock ? (lastBlock.body[lastBlock.body.length - 1] || lastBlock.heading) : preamble[preamble.length - 1];
+    if (prior && !(prior.raw === '\ufeff' && !prior.eol && !lastBlock)) {
+      if (!prior.eol) prior.eol = newline;
+      if (prior.raw !== '') (lastBlock ? lastBlock.body : preamble).push({ raw: '', eol: newline });
+    }
+    blocks.push({ heading: { raw: '- New test', eol: newline }, body: fields.map(name => ({ raw: '\t' + name, eol: newline })) });
+    render();
+    const lastTitle = $('blocks').lastElementChild.querySelector('input'); if (lastTitle) { lastTitle.focus(); lastTitle.select(); }
+  });
+  $('undo').addEventListener('click', () => {
+    const item = removed.pop();
+    if (item) {
+      const index = Math.min(item.index, blocks.length);
+      // A restored final block may now precede a new block. Its former EOF
+      // must become a line boundary so the following heading stays separate.
+      if (index < blocks.length) {
+        const end = item.block.body[item.block.body.length - 1] || item.block.heading;
+        if (!end.eol) end.eol = newline;
+      }
+      if (index > 0) {
+        const previous = blocks[index - 1];
+        const end = previous.body[previous.body.length - 1] || previous.heading;
+        if (!end.eol) end.eol = newline;
+      }
+      blocks.splice(index, 0, item.block); render();
+    }
+  });
+  $('download').addEventListener('click', () => {
+    const url = URL.createObjectURL(new Blob([serialize()], { type: 'text/markdown;charset=utf-8' }));
+    const link = el('a'); link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+  window.addEventListener('beforeunload', event => { if (dirty()) { event.preventDefault(); event.returnValue = ''; } });
+})();
+</script>
+</body>
+</html>
