@@ -35,10 +35,12 @@ Apply the same lifecycle to local and remote storage. See the
 ## Robust architecture and intensive checks
 
 The canonical Robust transmitter/channel/Helper path is the native
-`IndependentApskV2` stack. Python WeakReceiver acquisition and
-PracticalTrackingReceiver tracking are sequential stages and are not connected
-to the GUI. Robust GUI controls remain visible but Robust operation is unavailable
-pending reconnection. Keep this boundary accurate in code, tests, and documentation.
+`IndependentApskV2` stack. Case-suite acquisition uses noisy Helper estimates
+and `FFTScreen` proposals; its following bounded tracking subwindow uses
+`PracticalTrackingReceiver`. They are sequential research stages, not a
+qualified integrated receiver, and are not connected to the GUI. Robust GUI
+controls remain visible but Robust operation is unavailable pending
+reconnection. Keep this boundary accurate in code, tests, and documentation.
 
 Use one in-tree implementation. Protocol changes evolve the canonical source;
 maintain older protocol compatibility with Git tags and separate binary releases.
@@ -55,6 +57,26 @@ whole heavy-calibration runs as routine tests or fallbacks. RunPod may accelerat
 the same method but does not justify larger experiments. See
 [the maintained policy](docs/robust-current.md#testing-computationally-intensive-robust-changes)
 and [the abbreviated harness](docs/triad-performance.md).
+For the editable manual-case suite, run `./build.sh test triad` before
+`python3 tools/triad_abbreviated.py --cases --output local-evidence/robust-cases.json --exporter build/dev/triad_helper_export`.
+It reads `_tests-RobustModem.md` by default, requires all 16 strict fields,
+preserves ordered duplicate rows, and reuses identical normalized inputs only
+when explicitly marked. Use repeatable `--case-index N` only for targeted
+debugging; the full list is still parsed and validated, and partial output does
+not cover unselected cases. `--paired-followup` is a separate opt-in lower
+confidence check under the method's cost gates, not the standard 95% criterion.
+Interpret its local single-stream service ratios,
+conditional full-bit coarse sensitivity, and estimated workspace under
+[the maintained case-suite limits](docs/triad-performance.md#editable-manual-case-subwindow-suite):
+no operational admission, full Robust path, whole-message/`fox` success,
+unsaturated whole-machine CPU ceiling, or full-bank memory qualification is
+claimed. Its one-thread default reflects matched local measurements, including
+an FHSS case with no measured 12-thread speedup; it is not a global optimum.
+Preserve the thread override and do not infer a whole-machine ceiling. Preserve
+selected native channel effects; timing
+replicas are not independent success trials. Keep raw case JSON/report
+temporary in ignored `local-evidence/` and remove them when their current
+validation purpose ends.
 
 ## Shared contracts
 

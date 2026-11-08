@@ -20,8 +20,14 @@ provide bounded technique summaries and evidence limits.
 Computationally intensive Robust checks must follow the hierarchical,
 computationally minimal statistical method in [the current testing policy](robust-current.md#testing-computationally-intensive-robust-changes).
 The [isolated triad regression policy](triad-performance.md) states its
-predeclared coverage, uncertainty and provenance requirements. RunPod accelerates
-the same method; it does not authorize full or sustained campaigns.
+predeclared coverage, uncertainty and provenance requirements. Run
+`./build.sh test triad` before the documented local CPU-only editable-case
+subwindow command; the method and its receiver-coverage limits are in
+[the case-suite section](triad-performance.md#editable-manual-case-subwindow-suite).
+That section also distinguishes its conditional one-channel-seed coarse
+full-bit sensitivity from operational admission and whole-message success.
+RunPod accelerates the same bounded method; it does not authorize full or
+sustained campaigns.
 
 ## Other maintained components
 

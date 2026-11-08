@@ -14,6 +14,123 @@ this checkpoint is accepted unless a specific active validation or release
 requirement still needs them. The concise outcomes and limitations below are
 the maintained record.
 
+## Editable Robust case validation
+
+On 8 November 2026, the uncommitted suite extension based on
+`c578659143f400b7a56f444d4d9773b5a813394b` covered all nine current manual
+entries, with eight unique normalized configurations. Entries 2 and 3 explicitly
+reuse one measurement. The runner rereads and strictly validates the entire
+manual file on every invocation; optional row selection is labeled partial.
+The [current report](../local-evidence/robust-cases-current.md) and
+[JSON evidence](../local-evidence/robust-cases-current.json) contain the complete
+configuration, nominal DATA/Helper C/N0, bit/`fox` calendar, service intervals,
+workspace, preparation, success evidence, and limitations for every entry.
+Literal `fox` uses the canonical short-message dictionary and is 22 bits.
+
+The input SHA-256 is
+`03c85b3e6478836d9c2526b04d0fc1725706609d02c7e042d20114e2c2c1fee6`;
+the native binary SHA-256 is
+`f17a86ed10f529586a2e492aee6790650d0ca9d0669ec0a4ca456f362c1fec3a`.
+The report preserves six explicitly identified measurement phases, including
+their original source hashes, policies and unchanged-at-completion checks.
+Later rendering and the direct FIR follow-up do not relabel earlier timings or
+pool independent probability claims. This is research validation, not release,
+GUI, operational-admission or complete-message qualification.
+
+CPU measurements are local to the AMD Ryzen 5 PRO 5650U, with 12 logical CPUs
+available and one numerical thread selected. Values below are prepared receiver
+processing seconds per received baseband second; 1 or greater fails realtime.
+The complete coarse procedure includes the streaming FIR and full public
+Helper/FFT search. PracticalTracking subwindow measurements are separate and
+range from 0.0545 to 0.0899 s/s; they are not an integrated receiver total.
+The reused Python environment is Python 3.13.5, NumPy 2.5.4, SciPy 1.18.1,
+PyTorch 2.15.0+cpu and threadpoolctl 3.8.0.
+
+| Manual entry | Conditional coarse-bit DATA target, dB-Hz | Complete coarse CPU, s/s | Full coarse preparation, s |
+| --- | --- | --- | --- |
+| 1, Sub9 | -25.02, confirmed | 0.000283 | 80.09 |
+| 2/3, groundwave GPSDO | -15.02, confirmed | 0.000322 | 8.81 |
+| 4, groundwave Helper | Unresolved public frequency search | Unresolved | 8.95 |
+| 5, HF Helper | 8.57, confirmed | 0.04109 | 4.67 |
+| 6, HF encrypted GPSDO | 7.94, separate fixed-point confirmation | 0.003078 | 4.55 |
+| 7, HF FHSS | -5.50, unqualified pilot/paired evidence | 0.04406 | 75.47 |
+| 8, HF unencrypted GPSDO | 7.94, confirmed | 0.003040 | 4.84 |
+| 9, EME | 10.02, confirmed | 0.04881 | 10.73 |
+
+Confirmed targets are tested adequate points, not measured minimum crossings.
+They concern each bit on one sampled channel, conditional on a transmission,
+with independent noise confirmation and the recorded per-case confidence
+allocation. Earlier points use 36/36 successes per bit; current two-candidate
+tests use 42/42. Entry 6's separate 36/36 fixed-point follow-up does not extend
+the earlier failed lower-point search's confidence family. No simultaneous
+cross-case or 22-bit `fox` success claim is made. C/N0 values reference nominal
+received link budgets before sampled fading/selective effects, not measured
+realized component powers. At Sub9's nominal -36 dB-Hz, the pilot achieved only
+2/4 and 3/4 for the two bits; that nominal configuration is not qualified.
+
+Entry 7 obtained 1/4 and 3/4 at -11.50 dB-Hz, then 4/4 for each bit at
+-5.50, 0.50 and nominal 20.02 dB-Hz. The 1,105-second confirmation work forecast
+exceeded the predeclared 600-second per-candidate limit, so standard 95%
+confirmation stopped before starting. One separately predeclared point-specific
+check planned 22 independent common-noise pairs at -5.5022 dB-Hz, counting a
+pair successful only if both bits were correct. It stopped at its first failed
+pair: five successful pairs, then bit 1 failed in pair six (12 receives total).
+No fixed-budget probability bound is reported after this early stop, and no
+second candidate or extension followed. The >90% target remains provisional.
+The maintained `--paired-followup` option reproduces this separate lower-confidence
+tier: all 22 pairs would yield a 90% one-sided lower bound of 0.9006289 for the
+paired event and hence either bit marginal, without meeting the standard 95%
+criterion or representing real-message success.
+
+Entry 4's same-prefix
+diagnostic found both Helper pilot profiles usable, but the expanded public
+uncertainty remained too broad (`profile_or_allowance_too_broad`). The estimator
+correctly retained the original prior, and the full FFT search exceeded its
+frequency-work limit. This is a receiver limitation, not a passed case.
+
+The coarse CPU estimates that complete their coverage checks have approximately
+95.1–99.97% point-estimate margins, with high utilization of the allocated
+thread. Worst estimated coarse-test workspace is 1.554 GB against a 5.934 GB
+budget (50% of available RAM), leaving about 73.8% headroom. Conservative Helper
+transients are included while the DATA bank remains live. These are capacity
+estimates, not allocator or deployed-receiver certificates. Full preparation
+above five seconds is prominently flagged, especially Sub9 and FHSS; no proof
+of an unavoidable minimum receiver start lead is claimed. Simulator generation
+and noise-factor preparation are separate from receiver readiness/service.
+
+The short FIR extrapolation was unresolved for entries 7 and 9. A predeclared
+filter-only follow-up used their actual finite extents (1,680,827 and 658,304 raw
+samples), identical canonical taps/dtype/chunks/tails, an excluded warmup and
+three fresh repeats under the 4M-sample/5-second caps. Direct FIR service was
+0.000207 and 0.000212 s/s. The failed abbreviated evidence remains visible;
+the replacement uses no duration extrapolation and did not repeat channel,
+template-bank, FFT scoring or probability trials.
+
+The exact Sub9 bank's brief native-work forecast was 29–42 minutes, so it was
+not run. The S=240 collapsed profile failed; finite cubic boundaries and the
+original raw FIR must be preserved. Current S=60 slow-waveform and S=3 FHSS
+profiles pass fresh local rank, projector, stored-operator, wrong-bit-separation
+and clean/noise winner checks; this is local validation, not a global error
+bound. A matched HF timing comparison gave 0.0833–0.0927 s/s with one thread
+versus 0.680–0.868 with twelve, with identical scores. The FHSS comparison gave
+0.0427–0.0429 s/s for either allocation, also with identical scores. This
+supports the one-thread default without dividing service time by host cores.
+
+Native bounded FHSS template rendering now avoids the former 26-template cache
+failure without raising its cap. Regression coverage also checks native Helper
+calendar timing, gated-pilot metadata, finite projected-noise covariance and
+boundaries, fresh-list parsing, statistical decisions, partial selection and
+capacity limits. Final `./build.sh test triad --jobs 2 --build-jobs 3 --
+-DDATAPUMP_COMPILER_CACHE=OFF` passed **20/20** in 11.91 seconds. Compiler-cache
+use was disabled for this sandbox. No RunPod instances were needed or deployed.
+
+Keep only the consolidated report/JSON as current evidence for the two
+unresolved receiver/sensitivity questions and this validation claim. Retire or
+replace them when equivalent current validation resolves/supersedes those
+questions, or when the manual configurations change. Resolved projection,
+thread, preparation-cost, preliminary runs and reproducer artifacts are
+distilled above and removed; useful existing build caches are retained.
+
 ## Test timing investigation
 
 On 8 November 2026, the dirty working tree based on `64f7feb6` was timed with

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Bounded hierarchical timing of canonical Robust receiver kernels.
+"""Bounded hierarchical Robust tests and capacity estimates.
 
-Only short, fixed-geometry kernel units execute. Larger repeated-unit costs are
-conditional projections, never measured receiver latency or qualification.
-There is deliberately no full-run, sustained-run, or calibration mode.
+Kernel mode measures short fixed-geometry units and conditional projections.
+Manual-case mode uses bounded native simulation and coarse full-bit trials
+with explicit work, uncertainty and stopping limits. Neither mode qualifies
+the deployed receiver or runs a sustained heavy calibration campaign.
 """
 from __future__ import annotations
 
@@ -295,7 +296,29 @@ def main(argv=None):
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     parser.add_argument("--target-units", type=int, default=1000,
                         help="project repeated identical units; never execute this many")
+    parser.add_argument("--cases", nargs="?", const=str(Path(__file__).resolve().parents[1] / "_tests-RobustModem.md"),
+                        help="run the current editable case list (default: _tests-RobustModem.md)")
+    parser.add_argument("--exporter", type=Path,
+                        default=Path(__file__).resolve().parents[1] / "build/dev/triad_helper_export")
+    parser.add_argument("--probe-seconds", type=float, default=1.)
+    parser.add_argument("--threads", type=int)
+    parser.add_argument("--case-index", type=int, action="append",
+                        help="explicit partial rerun of a current manual row; repeat to select several")
+    parser.add_argument("--paired-followup", action="store_true",
+                        help="optional 22 common-noise pairs with 90%% confidence when standard 95%% confirmation is too costly")
     args = parser.parse_args(argv)
+    if args.cases is not None:
+        if args.baseline or args.device != "cpu":
+            parser.error("manual case capacity uses the local CPU; kernel baseline/CUDA options do not apply")
+        from triad_case_suite import run_cases
+        run_cases(executable=args.exporter, output=args.output, case_list=Path(args.cases),
+                  measurement_seconds=args.probe_seconds, threads=args.threads,
+                  case_indices=args.case_index, paired_followup=args.paired_followup)
+        return 2  # Staged subwindows do not certify a complete receiver.
+    if args.case_index is not None:
+        parser.error("--case-index requires --cases")
+    if args.paired_followup:
+        parser.error("--paired-followup requires --cases")
     if not 4 <= args.target_units <= 10**9:
         parser.error("target units must be in [4,1000000000]")
     baseline = json.loads(args.baseline.read_text()) if args.baseline else None

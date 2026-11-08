@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import math
 from pathlib import Path
 import sys
 import unittest
@@ -11,7 +13,9 @@ import numpy as np
 from scipy import fft
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
-from triad_realtime_fft import FFTScreen, _quadratic_scores
+from triad_realtime_fft import (FFTScreen, _quadratic_scores, _fir_decimate_chunks,
+    _collapsed_cubic_fir, _project_coarse_column, _mapped_finite_source,
+    compare_template_projectors)
 from triad_dynamic_joint import _sample_cubic
 
 
@@ -53,6 +57,121 @@ def waveform(m, source, epoch_index, bit, arrival, frequency, clock):
 
 
 class FFTScreenTests(unittest.TestCase):
+    def test_mapped_source_preserves_fractional_zero_extension_at_both_edges(self):
+        source = np.ones(12, complex)
+        requests = []
+        def provider(epoch, bit, positions):
+            requests.append(positions.copy())
+            return np.ones(len(positions), complex)
+        positions = np.array([-2., -1.1, -1e-6, 0., 1., 5., 10., 11., 11.9, 12.1, 13., 14.])
+        result = _mapped_finite_source(provider, 0, 0, positions, len(source), {})
+        np.testing.assert_allclose(result, _sample_cubic(source, positions), rtol=2e-14, atol=2e-14)
+        self.assertTrue(all(np.min(request) >= 0 and np.max(request) < len(source) for request in requests))
+
+    def test_collapsed_cubic_fir_matches_explicit_reconstruction_and_finite_edges(self):
+        rng = np.random.default_rng(971)
+        taps = np.array([.03, .12, .2, .3, .2, .12, .03])
+        for step in (1, 3, 8):
+            for decimation in (2, 5):
+                count = 197
+                coarse = rng.normal(size=math.ceil((count-1)/step)+1)+1j*rng.normal(size=math.ceil((count-1)/step)+1)
+                raw = _sample_cubic(coarse, np.arange(count)/step)
+                expected = np.convolve(raw, taps)[::decimation]
+                kernel, shift = _collapsed_cubic_fir(taps, step, decimation)
+                actual = _project_coarse_column(coarse, count, taps, step,
+                    decimation, kernel, shift, np.complex128)
+                np.testing.assert_allclose(actual, expected, rtol=3e-13, atol=3e-14)
+
+    def test_collapsed_final_coarse_knot_cannot_leak_beyond_finite_raw_end(self):
+        count, step, decimation = 197, 8, 2
+        taps = np.ones(64)
+        coarse = np.zeros(26, complex)
+        coarse[-1] = 1
+        expected = np.convolve(_sample_cubic(coarse, np.arange(count)/step), taps)[::decimation]
+        kernel, shift = _collapsed_cubic_fir(taps, step, decimation)
+        actual = _project_coarse_column(coarse, count, taps, step,
+            decimation, kernel, shift, np.complex128)
+        np.testing.assert_allclose(actual, expected, rtol=3e-13, atol=3e-14)
+
+    def test_streamed_templates_and_observation_match_raw_warp_and_full_tail(self):
+        m, source, epochs = fixture()
+        clocks = (-10000., 0., 10000.)
+        reference = screen(m, source, epochs, clock_ppm=clocks, precision='fp64')
+        raw = waveform(m, source, 1, 1, .1, 0., clocks[-1])
+        expected = reference.score(raw, [0.], top_per_bit=2)
+        for chunk in (17, 31, 64):
+            requests = []
+            def provider(epoch, bit, first, count):
+                requests.append((first, count))
+                return source[epochs.index(epoch), bit, first:first + count]
+            actual = screen(m, None, epochs, clock_ppm=clocks, precision='fp64',
+                template_provider=provider, source_samples=source.shape[-1],
+                template_identity=hashlib.sha256(source.view(np.uint8)).hexdigest(),
+                template_chunk_samples=chunk)
+            for before, after in zip(reference.workspaces, actual.workspaces):
+                np.testing.assert_allclose(after['columns'], before['columns'], rtol=3e-12, atol=3e-13)
+                np.testing.assert_allclose(after['gram'], before['gram'], rtol=3e-12, atol=3e-12)
+            comparison = compare_template_projectors(reference, actual)
+            self.assertTrue(comparison['rank_agreement'])
+            self.assertLess(comparison['maximum_projector_distance'], 1e-6)
+            projected = actual.prepare_observation_stream(raw[first:first + chunk]
+                for first in range(0, len(raw), chunk))
+            np.testing.assert_allclose(projected, reference.prepare_observation(raw), rtol=3e-12, atol=3e-13)
+            result = actual.score_projected(projected, [0.], top_per_bit=2)
+            receipt = actual.projection_receipt()
+            self.assertEqual(receipt['first_cropped_convolution_raw_sample'],
+                actual.crop_first*actual.decimation)
+            self.assertEqual(receipt['cropped_output_count'], len(projected))
+            self.assertEqual(receipt['raw_samples'], len(raw))
+            self.assertEqual(receipt['fir_taps_sha256'],
+                hashlib.sha256(actual.taps.astype('<f8').tobytes()).hexdigest())
+            for before, after in zip(expected['candidates'], result['candidates']):
+                self.assertEqual({k:v for k,v in before.items() if k != 'score'},
+                                 {k:v for k,v in after.items() if k != 'score'})
+                self.assertAlmostEqual(before['score'], after['score'], places=10)
+            self.assertLessEqual(max(count for _, count in requests), math.ceil(chunk * 1.01) + 4)
+            self.assertLess(actual.resident_estimate, reference.resident_estimate)
+
+    def test_streamed_fir_noise_covariance_keeps_edges_and_color(self):
+        # Independent finite convolution-matrix oracle. White unit complex
+        # input becomes H H*: neither the edge variance nor adjacent-output
+        # covariance can be replaced by one automatic white-noise variance.
+        taps = np.array([.2, .3, .5, .3, .2])
+        samples, decimation = 19, 3
+        expected, actual = [], []
+        for index in range(samples):
+            unit = np.zeros(samples, complex)
+            unit[index] = 1
+            expected.append(np.convolve(unit, taps)[::decimation])
+            actual.append(_fir_decimate_chunks((unit[first:first + 4]
+                for first in range(0, samples, 4)), taps, decimation, samples, np.complex128, 4))
+        before, after = np.asarray(expected).T, np.asarray(actual).T
+        np.testing.assert_allclose(after, before, rtol=2e-14, atol=2e-15)
+        covariance = after @ after.conj().T
+        np.testing.assert_allclose(covariance, before @ before.conj().T, rtol=2e-14, atol=2e-15)
+        self.assertAlmostEqual(float(covariance[2, 2].real), .51)
+        self.assertAlmostEqual(float(covariance[2, 3].real), .12)
+        self.assertAlmostEqual(float(covariance[0, 0].real), .04)
+
+    def test_streamed_entry_points_reject_incomplete_or_ambiguous_inputs(self):
+        m, source, epochs = fixture()
+        with self.assertRaisesRegex(ValueError, 'identity'):
+            screen(m, None, epochs, template_provider=lambda *args: source,
+                source_samples=200, template_identity='not-a-hash')
+        with self.assertRaisesRegex(ValueError, 'raw_templates'):
+            screen(m, source, epochs, template_provider=lambda *args: source,
+                source_samples=200, template_identity='0' * 64)
+        s = screen(template_chunk_samples=17)
+        for chunks in (iter([np.zeros(17, complex)]), iter([np.zeros(18, complex)])):
+            with self.assertRaises(ValueError):
+                s.prepare_observation_stream(chunks)
+        with self.assertRaises(ValueError):
+            s.score_projected(np.zeros(s.crop_rows + 1, complex), [0.])
+        receipt = s.projection_receipt()
+        receipt['cropped_output_start'] += 1
+        with self.assertRaisesRegex(ValueError, 'receipt'):
+            s.score_projected(np.zeros(s.crop_rows, complex), [0.], projection_receipt=receipt)
+
     def test_explicit_quadratic_noise_rankings_and_precision(self):
         rng = np.random.default_rng(1742)
         for precision in (np.complex64, np.complex128):

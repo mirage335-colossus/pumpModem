@@ -2,6 +2,7 @@
 // Bounded source/basis bridge for the canonical Robust backend.
 // It contains no receiver, campaign runner or complete-capture export path.
 #include "datapump/helper_carrier.hpp"
+#include "datapump/compression.hpp"
 #include "datapump/triad_modem_v3.hpp"
 #include "datapump/triad_shaping.hpp"
 #include "datapump/triad_helper_burst.hpp"
@@ -61,7 +62,8 @@ struct Options {
     std::optional<std::string> spread_preset, selective_perturbation;
     std::string timing_policy = "case-default";
     std::optional<double> rf_hz, spread_margin, selective_modulation_rate_hz;
-    std::optional<double> data_power_w, helper_power_w;
+    std::optional<double> data_power_w, helper_power_w, path_loss_db;
+    std::optional<std::string> short_message;
     std::uint64_t seed = 1, key_seed = 72001, epoch = 1793850000, symbol_ordinal = 0;
     std::optional<std::uint64_t> burst_wait_tiles;
     unsigned whole_bit_count = 1, whole_bit_wait_count = 0;
@@ -76,7 +78,7 @@ struct Options {
     std::optional<double> cn0, arrival;
     std::optional<bool> fhss;
     bool plan_only = false, power_plan_only = false;
-    bool data = true, helper = true, explicit_data_if = false;
+    bool data = true, helper = true, encrypt = true, added_interleave = true, thermal_noise = true, explicit_data_if = false;
     bool oscillator_effects = true;
     datapump::triad::cli::DiagnosticIqNoiseOptions diagnostic_iq_noise;
 };
@@ -136,7 +138,10 @@ Options parse(int argc, char** argv) {
                 "  [--selective-modulation-rate-hz HZ] [--timing-policy case-default|bounded|broad]\n"
                 "  [--channel-evolution legacy|stochastic] [--random-doppler-width-hz B]\n"
                 "  [--delay-excursion-ms A] [--delay-knot-seconds T]\n"
-                "  [--data-power-w W] [--helper-power-w W]\n"
+                "  [--data-power-w W] [--helper-power-w W] [--path-loss-db DB]\n"
+                "  [--encrypt on|off] [--added-interleave on|off]\n"
+                "  [--thermal-noise on|off] (receiver/channel thermal noise; default on)\n"
+                "  [--short-message TEXT] (plan metadata only; at most256 source bytes)\n"
                 "  [--receiver-tail-seconds 0..1]\n"
                 "  [--control selected|flat] [--data on|off] [--helper on|off]\n"
                 "  [--arrival-seconds T] [--symbol-ordinal N]\n"
@@ -216,6 +221,8 @@ Options parse(int argc, char** argv) {
         else if (arg == "--timing-policy") o.timing_policy = next();
         else if (arg == "--data-power-w") o.data_power_w = real(next(), "DATA power");
         else if (arg == "--helper-power-w") o.helper_power_w = real(next(), "Helper power");
+        else if (arg == "--path-loss-db") o.path_loss_db = real(next(), "path loss");
+        else if (arg == "--short-message") o.short_message = std::string(next());
         else if (arg == "--ramp-seconds") o.ramp_seconds = real(next(), "ramp duration");
         else if (arg == "--receiver-tail-seconds") o.receiver_tail_seconds = real(next(), "receiver tail duration");
         else if (arg == "--cn0") o.cn0 = real(next(), "C/N0");
@@ -223,6 +230,9 @@ Options parse(int argc, char** argv) {
         else if (arg == "--control") o.control = next();
         else if (arg == "--data") o.data = enabled(next());
         else if (arg == "--helper") o.helper = enabled(next());
+        else if (arg == "--encrypt") o.encrypt = enabled(next());
+        else if (arg == "--added-interleave") o.added_interleave = enabled(next());
+        else if (arg == "--thermal-noise") o.thermal_noise = enabled(next());
         else if (arg == "--plan-only") o.plan_only = true;
         else if (arg == "--power-plan-only") o.power_plan_only = true;
         else if (arg == "--power-reference") o.power_reference = next();
@@ -300,8 +310,12 @@ Options parse(int argc, char** argv) {
         throw std::invalid_argument("delay knot interval must be positive");
     if (o.delay_excursion_ms.value_or(0) > 0 && !o.delay_knot_seconds)
         throw std::invalid_argument("nonzero delay excursion requires explicit --delay-knot-seconds");
-    for (const auto power : {o.data_power_w, o.helper_power_w})
-        if (power && *power <= 0) throw std::invalid_argument("DATA and Helper powers must be positive");
+    if (o.data_power_w && *o.data_power_w <= 0) throw std::invalid_argument("DATA power must be positive");
+    if (o.helper_power_w && (*o.helper_power_w < 0 || (*o.helper_power_w == 0 && o.helper)))
+        throw std::invalid_argument("Helper power must be positive when Helper is enabled; zero requires --helper off");
+    if (o.path_loss_db && *o.path_loss_db < 0) throw std::invalid_argument("path loss must be nonnegative");
+    if (o.short_message && o.short_message->size() > 256)
+        throw std::invalid_argument("short message must contain at most256 source bytes");
     if (o.timing_policy != "case-default" && o.timing_policy != "bounded" && o.timing_policy != "broad")
         throw std::invalid_argument("timing policy must be case-default, bounded or broad");
     if (!o.plan_only && !o.power_plan_only && !o.stream_server)
@@ -362,6 +376,7 @@ Case case_for(const Options& o) {
     if (o.rf_hz) result.rf_hz = *o.rf_hz;
     if (o.data_power_w) result.data_w = *o.data_power_w;
     if (o.helper_power_w) result.helper_w = *o.helper_power_w;
+    if (o.path_loss_db) result.loss_db = *o.path_loss_db;
     if (!std::isfinite(result.data_w + result.helper_w))
         throw std::invalid_argument("combined requested power exceeds numeric range");
     if (o.spread_margin) result.margin = *o.spread_margin;
@@ -386,7 +401,7 @@ Format format_for(const Options& o) {
     const bool eme = o.scenario == "eme";
     f.inner_rate_hz = o.inner_rate_hz.value_or(eme ? 360 : 36);
     f.added_symbols = o.added_symbols.value_or(eme ? 1 : 10);
-    f.added_interleave = true;
+    f.added_interleave = o.added_interleave;
     f.sample_rate = o.sample_rate;
     f.bit_seconds = o.seconds;
     f.fhss = o.fhss.value_or(eme);
@@ -395,7 +410,7 @@ Format format_for(const Options& o) {
     f.ramp_seconds = o.ramp_seconds.value_or(eme ? 2. / 3600 : .02);
     f.margin_seconds = .005;
     f.burst_wait_tiles = static_cast<unsigned>(o.burst_wait_tiles.value_or(0));
-    f.encrypt = true;
+    f.encrypt = o.encrypt;
     f.epoch = o.epoch;
     f.symbol_ordinal = o.symbol_ordinal;
     return f;
@@ -501,9 +516,9 @@ ResolvedPhysics resolve_physics(const Options& o, const Case& physical) {
     }
     r.physical_cn0 = 10 * std::log10(physical.data_w * 1000) - physical.loss_db - thermal_n0_dbm_hz;
     r.data_cn0 = o.cn0.value_or(r.physical_cn0);
-    r.effective_helper_w = helper::effective_helper_power(helper_options_for(physical));
-    r.helper_power_limited = physical.helper_w > physical.data_w * 1e9;
-    if (!std::isfinite(r.physical_cn0) || !std::isfinite(r.effective_helper_w) || r.effective_helper_w <= 0)
+    r.effective_helper_w = o.helper ? helper::effective_helper_power(helper_options_for(physical)) : 0.;
+    r.helper_power_limited = o.helper && physical.helper_w > physical.data_w * 1e9;
+    if (!std::isfinite(r.physical_cn0) || !std::isfinite(r.effective_helper_w) || r.effective_helper_w < 0)
         throw std::invalid_argument("requested powers exceed the representable production Helper power range");
     return r;
 }
@@ -564,12 +579,18 @@ void physics_json(std::ostream& out, const Options& o, const Case& physical,
     out << ",\"timing_policy\":"; json_string(out, o.timing_policy);
     out << ",\"arrival_prior_seconds\":[" << physical.arrival_low << ',' << physical.arrival_high << ']'
         << ",\"capture_lead_seconds\":" << physical.capture_lead << ",\"capture_trail_seconds\":" << physical.capture_trail
-        << ",\"message_epoch_count\":13,\"data_w\":" << physical.data_w
+        << ",\"message_epoch_count\":13,\"path_loss_db\":" << physical.loss_db
+        << ",\"noise_floor_dbm_hz\":" << thermal_n0_dbm_hz << ",\"data_w\":" << physical.data_w
         << ",\"requested_helper_w\":" << physical.helper_w << ",\"effective_helper_w\":" << r.effective_helper_w
         << ",\"helper_ratio_limit_db\":" << helper_options_for(physical).ratio_limit_db
         << ",\"helper_power_limited\":" << boolean(r.helper_power_limited)
         << ",\"physical_data_cn0_db_hz\":" << r.physical_cn0 << ",\"data_cn0_db_hz\":" << r.data_cn0
-        << ",\"effective_helper_cn0_db_hz\":" << r.data_cn0 + 10 * std::log10(r.effective_helper_w / physical.data_w)
+        << ",\"thermal_noise_enabled\":" << boolean(o.thermal_noise)
+        << ",\"nominal_noise_variance\":" << o.sample_rate / std::pow(10., r.data_cn0 / 10)
+        << ",\"effective_helper_cn0_db_hz\":";
+    if (r.effective_helper_w > 0) out << r.data_cn0 + 10 * std::log10(r.effective_helper_w / physical.data_w);
+    else out << "null";
+    out
         << ",\"cn0_scope\":\"nominal active DATA reference and effective production Helper/DATA power ratio; actual finite-calendar component energies are reported separately\"}";
 }
 
@@ -590,9 +611,39 @@ void print_plan_json(const Options& o, double data_if_hz,
     const auto gate = std::max(0., selected.spectrum.placement_bandwidth_hz - nominal);
     const auto minimum_data_if = std::max(1725., helper::auxiliary_frequency_hz + 450 +
                                                      selected.spectrum.placement_bandwidth_hz / 2);
+    std::optional<Bytes> short_bits;
+    if (o.short_message) {
+        Bytes source;
+        source.reserve(o.short_message->size());
+        for (const unsigned char byte : *o.short_message) source.push_back(byte);
+        short_bits = compression::encode_short_bits(source);
+    }
+    const auto bit_samples_real = static_cast<long double>(g.bit_seconds) * sample_rate;
+    if (bit_samples_real < 1 || bit_samples_real > UINT64_MAX)
+        throw std::runtime_error("plan transmit calendar extent overflow");
+    const auto bit_samples = static_cast<std::uint64_t>(std::llround(bit_samples_real));
+    HelperBurstPlan transmit_calendar({sample_rate, bit_samples, g.source_samples,
+        g.calendar_origin_sample, o.whole_bit_wait_count, o.helper});
+    const HelperBurstCoordinate calendar_origin{f.epoch, 0};
+    const auto initial_lead = o.helper ? static_cast<std::uint64_t>(data_start_seconds * sample_rate) : 0;
+    const auto first_slot = transmit_calendar.first_slot(transmit_calendar.add(calendar_origin, initial_lead));
+    const auto single_bit_seconds = static_cast<double>(transmit_calendar.distance(
+        first_slot.helper_begin, first_slot.helper_end)) / sample_rate;
+    std::optional<double> short_message_seconds;
+    if (short_bits) {
+        if (short_bits->empty()) short_message_seconds = 0.;
+        else {
+            auto last = first_slot;
+            for (std::size_t i = 1; i < short_bits->size(); ++i)
+                last = transmit_calendar.successor(last);
+            short_message_seconds = static_cast<double>(transmit_calendar.distance(
+                first_slot.helper_begin, last.helper_end)) / sample_rate;
+        }
+    }
     double helper_high = 0;
     std::string helper_error;
     try {
+        if (!o.helper) throw std::logic_error("Helper disabled");
         const helper::PlacementBand placement{data_if_hz, nominal, gate, f.fhss};
         helper_high = helper::plan(helper_options, placement, sample_rate).frequency_hz;
     } catch (const std::exception& error) {
@@ -606,7 +657,8 @@ void print_plan_json(const Options& o, double data_if_hz,
         << ",\"symbol_ordinal\":" << f.symbol_ordinal
         << ",\"pattern_revision\":\"" << pattern_revision_name()
         << "\",\"added_amplitude_depth\":" << f.added_amplitude_depth
-        << ",\"added_symbols\":" << f.added_symbols << ",\"fine_chip_rate_hz\":" << g.fine_chip_rate_hz
+        << ",\"added_symbols\":" << f.added_symbols << ",\"added_interleave\":" << boolean(f.added_interleave)
+        << ",\"encrypt\":" << boolean(f.encrypt) << ",\"fine_chip_rate_hz\":" << g.fine_chip_rate_hz
         << ",\"occupied_bandwidth_hz\":" << nominal << ",\"fhss\":" << boolean(f.fhss)
         << ",\"center_aligned\":" << boolean(f.fhss_center_aligned)
         << ",\"quiet_seconds\":" << f.quiet_seconds << ",\"ramp_seconds\":" << f.ramp_seconds
@@ -649,15 +701,35 @@ void print_plan_json(const Options& o, double data_if_hz,
     std::cout << ",\"limitation\":"; json_string(std::cout, selected.spectrum.limitation);
     std::cout << "},\"helper_placement\":{\"requested_data_if_hz\":" << data_if_hz
         << ",\"minimum_data_if_hz_from_fixed_low_tones\":" << minimum_data_if
-        << ",\"effective_gate_bandwidth_hz\":" << gate << ",\"planned_high_hz\":" << helper_high
-        << ",\"feasible_at_requested_if\":" << boolean(helper_error.empty())
+        << ",\"effective_gate_bandwidth_hz\":" << gate << ",\"planned_high_hz\":";
+    if (o.helper && helper_error.empty()) std::cout << helper_high;
+    else std::cout << "null";
+    std::cout << ",\"enabled\":" << boolean(o.helper)
+        << ",\"feasible_at_requested_if\":" << boolean(!o.helper || helper_error.empty())
         << ",\"unavailable_reason\":";
     if (helper_error.empty()) std::cout << "null";
     else json_string(std::cout, helper_error);
     std::cout << "},\"physics\":";
     physics_json(std::cout, o, physical, physics, data_if_hz);
+    if (short_bits) {
+        const auto& source = *o.short_message;
+        std::cout << ",\"short_message\":{\"text\":";
+        json_string(std::cout, source);
+        std::cout << ",\"source_bytes\":" << source.size()
+            << ",\"encoded_bits\":" << short_bits->size()
+            << ",\"codec\":\"short-prefix\"}";
+    }
+    std::cout << ",\"transmit_calendar\":{\"single_bit_seconds\":" << single_bit_seconds
+        << ",\"first_support_start_seconds\":" << transmit_calendar.relative_seconds(calendar_origin, first_slot.support_begin)
+        << ",\"first_helper_start_seconds\":" << transmit_calendar.relative_seconds(calendar_origin, first_slot.helper_begin)
+        << ",\"first_helper_end_seconds\":" << transmit_calendar.relative_seconds(calendar_origin, first_slot.helper_end)
+        << ",\"bits\":";
+    if (short_bits) std::cout << short_bits->size(); else std::cout << "null";
+    std::cout << ",\"short_message_seconds\":";
+    if (short_message_seconds) std::cout << *short_message_seconds; else std::cout << "null";
+    std::cout << ",\"scope\":\"Native complete support including pulse halos, Helper schedule and inter-bit spacing; serialization only, no message receiver or added framing\"}";
     std::cout << ",\"export_constraints\":{\"sample_rate_hz\":" << sample_rate
-        << ",\"fixed_helper_lead_seconds\":38"
+        << ",\"fixed_helper_lead_seconds\":" << (o.helper ? data_start_seconds : 0.)
         << ",\"maximum_sampled_active_seconds\":null"
         << ",\"sampled_duration_constraint\":\"Bounded pull requests and keyed-tile power work independent of complete duration.\""
         << ",\"plan_only_duration_limit\":\"checked uint64 geometry with no sampled-duration cap\""
@@ -832,14 +904,15 @@ int run(const Options& o) {
     const auto& helper_key = keys.helper;
     PatternSource reference_source(f, key, 0);
     PatternSource data_source(f, key, static_cast<std::uint8_t>(o.bit));
-    const auto lead_samples = static_cast<std::uint64_t>(std::llround(data_start_seconds * sample_rate));
-    if (!o.whole_bit_calendar && g.calendar_origin_sample > lead_samples)
+    const auto lead_seconds = o.helper ? data_start_seconds : 0.;
+    const auto lead_samples = static_cast<std::uint64_t>(std::llround(lead_seconds * sample_rate));
+    if (!o.whole_bit_calendar && o.helper && g.calendar_origin_sample > lead_samples)
         throw std::runtime_error("DATA pulse padding exceeds the fixed Helper lead");
     // Power planning retains its public historical preview coordinate. The
     // opt-in emitted calendar below instead places the entire DATA support
     // after a fresh38-second Helper lead.
     const auto preview_data_offset = static_cast<long double>(data_start_seconds) * sample_rate - g.calendar_origin_sample;
-    auto data_offset = o.whole_bit_calendar ? std::uint64_t{0} : lead_samples - g.calendar_origin_sample;
+    auto data_offset = o.whole_bit_calendar || !o.helper ? std::uint64_t{0} : lead_samples - g.calendar_origin_sample;
     if (g.source_samples > UINT64_MAX - data_offset - dwell_samples)
         throw std::runtime_error("composite source extent overflow");
     const auto data_end = data_offset + g.source_samples;
@@ -900,30 +973,34 @@ int run(const Options& o) {
                                              g.occupied_bandwidth_hz);
     const auto complete_data_bandwidth = legacy_source_bandwidth;
     const helper::PlacementBand placement{data_if_hz, g.occupied_bandwidth_hz, gate_bandwidth, f.fhss};
-    helper::Plan plan;
-    try { plan = helper::plan(helper_options, placement, sample_rate, 0, 1, &reference); }
-    catch (const std::exception& error) {
-        throw std::runtime_error("production Helper plan rejected DATA IF " + std::to_string(data_if_hz) +
-                                 " Hz: " + error.what());
+    helper::Plan plan{};
+    if (o.helper) {
+        try { plan = helper::plan(helper_options, placement, sample_rate, 0, 1, &reference); }
+        catch (const std::exception& error) {
+            throw std::runtime_error("production Helper plan rejected DATA IF " + std::to_string(data_if_hz) +
+                                     " Hz: " + error.what());
+        }
     }
     // Preserve the production Helper preview and composite gain exactly. The
     // former two-second DATA window can sit inside a long low-rate birth ramp,
     // so it is not a general-rate nominal-power reference. A separate DATA-only
     // correction enforces configured active transmit power without changing a
     // Helper sample, duty cycle, waveform, or propagation effect.
-    const auto composite_gain = 1 / (plan.data_gain * std::sqrt(reference_mean_norm));
     const auto data_reference = bounded_tile_power(reference_source, f, g);
     const auto data_calibration_gain = std::sqrt(reference_mean_norm / data_reference.mean_norm);
-    const auto data_gain = plan.data_gain * composite_gain * data_calibration_gain;
-    helper::Generator generator(helper_options, plan, f.epoch, true, helper_key);
+    const auto composite_gain = o.helper ? 1 / (plan.data_gain * std::sqrt(reference_mean_norm)) : 1.;
+    const auto data_gain = o.helper ? plan.data_gain * composite_gain * data_calibration_gain
+                                    : 1 / std::sqrt(data_reference.mean_norm);
+    std::unique_ptr<helper::Generator> generator;
+    if (o.helper) generator = std::make_unique<helper::Generator>(helper_options, plan, f.epoch, true, helper_key);
     long double measured_helper_norm = 0;
-    for (unsigned i = 0; i < helper::power_reference_nodes; ++i) {
+    for (unsigned i = 0; o.helper && i < helper::power_reference_nodes; ++i) {
         const auto seconds = helper::power_reference_node(reference, i);
         if (reference.active(seconds))
-            measured_helper_norm += std::norm(generator.mix_analytic({}, seconds, sample_rate,
+            measured_helper_norm += std::norm(generator->mix_analytic({}, seconds, sample_rate,
                 reference.helper_end_seconds, 0) * composite_gain);
     }
-    const auto reference_helper_ratio = static_cast<double>(measured_helper_norm / reference_nodes);
+    const auto reference_helper_ratio = o.helper ? static_cast<double>(measured_helper_norm / reference_nodes) : 0.;
 
     if (o.power_plan_only) {
         std::cout << std::setprecision(17)
@@ -973,6 +1050,7 @@ int run(const Options& o) {
     effects.seed = mix64(o.seed ^ 0x4348414e4e454cULL);
     config.oscillator_seed = mix64(o.seed ^ 0x4f5343494c4cULL);
     config.noise_seed = mix64(o.seed ^ 0x4e4f495345ULL);
+    effects.noise_enabled = o.thermal_noise;
     config.frontend_seed = mix64(o.seed ^ 0x46524f4e54ULL);
     config.path_seed = mix64(o.seed ^ 0x50415448ULL);
     const auto static_seed = mix64(o.seed ^ 0x535441544943ULL);
@@ -1038,11 +1116,12 @@ int run(const Options& o) {
     emitted.geometry = g;
     emitted.geometry.source_samples = composite_samples;
     emitted.geometry.calendar_origin_sample = 0;
-    emitted.minimum_frequency_hz = std::min(-complete_data_bandwidth / 2,
-        helper::low_pilot_frequency_hz - data_if_hz) - spectral_skirt_allowance_hz;
+    emitted.minimum_frequency_hz = o.helper ? std::min(-complete_data_bandwidth / 2,
+        helper::low_pilot_frequency_hz - data_if_hz) - spectral_skirt_allowance_hz :
+        -complete_data_bandwidth / 2 - spectral_skirt_allowance_hz;
     emitted.maximum_frequency_hz = std::max(complete_data_bandwidth / 2,
-        plan.frequency_hz - data_if_hz) + spectral_skirt_allowance_hz;
-    emitted.working_bytes = data_source.working_bytes() + sizeof(generator);
+        o.helper ? plan.frequency_hz - data_if_hz : 0.) + spectral_skirt_allowance_hz;
+    emitted.working_bytes = data_source.working_bytes() + (generator ? sizeof(helper::Generator) : 0);
     for (const auto& source : whole_sources) emitted.working_bytes += source->working_bytes();
     std::size_t whole_slot_index = 0;
     emitted.sample_at = [&](std::uint64_t n) {
@@ -1069,7 +1148,7 @@ int run(const Options& o) {
         const auto data = raw_data * data_gain;
         const auto helper_input = raw_data * data_calibration_gain;
         auto audio = helper_active ?
-            generator.mix_analytic(helper_input * up, seconds, sample_rate, active_helper_end, active_helper_begin) * composite_gain : data * up;
+            generator->mix_analytic(helper_input * up, seconds, sample_rate, active_helper_end, active_helper_begin) * composite_gain : data * up;
         auto helper_component = helper_active ? audio - data * up : Complex{};
         const auto value = audio * std::conj(up);
         source_data_energy += std::norm(data);
@@ -1097,6 +1176,7 @@ int run(const Options& o) {
         if (o.whole_bit_calendar) candidate_format.epoch = whole_slots.front().pattern_begin.epoch;
         std::map<std::pair<int, unsigned>, std::unique_ptr<PatternSource>> templates;
         std::size_t template_bytes = 0;
+        std::size_t template_cache_evictions = 0;
         std::uint64_t cursor = 0;
         std::vector<Complex> samples(maximum_rows);
         std::vector<std::uint8_t> valid(maximum_rows, 1);
@@ -1114,7 +1194,9 @@ int run(const Options& o) {
             << ",\"total_samples\":" << total << ",\"data_offset_samples\":" << data_offset
             << ",\"source_samples\":" << g.source_samples
             << ",\"capture_lead_seconds\":" << (o.stream_kind == "channel" ? physical.capture_lead : 0)
-            << ",\"noise_variance\":" << (o.stream_kind == "channel" ? config.complex_noise_variance : 0)
+            << ",\"nominal_noise_variance\":" << config.complex_noise_variance
+            << ",\"noise_variance\":" << (o.stream_kind == "channel" && o.thermal_noise ? config.complex_noise_variance : 0)
+            << ",\"thermal_noise_enabled\":" << boolean(o.stream_kind == "channel" && o.thermal_noise)
             << ",\"template_data_gain\":" << data_gain << ",\"data_if_hz\":" << data_if_hz
             << ",\"epoch\":" << candidate_format.epoch
             << ",\"symbol_ordinal\":" << candidate_format.symbol_ordinal
@@ -1123,8 +1205,11 @@ int run(const Options& o) {
             << ",\"helper_enabled\":" << boolean(o.helper)
             << ",\"conditional_gaussian_null_supported\":"
             << boolean(o.stream_kind == "channel" && !o.helper && !o.diagnostic_iq_noise.enabled())
-            << ",\"helper_high_hz\":" << plan.frequency_hz
-            << ",\"helper_low_hz\":" << plan.low_frequency_hz
+            << ",\"helper_high_hz\":";
+        if (o.helper) std::cout << plan.frequency_hz; else std::cout << "null";
+        std::cout << ",\"helper_low_hz\":";
+        if (o.helper) std::cout << plan.low_frequency_hz; else std::cout << "null";
+        std::cout
             << ",\"maximum_rows\":" << maximum_rows << ",\"maximum_columns\":" << maximum_columns
             << ",\"mapped_basis_supported\":true,\"mapped_basis_maximum_offset_samples\":1048576"
             << ",\"workspace_budget_bytes\":" << stream_budget << ",\"fixed_workspace_bytes\":" << fixed_bytes
@@ -1162,7 +1247,8 @@ int run(const Options& o) {
                     << ",\"source_generated_samples\":" << source_rows
                     << ",\"source_data_energy\":" << static_cast<double>(source_data_energy)
                     << ",\"source_helper_energy\":" << static_cast<double>(source_helper_energy)
-                    << ",\"workspace_bytes\":" << fixed_bytes + template_bytes << "}\n" << std::flush;
+                    << ",\"workspace_bytes\":" << fixed_bytes + template_bytes
+                    << ",\"template_cache_evictions\":" << template_cache_evictions << "}\n" << std::flush;
                 return 0;
             }
             if (name == "next") {
@@ -1237,8 +1323,20 @@ int run(const Options& o) {
                 const auto bank_scratch = raw_bank ? PatternSource::render_bank_scratch_bytes : 0;
                 const auto output_bytes = columns * rows * sizeof(Complex);
                 const auto map_bytes = mapped ? rows * sizeof(double) : 0;
-                // write_complex packs one further binary64 buffer. Include both.
-                if (fixed_bytes + template_bytes + 2 * output_bytes + map_bytes + bank_scratch > stream_budget)
+                const auto command_bytes = columns * (sizeof(Candidate) + sizeof(PatternSource*) + sizeof(Tap));
+                // Account for parsed candidate storage, one tap allocation per
+                // candidate, optional mapped coordinates, render scratch, the
+                // complex output and write_complex's packed binary64 copy.
+                const auto request_bytes = command_bytes + 2 * output_bytes + map_bytes + bank_scratch;
+                const auto evict_templates = [&]() {
+                    if (!templates.empty()) {
+                        templates.clear();
+                        template_bytes = 0;
+                        ++template_cache_evictions;
+                    }
+                };
+                if (fixed_bytes + template_bytes + request_bytes > stream_budget) evict_templates();
+                if (fixed_bytes + request_bytes > stream_budget)
                     throw std::runtime_error("basis batch exceeds64MiB workspace budget");
                 std::vector<double> offsets;
                 if (mapped) {
@@ -1259,32 +1357,53 @@ int run(const Options& o) {
                 std::vector<Complex> output(columns * rows);
                 std::vector<PatternSource*> bank_sources;
                 if (raw_bank) bank_sources.reserve(columns);
+                std::size_t bank_group_first = 0;
+                const auto render_bank_group = [&]() {
+                    if (bank_sources.empty()) return;
+                    auto destination = std::span(output).subspan(bank_group_first * rows, bank_sources.size() * rows);
+                    PatternSource::render_bank(bank_sources, static_cast<long double>(first), 1, rows, destination);
+                    bank_sources.clear();
+                };
                 for (std::size_t c = 0; c < columns; ++c) {
                     const auto& candidate = requests[c];
                     const auto address = std::make_pair(static_cast<int>(candidate.epoch_offset_seconds), static_cast<unsigned>(candidate.source_bit));
                     auto found = templates.find(address);
                     if (found == templates.end()) {
-                        if (templates.size() >= 26 || fixed_bytes + template_bytes + 2 * output_bytes + map_bytes + bank_scratch + g.source_workspace_bytes > stream_budget)
-                            throw std::runtime_error("template cache exceeds64MiB workspace budget");
+                        const auto required = g.source_workspace_bytes;
+                        if (templates.size() >= 26 || fixed_bytes + template_bytes + request_bytes + required > stream_budget) {
+                            if (raw_bank) render_bank_group();
+                            evict_templates();
+                        }
+                        if (fixed_bytes + request_bytes + required > stream_budget)
+                            throw std::runtime_error("one basis source exceeds64MiB workspace budget");
                         auto format = candidate_format;
                         format.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(format.epoch) + candidate.epoch_offset_seconds);
                         auto source = std::make_unique<PatternSource>(format, key, candidate.source_bit);
-                        template_bytes += source->working_bytes();
-                        if (fixed_bytes + template_bytes + 2 * output_bytes + map_bytes + bank_scratch > stream_budget)
-                            throw std::runtime_error("template cache actual workspace exceeds64MiB budget");
+                        const auto actual_bytes = source->working_bytes();
+                        if (fixed_bytes + template_bytes + request_bytes + actual_bytes > stream_budget) {
+                            if (raw_bank) render_bank_group();
+                            evict_templates();
+                            if (fixed_bytes + request_bytes + actual_bytes > stream_budget)
+                                throw std::runtime_error("one actual basis source exceeds64MiB workspace budget");
+                        }
+                        template_bytes += actual_bytes;
                         found = templates.emplace(address, std::move(source)).first;
                     }
                     const auto destination = std::span(output).subspan(c * rows, rows);
-                    if (raw_bank) bank_sources.push_back(found->second.get());
+                    if (raw_bank) {
+                        if (bank_sources.empty()) bank_group_first = c;
+                        bank_sources.push_back(found->second.get());
+                    }
                     else {
                         if (mapped) shaped_basis_mapped(*found->second, candidate, sample_rate, first, offsets, destination, center_hz);
                         else shaped_basis(*found->second, candidate, sample_rate, first, rows, destination);
                     }
                 }
-                if (raw_bank) PatternSource::render_bank(bank_sources, static_cast<long double>(first), 1, rows, output);
+                if (raw_bank) render_bank_group();
                 for (auto& value : output) value *= data_gain;
                 std::cout << "{\"count\":" << rows << ",\"first_sample\":" << first
-                    << ",\"columns\":" << columns << ",\"workspace_bytes\":" << fixed_bytes + template_bytes + 2 * output_bytes + map_bytes + bank_scratch
+                    << ",\"columns\":" << columns << ",\"workspace_bytes\":" << fixed_bytes + template_bytes + request_bytes
+                    << ",\"template_cache_evictions\":" << template_cache_evictions
                     << ",\"shared_geometry_bank\":" << boolean(raw_bank)
                     << ",\"mapped\":" << boolean(mapped) << "}\n";
                 write_complex(std::cout, output);

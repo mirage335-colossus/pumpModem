@@ -440,8 +440,9 @@ tests but do not compile them. For individual work, build the corresponding
 ### Robust modem
 
 The current [Robust architecture](robust-current.md) has a canonical native
-waveform, channel and Helper path; Python acquisition and tracking are sequential
-stages, not an integrated receiver or GUI feature. Start with the affected cheap
+waveform, channel and Helper path; case-suite acquisition (`FFTScreen` proposals
+with a noisy Helper estimate) and `PracticalTrackingReceiver` tracking are
+sequential stages, not an integrated receiver or GUI feature. Start with the affected cheap
 deterministic tests. For computationally intensive estimates, follow the
 [abbreviated statistical policy](triad-performance.md): predeclare coverage,
 stopping and uncertainty, record source/configuration provenance, and use only
@@ -506,7 +507,31 @@ or a release.
 ### Robust computational checks
 
 The retained `triad` group covers concise native waveform, shaping, stream, and
-Helper Generator checks. Computationally intensive Robust performance work uses
+Helper Generator checks. Run it before the editable manual-case subwindow suite:
+
+```sh
+./build.sh test triad
+python3 tools/triad_abbreviated.py --cases \
+  --output local-evidence/robust-cases.json \
+  --exporter build/dev/triad_helper_export
+```
+
+Use repeatable `--case-index N` for an explicitly partial debugging rerun; the
+runner validates the entire current list and marks the output partial, which
+does not qualify omitted rows.
+
+The case suite reads `_tests-RobustModem.md` by default and reports bounded
+single-stream acquisition/tracking service, conditional one-channel-seed
+full-bit coarse sensitivity when preflight admits it, an estimated streaming
+FIR plus nominal full Helper/FFT service sum, and workspace estimates.
+It does not qualify operational admission, full Robust reception, whole-message
+success, a whole-machine CPU ceiling, full-bank memory, or GUI reception. The
+one-thread default reflects matched local comparisons, with `--threads` still
+available as an override; it is not a global optimality claim. The empirical
+confirmation bound is reported only when its projected service fits the
+600-second per-candidate cost gate. Follow the detailed
+[case-suite policy](triad-performance.md#editable-manual-case-subwindow-suite).
+Other computationally intensive Robust performance work uses
 [`tools/triad_abbreviated.py`](../tools/triad_abbreviated.py) under the
 [abbreviated statistical policy](triad-performance.md). Predeclare the covered
 kernels and path strata, stage allocation, uncertainty decision, and provenance.

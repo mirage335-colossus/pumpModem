@@ -7,12 +7,13 @@ channel, and Helper generation share native code. The retained
 [shaping findings](triad-shaping.md), and [channel model contract](channel-models.md)
 provide relevant technique summaries and measured limits.
 
-The Python `WeakReceiver` acquisition and `PracticalTrackingReceiver` tracking
-implementations are successive stages. They are not an integrated end-to-end
-receiver and are not connected to the ordinary Robust GUI. The GUI controls are
-retained, but Robust GUI transmission/reception remains unavailable until that
-connection is implemented. Do not describe the staged Python receivers as a
-qualified product path or imply GUI support.
+The manual-case suite's acquisition stage uses noisy Helper estimates and
+`FFTScreen` proposals; its bounded tracking subwindow uses
+`PracticalTrackingReceiver`. These are sequential research stages, not an
+integrated end-to-end receiver and not connected to the ordinary Robust GUI.
+The GUI controls are retained, but Robust GUI transmission/reception remains
+unavailable until that connection is implemented. Do not describe these staged
+measurements as a qualified product path or imply GUI support.
 
 Older single-carrier Robust and standalone triad/Helper implementations are not
 supported current paths. Protocol breaks belong in a new Git tag and a separate
@@ -56,6 +57,45 @@ uses the resolver; transmit-noise behavior has API-level checks only. No
 operational noise command or connected Robust GUI transmitter is available.
 
 ## Testing computationally intensive Robust changes
+
+For the current editable manual cases, first run `./build.sh test triad`, then
+run the local CPU-only subwindow suite:
+
+```sh
+python3 tools/triad_abbreviated.py --cases \
+  --output local-evidence/robust-cases.json \
+  --exporter build/dev/triad_helper_export
+```
+
+For focused debugging, add `--case-index N` once per selected current row; the
+whole list is still freshly parsed and validated, and the report will be marked
+partial. A partial run does not cover the unselected cases.
+
+The default case source is `_tests-RobustModem.md`; the parser rereads and
+hashes it, preserves row order and duplicates, validates all 16 fields
+strictly, and only reuses measurements for identical normalized configurations.
+See [the case-suite method, metrics, and limits](triad-performance.md#editable-manual-case-subwindow-suite)
+before interpreting output: acquisition is the noisy Helper plus `FFTScreen`
+public proposals and tracking is a bounded `PracticalTrackingReceiver`
+subwindow. Its conditional full-bit coarse sensitivity uses one fixed channel
+seed and does not establish operational admission or full Robust reception.
+Timing replicas are not independent reception trials; no whole-message or GUI
+qualification is claimed. Source, case-list, or binary changes invalidate a
+report. The one-thread default reflects matched local measurements, including
+an FHSS case with no measured 12-thread speedup, and is
+not asserted to be globally optimal or to establish a whole-machine CPU ceiling.
+FHSS Helper gating follows the native plan; when the gated-pilot estimator is
+unsupported, EME case 9 must retain the full CFO range.
+When admitted, the suite also estimates complete coarse service as the measured
+streaming FIR plus the slower bit's full nominal-SNR Helper/FFT search; it
+excludes the separate `PracticalTrackingReceiver` and is not divided by the
+host's CPU count. Confirmation is attempted only when its predeclared
+84-receive cost forecast is at most 600 seconds per candidate; above that, the
+model and pilot remain provisional and supply no empirical >90% bound.
+An explicit `--paired-followup` option can run a separate 90% paired-event
+check when its 44-receive cost gate also passes; the standard result remains
+unresolved and the paired outcome is not message success.
+Template-profile and preparation limits are in the linked method.
 
 Use a hierarchical, computationally minimal statistical method. Predeclare the
 decision, covered path strata, sample allocation and stopping rule. Begin with

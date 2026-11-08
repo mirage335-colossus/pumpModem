@@ -105,6 +105,92 @@ class Source:
 @unittest.skipIf(BINARY is None, 'native binary path required')
 class PullSourceTests(unittest.TestCase):
 
+    def test_plan_publishes_format_and_physics_controls(self):
+        def plan(*extra):
+            result = subprocess.run([str(BINARY), *COMMON, '--plan-only', *extra],
+                                    capture_output=True, check=True, timeout=90)
+            return json.loads(result.stdout)
+
+        defaults = plan()
+        self.assertTrue(defaults['format']['encrypt'])
+        self.assertTrue(defaults['format']['added_interleave'])
+        self.assertEqual(defaults['physics']['path_loss_db'], 180)
+        self.assertEqual(defaults['physics']['noise_floor_dbm_hz'], -164)
+        configured = plan('--encrypt', 'off', '--added-interleave', 'off', '--path-loss-db', '123.5')
+        self.assertFalse(configured['format']['encrypt'])
+        self.assertFalse(configured['format']['added_interleave'])
+        self.assertEqual(configured['physics']['path_loss_db'], 123.5)
+        self.assertEqual(configured['physics']['physical_data_cn0_db_hz'],
+                         defaults['physics']['physical_data_cn0_db_hz'] + 56.5)
+
+    def test_short_message_plan_metadata_uses_short_prefix_codec(self):
+        message = 'fox'
+        result = subprocess.run([str(BINARY), *COMMON, '--plan-only', '--short-message', message],
+                                capture_output=True, check=True, timeout=90)
+        plan = json.loads(result.stdout)
+        self.assertEqual(plan['short_message'], {
+            'text': message, 'source_bytes': 3, 'encoded_bits': 22, 'codec': 'short-prefix'})
+        self.assertEqual(plan['transmit_calendar']['bits'], 22)
+        calendar = plan['transmit_calendar']
+        self.assertAlmostEqual(calendar['single_bit_seconds'],
+                               calendar['first_helper_end_seconds']-calendar['first_helper_start_seconds'])
+        self.assertGreater(plan['transmit_calendar']['short_message_seconds'],
+                           plan['transmit_calendar']['single_bit_seconds'])
+        helper_plan = subprocess.run([str(BINARY), *COMMON, '--plan-only', '--helper', 'on',
+                                      '--short-message', message], capture_output=True,
+                                     check=True, timeout=90)
+        helper_calendar = json.loads(helper_plan.stdout)['transmit_calendar']
+        self.assertAlmostEqual(helper_calendar['single_bit_seconds'],
+                               helper_calendar['first_helper_end_seconds']-helper_calendar['first_helper_start_seconds'])
+        self.assertGreater(helper_calendar['first_support_start_seconds'],
+                           helper_calendar['first_helper_start_seconds'])
+        too_long = subprocess.run([str(BINARY), *COMMON, '--plan-only', '--short-message', 'x'*257],
+                                  capture_output=True, timeout=10)
+        self.assertNotEqual(too_long.returncode, 0)
+        self.assertIn(b'at most256 source bytes', too_long.stderr)
+
+    def test_zero_helper_power_is_truthful_when_helper_is_disabled(self):
+        args = ['--plan-only', '--helper', 'off', '--helper-power-w', '0']
+        result = subprocess.run([str(BINARY), *COMMON, *args], capture_output=True,
+                                check=True, timeout=90)
+        plan = json.loads(result.stdout)
+        self.assertEqual(plan['physics']['effective_helper_w'], 0)
+        self.assertIsNone(plan['physics']['effective_helper_cn0_db_hz'])
+        self.assertFalse(plan['helper_placement']['enabled'])
+        self.assertTrue(plan['helper_placement']['feasible_at_requested_if'])
+        self.assertEqual(plan['export_constraints']['fixed_helper_lead_seconds'], 0)
+        with Source(['--helper-power-w', '0']) as source:
+            self.assertFalse(source.plan['helper_placement']['enabled'])
+            self.assertEqual(source.plan['physics']['effective_helper_w'], 0)
+            self.assertIsNone(source.plan['physics']['effective_helper_cn0_db_hz'])
+            self.assertEqual(source.descriptor['helper_high_hz'], None)
+            self.assertLess(source.descriptor['data_offset_samples'], 6000)
+        failed = subprocess.run([str(BINARY), *COMMON, '--helper', 'on', '--plan-only', '--helper-power-w', '0'],
+                                capture_output=True, timeout=10)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn(b'zero requires --helper off', failed.stderr)
+
+    def test_thermal_noise_switch_preserves_nominal_link_and_basis(self):
+        candidate = [[0, 0, 0, 0, 0, 0, 0]]
+        with Source() as noisy:
+            self.assertTrue(noisy.plan['physics']['thermal_noise_enabled'])
+            self.assertTrue(noisy.descriptor['thermal_noise_enabled'])
+            self.assertGreater(noisy.descriptor['noise_variance'], 0)
+            self.assertEqual(noisy.descriptor['noise_variance'], noisy.descriptor['nominal_noise_variance'])
+            noisy_physics = dict(noisy.plan['physics'])
+            _, noisy_basis = noisy.basis(0, 4, candidate)
+        with Source(['--thermal-noise', 'off']) as clean:
+            self.assertFalse(clean.plan['physics']['thermal_noise_enabled'])
+            self.assertFalse(clean.descriptor['thermal_noise_enabled'])
+            self.assertEqual(clean.descriptor['noise_variance'], 0)
+            self.assertGreater(clean.descriptor['nominal_noise_variance'], 0)
+            clean_physics = dict(clean.plan['physics'])
+            _, clean_basis = clean.basis(0, 4, candidate)
+        noisy_physics.pop('thermal_noise_enabled')
+        clean_physics.pop('thermal_noise_enabled')
+        self.assertEqual(noisy_physics, clean_physics)
+        self.assertEqual(noisy_basis, clean_basis)
+
     def test_shared_raw_basis_bank_matches_scalar_mapped_reference_and_ordinals(self):
         rows = [(bit, epoch, 0, 0, 0, 0, 0) for epoch in (-6, 0, 6) for bit in (0, 1)]
         with Source(['--stream-kind', 'emitted', '--symbol-ordinal', '91']) as source:
@@ -121,6 +207,24 @@ class PullSourceTests(unittest.TestCase):
         with Source(['--stream-kind', 'emitted', '--symbol-ordinal', '92']) as source:
             _, different = source.basis(first, count, rows)
             self.assertNotEqual(bank, different)
+
+    def test_hf_fhss_public_basis_bank_batches_within_workspace(self):
+        # Regression for the real HF FHSS suite row: all 26 public bit/epoch
+        # alternatives must fit the bounded workspace without dropping epochs.
+        rows = [(bit, epoch, 0, 0, 0, 0, 0)
+                for epoch in range(-6, 7) for bit in (0, 1)]
+        with Source(['--rate', '36', '--added-symbols', '10', '--fhss', 'on',
+                     '--helper-power-w', '0']) as source:
+            first = source.descriptor['data_offset_samples'] + 32
+            header, bank = source.basis(first, 4, rows)
+            self.assertTrue(header['shared_geometry_bank'])
+            self.assertLessEqual(header['workspace_bytes'], source.descriptor['workspace_budget_bytes'])
+            self.assertGreater(header['template_cache_evictions'], 0)
+            _, repeated = source.basis(first, 4, rows)
+            self.assertEqual(bank, repeated)
+            selected = [rows[i] for i in (0, 12, 25)]
+            _, scalar = source.basis_map(first, [0., 1., 2., 3.], selected)
+            self.assertEqual([bank[i] for i in (0, 12, 25)], scalar)
 
     def test_mapped_basis_protocol_preserves_uniform_and_fractional_calendar(self):
         with Source(['--stream-kind', 'emitted']) as source:

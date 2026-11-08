@@ -57,6 +57,180 @@ def _elapsed(start):
     return dict(cpu_seconds=time.process_time()-start[0], wall_seconds=time.perf_counter()-start[1])
 
 
+def _fir_decimate_chunks(chunks, taps, decimation, samples, dtype, chunk_samples):
+    """Exact finite causal FIR/downsample operator with bounded input tiles.
+
+    Each tile's COMPLETE linear-convolution tail is added on the same global
+    output lattice. No filter state, boundary samples or endpoint tail is
+    discarded. The output covariance remains the FIR's colored covariance;
+    downsampling alone does not whiten it.
+    """
+    count = (samples + len(taps) - 2)//decimation + 1
+    output = np.zeros(count, dtype=dtype)
+    transform_rows = fft.next_fast_len(chunk_samples + len(taps) - 1)
+    transformed_taps = fft.fft(np.asarray(taps, dtype=dtype), n=transform_rows)
+    consumed = 0
+    for source in chunks:
+        values = np.asarray(source)
+        if (values.ndim != 1 or not np.iscomplexobj(values) or not len(values) or
+                len(values) > chunk_samples or not np.isfinite(values).all()):
+            raise ValueError('FIR chunks require bounded nonempty finite complex vectors')
+        if consumed + len(values) > samples:
+            raise ValueError('FIR stream exceeds the declared complete observation')
+        filtered = fft.ifft(fft.fft(values.astype(dtype), n=transform_rows) * transformed_taps)
+        filtered = filtered[:len(values) + len(taps) - 1]
+        phase = (-consumed) % decimation
+        first = (consumed + phase)//decimation
+        kept = filtered[phase::decimation]
+        output[first:first + len(kept)] += kept
+        consumed += len(values)
+    if consumed != samples:
+        raise ValueError('FIR stream ended before the declared complete observation')
+    return output
+
+
+def _provider_cubic(provider, epoch, bit, positions, source_samples):
+    """Apply the EXISTING raw-lattice cubic atom to bounded integer tiles."""
+    first = max(0, math.floor(float(np.min(positions))) - 1)
+    stop = min(source_samples, math.floor(float(np.max(positions))) + 3)
+    if stop <= first:
+        return np.zeros(len(positions), np.complex128)
+    source = np.asarray(provider(epoch, bit, first, stop - first))
+    if (source.shape != (stop - first,) or not np.iscomplexobj(source) or
+            not np.isfinite(source).all()):
+        raise ValueError('template provider must return the requested finite complex integer-source tile')
+    return _sample_cubic(source, positions - first)
+
+
+def _collapsed_cubic_fir(taps, step, downsample):
+    """Compose coarse-grid cubic reconstruction with the ORIGINAL raw FIR.
+
+    Polyphase filtering avoids materializing the upsampled raw lattice. The
+    returned shift preserves raw output phase0, even when step does not divide
+    the raw decimation. Only the coarse interpolation is approximate; this
+    composition and its finite-boundary corrections implement that interpolant.
+    """
+    impulse = np.array([0., 0., 1., 0., 0.], complex)
+    cardinal = _sample_cubic(impulse, np.arange(-2*step, 2*step+1)/step+2).real
+    kernel = signal.convolve(taps, cardinal, mode='full')
+    padding = (-2*step) % downsample
+    return np.pad(kernel, (padding, 0)), (2*step+padding)//downsample
+
+
+def _mapped_finite_source(provider, epoch, bit, positions, source_samples, edge_cache):
+    """Native mapped interior with the exact finite raw-cubic edge stencil."""
+    result = np.zeros(len(positions), np.complex128)
+    low = (positions >= -2) & (positions < 1)
+    high = (positions > source_samples-2) & (positions <= source_samples+1)
+    interior = (positions >= 1) & (positions <= source_samples-2)
+    def render(coordinates):
+        values = np.asarray(provider(epoch, bit, coordinates))
+        if (values.shape != coordinates.shape or not np.iscomplexobj(values) or
+                not np.isfinite(values).all()):
+            raise ValueError('mapped template provider must return finite complex samples matching positions')
+        return values
+    if low.any() or high.any():
+        key = (epoch, bit)
+        if key not in edge_cache:
+            edge_cache[key] = (render(np.arange(4, dtype=float)),
+                render(source_samples-4+np.arange(4, dtype=float)))
+        first, last = edge_cache[key]
+        result[low] = _sample_cubic(first, positions[low])
+        result[high] = _sample_cubic(last, positions[high]-(source_samples-4))
+    if interior.any():
+        result[interior] = render(positions[interior])
+    return result
+
+
+def _project_coarse_column(values, raw_samples, taps, step, downsample, kernel, shift, dtype):
+    """Project the finite coarse interpolant, removing its exterior spill."""
+    rows = (raw_samples+len(taps)-2)//downsample+1
+    filtered = signal.upfirdn(kernel, values, up=step, down=downsample)
+    output = np.zeros(rows, np.complex128)
+    count = min(rows, max(0, len(filtered)-shift))
+    output[:count] = filtered[shift:shift+count]
+    # Cubic reconstruction has support outside the finite raw column. Those
+    # samples were not part of the original operator and must be subtracted.
+    output_coordinates = np.arange(rows)*downsample
+    for first in (-2*step, raw_samples):
+        # A caller may supply a final nonzero coarse knot AFTER raw_samples-1.
+        # Its cubic support can reach almost three cells past the raw endpoint.
+        coordinates = np.arange(first, first+(2 if first < 0 else 3)*step+2)
+        if first < 0:
+            coordinates = coordinates[coordinates < 0]
+        outside = _sample_cubic(values, coordinates/step)
+        correction = signal.oaconvolve(outside, taps, mode='full')
+        indices = output_coordinates-first
+        keep = (indices >= 0) & (indices < len(correction))
+        output[keep] -= correction[indices[keep]]
+    return output.astype(dtype)
+
+
+def compare_template_projectors(exact, approximate):
+    """Compare actual retained GLRT spaces for one matched local native bank.
+
+    This diagnostic uses every supplied epoch/clock/bit and every retained ray,
+    at the SAME1e-10 rank cutoff as the scorer. It is not a global interpolation
+    error certificate or a communication-success estimate.
+    """
+    names = ('fs', 'output_fs', 'samples', 'crop_first', 'crop_rows', 'kernel_rows',
+             'source_samples', 'template_source_identity', 'clocks', 'epochs', 'rays')
+    if (any(getattr(exact, name) != getattr(approximate, name) for name in names) or
+            not np.array_equal(exact.taps, approximate.taps)):
+        raise ValueError('projector comparison requires matched source and finite projection geometry')
+    def basis(workspace):
+        values, vectors = np.linalg.eigh(workspace['gram'])
+        keep = values > values[-1]*1e-10
+        Q = workspace['columns'].T @ (vectors[:, keep]/np.sqrt(values[keep]))
+        # Reorthogonalization preserves the retained span and avoids attributing
+        # eigensolver normalization error to a tiny principal angle.
+        return np.linalg.qr(Q, mode='reduced')[0]
+    def distance(first, second):
+        if first.shape[1] != second.shape[1]:
+            return 1.
+        singular = np.linalg.svd(first.conj().T @ second, compute_uv=False)
+        return math.sqrt(max(0., 1-min(1., float(singular.min()))**2))
+    if len(exact.workspaces) != len(approximate.workspaces):
+        raise ValueError('projector comparison workspace coverage differs')
+    banks = ({}, {})
+    ranks, distances, operator_distances, column_errors, gram_errors = [], [], [], [], []
+    for first, second in zip(exact.workspaces, approximate.workspaces):
+        key = (first['epoch'], first['clock_ppm'], first['bit'])
+        if key != (second['epoch'], second['clock_ppm'], second['bit']):
+            raise ValueError('projector comparison alternative order differs')
+        Q, R = basis(first), basis(second)
+        banks[0][key], banks[1][key] = Q, R
+        ranks.append(first['rank'] == second['rank'])
+        distances.append(distance(Q, R))
+        combined = np.column_stack((first['columns'].T, second['columns'].T))
+        common = np.linalg.qr(combined, mode='reduced')[0]
+        left = common.conj().T @ first['columns'].T
+        right = common.conj().T @ second['columns'].T
+        delta = (left @ first['inverse'] @ left.conj().T -
+                 right @ second['inverse'] @ right.conj().T)
+        operator_distances.append(float(np.linalg.norm((delta+delta.conj().T)*.5, ord=2)))
+        column_errors.append(float(np.linalg.norm(first['columns']-second['columns'])/np.linalg.norm(first['columns'])))
+        gram_errors.append(float(np.linalg.norm(first['gram']-second['gram'])/np.linalg.norm(first['gram'])))
+    separations, reference_separations, candidate_separations = [], [], []
+    for epoch in exact.epochs:
+        for clock in exact.clocks:
+            before = distance(banks[0][epoch, clock, 0], banks[0][epoch, clock, 1])
+            after = distance(banks[1][epoch, clock, 0], banks[1][epoch, clock, 1])
+            separations.append(after/max(before, 1e-30))
+            reference_separations.append(before)
+            candidate_separations.append(after)
+    return dict(schema='triad-local-template-projectors-v1',
+        alternatives=len(ranks), rank_agreement=all(ranks), rank_cutoff_relative=1e-10,
+        maximum_projector_distance=max(distances),
+        maximum_stored_scoring_operator_distance=max(operator_distances),
+        maximum_column_relative_norm_error=max(column_errors),
+        maximum_gram_relative_norm_error=max(gram_errors),
+        minimum_wrong_bit_projector_separation_ratio=min(separations),
+        minimum_reference_wrong_bit_projector_separation=min(reference_separations),
+        minimum_candidate_wrong_bit_projector_separation=min(candidate_separations),
+        scope='Matched local public bank only; all supplied alternatives/rays retained. No full-waveform interpolation, physical channel, or receiver-success qualification.')
+
+
 def _quadratic_scores(correlations, inverse, *, explicit=True):
     """Small Hermitian form without a strided BLAS contraction.
 
@@ -93,7 +267,9 @@ class FFTScreen:
                  precision='fp32', pass_edge_hz=400., stop_edge_hz=490.,
                  frequency_batch_size=8, workers=2,
                  memory_limit_bytes=1024**3, maximum_frequency_points=1024,
-                 maximum_fft_products=32768):
+                 maximum_fft_products=32768, template_provider=None,
+                 source_samples=None, template_identity=None, template_chunk_samples=16384,
+                 mapped_template_provider=None, template_sampling_step=1):
         started = _clock()
         self.manifest = manifest
         self.fs = _integer(manifest['sample_rate_hz'], 'sample rate')
@@ -114,10 +290,39 @@ class FFTScreen:
         self.epochs = tuple(int(x) for x in epoch_offsets)
         if not self.epochs or len(set(self.epochs)) != len(self.epochs):
             raise ValueError('epoch offsets must be nonempty and unique')
-        source = np.asarray(raw_templates)
-        if (source.ndim != 3 or source.shape[:2] != (len(self.epochs), 2) or
-                source.shape[2] < 4 or not np.iscomplexobj(source) or not np.isfinite(source).all()):
-            raise ValueError('finite complex templates need [epochs,2,source samples]')
+        if template_provider is None and mapped_template_provider is None:
+            if source_samples is not None or template_identity is not None:
+                raise ValueError('provider metadata requires a template provider')
+            source = np.asarray(raw_templates)
+            if (source.ndim != 3 or source.shape[:2] != (len(self.epochs), 2) or
+                    source.shape[2] < 4 or not np.iscomplexobj(source) or not np.isfinite(source).all()):
+                raise ValueError('finite complex templates need [epochs,2,source samples]')
+            source_samples = source.shape[-1]
+            source_bytes = source.nbytes
+            source_identity = hashlib.sha256(np.ascontiguousarray(source).view(np.uint8)).hexdigest()
+        else:
+            if (raw_templates is not None or
+                    (template_provider is not None and mapped_template_provider is not None) or
+                    not callable(template_provider if mapped_template_provider is None else mapped_template_provider)):
+                raise ValueError('template provider requires raw_templates=None and a callable')
+            source_samples = _integer(source_samples, 'source samples', minimum=4)
+            if (not isinstance(template_identity, str) or len(template_identity) != 64 or
+                    any(value not in '0123456789abcdef' for value in template_identity)):
+                raise ValueError('template provider requires an explicit lowercase SHA256 source identity')
+            source = None
+            source_bytes = 0
+            source_identity = template_identity
+        template_chunk_samples = _integer(template_chunk_samples, 'template chunk samples')
+        if template_chunk_samples > 65536:
+            raise ValueError('template chunks exceed the bounded65536-sample limit')
+        self.template_chunk_samples = template_chunk_samples
+        self.source_samples = source_samples
+        self.template_source_identity = source_identity
+        self.template_sampling_step = _integer(template_sampling_step, 'template sampling step')
+        if self.template_sampling_step > 65536:
+            raise ValueError('template sampling step exceeds the bounded65536 raw samples')
+        if mapped_template_provider is None and self.template_sampling_step != 1:
+            raise ValueError('coarse template sampling requires a mapped template provider')
         self.clocks = tuple(_number(q, 'clock ppm') for q in clock_ppm)
         if (not self.clocks or len(set(self.clocks)) != len(self.clocks) or
                 any(1+q*1e-6 <= 0 for q in self.clocks)):
@@ -142,7 +347,7 @@ class FFTScreen:
             'raw noise variance', positive=True)*float(np.dot(self.taps.astype(float), self.taps.astype(float)))
         self.source_half_width = _number(manifest['format']['occupied_bandwidth_hz'],
             'nominal DATA bandwidth', positive=True)*.5
-        self.duration = source.shape[-1]/self.fs
+        self.duration = source_samples/self.fs
         self.maximum_frequency_step = 1/(4*self.duration)
 
         # Common basis origin aligned to the arrival lattice.  Cubic zero
@@ -151,7 +356,7 @@ class FFTScreen:
         earliest = min((self.offset-2/self.fs)/scales)
         self.origin = (math.floor((earliest+self.lead+self.lower)*self.output_fs)/
                        self.output_fs-self.lead-self.lower)
-        latest = max((self.offset+(source.shape[-1]+2)/self.fs)/scales)+self.delay
+        latest = max((self.offset+(source_samples+2)/self.fs)/scales)+self.delay
         self.raw_kernel_rows = math.ceil((latest-self.origin)*self.fs)+1
         self.kernel_rows = (self.raw_kernel_rows+len(self.taps)-2)//self.decimation+1
         self.lag_count = math.floor((self.upper-self.lower)*self.output_fs+1e-9)+1
@@ -170,22 +375,63 @@ class FFTScreen:
         self.nfft = fft.next_fast_len(self.crop_rows)
         workspace_count = len(self.epochs)*len(self.clocks)*2
         self.resident_estimate = (workspace_count*len(self.rays)*(self.nfft+self.kernel_rows)*
-                                  np.dtype(self.dtype).itemsize + source.nbytes)
-        scratch = 4*self.raw_kernel_rows*16+4*self.nfft*np.dtype(self.dtype).itemsize
+                                  np.dtype(self.dtype).itemsize + source_bytes)
+        if template_provider is None and mapped_template_provider is None:
+            scratch = 4*self.raw_kernel_rows*16+4*self.nfft*np.dtype(self.dtype).itemsize
+        elif mapped_template_provider is not None:
+            coarse_rows = math.ceil((self.raw_kernel_rows-1)/self.template_sampling_step)+1
+            scratch = (8*coarse_rows*16 + 16*(len(self.taps)+4*self.template_sampling_step)*16 +
+                4*self.nfft*np.dtype(self.dtype).itemsize)
+        else:
+            transform_rows = fft.next_fast_len(template_chunk_samples + len(self.taps) - 1)
+            provider_rows = min(source_samples, math.ceil(template_chunk_samples*float(max(scales))) + 4)
+            scratch = (8*transform_rows*np.dtype(self.dtype).itemsize + 4*provider_rows*16 +
+                       4*self.nfft*np.dtype(self.dtype).itemsize)
         if self.resident_estimate+scratch > self.memory_limit_bytes:
             raise MemoryError('coarse FFT template preparation exceeds memory limit')
         self.workspaces = []
-        time_source = self.origin+np.arange(self.raw_kernel_rows, dtype=float)/self.fs
+        time_source = (self.origin+np.arange(self.raw_kernel_rows, dtype=float)/self.fs
+                       if template_provider is None and mapped_template_provider is None else None)
+        collapsed = (_collapsed_cubic_fir(self.taps, self.template_sampling_step, self.decimation)
+                     if mapped_template_provider is not None else None)
+        mapped_edges = {}
         for ei, epoch in enumerate(self.epochs):
             for clock, scale in zip(self.clocks, scales):
                 for bit in (0, 1):
                     columns = []
                     for delay, doppler in self.rays:
-                        position = (((time_source-delay)*scale)-self.offset)*self.fs
-                        values = _sample_cubic(source[ei, bit], position)
-                        values *= np.exp(2j*np.pi*np.remainder(doppler*time_source, 1.))
-                        column = signal.oaconvolve(values.astype(self.dtype), self.taps,
-                                                   mode='full')[::self.decimation].astype(self.dtype)
+                        if template_provider is None and mapped_template_provider is None:
+                            position = (((time_source-delay)*scale)-self.offset)*self.fs
+                            values = _sample_cubic(source[ei, bit], position)
+                            values *= np.exp(2j*np.pi*np.remainder(doppler*time_source, 1.))
+                            column = signal.oaconvolve(values.astype(self.dtype), self.taps,
+                                                       mode='full')[::self.decimation].astype(self.dtype)
+                        elif mapped_template_provider is not None:
+                            step = self.template_sampling_step
+                            coarse = np.zeros(math.ceil((self.raw_kernel_rows-1)/step)+1, np.complex128)
+                            for first in range(0, len(coarse), template_chunk_samples):
+                                stop = min(len(coarse), first+template_chunk_samples)
+                                raw_indices = np.arange(first, stop)*step
+                                times = self.origin+raw_indices/self.fs
+                                positions = (((times-delay)*scale)-self.offset)*self.fs
+                                keep = raw_indices < self.raw_kernel_rows
+                                if keep.any():
+                                    supplied = _mapped_finite_source(mapped_template_provider, epoch, bit,
+                                        positions[keep], source_samples, mapped_edges)
+                                    coarse[first:stop][keep] = supplied*np.exp(
+                                        2j*np.pi*np.remainder(doppler*times[keep], 1.))
+                            column = _project_coarse_column(coarse, self.raw_kernel_rows, self.taps,
+                                step, self.decimation, *collapsed, self.dtype)
+                        else:
+                            def chunks():
+                                for first in range(0, self.raw_kernel_rows, template_chunk_samples):
+                                    stop = min(self.raw_kernel_rows, first + template_chunk_samples)
+                                    times = self.origin + np.arange(first, stop, dtype=float)/self.fs
+                                    position = (((times-delay)*scale)-self.offset)*self.fs
+                                    values = _provider_cubic(template_provider, epoch, bit, position, source_samples)
+                                    yield values * np.exp(2j*np.pi*np.remainder(doppler*times, 1.))
+                            column = _fir_decimate_chunks(chunks(), self.taps, self.decimation,
+                                self.raw_kernel_rows, self.dtype, template_chunk_samples)
                         columns.append(column)
                     columns = np.asarray(columns, dtype=self.dtype)
                     if columns.shape != (len(self.rays), self.kernel_rows):
@@ -210,12 +456,21 @@ class FFTScreen:
             statistic='static complex matched-subspace GLRT; proposal only',
             score_arithmetic='FP64 explicit Hermitian2-ray form; original contraction if one-ray, rank-deficient or condition>1e6',
             filter_model='causal full-tail FIR, zero-CFO templates, fixed observed coarse projection',
+            bounded_fir_chunk_samples=template_chunk_samples,
             maximum_frequency_points=self.maximum_frequency_points,
             maximum_fft_products=self.maximum_fft_products)
+        if template_provider is not None:
+            self.policy.update(template_storage='bounded integer-source callback; identical cubic/warp/FIR operator',
+                template_chunk_samples=template_chunk_samples, template_provider_identity=source_identity)
+        if mapped_template_provider is not None:
+            self.policy.update(template_storage='bounded mapped native samples; coarse cubic reconstruction plus exact original FIR polyphase composition',
+                template_sampling_step=self.template_sampling_step,
+                template_provider_identity=source_identity,
+                approximation_scope='Template interpolation only; requires matched native fidelity checks for this source/configuration. Observation FIR/noise/effects are unchanged.')
         self.procedure_id = _digest(dict(policy=self.policy,
             source_sha256={name: hashlib.sha256((Path(__file__).parent/name).read_bytes()).hexdigest()
                 for name in ('triad_realtime_fft.py', 'triad_dynamic_joint.py', 'triad_acquisition.py')},
-            template_sha256=hashlib.sha256(np.ascontiguousarray(source).view(np.uint8)).hexdigest(),
+            template_sha256=source_identity,
             geometry=dict(samples=self.samples, fs=self.fs, source_offset=self.offset,
                           lead=self.lead, delay=self.delay, doppler=self.doppler,
                           projected_noise_variance=self.reference_variance)))
@@ -270,8 +525,62 @@ class FFTScreen:
             raise ValueError('complete filtered support outside capture')
         return np.array(filtered[self.crop_first:self.crop_stop], dtype=self.dtype, copy=True)
 
+    def projection_receipt(self):
+        """Exact finite complex-FIR coordinates; taps remain available as .taps.
+
+        Cropped output row i uses raw convolution coordinate
+        ``(cropped_output_start + i)*downsample``. Input outside the declared
+        finite raw observation is numeric zero, never another noise sample.
+        The receipt does not assert whitened or independent output noise.
+        """
+        taps = np.asarray(self.taps, dtype='<f4' if self.precision == 'fp32' else '<f8')
+        return dict(schema='triad-complex-fir-projection-v1',
+            raw_samples=self.samples, input_sample_rate_hz=self.fs,
+            output_sample_rate_hz=self.output_fs, downsample=self.decimation,
+            fir_taps_count=len(taps), fir_taps_dtype=taps.dtype.str,
+            fir_taps_sha256=hashlib.sha256(taps.tobytes()).hexdigest(),
+            template_source_samples=self.source_samples,
+            template_source_identity_sha256=self.template_source_identity,
+            template_sampling_step_raw_samples=self.template_sampling_step,
+            decimation_phase_raw_samples=0, cropped_output_start=self.crop_first,
+            cropped_output_count=self.crop_rows,
+            first_cropped_convolution_raw_sample=self.crop_first*self.decimation,
+            complete_filtered_output_count=(self.samples+len(taps)-2)//self.decimation+1,
+            capture_lead_seconds=self.lead,
+            finite_input_boundary='Exactly zero outside raw sample indices0..raw_samples-1; complete causal FIR tail retained before crop.',
+            noise_scope='Shared finite FIR of raw noise; generally colored, with finite-edge variances. No whitening or new likelihood qualification.')
+
+    def prepare_observation_stream(self, chunks):
+        """Same complex FIR projection from consecutive bounded input chunks.
+
+        All declared raw samples must be present. This entry point preserves
+        the existing screen's all-valid contract; callers must not replace
+        erasures with numeric zeros or treat numeric filter tails as observed.
+        """
+        output_rows = (self.samples + len(self.taps) - 2)//self.decimation + 1
+        transform_rows = fft.next_fast_len(self.template_chunk_samples + len(self.taps) - 1)
+        peak = (self.resident_estimate +
+            (2*output_rows + 8*transform_rows)*np.dtype(self.dtype).itemsize +
+            self.template_chunk_samples*16)
+        if peak > self.memory_limit_bytes:
+            raise MemoryError('streamed observation FIR exceeds the declared memory budget')
+        filtered = _fir_decimate_chunks(chunks, self.taps, self.decimation,
+            self.samples, self.dtype, self.template_chunk_samples)
+        return np.array(filtered[self.crop_first:self.crop_stop], dtype=self.dtype, copy=True)
+
+    def score_projected(self, projected, frequencies_hz=None, *, projection_receipt=None, **arguments):
+        """Score the exact cropped output of this screen's preparation operator.
+
+        This is an implementation entry point, not a claim that an arbitrary
+        downsampled signal has the matching filter/noise/source identity.
+        """
+        if projection_receipt is not None and projection_receipt != self.projection_receipt():
+            raise ValueError('prepared projection receipt does not match this finite operator/source')
+        return self.score(None, frequencies_hz, projected_observation=projected, **arguments)
+
     def score(self, raw, frequencies_hz=None, *, frequency_intervals=None,
-              valid=None, top_per_bit=4, minimum_arrival_separation_seconds=None):
+              valid=None, top_per_bit=4, minimum_arrival_separation_seconds=None,
+              projected_observation=None):
         started = _clock()
         top_per_bit = _integer(top_per_bit, 'top candidates per bit')
         if top_per_bit > 64:
@@ -289,13 +598,21 @@ class FFTScreen:
             return result
         projected_count = len(frequencies)*self.nfft
         batch_scratch = self.batch_size*len(self.rays)*self.nfft*np.dtype(self.dtype).itemsize*3
+        if projected_observation is not None:
+            if raw is not None or valid is not None:
+                raise ValueError('prepared projection requires raw=None and no separate validity')
+            observation = np.asarray(projected_observation)
+            if (observation.shape != (self.crop_rows,) or not np.iscomplexobj(observation) or
+                    not np.isfinite(observation).all()):
+                raise ValueError('finite prepared projection must match this screen crop')
         peak = (self.resident_estimate+projected_count*np.dtype(self.dtype).itemsize+
-                batch_scratch+64*self.samples+32*self.crop_rows)
+                batch_scratch+64*(self.samples if projected_observation is None else self.crop_rows)+32*self.crop_rows)
         if peak > self.memory_limit_bytes:
             result.update(reason='observation_fft_memory_limit', timing=dict(total=_elapsed(started)))
             return result
         mark = _clock()
-        observation = self.prepare_observation(raw, valid)
+        if projected_observation is None:
+            observation = self.prepare_observation(raw, valid)
         filtering_timing = _elapsed(mark)
         mark = _clock()
         spectra = np.empty((len(frequencies), self.nfft), dtype=self.dtype)

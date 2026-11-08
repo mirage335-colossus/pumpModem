@@ -573,6 +573,12 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
     add_test(NAME triad_abbreviated COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_abbreviated.py)
     set_tests_properties(triad_abbreviated PROPERTIES LABELS "triad" TIMEOUT 30)
+    add_test(NAME triad_cases COMMAND ${Python3_EXECUTABLE} -m unittest
+      tests.test_triad_cases tests.test_triad_case_metrics tests.test_triad_case_noise
+      tests.test_triad_case_receiver tests.test_triad_case_replay tests.test_triad_case_suite)
+    set_tests_properties(triad_cases PROPERTIES LABELS "triad" TIMEOUT 60
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+      ENVIRONMENT "OPENBLAS_NUM_THREADS=1;OMP_NUM_THREADS=1;MKL_NUM_THREADS=1")
     add_test(NAME background_noise_cli COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_background_noise_cli.py $<TARGET_FILE:background_noise>)
     add_custom_target(test_background_noise_cli DEPENDS background_noise)
