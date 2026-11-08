@@ -27,8 +27,9 @@ are retained pending reconnection. See [current architecture and status](docs/ro
 To edit the informal [Robust test list](_tests-RobustModem.md), open the
 [standalone editor](tools-endUser/robust-test-list-editor.html) in a browser, select the
 list file, and download the edited result. Use the dropdowns for normal edits;
-choose “Custom value…” only to enter an override. The editor runs locally and
-does not run or validate modem tests.
+choose “Custom value…” only to enter an override. Reorder blocks with their drag
+handles or Move up/Move down buttons before downloading. The editor runs locally
+and does not run or validate modem tests.
 
 The retired single-carrier and standalone triad/Helper receivers are not
 maintained as parallel implementations. Protocol revisions use Git tags and

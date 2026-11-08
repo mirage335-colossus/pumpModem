@@ -32,7 +32,13 @@ h2 { font-size: 1rem; margin: 0; }
 .empty { padding: 52px 20px; border: 1px dashed #a9bdc7; border-radius: 12px; text-align: center; color: #56707e; background: #f9fbfc; line-height: 1.6; }
 .card { border: 1px solid #d6e1e6; background: white; border-radius: 12px; box-shadow: 0 4px 14px #1734450a; overflow: hidden; }
 .card-head { display: flex; align-items: end; gap: 14px; padding: 16px 18px; background: #f9fbfc; border-bottom: 1px solid #e3eaed; }
-.number { align-self: center; color: #08786f; font-size: .75rem; font-weight: 750; letter-spacing: .08em; white-space: nowrap; }
+.block-actions { display: flex; gap: 6px; align-items: center; }
+.drag-handle { cursor: grab; padding: 9px 10px; font-size: 1rem; line-height: 1.2; }
+.drag-handle:active { cursor: grabbing; }
+.move { padding: 9px 10px; }
+.card.dragging { opacity: .55; }
+.card.drop-before { box-shadow: 0 -4px 0 #08786f; }
+.card.drop-after { box-shadow: 0 4px 0 #08786f; }
 .title-field { flex: 1; min-width: 0; }
 label span, .field-label { display: block; color: #59707c; font-size: .72rem; font-weight: 700; letter-spacing: .035em; margin-bottom: 5px; }
 input[type=text], select { width: 100%; padding: 9px 10px; border: 1px solid #c5d3da; border-radius: 6px; background: #fff; color: #172f3d; font: inherit; font-size: .9rem; }
@@ -45,7 +51,7 @@ input[type=text]:hover, select:hover { border-color: #89a6b2; }
 .details summary { cursor: pointer; }
 .details pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f4f7f8; padding: 12px; border-radius: 6px; color: #3d5664; }
 .field-help { display: block; margin-top: 5px; color: #5e7581; font-size: .75rem; line-height: 1.4; }
-@media (max-width: 540px) { main { padding: 16px; } header { padding: 24px 16px; } .card-head { flex-wrap: wrap; } .number { width: 100%; } .toolbar .spacer { display: none; } }
+@media (max-width: 540px) { main { padding: 16px; } header { padding: 24px 16px; } .card-head { flex-wrap: wrap; } .title-field { flex-basis: 100%; } .toolbar .spacer { display: none; } .section-head { flex-wrap: wrap; } }
 </style>
 </head>
 <body>
@@ -63,7 +69,7 @@ input[type=text]:hover, select:hover { border-color: #89a6b2; }
     <button id="download" class="primary" type="button" disabled>Download list</button>
   </div>
   <p class="status" id="status" role="status" aria-live="polite"><strong>Open a list to begin.</strong> Choose the repository’s <code>_tests-RobustModem.md</code>, or add a block to start a new list. Downloads do not overwrite the original file.</p>
-  <div class="section-head"><h2>Test blocks <span id="count"></span></h2><p class="hint">Choose a value, or select Custom value… to type one.</p></div>
+  <div class="section-head"><h2>Test blocks <span id="count"></span></h2><p class="hint">Drag the grip to reorder, or use the arrows. Choose Custom value… to type an override.</p></div>
   <div id="blocks"><div class="empty">No blocks yet.<br>Open the existing list or add a block.</div></div>
 </main>
 <script>
@@ -90,6 +96,7 @@ input[type=text]:hover, select:hover { border-color: #89a6b2; }
   };
   const $ = id => document.getElementById(id);
   let preamble = [], blocks = [], newline = '\n', filename = '_tests-RobustModem.md', baseline = '', started = false, removed = [];
+  let draggedBlock = null, draggedCard = null, dropCue = null;
   const el = (tag, className, text) => { const n = document.createElement(tag); if (className) n.className = className; if (text !== undefined) n.textContent = text; return n; };
   function linesOf(text) {
     const lines = [];
@@ -120,7 +127,12 @@ input[type=text]:hover, select:hover { border-color: #89a6b2; }
   }
   function serialize() {
     const lineText = line => line.raw + line.eol;
-    return preamble.map(lineText).join('') + blocks.map(block => lineText(block.heading) + block.body.map(lineText).join('')).join('');
+    return preamble.map(lineText).join('') + blocks.map((block, index) => {
+      const text = lineText(block.heading) + block.body.map(lineText).join('');
+      // A former final block may lack a newline. Supply a boundary only while
+      // it precedes another block, so moving it back restores the exact bytes.
+      return text + (index < blocks.length - 1 && !/[\r\n]$/.test(text) ? newline : '');
+    }).join('');
   }
   function dirty() { return started && serialize() !== baseline; }
   function refreshStatus() {
@@ -134,7 +146,25 @@ input[type=text]:hover, select:hover { border-color: #89a6b2; }
     blocks.forEach(block => block.body.forEach(line => { const f = fieldOf(line); if (f && f.name === name && f.value) values.add(f.value); }));
     return values;
   }
-  function render() {
+  const blockName = block => block.heading.raw.slice(2).trim() || 'Untitled block';
+  function clearDropCue() {
+    if (dropCue) dropCue.classList.remove('drop-before', 'drop-after');
+    dropCue = null;
+  }
+  function endDrag() {
+    clearDropCue();
+    if (draggedCard) draggedCard.classList.remove('dragging');
+    draggedBlock = null; draggedCard = null;
+  }
+  function moveBlock(block, destination, action) {
+    const from = blocks.indexOf(block);
+    if (from < 0 || destination < 0 || destination >= blocks.length || from === destination) return;
+    blocks.splice(from, 1); blocks.splice(destination, 0, block);
+    render({ block, action });
+    $('status').append(document.createTextNode(` Moved “${blockName(block)}”.`));
+  }
+  function render(focus) {
+    endDrag();
     $('count').textContent = `(${blocks.length})`;
     $('undo').disabled = removed.length === 0;
     const container = $('blocks'); container.replaceChildren();
@@ -142,14 +172,60 @@ input[type=text]:hover, select:hover { border-color: #89a6b2; }
     blocks.forEach((block, index) => {
       const card = el('section', 'card');
       const head = el('div', 'card-head');
-      head.append(el('div', 'number', `BLOCK ${String(index + 1).padStart(2, '0')}`));
       const titleLabel = el('label', 'title-field'); titleLabel.append(el('span', '', 'BLOCK TITLE'));
-      const title = el('input'); title.type = 'text'; title.value = block.heading.raw.slice(2); title.setAttribute('aria-label', `Block ${index + 1} title`);
-      title.addEventListener('input', () => { block.heading.raw = '- ' + title.value; refreshStatus(); });
+      const title = el('input'); title.type = 'text'; title.value = block.heading.raw.slice(2);
       titleLabel.append(title); head.append(titleLabel);
-      const remove = el('button', 'remove', 'Remove'); remove.type = 'button'; remove.setAttribute('aria-label', `Remove block ${index + 1}`);
-      remove.addEventListener('click', () => { removed.push({ index: blocks.indexOf(block), block }); blocks.splice(blocks.indexOf(block), 1); render(); });
-      head.append(remove); card.append(head);
+      const actions = el('div', 'block-actions');
+      const handle = el('button', 'drag-handle', '⠿'); handle.type = 'button'; handle.draggable = true;
+      const up = el('button', 'move', '↑'); up.type = 'button'; up.disabled = index === 0;
+      const down = el('button', 'move', '↓'); down.type = 'button'; down.disabled = index === blocks.length - 1;
+      const remove = el('button', 'remove', 'Remove'); remove.type = 'button';
+      function updateNames() {
+        const name = blockName(block);
+        title.setAttribute('aria-label', `Title: ${name}`);
+        [[handle, 'Drag to reorder'], [up, 'Move up'], [down, 'Move down'], [remove, 'Remove']].forEach(([control, action]) => {
+          control.setAttribute('aria-label', `${action}: ${name}`);
+          control.title = `${action}: ${name}`;
+        });
+      }
+      updateNames();
+      title.addEventListener('input', () => { block.heading.raw = '- ' + title.value; updateNames(); refreshStatus(); });
+      up.addEventListener('click', () => moveBlock(block, blocks.indexOf(block) - 1, 'up'));
+      down.addEventListener('click', () => moveBlock(block, blocks.indexOf(block) + 1, 'down'));
+      remove.addEventListener('click', () => {
+        const at = blocks.indexOf(block);
+        removed.push({ index: at, block, previous: blocks[at - 1], next: blocks[at + 1] });
+        blocks.splice(at, 1); render();
+      });
+      handle.addEventListener('dragstart', event => {
+        endDrag(); draggedBlock = block; draggedCard = card;
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', blockName(block));
+        card.classList.add('dragging');
+      });
+      handle.addEventListener('dragend', endDrag);
+      function dropAfter(event) {
+        const rect = card.getBoundingClientRect();
+        return event.clientY >= rect.top + rect.height / 2;
+      }
+      card.addEventListener('dragover', event => {
+        if (!draggedBlock) return;
+        event.preventDefault(); event.dataTransfer.dropEffect = 'move';
+        clearDropCue();
+        if (draggedBlock === block) return;
+        dropCue = card; card.classList.add(dropAfter(event) ? 'drop-after' : 'drop-before');
+      });
+      card.addEventListener('dragleave', event => { if (!card.contains(event.relatedTarget)) clearDropCue(); });
+      card.addEventListener('drop', event => {
+        if (!draggedBlock) return;
+        event.preventDefault();
+        const source = draggedBlock, from = blocks.indexOf(source);
+        let destination = blocks.indexOf(block) + (dropAfter(event) ? 1 : 0);
+        if (from < destination) destination--;
+        endDrag();
+        if (source !== block) moveBlock(source, destination, 'handle');
+      });
+      actions.append(handle, up, down, remove); head.append(actions); card.append(head);
       const grid = el('div', 'fields'), unknown = [], seen = new Set();
       function showField(name, line) {
         const wrapper = el('div');
@@ -205,6 +281,11 @@ input[type=text]:hover, select:hover { border-color: #89a6b2; }
         detail.append(el('pre', '', unknown.join('\n'))); card.append(detail);
       }
       container.append(card);
+      if (focus && focus.block === block) {
+        const requested = { up, down, handle, title }[focus.action] || title;
+        const target = !requested.disabled ? requested : (!up.disabled ? up : !down.disabled ? down : title);
+        target.focus();
+      }
     });
     refreshStatus();
   }
@@ -236,19 +317,10 @@ input[type=text]:hover, select:hover { border-color: #89a6b2; }
   $('undo').addEventListener('click', () => {
     const item = removed.pop();
     if (item) {
-      const index = Math.min(item.index, blocks.length);
-      // A restored final block may now precede a new block. Its former EOF
-      // must become a line boundary so the following heading stays separate.
-      if (index < blocks.length) {
-        const end = item.block.body[item.block.body.length - 1] || item.block.heading;
-        if (!end.eol) end.eol = newline;
-      }
-      if (index > 0) {
-        const previous = blocks[index - 1];
-        const end = previous.body[previous.body.length - 1] || previous.heading;
-        if (!end.eol) end.eol = newline;
-      }
-      blocks.splice(index, 0, item.block); render();
+      // Prefer a surviving neighbor over the old numeric position after moves.
+      const next = blocks.indexOf(item.next), previous = blocks.indexOf(item.previous);
+      const index = next >= 0 ? next : previous >= 0 ? previous + 1 : Math.min(item.index, blocks.length);
+      blocks.splice(index, 0, item.block); render({ block: item.block, action: 'title' });
     }
   });
   $('download').addEventListener('click', () => {
