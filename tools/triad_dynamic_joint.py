@@ -19,7 +19,6 @@ observation aperture.
 """
 from __future__ import annotations
 
-import argparse
 from dataclasses import dataclass
 import hashlib
 import itertools
@@ -611,66 +610,3 @@ class DynamicJointReceiver(ProjectedJointReceiver):
             valid_sha256=hashlib.sha256(self.valid.tobytes()).hexdigest(),
             implementation_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()),
             sort_keys=True).encode()).hexdigest()
-
-
-def load_public(directory, template_directory=None):
-    """Load public inputs only.  Evaluator truth is deliberately never opened."""
-    directory = Path(directory)
-    template_directory = directory if template_directory is None else Path(template_directory)
-    m = json.loads((directory/"manifest.json").read_text())
-    tm = json.loads((template_directory/"manifest.json").read_text())
-    if m["sample_rate_hz"] != tm["sample_rate_hz"] or m["format"] != tm["format"]:
-        raise ValueError("public template geometry differs")
-    spec = tm["templates"]
-    shape = tuple(spec["shape"])
-    path = template_directory/spec["file"]
-    if path.stat().st_size != math.prod(shape)*16:
-        raise ValueError("template byte count differs from public shape")
-    source = np.memmap(path, dtype="<c16", mode="r", shape=shape)
-    rows = int(m["calendar"]["capture_samples"])
-    raw_path, valid_path = directory/m["observation"]["file"], directory/m["validity"]["file"]
-    if raw_path.stat().st_size != rows*16 or valid_path.stat().st_size != rows:
-        raise ValueError("capture byte count differs from public shape")
-    raw = np.memmap(raw_path, dtype="<c16", mode="r", shape=(rows,))
-    valid = np.memmap(valid_path, dtype="u1", mode="r", shape=(rows,))
-    return m, source, spec["epoch_offsets_seconds"], raw, valid
-
-
-def _main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("capture", type=Path)
-    parser.add_argument("--templates", type=Path)
-    parser.add_argument("--block-seconds", type=float, default=.25)
-    parser.add_argument("--coherence-seconds", type=float, nargs="+", default=[.5, math.inf])
-    parser.add_argument("--arrival-seconds", type=float, nargs="+", default=[0.])
-    parser.add_argument("--frequencies-hz", type=float, nargs="+", default=[0.])
-    parser.add_argument("--clock-ppm", type=float, nargs="+", default=[0.])
-    parser.add_argument("--epochs", type=int, nargs="+", default=[0])
-    parser.add_argument("--pilot-use", choices=("both", "low", "high", "none"), default="both")
-    parser.add_argument("--precision", choices=("fp32", "fp64"), default="fp32")
-    parser.add_argument("--device", default="cpu")
-    parser.add_argument("--threads", type=int, default=2)
-    parser.add_argument("--output", type=Path)
-    args = parser.parse_args()
-    torch.set_num_threads(args.threads)
-    torch.backends.cuda.matmul.allow_tf32 = False
-    torch.set_float32_matmul_precision("highest")
-    m, templates, epochs, raw, valid = load_public(args.capture, args.templates)
-    receiver = DynamicJointReceiver(m, templates, epochs, valid=valid,
-        arrival_seconds=args.arrival_seconds, frequencies_hz=args.frequencies_hz,
-        clock_ppm=args.clock_ppm, selected_epochs=args.epochs,
-        block_seconds=args.block_seconds, coherence_seconds=args.coherence_seconds,
-        pilot_use=args.pilot_use, precision=args.precision, device=args.device)
-    result = receiver.score(raw)
-    result["procedure_id"] = receiver.procedure_id
-    result["required_bands_hz"] = receiver.required_bands_hz
-    result["auxiliary_exclusion_hz"] = receiver.auxiliary_exclusion_hz
-    encoded = json.dumps(result, default=lambda x: x.tolist(), indent=2)
-    if args.output:
-        args.output.write_text(encoded+"\n")
-    else:
-        print(encoded)
-
-
-if __name__ == "__main__":
-    _main()

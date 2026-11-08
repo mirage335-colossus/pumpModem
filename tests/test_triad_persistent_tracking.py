@@ -11,7 +11,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
 from triad_gaussian_state import GaussianPrior, GaussianStateFilter
 from triad_incremental_receiver import IncrementalReceiver
-from triad_tracking_receiver import TrackingReceiver, PersistentTrackingReceiver, PracticalTrackingReceiver
+from triad_tracking_receiver import _PersistentTimingLane, PracticalTrackingReceiver
 from triad_timing_forward import SparseTimingForward, TimingState
 
 
@@ -41,7 +41,7 @@ class PersistentTrackingTests(unittest.TestCase):
             out[2,j,0]=(.2-.8j)*np.exp(2j*np.pi*.6*u)-.3j*np.exp(-2j*np.pi*1.1*u)
         return out
 
-    def make(self, cls=PersistentTrackingReceiver, *, samples=64, segment=16,
+    def make(self, cls=_PersistentTimingLane, *, samples=64, segment=16,
              prior=None, provider=None, coherences=(.6,math.inf), **kw):
         return cls(sample_rate=16,samples=samples,block_samples=8,segment_samples=segment,
             basis_provider=provider or self.provider,timing_forward=prior or self.prior(),
@@ -230,19 +230,17 @@ class PersistentTrackingTests(unittest.TestCase):
         truth=provider((TimingState(0,0,0),),0,0,count,0,np.arange(count))[1,0,0]
         values=truth+math.sqrt(variance/2)*(rng.normal(size=count)+1j*rng.normal(size=count))
         reports=[]
-        for cls in (TrackingReceiver,PersistentTrackingReceiver):
+        for cls in (_PersistentTimingLane,):
             rx=cls(sample_rate=1,samples=count,block_samples=16,segment_samples=16,
                 basis_provider=provider,timing_forward=self.prior(moving=True,models=1),
                 required_bands=[[-.49,.49]],noise_variance=variance,stationary_power=(1.,),
                 coherence_seconds=(math.inf,),precision='fp64',projection_mode='valid-rows',
                 maximum_input_chunk_samples=count,memory_limit_bytes=64*1024**2)
             rx.push(0,values);reports.append(rx.finish())
-        old,new=reports
-        self.assertLess(float(np.logaddexp(*old['bit_scores'])-math.log(2)),math.log(10000))
+        new=reports[0]
         self.assertGreater(float(np.logaddexp(*new['bit_scores'])-math.log(2)),math.log(10000))
         self.assertEqual(int(np.argmax(new['bit_scores'])),0)
         self.assertGreater(new['work_counts']['merged_channel_components'],0)
-        self.assertEqual(new['timing']['retained_initial_path_probability'],old['timing']['retained_initial_path_probability'])
 
 
 class PracticalTrackingTests(unittest.TestCase):

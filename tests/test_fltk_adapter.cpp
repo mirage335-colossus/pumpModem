@@ -1,7 +1,6 @@
 #define DATAPUMP_FLTK_ADAPTER_TEST
 #include "../src/gui/backend_fltk.cpp"
 #include "gui_extension_fixture.hpp"
-#include "estimate_warning_fixture.hpp"
 #include "overlay_fixture.hpp"
 #include <cstring>
 #include <FL/Fl_Image_Surface.H>
@@ -439,34 +438,6 @@ void prompts() {
     require(find_button(*file_dialog,ui::service_cancel_label)&&find_button(*file_dialog,ui::service_dialog({93,ui::ServiceKind::open_file}).accept_label),
         "Native chooser buttons did not consume shared service wording");
     file_services.cancel();Fl::check();require(!Fl::modal(),"Cancelling the title lifetime fixture retained its chooser");
-}
-void estimate_warning_colors() {
-    for(bool color:{false,true}) {
-        theme::apply_palette(color);
-        Launch launch;launch.color=color;launch.simulation=true;NativeApp app(launch);Fl::check();
-        auto* window=application_window();require(window,"Estimate color fixture has no native window");
-        test::estimate_warning_fields(app.application,[] {Fl::wait(.01);},[&](ui::Field field,ui::TextTone tone) {
-            const auto& state=app.application.field(field);
-            auto* label=find_label(*window,state.text);
-            if(field==ui::Field::lpi_estimate) {
-                require(state.text_tone==tone&&!label,
-                    "LPI advisory must retain its model tone without recreating the retired header label");
-                return;
-            }
-            const auto deadline=Clock::now()+std::chrono::seconds(2);
-            while((!label||label->labelcolor()!=text_color(tone))&&Clock::now()<deadline) {
-                Fl::wait(.01);label=find_label(*window,state.text);
-            }
-            if(state.text_tone!=tone||!label||label->labelcolor()!=text_color(tone))
-                throw std::runtime_error("FLTK estimate label ignored or retained a shared warning tone: field="+
-                    std::to_string(static_cast<int>(field))+" expected="+std::to_string(static_cast<int>(tone))+
-                    " shared="+std::to_string(static_cast<int>(state.text_tone))+" color="+
-                    std::to_string(label?label->labelcolor():0)+" expected_color="+std::to_string(text_color(tone))+
-                    " text="+state.text);
-        });
-        app.application.close();while(!app.application.finished())Fl::wait(.005);
-    }
-    theme::apply_palette();
 }
 void fast_mode_visibility() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
@@ -1006,6 +977,15 @@ void expanded_bitmap_clicks() {
         }
         return nullptr;
     };
+    std::function<NativeEditor*(Fl_Group&)> message_editor=[&](Fl_Group& group) -> NativeEditor* {
+        const auto expected=ui::DesktopLayout(window->w(),window->h())[ui::Slot::message];
+        for(int i=0;i<group.children();++i) {
+            auto* child=group.child(i);
+            if(auto* editor=dynamic_cast<NativeEditor*>(child);editor&&editor->x()==expected.x&&editor->y()==expected.y)return editor;
+            if(auto* nested=dynamic_cast<Fl_Group*>(child))if(auto* found=message_editor(*nested))return found;
+        }
+        return nullptr;
+    };
     const auto fingerprint=[](NativeBitmap& view) {
         Fl_Image_Surface surface(view.w(),view.h());surface.draw(&view);
         std::unique_ptr<Fl_RGB_Image> pixels(surface.image());std::uint64_t hash=14695981039346656037ULL;
@@ -1017,11 +997,9 @@ void expanded_bitmap_clicks() {
     app.application.select(ui::Field::qr_brightness,"normal");refresh();
     for(const auto& size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
         window->resize(43,61,size.first,size.second);refresh();
-        auto* previous_focus=find_button(*window,"Transmit");require(previous_focus,"Expanded fixture has no focus target");
-        // Draft edits debounce for 120 ms before an asynchronous estimate.
-        // A fixed presentation wait does not establish focus eligibility.
-        await_ready([&]{return app.application.enabled(ui::Command::transmit)&&previous_focus->active_r();},
-            "Expanded fixture Transmit focus target did not become enabled before opening");
+        auto* previous_focus=message_editor(*window);require(previous_focus,"Expanded fixture has no message editor focus target");
+        await_ready([&]{return app.application.field(ui::Field::message).enabled&&previous_focus->active_r();},
+            "Expanded fixture message editor focus target did not become enabled before opening");
         require(previous_focus->take_focus()&&Fl::focus()==previous_focus,
             "Expanded fixture could not establish its original keyboard focus");
         const ui::Rect original{window->x(),window->y(),window->w(),window->h()};
@@ -1056,8 +1034,8 @@ void expanded_bitmap_clicks() {
             window_count()==original_windows,"Expanded bitmap did not follow an app window resize");
         // The overlay intentionally deactivates the native background. Check
         // shared eligibility so dismissal has a ready target to restore.
-        await_ready([&]{return app.application.enabled(ui::Command::transmit);},
-            "Expanded fixture updated draft did not restore Transmit eligibility before dismissal");
+        await_ready([&]{return app.application.field(ui::Field::message).enabled;},
+            "Expanded fixture updated draft did not retain message editor eligibility before dismissal");
         click(window->w()/2,window->h()/2);refresh();
         require(!expanded()&&!app.application.overlay()&&window->shown()&&window_count()==original_windows,
             "Second bitmap click did not restore the existing app view");
@@ -1757,9 +1735,6 @@ int main(int argc,char** argv) {
         if(argc==2&&std::string_view(argv[1])=="--disabled-text") {
             theme::apply_palette();disabled_editor_presentation();return 0;
         }
-        if(argc==2&&std::string_view(argv[1])=="--estimate-colors") {
-            theme::apply_palette();estimate_warning_colors();return 0;
-        }
         if(argc==2&&std::string_view(argv[1])=="--layout-lifecycle") {
             theme::apply_palette();layout_lifecycle();return 0;
         }
@@ -1776,7 +1751,7 @@ int main(int argc,char** argv) {
         theme::apply_palette();
         using Probe=std::pair<const char*,void(*)()>;
         const std::array probes{
-            Probe{"palette_roles",palette_roles},Probe{"estimate_warning_colors",estimate_warning_colors},
+            Probe{"palette_roles",palette_roles},
             Probe{"menus",menus},Probe{"generic_gestures_and_bitmaps",generic_gestures_and_bitmaps},
             Probe{"editor_cursor_requests",editor_cursor_requests},Probe{"editor_history_requests",editor_history_requests},
             Probe{"disabled_editor_presentation",disabled_editor_presentation},

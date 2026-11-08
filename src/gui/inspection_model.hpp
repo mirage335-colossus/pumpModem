@@ -1,7 +1,5 @@
 #pragma once
 #include "datapump/transfer.hpp"
-#include "datapump/lpi_estimate.hpp"
-#include "pattern_space.hpp"
 #include <complex>
 #include <optional>
 #include <string>
@@ -37,11 +35,8 @@ struct Inspection {
     std::vector<StructureSection> sections;
     std::vector<Field> fields;
     std::vector<Constellation> constellations;
-    std::optional<inspection::PatternSpace> pattern_space;
     std::string preamble_description,chip_description;
     transfer::Estimate estimate;
-    lpi::Estimate lpi_estimate;
-    std::string lpi_summary,lpi_description;
     std::optional<StreamLayout> stream_layout;
 };
 struct InspectionRequest {
@@ -49,13 +44,11 @@ struct InspectionRequest {
     std::optional<Bytes> binary;
     transfer::Options options;
     std::string requested_pattern;
-    std::optional<lpi::Hopping> observer_hopping;
     double target_snr=0;
     bool simulation=false;
     std::string device;
 };
-// Run alongside the transmission estimate worker. Encodes a bounded source to
-// inspect its fixed interval layout; never generates a waveform or retains
-// source data, metadata strings, key bytes, masks, or coded bytes in the model.
+// UI boundary for the replacement triad backend. No waveform or receiver
+// estimate is produced while that backend is disconnected.
 Inspection inspect(const InspectionRequest& request,std::stop_token stop = {});
 }

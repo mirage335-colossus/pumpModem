@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
-"""Bounded timing-state likelihoods with explicit channel-state policies.
+"""Canonical persistent nominal/adaptive timing receiver.
 
-TrackingReceiver is the independent-segment reference.  Its timing model, bit
-and global coherence choice continue while channel priors renew at boundaries.
-PersistentTrackingReceiver also transports channel posteriors, using normalized
-Gaussian moment matching at converging histories.  That is a declared
-interacting-model approximation, not an exact switching-channel likelihood.
-
-This module makes no admission decisions. Its Gaussian noise null is still a
-conditional model, especially after physical asynchronous sample conversion.
+The two internal lanes share stream geometry and transport channel posteriors
+using normalized Gaussian moment matching at converging histories. This is a
+declared interacting-model approximation, not exact switching likelihood.
+This module makes no admission decisions; physical ADC/ASRC covariance and
+endpoint policy remain the caller's scope.
 """
 from __future__ import annotations
 
@@ -28,7 +25,7 @@ def _integer(value, name, low=1, high=(1 << 64)-1):
     return int(value)
 
 
-class TrackingReceiver:
+class _TimingStream:
     """Consume a contiguous observation using a public sparse timing model.
 
     ``basis_provider(states, anchor_seconds, first, stop, origin, offsets)``
@@ -255,15 +252,13 @@ class TrackingReceiver:
         self.maximum_segment_wall_seconds = max(self.maximum_segment_wall_seconds, time.perf_counter()-started)
 
     def _predict_timing(self, elapsed, boundary_from_previous_anchor=None):
-        self.timing.predict(elapsed)
+        raise NotImplementedError("timing stream requires a persistent lane")
 
     def _make_segment_receiver(self, rows, states, render, origin, offsets):
-        return IncrementalReceiver(samples=rows, candidate_count=len(states), basis=render,
-            block_center_seconds=lambda lo, hi: .5*(float(offsets[lo])+float(offsets[hi-1]))/self.sample_rate,
-            **self.receiver_arguments)
+        raise NotImplementedError("timing stream requires a persistent lane")
 
     def _observe_segment(self, receiver, unmixed, origin, offsets, rows):
-        self.timing.observe(unmixed[:, 1:])
+        raise NotImplementedError("timing stream requires a persistent lane")
 
     def push(self, first_sample, values, valid=None, *, physical_origin=None, physical_offsets=None):
         started = time.process_time()
@@ -358,10 +353,8 @@ class TrackingReceiver:
         return result
 
 
-SegmentedTimingReceiver = TrackingReceiver
 
-
-class PersistentTrackingReceiver(TrackingReceiver):
+class _PersistentTimingLane(_TimingStream):
     """Carry normalized channel posteriors through public timing updates.
 
     Incoming channel distributions at the same timing state are replaced by a
@@ -532,7 +525,7 @@ class PersistentTrackingReceiver(TrackingReceiver):
         return result
 
 
-class _InitialAffineReceiver(PersistentTrackingReceiver):
+class _InitialAffineReceiver(_PersistentTimingLane):
     """Persistent initial public affine bank with one immutable time anchor."""
 
     def __init__(self, *, basis_provider, **arguments):
@@ -625,7 +618,7 @@ class PracticalTrackingReceiver:
         remaining = self.memory_limit_bytes-self.nominal.owned_bytes_estimate
         if remaining <= 0:
             raise MemoryError('initial affine lane exhausts combined tracking workspace')
-        self.adaptive = PersistentTrackingReceiver(timing_forward=timing_forward,
+        self.adaptive = _PersistentTimingLane(timing_forward=timing_forward,
             memory_limit_bytes=remaining, **arguments)
         self.owned_bytes_estimate = self.nominal.owned_bytes_estimate+self.adaptive.owned_bytes_estimate
         for name in ('sample_rate','samples','block_samples','segment_samples','precision',

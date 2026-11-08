@@ -227,20 +227,20 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(self.process.poll(),0)
         self.assertIsNone(self.server.worker)
 
-    def test_native_file_round_trip_and_cancel(self):
+    def test_native_file_import_and_cancel(self):
         fixture=bytes([0,1,2,3,255,192,128,68,97,116,97,80,117,109,112,10])
         (self.root/'input.bin').write_bytes(fixture)
         self.event(4,self.control('Attach file')['id']);self.wait(lambda:bool(self.snapshot.get('service')))
         self.event(13,self.snapshot['service']['id'],flags=2)
         self.assertFalse(self.snapshot.get('service'))
-        for label,value in [('Path loss','6 dB'),('Short ≤16 B target SNR (dB-Hz)','80'),('Long / file target SNR (dB-Hz)','80')]:self.event(1,self.control(label)['id'],value)
         self.event(4,self.control('Attach file')['id']);self.wait(lambda:bool(self.snapshot.get('service')))
-        self.service('input.bin');self.wait(lambda:self.control('Transmit')['enabled'])
-        self.event(4,self.control('Transmit')['id'])
-        self.wait(lambda:bool(self.control('Files in memory').get('records')))
-        files=self.control('Files in memory');self.event(7,files['id'],files['records'][0]['id'])
-        self.wait(lambda:bool(self.snapshot.get('service')));self.service('received.bin')
-        self.assertEqual((self.root/'received.bin').read_bytes(),fixture)
+        self.service('input.bin')
+        self.wait(lambda:any(item.get('text')=='Attached: input.bin' for item in self.snapshot['controls']))
+        self.assertFalse(self.control('Transmit')['enabled'])
+        self.assertFalse(self.control('Files in memory').get('records'))
+        self.assertTrue(any(item.get('text')=='Robust is unavailable until the canonical triad backend is connected.'
+                            for item in self.snapshot['controls']))
+        self.event(4,self.control('Use text')['id'])
         worker=self.server.worker;self.assertEqual(self.request('/stop',b'')[0],200)
         self.assertEqual(self.process.poll(),0);self.assertFalse(worker.reader.is_alive())
 
@@ -266,7 +266,9 @@ class NativeTests(unittest.TestCase):
         self.wait(lambda:int(self.snapshot['ack'])>=sequence)
         self.assertFalse(self.snapshot.get('service'))
         self.event(4,self.control('Attach file')['id']);self.wait(lambda:bool(self.snapshot.get('service')))
-        self.service('input.bin');self.wait(lambda:self.control('Transmit')['enabled'])
+        self.service('input.bin')
+        self.wait(lambda:any(item.get('text')=='Attached: input.bin' for item in self.snapshot['controls']))
+        self.assertFalse(self.control('Transmit')['enabled'])
 
 
 if __name__=='__main__':

@@ -33,7 +33,6 @@ on:
         type: choice
         options: [none, linux, windows, wasm, both, all]
         default: none
-      sanitizer_smoke:
         description: 'Also run the optional instrumented desktop smoke in native CI'
         type: boolean
         default: false
@@ -112,7 +111,6 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       devfast: false
-      sanitizer_smoke: ${{ inputs.sanitizer_smoke }}
       sanitizer_realtime: ${{ inputs.sanitizer_realtime }}
       linux_runner: ${{ inputs.linux_runner }}
       arm_runner: ${{ inputs.arm_runner }}

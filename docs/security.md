@@ -1,267 +1,69 @@
 # Security boundaries
 
-Data Pump transports analog-audio decisions into opaque application bytes.
-No received address selects a network endpoint, filename selects a destination,
-or command is executed. Files are not automatically opened. The native GUI calls
-the C++ transfer service without a shell; saving requires a local explicit path.
-The byte transport has no packet header, remote integer length, filename/type,
-packet ID, repeat flag, bootstrap CRC, or automatic legacy parser fallback.
-Peers using file-backed keys must use the current keyfile format, matching cipher
-suite, fixed-interval wire format and local profile. Older keyfile formats are rejected.
-See [protocol](protocol.md) and [cryptography](crypto.md).
+Data Pump does not execute received data or use it to choose a file path,
+network endpoint, or command. Saving original received bytes requires an
+explicit local path. Current format, authentication, and completion guarantees
+are specific to each maintained service; see [Fast](fast-mode.md),
+[Legacy](legacy-modem.md), and [cryptography](crypto.md). Robust transmission
+and reception are not connected to the GUI.
 
-The Robust GUI's default **WARNING-Amateur** keyset is public and offers no
-confidentiality or sender authentication. Its use of the normal cipher and MAC
-paths does not make its public key material secret. Loading a real keyfile
-replaces this keyset; failed loads retain the current key bank.
+## Received-content presentation
 
-## Received-text boundary
+The shared receive presentation policy restricts bytes before text reaches the
+GUI, clipboard, transmit draft, terminal, pipe, or JSON text field. The allowed
+bytes are English ASCII letters and digits, comma, period, at sign, space,
+hyphen, underscore, slash, equals, and line-feed (`LF`, `0x0a`). Every other
+byte is displayed as one underscore. UTF-8 is not decoded; CR and tab become
+placeholders. JSON output escapes the filtered LF as `\n`.
 
-Robust, Fast and Legacy Modem apply the same restricted receive character policy
-before received content reaches native GUI text, clipboard requests or a
-transmit draft. The CLI applies it to received content on terminals, in pipes
-and in JSON text fields. The default allowed bytes are exactly English ASCII
-`a-z`, `A-Z`, `0-9`, comma (`,`), period (`.`), at sign (`@`), space, hyphen (`-`),
-underscore (`_`), slash (`/`), equals (`=`), and line-feed newline (`LF`, `0x0a`).
+**Shellcode mode** is an opt-in GUI exception for copying bootstrap commands.
+It is hidden unless Developer mode is enabled and permits printable ASCII
+`0x20`–`0x7e` plus LF. Turning Developer mode off disables Shellcode mode and
+reapplies the default policy to received views and derived drafts/history. It
+cannot revoke bytes already copied outside the application.
 
-Every other source byte becomes one ASCII underscore. This includes parentheses,
-semicolon, backslash, ampersand, every control byte except LF, and every byte
-outside ASCII. Carriage return (`CR`) and tab remain placeholders; CRLF is
-therefore displayed as an underscore followed by a newline.
-UTF-8 is not decoded: a two-byte UTF-8 character becomes two underscores.
-`received_text.hpp` implements this boundary with byte comparisons and a
-same-size output buffer, without locale handling, Unicode parsing or escape
-expansion. CLI JSON escapes the already-filtered LF as `\n` to preserve valid
-JSON; plain-text output and GUI message text retain actual newlines.
-Received filenames use the default policy even in Shellcode mode.
-Application-owned labels and diagnostics are distinct from received content.
+Paste and export use the filtered presentation for text. Raw-bit presentation
+contains only `0` and `1`; original completed file bytes remain available only
+through explicit saving. The policy changes presentation, not the underlying
+wire format or cryptographic guarantees. See the
+[GUI contract](gui-contract.md#received-content-and-drafts) for adapter behavior.
 
-**Shellcode mode** is a GUI exception for copying bootstrap commands. It starts
-unchecked, is hidden unless **Developer mode** is checked, and permits only
-printable English ASCII bytes `0x20` through `0x7e` in addition to LF. Other
-controls and non-ASCII bytes still become underscores. Turning Developer mode
-off also unchecks and hides Shellcode mode. Turning either permission off
-reapplies the default policy to received views and received-derived drafts/history,
-refreshes their QR previews,
-and revokes pending copies made under the withdrawn exception. It cannot revoke
-content already copied to an external program or clipboard manager.
+## Cryptography and format limits
 
-**Paste as message** copies the permitted presentation, not the original rejected
-bytes. Received raw-bit pastes preserve exact `0`/`1` bits, but any accompanying
-decoded text or expected-text preview obeys the same character policy. Edits and
-previous-message actions cannot restore forbidden received bytes after the
-exception is disabled. Fresh locally entered transmit text retains its existing
-input rules; its QR generator may encode locally typed or pasted punctuation
-without either mode being enabled. QR generators consume the transmit draft,
-never original received buffers.
+Fast has encrypted authenticated operation and a separate public checksum
+mode; checksums detect accidental changes but do not authenticate a sender.
+Authentication failures do not fall back to public mode. Legacy follows its
+own maintained format and security limits. See [Fast integrity and physical
+completion](fast-mode.md#integrity-physical-completion-and-bounded-storage),
+the [Legacy reference](legacy-modem.md), and [cryptographic constructions](crypto.md).
 
-Received-content presentation and export have three forms: retained diagnostic
-bits are rendered as `0` and `1`, rejected byte values have the fixed placeholder,
-and completed original payloads stay in bounded receive memory for direct saving
-to a user-chosen file. Attachment saves and explicit CLI `--save PATH` preserve
-the original bytes and never open or execute them. Ordinary CLI output does not
-provide an exact-byte pipe bypass or a Base64 payload field. The policy changes
-presentation and export behavior, not modem framing, source decoding quotas,
-physical completion, authentication or pending bit progress.
+The native Robust waveform uses purpose-separated keyed streams, and its data
+confidentiality uses independent Serpent and AES lanes. Reusing the same key
+and canonical stream address reproduces bytes; key/address reuse is unsafe.
+Purpose separation and waveform evidence do not authenticate a sender or
+provide replay protection. The current Robust implementation is not an
+integrated receiver or GUI service, so no end-to-end reception or physical-link
+security claim is made.
 
-## Speculative execution: current coverage and limits
+Keyfiles use the current `DPMKEY04` format; older versions are rejected. Audio
+collected during key generation is supplementary input, not a source of
+measured entropy. A delay between operating-system random collections does
+not prove independence or hardware RNG use. A complete unpadded keyfile
+contains the material needed to recover its keys; it is not password
+protection. See [keyfile construction and limits](crypto.md#keyfile-version-4).
 
-Selected receive indices now retain a bounds dependency through their memory
-access, and selected validation transitions have a target-specific speculation
-barrier. Coverage includes short-dictionary reads, portions of Regular/Fast
-Reed–Solomon correction, retained-bit recovery, acoustic interpolation, selected
-LZMA dictionary/property operations, the ASCII output boundary and explicit
-payload writes. The LZMA changes are applied to a verified generated copy of the
-pristine pinned source. Full-domain field tables and reviewed Legacy/LDPC tables
-and arithmetic remain unchanged; no global DSP serialization is enabled.
+## Input bounds and host boundary
 
-These are targeted bounds-check-bypass mitigations, not protection against all
-Spectre variants, Meltdown or other CPU weaknesses. Ordinary C++, printable ASCII,
-authentication and an explicit file save are not security proofs. Compiler-target
-support is recorded in `build-info.txt`; unsupported targets retain architectural
-checks without a claim of speculative protection. Generated-code witnesses check
-specific instruction dependencies, not the behavior of every caller or CPU.
+Decoders and parsers must validate lengths, indices, and allocation extents
+before using received-derived values. Current component limits and selected
+speculative-execution mitigations are described in
+[receive-processing hardening](receive-processing-hardening.md); they are
+defense in depth, not protection against every CPU, compiler, operating-system,
+or hardware vulnerability.
 
-The application-controlled receive paths contain no JavaScript engine, embedded
-browser, received-content JIT/interpreter or automatic execution of received
-files. No process or VM isolation is added or credited. CPU, firmware, operating
-system and library behavior still require separate deployment assessment; this
-change neither configures nor verifies host mitigations. See the
-[technical design and audit scope](receive-processing-hardening.md) for precise
-coverage, architecture limits, direct-save handling and performance validation.
-
-## Signal evidence, error correction and authentication
-
-Pattern evidence alone establishes symbol timing and keystream coordinates.
-It is a model score, not authentication or a calibrated probability for arbitrary
-real interference. Fixed marker recognition follows normal Data unmasking and
-cannot restart the cipher or select a packet parser.
-
-Each marker precedes exactly 128 coded bytes. Public intervals contain only their
-fixed data area and optional RS parity: no SHA-256 content digest or substitute
-checksum. Anyone can generate valid public RS codewords; neither marker confidence
-nor successful correction makes public content trustworthy. Public source-format
-validation is likewise not proof of origin or harmlessness.
-
-Encrypted intervals use a 32-byte tag formed by XORing HMAC-SHA256 values under
-separately derived Serpent- and AES-lane authentication keys. Their fixed
-layout is data area, tag, then optional RS parity. The tag binds the local
-FEC/source profile, a versioned domain, the canonical `(epoch, ordinal)` address
-of the interval's first coded symbol, and the complete fixed data area. RS protects
-the data and tag together; MAC verification follows correction. Missing timing
-addresses remain unresolved, and failed authentication cannot become accepted
-source content. The cipher masks markers and all other interval bits at their
-normal symbol positions.
-
-Generic RS supports known byte erasures with `2*errors+erasures <= parity`.
-Unknown slots contribute no marker evidence. Their zero placeholders retain an
-erasure mask through packing; they cannot silently become observed zero bits or
-empty source cells. Uncorrectable intervals make exact source reconstruction
-incomplete. Later markers may permit later segments to be received independently.
-There is no public integrity claim merely because an error pattern was accepted
-by an algebraic decoder.
-
-The optional additional post-end search consumes only retained hard decisions,
-missing-slot masks and already established symbol addresses. It enumerates
-assignments for unknown bits to free RS capacity, and tests fixed-size interval
-alignments. Analog observations and symbol-confidence scores are not inputs.
-Assignments retain their original unknown status for evidence and diagnostics;
-the received bits inside a partially missing byte must remain consistent with
-any recovered byte. No trial changes timing, cipher position, key, local FEC
-profile or source codec. Every keyed candidate still passes the complete
-HMAC-SHA256 verification after ordinary RS correction.
-
-This search has an explicit finite domain and local storage, wall-clock and
-worker limits. Completing only a prefix of that domain cannot establish
-uniqueness: deadline or cancellation retains an unfinished result for resumption,
-without releasing speculative source bytes. Competing credible reconstructions
-are rejected before source parsing. Neither successful authentication nor
-readable/decompressible content supplies missing alignment evidence. See the
-[recovery scope and evidence accounting](protocol.md#exhaustive-hard-bit-recovery).
-
-The marker's independent-fair-bit model budgets at most `2^-84` false acceptance
-across a drained collector, charging all bounded start/deletion/mismatch trials.
-See [marker evidence](protocol.md#marker-evidence-threshold). This model does not
-cover a sender constructing marker-like bytes and supplies no authentication.
-Runtime derivation from a stored public label reduces literal self-recognition;
-it cannot make a finite marker absent from every possible source file.
-
-## Stream completion and post-end decoding
-
-Only iterative search finding consecutive **fully scored failed symbols** whose
-received duration covers at least six seconds ends a stream. If one symbol lasts
-six seconds or more, its first completed failure suffices. Shorter symbols require
-enough consecutive failures to cover six seconds. Long symbols are not preempted
-by a partial six-second window.
-
-EOF, cancellation, receiver replacement, exhausted quotas, FEC/MAC results and
-codec end markers are not evidence of physical completion. They cannot bypass
-the application source-decoder gate. Reception may be interrupted and buffers
-released while its status remains incomplete.
-
-For interval-coded sources, compressed mode is exactly one raw LZMA2 source with a fixed 4 MiB dictionary and
-less than one fixed data area's trailing zero fill. It transmits no original
-length. A bounded spool retains corrected compressed areas until physical end;
-only then may the application decompress. No compressed previews or speculative
-codec probes run during reception. The decoder has explicit scratch/output caps,
-requires its own end, and rejects noncanonical trailing fill. Uncompressed mode
-uses fixed validity/byte cells with bounded loops to retain exact trailing zeros.
-Malformed occupancy, unresolved holes or failed MACs cannot be concatenated away.
-
-LZMA2 has an internal chunk grammar; it is a separately bounded post-end application
-codec, not modem framing. Public senders can construct syntactically valid
-compressed data. Decoder bounds and safe output handling remain necessary even
-when a source is well formed or keyed authentication succeeds. The format rewrite
-removes old parser dependencies; this review did not establish a buffer-overflow
-exploit in the previous implementation.
-
-Independent MACs authenticate received intervals at their canonical positions.
-They do not prove the sender intended no additional intervals. A whole lost final
-interval removes the sole codec endpoint of a canonical compressed source and
-therefore makes that source truncated; an independently acquired later segment,
-or an uncompressed source, still carries no authenticated total transfer count.
-A long fade may terminate a receiving segment rather than the intended file.
-
-## Keys, replay and private waveforms
-
-Serpent-256-CTR and AES-256-CTR protect message confidentiality in separate
-layers; AES-256-CTR and purpose separation retain the Scrambler, DSSS and FHSS
-waveform roles, and MAC keys remain separate. A symbol selects its start-second
-epoch for its entire duration; same-second ordinals and fixed seek caches preserve addresses
-through missing bits and interval drains. A canonical schedule address is not a
-fresh nonce. Reusing key/epoch/ordinal positions exposes XOR relationships between
-plaintexts and permits replay within accepted timing windows. Local cooldowns do
-not coordinate separate processes or hosts; there is no durable replay database.
-
-The Fake FHSS illustration uses the separate `FhssCycleV2` counter domain
-(`fh-cyc02`) and fresh, disjoint 1024-byte regions for successive channel
-permutations. It no longer recycles one permutation. Bounded unbiased draws and
-checked offsets fail explicitly on exhaustion. Coincidental equal permutations
-are possible; key/epoch reuse still recreates the same schedule. Fake does not
-control RF tuning or enforce regulatory sliding occupancy. See
-[the schedule and hardware requirements](spread-spectrum-controls.md#fresh-cycle-addresses-and-bounded-work).
-
-Every selected non-tone key enables private pattern templates. Each bit value
-uses a separate versioned cryptographic domain, and each successive symbol uses
-its own canonical address. The two secret candidates have independent amplitude
-and phase; the former public chip-mask transform no longer swaps them. Observing
-one candidate does not reveal the opposite under the AES assumption. Reusing an
-address still enables recognition/replay; this change supplies no authentication
-for exact short/raw messages and does not prevent jamming or cancellation.
-Private chips and protected settling use capped circular I/Q values with varying amplitude/phase.
-Private settling uses separated child cover secrets and full outer DSSS;
-public/Data-only diagnostics retain separate preamble positions. It supplies no acquisition
-condition. Tone modes clear private protections. Bandwidth, chip cadence, capped
-amplitudes and finite edges remain observable; no measured interception or
-indistinguishability guarantee is made. Exact raw-bit/status signals have no MAC
-and cannot authenticate identity.
-
-The 128 MiB named-keyfile codec and optional pad remain separate from radio data.
-New keyfiles use exclusive creation. Large keyfiles do not guarantee physical
-SSD erasure, and possession of a complete keyfile and required pad compromises
-its shared secrets. Buffers are cleansed where practical; all process memory is
-not locked or scrubbed. See [cryptography](crypto.md).
-
-## Resource and host boundary
-
-The receiver drains decisions and fixed intervals; retained waveform/candidate
-state, marker overlap, RS scratch and diagnostic prefixes are bounded. A continuous
-confident signal is limited by local content, spool and output quotas, not by a
-silence timeout. Received compressed areas remain in bounded RAM until physical
-completion; they are not written to temporary files. Application caches, caller
-buffers, spool storage and codec scratch are separately charged; a content quota
-is not a process RSS limit.
-Current fixed LZMA2 scratch caps are 64 MiB for encoding and 8 MiB for decoding.
-Additional recovery defaults to five wall-clock minutes per run and at most the
-available CPU cores. It separately retains up to 65,536 hard-bit slots; the
-displayed diagnostic prefix remains limited to 4,096 bits. Recovery retains no
-analog samples and does not expand a quota according to received lengths.
-An unfinished job remains resumable while its owning result is retained; this
-is not a persistent checkpoint or an authenticated total message-length claim.
-Live reception admits at most eight active, queued or suspended recovery jobs
-within a separate 16 MiB recovery pool. Queue admission reserves the job's
-bounded workspace; overflow is reported as unavailable. One coordinator runs
-jobs using their parallel workers, independently of the capture/DSP budget.
-Batch PCM APIs still require a full-waveform budget; simulation work grows with
-sample count. Finite key/timing/frequency banks can be refused when unaffordable.
-
-OS swap/hibernation/core dumps, explicit saved files, terminal scrollback,
-redirection and clipboard managers can persist data outside the application.
-The receive character policy applies before text display, pipe output and
-clipboard export; exact saved payloads remain opaque. No source bytes supply a
-destination path or executable file type.
-
-The system still trusts audio hardware, firmware, OS drivers and its runtime.
-Analog modulation does not establish protection against hostile peripherals,
-BadUSB, electrical faults, host compromise or driver defects. Hardware isolation
-and attenuation remain external engineering responsibilities. Tests and source
-review do not replace independent security assessment on the intended hardware.
-
-## Transmitter cover domains
-
-Private surrounding noise now derives separate child secrets through `cv-pre01`
-and `cv-sup01`; tuning retains fresh temporary cryptographic roots. Full outer
-DSSS does not consume communication candidate addresses. These roots never enter
-a receiver bank, saved keyfile or TX diagnostic root field. See
-[transmitter cover](transmit-cover.md) for purpose separation, finite-stream bounds,
-remaining distinguishers and the limits of finite false-acceptance testing.
+No process or VM isolation is credited. Audio hardware, firmware, drivers,
+operating systems, swap, crash dumps, terminal scrollback, clipboard managers,
+and explicitly saved files can persist or expose information outside the
+application's control. Source review and tests do not replace independent
+security assessment on the intended deployment hardware. See the
+[validation record](validation.md) for the actual test coverage and limits.

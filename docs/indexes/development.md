@@ -16,7 +16,7 @@
 | [Validation ledger](../validation.md) | Current qualification, coverage limits and links to historical evidence. |
 | [Development contract](../development.md) | Compatibility and preservation tests required by implementation changes. |
 | [Simulation channel integration](../channel-models.md) | Required starting point for new Robust sampled simulations: Doppler/delay spread, additional frequency-selective amplitude modulation, implementation APIs and focused checks. |
-| [Three-carrier development workflow](../triad-development-workflow.md) | New isolated Robust modem: efficient simulation recipes, measured receiver choices, workspace reuse and validation escalation without routine historical campaign reruns. |
+| [Current Robust architecture](../robust-current.md) | Canonical native waveform/channel/Helper path, staged Python receiver limits, GUI availability and computationally minimal checks. |
 | [Contributor requirements](../../AGENTS.md) | Repository instructions and testing stages. |
 
 ## Dependencies and provenance

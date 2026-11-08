@@ -15,9 +15,7 @@ TOOL = Path(__file__).resolve().parents[1] / 'tools/run-native-tests.py'
 SPEC = importlib.util.spec_from_file_location('native_tests_runner', TOOL)
 helper = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(helper)
-MARKER = ('INCOMPLETE GUI_SMOKE_BUDGET: phase=17 elapsed=600.001000 budget=600.000000 '
-          'tx_id=13 fraction=0.100000 media_seconds=10.000000 samples=1234 '
-          'tail=0 progress_age=0.001000 result=incomplete')
+MARKER = 'INCOMPLETE old workload'
 
 
 class NativeSelectionTests(unittest.TestCase):
@@ -67,7 +65,7 @@ class NativeRunnerTests(unittest.TestCase):
             f'if mode in ("budget","budget_sleep"):print({MARKER!r},flush=True)\n'
             'if mode=="budget":sys.exit(75)\n'
             'if mode in ("sleep","budget_sleep"):time.sleep(30)\n'
-            'if mode=="failure":print("physical assertion failed");sys.exit(1)\n'
+            'if mode=="failure":print("UI assertion failed");sys.exit(1)\n'
             'if mode=="sanitizer":print("ERROR: AddressSanitizer: heap-use-after-free")\n'
             'if mode=="slow":time.sleep(.05)\n'
             'if mode=="timing":print("TEST_WORKLOAD_BUDGET: fixture completed with additional workload time")\n'
@@ -80,8 +78,8 @@ class NativeRunnerTests(unittest.TestCase):
             lines.append(f'add_test(NAME {name} COMMAND {quote(sys.executable)} {quote(self.fixture)} {mode})')
             lines.append(f'set_tests_properties({name} PROPERTIES LABELS "gui;native_gui" TIMEOUT {timeout} '
                          f'WORKING_DIRECTORY {quote(self.work)} ENVIRONMENT "PROBE_VALUE=hello world")')
-        lines += ['add_test(NAME calibration COMMAND '+quote(sys.executable)+' -c "raise SystemExit(9)")',
-                  'set_tests_properties(calibration PROPERTIES LABELS "gui;calibration")',extra]
+        lines += ['add_test(NAME excluded COMMAND '+quote(sys.executable)+' -c "raise SystemExit(9)")',
+                  'set_tests_properties(excluded PROPERTIES LABELS "gui;excluded")',extra]
         (self.root/'CMakeLists.txt').write_text('\n'.join(lines)+'\n')
         subprocess.run(['cmake','-S',str(self.root),'-B',str(self.build)],capture_output=True,check=True)
 
@@ -97,18 +95,15 @@ class NativeRunnerTests(unittest.TestCase):
     def report(self):
         return json.loads((self.reports/'native-tests.json').read_text())
 
-    def test_incomplete_smoke_retains_all_other_tests_and_exact_identity(self):
+    def test_nonzero_smoke_fails_after_retained_cases(self):
         self.configure()
-        result=self.invoke('--allow-budget-exhaustion')
-        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        result=self.invoke()
+        self.assertNotEqual(result.returncode,0)
         report=self.report()
-        self.assertEqual(report['status'],'passed_with_warnings')
+        self.assertEqual(report['status'],'failed')
         self.assertEqual({x['name']:x['status'] for x in report['tests']},
-                         {'gui_workflow':'incomplete','gui_adapter_conformance':'passed','gui_platform_conformance':'passed'})
+                         {'gui_workflow':'failed','gui_adapter_conformance':'passed','gui_platform_conformance':'passed'})
         self.assertEqual(sorted(self.stamp.read_text().splitlines()),['adapter','budget','platform'])
-        warning=json.loads((self.reports/'gui_workflow.json').read_text())['warning']
-        self.assertEqual(warning['diagnostic'],MARKER)
-        self.assertEqual(warning['source_sha'],'a'*40)
         self.assertTrue((self.reports/'native-remaining.xml').exists())
 
     def test_smoke_is_strict_without_policy(self):
@@ -119,29 +114,29 @@ class NativeRunnerTests(unittest.TestCase):
 
     def test_full_pass_preserves_label_exclusion_and_timing_warning(self):
         self.configure(smoke='smoke',remaining='timing')
-        result=self.invoke('--label','gui','--exclude-label','calibration')
+        result=self.invoke('--label','gui','--exclude-label','excluded')
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         self.assertEqual(self.report()['status'],'passed')
         self.assertIn('::warning title=CI test workload::',result.stdout)
-        self.assertNotIn('calibration',self.report()['selected'])
+        self.assertNotIn('excluded',self.report()['selected'])
 
     def test_complementary_assertion_fails_fast_and_does_not_run_smoke(self):
         self.configure(remaining='failure')
-        result=self.invoke('--allow-budget-exhaustion')
+        result=self.invoke()
         self.assertNotEqual(result.returncode,0)
         self.assertEqual(self.report()['status'],'failed')
         self.assertNotIn('budget',self.stamp.read_text().splitlines())
 
     def test_registered_process_deadline_remains_fatal(self):
         self.configure(smoke='budget_sleep',timeout=.2)
-        result=self.invoke('--allow-budget-exhaustion')
+        result=self.invoke()
         self.assertNotEqual(result.returncode,0)
         self.assertEqual(self.report()['status'],'failed')
         self.assertNotIn('Incomplete GUI smoke coverage',result.stdout)
 
     def test_native_ctest_collector_preserves_stderr_warning(self):
         self.configure(smoke='smoke',remaining='timing_stderr')
-        result=self.invoke('--label','gui','--exclude-label','calibration')
+        result=self.invoke('--label','gui','--exclude-label','excluded')
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         report=self.report()
         platform=next(item for item in report['tests'] if item['name']=='gui_platform_conformance')
@@ -168,7 +163,7 @@ class NativeRunnerTests(unittest.TestCase):
 
     def test_unsupported_direct_properties_fail_before_execution(self):
         self.configure(extra='set_tests_properties(gui_workflow PROPERTIES SKIP_RETURN_CODE 75)')
-        result=self.invoke('--allow-budget-exhaustion')
+        result=self.invoke()
         self.assertNotEqual(result.returncode,0)
         self.assertFalse(self.stamp.exists())
         self.assertIn('Cannot directly preserve',self.report()['error'])

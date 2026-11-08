@@ -35,7 +35,7 @@ printable ASCII only when Developer mode also permits it. Native widgets,
 clipboard requests, received filenames, CLI text and received-derived transmit
 drafts get the permitted view.
 Original bytes remain separate for explicit saving. See the complete
-[received-text policy](security.md#received-text-boundary), including revocation
+[received-text policy](security.md#received-content-presentation), including revocation
 and the locally entered QR input exception.
 
 The filter ends with `datapump_speculation_barrier()` before its output is handed
@@ -186,7 +186,6 @@ noise, not universal performance guarantees. The validation record includes the
 full table, per-run results and workload definitions; MSVC's fencing fallback has
 not been benchmarked here.
 
-The subsequent [Robust reception and recovery study](robust-cpu-costs.md) adds
-sampled Robust reception, near-limit RS correction, exhaustive assignment and
-alignment-planning measurements. It documents the resulting ordinary
-receive-processing allowance shared by Console and Link Planner CPU estimates.
+Former single-carrier reception and recovery performance measurements are
+historical and do not define current Robust compute estimates. Robust estimates
+are unavailable pending receiver integration; see [current status](robust-current.md).

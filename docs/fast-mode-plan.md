@@ -49,15 +49,18 @@ rates, constellation thresholds and interruption tolerance were engineering
 targets at that time; current behavior and measurements are documented in
 [Fast mode](fast-mode.md).
 
-## 2. What the current code actually does
+## 2. What the original source audit observed
 
-Line references below identify the audited checkout, not permanent interfaces.
+This source map belongs to the original pre-implementation audit. Its
+implementation descriptions and line references are historical, not a map of
+the current repository or a set of current Fast requirements. See
+[Fast mode](fast-mode.md) for supported behavior and the current wire format.
 
-| Area | Active path and consequence |
+| Area | Audited path and consequence at that revision |
 | --- | --- |
 | TX selection | `src/transfer.cpp:200` selects nonempty text of **1–16 source bytes inclusive**. `wire_bits()` at 324–359 sends its exact fixed-dictionary bits, explicit raw bits, or marked fixed intervals. Preserve all three paths. |
 | Long TX | `encoded_intervals()` at `src/transfer.cpp:162` invokes attachment encoding, source encoding, interval authentication/RS and marker insertion. The source, coded bytes and byte-per-bit vectors are materialized; streaming PCM does not make this a streaming file API. |
-| Fixed geometry | `include/datapump/stream_codec.hpp:54` fixes 128 coded bytes; `include/datapump/boundary_sync.hpp:10` fixes the 192-bit marker and cadence. Fast must not change these constants. |
+| Fixed geometry | The early audit described a fixed 128-byte coding interval and a 192-bit marker in the then-current source. Those implementation details are not current Fast requirements; use the maintained Fast specification. |
 | FEC | `src/stream_codec.cpp:64–78` provides shortened GF(256) RS with at most 255 symbols. A conventional RS(256,k) cannot be obtained by increasing the existing constant. |
 | Modem | `src/modem.cpp:102–104` rejects the old APSK setting. `src/streaming_modem.cpp:15–60,157–199` wraps pattern TX/RX; legacy symbol methods deliberately fail. Implement new classes instead. |
 | RX progress/end | `src/pattern_receiver.cpp:887–907,1357–1362` scores complete symbols and accumulates failed durations. `finish()` at 1412 flushes without inventing completion; the drain methods publish accepted bits. |
@@ -74,8 +77,8 @@ Line references below identify the audited checkout, not permanent interfaces.
 | Build | `CMakeLists.txt:23–30` links the current runtime as one library; `cmake/GuiShared.cmake` gives both native adapters the same shared application. Add a fast target with enforceable dependencies. |
 
 Repository searches found no active packet codec/API or received modem length
-parser. Historical packet references in `docs/packetless-stream-plan.md` and
-`docs/security-review.md` are explicitly marked historical. Legacy
+parser. Historical packet references in the security review are explicitly
+marked historical. Legacy
 `expected_bits`/`expected_bytes` live presentation fields do not constitute a
 received-length protocol. Preserve history and accurately label it; cosmetic
 renaming is not a security improvement.

@@ -1,27 +1,15 @@
 #pragma once
 #include "controller.hpp"
-#include "gui_smoke_budget.hpp"
-#include "gui_smoke_clock.hpp"
-#include <chrono>
-#include <filesystem>
-#include <memory>
-
 namespace datapump::gui {
 class BitmapSources;
-// Backend-independent smoke choreography. Its service requests are completed
-// by this harness, checking exact payloads without requiring desktop dialogs.
-// Call after each controller poll; exceptions identify an actual failed check.
+// Bounded UI checks only. No Robust receiver or waveform campaign is hidden
+// inside desktop/package smoke validation.
 class Smoke {
 public:
-    explicit Smoke(std::shared_ptr<smoke_detail::InterruptionClock> replay_clock,
-                   std::filesystem::path directory = {}, double timeout_seconds = 100);
-    ~Smoke();
-    void step(Controller& controller, const BitmapSources* bitmaps = nullptr);
-    bool done() const;
+    void step(Controller&,const BitmapSources* =nullptr);
+    bool done() const {return done_;}
 private:
-    struct Impl;
-    std::unique_ptr<Impl> impl_;
+    bool done_=false;
 };
-// Pure controller/declaration policy checks; does not open a window or device.
 void controller_self_check();
 }

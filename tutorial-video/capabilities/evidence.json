@@ -11,21 +11,6 @@
       "bytes": 2674542,
       "sha256": "21f5f312a88d2e7222867075b4091aa7f13b5facdc074a36823bc1237c55f1b2"
     },
-    "robust-bit.mp4": {
-      "source": "/home/user/___quick/p/_cur/dataPump/_lessonsLearned/data-pump-tutorial-media/clarity/robust-bit.mp4",
-      "bytes": 1655770,
-      "sha256": "c2786d80d14d5a51e58a5bdb4d92a9f872d4ad8b4d7a1e1528136024eba4a9e6"
-    },
-    "robust-result.mp4": {
-      "source": "/home/user/___quick/p/_cur/dataPump/_lessonsLearned/data-pump-tutorial-media/clarity/robust-result.mp4",
-      "bytes": 1130405,
-      "sha256": "f2e5613177f1009af351d9c57b25ce9e1ffedcb4ee5519427a93a2a9359cc275"
-    },
-    "robust-tx.wav": {
-      "source": "/home/user/___quick/p/_cur/dataPump/_lessonsLearned/data-pump-tutorial-media/clarity/robust-tx.wav",
-      "bytes": 510044,
-      "sha256": "23a666027c105c39022e1969dc4342b0b5076dc747e4392a9c836c3cd025dcb2"
-    },
     "foundation-fltk.png": {
       "source": "/home/user/___quick/p/_cur/dataPump/_lessonsLearned/software-foundation/docs/screenshots/fltk.png",
       "bytes": 13764,
@@ -42,7 +27,7 @@
       "sha256": "de15b044be504ffea36cb548fb2a84e79ad4ec21f66ec8ff68f70cab9e7050c4"
     }
   },
-  "claim_review": "Independent modem evidence and development practice research; simulation, channel model and recorded physical trial separated. Future productivity is ambition. No historical superiority ranking.",
+  "claim_review": "Historical production claim review; retired Robust simulation, private waveform and detection-model claims are excluded from the current source storyboard.",
   "foundation_public_api_verified": true,
   "voice": "Piper en_US-ljspeech-medium, synthetic English, length_scale0.92",
   "toolchain": {
@@ -69,7 +54,7 @@
     "Verifier accepts loudness JSON followed by FFmpeg trailing status; complete decode already passed.",
     "Revision2:64kAAC produced a brief+1.66dBTP encoding overshoot;128kAAC preserves the same PCM mix at-19.30LUFS and-3.56dBTP. First encode and failed metrics retained externally. Renderer now uses128kAAC."
   ],
-  "revision": "4: shorten the spoken Olivia mode description",
+  "revision": "Historical revision 4; current source storyboard removes retired Robust scenes and does not regenerate delivery media",
   "prior_delivery": {
     "full_video_audio_decode": "passed",
     "chapters": 10,
@@ -83,12 +68,10 @@
     "sha256": "1b062124d82632457f2a915873a17622307fb9b4571d239b3f73a54580fd0431",
     "loudness_lufs": -19.37,
     "true_peak_dbtp": -3.01,
-    "robust_audio_rms_dbfs": -28.453443371861177,
-    "robust_audio_peak_dbfs": -19.57518384280891,
-    "robust_voice_free_seconds": 4,
     "encoded_visual_review": "passed: all10scenes inspected from final encoded frames; native received snapshot and rate/model labels readable",
     "external_directory": "/home/user/___quick/p/_cur/dataPump/_lessonsLearned/data-pump-capabilities-media/delivery",
-    "voice_model_sha256": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22"
+    "voice_model_sha256": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22",
+    "status": "historical; contains retired single-carrier Robust scenes/audio; not for current distribution"
   },
   "comparison": {
     "olivia_mode": "4tones/2000Hz",
@@ -96,14 +79,6 @@
     "documented_fast_goodput_bit_s": 28470.358797696746,
     "rate_ratio": 260.30042329322737,
     "scope": "Different bandwidths and channel conditions; rate comparison only"
-  },
-  "below_noise_graphic": {
-    "modeled": true,
-    "band_hz": 2250,
-    "received_dbm": -147,
-    "noise_density_dbm_hz": -164,
-    "signal_to_noise_db": -16.521825181113627,
-    "noise_rise_db_approx": 0.096
   },
   "future_speed": "Project owner estimate:~2weeks; explicit ambition:fewhours,potentially1hour; not measured performance",
   "previous_revision_delivery": {
@@ -119,18 +94,16 @@
     "sha256": "7c1e1cf9f48da612a5fe9cdd578237f7587d71ca84980f57d985d20b1b9fcd72",
     "loudness_lufs": -19.26,
     "true_peak_dbtp": -3.56,
-    "robust_audio_rms_dbfs": -28.40139623409375,
-    "robust_audio_peak_dbfs": -20.00344791864739,
-    "robust_voice_free_seconds": 4,
     "encoded_visual_review": "passed: all10encoded scenes plus explicit second-phase109bit/s/260x comparison frame reviewed",
     "external_directory": "/home/user/___quick/p/_cur/dataPump/_lessonsLearned/data-pump-capabilities-media/revision-3/delivery",
     "audio_bitrate": 128000,
-    "voice_model_sha256": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22"
+    "voice_model_sha256": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22",
+    "status": "historical; contains retired single-carrier Robust scenes/audio; not for current distribution"
   },
   "historical_context": {
     "olivia_origin": "December2004",
-    "common_selected_olivia_wpm": "15\u201329",
-    "arrl_morse_practice_wpm": "10\u201335",
+    "common_selected_olivia_wpm": "15–29",
+    "arrl_morse_practice_wpm": "10–35",
     "comparison_scope": "Common modes shown separately from faster4/2000 variant;260x figure only for109.375bit/s baseline",
     "independent_review": "passed"
   },
@@ -147,12 +120,11 @@
     "sha256": "f5ab8ee65caff46dc4acc99c9f1df439b4419adf3f3d3686ee78f9b15e7a66de",
     "loudness_lufs": -19.26,
     "true_peak_dbtp": -3.56,
-    "robust_audio_rms_dbfs": -28.40136048272803,
-    "robust_audio_peak_dbfs": -19.98630017715648,
-    "robust_voice_free_seconds": 4,
     "encoded_visual_review": "passed:changed caption and retained mode/rate visual inspected from final encoded frame; visual source byte-for-byte unchanged",
     "external_directory": "/home/user/___quick/p/_cur/dataPump/_lessonsLearned/data-pump-capabilities-media/revision-4/delivery",
     "audio_bitrate": 128000,
-    "voice_model_sha256": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22"
-  }
+    "voice_model_sha256": "6f52a751e2349abe7a76735eb09dc1875298c77ea2342ffd2fef79ff81b87f22",
+    "status": "historical; contains retired single-carrier Robust scenes/audio; not for current distribution"
+  },
+  "status": "historical delivery evidence only; every recorded deliverable contains retired single-carrier Robust content and must not be distributed as current"
 }

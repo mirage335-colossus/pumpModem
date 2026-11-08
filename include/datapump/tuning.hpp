@@ -18,9 +18,6 @@ std::string_view pattern_mode_name(PatternMode mode);
 std::span<const PatternMode> pattern_modes();
 bool tone_mode(PatternMode mode);
 inline constexpr double default_receive_target_db_hz = 32;
-// Existing one-symbol integration design reference, not a measured admission
-// threshold or a calibrated probability of receiving one bit.
-inline constexpr double pattern_target_symbol_snr_db = 18;
 inline constexpr std::size_t maximum_receive_targets = 16;
 inline constexpr std::size_t maximum_receive_target_text = 512;
 struct ReceiveTargets {
@@ -31,15 +28,6 @@ struct ReceiveTargets {
 // One invalid token resets the complete list. Accept at most 16 finite
 // decimal targets in -200..200 dB-Hz and preserve first-occurrence order.
 ReceiveTargets parse_receive_targets(std::string_view text);
-struct Plan {
-    modem::Config config;
-    double estimated_processing_gain_db = 0;
-    double target_symbol_snr_db = 0;
-    double estimated_symbol_snr_db = 0;
-    double required_spreading = 1;
-    bool target_supported = false;
-    std::string explanation;
-};
 // target_snr_db_hz is C/N0: signal power / noise power in a 1 Hz bandwidth.
 // Results are integration estimates, not empirical sensitivity guarantees.
 inline constexpr double minimum_bandwidth_hz = modem::minimum_bandwidth_hz;
@@ -63,38 +51,19 @@ struct Doppler {
 // positive. Canonical text uses c and preserves the parsed double precision.
 Doppler parse_doppler(std::string_view text);
 double doppler_carrier_hz(double configured_physical_carrier_hz, const Doppler& doppler);
-// Automatic real-PCM plans center narrow audio bands at 1500 Hz. Wider bands
-// retain the 0.75 * bandwidth carrier. The logical clock covers both the band
-// and carrier with four samples per hertz, keeping the nominal upper edge in
-// the resampler's flat passband. Hardware clocks are negotiated independently.
-// Round up to whole sampled half-chips when an exact decimal-rate clock fits within
-// 5% of the minimum. This keeps small carrier edits from creating large FFTs.
-// The physical carrier and nominal symbol-duration formula are unchanged.
+// Suggested display geometry only; no receiver profile is selected.
 std::uint32_t recommended_sample_rate(double bandwidth_hz,
     std::optional<double> carrier_hz = std::nullopt);
 double recommended_carrier_hz(double bandwidth_hz);
-modem::OuterDsssVersion parse_outer_dsss_version(std::string_view name);
-std::string_view outer_dsss_version_id(modem::OuterDsssVersion version);
 // Receiver execution only. The requested aliases remain distinct when saved;
 // they do not select transmitted patterns, cipher addresses or search coverage.
+modem::OuterDsssVersion parse_outer_dsss_version(std::string_view name);
+std::string_view outer_dsss_version_id(modem::OuterDsssVersion version);
 modem::SearchArithmetic parse_search_arithmetic(std::string_view name);
 std::string_view search_arithmetic_id(modem::SearchArithmetic arithmetic);
 modem::ReceiverStrategy parse_receiver_strategy(std::string_view name);
 std::string_view receiver_strategy_id(modem::ReceiverStrategy strategy);
 void validate_receiver_cpu_budget(double ratio);
-Plan resolve(double bandwidth_hz, double target_snr_db_hz, PatternMode mode,
-             bool encryption, std::optional<double> carrier_hz = std::nullopt, unsigned dsss_factor = 1,
-             modem::OuterDsssVersion version = modem::OuterDsssVersion::legacy_v1,
-             modem::SearchArithmetic arithmetic = modem::SearchArithmetic::default_mode);
-// Selected bandwidth and pattern mode stay fixed. Targets resolving to the
-// same waveform profile share one receiver hypothesis.
-std::vector<modem::Config> receive_profiles(double bandwidth_hz,
-    std::span<const double> targets_db_hz, PatternMode mode, bool encryption);
-// Preserve the caller's carrier, sample clock, DSSS settings, seeds, epoch and
-// resource limit while replacing only the selected pattern integration plan.
-// Tone profiles always clear Data encryption, Scrambler and DSSS material.
-std::vector<modem::Config> receive_profiles(const modem::Config& base,
-    std::span<const double> targets_db_hz, PatternMode mode, bool encryption);
 struct SimulationPreset {
     std::string_view name;
     bool enabled = false;

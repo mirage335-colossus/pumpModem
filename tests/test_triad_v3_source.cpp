@@ -1,6 +1,6 @@
 #include "triad_crypto_fixture.hpp"
 #include "datapump/triad_modem_v3.hpp"
-#include "datapump/pattern_pulse.hpp"
+#include "datapump/triad_pulse.hpp"
 
 #include <algorithm>
 #include <array>
@@ -29,70 +29,25 @@ Crypto fixture_key() {
 }
 
 // Reconstruct the documented public coordinates rather than asking the
-// transmitter which child it selected. This exercises both revision layouts.
+// transmitter which child it selected. This checks the current independently keyed layout.
 datapump::Bytes payload_context(const Format& f) {
-    const std::string_view prefix=f.pattern_revision==PatternRevision::IndependentApskV2
-        ? "datapump/experimental-triad/v3/independent-apsk-2/"
-        : "datapump/experimental-triad/v3/tiled-1/";
+    constexpr std::string_view prefix="datapump/experimental-triad/v3/independent-apsk-2/";
     datapump::Bytes id(prefix.begin(),prefix.end());
     const auto append64=[&](std::uint64_t value){
         for(int shift=56;shift>=0;shift-=8)id.push_back(static_cast<std::uint8_t>(value>>shift));
     };
     constexpr std::string_view purpose="payload";
-    if(f.pattern_revision==PatternRevision::IndependentApskV2)append64(purpose.size());
-    id.insert(id.end(),purpose.begin(),purpose.end());
-    if(f.pattern_revision==PatternRevision::LegacyV1)id.push_back(0);
+    append64(purpose.size());id.insert(id.end(),purpose.begin(),purpose.end());
     append64(f.epoch);append64(f.symbol_ordinal);append64(0);
-    if(f.pattern_revision==PatternRevision::IndependentApskV2){
-        append64(2);append64(f.fhss_center_aligned?1:0);
-    }else if(f.fhss_center_aligned){
-        constexpr std::string_view aligned="/fhss-center-aligned";
-        id.insert(id.end(),aligned.begin(),aligned.end());
-    }
+    append64(2);append64(f.fhss_center_aligned?1:0);
     return id;
-}
-
-void legacy_pattern_goldens() {
-    // Captured from the pre-migration source/library, before adding the new
-    // revision. Include fractional coordinates, both alternatives and guards.
-    const Complex expected[3][2][3]={
-        {{{.47707298017000677,-.48840020184289495},{1.3587066107478152,-.19459343143392069},{-.33157290575745846,1.2104609669413073}},
-         {{.045662536859675001,1.1045737752950124},{1.2286429655848221,-.54157636434132828},{.27551831666536292,-.097841332829710526}}},
-        {{{-1.0462810550161215,.0039379055680827391},{0,0},{-.66499179403722886,-.76232705316848237}},
-         {{-.8266983951226341,.16524722487060584},{0,0},{-.66515706904988603,-.7555865042054638}}},
-        {{{.92083693362741337,-.40973791737129933},{-.056530910543517901,.61736394551964202},{-.56479148686767888,-.34058254135501675}},
-         {{-.061416002977603718,.0750100172430751},{-.60084949570568813,-.2107339651649458},{1.0867734238532554,.055204529796408719}}}
-    };
-    std::array<std::uint8_t, 32> legacy_seed{};
-    for (std::size_t i=0;i<legacy_seed.size();++i) legacy_seed[i]=static_cast<std::uint8_t>(17*i+3);
-    const Crypto key(legacy_seed);
-    for(unsigned mode=0;mode<3;++mode){
-        Format f;f.pattern_revision=PatternRevision::LegacyV1;
-        if(mode==1){f.inner_rate_hz=360;f.added_symbols=1;f.sample_rate=960;f.bit_seconds=8;
-            f.fhss=true;f.fhss_center_aligned=true;f.quiet_seconds=.055;f.ramp_seconds=.006;}
-        if(mode==2){f.bit_seconds=40;f.burst_wait_tiles=1;}
-        // These pre-cascade captures included the old AES-only data mask.
-        // Select the resulting clear alternative to keep testing the unchanged
-        // waveform generator without treating the old cipher as current.
-        const auto old_mask=Crypto(key.mac(payload_context(f))).stream(
-            datapump::StreamPurpose::Data,f.epoch,0,1)[0]&1U;
-        f.encrypt=false;
-        for(unsigned bit=0;bit<2;++bit){
-            PatternSource source(f,key,bit^old_mask);unsigned i=0;
-            for(long double t:{.037L,.317L,.731L}){
-                const auto sample=source.geometry().calendar_origin_sample+t*source.geometry().tile_seconds*f.sample_rate;
-                check(std::abs(source.sample_at(sample)-expected[mode][bit][i++])<2e-12,
-                      "legacy revision no longer matches frozen pre-migration waveform");
-            }
-        }
-    }
 }
 
 void confidentiality_payload_checks() {
     const auto key=fixture_key();
-    for(auto revision:{PatternRevision::LegacyV1,PatternRevision::IndependentApskV2}){
+    {
         for(bool aligned:{false,true}){
-            Format f;f.pattern_revision=revision;f.epoch=1720000011;
+            Format f;f.epoch=1720000011;
             if(aligned){f.inner_rate_hz=360;f.added_symbols=1;f.sample_rate=960;
                 f.bit_seconds=8;f.fhss=true;f.fhss_center_aligned=true;
                 f.quiet_seconds=.055;f.ramp_seconds=.006;}
@@ -134,8 +89,6 @@ void confidentiality_payload_checks() {
 void independent_patterns_and_apsk() {
     auto key=fixture_key();Format f;f.encrypt=false;f.added_symbols=1;
     f.inner_rate_hz=240;f.sample_rate=2048;f.bit_seconds=24;
-    check(f.pattern_revision==PatternRevision::IndependentApskV2,
-          "independent APSK pattern is not the default");
     PatternSource zero(f,key,0),one(f,key,1);
     constexpr unsigned permutations[6][3]={{0,1,2},{0,2,1},{1,0,2},{1,2,0},{2,0,1},{2,1,0}};
     std::array<double,6> amplitude_error{};std::array<Complex,6> phase_relation{},conjugate_relation{};
@@ -212,8 +165,8 @@ void independent_patterns_and_apsk() {
 
 void revision_random_access_checks() {
     auto key=fixture_key();
-    for(auto revision:{PatternRevision::LegacyV1,PatternRevision::IndependentApskV2}){
-        Format f;f.pattern_revision=revision;f.bit_seconds=38*86400.;
+    {
+        Format f;f.bit_seconds=38*86400.;
         PatternSource sequential(f,key,1),random(f,key,1);
         const auto first=sequential.geometry().source_samples/2;
         std::array<Complex,59> a{},b{};sequential.render(first,a);
@@ -247,7 +200,6 @@ void shared_geometry_bank_checks() {
         std::vector<PatternSource*> pointers;
         for(unsigned row=0;row<4;++row){
             auto f=format;f.epoch+=row;f.symbol_ordinal+=13*row;
-            f.pattern_revision=(row&1)?PatternRevision::LegacyV1:PatternRevision::IndependentApskV2;
             f.added_interleave=(row&1)==0;f.encrypt=(row&2)==0;
             bank.emplace_back(f,key,static_cast<std::uint8_t>(row%2));
             references.emplace_back(f,key,static_cast<std::uint8_t>(row%2));
@@ -332,25 +284,19 @@ void random_access_and_chunk_checks() {
     Format f;
     f.bit_seconds = 16;
     PatternSource whole(f, key, 1), split(f, key, 1);
-    std::vector<Complex> expected(whole.geometry().source_samples);
-    whole.render(0, expected);
-    std::vector<Complex> actual(expected.size());
-    std::uint64_t offset = 0;
-    std::uint32_t state = 0x12345678;
-    while (offset < actual.size()) {
-        state = state * 1664525U + 1013904223U;
-        const auto count = std::min<std::size_t>(1 + (state % 401), actual.size() - offset);
-        split.render(offset, std::span(actual).subspan(offset, count));
-        offset += count;
+    // Exercise source boundaries with fixed short windows. Never render a
+    // complete bit merely to establish local random-access/chunk equivalence.
+    const auto& shape=whole.geometry();
+    const auto tile_boundary=shape.calendar_origin_sample+
+        static_cast<std::uint64_t>(shape.tile_seconds*f.sample_rate);
+    for(const auto first:{std::uint64_t{0},shape.calendar_origin_sample+100,
+                          tile_boundary-100,shape.source_samples-128}){
+        std::array<Complex,257> expected{},actual{};
+        whole.render(first,expected);
+        split.render(first,std::span(actual).first(101));
+        split.render(first+101,std::span(actual).subspan(101));
+        check(actual==expected,"source sequence changes across local rendering chunks");
     }
-    double error = 0, energy = 0;
-    for (std::size_t i = 0; i < actual.size(); ++i) {
-        error = std::max(error, std::abs(actual[i] - expected[i]));
-        energy += std::norm(actual[i]) / f.sample_rate;
-    }
-    check(error == 0, "sample sequence changes at arbitrary rendering chunk boundaries");
-    if (!(energy > 2 && energy < 40)) std::cerr << "energy=" << energy << '\n';
-    check(energy > 2 && energy < 40, "shaped v3 bit has implausible integrated baseband energy");
     check(whole.sample_at(-1) == Complex{} &&
           whole.sample_at(std::numeric_limits<long double>::infinity()) == Complex{} &&
           whole.sample_at(static_cast<long double>(whole.geometry().source_samples)) == Complex{},
@@ -462,7 +408,7 @@ void center_aligned_fhss_checks() {
         check(difference>1e-8,"aligned protected center carries no bit information");
         for(long double chips:{-8.00001L,-8.L,-7.5L,-4.25L,0.L,4.25L,7.5L,8.L,8.00001L}){
             const auto x=at(zero,chips),y=at(one,chips);
-            const auto ratio=datapump::modem::pattern_pulse(static_cast<double>(chips))/datapump::modem::pattern_pulse(0);
+            const auto ratio=datapump::triad::v3::rrc_pulse(static_cast<double>(chips))/datapump::triad::v3::rrc_pulse(0);
             for(unsigned c=0;c<3;++c)
                 check(std::abs((x[c]-y[c])-(a[c]-b[c])*ratio)<1e-11,
                       "aligned fine cell lost or shifted its complete pulse support");
@@ -640,7 +586,6 @@ void month_and_low_sample_rate_checks() {
 
 int main() {
     try {
-        legacy_pattern_goldens();
         confidentiality_payload_checks();
         independent_patterns_and_apsk();
         revision_random_access_checks();

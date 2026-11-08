@@ -10,7 +10,6 @@ from unittest.mock import patch
 import numpy as np
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
-from triad_realtime_helper import estimate_helper
 from triad_weak_helper import estimate_weak_helper, weak_helper_policy
 
 
@@ -41,8 +40,6 @@ def fixture(arrival=.17, *, amplitude=.11, seed=30):
 class WeakHelperTests(unittest.TestCase):
     def test_narrow_pilots_recover_onset_below_broadband_guard(self):
         m,y,bank=fixture();before=copy.deepcopy(m)
-        old=estimate_helper(y,m,bank)
-        self.assertEqual(old['reason'],'weak_or_absent_helper_onset')
         r=estimate_weak_helper(y,m,bank)
         self.assertEqual(r['status'],'narrowed',r['reason'])
         self.assertTrue(any(a<=.17<=b for a,b in r['onset_intervals_seconds']))

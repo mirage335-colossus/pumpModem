@@ -1,0 +1,50 @@
+name: Hierarchical abbreviated triad checks
+'on':
+  workflow_call:
+    inputs:
+      candidate_ref:
+        type: string
+        default: ''
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  abbreviated:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      OMP_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+        ref: ${{ inputs.candidate_ref || github.sha }}
+    - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+      with:
+        python-version: '3.12'
+        cache: pip
+        cache-dependency-path: tools/triad_abbreviated.py
+    - name: Install retained numerical dependencies
+      run: |
+        python -m pip install --disable-pip-version-check 'numpy==2.3.5' 'scipy==1.16.3' 'threadpoolctl==3.6.0'
+        python -m pip install --disable-pip-version-check 'torch==2.8.0' --index-url https://download.pytorch.org/whl/cpu
+    - name: Install native correctness-test dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build g++ pkg-config libssl-dev
+    - name: Check canonical source and receiver stages
+      run: |
+        ./build.sh test triad --cli --jobs 2 -- -DPython3_EXECUTABLE="$(command -v python)"
+    - name: Measure abbreviated current kernels
+      run: |
+        python tools/triad_abbreviated.py --output build/triad-abbreviated.json --device cpu
+    - name: Retain estimates and their uncertainty
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: triad-abbreviated-${{ github.run_attempt }}
+        path: build/triad-abbreviated.json
+        if-no-files-found: warn
+        retention-days: 7

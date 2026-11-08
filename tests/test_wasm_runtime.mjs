@@ -71,15 +71,16 @@ assert.equal(snapshot.ack,'1');
 const ping=Buffer.alloc(16);ping.writeBigUInt64LE(77n);ping.writeDoubleLE(1234.5,8);const packet=frame(15,ping);
 await send(packet.subarray(0,7));await send(packet.subarray(7));flush();
 const reply=received.find(message=>message.type===108);assert(reply);assert.equal(reply.bytes.readBigUInt64LE(),77n);assert.equal(reply.bytes.readDoubleLE(8),1234.5);
-// Import an opaque binary attachment, pass it through the real modem/receiver,
-// then export only the explicit completed-file capability. UI test selection
-// follows published labels and IDs; production renderer has no feature mapping.
+// Exercise saved Robust controls and opaque file import without the retired
+// modem. UI test selection follows published labels and IDs; production renderer
+// has no feature mapping.
 const control=label=>snapshot.controls.find(item=>item.label===label);
 const act=async(kind,id,value='')=>{const sequence=BigInt(snapshot.ack)+1n,start=received.length;await send(frame(2,event(kind,id,value)));await tick();assert.equal(BigInt(snapshot.ack),sequence,'application rejected UI fixture event');assert(!received.slice(start).some(m=>m.type===103),'application reported UI fixture error');};
 const modem=snapshot.controls.find(item=>item.options?.some(option=>option.label==='Robust Modem'));
 assert(modem,'modem selector missing');
 await act(2,modem.id,modem.options.find(option=>option.label==='Robust Modem').id);
-await wait(()=>control('Simulation')?.enabled);
+await wait(()=>control('Message')?.enabled);
+await act(1,control('Message').id,literal);
 // Exercise browser glyph measurement through the compiled C++/libc++ parser,
 // then verify the common document engine refines its published geometry.
 const planner=snapshot.tabs.find(tab=>tab.label==='Link planner');
@@ -95,36 +96,19 @@ assert.equal(refined.measure.height,glyphHeight,'Wasm did not retain the browser
 assert(refined.geometry.frame.h>priorHeight,'Browser measurement did not refine shared C++ geometry');
 const consoleTab=snapshot.tabs.find(tab=>tab.label==='Console');assert(consoleTab);
 await act(11,consoleTab.id);assert.equal(snapshot.document,null);
-await wait(()=>control('Simulation')?.enabled);
-const simulation=control('Simulation');assert(simulation,'simulation selector missing');
-await act(2,simulation.id,simulation.options.find(option=>option.label==='Yes').id);
-const loss=control('Path loss');assert(loss,'link loss control missing');await act(1,loss.id,'6 dB');
-await act(1,control('Short ≤16 B target SNR (dB-Hz)').id,'80');
-await act(1,control('Long / file target SNR (dB-Hz)').id,'80');
 await act(4,control('Attach file').id);
 await wait(()=>snapshot.service?.kind==='open_file');
 const incoming=snapshot.service.id,fixture=Buffer.from([0,1,2,3,255,192,128,68,97,116,97,80,117,109,112,10]);
 await send(frame(10,Buffer.concat([event(13,incoming,'a.bin'),u64(fixture.length)])));
 for(const [start,end] of [[0,5],[5,fixture.length]])await send(frame(11,Buffer.concat([u64(incoming),u64(start),u32(end-start),fixture.subarray(start,end)])));
 await send(frame(12,u64(incoming)));await tick();
-assert(control('Transmit'),JSON.stringify(snapshot.controls.map(c=>({label:c.label,text:c.text,kind:c.kind,enabled:c.enabled}))));
-await wait(()=>control('Transmit')?.enabled);
-await act(4,control('Transmit').id);
-await wait(()=>control('Files in memory')?.records?.length>0,180000);
-const files=control('Files in memory');await act(7,files.id,files.records[0].id);
-await wait(()=>snapshot.service?.kind==='save_file');const outgoing=snapshot.service.id;
-await send(frame(13,event(13,outgoing,'copy.bin')));await tick();
-await wait(()=>received.some(message=>message.type===107&&message.bytes.readBigUInt64LE()===BigInt(outgoing)));
-const exported=received.filter(message=>message.type>=105&&message.type<=107&&message.bytes.readBigUInt64LE()===BigInt(outgoing));
-assert.equal(exported[0].type,105);const nameLength=exported[0].bytes.readUInt32LE(8);
-assert.equal(exported[0].bytes.subarray(12,12+nameLength).toString(),'copy.bin');
-assert.equal(exported[0].bytes.readBigUInt64LE(12+nameLength),BigInt(fixture.length));
-let exportedCount=0;const pieces=[];
-for(const message of exported) {
-    if(message.type===106){assert.equal(message.bytes.readBigUInt64LE(8),BigInt(exportedCount));const n=message.bytes.readUInt32LE(16);assert.equal(message.bytes.length,20+n);pieces.push(message.bytes.subarray(20));exportedCount+=n;}
-    if(message.type===107)assert.equal(message.bytes.readUInt32LE(8),0,'C++ save/export failed');
-}
-assert.deepEqual(Buffer.concat(pieces),fixture,'binary file changed through C++ import/modem/export');
+await wait(()=>snapshot.controls.some(item=>item.text==='Attached: a.bin'));
+assert.equal(control('Transmit')?.enabled,false,'Retired Robust backend must not accept transmission');
+assert.equal(control('Files in memory')?.records?.length||0,0,'File import manufactured a reception');
+assert(snapshot.controls.some(item=>item.text==='Robust is unavailable until the canonical triad backend is connected.'),
+    'Robust unavailable status missing');
+await act(4,control('Use text').id);
+assert(snapshot.controls.some(item=>item.kind==='text'&&item.text===literal),'File import lost the saved composer draft');
 // Reject an unavailable file capability and complete its error, so a browser
 // waiting for an explicit save cannot hang or receive unrelated output bytes.
 await send(frame(13,event(13,'999999','received.bin')));flush();
@@ -134,4 +118,4 @@ assert(received.some(message=>message.type===107&&message.bytes.readBigUInt64LE(
 for(let i=0;i<50;i++){await tick();await new Promise(resolve=>setTimeout(resolve,2));}
 await module.ccall('datapump_web_destroy',null,[],[],{async:true});
 assert(!errors.some(error=>/Aborted|out of bounds|unreachable/i.test(error)),errors.join('\n'));
-console.log('Actual Wasm application initialization, task polling, literal edits, framed clock, binary file round trip and revoked file capability passed; no network APIs available');
+console.log('Actual Wasm application initialization, task polling, literal edits, framed clock, bounded file import, unavailable Robust transmission and revoked file capability passed; no network APIs available');

@@ -450,8 +450,9 @@ At 256-APSK, the existing interval has 256 data symbols, 32 pilots and a
 intervals gives 304 symbols per interval and `352/304 - 1 = 15.79%` higher
 steady throughput. This crosses the requested approximate 10% investigation
 threshold, but excludes acquisition, final fill, longer loss propagation and
-reacquisition cost. It proposes a Fast-format change only; regular-mode
-192-bit markers and 128-coded-byte intervals retain their separate contract.
+reacquisition cost. It proposes a Fast-format change only; the historical
+single-carrier Robust framing discussed in older studies is not a current
+compatibility contract.
 
 ## Implemented follow-on work and evidence limits
 

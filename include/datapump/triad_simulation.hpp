@@ -78,40 +78,4 @@ struct SimulationConfig {
     bool slow_agc = false;
 };
 
-struct Capture {
-    std::vector<std::complex<double>> iq;
-    std::size_t source_samples = 0;
-    std::size_t tail_samples = 0;
-    std::size_t timing_pad_samples = 0;
-    std::size_t erased_samples = 0;
-    std::size_t out_of_passband_samples = 0;
-    double input_power = 0;
-    double noise_reference_bandwidth_hz = 0;
-    // Complex sample variance; integrated noise power in the occupied band is
-    // noise_power * noise_reference_bandwidth_hz / sample_rate.
-    double noise_power = 0;
-    double observed_power = 0;
-    double capture_signal_power = 0;
-    double expected_max_cfo_hz = 0;
-    Oscillator tx_realization{};
-    Oscillator rx_realization{};
-};
-
-// Conservative bound for independent end errors. RF ppm is scaled at rf_hz;
-// audio ppm is scaled only at nominal_conversion_if_hz. Drifts are bounded
-// over duration_seconds about each configured starting offset.
-double oscillator_bound_hz(double rf_hz, double per_end_ppm_bound,
-                           double duration_seconds,
-                           double per_end_drift_ppm_per_second = 0,
-                           double nominal_conversion_if_hz = 0,
-                           double per_end_audio_ppm_bound = 0,
-                           double per_end_audio_drift_ppm_per_second = 0);
-
-// Simulate an independently generated complex-baseband source. The receiver
-// consumes only Capture::iq; channel truth remains in SimulationConfig and
-// is not included in any decoding interface. The input must already contain
-// its transmit ramps/quiet intervals. Propagated output is never re-gated.
-Capture simulate(std::span<const std::complex<double>> source,
-                 const SimulationConfig& config);
-
 } // namespace datapump::triad

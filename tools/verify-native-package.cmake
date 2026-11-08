@@ -183,21 +183,12 @@ function(check_command command_timeout)
     string(RANDOM LENGTH 16 ALPHABET 0123456789abcdef smoke_identifier)
     set(smoke_evidence "${smoke_directory}/${smoke_name}-${smoke_identifier}")
     set(smoke_command ${ARGN})
-    set(capture_smoke_fixtures FALSE)
-    if("$ENV{DATAPUMP_CI_SMOKE_CAPTURE_FIXTURES}" STREQUAL "1" AND
-        DEFINED GUI_SMOKE_ARCHIVE_NAME AND GUI_SMOKE_ARCHIVE_NAME MATCHES "-native-(rev|fltk)[.](tar[.]gz|zip)$")
-      set(capture_smoke_fixtures TRUE)
-      get_filename_component(smoke_fixture_parent "${smoke_directory}" DIRECTORY)
-      set(smoke_fixture_source "${smoke_fixture_parent}/.smoke-fixture-${smoke_identifier}")
-      list(APPEND smoke_command --smoke-dir "${smoke_fixture_source}")
-    endif()
     execute_process(COMMAND "${CMAKE_COMMAND}" -E env --unset=PYTHONHOME --unset=PYTHONPATH
-      "${smoke_python}" "${smoke_runner}" --allow-budget-exhaustion
+      "${smoke_python}" "${smoke_runner}"
       --log "${smoke_evidence}.log" --report "${smoke_evidence}.json" --
       "${CMAKE_COMMAND}" -E env ${isolated_environment} ${smoke_command}
       RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT "${command_timeout}")
-    # This includes incomplete-coverage warnings; their full output and typed
-    # report remain in the caller's per-job artifact directory.
+    # Preserve command output alongside the strict pass/fail report.
     if(NOT output STREQUAL "")
       message("${output}")
     endif()
@@ -207,11 +198,8 @@ function(check_command command_timeout)
       endif()
       file(READ "${smoke_evidence}.json" smoke_report)
       string(JSON smoke_status ERROR_VARIABLE report_error GET "${smoke_report}" status)
-      if(report_error OR NOT smoke_status MATCHES "^(passed|incomplete)$")
+      if(report_error OR NOT smoke_status STREQUAL "passed")
         message(FATAL_ERROR "Native GUI smoke runner returned an invalid success report")
-      endif()
-      if(smoke_status STREQUAL "incomplete")
-        set(package_gui_smoke_incomplete TRUE PARENT_SCOPE)
       endif()
     endif()
   else()
@@ -219,31 +207,7 @@ function(check_command command_timeout)
       RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error TIMEOUT "${command_timeout}")
   endif()
   if(NOT status EQUAL 0)
-    set(fixture_capture_detail "")
-    if(smoke_wrapped AND capture_smoke_fixtures AND EXISTS "${smoke_fixture_source}")
-      set(fixture_capture_script "${CMAKE_CURRENT_LIST_DIR}/capture-gui-smoke-fixtures.py")
-      set(fixture_capture_destination "${smoke_evidence}.fixtures")
-      execute_process(COMMAND "${smoke_python}" "${fixture_capture_script}"
-        --source "${smoke_fixture_source}" --destination "${fixture_capture_destination}"
-        --log "${smoke_evidence}.log" --report "${smoke_evidence}.json"
-        --package-manifest "${PACKAGE_ROOT}/manifest.sha256"
-        --archive-name "${GUI_SMOKE_ARCHIVE_NAME}"
-        --archive-sha256 "${GUI_SMOKE_ARCHIVE_SHA256}"
-        RESULT_VARIABLE fixture_capture_status OUTPUT_VARIABLE fixture_capture_output
-        ERROR_VARIABLE fixture_capture_error TIMEOUT 60)
-      if(fixture_capture_status EQUAL 0)
-        set(fixture_capture_detail "\nSynthetic smoke fixtures retained at ${fixture_capture_destination}")
-      else()
-        set(fixture_capture_detail "\nSynthetic smoke fixture capture failed (original smoke failure preserved): ${fixture_capture_output}${fixture_capture_error}")
-        message(WARNING "${fixture_capture_detail}")
-      endif()
-    elseif(smoke_wrapped AND capture_smoke_fixtures)
-      set(fixture_capture_detail "\nSynthetic smoke fixtures unavailable: designated source directory was not created")
-    endif()
-    message(FATAL_ERROR "Relocated native command failed: ${ARGN}\n${output}\n${error}${fixture_capture_detail}")
-  endif()
-  if(smoke_wrapped AND capture_smoke_fixtures AND EXISTS "${smoke_fixture_source}")
-    file(REMOVE_RECURSE "${smoke_fixture_source}")
+    message(FATAL_ERROR "Relocated native command failed: ${ARGN}\n${output}\n${error}")
   endif()
   # Successful Rev smoke checks may still report display-cadence warnings.
   # Preserve them in CI logs instead of hiding captured stderr on success.
@@ -256,19 +220,9 @@ function(check_command command_timeout)
   set(command_output "${output}" PARENT_SCOPE)
 endfunction()
 check_command(120 "${pump}" --version)
-check_command(120 "${pump}" simulate --text "offline native relocation" --snr 18 --json)
-string(JSON validated ERROR_VARIABLE json_error GET "${command_output}" validated)
-if(json_error OR NOT validated)
-  message(FATAL_ERROR "Relocated modem simulation did not return validated content: ${command_output}")
-endif()
-# Exercise the long codec inside the copied executable with no runtime tools
-# or package paths, in addition to the short-message simulation above.
-string(REPEAT "portable compressed data pump content " 64 long_text)
-check_command(120 "${pump}" simulate --text "${long_text}" --snr 18 --json)
-string(JSON validated ERROR_VARIABLE json_error GET "${command_output}" validated)
-if(json_error OR NOT validated)
-  message(FATAL_ERROR "Relocated long-payload codec failed: ${command_output}")
-endif()
+# Exercise surviving lightweight CLI surfaces inside the relocated environment.
+check_command(120 "${pump}" --help)
+check_command(120 "${pump}" fast-info)
 if(EXISTS "${gui}")
   check_command(120 "${gui}" --self-check)
   if(GUI_SMOKE)
@@ -296,8 +250,4 @@ if(EXISTS "${PACKAGE_ROOT}/bin/datapump-fb${extension}")
       "${PACKAGE_ROOT}/bin/datapump-fb${extension}" --simulation --frames 3)
   endif()
 endif()
-if(package_gui_smoke_incomplete)
-  message(STATUS "Native package inventory and dependency closure verified; GUI smoke coverage incomplete (see retained warning report)")
-else()
-  message(STATUS "Native package inventory, dependency closure, and isolated commands verified")
-endif()
+message(STATUS "Native package inventory and dependency closure verified")

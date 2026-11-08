@@ -6,7 +6,6 @@
 #include "legacy/screen.hpp"
 #include "bitmap_sources.hpp"
 #include "gui_smoke.hpp"
-#include "debug_live.hpp"
 #include "../audio_trace.hpp"
 #include "audio_diagnostic.hpp"
 #include <condition_variable>
@@ -30,10 +29,7 @@
 namespace datapump::gui {
 using Clock=std::chrono::steady_clock;
 struct Application::Impl {
-    explicit Impl(const Launch& launch):smoke_clock(launch.smoke?std::make_shared<smoke_detail::InterruptionClock>():nullptr),
-        controller({launch.simulation||launch.smoke,launch.smoke,launch.settings,
-            smoke_clock?live::Session::ReplayClock([clock=smoke_clock]{return clock->now();}):live::Session::ReplayClock{},
-            launch.debug_workspace_bytes,launch.debug_capture_rate_hz}),
+    explicit Impl(const Launch& launch):controller({launch.simulation||launch.smoke,launch.smoke,launch.settings}),
         fast_controller([this] {
             if(legacy_controller.active())return false;
             // The first attempt can initiate asynchronous device closure.
@@ -45,7 +41,6 @@ struct Application::Impl {
         }) {}
     // Outlives every controller/audio worker, so its footer follows their joins.
     std::unique_ptr<audio::trace::Scope> trace;
-    std::shared_ptr<smoke_detail::InterruptionClock> smoke_clock;
     Controller controller;
     fast_ui::Controller fast_controller;
     legacy_ui::Controller legacy_controller;
@@ -54,7 +49,6 @@ struct Application::Impl {
     BitmapSources bitmaps;
     Clock::time_point next=Clock::now(),next_presentation=next,started=next,completed=next;
     std::unique_ptr<Smoke> smoke;
-    std::unique_ptr<DebugLive> debug;
     bool started_session=false,passed=false;
     std::string traced_error;
     Clock::time_point next_trace=Clock::now();
@@ -116,31 +110,21 @@ Application::Application(Launch options):launch(std::move(options)),impl_(std::m
     impl_->shellcode_mode.visible=launch.smoke;
     impl_->fast_mode.options={{"fast","Fast Modem"},{"robust","Robust Modem"},{"legacy","Legacy Modem"}};
     // Explicit Robust simulation/settings/page launches keep their requested work.
-    impl_->fast_mode.selected=launch.simulation||launch.smoke||launch.debug_live||launch.settings||launch.page!=ui::Page::console?"robust":"fast";
+    impl_->fast_mode.selected=launch.simulation||launch.smoke||launch.settings||launch.page!=ui::Page::console?"robust":"fast";
     select_page(launch.page);
 }
 Application::~Application()=default;
 void Application::start() {
     if(impl_->started_session)return;
     if(launch.verbose) {
-        const auto filter=debug_live_detail::trace_event_filter(launch.debug_live,launch.debug_repeat,
-            std::getenv("DATAPUMP_DEBUG_PREFIX_TRACE"),launch.debug_work_trace);
-        impl_->trace=std::make_unique<audio::trace::Scope>(launch.verbose_file,false,filter);
+        impl_->trace=std::make_unique<audio::trace::Scope>(launch.verbose_file);
         std::cerr<<"Verbose timing trace: "<<impl_->trace->path()<<'\n';
-        audio::trace::record("gui_start",[&](auto& f){f.add("version",DATAPUMP_VERSION);f.add("debug",launch.debug_live);
+        audio::trace::record("gui_start",[&](auto& f){f.add("version",DATAPUMP_VERSION);
             f.add("simulation",launch.simulation);});
     }
     impl_->started_session=true;
     impl_->next=impl_->next_presentation=impl_->started=Clock::now();
-    if(launch.smoke)impl_->smoke=std::make_unique<Smoke>(impl_->smoke_clock,launch.smoke_directory,launch.timeout);
-    if(launch.debug_live) {
-        if(launch.simulation||launch.smoke)throw Error("Hardware debug cannot use Simulation/smoke");
-        impl_->debug=std::make_unique<DebugLive>(launch.debug_timeout,std::cerr,
-            launch.settings && launch.settings->clock_sync && *launch.settings->clock_sync!="default",launch.debug_bits,launch.debug_repeat,
-            launch.debug_workspace_bytes.value_or(0),launch.debug_capture_rate_hz,launch.debug_post_tail_seconds);
-        impl_->controller.toggle(ui::Field::live_duplex,true);
-        impl_->controller.edit(ui::Field::binary,launch.debug_bits);
-    }
+    if(launch.smoke)impl_->smoke=std::make_unique<Smoke>();
     impl_->controller.start();impl_->bitmaps.update(impl_->controller);
     if(impl_->fast_selected()&&!launch.simulation&&!launch.smoke)impl_->fast_controller.set_selected(true);
 }
@@ -149,22 +133,6 @@ bool Application::tick() {
     if(now>=impl_->next) {
         impl_->next=now+std::chrono::milliseconds(40);
         impl_->controller.poll();
-        if(launch.verbose) {
-            const auto& s=impl_->controller.snapshot();
-            if(now>=impl_->next_trace) {
-                impl_->next_trace=now+std::chrono::seconds(1);
-                audio::trace::record("gui_state",[&](auto& f){f.add("samples",s.samples_received);f.add("hardware_rate",s.hardware_sample_rate);
-                    f.add("transmitting",s.transmitting);f.add("tx_id",s.transmission_id);f.add("tx_seconds",s.transmission_seconds);
-                    f.add("tx_fraction",s.transmission_fraction);f.add("tx_finished",s.transmission_finished);f.add("tx_failed",s.transmission_failed);
-                    f.add("tx_stopping",s.transmission_stopping);f.add("tx_timed",s.transmit_clock_following);
-                    f.add("backlog",s.receiver_backlog_seconds);f.add("oldest",s.receiver_oldest_input_seconds);
-                    f.add("banks",s.receiver_instances);f.add("admissions",s.receiver_admissions);
-                    f.add("rx_timed",s.clock_window_modeled);f.add("fallback",s.clock_timing_fallback);f.add("timing",s.clock_timing_status);});
-            }
-            if(s.error!=impl_->traced_error) {impl_->traced_error=s.error;
-                audio::trace::record("gui_error",[&](auto& f){f.add("error",s.error);f.add("tx_failed",s.transmission_failed);
-                    f.add("tx_stopping",s.transmission_stopping);f.add("tx_timed",s.transmit_clock_following);});}
-        }
         const auto& devices=impl_->controller.audio_devices();
         if(impl_->device_count!=devices.size()) {
             impl_->fast_controller.set_devices(devices);impl_->legacy_controller.set_devices(devices);
@@ -175,25 +143,11 @@ bool Application::tick() {
             impl_->controller.resume_capture();impl_->audio_suspended=false;
         }
         ++impl_->poll_count;
-        if(impl_->debug&&!closing()) {
-            const auto action=impl_->debug->step(std::chrono::duration<double>(now-impl_->started).count(),
-                impl_->controller.snapshot(),impl_->controller.signals(),impl_->controller.enabled(ui::Command::transmit),
-                impl_->controller.settings().transfer.key.has_value(),impl_->controller.field(ui::Field::status).text,
-                impl_->controller.settings().dsp_workspace_bytes,impl_->controller.settings().transfer.dsp_workspace_bytes);
-            if(action==DebugLive::Action::transmit) {
-                impl_->controller.activate(ui::Command::transmit);
-                // The normal action seeds a new draft after accepting TX.
-                // Prepare the SAME bits for the next diagnostic request while
-                // this transmission runs; its queued source is already owned.
-                if(launch.debug_repeat>1)impl_->controller.edit(ui::Field::binary,launch.debug_bits);
-            }
-            if(action==DebugLive::Action::close)close();
-        }
         if(impl_->smoke&&!closing()) {
             impl_->smoke->step(impl_->controller, &impl_->bitmaps);
             if(!impl_->passed&&impl_->smoke->done()) {
                 impl_->passed=true;impl_->completed=now;select_page(launch.page);
-                std::cout<<"Shared GUI smoke passed: keys, text, files, binary editing, cancellation, retained saves, live plots and page switching.\n";
+                std::cout<<"Shared GUI smoke passed: editor controls, dropdowns, declarations and explicit Robust unavailable state.\n";
             }
             if(!impl_->passed) {
                 const auto& definitions=ui::pages();
@@ -206,7 +160,7 @@ bool Application::tick() {
     return true;
 }
 bool Application::finished() const { return impl_->controller.ready_to_close()&&impl_->fast_controller.ready_to_close()&&impl_->legacy_controller.ready_to_close(); }
-int Application::result() const { return impl_->debug?impl_->debug->result():(launch.smoke&&!impl_->passed?1:0); }
+int Application::result() const { return launch.smoke&&!impl_->passed?1:0; }
 void Application::close() { dismiss_overlay();impl_->controller.close();impl_->fast_controller.close();impl_->legacy_controller.close();impl_->service_routes.clear();impl_->service_completion_routes.clear(); }
 bool Application::closing() const { return impl_->controller.closing(); }
 void Application::edit(ui::Field field,std::string text) {
@@ -611,12 +565,6 @@ std::shared_ptr<const ui::DocumentNode> Application::document(ui::Page page,int 
                 // while navigation always belongs to the current inputs.
                 auto current_actions=std::make_shared<planner::Model>(*cached.previous);
                 current_actions->calculating=true;
-                if(!model->inputs.options.key ||
-                   model->inputs.options.modem.spreading_mode!=modem::SpreadingMode::pattern) {
-                    current_actions->observer_hypothetical=true;
-                    current_actions->observer_available=false;current_actions->observer_ratio=0;
-                    for(auto& point:current_actions->points){point.observer_available=false;point.observer_ratio=0;}
-                }
                 current_actions->stronger_fit_target=model->stronger_fit_target;
                 current_actions->weaker_fit_target=model->weaker_fit_target;
                 displayed=std::move(current_actions);
@@ -638,7 +586,6 @@ std::shared_ptr<const ui::DocumentNode> Application::document(ui::Page page,int 
     const auto pending=impl_->controller.field(ui::Field::inspection).text;
     if(!cached.root||cached.model!=model||cached.first!=first||cached.width!=width||cached.closing!=impl_->controller.closing()||(!model&&cached.pending!=pending)) {
         auto document=inspection_page::build(model.get(),page==ui::Page::flow,static_cast<float>(width),first,pending);
-        if(page==ui::Page::flow&&model&&model->pattern_space)impl_->controller.pattern_page_size(document.page_size);
         std::function<void(ui::DocumentNode&)> enable=[&](auto& node) {
             if(node.kind==ui::DocumentKind::action)node.enabled=impl_->controller.enabled(node.command);
             for(auto& child:node.children)enable(child);
@@ -650,32 +597,31 @@ std::shared_ptr<const ui::DocumentNode> Application::document(ui::Page page,int 
 }
 void gui_self_check() {
     controller_self_check();
-    Message message;const std::string text="Data Pump shared GUI self-check";message.data=Bytes(text.begin(),text.end());
-    transfer::Options options;options.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_pattern,false).config;
-    options.timestamp=1800000000;modem::ChannelConfig channel;channel.snr_db=18;channel.delay_samples=137;
-    const auto result=transfer::simulate(message,options,channel);
-    if(result.content.message.data!=message.data)throw Error("Shared GUI transfer self-check failed");
+    const std::string text="Data Pump shared GUI self-check";
     BitmapImage bitmap(137,101);const auto plot=plots::PlotSnapshot::qr(encode_qr(text),plots::QrBrightness::normal);
     plot.paint(full_bitmap_request(137,101,false,true),[&](unsigned x,unsigned y,PixelBlock block){bitmap.blit(x,y,block);});
     std::cout<<"Data Pump shared GUI self-check passed; no display required.\n";
 }
 int gui_main(int argc,char** argv,const char* backend,const std::function<int(Launch)>& run,const char* program_name) {
-    bool smoke_requested=false,self_check_requested=false;
+    bool self_check_requested=false;
     try {
-        Launch launch;bool audio_device_option=false,debug_repeat_option=false,debug_post_tail_option=false;
+        Launch launch;bool audio_device_option=false;
         const auto frontend_label=std::string_view(program_name)=="datapump-gui"?"GUI backend: ":"Frontend: ";
         std::vector<std::string> settings_arguments;
-        const auto debug_unsigned=[](std::string_view option,std::string_view text) {
-            std::uint64_t value=0;
-            const auto parsed=std::from_chars(text.data(),text.data()+text.size(),value);
-            if(text.empty()||text.front()<'0'||text.front()>'9'||parsed.ec!=std::errc{}||
-               parsed.ptr!=text.data()+text.size()||!value)
-                throw Error(std::string(option)+" requires a positive unsigned decimal integer");
-            return value;
-        };
         for(int i=1;i<argc;++i) {
             const std::string arg=argv[i];
-            if(arg=="--help") {std::cout<<"Data Pump continuous console\n"<<frontend_label<<backend<<" (selected at build time)\nUsage: "<<program_name<<" [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nLink settings: --tx-dbm DBM --path-loss-db DB --noise-dbm-hz DBM/Hz\n  --oscillator ID --rf-oscillator ID --spread-preset ID --selective-perturbation ID\n  --shift HZ (default 0) --search-margin N (default 3)\n  --clock-sync default|GPS_1ms-400ms_region-2564ms_offset\n  --audio-error default|TIME (total lag 0..+70ms per station by default)\n  --keyfile PATH | --keyset amateur|none; --tx-key named|none --key-name NAME\n  --dsss-mode off|interleave --dsss-factor 1|10|100|1000 --dsss-version interleave|legacy (both peers must match)\n  --search-arithmetic default|fp32-min|fp64-force (experimental CPU policy; legacy IDs accepted)\n  --receiver-strategy auto|existing|complex|amplitude (receiver only)\n  --helper-power WATTS --helper-ratio-limit 10|20|40|60|80|90\n  --helper-frequency high --helper-callsign ASCII (maximum 16 characters)\n  --receiver-cpu-budget RATIO (estimated processing s / audio s, default 0.6)\n  --fhss off|fake-fcc|fake-eu|fake-list (legacy fake-0.4s-200 maps to fake-fcc)\n  --fhss-list '30MHz,30.006MHz' or --fhss-list-file PATH (2-200 Shift frequencies)\n  --symbol-burst off|1|2|3|5|10 (symbol waits; UTC 30s grid, at least 60s between starts)\n  --symbol-burst-random 0|1|2|3 (additional whole-symbol waits; effective zero without encryption)\n  --sched-hop 0|3|5 (secret burst nominal total-time multiplier; key required)\n  --sched-hop-dilution 0|3 (0: one active hop; 3: three active hops; developer control)\n  --sched-frequency-search 1|2|4|8|16|32 (frequency uncertainty multiplier with Sched_Hop)\n  --live-duplex yes|no (default no; simultaneous hardware input/output)\n  --reference independent|shared-radio --lf-reference 0 (shared-radio shorthand)\n  --doppler VELOCITY (c, knots, mph, kph or %; default 0.000000c)\n  --carrier HZ is configured absolute; stream is Doppler-adjusted Carrier minus Shift (>0)\n  --target-snr DB-Hz --rate HZ --carrier HZ --dsp-workspace 25%|50%|75%\n  --auto-pattern or --pattern MODE; --bw is an alias for --rate\n  --target-snr sets preview, short and long targets; --short-target-snr / --long-target-snr override them\nHardware diagnostic: --debug [--debug-bits BITS] [--debug-repeat 1..3] [--debug-timeout 10..300]\n  Sends 1..16 raw bits (default 1) using a supplied synthetic named key through real GUI duplex audio;\n  Repeats wait for physical RX completion and 2 seconds settling in the same GUI.\n  Repeated debug with --verbose keeps helper reference, clock refresh and re-entry events.\n  Optional --debug-workspace-bytes N fixes DSP bytes; --debug-capture-rate 48000 requires exact raw capture.\n  --debug-post-tail-seconds 2..15 observes after TX tail and ordinary RX completion (default 2).\n  --debug-work-trace opts into bounded ordinary-work/reference/wire tracing.\n  Diagnostic controls require --debug and are never saved modem preferences.\n  JSON lines on stderr; one overall deadline; never enables Simulation.\nDeveloper timing trace: --verbose [--verbose-file NEW-PATH] (bounded asynchronous JSONL; no secrets/PCM)\nPhysical audio instrument: --audio-timing-test 5..300 [--audio-test-device DEVICE]\n  Emits a low-level public probe; physical return path required for measured latency/jitter.\n  No GUI or modem; does not calibrate the hardware clock or change mixer routing.\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
+            if(arg=="--help") {
+                std::cout<<"Data Pump console\n"<<frontend_label<<backend<<" (selected at build time)\nUsage: "<<program_name
+                    <<" [--color|--monochrome] [--self-check] [--smoke-test]\n"
+                    <<"Fast and Legacy audio remain available. Robust controls are retained while\n"
+                    <<"the canonical triad backend is connected; Robust audio is unavailable.\n"
+                    <<"Saved settings: --keyfile PATH | --keyset amateur|none, --key-name NAME,\n"
+                    <<"--rate HZ --carrier HZ --shift HZ --target-snr DB-Hz --helper-power WATTS.\n"
+                    <<"Developer trace: --verbose [--verbose-file NEW-PATH]\n"
+                    <<"Physical audio instrument: --audio-timing-test 5..300 [--audio-test-device DEVICE]\n"
+                    <<"Smoke controls: --smoke-hold SECONDS --smoke-view NAME --smoke-scroll 0..1\n";
+                return 0;
+            }
             if(arg=="--version") {std::cout<<"Data Pump "<<DATAPUMP_VERSION<<' '<<frontend_label<<backend<<'\n';return 0;}
             if(arg=="--self-check") {self_check_requested=true;continue;}
             if(arg=="--color")launch.color=true;
@@ -689,40 +635,6 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
                 const std::string value=argv[++i];std::size_t used=0;launch.audio_test_seconds=std::stod(value,&used);
                 if(used!=value.size()||!std::isfinite(launch.audio_test_seconds)||launch.audio_test_seconds<5||launch.audio_test_seconds>300)
                     throw Error("Audio timing test must be 5..300 seconds");
-            }
-            else if(arg=="--debug"||arg=="--debug-live-duplex")launch.debug_live=true;
-            else if(arg=="--debug-work-trace") {launch.debug_work_trace=true;launch.verbose=true;}
-            else if(arg=="--debug-post-tail-seconds"&&i+1<argc) {
-                debug_post_tail_option=true;const std::string text=argv[++i];std::size_t used=0;
-                launch.debug_post_tail_seconds=std::stod(text,&used);
-                if(used!=text.size()||!std::isfinite(launch.debug_post_tail_seconds)||
-                   launch.debug_post_tail_seconds<2||launch.debug_post_tail_seconds>15)
-                    throw Error("Debug post-tail observation must be 2..15 seconds");
-            }
-            else if(arg=="--debug-workspace-bytes"&&i+1<argc) {
-                const auto value=debug_unsigned(arg,argv[++i]);
-                if(value>std::numeric_limits<std::size_t>::max())throw Error("Debug workspace does not fit size_t");
-                launch.debug_workspace_bytes=static_cast<std::size_t>(value);
-            }
-            else if(arg=="--debug-capture-rate"&&i+1<argc) {
-                const auto value=debug_unsigned(arg,argv[++i]);
-                if(value!=48000)throw Error("Debug capture rate must be 48000 Hz");
-                launch.debug_capture_rate_hz=48000;
-            }
-            else if(arg=="--debug-bits"&&i+1<argc) {
-                launch.debug_bits=argv[++i];
-                if(launch.debug_bits.empty()||launch.debug_bits.size()>16||launch.debug_bits.find_first_not_of("01")!=std::string::npos)
-                    throw Error("Debug bits must contain 1..16 binary digits");
-            }
-            else if(arg=="--debug-repeat"&&i+1<argc) {
-                const std::string value=argv[++i];debug_repeat_option=true;
-                if(value!="1"&&value!="2"&&value!="3")throw Error("Debug repeat must be 1..3");
-                launch.debug_repeat=static_cast<unsigned>(value.front()-'0');
-            }
-            else if(arg=="--debug-timeout"&&i+1<argc) {
-                const std::string value=argv[++i];std::size_t used=0;launch.debug_timeout=std::stod(value,&used);
-                if(used!=value.size()||!std::isfinite(launch.debug_timeout)||launch.debug_timeout<10||launch.debug_timeout>300)
-                    throw Error("Debug timeout must be 10..300 seconds");
             }
             else if(arg=="--smoke-dir"&&i+1<argc)launch.smoke_directory=std::filesystem::u8path(argv[++i]);
             else if((arg=="--smoke-hold"||arg=="--smoke-timeout"||arg=="--smoke-scroll")&&i+1<argc) {
@@ -746,12 +658,9 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
         }
         if(!settings_arguments.empty())launch.settings=launch_command::parse_arguments(settings_arguments);
         if(audio_device_option&&!launch.audio_test_seconds)throw Error("--audio-test-device requires --audio-timing-test");
-        if(debug_repeat_option&&!launch.debug_live)throw Error("--debug-repeat requires --debug");
-        if((launch.debug_workspace_bytes||launch.debug_capture_rate_hz||debug_post_tail_option||launch.debug_work_trace)&&!launch.debug_live)
-            throw Error("Debug workspace/capture controls require --debug");
         if(launch.audio_test_seconds) {
-            if(launch.debug_live||launch.smoke||launch.simulation||self_check_requested||launch.settings)
-                throw Error("Audio timing test cannot combine with modem settings, debug, Simulation, smoke or self-check");
+            if(launch.smoke||launch.simulation||self_check_requested||launch.settings)
+                throw Error("Audio timing test cannot combine with modem settings, Simulation, smoke or self-check");
             std::unique_ptr<audio::trace::Scope> trace;
             if(launch.verbose) {trace=std::make_unique<audio::trace::Scope>(launch.verbose_file);std::cerr<<"Verbose timing trace: "<<trace->path()<<'\n';}
             // Device/driver teardown is not guaranteed to honor a stop token.
@@ -763,31 +672,8 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
             try {const auto result=audio_diagnostic::run_audio_timing_test(launch.audio_test_seconds,launch.audio_test_device,std::cout);finish();return result;}
             catch(...){finish();throw;}
         }
-        if(launch.debug_live && (launch.smoke||launch.simulation||self_check_requested))
-            throw Error("Hardware debug cannot use Simulation, smoke or self-check");
-        if(launch.debug_live && (!launch.settings || !launch.settings->keyfile || launch.settings->tx_key!="named"))
-            throw Error("Hardware debug requires an explicit --keyfile and --tx-key named; use a synthetic key");
-        if(launch.debug_live)launch.settings->full_duplex=true; // Normalize asynchronous key-load settings too.
         if(self_check_requested) {gui_self_check();return 0;}
-        smoke_requested=launch.smoke;
-        if(!launch.debug_live)return run(launch);
-        // Includes backend construction and destruction: UI-thread deadlines
-        // cannot break a blocked device/worker join. This diagnostic-only hard
-        // stop deliberately forfeits tail protection, and is never a pass.
-        std::mutex mutex;std::condition_variable cv;bool joined=false;
-        std::jthread watchdog([&] {
-            std::unique_lock lock(mutex);
-            if(!cv.wait_for(lock,std::chrono::duration<double>(launch.debug_timeout+15),[&]{return joined;})) {
-                // Never wait for a stdio lock or a full pipe in the hard-stop path.
-                // Exit124 is the authoritative watchdog result for the launcher.
-                std::_Exit(124);
-            }
-        });
-        const auto finish=[&]{ {std::lock_guard lock(mutex);joined=true;}cv.notify_one(); };
-        try {const auto result=run(launch);finish();return result;}catch(...) {finish();throw;}
-    }catch(const SmokeBudgetExhausted& error) {
-        if(!smoke_requested) {std::cerr<<"Data Pump "<<backend<<": "<<error.what()<<'\n';return 1;}
-        std::cerr<<smoke_budget_marker<<error.what()<<'\n';return smoke_budget_exit_code;
+        return run(launch);
     }catch(const std::exception& error){std::cerr<<"Data Pump "<<backend<<": "<<error.what()<<'\n';return 1;}
 }
 }

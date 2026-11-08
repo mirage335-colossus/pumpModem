@@ -1,55 +1,47 @@
 name: SDK application qualification scope
-
-on:
+'on':
   workflow_dispatch:
     inputs:
       scope:
-        description: 'Run one SDK scope or the focused FLTK Live validation without repeating other producers and consumers'
+        description: Select the retained application test or package scope
         type: choice
-        options: [tests, packages, frontends, web, live, sched-hop-diagnostic, gui-core-diagnostic, sdk-burst-scheduling-diagnostic, binary-capture-diagnostic, binary-capture-continuation, controlled-replay-causal, native-copy-capture-diagnostic, copied-help-causal-diagnostic, copied-help-replay-diagnostic, copied-help-session-diagnostic, live-affinity-partition-diagnostic]
+        options:
+        - tests
+        - packages
+        - frontends
+        - web
         default: tests
-      contract_part:
-        description: 'Run the complete SDK test scope or one independent FLTK contract partition'
-        type: choice
-        options: [full, general, preparation, live, calibration]
-        default: full
       backend:
         type: choice
-        options: [fltk, rev]
+        options:
+        - fltk
+        - rev
         default: fltk
       image:
-        description: 'Match the original scope container for comparable qualification'
+        description: Match the original scope container for comparable qualification
         type: choice
-        options: [debian:bookworm-slim, ubuntu:24.04]
+        options:
+        - debian:bookworm-slim
+        - ubuntu:24.04
         default: debian:bookworm-slim
       linux_runner:
         type: choice
-        options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
+        options:
+        - ubuntu-24.04
+        - ubuntu-latest-m
+        - ubuntu-latest-l
+        - ubuntu-latest-h
         default: ubuntu-24.04
       tui_drain_diagnostic:
-        description: 'After the ordinary frontend scope, measure the same complete PTY fixture separately'
+        description: After the ordinary frontend scope, measure the same complete PTY fixture separately
         type: boolean
         default: false
-      binary_capture_source:
-        description: Immutable source for binary-capture-diagnostic only
-        type: choice
-        options: ['42d7a0cb82c027f906555c39adccb7ec6fa91f21', '37f4315c553b9fc3807f2f173d9a0fae3f239ebc']
-        default: '42d7a0cb82c027f906555c39adccb7ec6fa91f21'
-      binary_capture_attempts:
-        description: Independent synthetic inputs for binary-capture-diagnostic only
-        type: choice
-        options: ['1', '2']
-        default: '2'
   workflow_call:
     inputs:
       scope:
-        description: 'packages builds archives; tests runs source qualification; frontends checks TUI/framebuffer; web independently checks the pipe worker; sched-hop-diagnostic runs both complete scheduled-hop tests; gui-core-diagnostic runs both complete GUI core tests; sdk-burst-scheduling-diagnostic measures original SDK Symbol Burst cases only'
+        description: Select the retained application test or package scope
         type: string
         required: true
-      contract_part:
-        description: 'FLTK contract partition for the tests scope; full preserves the standalone complete invocation'
-        type: string
-        default: full
       backend:
         type: string
         required: true
@@ -62,24 +54,14 @@ on:
       tui_drain_diagnostic:
         type: boolean
         default: false
-      binary_capture_source:
-        type: string
-        default: '42d7a0cb82c027f906555c39adccb7ec6fa91f21'
-      binary_capture_attempts:
-        type: string
-        default: '2'
-
 permissions:
   contents: read
-
 jobs:
   application:
-    if: inputs.scope != 'binary-capture-diagnostic' && inputs.scope != 'binary-capture-continuation' && inputs.scope != 'controlled-replay-causal' && inputs.scope != 'native-copy-capture-diagnostic' && inputs.scope != 'copied-help-causal-diagnostic' && inputs.scope != 'copied-help-replay-diagnostic' && inputs.scope != 'copied-help-session-diagnostic' && inputs.scope != 'live-affinity-partition-diagnostic'
     name: SDK ${{ inputs.scope }} / ${{ inputs.backend }} / ${{ inputs.image }}
     runs-on: ${{ inputs.linux_runner }}
     container: ${{ inputs.image }}
-    # Full FLTK contracts include calibration after the ordinary regressions.
-    timeout-minutes: ${{ inputs.scope == 'tests' && inputs.backend == 'fltk' && 180 || 120 }}
+    timeout-minutes: 90
     env:
       DATAPUMP_SMOKE_TARGET: linux-x86_64-${{ inputs.backend }}
       DATAPUMP_SMOKE_SCOPE: published/sdk-archives
@@ -87,569 +69,220 @@ jobs:
       DATAPUMP_SMOKE_INVENTORY_SHA256: ''
       DEBIAN_FRONTEND: noninteractive
       LIBGL_ALWAYS_SOFTWARE: '1'
-      # Reserve CPU time for sampled DSP and GUI polling on standard runners.
       LP_NUM_THREADS: ${{ inputs.linux_runner == 'ubuntu-24.04' && '1' || '2' }}
       SDK_SCOPE: ${{ inputs.scope }}
       SDK_BACKEND: ${{ inputs.backend }}
-      SDK_CONTRACT_PART: ${{ inputs.contract_part }}
-      DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL: ${{ (inputs.scope == 'live' || (inputs.scope == 'tests' && inputs.backend == 'fltk')) && inputs.linux_runner == 'ubuntu-24.04' && 'ON' || 'OFF' }}
     defaults:
       run:
         shell: bash
     steps:
-      - name: Validate qualification scope and prepare logs
-        run: |
-          case "$SDK_SCOPE" in packages|tests|frontends|web|live|sched-hop-diagnostic|gui-core-diagnostic|sdk-burst-scheduling-diagnostic) ;; *) echo '::error::Invalid SDK qualification scope'; exit 2 ;; esac
-          case "$SDK_BACKEND" in fltk|rev) ;; *) echo '::error::Invalid GUI backend'; exit 2 ;; esac
-          case "$SDK_CONTRACT_PART" in full|general|preparation|live|calibration) ;; *) echo '::error::Invalid SDK contract partition'; exit 2 ;; esac
-          if [ "$SDK_SCOPE" != tests ] && [ "$SDK_CONTRACT_PART" != full ]; then
-            echo '::error::Contract partitions apply only to the tests scope'
-            exit 2
-          fi
-          if [ "$SDK_BACKEND" = rev ] && [ "$SDK_CONTRACT_PART" != full ]; then
-            echo '::error::Rev conformance retains the complete standalone SDK test scope'
-            exit 2
-          fi
-          if [ "$SDK_SCOPE" = gui-core-diagnostic ] && [ "$SDK_BACKEND" != fltk ]; then
-            echo '::error::gui-core-diagnostic requires the FLTK backend'
-            exit 2
-          fi
-          if [ "$SDK_SCOPE" = sdk-burst-scheduling-diagnostic ] && { [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ "$SDK_BACKEND" != fltk ] || [ "${{ inputs.linux_runner }}" != ubuntu-24.04 ] || [ "$SDK_CONTRACT_PART" != full ] || [ "${{ inputs.image }}" != debian:bookworm-slim ]; }; then
-            echo '::error::sdk-burst-scheduling-diagnostic requires manual FLTK on ubuntu-24.04 with the Debian bookworm image and full partition input'
-            exit 2
-          fi
-          if [ "$SDK_SCOPE" = live ] && { [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ "$SDK_BACKEND" != fltk ] || [ "${{ inputs.linux_runner }}" != ubuntu-24.04 ]; }; then
-            echo '::error::focused SDK Live requires manual FLTK scope on ubuntu-24.04'
-            exit 2
-          fi
-          if [ '${{ inputs.tui_drain_diagnostic }}' = true ] && { [ "$SDK_SCOPE" != frontends ] || [ "$SDK_BACKEND" != fltk ] || [ "$GITHUB_EVENT_NAME" != workflow_dispatch ]; }; then
-            echo '::error::TUI drain measurement requires the manual FLTK frontend scope'
-            exit 2
-          fi
-          SDK_LOG_DIR="$RUNNER_TEMP/datapump-sdk-$SDK_SCOPE-$SDK_BACKEND"
-          mkdir -p "$SDK_LOG_DIR"
-          printf 'SDK_LOG_DIR=%s\n' "$SDK_LOG_DIR" >> "$GITHUB_ENV"
-      # No host compiler or development packages: the downloaded SDK supplies
-      # all application headers/libraries, GCC, CMake, Ninja and pkg-config.
-      - name: Load current package-fetch helper before installing Git
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-          path: .ci-bootstrap
-          sparse-checkout: tools/ci-apt.sh
-          sparse-checkout-cone-mode: false
-      - name: Install checkout and runtime test prerequisites
-        run: |
-          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
-          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates git gh python3 file binutils make xvfb xauth fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri libxtst6 2>&1 | tee "$SDK_LOG_DIR/prerequisites.log"
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Set container-local smoke evidence paths
-        run: |
-          printf 'DATAPUMP_CI_SMOKE_WARNINGS_DIR=%s/build/ci-smoke-results\n' "$PWD" >> "$GITHUB_ENV"
-          printf 'DATAPUMP_CI_SMOKE_RUNNER=%s/tools/run-gui-smoke.py\n' "$PWD" >> "$GITHUB_ENV"
-      - name: Fetch the exact published SDK from base
-        id: sdk
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 tools/sdk-release.py fetch --binary-only --repo "$GITHUB_REPOSITORY" --directory downloaded-sdk --github-output "$GITHUB_OUTPUT" 2>&1 | tee "$SDK_LOG_DIR/sdk-fetch.log"
-      - name: Install and verify the same SDK on this host
-        run: |
-          if [ '${{ steps.sdk.outputs.found }}' != true ]; then
-            echo '::error::The base release has no SDK matching this recipe. Run the SDK base workflow first.'
-            exit 1
-          fi
-          set -- downloaded-sdk/datapump-sdk-*-linux-x86_64.tar.gz
-          test "$#" -eq 1
-          python3 tools/build-sdk.py install --archive "$1" --destination "$GITHUB_WORKSPACE/build/sdk"
-          python3 tools/build-sdk.py verify "$GITHUB_WORKSPACE/build/sdk" --max-host-glibc 2.36
-      - name: Verify relocated SDK tools and their private runtimes
-        run: |
-          python3 - <<'PY' 2>&1 | tee "$SDK_LOG_DIR/sdk-runtime.log"
-          import json
-          import os
-          from pathlib import Path
-          import subprocess
+    - name: Validate qualification scope and prepare logs
+      run: |
+        case "$SDK_SCOPE" in packages|tests|frontends|web) ;; *) echo '::error::Invalid SDK scope'; exit 2 ;; esac
+        case "$SDK_BACKEND" in fltk|rev) ;; *) echo '::error::Invalid GUI backend'; exit 2 ;; esac
+        SDK_LOG_DIR="$RUNNER_TEMP/datapump-sdk-$SDK_SCOPE-$SDK_BACKEND"
+        mkdir -p "$SDK_LOG_DIR"
+        echo "SDK_LOG_DIR=$SDK_LOG_DIR" >> "$GITHUB_ENV"
+    - name: Load current package-fetch helper before installing Git
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+        path: .ci-bootstrap
+        sparse-checkout: tools/ci-apt.sh
+        sparse-checkout-cone-mode: false
+    - name: Install checkout and runtime test prerequisites
+      run: |
+        cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+        sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates git gh python3 file binutils make xvfb xauth fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri libxtst6 2>&1 | tee "$SDK_LOG_DIR/prerequisites.log"
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Set container-local smoke evidence paths
+      run: |
+        printf 'DATAPUMP_CI_SMOKE_WARNINGS_DIR=%s/build/ci-smoke-results\n' "$PWD" >> "$GITHUB_ENV"
+        printf 'DATAPUMP_CI_SMOKE_RUNNER=%s/tools/run-gui-smoke.py\n' "$PWD" >> "$GITHUB_ENV"
+    - name: Fetch the exact published SDK from base
+      id: sdk
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: python3 tools/sdk-release.py fetch --binary-only --repo "$GITHUB_REPOSITORY" --directory downloaded-sdk
+        --github-output "$GITHUB_OUTPUT" 2>&1 | tee "$SDK_LOG_DIR/sdk-fetch.log"
+    - name: Install and verify the same SDK on this host
+      run: |
+        if [ '${{ steps.sdk.outputs.found }}' != true ]; then
+          echo '::error::The base release has no SDK matching this recipe. Run the SDK base workflow first.'
+          exit 1
+        fi
+        set -- downloaded-sdk/datapump-sdk-*-linux-x86_64.tar.gz
+        test "$#" -eq 1
+        python3 tools/build-sdk.py install --archive "$1" --destination "$GITHUB_WORKSPACE/build/sdk"
+        python3 tools/build-sdk.py verify "$GITHUB_WORKSPACE/build/sdk" --max-host-glibc 2.36
+    - name: Verify relocated SDK tools and their private runtimes
+      run: |
+        python3 - <<'PY' 2>&1 | tee "$SDK_LOG_DIR/sdk-runtime.log"
+        import json
+        import os
+        from pathlib import Path
+        import subprocess
 
-          root = (Path(os.environ['GITHUB_WORKSPACE']) / 'build/sdk').resolve()
-          manifest = json.loads((root / 'share/datapump-sdk/manifest.json').read_text())
-          runtimes = {'libstdc++.so.6', 'libgcc_s.so.1'}
-          for name in runtimes:
-              if not (root / 'lib' / name).is_file():
-                  raise SystemExit('SDK host runtime is missing: ' + name)
-          env = os.environ.copy()
-          for name in ('LD_LIBRARY_PATH', 'LD_PRELOAD', 'LD_AUDIT', 'LD_DEBUG'):
-              env.pop(name, None)
-          compiler = root / manifest['target']['cxx_compiler']
-          cc1plus = subprocess.check_output([str(compiler), '-print-prog-name=cc1plus'], env=env, text=True).strip()
-          python = root / 'bin/python3'
-          tools = [root / 'bin/cmake', root / 'bin/ninja', Path(cc1plus), python]
-          if (root / 'bin/patchelf').is_file():
-              tools.append(root / 'bin/patchelf')
-          for tool in tools:
-              if not tool.is_absolute() or not tool.is_file() or root not in tool.resolve().parents:
-                  raise SystemExit('SDK host tool is missing or outside its root: ' + str(tool))
-              result = subprocess.run(['ldd', str(tool)], env=env, text=True, capture_output=True, check=True)
-              if 'not found' in result.stdout:
-                  raise SystemExit('SDK host dependency is missing: ' + result.stdout)
-              for line in result.stdout.splitlines():
-                  fields = line.split()
-                  if fields and fields[0] in runtimes:
-                      expected = (root / 'lib' / fields[0]).resolve()
-                      if len(fields) < 3 or fields[1] != '=>' or Path(fields[2]).resolve() != expected:
-                          raise SystemExit('SDK tool selected a non-SDK C++ runtime: ' + str(tool) + '\n' + line)
-              print('Verified SDK host runtime resolution:', tool.relative_to(root))
-          python_paths = json.loads(subprocess.check_output([str(python), '-c',
-              'import argparse, json, pathlib, re, sys, sysconfig; print(json.dumps([sys.executable, sys.prefix, sys.base_prefix, sysconfig.get_path("stdlib")]))'], env=env, text=True))
-          for location in python_paths:
-              resolved = Path(location).resolve()
-              if resolved != root and root not in resolved.parents:
-                  raise SystemExit('SDK Python selected a path outside its installation: ' + location)
-          print('Verified relocated SDK Python and Rev resource-builder imports:', python_paths[0])
-          PY
-      - name: Record and verify checkout source identity
-        run: |
-          git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD > "$SDK_LOG_DIR/source-commit.txt"
-          git -c safe.directory="$GITHUB_WORKSPACE" status --porcelain --untracked-files=normal > "$SDK_LOG_DIR/source-status.txt"
-          git -c safe.directory="$GITHUB_WORKSPACE" diff --exit-code HEAD -- > "$SDK_LOG_DIR/source-diff.txt"
-      - name: Build and verify portable application archives
-        if: inputs.scope == 'packages'
-        env:
-          DATAPUMP_CI_SMOKE_CAPTURE_FIXTURES: ${{ inputs.backend == 'rev' && '1' || '' }}
-        run: |
-          {
-            ./build.sh package --tui --fb --web-worker --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)"
-            xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' build/sdk/bin/cmake -DARCHIVE_DIR="$PWD/build/sdk-application/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.36 -DREQUIRE_MANUALS=ON -DREQUIRE_FRONTENDS=ON -P tools/verify-native-archives.cmake
-          } 2>&1 | tee "$SDK_LOG_DIR/packages.log"
-      - name: Run build and packaging isolation regressions
-        if: (inputs.scope == 'tests' && (inputs.backend == 'rev' || inputs.contract_part == 'full' || inputs.contract_part == 'general')) || inputs.scope == 'sched-hop-diagnostic' || inputs.scope == 'gui-core-diagnostic'
-        run: |
-          {
-            ./build.sh test build --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL="$DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL"
-            ./build.sh test packaging --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL="$DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL"
-          } 2>&1 | tee "$SDK_LOG_DIR/build-packaging-tests.log"
-      - name: Configure the SDK Symbol Burst diagnostic
-        if: inputs.scope == 'sdk-burst-scheduling-diagnostic'
-        run: |
-          {
-            ./build.sh configure --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend fltk --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DCMAKE_BUILD_TYPE=Release -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_PORTABLE=ON -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL=ON
-            build/sdk/bin/cmake --build build/sdk-application --config Release --target test_symbol_burst_live test_weak_signal --parallel "$(python3 -B tools/build_capacity.py)"
-            python3 -B tools/sdk-burst-scheduling-diagnostic.py \
-              --root "$GITHUB_WORKSPACE" --build-dir "$GITHUB_WORKSPACE/build/sdk-application" \
-              --ctest "$GITHUB_WORKSPACE/build/sdk/bin/ctest" --source "$GITHUB_SHA" \
-              --report "$SDK_LOG_DIR/sdk-burst-scheduling-diagnostic"
-          } 2>&1 | tee "$SDK_LOG_DIR/sdk-burst-scheduling-diagnostic.log"
-      - name: Configure the selected SDK FLTK contract partition
-        if: inputs.scope == 'tests' && inputs.backend == 'fltk' && inputs.contract_part != 'full'
-        run: |
-          {
-            ./build.sh configure --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend fltk --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_PORTABLE=ON -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL="$DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL"
-            extra_target=()
-            if [ "$SDK_CONTRACT_PART" = general ]; then extra_target=(--extra-target datapump-apps); fi
-            python3 tools/ci-test-plan.py plan \
-              --build-dir build/sdk-application --source-root "$GITHUB_WORKSPACE" \
-              --scope contract --part "$SDK_CONTRACT_PART" --config Release \
-              --ctest "$GITHUB_WORKSPACE/build/sdk/bin/ctest" \
-              "${extra_target[@]}" --output "$SDK_LOG_DIR/contract-$SDK_CONTRACT_PART-plan.json"
-            if [ "$SDK_CONTRACT_PART" = general ]; then
-              python3 tools/ci-test-plan.py plan \
-                --build-dir build/sdk-application --source-root "$GITHUB_WORKSPACE" \
-                --scope contract --part live --config Release \
-                --ctest "$GITHUB_WORKSPACE/build/sdk/bin/ctest" \
-                --output "$SDK_LOG_DIR/contract-live-plan.json"
-            fi
-            python3 - "$SDK_LOG_DIR/contract-$SDK_CONTRACT_PART-plan.json" "$SDK_LOG_DIR/contract-$SDK_CONTRACT_PART-targets.txt" "$SDK_LOG_DIR/contract-live-plan.json" "$SDK_CONTRACT_PART" <<'PY'
-          import json, sys
-          targets = []
-          for path in (sys.argv[1], sys.argv[3]):
-              if sys.argv[4] != 'general' and path != sys.argv[1]:
-                  continue
-              plan = json.load(open(path, encoding='utf-8'))
-              selected = plan.get('build_targets')
-              if not isinstance(selected, list) or any(not isinstance(item, str) or not item for item in selected):
-                  raise SystemExit('contract plan has invalid build targets')
-              targets.extend(selected)
-          targets = sorted(set(targets))
-          if not targets:
-              raise SystemExit('contract plan union has no build targets')
-          with open(sys.argv[2], 'w', encoding='utf-8') as stream:
-              for target in targets:
-                  stream.write(target + '\n')
-          print('Selected SDK build targets:', ', '.join(targets))
-          PY
-            set --
-            while IFS= read -r target; do set -- "$@" "$target"; done < "$SDK_LOG_DIR/contract-$SDK_CONTRACT_PART-targets.txt"
-            test "$#" -gt 0
-            build/sdk/bin/cmake --build build/sdk-application --config Release --target "$@" --parallel "$(python3 -B tools/build_capacity.py)"
-            runner_jobs=1
-            runner_timeout=3600
-            if [ "$SDK_CONTRACT_PART" = general ]; then
-              live_status=0
-              general_status=0
-              python3 tools/run-ci-tests.py --build-dir build/sdk-application --scope contract \
-                --selection-plan "$SDK_LOG_DIR/contract-live-plan.json" \
-                --config Release --jobs 1 --timeout 3600 \
-                --ctest "$GITHUB_WORKSPACE/build/sdk/bin/ctest" \
-                --report "$SDK_LOG_DIR/contract-live-report.json" \
-                --summary "$GITHUB_STEP_SUMMARY" || live_status=$?
-              python3 tools/run-ci-tests.py --build-dir build/sdk-application --scope contract \
-                --selection-plan "$SDK_LOG_DIR/contract-general-plan.json" \
-                --config Release --jobs 2 --timeout 3600 \
-                --ctest "$GITHUB_WORKSPACE/build/sdk/bin/ctest" \
-                --report "$SDK_LOG_DIR/contract-general-report.json" \
-                --summary "$GITHUB_STEP_SUMMARY" || general_status=$?
-              printf 'Contract partition exits: live=%s general=%s\n' "$live_status" "$general_status"
-              if [ "$live_status" -ne 0 ] || [ "$general_status" -ne 0 ]; then exit 1; fi
-            else
-              if [ "$SDK_CONTRACT_PART" = calibration ]; then runner_timeout=7200; fi
-              python3 tools/run-ci-tests.py --build-dir build/sdk-application --scope contract \
-                --selection-plan "$SDK_LOG_DIR/contract-$SDK_CONTRACT_PART-plan.json" \
-                --config Release --jobs "$runner_jobs" --timeout "$runner_timeout" \
-                --ctest "$GITHUB_WORKSPACE/build/sdk/bin/ctest" \
-                --report "$SDK_LOG_DIR/contract-$SDK_CONTRACT_PART-report.json" \
-                --summary "$GITHUB_STEP_SUMMARY"
-            fi
-          } 2>&1 | tee "$SDK_LOG_DIR/contract-$SDK_CONTRACT_PART.log"
-      - name: Prepare focused SDK Live with the published SDK toolchain
-        if: inputs.scope == 'live'
-        run: |
-          {
-            # This required build-isolation group is a setup prerequisite, not Live coverage.
-            ./build.sh test build --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend fltk --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL="$DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL"
-          } 2>&1 | tee "$SDK_LOG_DIR/build-isolation-setup.log"
-      - name: Run the two required SDK Live cases
-        if: inputs.scope == 'live'
-        run: |
-          {
-            printf 'source_sha=%s\n' "$GITHUB_SHA"
-            build/sdk/bin/cmake -S . -B build/sdk-application -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_PORTABLE=ON -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL="$DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL"
-            build/sdk/bin/cmake --build build/sdk-application --target datapump-tests-ci-live --parallel "$(python3 -B tools/build_capacity.py)"
-            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --show-only=json-v1 -L '^contract$' -LE native_gui -R '^(live|live_profiles)$' > "$SDK_LOG_DIR/contract-live-inventory.json"
-            python3 - "$SDK_LOG_DIR/contract-live-inventory.json" <<'PY'
-          import json, os, sys
-          tests = json.load(open(sys.argv[1], encoding='utf-8'))['tests']
-          expected = {'live', 'live_profiles'}
-          names = [test.get('name') for test in tests]
-          assert len(tests) == 2 and len(set(names)) == 2 and set(names) == expected, names
-          for test in tests:
-              props = {item['name']: item.get('value') for item in test.get('properties', [])}
-              labels = props.get('LABELS', [])
-              if isinstance(labels, str): labels = labels.split(';')
-              assert 'contract' in labels and 'native_gui' not in labels, (test['name'], labels)
-              command = test.get('command')
-              assert isinstance(command, list) and command, (test['name'], command)
-              has_flag = '--ci-functional-clock' in command[1:]
-              expected_flag = test['name'] == 'live' and os.environ.get('DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL') == 'ON'
-              assert has_flag == expected_flag, (test['name'], command, expected_flag)
-          print('SDK Live inventory: exactly live and live_profiles; functional-clock flag on live only')
-          PY
-            live_status=0
-            python3 tools/run-ci-tests.py --build-dir build/sdk-application --scope live --config Release --jobs 1 --ctest "$GITHUB_WORKSPACE/build/sdk/bin/ctest" --report "$SDK_LOG_DIR/contract-live.json" --summary "$GITHUB_STEP_SUMMARY" || live_status=$?
-            python3 - "$SDK_LOG_DIR/contract-live-inventory.json" "$SDK_LOG_DIR/contract-live.json" <<'PY'
-          import json, sys
-          inventory = json.load(open(sys.argv[1], encoding='utf-8'))['tests']
-          expected = {test['name'] for test in inventory}
-          report = json.load(open(sys.argv[2], encoding='utf-8'))
-          selected = report.get('selected')
-          omitted = report.get('omitted')
-          assert isinstance(selected, list) and set(selected) == expected and len(selected) == len(expected), (selected, expected)
-          assert omitted == [], omitted
-          print('Runner selection matches the complete contract-filtered Live inventory')
-          PY
-            if [ "$live_status" -ne 0 ]; then exit "$live_status"; fi
-          } 2>&1 | tee "$SDK_LOG_DIR/hosted-live.log"
-      - name: Run both complete scheduled-hop tests with the prepared SDK
-        if: inputs.scope == 'sched-hop-diagnostic'
-        run: |
-          {
-            git -c safe.directory="$PWD" rev-parse HEAD > "$SDK_LOG_DIR/sched-hop-source.txt"
-            build/sdk/bin/cmake -S . -B build/sdk-application -DDART_TESTING_TIMEOUT=3600
-            build/sdk/bin/cmake --build build/sdk-application --target test_sched_hop_transmit test_sched_hop_receiver --parallel "$(python3 -B tools/build_capacity.py)"
-            selector='^(sched_hop_transmit|sched_hop_receiver)$'
-            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --show-only=json-v1 -R "$selector" > "$SDK_LOG_DIR/sched-hop-inventory.json"
-            python3 -c 'import json,sys; names=[t["name"] for t in json.load(open(sys.argv[1]))["tests"]]; assert len(names)==2 and set(names)=={"sched_hop_transmit","sched_hop_receiver"},names' "$SDK_LOG_DIR/sched-hop-inventory.json"
-            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --output-on-failure --no-tests=error --parallel 1 --timeout 3600 --output-junit "$SDK_LOG_DIR/sched-hop.xml" -R "$selector"
-          } 2>&1 | tee "$SDK_LOG_DIR/sched-hop.log"
-      - name: Run both complete GUI core tests with the prepared SDK
-        if: inputs.scope == 'gui-core-diagnostic'
-        run: |
-          {
-            git -c safe.directory="$PWD" rev-parse HEAD > "$SDK_LOG_DIR/gui-core-source.txt"
-            build/sdk/bin/cmake -S . -B build/sdk-application -DDART_TESTING_TIMEOUT=3600
-            build/sdk/bin/cmake --build build/sdk-application --target test_gui_timing_advice test_gui_controller --parallel "$(python3 -B tools/build_capacity.py)"
-            selector='^(gui_timing_advice|gui_controller)$'
-            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --show-only=json-v1 -R "$selector" > "$SDK_LOG_DIR/gui-core-inventory.json"
-            python3 -c 'import json,os,sys; expected={"gui_timing_advice","gui_controller"}; tests=json.load(open(sys.argv[1]))["tests"]; names=[t.get("name") for t in tests]; assert len(tests)==2 and len(set(names))==2 and set(names)==expected,names; assert all(isinstance(t.get("command"),list) and len(t["command"])==1 and os.path.basename(t["command"][0])=="test_"+t["name"] for t in tests),tests' "$SDK_LOG_DIR/gui-core-inventory.json"
-            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --output-on-failure --no-tests=error --parallel 1 --timeout 3600 --output-junit "$SDK_LOG_DIR/gui-core.xml" -R "$selector"
-          } 2>&1 | tee "$SDK_LOG_DIR/gui-core.log"
-      - name: Preserve wire and shared GUI contracts with the SDK toolchain
-        if: inputs.scope == 'tests' && inputs.backend == 'fltk' && inputs.contract_part == 'full'
-        run: |
-          {
-            # The preceding build/packaging groups configured this exact SDK
-            # tree. Keep the full contract while isolating functional Live work.
-            printf 'source_sha=%s\n' "$GITHUB_SHA"
-            build/sdk/bin/cmake -S . -B build/sdk-application -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL="$DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL"
-            build/sdk/bin/cmake --build build/sdk-application --target datapump-tests-contract --parallel "$(python3 -B tools/build_capacity.py)"
-            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --show-only=json-v1 -L '^contract$' -LE native_gui -R '^(live|live_profiles)$' > "$SDK_LOG_DIR/contract-live-inventory.json"
-            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --show-only=json-v1 -L '^contract$' -LE native_gui -E '^(live|live_profiles|differential_receiver_probability)$' > "$SDK_LOG_DIR/contract-general-inventory.json"
-            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --show-only=json-v1 -L '^contract$' -LE native_gui -R '^differential_receiver_probability$' > "$SDK_LOG_DIR/contract-calibration-inventory.json"
-            # Complete every selected case even when another group fails.
-            # The combined result remains fatal; no failure is converted to a pass.
-            live_status=0
-            python3 - "$SDK_LOG_DIR/contract-live-inventory.json" <<'PY' || live_status=$?
-          import json, os, sys
-          tests = json.load(open(sys.argv[1], encoding='utf-8'))['tests']
-          expected = {'live', 'live_profiles'}
-          names = [test.get('name') for test in tests]
-          assert len(tests) == 2 and len(set(names)) == 2 and set(names) == expected, names
-          for test in tests:
-              props = {item['name']: item.get('value') for item in test.get('properties', [])}
-              labels = props.get('LABELS', [])
-              if isinstance(labels, str): labels = labels.split(';')
-              assert 'contract' in labels and 'native_gui' not in labels, (test['name'], labels)
-              command = test.get('command')
-              assert isinstance(command, list) and command, (test['name'], command)
-              has_flag = '--ci-functional-clock' in command[1:]
-              expected_flag = test['name'] == 'live' and os.environ.get('DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL') == 'ON'
-              assert has_flag == expected_flag, (test['name'], command, expected_flag)
-          PY
-            python3 tools/run-ci-tests.py --build-dir build/sdk-application --scope live --config Release --jobs 1 --ctest "$GITHUB_WORKSPACE/build/sdk/bin/ctest" --report "$SDK_LOG_DIR/contract-live.json" --summary "$GITHUB_STEP_SUMMARY" || { live_status=$?; }
-            compare_status=0
-            python3 - "$SDK_LOG_DIR/contract-live-inventory.json" "$SDK_LOG_DIR/contract-live.json" <<'PY' || compare_status=$?
-          import json, sys
-          inventory = json.load(open(sys.argv[1], encoding='utf-8'))['tests']
-          expected = {test['name'] for test in inventory}
-          report = json.load(open(sys.argv[2], encoding='utf-8'))
-          selected = report.get('selected')
-          omitted = report.get('omitted')
-          assert isinstance(selected, list) and set(selected) == expected and len(selected) == len(expected), (selected, expected)
-          assert omitted == [], omitted
-          print('Runner selection matches the complete contract-filtered Live inventory')
-          PY
-            if [ "$compare_status" -ne 0 ] && [ "$live_status" -eq 0 ]; then live_status=$compare_status; fi
-            contract_status=0
-            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --output-on-failure --no-tests=error -L '^contract$' -LE native_gui -E '^(live|live_profiles|differential_receiver_probability)$' --parallel 2 --output-junit "$SDK_LOG_DIR/contract-general.xml" || contract_status=$?
-            # Only the complete calibration receives extra computation time.
-            # Its fixed captures, statistical gates and explicit limits remain.
-            calibration_status=0
-            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --output-on-failure --no-tests=error -L '^contract$' -LE native_gui -R '^differential_receiver_probability$' --parallel 1 --timeout 7200 --output-junit "$SDK_LOG_DIR/contract-calibration.xml" || calibration_status=$?
-            printf 'Contract group exits: live=%s remaining=%s calibration=%s\n' "$live_status" "$contract_status" "$calibration_status"
-            if [ "$live_status" -ne 0 ] || [ "$contract_status" -ne 0 ] || [ "$calibration_status" -ne 0 ]; then exit 1; fi
-          } 2>&1 | tee "$SDK_LOG_DIR/contract.log"
-      - name: Run Rev native conformance separately under a private display
-        if: inputs.scope == 'tests' && inputs.backend == 'rev'
-        # Full validation includes the complete workflow; devfast never runs it.
-        # A validated progressing workload limit records incomplete coverage.
-        env:
-          DATAPUMP_SMOKE_SCOPE: source/native
-        run: |
-          {
-            ./build.sh --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend rev --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600
-            build/sdk/bin/cmake --build build/sdk-application --target datapump-tests-native --parallel "$(python3 -B tools/build_capacity.py)"
-            xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 tools/run-native-tests.py --allow-budget-exhaustion --build-dir build/sdk-application --ctest "$GITHUB_WORKSPACE/build/sdk/bin/ctest" --report-dir "$DATAPUMP_CI_SMOKE_WARNINGS_DIR"
-          } 2>&1 | tee "$SDK_LOG_DIR/native.log"
-      - name: Check terminal and framebuffer independently of native GUI and modem suites
-        if: inputs.scope == 'frontends'
-        run: |
-          ./build.sh test frontends --cli --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --build-dir build/sdk-frontends --jobs 1 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON 2>&1 | tee "$SDK_LOG_DIR/frontends.log"
-      - name: Measure the same complete PTY fixture after its ordinary baseline
-        if: always() && inputs.scope == 'frontends' && inputs.tui_drain_diagnostic
-        env:
-          DATAPUMP_TEST_DRAIN_DIAGNOSTICS: ${{ env.SDK_LOG_DIR }}/tui-drain-adapter.log
-          DATAPUMP_TEST_DRAIN_HARNESS: '1'
-        run: |
-          test -x build/sdk-frontends/datapump_tui_adapter_test
-          cp build/sdk-frontends/Testing/Temporary/LastTest.log "$SDK_LOG_DIR/tui-drain-baseline.log"
-          python3 - <<'PY' 2>&1 | tee "$SDK_LOG_DIR/tui-drain-trace.log"
-          import hashlib
-          import json
-          import os
-          from pathlib import Path
-          import subprocess
-          import time
+        root = (Path(os.environ['GITHUB_WORKSPACE']) / 'build/sdk').resolve()
+        manifest = json.loads((root / 'share/datapump-sdk/manifest.json').read_text())
+        runtimes = {'libstdc++.so.6', 'libgcc_s.so.1'}
+        for name in runtimes:
+            if not (root / 'lib' / name).is_file():
+                raise SystemExit('SDK host runtime is missing: ' + name)
+        env = os.environ.copy()
+        for name in ('LD_LIBRARY_PATH', 'LD_PRELOAD', 'LD_AUDIT', 'LD_DEBUG'):
+            env.pop(name, None)
+        compiler = root / manifest['target']['cxx_compiler']
+        cc1plus = subprocess.check_output([str(compiler), '-print-prog-name=cc1plus'], env=env, text=True).strip()
+        python = root / 'bin/python3'
+        tools = [root / 'bin/cmake', root / 'bin/ninja', Path(cc1plus), python]
+        if (root / 'bin/patchelf').is_file():
+            tools.append(root / 'bin/patchelf')
+        for tool in tools:
+            if not tool.is_absolute() or not tool.is_file() or root not in tool.resolve().parents:
+                raise SystemExit('SDK host tool is missing or outside its root: ' + str(tool))
+            result = subprocess.run(['ldd', str(tool)], env=env, text=True, capture_output=True, check=True)
+            if 'not found' in result.stdout:
+                raise SystemExit('SDK host dependency is missing: ' + result.stdout)
+            for line in result.stdout.splitlines():
+                fields = line.split()
+                if fields and fields[0] in runtimes:
+                    expected = (root / 'lib' / fields[0]).resolve()
+                    if len(fields) < 3 or fields[1] != '=>' or Path(fields[2]).resolve() != expected:
+                        raise SystemExit('SDK tool selected a non-SDK C++ runtime: ' + str(tool) + '\n' + line)
+            print('Verified SDK host runtime resolution:', tool.relative_to(root))
+        python_paths = json.loads(subprocess.check_output([str(python), '-c',
+            'import argparse, json, pathlib, re, sys, sysconfig; print(json.dumps([sys.executable, sys.prefix, sys.base_prefix, sysconfig.get_path("stdlib")]))'], env=env, text=True))
+        for location in python_paths:
+            resolved = Path(location).resolve()
+            if resolved != root and root not in resolved.parents:
+                raise SystemExit('SDK Python selected a path outside its installation: ' + location)
+        print('Verified relocated SDK Python and Rev resource-builder imports:', python_paths[0])
+        PY
+    - name: Record and verify checkout source identity
+      run: |
+        git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD > "$SDK_LOG_DIR/source-commit.txt"
+        git -c safe.directory="$GITHUB_WORKSPACE" status --porcelain --untracked-files=normal > "$SDK_LOG_DIR/source-status.txt"
+        git -c safe.directory="$GITHUB_WORKSPACE" diff --exit-code HEAD -- > "$SDK_LOG_DIR/source-diff.txt"
+    - name: Build and verify portable application archives
+      if: inputs.scope == 'packages'
+      run: |
+        {
+          ./build.sh package --tui --fb --web-worker --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)"
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' build/sdk/bin/cmake -DARCHIVE_DIR="$PWD/build/sdk-application/releases" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.36 -DREQUIRE_MANUALS=ON -DREQUIRE_FRONTENDS=ON -P tools/verify-native-archives.cmake
+        } 2>&1 | tee "$SDK_LOG_DIR/packages.log"
+    - name: Run build and packaging isolation regressions
+      if: inputs.scope == 'tests'
+      run: |
+        {
+          ./build.sh test build --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON
+          ./build.sh test packaging --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON
+        } 2>&1 | tee "$SDK_LOG_DIR/build-packaging-tests.log"
+    - name: Check retained shared contracts with the SDK
+      if: inputs.scope == 'tests' && inputs.backend == 'fltk'
+      run: |
+        ./build.sh test contract --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend fltk --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON 2>&1 | tee "$SDK_LOG_DIR/contract.log"
+    - name: Run Rev native conformance separately under a private display
+      if: inputs.scope == 'tests' && inputs.backend == 'rev'
+      env:
+        DATAPUMP_SMOKE_SCOPE: source/native
+      run: |
+        {
+          ./build.sh --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend rev --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600
+          build/sdk/bin/cmake --build build/sdk-application --target datapump-tests-native --parallel "$(python3 -B tools/build_capacity.py)"
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 tools/run-native-tests.py --build-dir build/sdk-application --ctest "$GITHUB_WORKSPACE/build/sdk/bin/ctest" --report-dir "$DATAPUMP_CI_SMOKE_WARNINGS_DIR"
+        } 2>&1 | tee "$SDK_LOG_DIR/native.log"
+    - name: Check terminal and framebuffer independently of native GUI and modem suites
+      if: inputs.scope == 'frontends'
+      run: |
+        ./build.sh test frontends --cli --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --build-dir build/sdk-frontends --jobs 1 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON 2>&1 | tee "$SDK_LOG_DIR/frontends.log"
+    - name: Measure the same complete PTY fixture after its ordinary baseline
+      if: always() && inputs.scope == 'frontends' && inputs.tui_drain_diagnostic
+      env:
+        DATAPUMP_TEST_DRAIN_DIAGNOSTICS: ${{ env.SDK_LOG_DIR }}/tui-drain-adapter.log
+        DATAPUMP_TEST_DRAIN_HARNESS: '1'
+      run: |
+        test -x build/sdk-frontends/datapump_tui_adapter_test
+        cp build/sdk-frontends/Testing/Temporary/LastTest.log "$SDK_LOG_DIR/tui-drain-baseline.log"
+        python3 - <<'PY' 2>&1 | tee "$SDK_LOG_DIR/tui-drain-trace.log"
+        import hashlib
+        import json
+        import os
+        from pathlib import Path
+        import subprocess
+        import time
 
-          binary = Path('build/sdk-frontends/datapump_tui_adapter_test').resolve()
-          fixture = Path('tests/test_tui_terminal.py').resolve()
-          command = [str(Path('build/sdk/bin/ctest').resolve()),
-                     '--test-dir', 'build/sdk-frontends', '--output-on-failure',
-                     '--verbose', '--no-tests=error', '-R', '^tui_terminal$',
-                     '--output-junit', str(Path(os.environ['SDK_LOG_DIR']) / 'tui-drain-trace.xml')]
-          started = time.monotonic_ns()
-          result = subprocess.run(command, check=False)
-          elapsed = time.monotonic_ns() - started
-          report = {
-              'scope': 'diagnostic; ordinary baseline remains independently fatal',
-              'source_sha': os.environ['GITHUB_SHA'],
-              'command': command,
-              'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
-              'fixture_sha256': hashlib.sha256(fixture.read_bytes()).hexdigest(),
-              'returncode': result.returncode,
-              'wall_ns': elapsed,
-              'baseline_log': 'frontends.log',
-              'adapter_log': 'tui-drain-adapter.log',
-              'comparison_limit': 'one matched full-fixture pair; not a reliable performance estimate',
-          }
-          (Path(os.environ['SDK_LOG_DIR']) / 'tui-drain-result.json').write_text(
-              json.dumps(report, indent=2) + '\n')
-          print(json.dumps(report), flush=True)
-          raise SystemExit(result.returncode)
-          PY
-      - name: Prepare the JavaScript test host
-        if: inputs.scope == 'web'
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: '24.19.0'
-      - name: Check the native pipe worker independently with SDK dependencies
-        if: inputs.scope == 'web'
-        run: |
-          ./build.sh test web --cli --web-worker --sdk "$GITHUB_WORKSPACE/build/sdk" --build-dir build/sdk-web --jobs 1 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON 2>&1 | tee "$SDK_LOG_DIR/web.log"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: inputs.scope == 'packages'
-        with:
-          name: DataPump-SDK-${{ inputs.backend }}-Linux-x86_64-glibc-2.36
-          path: |
-            build/sdk-application/releases/*.tar.gz
-            build/sdk-application/releases/*.zip
-            build/sdk-application/releases/SHA256SUMS.txt
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always() && inputs.scope == 'tests' && inputs.backend == 'fltk' && inputs.contract_part != 'full'
-        with:
-          name: DataPump-SDK-tests-fltk-contract-${{ inputs.contract_part }}
-          path: |
-            ${{ env.SDK_LOG_DIR }}/contract-${{ inputs.contract_part }}-plan.json
-            ${{ env.SDK_LOG_DIR }}/contract-${{ inputs.contract_part }}-report.json
-          if-no-files-found: warn
-          compression-level: 9
-          retention-days: 7
-          overwrite: true
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always() && inputs.scope == 'tests' && inputs.backend == 'fltk' && inputs.contract_part == 'general'
-        with:
-          name: DataPump-SDK-tests-fltk-contract-live
-          path: |
-            ${{ env.SDK_LOG_DIR }}/contract-live-plan.json
-            ${{ env.SDK_LOG_DIR }}/contract-live-report.json
-          if-no-files-found: warn
-          compression-level: 9
-          retention-days: 7
-          overwrite: true
-      - name: Preserve qualification logs and incomplete coverage
-        if: always() && inputs.scope != 'sdk-burst-scheduling-diagnostic'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: DataPump-SDK-${{ inputs.scope }}-${{ inputs.backend }}${{ inputs.contract_part != 'full' && format('-{0}', inputs.contract_part) || '' }}-qualification-logs
-          path: |
-            ${{ env.SDK_LOG_DIR }}/*.log
-            ${{ env.SDK_LOG_DIR }}/*.xml
-            ${{ env.SDK_LOG_DIR }}/*.json
-            ${{ env.SDK_LOG_DIR }}/*.txt
-            build/sdk-application/CMakeCache.txt
-            build/sdk-application/Testing/Temporary/*.log
-            build/sdk-frontends/Testing/Temporary/*.log
-            build/sdk-web/Testing/Temporary/*.log
-            build/sdk-application/CMakeFiles/CMakeConfigureLog.yaml
-            build/sdk-application/build-info.txt
-            build/ci-smoke-results/
-          if-no-files-found: warn
-          retention-days: 7
-      - name: Preserve bounded SDK scheduling diagnostic evidence
-        if: always() && inputs.scope == 'sdk-burst-scheduling-diagnostic'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: DataPump-SDK-burst-scheduling-diagnostic
-          path: ${{ env.SDK_LOG_DIR }}/
-          if-no-files-found: warn
-          compression-level: 9
-          retention-days: 3
-      - name: Summarize this qualification scope
-        if: always()
-        env:
-          RESULT: ${{ job.status }}
-        run: |
-          {
-            printf 'SDK **%s / %s**: **%s**.\n\n' "$SDK_SCOPE" "$SDK_BACKEND" "$RESULT"
-            if [ "$SDK_SCOPE" = packages ]; then
-              echo 'This scope builds and verifies both portable archives, including copied GUI smoke with any incomplete coverage recorded, and supplies the compatibility matrix.'
-            elif [ "$SDK_SCOPE" = frontends ]; then
-              echo 'This independent scope runs every registered TUI and framebuffer case with SDK dependencies and no native GUI toolkit.'
-            elif [ "$SDK_SCOPE" = web ]; then
-              echo 'This independent scope runs the native pipe worker, renderer and simulated browser audio cases.'
-            elif [ "$SDK_SCOPE" = sched-hop-diagnostic ]; then
-              echo 'This scope runs both complete scheduled-hop tests plus unchanged build/packaging isolation checks using the prepared SDK. It supplies replacement evidence; it is not the full SDK contract.'
-            elif [ "$SDK_SCOPE" = gui-core-diagnostic ]; then
-              echo 'This FLTK-only scope runs both complete GUI core tests plus unchanged build/packaging isolation checks using the prepared SDK. It supplies replacement evidence; it is not the full SDK contract.'
-            elif [ "$SDK_SCOPE" = sdk-burst-scheduling-diagnostic ]; then
-              echo 'This manual diagnostic runs six original no-argument SDK Live fixture trials: three alone and three paired with weak_signal, with two observed and one unobserved trial per variant. It records scheduling measurements but is not qualification evidence.'
-            elif [ "$SDK_SCOPE" = live ]; then
-              echo 'This manual FLTK scope runs the two Live cases with the standard-hosted functional analogue after the separate SDK build-isolation setup group. It does not run the remaining contracts or calibration and is not full SDK qualification.'
-            elif [ "$SDK_SCOPE" = tests ] && [ "$SDK_BACKEND" = fltk ] && [ "$SDK_CONTRACT_PART" != full ]; then
-              if [ "$SDK_CONTRACT_PART" = general ]; then
-                echo 'This FLTK SDK job ran the complete Live pair and general contract partitions as separate invocations after building their target union. The required aggregate joins all four logical parts against the full inventory.'
-              else
-                printf 'This FLTK SDK job ran the complete %s contract partition. The required aggregate joins all four logical parts against the full inventory.\n' "$SDK_CONTRACT_PART"
-              fi
-            else
-              echo 'This scope runs build/packaging regressions plus the FLTK preservation contract or Rev native conformance. Source qualification runs independently of package delivery.'
-            fi
-            echo 'The complete SDK workflow requires both source scopes, both package scopes, the independent frontend and web scopes, both Wasm scopes and every copied-runtime check; a partial scope is not full qualification.'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  binary-capture-diagnostic:
-    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'binary-capture-diagnostic'
-    uses: ./.github/workflows/sdk-rev-smoke-capture.yml
-    with:
-      base_source: ${{ inputs.binary_capture_source || '42d7a0cb82c027f906555c39adccb7ec6fa91f21' }}
-      capture_attempts: ${{ inputs.binary_capture_attempts || '2' }}
-
-  binary-capture-continuation:
-    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'binary-capture-continuation'
-    permissions:
-      contents: read
-      actions: read
-    uses: ./.github/workflows/sdk-rev-smoke-capture-continue.yml
-
-  controlled-replay-causal:
-    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'controlled-replay-causal'
-    permissions:
-      contents: read
-      actions: read
-    uses: ./.github/workflows/controlled-replay-causal.yml
-
-  native-copy-capture-diagnostic:
-    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'native-copy-capture-diagnostic'
-    permissions:
-      contents: read
-      actions: read
-    uses: ./.github/workflows/native-copy-smoke-capture.yml
-
-  copied-help-causal-diagnostic:
-    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'copied-help-causal-diagnostic'
-    uses: ./.github/workflows/copied-help-capture.yml
-
-  copied-help-replay-diagnostic:
-    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'copied-help-replay-diagnostic'
-    permissions:
-      contents: read
-      actions: read
-    uses: ./.github/workflows/copied-help-replay.yml
-  copied-help-session-diagnostic:
-    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'copied-help-session-diagnostic'
-    permissions:
-      contents: read
-      actions: read
-    uses: ./.github/workflows/copied-help-replay.yml
-    with:
-      diagnostic: session
-
-  live-affinity-partition-diagnostic:
-    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'live-affinity-partition-diagnostic'
-    permissions:
-      contents: read
-      actions: read
-    uses: ./.github/workflows/live-affinity-partition.yml
+        binary = Path('build/sdk-frontends/datapump_tui_adapter_test').resolve()
+        fixture = Path('tests/test_tui_terminal.py').resolve()
+        command = [str(Path('build/sdk/bin/ctest').resolve()),
+                   '--test-dir', 'build/sdk-frontends', '--output-on-failure',
+                   '--verbose', '--no-tests=error', '-R', '^tui_terminal$',
+                   '--output-junit', str(Path(os.environ['SDK_LOG_DIR']) / 'tui-drain-trace.xml')]
+        started = time.monotonic_ns()
+        result = subprocess.run(command, check=False)
+        elapsed = time.monotonic_ns() - started
+        report = {
+            'scope': 'diagnostic; ordinary baseline remains independently fatal',
+            'source_sha': os.environ['GITHUB_SHA'],
+            'command': command,
+            'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
+            'fixture_sha256': hashlib.sha256(fixture.read_bytes()).hexdigest(),
+            'returncode': result.returncode,
+            'wall_ns': elapsed,
+            'baseline_log': 'frontends.log',
+            'adapter_log': 'tui-drain-adapter.log',
+            'comparison_limit': 'one matched full-fixture pair; not a reliable performance estimate',
+        }
+        (Path(os.environ['SDK_LOG_DIR']) / 'tui-drain-result.json').write_text(
+            json.dumps(report, indent=2) + '\n')
+        print(json.dumps(report), flush=True)
+        raise SystemExit(result.returncode)
+        PY
+    - name: Prepare the JavaScript test host
+      if: inputs.scope == 'web'
+      uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+      with:
+        node-version: 24.19.0
+    - name: Check the native pipe worker independently with SDK dependencies
+      if: inputs.scope == 'web'
+      run: |
+        ./build.sh test web --cli --web-worker --sdk "$GITHUB_WORKSPACE/build/sdk" --build-dir build/sdk-web --jobs 1 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON 2>&1 | tee "$SDK_LOG_DIR/web.log"
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      if: inputs.scope == 'packages'
+      with:
+        name: DataPump-SDK-${{ inputs.backend }}-Linux-x86_64-glibc-2.36
+        path: |
+          build/sdk-application/releases/*.tar.gz
+          build/sdk-application/releases/*.zip
+          build/sdk-application/releases/SHA256SUMS.txt
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 1
+    - name: Preserve qualification logs and incomplete coverage
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: DataPump-SDK-${{ inputs.scope }}-${{ inputs.backend }}-qualification-logs
+        path: |
+          ${{ env.SDK_LOG_DIR }}/*.log
+          ${{ env.SDK_LOG_DIR }}/*.xml
+          ${{ env.SDK_LOG_DIR }}/*.json
+          ${{ env.SDK_LOG_DIR }}/*.txt
+          build/sdk-application/CMakeCache.txt
+          build/sdk-application/Testing/Temporary/*.log
+          build/sdk-frontends/Testing/Temporary/*.log
+          build/sdk-web/Testing/Temporary/*.log
+          build/sdk-application/CMakeFiles/CMakeConfigureLog.yaml
+          build/sdk-application/build-info.txt
+          build/ci-smoke-results/
+        if-no-files-found: warn
+        retention-days: 7
+    - name: Summarize this qualification scope
+      if: always()
+      env:
+        RESULT: ${{ job.status }}
+      run: |
+        printf 'SDK **%s / %s**: **%s**. This result covers only the selected retained scope.\n' "$SDK_SCOPE" "$SDK_BACKEND" "$RESULT" >> "$GITHUB_STEP_SUMMARY"

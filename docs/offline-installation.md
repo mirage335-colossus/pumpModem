@@ -136,8 +136,8 @@ worker is not included on Windows.
 
 ## Manual pages
 
-The concise command references are `pump(1)`, `pump-fast(1)` and
-`datapump-gui(1)`. `pump-fast` is a manual for the `pump fast-*` subcommands,
+The concise command references are `pump(1)` (key, device, QR and Fast utility
+subcommands), `pump-fast(1)` and `datapump-gui(1)`. `pump-fast` is a manual for the `pump fast-*` subcommands,
 not a separate executable. CLI-only installations include the first two pages.
 
 With a UNIX manual reader, read a page directly from an extracted bundle:

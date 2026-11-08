@@ -1,5 +1,5 @@
 #include "datapump/triad_shaping.hpp"
-#include "datapump/pattern_pulse.hpp"
+#include "datapump/triad_pulse.hpp"
 #include "search_fft.hpp"
 #include <algorithm>
 #include <array>
@@ -157,18 +157,18 @@ Profile profile(const Format& f,const Geometry& g,const ShapingOptions& o,unsign
 }
 
 const char* pulse_shape_name(PulseShape p) {
-    switch(p){case PulseShape::LegacyRrc:return "rrc-025-span8";
+    switch(p){case PulseShape::Rrc:return "rrc-025-span8";
         case PulseShape::TaperedRrc:return "rrc-025-span8-c2-tail2";}
     throw Error("triad shaping invalid pulse descriptor");
 }
 double shaping_pulse(PulseShape p,double t) {
-    if(p==PulseShape::LegacyRrc)return modem::pattern_pulse(t);
+    if(p==PulseShape::Rrc)return rrc_pulse(t);
     require(p==PulseShape::TaperedRrc,"triad shaping invalid pulse descriptor");
     constexpr unsigned resolution=256,count=8*resolution;
     static const auto table=[] {
         std::array<double,count+1> values{};
         for(unsigned j=0;j<=count;++j){const double coordinate=static_cast<double>(j)/resolution;
-            values[j]=modem::pattern_pulse(coordinate)*smooth((8-coordinate)/2);}
+            values[j]=rrc_pulse(coordinate)*smooth((8-coordinate)/2);}
         double energy=values[0]*values[0]+values[count]*values[count];
         for(unsigned j=1;j<count;++j)energy+=2*values[j]*values[j];
         const auto scale=std::sqrt(resolution/energy);for(auto& x:values)x*=scale;
@@ -286,7 +286,7 @@ ShapingPlan plan_shaping(const Format& input,const ShapingOptions& o) {
             if(limit>1/effective_sample_rate(f))ramps.push_back(limit-1/effective_sample_rate(f));
             if(!original&&limit>0)ramps.push_back(limit*.5);
         }
-        for(const auto ramp:ramps)for(const auto pulse:{PulseShape::LegacyRrc,PulseShape::TaperedRrc}){
+        for(const auto ramp:ramps)for(const auto pulse:{PulseShape::Rrc,PulseShape::TaperedRrc}){
             f.ramp_seconds=ramp;f.pulse_shape=pulse;
             try{const auto g=geometry(f);if(original&&!same_allocation(*original,g))continue;
                 if(std::none_of(candidates.begin(),candidates.end(),[&](const Format& x){return x.ramp_seconds==ramp&&

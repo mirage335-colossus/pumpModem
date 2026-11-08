@@ -46,11 +46,8 @@ def compose(scene,t,native,media,index,count):
             for j,(a,b) in enumerate([('30 kB','text file'),('Encrypted','authenticated on receipt'),('Speakers / mic','channel profile')]):
                 tx(d,(57,y+55+j*103),a,31,MINT,True);tx(d,(57,y+96+j*103),b,22,MUTED)
         else:
-            for j,(a,b) in enumerate([('2 mW','transmit power'),('150 dB','modeled path loss'),('Received: 1','actual simulation result')]):
-                tx(d,(57,y+42+j*100),a,33,MINT,True);tx(d,(57,y+85+j*100),b,22,MUTED)
+            tx(d,(57,y+55),'Recorded file transfer',28,MINT,True)
         im.paste(native.resize((884,691),Image.Resampling.LANCZOS),(662,92));d=ImageDraw.Draw(im);d.rectangle((660,90,1548,785),outline=LINE,width=2)
-        if scene['id']=='robust':
-            crop=native.crop((18,433,440,490)).resize((844,114),Image.Resampling.LANCZOS);im.paste(crop,(682,476));d=ImageDraw.Draw(im);d.rectangle((680,474,1528,592),outline=MINT,width=2);pill(d,950,620,'RECEIVED SNAPSHOT')
         tx(d,(1546,803),scene['note'],17,MUTED,anchor='rm')
     else:
         tx(d,(55,103),scene['eyebrow'],20,MINT,True)
@@ -78,14 +75,6 @@ def compose(scene,t,native,media,index,count):
             tx(d,(800,480),'→' if common else '260×',55,GOLD,True,anchor='mm');arrow(d,(691,553),(909,553),GOLD);tx(d,(800,613),'TEXT-MODE ROOTS' if common else 'RATE RATIO',18,GOLD,True,anchor='mm')
             tx(d,(55,728),'A text-modem generation more than twenty years old.' if common else 'More than two orders of magnitude in the recorded rate comparison.',27,INK,True)
             tx(d,(55,777),'Different bandwidths and channel conditions · higher-throughput acoustic profile',22,MUTED)
-        elif kind=='private':
-            tx(d,(55,165),scene['title'],62,INK,True);tx(d,(55,247),scene['subtitle'],43,MUTED)
-            for j,(a,b,c) in enumerate([('Keyed transmitter','encrypted data',MINT),('Noise-like signal','low-power channel',GOLD),('Keyed receiver','known private template',BLUE)]):
-                x=55+j*508;rounded(d,(x,376,x+470,687),PANEL,c);tx(d,(x+235,410),a,27,c,True,anchor='mm');wave(d,x+35,511,400,t+j,c,noise=True,amp=31);tx(d,(x+235,634),b,24,MUTED,anchor='mm')
-            at=scene.get('audio_excerpt',{}).get('at',1e8);audible=at<=t<at+4
-            pill(d,55,724,'MODEM AUDIO · LISTEN' if audible else 'LOW PROBABILITY OF INTERCEPT',GOLD if audible else MINT)
-            if audible:tx(d,(1544,754),'Separate waveform sample · same simulation settings',17,MUTED,anchor='rm')
-            else:tx(d,(1544,788),'Modeled link: signal 16.5 dB below in-band noise · ~0.1 dB noise rise',21,MUTED,anchor='rm')
         elif kind=='development':
             tx(d,(55,165),scene['title'],57,INK,True);tx(d,(55,243),scene['subtitle'],40,MUTED)
             labels=[('Portable interfaces','Desktop · browser · terminal'),('Regression tests','Normal paths + failure cases'),('Data flow + cancellation','Bounded queues · safe shutdown'),('Reproducible builds','Retained tools + dependencies'),('Verified releases','Test the delivered software'),('Parallel development','Preserve each contribution')]

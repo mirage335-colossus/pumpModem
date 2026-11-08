@@ -41,7 +41,7 @@ void independent_imports(const std::filesystem::path& dir,const testing::Keyfile
     const auto expected=Crypto::from_independent_roots(hex(serpent_root),hex(aes_root));
     const auto entries=testing::load_keyring(path,policy);
     check(entries.size()==1 && entries[0].name=="Fixture","independent keyring identity changed");
-    check(entries[0].key.identity_fingerprint(hex(identity_context))==hex(identity_confidentiality),"independent entry roots changed on import");
+    check(entries[0].key.confidentiality_mac(hex(mac_message))==hex(mac_combined),"independent entry roots changed on import");
     check(entries[0].key.confidentiality_stream(1720000000,0,64)==hex(streams_0_64_cascade),"independent ciphertext roots changed on import");
     check(entries[0].key.mac({})==expected.mac({}),"AES purpose keys changed on import");
     for(const auto purpose:{StreamPurpose::Data,StreamPurpose::Dsss,StreamPurpose::Scrambler,StreamPurpose::Fhss})
@@ -59,7 +59,7 @@ void independent_imports(const std::filesystem::path& dir,const testing::Keyfile
     const auto padded_path=dir/"independent-v4-padded",pad=dir/"independent-pad";
     Bytes pad_data(8193);for(std::size_t i=0;i<pad_data.size();++i)pad_data[i]=static_cast<std::uint8_t>(i*73+5);
     write(padded_path,padded);write(pad,pad_data);
-    check(testing::load_keyring(padded_path,odd_policy,pad).front().key.identity_fingerprint(hex(identity_context))==hex(identity_confidentiality),"odd header/pad lane partition vector mismatch");
+    check(testing::load_keyring(padded_path,odd_policy,pad).front().key.confidentiality_mac(hex(mac_message))==hex(mac_combined),"odd header/pad lane partition vector mismatch");
     pad_data.back()^=1;write(pad,pad_data);rejects([&]{testing::load_keyring(padded_path,odd_policy,pad);});
     // Every historical magic is rejected from a prefix alone; dimensions or
     // payload must never trigger an implicit legacy reconstruction path.

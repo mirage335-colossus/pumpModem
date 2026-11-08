@@ -7,7 +7,6 @@
 #include <string_view>
 #include <glew/glew.h>
 #include "gui_extension_fixture.hpp"
-#include "estimate_warning_fixture.hpp"
 #include "document_geometry_fixture.hpp"
 #include "overlay_fixture.hpp"
 import Rev.Graphics.FrameBuffer;
@@ -108,13 +107,6 @@ int run_native_probes(std::string_view selected={}) {
         auto controls=test::layout_lifecycle_controls();
         rev_adapter_timing::FixtureTiming fixture_timing{"fixture-4"};RevApp probe(windows,launch,controls);fixture_timing.constructed();rev_adapter_timing::BeforeDestroy destruction_timing{fixture_timing};rev_adapter_timing::step("verify_layout_lifecycle",[&]{probe.verify_layout_lifecycle(controls);});return 0;
     }
-    if(selected=="--estimate-colors") {
-        for(bool color:{false,true}) {
-            launch.color=color;configure_theme(color);
-            rev_adapter_timing::FixtureTiming fixture_timing{"fixture-5"};RevApp probe(windows,launch);fixture_timing.constructed();rev_adapter_timing::BeforeDestroy destruction_timing{fixture_timing};rev_adapter_timing::step("verify_estimate_warning_colors",[&]{probe.verify_estimate_warning_colors();});
-        }
-        return 0;
-    }
     if(!selected.empty())throw std::runtime_error("Unknown Rev adapter probe");
     {
         rev_adapter_timing::FixtureTiming fixture_timing{"fixture-6"};RevApp probe(windows,launch);fixture_timing.constructed();rev_adapter_timing::BeforeDestroy destruction_timing{fixture_timing};rev_adapter_timing::step("verify_fast_mode_visibility",[&]{probe.verify_fast_mode_visibility();});rev_adapter_timing::step("verify_developer_mode_visibility",[&]{probe.verify_developer_mode_visibility();});
@@ -142,11 +134,11 @@ int run_native_probes(std::string_view selected={}) {
     {
         rev_adapter_timing::FixtureTiming fixture_timing{"fixture-12"};RevApp probe(windows,launch);fixture_timing.constructed();rev_adapter_timing::BeforeDestroy destruction_timing{fixture_timing};
         probe.application.toggle(ui::Field::developer_mode,true);probe.apply();
-        rev_adapter_timing::step("verify_palette_roles",[&]{probe.verify_palette_roles();});rev_adapter_timing::step("verify_editor_contract",[&]{probe.verify_editor_contract();});rev_adapter_timing::step("verify_clipboard_shortcuts",[&]{probe.verify_clipboard_shortcuts();});rev_adapter_timing::step("verify_choice_contract",[&]{probe.verify_choice_contract();});rev_adapter_timing::step("verify_record_contract",[&]{probe.verify_record_contract();});rev_adapter_timing::step("verify_prompt_focus",[&]{probe.verify_prompt_focus();});rev_adapter_timing::step("verify_native_resize",[&]{probe.verify_native_resize();});rev_adapter_timing::step("verify_overlay_composition",[&]{probe.verify_overlay_composition();});rev_adapter_timing::step("verify_estimate_warning_colors",[&]{probe.verify_estimate_warning_colors();});
+        rev_adapter_timing::step("verify_palette_roles",[&]{probe.verify_palette_roles();});rev_adapter_timing::step("verify_editor_contract",[&]{probe.verify_editor_contract();});rev_adapter_timing::step("verify_clipboard_shortcuts",[&]{probe.verify_clipboard_shortcuts();});rev_adapter_timing::step("verify_choice_contract",[&]{probe.verify_choice_contract();});rev_adapter_timing::step("verify_record_contract",[&]{probe.verify_record_contract();});rev_adapter_timing::step("verify_prompt_focus",[&]{probe.verify_prompt_focus();});rev_adapter_timing::step("verify_native_resize",[&]{probe.verify_native_resize();});rev_adapter_timing::step("verify_overlay_composition",[&]{probe.verify_overlay_composition();});
     }
     {
         launch.color=true;configure_theme(launch.color);
-        rev_adapter_timing::FixtureTiming fixture_timing{"fixture-13"};RevApp probe(windows,launch);fixture_timing.constructed();rev_adapter_timing::BeforeDestroy destruction_timing{fixture_timing};probe.application.toggle(ui::Field::developer_mode,true);probe.apply();rev_adapter_timing::step("verify_palette_roles",[&]{probe.verify_palette_roles();});rev_adapter_timing::step("verify_estimate_warning_colors",[&]{probe.verify_estimate_warning_colors();});
+        rev_adapter_timing::FixtureTiming fixture_timing{"fixture-13"};RevApp probe(windows,launch);fixture_timing.constructed();rev_adapter_timing::BeforeDestroy destruction_timing{fixture_timing};probe.application.toggle(ui::Field::developer_mode,true);probe.apply();rev_adapter_timing::step("verify_palette_roles",[&]{probe.verify_palette_roles();});
     }
     if(!windows.empty())throw std::runtime_error("Rev native probes retained a window after conformance checks");
     std::cout<<"Rev native adapter probes passed: declarative extensions, UTF-8 editing, choices, records, scrolling and modal focus.\n";

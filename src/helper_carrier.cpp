@@ -1,7 +1,4 @@
 #include "datapump/helper_carrier.hpp"
-#include "datapump/fhss_schedule.hpp"
-#include "datapump/modem.hpp"
-#include "datapump/pattern_receiver.hpp"
 #include "datapump/types.hpp"
 #include <algorithm>
 #include <cmath>
@@ -12,6 +9,7 @@
 namespace datapump::helper {
 namespace {
 constexpr double tau=2*std::numbers::pi;
+constexpr double nominal_data_mean_power=.153125;
 constexpr long double dwell=.4L,ramp=.004L,metadata_end=.392L,symbol_time=.020L;
 constexpr long double punctuation_begin=.152L,punctuation_mid=.160L,punctuation_end=.168L;
 // Literal rational-calendar endpoints avoid accumulated rounding at an exact source sample.
@@ -36,7 +34,7 @@ void validate_callsign(std::string_view callsign) {
         if(static_cast<unsigned char>(c)==0 || static_cast<unsigned char>(c)>127)throw Error("Helper Carrier callsign must be non-NUL seven-bit ASCII");
 }
 std::pair<double,double> gains_from_ratio(double power_ratio,double helper_mean,
-        double data_mean=modem::nominal_signal_power) {
+        double data_mean=nominal_data_mean_power) {
     const auto relative_peak=std::sqrt(2*data_mean*power_ratio/helper_mean);
     const auto composite_peak=relative_peak*(pilot_amplitude_fraction+low_pilot_amplitude_fraction+auxiliary_amplitude_fraction);
     return {relative_peak,.95/(1+composite_peak)};
@@ -92,17 +90,6 @@ double leakage_bound(double distance,double bandwidth,double transition_magnitud
         transition_magnitude*derivative_transform(.008))/(tau*distance*.4);
     const auto harmonics=1+std::min(std::ceil(bandwidth/2.5),distance/(7*2.5));
     return 4*coefficient*coefficient*harmonics;
-}
-long double aligned_duration(long double seconds,long double rate) {
-    auto count=seconds*2.5L;
-    const auto nearest=std::round(count);
-    // Input durations are binary64. Do not add a whole dwell because promoting
-    // an intended integral count (e.g. 6.4s) exposes its input rounding residue.
-    const auto tolerance=std::min(4*std::numeric_limits<double>::epsilon()*std::max(1.L,std::abs(count)),
-        .5L/rate*2.5L);
-    if(std::abs(count-nearest)<=tolerance)
-        count=nearest;
-    return std::ceil(count)*dwell;
 }
 }
 void validate(const Options& options) {
@@ -191,7 +178,7 @@ double calibrated_data_gain(const Options& options,bool pilot_gating,const Power
     if(options.power_w==0||effective_helper_power(options)==0)return 1;
     return gains_from_ratio(effective_helper_power(options)/options.data_power_w,
         mean_power(options,pilot_gating,reference).total,
-        reference&&reference->data_mean_power?*reference->data_mean_power:modem::nominal_signal_power).second;
+        reference&&reference->data_mean_power?*reference->data_mean_power:nominal_data_mean_power).second;
 }
 ReferenceLevel reference_level(const Options& options,double nominal,double scale,double payload_fraction,double usable_fraction) {
     validate(options);
@@ -222,57 +209,6 @@ ReferenceLevel reference_level(const Options& options,double nominal,double scal
        !std::isfinite(result.payload_average_cn0_db_hz))
         throw Error("Helper Carrier reference level exceeds the numerical range");
     return result;
-}
-EnvelopePlan plan_envelope(const modem::Config& config,const EnvelopeRequirements& requirements) {
-    modem::validate(config);
-    for(const auto duration:{requirements.frequency_acquisition_seconds,requirements.frontend_lookahead_seconds,
-                             requirements.receiver_buffer_deficit_seconds})
-        if(!std::isfinite(duration)||duration<0)throw Error("invalid Helper Carrier envelope duration");
-    if(!std::isfinite(requirements.frequency_precision_extension_seconds)||
-       requirements.frequency_precision_extension_seconds<0||requirements.frequency_precision_extension_seconds>36)
-        throw Error("invalid Helper Carrier precision lead extension");
-    if(!std::isfinite(requirements.maximum_source_capture_ratio)||requirements.maximum_source_capture_ratio<=0)
-        throw Error("invalid Helper Carrier envelope clock ratio");
-    const auto rate=static_cast<long double>(config.sample_rate);
-    const auto support=2.L*modem::pattern_pulse_padding_samples(config)/rate;
-    const auto ordinary_tail=static_cast<long double>(modem::pattern_absence_capture_samples(config))/rate+1+support;
-    const auto lookahead=static_cast<long double>(requirements.frontend_lookahead_seconds);
-    EnvelopePlan result;
-    // The transmit schedule is a fixed 36-second Helper measurement window
-    // followed by the original 2-second Helper-only baseline. These are 90
-    // precision dwells plus five baseline dwells; all durations passed by
-    // receiver/startup forecasts are diagnostic only and cannot enlarge it.
-    result.lead_seconds=36.L+2.L;
-    const auto ratio=std::max(1.L,static_cast<long double>(requirements.maximum_source_capture_ratio));
-    result.tail_seconds=aligned_duration(ratio*(std::max({2.L,ordinary_tail,
-        static_cast<long double>(requirements.receiver_buffer_deficit_seconds)})+lookahead),rate);
-    // The start no longer rounds down to a dwell boundary. Scheduling already
-    // retries after slow construction, so reserve exactly the emitted lead.
-    result.preparation_seconds=result.lead_seconds;
-    result.maximum_stop_extension_seconds=result.lead_seconds+result.tail_seconds+2*dwell+2/rate;
-    // The source wrapper still checks its full endpoint.
-    if(!std::isfinite(result.maximum_stop_extension_seconds)||
-       std::ceil(result.maximum_stop_extension_seconds*rate)>=std::ldexp(1.L,64))
-        throw Error("Helper Carrier envelope exceeds the source sample counter");
-    return result;
-}
-PlacementBand placement_band(const modem::Config& config,double minimum_bandwidth) {
-    modem::validate(config);
-    if(!std::isfinite(minimum_bandwidth)||minimum_bandwidth<0)
-        throw Error("invalid Helper Carrier minimum occupied data bandwidth");
-    if(config.fake_hopping) {
-        // Helper geometry must not turn an unavailable mandatory gate into
-        // ungated payload. This is the same public shape used by the source.
-        (void)modem::FhssPowerShape(*config.fake_hopping,config.sample_rate,
-            modem::pattern_pulse_padding_samples(config),modem::symbol_sample_count(config));
-    }
-    const auto waveform=modem::pattern_pulse_enabled(config)?
-        (1+modem::pattern_pulse_rolloff)*config.sample_rate/modem::pattern_chip_samples(config):
-        modem::waveform_bandwidth_hz(config);
-    const auto full=std::max(minimum_bandwidth,waveform+modem::waveform_gate_bandwidth_allowance_hz(config));
-    PlacementBand band{config.carrier_hz,waveform,full-waveform,static_cast<bool>(config.fake_hopping)};
-    (void)mono_passband(band);
-    return band;
 }
 MonoPassband mono_passband(const PlacementBand& band) {
     if(!std::isfinite(band.carrier_hz)||band.carrier_hz<=0||
@@ -349,7 +285,7 @@ Plan plan(const Options& options,const PlacementBand& band,std::uint32_t rate,
         throw Error("Helper Carrier cannot fit its power-dependent leakage guard at this output sample rate");
     const bool actual_data=reference&&reference->data_mean_power;
     const auto [relative_peak,data_gain]=gains_from_ratio(power_ratio,mean,
-        actual_data?*reference->data_mean_power:modem::nominal_signal_power);
+        actual_data?*reference->data_mean_power:nominal_data_mean_power);
     // A measured source mean already contains its DSSS/backoff factor.
     const auto source_scale=actual_data?1.:data_amplitude_scale;
     return {frequency,relative_peak*data_gain*source_scale,data_gain,effective,
@@ -479,111 +415,4 @@ float Generator::mix(float payload,long double seconds,std::uint32_t rate,
     return static_cast<float>(mix_analytic({payload,0},seconds,rate,end_seconds,start_seconds).real());
 }
 
-Tracker::Tracker(double expected,double width):expected_(expected),half_width_(width) {
-    if(!std::isfinite(expected)||expected<=0||!std::isfinite(width)||width<0||width>100)
-        throw Error("invalid Helper Carrier tracking band");
-}
-void Tracker::reset() {
-    rate_=0;window_size_=window_count_=group_windows_=0;groups_=0;
-    admitted_=false;present_seconds_=absent_seconds_=energy_=0;bins_.clear();update_.reset();
-}
-void Tracker::configure(std::uint32_t rate) {
-    reset();
-    if(rate<1000||expected_-half_width_<10||expected_+half_width_>=rate/2.-10)
-        throw Error("Helper Carrier tracking band is outside capture passband");
-    rate_=rate;window_size_=rate/10;
-    const auto cells=static_cast<unsigned>(std::ceil(half_width_/5));
-    const auto spacing=cells?half_width_/cells:0;
-    bins_.resize(2*cells+1);
-    if(sizeof(*this)+bins_.capacity()*sizeof(Bin)>workspace_bound) {
-        std::vector<Bin>{}.swap(bins_);rate_=0;
-        throw Error("Helper Carrier tracker exceeds its bounded workspace");
-    }
-    for(std::size_t i=0;i<bins_.size();++i) {
-        auto& bin=bins_[i];
-        bin.frequency=expected_+(static_cast<double>(i)-cells)*spacing;
-        const auto omega=tau*bin.frequency/rate;
-        bin.step=std::polar(1.,omega);
-        // Exact finite-window Gram matrix, including noninteger tone periods.
-        const auto count=static_cast<double>(window_size_);
-        const auto geometric=(std::sin(count*omega)/std::sin(omega))*
-            std::polar(1.,(count-1)*omega);
-        bin.cc=(count+geometric.real())/2;
-        bin.ss=(count-geometric.real())/2;
-        bin.cs=geometric.imag()/2;
-    }
-}
-void Tracker::push(std::span<const float> samples,std::uint32_t rate) {
-    if(rate_!=rate)configure(rate);
-    for(const auto sample:samples) {
-        if(!std::isfinite(sample)) {reset();return;}
-        energy_+=static_cast<double>(sample)*sample;
-        for(auto& bin:bins_) {
-            bin.sum+=static_cast<double>(sample)*bin.oscillator;
-            bin.oscillator*=bin.step;
-        }
-        if(++window_count_==window_size_)finish_window();
-    }
-}
-void Tracker::finish_window() {
-    const auto degrees=static_cast<double>(window_size_-2);
-    for(auto& bin:bins_) {
-        const auto c=bin.sum.real(),s=bin.sum.imag();
-        const auto determinant=bin.cc*bin.ss-bin.cs*bin.cs;
-        const auto explained=std::clamp((bin.ss*c*c+bin.cc*s*s-2*bin.cs*c*s)/determinant,0.,energy_);
-        const auto residual=std::max(energy_-explained,std::numeric_limits<double>::min());
-        // Under finite independent normal noise this has F(2,N-2) survival.
-        const auto f=energy_>0?std::min(1e100,explained*.5/(residual/degrees)):0;
-        const auto logp=-degrees*.5*std::log1p(2*f/degrees);
-        bin.log_evidence-=logp;
-        bin.snr_sum+=std::max(0.,f-1);
-        bin.power+=explained;
-        bin.sum={};bin.oscillator={1,0};
-    }
-    window_count_=0;energy_=0;
-    const auto target_windows=std::min<std::size_t>(96,4+static_cast<std::size_t>(
-        std::ceil(2*std::log1p(static_cast<double>(groups_)))));
-    if(++group_windows_<target_windows)return;
-    const bool admission_budget_remaining=groups_!=std::numeric_limits<std::uint64_t>::max();
-    if(admission_budget_remaining)++groups_;
-    // Fisher combination of K independent finite-window p values has
-    // integer-gamma survival. K is deterministic before observing this group.
-    // Union bound covers all bins; alpha spending
-    // 1/(g(g+1)) covers every look, including a beacon-free infinite stream.
-    const auto log_alpha=std::log(.01)-std::log(static_cast<double>(bins_.size()))-
-        std::log(static_cast<double>(groups_))-std::log(static_cast<double>(groups_)+1);
-    std::size_t best=0;
-    for(std::size_t i=1;i<bins_.size();++i)
-        if(bins_[i].log_evidence>bins_[best].log_evidence)best=i;
-    const auto evidence=bins_[best].log_evidence;
-    double log_sum=0,log_term=0;
-    if(evidence>0)for(std::size_t j=1;j<target_windows;++j) {
-        log_term+=std::log(evidence)-std::log(static_cast<double>(j));
-        const auto high=std::max(log_sum,log_term),low=std::min(log_sum,log_term);
-        log_sum=high+std::log1p(std::exp(low-high));
-    }
-    const auto log_probability=evidence>0?-evidence+log_sum:0;
-    const auto snr=10*std::log10(std::max(1e-100,
-        bins_[best].snr_sum/static_cast<double>(target_windows)));
-    if(!admitted_&&snr>=6&&admission_budget_remaining&&log_probability<=log_alpha)
-        admitted_=true;
-    const bool present=admitted_&&snr>=6;
-    const auto elapsed=static_cast<double>(target_windows*window_size_)/rate_;
-    if(present) {present_seconds_+=elapsed;absent_seconds_=0;}
-    else {present_seconds_=0;absent_seconds_+=elapsed;}
-    if(absent_seconds_+1e-9>=6)admitted_=false;
-    auto frequency=bins_[best].frequency;
-    if(best>0&&best+1<bins_.size()) {
-        const auto left=bins_[best-1].power,center=bins_[best].power,right=bins_[best+1].power;
-        const auto curvature=left-2*center+right;
-        if(curvature<0)frequency+=std::clamp(.5*(left-right)/curvature,-.5,.5)*
-            (bins_[best+1].frequency-frequency);
-    }
-    update_=Observation{present,present&&present_seconds_+1e-9>=6,frequency,snr,present_seconds_,absent_seconds_};
-    for(auto& bin:bins_) {bin.log_evidence=bin.snr_sum=bin.power=0;}
-    group_windows_=0;
-}
-std::optional<Observation> Tracker::take_update() {
-    return std::exchange(update_,std::nullopt);
-}
-}
+} // namespace datapump::helper

@@ -666,31 +666,39 @@ void retained_key_and_result_presentation() {
           "Encrypted completion lost its captured authentication result");
     controller.close();
 }
-void regular_work_keeps_polling() {
+void robust_boundary_keeps_polling() {
     using F=ui::Field;using C=ui::Command;
-    // Use the ordinary simulation pipeline; only the link assumption is strong.
+    // The retained Robust editor must stay usable across a mode switch while
+    // its retired audio backend remains explicitly unavailable.
     Application app({.simulation=true});
-    app.edit(F::link_loss,"6 dB");app.edit(F::binary,"001");app.start();
-    const auto wait=[&](auto predicate) {
-        const auto end=std::chrono::steady_clock::now()+std::chrono::seconds(15);
-        while(std::chrono::steady_clock::now()<end) {
-            app.tick();if(predicate())return true;std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-        return false;
-    };
-    check(wait([&]{return app.enabled(C::transmit);}),"Regular simulation did not become ready");
-    app.activate(C::transmit);app.select(F::fast_mode,"fast");
+    app.edit(F::short_bits,"001");app.edit(F::bandwidth,"1.2 kHz");app.start();app.tick();
+    const auto bits=app.field(F::short_bits).text;
+    const auto rate=app.field(F::bandwidth).text;
+    const auto key=app.field(F::key).selected;
+    check(bits=="001"&&!app.enabled(C::transmit)&&!app.enabled(C::transmit_noise),
+          "Removed Robust backend accepted transmission or lost the raw draft");
+    check(app.field(F::mode).text.find("unavailable")!=std::string::npos,
+          "Robust boundary did not explain its unavailable backend");
+    app.select(F::fast_mode,"fast");app.edit(F::fast_text,"Keep this Fast draft");
     const auto before=app.poll_count();
-    check(wait([&]{return !app.field(F::signals).records.empty();}),"Switching to Fast stopped regular reception/progress");
-    check(app.poll_count()>before,"Mode switch stopped shared progress polling");
-    const auto records=app.field(F::signals).records;
-    const auto draft=app.field(F::binary).text; // Normal successful TX may clear its composer.
+    const auto end=std::chrono::steady_clock::now()+std::chrono::seconds(1);
+    while(app.poll_count()==before&&std::chrono::steady_clock::now()<end) {
+        app.tick();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(app.poll_count()>before,"Mode switch stopped shared event polling");
     app.select(F::fast_mode,"robust");
-    check(app.field(F::signals).records==records&&app.field(F::binary).text==draft,"Mode switch replaced regular reception rows or exact source bits");
+    check(app.field(F::short_bits).text==bits&&app.field(F::bandwidth).text==rate&&
+          app.field(F::key).selected==key&&app.field(F::message).enabled,
+          "Fast mode replaced the retained Robust draft or settings");
+    check(!app.enabled(C::transmit)&&app.field(F::signals).records.empty(),
+          "Mode switch fabricated Robust reception or enabled the retired transmitter");
+    app.select(F::fast_mode,"fast");
+    check(app.field(F::fast_text).text=="Keep this Fast draft"&&app.field(F::fast_text).enabled,
+          "Returning to Fast lost its independent draft or editor");
     app.close();
 }
 }
 int main() {
-    try {audio_settings();rate_and_spectrum_presentation();damaged_reception_presentation();snr_and_symbol_rate_controls();message_submit_shortcut();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();regular_work_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
+    try {audio_settings();rate_and_spectrum_presentation();damaged_reception_presentation();snr_and_symbol_rate_controls();message_submit_shortcut();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();robust_boundary_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

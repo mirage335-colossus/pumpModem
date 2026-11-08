@@ -49,27 +49,16 @@ scanning has no return data path through that link. The scanner's USB connection
 is to the receiving computer, not the sender. Error correction recovers damaged
 symbols; it does not establish that command content from the sender is trusted.
 
-GPSDO model and the supplied audible Robust profile:
-https://github.com/mirage335-colossus/pumpModem/blob/main/docs/oscillator-models.md
-https://tf.nist.gov/general/pdf/2871.pdf
-gpsdo-xo is an illustrative hobbyist GPS disciplined crystal model, without an
-oven. It assumes the modem carrier and sampling clocks have that reference.
-Disciplining only the wall RTC does not discipline an independent audio clock.
-The user-selected profile spans about 375–2625 Hz, permitting an audible example.
-Selecting the profile itself does not synchronize hardware.
-
 A Linux tg3 driver overflow did exist, but this primary fix concerns malicious
 firmware/VPD input; it does not establish a remote Ethernet-packet attack:
 https://github.com/torvalds/linux/commit/715230a44310a8cf66fbfb5a46f9a62a9b2de424
 https://nvd.nist.gov/vuln/detail/CVE-2013-1929
 This example is omitted from the beginner narration to avoid implying otherwise.
 
-The encrypted Robust demonstration is explicitly a simulation. Permitted
-frequencies, power and modes depend on the radio service and jurisdiction.
+Permitted frequencies, power and modes depend on the radio service and jurisdiction.
 For example, US amateur rules restrict messages encoded to obscure meaning:
 https://www.ecfr.gov/current/title-47/chapter-I/subchapter-D/part-97/subpart-B/section-97.113
 https://www.ecfr.gov/current/title-47/chapter-I/subchapter-D/part-97/subpart-D/section-97.309
-Noise-like signalling is not a guarantee of undetectability or no interference.
 
 The S/PDIF/fiber illustration assumes compatible audio interfaces and suitable
 one-way physical hardware. Data Pump itself does not certify optical isolation.

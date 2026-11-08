@@ -46,7 +46,7 @@ jobs:
             throw 'repetitions must be an integer from 1 to 20'
           }
           $sha = git rev-parse HEAD
-          "devfast checks source $sha; no SDK build, calibration, packages or certification."
+          "devfast checks source $sha; no SDK build, packages or certification."
           "## Focused development diagnostic`nSource: $sha`n`nThis run cannot certify or promote a release. Full regression testing is still required." >> $env:GITHUB_STEP_SUMMARY
       - name: Configure only the Legacy diagnostic
         shell: pwsh

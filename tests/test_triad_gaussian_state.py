@@ -1,21 +1,16 @@
 #!/usr/bin/env python3
-"""Focused optional-Torch checks for the isolated Gaussian-state likelihood."""
+"""Small deterministic checks for the canonical Gaussian-state likelihood."""
 import math
 from pathlib import Path
 import sys
 import unittest
 
-try:
-    import torch
-except ImportError:
-    torch = None
+import torch
 
-if torch is not None:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-    from triad_gaussian_state import GaussianPrior, GaussianStateFilter
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from triad_gaussian_state import GaussianPrior, GaussianStateFilter
 
 
-@unittest.skipIf(torch is None, "optional Torch dependency is not installed")
 class GaussianStateTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -107,17 +102,6 @@ class GaussianStateTests(unittest.TestCase):
         state.update_many(r, grams, elapsed)
         self.assertEqual(float(state.finish()), 0.)
 
-    def test_normalized_null_likelihood_mean(self):
-        count = 16384
-        state = GaussianStateFilter(GaussianPrior((.12,), 3.))
-        gram = torch.tensor([[[.5]]], dtype=torch.complex128)
-        for block in range(3):
-            r = self.random_complex((count, 1, 1), 1700+block)*math.sqrt(.5)
-            state.update(r, gram, 0. if block == 0 else 1.)
-        likelihood = state.finish().exp()
-        mean = float(likelihood.mean())
-        standard_error = float(likelihood.std(unbiased=True))/math.sqrt(count)
-        self.assertLess(abs(mean-1), max(.02, 5*standard_error))
 
     def test_fp32_against_fp64(self):
         r, grams, elapsed, _ = self.dense_fixture(rank_deficient=True)

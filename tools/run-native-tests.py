@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run registered native tests, retaining typed incomplete smoke as explicit evidence."""
+"""Run registered native UI tests with strict outcomes and retained evidence."""
 import argparse
 import importlib.util
 import json
@@ -122,7 +122,7 @@ def run(args):
             before = time.monotonic()
             smoke_report = directory / 'gui_workflow.json'
             result = smoke.run(command, directory / 'gui_workflow.log', args.summary,
-                               args.allow_budget_exhaustion, smoke_report, timeout, cwd, environment)
+                               smoke_report, timeout, cwd, environment)
             outcome = json.loads(smoke_report.read_text())
             report['tests'].append({'name': 'gui_workflow', 'status': outcome['status'],
                                     'seconds': time.monotonic() - before, 'timeout_seconds': timeout,
@@ -150,8 +150,7 @@ def run(args):
                 ci.annotation(f'All original adapter assertions completed in {elapsed:.1f}s, above '
                               f'{args.adapter_warn_after:g}s; bounded allowance {args.adapter_timeout:g}s.',
                               'Rev adapter workload')
-        report['status'] = ('passed_with_warnings' if any(test['status'] == 'incomplete'
-                            for test in report['tests']) else 'passed')
+        report['status'] = 'passed'
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError, ci.ET.ParseError) as error:
         report['error'] = str(error)
         print(f'Native tests failed: {error}', file=sys.stderr)
@@ -160,7 +159,7 @@ def run(args):
         json.dump(report, stream, indent=2)
         stream.write('\n')
     ci.write_summary(args.summary, report)
-    print(f"Native test scope: {report['status']}; smoke incomplete outcomes are recorded as incomplete, not passes.")
+    print(f"Native test scope: {report['status']}.")
     return 1 if report['status'] == 'failed' else 0
 
 
@@ -173,7 +172,6 @@ def main(argv=None):
     parser.add_argument('--exclude-label')
     parser.add_argument('--report-dir', type=Path, required=True)
     parser.add_argument('--summary', type=Path, default=os.environ.get('GITHUB_STEP_SUMMARY') or None)
-    parser.add_argument('--allow-budget-exhaustion', action='store_true')
     parser.add_argument('--adapter-timeout', type=float)
     parser.add_argument('--adapter-warn-after', type=float, default=330)
     args = parser.parse_args(argv)

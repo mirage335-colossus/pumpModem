@@ -1,11 +1,9 @@
 #pragma once
 
-#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <cstdint>
 #include <numbers>
-#include <stop_token>
 
 namespace datapump::modem::detail {
 // Illustrative two-ray channel: a direct ray and a delayed ray have equal
@@ -43,29 +41,4 @@ private:
     std::uint64_t count_=0;
 };
 
-// Use the same polyphase interpolation geometry as the direct streaming ray.
-// preview_analytic_at reconstructs the actual source waveform at a physical
-// source coordinate and does not advance the transmitter. Its original FHSS
-// envelope is already included at that emission coordinate. No arrival-time
-// transmitter envelope may be applied to the returned delayed ray.
-template<class Source,class CoefficientRow>
-std::complex<double> preview_spread_ray(Source& source,long double position,
-                                        std::uint64_t total,CoefficientRow coefficient_row,
-                                        std::stop_token stop) {
-    if(position<0 || position>=static_cast<long double>(total))return {};
-    constexpr std::size_t taps=16,phases=256;
-    const auto center=static_cast<std::uint64_t>(std::floor(position));
-    const auto fractional=static_cast<double>(position-center)*phases;
-    const auto phase=std::min(phases-1,static_cast<std::size_t>(fractional));
-    const auto blend=fractional-static_cast<double>(phase);
-    const auto first=coefficient_row(phase),second=coefficient_row(phase+1);
-    std::complex<double> value{};
-    for(std::size_t tap=0;tap<taps;++tap) {
-        if((tap<7&&center<7-tap)||(tap>=7&&total-center<=tap-7))continue;
-        const auto index=tap<7?center-(7-tap):center+(tap-7);
-        const auto coefficient=first[tap]+blend*(second[tap]-first[tap]);
-        value+=source.preview_analytic_at(index,stop)*coefficient;
-    }
-    return value;
-}
 } // namespace datapump::modem::detail

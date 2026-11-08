@@ -63,26 +63,6 @@ This example contains thirty thousand bytes of repeated text. Compression makes 
 
 On the receiving computer, wait for the authenticated attachment. Select it, choose Save selected, and pick where to save it.
 
-Robust Modem · plan a difficult link
-[3600 Hz RATE · 1500 Hz CARRIER · 2 mW · 150 dB LOSS]
-Try Robust Modem in simulation first. Choose Simulation Yes, load your key, and select the hobbyist G P S clock model.
-
-In Link planner, use the settings shown. This low probability of intercept example uses a private waveform and only two milliwatts. Compare Stronger and Weaker.
-
-This target gives a high reception estimate and about eighteen seconds of transmit time. Apply it and return to Console.
-
-Robust Modem · send one bit
-[SIMULATION · ENCRYPTED PRIVATE WAVEFORM]
-Type one in Binary, then choose Transmit.
-
-Listen to this short sample of the transmitted signal.
-
-Robust Modem · received 1
-[SIMULATION RESULT · RECEIVED SNAPSHOT]
-Wait for Binary received. The receiver shows one. Use this simulation workflow to explore a difficult link before connecting real hardware.
-
-The very short, one bit format is encrypted but has no authentication tag.
-
 Legacy Modem · PSK31 text
 [ILLUSTRATED PHONE · SMS DRAFT]
 Legacy Modem works with established radio text formats. Choose B P S K thirty one, enter your message, and transmit.
@@ -106,10 +86,10 @@ A USB QR scanner types the text. Enable automatic Enter for convenient command s
 The optical scan provides no return connection for the receiving computer to infect the sending computer. The command itself still comes from the sender.
 
 Audio first. Radio experiments too.
-[FIXED LOCATIONS · LOW POWER]
-Data Pump also supports fixed location radio experiments, including sub nine kilohertz, with suitable hardware. Robust can spread the signal energy and use very low power, helping limit interference with appropriate settings.
+[FIXED LOCATIONS · SUITABLE HARDWARE]
+Data Pump supports fixed-location radio experiments with suitable hardware, including sub nine kilohertz.
 
-Our encrypted example is a simulation. Choose frequencies and modes permitted for your radio service. Amateur Radio compatible modes are included, while safe data transfer remains the development priority.
+Choose frequencies and modes permitted for your radio service. Amateur Radio compatible modes are included, while safe data transfer remains the development priority.
 
 An optional one-way optical path
 [COMPATIBLE AUDIO HARDWARE]

@@ -10,11 +10,9 @@ namespace datapump::gui::plots {
 namespace {
 struct Waveform { std::vector<float> samples; modem::Config config; double zoom; bool environment=false; };
 struct Constellation { std::vector<std::complex<double>> points; bool symbols; };
-struct PatternScores { std::vector<PatternScore> scores; bool enabled; };
 struct Waterfall { std::shared_ptr<const SpectrumHistory> history; bool overview; };
 struct SpectrumDetail { std::shared_ptr<const SpectrumHistory> history; std::optional<std::pair<double,double>> band; std::string label; };
 struct Qr { std::optional<QrCode> code; QrBrightness brightness; };
-struct Pattern { inspection::PatternSpace model; std::size_t first, count; enum Kind { chips, distances, evidence } kind; };
 struct Codeword { std::size_t data, parity; };
 using Rgb = theme::Rgb;
 Rgb gray(unsigned char value) { return {value, value, value}; }
@@ -73,43 +71,10 @@ double constellation_scale(const Constellation& data) {
     if (data.symbols && scale < std::numeric_limits<double>::max() / 2) scale = std::max(1., std::ceil(scale * 2) / 2);
     return scale;
 }
-bool valid_pattern_score(const PatternScore& point) {
-    const auto score = point.evidence;
-    return std::isfinite(score.real()) && std::isfinite(score.imag()) && score.real() >= 0 && score.imag() >= 0 &&
-        std::isfinite(point.admission_threshold) && point.admission_threshold > 0;
-}
-double pattern_score_upper_log_ratio(const PatternScores& data) {
-    // Both axes share their upper range. Only scores above 2T are rescaled;
-    // a strong outlier cannot squeeze the noise or threshold regions.
-    double upper = 2 * std::numbers::ln2;
-    if (data.enabled) for (const auto& point : data.scores) {
-        if (!valid_pattern_score(point)) continue;
-        const auto score = std::max(point.evidence.real(), point.evidence.imag());
-        if (score > point.admission_threshold)
-            upper = std::max(upper, std::log(score) - std::log(point.admission_threshold));
-    }
-    return upper;
-}
-double pattern_score_position(double score, double threshold, double upper_log_ratio) {
-    // Plot native log scores, not a squashed probability-like value. Preserve
-    // noise variation below T, reserve a quarter axis for T..2T, and use the
-    // final region for the full retained strong-signal range with 5% headroom.
-    if (score <= threshold) return .5 * (score / threshold);
-    const auto log_ratio = std::log(score) - std::log(threshold);
-    if (log_ratio <= std::numbers::ln2) return .5 + .25 * log_ratio / std::numbers::ln2;
-    return .75 + .2 * (log_ratio - std::numbers::ln2) / (upper_log_ratio - std::numbers::ln2);
-}
-double pattern_distance(const inspection::PatternSpace& model, std::size_t a, std::size_t b) {
-    if (a == b) return 0;
-    const auto count = model.coefficients.size();
-    if (a < count && b < count) return std::sqrt(model.squared_distance(a,b)/model.symbol_seconds);
-    const auto coefficient = model.coefficients[a < count ? a : b], reference = model.coefficients.front();
-    return std::sqrt(std::max(0., std::norm(coefficient) + std::norm(reference) -
-        2 * (coefficient * std::conj(reference)).real() * model.unused_pattern->correlation));
-}
+
 }
 struct PlotSnapshot::Data {
-    std::variant<std::monostate, Waveform, Constellation, PatternScores, Waterfall, SpectrumDetail, Qr, Pattern, Codeword> value;
+    std::variant<std::monostate, Waveform, Constellation, Waterfall, SpectrumDetail, Qr, Codeword> value;
     template<class Value> explicit Data(Value value_) : value(std::move(value_)) {}
 };
 PlotSnapshot::PlotSnapshot() : data_(std::make_shared<Data>(std::monostate{})) {}
@@ -138,9 +103,6 @@ PlotSnapshot PlotSnapshot::oscilloscope(std::vector<float> samples,std::uint32_t
 PlotSnapshot PlotSnapshot::constellation(std::vector<std::complex<double>> points, bool symbols) {
     return PlotSnapshot(std::make_shared<Data>(Constellation{std::move(points), symbols}));
 }
-PlotSnapshot PlotSnapshot::pattern_scores(std::vector<PatternScore> scores, bool enabled) {
-    return PlotSnapshot(std::make_shared<Data>(PatternScores{std::move(scores), enabled}));
-}
 PlotSnapshot PlotSnapshot::waterfall(SpectrumHistory history, bool overview) {
     return waterfall_shared(std::make_shared<const SpectrumHistory>(std::move(history)),overview);
 }
@@ -157,15 +119,6 @@ PlotSnapshot PlotSnapshot::waterfall_detail(std::shared_ptr<const SpectrumHistor
 }
 PlotSnapshot PlotSnapshot::qr(std::optional<QrCode> code, QrBrightness brightness) {
     return PlotSnapshot(std::make_shared<Data>(Qr{std::move(code), brightness}));
-}
-PlotSnapshot PlotSnapshot::pattern_chips(inspection::PatternSpace model, std::size_t first, std::size_t count) {
-    return PlotSnapshot(std::make_shared<Data>(Pattern{std::move(model), first, count, Pattern::chips}));
-}
-PlotSnapshot PlotSnapshot::pattern_distances(inspection::PatternSpace model) {
-    return PlotSnapshot(std::make_shared<Data>(Pattern{std::move(model), 0, 0, Pattern::distances}));
-}
-PlotSnapshot PlotSnapshot::pattern_evidence(inspection::PatternSpace model) {
-    return PlotSnapshot(std::make_shared<Data>(Pattern{std::move(model), 0, 0, Pattern::evidence}));
 }
 PlotSnapshot PlotSnapshot::codeword(std::size_t data, std::size_t parity) {
     return PlotSnapshot(std::make_shared<Data>(Codeword{data, parity}));
@@ -293,52 +246,6 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
                 if (std::abs(radius - .5) <= tolerance || std::abs(radius - 1) <= tolerance) return reference(x, y);
                 return gray(0);
             });
-        } else if constexpr (std::is_same_v<Type, PatternScores>) {
-            const auto upper_log_ratio = pattern_score_upper_log_ratio(data);
-            const auto sx = std::min((width - 1) * .8, (height - 1) * .8 / request.sample_aspect_ratio);
-            const auto sy = std::min((height - 1) * .8, (width - 1) * .8 * request.sample_aspect_ratio);
-            const auto left = ((width - 1) - sx) / 2, bottom = ((height - 1) + sy) / 2;
-            const auto axis_x = static_cast<int>(std::lround(left)), axis_y = static_cast<int>(std::lround(bottom));
-            const auto threshold_x = static_cast<int>(std::lround(left + .5 * sx));
-            const auto threshold_y = static_cast<int>(std::lround(bottom - .5 * sy));
-            const auto twice_x = static_cast<int>(std::lround(left + .75 * sx));
-            const auto twice_y = static_cast<int>(std::lround(bottom - .75 * sy));
-            // Each observation uses its own captured threshold on both axes.
-            // These are diagnostic single-symbol references; chain evidence
-            // and the competing-pattern margin also affect actual admission.
-            std::vector<std::pair<int, int>> points;
-            if (data.enabled) for (const auto score : data.scores) {
-                if (!valid_pattern_score(score)) continue;
-                const auto x = static_cast<int>(std::lround(left + pattern_score_position(score.evidence.real(), score.admission_threshold, upper_log_ratio) * sx));
-                const auto y = static_cast<int>(std::lround(bottom - pattern_score_position(score.evidence.imag(), score.admission_threshold, upper_log_ratio) * sy));
-                for (int dy : {-1, 0}) for (int dx : {-1, 0}) points.emplace_back(y + dy, x + dx);
-            }
-            std::sort(points.begin(), points.end());
-            auto next_point = points.end();
-            auto current_row = std::numeric_limits<unsigned>::max();
-            rows(request, sink, color, [&](unsigned x, unsigned y) {
-                if (current_row != y) {
-                    current_row = y;
-                    next_point = std::lower_bound(points.begin(), points.end(), std::pair{static_cast<int>(y), static_cast<int>(x)});
-                }
-                const auto position = std::pair{static_cast<int>(y), static_cast<int>(x)};
-                if (next_point != points.end() && *next_point == position) {
-                    do { ++next_point; } while (next_point != points.end() && *next_point == position);
-                    return color ? theme::data_tint : gray(255);
-                }
-                if (x < left - .5 || x > left + sx + .5 || y < bottom - sy - .5 || y > bottom + .5) return gray(0);
-                if (static_cast<int>(x) == axis_x || static_cast<int>(y) == axis_y) return reference(x, y);
-                if (data.enabled) {
-                    if (static_cast<int>(x) == threshold_x || static_cast<int>(y) == threshold_y)
-                        return gray(request.monochrome ? 255 : theme::muted);
-                    if ((static_cast<int>(x) == twice_x && y % 8 < 4) ||
-                        (static_cast<int>(y) == twice_y && x % 8 < 4))
-                        return gray(request.monochrome ? 255 : theme::grid);
-                }
-                if (sx > 0 && sy > 0 && std::abs((x - left) * sy - (bottom - y) * sx) <= .6 * std::hypot(sx, sy))
-                    return gray(request.monochrome ? ((sx >= sy ? x : y) % 3 == 0 ? 255 : 0) : theme::grid);
-                return gray(0);
-            });
         } else if constexpr (std::is_same_v<Type, Waterfall>) {
             const auto& history = data.history->rows();
             // Keep the recent one-row-per-pixel view in short plots. Beyond
@@ -442,57 +349,6 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
                 }
                 return background;
             });
-        } else if constexpr (std::is_same_v<Type, Pattern>) {
-            const auto& model = data.model;
-            const auto symbols = model.coefficients.size();
-            if (data.kind == Pattern::chips) {
-                const auto first = std::min(data.first, model.code.size());
-                const auto count = std::min(data.count, model.code.size() - first);
-                double scale = 0;
-                for (const auto coefficient : model.coefficients) scale = std::max(scale, std::abs(coefficient));
-                rows(request, sink, false, [&](unsigned x, unsigned y) {
-                    if (!count || !symbols) return gray(0);
-                    const auto col = static_cast<std::size_t>(x) * count / request.width;
-                    const auto component = static_cast<std::size_t>(y) * symbols * 2 / request.height;
-                    if (request.width >= count * 2 && static_cast<std::size_t>(x + 1) * count / request.width != col) return gray(0);
-                    if (request.height >= symbols * 4 && static_cast<std::size_t>(y + 1) * symbols / request.height != component / 2) return gray(0);
-                    const auto chip = first + col;
-                    if (chip >= model.chip_weights.size() || !model.chip_weights[chip])
-                        return gray((x + y) % 4 == 0 ? (request.monochrome ? 255 : theme::grid) : theme::surface);
-                    const auto sample = model.chip_value(component / 2,chip);
-                    const auto value = component % 2 ? sample.imag() : sample.real();
-                    const auto fraction = scale > 0 ? std::clamp(value / scale, -1., 1.) : 0;
-                    if (request.monochrome) {
-                        // Signed values retain their midpoint meaning on Mono1:
-                        // positive/negative vary white duty around a 50% zero.
-                        constexpr unsigned char bayer[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
-                        return gray((1 + fraction) * 8 > bayer[y % 4][x % 4] ? 255 : 0);
-                    }
-                    return gray(static_cast<unsigned char>(std::lround(127.5 * (1 + fraction))));
-                });
-            } else if (data.kind == Pattern::distances) {
-                const auto count = symbols + (symbols && model.unused_pattern ? 1U : 0U);
-                double maximum = 0;
-                for (std::size_t a = 0; a < count; ++a) for (std::size_t b = 0; b < a; ++b)
-                    maximum = std::max(maximum, pattern_distance(model, a, b));
-                rows(request, sink, false, [&](unsigned x, unsigned y) {
-                    if (!count || maximum <= 0) return gray(0);
-                    const auto a = static_cast<std::size_t>(y) * count / request.height;
-                    const auto b = static_cast<std::size_t>(x) * count / request.width;
-                    return gray(static_cast<unsigned char>(std::lround(255 * std::clamp(pattern_distance(model, a, b) / maximum, 0., 1.))));
-                });
-            } else {
-                std::vector<double> matched{1, std::clamp(1 - model.one_chip_shift.residual_fraction, 0., 1.)};
-                if (model.unused_pattern) matched.push_back(std::clamp(1 - model.unused_pattern->residual_fraction, 0., 1.));
-                const auto intervals = model.chip_samples ? model.symbol_samples / model.chip_samples + (model.symbol_samples % model.chip_samples != 0) : 0;
-                matched.push_back(intervals ? 1. / static_cast<double>(intervals) : 0);
-                rows(request, sink, false, [&](unsigned x, unsigned y) {
-                    const auto row = static_cast<std::size_t>(y) * matched.size() / request.height;
-                    if ((static_cast<std::size_t>(y) * matched.size()) % request.height < matched.size()) return gray(0);
-                    if (x < matched[row] * request.width) return gray(255);
-                    return request.monochrome ? gray((x + y) % 3 == 0 ? 255 : 0) : gray(theme::grid);
-                });
-            }
         } else if constexpr (std::is_same_v<Type, Codeword>) {
             const auto total = static_cast<long double>(data.data) + data.parity;
             const auto split = total ? static_cast<unsigned>(request.width * (static_cast<long double>(data.data) / total)) : request.width;
@@ -524,20 +380,6 @@ std::string PlotSnapshot::caption(unsigned width) const {
             const auto scale = constellation_scale(data);
             out << std::setprecision(2) << scale / 2 << " / " << scale << " amplitude";
             if (width >= 320) out << " / " << data.points.size() << (data.symbols ? " symbols" : " input points");
-        } else if constexpr (std::is_same_v<Type, PatternScores>) {
-            if (!data.enabled) return width < 320 ? "Phase/amplitude mode" : "Pattern scores unavailable in phase/amplitude mode";
-            const auto count = std::count_if(data.scores.begin(), data.scores.end(), valid_pattern_score);
-            if (width < 320) {
-                if (!count) return "waiting for patterns";
-                return "P0 x/P1 y; log score T / 2T";
-            }
-            out << "Horizontal P0 / vertical P1: ";
-            if (!count) out << "waiting for pattern candidates (ln evidence vs noise)";
-            else {
-                out << "log-score scale; solid T = single-symbol threshold, dashed 2T = twice the log score";
-                out << " / " << count << " retained candidates";
-                out << "; diagonal = equal scores";
-            }
         } else if constexpr (std::is_same_v<Type, Waterfall>) {
             out << "0.." << data.history->max_hz() << " Hz / ";
             if (data.history->simulation_reference()) out << std::fixed << std::setprecision(1);
@@ -563,16 +405,6 @@ std::string PlotSnapshot::caption(unsigned width) const {
         } else if constexpr (std::is_same_v<Type, Qr>) {
             if (data.brightness == QrBrightness::off) return "QR preview off";
             return data.code ? "QR preview" : "No QR message";
-        } else if constexpr (std::is_same_v<Type, Pattern>) {
-            if (data.kind == Pattern::chips) {
-                const auto first = std::min(data.first, data.model.code.size());
-                const auto count = std::min(data.count, data.model.code.size() - first);
-                out << "Chips " << (count ? first + 1 : 0) << "-" << first + count << " / " << data.model.code.size()
-                    << "; I above Q; light positive, dark negative, middle gray zero; hatching unused";
-            } else if (data.kind == Pattern::distances) return data.model.bounded_pattern_preview?
-                "Illustrated pattern distance: dark close, light far; preview only; diagonal zero":
-                "Complete-symbol distance: dark close, light far; diagonal zero; common scale";
-            else return "Energy matching code (white) / outside code (gray): legal, shifted, unused (if present), isotropic noise mean";
         } else if constexpr (std::is_same_v<Type, Codeword>) out << data.data << " data / " << data.parity << " parity bytes";
         return out.str();
     }, data_->value);

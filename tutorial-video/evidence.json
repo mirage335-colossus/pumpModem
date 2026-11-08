@@ -4,7 +4,7 @@
   "gui_sha256": "a0af24469be9afa055834c581b10b8cb97422ff6e012cc96927a9764e119b0d2",
   "application_source_changed": false,
   "fast": {
-    "profile": "Speakers / mic \u00b7 short",
+    "profile": "Speakers / mic · short",
     "encrypted": true,
     "text_received": "Hello from Data Pump",
     "text_bytes": 20,
@@ -14,47 +14,6 @@
     "saved_file_matches_source": true,
     "fixture": "repeated text; deliberately compressible",
     "file_sha256": "e44a0966272ac33350be7c565c1249230b1f7b7e9eaba26c8244f78ebbb1d3b2"
-  },
-  "robust": {
-    "simulation": true,
-    "pattern": "auto-keystream",
-    "rate_hz": 3600,
-    "carrier_hz": 1500,
-    "tx_dbm": 3,
-    "tx_mw": 1.9952623149688795,
-    "path_loss_db": 150,
-    "noise_dbm_hz": -164,
-    "target_db_hz": 6.326999095983183,
-    "oscillator": "gpsdo-xo",
-    "encryption": true,
-    "keyed_private_waveform": true,
-    "authentication_tag": false,
-    "modeled_tx_seconds": 17.71,
-    "modeled_content_seconds": 14.7,
-    "modeled_reference_cpu_seconds": 7.6,
-    "modeled_rx_probability": ">99%",
-    "modeled_observer_receiver_ratio_approx": 108,
-    "actual_fresh_simulation_received_bit": "1",
-    "received_pattern_score": 380.2,
-    "result_file": "robust-result.mp4",
-    "result_cut_seconds": [
-      0,
-      1
-    ],
-    "result_presentation": "Held actual received snapshot; pending phase excluded",
-    "separate_audio_waveform": {
-      "seconds": 17.70833333333333,
-      "sample_rate": 14400,
-      "timestamp": 1800000000,
-      "excerpt_source_seconds": [
-        2,
-        8
-      ],
-      "excerpt_voice_free": true,
-      "energy_fraction_375_to_2625_hz": 0.9996110200881958,
-      "note": "Same modem configuration and disposable key; separately generated waveform, explicitly labelled."
-    },
-    "planner_edit": "none; captured speed"
   },
   "legacy": {
     "modulation": "BPSK31",
@@ -96,34 +55,6 @@
     "tui-screen.txt": {
       "bytes": 2886,
       "sha256": "a226f613099c87a6f06db8c95bc10df68d61f2889f86a8c37b9e723f070c69db"
-    },
-    "robust-planner.mp4": {
-      "bytes": 1917014,
-      "sha256": "df0e50d114cd01d82451c78dfa11690854f9ccb3e926b586dae1b732be9e0e93"
-    },
-    "robust-tx.wav": {
-      "bytes": 510044,
-      "sha256": "23a666027c105c39022e1969dc4342b0b5076dc747e4392a9c836c3cd025dcb2"
-    },
-    "robust-planner.actions.json": {
-      "bytes": 2400,
-      "sha256": "4e7676207bcae3df05004e9a77043a2b824f48e6b6212cdd539895166a146280"
-    },
-    "robust-bit.mp4": {
-      "bytes": 1655770,
-      "sha256": "c2786d80d14d5a51e58a5bdb4d92a9f872d4ad8b4d7a1e1528136024eba4a9e6"
-    },
-    "robust-bit.actions.json": {
-      "bytes": 427,
-      "sha256": "deaba4b5de7507f47bfc7ca4f255d1bbdc2c63256b9caeb2f5c3c7fc5a95778f"
-    },
-    "robust-result.mp4": {
-      "bytes": 1130405,
-      "sha256": "f2e5613177f1009af351d9c57b25ce9e1ffedcb4ee5519427a93a2a9359cc275"
-    },
-    "robust-result.actions.json": {
-      "bytes": 166,
-      "sha256": "f4dfc44a8c09d2d0f1ccf5737202ae823e80fa9a669d82303e9373b2aaacd377"
     }
   },
   "final_delivery": {
@@ -135,19 +66,11 @@
     "chapters": 18,
     "external_delivery": "/home/user/___quick/p/_cur/dataPump/_lessonsLearned/data-pump-tutorial-media/clarity/delivery",
     "complete_audio_video_decode": "passed; ffmpeg -xerror exit0",
-    "encoded_visual_review": "passed: security, workstation, Rev, Debian links, actual Robust result and automatic QR Enter",
-    "audio": {
-      "integrated_lufs": -19.14,
-      "true_peak_dbtp": -2.4,
-      "loudness_range_lu": 5.5,
-      "robust_excerpt": {
-        "rms_dbfs": -28.318897247314453,
-        "peak_dbfs": -19.580623626708984,
-        "energy_375_to_2625_hz": 0.9994347095489502
-      }
-    },
     "caption_timing": "passed",
-    "application_source_changed": false
+    "application_source_changed": false,
+    "status": "historical; embeds retired single-carrier Robust footage; not for current distribution",
+    "historical_media_note": "The external MP4 contains retired single-carrier Robust footage; it is not current and must not be distributed.",
+    "historical_visual_review": "The historical encoded video included retired Robust content."
   },
   "toolchain": {
     "ffmpeg": "7.1.5",
@@ -162,14 +85,15 @@
     "legacy": 10.3
   },
   "native_audio_onsets_match_transmit_actions": true,
-  "revision": "clarity corrections and audible Robust profile",
+  "revision": "Historical revision: clarity corrections and audible Robust profile (retired)",
   "retained_footage": "Fast and Legacy source videos unchanged, copied from verified prior tutorial take",
   "validation": {
     "source_syntax": "passed",
     "script_storyboard_equality": "passed",
     "read_only_content_review": "passed",
     "correction_copy_checks": "passed",
-    "robust_audio_narration_gap_seconds": 6,
-    "final_encoded": "passed"
-  }
+    "final_encoded": "passed",
+    "scope": "historical production only; no current media regenerated after Robust retirement"
+  },
+  "status": "historical production evidence; the prior final video contains retired single-carrier Robust footage and is not current or for distribution"
 }

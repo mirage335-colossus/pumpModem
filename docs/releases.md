@@ -67,8 +67,7 @@ source revisions between stages. The sequence is:
 | `arm_runner` | `ubuntu-24.04-arm` | Standard ARM64 host; explicitly select an organization L/H pool when desired. |
 | `windows_runner` | `windows-2022` | Standard Windows x64 host; explicitly select an organization L/H pool when desired. |
 | `maintain_base` | `none` | Explicitly maintain `linux`, `windows`, `wasm`, `both` (Linux/Windows), or `all` before qualification. `source=auto` reuses matching recipes and builds missing ones; existing assets are never overwritten. |
-| `sanitizer_smoke` | Unchecked | Add the optional instrumented native desktop smoke. |
-| `sanitizer_realtime` | Unchecked | Add timing-sensitive Fast RX cases to instrumented native CI. |
+| `sanitizer_realtime` | Unchecked | Add timing-sensitive Fast RX cases to the instrumented Debug scope. |
 
 Runner selections are passed through to every applicable stage. Standard
 GitHub-hosted runners are free for public repositories; private repositories
@@ -252,14 +251,10 @@ Full qualification of a new release requires coverage of every declared backend.
 The scoped Windows Rev WGL warning described below permits a green workflow with
 explicitly incomplete graphics coverage. That known runner limitation does not
 block certification or Latest eligibility for an otherwise qualified ordinary release.
-The same policy applies to an exact typed GUI smoke workload limit with recent
-sampled-transmission progress. Certification records it as `passed_with_warnings`,
-retains `incomplete_smoke_coverage` by target and scope, and appends immutable
-`certification-RUN_ID-attempt-ATTEMPT-smoke-warnings.json` and `.log` assets. These
-are bound by SHA-256 to the main report and identify the exact source and binary
-inventory. Incomplete smoke is never reported as a smoke pass. Stalls, crashes,
-sanitizer errors, invalid evidence and external timeouts still fail. Experiment
-releases remain prereleases and never replace Latest.
+Certification reports the completed test scopes and any explicitly incomplete
+coverage. An incomplete check is not reported as a pass. Stalls, crashes,
+sanitizer errors, invalid evidence and external timeouts remain failures.
+Experiment releases remain prereleases and never replace Latest.
 
 For the Ubuntu 22.04 x86_64 baseline, set `linux_baseline=ubuntu-22.04`.
 Clear `experiment` for an ordinary release. `publish=false` still reserves a
@@ -730,123 +725,33 @@ repeating `makepkg -si`, or selecting its new overlay directory and running
 `emerge --update`. These local recipes are not submitted to AUR or Gentoo's main
 repository. Use the schema-5 channels above for automatic repository updates.
 
-## Rev display warnings
+## GUI support limits
 
-The release's `warning.log` records a known presentation limitation: Rev may
-refresh its replay/waterfall display below the target cadence. This is advisory,
-not a build or certification failure. It is a known-limit notice, not a claim
-that publication measured the current build's framerate.
-
-When an extensive GUI smoke observes a cadence miss, it emits
-`WARNING REV_REPLAY_CADENCE:` with elapsed time, frame/change counts, displayed
-fraction and phase. Portable verification preserves these warnings in CI logs,
-and certification reports link the release's checksummed warning notice.
-Missing physical observations, premature completed content, changed pending
-identity, wrong source/bitmap data and other correctness checks remain failures.
-Do not tune the framerate or repeat long suites just to eliminate this advisory.
-
-Rev also requires a working desktop OpenGL driver (4.4, or 4.3 with
-`GL_ARB_buffer_storage`). That is a runtime requirement, distinct from a cadence
-warning. The FLTK bundle remains available for systems lacking that capability.
-
-Windows certification treats only the exact coordinate-probe error
-`[NativeWindow] Required WGL ARB extensions not available` with exit code 1 as a
-hosted-environment warning. Compilation and all headless GUI/CLI, modem,
-clipboard, package, relocation and calibration checks remain mandatory.
-Only `gui_workflow`, `gui_adapter_conformance`, `gui_coordinates_1x`,
-`gui_coordinates_2x` and the published Rev GUI smoke are omitted on that runner.
-Unexpected output, different failures, crashes and timeouts still fail.
-
-If all remaining checks pass, GitHub displays a green check and the report says
-`passed_with_warnings`. A prominent summary, release notes and immutable
-`certification-RUN-attempt-N-warning.log` record the missing coverage. Existing
-release `warning.log` and earlier reports remain untouched. Such a result
-certifies the release within the documented hosted-runner scope and permits an
-otherwise qualified regular release to become Latest. It does not claim that
-omitted Windows Rev graphics tests passed. Experiments remain prereleases.
-The runner limitation is minor for build delivery, but a user machine with the
-same limitation cannot launch the Rev GUI; that is a functional limitation,
-with FLTK available as the alternative frontend.
+Robust controls remain in the GUI, but the Robust transmitter and receiver are
+unavailable pending reconnection to the canonical native path. Do not describe
+package or frontend checks as Robust operation or reception qualification. Fast
+and Legacy GUI behavior, Rev's OpenGL requirement, and host audio-device limits
+remain separate release boundaries. See [current Robust status](robust-current.md).
 
 ## Diagnose a branch before full validation
 
-Native CI (`ci.yml`), SDK qualification (`sdk.yml`) and certification
-(`certify.yml`) expose a manual boolean `devfast`, default **false**. Leave it
-unchecked for the existing full suites, including calibration and compatibility
-matrices. `devfast=true` is temporary diagnosis while resolving a bug or feature.
-For a focused Legacy investigation, dispatch either entry point, replacing
-`REF` with the branch or tag containing the candidate:
+Native CI (`ci.yml`), SDK qualification (`sdk.yml`), and exact-binary
+certification (`certify.yml`) use `devfast=true` only for focused diagnosis.
+Those runs test the selected source or published artifacts within their declared
+scope; they do not certify a release.
 
-```sh
-gh workflow run ci.yml --ref REF -f devfast=true
-# Alternative entry point; release_tag may be omitted in this mode:
-gh workflow run certify.yml --ref REF -f devfast=true
-```
+For routine local feedback, build the affected application and test group with
+`./build.sh` and `./build.sh test GROUP`. Use
+[the current test policy](building.md#robust-computational-checks) for Robust
+kernel estimates. A computational estimate is not end-to-end reception
+qualification.
 
-These commands run the same small Linux/Windows diagnostic against the selected
-branch commit. They compile only its Legacy controller/session fixture with
-available cores and repeat `gui_legacy_poll` and `gui_legacy_live` three times
-serially, stopping on failure. They skip SDK/application builds, calibration, the general test matrix
-and packaging, and use neither Actions artifacts nor cache storage. The source
-SHA is printed in the run summary. Dispatch again after pushing a fix; a rerun
-of an older run still uses that run's original revision.
-
-Native CI additionally accepts `diagnostic=windows-rev` with `devfast=true`.
-It runs the small Win32 event-pump regression, reuses the Windows base, compiles
-the Rev GUI and runs a bounded headless self-check. The event regression uses a
-small nonactivating window to exercise real paint messages. Use this
-selection for Windows Rev compiler/event-loop diagnosis before another
-build of all six packages. It does not certify graphics or publish release assets.
-
-The Legacy and certification `devfast` routes test source without downloading a
-published application. The graphics diagnostic instead checks an existing
-published archive. Neither route issues a certification report, changes a
-release or grants Latest status. Full certification continues
-to bind the release's recorded source and published hashes, even when the
-dispatch branch has newer code. Publish a new version/date release when a code
-fix must be included in the binaries being certified.
-
-See [local focused commands](building.md#focused-development-diagnostics).
-Automatic CI runs lightweight Legacy and helper checks on PRs and pushes to
-`main`; SDK qualification and full native matrices are manual. A PR branch push
-does not duplicate the PR run. For temporary investigation commits, `[skip ci]`
-can suppress the automatic checks while manual dispatch remains available. Once the candidate is
-complete, continue with full source CI and applicable SDK qualification on that
-same revision, using `devfast=false` or unchecked:
-
-```sh
-gh workflow run ci.yml --ref REF -f devfast=false
-# Also run SDK/toolchain and copied-bundle coverage when relevant to the change:
-gh workflow run sdk.yml --ref REF -f devfast=false
-gh run list --workflow ci.yml --limit 5
-gh run list --workflow sdk.yml --limit 5
-gh run watch RUN_ID --exit-status
-```
-
-Wait for the relevant full runs to complete successfully and address any
-regressions they expose. **Do not finish bug or feature work with only a fast
-pass.** Full manual dispatch after a `[skip ci]` commit provides this validation;
-there is no need to launch duplicate push/PR runs solely to remove the marker.
-Automatic green checks do not replace that full manual validation. Record
-the tested commit and run IDs in either case.
-
-For a release task, follow successful source validation with publication and
-full certification of the correct published source:
-
-```sh
-# When the fix needs new binaries, publish a new version/date release first:
-gh workflow run release.yml --ref REF -f experiment=true -f publish=true
-# After publication completes, use its actual new tag:
-gh workflow run certify.yml --ref REF -f release_tag=RELEASE_TAG -f devfast=false
-gh run list --workflow certify.yml --limit 5
-gh run watch CERTIFICATION_RUN_ID --exit-status
-```
-
-Publication remains separate from certification. Existing binaries and prior
-reports stay immutable; selecting a newer `REF` cannot apply a source fix to an
-older release. A diagnostic pass does not qualify either release, and an
-experimental release remains a prerelease and never Latest even after full
-certification passes.
+Once a source candidate is complete, run the applicable current source workflows
+with `devfast=false`, including platform or SDK coverage when affected. For a
+release, publish the intended binaries, then certify the actual release tag so
+the report binds to its source and binary hashes. Reuse completed results only
+when their source, configuration, and inputs still match. Do not describe a
+focused diagnostic as full qualification.
 
 ## Browser packages
 
@@ -892,8 +797,8 @@ Linux builds both FLTK and Rev with the relocated SDK, runs their native
 conformance/self-check cases, the complete terminal/framebuffer group and an
 X11 software-window probe. This checks the actual cold-built archive when
 `source=rebuild`; a later application run would otherwise fetch the existing
-published archive. Full GUI workflow, modem and calibration qualification stays
-in the separate SDK/release workflows. Windows maintenance verifies the retained
+published archive. Full GUI and modem qualification stays in the separate
+SDK/release workflows. Windows maintenance verifies the retained
 source archive as well as the compiled dependency bundle before reuse.
 
 Routine app builds download only the compiled SDK and checksum inventory.
@@ -1176,8 +1081,8 @@ respectively, including fresh application compilation and packaging checks. A
 separate reuse-only maintenance run completed its Windows job in **44 seconds**,
 including a fresh static compile/link/run probe, with dependency compilation
 and upload skipped. See the [validation record](validation.md) for those exact
-runs. Long regression/calibration work belongs to the separate certification
-workflow and does not indicate that dependencies were rebuilt.
+runs. Application regressions run in the separate source-validation workflow and do
+not indicate that dependencies were rebuilt.
 
 ## Choose the Linux baseline
 
@@ -1234,10 +1139,10 @@ set extensions. GitHub documents the available
 
 ## Compatibility checks and scope
 
-The separate certification workflow runs the full build, contract, GUI and
-packaging selections on Linux, and the contract, GUI and packaging selections
-on Windows, for each published GUI backend. It also tests both backends' published
-archives on the hosts below.
+The separate certification workflow runs the maintained source, frontend, web,
+and packaging scopes required by release metadata, then tests published
+archives on the hosts below. It does not qualify Robust operation or physical
+radio reception.
 Read the attached report before describing a particular release as tested.
 
 | Bundle | Build baseline | Copied-archive compatibility jobs |
@@ -1298,42 +1203,17 @@ executable RPATHs during recursive scans and falsely report conflicts with host
 X11/font libraries. This is a host-tool upgrade: the application still compiles
 against the selected glibc baseline, and host dependency rejection remains strict.
 Release tests stop after the first failed suite for prompt feedback; successful
-runs execute the full contract, GUI and packaging selections.
+runs execute the selected maintained source, GUI/frontend and packaging scopes.
 
-The hosted release configuration gives each otherwise-unbounded CTest case a
-3600-second process limit instead of CTest's 1500-second default: the full
-probability calibration exceeded that default on a hosted x86-64 runner. It
-retains every sample and numerical assertion. Windows suites run serially to
-avoid competing with the live/audio fixtures' own workers; their internal
-progress deadlines remain unchanged.
+The hosted release workflow builds and runs its declared test scopes with the
+workflow's configured timeouts. Release reports bind outcomes to the checked
+source revision and binary inventory. These results do not establish performance
+on arbitrary hosts or physical audio/radio qualification.
 
-The copied-archive GUI smoke uses the existing 600-second overall allowance.
-It covers the complete text, attachment, interruption and replacement sequence;
-the previous 300-second CI allowance expired late in that sequence on hosted
-runners. Rev display cadence is measured and reported as a warning; pending
-progress, content correctness and cancellation checks remain mandatory.
-Certification tests the selected published format on each compatibility host;
-publication still verifies both generated package formats.
+Certification runs the test groups selected by current release metadata.
+Robust full-observation and calibration campaigns are retired and are not
+certification requirements.
 
-The Windows live-profile capture fixture requests 1 ms timer resolution for
-its existing 1 ms sleeps and restores it on exit, following Microsoft's
-[timer API contract](https://learn.microsoft.com/en-us/windows/win32/api/timeapi/nf-timeapi-timebeginperiod).
-Coarse timer rounding could otherwise leave fixture audio undelivered after
-30 seconds even with an empty decoder queue. The same audio chunks, 30-second
-deadline and all receiver assertions remain in place. Full certification runs
-calibration in independent jobs for every Linux and Windows source target,
-alongside GUI, contract and published-package verification. Both scopes reuse
-the same pinned source, dependency recipe and build configuration. Calibration
-retains every section, seed, worker setting, assertion and process deadline;
-each applicable calibration job must succeed before certification is recorded.
-This duplicates only setup and the minimal calibration build, allowing its
-roughly 20–40 minutes of computation on standard runners to overlap the other
-checks; actual duration varies with the host.
-
-Terminal and framebuffer regressions run in independent native Linux Release
-and Debug jobs, a Windows job, and an SDK job. Releases declaring both interfaces
-also require independent frontend certification jobs for each source target.
-They run alongside the existing modem, native GUI, calibration and package jobs;
-their tests are excluded from the core/native-GUI test selection. Each frontend
-job runs its cases serially to preserve terminal input timing. Package producers
-still include and verify both binaries and their runtime resources.
+Terminal and framebuffer checks run only for interfaces declared by release
+metadata, in their own source scopes. Package producers include and verify the
+supported binaries and runtime resources.

@@ -1,4 +1,4 @@
-"""Bounded default tracking preflight and imported CPU-model guards."""
+"""Bounded default tracking preflight and exact work/memory guards."""
 import math
 from pathlib import Path
 import sys
@@ -34,19 +34,6 @@ class PreflightTests(unittest.TestCase):
         with self.assertRaises(MemoryError):
             self.plan(memory_mib=1)
 
-    def test_cpu_scope_and_regime_changes_fail_closed(self):
-        first = self.plan()
-        calibration = dict(identity=first['identity'], work=first['work'], cpu_seconds=10.,
-                           scope='receiver-excluding-basis-v1')
-        matched = self.plan(calibration=calibration)
-        self.assertTrue(matched['cpu_forecast']['available'])
-        self.assertEqual(matched['cpu_forecast']['cpu_seconds'], 10.)
-        self.assertFalse(self.plan(calibration=dict(calibration, scope='includes-native'))['cpu_forecast']['available'])
-        changed = self.plan(calibration=calibration, descriptor=dict(nominal_triplet_bandwidth_hz=.0625,
-            data_if_hz=.051, fine_chip_rate_hz=.05))
-        self.assertFalse(changed['cpu_forecast']['available'])
-        with self.assertRaisesRegex(ValueError, 'calibration must be an object'):
-            self.plan(calibration=[])
 
 
 if __name__ == '__main__':

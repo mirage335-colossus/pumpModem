@@ -1,7 +1,6 @@
 #pragma once
 #include "datapump/background_noise.hpp"
 #include "datapump/crypto.hpp"
-#include "datapump/triad_modem.hpp"
 #include "datapump/triad_simulation.hpp"
 #include <array>
 #include <complex>
@@ -15,20 +14,17 @@
 
 namespace datapump::triad::v3 {
 using Complex = std::complex<double>;
-using Arithmetic = triad::Arithmetic;
-enum class PulseShape { LegacyRrc, TaperedRrc };
-enum class PatternRevision { LegacyV1, IndependentApskV2 };
-const char* pattern_revision_name(PatternRevision);
+enum class PulseShape { Rrc, TaperedRrc };
+inline constexpr const char* pattern_revision_name(){return "independent-apsk-v2";}
 
-// Version3 is a separate one-bit, random-access streaming experiment. All
-// addresses and sample counts are64-bit; no whole-symbol map/capture is held.
+// Canonical three-carrier waveform. Addresses and sample counts are 64-bit;
+// no whole-symbol map or capture is held.
 struct Format {
     double inner_rate_hz = 36;
     unsigned added_symbols = 10;
     bool added_interleave = true;
     // Independent keyed bit alternatives, with two-phase/two-radius Added
-    // Symbols. LegacyV1 is only for explicitly replaying historical waveforms.
-    PatternRevision pattern_revision = PatternRevision::IndependentApskV2;
+    // Symbols. Historical wire implementations belong in Git tags.
     // The unnormalized Added symbol powers are 1-depth and 1+depth. A common
     // positive gain then preserves the total three-carrier coefficient power.
     double added_amplitude_depth = .25;
@@ -52,7 +48,7 @@ struct Format {
     unsigned burst_wait_tiles = 0;
     // DATA-only pulse selection. Both retain rolloff .25, full +/-8-cell
     // support and unit pulse energy; the default preserves existing samples.
-    PulseShape pulse_shape = PulseShape::LegacyRrc;
+    PulseShape pulse_shape = PulseShape::Rrc;
 };
 double effective_sample_rate(const Format&);
 struct Geometry {
@@ -201,13 +197,9 @@ struct PathEvolutionConfig {
     double outage_start_seconds = -1, outage_end_seconds = -1;
     double outage_gain = 0, outage_ramp_seconds = 60;
 };
-// The ordinary sampled/physical channels retain the legacy operator. This
-// versioned selection belongs to the isolated triad study only.
-enum class SelectiveModel { LegacyAllpass, DispersiveDft };
 enum class SelectiveCoefficientLaw { Sinusoidal, GaussianErf };
 struct SelectiveModelConfig {
-    SelectiveModel model = SelectiveModel::DispersiveDft;
-    // GaussianErf is isolated dispersive-dft random-v1 only. Each bounded
+    // Each bounded GaussianErf
     // excursion is depth*erf(g/sqrt2), g a unit fixed-time Gaussian process:
     // peak depth, RMS depth/sqrt3. Existing rates become widths B=2sigma.
     // Slow and fast states are independent; no energy normalization follows.
@@ -215,10 +207,9 @@ struct SelectiveModelConfig {
     // Effective physical fast-component rate; slow runs at one tenth of it.
     // Unset retains the historical linkage to effects.spread_doppler_hz.
     // Explicit zero disables added modulation even with nonzero ray Doppler.
-    // This isolated stress control is not scaled by spread margin again.
+    // This stress control is not scaled by spread margin again.
     std::optional<double> modulation_rate_hz;
-    // DispersiveDft only; LegacyAllpass retains its historical geometry and
-    // ignores both geometry fields. Zero uses the public transmitted carrier spacing. Positive values fix
+    // Zero uses the public transmitted carrier spacing. Positive values fix
     // the selectivity scale in Hz independently of waveform rate. This is a
     // synthetic dispersive stress law, not the millisecond ray excess delay.
     double correlation_spacing_hz = 0;
@@ -277,7 +268,6 @@ struct SelectivePerturbationReport {
     // Initial phases apply to capture row zero for Sinusoidal only; zeros for
     // GaussianErf, whose counter seed instead addresses physical-time knots.
     double sample_rate_hz = 0, band_width_hz = 0;
-    SelectiveModel model = SelectiveModel::LegacyAllpass;
     SelectiveCoefficientLaw coefficient_law = SelectiveCoefficientLaw::Sinusoidal;
     // response_period_hz is the ideal continuous-delay law's period; cubic
     // sampled delays perturb it. Actual sampled transfer has period Fs.
@@ -358,58 +348,6 @@ struct Candidate {
     double frequency_drift_hz_per_second = 0;
     ChannelBasis channel{};
 };
-struct ReceiverConfig {
-    Format format{};
-    std::vector<Candidate> candidates{};
-    // Scored raw-sample rows partition this exact public calendar. Samples
-    // outside it are ignored; EOF before end cannot complete the observation.
-    std::uint64_t observation_first_sample = 0, observation_samples = 0;
-    std::size_t block_samples = 1536, maximum_chunk_samples = 4096;
-    unsigned threads = 2;
-    Arithmetic arithmetic = Arithmetic::automatic;
-    std::size_t memory_limit_bytes = 64ULL * 1024 * 1024;
-    double complex_noise_variance = 1;
-    bool known_white_noise = true;
-    // Full finite monitoring schedule, including starts/durations/models and
-    // repeated attempts. Must be at least log(number of bank candidates).
-    double log_family_hypotheses = 0;
-    double family_false_admission_probability = 1e-4;
-    bool conservative_threshold = false;
-    // Difference from the strongest opposite-bit candidate, not from an
-    // equivalent same-bit frequency/timing alternative. Empirical if nonzero.
-    double minimum_score_margin = 0;
-    double rank_relative_tolerance = 1e-10;
-    double minimum_observed_fraction = .9;
-};
-struct CandidateStatistics {
-    double projection_energy = 0, residual_energy = 0, input_energy = 0;
-    double normalized_score = 0, null_threshold = 0;
-    bool threshold_conservative = true;
-    std::uint64_t rank = 0, rows = 0, blocks = 0, rank_deficient_blocks = 0;
-    std::vector<Complex> last_channel_coefficients;
-};
-// Independent fixed-design QR reference for CPU/GPU and null-law checks.
-// Matrix is column-major [column][sample], with no inferred channel truth.
-CandidateStatistics project_block(std::span<const Complex> observations,
-                                 std::span<const Complex> column_major_basis,
-                                 std::size_t columns, double complex_noise_variance = 1,
-                                 double rank_relative_tolerance = 1e-10);
-struct ReceiverReport {
-    std::vector<CandidateStatistics> candidates;
-    std::size_t best_candidate = 0;
-    std::uint8_t source_bit = 0;
-    bool complete_observation = false, accepted = false, presence = false;
-    bool analytic_null_supported = false, all_samples_observed = true;
-    bool any_threshold_conservative = false;
-    double score = 0, margin = 0, threshold = 0;
-    double fully_scored_absence_seconds = 0;
-    std::uint64_t consumed_samples = 0, scored_samples = 0, missing_samples = 0;
-    std::uint64_t basis_values = 0, blocks = 0;
-    std::size_t working_bytes = 0;
-    unsigned threads_used = 0;
-    Arithmetic arithmetic_used = Arithmetic::fp64;
-    double wall_seconds = 0, cpu_seconds = 0;
-};
 // Actual raw shaped-waveform columns, column-major [column][sample]. This
 // boundary is also suitable for packed CPU/GPU projection batches. Parameters
 // and basis are fixed independently of observed samples.
@@ -432,22 +370,4 @@ void shaped_basis_mapped(PatternSource&, const Candidate&, double sample_rate,
                          std::span<const double> sample_offsets,
                          std::span<Complex> column_major_output,
                          double audio_center_hz = 0);
-class StreamingReceiver {
-public:
-    StreamingReceiver(const ReceiverConfig&, const Crypto&);
-    ~StreamingReceiver();
-    StreamingReceiver(StreamingReceiver&&) noexcept;
-    StreamingReceiver& operator=(StreamingReceiver&&) noexcept;
-    // first_sample must be contiguous with previous input. Missing rows are
-    // explicit via validity; no missing observation is manufactured as zeros.
-    void push(std::uint64_t first_sample, std::span<const Complex>,
-              std::span<const std::uint8_t> validity = {});
-    // Finalizes currently complete score blocks. A short observation remains
-    // incomplete. Call only after the caller's input stream is finished.
-    ReceiverReport finish();
-    std::size_t working_bytes() const;
-private:
-    struct Impl;
-    std::unique_ptr<Impl> impl_;
-};
 } // namespace datapump::triad::v3

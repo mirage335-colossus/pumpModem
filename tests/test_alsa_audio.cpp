@@ -1,9 +1,6 @@
 #include "resource_test_margin.hpp"
 #include "datapump/audio.hpp"
 #include "datapump/resampler.hpp"
-#include "datapump/pattern_code.hpp"
-#include "datapump/pattern_pulse.hpp"
-#include "datapump/sched_hop.hpp"
 #include "alsa_stub.hpp"
 #include "../src/alsa_plugin_path.hpp"
 #include "../src/pulse_playback.hpp"
@@ -665,59 +662,6 @@ void native_playback_frontiers() {
     },a::ChannelMode::left_mono,options);
     check(status_count==1 && formats==1 && generated==1 && !state.live,
         "long native tail fallback did not finish cleanly");
-    }
-}
-void native_sparse_clock_policy() {
-    // Production ALSA timestamps and queues, virtual paced DAC. These are
-    // preflight + half-second runtime checks, not complete sparse receptions.
-    // Same provider/error budget as the generic reference; only declared rate
-    // and the mathematically bounded outstanding pulse horizon differ.
-    for(const auto multiplier:{1u,10u,100u,1000u,10000u}) {
-        constexpr unsigned fs=8000;
-        f::reset();auto& state=f::state;state.available={"default"};state.supported_rates={fs};
-        state.period_refinement=true;state.period_frames=fs/100;state.buffer_frames=fs*3/4;
-        state.avail_min=fs/40;state.start_threshold=fs/10;state.write_limit=fs/20;
-        auto origin=std::chrono::steady_clock::now();std::size_t accepted=0;bool running=false;
-        state.after_prepare=[&]{accepted=0;running=false;};
-        state.after_write=[&](std::size_t frames) {
-            if(!running){origin=std::chrono::steady_clock::now();running=true;}accepted+=frames;
-            std::this_thread::sleep_until(origin+std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                std::chrono::duration<double>(std::max(.001,static_cast<double>(accepted)/fs-.05))));
-        };
-        state.delay_observation=[&] {
-            const auto raw=static_cast<std::size_t>(std::max(0.L,std::chrono::duration<long double>(
-                std::chrono::steady_clock::now()-origin).count())*fs);
-            return static_cast<long>(accepted-std::min(accepted,(raw/state.period_frames)*state.period_frames));
-        };
-        datapump::modem::Config c;c.sample_rate=fs;
-        if(multiplier>1)c.scheduled_hopping=std::make_shared<datapump::modem::SchedHopPlan>(datapump::modem::SchedHopPlan{multiplier,1});
-        const auto horizon=static_cast<double>(datapump::modem::scheduled_physical_span_samples(c,fs/4))/fs;
-        a::Options options;options.follow_system_clock=true;options.maximum_utc_error_seconds=.025;
-        options.presentation_lag_seconds=.025;options.maximum_timing_rate_correction=3e-10;
-        options.clock_timing=a::ClockTimingPolicy{multiplier<=100?100e-6:1e-9,.001,.01};
-        options.timing_stop_duration_seconds=horizon+3;options.timing_independent_cover_seconds=3;
-        options.estimated_timing=a::EstimatedDeviceTiming{.001,.025,5.};
-        unsigned statuses=0;std::size_t cursor=0;double radius=0;
-        options.timing_status=[&](const auto& status) {
-            ++statuses;radius=status.modeled_uncertainty_seconds;
-            check(status.following_system_clock && status.requested_error_seconds==.025 && radius<=.025,
-                "declared sparse native policy changed Audio50 or silently fell back");
-        };
-        options.timing_protected_stop=[](const auto&){throw std::runtime_error("declared sparse fixture lost headroom");};
-        a::playback(fs,"default",[&](std::span<float> output) {
-            check(statuses==1,"declared sparse source before timing qualification");
-            const auto count=std::min(output.size(),fs/2-cursor);
-            for(std::size_t i=0;i<count;++i)output[i]=.1f*std::sin(2*std::numbers::pi*(cursor+i)/16);
-            cursor+=count;return count;
-        },{},[&](const auto&) {
-            const auto now=std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
-            a::schedule_output(now+.15);
-        },a::ChannelMode::left_mono,options);
-        check(cursor==fs/2 && statuses==1 && state.drain_calls==1 && !state.live &&
-            state.buffer_frames==fs*3/4,"sparse timing replayed/truncated PCM or changed known queue capacity");
-        std::cout<<"Declared sparse native: multiplier="<<multiplier<<" support_horizon_s="<<horizon
-            <<" assumed_ppm="<<options.clock_timing->sample_rate_half_width_fraction*1e6
-            <<" audio_radius_ms="<<radius*1000<<" queue_capacity_ms=750 runtime_seconds=0.5\n";
     }
 }
 void native_period_refinement() {
@@ -2143,31 +2087,6 @@ struct QueuedPlayback {
         return {static_cast<long double>(presented),origin+time,time,.028,1e-6,a::TimingQuality::estimated,771};
     }
 };
-datapump::modem::Config dsss_audio_config(bool interleave) {
-    datapump::modem::Config config;
-    config.sample_rate=48000;config.carrier_hz=9000;config.bandwidth_hz=1200;
-    config.spreading_factor=64;config.scramble=true;config.dsss_factor=10;
-    if(interleave)config.outer_dsss_version=datapump::modem::OuterDsssVersion::interleaved_v2;
-    for(std::size_t i=0;i<config.spreading_seed.size();++i) {
-        config.spreading_seed[i]=static_cast<std::uint8_t>(17+3*i);
-        config.dsss_seed[i]=static_cast<std::uint8_t>(101+5*i);
-    }
-    check(datapump::modem::pattern_chip_samples(config)==8 &&
-        datapump::modem::symbol_sample_count(config)==5120 &&
-        datapump::modem::pattern_pulse_padding_samples(config)==64,
-        "DSSS audio fixture geometry changed");
-    return config;
-}
-std::vector<float> dsss_audio_pcm(bool interleave) {
-    const auto config=dsss_audio_config(interleave);
-    datapump::modem::PatternTransmitter source(datapump::Bytes{0,0,1},config,1800000000,0,true);
-    std::vector<float> result(static_cast<std::size_t>(source.total_samples()));
-    for(std::size_t offset=0;offset<result.size();) {
-        const auto count=source.read(std::span(result).subspan(offset,std::min<std::size_t>(503,result.size()-offset)));
-        check(count>0,"DSSS PCM fixture stopped before finite tails");offset+=count;
-    }
-    return result;
-}
 void independent_cover_runtime() {
     constexpr unsigned rate=48000;std::vector<std::int16_t> reference;
     for(unsigned scenario=0;scenario<3;++scenario) {
@@ -2269,67 +2188,6 @@ void scheduled_payload_runtime() {
     }
     std::cout<<"Scheduled physical-payload endpoint forecasts and strict UTC cover checks passed\n";
 }
-void protected_timing_playback() {
-    f::reset();f::state.available={"default"};f::state.supported_rates={48000};f::state.write_limit=137;
-    const auto epoch=std::ceil(std::chrono::duration<long double>(std::chrono::system_clock::now().time_since_epoch()).count())+6;
-    QueuedPlayback driver(epoch-.125L-.375L/48000,0);
-    datapump::modem::Config config;config.sample_rate=48000;config.carrier_hz=9000;config.bandwidth_hz=1200;
-    config.spreading_factor=64;config.scramble=true;config.dsss_factor=10;
-    config.outer_dsss_version=datapump::modem::OuterDsssVersion::interleaved_v2;
-    config.spreading_seed.fill(0x31);config.dsss_seed.fill(0x7a);
-    datapump::Bytes bits(256);for(std::size_t i=0;i<bits.size();++i)bits[i]=i%2;
-    datapump::modem::PatternTransmitter source(bits,config,1800000000),reference(bits,config,1800000000);
-    const auto original=source.total_samples(),stop_bound=datapump::modem::transmit_stop_sample_count(config);
-    unsigned statuses=0,formats=0,stops=0;std::uint64_t stopped_at=0;long double scheduled_epoch=0;
-    std::optional<long double> first_private_time;
-    a::Options options;options.follow_system_clock=true;options.maximum_utc_error_seconds=.03;
-    options.maximum_timing_rate_correction=.0002;options.maximum_timing_slew_per_second=1e-14;
-    options.timing_stop_duration_seconds=double(stop_bound)/48000;
-    options.estimated_timing=a::EstimatedDeviceTiming{.001,.03,120};options.allow_timing_fallback=true;
-    options.frame_timestamp=[&](auto submitted,bool capture) {
-        check(!capture && submitted==driver.accepted,"protected provider confused accepted/presented position");
-        const auto elapsed=static_cast<long double>(driver.elapsed)/48000;
-        const auto age=first_private_time?std::max(0.L,elapsed-*first_private_time):0.L;
-        return a::FrameTimestamp{static_cast<long double>(driver.presented),driver.origin+elapsed*1.0001L,
-            elapsed*1.0001L,.028+static_cast<double>(std::min(age,20.L))*1e-6,1e-6,a::TimingQuality::estimated,771};
-    };
-    options.timing_status=[&](const auto& status) {
-        ++statuses;check(status.following_system_clock && !source.samples_emitted(),"protected stop silently fell back or requalified");
-    };
-    options.timing_protected_stop=[&](const std::string& reason) {
-        check(reason.find("now=")!=std::string::npos && reason.find("cover end=")!=std::string::npos &&
-              reason.find("cover after next=")!=std::string::npos && reason.find("allowed radius=30.000000 ms")!=std::string::npos &&
-              reason.find("cover horizon=")!=std::string::npos,"protected stop omitted its timing frontier diagnostic");
-        check(++stops==1 && source.samples_emitted()<original-stop_bound,"timing stop depends on known source EOF");
-        stopped_at=source.samples_emitted();source.request_finish();
-        check(source.total_samples()<=stopped_at+stop_bound,"timing stop lost its bounded protection horizon");
-    };
-    a::playback(48000,"default",[&](std::span<float> output) {
-        const auto count=source.read(output);
-        if(count) {
-            if(!stops) {
-                std::vector<float> expected(count);check(reference.read(expected)==count &&
-                    std::equal(expected.begin(),expected.end(),output.begin()),"timing policy altered emitted private source prefix");
-            }
-            if(!first_private_time)first_private_time=static_cast<long double>(driver.elapsed)/48000;
-            driver.private_generated=true;driver.advance(24);
-        }
-        return count;
-    },{},[&](const auto&) {
-        ++formats;check(!source.samples_emitted() && f::state.stopped,"protected source scheduled on a running DAC");
-        scheduled_epoch=std::ceil(driver.origin+.125L);a::schedule_output(static_cast<double>(scheduled_epoch));
-    },a::ChannelMode::left_mono,options);
-    check(stops==1 && statuses==1 && formats==1 && stopped_at>datapump::modem::training_sample_count(config) &&
-          source.finished() && source.total_samples()<original && driver.presented==driver.accepted &&
-          !driver.underrun && !f::state.live && f::state.configured_streams==1 && f::state.drops==1 &&
-          f::state.prepares==1 && f::state.recovered_errors.empty(),
-          "anticipated UTC failure did not protect, drain once and stop without fallback/restart");
-    const auto true_error=std::abs(driver.origin+static_cast<long double>(driver.accepted)*1.0001L/48000-
-        scheduled_epoch-static_cast<long double>(source.total_samples())/48000);
-    check(true_error+.028020L<.03L,"protected source drained beyond the physical UTC allowance");
-    std::cout<<"protected UTC stop after "<<double(stopped_at)/48000<<" s, tail "
-        <<double(source.total_samples()-stopped_at)/48000<<" s, original "<<double(original)/48000<<" s\n";
-}
 void timed_background_noise_preroll() {
     constexpr unsigned rate=48000;
     f::reset();f::state.available={"default"};f::state.supported_rates={rate};f::state.write_limit=137;
@@ -2390,293 +2248,6 @@ void timed_background_noise_preroll() {
           noise_report.active_samples<=f::state.played.size()-predicted_active+4,
         "noise accounting included preparation or omitted scheduled source frames");
 }
-long double outside_energy(std::span<const float> pcm,double low,double high) {
-    std::size_t size=1;while(size<pcm.size())size*=2;
-    std::vector<std::complex<double>> bins(size);
-    for(std::size_t i=0;i<pcm.size();++i)bins[i]=pcm[i];
-    for(std::size_t i=1,j=0;i<size;++i) {
-        auto bit=size/2;for(;j&bit;bit/=2)j^=bit;j^=bit;
-        if(i<j)std::swap(bins[i],bins[j]);
-    }
-    for(std::size_t length=2;length<=size;length*=2) {
-        const auto step=std::polar(1.,-2*std::numbers::pi/static_cast<double>(length));
-        for(std::size_t begin=0;begin<size;begin+=length) {
-            std::complex<double> oscillator{1,0};
-            for(std::size_t j=0;j<length/2;++j) {
-                const auto first=bins[begin+j],second=oscillator*bins[begin+j+length/2];
-                bins[begin+j]=first+second;bins[begin+j+length/2]=first-second;oscillator*=step;
-            }
-        }
-    }
-    long double outside=0;
-    for(std::size_t k=0;k<=size/2;++k) {
-        const auto hz=static_cast<double>(k)*48000/size;
-        if(hz<low || hz>high)outside+=std::norm(bins[k])*(k && k<size/2?2:1)/size;
-    }
-    return outside;
-}
-void dsss_clipping_diagnostic(std::span<const float> input,double fixture_fraction,
-                              const datapump::modem::Config& config) {
-    const auto begun=std::chrono::steady_clock::now();
-    std::array<unsigned char,EVP_MAX_MD_SIZE> digest{};unsigned digest_size=0;
-    check(EVP_Digest(input.data(),input.size_bytes(),digest.data(),&digest_size,EVP_sha256(),nullptr)==1,
-        "DSSS clipping diagnostic digest failed");
-    std::cout<<std::setprecision(17)<<"clipping_diagnostic_source samples="<<input.size()<<" sha256=";
-    for(unsigned i=0;i<digest_size;++i)std::cout<<std::hex<<std::setw(2)<<std::setfill('0')<<unsigned(digest[i]);
-    std::cout<<std::dec<<std::setfill(' ')<<" fixture_fraction="<<fixture_fraction<<'\n';
-    struct Peak {double fraction=0;std::size_t index=0;float value=0;};
-    Peak largest;
-    std::vector<float> converted(input.size()+4);
-    const auto coefficients=[](unsigned p) {
-        constexpr double pi=std::numbers::pi;const double cutoff=.46*1.;
-        std::array<float,97> result{};double sum=0;
-        for(std::size_t tap=0;tap<result.size();++tap) {
-            const auto distance=static_cast<double>(tap)-48-static_cast<double>(p)/256;
-            const auto window_position=distance/48;
-            const auto window=std::abs(window_position)>=1?0:.42+.5*std::cos(pi*window_position)+
-                .08*std::cos(2*pi*window_position);
-            const auto value=std::abs(distance)<1e-12?2*cutoff:std::sin(2*pi*cutoff*distance)/(pi*distance);
-            result[tap]=static_cast<float>(value*window);sum+=value*window;
-        }
-        for(auto& value:result)value=static_cast<float>(value/sum);
-        return result;
-    };
-    const auto convert=[&](double fraction) {
-        a::Resampler converter(48000,48000,true);converter.initialize_timing(fraction,0);
-        const auto result=converter.process(input,converted,true);
-        check(result.consumed==input.size()&&converter.finished(),"phase sweep did not finish the original finite PCM");
-        long double energy=0,clamp_energy=0;Peak peak{fraction};std::size_t clipped=0;
-        for(std::size_t i=0;i<result.produced;++i) {
-            const auto value=converted[i];energy+=value*value;
-            const auto error=value-std::clamp(value,-1.f,1.f);clamp_energy+=error*error;
-            clipped+=std::abs(value)>1;
-            if(std::abs(value)>std::abs(peak.value))peak={fraction,i,value};
-        }
-        if(std::abs(peak.value)>std::abs(largest.value))largest=peak;
-        std::cout<<"clipping_diagnostic_phase fraction="<<fraction<<" samples="<<result.produced
-            <<" peak="<<peak.value<<" index="<<peak.index<<" over_unity="<<clipped
-            <<" clamp_fraction="<<static_cast<double>(clamp_energy/energy)<<'\n';
-        return result.produced;
-    };
-    const auto count=convert(fixture_fraction);
-    const std::vector<float> whole(converted.begin(),converted.begin()+static_cast<std::ptrdiff_t>(count));
-    a::Resampler split(48000,48000,true);split.initialize_timing(fixture_fraction,0);
-    std::array<float,61> block{};std::size_t consumed=0,produced=0;
-    std::size_t chunk_end=std::min<std::size_t>(97,input.size());
-    while(!split.finished()) {
-        const auto n=chunk_end-consumed;
-        const auto result=split.process(input.subspan(consumed,n),block,chunk_end==input.size());
-        check(result.consumed||result.produced||split.finished(),"split clipping diagnostic stalled");
-        consumed+=result.consumed;
-        if(consumed==chunk_end)chunk_end=std::min(input.size(),chunk_end+97);
-        for(std::size_t i=0;i<result.produced;++i) {
-            check(produced<whole.size()&&std::bit_cast<std::uint32_t>(block[i])==std::bit_cast<std::uint32_t>(whole[produced]),
-                "clipping diagnostic changed actual PCM with source/output chunks");
-            ++produced;
-        }
-    }
-    check(consumed==input.size()&&produced==whole.size(),"split clipping diagnostic changed finite duration");
-    for(unsigned phase=0;phase<256;++phase) {
-        const auto produced=convert(static_cast<double>(phase)/256);
-        check(produced==input.size(),"table-node sweep changed constant fractional advance");
-    }
-    // The formal phase-1 endpoint is phase 0 shifted by one input sample,
-    // plus its last zero-extended cell. Near-1 initialization is not constant:
-    // adding one can round to two and change the production source advance.
-    const auto endpoint=coefficients(256);
-    double endpoint_tail=0;
-    for(std::size_t tap=0;tap<endpoint.size();++tap) {
-        const auto index=static_cast<std::int64_t>(input.size()-1)+static_cast<std::int64_t>(tap)-48;
-        if(index>=0&&static_cast<std::uint64_t>(index)<input.size())
-            endpoint_tail+=input[static_cast<std::size_t>(index)]*static_cast<double>(endpoint[tap]);
-    }
-    const auto endpoint_value=static_cast<float>(endpoint_tail);
-    if(std::abs(endpoint_value)>std::abs(largest.value))largest={1.,input.size()-1,endpoint_value};
-    double max_jump=0,max_l1=0,max_input=0;
-    for(auto value:input)max_input=std::max(max_input,std::abs(static_cast<double>(value)));
-    for(unsigned phase=0;phase<256;++phase) {
-        const auto a=coefficients(phase),b=coefficients(phase+1);double jump=0,l1=0;
-        for(std::size_t tap=0;tap<a.size();++tap) {
-            jump+=std::abs(static_cast<double>(a[tap])+static_cast<double>(b[tap]-a[tap])-b[tap]);
-            l1+=std::abs(static_cast<double>(a[tap]))+std::abs(static_cast<double>(b[tap]-a[tap]));
-        }
-        max_jump=std::max(max_jump,jump);max_l1=std::max(max_l1,l1);
-    }
-    const auto arithmetic_bound=max_input*(max_jump+1024*std::numeric_limits<double>::epsilon()*max_l1);
-    const auto peak_upper=std::nextafter(static_cast<float>(std::abs(largest.value)+arithmetic_bound),
-        std::numeric_limits<float>::infinity());
-    std::cout<<"clipping_diagnostic_nodes phase_nodes=257 formal_phase_1_tail="<<endpoint_value
-        <<" interpolation_endpoint_l1_jump="<<max_jump<<" arithmetic_bound="<<arithmetic_bound
-        <<" phase_peak_upper="<<peak_upper<<'\n';
-    const auto phase_position=largest.fraction*256;
-    const auto phase=static_cast<unsigned>(phase_position);
-    const auto blend=phase_position-phase;
-    const auto first=coefficients(phase),second=coefficients(std::min(phase+1,256u));double reconstructed=0;
-    const auto training=datapump::modem::training_sample_count(config);
-    const auto padding=datapump::modem::pattern_pulse_padding_samples(config);
-    const auto payload_end=training+padding+3*datapump::modem::symbol_sample_count(config);
-    const auto source_position=largest.index+largest.fraction;
-    const auto section=source_position<training?"training":source_position<training+padding?"leading-pulse":
-        source_position<payload_end?"payload":source_position<payload_end+padding?"trailing-pulse":"suppression";
-    std::cout<<"clipping_diagnostic_peak fraction="<<largest.fraction<<" index="<<largest.index
-        <<" value="<<largest.value<<" section="<<section<<'\n';
-    for(std::size_t tap=0;tap<first.size();++tap) {
-        const auto index=static_cast<std::int64_t>(largest.index)+static_cast<std::int64_t>(tap)-48;
-        const auto value=index>=0&&static_cast<std::uint64_t>(index)<input.size()?input[static_cast<std::size_t>(index)]:0.f;
-        const auto weight=first[tap]+(second[tap]-first[tap])*blend;
-        const auto contribution=value*weight;reconstructed+=contribution;
-        std::cout<<"clipping_diagnostic_tap tap="<<tap<<" source_index="<<index<<" input="<<value
-            <<" weight="<<weight<<" contribution="<<contribution<<'\n';
-    }
-    check(std::bit_cast<std::uint32_t>(static_cast<float>(reconstructed))==std::bit_cast<std::uint32_t>(largest.value),
-        "clipping diagnostic FIR oracle disagrees with production converter");
-    std::cout<<"clipping_diagnostic_complete actual_phase_nodes=256 formal_endpoint=1 actual_fixture_phase=1 chunk_parity=1 fir_oracle=1 seconds="
-        <<std::chrono::duration<double>(std::chrono::steady_clock::now()-begun).count()
-        <<" note=original_clipping_gate_follows\n";
-}
-
-void native_queued_dsss_playback(bool interleave=false,bool diagnose=false) {
-    const auto input=dsss_audio_pcm(interleave);
-    std::vector<std::int16_t> reference_pcm;
-    std::vector<float> expected;
-    std::optional<std::array<std::uint64_t,3>> reference_start;
-    std::optional<double> reference_fraction;
-    for(const auto source_chunk:{97u,503u})for(int scenario=0;scenario<3;++scenario) {
-        if(source_chunk==503 && scenario)continue;
-        f::reset();f::state.available={"default"};f::state.supported_rates={48000};
-        f::state.write_limit=source_chunk==97?61:137;
-        const auto epoch=std::ceil(std::chrono::duration<long double>(std::chrono::system_clock::now().time_since_epoch()).count())+6;
-        QueuedPlayback driver(epoch-.125L-.375L/48000,scenario);
-        a::Options options;options.follow_system_clock=true;options.maximum_utc_error_seconds=.05;
-        options.maximum_timing_rate_correction=3e-10;
-        options.timing_stop_duration_seconds=static_cast<double>(input.size())/48000;
-        options.estimated_timing=a::EstimatedDeviceTiming{.001,.05,120};options.allow_timing_fallback=true;
-        unsigned statuses=0,formats=0;std::size_t cursor=0;
-        long double start_origin=0;double fraction=0;std::size_t first_frame=0;
-        options.timing_status=[&](const auto& status) {
-            ++statuses;check(!cursor && !formats && status.following_system_clock &&
-                status.requested_error_seconds==.05 && status.modeled_uncertainty_seconds<=.05,
-                "usable native-sized 50ms model failed before private source or silently fell back");
-        };
-        options.frame_timestamp=[&](auto frames,bool capture){return driver.stamp(frames,capture);};
-        std::string error;
-        try {a::playback(48000,"default",[&](std::span<float> output) {
-            check(formats==1 && statuses==1,"queued provider requested private source before one qualification/schedule");
-            const auto count=std::min({output.size(),static_cast<std::size_t>(source_chunk),input.size()-cursor});
-            if(count && cursor==0 && scenario==0) {
-                const std::array<std::uint64_t,3> start{driver.accepted,driver.presented,driver.elapsed};
-                if(!reference_start)reference_start=start;
-                else check(start==*reference_start,"PCM chunk comparison changed the initial native timing observations");
-            }
-            std::copy_n(input.begin()+static_cast<std::ptrdiff_t>(cursor),count,output.begin());cursor+=count;
-            if(count) {
-                driver.private_generated=true;
-                // Model bounded synthesis/publication work while the DAC runs.
-                // Even the smaller callbacks leave headroom in the 100ms queue.
-                driver.advance(24);
-            }
-            return count;
-        },{},[&](const auto& format) {
-            ++formats;check(!cursor && f::state.stopped && f::state.drops==1 &&
-                format.timing_quality==a::TimingQuality::estimated,
-                "source construction ran with a live DAC or upgraded estimated timing");
-            start_origin=driver.origin;
-            const auto scheduled=static_cast<double>(std::ceil(start_origin+.125L));
-            first_frame=static_cast<std::size_t>(std::ceil((scheduled-start_origin)*48000));
-            fraction=static_cast<double>((start_origin+static_cast<long double>(first_frame)/48000-scheduled)*48000);
-            if(scenario==0) {
-                if(!reference_fraction)reference_fraction=fraction;
-                else check(fraction==*reference_fraction,"PCM chunk comparison changed its initial affine source phase");
-            }
-            a::schedule_output(scheduled);
-        },a::ChannelMode::left_mono,options);}
-        catch(const datapump::Error& e){error=e.what();}
-        check(statuses==1 && formats==1 && driver.private_generated && cursor>0 &&
-            !f::state.live && f::state.configured_streams==1 && f::state.drops==1 && f::state.prepares==1 &&
-            f::state.recovered_errors.empty(),"private output failure reopened, recovered, reseeded or concealed qualification");
-        if(scenario==1) {
-            check(!error.empty() && driver.private_writes==0 && f::state.played.size()<=2400+first_frame && f::state.played.size()+2400>2400+first_frame &&
-                std::all_of(f::state.played.begin(),f::state.played.end(),[](auto value){return value==0;}),
-                "first-private-write failure emitted/replayed private PCM or lost silent preroll accounting");continue;
-        }
-        if(scenario==2) {
-            check(error=="synthetic timestamp failure after private output" && driver.private_writes>0 &&
-                cursor<input.size(),"post-private timestamp failure completed or restarted the source");continue;
-        }
-        check(error.empty() && cursor==input.size() && !driver.underrun && driver.presented==driver.accepted,
-            "bounded queued-provider synthesis/partial writes failed or dropped the finite source");
-        a::Resampler converter(48000,48000,true);converter.initialize_timing(fraction,0);
-        std::vector<float> converted(input.size()+4);
-        const auto result=converter.process(input,converted,true);
-        check(result.consumed==input.size() && converter.finished(),"independent DSSS audio reference did not finish");
-        converted.resize(result.produced);
-        const auto offset=2400+first_frame;
-        check(f::state.played.size()==offset+converted.size(),"queued playback lost settling/tails or changed finite duration");
-        // Signed FIR reconstruction can exceed the sampled source radial bound.
-        // Check the exact established clamp+quantization, then separately bound
-        // its actual waveform residual; a zero-clipping premise is false here.
-        for(std::size_t i=0;i<converted.size();++i)check(std::isfinite(converted[i]) &&
-            std::abs(f::state.played[offset+i]-std::clamp(converted[i],-1.f,1.f)*32767)<2,
-            "queued DSSS playback changed its monotonic affine waveform");
-        std::vector<std::int16_t> suffix(f::state.played.begin()+static_cast<std::ptrdiff_t>(offset),f::state.played.end());
-        if(reference_pcm.empty()) {reference_pcm=std::move(suffix);expected=std::move(converted);}
-        else check(suffix==reference_pcm,"different source chunks/partial hardware writes changed final DSSS PCM");
-    }
-    const auto energy=[](std::span<const float> pcm) {long double result=0;for(auto x:pcm)result+=x*x;return result;};
-    std::vector<float> quantized(reference_pcm.size());
-    std::size_t clipped=0;double peak_raw=0,peak_converted=0;
-    for(const auto value:input)peak_raw=std::max(peak_raw,std::abs(static_cast<double>(value)));
-    for(std::size_t i=0;i<reference_pcm.size();++i) {
-        peak_converted=std::max(peak_converted,std::abs(static_cast<double>(expected[i])));
-        if(reference_pcm[i]==32767 || reference_pcm[i]==-32767 || reference_pcm[i]==-32768)++clipped;
-        quantized[i]=reference_pcm[i]/32767.f;
-    }
-    long double clamp_error=0,pcm_error=0;
-    for(std::size_t i=0;i<expected.size();++i) {
-        const auto error=expected[i]-std::clamp(expected[i],-1.f,1.f);
-        clamp_error+=error*error;
-        const auto q=expected[i]-quantized[i];pcm_error+=q*q;
-    }
-    std::cerr<<"clipping audit peak="<<peak_converted<<" clipped="<<clipped<<" energy_fraction="<<double(clamp_error/energy(expected))<<"\n";
-    if(diagnose) {
-        check(reference_fraction.has_value(),"DSSS clipping diagnostic lacks its actual fixture phase");
-        dsss_clipping_diagnostic(input,*reference_fraction,dsss_audio_config(interleave));
-    }
-    check(clamp_error/energy(expected)<1e-8L,
-        "fractional DSSS reconstruction clipping exceeds the bounded reference distortion");
-    const auto raw_out=outside_energy(input,5250,12750),converted_out=outside_energy(expected,5250,12750);
-    const auto integer_out=outside_energy(quantized,5250,12750);
-    const auto quantization_radius=std::sqrt(clamp_error)+std::sqrt(static_cast<long double>(expected.size()))*2/32767;
-    check(std::sqrt(integer_out)<=std::sqrt(converted_out)+quantization_radius,
-        "post-int16 out-of-band energy exceeds the analytic PCM quantization envelope");
-    std::cout<<"DSSS10 native PCM samples="<<input.size()<<" clipped="<<clipped<<" peak_raw="<<peak_raw<<" peak_resampled="<<peak_converted
-        <<" clamp_energy_fraction="<<static_cast<double>(clamp_error/energy(expected))
-        <<" pcm_energy_fraction="<<static_cast<double>(pcm_error/energy(expected))
-        <<" whole outside fractions raw="<<static_cast<double>(raw_out/energy(input))
-        <<" resampled="<<static_cast<double>(converted_out/energy(expected))
-        <<" int16="<<static_cast<double>(integer_out/energy(quantized))<<" windows=";
-    // Fixed-size live display windows cover settling, payload/pulse boundaries
-    // and the tapered final tail. Window leakage is measured, not a mask claim.
-    for(const auto at:{std::size_t{0},std::size_t{97280},std::size_t{112640},expected.size()-4096}) {
-        std::array<float,4096> floating{},integer{};
-        for(std::size_t i=0;i<floating.size();++i) {
-            const auto taper=static_cast<float>(.5-.5*std::cos(2*std::numbers::pi*i/(floating.size()-1)));
-            floating[i]=expected[at+i]*taper;integer[i]=quantized[at+i]*taper;
-        }
-        const auto before=outside_energy(floating,5250,12750),after=outside_energy(integer,5250,12750);
-        long double window_clamp_error=0;
-        for(std::size_t i=0;i<floating.size();++i) {
-            const auto taper=.5L-.5L*std::cos(2*std::numbers::pi_v<long double>*i/(floating.size()-1));
-            const auto error=(expected[at+i]-std::clamp(expected[at+i],-1.f,1.f))*taper;
-            window_clamp_error+=error*error;
-        }
-        check(std::sqrt(after)<=std::sqrt(before)+std::sqrt(window_clamp_error)+std::sqrt(4096.L)*2/32767,
-            "streaming-window quantization exceeds its analytic energy envelope");
-        std::cout<<at<<":"<<static_cast<double>(after/energy(integer))<<",";
-    }
-    std::cout<<" (estimated provider/quantization evidence; no hardware emission-mask qualification)\n";
-}
-
 void bounded_clock_provider() {
     // Independently supplied device timestamps exercise native scheduling and
     // partial writes without wall-clock sleeps or relying on ALSA delay jitter.
@@ -3438,7 +3009,6 @@ int main(int argc,char** argv){try{
     full_rate_background_noise_output();
     if(argc==2&&std::string(argv[1])=="--minimum-rate") {minimum_hardware_rate();return 0;}
     minimum_hardware_rate();
-    if(argc==2&&std::string(argv[1])=="--dsss-clipping-diagnostic") {native_queued_dsss_playback(false,true);return 0;}
     std::unique_ptr<datapump::audio::trace::Scope> verbose;
     if(argc==3&&std::string(argv[1])=="--trace-utc") {
         verbose=std::make_unique<datapump::audio::trace::Scope>(argv[2]);argv[1]=const_cast<char*>("--utc-runtime");argc=2;
@@ -3448,7 +3018,6 @@ int main(int argc,char** argv){try{
         std::cout<<"Independent passive capture timing passed\n";return 0;
     }
     if(argc==2 && std::string(argv[1])=="--scheduled-payload") {scheduled_payload_runtime();return 0;}
-    if(argc==2 && std::string(argv[1])=="--sparse-clock") {native_sparse_clock_policy();return 0;}
     if(argc==2 && std::string(argv[1])=="--pipewire") {native_pipewire_dated_observations();independent_cover_runtime();std::cout<<"Native PipeWire dated observations passed\n";return 0;}
     if(argc==2 && std::string(argv[1])=="--live-debug") {native_source_endpoint_contract();shared_server_timing_fallback();native_prepared_positive_pointer();native_prepared_delay_readiness();return 0;}
     if(argc==2 && std::string(argv[1])=="--absolute-rate") {native_absolute_clock_not_steering_limit();return 0;}
@@ -3456,18 +3025,14 @@ int main(int argc,char** argv){try{
     if(argc==2 && std::string(argv[1])=="--native-frontier") {native_playback_frontiers();return 0;}
     if(argc==2 && std::string(argv[1])=="--utc-runtime") {
         native_pipewire_dated_observations();native_source_endpoint_contract();shared_server_timing_fallback();native_prepared_positive_pointer();native_absolute_clock_not_steering_limit();native_running_pointer_intervals();native_slow_query_recovers();native_playback_frontiers();native_audio_error_model();native_period_refinement();native_protected_period_reserve();
-        independent_cover_runtime();scheduled_payload_runtime();bounded_clock_provider();protected_timing_playback();timed_background_noise_preroll();native_queued_dsss_playback(true);
+        independent_cover_runtime();scheduled_payload_runtime();bounded_clock_provider();timed_background_noise_preroll();
         std::cout<<"Native runtime UTC timing passed\n";return 0;
     }
     if(argc==2 && std::string(argv[1])=="--background-noise-preroll") {timed_background_noise_preroll();return 0;}
     if(argc==2 && std::string(argv[1])=="--period") {native_period_refinement();native_protected_period_reserve();std::cout<<"Native period refinement passed\n";return 0;}
     if(argc==2 && std::string(argv[1])=="--lag") {bounded_clock_provider();std::cout<<"One-sided audio lag scheduling passed\n";return 0;}
-    if(argc==2 && std::string(argv[1])=="--interleave") {
-        protected_timing_playback();native_queued_dsss_playback(true);
-        std::cout<<"Interleave queued UTC playback passed\n";return 0;
-    }
     plugin_directories();selected_endpoint();default_shared_routes();
-    native_source_endpoint_contract();shared_server_timing_fallback();native_prepared_positive_pointer();native_absolute_clock_not_steering_limit();native_running_pointer_intervals();native_slow_query_recovers();native_playback_frontiers();native_sparse_clock_policy();
+    native_source_endpoint_contract();shared_server_timing_fallback();native_prepared_positive_pointer();native_absolute_clock_not_steering_limit();native_running_pointer_intervals();native_slow_query_recovers();native_playback_frontiers();
     channel_routing();capture_channel_routing();raw_capture_startup();audio_options();
     f::reset();f::state.available={"default:CARD=Good"};f::state.hints={{"default:CARD=Good",""}};
     rejects([&]{a::play(std::vector<float>(1),48000,"explicit-bad");});
@@ -3587,7 +3152,7 @@ int main(int argc,char** argv){try{
     bounded_clock_provider();
     zero_audio_error_requests();
     playback_discontinuity_observer();
-    independent_cover_runtime();scheduled_payload_runtime();protected_timing_playback();timed_background_noise_preroll();
-    native_queued_dsss_playback();
+    independent_cover_runtime();scheduled_payload_runtime();timed_background_noise_preroll();
+
     std::cout<<"ALSA default resolution and streaming tests passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

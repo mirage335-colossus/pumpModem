@@ -9,18 +9,12 @@ enabled.  Physical sensitivity and admission calibration remain external.
 """
 from __future__ import annotations
 
-import argparse
-import hashlib
-import json
 import math
-from pathlib import Path
-import statistics
 import time
 
 import torch
 
 from triad_gaussian_prepared import PreparedGaussianDesign
-from triad_gaussian_state import GaussianPrior
 
 
 def _sync(device):
@@ -231,104 +225,3 @@ class PreparedGaussianScan:
             owned_bytes_estimate=self.owned_bytes_estimate,
             preparation_peak_bytes_estimate=self.preparation_peak_bytes_estimate,
             scope="Fresh complete zero-initial-mean captures; reordered finite arithmetic; no automatic receiver selection")
-
-
-def _benchmark(args):
-    if args.output.exists():
-        raise ValueError("benchmark output must be fresh")
-    if min(args.blocks, args.batch, args.hypotheses, args.taps, args.repetitions, args.threads) < 1:
-        raise ValueError("positive workload dimensions required")
-    torch.set_num_threads(args.threads)
-    torch.backends.cuda.matmul.allow_tf32 = False
-    torch.set_float32_matmul_precision("highest")
-    generator = torch.Generator().manual_seed(args.seed)
-    shape = (args.blocks, args.hypotheses, args.taps)
-    v = torch.complex(torch.randn(shape, generator=generator, dtype=torch.float64),
-                      torch.randn(shape, generator=generator, dtype=torch.float64))*.3
-    gram = v[..., :, None]@v.conj()[..., None, :]
-    gram[::19] = 0
-    dts = [0.]+[.021+(i%7)*.003 for i in range(args.blocks-1)]
-    prior = GaussianPrior(tuple([1/args.taps]*args.taps), .25, .17)
-    rshape = (args.blocks, args.batch, args.hypotheses, args.taps)
-    r = torch.complex(torch.randn(rshape, generator=generator, dtype=torch.float64),
-                      torch.randn(rshape, generator=generator, dtype=torch.float64))*.2
-    r[::19] = 0
-    start = time.perf_counter()
-    design = PreparedGaussianDesign(gram, dts, prior)
-    design_seconds = time.perf_counter()-start
-    dtype = torch.complex64 if args.precision == "fp32" else torch.complex128
-    scan = PreparedGaussianScan(design, args.device, dtype,
-                               memory_limit_bytes=args.memory_limit_bytes)
-    serial = design.to(scan.device, dtype, check_inputs=False)
-    start = time.perf_counter()
-    resident = r.to(device=scan.device, dtype=dtype)
-    _sync(scan.device)
-    transfer_seconds = time.perf_counter()-start
-
-    def serial_score():
-        serial.reset()
-        for block in resident:
-            serial.update(block)
-        return serial.scores(), serial.mean
-
-    expected, expected_mean = serial_score()
-    actual = scan.score(resident)
-    _sync(scan.device)
-    measurements = {"serial": [], "scan": []}
-    for repetition in range(args.repetitions):
-        for name in (("serial", "scan") if repetition%2 == 0 else ("scan", "serial")):
-            _sync(scan.device)
-            mark = time.perf_counter()
-            if name == "serial":
-                expected, expected_mean = serial_score()
-            else:
-                actual = scan.score(resident)
-            _sync(scan.device)
-            measurements[name].append(time.perf_counter()-mark)
-    _sync(scan.device)
-    mark = time.perf_counter()
-    transferred = scan.score(r)
-    _sync(scan.device)
-    transfer_inclusive = time.perf_counter()-mark
-    result = dict(schema="triad-gaussian-affine-scan-benchmark-v1",
-        workload=vars(args)|{"output": str(args.output)},
-        design_preparation_seconds=design_seconds,
-        scan=scan.diagnostics(), transfer_seconds=transfer_seconds,
-        resident_score_seconds=measurements,
-        median_speedup=statistics.median(measurements["serial"])/statistics.median(measurements["scan"]),
-        scan_transfer_inclusive_seconds=transfer_inclusive,
-        maximum_score_difference=float((actual["scores"]-expected).abs().amax()),
-        maximum_mean_difference=float((actual["final_mean"]-expected_mean).abs().amax()),
-        transfer_score_difference=float((transferred["scores"]-actual["scores"]).abs().amax()),
-        candidate_ranking_equal=bool(torch.equal(actual["scores"].argmax(-1),expected.argmax(-1))),
-        torch_version=torch.__version__, cuda_version=torch.version.cuda,
-        hardware=torch.cuda.get_device_name(scan.device) if scan.device.type == "cuda" else "CPU",
-        input_sha256=hashlib.sha256(r.numpy().tobytes()).hexdigest(),
-        sources={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in
-            (Path(__file__),Path(__file__).with_name("triad_gaussian_prepared.py"),
-             Path(__file__).with_name("triad_gaussian_state.py"))},
-        scope="Synthetic arithmetic/workload discriminator; not sampled sensitivity or a confidence-qualified runtime model")
-    args.output.parent.mkdir(parents=True,exist_ok=True)
-    args.output.write_text(json.dumps(result,indent=2)+"\n")
-    print(json.dumps({k:result[k] for k in ("median_speedup","maximum_score_difference",
-                                         "maximum_mean_difference","candidate_ranking_equal")}))
-
-
-def _main():
-    parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output",type=Path,required=True)
-    parser.add_argument("--blocks",type=int,default=10000)
-    parser.add_argument("--batch",type=int,default=8)
-    parser.add_argument("--hypotheses",type=int,default=3)
-    parser.add_argument("--taps",type=int,default=2)
-    parser.add_argument("--repetitions",type=int,default=3)
-    parser.add_argument("--threads",type=int,default=2)
-    parser.add_argument("--seed",type=int,default=614901)
-    parser.add_argument("--device",default="cpu")
-    parser.add_argument("--precision",choices=("fp32","fp64"),default="fp32")
-    parser.add_argument("--memory-limit-bytes",type=int,default=2*1024**3)
-    _benchmark(parser.parse_args())
-
-
-if __name__=="__main__":
-    _main()

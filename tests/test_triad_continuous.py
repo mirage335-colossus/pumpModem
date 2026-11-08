@@ -10,62 +10,14 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
 from triad_continuous import (carrier_phase, endpoint_decision, read_exact,
-                              receiver_noise_variance, validate_stream_identity, BoundedClockControl, execute, parser,
+                              receiver_noise_variance, validate_stream_identity,
                               disciplined_capture_extent, make_timing_forward, tracking_source_basis,
                               tracking_receiver_class)
 from triad_timing_forward import TimingState
-from triad_control_clock import ControlClock, ClockReading
 
 
 class ContinuousTests(unittest.TestCase):
-    def test_cpu_default_and_explicit_large_limit_reach_physical_controller(self):
-        self.assertIsNone(parser().parse_args(['--report', '/tmp/unused']).threads)
-        for flags, expected in (([], 12), (['--threads', '65'], 65)):
-            with self.subTest(flags=flags), tempfile.TemporaryDirectory() as directory:
-                events = []
-                def configure(allocation):
-                    events.append('configure')
-                    self.assertEqual(allocation['threads'], expected)
-                    self.assertEqual(allocation['linear_algebra_threads'], expected)
-                    return dict(configured=True)
-                def physical(options, arguments):
-                    events.append('physical')
-                    self.assertEqual(options.threads, expected)
-                    self.assertEqual(options.cpu_allocation['runtime'], dict(configured=True))
-                    return dict(cpu_allocation=options.cpu_allocation)
-                with mock.patch('triad_cpu.detect_cpu_budget', return_value=dict(available_cpus=12)), \
-                     mock.patch('triad_continuous.configure_numerical_threads', side_effect=configure), \
-                     mock.patch('triad_physical_run.execute', side_effect=physical):
-                    result = execute(['--mode', 'receive', '--bank', 'not-opened.json',
-                        '--physical-noise-profile', 'not-opened-profile.json',
-                        '--report', str(Path(directory)/'report.json'), *flags])
-                self.assertEqual(events, ['configure', 'physical'])
-                self.assertEqual(result['cpu_allocation']['threads'], expected)
-        with tempfile.TemporaryDirectory() as directory, \
-             mock.patch('triad_continuous.configure_numerical_threads') as configure:
-            with self.assertRaisesRegex(ValueError, 'positive integer'):
-                execute(['--threads', '0', '--mode', 'transmit',
-                         '--report', str(Path(directory)/'report.json')])
-            configure.assert_not_called()
 
-    def test_default_live_clock_and_public_tracking_policy(self):
-        options = parser().parse_args(['--report', '/tmp/unused-triad-clock-report'])
-        self.assertEqual(options.follow_system_clock, 'auto')
-        self.assertEqual(options.receiver, 'auto')
-        self.assertEqual(options.clock_phase_max_ppm, 200)
-        from triad_tracking_receiver import PracticalTrackingReceiver, PersistentTrackingReceiver, TrackingReceiver
-        self.assertIs(tracking_receiver_class(), PracticalTrackingReceiver)
-        self.assertIs(tracking_receiver_class('tracking-persistent'), PersistentTrackingReceiver)
-        self.assertIs(tracking_receiver_class('tracking-reset'), TrackingReceiver)
-        bank = dict(coordinates=[[0, 0, 0, 0]])
-        forward, seconds = make_timing_forward(bank, dict(nominal_triplet_bandwidth_hz=225), 3)
-        self.assertEqual(forward.states, (TimingState(0, 0, 0),))
-        self.assertEqual(seconds, 4)
-        self.assertAlmostEqual(forward.delay_step_seconds, 1/900)
-        for config in ([], dict(initial_rate_indices=2), dict(segment_seconds='4'),
-                       dict(segment_seconds=.1), dict(secret_tx_trace=True)):
-            with self.assertRaises(ValueError):
-                make_timing_forward(dict(bank, tracking=config), dict(nominal_triplet_bandwidth_hz=225), 3)
 
     def test_slow_envelope_cadence_and_audio_phase_are_separate(self):
         bank = dict(coordinates=[[0, 0, 0, 0]])
@@ -128,50 +80,15 @@ class ContinuousTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'sample counter'):
             disciplined_capture_extent(2**64-1, 6000, .001, [[0, 0, 0, 0]], [[0, 0]])
 
-    def test_full_audio_policy_is_explicit_and_rejects_double_steering(self):
-        with tempfile.TemporaryDirectory() as directory:
-            report = str(Path(directory)/'result.json')
-            flags = ['--mode', 'transmit', '--report', report, '--follow-system-clock', 'continuous']
-            self.assertEqual(parser().parse_args(flags).follow_system_clock, 'continuous')
-            with self.assertRaisesRegex(ValueError, 'source-only clock steering'):
-                execute(flags+['--', '--clock-follow-bounded'])
-            with self.assertRaisesRegex(ValueError, 'dated TX/RX hardware'):
-                execute(['--mode', 'simulate', '--bank', 'not-opened.json', '--report', report,
-                    '--follow-system-clock', 'continuous'])
-            self.assertFalse(Path(report).exists())
 
-    def test_clock_follow_uses_original_envelope_without_changing_receiver_bank(self):
-        now = [10000000000]
-        offset = [1700000000000000000]
-        clock = ControlClock(reference_now=lambda: now[0], reader=lambda:
-            ClockReading(now[0]+offset[0], now[0], now[0]))
-        control = BoundedClockControl(clock)
-        class Source:
-            targets = []
-            def clock_target(self, target):
-                self.targets.append(target)
-                return {'accepted': True}
-        source = Source()
-        def update(delta):
-            now[0] += 1000000000
-            offset[0] += delta
-            control.poll(source)
-        update(2_000_000_000)
-        update(1_000_000_000)  # individually small, but outside original envelope
-        update(-2_000_000_000)
-        update(-2_000_000_000)
-        update(10)  # paired-read jitter is not another waveform correction
-        self.assertEqual(source.targets, [2., 1., -1.])
-        self.assertEqual(control.report['outside_envelope'], 1)
-        self.assertEqual(control.origin.offset_ns, 1700000000000000000)
 
     def test_live_stream_requires_matching_explicit_pattern_identity(self):
-        for revision in ('legacy-v1', 'independent-apsk-v2'):
+        for revision in ('independent-apsk-v2',):
             identity = dict(pattern_revision=revision, added_amplitude_depth=.25)
             self.assertEqual(validate_stream_identity({'format': identity}, identity), identity)
             for changed in ({**identity, 'pattern_revision': 'future-unknown'},
                             {**identity, 'pattern_revision': []},
-                            {**identity, 'pattern_revision': 'legacy-v1' if revision != 'legacy-v1' else 'independent-apsk-v2'},
+                            {**identity, 'pattern_revision': 'retired-pattern'},
                             {**identity, 'added_amplitude_depth': .5},
                             {**identity, 'added_amplitude_depth': math.nan},
                             {**identity, 'added_amplitude_depth': True},

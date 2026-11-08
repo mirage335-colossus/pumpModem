@@ -1,445 +1,106 @@
 # Symmetric cryptography and keyfiles
 
-The implementation uses OpenSSL 3 for HKDF, AES, HMAC and SHA, and a
-portable Serpent-256 implementation for the confidentiality cascade. Waveform,
-spreading and hop streams retain AES-256-CTR.
+The maintained services use OpenSSL 3 for AES, HKDF, HMAC, SHA and AES-GCM,
+plus a portable Serpent-256 implementation. Robust waveform keys, dual-lane
+confidentiality, keyfiles and Fast encryption are separate constructions; a
+waveform-purpose stream is not message encryption.
 
-The time-indexed streams below belong to regular mode and are unchanged by
-Fast. [Fast cryptography](fast-mode.md#integrity-physical-completion-and-bounded-storage) uses
-separately derived Serpent-256-CBC and AES-256-CBC layers with HMAC, a
-per-transfer random salt and fresh per-group IVs when encryption is enabled. It
-reuses the keyfile loader, never
-the regular epoch keystream. Fast encryption is optional; its public SHA-256
-checksum mode provides neither secrecy nor authentication. Both peers choose
-the same mode locally, with no automatic fallback on authentication failure.
+## Canonical Robust waveform purposes
 
-The Robust GUI's built-in **WARNING-Amateur** keyset has fixed public key
-material included in the software. It exercises the same regular-mode cipher,
-waveform and synchronization machinery as a file-backed keyset, but cannot
-provide confidentiality or sender authentication. The existing transmit guard
-and address-reuse limits apply to it as well: independent stations or sessions
-using the same epoch and positions can reproduce a stream. The public keyset is
-not a fallback for a failed or mismatched real keyfile.
+The native `IndependentApskV2` waveform uses purpose-separated AES streams.
+`Crypto` derives the fixed purpose keys from a 32-byte waveform seed using the
+`datapump/v1/hkdf-sha256` salt and the following labels:
 
-## Time-indexed streams
+| Slot | Purpose | Label | Use |
+| ---: | --- | --- | --- |
+| 0 | Data | `datapump/v1/data` | Reserved waveform-purpose stream |
+| 1 | DSSS | `datapump/v1/dsss` | Canonical triad waveform |
+| 2 | Scrambler | `datapump/v1/scrambler` | Canonical triad waveform |
+| 3 | FHSS | `datapump/v1/fhss` | Reserved purpose slot |
+| 4 | MAC | `datapump/v1/mac` | Waveform context derivation |
 
-All text labels below are ASCII bytes without a terminating zero. `BE64(x)` is
-exactly eight bytes in network order. `HKDF(ikm, info)` means RFC 5869 HKDF with
-SHA256, extract-and-expand, output length 32, and salt
-`datapump/v1/hkdf-sha256`.
+The canonical triad uses the DSSS and Scrambler slots. Keep all labels and
+indices unchanged: exact sample bytes and independent vectors depend on them.
+An intentional waveform change must update the canonical format and its
+independent vectors together.
 
-The AES-only waveform constructor takes a 32-byte seed and derives the
-following purpose keys. A current named key set has separate 64-byte Serpent and
-AES roots; the first 32 bytes of its AES root supply that waveform seed. A
-waveform-only key cannot be used for message confidentiality.
+For stream purpose `p` and whole-second timestamp `t`, the stream key is
+`HKDF(purpose_key[p], "datapump/v1/epoch/" || BE64(t))`. The AES-CTR counter
+starts with eight zero bytes followed by `BE64(floor(offset/16))`; the first
+`offset mod 16` bytes are skipped. The stream API takes purpose, timestamp,
+byte offset, and count. Separate purposes prevent Scrambler and DSSS output
+from sharing keystream; they do not provide message confidentiality,
+authentication, replay prevention, or key freshness. Reusing the same key,
+purpose, timestamp, and offset reproduces the same bytes.
 
-| Purpose | HKDF info |
-| --- | --- |
-| Data-purpose waveform and cover | `datapump/v1/data` |
-| DSSS | `datapump/v1/dsss` |
-| Scrambler | `datapump/v1/scrambler` |
-| Reserved keyfile purpose (FHSS) | `datapump/v1/fhss` |
-| Waveform MAC | `datapump/v1/mac` |
+For file-backed keys, the AES root's first 32 bytes seed those waveform
+purpose keys. The independent Serpent root does not feed that AES derivation.
 
-Each stream purpose derives `epoch_key = HKDF(purpose_key,
-"datapump/v1/epoch/" || BE64(timestamp))`. A timestamp is an unsigned whole-second
-coordinate, normally a Unix-time approximation of absolute time. The
-`Crypto::stream` primitive accepts an explicit timestamp and byte offset;
-it does not read the system clock. Pattern transport selects a new timestamp
-at symbol boundaries using the sample schedule below. Data, Scrambler and
-DSSS use that same symbol-start timestamp under each clock hypothesis.
+The waveform's keyed child sources use `Crypto::mac` on their canonical
+context to derive a child waveform seed. The dual-lane message APIs are kept
+separate from this AES-only waveform path. Python acquisition/tracking tools
+are not an integrated receiver, and the Robust backend is not connected to the
+GUI.
 
-For byte offset `o`, the AES-only `Crypto::stream` initial 128-bit counter is
-`domain_pad || BE64(floor(o / 16))`. The optional final `Crypto::stream`
-argument selects `StreamDomain::Payload` by default, whose eight-byte pad is
-all zero, preserving this AES-only API's existing output. `StreamDomain::Preamble` uses
-the eight ASCII bytes `preamble`; `StreamDomain::Suppression` uses `suppress`.
-Private pattern candidates use `StreamDomain::PatternZeroV2` and
-`StreamDomain::PatternOneV2`, with ASCII pads `pat-v2-0` and `pat-v2-1`.
-All domains use the same purpose and epoch key; the counter pad is not another key derivation. Discard the first `o % 16`
-keystream bytes and produce the requested count. OpenSSL increments the whole
-counter in big-endian order. The API rejects an offset/count combination whose
-final byte exceeds `2^64-1`, so no domain can carry into the high counter
-bytes or overlap another domain.
-Changing the whole-second anchor derives a fresh epoch key; counter positions
-therefore do not collide merely because adjacent transmissions cross a second.
-Within one anchor, purpose and domain, random access and sequential generation
-agree.
+## Dual-lane confidentiality and authentication
 
-### Binary pattern chip addressing
+Current key entries hold independent 64-byte Serpent and AES roots. They are
+not concatenated as input to one cipher-key KDF. For the random-access
+confidentiality stream, each lane derives its own epoch key with HKDF-SHA512
+and the fixed `datapump/cascade/v2/hkdf-sha512` salt. Its info is the
+lane-specific `datapump/cascade/v2/{serpent|aes}/stream/` label followed by
+`BE64(epoch)`. Each lane uses AES-256-CTR or Serpent-256-CTR respectively;
+their output bytes are XORed. Offset and length are checked against the
+64-bit byte-coordinate limit. Reusing a key/epoch/offset stream is unsafe.
 
-Every selected key on a non-tone transfer enables private Scrambler templates
-as well as Data encryption. DSSS remains an independently selectable private
-purpose. Tone modes force the key, Data mask, Scrambler and DSSS off; they are
-unencrypted modes for ordinary communications or local experiments and provide
-no LPI claim. Explicit old APSK profiles are rejected.
+`confidentiality_child(context)` derives child confidentiality roots
+independently within both lanes. The Serpent and AES info domains are
+`datapump/cascade/v2/serpent/child/` and
+`datapump/cascade/v2/aes/child/`, each followed by the same framed context.
+Use separate, stable contexts for distinct cryptographic purposes.
 
-Transfer derives each stable 32-byte waveform seed from its purpose's original
-key stream at epoch zero and byte offset zero. `PatternCode` constructs a
-`Crypto` instance from that seed and selects the purpose and each symbol's
-start epoch for chip generation. Raw payload Data masking uses the original
-selected key. A later symbol therefore does not require the original message's
-epoch to reconstruct its streams. Both peers must use this addressing scheme;
-it is incompatible with the earlier transmission-wide epoch mapping and the
-former real-sign waveform.
+The stream counter prefixes are `data-s02` for Serpent and `data-a02` for
+AES, followed by `BE64(floor(offset/16))`; the first `offset mod 16` bytes
+are skipped. These fixed prefixes and the per-lane KDF domains are part of the
+construction and are covered by the independent vectors.
 
-Let `Fs` be the sample rate, `N` the samples per symbol, and
-`C = ceil(N / chip_samples)`. `stream_epoch` is the whole second of symbol
-zero; `stream_phase_samples` is its sample offset within that second. For
-symbol `j`, integer arithmetic evaluates:
+`confidentiality_mac(message)` returns the XOR of full HMAC-SHA256 results
+under independently derived Serpent- and AES-lane authentication keys. The
+key domains are `datapump/cascade/v2/serpent/auth/` and
+`datapump/cascade/v2/aes/auth/`. The protocol supplies the canonical message
+context and framing. Authentication does not
+replace source sanitization or establish sender identity outside that framed
+construction. `mac` is the waveform-purpose HMAC utility; it is not a
+confidentiality tag for user data.
 
-```text
-start_samples = stream_phase_samples + j*N
-epoch         = stream_epoch + floor(start_samples / Fs)
-within_second = start_samples mod Fs
-ordinal       = floor(within_second / N)
-chip_position = ordinal*C + chip_in_symbol
-```
+Fast uses a prepared per-transfer `ConfidentialityCbc` context. Its
+`prepare_confidentiality_cbc` setup derives Serpent and AES CBC keys from
+separate roots, context, and random transfer salt; each group uses fresh IV
+material. The Fast layer authenticates IV, salt, local profile, ordinal and
+ciphertext before decryption. The exact bootstrap and group framing, public
+checksum mode, bounded storage, and failure behavior are in
+[Fast integrity and completion](fast-mode.md#integrity-physical-completion-and-bounded-storage).
+There is no automatic fallback from an authentication failure to public mode.
 
-The selected epoch stays fixed through the entire symbol, including an
-hours-long pattern. Successive symbols beginning in one second consume
-successive positions; the first symbol beginning in a later second selects
-that newer epoch and resets the local positions. Long symbols skip intervening
-seconds. Partial final chips consume a full position. The helpers avoid
-overflowing intermediate sample products and reject true epoch/address overflow.
+## Keyfile version 4
 
-Each private candidate consumes eight bytes at `8*chip_position`, in its own
-versioned domain: `PatternZeroV2` for bit 0, `PatternOneV2` for bit 1. Both
-Scrambler and DSSS use that candidate's domain. If Scrambler is enabled its
-bytes supply the row; otherwise a public Scrambler stream at epoch zero supplies
-the base in the same candidate domain. Enabled DSSS bytes at the same position
-and symbol epoch XOR into that row. This also separates candidates when only
-DSSS is private. DSSS follows the same symbol-boundary schedule. Two
-big-endian 32-bit words determine a circular
-I/Q sample: uniform words `u,v` in `(0,1)` produce phase `2*pi*v` and radius
-`min(1.75, sqrt(-log(u))) / sqrt(1-exp(-1.75^2))`. This caps input-chip peaks and
-normalizes expected complex power to one. Both amplitude and
-phase now depend on the private stream. This removes the former invariant
-where squaring real PCM canceled all private +/- signs and exposed a fixed
-squared carrier.
+New keyfiles use `DPMKEY04`; versions 01–03 are rejected. Each named entry
+stores separate 64-byte Serpent and AES roots. A waveform-only seed cannot
+provide the independent confidentiality roots, and an older keyfile cannot
+reconstruct a missing lane. Both peers must use matching current key material
+and the same locally selected cryptographic mode.
 
-The public seek coordinate for symbol `j` starts at chip `start_chip + j*C`;
-it indexes this schedule rather than one transmission-wide cryptographic byte
-stream. All addresses are checked, including the eight-byte expansion. Fixed
-512-byte seek caches are indexed by epoch and offset, retain no
-duration-proportional keystream history, and are cleansed on release.
+Keyfile generation gathers separate 64-byte operating-system random values for
+the Serpent and AES lanes in each of two rounds, separated by at least one
+monotonic second. It can also collect three seconds of selected mono audio.
+The incrementally hashed audio digest is mixed only into the Serpent lane;
+the AES lane does not depend on audio or Serpent material. Audio is
+supplementary input, not an entropy estimate. An OS-only fallback is permitted
+only when explicitly enabled and is reported to the caller. A delay between
+random collections does not prove independent entropy or hardware RNG use.
 
-Receiver search state is separate from these caches. Live keyed symbols lasting at
-least 60 seconds use compact scalar correlation rather than a symbol-sized
-FFT history: all configured timing/frequency/rate/phase hypotheses remain,
-with at most 32 diagnostic evidence records and 64 constellation points.
-Failed symbol results and expired epoch searches are discarded. The number
-of still-running epoch hypotheses remains subject to the aggregate DSP budget;
-compact caches do not imply unlimited search or guaranteed real-time operation.
-
-Pulse shaping occurs after this mapping. Eligible profiles use finite 25% RRC
-pulses, followed by a circular radial PCM limiter for overlapping peaks. Neither
-operation changes plaintext-to-ciphertext encryption, AES/HKDF, purpose keys,
-CTR domains, byte XOR mixing or absolute chip positions. The two
-filter tails consume no new chips or stream bytes. Fixed-size mapped-chip caches
-avoid repeating the same seek/map work and are cleansed on release. The receiver
-uses linear shaped candidate templates and treats limiter/neighbor tails as
-model mismatch, while retaining pattern evidence as its sole synchronization
-criterion. See [pulse shaping](modem.md#pulse-shaping) for bandwidth, power loss,
-short-pattern exceptions and peer compatibility.
-
-The two legal private alternatives are independent secret rows, rather than
-one row multiplied by a public mask. Both rows change with every symbol's
-canonical epoch/ordinal and chip position. Learning one emitted row does not
-reveal its opposite or the next symbol's alternatives under the AES assumption.
-Only the selected alternative is emitted at each position. The receiver regenerates both alternatives for
-its candidate key, epoch and stream position, fitting unknown common gain and
-phase. FFT correlation divides by the actual template energy; the bounded
-clock-window correlator retains the full two-quadrature Gram matrix. Signal
-start, continuation, end and time/key alignment still come from pattern
-evidence alone, never a preamble, coding interval, FEC or MAC. Ending requires
-consecutive fully scored failed symbols whose durations cover six seconds;
-an individual symbol lasting at least six seconds ends the stream on its first
-completed failure. A partial long-symbol window cannot end reception.
-
-Unkeyed public patterns use the same circular I/Q mapping with the known
-Scrambler seed and epoch zero. Both rows restart at symbol boundaries. Bit 0
-uses `Payload` at chip `i`; bit 1 uses `PatternOneV2` at chip `1886+i`.
-The public prefix was selected for finite-pattern energy and amplitude/complex
-separation, including shifted alternatives; no chip or whole-symbol energy
-normalization is applied. The first 128 coefficients of both rows are immutable
-precomputed public values; longer patterns lazily use exactly the same mapping.
-This is not secret material or an extra cryptographic counter domain.
-
-The former balanced sign-mask public alphabet is no longer the default. Both
-public peers must use the new alphabet; no wire marker, new hypothesis or GUI
-option selects it. Private waveforms and addresses are unchanged. Low-level
-Data-only encrypted diagnostics retain the old mask; production keyed transfer
-always enables Scrambler and uses the existing independent private alphabet.
-See [public alphabet construction and measurements](public-pattern-alphabet.md).
-
-Two bit alternatives mean two complete templates, not a two-point constellation.
-Short public templates yield sparse plots because later symbols reuse the same
-finite values. Their known repetition remains recognizable and provides no
-secrecy. All templates use complex `value` samples; the former real `sign`/`fill`
-API has been removed.
-
-### Independent private alphabet compatibility and limits
-
-The v2 private alphabet is mandatory whenever pattern Scrambler or DSSS is
-active. Both peers must use it; there is no legacy toggle, on-air version bit,
-automatic fallback or additional receiver hypothesis. Existing parameter lists
-continue to select private operation through their key/Scrambler/DSSS settings.
-Public unkeyed patterns, settling and suppression retain their existing
-formats. Payload confidentiality and new keyfiles use the cascade described
-below. Raw and dictionary-short messages keep their exact bit counts; longer
-messages retain the fixed marker and interval format.
-
-This removes the former public chip-mask substitution, including reuse of that
-transform at the next symbol. It is not a MAC for short messages, proof of sender
-identity, replay prevention or protection against cancellation and jamming.
-Repeated key/epoch/ordinal/chip coordinates still reproduce both rows. The
-cross-transmission limits and in-memory TX lock described below still apply;
-independent templates do not make a reused address fresh. Very short templates
-can also have poor phase-invariant separation; a single complex chip cannot
-establish bit identity under unknown gain and phase.
-
-The receiver still fits two candidates using its existing search bank and
-admission thresholds. Generation uses two bounded stream/mapped-chip caches;
-no storage grows with symbol duration. Planner probabilities retain complex
-template correlations and separate energy envelopes, and average both private
-source-bit conditions when finite templates are evaluated. Dense templates
-retain their orthogonal ensemble approximation. These are model estimates,
-not measured sensitivity or a universal dB penalty.
-
-### Protected hardware settling
-
-The hardware-settling prefix uses the same bounded circular-noise mapping and
-one update per chip as private payload templates. Public prefix bytes are
-XORed with the selected Data-purpose bytes and every enabled Scrambler/DSSS
-stream before amplitude and phase mapping. Each layer uses the existing key
-and transmission epoch with `StreamDomain::Preamble`, the separate counter
-range whose high eight bytes are ASCII `preamble`. This pad is local state,
-never an on-air field; no preamble-specific key is generated.
-
-After the full payload waveform and its final filter tail, every nonempty
-transmission emits exactly three seconds of suppression noise. It uses the same
-noise mapping and enabled Data/Scrambler/DSSS mixture, but a third counter
-domain, `StreamDomain::Suppression`, whose high eight bytes are ASCII
-`suppress`. This separates its bytes from both the prefix and every payload
-stream without deriving another key. The same transmission epoch anchors
-these bounded noise caches. There is no payload bit, symbol slot, transmitted
-metadata or change to the Data counter schedule associated with this tail.
-Its duration is independent of symbol duration, including when the rounded
-prefix is absent. The tail is a guard against weaker delayed echoes, not a
-proof of echo cancellation or a receiver ending condition.
-
-The prefix's input chips are generated independently of both payload codewords and carry no
-acquisition marker. It uses no payload stream positions; payload starts at
-position zero afterward. Continuous pulse shaping overlaps those independent
-prefix and payload contributions near their boundary; this overlap does not
-change either stream's source bytes or addresses.
-For automatically timed hardware output, the epoch is the scheduled whole
-second of the first payload symbol; playback begins earlier by the settling
-duration and leading pulse tail. The sample schedule advances later epochs,
-so buffer generation never polls the clock to change a pattern in progress.
-The output device is opened before scheduling. This is a nominal audio sample
-schedule; unknown hardware/output-buffer latency is not measured or compensated.
-Explicit-timestamp output and simulation remain deterministic; capture timing
-hints account for their prefix offset. No epoch, prefix length, chip count, nonce
-or sender identity is transmitted as an additional field. There is no legacy
-APSK training prefix or post-encryption symbol padding.
-
-Regular chip timing, finite bandwidth, burst edges and bounded sample amplitudes
-remain physical characteristics of the waveform. RRC pulses can expose periodic
-second-order statistics at the chip clock, and concentrating signal energy can
-aid a keyless energy detector. Removing the squared-carrier
-invariant is not proof of indistinguishability from arbitrary background noise
-or a measured probability of interception.
-
-### Continuous tuning noise
-
-The GUI's **Transmit noise** action continuously modulates dummy bits through
-the regular encrypted pattern transmitter. Each start obtains fresh temporary
-master key material through `Crypto::random()` (the operating-system CSPRNG).
-The usual purpose-separated Data, Scrambler and DSSS streams use the same
-derivation and addressing as ordinary encrypted transmission. Saved key
-material is not a noise input; temporary keys
-are never registered with reception, saved or shown in the transmission trace,
-and their owned cryptographic storage is cleansed on release.
-
-Noise keeps the selected carrier, chip rate, waveform shaping and normal signal
-level, using encrypted pattern modulation even when the saved mode is Tone.
-A bounded source masks all-zero dummy bits with the AES Data-purpose stream and
-feeds the resulting bits into the ordinary `PatternCode` and `PatternTransmitter`.
-This preserves the two pattern alternatives, symbol boundaries, private
-Scrambler/DSSS mapping, pulse shaping and normal settling waveform. It does not
-replace the payload with the preamble's noise distribution. No user content,
-dictionary or interval framing is added. Each symbol uses its own normal
-epoch/ordinal address; no finite buffer loops or stream positions restart on
-successive reads. Finite coordinate limits stop generation before exhaustion
-rather than wrapping. This prevents intentional periodic reuse; it does not
-forbid chance repetition in random output values.
-
-The independent receiver retains its ordinary local key bank and admission
-thresholds. Noise is intended to present unrelated random evidence, like
-background noise at comparable received power and spectrum, rather than a
-recognizable public or saved-key message template. This is not an absolute
-false-detection guarantee: raw-bit reception is unauthenticated, finite random
-observations can correlate by chance, and transmitted power can raise the
-receiver's noise floor. The bounded Gaussian mapping, chip clock, filtering and
-hardware remain distinguishable physical characteristics; no thermal-noise
-indistinguishability or RF interference measurement is claimed.
-
-### Data, integrity and reuse
-
-`xor_data` XORs arbitrary bytes at an explicitly selected epoch with the
-confidentiality stream. This stream applies separate Serpent-256-CTR and
-AES-256-CTR layers, equivalent to XORing the two separately keyed keystreams.
-Each epoch derives the Serpent key from its own root using HKDF-SHA512 with info
-`datapump/cascade/v2/serpent/stream/ || BE64(epoch)` and the AES key separately
-from its own root with `datapump/cascade/v2/aes/stream/ || BE64(epoch)`. Each
-uses the first 32 bytes of its own 64-byte output. The HKDF-SHA512 salt is
-`datapump/cascade/v2/hkdf-sha512`; neither lane's secret enters the other's
-derivation. Counters use the respective eight-byte prefixes `data-s02` and
-`data-a02`, followed by BE64(floor(offset/16)); partial blocks start at offset
-modulo 16. Byte-position overflow is rejected. Child and Fast CBC keys are also
-derived separately within each lane. These layers add no wire bits and retain
-random access at original physical positions. Confidentiality stream addresses
-must not be reused. Encrypted peers need the same current suite; previous
-ciphertext is not retroactively protected.
-
-On-air pattern transport uses `xor_binary_bits`: each symbol consumes
-Data bit `ordinal` from its symbol-start epoch, most-significant bit first
-within each byte. Data and
-pattern addressing advance on the sample schedule whether preceding symbols
-decoded or not. A 512-byte cache bounds Data mask scratch storage.
-For interval confidentiality, `confidentiality_mac` XORs the two full
-HMAC-SHA256 values computed with separate Serpent- and AES-lane authentication
-keys. Verification compares all 32 bytes with `CRYPTO_memcmp`. The separate
-AES-only `mac` operation remains available for waveform derivation and for the
-waveform-only identity fallback. Confidentiality-bearing key sets instead use a
-domain-separated `confidentiality_mac` for their identity fingerprint.
-
-Every source interval carries exactly 128 coded bytes. A 24-byte marker made
-from two copies of the 96-bit recovery word precedes each interval; there is no
-terminal marker or whole-stream footer. FEC and compression profiles are agreed
-locally. The data area, optional keyed HMAC and optional RS parity occupy fixed
-positions:
-
-| FEC | Public data bytes | Keyed data bytes | Keyed HMAC bytes | Parity bytes |
-| --- | ---: | ---: | ---: | ---: |
-| Off | 128 | 96 | 32 | 0 |
-| RS20 | 106 | 74 | 32 | 22 |
-| RS60 | 80 | 48 | 32 | 48 |
-
-Only encrypted intervals contain an integrity tag. For each keyed interval,
-transfer computes the two-lane tag over the following exact concatenation:
-
-```text
-ASCII("DP-INTERVAL") || 0x04 || U8(fec) || U8(compressed)
-    || BE64(epoch) || BE64(ordinal) || fixed_data_area
-```
-
-Here `fec` is 0, 1 or 2 for Off, RS20 or RS60; `compressed` is 0 or 1. The
-canonical `(epoch, ordinal)` comes from `symbol_stream_address` for the first
-coded symbol after that interval's marker. It is not a received-interval count,
-measured carrier frequency, transmitted identifier or original-stream origin.
-A later acquisition can verify a surviving interval if it acquires the same
-canonical address. The full tag is appended before RS encoding, so RS protects
-data and tag together. Data encryption then masks all marker, data, tag and
-parity bits. Reception reverses this order and verifies the tag after RS.
-
-Public intervals contain no content digest, checksum or MAC. Raw bits bypass
-markers, the source codec, FEC and MAC altogether, even when Data encryption is
-selected. Pattern evidence and successful public RS correction provide no
-cryptographic authentication or replay protection. The fixed short-text
-dictionary adds no authentication, transmitted metadata or length field. There
-is no packet parser. Short dictionary interpretation runs only after physical end.
-
-Marker recovery runs after Data decryption and cannot change a crypto offset or
-reset a counter. Its [evidence threshold](protocol.md#marker-evidence-threshold)
-accounts for tested marker hypotheses under an independent-fair-bit model,
-including bounded leading and interior missing runs. Missing leading positions
-come from the physical receiver's symbol clock. Marker search cannot select a
-new Data-stream alignment or turn its model bound into authentication.
-
-An established pattern track can retain unknown interior symbol slots until a
-later confident observation confirms their extent. Data decryption processes
-the known spans at their original symbol addresses; a missing slot consumes
-its position without supplying a ciphertext decision. Marker matching excludes
-these unknowns from its evidence. Any coded byte containing an unknown bit is
-passed to RS as a declared erasure; its zero filler is not an observed value.
-At physical completion, a partially observed final interval can supply its
-remaining fixed positions as erasures. No entirely unobserved interval is
-manufactured from a marker alone. Keyed intervals must still pass HMAC after
-correction. This preserves alignment across a detection gap; it does not
-recover from an unknown change in the capture clock or keystream origin.
-
-The bounded receiver spools corrected data areas during reception. Only the
-physical six-second ending event permits the raw LZMA2 source decoder or exact
-uncompressed validity-cell decoder to run. Raw LZMA2 uses a fixed dictionary;
-its endpoint and final zero padding are checked after physical completion.
-Codec success does not provide public integrity. Independent interval MACs do
-not authenticate a total stream length or prove that no later interval was
-intended. Losing the final interval of one canonical LZMA2 source removes its
-codec endpoint and causes post-end source decoding to fail. Whole-interval loss
-can remain undetected for an uncompressed source or independently valid suffix.
-
-Reusing the same key, timestamp, purpose, domain and stream positions repeats
-CTR output. It can expose plaintext XORs and allow correlation between repeated
-private waveforms; the new mapping cannot repair stream reuse. Independent
-MAC keys remain separate. The live hardware sender keeps an in-memory maximum
-used epoch for each key, identified by a dedicated local MAC label. It includes
-the first epoch used by surrounding noise and every payload symbol whose shaped
-pulse can contribute to generated output, even before that symbol's nominal
-start. Reservations are retained before audio delivery and survive cancellation,
-profile changes and reloading the same key within the session.
-
-An ordinary subsequent payload must start beyond that maximum. The selected
-new profile's settling/pulse prefix determines the corresponding playback wait.
-For maximum used whole-second epoch `H` and prefix duration `P` seconds, the
-conservative automatic-playback deadline is `H + 1 - P`; the countdown is
-`max(0, H + 1 - P - current_time)`. It is recomputed from the clock, rather than
-decremented independently of clock adjustments. A fixed caller-supplied epoch
-at or below `H` stays locked until changed or explicitly forced.
-The shared GUI shows **TX lock** with a countdown and enforces the same condition
-for ordinary button, keyboard and raw-bit sends. A backward clock correction
-can extend the wait. Backward jumps during preparation or playback waiting,
-and forward jumps that miss the scheduled start, abort that attempt. Normal
-hardware completion retains its separate symbol-duration-aware receive-separation
-wait; cancellation retains its existing separation behavior.
-
-The explicit **Force next transmission** action bypasses these transmit waits
-for one valid request. It can repeat CTR masks and private waveforms, but does
-not erase the maximum used epoch or leave protection disabled for later requests.
-It does not alter the receiver's physical-absence completion rule. No keyfile
-flags, transmitted fields or extra receive hypotheses implement this override.
-All history is memory-only and closing the program forgets it. Simulation stays
-separate from hardware history. Standalone CLI/file transmitter timestamps remain
-caller-controlled, and separate devices sharing a key still require coordination.
-A surviving reception uses its acquired epoch,
-subsecond phase and stream-symbol index to recover the matching Data positions.
-Recovering later bits does not reconstruct wholly missing intervals or prove
-that reception includes the complete original source.
-
-## Named key sets: keyfile version 4
-
-New CLI and GUI keyfiles use `DPMKEY04`; versions `DPMKEY01`, `DPMKEY02` and
-`DPMKEY03` are rejected. V4 stores separately derived Serpent and AES roots per
-named entry. It does not reconstruct a missing confidentiality lane from old
-Data or MAC keys. Both peers must use the current suite and the same file-backed
-keyset, or the same built-in public amateur keyset in the Robust GUI.
-
-Generation gathers separate 64-byte operating-system CSPRNG inputs for the
-Serpent and AES lanes in each of two rounds, at least one monotonic second
-apart. It also attempts to collect three seconds of selected mono audio at the
-provider's input rate, after a short capture warm-up. The received Float32
-samples are framed and hashed incrementally; samples are not recorded to disk
-or written to logs. The audio digest is mixed only into the Serpent lane with
-HMAC-SHA512 keyed by that lane's OS-derived secret. The AES lane's keys,
-including waveform-purpose and lane authentication keys, never use the audio
-digest or Serpent root; the combined authentication tag uses both lanes.
-Serpent and AES entry, child, epoch, CBC and authentication keys are derived
-within their respective lanes rather than splitting a combined KDF output.
-Specifically, with `HKDF512` denoting HKDF-SHA512 and salt
-`datapump/cascade/v2/hkdf-sha512`, the two rounds `S0,S1` and `A0,A1` are
-conditioned as:
+With HKDF-SHA512 and salt `datapump/cascade/v2/hkdf-sha512`, the two rounds
+`S0,S1` and `A0,A1` are conditioned as:
 
 ```text
 S_os = HKDF512(S0 || S1, "datapump/v4/serpent/os-entropy")
@@ -447,112 +108,51 @@ S    = HMAC-SHA512(S_os, "datapump/v4/serpent/audio-mix/" || U8(audio_used) || a
 A    = HKDF512(A0 || A1, "datapump/v4/aes/keyfile-entropy")
 ```
 
-When audio is unavailable and fallback is explicitly allowed, `audio_used` is
-zero and `audio_digest64` is all zero. Entry roots are then separately derived
-from `S` and `A` using lane-specific, indexed domains.
+When audio fallback is used, `audio_used` is zero and its digest field is
+all zero; lane-specific domains then derive the indexed entry roots.
 
-The capture checks reject unsupported or changing sample rates, nonfinite or
-out-of-range samples, obvious constant input, insufficient variation and
-extreme clipping. These are checks for unusable input, not an entropy estimate
-or proof of unpredictability. The native monitor is taken before the project's
-resampler; an operating system, audio device or browser may already process its
-input. Browser deliveries can include upstream queued samples, so warm-up and
-cadence do not prove that each sample was acquired after a request. A microphone,
-loopback or adversarial audio source need not provide independent noise.
+The fixed keyfile prefix records format, lengths, entry count, nonce and
+whether audio contributed. The encrypted payload contains unique named entries
+with both roots. AES-GCM authenticates the public prefix as associated data;
+a separately keyed Serpent HMAC authenticates the framed prefix and GCM
+ciphertext before keys are released. The optional pad is additional storage
+protection, not password-derived encryption. A complete unpadded file contains
+the material needed to recover its keys.
 
-The GUI and CLI attempt the selected audio input and clearly warn when
-unavailable or unusable audio causes an OS-only fallback. Cancellation and OS
-randomness failures abort generation. An OS-only result retains separate OS
-inputs for the two lanes but has no audio contribution. The C++ creation API
-allows this fallback only when explicitly requested and returns whether audio
-was used along with any warning. A current-format keyfile records whether audio
-contributed; this flag is not an entropy estimate.
+The 48-byte prefix contains the `DPMKEY04` magic, header and optional-pad
+lengths, flags, entry count, a random 12-byte nonce, and payload length. Each
+plaintext entry is a big-endian 16-bit name length, 1–64 printable UTF-8 name
+bytes, and the 64-byte Serpent and AES roots. The prefix is followed by the
+random header, ciphertext, a 16-byte AES-GCM tag, and a 32-byte Serpent HMAC.
+The optional pad must contain at least 1,073,741,825 bytes.
 
-These measures are best effort: a delay does not prove fresh independent
-entropy, hardware RNG use or 512-bit security. An operating-system generator
-may itself depend on AES; for example, Windows `BCryptGenRandom` documents a
-CTR_DRBG. If OS output is exposed, protection from the audio contribution
-depends on the captured input retaining unpredictability and on the conditioner
-and key-handling assumptions. Predictable audio is mixed with the OS material,
-not substituted for it. Reuse of cipher addresses is still unsafe.
+Even-indexed header and pad bytes feed the Serpent wrapping derivation;
+odd-indexed bytes feed the AES derivation, with pad lengths framed in both.
+Separate SHA-512/HKDF-SHA512 domains derive the wrapping keys. Serpent-CTR is
+the inner layer, AES-256-GCM the outer layer, and the prefix is GCM associated
+data. A separately derived Serpent HMAC covers the framed prefix and outer
+ciphertext including the GCM tag; the loader verifies that tag before opening
+either cipher layer or releasing key entries.
 
-The platform random calls are Linux `getrandom`, Windows `BCryptGenRandom`,
-browser `__wasi_random_get` through the WebCrypto adapter, and `getentropy` on
-other supported POSIX systems. Browser requests are limited to 65,536 bytes and
-header generation cooperatively checkpoints between chunks. Browser and native
-audio availability, permissions and provider behavior are separate from the
-cryptographic construction; see the [validation record](validation.md) for
-what has actually been tested.
+Production creation uses exclusive file creation, owner-only permissions and
+bounded working storage. The 128 MiB random header and optional pad must not be
+represented as guarantees of secure deletion or resistance to someone holding
+the complete keyfile. Secret buffers are cleansed where practical, but process
+memory, swap, crash dumps, caller-owned buffers, audio providers, operating
+systems and hardware remain outside that guarantee.
 
-The 48-byte prefix contains `DPMKEY04`, the header and optional pad lengths,
-flags, entry count, a random 12-byte nonce and the payload length. The low flag
-bit indicates a required pad; the next bit records that audio was used. Each
-plaintext entry consists of a BE16 name length, 1–64 printable UTF-8 name bytes,
-then a 64-byte Serpent root and a 64-byte AES root. Names are unique, and 1–128
-entries are allowed. The prefix is followed by the random header, ciphertext,
-a 16-byte AES-GCM tag and a 32-byte Serpent-lane authentication tag. Dimensions,
-flags, exact length and the optional pad are checked before key entries are
-returned.
+## Security limits and references
 
-The public prefix is bound into both wrapping derivations. Even-indexed header
-and pad bytes feed the Serpent hash; odd-indexed bytes feed the AES hash, with
-pad lengths framed in both. SHA-512 and separate HKDF-SHA512 domains derive the
-two wrapping keys. Serpent-CTR is the inner layer; AES-256-GCM is the outer
-layer, authenticating the prefix as associated data. A separate Serpent-lane
-HMAC-SHA256 covers the framed prefix and outer ciphertext including its GCM
-tag; the loader verifies it before opening the AES and Serpent layers. A
-complete unpadded file contains everything needed to recover its keys; this is
-not password protection.
+Cryptographic correctness does not establish fresh keys, prevent address
+reuse, secure an audio device, or protect a compromised host. Tests and
+independent vectors verify specified constructions; they are not a security
+audit or physical-link qualification. See [security boundaries](security.md),
+the [current validation record](validation.md), and the
+[evidence index](indexes/evidence.md) for current limits and source-bound
+measurements.
 
-More precisely, the Serpent authentication key is the first 32 bytes of
-`HKDF512(S_digest, "datapump/v4/serpent/keyfile-auth")`. Its authenticated
-input is `ASCII("datapump/v4/keyfile-auth/") || prefix48 || BE64(outer_size) ||
-outer`, where `outer` includes the AES-GCM tag. The GCM tag is checked before
-Serpent decoding and before any key entry is released.
-
-The optional pad must contain at least 1,073,741,825 bytes, and its complete
-contents are read with bounded working storage. A padded file requires the
-same pad; a pad cannot be supplied for an unpadded file. Corruption, truncation,
-trailing data and unsupported flags are rejected. The explicit
-`datapump::testing` helpers use smaller fixture policies; production entry
-points enforce the 128 MiB header and greater-than-1 GiB pad sizes.
-
-Creation uses exclusive file creation and refuses existing paths and symlinks.
-POSIX creation uses mode 0600. Windows uses a protected owner-only DACL and
-`CREATE_NEW`; Windows builds link the system Advapi32 library. Data is flushed
-and synchronized before successful return. A failed write can leave an
-incomplete, restricted file, which will fail to load; automatic deletion is
-avoided because a pathname could have been replaced concurrently. Directory
-entry durability across a power loss is not guaranteed by this library.
-
-## Boundaries
-
-* An unpadded keyfile contains everything needed to recover its master key.
-  This format spreads the key's storage dependency across a large random file;
-  it is not password protection or encryption against someone holding the file.
-  A pad must also remain secret. Neither file should contain signing keys or
-  secrets for unrelated applications.
-* Header and pad size improve the opportunity to remove necessary entropy;
-  they do **not** guarantee secure erasure on SSDs, snapshots, journaling file
-  systems, backups, or wear-levelled devices. Deleting a few predictable bytes
-  does not guarantee cryptographic erasure either.
-* Sensitive internal key arrays, hash inputs, and temporary secret buffers are
-  cleansed where practical. Memory is not locked, and swap, crash dumps, compiler
-  copies, and caller-owned plaintext/keystream buffers remain outside this
-  guarantee.
-* No replay protection is implemented. A bounded clock search can limit the
-  accepted time range; it does not prevent a replay within that range.
-* Cryptography authenticates bytes after decoding. It cannot establish hardware
-  isolation or guarantee that an audio interface, USB device, driver, or host
-  cannot be compromised.
-* This code and the integrated modem require independent review before relying
-  on them for sensitive communications. Test coverage is not a security audit.
-
-## Primary references
-
-* [RFC 5869: HKDF](https://www.rfc-editor.org/rfc/rfc5869)
-* [RFC 2104: HMAC](https://www.rfc-editor.org/rfc/rfc2104)
-* [NIST SP 800-38A: block cipher modes](https://csrc.nist.gov/pubs/sp/800/38/a/final)
-* [OpenSSL HKDF API](https://docs.openssl.org/3.0/man7/EVP_KDF-HKDF/)
-* [OpenSSL HMAC API](https://docs.openssl.org/3.0/man7/EVP_MAC-HMAC/)
-* [OpenSSL EVP encryption API](https://docs.openssl.org/3.0/man3/EVP_EncryptInit/)
+Primary references: [RFC 5869: HKDF](https://www.rfc-editor.org/rfc/rfc5869),
+[RFC 2104: HMAC](https://www.rfc-editor.org/rfc/rfc2104),
+[NIST SP 800-38A: block cipher modes](https://csrc.nist.gov/pubs/sp/800/38/a/final),
+[OpenSSL HKDF](https://docs.openssl.org/3.0/man7/EVP_KDF-HKDF/), and
+[OpenSSL EVP encryption](https://docs.openssl.org/3.0/man3/EVP_EncryptInit/).

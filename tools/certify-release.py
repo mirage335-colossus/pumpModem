@@ -22,20 +22,13 @@ WINDOWS_SPEC = importlib.util.spec_from_file_location('datapump_windows_certific
     Path(__file__).with_name('windows-certification.py'))
 windows_certification = importlib.util.module_from_spec(WINDOWS_SPEC)
 WINDOWS_SPEC.loader.exec_module(windows_certification)
-SMOKE_SPEC = importlib.util.spec_from_file_location('datapump_gui_smoke',
-    Path(__file__).with_name('run-gui-smoke.py'))
-gui_smoke = importlib.util.module_from_spec(SMOKE_SPEC)
-SMOKE_SPEC.loader.exec_module(gui_smoke)
 gh = release.gh
 REQUIRED_JOBS = {'linux-tests', 'windows-tests', 'compatibility'}
 DISPLAY_WARNING_POLICY = ('Display cadence warnings do not fail certification; '
-                          'content/physical/pending checks remain mandatory.')
+                          'all remaining UI checks remain mandatory.')
 HOSTED_WARNING_POLICY = ('The recognized hosted graphics exclusion does not block certification or '
                          'Latest eligibility. The listed graphics checks remain untested; '
                          'all other required checks remain mandatory.')
-SMOKE_WARNING_POLICY = ('A typed workload cap with validated recent progress is incomplete GUI smoke '
-                        'coverage, not a smoke pass. It does not block hosted certification or '
-                        'Latest eligibility; all other required checks remain mandatory.')
 SCOPE = ('Hosted source contract, GUI and packaging tests, plus checks of the exact '
          'published archives. Linux containers share the runner kernel; Windows '
          'uses the selected Windows x64 hosted runner, with its image recorded in '
@@ -54,41 +47,9 @@ def validate_warnings(value, metadata):
     return value
 
 
-def validate_smoke_warnings(value, metadata, inventory_sha, run_id, run_attempt):
-    if not isinstance(value, list) or len(value) > 64:
-        raise ValueError('Smoke warnings must be a bounded list of at most 64 records')
-    fields = {'code', 'target', 'scope', 'diagnostic', 'source_sha',
-              'inventory_sha256', 'run_id', 'run_attempt'}
-    identities = {'source_sha': metadata['source_sha'], 'inventory_sha256': inventory_sha,
-                  'run_id': str(run_id)}
-    targets = release.application_targets(metadata)
-    seen = set()
-    for item in value:
-        if (not isinstance(item, dict) or set(item) != fields
-                or any(not isinstance(field, str) for field in item.values())):
-            raise ValueError('Smoke warning must contain exactly the expected string fields')
-        if (item['code'] != 'gui-smoke-workload-incomplete' or item['target'] not in targets
-                or any(item[key] != expected for key, expected in identities.items())):
-            raise ValueError('Smoke warning identity differs from this release, inventory or run')
-        # A partial rerun may reuse a successful job from an earlier attempt of
-        # this same run. Keep its actual originating attempt in immutable evidence.
-        if (not re.fullmatch(r'[1-9][0-9]*', item['run_attempt'])
-                or int(item['run_attempt']) > int(run_attempt)):
-            raise ValueError('Smoke warning attempt must be positive and no later than the recording attempt')
-        scope = item['scope']
-        if (len(scope) > 128 or not (scope == 'source/native'
-                or re.fullmatch(r'published/[A-Za-z0-9][A-Za-z0-9._:/@+-]*', scope))):
-            raise ValueError('Smoke warning scope must be source/native or a bounded published image')
-        if not gui_smoke.valid_budget_diagnostic(item['diagnostic']):
-            raise ValueError('Smoke warning lacks the exact typed recent-progress budget diagnostic')
-        identity = (item['target'], scope, item['diagnostic'])
-        if identity in seen:
-            raise ValueError('Duplicate smoke warning for the same target, scope and diagnostic')
-        seen.add(identity)
-    return value
 
 
-def collect_smoke_warnings(directory, run_id, run_attempt):
+def validate_smoke_reports(directory, run_id, run_attempt):
     """Keep the newest artifact per job, preserving any earlier successful job's origin."""
     run_id, run_attempt = str(run_id), str(run_attempt)
     if not all(re.fullmatch(r'[1-9][0-9]*', value) for value in (run_id, run_attempt)):
@@ -103,7 +64,6 @@ def collect_smoke_warnings(directory, run_id, run_attempt):
         job, attempt = match.groups()
         if job not in newest or int(attempt) > int(newest[job][0]):
             newest[job] = (attempt, artifact)
-    warnings = []
     for attempt, artifact in newest.values():
         identity = {'run_id': run_id, 'run_attempt': attempt}
         manifest_path = artifact / 'job-coverage.json'
@@ -118,22 +78,13 @@ def collect_smoke_warnings(directory, run_id, run_attempt):
             if not isinstance(report, dict):
                 raise ValueError(f'Malformed smoke report: {path.name}')
             if (path.name == 'native-tests.json' and not {'run_id', 'run_attempt'} & report.keys()
-                    and report.get('status') in ('passed', 'failed', 'passed_with_warnings')):
+                    and report.get('status') in ('passed', 'failed')):
                 continue
             if any(report.get(key) != value for key, value in identity.items()):
                 raise ValueError(f'Smoke report identity differs from its artifact: {path.name}')
-            if report.get('status') == 'incomplete':
-                warning = report.get('warning')
-                if (not isinstance(warning, dict)
-                        or any(warning.get(key) != value for key, value in identity.items())
-                        or warning.get('source_sha') != report.get('source_sha')):
-                    raise ValueError(f'Smoke warning identity differs from its report: {path.name}')
-                warnings.append(warning)
-                if len(warnings) > 64:
-                    raise ValueError('Smoke collection contains more than 64 warning records')
-            elif report.get('status') not in ('passed', 'failed') or 'warning' in report:
+            if report.get('status') not in ('passed', 'failed') or 'warning' in report:
                 raise ValueError(f'Malformed smoke report outcome: {path.name}')
-    return warnings
+
 
 
 def required_jobs(metadata):
@@ -395,6 +346,8 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
     results = json.loads(results_path.read_text(encoding='utf-8'))
     if not isinstance(results, dict):
         raise ValueError('Results must be a JSON object')
+    if set(results) - {'source_sha', 'inventory_sha256', 'jobs', 'tested_targets', 'warnings'}:
+        raise ValueError('Results contain unsupported certification fields')
     jobs = results.get('jobs', {})
     if not isinstance(jobs, dict) or any(not isinstance(k, str) or not re.fullmatch(r'[A-Za-z0-9_.-]+', k)
                                         or v not in ('success', 'failure', 'cancelled', 'skipped', 'timed_out', 'pending')
@@ -407,8 +360,6 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
         state = prepare(repository, tag, Path(scratch) / 'published', inventory_sha)
         metadata = state['metadata']
         warnings = validate_warnings(results.get('warnings', []), metadata)
-        smoke_warnings = validate_smoke_warnings(results.get('smoke_warnings', []), metadata,
-                                                 inventory_sha, run_id, run_attempt)
         required = required_jobs(metadata)
         jobs_passed = required <= jobs.keys() and all(value == 'success' for value in jobs.values())
         if results.get('source_sha') != metadata['source_sha']:
@@ -419,10 +370,10 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
                 or len(set(tested_targets)) != len(tested_targets) or not set(tested_targets) <= names.keys()):
             raise ValueError('Tested targets must be unique application identities from this release')
         passed = jobs_passed and set(tested_targets) == names.keys()
-        # Exact hosted exclusions and incomplete smoke results stay visible.
+        # Exact hosted platform exclusions stay visible.
         # Neither excuses other failures nor attests to coverage not completed.
         latest_eligible = passed and not metadata['experiment'] and metadata['schema'] >= 5
-        status = ('passed_with_warnings' if warnings or smoke_warnings else 'passed') if passed else 'failed'
+        status = ('passed_with_warnings' if warnings else 'passed') if passed else 'failed'
         if latest_eligible:
             latest_note = 'This ordinary release remains eligible for Latest.'
         elif metadata['experiment']:
@@ -457,12 +408,6 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
             evidence['coverage_exclusions'] = {
                 warning['target']: warning['omitted_checks'] for warning in warnings}
             evidence['hosted_warning_policy'] = HOSTED_WARNING_POLICY
-        if smoke_warnings:
-            evidence['smoke_warnings'] = smoke_warnings
-            evidence['smoke_warning_policy'] = SMOKE_WARNING_POLICY
-            evidence['incomplete_smoke_coverage'] = {
-                target: sorted({item['scope'] for item in smoke_warnings if item['target'] == target})
-                for target in sorted({item['target'] for item in smoke_warnings})}
         if metadata['schema'] >= 2:
             evidence.update(
                 gui_backends=metadata['gui_backends'], tested_targets=sorted(tested_targets),
@@ -490,12 +435,11 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
             evidence['browser_device_qualification'] = 'Not covered: real browser microphone, playback and download behavior'
         stem = f'certification-{run_id}-attempt-{run_attempt}'
         if any(stem + suffix in state['assets'] for suffix in (
-                '.json', '.md', '-warning.log', '-smoke-warnings.json', '-smoke-warnings.log')):
+                '.json', '.md', '-warning.log')):
             raise ValueError('Certification evidence already exists; never overwrite a prior run')
         json_path, markdown_path = Path(scratch) / (stem + '.json'), Path(scratch) / (stem + '.md')
         warning_paths = []
         warning_text = ''
-        smoke_warning_text = ''
         if warnings:
             warning_path = Path(scratch) / (stem + '-warning.log')
             warning_text = '\n'.join(f'WARNING {item["code"]}: {item["message"]}\n'
@@ -505,22 +449,6 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
             warning_paths.append(str(warning_path))
             evidence['warning_report_asset'] = warning_path.name
             evidence['warning_report_sha256'] = release.digest(warning_path)
-        if smoke_warnings:
-            smoke_json_path = Path(scratch) / (stem + '-smoke-warnings.json')
-            smoke_log_path = Path(scratch) / (stem + '-smoke-warnings.log')
-            release.write_json(smoke_json_path, smoke_warnings)
-            smoke_warning_text = '\n'.join(
-                f'WARNING {item["code"]}: {item["target"]} / {item["scope"]}\n'
-                f'Incomplete GUI smoke coverage, not a smoke pass. {item["diagnostic"]}\n'
-                f'Source {item["source_sha"]}; inventory {item["inventory_sha256"]}; '
-                f'run {item["run_id"]}, attempt {item["run_attempt"]}.\n'
-                for item in smoke_warnings)
-            smoke_log_path.write_text(smoke_warning_text, encoding='utf-8')
-            warning_paths.extend((str(smoke_json_path), str(smoke_log_path)))
-            evidence['smoke_warning_json_asset'] = smoke_json_path.name
-            evidence['smoke_warning_json_sha256'] = release.digest(smoke_json_path)
-            evidence['smoke_warning_log_asset'] = smoke_log_path.name
-            evidence['smoke_warning_log_sha256'] = release.digest(smoke_log_path)
         release.write_json(json_path, evidence)
         coverage = evidence['required_coverage']
         status_label = evidence['status'].replace('_', ' ')
@@ -539,13 +467,6 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
                   else 'Hosted certification failed. ')
                + HOSTED_WARNING_POLICY + ' ' + latest_note + '\n\n'
                + warning_text + '\n' if warnings else '')
-            + ('**Incomplete GUI smoke coverage.** '
-               + ('Hosted certification passed with documented incomplete smoke coverage. ' if passed
-                  else 'Hosted certification failed. ')
-               + SMOKE_WARNING_POLICY + ' ' + latest_note + '\n\n'
-               + f'[Smoke warning JSON]({asset_base}/{stem}-smoke-warnings.json), '
-               + f'[smoke warning log]({asset_base}/{stem}-smoke-warnings.log).\n\n'
-               + smoke_warning_text + '\n' if smoke_warnings else '')
             + '\n'.join(f'- {job}: **{jobs.get(job, "missing")}**' for job in sorted(required | jobs.keys()))
             + ('\n\nRecorded application targets: ' + ', '.join(f'`{target}`' for target in tested_targets)
                + '. Missing targets: ' + (', '.join(f'`{target}`' for target in names if target not in tested_targets) or 'none')
@@ -553,9 +474,9 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
             + (f'\n\n{DISPLAY_WARNING_POLICY} Known limitations: '
                f'[warning.log]({asset_base}/warning.log).' if metadata['schema'] >= 2 else '')
             + '\n\nHosted certification succeeds with status **passed** or **passed_with_warnings**. '
-            'Documented exclusions remain untested; incomplete smoke coverage remains unqualified. '
+            'Documented exclusions remain untested. '
             'All other required coverage must pass. '
-            'Source suites rebuild the recorded release commit, including the full calibration tests. '
+            'Source suites rebuild the recorded release commit and run its retained correctness contracts. '
             'Archive checks run the published bytes identified by the hashes below.\n\n'
             + '\n'.join(f'- Source `{target}`: {item["environment"]}; groups '
                         + ', '.join(item['groups']) + '.' for target, item in coverage['source_tests'].items())
@@ -597,15 +518,6 @@ def record(repository, tag, run_id, results_path, run_attempt='1'):
                      + ('Hosted certification passed with documented exclusions. ' if passed
                         else 'Hosted certification failed. ')
                      + HOSTED_WARNING_POLICY + ' ' + latest_note + '\n')
-        if smoke_warnings:
-            body += ('**Incomplete GUI smoke coverage, not a smoke pass.** '
-                     + ('Hosted certification passed with documented incomplete smoke coverage. ' if passed
-                        else 'Hosted certification failed. ')
-                     + SMOKE_WARNING_POLICY + ' ' + latest_note + '\n\n'
-                     + '\n'.join(f'- `{target}`: ' + ', '.join(f'`{scope}`' for scope in scopes)
-                                 for target, scopes in evidence['incomplete_smoke_coverage'].items())
-                     + f'\n\n[Smoke warning JSON]({asset_base}/{stem}-smoke-warnings.json), '
-                     + f'[smoke warning log]({asset_base}/{stem}-smoke-warnings.log).\n')
         if metadata['schema'] < 5:
             body += ('This older release cannot become Latest because it lacks the signed APT repository '
                      'or signed Arch/Gentoo update channels required by current consumers.\n')

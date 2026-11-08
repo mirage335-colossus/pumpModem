@@ -2,7 +2,6 @@
 #include "web_pixels.hpp"
 #include "plot_render.hpp"
 #include "document_presentation.hpp"
-#include "datapump/transfer.hpp"
 #include <array>
 #include <iostream>
 #include <map>
@@ -11,7 +10,6 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
-#include <thread>
 
 using namespace datapump::gui;
 namespace {
@@ -159,22 +157,17 @@ void layers_and_services() {
 void document_withdrawal() {
     Launch launch;launch.page=ui::Page::planner;
     Application app(launch);web::Bridge bridge(app);
-    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(30);
-    while(!app.enabled(ui::Command::planner_apply_short)&&std::chrono::steady_clock::now()<deadline) {
-        app.tick();std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
-    check(app.enabled(ui::Command::planner_apply_short),"Planner worker did not prepare the apply fixture");
     const auto snapshot=bridge.snapshot(1000,760);
-    const auto text=snapshot.find("\"text\":\"Use target for short messages\"");
-    check(text!=std::string::npos,"Planner fixture requires an available apply action");
+    const auto text=snapshot.find("\"text\":\"Use current draft\"");
+    check(text!=std::string::npos,"Planner fixture requires a saved-preference action");
     const auto begin=snapshot.find(",\"id\":\"",text);
     check(begin!=std::string::npos,"Document action has no opaque identity");
     const auto target=std::stoull(snapshot.substr(begin+7));
-    // The previously rendered action disappears before another snapshot. Its
-    // local document eligibility must be checked independently of old handles.
-    app.edit(ui::Field::planner_target,"invalid target");
+    // Navigation withdraws the previously rendered document before another
+    // snapshot. Eligibility must be checked independently of stale handles.
+    app.select_page(ui::Page::console);
     const auto result=bridge.accept(event(bridge,web::EventKind::activate,target,1));
-    check(!result.accepted&&result.error.find("Document declaration")!=std::string::npos,
+    check(!result.accepted&&result.error.find("Presentation changed")!=std::string::npos,
           "Withdrawn document action retained stale eligibility");app.close();
 }
 void service_completion_routing() {

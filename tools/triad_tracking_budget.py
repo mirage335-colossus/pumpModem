@@ -2,18 +2,14 @@
 """Bounded work and workspace forecasts for isolated streaming timing tracking.
 
 Work counts describe a declared receiver configuration; they are not CPU-time
-predictions. A timing forecast is available only from a source-, hardware-, and
-algorithm-regime-matched measurement whose stage work scales uniformly.
+predictions. Runtime forecasts belong to the hierarchical abbreviated harness.
 """
 from __future__ import annotations
 
 import math
-from statistics import median
 
 
 _U64 = (1 << 64) - 1
-_WORK = ("sample_rows", "segments", "basis_row_samples", "gaussian_updates",
-         "transition_edges")
 
 
 def _integer(value, name, low=1, high=_U64):
@@ -131,98 +127,4 @@ def count_tracking_work(*, samples, sample_rate_hz, block_samples,
         timing_uncertainty=timing_uncertainty,
         cpu_forecast=dict(available=False, cpu_seconds=None, interval_seconds=None,
                           status="unmeasured", confidence="none",
-                          reason="no source-, hardware-, and regime-matched timing calibration supplied"))
-
-
-def forecast_tracking_cost(work, calibration=None, identity=None, *,
-                           cpu_ceiling_seconds=None, memory_ceiling_bytes=None,
-                           ratio_tolerance=.05):
-    """Attach a deliberately narrow, empirical work-scaled CPU forecast.
-
-    A calibration has ``identity``, ``work`` (the five integer work counters),
-    and ``cpu_seconds``. Its identity must exactly match the supplied source,
-    hardware and algorithm regime. Every nonzero calibration work counter must
-    be positive; all target/calibration work ratios must lie within the declared
-    tolerance of their median. The resulting range is an engineering envelope,
-    not a statistical confidence interval or universal runtime bound.
-    """
-    if not isinstance(work, dict) or work.get("schema") != "triad-tracking-work-v1":
-        raise ValueError("a triad-tracking-work-v1 report is required")
-    if not 0 <= _finite(ratio_tolerance, "ratio tolerance", nonnegative=True) <= .25:
-        raise ValueError("ratio tolerance must be in [0,.25]")
-    if cpu_ceiling_seconds is not None:
-        cpu_ceiling_seconds = _finite(cpu_ceiling_seconds, "CPU ceiling", positive=True)
-    if memory_ceiling_bytes is not None:
-        memory_ceiling_bytes = _integer(memory_ceiling_bytes, "memory ceiling")
-
-    memory_bytes = work["workspace"]["receiver_estimate_bytes"]
-    memory = dict(available=memory_ceiling_bytes is not None,
-                  ceiling_bytes=memory_ceiling_bytes,
-                  estimated_bytes=memory_bytes,
-                  status=("unknown" if memory_ceiling_bytes is None else
-                          "exceeded" if memory_bytes > memory_ceiling_bytes else "within"),
-                  confidence="receiver estimate only; excludes allocator/RSS and external workspaces")
-    cpu = dict(available=False, cpu_seconds=None, interval_seconds=None,
-               status="unknown", confidence="none",
-               reason="no source-, hardware-, and regime-matched timing calibration supplied")
-    if calibration is not None:
-        if not isinstance(calibration, dict):
-            raise ValueError("calibration must be an object")
-        def meaningful(value):
-            if value is None:
-                return False
-            if isinstance(value, str):
-                return bool(value.strip())
-            if isinstance(value, (dict, list, tuple, set)):
-                return bool(value)
-            return True
-        def valid_identity(value):
-            return (isinstance(value, dict) and
-                    all(key in value and meaningful(value[key])
-                        for key in ("source", "hardware", "regime")))
-        if not valid_identity(identity) or not valid_identity(calibration.get("identity")):
-            cpu["reason"] = "calibration requires meaningful source, hardware, and regime identity"
-        elif calibration.get("identity") != identity:
-            cpu["reason"] = "source/hardware/algorithm-regime identity mismatch"
-        elif not isinstance(calibration.get("work"), dict):
-            cpu["reason"] = "calibration lacks measured work counters"
-        else:
-            try:
-                measured_cpu = _finite(calibration.get("cpu_seconds"),
-                                       "calibration CPU seconds", positive=True)
-                ratios = []
-                for key in _WORK:
-                    target = _integer(work["work"][key], f"target {key}", low=0)
-                    measured = _integer(calibration["work"].get(key),
-                                        f"calibration {key}", low=0)
-                    if target == measured == 0:
-                        continue
-                    if target == 0 or measured == 0:
-                        raise ValueError(f"{key} work regime differs")
-                    ratios.append(target / measured)
-                if not ratios:
-                    raise ValueError("no measured work counters")
-                center = median(ratios)
-                low, high = min(ratios), max(ratios)
-                if center <= 0 or (high-low) / center > ratio_tolerance:
-                    raise ValueError("work-counter ratios are not uniformly scalable")
-                estimate_low, estimate_high = measured_cpu*low, measured_cpu*high
-                cpu.update(available=True, cpu_seconds=measured_cpu*center,
-                    interval_seconds=[estimate_low, estimate_high], status="estimated",
-                    confidence="unquantified engineering envelope; not a statistical confidence interval",
-                    ratio_tolerance=ratio_tolerance,
-                    work_scale_ratios={key: target / measured for key, target, measured in
-                        ((key, work["work"][key], calibration["work"][key])
-                         for key in _WORK if work["work"][key] or calibration["work"][key])},
-                    calibration_scope=calibration.get("scope", "unspecified"))
-            except ValueError as error:
-                cpu["reason"] = str(error)
-    if cpu_ceiling_seconds is not None:
-        cpu["ceiling_seconds"] = cpu_ceiling_seconds
-        cpu["ceiling_status"] = ("unknown" if not cpu["available"] else
-            "exceeded" if cpu["interval_seconds"][0] > cpu_ceiling_seconds else
-            "within" if cpu["interval_seconds"][1] <= cpu_ceiling_seconds else "uncertain")
-    result = dict(work)
-    result["cpu_forecast"] = cpu
-    result["memory_forecast"] = memory
-    return result
+                          reason="runtime forecasts require the hierarchical abbreviated harness"))

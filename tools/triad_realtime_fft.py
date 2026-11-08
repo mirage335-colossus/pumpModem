@@ -27,7 +27,7 @@ import numpy as np
 from scipy import fft, signal
 
 from triad_dynamic_joint import _sample_cubic
-from triad_helper_receiver import data_fir_taps
+from triad_acquisition import data_fir_taps
 
 
 def _number(x, name, *, positive=False):
@@ -214,7 +214,7 @@ class FFTScreen:
             maximum_fft_products=self.maximum_fft_products)
         self.procedure_id = _digest(dict(policy=self.policy,
             source_sha256={name: hashlib.sha256((Path(__file__).parent/name).read_bytes()).hexdigest()
-                for name in ('triad_realtime_fft.py', 'triad_dynamic_joint.py', 'triad_helper_receiver.py')},
+                for name in ('triad_realtime_fft.py', 'triad_dynamic_joint.py', 'triad_acquisition.py')},
             template_sha256=hashlib.sha256(np.ascontiguousarray(source).view(np.uint8)).hexdigest(),
             geometry=dict(samples=self.samples, fs=self.fs, source_offset=self.offset,
                           lead=self.lead, delay=self.delay, doppler=self.doppler,

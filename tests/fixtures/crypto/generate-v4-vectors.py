@@ -272,15 +272,6 @@ def main():
         s, a = child_roots(context, sroot, aroot)
         result["lane_variations"][name + "_child"] = {"serpent_root": s.hex(), "aes_root": a.hex()}
         result["lane_variations"][name + "_cbc"] = cbc_vector(sroot, aroot)
-    identity_context = b"v4 identity context"
-    identity_message = contextual(b"datapump/v4/identity/confidentiality/", identity_context)
-    s, a = mac_components(SROOT, AROOT, identity_message)
-    wave_prk = hmac.new(b"datapump/v1/hkdf-sha256", AROOT[:32], hashlib.sha256).digest()
-    wave_key = hmac.new(wave_prk, b"datapump/v1/mac\x01", hashlib.sha256).digest()
-    wave_message = contextual(b"datapump/v4/identity/waveform/", identity_context)
-    result["identity"] = {"context": identity_context.hex(), "serpent": s.hex(), "aes": a.hex(),
-                          "confidentiality": xor(s, a).hex(),
-                          "waveform": hmac.new(wave_key, wave_message, hashlib.sha256).hexdigest()}
     if args.write_cpp:
         write_cpp(args.write_cpp, result)
     print(json.dumps(result, indent=2, sort_keys=True))

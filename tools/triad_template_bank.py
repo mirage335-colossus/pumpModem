@@ -37,10 +37,10 @@ def _validate_arguments(argv):
     for flag in ('--output','--templates','--stream-server','--stream-kind','--plan-only','--key-file','--now'):
         if flag in argv:raise ValueError('template source argv must omit '+flag)
     if argv.count('--power-reference')!=1:
-        raise ValueError('explicit whole-active power reference required')
+        raise ValueError('explicit bounded-tiles power reference required')
     at=argv.index('--power-reference')
-    if at+1==len(argv)or argv[at+1]!='whole-active':
-        raise ValueError('explicit whole-active power reference required')
+    if at+1==len(argv)or argv[at+1]!='bounded-tiles':
+        raise ValueError('explicit bounded-tiles power reference required')
     if argv.count('--epoch')!=1 or argv.count('--key-seed')!=1:
         raise ValueError('explicit public epoch and key seed required')
 
@@ -137,8 +137,8 @@ def generate_template_bank(manifest, native_argv, *, chunk_samples=4096,
             value=d.get(name)
             if not isinstance(value,(int,float))or not math.isfinite(value)or not math.isclose(value,expected,rel_tol=5e-13,abs_tol=5e-15):
                 raise ValueError('native public template identity differs: '+name)
-        if d.get('power',{}).get('data_power_reference_policy')!='whole-active':
-            raise ValueError('native power reference differs from public whole-active bank')
+        if d.get('power',{}).get('data_power_reference_policy')!='bounded-tiles':
+            raise ValueError('native power reference differs from public bounded-tiles bank')
         bank=np.empty(shape,dtype=np.complex128)
         rows=[(bit,epoch,0.,0.,0.,0.,0.)for epoch in epochs for bit in (0,1)]
         for first in range(0,shape[-1],chunk_samples):

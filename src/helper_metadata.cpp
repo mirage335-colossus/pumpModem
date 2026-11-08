@@ -87,16 +87,8 @@ MetadataPacket metadata_packet(std::uint64_t ticks,std::string_view callsign,con
     return packet;
 }
 
-MetadataPacket callsign_packet(std::string_view callsign) {
-    return metadata_packet(0,callsign);
-}
-
-MetadataPacket timecode_packet(std::uint64_t ticks,const Crypto* key) {
-    return metadata_packet(ticks,{},key);
-}
-
 std::optional<Metadata> decode_metadata_packet(std::span<const std::uint32_t> symbols,
-                                               std::span<const Crypto> receive_keys,
+                                               const Crypto* receive_key,
                                                std::optional<std::uint64_t> anchor) {
     // Encryption mode is local configuration; it is never inferred from data.
     if(symbols.size()!=metadata_symbol_count||
@@ -104,16 +96,16 @@ std::optional<Metadata> decode_metadata_packet(std::span<const std::uint32_t> sy
         return std::nullopt;
     MetadataPacket packet;
     std::copy(symbols.begin(),symbols.end(),packet.symbols.begin());
-    if(!receive_keys.empty()) {
+    if(receive_key) {
         if(!anchor)return std::nullopt;
         const auto dwell=absolute_dwell(symbols[0],*anchor);
         if(!dwell)return std::nullopt;
-        try {crypt_characters(packet,receive_keys.front(),*dwell);}
+        try {crypt_characters(packet,*receive_key,*dwell);}
         catch(const Error&) {return std::nullopt;}
     }
     Metadata result;
     result.time_ticks=symbols[0];
-    if(!receive_keys.empty())result.kind=MetadataKind::encrypted_time;
+    result.encrypted=receive_key!=nullptr;
     bool padding=false;
     for(std::size_t i=0;i<metadata_max_characters;++i) {
         const auto c=(packet.symbols[1+i/2]>>(i%2?0:7))&127U;

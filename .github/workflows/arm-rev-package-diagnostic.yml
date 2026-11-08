@@ -116,8 +116,8 @@ jobs:
               summary.write(f'ARM64 Rev diagnostic source `{os.environ["GITHUB_SHA"]}`: inventory, relocation and glibc 2.35 audits passed.\n\n')
               for image, report in reports:
                   summary.write(f'- {image}: GUI smoke **{report["status"]}**.\n')
-              summary.write('\nAny incomplete result is untested remaining smoke coverage, not a smoke pass; exact logs and reports are retained. No calibration, general matrix, SDK rebuild or release certification; no release assets changed.\n')
+              summary.write('\nAny incomplete result is untested remaining smoke coverage, not a smoke pass; exact logs and reports are retained. No general matrix, SDK rebuild or release certification; no release assets changed.\n')
           PY
           else
-            echo 'ARM64 Rev packaging and visible startup with the Ubuntu 24.04 host driver passed. No full smoke, calibration or certification claim; no release assets changed.' >> "$GITHUB_STEP_SUMMARY"
+            echo 'ARM64 Rev packaging and visible startup with the Ubuntu 24.04 host driver passed. No full smoke or certification claim; no release assets changed.' >> "$GITHUB_STEP_SUMMARY"
           fi

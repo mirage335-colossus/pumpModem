@@ -1,45 +1,43 @@
 name: Native Windows validation shard
-
-on:
+'on':
   workflow_dispatch:
     inputs:
       windows_runner:
-        description: 'Windows runner for native scopes; the clock functional probe uses windows-2022'
+        description: Windows runner for native scopes; the clock functional probe uses windows-2022
         type: choice
-        options: [windows-2022, windows-latest-l, windows-latest-h]
+        options:
+        - windows-2022
+        - windows-latest-l
+        - windows-latest-h
         default: windows-2022
       scope:
-        description: 'Run an unchanged native scope or a focused Windows diagnostic'
+        description: Select the retained application test or package scope
         type: choice
-        options: [core, preparation, fast, live, calibration, frontends, web, gui, package, receiver-baseline, eme-diagnostic, receiver, receiver-diagnostic, startup-guide, sched-hop-diagnostic, receiver-size-boundary, windows-clock-functional-probe]
-        default: live
-      calibration_section:
-        description: 'Calibration section; used only by the calibration scope'
-        type: choice
-        options: [all, shaped, matrix, 'null', default-window]
-        default: all
+        options:
+        - core
+        - fast
+        - legacy
+        - frontends
+        - web
+        - gui
+        - package
+        default: core
   workflow_call:
     inputs:
       windows_runner:
         type: string
         default: windows-2022
       scope:
-        description: 'core, preparation, fast, live, calibration, frontends, web, gui, package, frozen receiver-baseline, eme-diagnostic, receiver, receiver-diagnostic, startup-guide, sched-hop-diagnostic, or receiver-size-boundary'
+        description: Select the retained application test or package scope
         type: string
         required: true
-      calibration_section:
-        type: string
-        default: all
-
 permissions:
   contents: read
-
 jobs:
   native:
-    if: inputs.scope != 'windows-clock-functional-probe' || github.event_name != 'workflow_dispatch'
-    name: Windows Release / ${{ inputs.scope }} / ${{ inputs.calibration_section }}
+    name: Windows Release / ${{ inputs.scope }}
     runs-on: ${{ inputs.windows_runner }}
-    timeout-minutes: ${{ inputs.scope == 'preparation' && 240 || 120 }}
+    timeout-minutes: 60
     defaults:
       run:
         shell: pwsh
@@ -50,506 +48,77 @@ jobs:
       DATAPUMP_SMOKE_SCOPE: published/native-package
       DATAPUMP_SMOKE_SOURCE_SHA: ${{ github.sha }}
       DATAPUMP_SMOKE_INVENTORY_SHA256: ''
-      VCPKG_DISABLE_METRICS: "1"
+      VCPKG_DISABLE_METRICS: '1'
       UseMultiToolTask: 'true'
       EnforceProcessCountAcrossBuilds: 'true'
       CI_SCOPE: ${{ inputs.scope }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Reuse verified static dependencies from base
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ./tools/use-windows-base.ps1 -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
-      - name: Check out the frozen pre-Burst receiver control
-        if: inputs.scope == 'receiver-baseline'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: de8699b47b6b0a4c58b816a1894c974858eb35a3
-          path: comparison-source
-          persist-credentials: false
-      - name: Prepare only verified RPC identifier compile ports
-        if: inputs.scope == 'receiver-baseline'
-        run: |
-          $prepare = @'
-          import difflib,hashlib,json,os,pathlib,subprocess,sys
-          base='de8699b47b6b0a4c58b816a1894c974858eb35a3'
-          root,report=(pathlib.Path(v).resolve() for v in sys.argv[1:3]); H=lambda b:hashlib.sha256(b).hexdigest()
-          def need(ok,why):
-              if not ok: raise SystemExit(why)
-          need(root!=report and root not in report.parents,'report must be outside baseline checkout')
-          need(subprocess.check_output(['git','rev-parse','HEAD'],cwd=root).decode().strip()==base and not subprocess.check_output(['git','status','--porcelain'],cwd=root),'baseline identity/cleanliness precondition failed')
-          phase=b'    struct PhaseGroups {\n        std::array<PhaseGroup,3> small{};\n        std::uint64_t first=0,step=0;\n        PhaseGroup operator[](std::size_t index) const {\n            if(step){const auto phase=first+index*step;return {phase,phase};}\n            return small.at(index);\n        }\n    };'
-          cert=b'    volatile T small=std::numeric_limits<T>::min(),two=2,tiny=std::numeric_limits<T>::denorm_min(),one=1;\n    volatile double dsmall=std::numeric_limits<double>::min(),dtwo=2,dtiny=std::numeric_limits<double>::denorm_min(),done=1;\n    return small/two>0 && tiny*one>0 && dsmall/dtwo>0 && dtiny*done>0;'
-          prefit=b'        const auto small=cert::mul(8*static_cast<double>(count)+32,eta);\n        const auto du=cert::divide(cert::add(d,small),den);\n        const auto hu=cert::divide(cert::add(h,small),den);'
-          nodes=b'    const auto near=std::round(source*k.subdivisions/k.chip);\n    if(near<0||near>=*n)return {};const auto at=static_cast<std::size_t>(near);'
-          ports=[
-          ('src/pattern_correlator.cpp','8c450100a0d18836a4e40e3c6f2098a97627ffeee34a07af395c6187befc8a4b','c1efa1178a5b122c06de106e6ca4dea87885e2b8e7a7e880b516bce243b9262e',[(phase,phase.replace(b'small',b'inline_groups'),1),(b'groups.small',b'groups.inline_groups',3)]),
-          ('src/scheduled_acquisition_certificate.hpp','b8d16582e11eef7a16d771913d5572b780aec9f546d013944ef4082ed50ad394','1fea5143e5a406417a8f6024f3032070d3632b3906c158872caa56e662a3b1be',[(cert,cert.replace(b'volatile T small=',b'volatile T minimum_normal=').replace(b'return small/two',b'return minimum_normal/two'),1)]),
-          ('src/scheduled_fp32_coherent_prefit.hpp','eda959eb6d48d0d79c0435c95e340deb9604273f735afca8dc93dc4a592b7217','dc5b2f193b8ba6903df6fcc3a11bf068d74cd29ca2187d4537cbb75e842c0503',[(prefit,prefit.replace(b'small',b'underflow_allowance'),1)]),
-          ('src/scheduled_point_source_nodes.hpp','27b0c63a0432a5d44d2bfdb2ca4ac2fb0b5371dccbe1259a4915642419c4c49a','69f8748f548757e0aed5808519e3c26649eb9c2cf77e93e1d47d190eb84e287f',[(nodes,nodes.replace(b'near',b'rounded_index'),1)])]
-          prepared=[]
-          for path,before,after,edits in ports:
-              raw=(root/path).read_bytes(); src=raw.replace(b'\r\n',b'\n'); dst=src
-              need(H(src)==before,'unexpected baseline preimage: '+path)
-              for old,new,count in edits:
-                  need(dst.count(old)==count,'fragment count mismatch: '+path); dst=dst.replace(old,new)
-              need(H(dst)==after,'unexpected port result: '+path)
-              prepared.append((path,raw,src,dst,[count for old,new,count in edits]))
-          patch=''.join(''.join(difflib.unified_diff(src.decode().splitlines(True),dst.decode().splitlines(True),fromfile='a/'+path,tofile='b/'+path)) for path,raw,src,dst,counts in prepared).encode()
-          report.mkdir(parents=True,exist_ok=True)
-          for path,raw,src,dst,counts in prepared:
-              (root/path).write_bytes(dst); need((root/path).read_bytes()==dst,'saved port mismatch: '+path)
-          need(set(subprocess.check_output(['git','diff','--name-only'],cwd=root).decode().splitlines())=={p[0] for p in ports},'unexpected baseline delta')
-          (report/'compile-ports.patch').write_bytes(patch)
-          actual_diff=subprocess.check_output(['git','diff','--binary'],cwd=root)
-          (report/'actual-source.patch').write_bytes(actual_diff)
-          names=['pattern_correlator','pattern_drift','receiver_differential','clock_sync']
-          manifest={'baseline_sha':base,'workflow_sha':os.environ['GITHUB_SHA'],'port_reference':'38e20952d512b8073cbe49d3e49d1fdfb436ce1a','patch_sha256':H(patch),'selected_tests':names,'unchanged_test_sources':{name:H((root/('tests/test_'+name+'.cpp')).read_bytes().replace(b'\r\n',b'\n')) for name in names},'files':[{'path':path,'raw_before_sha256':H(raw),'canonical_before_sha256':H(src),'after_sha256':H(dst),'fragment_counts':counts} for path,raw,src,dst,counts in prepared]}
-          manifest['actual_diff_sha256']=H(actual_diff)
-          (report/'baseline-ports.json').write_text(json.dumps(manifest,sort_keys=True,indent=2)+'\n',encoding='utf-8')
-          print(json.dumps(manifest,sort_keys=True))
-          '@
-          $prepare | python - comparison-source build/receiver-baseline
-          if ($LASTEXITCODE -ne 0) { throw "Frozen receiver control preparation failed" }
-      - name: Configure native application and selected test scope
-        run: >-
-          cmake -S "${{ inputs.scope == 'receiver-baseline' && 'comparison-source' || '.' }}" -B build -A x64
-          -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN"
-          -DVCPKG_TARGET_TRIPLET=x64-windows-static
-          -DDATAPUMP_PORTABLE=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
-          -DBUILD_TESTING=${{ inputs.scope == 'package' && 'OFF' || 'ON' }}
-          -DDATAPUMP_BUILD_TUI=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
-          -DDATAPUMP_BUILD_FB=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
-          -DDATAPUMP_CALIBRATION_SECTION=${{ inputs.calibration_section }}
-          -DDART_TESTING_TIMEOUT=3600
-          -DCMAKE_DISABLE_FIND_PACKAGE_Python3=${{ inputs.scope == 'frontends' && 'FALSE' || 'TRUE' }}
-          -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL=${{ inputs.scope == 'live' && inputs.windows_runner == 'windows-2022' && 'ON' || 'OFF' }}
-      - name: Build this shard's prerequisites
-        run: |
-          switch ($env:CI_SCOPE) {
-            'calibration' { $targets = @('test_differential_receiver_probability') }
-            'package' { $targets = @('datapump-apps') }
-            'frontends' { $targets = @('datapump-tests-frontends') }
-            'web' { $targets = @('datapump-tests-web') }
-            'core' { $targets = @('datapump-apps', 'datapump-tests-ci-core') }
-            'preparation' { $targets = @('test_scheduled_parallel_preparation') }
-            'gui' { $targets = @('datapump-apps', 'datapump-tests-gui') }
-            'receiver-baseline' { $targets = @('test_pattern_correlator', 'test_pattern_drift', 'test_receiver_differential', 'test_clock_sync') }
-            'receiver-size-boundary' { $targets = @('test_receiver_strategy', 'test_live_planning_link') }
-            'eme-diagnostic' { $targets = @('test_frequency_axis_probability') }
-            'receiver' { $targets = @('test_pattern_correlator', 'test_pattern_drift', 'test_receiver_differential', 'test_clock_sync', 'test_pattern_startup_guide') }
-            'startup-guide' { $targets = @('test_pattern_startup_guide') }
-            'sched-hop-diagnostic' { $targets = @('test_sched_hop_transmit', 'test_sched_hop_receiver') }
-            'receiver-diagnostic' { $targets = @('test_pattern_correlator', 'test_pattern_drift', 'test_clock_sync') }
-            'fast' { $targets = @('datapump-tests-fast') }
-            'live' { $targets = @('datapump-tests-ci-live') }
-            default { throw "Unknown native scope: $env:CI_SCOPE" }
-          }
-          $env:CL_MPCount = python -B tools/build_capacity.py
-          if ($LASTEXITCODE -ne 0 -or $env:CL_MPCount -notmatch '^[1-9][0-9]*$') { $env:CL_MPCount = '1' }
-          cmake --build build --config Release --target @targets --parallel $env:CL_MPCount
-          if ($LASTEXITCODE -ne 0) { throw "Native shard build failed" }
-      - name: Run the selected native tests
-        if: inputs.scope != 'package' && inputs.scope != 'receiver-size-boundary' && inputs.scope != 'receiver-baseline' && inputs.scope != 'eme-diagnostic' && inputs.scope != 'receiver' && inputs.scope != 'receiver-diagnostic' && inputs.scope != 'startup-guide' && inputs.scope != 'sched-hop-diagnostic'
-        # Separate runners supply parallelism; preserve per-runner live budgets.
-        run: |
-          $timeoutSeconds = if ($env:CI_SCOPE -eq 'preparation') { 7200 } else { 3600 }
-          python tools/run-ci-tests.py --build-dir build --scope "$env:CI_SCOPE" --jobs 1 --config Release --timeout $timeoutSeconds --report build/ci-test-report.json
-      - name: Run the production numeric receiver-size boundary regressions
-        if: inputs.scope == 'receiver-size-boundary'
-        run: |
-          $report = 'build/receiver-size-boundary'
-          New-Item -ItemType Directory -Force $report | Out-Null
-          git rev-parse HEAD | Tee-Object -FilePath "$report/source.txt"
-          if ($LASTEXITCODE -ne 0) { throw "Numeric boundary source identity failed" }
-          Copy-Item build/CMakeCache.txt "$report/CMakeCache.txt" -Force
-          $cache = Get-Content build/CMakeCache.txt
-          function CacheValue([string]$key) {
-            $line = $cache | Where-Object { $_ -match "^$([regex]::Escape($key)):[^=]*=" } | Select-Object -First 1
-            if (!$line) { return $null }
-            return ($line -split '=', 2)[1]
-          }
-          $generator = CacheValue 'CMAKE_GENERATOR'
-          $platform = CacheValue 'CMAKE_GENERATOR_PLATFORM'
-          $configs = CacheValue 'CMAKE_CONFIGURATION_TYPES'
-          $toolchain = CacheValue 'CMAKE_TOOLCHAIN_FILE'
-          $triplet = CacheValue 'VCPKG_TARGET_TRIPLET'
-          $runtime = CacheValue 'CMAKE_MSVC_RUNTIME_LIBRARY'
-          $portable = CacheValue 'DATAPUMP_PORTABLE'
-          $cacheEvidence = @("CMAKE_GENERATOR=$generator", "CMAKE_GENERATOR_PLATFORM=$platform", "CMAKE_CONFIGURATION_TYPES=$configs", "CMAKE_TOOLCHAIN_FILE=$toolchain", "VCPKG_TARGET_TRIPLET=$triplet", "CMAKE_MSVC_RUNTIME_LIBRARY=$runtime", "DATAPUMP_PORTABLE=$portable")
-          $cacheEvidence | Set-Content "$report/cache-verification.txt"
-          if ($generator -notmatch '^Visual Studio (17|18) ' -or $platform -ne 'x64' -or
-              $configs -notmatch '(^|;)Release(;|$)' -or
-              [IO.Path]::GetFullPath($toolchain) -ine [IO.Path]::GetFullPath($env:DATAPUMP_WINDOWS_TOOLCHAIN) -or $triplet -ne 'x64-windows-static' -or
-              $runtime -ne 'MultiThreaded' -or $portable -ne 'ON') {
-            throw "Numeric boundary route cache is not the configured MSVC x64 portable Release route"
-          }
-          # Visual Studio does not store CMAKE_CXX_COMPILER in CMakeCache.
-          $compilerFiles = @(Get-ChildItem build/CMakeFiles -Filter CMakeCXXCompiler.cmake -Recurse -File)
-          if ($compilerFiles.Count -ne 1) { throw "Missing or ambiguous configured C++ compiler identity" }
-          Copy-Item $compilerFiles[0].FullName "$report/CMakeCXXCompiler.cmake" -Force
-          $compilerConfig = Get-Content $compilerFiles[0].FullName -Raw
-          if ($compilerConfig -notmatch 'set\(CMAKE_CXX_COMPILER_ID "MSVC"\)') { throw "Numeric boundary route did not configure MSVC" }
-          $expected = @('amplitude_arrival_strategy', 'amplitude_arrival_planning')
-          $selector = '^(amplitude_arrival_strategy|amplitude_arrival_planning)$'
-          ctest --test-dir build -C Release --show-only=json-v1 -R $selector 2>&1 | Tee-Object -FilePath "$report/inventory-output.log" | Out-File -FilePath "$report/inventory.json" -Encoding utf8
-          if ($LASTEXITCODE -ne 0) { throw "Numeric boundary CTest inventory command failed" }
-          $inventory = Get-Content "$report/inventory.json" -Raw | ConvertFrom-Json
-          $actual = @($inventory.tests | ForEach-Object { $_.name })
-          if ($actual.Count -ne $expected.Count -or @(Compare-Object $actual $expected).Count -ne 0) { throw "Numeric boundary inventory is missing, extra, or changed CTest cases" }
-          foreach ($test in $inventory.tests) {
-            $command = @($test.command)
-            if ($test.name -eq 'amplitude_arrival_strategy') {
-              if ($command.Count -ne 2 -or [IO.Path]::GetFileName($command[0]) -ine 'test_receiver_strategy.exe' -or $command[1] -ne '--amplitude-arrival-only') { throw "Changed production strategy boundary command" }
-            } else {
-              if ($command.Count -ne 1 -or [IO.Path]::GetFileName($command[0]) -ine 'test_live_planning_link.exe') { throw "Changed production planning boundary command" }
-            }
-          }
-          ctest --test-dir build -C Release --output-on-failure --no-tests=error --parallel 1 --timeout 3600 --output-junit "$PWD/$report/results.xml" -R $selector 2>&1 | Tee-Object -FilePath "$report/ctest-output.log"
-          $ctestExit = $LASTEXITCODE
-          if ($ctestExit -ne 0) { throw "Numeric boundary CTest regressions failed (exit $ctestExit)" }
-          [xml]$junit = Get-Content "$report/results.xml" -Raw
-          $cases = @($junit.SelectNodes('//testcase'))
-          $skipped = @($junit.SelectNodes('//testcase/skipped'))
-          $failed = @($junit.SelectNodes('//testcase/failure | //testcase/error'))
-          if ($cases.Count -ne $expected.Count -or $skipped.Count -ne 0 -or $failed.Count -ne 0) { throw "Numeric boundary JUnit has missing cases, skips, failures, or errors" }
-          $caseNames = @($cases | ForEach-Object { $_.name })
-          if (@(Compare-Object $caseNames $expected).Count -ne 0 -or @($cases | Where-Object { $_.status -ne 'run' }).Count -ne 0) { throw "Numeric boundary JUnit identity or execution status changed" }
-          foreach ($attribute in @('failures', 'errors', 'skipped', 'disabled')) {
-            $value = $junit.testsuite.GetAttribute($attribute)
-            if ($value -and [int]$value -ne 0) { throw "Numeric boundary JUnit reports $attribute" }
-          }
-          'Both production numeric boundary regressions passed on the verified MSVC x64 Release route.' >> $env:GITHUB_STEP_SUMMARY
-      - name: Diagnose one strict EME continuation capture without changing its gates
-        if: inputs.scope == 'eme-diagnostic'
-        timeout-minutes: 30
-        run: |
-          git rev-parse HEAD | Tee-Object -FilePath build/eme-diagnostic-source.txt
-          if ($LASTEXITCODE -ne 0) { throw "EME diagnostic source identity failed" }
-          ./build/Release/test_frequency_axis_probability.exe --strict-end 128 30 3 3 2>&1 | Tee-Object -FilePath build/eme-diagnostic.log
-          if ($LASTEXITCODE -ne 0) { throw "Paired EME continuation diagnostic failed" }
-          'One paired strict capture: exact content, immutable pending identity, backend parity and independent physical end are required. Full regression and calibration remain separate.' >> $env:GITHUB_STEP_SUMMARY
-      - name: Diagnose original receiver decisions and portable timing guards
-        if: inputs.scope == 'receiver-diagnostic'
-        run: |
-          New-Item -ItemType Directory -Force build/receiver-diagnostic | Out-Null
-          git rev-parse HEAD | Tee-Object -FilePath build/receiver-diagnostic/source.txt
-          if ($LASTEXITCODE -ne 0) { throw "Receiver diagnostic source identity failed" }
-          ./build/Release/test_pattern_correlator.exe paired_pulse_origin_parities_and_canonical_quarters --diagnose-pulse-membership 2>&1 | Tee-Object -FilePath build/receiver-diagnostic/pulse.log
-          $pulse = $LASTEXITCODE
-          ./build/Release/test_pattern_drift.exe 2>&1 | Tee-Object -FilePath build/receiver-diagnostic/drift-full.log
-          $driftFull = $LASTEXITCODE
-          ./build/Release/test_pattern_drift.exe --diagnose-commit "$PWD/build/receiver-diagnostic/drift.jsonl" 2>&1 | Tee-Object -FilePath build/receiver-diagnostic/drift.log
-          $drift = $LASTEXITCODE
-          ./build/Release/test_clock_sync.exe --diagnose-all 2>&1 | Tee-Object -FilePath build/receiver-diagnostic/clock.log
-          $clock = $LASTEXITCODE
-          "pulse=$pulse drift_full=$driftFull drift=$drift clock=$clock" | Set-Content build/receiver-diagnostic/exits.txt
-          if ($pulse -ne 0 -or $driftFull -ne 0 -or $drift -ne 0 -or $clock -ne 0) { throw "Original receiver diagnostic assertions failed; inspect all retained results" }
-      - name: Run selected receiver and clock tests
-        if: inputs.scope == 'receiver-baseline' || inputs.scope == 'receiver' || inputs.scope == 'startup-guide' || inputs.scope == 'sched-hop-diagnostic'
-        run: |
-          $report = if ($env:CI_SCOPE -eq 'receiver-baseline') { 'receiver-baseline' } else { 'receiver-fixtures' }
-          New-Item -ItemType Directory -Force "build/$report" | Out-Null
-          $expected = @('pattern_correlator', 'pattern_drift', 'receiver_differential', 'clock_sync')
-          if ($env:CI_SCOPE -eq 'receiver') { $expected += 'pattern_startup_guide' }
-          if ($env:CI_SCOPE -eq 'startup-guide') { $expected = @('pattern_startup_guide') }
-          if ($env:CI_SCOPE -eq 'sched-hop-diagnostic') { $expected = @('sched_hop_transmit', 'sched_hop_receiver') }
-          $selector = '^(' + ($expected -join '|') + ')$'
-          ctest --test-dir build -C Release --show-only=json-v1 -R $selector > "build/$report/inventory.json"
-          if ($LASTEXITCODE -ne 0) { throw "Frozen receiver inventory failed" }
-          $inventory = Get-Content "build/$report/inventory.json" -Raw | ConvertFrom-Json
-          $actual = @($inventory.tests | ForEach-Object { $_.name })
-          if ($actual.Count -ne $expected.Count -or @(Compare-Object $actual $expected).Count -ne 0) { throw "Receiver inventory differs from its complete selected scope" }
-          ctest --test-dir build -C Release --output-on-failure --no-tests=error --parallel 1 --timeout 3600 --output-junit "$PWD/build/$report/results.xml" -R $selector
-          if ($LASTEXITCODE -ne 0) { throw "Frozen receiver control tests failed" }
-      - name: Probe frozen and current UTC phase arithmetic independently
-        if: always() && inputs.scope == 'receiver-baseline'
-        run: |
-          $probe = 'build/receiver-baseline/utc-phase-probe'
-          New-Item -ItemType Directory -Force $probe | Out-Null
-          @'
-          #include "datapump/utc_timing.hpp"
-          #include <iomanip>
-          #include <iostream>
-          int main() {
-              using namespace datapump::audio;
-              constexpr long double epoch=1800000000.L;
-              constexpr double phase=.010,raw=.0002;
-              const auto ulp=std::nextafter(epoch,std::numeric_limits<long double>::infinity())-epoch;
-              std::cout<<std::setprecision(std::numeric_limits<long double>::max_digits10);
-              unsigned failures=0;
-              for(const auto read_roundoff:{0.L,ulp})
-                  for(const auto mode:{UtcTimeline::Prediction::fitted,UtcTimeline::Prediction::timestamp_intersection})
-                      for(const auto joint:{false,true}) {
-                          unsigned observed=0,index=0; bool contained=true,decomposed=true; std::string error,stage="construct";
-                          TimePrediction last{};
-                          try {
-                              UtcTimeline timeline(48000,.001,mode,
-                                  mode==UtcTimeline::Prediction::timestamp_intersection?std::optional<double>(raw):std::nullopt,
-                                  mode==UtcTimeline::Prediction::timestamp_intersection,ClockTimingPolicy{0,.001,phase});
-                              for(unsigned i=0;i<=200;++i) {
-                                  index=i; stage="observe";
-                                  const auto t=static_cast<long double>(i)*.1L;
-                                  const auto p=-static_cast<long double>(phase)+2*phase*i/200;
-                                  timeline.observe({48000*t,epoch+t+p,t+(joint?p:0),raw,
-                                      static_cast<double>(read_roundoff),TimingQuality::estimated,4});
-                                  ++observed;
-                                  stage="predict";
-                                  last=timeline.predict(48000*(t+.05L));
-                                  contained=contained && std::abs(last.utc_seconds-(epoch+t+.05L))<=last.uncertainty_seconds;
-                                  const auto seen=timeline.observation_uncertainty();
-                                  decomposed=decomposed && last.system_clock_phase_uncertainty_seconds==phase &&
-                                      last.provider_uncertainty_floor_seconds==raw && seen.latest==raw && seen.maximum==raw &&
-                                      last.clock_extrapolation_seconds==0 && last.rate_uncertainty_fraction<1e-12;
-                              }
-                              stage="final_predict";
-                              last=timeline.predict(48000*20.05L);
-                          } catch(const std::exception& e) { error=e.what(); }
-                          const auto latest=epoch+20.L+static_cast<long double>(phase);
-                          const auto roundoff=32*std::numeric_limits<long double>::epsilon()*(std::abs(latest)+20.05L+1);
-                          const auto contraction=last.uncertainty_seconds<raw+1e-7;
-                          const auto passed=error.empty() && observed==201 && contained && decomposed &&
-                              (mode!=UtcTimeline::Prediction::timestamp_intersection || contraction);
-                          if(!passed)++failures;
-                          std::cout<<"mode="<<(mode==UtcTimeline::Prediction::fitted?"fitted":"intersection")
-                              <<" joint_slew="<<joint<<" read_roundoff="<<read_roundoff
-                              <<" long_double_bytes="<<sizeof(long double)<<" long_double_digits="<<std::numeric_limits<long double>::digits
-                              <<" epsilon="<<std::numeric_limits<long double>::epsilon()<<" epoch_ulp="<<ulp
-                              <<" observed="<<observed<<" contained="<<contained<<" decomposed="<<decomposed
-                              <<" uncertainty="<<last.uncertainty_seconds<<" test_limit="<<(raw+1e-7)
-                              <<" predict_roundoff="<<roundoff<<" provider_floor="<<last.provider_uncertainty_floor_seconds
-                              <<" phase_allowance="<<last.system_clock_phase_uncertainty_seconds
-                              <<" utc_offset="<<(last.utc_seconds-epoch)<<" seconds_per_frame="<<last.seconds_per_frame
-                              <<" rate_uncertainty="<<last.rate_uncertainty_fraction<<" extrapolation="<<last.clock_extrapolation_seconds
-                              <<" minimum_radius="<<(raw+roundoff)<<" contraction_assertion="<<contraction
-                              <<" passed="<<passed<<" index="<<index<<" stage="<<stage<<" error="<<std::quoted(error)<<'\n';
-                      }
-              return failures?1:0;
-          }
-          '@ | Set-Content -Encoding utf8 "$probe/probe.cpp"
-          @'
-          cmake_minimum_required(VERSION 3.21)
-          project(utc_phase_probe LANGUAGES CXX)
-          foreach(source frozen current)
-            add_executable(${source} probe.cpp)
-            target_compile_features(${source} PRIVATE cxx_std_20)
-            target_include_directories(${source} PRIVATE "${${source}_ROOT}/include")
-          endforeach()
-          '@ | Set-Content -Encoding utf8 "$probe/CMakeLists.txt"
-          Get-FileHash comparison-source/include/datapump/utc_timing.hpp, include/datapump/utc_timing.hpp, "$probe/probe.cpp" | Format-List | Out-File build/receiver-baseline/utc-phase-inputs.txt
-          cmake -S $probe -B build/utc-phase-probe -A x64 "-Dfrozen_ROOT=$PWD/comparison-source" "-Dcurrent_ROOT=$PWD"
-          if ($LASTEXITCODE -ne 0) { throw "UTC phase probe configuration failed" }
-          cmake --build build/utc-phase-probe --config Release --parallel 1
-          if ($LASTEXITCODE -ne 0) { throw "UTC phase probe build failed" }
-          $probeFailed = $false
-          foreach ($source in @('frozen', 'current')) {
-            & "./build/utc-phase-probe/Release/$source.exe" | Tee-Object -FilePath "build/receiver-baseline/utc-phase-$source.log"
-            $probeExit = $LASTEXITCODE
-            "$source exit=$probeExit" | Tee-Object -FilePath "build/receiver-baseline/utc-phase-$source-exit.txt"
-            if ($probeExit -ne 0) { $probeFailed = $true }
-          }
-          Copy-Item build/utc-phase-probe/CMakeCache.txt build/receiver-baseline/utc-phase-probe-cache.txt
-          if ($probeFailed) { throw "UTC phase diagnostic retained failing subcases; see both numerical logs" }
-      - name: Verify Windows GUI and relocation with an empty PATH
-        if: inputs.scope == 'package'
-        env:
-          DATAPUMP_SMOKE_SCOPE: published/relocation
-        run: |
-          cmake -DBUILD_DIR="$PWD/build" -DCONFIG=Release -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tests/package_native.cmake 2>&1 | Tee-Object -FilePath build/package-relocation.log
-          if ($LASTEXITCODE -ne 0) { throw "Native relocation failed" }
-      - name: Create and verify both native archives
-        if: inputs.scope == 'package'
-        env:
-          DATAPUMP_SMOKE_SCOPE: published/native-archives
-        run: |
-          $env:CL_MPCount = python -B tools/build_capacity.py
-          if ($LASTEXITCODE -ne 0 -or $env:CL_MPCount -notmatch '^[1-9][0-9]*$') { $env:CL_MPCount = '1' }
-          cmake --build build --config Release --target package --parallel $env:CL_MPCount
-          if ($LASTEXITCODE -ne 0) { throw "Native packaging failed" }
-          cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DREQUIRE_MANUALS=ON -DREQUIRE_FRONTENDS=ON -P tools/verify-native-archives.cmake 2>&1 | Tee-Object -FilePath build/package-archives.log
-          if ($LASTEXITCODE -ne 0) { throw "Archive verification failed" }
-          'Portable Release relocation, corruption and both archive GUI checks completed; any incomplete smoke coverage is listed in the retained reports. Independent regression/calibration jobs still determine the overall workflow result.' >> $env:GITHUB_STEP_SUMMARY
-      - name: Upload Windows offline bundles
-        if: inputs.scope == 'package'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: DataPump-Windows-x86_64
-          path: |
-            build/releases/*.tar.gz
-            build/releases/*.zip
-            build/releases/SHA256SUMS.txt
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
-      - name: Retain shard reports and failure logs
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: CI-Windows-Release-${{ inputs.scope }}-${{ inputs.calibration_section }}-attempt-${{ github.run_attempt }}
-          path: |
-            build/ci-test-report.*
-            build/Testing/Temporary/
-            build/receiver-baseline/
-            build/receiver-fixtures/
-            build/receiver-size-boundary/
-            build/receiver-diagnostic/
-            build/CMakeCache.txt
-            build/eme-diagnostic*
-            build/package-*.log
-            ${{ github.workspace }}/build/ci-smoke-results/
-          if-no-files-found: warn
-          retention-days: 7
-
-  windows-clock-functional-probe:
-    name: Windows standard-clock functional diagnostic
-    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'windows-clock-functional-probe'
-    runs-on: windows-2022
-    timeout-minutes: 30
-    defaults:
-      run:
-        shell: pwsh
-    env:
-      VCPKG_DISABLE_METRICS: '1'
-      UseMultiToolTask: 'true'
-      EnforceProcessCountAcrossBuilds: 'true'
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Initialize diagnostic artifact directory
-        run: New-Item -ItemType Directory -Force build/windows-clock-functional-probe | Out-Null
-      - name: Reuse verified static dependencies from base
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ./tools/use-windows-base.ps1 -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
-      - name: Configure standard portable Release test target
-        run: |
-          $report = 'build/windows-clock-functional-probe'
-          $configureArgs = @('-S', '.', '-B', 'build', '-A', 'x64', "-DCMAKE_TOOLCHAIN_FILE=$env:DATAPUMP_WINDOWS_TOOLCHAIN", '-DVCPKG_TARGET_TRIPLET=x64-windows-static', '-DDATAPUMP_PORTABLE=ON', '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded', '-DBUILD_TESTING=ON', '-DDATAPUMP_BUILD_TUI=OFF', '-DDATAPUMP_BUILD_FB=OFF', '-DDATAPUMP_CALIBRATION_SECTION=all', '-DDART_TESTING_TIMEOUT=3600', '-DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE')
-          $configureCommand = 'cmake ' + (($configureArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' ')
-          $configureOutput = & cmake @configureArgs 2>&1
-          $configureExit = $LASTEXITCODE
-          $configureOutput | Out-File -FilePath "$report/configure.log" -Encoding utf8
-          [ordered]@{ command=$configureCommand; toolchain_file=$env:DATAPUMP_WINDOWS_TOOLCHAIN; exit_code=$configureExit } | ConvertTo-Json | Set-Content -Encoding utf8 "$report/configure.json"
-          if ($configureExit -ne 0) { throw "CMake configuration failed with exit $configureExit" }
-      - name: Build only test_live and retain identity
-        run: |
-          $report = 'build/windows-clock-functional-probe'
-          $sourceSha = (& git rev-parse HEAD).Trim()
-          if ($LASTEXITCODE -ne 0 -or $sourceSha -ne $env:GITHUB_SHA) { throw 'Diagnostic source SHA does not match the checked-out workflow revision' }
-          $testSource = (Get-FileHash tests/test_live.cpp -Algorithm SHA256).Hash.ToLowerInvariant()
-          $workflowSource = (Get-FileHash .github/workflows/native-windows.yml -Algorithm SHA256).Hash.ToLowerInvariant()
-          $configureRecord = Get-Content "$report/configure.json" -Raw | ConvertFrom-Json
-          $cache = 'build/CMakeCache.txt'
-          if (!(Test-Path -LiteralPath $cache -PathType Leaf)) { throw 'Configured CMake cache is missing; diagnostic refuses a cold dependency build' }
-          $cacheSha = (Get-FileHash $cache -Algorithm SHA256).Hash.ToLowerInvariant()
-          $buildCommand = 'cmake --build build --config Release --target test_live --parallel 1'
-          $buildOutput = & cmake --build build --config Release --target test_live --parallel 1 2>&1
-          $buildExit = $LASTEXITCODE
-          $buildOutput | Out-File -FilePath "$report/build.log" -Encoding utf8
-          if ($buildExit -ne 0) { throw "test_live build failed with exit $buildExit" }
-          $binary = 'build/Release/test_live.exe'
-          if (!(Test-Path -LiteralPath $binary -PathType Leaf)) { throw 'Expected Release test_live binary was not produced' }
-          $binarySha = (Get-FileHash $binary -Algorithm SHA256).Hash.ToLowerInvariant()
-          $record = [ordered]@{
-            workflow_run_id = $env:GITHUB_RUN_ID
-            workflow_run_attempt = $env:GITHUB_RUN_ATTEMPT
-            source_sha = $sourceSha
-            workflow_file_sha256 = $workflowSource
-            test_live_source_sha256 = $testSource
-            configure_command = $configureRecord.command
-            configure_exit_code = $configureRecord.exit_code
-            toolchain_file = $configureRecord.toolchain_file
-            toolchain_file_sha256 = (Get-FileHash $configureRecord.toolchain_file -Algorithm SHA256).Hash.ToLowerInvariant()
-            cmake_cache_sha256 = $cacheSha
-            build_command = $buildCommand
-            build_exit_code = $buildExit
-            binary_path = $binary
-            binary_sha256 = $binarySha
-            standard_mode_command = "$binary --simulation-media-clock-standard"
-            result = 'built; application run pending'
-          }
-          $record | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 "$report/build-identity.json"
-      - name: Run only the existing standard-clock functional fixture
-        timeout-minutes: 12
-        run: |
-          $report = 'build/windows-clock-functional-probe'
-          $recordPath = "$report/build-identity.json"
-          $record = Get-Content $recordPath -Raw | ConvertFrom-Json
-          $binary = Resolve-Path -LiteralPath $record.binary_path
-          if ((Get-FileHash $binary -Algorithm SHA256).Hash.ToLowerInvariant() -ne $record.binary_sha256) { throw 'test_live binary changed after build identity capture' }
-          $psi = [System.Diagnostics.ProcessStartInfo]::new()
-          $psi.FileName = $binary.Path
-          $psi.Arguments = '--simulation-media-clock-standard'
-          $psi.WorkingDirectory = (Get-Location).Path
-          $psi.UseShellExecute = $false
-          $psi.RedirectStandardOutput = $true
-          $psi.RedirectStandardError = $true
-          $process = [System.Diagnostics.Process]::new()
-          $process.StartInfo = $psi
-          $startedUtc = [DateTimeOffset]::UtcNow
-          $watch = [System.Diagnostics.Stopwatch]::StartNew()
-          $timedOut = $false
-          $exitCode = $null
-          $launchError = $null
-          $stdout = ''
-          $stderr = ''
-          try {
-            if (!$process.Start()) { throw 'Process.Start returned false' }
-            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-            $stderrTask = $process.StandardError.ReadToEndAsync()
-            if (!$process.WaitForExit(600000)) {
-              $timedOut = $true
-              try { $process.Kill($true) } catch [System.InvalidOperationException] { }
-              $process.WaitForExit()
-            }
-            else { $process.WaitForExit() }
-            $exitCode = $process.ExitCode
-            $stdout = $stdoutTask.GetAwaiter().GetResult()
-            $stderr = $stderrTask.GetAwaiter().GetResult()
-          }
-          catch { $launchError = $_.Exception.ToString() }
-          finally { $watch.Stop(); $process.Dispose() }
-          [System.IO.File]::WriteAllText((Join-Path $report 'stdout.log'), $stdout, [System.Text.UTF8Encoding]::new($false))
-          [System.IO.File]::WriteAllText((Join-Path $report 'stderr.log'), $stderr, [System.Text.UTF8Encoding]::new($false))
-          $sourceAfter = (& git rev-parse HEAD).Trim()
-          if ($LASTEXITCODE -ne 0) { $sourceAfter = 'git-rev-parse-failed' }
-          $testSourceAfter = (Get-FileHash tests/test_live.cpp -Algorithm SHA256).Hash.ToLowerInvariant()
-          $cacheAfter = (Get-FileHash build/CMakeCache.txt -Algorithm SHA256).Hash.ToLowerInvariant()
-          $binaryAfter = (Get-FileHash $binary -Algorithm SHA256).Hash.ToLowerInvariant()
-          $sha = [System.Security.Cryptography.SHA256]::Create()
-          try {
-            $stdoutSha = ([Convert]::ToHexString($sha.ComputeHash([System.IO.File]::ReadAllBytes((Join-Path $report 'stdout.log'))))).ToLowerInvariant()
-            $stderrSha = ([Convert]::ToHexString($sha.ComputeHash([System.IO.File]::ReadAllBytes((Join-Path $report 'stderr.log'))))).ToLowerInvariant()
-          }
-          finally { $sha.Dispose() }
-          $marker = $stdout.Contains('default simulation media clock standard geometry passed')
-          $record | Add-Member -NotePropertyName application_started_utc -NotePropertyValue $startedUtc.ToString('o') -Force
-          $record | Add-Member -NotePropertyName wrapper_wall_seconds -NotePropertyValue $watch.Elapsed.TotalSeconds -Force
-          $record | Add-Member -NotePropertyName external_timeout_seconds -NotePropertyValue 600 -Force
-          $record | Add-Member -NotePropertyName timed_out -NotePropertyValue $timedOut -Force
-          $record | Add-Member -NotePropertyName application_exit_code -NotePropertyValue $exitCode -Force
-          $record | Add-Member -NotePropertyName launch_error -NotePropertyValue $launchError -Force
-          $record | Add-Member -NotePropertyName stdout_sha256 -NotePropertyValue $stdoutSha -Force
-          $record | Add-Member -NotePropertyName stderr_sha256 -NotePropertyValue $stderrSha -Force
-          $record | Add-Member -NotePropertyName stdout_success_marker_present -NotePropertyValue $marker -Force
-          $record | Add-Member -NotePropertyName stderr_empty -NotePropertyValue ([string]::IsNullOrEmpty($stderr)) -Force
-          $record | Add-Member -NotePropertyName source_sha_after -NotePropertyValue $sourceAfter -Force
-          $record | Add-Member -NotePropertyName test_live_source_sha256_after -NotePropertyValue $testSourceAfter -Force
-          $record | Add-Member -NotePropertyName cmake_cache_sha256_after -NotePropertyValue $cacheAfter -Force
-          $record | Add-Member -NotePropertyName binary_sha256_after -NotePropertyValue $binaryAfter -Force
-          $passed = (!$timedOut -and $null -eq $launchError -and $exitCode -eq 0 -and $marker -and [string]::IsNullOrEmpty($stderr) -and $sourceAfter -eq $record.source_sha -and $testSourceAfter -eq $record.test_live_source_sha256 -and $cacheAfter -eq $record.cmake_cache_sha256 -and $binaryAfter -eq $record.binary_sha256)
-          $record | Add-Member -NotePropertyName result -NotePropertyValue $(if ($passed) { 'PASS' } else { 'FAIL' }) -Force
-          $record | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 "$report/run.json"
-          if (!$passed) { throw 'Standard-clock diagnostic failed; retained run.json and stdout/stderr.' }
-          'This manual-only standard-geometry run is a diagnostic functional probe, not a compact-geometry throughput qualification or waiver for existing gates.' | Add-Content -Encoding utf8 $env:GITHUB_STEP_SUMMARY
-      - name: Retain standard-clock diagnostic evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: CI-Windows-Clock-Functional-${{ github.run_id }}-attempt-${{ github.run_attempt }}
-          path: build/windows-clock-functional-probe/
-          if-no-files-found: warn
-          retention-days: 7
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Reuse verified static dependencies from base
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: ./tools/use-windows-base.ps1 -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
+    - name: Configure the retained native scope
+      run: |
+        cmake -S . -B build -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:DATAPUMP_WINDOWS_TOOLCHAIN" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DDATAPUMP_PORTABLE=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DBUILD_TESTING=${{ inputs.scope == 'package' && 'OFF' || 'ON' }} -DDATAPUMP_BUILD_TUI=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }} -DDATAPUMP_BUILD_FB=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }} -DDATAPUMP_BUILD_WEB_WORKER=${{ inputs.scope == 'web' && 'ON' || 'OFF' }}
+    - name: Build scope prerequisites
+      run: |
+        switch ($env:CI_SCOPE) {
+          'package' { $target = 'datapump-apps' }
+          'core' { $target = 'datapump-tests-regular' }
+          { $_ -in 'fast','legacy','frontends','web','gui' } { $target = "datapump-tests-$env:CI_SCOPE" }
+          default { throw "Unknown native scope: $env:CI_SCOPE" }
+        }
+        $env:CL_MPCount = python -B tools/build_capacity.py
+        if ($LASTEXITCODE -ne 0 -or $env:CL_MPCount -notmatch '^[1-9][0-9]*$') { $env:CL_MPCount = '1' }
+        cmake --build build --config Release --target $target --parallel $env:CL_MPCount
+        if ($LASTEXITCODE -ne 0) { throw 'Native scope build failed' }
+    - name: Run selected native tests
+      if: inputs.scope != 'package'
+      run: |
+        python tools/run-ci-tests.py --build-dir build --scope "$env:CI_SCOPE" --jobs 1 --config Release --timeout 1800 --report build/ci-test-report.json
+    - name: Verify Windows GUI and relocation with an empty PATH
+      if: inputs.scope == 'package'
+      env:
+        DATAPUMP_SMOKE_SCOPE: published/relocation
+      run: |
+        cmake -DBUILD_DIR="$PWD/build" -DCONFIG=Release -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P tests/package_native.cmake 2>&1 | Tee-Object -FilePath build/package-relocation.log
+        if ($LASTEXITCODE -ne 0) { throw "Native relocation failed" }
+    - name: Create and verify both native archives
+      if: inputs.scope == 'package'
+      env:
+        DATAPUMP_SMOKE_SCOPE: published/native-archives
+      run: |
+        $env:CL_MPCount = python -B tools/build_capacity.py
+        if ($LASTEXITCODE -ne 0 -or $env:CL_MPCount -notmatch '^[1-9][0-9]*$') { $env:CL_MPCount = '1' }
+        cmake --build build --config Release --target package --parallel $env:CL_MPCount
+        if ($LASTEXITCODE -ne 0) { throw "Native packaging failed" }
+        cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DREQUIRE_MANUALS=ON -DREQUIRE_FRONTENDS=ON -P tools/verify-native-archives.cmake 2>&1 | Tee-Object -FilePath build/package-archives.log
+        if ($LASTEXITCODE -ne 0) { throw "Archive verification failed" }
+        'Portable Release relocation, corruption and both archive GUI checks completed; any incomplete smoke coverage is listed in the retained reports. Independent regression jobs still determine the overall workflow result.' >> $env:GITHUB_STEP_SUMMARY
+    - name: Upload Windows offline bundles
+      if: inputs.scope == 'package'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: DataPump-Windows-x86_64
+        path: |
+          build/releases/*.tar.gz
+          build/releases/*.zip
+          build/releases/SHA256SUMS.txt
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 1
+    - name: Retain test and package logs
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: CI-Windows-Release-${{ inputs.scope }}-attempt-${{ github.run_attempt }}
+        path: |
+          build/ci-test-report.*
+          build/Testing/Temporary/
+          build/package-*.log
+          build/ci-smoke-results/
+        if-no-files-found: warn
+        retention-days: 7

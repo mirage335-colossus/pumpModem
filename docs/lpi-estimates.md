@@ -1,285 +1,48 @@
-# Low-probability-of-intercept relative observation estimate
+# Energy-detector research and interception limits
 
-The LPI estimate compares the on-air observation an **unkeyed energy detector**
-would need with the intended receiver's **one-symbol design reference**. A
-result of `N:1` means N total wire-bit durations for the observer versus one
-for the receiver, or `N - 1` additional durations. The observer's criterion is
-modeled 90% detection with a 1% false-alarm probability for one known window.
-Both listeners have the same signal power and noise density, normalized so one
-receiver symbol has **18 dB Es/N0**, the existing pattern-planning reference.
-This is an uncalibrated design reference, not a measured reception threshold,
-a safe message length or a measurement of an adversary's capabilities.
+This is a retained research note, not an operating or qualification guide. The
+[current Robust architecture](robust-current.md) and [abbreviated testing
+policy](triad-performance.md) govern new work. The old single-carrier receiver,
+planner and standalone campaign tools have been removed; their results do not
+qualify the current three-carrier stages.
 
-The comparison is strictly relative. Simulation on/off, channel power, noise
-figure, link attenuation and oscillator presets do not enter it. The reference
-does not mean that only one of N transmitted bits would be accepted: it compares
-observation durations, not a 1-in-N reception success rate. Predicting successful
-admissions requires the receiver's search, coherence and evidence behavior.
+A receiver that knows a private waveform can correlate against it while an
+observer can still detect its added energy. Encryption does not remove energy.
+Spreading changes power density; long transmissions can become easier to detect
+by integration even if individual chips are weak. No observer/receiver duration
+ratio establishes a safe message length or an adversary's capability.
 
-Knowing a private waveform lets the intended receiver correlate against it.
-An observer without that waveform can still measure the extra received energy.
-Encryption does not remove that energy. Spreading can lower the signal's power
-density while a receiver with the waveform collects its energy over a symbol;
-the unknown-waveform observer generally needs longer integration in the weak
-signal model used here. A long enough transmission can consequently be easier
-to detect even though its individual chips remain weak.
+## Ideal radiometer comparison
 
-## When the estimate applies
-
-The estimate assumes encrypted private patterns. The transfer layer enables
-private scrambling for every keyed non-tone transmission, including callers
-whose original configuration left Scrambler off. Data masking by itself would
-not make a public acquisition pattern private.
-
-The GUI only shows numerical observer comparisons for an encrypted private
-pattern. With encryption disabled or a tone selected, it shows **Observer /
-receiver time: not applicable** and omits the observer graph and numerical fields.
-The standalone API and CLI retain the explicit hypothetical calculation for
-experimentation, marked `hypothetical_encryption: true`. Actual public patterns
-and tones can be easier to detect; those figures do not describe them.
-
-This hypothetical calculation keeps the current sample, chip and symbol timing
-and uses the same normalized one-symbol reference. For a tone, it uses the
-corresponding private pattern's observation band with that timing, not the
-actual tone's spectrum. It does not
-select the encrypted automatic profile, supply a key, enable Scrambler or DSSS,
-re-encode the draft with authentication, or change a transmission setting.
-Selecting encryption later may change the automatic profile and fixed-interval
-source capacity, so the result is a controlled comparison at the current
-timing, not a preview of all settings that a real key selection would produce.
-
-The ordinary encrypted automatic profile already spreads each bit across private
-Scrambler chips. The additional outer-DSSS factor changes the fine-chip bandwidth
-and, depending on the inner Rate, its symbol duration. The calculation uses the
-resulting bandwidth and actual duration once; it adds no separate DSSS or
-encryption multiplier. At fixed outer bandwidth, decreasing inner Rate as the
-factor increases lengthens symbols. Normalized received power then decreases to
-preserve the same 18 dB one-symbol energy reference.
-
-Numerical detection times are restricted to a normalized observation-band SNR of
-at most **-10 dB**. Stronger signals are reported as outside this weak-signal
-model, without a claimed protection interval. This restriction also keeps the
-time-bandwidth product large enough for the Gaussian approximation below.
-An estimate exceeding the numerical range is unavailable, not infinite
-protection.
-
-The selected TX target can affect the ratio by changing the automatic symbol
-geometry. Short and long draft profiles can therefore give different ratios.
-At fixed waveform geometry, TX/RX target labels and simulation/live link
-conditions leave the result unchanged. CLI `estimate` and `analyze-link` expose
-the same model in their `lpi` result: `model` is
-`relative_weak_signal_radiometer`, `cn0_basis` is
-`receiver_one_symbol_reference`, and `receiver_reference_symbol_snr_db` is 18.
-`reference_cn0_db_hz` is derived from that reference, not taken from a channel
-preset or live measurement. `observation_ratio` and `equivalent_wire_symbols`
-both give N; `additional_wire_symbols` gives `max(0, N - 1)`.
-
-## Observation bandwidth and receiver reference
-
-Let `F` be the internal sample rate, `R_inner` the Rate setting and `D` the
-outer-DSSS factor (Off is 1). Fine-chip geometry is sample-quantized:
+Assume a known band of width B, a known observation window T, stationary exactly
+known noise power, and independent Gaussian signal and noise. With signal/noise
+power ratio rho, the ideal real bandpass energy statistic has approximately
+`2BT` degrees of freedom. Its normalized mean and standard deviation are
+`1, 1/sqrt(BT)` without signal and `1+rho, (1+rho)/sqrt(BT)` with signal.
+For a 1% false alarm and 90% detection normal approximation:
 
 ```text
-R_outer = R_inner * D
-chip_samples = ceil(2 F / R_outer)
-chip_rate = F / chip_samples
-T_s = symbol_sample_count / F
+T90 = ((2.326347874 + (1+rho)*1.281551566) / rho)^2 / B
 ```
 
-For a shaped pattern (including the private pattern assumed in a hypothetical
-tone experiment), the assumed observer bandwidth is
-`B = (1 + 0.25) * chip_rate`, the ideal full passband support of the
-root-raised-cosine pulse. It is approximately `0.625 R_outer`.
-For rectangular patterns the model uses `B = R_outer`. These are assumed ideal
-observation filters, not measured occupied bandwidths: finite pulse truncation,
-limiting, sidelobes and spectral weighting can change a real detector's result.
-The model treats all nominal signal power as lying within the chosen band.
+This is a model equation, not a current planner estimate. The removed estimator
+normalized the intended receiver to an assumed 18 dB one-symbol energy; that
+number was never a measured threshold of the current triad receiver.
 
-`C/N0` is signal power divided by one-sided noise density, expressed in dB-Hz.
-Normalize both listeners to the existing one-symbol design energy. The linear
-signal-to-noise ratio in the observer's band then follows from geometry:
+The approximation depends on time-bandwidth product and the signal-present
+variance. Deterministic fixed-energy signals, correlated amplitude envelopes,
+finite shaping, receiver filtering, uncertain noise and repeated searched
+windows change the comparison. Nominal bandwidth does not establish independent
+power samples. An observer might exploit public patterns, envelope features,
+cyclostationarity, timing, direction or other side information. Noise uncertainty
+can also limit an ideal radiometer; it is not a security guarantee.
 
-```text
-E_ref = 10^(18 / 10)
-reference_cn0_db_hz = 18 - 10 log10(T_s)
-c_ref = E_ref / T_s
-rho = c_ref / B = E_ref / (B T_s)
-in_band_snr_db = reference_cn0_db_hz - 10 log10(B)
-noise_rise_db = 10 log10(1 + rho)
-```
+## Interpretation for current work
 
-The noise-rise value describes the average power increase in that band **at
-the normalized reference**, not measured interference on the actual link.
-It does not establish harmless interference to another receiver. The simulator
-expresses sample SNR over its `F/2` noise bandwidth; that channel SNR and the
-separate whole-draft simulation probability model are not inputs here. The LPI
-noise assumptions remain the same whether simulation is enabled or disabled.
-
-## Radiometer approximation
-
-Assume independent Gaussian signal and noise in the chosen band, exactly known
-stationary noise power, known band and known on-air observation window. For
-observation duration `T`, the ideal real bandpass radiometer has approximately
-`2 B T` independent real degrees of freedom. Its normalized mean-power
-statistic has mean 1 and standard deviation `1/sqrt(BT)` without a signal,
-and mean `1 + rho` and standard deviation `(1 + rho)/sqrt(BT)` with one.
-
-Outer DSSS retains each inner complex coefficient across several fine chips with
-independent secret QPSK phase changes. The wider spectrum retains correlated
-power envelopes. Bandwidth alone does not establish independent power samples
-or signal-present variance. The model omits these correlations and envelope or
-higher-order detectors. Its ratio remains an uncalibrated analytical comparison;
-that correlation alone does not establish a large error when noise dominates.
-
-The normal approximation therefore gives
-
-```text
-z_fa = 2.3263478740408408    # standard-normal 99th percentile
-z_d  = 1.2815515655446004    # standard-normal 90th percentile
-T_90 = ((z_fa + (1 + rho) * z_d) / rho)^2 / B
-N = T_90 / T_s
-  = (z_fa + (1 + rho) * z_d)^2 / (B T_s rho^2)
-additional_symbols = max(0, N - 1)
-```
-
-This is the noise-like random-signal model. A fixed-energy deterministic signal
-has a different signal-present variance and is not being substituted for it.
-The actual modem uses bounded cryptographic I/Q samples and finite pulse
-shaping, so neither ideal distribution is an empirical calibration of its
-transmitted waveform. The Gaussian radiometer analysis and its low-SNR
-approximation are developed in [Tandra's dissertation, chapter 2, equations
-2.5–2.7](https://digicoll.lib.berkeley.edu/record/137682/files/EECS-2009-192.pdf).
-
-At very low SNR the relative expression simplifies to
-`N ≈ 13.0169383662 * B * T_s / E_ref^2`. Doubling the observation bandwidth
-or the symbol duration approximately doubles the observation ratio. Increasing
-symbol duration also lowers the normalized received power to keep the same
-one-symbol energy reference. These relationships do not credit encryption with
-a reduction in actual transmitted power.
-
-## Frequency hopping
-
-The GUI's Fake FHSS selection previews secret hopping while the observer captures
-**all channels simultaneously**, intercepting all signal energy. It excludes known
-empty frequency gaps, rather than diluting the signal in noise from DC through
-hundreds of GHz. The selected FCC/EU profile supplies the actual channel count K and residence
-d (currently 0.4 s); below 800 MHz both use the experimental narrow profile.
-See [profile resolution](spread-spectrum-controls.md#automatic-geometry). Genuine hardware hopping remains unavailable; the actual Fake
-output stays fixed. No receiver CPU credit is assigned to a nonexistent dehopper.
-
-The model chooses the faster of two strategies *before observing data*, each at
-90% detection and a global 1% false-alarm probability per specified window:
-
-* Aggregate energy over the whole hop set. At channel bandwidth B and active-band
-  SNR rho, the Gaussian approximation gives
-  `T = [z_.99 sqrt(K) + z_.90 sqrt(K + 2 rho + rho^2)]^2 / (B rho^2)`.
-  One channel carries the signal at each instant; the other channels add noise.
-* A channelized dwell-energy maximum. For n=floor(Bd) independent complex samples
-  per full dwell and M observed dwells, each noise-cell energy has Gamma(n,1)
-  distribution, while the occupied cell has Gamma(n,1+rho). The threshold h
-  satisfies `P(Gamma(n,1)>h) = 1 - .99^(1/(KM))`. With occupied-cell exceedance
-  q1, the miss probability is `(1-q1)^M (1-q0)^((K-1)M)`.
-  First-dwell whole-sample endpoints and later complete-dwell endpoints are
-  searched using bounded Gamma calculations. No zero-duration fractional cell is
-  treated as evidence. Unsupported/numerically unresolved channel banks retain
-  the aggregate reference and expose their status.
-
-The model assumes known dwell alignment, stationary independent Gaussian cells,
-known noise power and occupied channel set, and no tuning or access gaps.
-EU adaptive-access and sub-GHz duty requirements are not simulated; their
-numerical observer comparisons are conditional on on-air dwell, not elapsed
-compliant operation. Unsupported profiles retain the fixed-band model. It does not know
-the secret channel order. It is not an optimum-detector lower bound: joint
-likelihood detectors, spectral structure, finite pulse tails, limiting and
-sequential observation can change performance. In particular, 200 channels do
-not imply a universal 200x gain. Off and K=1 retain the previous model's numbers.
-The [NIST Gamma distribution reference](https://itl.nist.gov/div898/handbook/eda/section3/eda366b.htm)
-and [DLMF incomplete-Gamma numerical methods](https://dlmf.nist.gov/8.25) describe
-the distributions and numerical functions; deterministic tests check global
-false-alarm accounting and independent high-precision reference points.
-
-## Symbols, whole bursts and examples
-
-One wire bit occupies one modem symbol. Equivalent symbols count transmitted
-bits, including marker and FEC bits on the fixed-interval paths. They do not
-count source characters, source bytes or chips. Short text retains its exact
-dictionary endpoint, and explicit binary input retains exactly its entered
-bits. No new header, padding or symbol is transmitted for this estimate.
-
-The symbol result is fractional because an energy detector can accumulate
-evidence within a modem symbol. N is the total observer-to-receiver observation
-ratio; the additional count subtracts the receiver's first duration and is
-clamped at zero. Neither count promises that the preceding whole number of
-symbols is undetectable. The modeled 90% detection point is also not the first
-possible detection time.
-
-The whole-burst exposure ratio is
-`transmission.total_seconds / T_90`, at the same normalized reference. It
-includes settling, filter tails and suppression waveforms as an
-**equal-power approximation**; those waveforms
-also radiate energy even though they carry no additional message bits. Filter
-transients do not actually have constant power, so this ratio is approximate.
-Idle time and the receiver's post-transmission absent-symbol observation are
-excluded. A ratio of one means the modeled exposure duration equals `T_90`;
-the ratio itself is not a detection probability or an actual link-budget
-estimate. Repeated traffic can provide additional evidence when the observer
-can identify and combine its on-air windows.
-
-When encryption is off, this ratio compares the **current draft's actual
-duration** with the hypothetical private-pattern detection time. It does not
-include any extra intervals or different timing that enabling encryption might
-require. Tone drafts keep their actual tone airtime, including their absence
-of shaped pulse tails; only the detection model assumes the private waveform.
-
-These examples use automatic shaped patterns and the normalized 18 dB
-one-symbol reference at both listeners. The TX target selects symbol geometry;
-reference C/N0 is then calculated from the actual sampled duration. They give
-the same numbers with simulation enabled or disabled, regardless of its preset.
-In the API and CLI, no-key examples carry the hypothetical-encryption flag; the GUI does not display those numbers.
-
-| Nominal Rate | TX target, dB-Hz | Reference C/N0, dB-Hz | Assumed B | Actual seconds/symbol | Observer : receiver | Additional bit durations |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 100 Hz | -3 | -4.1442 | 62.5 Hz | 163.84 | 33.63 : 1 | 32.63 |
-| 100 Hz | -6 | -7.1545 | 62.5 Hz | 327.68 | 67.11 : 1 | 66.11 |
-| 1,200 Hz | -10 | -10.000001 | 750 Hz | 630.9575 | 1,547.43 : 1 | 1,546.43 |
-
-All three use a 6,000 Hz internal clock, with 120 samples/chip at 100 Hz
-and 10 samples/chip at 1,200 Hz. Symbol durations use the actual sample count,
-including rounding for the third row. These calculations omit no symbol
-rounding and do not assert that the intended receiver can sustain the required
-coherence or acquire the waveform.
-
-The GUI initially selects no key, so its observer estimate is initially not
-applicable. A short profile can put the normalized in-band SNR outside the
-weak-signal model, with or without a key. Changing simulated attenuation cannot
-make that profile eligible: the relative reference does not use the channel's
-power. A longer symbol or wider observation band can lower its normalized SNR.
-Encryption alone must not create an apparent processing-gain multiplier.
-
-## What this model cannot establish
-
-The 1% false-alarm rate applies to one preselected observation window. Searching
-many frequencies or start times and repeatedly checking growing windows changes
-the total false-alarm probability. A sequential detector requires its own
-threshold analysis.
-
-A different location, antenna, noise figure, received power or observation
-bandwidth breaks the equal-opportunity assumption. Spectral structure,
-cyclostationary features, repeated or disclosed patterns, key compromise and
-correlation methods can allow earlier detection than this particular energy
-detector. Conversely, unknown or drifting noise and interference can make
-energy detection substantially harder. Longer integration cannot always
-overcome that uncertainty; [Tandra and Sahai describe noise uncertainty and
-detector SNR walls](https://people.eecs.berkeley.edu/~sahai/Papers/DelayCoherenceDySpAN08.pdf).
-
-Detection of a transmission, recovery of its bits, decryption of its contents
-and interference to another service are different outcomes. This estimate
-addresses only the first, under its stated assumptions. It changes no waveform,
-receiver admission decision, physical-end condition or pending-message progress.
-
-### Advisory cancellation
-
-The GUI passes its advisory cancellation token through draft inspection and
-planner FHSS calculations. Gamma iterations check it within the existing
-numerical work budget. Cancelled calculations do not publish partial observer
-ratios; completed calculations retain the same detector, bounds and budget.
+Keep power, noise density, observation bandwidth and actual emitted duration
+separate. Count burst gaps and hop transitions by their real energy and time,
+not an invented independent spreading multiplier. Compare matched assumptions
+and record both receiver search/admission costs and observer alternatives.
+The [background-noise component](triad-background-noise.md) adds energy and must
+be included in an observer model. Neither cryptographic appearance nor a
+successful receiver decode proves low probability of intercept.

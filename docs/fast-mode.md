@@ -39,11 +39,9 @@ Dark and Off. The CLI reports counts and integrity.
 Switching Text/File retains both drafts. Loading a key does not enable
 encryption; switching encryption off retains the key for later use.
 
-Regular mode retains its existing short dictionary, exact raw bits, 192-bit
-markers and 128-coded-byte intervals, private noise waveforms, time-indexed
-encryption, iterative search and incremental pending reception. Fast settings,
-key selection, text/file drafts and history are independent of regular settings and
-drafts. Switching views does not cancel a regular reception. Starting Fast
+Fast settings, key selection, text/file drafts and history remain independent
+of other application settings and drafts. Robust is currently unavailable in
+the GUI; switching views does not connect or start a Robust reception. Starting Fast
 hardware waits for the regular audio device to close and refuses to interrupt
 an admitted pending reception or transmission. A regular simulation can continue
 while its interface is hidden.

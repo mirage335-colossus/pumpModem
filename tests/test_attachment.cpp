@@ -1,5 +1,4 @@
 #include "datapump/attachment.hpp"
-#include "datapump/transfer.hpp"
 #include <iostream>
 #include <limits>
 using namespace datapump;
@@ -41,46 +40,11 @@ void convention() {
     Message plain;plain.data.assign(incomplete.begin(),incomplete.end());attachment::interpret(plain,100);
     check(plain.kind==MessageKind::text && plain.data.size()==incomplete.size(),"truncated application marker is not an attachment");
 }
-void completed_source_only() {
-    for(const bool compressed:{false,true}) {
-        transfer::Options value;value.timestamp=1800000000;value.search_seconds=0;value.compression=compressed;value.content_limit=4;
-        Message sent;sent.kind=MessageKind::file;sent.filename="zero.bin";sent.data={0,1,2,0};sent.repeatable=true;
-        const auto wire=transfer::message_wire_bits(sent,value);
-        check(!transfer::estimate(sent,value).repeatable_allowed,"attachments must not offer repeatable transmission");
-        transfer::StreamReceiver receiver(value,value.timestamp);modem::PatternBurst burst;
-        burst.bits=wire;burst.score=100;burst.stream_first_sample=100;
-        const auto pending=receiver.push(burst);
-        check(!pending.content_validated && pending.content.message.filename.empty(),"attachment interpretation ran before physical end");
-        burst.bits.clear();burst.first_stream_symbol=wire.size();burst.complete=true;
-        const auto received=receiver.push(burst);
-        check(received.content_validated && received.content.message.kind==MessageKind::file && received.content.message.filename==sent.filename &&
-              received.content.message.data==sent.data,"attachment source roundtrip exceeded content quota or lost its marker");
-    }
-}
-void rejected_source_is_not_published() {
-    for(const bool compressed:{false,true})for(const bool file:{false,true}) {
-        transfer::Options sender;sender.timestamp=1800000000;sender.search_seconds=0;
-        sender.compression=compressed;sender.content_limit=file?3:17;
-        Message sent;sent.data={0,255,0};
-        // Text through 16 bytes uses the optional raw dictionary interpretation;
-        // this fixture exercises rejection by the fixed-interval source decoder.
-        if(!file)sent.data.resize(17,0);
-        if(file){sent.kind=MessageKind::file;sent.filename="oversized.bin";}
-        check(!transfer::uses_raw_message(sent),"source quota rejection fixture must use fixed intervals");
-        const auto wire=transfer::message_wire_bits(sent,sender);
-        auto value=sender;value.content_limit=2;
-        transfer::StreamReceiver receiver(value,value.timestamp);modem::PatternBurst burst;
-        burst.bits=wire;burst.score=100;burst.stream_first_sample=100;burst.complete=true;
-        const auto received=receiver.push(burst);
-        check(received.stream_complete && !received.content_validated && !received.error.empty() &&
-              received.content.message.data.empty() && received.content.message.filename.empty() &&
-              received.content.message.kind==MessageKind::text,
-              "a source rejected by the application quota must publish neither decoded bytes nor attachment metadata");
-    }
+void quota_overflow() {
     bool rejected=false;
     try{(void)attachment::source_limit(std::numeric_limits<std::size_t>::max());}catch(const Error&){rejected=true;}
     check(rejected,"attachment quota padding must reject address-space overflow");
 }
 }
-int main(){try{convention();completed_source_only();rejected_source_is_not_published();std::cout<<"Attachment application convention passed\n";}
+int main(){try{convention();quota_overflow();std::cout<<"Attachment application convention passed\n";}
 catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

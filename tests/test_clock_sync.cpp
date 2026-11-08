@@ -1,10 +1,6 @@
 #include "datapump/clock_sync.hpp"
-#include "datapump/fhss_schedule.hpp"
-#include "datapump/sched_hop.hpp"
 #include "datapump/utc_timing.hpp"
 #include "datapump/resampler.hpp"
-#include "datapump/pattern_code.hpp"
-#include "datapump/pattern_pulse.hpp"
 #include <cmath>
 #include <numbers>
 #include <iostream>
@@ -725,58 +721,8 @@ void continuous_guard() {
     check.verify(shorter,{1.L/48000,1,0},0,0); // final short block needs no horizon reset
 }
 
-void shaped_timing_error(datapump::modem::Config config) {
-    using namespace datapump::modem;
-    config.scramble=true;config.stream_epoch=1800000100;
-    for(std::size_t i=0;i<config.spreading_seed.size();++i)config.spreading_seed[i]=static_cast<std::uint8_t>(i*31+7);
-    for(std::size_t i=0;i<config.dsss_seed.size();++i)config.dsss_seed[i]=static_cast<std::uint8_t>(i*17+3);
-    const datapump::Bytes bits{0,1,0};
-    PatternTransmitter transmitter(bits,config,config.stream_epoch,0,false);
-    std::vector<float> raw(static_cast<std::size_t>(transmitter.total_samples()));
-    require(transmitter.read(raw)==raw.size(),"finite waveform fixture incomplete");
-    PatternCode code(config,config.stream_epoch);
-    const auto padding=pattern_pulse_padding_samples(config);
-    const double amplitude=std::sqrt(2*nominal_signal_power);
-    const auto ideal=[&](double sample) {
-        std::complex<double> envelope{};
-        for(std::size_t bit=0;bit<bits.size();++bit)
-            envelope+=code.shaped_value(bit*code.chips_per_symbol(),bits[bit],
-                sample-static_cast<double>(padding)-static_cast<double>(bit*code.symbol_samples()));
-        return (pattern_limit_pcm(amplitude*envelope)*std::polar(1.,
-            2*std::numbers::pi*config.carrier_hz*sample/config.sample_rate)).real();
-    };
-    datapump::audio::Resampler resampler(config.sample_rate,config.sample_rate,true);
-    resampler.initialize_timing(.375,0);
-    const auto slew=datapump::audio::conservative_timing_slew(config.sample_rate,
-        static_cast<double>(code.symbol_samples())/config.sample_rate);
-    resampler.set_rate_correction(.0001,slew);
-    std::array<float,257> output{};
-    std::size_t offset=0,produced=0;double energy=0,observed=0,dot=0,error=0;
-    while(!resampler.finished()) {
-        const auto count=std::min<std::size_t>(1031,raw.size()-offset);
-        const auto progress=resampler.process(std::span(raw).subspan(offset,count),output,offset+count==raw.size());
-        require(progress.consumed || progress.produced || resampler.finished(),"finite waveform ASRC stalled");
-        offset+=progress.consumed;
-        for(std::size_t i=0;i<progress.produced;++i,++produced) {
-            const double t=static_cast<double>(produced)/config.sample_rate;
-            const auto ramp=std::min(t,.0001/slew);
-            const double source=.375+config.sample_rate*(t+.5*slew*ramp*ramp+.0001*(t-ramp));
-            const auto reference=ideal(source),sample=static_cast<double>(output[i]);
-            energy+=reference*reference;observed+=sample*sample;dot+=reference*sample;
-            error+=(reference-sample)*(reference-sample);
-        }
-    }
-    const auto mismatch_db=-10*std::log10(dot*dot/(energy*observed));
-    const auto relative_error=error/energy;
-    std::cout<<"ASRC finite-pulse case Fs="<<config.sample_rate<<" carrier="<<config.carrier_hz
-        <<" DSSS="<<config.dsss_factor<<" symbol_seconds="<<static_cast<double>(code.symbol_samples())/config.sample_rate
-        <<" samples="<<produced<<" waveform_mismatch_db="<<mismatch_db<<" error_energy_ratio="<<relative_error<<'\n';
-    // Conditional waveform-norm regression, including every boundary/tail and
-    // the actual nonlinear amplitude limiter. Not an acquisition-bank PD/PFA
-    // or receiver noise-covariance qualification.
-    require(mismatch_db<.01 && relative_error<.001,"UTC interpolation distorts finite shaped/limited waveform");
 }
-}
+
 int main(int argc,char** argv) {try {
     const bool diagnose=argc==2&&std::string(argv[1])=="--diagnose-all";
     require(argc==1||diagnose,"usage: test_clock_sync [--diagnose-all]");
@@ -788,9 +734,6 @@ int main(int argc,char** argv) {try {
             std::cerr<<"clock_diagnostic case="<<name<<" result=failed error="<<error.what()<<'\n';}
     };
     run("declared_clock_timing",declared_clock_timing);run("physical_waveform_rate",physical_waveform_rate);run("bounded_system_utc_phase",bounded_system_utc_phase);
-    require(datapump::modem::FhssPlan{}.audio_error_seconds==datapump::clock_sync::default_audio_error_seconds &&
-        datapump::modem::SchedHopPlan{}.audio_error_seconds==datapump::clock_sync::default_audio_error_seconds,
-        "FHSS and Sched_Hop must share the configured audio-lag default");
     run("native_timestamp_intervals",native_timestamp_intervals);run("native_query_uncertainty",native_query_uncertainty);run("native_frozen_source_timing",native_frozen_source_timing);
     require(datapump::clock_sync::parse_audio_error("default")==.07&&
         datapump::clock_sync::parse_audio_error("Default")==.07&&
@@ -991,11 +934,6 @@ int main(int argc,char** argv) {try {
         "timing slew uses audio block length instead of full coherent symbol");
     const auto policy=datapump::clock_sync::parse("GPS_1ms-400ms_region-2564ms_offset");
     require(policy && std::abs(policy->half_window_seconds()-.202)<1e-12,"clock window changed total-region semantics");
-    datapump::modem::Config waveform;waveform.sample_rate=4800;waveform.carrier_hz=1200;waveform.bandwidth_hz=1200;
-    shaped_timing_error(waveform);
-    waveform.bandwidth_hz=120;waveform.dsss_factor=10;shaped_timing_error(waveform);
-    waveform.sample_rate=64;waveform.carrier_hz=.5;waveform.bandwidth_hz=.5;waveform.dsss_factor=1;
-    shaped_timing_error(waveform);
     if(diagnostic_failures)return 1;
     std::cout<<"UTC timestamp, uncertainty, rate direction and discontinuity tests passed\n";
     return 0;

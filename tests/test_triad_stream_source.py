@@ -104,19 +104,6 @@ class Source:
 
 @unittest.skipIf(BINARY is None, 'native binary path required')
 class PullSourceTests(unittest.TestCase):
-    def test_template_bank_memory_plan_uses_single_source_fallback(self):
-        # Checked geometry only: exercise the large private-cache regime without
-        # allocating it or exporting millions of samples as a routine test.
-        common = [str(BINARY), *COMMON, '--plan-only', '--shaping', 'legacy',
-                  '--spread-preset', 'none', '--selective-perturbation', 'off']
-        ordinary = json.loads(subprocess.check_output(common))['geometry']
-        large = json.loads(subprocess.check_output(common + [
-            '--rate', '500000', '--sample-rate', '400000']))['geometry']
-        self.assertEqual(ordinary['template_bank_rows'], 26)
-        self.assertFalse(ordinary['template_bank_single_source_fallback'])
-        self.assertEqual(large['template_bank_rows'], 1)
-        self.assertTrue(large['template_bank_single_source_fallback'])
-        self.assertGreater(large['bounded_source_workspace_bytes'], large['template_bank_budget_bytes'])
 
     def test_shared_raw_basis_bank_matches_scalar_mapped_reference_and_ordinals(self):
         rows = [(bit, epoch, 0, 0, 0, 0, 0) for epoch in (-6, 0, 6) for bit in (0, 1)]
@@ -151,94 +138,9 @@ class PullSourceTests(unittest.TestCase):
             _, right = source.basis_map(first+7, [x-7 for x in offsets[7:]], rows, 1725)
             self.assertEqual(whole, [a+b for a, b in zip(left, right)])
 
-    def test_clock_follow_is_explicit_bounded_and_retains_nominal_basis(self):
-        args = ['--stream-kind', 'emitted', '--rate', '.0036', '--seconds', '1000000',
-                '--clock-follow-bounded']
-        with Source(args) as source:
-            d = source.descriptor
-            self.assertTrue(d['clock_follow_bounded'])
-            self.assertEqual(d['clock_follow_endpoint_padding_seconds'], 2)
-            epoch = d['epoch']
-            r = source.command('clock 2')
-            self.assertTrue(r['accepted'])
-            self.assertEqual(r['offset_seconds'], 0)
-            source.next(4096)
-            r = source.command('clock -1')
-            self.assertTrue(r['accepted'])
-            self.assertGreaterEqual(r['rate_scale'], 1)
-            self.assertFalse(source.command('clock 2.1')['accepted'])
-            self.assertEqual(d['epoch'], epoch)
-            # An independently started RX gets the public calendar and nominal
-            # templates, without being told the private TX correction trace.
-            sample = d['data_offset_samples'] + 100000 * 6000
-            candidates = [(0, 0, d['data_offset_samples']/6000, 0, 0, 0, 0)]
-            _, rows = source.basis(sample, 8, candidates)
-            self.assertEqual(len(rows[0]), 8)
-            with Source(args) as receiver:
-                for field in ('epoch', 'total_samples', 'data_offset_samples', 'source_samples'):
-                    self.assertEqual(receiver.descriptor[field], d[field])
-                _, independent = receiver.basis(sample, 8, candidates)
-                self.assertEqual(rows, independent)
-        with Source(['--stream-kind', 'emitted']) as source:
-            self.assertFalse(source.command('clock 1')['accepted'])
 
-    def test_clock_follow_rejects_unqualified_regimes(self):
-        for extra in ([], ['--helper','on'], ['--fhss','on'], ['--burst-wait-tiles','3']):
-            args = [] if not extra else ['--rate','.0036','--seconds','1000000',*extra]
-            p = subprocess.run([str(BINARY), *COMMON, '--stream-server', '--stream-kind','emitted',
-                '--clock-follow-bounded', *args], input=b'quit\n', capture_output=True, timeout=10)
-            self.assertNotEqual(p.returncode, 0)
-            self.assertTrue(b'bounded clock following requires' in p.stderr or
-                            b'center-aligned FHSS requires' in p.stderr)
 
-    def test_pattern_identity_propagates_and_unknown_choices_fail(self):
-        actual = []
-        for revision, depth in (('independent-apsk-v2', .25), ('legacy-v1', .4)):
-            args = ['--stream-kind', 'emitted', '--added-symbols', '10']
-            if revision == 'legacy-v1':
-                args += ['--pattern-revision', revision, '--added-amplitude-depth', str(depth)]
-            with Source(args) as source:
-                d = source.descriptor
-                for info in (source.plan['format'], d, d['power']):
-                    self.assertEqual(info['pattern_revision'], revision)
-                    self.assertEqual(info['added_amplitude_depth'], depth)
-                first = d['data_offset_samples'] + d['sample_rate_hz']
-                _, basis = source.basis(first, 71, [[0, 0, d['data_offset_samples']/d['sample_rate_hz'], 0, 0, 0, 0]])
-                actual.append(basis)
-        self.assertNotEqual(actual[0], actual[1])
-        for flags in (['--pattern-revision', 'unknown'], ['--added-amplitude-depth', '0'],
-                      ['--added-amplitude-depth', '1'], ['--added-amplitude-depth', 'nan']):
-            failed = subprocess.run([str(BINARY), *COMMON, '--stream-server', *flags],
-                                    input=b'', capture_output=True, timeout=10)
-            self.assertNotEqual(failed.returncode, 0)
 
-    def test_channel_matches_finite_export_and_chunks(self):
-        with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory)/'reference'
-            subprocess.run([str(BINARY), *COMMON, '--power-reference', 'whole-active', '--output', str(output)],
-                           check=True, capture_output=True, timeout=60)
-            metadata = json.loads((output/'manifest.json').read_text())
-            self.assertEqual(metadata['format']['pattern_revision'], 'independent-apsk-v2')
-            self.assertEqual(metadata['format']['added_amplitude_depth'], .25)
-            expected = (output/'observation.c128').read_bytes()
-            expected_validity = (output/'validity.u8').read_bytes()
-            with Source(['--power-reference', 'whole-active']) as source:
-                self.assertTrue(source.descriptor['conditional_gaussian_null_supported'])
-                raw, validity, position = [], [], 0
-                for iteration in range(10000):
-                    header, data, valid = source.next((17, 4096, 16384)[iteration % 3])
-                    self.assertEqual(header['first_sample'], position)
-                    position += header['count']
-                    raw.append(data); validity.append(valid)
-                    if header['complete']:
-                        break
-                else:
-                    self.fail('short source did not finish')
-                self.assertEqual(position, source.descriptor['total_samples'])
-                self.assertEqual(b''.join(raw), expected)
-                self.assertEqual(b''.join(validity), expected_validity)
-                empty, data, valid = source.next(1)
-                self.assertEqual((empty['count'], data, valid), (0, b'', b''))
 
     def test_emitted_basis_and_random_access_continuity(self):
         with Source(['--stream-kind', 'emitted']) as source:
@@ -360,22 +262,6 @@ class PullSourceTests(unittest.TestCase):
                                      input=b'', capture_output=True, timeout=90)
             self.assertNotEqual(damaged.returncode, 0)
             self.assertIn(b'authentication failed', damaged.stderr)
-            # Production pad policy is >1 GiB. Sparse fixtures exercise the
-            # real loader and are never used as operational key material.
-            pad, wrong, padded = root/'pad', root/'wrong-pad', root/'padded.key'
-            for path, last in ((pad, b'\x01'), (wrong, b'\x02')):
-                with path.open('wb') as handle:
-                    handle.seek(1024*1024*1024); handle.write(last)
-            subprocess.run([str(KEY_FIXTURE), str(padded), 'single', str(pad)], check=True, timeout=180)
-            missing = subprocess.run([str(BINARY), *args, '--stream-server', '--key-file', str(padded)],
-                                     input=b'', capture_output=True, timeout=90)
-            self.assertNotEqual(missing.returncode, 0)
-            self.assertIn(b'requires an optional external pad', missing.stderr)
-            bad_pad = subprocess.run([str(BINARY), *args, '--stream-server', '--key-file', str(padded), '--pad', str(wrong)],
-                                     input=b'', capture_output=True, timeout=180)
-            self.assertNotEqual(bad_pad.returncode, 0)
-            self.assertIn(b'authentication failed', bad_pad.stderr)
-            accepted(padded, '--pad', str(pad))
         with Source() as source:
             _, error = source.process.communicate(b'next 16385\n', timeout=10)
             self.assertNotEqual(source.process.returncode, 0)

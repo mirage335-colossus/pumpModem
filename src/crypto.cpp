@@ -248,11 +248,6 @@ void serpent_cbc_prepared(std::span<std::uint8_t> data,const Serpent256& serpent
     }
 }
 
-void serpent_cbc(std::span<std::uint8_t> data,View key,View iv,bool encrypt) {
-    Serpent256 serpent(std::span<const std::uint8_t,32>(key.data(),32));
-    serpent_cbc_prepared(data,serpent,iv,encrypt);
-}
-
 class Hash512 {
 public:
     Hash512():context_(EVP_MD_CTX_new(),EVP_MD_CTX_free) {
@@ -658,13 +653,6 @@ Crypto& Crypto::operator=(const Crypto& other) {
     }
     return *this;
 }
-const void* Crypto::confidentiality_storage_id() const noexcept {return confidentiality_;}
-std::size_t Crypto::confidentiality_storage_bytes() const noexcept {
-    return confidentiality_?sizeof(ConfidentialityMaterial):0;
-}
-Crypto Crypto::random() {
-    Secret<32> material;system_random_fill(material.bytes);return Crypto(material.bytes);
-}
 Crypto Crypto::from_independent_roots(View serpent_root,View aes_root) {
     require(serpent_root.size()==64 && aes_root.size()==64,"independent cipher roots must each contain exactly 64 bytes");
     Crypto key(aes_root.first(32));
@@ -772,55 +760,10 @@ std::unique_ptr<ConfidentialityCbc> Crypto::prepare_confidentiality_cbc(View con
     Secret<64> material;std::copy_n(sm.bytes.begin(),32,material.bytes.begin());std::copy_n(am.bytes.begin(),32,material.bytes.begin()+32);
     return std::unique_ptr<ConfidentialityCbc>(new ConfidentialityCbc(material.bytes));
 }
-namespace {
-Bytes confidentiality_cbc(const Crypto& crypto,View input,View context,View salt,View iv,bool encrypt) {
-    require(salt.size()==32 && iv.size()==16 && !input.empty() && input.size()%16==0,"invalid confidentiality CBC geometry");
-    const auto sm=cascade_kdf(KeyringAccess::root(crypto,true),contextual_info("datapump/cascade/v2/serpent/cbc/",context,salt));
-    const auto am=cascade_kdf(KeyringAccess::root(crypto,false),contextual_info("datapump/cascade/v2/aes/cbc/",context,salt));
-    Secret<64> material;std::copy_n(sm.bytes.begin(),32,material.bytes.begin());std::copy_n(am.bytes.begin(),32,material.bytes.begin()+32);
-    const auto iv_label=view("datapump/cascade/v2/cbc/serpent-iv/");Bytes iv_info(iv_label.begin(),iv_label.end());iv_info.insert(iv_info.end(),iv.begin(),iv.end());
-    auto serpent_iv=cascade_kdf(std::span(material.bytes).first(32),iv_info);
-    if(encrypt){
-        SecretBytes inner(input.size());std::copy(input.begin(),input.end(),inner.bytes.begin());
-        serpent_cbc(inner.bytes,std::span(material.bytes).first(32),std::span(serpent_iv.bytes).first(16),true);
-        return aes_cipher(inner.bytes,std::span(material.bytes).last(32),iv,EVP_aes_256_cbc(),true);
-    }
-    auto plain=aes_cipher(input,std::span(material.bytes).last(32),iv,EVP_aes_256_cbc(),false);
-    serpent_cbc(plain,std::span(material.bytes).first(32),std::span(serpent_iv.bytes).first(16),false);
-    return plain;
-}
-}
-Bytes Crypto::encrypt_confidentiality_cbc(View input,View context,View salt,View iv) const {
-    return confidentiality_cbc(*this,input,context,salt,iv,true);
-}
-Bytes Crypto::decrypt_confidentiality_cbc(View input,View context,View salt,View iv) const {
-    return confidentiality_cbc(*this,input,context,salt,iv,false);
-}
-
 Bytes Crypto::stream(StreamPurpose purpose, std::uint64_t timestamp,
-                      std::uint64_t offset, std::size_t count, StreamDomain domain) const {
+                      std::uint64_t offset, std::size_t count) const {
     const auto index = static_cast<std::size_t>(purpose);
     require(index < 4, "invalid keystream purpose");
-    require(domain == StreamDomain::Payload || domain == StreamDomain::Preamble || domain == StreamDomain::Suppression ||
-            domain == StreamDomain::PatternZeroV2 || domain == StreamDomain::PatternOneV2 ||
-            domain == StreamDomain::OuterDsss10V1 || domain == StreamDomain::OuterDsss100V1 ||
-            domain == StreamDomain::OuterDsss1000V1 || domain == StreamDomain::FakeFhssV1 ||
-            domain == StreamDomain::OuterDsss10RotationV2 || domain == StreamDomain::OuterDsss100RotationV2 ||
-            domain == StreamDomain::OuterDsss1000RotationV2 || domain == StreamDomain::OuterDsss10PermutationV2 ||
-            domain == StreamDomain::OuterDsss100PermutationV2 || domain == StreamDomain::OuterDsss1000PermutationV2 ||
-            domain == StreamDomain::FhssCycleV2 || domain == StreamDomain::CoverPreambleV1 ||
-            domain == StreamDomain::CoverSuppressionV1 || domain == StreamDomain::FhssUtcV3 || domain == StreamDomain::CoverWaitV1 ||
-            domain == StreamDomain::SchedHopKeyV1 || domain == StreamDomain::SchedHopUtcV1 ||
-            domain == StreamDomain::SymbolBurstWaitV1,
-            "invalid keystream domain");
-    const bool outer_v2=domain==StreamDomain::OuterDsss10RotationV2 || domain==StreamDomain::OuterDsss100RotationV2 ||
-        domain==StreamDomain::OuterDsss1000RotationV2 || domain==StreamDomain::OuterDsss10PermutationV2 ||
-        domain==StreamDomain::OuterDsss100PermutationV2 || domain==StreamDomain::OuterDsss1000PermutationV2;
-    require(!outer_v2 || purpose==StreamPurpose::Dsss,"outer spreading requires the dedicated DSSS purpose key");
-    require((domain!=StreamDomain::FhssCycleV2 && domain!=StreamDomain::FakeFhssV1 && domain!=StreamDomain::FhssUtcV3 &&
-             domain!=StreamDomain::SchedHopKeyV1 && domain!=StreamDomain::SchedHopUtcV1 &&
-             domain!=StreamDomain::SymbolBurstWaitV1) ||
-            purpose==StreamPurpose::Fhss,"hopping requires the dedicated FHSS purpose key");
     require(count == 0 || count - 1 <= std::numeric_limits<std::uint64_t>::max() - offset,
             "keystream byte offset would overflow");
     if (count == 0) return {};
@@ -831,54 +774,6 @@ Bytes Crypto::stream(StreamPurpose purpose, std::uint64_t timestamp,
     put_u64(std::span(info).last(8), timestamp);
     auto key = hkdf(keys_[index], info);
     std::array<std::uint8_t, 16> counter{};
-    if(domain == StreamDomain::Preamble) {
-        constexpr std::string_view pad = "preamble";
-        std::copy(pad.begin(), pad.end(), counter.begin());
-    }
-    if(domain == StreamDomain::Suppression) {
-        constexpr std::string_view pad = "suppress";
-        std::copy(pad.begin(), pad.end(), counter.begin());
-    }
-    if(domain == StreamDomain::PatternZeroV2 || domain == StreamDomain::PatternOneV2) {
-        const std::string_view pad = domain == StreamDomain::PatternZeroV2 ? "pat-v2-0" : "pat-v2-1";
-        std::copy(pad.begin(), pad.end(), counter.begin());
-    }
-    if(domain == StreamDomain::OuterDsss10V1 || domain == StreamDomain::OuterDsss100V1 ||
-       domain == StreamDomain::OuterDsss1000V1) {
-        require(purpose==StreamPurpose::Dsss,"outer spreading requires the dedicated DSSS purpose key");
-        const std::string_view pad=domain==StreamDomain::OuterDsss10V1?"ds1-0010":
-            domain==StreamDomain::OuterDsss100V1?"ds1-0100":"ds1-1000";
-        std::copy(pad.begin(),pad.end(),counter.begin());
-    }
-    if(domain == StreamDomain::FakeFhssV1) {
-        require(purpose==StreamPurpose::Fhss,"fake hopping requires the dedicated FHSS purpose key");
-        constexpr std::string_view pad="fh-fake1";
-        std::copy(pad.begin(),pad.end(),counter.begin());
-    }
-    if(domain == StreamDomain::FhssCycleV2 || domain == StreamDomain::FhssUtcV3) {
-        const std::string_view pad=domain == StreamDomain::FhssUtcV3?"fh-utc03":"fh-cyc02";
-        std::copy(pad.begin(),pad.end(),counter.begin());
-    }
-    if(domain == StreamDomain::SchedHopKeyV1 || domain == StreamDomain::SchedHopUtcV1) {
-        const std::string_view pad=domain == StreamDomain::SchedHopKeyV1?"sh-key01":"sh-utc01";
-        std::copy(pad.begin(),pad.end(),counter.begin());
-    }
-    if(domain == StreamDomain::SymbolBurstWaitV1) {
-        constexpr std::string_view pad="sb-wai01";
-        std::copy(pad.begin(),pad.end(),counter.begin());
-    }
-    if(domain == StreamDomain::CoverPreambleV1 || domain == StreamDomain::CoverSuppressionV1 || domain == StreamDomain::CoverWaitV1) {
-        const std::string_view pad=domain==StreamDomain::CoverPreambleV1?"cv-pre01":domain==StreamDomain::CoverWaitV1?"cv-wai01":"cv-sup01";
-        std::copy(pad.begin(),pad.end(),counter.begin());
-    }
-    if(outer_v2) {
-        const std::string_view pad=domain==StreamDomain::OuterDsss10RotationV2?"dr2-0010":
-            domain==StreamDomain::OuterDsss100RotationV2?"dr2-0100":
-            domain==StreamDomain::OuterDsss1000RotationV2?"dr2-1000":
-            domain==StreamDomain::OuterDsss10PermutationV2?"dp2-0010":
-            domain==StreamDomain::OuterDsss100PermutationV2?"dp2-0100":"dp2-1000";
-        std::copy(pad.begin(),pad.end(),counter.begin());
-    }
     put_u64(std::span(counter).last(8), offset / 16);
     CipherContext context(EVP_CIPHER_CTX_new(), EVP_CIPHER_CTX_free);
     require(context && EVP_EncryptInit_ex(context.get(), EVP_aes_256_ctr(), nullptr,
@@ -902,12 +797,6 @@ Bytes Crypto::stream(StreamPurpose purpose, std::uint64_t timestamp,
     }
     require(EVP_EncryptFinal_ex(context.get(), discarded.data(), &produced) == 1 && produced == 0,
             "OpenSSL stream finalization failed");
-    return result;
-}
-Bytes Crypto::xor_data(std::span<const std::uint8_t> data, std::uint64_t timestamp,
-                        std::uint64_t offset) const {
-    auto result = confidentiality_stream(timestamp, offset, data.size());
-    for (std::size_t i = 0; i < data.size(); ++i) result[i] ^= data[i];
     return result;
 }
 Bytes Crypto::mac(std::span<const std::uint8_t> message) const {
@@ -935,21 +824,6 @@ Bytes Crypto::confidentiality_mac(View message) const {
     for(std::size_t i=0;i<result.bytes.size();++i)result.bytes[i]^=other.bytes[i];
     return Bytes(result.bytes.begin(),result.bytes.end());
 }
-bool Crypto::verify_confidentiality(View message,View tag) const {
-    if(tag.size()!=32)return false;
-    const auto expected=confidentiality_mac(message);return CRYPTO_memcmp(expected.data(),tag.data(),tag.size())==0;
-}
-Bytes Crypto::identity_fingerprint(View context) const {
-    return confidentiality_?confidentiality_mac(contextual_info("datapump/v4/identity/confidentiality/",context)):
-        mac(contextual_info("datapump/v4/identity/waveform/",context));
-}
-
-bool Crypto::verify(std::span<const std::uint8_t> message, std::span<const std::uint8_t> tag) const {
-    if (tag.size() != 32) return false;
-    const auto expected = mac(message);
-    return CRYPTO_memcmp(expected.data(), tag.data(), expected.size()) == 0;
-}
-
 KeyfileGenerationResult create_keyfile(const std::filesystem::path& path,const std::optional<std::filesystem::path>& pad,
                     const KeyfileGenerationOptions& generation) {
     return create_keyring_impl(path,{"Default"},normal_policy,pad,generation);

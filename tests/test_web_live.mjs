@@ -1,4 +1,4 @@
-// Real C++ live audio regression, without a server, sockets or browser launch.
+// Fast Modem live audio regression, without a server, sockets or browser launch.
 // Only the physical audio device is simulated. BrowserAudio, its AudioWorklet,
 // the protocol and the Wasm Worker script are the production implementations.
 import assert from 'node:assert/strict';

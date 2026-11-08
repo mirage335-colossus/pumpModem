@@ -1,88 +1,95 @@
 name: Certify published release
-run-name: ${{ inputs.devfast && 'devfast source diagnostics' || format('Certify {0} (published binary hashes)', inputs.release_tag) }}
-
-on:
+run-name: ${{ inputs.devfast && 'devfast source diagnostics' || format('Certify {0} (published binary hashes)',
+  inputs.release_tag) }}
+'on':
   workflow_call:
     inputs:
       release_tag:
-        description: 'Published release to certify (required unless devfast); binaries are never replaced'
+        description: Published release to certify (required unless devfast); binaries are never replaced
         type: string
         required: false
       devfast:
-        description: 'Diagnose current branch source only; skip expensive tests and all certification/release changes'
+        description: Diagnose current branch source only; skip expensive tests and all certification/release changes
         type: boolean
         default: false
       linux_runner:
-        description: 'x86-64 Linux runner'
+        description: x86-64 Linux runner
         type: string
         default: ubuntu-24.04
       arm_runner:
-        description: 'Linux ARM64 runner for compilation and qualification'
+        description: Linux ARM64 runner for compilation and qualification
         type: string
         default: ubuntu-24.04-arm
       windows_runner:
-        description: 'Windows x64 runner'
+        description: Windows x64 runner
         type: string
         default: windows-2022
     outputs:
       inventory_sha256:
-        description: 'Exact published inventory checked by this certification'
+        description: Exact published inventory checked by this certification
         value: ${{ jobs.prepare.outputs.inventory_sha256 }}
       report_attempt:
-        description: 'Run attempt that wrote the successful certification report'
+        description: Run attempt that wrote the successful certification report
         value: ${{ jobs.record.outputs.report_attempt }}
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Published release to certify (required unless devfast); binaries are never replaced'
+        description: Published release to certify (required unless devfast); binaries are never replaced
         type: string
         required: false
       devfast:
-        description: 'Diagnose current branch source only; skip expensive tests and all certification/release changes'
+        description: Diagnose current branch source only; skip expensive tests and all certification/release changes
         type: boolean
         default: false
       linux_runner:
-        description: 'x86-64 Linux runner'
+        description: x86-64 Linux runner
         type: choice
-        options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
+        options:
+        - ubuntu-24.04
+        - ubuntu-latest-m
+        - ubuntu-latest-l
+        - ubuntu-latest-h
         default: ubuntu-24.04
       arm_runner:
-        description: 'Linux ARM64 runner for compilation and qualification'
+        description: Linux ARM64 runner for compilation and qualification
         type: choice
-        options: [ubuntu-24.04-arm-l, ubuntu-24.04-arm-h, ubuntu-24.04-arm]
+        options:
+        - ubuntu-24.04-arm-l
+        - ubuntu-24.04-arm-h
+        - ubuntu-24.04-arm
         default: ubuntu-24.04-arm
       windows_runner:
-        description: 'Windows x64 runner'
+        description: Windows x64 runner
         type: choice
-        options: [windows-2022, windows-latest-l, windows-latest-h]
+        options:
+        - windows-2022
+        - windows-latest-l
+        - windows-latest-h
         default: windows-2022
-
   pull_request:
     paths:
-      - 'tools/ci-apt.sh'
-      - 'tests/test_ci_apt.py'
-      - '.github/workflows/certify.yml'
-      - '.github/workflows/certify-windows.yml'
-      - 'tools/windows-certification.py'
-      - 'tests/test_windows_certification.py'
-      - '.github/workflows/apt-check.yml'
-      - '.github/workflows/distro-check.yml'
-      - 'tools/apt-release.py'
-      - 'tools/distro-release.py'
-      - 'tools/arch-release.py'
-      - 'tools/gentoo-release.py'
-      - 'tools/gentoo-sync.py'
-      - 'tests/test_arch_release.py'
-      - 'tests/test_gentoo_sync.py'
-      - 'tools/certify-release.py'
-      - 'tests/test_certify_release.py'
-      - 'tools/release-dependencies.py'
-      - 'tools/use-windows-base.ps1'
-      - 'tests/test_release_dependencies.py'
-
+    - tools/ci-apt.sh
+    - tests/test_ci_apt.py
+    - .github/workflows/certify.yml
+    - .github/workflows/certify-windows.yml
+    - tools/windows-certification.py
+    - tests/test_windows_certification.py
+    - .github/workflows/apt-check.yml
+    - .github/workflows/distro-check.yml
+    - tools/apt-release.py
+    - tools/distro-release.py
+    - tools/arch-release.py
+    - tools/gentoo-release.py
+    - tools/gentoo-sync.py
+    - tests/test_arch_release.py
+    - tests/test_gentoo_sync.py
+    - tools/certify-release.py
+    - tests/test_certify_release.py
+    - tools/release-dependencies.py
+    - tools/use-windows-base.ps1
+    - tests/test_release_dependencies.py
 permissions:
   contents: read
-
 jobs:
   devfast:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast
@@ -93,22 +100,20 @@ jobs:
     with:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
-
   helpers:
     if: ${{ !inputs.devfast }}
     runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - run: python3 tests/test_certify_release.py
-      - run: python3 tests/test_gui_smoke_runner.py
-      - run: python3 tests/test_native_tests_runner.py
-      - run: python3 tests/test_ci_apt.py
-      - run: python3 tests/test_release_dependencies.py
-      - run: python3 tests/test_windows_certification.py
-
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - run: python3 tests/test_certify_release.py
+    - run: python3 tests/test_gui_smoke_runner.py
+    - run: python3 tests/test_native_tests_runner.py
+    - run: python3 tests/test_ci_apt.py
+    - run: python3 tests/test_release_dependencies.py
+    - run: python3 tests/test_windows_certification.py
   prepare:
     if: github.event_name == 'workflow_dispatch' && !inputs.devfast
     needs: helpers
@@ -129,44 +134,44 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Pin published source revision and checksum inventory
-        id: release
-        run: |
-          if [ -z "$RELEASE_TAG" ]; then echo '::error::release_tag is required for full certification.'; exit 1; fi
-          python3 tools/certify-release.py prepare --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --directory release-info --github-output "$GITHUB_OUTPUT"
-      - name: Select full test and copied-binary coverage for every published backend
-        id: matrix
-        run: |
-          python3 - <<'PYMATRIX'
-          import json, os, runpy
-          from pathlib import Path
-          release = runpy.run_path('tools/release.py')
-          metadata = release['load_metadata'](Path('release-info/release-metadata.json'))
-          matrices = release['build_matrices'](metadata)
-          # Expand include-only rows explicitly; each published target requires
-          # both independent scopes with the same compiler and recipe identity.
-          scopes = ['main', 'calibration']
-          if metadata.get('frontends'):
-              scopes.append('frontends')
-          if metadata.get('web'):
-              scopes.append('web')
-          matrices['linux_matrix']['include'] = [
-              dict(row, scope=scope)
-              for row in matrices['linux_matrix']['include']
-              for scope in scopes]
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              for name, value in {'metadata_json': metadata, **matrices}.items():
-                  output.write(name + '=' + json.dumps(value, separators=(',', ':')) + '\n')
-          PYMATRIX
-
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Pin published source revision and checksum inventory
+      id: release
+      run: |
+        if [ -z "$RELEASE_TAG" ]; then echo '::error::release_tag is required for full certification.'; exit 1; fi
+        python3 tools/certify-release.py prepare --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --directory release-info --github-output "$GITHUB_OUTPUT"
+    - name: Select full test and copied-binary coverage for every published backend
+      id: matrix
+      run: |
+        python3 - <<'PYMATRIX'
+        import json, os, runpy
+        from pathlib import Path
+        release = runpy.run_path('tools/release.py')
+        metadata = release['load_metadata'](Path('release-info/release-metadata.json'))
+        matrices = release['build_matrices'](metadata)
+        # Expand include-only rows explicitly; each published target requires
+        # both independent scopes with the same compiler and recipe identity.
+        scopes = ['main']
+        if metadata.get('frontends'):
+            scopes.append('frontends')
+        if metadata.get('web'):
+            scopes.append('web')
+        matrices['linux_matrix']['include'] = [
+            dict(row, scope=scope)
+            for row in matrices['linux_matrix']['include']
+            for scope in scopes]
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+            for name, value in {'metadata_json': metadata, **matrices}.items():
+                output.write(name + '=' + json.dumps(value, separators=(',', ':')) + '\n')
+        PYMATRIX
   linux-tests:
     name: Linux ${{ matrix.arch }} / ${{ matrix.backend }} / ${{ matrix.scope }} qualification
     if: ${{ !inputs.devfast }}
     needs: prepare
-    runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm') || inputs.linux_runner || 'ubuntu-24.04' }}
+    runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm') || inputs.linux_runner ||
+      'ubuntu-24.04' }}
     container: ${{ matrix.image }}
     timeout-minutes: 120
     strategy:
@@ -179,8 +184,8 @@ jobs:
       DATAPUMP_SMOKE_INVENTORY_SHA256: ${{ needs.prepare.outputs.inventory_sha256 }}
       DEBIAN_FRONTEND: noninteractive
       LIBGL_ALWAYS_SOFTWARE: '1'
-      # Only the runner selected for this architecture controls rendering.
-      LP_NUM_THREADS: ${{ ((matrix.arch == 'aarch64' && inputs.arm_runner == 'ubuntu-24.04-arm') || (matrix.arch != 'aarch64' && inputs.linux_runner == 'ubuntu-24.04')) && '1' || '2' }}
+      LP_NUM_THREADS: ${{ ((matrix.arch == 'aarch64' && inputs.arm_runner == 'ubuntu-24.04-arm') || (matrix.arch
+        != 'aarch64' && inputs.linux_runner == 'ubuntu-24.04')) && '1' || '2' }}
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag }}
       GUI_BACKEND: ${{ matrix.backend }}
@@ -189,282 +194,229 @@ jobs:
       BUILD_FRONTENDS: ${{ needs.prepare.outputs.frontends }}
       BUILD_WEB: ${{ needs.prepare.outputs.web }}
     steps:
-      - name: Load current package-fetch helper before installing Git
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-          path: .ci-bootstrap
-          sparse-checkout: tools/ci-apt.sh
-          sparse-checkout-cone-mode: false
-      - name: Install download and archive inspection prerequisites
-        run: |
-          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
-          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git gh python3 file binutils make xvfb xauth fonts-dejavu-core fontconfig-config libxtst6 libgl1 libopengl0 libgl1-mesa-dri
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.source_sha }}
-      - name: Load current release metadata tooling without changing the released source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-          path: .certification-tools
-          sparse-checkout: |
-            tools
-            cmake
-      - name: Set container-local smoke evidence paths
-        run: |
-          printf 'DATAPUMP_CI_SMOKE_WARNINGS_DIR=%s/build/ci-smoke-results\n' "$PWD" >> "$GITHUB_ENV"
-          printf 'DATAPUMP_CI_SMOKE_RUNNER=%s/.certification-tools/tools/run-gui-smoke.py\n' "$PWD" >> "$GITHUB_ENV"
-      - name: Fetch this release's verified SDK (legacy base fallback, no compiler rebuild)
-        if: matrix.sdk
-        id: sdk
-        run: |
-          python3 .certification-tools/tools/release-dependencies.py fetch --repo "$GITHUB_REPOSITORY" \
-            --tag "$RELEASE_TAG" --kind linux-sdk --directory downloaded-sdk \
-            --inventory-sha256 "$INVENTORY_SHA256" > release-sdk.json
-          if python3 -c 'import json, sys; sys.exit(0 if json.load(open("release-sdk.json"))["found"] else 1)'; then
-            echo 'found=true' >> "$GITHUB_OUTPUT"
-          else
-            python3 tools/sdk-release.py fetch --binary-only --repo "$GITHUB_REPOSITORY" --directory downloaded-sdk --github-output "$GITHUB_OUTPUT"
-          fi
-      - name: Install verified SDK
-        if: matrix.sdk
-        env:
-          SDK_FOUND: ${{ steps.sdk.outputs.found }}
-        run: |
-          if [ "$SDK_FOUND" != true ]; then echo 'Run Maintain base SDK for this recipe first.' >&2; exit 1; fi
-          set -- downloaded-sdk/datapump-sdk-*-linux-x86_64.tar.gz
-          test "$#" -eq 1
-          python3 tools/build-sdk.py install --archive "$1" --destination "$GITHUB_WORKSPACE/build/sdk"
-          python3 tools/build-sdk.py verify "$GITHUB_WORKSPACE/build/sdk" --max-host-glibc 2.36
-      - name: Install native baseline dependencies and pinned scanner
-        if: ${{ !matrix.sdk }}
-        run: |
-          sh "$RUNNER_TEMP/ci-apt.sh" install cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libncurses-dev libsdl2-dev
-          sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
-          echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
-      - name: Install native Rev compiler and module-aware Ninja
-        if: ${{ !matrix.sdk && matrix.backend == 'rev' }}
-        run: |
-          python3 tools/install-release-rev.py "$GITHUB_WORKSPACE/build/ci-rev-tools"
-          echo "$GITHUB_WORKSPACE/build/ci-rev-tools/bin" >> "$GITHUB_PATH"
-      - name: Prepare the released source's pinned CPU framebuffer host
-        if: ${{ !matrix.sdk && needs.prepare.outputs.frontends == 'true' && (matrix.scope == 'main' || matrix.scope == 'frontends') }}
-        run: |
-          python3 -B tools/prepare-native-sdl.py "$GITHUB_WORKSPACE/build/native-sdl" --cc gcc-11 --cxx g++-11 --jobs "$(python3 -B .certification-tools/tools/build_capacity.py)"
-          echo "DATAPUMP_NATIVE_SDL_ROOT=$GITHUB_WORKSPACE/build/native-sdl/install" >> "$GITHUB_ENV"
-      - name: Run source GUI, packaging and non-calibration contract suites
-        if: matrix.scope == 'main'
-        env:
-          USE_SDK: ${{ matrix.sdk }}
-          DATAPUMP_MAX_GLIBC: ${{ matrix.glibc }}
-          STANDARD_ARM_REV_ADAPTER: ${{ matrix.arch == 'aarch64' && matrix.backend == 'rev' && inputs.arm_runner == 'ubuntu-24.04-arm' }}
-        run: |
-          if [ "$USE_SDK" != true ]; then
-            if [ "$GUI_BACKEND" = rev ]; then export CC=clang-19 CXX=clang++-19;
-            else export CC=gcc-11 CXX=g++-11; fi
-          fi
-          # Certification checks out immutable released source. Older wrappers
-          # lack --build-jobs, so keep their existing two-job behavior.
-          separate_build_jobs=false
-          if ./build.sh --help | grep -q -- '--build-jobs'; then
-            separate_build_jobs=true
-          else
-            echo 'Released build wrapper has no --build-jobs; retaining two build/test jobs.'
-          fi
-          # Run adapter/package checks before the slower numerical calibration.
-          for group in build gui packaging; do
-            set -- --backend "$GUI_BACKEND" --build-dir build/certify --jobs 2
-            if [ "$BUILD_FRONTENDS" = true ]; then set -- "$@" --tui --fb; fi
-            if [ "$BUILD_WEB" = true ]; then set -- "$@" --web-worker; fi
-            if [ "$separate_build_jobs" = true ]; then set -- "$@" --build-jobs "$(python3 -B .certification-tools/tools/build_capacity.py)"; fi
-            if [ "$USE_SDK" = true ]; then set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"; fi
-            ./build.sh test "$group" --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600
-            if [ "$group" = gui ]; then
-              ./build.sh "$@" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600
-              native_cmake=cmake
-              native_ctest=ctest
-              if [ "$USE_SDK" = true ]; then
-                native_cmake="$GITHUB_WORKSPACE/build/sdk/bin/cmake"
-                native_ctest="$GITHUB_WORKSPACE/build/sdk/bin/ctest"
-              fi
-              "$native_cmake" --build build/certify --target datapump-tests-native --parallel "$(python3 -B .certification-tools/tools/build_capacity.py)"
-              set -- --build-dir build/certify --config Release --ctest "$native_ctest" --report-dir "$DATAPUMP_CI_SMOKE_WARNINGS_DIR"
-              if [ "$STANDARD_ARM_REV_ADAPTER" = true ]; then set -- "$@" --adapter-timeout 900 --adapter-warn-after 330; fi
-              xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 .certification-tools/tools/run-native-tests.py --allow-budget-exhaustion "$@"
-            fi
-          done
-          contract_cmake=cmake
-          contract_ctest=ctest
-          if [ "$USE_SDK" = true ]; then
-            contract_cmake="$GITHUB_WORKSPACE/build/sdk/bin/cmake"
-            contract_ctest="$GITHUB_WORKSPACE/build/sdk/bin/ctest"
-          fi
-          "$contract_cmake" --build build/certify --target datapump-tests-contract --parallel "$(python3 -B .certification-tools/tools/build_capacity.py)"
-          # Disjoint selections retain the complete immutable source contract.
-          # Live simulation gets the CPU alone; full calibration runs in its
-          # required sibling scope and remaining tests keep concurrency.
-          "$contract_ctest" --test-dir build/certify -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -R '^(live|live_profiles)$' --parallel 1
-          "$contract_ctest" --test-dir build/certify -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -E '^(live|live_profiles|differential_receiver_probability)$' --parallel 2
-      - name: Prepare the JavaScript host for independent web source checks
-        if: matrix.scope == 'web'
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: '24.19.0'
-      - name: Run every native pipe worker and browser adapter case independently
-        if: matrix.scope == 'web'
-        env:
-          USE_SDK: ${{ matrix.sdk }}
-          DATAPUMP_MAX_GLIBC: ${{ matrix.glibc }}
-        run: |
-          if [ "$USE_SDK" != true ]; then export CC=gcc-11 CXX=g++-11; fi
-          set -- --cli --web-worker --build-dir build/certify-web --jobs 1 --build-jobs "$(python3 -B .certification-tools/tools/build_capacity.py)"
-          if [ "$USE_SDK" = true ]; then set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"; fi
-          ./build.sh test web --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON
-      - name: Retain independent native web evidence
-        if: ${{ always() && matrix.scope == 'web' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: certification-web-${{ matrix.target }}-attempt-${{ github.run_attempt }}
-          path: |
-            build/certify-web/build-info.txt
-            build/certify-web/Testing/Temporary/
-          if-no-files-found: warn
-          retention-days: 7
-      - name: Run required terminal and framebuffer source checks independently
-        if: matrix.scope == 'frontends'
-        env:
-          USE_SDK: ${{ matrix.sdk }}
-          DATAPUMP_MAX_GLIBC: ${{ matrix.glibc }}
-        run: |
-          if [ "$USE_SDK" != true ]; then
-            if [ "$GUI_BACKEND" = rev ]; then export CC=clang-19 CXX=clang++-19;
-            else export CC=gcc-11 CXX=g++-11; fi
-          fi
-          set -- --cli --tui --fb --backend "$GUI_BACKEND" --build-dir build/certify-frontends --jobs 1 --build-jobs "$(python3 -B .certification-tools/tools/build_capacity.py)"
-          if [ "$USE_SDK" = true ]; then set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"; fi
-          ./build.sh test frontends --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON
-      - name: Retain independent frontend evidence
-        if: ${{ always() && matrix.scope == 'frontends' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: certification-frontends-${{ matrix.target }}-attempt-${{ github.run_attempt }}
-          path: |
-            build/certify-frontends/build-info.txt
-            build/certify-frontends/Testing/Temporary/
-          if-no-files-found: warn
-          retention-days: 7
-      - name: Record historical frontend coverage
-        if: matrix.scope == 'main' && needs.prepare.outputs.frontends != 'true'
-        run: echo 'This historical release does not declare TUI/framebuffer delivery. No frontend source coverage is claimed.' >> "$GITHUB_STEP_SUMMARY"
-      - name: Run the complete registered differential calibration independently
-        if: matrix.scope == 'calibration'
-        env:
-          USE_SDK: ${{ matrix.sdk }}
-          DATAPUMP_MAX_GLIBC: ${{ matrix.glibc }}
-        run: |
-          mkdir -p build/certify
-          python3 - <<'PYCALIBRATION'
-          import json, os
-          from pathlib import Path
-          identity = {key: os.environ[name] for key, name in {
-              'source_sha': 'DATAPUMP_SMOKE_SOURCE_SHA',
-              'inventory_sha256': 'INVENTORY_SHA256', 'target': 'RELEASE_TARGET',
-              'run_id': 'GITHUB_RUN_ID', 'run_attempt': 'GITHUB_RUN_ATTEMPT'}.items()}
-          (Path('build/certify') / 'calibration-identity.json').write_text(json.dumps(identity))
-          PYCALIBRATION
-          if [ "$USE_SDK" != true ]; then
-            if [ "$GUI_BACKEND" = rev ]; then export CC=clang-19 CXX=clang++-19;
-            else export CC=gcc-11 CXX=g++-11; fi
-          fi
+    - name: Load current package-fetch helper before installing Git
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+        path: .ci-bootstrap
+        sparse-checkout: tools/ci-apt.sh
+        sparse-checkout-cone-mode: false
+    - name: Install download and archive inspection prerequisites
+      run: |
+        cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+        sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git gh python3 file binutils make xvfb xauth fonts-dejavu-core fontconfig-config libxtst6 libgl1 libopengl0 libgl1-mesa-dri
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+        ref: ${{ needs.prepare.outputs.source_sha }}
+    - name: Load current release metadata tooling without changing the released source
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+        path: .certification-tools
+        sparse-checkout: |
+          tools
+          cmake
+    - name: Set container-local smoke evidence paths
+      run: |
+        printf 'DATAPUMP_CI_SMOKE_WARNINGS_DIR=%s/build/ci-smoke-results\n' "$PWD" >> "$GITHUB_ENV"
+        printf 'DATAPUMP_CI_SMOKE_RUNNER=%s/.certification-tools/tools/run-gui-smoke.py\n' "$PWD" >> "$GITHUB_ENV"
+    - name: Fetch this release's verified SDK (legacy base fallback, no compiler rebuild)
+      if: matrix.sdk
+      id: sdk
+      run: |
+        python3 .certification-tools/tools/release-dependencies.py fetch --repo "$GITHUB_REPOSITORY" \
+          --tag "$RELEASE_TAG" --kind linux-sdk --directory downloaded-sdk \
+          --inventory-sha256 "$INVENTORY_SHA256" > release-sdk.json
+        if python3 -c 'import json, sys; sys.exit(0 if json.load(open("release-sdk.json"))["found"] else 1)'; then
+          echo 'found=true' >> "$GITHUB_OUTPUT"
+        else
+          python3 tools/sdk-release.py fetch --binary-only --repo "$GITHUB_REPOSITORY" --directory downloaded-sdk --github-output "$GITHUB_OUTPUT"
+        fi
+    - name: Install verified SDK
+      if: matrix.sdk
+      env:
+        SDK_FOUND: ${{ steps.sdk.outputs.found }}
+      run: |
+        if [ "$SDK_FOUND" != true ]; then echo 'Run Maintain base SDK for this recipe first.' >&2; exit 1; fi
+        set -- downloaded-sdk/datapump-sdk-*-linux-x86_64.tar.gz
+        test "$#" -eq 1
+        python3 tools/build-sdk.py install --archive "$1" --destination "$GITHUB_WORKSPACE/build/sdk"
+        python3 tools/build-sdk.py verify "$GITHUB_WORKSPACE/build/sdk" --max-host-glibc 2.36
+    - name: Install native baseline dependencies and pinned scanner
+      if: ${{ !matrix.sdk }}
+      run: |
+        sh "$RUNNER_TEMP/ci-apt.sh" install cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libncurses-dev libsdl2-dev
+        sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
+        echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
+    - name: Install native Rev compiler and module-aware Ninja
+      if: ${{ !matrix.sdk && matrix.backend == 'rev' }}
+      run: |
+        python3 tools/install-release-rev.py "$GITHUB_WORKSPACE/build/ci-rev-tools"
+        echo "$GITHUB_WORKSPACE/build/ci-rev-tools/bin" >> "$GITHUB_PATH"
+    - name: Prepare the released source's pinned CPU framebuffer host
+      if: ${{ !matrix.sdk && needs.prepare.outputs.frontends == 'true' && (matrix.scope == 'main' || matrix.scope
+        == 'frontends') }}
+      run: |
+        python3 -B tools/prepare-native-sdl.py "$GITHUB_WORKSPACE/build/native-sdl" --cc gcc-11 --cxx g++-11 --jobs "$(python3 -B .certification-tools/tools/build_capacity.py)"
+        echo "DATAPUMP_NATIVE_SDL_ROOT=$GITHUB_WORKSPACE/build/native-sdl/install" >> "$GITHUB_ENV"
+    - name: Run source GUI, packaging and shared contract suites
+      if: matrix.scope == 'main'
+      env:
+        USE_SDK: ${{ matrix.sdk }}
+        DATAPUMP_MAX_GLIBC: ${{ matrix.glibc }}
+        STANDARD_ARM_REV_ADAPTER: ${{ matrix.arch == 'aarch64' && matrix.backend == 'rev' && inputs.arm_runner ==
+          'ubuntu-24.04-arm' }}
+      run: |
+        if [ "$USE_SDK" != true ]; then
+          if [ "$GUI_BACKEND" = rev ]; then export CC=clang-19 CXX=clang++-19;
+          else export CC=gcc-11 CXX=g++-11; fi
+        fi
+        # Certification checks out immutable released source. Older wrappers
+        # lack --build-jobs, so keep their existing two-job behavior.
+        separate_build_jobs=false
+        if ./build.sh --help | grep -q -- '--build-jobs'; then
+          separate_build_jobs=true
+        else
+          echo 'Released build wrapper has no --build-jobs; retaining two build/test jobs.'
+        fi
+        # Retained adapter and package checks share the current source contract.
+        for group in build gui packaging; do
           set -- --backend "$GUI_BACKEND" --build-dir build/certify --jobs 2
-          if ./build.sh --help | grep -q -- '--build-jobs'; then
-            set -- "$@" --build-jobs "$(python3 -B .certification-tools/tools/build_capacity.py)"
+          if [ "$BUILD_FRONTENDS" = true ]; then set -- "$@" --tui --fb; fi
+          if [ "$BUILD_WEB" = true ]; then set -- "$@" --web-worker; fi
+          if [ "$separate_build_jobs" = true ]; then set -- "$@" --build-jobs "$(python3 -B .certification-tools/tools/build_capacity.py)"; fi
+          if [ "$USE_SDK" = true ]; then set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"; fi
+          ./build.sh test "$group" --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600
+          if [ "$group" = gui ]; then
+            ./build.sh "$@" -- -DDATAPUMP_PORTABLE=ON -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=600
+            native_cmake=cmake
+            native_ctest=ctest
+            if [ "$USE_SDK" = true ]; then
+              native_cmake="$GITHUB_WORKSPACE/build/sdk/bin/cmake"
+              native_ctest="$GITHUB_WORKSPACE/build/sdk/bin/ctest"
+            fi
+            "$native_cmake" --build build/certify --target datapump-tests-native --parallel "$(python3 -B .certification-tools/tools/build_capacity.py)"
+            set -- --build-dir build/certify --config Release --ctest "$native_ctest" --report-dir "$DATAPUMP_CI_SMOKE_WARNINGS_DIR"
+            if [ "$STANDARD_ARM_REV_ADAPTER" = true ]; then set -- "$@" --adapter-timeout 900 --adapter-warn-after 330; fi
+            xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 .certification-tools/tools/run-native-tests.py "$@"
           fi
-          calibration_cmake=cmake
-          calibration_ctest=ctest
-          if [ "$USE_SDK" = true ]; then
-            set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"
-            calibration_cmake="$GITHUB_WORKSPACE/build/sdk/bin/cmake"
-            calibration_ctest="$GITHUB_WORKSPACE/build/sdk/bin/ctest"
-          fi
-          # The released wrapper selects the same backend/preset/toolchain.
-          # Static OpenSSL matches main's contract configuration after packaging.
-          # Do not override registered calibration workers, sections or seeds.
-          ./build.sh test build --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON -DOPENSSL_USE_STATIC_LIBS=ON -DDART_TESTING_TIMEOUT=3600
-          "$calibration_cmake" --build build/certify --config Release --target test_differential_receiver_probability --parallel "$(python3 -B .certification-tools/tools/build_capacity.py)"
-          "$calibration_ctest" --test-dir build/certify -C Release --show-only=json-v1 -L '^contract$' -LE native_gui -R '^differential_receiver_probability$' > build/certify/calibration-registration.json
-          "$calibration_ctest" --test-dir build/certify -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -R '^differential_receiver_probability$' --parallel 1 --output-log "$GITHUB_WORKSPACE/build/certify/calibration.log" --output-junit "$GITHUB_WORKSPACE/build/certify/calibration.xml"
-          echo 'The complete registered differential receiver calibration passed independently; source and published-package checks remain required.' >> "$GITHUB_STEP_SUMMARY"
-      - name: Retain independent calibration evidence
-        if: ${{ always() && matrix.scope == 'calibration' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: certification-calibration-${{ matrix.target }}-attempt-${{ github.run_attempt }}
-          path: |
-            build/certify/calibration-identity.json
-            build/certify/calibration-registration.json
-            build/certify/calibration.log
-            build/certify/calibration.xml
-            build/certify/CMakeCache.txt
-            build/certify/Testing/Temporary/
-          if-no-files-found: warn
-          retention-days: 7
-      - name: Verify shared audio routing and both audio platform adapters
-        if: matrix.scope == 'main'
-        env:
-          USE_SDK: ${{ matrix.sdk }}
-        run: |
-          audio_cmake=cmake
-          audio_ctest=ctest
-          if [ "$USE_SDK" = true ]; then
-            audio_cmake="$GITHUB_WORKSPACE/build/sdk/bin/cmake"
-            audio_ctest="$GITHUB_WORKSPACE/build/sdk/bin/ctest"
-          fi
-          "$audio_cmake" --build build/certify --target test_alsa_audio test_windows_audio test_audio_rates test_resampler --parallel "$(python3 -B .certification-tools/tools/build_capacity.py)"
-          "$audio_ctest" --test-dir build/certify --output-on-failure -R '^(alsa_audio_contract|windows_audio_contract|audio_rates|resampler)$' --parallel 1 --stop-on-failure --no-tests=error
-      - name: Download and verify the exact published archive
-        if: matrix.scope == 'main'
-        id: binary
-        env:
-          RELEASE_TARGET: ${{ matrix.target }}
-        run: python3 .certification-tools/tools/certify-release.py download --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target "$RELEASE_TARGET" --directory published --inventory-sha256 "$INVENTORY_SHA256" --github-output "$GITHUB_OUTPUT"
-      - name: Test published GUI, CLI, relocation and ELF dependencies
-        if: matrix.scope == 'main'
-        env:
-          DATAPUMP_SMOKE_SCOPE: published/source-host
-          PACKAGE_ROOT: ${{ steps.binary.outputs.package_root }}
-          USE_SDK: ${{ matrix.sdk }}
-          GLIBC_CEILING: ${{ matrix.glibc }}
-        run: |
-          scanner=cmake
-          if [ "$USE_SDK" = true ]; then scanner="$GITHUB_WORKSPACE/build/sdk/bin/cmake"; fi
-          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' "$scanner" -DPACKAGE_ROOT="$PACKAGE_ROOT" -DBUILD_DIR="$PWD/build/certify" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P .certification-tools/tools/verify-native-package.cmake
-          "$scanner" -DPACKAGE_ROOT="$PACKAGE_ROOT" -DMAX_GLIBC="$GLIBC_CEILING" -P tools/verify-linux-abi.cmake
-      - name: Identify this attempt's smoke coverage artifact
-        if: ${{ always() && matrix.scope == 'main' }}
-        run: |
-          python3 - <<'PY'
-          import json, os
-          from pathlib import Path
-          directory = Path(os.environ['DATAPUMP_CI_SMOKE_WARNINGS_DIR'])
-          directory.mkdir(parents=True, exist_ok=True)
-          (directory / 'job-coverage.json').write_text(json.dumps({
-              'run_id': os.environ['GITHUB_RUN_ID'],
-              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT']}))
-          PY
-      - name: Retain smoke workload coverage and diagnostics
-        if: ${{ always() && matrix.scope == 'main' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: certification-smoke-source-${{ matrix.target }}-attempt-${{ github.run_attempt }}
-          path: build/ci-smoke-results/
-          if-no-files-found: warn
-          retention-days: 7
-
+        done
+        contract_cmake=cmake
+        contract_ctest=ctest
+        if [ "$USE_SDK" = true ]; then
+          contract_cmake="$GITHUB_WORKSPACE/build/sdk/bin/cmake"
+          contract_ctest="$GITHUB_WORKSPACE/build/sdk/bin/ctest"
+        fi
+        "$contract_cmake" --build build/certify --target datapump-tests-contract --parallel "$(python3 -B .certification-tools/tools/build_capacity.py)"
+        "$contract_ctest" --test-dir build/certify -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui --parallel 2
+    - name: Prepare the JavaScript host for independent web source checks
+      if: matrix.scope == 'web'
+      uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+      with:
+        node-version: 24.19.0
+    - name: Run every native pipe worker and browser adapter case independently
+      if: matrix.scope == 'web'
+      env:
+        USE_SDK: ${{ matrix.sdk }}
+        DATAPUMP_MAX_GLIBC: ${{ matrix.glibc }}
+      run: |
+        if [ "$USE_SDK" != true ]; then export CC=gcc-11 CXX=g++-11; fi
+        set -- --cli --web-worker --build-dir build/certify-web --jobs 1 --build-jobs "$(python3 -B .certification-tools/tools/build_capacity.py)"
+        if [ "$USE_SDK" = true ]; then set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"; fi
+        ./build.sh test web --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON
+    - name: Retain independent native web evidence
+      if: ${{ always() && matrix.scope == 'web' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: certification-web-${{ matrix.target }}-attempt-${{ github.run_attempt }}
+        path: |
+          build/certify-web/build-info.txt
+          build/certify-web/Testing/Temporary/
+        if-no-files-found: warn
+        retention-days: 7
+    - name: Run required terminal and framebuffer source checks independently
+      if: matrix.scope == 'frontends'
+      env:
+        USE_SDK: ${{ matrix.sdk }}
+        DATAPUMP_MAX_GLIBC: ${{ matrix.glibc }}
+      run: |
+        if [ "$USE_SDK" != true ]; then
+          if [ "$GUI_BACKEND" = rev ]; then export CC=clang-19 CXX=clang++-19;
+          else export CC=gcc-11 CXX=g++-11; fi
+        fi
+        set -- --cli --tui --fb --backend "$GUI_BACKEND" --build-dir build/certify-frontends --jobs 1 --build-jobs "$(python3 -B .certification-tools/tools/build_capacity.py)"
+        if [ "$USE_SDK" = true ]; then set -- "$@" --sdk "$GITHUB_WORKSPACE/build/sdk"; fi
+        ./build.sh test frontends --stop-on-failure "$@" -- -DDATAPUMP_PORTABLE=ON
+    - name: Retain independent frontend evidence
+      if: ${{ always() && matrix.scope == 'frontends' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: certification-frontends-${{ matrix.target }}-attempt-${{ github.run_attempt }}
+        path: |
+          build/certify-frontends/build-info.txt
+          build/certify-frontends/Testing/Temporary/
+        if-no-files-found: warn
+        retention-days: 7
+    - name: Record historical frontend coverage
+      if: matrix.scope == 'main' && needs.prepare.outputs.frontends != 'true'
+      run: echo 'This historical release does not declare TUI/framebuffer delivery. No frontend source coverage
+        is claimed.' >> "$GITHUB_STEP_SUMMARY"
+    - name: Verify shared audio routing and both audio platform adapters
+      if: matrix.scope == 'main'
+      env:
+        USE_SDK: ${{ matrix.sdk }}
+      run: |
+        audio_cmake=cmake
+        audio_ctest=ctest
+        if [ "$USE_SDK" = true ]; then
+          audio_cmake="$GITHUB_WORKSPACE/build/sdk/bin/cmake"
+          audio_ctest="$GITHUB_WORKSPACE/build/sdk/bin/ctest"
+        fi
+        "$audio_cmake" --build build/certify --target test_alsa_audio test_windows_audio test_audio_rates test_resampler --parallel "$(python3 -B .certification-tools/tools/build_capacity.py)"
+        "$audio_ctest" --test-dir build/certify --output-on-failure -R '^(alsa_audio_contract|windows_audio_contract|audio_rates|resampler)$' --parallel 1 --stop-on-failure --no-tests=error
+    - name: Download and verify the exact published archive
+      if: matrix.scope == 'main'
+      id: binary
+      env:
+        RELEASE_TARGET: ${{ matrix.target }}
+      run: python3 .certification-tools/tools/certify-release.py download --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG"
+        --target "$RELEASE_TARGET" --directory published --inventory-sha256 "$INVENTORY_SHA256" --github-output
+        "$GITHUB_OUTPUT"
+    - name: Test published GUI, CLI, relocation and ELF dependencies
+      if: matrix.scope == 'main'
+      env:
+        DATAPUMP_SMOKE_SCOPE: published/source-host
+        PACKAGE_ROOT: ${{ steps.binary.outputs.package_root }}
+        USE_SDK: ${{ matrix.sdk }}
+        GLIBC_CEILING: ${{ matrix.glibc }}
+      run: |
+        scanner=cmake
+        if [ "$USE_SDK" = true ]; then scanner="$GITHUB_WORKSPACE/build/sdk/bin/cmake"; fi
+        xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' "$scanner" -DPACKAGE_ROOT="$PACKAGE_ROOT" -DBUILD_DIR="$PWD/build/certify" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P .certification-tools/tools/verify-native-package.cmake
+        "$scanner" -DPACKAGE_ROOT="$PACKAGE_ROOT" -DMAX_GLIBC="$GLIBC_CEILING" -P tools/verify-linux-abi.cmake
+    - name: Identify this attempt's smoke coverage artifact
+      if: ${{ always() && matrix.scope == 'main' }}
+      run: |
+        python3 - <<'PY'
+        import json, os
+        from pathlib import Path
+        directory = Path(os.environ['DATAPUMP_CI_SMOKE_WARNINGS_DIR'])
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / 'job-coverage.json').write_text(json.dumps({
+            'run_id': os.environ['GITHUB_RUN_ID'],
+            'run_attempt': os.environ['GITHUB_RUN_ATTEMPT']}))
+        PY
+    - name: Retain smoke workload coverage and diagnostics
+      if: ${{ always() && matrix.scope == 'main' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: certification-smoke-source-${{ matrix.target }}-attempt-${{ github.run_attempt }}
+        path: build/ci-smoke-results/
+        if-no-files-found: warn
+        retention-days: 7
   windows-fltk:
     if: ${{ !inputs.devfast }}
     needs: prepare
@@ -473,13 +425,13 @@ jobs:
       scope: main
       frontends: ${{ needs.prepare.outputs.frontends == 'true' }}
       backend: fltk
-      target: ${{ contains(needs.prepare.outputs.application_targets, 'windows-x86_64-fltk') && 'windows-x86_64-fltk' || 'windows-x86_64' }}
+      target: ${{ contains(needs.prepare.outputs.application_targets, 'windows-x86_64-fltk') && 'windows-x86_64-fltk'
+        || 'windows-x86_64' }}
       source_sha: ${{ needs.prepare.outputs.source_sha }}
       tooling_sha: ${{ github.sha }}
       release_tag: ${{ inputs.release_tag }}
       inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
       windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
-
   windows-rev:
     if: ${{ !inputs.devfast && contains(needs.prepare.outputs.application_targets, 'windows-x86_64-rev') }}
     needs: prepare
@@ -494,42 +446,15 @@ jobs:
       release_tag: ${{ inputs.release_tag }}
       inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
       windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
-
-  windows-fltk-calibration:
-    if: ${{ !inputs.devfast }}
-    needs: prepare
-    uses: ./.github/workflows/certify-windows.yml
-    with:
-      scope: calibration
-      backend: fltk
-      target: ${{ contains(needs.prepare.outputs.application_targets, 'windows-x86_64-fltk') && 'windows-x86_64-fltk' || 'windows-x86_64' }}
-      source_sha: ${{ needs.prepare.outputs.source_sha }}
-      tooling_sha: ${{ github.sha }}
-      release_tag: ${{ inputs.release_tag }}
-      inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
-
-  windows-rev-calibration:
-    if: ${{ !inputs.devfast && contains(needs.prepare.outputs.application_targets, 'windows-x86_64-rev') }}
-    needs: prepare
-    uses: ./.github/workflows/certify-windows.yml
-    with:
-      scope: calibration
-      backend: rev
-      target: windows-x86_64-rev
-      source_sha: ${{ needs.prepare.outputs.source_sha }}
-      tooling_sha: ${{ github.sha }}
-      release_tag: ${{ inputs.release_tag }}
-      inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
-      windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
-
   windows-frontends:
     if: ${{ !inputs.devfast && needs.prepare.outputs.frontends == 'true' }}
     needs: prepare
     strategy:
       fail-fast: false
       matrix:
-        backend: [fltk, rev]
+        backend:
+        - fltk
+        - rev
     uses: ./.github/workflows/certify-windows.yml
     with:
       scope: frontends
@@ -541,43 +466,46 @@ jobs:
       release_tag: ${{ inputs.release_tag }}
       inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
       windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
-
   windows-tests:
     name: Collect Windows certification results and warnings
     if: ${{ always() && !inputs.devfast && needs.prepare.result == 'success' }}
-    needs: [prepare, windows-fltk, windows-rev, windows-fltk-calibration, windows-rev-calibration, windows-frontends]
+    needs:
+    - prepare
+    - windows-fltk
+    - windows-rev
+    - windows-frontends
     runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     timeout-minutes: 5
     outputs:
       warnings: ${{ steps.result.outputs.warnings }}
     steps:
-      - name: Preserve warnings and require all applicable Windows jobs
-        id: result
-        env:
-          JOB_RESULTS: ${{ toJSON(needs) }}
-          TARGETS: ${{ needs.prepare.outputs.application_targets }}
-          FRONTENDS: ${{ needs.prepare.outputs.frontends }}
-        run: |
-          python3 - <<'PYWINDOWS'
-          import json, os
-          needs = json.loads(os.environ['JOB_RESULTS'])
-          warnings = json.loads(needs['windows-rev'].get('outputs', {}).get('warnings') or '[]')
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
-              out.write('warnings=' + json.dumps(warnings, separators=(',', ':')) + '\n')
-          required = ['windows-fltk', 'windows-fltk-calibration']
-          if 'windows-x86_64-rev' in json.loads(os.environ['TARGETS']):
-              required.extend(['windows-rev', 'windows-rev-calibration'])
-          if os.environ.get('FRONTENDS') == 'true':
-              required.append('windows-frontends')
-          if any(needs.get(name, {}).get('result') != 'success' for name in required):
-              raise SystemExit('A required Windows certification job failed or did not complete')
-          PYWINDOWS
-
+    - name: Preserve warnings and require all applicable Windows jobs
+      id: result
+      env:
+        JOB_RESULTS: ${{ toJSON(needs) }}
+        TARGETS: ${{ needs.prepare.outputs.application_targets }}
+        FRONTENDS: ${{ needs.prepare.outputs.frontends }}
+      run: |
+        python3 - <<'PYWINDOWS'
+        import json, os
+        needs = json.loads(os.environ['JOB_RESULTS'])
+        warnings = json.loads(needs['windows-rev'].get('outputs', {}).get('warnings') or '[]')
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+            out.write('warnings=' + json.dumps(warnings, separators=(',', ':')) + '\n')
+        required = ['windows-fltk']
+        if 'windows-x86_64-rev' in json.loads(os.environ['TARGETS']):
+            required.extend(['windows-rev'])
+        if os.environ.get('FRONTENDS') == 'true':
+            required.append('windows-frontends')
+        if any(needs.get(name, {}).get('result') != 'success' for name in required):
+            raise SystemExit('A required Windows certification job failed or did not complete')
+        PYWINDOWS
   compatibility:
     name: Published ${{ matrix.target }} on ${{ matrix.image }}
     if: ${{ !inputs.devfast }}
     needs: prepare
-    runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm') || inputs.linux_runner || 'ubuntu-24.04' }}
+    runs-on: ${{ matrix.arch == 'aarch64' && (inputs.arm_runner || 'ubuntu-24.04-arm') || inputs.linux_runner ||
+      'ubuntu-24.04' }}
     container: ${{ matrix.image }}
     timeout-minutes: 30
     strategy:
@@ -590,85 +518,86 @@ jobs:
       DATAPUMP_SMOKE_INVENTORY_SHA256: ${{ needs.prepare.outputs.inventory_sha256 }}
       DEBIAN_FRONTEND: noninteractive
       LIBGL_ALWAYS_SOFTWARE: '1'
-      # Use the same architecture-specific limit for unchanged copied binaries.
-      LP_NUM_THREADS: ${{ ((matrix.arch == 'aarch64' && inputs.arm_runner == 'ubuntu-24.04-arm') || (matrix.arch != 'aarch64' && inputs.linux_runner == 'ubuntu-24.04')) && '1' || '2' }}
+      LP_NUM_THREADS: ${{ ((matrix.arch == 'aarch64' && inputs.arm_runner == 'ubuntu-24.04-arm') || (matrix.arch
+        != 'aarch64' && inputs.linux_runner == 'ubuntu-24.04')) && '1' || '2' }}
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag }}
       GUI_BACKEND: ${{ matrix.backend }}
       RELEASE_TARGET: ${{ matrix.target }}
       INVENTORY_SHA256: ${{ needs.prepare.outputs.inventory_sha256 }}
     steps:
-      - name: Load current package-fetch helper before installing Git
-        if: ${{ !startsWith(matrix.image, 'archlinux:') }}
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-          path: .ci-bootstrap
-          sparse-checkout: tools/ci-apt.sh
-          sparse-checkout-cone-mode: false
-      - name: Install inspection and display tools (no compiler)
-        run: |
-          if command -v apt-get >/dev/null; then
-            cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
-            sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git gh python3 cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core libxtst6 libgl1 libopengl0 libgl1-mesa-dri
-          else
-            pacman -Syu --noconfirm --needed ca-certificates curl git github-cli python cmake binutils xorg-server-xvfb xorg-xauth ttf-dejavu fontconfig libxtst libglvnd mesa
-          fi
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.source_sha }}
-      - name: Load current release metadata tooling without changing the released source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-          path: .certification-tools
-          sparse-checkout: |
-            tools
-            cmake
-      - name: Set container-local smoke evidence paths
-        run: |
-          printf 'DATAPUMP_CI_SMOKE_WARNINGS_DIR=%s/build/ci-smoke-results\n' "$PWD" >> "$GITHUB_ENV"
-          printf 'DATAPUMP_CI_SMOKE_RUNNER=%s/.certification-tools/tools/run-gui-smoke.py\n' "$PWD" >> "$GITHUB_ENV"
-      - name: Download and verify this target's published archive
-        id: binary
-        env:
-          RELEASE_TARGET: ${{ matrix.target }}
-        run: python3 .certification-tools/tools/certify-release.py download --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --target "$RELEASE_TARGET" --directory published --inventory-sha256 "$INVENTORY_SHA256" --github-output "$GITHUB_OUTPUT"
-      - name: Use the pinned dependency scanner
-        run: |
-          sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
-          echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
-      - name: Run the identical published application on this distribution
-        env:
-          PACKAGE_ROOT: ${{ steps.binary.outputs.package_root }}
-          GLIBC_CEILING: ${{ matrix.glibc }}
-        run: |
-          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DPACKAGE_ROOT="$PACKAGE_ROOT" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P .certification-tools/tools/verify-native-package.cmake
-          cmake -DPACKAGE_ROOT="$PACKAGE_ROOT" -DMAX_GLIBC="$GLIBC_CEILING" -P tools/verify-linux-abi.cmake
-      - name: Identify this attempt's smoke coverage artifact
-        if: always()
-        run: |
-          python3 - <<'PY'
-          import json, os
-          from pathlib import Path
-          directory = Path(os.environ['DATAPUMP_CI_SMOKE_WARNINGS_DIR'])
-          directory.mkdir(parents=True, exist_ok=True)
-          (directory / 'job-coverage.json').write_text(json.dumps({
-              'run_id': os.environ['GITHUB_RUN_ID'],
-              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT']}))
-          PY
-      - name: Retain smoke workload coverage and diagnostics
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: certification-smoke-copy-${{ strategy.job-index }}-attempt-${{ github.run_attempt }}
-          path: build/ci-smoke-results/
-          if-no-files-found: warn
-          retention-days: 7
-
+    - name: Load current package-fetch helper before installing Git
+      if: ${{ !startsWith(matrix.image, 'archlinux:') }}
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+        path: .ci-bootstrap
+        sparse-checkout: tools/ci-apt.sh
+        sparse-checkout-cone-mode: false
+    - name: Install inspection and display tools (no compiler)
+      run: |
+        if command -v apt-get >/dev/null; then
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git gh python3 cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core libxtst6 libgl1 libopengl0 libgl1-mesa-dri
+        else
+          pacman -Syu --noconfirm --needed ca-certificates curl git github-cli python cmake binutils xorg-server-xvfb xorg-xauth ttf-dejavu fontconfig libxtst libglvnd mesa
+        fi
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+        ref: ${{ needs.prepare.outputs.source_sha }}
+    - name: Load current release metadata tooling without changing the released source
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+        path: .certification-tools
+        sparse-checkout: |
+          tools
+          cmake
+    - name: Set container-local smoke evidence paths
+      run: |
+        printf 'DATAPUMP_CI_SMOKE_WARNINGS_DIR=%s/build/ci-smoke-results\n' "$PWD" >> "$GITHUB_ENV"
+        printf 'DATAPUMP_CI_SMOKE_RUNNER=%s/.certification-tools/tools/run-gui-smoke.py\n' "$PWD" >> "$GITHUB_ENV"
+    - name: Download and verify this target's published archive
+      id: binary
+      env:
+        RELEASE_TARGET: ${{ matrix.target }}
+      run: python3 .certification-tools/tools/certify-release.py download --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG"
+        --target "$RELEASE_TARGET" --directory published --inventory-sha256 "$INVENTORY_SHA256" --github-output
+        "$GITHUB_OUTPUT"
+    - name: Use the pinned dependency scanner
+      run: |
+        sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
+        echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
+    - name: Run the identical published application on this distribution
+      env:
+        PACKAGE_ROOT: ${{ steps.binary.outputs.package_root }}
+        GLIBC_CEILING: ${{ matrix.glibc }}
+      run: |
+        xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DPACKAGE_ROOT="$PACKAGE_ROOT" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -P .certification-tools/tools/verify-native-package.cmake
+        cmake -DPACKAGE_ROOT="$PACKAGE_ROOT" -DMAX_GLIBC="$GLIBC_CEILING" -P tools/verify-linux-abi.cmake
+    - name: Identify this attempt's smoke coverage artifact
+      if: always()
+      run: |
+        python3 - <<'PY'
+        import json, os
+        from pathlib import Path
+        directory = Path(os.environ['DATAPUMP_CI_SMOKE_WARNINGS_DIR'])
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / 'job-coverage.json').write_text(json.dumps({
+            'run_id': os.environ['GITHUB_RUN_ID'],
+            'run_attempt': os.environ['GITHUB_RUN_ATTEMPT']}))
+        PY
+    - name: Retain smoke workload coverage and diagnostics
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: certification-smoke-copy-${{ strategy.job-index }}-attempt-${{ github.run_attempt }}
+        path: build/ci-smoke-results/
+        if-no-files-found: warn
+        retention-days: 7
   wasm-tests:
     if: ${{ !inputs.devfast && needs.prepare.outputs.web == 'true' }}
     needs: prepare
@@ -681,10 +610,12 @@ jobs:
       source_ref: ${{ needs.prepare.outputs.source_sha }}
       release_tag: ${{ inputs.release_tag }}
       inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
-
   web-tests:
     if: ${{ always() && !inputs.devfast && needs.prepare.outputs.web == 'true' }}
-    needs: [prepare, linux-tests, wasm-tests]
+    needs:
+    - prepare
+    - linux-tests
+    - wasm-tests
     name: Require all independent worker and Wasm scopes
     runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     timeout-minutes: 5
@@ -692,12 +623,11 @@ jobs:
       NATIVE_RESULT: ${{ needs.linux-tests.result }}
       WASM_RESULT: ${{ needs.wasm-tests.result }}
     steps:
-      - name: Reject failed, skipped or cancelled web qualification
-        run: |
-          test "$NATIVE_RESULT" = success
-          test "$WASM_RESULT" = success
-          echo 'Every native worker scope and the release-retained Wasm SDK source suite passed independently. Physical browser/device qualification remains separate.' >> "$GITHUB_STEP_SUMMARY"
-
+    - name: Reject failed, skipped or cancelled web qualification
+      run: |
+        test "$NATIVE_RESULT" = success
+        test "$WASM_RESULT" = success
+        echo 'Every native worker scope and the release-retained Wasm SDK source suite passed independently. Physical browser/device qualification remains separate.' >> "$GITHUB_STEP_SUMMARY"
   apt-repository:
     if: ${{ !inputs.devfast && needs.prepare.outputs.apt_repository == 'true' }}
     needs: prepare
@@ -707,7 +637,6 @@ jobs:
       inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm' }}
-
   distro-recipes:
     if: ${{ !inputs.devfast && needs.prepare.outputs.distro_recipes == 'true' }}
     needs: prepare
@@ -716,16 +645,21 @@ jobs:
       release_tag: ${{ inputs.release_tag }}
       inventory_sha256: ${{ needs.prepare.outputs.inventory_sha256 }}
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
-
   record:
     outputs:
       report_attempt: ${{ steps.report.outputs.report_attempt }}
-    needs: [prepare, linux-tests, windows-tests, compatibility, apt-repository, distro-recipes, web-tests]
+    needs:
+    - prepare
+    - linux-tests
+    - windows-tests
+    - compatibility
+    - apt-repository
+    - distro-recipes
+    - web-tests
     if: ${{ always() && !inputs.devfast && needs.prepare.result == 'success' }}
-    # Read-only tests may overlap earlier attempts. Only this job updates the
-    # release, and retains the original per-release lock and no-cancel policy.
     concurrency:
-      group: certify-release-${{ inputs.devfast && github.ref || inputs.release_tag }}-${{ inputs.devfast && 'devfast' || 'full' }}
+      group: certify-release-${{ inputs.devfast && github.ref || inputs.release_tag }}-${{ inputs.devfast && 'devfast'
+        || 'full' }}
       cancel-in-progress: false
     runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     timeout-minutes: 15
@@ -743,38 +677,37 @@ jobs:
       DISTRO_RECIPES: ${{ needs.prepare.outputs.distro_recipes }}
       WEB: ${{ needs.prepare.outputs.web }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Collect per-job smoke coverage evidence
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: certification-smoke-*
-          path: smoke-results
-          merge-multiple: false
-      - name: Record complete job outcomes without replacing binaries
-        id: report
-        run: |
-          python3 - <<'PYRESULTS'
-          import json, os, runpy
-          from pathlib import Path
-          collect = runpy.run_path('tools/certify-release.py')['collect_smoke_warnings']
-          smoke_warnings = collect(Path('smoke-results'), os.environ['GITHUB_RUN_ID'], os.environ['GITHUB_RUN_ATTEMPT'])
-          needs = json.loads(os.environ['JOB_RESULTS'])
-          jobs = ['linux-tests', 'windows-tests', 'compatibility']
-          if os.environ['APT_REPOSITORY'] == 'true':
-              jobs.append('apt-repository')
-          if os.environ['DISTRO_RECIPES'] == 'true':
-              jobs.append('distro-recipes')
-          if os.environ['WEB'] == 'true':
-              jobs.append('web-tests')
-          results = {'source_sha': os.environ['SOURCE_SHA'], 'inventory_sha256': os.environ['INVENTORY_SHA256'],
-                     'tested_targets': json.loads(os.environ['TESTED_TARGETS']),
-                     'jobs': {name: needs[name]['result'] for name in jobs},
-                     'smoke_warnings': smoke_warnings,
-                     'warnings': json.loads(needs['windows-tests'].get('outputs', {}).get('warnings') or '[]')}
-          with open('certification-results.json', 'w') as out:
-              json.dump(results, out)
-          PYRESULTS
-          python3 tools/certify-release.py record --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --run-id "$GITHUB_RUN_ID" --results-json certification-results.json
-          echo "report_attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Collect per-job smoke coverage evidence
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        pattern: certification-smoke-*
+        path: smoke-results
+        merge-multiple: false
+    - name: Record complete job outcomes without replacing binaries
+      id: report
+      run: |
+        python3 - <<'PYRESULTS'
+        import json, os, runpy
+        from pathlib import Path
+        validate = runpy.run_path('tools/certify-release.py')['validate_smoke_reports']
+        validate(Path('smoke-results'), os.environ['GITHUB_RUN_ID'], os.environ['GITHUB_RUN_ATTEMPT'])
+        needs = json.loads(os.environ['JOB_RESULTS'])
+        jobs = ['linux-tests', 'windows-tests', 'compatibility']
+        if os.environ['APT_REPOSITORY'] == 'true':
+            jobs.append('apt-repository')
+        if os.environ['DISTRO_RECIPES'] == 'true':
+            jobs.append('distro-recipes')
+        if os.environ['WEB'] == 'true':
+            jobs.append('web-tests')
+        results = {'source_sha': os.environ['SOURCE_SHA'], 'inventory_sha256': os.environ['INVENTORY_SHA256'],
+                   'tested_targets': json.loads(os.environ['TESTED_TARGETS']),
+                   'jobs': {name: needs[name]['result'] for name in jobs},
+                   'warnings': json.loads(needs['windows-tests'].get('outputs', {}).get('warnings') or '[]')}
+        with open('certification-results.json', 'w') as out:
+            json.dump(results, out)
+        PYRESULTS
+        python3 tools/certify-release.py record --repo "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --run-id "$GITHUB_RUN_ID" --results-json certification-results.json
+        echo "report_attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"

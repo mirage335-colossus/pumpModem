@@ -20,7 +20,7 @@ from triad_realtime_fft import (FFTScreen, _clock, _digest, _elapsed, _integer,
                                 _number, _quadratic_scores)
 
 
-def _correlation_fft_length(rows, policy):
+def _correlation_fft_length(rows):
     """Pad valid-only correlation without changing any requested lag.
 
     A complex ``next_fast_len`` can select repeated radix-11 lengths, which
@@ -28,10 +28,7 @@ def _correlation_fft_length(rows, policy):
     Real-fast lengths currently use the smaller 2/3/5 radices. A nearby power
     of two may be cheaper still; cap that extra padding at ten percent. This
     is a bounded portable heuristic, not a claim of universal FFT optimality.
-    The original length remains available for paired numerical/timing checks.
     """
-    if policy == 'legacy':
-        return fft.next_fast_len(rows)
     smooth = fft.next_fast_len(rows, real=True)
     power_two = 1 << (rows-1).bit_length()
     return power_two if power_two <= smooth+smooth//10 else smooth
@@ -47,15 +44,12 @@ class SegmentedFFTScreen(FFTScreen):
     """
     def __init__(self, manifest, raw_templates, epoch_offsets, *, block_seconds=.5,
                  workspace_batch_size=8, transform_batch_bytes=4*1024**2,
-                 fft_length_policy='bounded-smooth', maximum_fft_products=250_000,
+                 maximum_fft_products=250_000,
                  **kwargs):
         started = _clock()
         block_seconds = _number(block_seconds, 'block seconds', positive=True)
         self.workspace_batch_size = _integer(workspace_batch_size, 'workspace batch size')
         self.transform_batch_bytes = _integer(transform_batch_bytes, 'transform batch bytes')
-        if fft_length_policy not in ('bounded-smooth', 'legacy'):
-            raise ValueError('FFT length policy must be bounded-smooth or legacy')
-        self.fft_length_policy = fft_length_policy
         super().__init__(manifest, raw_templates, epoch_offsets,
                          maximum_fft_products=maximum_fft_products, **kwargs)
         self.parent_procedure_id = self.procedure_id
@@ -64,8 +58,7 @@ class SegmentedFFTScreen(FFTScreen):
         self.maximum_frequency_step = 1/(4*self.block_seconds)
         self.blocks = [(start, min(start+self.block_rows, self.kernel_rows))
                        for start in range(0, self.kernel_rows, self.block_rows)]
-        self.block_nfft = tuple(_correlation_fft_length(stop-start+self.lag_count-1,
-                                                       self.fft_length_policy)
+        self.block_nfft = tuple(_correlation_fft_length(stop-start+self.lag_count-1)
                                 for start, stop in self.blocks)
         self.columns = np.asarray([w['columns'] for w in self.workspaces], dtype=self.dtype)
         self.orthonormal_columns = np.zeros_like(self.columns)
@@ -108,8 +101,8 @@ class SegmentedFFTScreen(FFTScreen):
             workspace_batch_size=self.workspace_batch_size,
             transform_product_target_bytes=self.transform_batch_bytes,
             transform_tiling='workspace/frequency ceilings and byte target; at least one complete ray design',
-            fft_length_policy=self.fft_length_policy,
-            fft_padding='real-fast length, or next power of two when at most ten percent larger; legacy retains complex next_fast_len',
+            fft_length_policy='bounded-smooth',
+            fft_padding='real-fast length, or next power of two when at most ten percent larger',
             statistic='sum of independent block complex two-ray GLRT energies; proposal only',
             score_arithmetic='FP64 block basis orthonormalization before selected-precision FFT; FP64 squared-correlation sums',
             rank_policy='eigenvalue > max(1e-12 whole-pattern maximum,1e-10 block maximum)',
@@ -204,7 +197,7 @@ class SegmentedFFTScreen(FFTScreen):
             maximum_transform_product_bytes=product_bytes,
             fft_batch_shapes=[dict(fft_length=n, workspace_batch_size=w,
                                    frequency_batch_size=f) for n,w,f in tiles],
-            fft_length_policy=self.fft_length_policy,
+            fft_length_policy='bounded-smooth',
             active_block_designs=int(np.count_nonzero(self.ranks)),
             total_design_rank=int(self.ranks.sum()), score_array_bytes=score_bytes,
             estimated_peak_bytes=peak, source_support_complete=True, coarse_projection_only=True)

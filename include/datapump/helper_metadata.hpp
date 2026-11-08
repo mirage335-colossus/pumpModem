@@ -12,17 +12,12 @@
 
 namespace datapump::helper {
 
-// Kept for consumers which distinguish metadata from tone observations. The
-// current wire record always carries both the time phase and the callsign.
-enum class MetadataKind { callsign, clear_time, encrypted_time };
-
 struct Metadata {
-    MetadataKind kind=MetadataKind::callsign;
     std::string callsign;
     // 14-bit phase of Unix time in the 8.125-second cycle. One step is
     // 65/131072 seconds (approximately 495.91 microseconds).
     std::uint64_t time_ticks=0;
-    bool authenticated=false;
+    bool encrypted=false;
 };
 
 struct MetadataPacket {
@@ -52,16 +47,12 @@ inline constexpr std::size_t metadata_max_characters=16;
 MetadataPacket metadata_packet(std::uint64_t unix_q16_ticks,std::string_view callsign,
                                const Crypto* key=nullptr);
 
-// Convenience wrappers for callers constructing reference geometry.
-MetadataPacket callsign_packet(std::string_view);
-MetadataPacket timecode_packet(std::uint64_t ticks,const Crypto* key=nullptr);
-
 std::optional<Metadata> decode_metadata_packet(
-    std::span<const std::uint32_t>,std::span<const Crypto> receive_keys={},
+    std::span<const std::uint32_t>,const Crypto* receive_key=nullptr,
     // Capture-time estimate of the transmitted dwell start. The clear phase
     // resolves the absolute dwell without a search for clocks within +/-4 s.
-    // Keyed decoding without this anchor fails closed. Only the first key is
-    // selected; wrong keys can yield plausible unauthenticated ASCII.
+    // Keyed decoding without this anchor fails closed. A wrong key may yield
+    // plausible unauthenticated ASCII.
     std::optional<std::uint64_t> approximate_unix_q16_ticks={});
 
 } // namespace datapump::helper

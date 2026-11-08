@@ -135,8 +135,7 @@ class SegmentedFFTTests(unittest.TestCase):
     def test_padding_and_tiling_preserve_all_scores(self):
         rng = np.random.default_rng(83122)
         for precision in ('fp32', 'fp64'):
-            reference = screen(precision=precision, fft_length_policy='legacy',
-                               transform_batch_bytes=2**30)
+            reference = screen(precision=precision, transform_batch_bytes=2**30)
             tiled = screen(precision=precision, transform_batch_bytes=1,
                            workspace_batch_size=2)
             y = (rng.normal(size=tiled.crop_rows)+1j*rng.normal(size=tiled.crop_rows)).astype(tiled.dtype)
@@ -157,15 +156,12 @@ class SegmentedFFTTests(unittest.TestCase):
         # The reference-host regression was a repeated radix-11 length; the
         # choice changes padding only, while the independent SVD test above
         # checks every requested linear-correlation lag in both precisions.
-        self.assertEqual(_correlation_fft_length(14582, 'legacy'), fft.next_fast_len(14582))
-        self.assertEqual(_correlation_fft_length(14582, 'bounded-smooth'), 16384)
+        self.assertEqual(_correlation_fft_length(14582), 16384)
         for rows in (1, 2, 17, 511, 512, 513, 8192, 8193, 14582, 16384, 16385):
-            actual = _correlation_fft_length(rows, 'bounded-smooth')
+            actual = _correlation_fft_length(rows)
             smooth = fft.next_fast_len(rows, real=True)
             self.assertGreaterEqual(actual, rows)
             self.assertLessEqual(actual, smooth+smooth//10)
-        with self.assertRaisesRegex(ValueError, 'FFT length policy'):
-            screen(fft_length_policy='unknown')
         with self.assertRaisesRegex(ValueError, 'transform batch bytes'):
             screen(transform_batch_bytes=0)
 

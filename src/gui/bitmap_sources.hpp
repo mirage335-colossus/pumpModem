@@ -1,7 +1,6 @@
 #pragma once
 #include "controller.hpp"
 #include "plot_render.hpp"
-#include "pattern_score_view.hpp"
 #include <map>
 
 namespace datapump::gui {
@@ -39,20 +38,7 @@ public:
             constellation_source_ = snapshot.constellation_source;
             constellation_dropped_ = snapshot.constellation_dropped;
         }
-        const bool pattern_enabled = controller.settings().transfer.modem.pattern_symbols;
-        const bool pattern_rx_paused = snapshot.transmitting && !controller.settings().simulation &&
-            snapshot.constellation_source == live::ConstellationSource::transmitted;
-        if (update.clear_pattern_scores_through) pattern_view_.clear_through(*update.clear_pattern_scores_through);
-        auto pattern_scores = pattern_rx_paused ? std::vector<plots::PatternScore>{} :
-            pattern_view_.scores(snapshot,controller.presentation_time());
-        if (update.update_plots || pattern_enabled_ != pattern_enabled || pattern_rx_paused_ != pattern_rx_paused ||
-            update.clear_pattern_scores_through || pattern_scores_ != pattern_scores || !frames_.contains(ui::Bitmap::pattern_scores)) {
-            pattern_scores_ = std::move(pattern_scores);
-            put(ui::Bitmap::pattern_scores, plots::PlotSnapshot::pattern_scores(pattern_scores_, pattern_enabled));
-            pattern_waiting_ = pattern_scores_.empty();
-        }
-        pattern_enabled_ = pattern_enabled;
-        pattern_rx_paused_ = pattern_rx_paused;
+        if(!frames_.contains(ui::Bitmap::pattern_scores))put(ui::Bitmap::pattern_scores, {});
         const auto band=controller.spectrum_search_band();
         if (update.clear_waterfall || append) {
             frozen_history_=std::make_shared<const plots::SpectrumHistory>(history_);
@@ -80,17 +66,9 @@ public:
             put(ui::Bitmap::qr, plots::PlotSnapshot::qr(std::move(code), mode));
         }
         const auto model = controller.inspection();
-        const auto first = controller.pattern_first();
-        const auto page_size = controller.pattern_page_size();
-        if (inspected_ != model || pattern_first_ != first || pattern_page_size_ != page_size) {
-            inspected_ = model; pattern_first_ = first; pattern_page_size_ = page_size;
-            if (model && model->pattern_space) {
-                put(ui::Bitmap::pattern, plots::PlotSnapshot::pattern_chips(*model->pattern_space, first, controller.pattern_page_size()));
-                put(ui::Bitmap::pattern_distances, plots::PlotSnapshot::pattern_distances(*model->pattern_space));
-                put(ui::Bitmap::pattern_evidence, plots::PlotSnapshot::pattern_evidence(*model->pattern_space));
-            } else {
-                put(ui::Bitmap::pattern, {}); put(ui::Bitmap::pattern_distances, {}); put(ui::Bitmap::pattern_evidence, {});
-            }
+        if (inspected_ != model) {
+            inspected_ = model;
+            put(ui::Bitmap::pattern, {}); put(ui::Bitmap::pattern_distances, {}); put(ui::Bitmap::pattern_evidence, {});
             for (auto id : {ui::Bitmap::payload_alphabet, ui::Bitmap::reference_alphabet}) {
                 const std::size_t index = id == ui::Bitmap::payload_alphabet ? 0 : 1;
                 put(id, model && index < model->constellations.size() ?
@@ -106,11 +84,7 @@ public:
     std::uint64_t version(ui::Bitmap id) const { const auto it=versions_.find(id);return it==versions_.end()?0:it->second; }
     std::string caption(ui::Bitmap id, unsigned width = 640) const {
         if (id == ui::Bitmap::qr && !qr_error_.empty()) return qr_error_;
-        if (id == ui::Bitmap::pattern_scores && pattern_enabled_) {
-            if (pattern_rx_paused_) return width < 320 ? "RX paused during TX" : "Receiver audio input is paused during transmission";
-            if (pattern_waiting_) return width < 320 ? "waiting for full-pattern evidence" :
-                "Horizontal P0 / vertical P1: waiting for retained evidence from complete pattern windows";
-        }
+        if (id == ui::Bitmap::pattern_scores) return "Triad backend unavailable";
         auto result = get(id).caption(width);
         if(id==ui::Bitmap::waveform || id==ui::Bitmap::waterfall || id==ui::Bitmap::waterfall_detail || id==ui::Bitmap::waterfall_helper_detail)
             result+=environment_monitor_?" / input monitor":simulation_?" / simulated stream":" / modem stream";
@@ -141,19 +115,12 @@ private:
     std::optional<std::pair<double,double>> searched_band_;
     std::optional<std::pair<double,double>> helper_band_;
     std::optional<std::uint64_t> spectrum_revision_;
-    PatternScoreView pattern_view_;
-    std::vector<plots::PatternScore> pattern_scores_;
     std::string qr_text_, brightness_, qr_error_;
     std::shared_ptr<const Inspection> inspected_;
-    std::size_t pattern_first_ = 0;
-    std::size_t pattern_page_size_ = 0;
     std::uint64_t constellation_dropped_ = 0;
     double zoom_ = 0;
     bool replaying_ = false;
     bool simulation_ = true, environment_monitor_ = false;
-    bool pattern_enabled_ = false;
-    bool pattern_rx_paused_ = false;
-    bool pattern_waiting_ = true;
     live::ConstellationSource constellation_source_ = live::ConstellationSource::input;
 };
 }

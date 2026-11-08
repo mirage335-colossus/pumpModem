@@ -29,11 +29,6 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-SMOKE_DIAGNOSTIC = ('INCOMPLETE GUI_SMOKE_BUDGET: phase=17 elapsed=600.018200 budget=600.000000 '
-                    'tx_id=11 fraction=0.225619 media_seconds=30.392361 samples=441901 '
-                    'tail=0 progress_age=2.343160 result=incomplete')
-
-
 class CertificationFixture:
     schema = 1
 
@@ -156,114 +151,6 @@ class CertificationFixture:
     def record(self, **options):
         return certify.record(self.repository, self.tag, '789', self.results(**options), '2')
 
-    def smoke_warning(self, **options):
-        value = {'code': 'gui-smoke-workload-incomplete',
-                 'target': next(iter(certify.release.application_targets(self.metadata))),
-                 'scope': 'source/native', 'diagnostic': SMOKE_DIAGNOSTIC,
-                 'source_sha': self.metadata['source_sha'],
-                 'inventory_sha256': digest(self.files['SHA256SUMS.txt']),
-                 'run_id': '789', 'run_attempt': '2'}
-        value.update(options)
-        return value
-
-
-class SmokeWarningCollectionTests(CertificationFixture, unittest.TestCase):
-    def artifact(self, job='source-linux-x86_64-rev', attempt='1', status='incomplete'):
-        directory = self.root / 'artifacts' / f'certification-smoke-{job}-attempt-{attempt}'
-        directory.mkdir(parents=True)
-        identity = {'run_id': '789', 'run_attempt': attempt}
-        (directory / 'job-coverage.json').write_text(json.dumps(identity))
-        if status is not None:
-            report = dict(identity, status=status, source_sha=self.metadata['source_sha'])
-            if status == 'incomplete':
-                report['warning'] = self.smoke_warning(run_attempt=attempt)
-            (directory / 'gui_workflow.json').write_text(json.dumps(report))
-        return directory
-
-    def collect(self, attempt='2'):
-        return certify.collect_smoke_warnings(self.root / 'artifacts', '789', attempt)
-
-    def test_partial_rerun_retains_earlier_successful_job_warning(self):
-        self.artifact()
-        self.artifact('copy-0', '2', 'passed')
-        warnings = self.collect()
-        self.assertEqual(warnings, [self.smoke_warning(run_attempt='1')])
-        evidence = self.record(smoke_warnings=warnings)
-        self.assertEqual(evidence['status'], 'passed_with_warnings')
-        self.assertEqual(evidence['smoke_warnings'][0]['run_attempt'], '1')
-
-    def test_full_rerun_pass_or_no_smoke_replaces_earlier_warning(self):
-        self.artifact()
-        latest = self.artifact(attempt='2', status='passed')
-        self.assertEqual(self.collect(), [])
-        (latest / 'gui_workflow.json').unlink()
-        # An always-written manifest clears old smoke evidence for a WGL omission.
-        self.assertEqual(self.collect(), [])
-
-    def test_newest_attempt_is_numeric(self):
-        self.artifact(attempt='2')
-        self.artifact(attempt='10', status='passed')
-        self.assertEqual(self.collect('10'), [])
-
-    def test_future_and_malformed_artifact_names_are_rejected(self):
-        original = self.artifact()
-        for name in ('certification-smoke-source-attempt-3', 'certification-smoke-source-attempt-0',
-                     'certification-smoke-source-attempt-01', 'certification-smoke-source-attempt-x',
-                     'unexpected-artifact'):
-            changed = original.with_name(name)
-            original.rename(changed)
-            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'artifact'):
-                self.collect()
-            changed.rename(original)
-
-    def test_selected_manifest_must_have_exact_string_identity(self):
-        directory = self.artifact()
-        manifest = directory / 'job-coverage.json'
-        manifest.unlink()
-        with self.assertRaisesRegex(ValueError, 'manifest'):
-            self.collect()
-        for value in (None, {}, {'run_id': '788', 'run_attempt': '1'},
-                      {'run_id': '789', 'run_attempt': '2'}, {'run_id': '789', 'run_attempt': 1},
-                      {'run_id': '789', 'run_attempt': '1', 'extra': 'not allowed'}):
-            manifest.write_text(json.dumps(value))
-            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'manifest identity'):
-                self.collect()
-
-    def test_all_report_identities_match_the_selected_artifact(self):
-        directory = self.artifact()
-        path = directory / 'gui_workflow.json'
-        incomplete = json.loads(path.read_text())
-        for status in ('passed', 'failed', 'incomplete'):
-            for change in ({'run_id': '788'}, {'run_attempt': '2'}, {'run_attempt': 1}):
-                report = dict(incomplete, status=status, **change)
-                if status != 'incomplete':
-                    report.pop('warning')
-                path.write_text(json.dumps(report))
-                with self.subTest(status=status, change=change), self.assertRaisesRegex(ValueError, 'report identity'):
-                    self.collect()
-        for change in ({'run_id': '788'}, {'run_attempt': '2'}, {'source_sha': 'b' * 40}):
-            report = dict(incomplete, warning=dict(incomplete['warning'], **change))
-            path.write_text(json.dumps(report))
-            with self.subTest(change=change), self.assertRaisesRegex(ValueError, 'warning identity'):
-                self.collect()
-
-    def test_only_known_aggregate_may_omit_identity(self):
-        directory = self.artifact(status=None)
-        path = directory / 'native-tests.json'
-        path.write_text(json.dumps({'status': 'passed_with_warnings', 'tests': []}))
-        self.assertEqual(self.collect(), [])
-        path.write_text(json.dumps({'status': 'incomplete', 'warning': self.smoke_warning()}))
-        with self.assertRaisesRegex(ValueError, 'report identity'):
-            self.collect()
-
-    def test_collection_bounds_warning_count(self):
-        directory = self.artifact()
-        report = (directory / 'gui_workflow.json').read_text()
-        for i in range(64):
-            (directory / f'package-{i}.json').write_text(report)
-        with self.assertRaisesRegex(ValueError, 'more than 64'):
-            self.collect()
-
 
 class CertificationWorkflowTests(unittest.TestCase):
     def setUp(self):
@@ -286,7 +173,7 @@ class CertificationWorkflowTests(unittest.TestCase):
         values = dict(line.split('=', 1) for line in output.read_text().splitlines()) if output.exists() else {}
         return result, {name: json.loads(value) for name, value in values.items()}
 
-    def test_linux_matrix_requires_both_scopes_without_changing_release_rows(self):
+    def test_linux_matrix_preserves_retained_main_scope_and_release_rows(self):
         (self.root / 'tools').mkdir()
         for name in ('release.py', 'release-dependencies.py'):
             shutil.copyfile(ROOT / 'tools' / name, self.root / 'tools' / name)
@@ -301,7 +188,7 @@ class CertificationWorkflowTests(unittest.TestCase):
                     result, matrices = self.run_workflow_python('PYMATRIX')
                     self.assertEqual(result.returncode, 0, result.stderr)
                     expected = [dict(row, scope=scope) for row in original['linux_matrix']['include']
-                                for scope in ('main', 'calibration')]
+                                for scope in ('main',)]
                     self.assertCountEqual(matrices['linux_matrix']['include'], expected)
                     self.assertEqual(matrices['windows_matrix'], original['windows_matrix'])
                     self.assertEqual(matrices['compatibility_matrix'], original['compatibility_matrix'])
@@ -309,7 +196,7 @@ class CertificationWorkflowTests(unittest.TestCase):
 
     def windows_jobs(self):
         needs = {name: {'result': 'success', 'outputs': {}} for name in
-                 ('windows-fltk', 'windows-rev', 'windows-fltk-calibration', 'windows-rev-calibration')}
+                 ('windows-fltk', 'windows-rev')}
         needs['windows-rev']['outputs']['warnings'] = json.dumps([certify.windows_certification.warning_record()])
         return needs
 
@@ -341,18 +228,18 @@ class CertificationWorkflowTests(unittest.TestCase):
         original = certify.release.build_matrices(metadata)
         self.assertCountEqual(matrices['linux_matrix']['include'],
             [dict(row, scope=scope) for row in original['linux_matrix']['include']
-             for scope in ('main', 'calibration', 'frontends')])
+             for scope in ('main', 'frontends')])
 
-    def test_windows_main_warning_survives_empty_or_unrelated_calibration_outputs(self):
+    def test_windows_main_warning_survives_unrelated_frontend_outputs(self):
         for output in ({}, {'warnings': '[]'}, {'warnings': '[{"code":"not-the-main-probe"}]'}):
             needs = self.windows_jobs()
-            needs['windows-rev-calibration']['outputs'] = output
+            needs['windows-frontends'] = {'result': 'success', 'outputs': output}
             with self.subTest(output=output):
                 result, values = self.collect_windows(needs)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(values['warnings'], [certify.windows_certification.warning_record()])
 
-    def test_every_required_windows_main_and_calibration_child_must_succeed(self):
+    def test_every_required_windows_child_must_succeed(self):
         for name in self.windows_jobs():
             for status in ('failure', 'cancelled', 'skipped', None):
                 needs = self.windows_jobs()
@@ -368,7 +255,7 @@ class CertificationWorkflowTests(unittest.TestCase):
 
     def test_legacy_fltk_release_does_not_require_unpublished_rev_children(self):
         needs = self.windows_jobs()
-        for name in ('windows-rev', 'windows-rev-calibration'):
+        for name in ('windows-rev',):
             needs[name] = {'result': 'skipped', 'outputs': {}}
         result, values = self.collect_windows(needs, ['windows-x86_64'])
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -376,6 +263,12 @@ class CertificationWorkflowTests(unittest.TestCase):
 
 
 class CertificationTests(CertificationFixture, unittest.TestCase):
+    def test_unknown_policy_fields_cannot_relax_certification(self):
+        with self.assertRaisesRegex(ValueError, 'unsupported certification fields'):
+            self.record(unrecognized_exception=True)
+        self.assertEqual(self.uploads, {})
+        self.assertEqual(self.edits, [])
+
     def test_prepare_pins_metadata_inventory_and_source_without_archive_download(self):
         state = self.prepare()
         self.assertEqual(state['metadata'], self.metadata)
@@ -744,8 +637,7 @@ class BackendCertificationTests(CertificationFixture, unittest.TestCase):
     schema = 2
 
     def test_hosted_warning_does_not_bypass_legacy_release_schema_gate(self):
-        for options in ({'warnings': [certify.windows_certification.warning_record()]},
-                        {'smoke_warnings': [self.smoke_warning()]}):
+        for options in ({'warnings': [certify.windows_certification.warning_record()]},):
             with self.subTest(options=options):
                 evidence = self.record(**options)
                 self.assertEqual(evidence['status'], 'passed_with_warnings')
@@ -1161,184 +1053,6 @@ class ChannelCertificationTests(DistroCertificationTests):
             self.assertIn('This experiment remains a prerelease and is not eligible for Latest', report)
             self.assertNotIn('This ordinary release remains eligible for Latest', report)
 
-    def test_incomplete_smoke_binds_evidence_and_keeps_ordinary_release_eligible(self):
-        history = 'Earlier certification remains recorded.'
-        self.published['body'] = certify.release.CERTIFICATION_PENDING + '\n' + history
-        warnings = [self.smoke_warning(), self.smoke_warning(scope='published/ubuntu:24.04')]
-        evidence = self.record(smoke_warnings=warnings)
-        self.assertEqual(evidence['status'], 'passed_with_warnings')
-        self.assertTrue(evidence['latest_eligible'])
-        self.assertIn('--latest=true', self.edits[-1][0])
-        self.assertNotIn('warnings', evidence)
-        self.assertEqual(evidence['smoke_warnings'], warnings)
-        self.assertEqual(evidence['incomplete_smoke_coverage'], {
-            warnings[0]['target']: ['published/ubuntu:24.04', 'source/native']})
-        self.assertEqual(evidence['smoke_warning_policy'], certify.SMOKE_WARNING_POLICY)
-        stem = 'certification-789-attempt-2'
-        self.assertEqual(set(self.uploads), {
-            stem + suffix for suffix in ('.json', '.md', '-smoke-warnings.json', '-smoke-warnings.log')})
-        self.assertEqual(json.loads(self.uploads[stem + '.json']), evidence)
-        self.assertEqual(json.loads(self.uploads[stem + '-smoke-warnings.json']), warnings)
-        for kind in ('json', 'log'):
-            name = stem + '-smoke-warnings.' + kind
-            self.assertEqual(evidence[f'smoke_warning_{kind}_asset'], name)
-            self.assertEqual(evidence[f'smoke_warning_{kind}_sha256'], digest(self.uploads[name]))
-        log = self.uploads[stem + '-smoke-warnings.log'].decode()
-        self.assertIn(SMOKE_DIAGNOSTIC, log)
-        self.assertIn('Incomplete GUI smoke coverage, not a smoke pass', log)
-        self.assertIn(warnings[0]['inventory_sha256'], log)
-        self.assertIn('run 789, attempt 2', log)
-        for report in (self.edits[-1][1], self.uploads[stem + '.md'].decode()):
-            self.assertIn('Hosted certification passed with documented incomplete smoke coverage', report)
-            self.assertIn('not a smoke pass', report)
-            self.assertIn('This ordinary release remains eligible for Latest', report)
-            self.assertIn('published/ubuntu:24.04', report)
-            self.assertIn(stem + '-smoke-warnings.json', report)
-            self.assertIn(stem + '-smoke-warnings.log', report)
-        self.assertIn(history, self.edits[-1][1])
-
-    def test_graphics_and_smoke_warnings_remain_separate(self):
-        graphics = [certify.windows_certification.warning_record()]
-        smoke = [self.smoke_warning()]
-        evidence = self.record(warnings=graphics, smoke_warnings=smoke)
-        self.assertEqual(evidence['status'], 'passed_with_warnings')
-        self.assertTrue(evidence['latest_eligible'])
-        self.assertEqual(evidence['warnings'], graphics)
-        self.assertEqual(evidence['smoke_warnings'], smoke)
-        self.assertIn('windows-x86_64-rev', evidence['coverage_exclusions'])
-        self.assertIn(smoke[0]['target'], evidence['incomplete_smoke_coverage'])
-        self.assertEqual(len(self.uploads), 5)
-
-    def test_incomplete_smoke_never_promotes_an_experiment(self):
-        self.metadata.update(experiment=True, title='experiment')
-        self.published.update(prerelease=True, name='experiment')
-        self.refresh_metadata()
-        evidence = self.record(smoke_warnings=[self.smoke_warning()])
-        self.assertEqual(evidence['status'], 'passed_with_warnings')
-        self.assertFalse(evidence['latest_eligible'])
-        flags, body = self.edits[-1]
-        self.assertIn('--latest=false', flags)
-        self.assertNotIn('--latest=true', flags)
-        self.assertIn('--prerelease', flags)
-        self.assertEqual(flags[flags.index('--title') + 1], 'experiment')
-        self.assertIn('This experiment remains a prerelease and is not eligible for Latest', body)
-
-    def test_incomplete_smoke_never_hides_failed_or_missing_required_jobs(self):
-        for status in ('failure', 'cancelled', 'skipped', 'timed_out', 'pending', None):
-            with self.subTest(status=status):
-                jobs = dict.fromkeys(certify.required_jobs(self.metadata), 'success')
-                if status is None:
-                    jobs.pop('linux-tests')
-                else:
-                    jobs['linux-tests'] = status
-                evidence = self.record(jobs=jobs, smoke_warnings=[self.smoke_warning()])
-                self.assertEqual(evidence['status'], 'failed')
-                self.assertFalse(evidence['latest_eligible'])
-                self.assertIn('--latest=false', self.edits[-1][0])
-                self.assertNotIn('--latest=true', self.edits[-1][0])
-                self.assertIn('Hosted certification failed', self.edits[-1][1])
-                self.assertNotIn('Hosted certification passed with documented incomplete smoke coverage',
-                                 self.edits[-1][1])
-
-    def test_smoke_warning_schema_release_run_and_scope_are_exact(self):
-        known = self.smoke_warning()
-        missing = dict(known)
-        missing.pop('scope')
-        cases = [None, {}, 'warning', [None], [missing], [dict(known, extra='not allowed')]]
-        changes = [
-            {'code': 'generic-timeout'}, {'target': 'unknown-target'},
-            {'source_sha': 'b' * 40}, {'inventory_sha256': 'b' * 64},
-            {'run_id': '788'}, {'run_attempt': '3'}, {'run_id': 789},
-            {'scope': 'source/adapter'}, {'scope': 'published/'},
-            {'scope': 'published/' + 'a' * 129}, {'scope': 'published/ubuntu:24.04\ninjected'},
-            {'scope': 'published/`injected`'}, {'scope': None}, {'diagnostic': 75}]
-        cases += [[dict(known, **change)] for change in changes]
-        for warnings in cases:
-            with self.subTest(warnings=warnings), self.assertRaisesRegex(ValueError, '[Ss]moke warning'):
-                self.record(smoke_warnings=warnings)
-        self.assertFalse(self.uploads)
-        self.assertFalse(self.edits)
-
-    def test_smoke_warning_from_earlier_attempt_retains_its_origin(self):
-        warning = self.smoke_warning(run_attempt='1')
-        evidence = self.record(smoke_warnings=[warning])
-        self.assertEqual(evidence['status'], 'passed_with_warnings')
-        self.assertTrue(evidence['latest_eligible'])
-        self.assertEqual(evidence['run_attempt'], '2')
-        self.assertEqual(evidence['smoke_warnings'], [warning])
-        stem = 'certification-789-attempt-2'
-        self.assertEqual(json.loads(self.uploads[stem + '-smoke-warnings.json']), [warning])
-        log = self.uploads[stem + '-smoke-warnings.log'].decode()
-        self.assertIn('run 789, attempt 1.', log)
-        self.assertNotIn('run 789, attempt 2.', log)
-        self.assertIn('/attempts/2', self.edits[-1][1])
-
-    def test_smoke_warning_rejects_future_zero_and_malformed_attempts(self):
-        for attempt in ('3', '0', '01', '-1', '1.0', '', ' 1', '1\n', 1, None):
-            with self.subTest(attempt=attempt), self.assertRaisesRegex(ValueError, '[Ss]moke warning'):
-                self.record(smoke_warnings=[self.smoke_warning(run_attempt=attempt)])
-        self.assertFalse(self.uploads)
-        self.assertFalse(self.edits)
-
-    def test_smoke_warning_requires_typed_recent_progress_diagnostic(self):
-        invalid = ['Timeout 600 seconds', ' ' + SMOKE_DIAGNOSTIC,
-                   SMOKE_DIAGNOSTIC + '\nAddressSanitizer: failure',
-                   SMOKE_DIAGNOSTIC.replace('phase=17', 'phase=24'),
-                   SMOKE_DIAGNOSTIC.replace('elapsed=600.018200', 'elapsed=599.999999'),
-                   SMOKE_DIAGNOSTIC.replace('budget=600.000000', 'budget=9.000000'),
-                   SMOKE_DIAGNOSTIC.replace('budget=600.000000', 'budget=1201.000000')
-                       .replace('elapsed=600.018200', 'elapsed=1201.000000'),
-                   SMOKE_DIAGNOSTIC.replace('tx_id=11', 'tx_id=0'),
-                   SMOKE_DIAGNOSTIC.replace('fraction=0.225619', 'fraction=1.000001'),
-                   SMOKE_DIAGNOSTIC.replace('progress_age=2.343160', 'progress_age=30.000001'),
-                   SMOKE_DIAGNOSTIC.replace('result=incomplete', 'result=passed')]
-        for diagnostic in invalid:
-            with self.subTest(diagnostic=diagnostic), self.assertRaisesRegex(ValueError, 'diagnostic'):
-                self.record(smoke_warnings=[self.smoke_warning(diagnostic=diagnostic)])
-        self.assertFalse(self.uploads)
-        self.assertFalse(self.edits)
-
-    def test_smoke_warning_uses_shared_budget_boundaries_and_retains_distinct_attempts(self):
-        warnings = []
-        for budget in (10, 1200):
-            diagnostic = (SMOKE_DIAGNOSTIC.replace('budget=600.000000', f'budget={budget:.6f}')
-                          .replace('elapsed=600.018200', f'elapsed={budget:.6f}')
-                          .replace('progress_age=2.343160', 'progress_age=30.000000'))
-            warnings.append(self.smoke_warning(diagnostic=diagnostic))
-        evidence = self.record(smoke_warnings=warnings)
-        self.assertEqual(evidence['status'], 'passed_with_warnings')
-        self.assertEqual(evidence['smoke_warnings'], warnings)
-        self.assertEqual(evidence['incomplete_smoke_coverage'], {
-            warnings[0]['target']: ['source/native']})
-        self.assertEqual(json.loads(self.uploads['certification-789-attempt-2-smoke-warnings.json']), warnings)
-
-    def test_smoke_warning_count_and_duplicate_bounds(self):
-        known = self.smoke_warning()
-        for warnings in ([known, known], [self.smoke_warning(scope=f'published/fixture:{i}') for i in range(65)]):
-            with self.subTest(count=len(warnings)), self.assertRaisesRegex(ValueError, '[Ss]moke warning'):
-                self.record(smoke_warnings=warnings)
-        self.assertFalse(self.uploads)
-        warnings = [self.smoke_warning(scope=f'published/fixture:{i}') for i in range(64)]
-        evidence = self.record(smoke_warnings=warnings)
-        self.assertEqual(len(evidence['smoke_warnings']), 64)
-        self.assertEqual(len(evidence['incomplete_smoke_coverage'][known['target']]), 64)
-
-    def test_smoke_warning_assets_cannot_be_overwritten_or_promoted_before_upload(self):
-        for suffix in ('-smoke-warnings.json', '-smoke-warnings.log'):
-            self.assets.append({'name': 'certification-789-attempt-2' + suffix})
-            with self.subTest(suffix=suffix), self.assertRaisesRegex(ValueError, 'already exists'):
-                self.record(smoke_warnings=[self.smoke_warning()])
-            self.assets.pop()
-        self.assertFalse(self.uploads)
-        self.assertFalse(self.edits)
-
-        def fail_upload(args, **options):
-            if args[:2] == ['release', 'upload']:
-                raise subprocess.CalledProcessError(1, args)
-            return self.gh(args, **options)
-        with patch.object(certify, 'gh', side_effect=fail_upload), self.assertRaises(subprocess.CalledProcessError):
-            self.record(smoke_warnings=[self.smoke_warning()])
-        self.assertFalse(self.edits)
 
     def test_warning_never_hides_other_failed_jobs(self):
         jobs = dict.fromkeys(certify.required_jobs(self.metadata), 'success')

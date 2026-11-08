@@ -1,7 +1,6 @@
 #pragma once
 // Opt-in developer instrumentation. Never call from an audio process callback.
 // Missing records/footer mean incomplete evidence, not a successful timing run.
-#include "trace_work_coalescer.hpp"
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -70,35 +69,9 @@ struct State {
     static constexpr std::uint64_t maximum_file_bytes=256ULL*1024*1024;
     std::uint64_t file_bytes=0;
     bool size_limited=false;
-    bool receiver_probe=false;
-    std::uint64_t acquisition_work_minimum_interval_samples=0;
-    bool acquisition_work_sample_reference_phase_flag=false;
-    // Optional diagnostic selection happens before field formatting. Keep the
-    // normal trace unchanged when no selector is supplied.
-    bool (*event_filter)(const char*) noexcept=nullptr;
     std::FILE* file=nullptr;
     std::string token,path;
     std::mutex mutex;
-    // Lazy bounded logger storage; optional allocation failure emits every call.
-    std::unique_ptr<WorkTraceCoalescer> acquisition_work_cache;
-    bool acquisition_work_cache_attempted=false;
-    WorkTraceDecision work_decision(WorkTraceCoalescer::Key key,const WorkTraceStamp& stamp,
-                                   std::uint64_t sample,bool force,bool retired) noexcept {
-        try {
-            std::lock_guard lock(mutex);
-            if(!acquisition_work_cache_attempted) {
-                acquisition_work_cache_attempted=true;
-                acquisition_work_cache.reset(new(std::nothrow) WorkTraceCoalescer(
-                    acquisition_work_minimum_interval_samples,acquisition_work_sample_reference_phase_flag));
-            }
-            if(acquisition_work_cache)return acquisition_work_cache->observe(key,stamp,sample,force,retired);
-        }catch(...){} // Diagnostic pressure cannot alter the receiver.
-        return {};
-    }
-    WorkTraceCoalescer::Stats work_stats() {
-        std::lock_guard lock(mutex);
-        return acquisition_work_cache?acquisition_work_cache->stats():WorkTraceCoalescer::Stats{};
-    }
     std::condition_variable changed,finished;
     struct Slot {std::atomic<std::uint64_t> sequence{0};std::string line;};
     std::array<Slot,capacity> slots;
@@ -147,16 +120,9 @@ struct State {
                 }
                 if(!write(line))++dropped;
             }
-            const auto work=work_stats();
             write("{\"event\":\"trace_end\",\"token\":"+datapump::audio::trace::quoted(token)+",\"finalization_required\":true,\"attempted\":"+std::to_string(attempted.load())+
                 ",\"dropped\":"+std::to_string(dropped.load())+",\"size_limited\":"+(size_limited?"true":"false")+
-                ",\"prior_io_failed\":"+(io_failed?"true":"false")+
-                ",\"coalesced_acquisition_work_calls\":"+std::to_string(work.coalesced_calls)+
-                ",\"pending_coalesced_acquisition_work_calls\":"+std::to_string(work.pending_calls)+
-                ",\"acquisition_work_tracked_open_owners\":"+std::to_string(work.open_owners)+
-                ",\"acquisition_work_tracked_lifecycles_closed\":"+(!work.open_owners&&!work.pending_calls?"true":"false")+
-                ",\"acquisition_work_capacity_declines\":"+std::to_string(work.capacity_declines)+
-                ",\"acquisition_work_lifecycle_scope\":\"tracked coalescer entries only; untracked owners require terminal-event scan\"}\n",true);
+                ",\"prior_io_failed\":"+(io_failed?"true":"false")+"}\n",true);
         }catch(...){io_failed=true;}
         const auto result=finish_file(file,io_failed);
         if(!result.succeeded())io_failed=true;
@@ -190,19 +156,10 @@ public:
     }
 };
 inline StateSlot active;
-inline bool event_enabled(const char* event) noexcept {
-    const auto state=active.load(std::memory_order_acquire);
-    return state && (!state->event_filter || state->event_filter(event));
-}
-inline bool receiver_probe_enabled() noexcept {
-    const auto state=active.load(std::memory_order_acquire);
-    return state && state->receiver_probe;
-}
 inline std::atomic<std::uint64_t> next_identity{0};
 inline std::uint64_t identity(){return ++next_identity;}
 template<class F>void record(const char* event,F fields) noexcept {
     const auto state=active.load(std::memory_order_acquire);if(!state)return;
-    if(state->event_filter && !state->event_filter(event))return;
     ++state->producers;
     // A delayed caller which loaded active before close may not register work
     // after the footer. Accepted producers finish/drop before the footer.
@@ -215,56 +172,15 @@ template<class F>void record(const char* event,F fields) noexcept {
     }catch(...){++state->dropped;}
     --state->producers;state->changed.notify_one();
 }
-// Joined numeric snapshots alone use this path. Producer registration encloses
-// coalescing, so the final footer cannot race an accepted cache update.
-template<class F>void record_work(WorkTraceCoalescer::Key key,const WorkTraceStamp& stamp,
-        std::uint64_t sample,bool force,bool retired,F fields) noexcept {
-    const auto state=active.load(std::memory_order_acquire);if(!state)return;
-    constexpr auto event="receiver_acquisition_work";
-    if(state->event_filter && !state->event_filter(event))return;
-    ++state->producers;
-    if(state->closing) {--state->producers;state->changed.notify_one();return;}
-    const auto decision=state->work_decision(key,stamp,sample,force,retired);
-    if(decision.emit) {
-        const auto sequence=state->attempted.fetch_add(1)+1;
-        try {
-            Fields f;f.add("sequence",sequence);
-            f.add("steady",std::chrono::duration<long double>(std::chrono::steady_clock::now().time_since_epoch()).count());
-            fields(f);
-            f.add("work_stamp_supported",stamp.valid);
-            f.add("work_coalescer_available",decision.cache_available);
-            f.add("work_coalescer_tracked",decision.tracked);
-            f.add("work_coalescer_capacity_declined",decision.capacity_declined);
-            f.add("coalesced_snapshot_calls",decision.coalesced_calls);
-            f.add("first_coalesced_sample",decision.first_coalesced_sample);
-            f.add("last_coalesced_sample",decision.last_coalesced_sample);
-            if(state->acquisition_work_minimum_interval_samples) {
-                f.add("work_snapshot_mode","periodic_cumulative_counters");
-                f.add("work_snapshot_minimum_interval_samples",state->acquisition_work_minimum_interval_samples);
-                f.add("work_reference_phase_flag_periodic",state->acquisition_work_sample_reference_phase_flag);
-                f.add("work_counter_regressed",decision.counter_regressed);
-            }
-            state->push("{\"event\":"+quoted(event)+f.out.str()+"}\n");
-        }catch(...){++state->dropped;}
-    }
-    --state->producers;state->changed.notify_one();
-}
 class Scope {
     std::shared_ptr<State> state_;
     std::thread writer_;
     std::filesystem::path path_;
 public:
-    explicit Scope(std::filesystem::path path={},bool receiver_probe=false,
-                   bool (*event_filter)(const char*) noexcept=nullptr,
-                   std::uint64_t acquisition_work_minimum_interval_samples=0,
-                   bool acquisition_work_sample_reference_phase_flag=false) {
+    explicit Scope(std::filesystem::path path={}) {
         if(path.empty())path="datapump-verbose-"+std::to_string(std::chrono::system_clock::now().time_since_epoch().count())+".jsonl";
         path_=std::filesystem::absolute(path);
         state_=std::make_shared<State>();
-        state_->receiver_probe=receiver_probe;
-        state_->event_filter=event_filter;
-        state_->acquisition_work_minimum_interval_samples=acquisition_work_minimum_interval_samples;
-        state_->acquisition_work_sample_reference_phase_flag=acquisition_work_sample_reference_phase_flag;
         const auto utf8=path_.u8string();state_->path.assign(utf8.begin(),utf8.end());
         state_->token=std::to_string(std::chrono::system_clock::now().time_since_epoch().count())+"-"+std::to_string(identity());
 #if defined(_WIN32) && !defined(__linux__)
@@ -280,15 +196,8 @@ public:
         catch(...){active.store({});throw;}
         record("trace_begin",[&](Fields& f){f.add("schema",2);f.add("token",state_->token);f.add("maximum_queue_records",State::capacity);
             f.add("maximum_record_bytes",State::maximum_record);f.add("maximum_file_bytes",State::maximum_file_bytes);
-            f.add("acquisition_work_coalescer_maximum_owners",WorkTraceCoalescer::capacity);
-            f.add("acquisition_work_coalescer_maximum_bytes",sizeof(WorkTraceCoalescer));
-            if(acquisition_work_minimum_interval_samples) {
-                f.add("acquisition_work_snapshot_mode","periodic_cumulative_counters");
-                f.add("acquisition_work_minimum_interval_samples",acquisition_work_minimum_interval_samples);
-                f.add("acquisition_work_reference_phase_flag_periodic",acquisition_work_sample_reference_phase_flag);
-            }
             f.add("long_double_digits",std::numeric_limits<long double>::max_digits10);
-            f.add("receiver_probe",receiver_probe);if(event_filter)f.add("event_filter",true);});
+            });
     }
     ~Scope(){
         state_->closing=true;

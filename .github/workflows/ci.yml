@@ -1,123 +1,134 @@
-name: Focused checks and full native regression
-
-on:
+name: Focused checks and native regression
+'on':
   workflow_call:
     inputs:
       linux_runner:
-        description: 'Linux x86_64 runner for compilation and qualification'
+        description: Linux x86_64 runner for compilation and qualification
         type: string
         default: ubuntu-24.04
       arm_runner:
-        description: 'Linux ARM64 runner for compilation and qualification'
+        description: Linux ARM64 runner for compilation and qualification
         type: string
         default: ubuntu-24.04-arm
       windows_runner:
-        description: 'Windows x64 runner for compilation and qualification'
+        description: Windows x64 runner for compilation and qualification
         type: string
         default: windows-2022
       devfast:
-        description: 'Run only the selected focused diagnostic; skip full regression and release work'
-        type: boolean
-        default: false
-      sanitizer_smoke:
-        description: 'Run the instrumented desktop smoke as a separate job (full runs only)'
+        description: Run only the selected focused diagnostic; skip full regression and release work
         type: boolean
         default: false
       sanitizer_realtime:
-        description: 'Include real-time Fast RX checks in the instrumented Debug job (full runs only)'
+        description: Include real-time Fast RX checks in the instrumented Debug job (full runs only)
         type: boolean
         default: false
       diagnostic:
-        description: 'Focused check used only with devfast=true'
+        description: Focused application or platform check used with devfast=true
         type: string
         default: legacy
       diagnostic_release:
-        description: 'Published tag for graphics, or immutable source tag/ref for ARM adapter / SDK live diagnostics'
+        description: Published tag for graphics, or immutable source tag/ref for ARM adapter / SDK live diagnostics
         type: string
         default: ''
-  # Branch pushes are covered by their PR. Automatic work is deliberately
-  # bounded; completed candidates use the explicit full manual dispatch.
   push:
-    branches: [main]
+    branches:
+    - main
     paths:
-      - '.github/workflows/**'
-      - 'src/**'
-      - 'web/**'
-      - 'include/**'
-      - 'tests/**'
-      - 'cmake/**'
-      - 'third_party/**'
-      - 'tools/**'
-      - 'CMakeLists.txt'
-      - 'CMakePresets.json'
-      - 'build.sh'
+    - .github/workflows/**
+    - src/**
+    - web/**
+    - include/**
+    - tests/**
+    - cmake/**
+    - third_party/**
+    - tools/**
+    - CMakeLists.txt
+    - CMakePresets.json
+    - build.sh
   pull_request:
     paths:
-      - '.github/workflows/**'
-      - 'src/**'
-      - 'web/**'
-      - 'include/**'
-      - 'tests/**'
-      - 'cmake/**'
-      - 'third_party/**'
-      - 'tools/**'
-      - 'CMakeLists.txt'
-      - 'CMakePresets.json'
-      - 'build.sh'
+    - .github/workflows/**
+    - src/**
+    - web/**
+    - include/**
+    - tests/**
+    - cmake/**
+    - third_party/**
+    - tools/**
+    - CMakeLists.txt
+    - CMakePresets.json
+    - build.sh
   workflow_dispatch:
     inputs:
       linux_runner:
-        description: 'Linux x86_64 runner for compilation and qualification'
+        description: Linux x86_64 runner for compilation and qualification
         type: choice
-        options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
+        options:
+        - ubuntu-24.04
+        - ubuntu-latest-m
+        - ubuntu-latest-l
+        - ubuntu-latest-h
         default: ubuntu-24.04
       arm_runner:
-        description: 'Linux ARM64 runner for compilation and qualification'
+        description: Linux ARM64 runner for compilation and qualification
         type: choice
-        options: [ubuntu-24.04-arm-l, ubuntu-24.04-arm-h, ubuntu-24.04-arm]
+        options:
+        - ubuntu-24.04-arm-l
+        - ubuntu-24.04-arm-h
+        - ubuntu-24.04-arm
         default: ubuntu-24.04-arm
       windows_runner:
-        description: 'Windows x64 runner for compilation and qualification'
+        description: Windows x64 runner for compilation and qualification
         type: choice
-        options: [windows-2022, windows-latest-l, windows-latest-h]
+        options:
+        - windows-2022
+        - windows-latest-l
+        - windows-latest-h
         default: windows-2022
       devfast:
-        description: 'Run only the selected focused diagnostic; skip full regression and release work'
-        type: boolean
-        default: false
-      sanitizer_smoke:
-        description: 'Run the instrumented desktop smoke as a separate job (full runs only)'
+        description: Run only the selected focused diagnostic; skip full regression and release work
         type: boolean
         default: false
       sanitizer_realtime:
-        description: 'Include real-time Fast RX checks in the instrumented Debug job (full runs only)'
+        description: Include real-time Fast RX checks in the instrumented Debug job (full runs only)
         type: boolean
         default: false
       diagnostic:
-        description: 'Focused check used only with devfast=true'
+        description: Focused application or platform check used with devfast=true
         type: choice
-        options: [legacy, certification, windows-certification, windows-rev, graphics, arm-rev-package, arm-rev-smoke, arm-rev-adapter, sdk-live, gui-contract, sanitizer-gui, runner-capacity, arm-runner-capacity, ci-tooling, core-partition, preparation-partition, native-copy-recovery]
+        options:
+        - legacy
+        - certification
+        - windows-certification
+        - windows-rev
+        - graphics
+        - arm-rev-package
+        - arm-rev-smoke
+        - arm-rev-adapter
+        - gui-contract
+        - runner-capacity
+        - arm-runner-capacity
+        - ci-tooling
+        - native-copy-recovery
         default: legacy
       diagnostic_release:
-        description: 'Published tag for graphics, or immutable source tag/ref for ARM adapter / SDK live diagnostics'
+        description: Published tag for graphics, or immutable source tag/ref for ARM adapter / SDK live diagnostics
         type: string
         default: ''
       copy_run_id:
-        description: 'Exact native-linux.yml package run for native-copy-recovery only'
+        description: Exact native-linux.yml package run for native-copy-recovery only
         type: string
         default: ''
       copy_source_sha:
-        description: 'Exact package source SHA for native-copy-recovery only'
+        description: Exact package source SHA for native-copy-recovery only
         type: string
         default: ''
-
 permissions:
   contents: read
-
 concurrency:
-  group: native-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.diagnostic || 'legacy' }}-${{ inputs.devfast && 'devfast' || 'full' }}-${{ !inputs.devfast && inputs.sanitizer_realtime && 'realtime' || 'standard' }}-${{ inputs.sanitizer_smoke && 'sanitizer-smoke' || 'no-sanitizer-smoke' }}-${{ inputs.linux_runner || 'ubuntu-24.04' }}-${{ inputs.windows_runner || 'windows-2022' }}-${{ inputs.arm_runner || 'ubuntu-24.04-arm' }}
+  group: native-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.diagnostic || 'legacy'
+    }}-${{ inputs.devfast && 'devfast' || 'full' }}
   cancel-in-progress: true
-
 jobs:
   tooling:
     if: github.event_name != 'workflow_dispatch'
@@ -125,41 +136,32 @@ jobs:
     runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Check orchestration with small offline fixtures
-        run: |
-          python3 tests/test_build_wrapper.py
-          python3 tests/test_build_dependencies.py
-          python3 tests/test_ci_apt.py
-          python3 tests/test_source_sdk.py
-          python3 tests/test_sdk_build.py
-          python3 tests/test_release_dependencies.py
-          python3 tests/test_gui_smoke_runner.py
-          python3 tests/test_native_tests_runner.py
-          python3 tests/test_ci_tests.py
-          python3 tests/test_ci_test_plan.py
-          python3 -B tests/test_resource_results.py
-          python3 -B tools/resource-results.py check docs/ci-resource-results.json
-          python3 tests/test_ci_preparation_plan.py
-          python3 tests/test_calibration_cli.py
-          python3 tests/test_ci_sdk_copy_inputs.py
-          python3 tests/test_ci_native_copy_inputs.py
-          python3 tests/test_ci_build_probe.py
-          python3 tests/test_sdk_burst_scheduling_diagnostic.py
-          python3 tests/test_wasm_sdk.py
-          python3 tests/test_package_wasm.py
-          python3 tests/test_wasm_sdk_release.py
-          python3 tests/test_verify_latest_release.py
-          python3 tests/test_triad_performance_workflow.py
-      - name: Record the remaining candidate gate
-        run: echo 'Automatic checks are focused feedback only. Completed runtime changes require explicit ci.yml devfast=false, applicable SDK qualification, and release certification when publishing.' >> "$GITHUB_STEP_SUMMARY"
-
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Check orchestration with small offline fixtures
+      run: |
+        python3 tests/test_build_wrapper.py
+        python3 tests/test_build_dependencies.py
+        python3 tests/test_ci_apt.py
+        python3 tests/test_source_sdk.py
+        python3 tests/test_sdk_build.py
+        python3 tests/test_release_dependencies.py
+        python3 tests/test_gui_smoke_runner.py
+        python3 tests/test_native_tests_runner.py
+        python3 tests/test_ci_tests.py
+        python3 tests/test_ci_sdk_copy_inputs.py
+        python3 tests/test_ci_native_copy_inputs.py
+        python3 tests/test_wasm_sdk.py
+        python3 tests/test_package_wasm.py
+        python3 tests/test_wasm_sdk_release.py
+        python3 tests/test_verify_latest_release.py
+    - name: Record the remaining candidate gate
+      run: echo 'Automatic checks are focused feedback only. Completed runtime changes require explicit ci.yml devfast=false,
+        applicable SDK qualification, and release certification when publishing.' >> "$GITHUB_STEP_SUMMARY"
   ctest-utilities:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'ci-tooling'
     uses: ./.github/workflows/ci-tooling.yml
-
   native-copy-recovery:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'native-copy-recovery'
     permissions:
@@ -169,50 +171,39 @@ jobs:
     with:
       source_run_id: ${{ inputs.copy_run_id }}
       source_sha: ${{ inputs.copy_source_sha }}
-
   devfast:
     if: github.event_name != 'workflow_dispatch' || (inputs.devfast && inputs.diagnostic == 'legacy')
     uses: ./.github/workflows/devfast.yml
     with:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
-
-  triad-performance:
-    if: ${{ !inputs.devfast }}
-    name: Isolated three-carrier performance regression
-    uses: ./.github/workflows/triad-performance.yml
-    with:
-      candidate_ref: ${{ github.sha }}
-
   certification-diagnostic:
-    if: github.event_name == 'workflow_dispatch' && inputs.devfast && (inputs.diagnostic == 'certification' || inputs.diagnostic == 'windows-certification' || inputs.diagnostic == 'arm-rev-adapter' || inputs.diagnostic == 'sdk-live')
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast && (inputs.diagnostic == 'certification' || inputs.diagnostic
+      == 'windows-certification' || inputs.diagnostic == 'arm-rev-adapter')
     uses: ./.github/workflows/certification-diagnostic.yml
     with:
-      scope: ${{ inputs.diagnostic == 'arm-rev-adapter' && 'arm-rev-adapter' || inputs.diagnostic == 'sdk-live' && 'sdk-live' || inputs.diagnostic == 'windows-certification' && 'windows' || 'all' }}
+      scope: ${{ inputs.diagnostic == 'arm-rev-adapter' && 'arm-rev-adapter' || inputs.diagnostic == 'windows-certification'
+        && 'windows' || 'all' }}
       source_ref: ${{ inputs.diagnostic_release }}
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
       arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm' }}
-
   windows-rev-diagnostic:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'windows-rev'
     uses: ./.github/workflows/windows-rev-diagnostic.yml
     with:
       windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
-
   runner-capacity:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'runner-capacity'
     uses: ./.github/workflows/runner-capacity.yml
     with:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
-
   arm-runner-capacity:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'arm-runner-capacity'
     uses: ./.github/workflows/arm-runner-capacity.yml
     with:
       arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm' }}
-
   graphics-diagnostic:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'graphics'
     uses: ./.github/workflows/graphics-diagnostic.yml
@@ -220,14 +211,13 @@ jobs:
       arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm' }}
       windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
       release_tag: ${{ inputs.diagnostic_release }}
-
   arm-rev-package-diagnostic:
-    if: github.event_name == 'workflow_dispatch' && inputs.devfast && (inputs.diagnostic == 'arm-rev-package' || inputs.diagnostic == 'arm-rev-smoke')
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast && (inputs.diagnostic == 'arm-rev-package' ||
+      inputs.diagnostic == 'arm-rev-smoke')
     uses: ./.github/workflows/arm-rev-package-diagnostic.yml
     with:
       arm_runner: ${{ inputs.arm_runner || 'ubuntu-24.04-arm' }}
       smoke: ${{ inputs.diagnostic == 'arm-rev-smoke' }}
-
   gui-contract:
     if: github.event_name == 'workflow_dispatch' && (!inputs.devfast || inputs.diagnostic == 'gui-contract')
     name: GUI contract (${{ matrix.backend }})
@@ -237,72 +227,66 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [fltk, rev]
+        backend:
+        - fltk
+        - rev
     env:
       DATAPUMP_SMOKE_TARGET: linux-x86_64-${{ matrix.backend }}
       DATAPUMP_SMOKE_SCOPE: source/native
       DATAPUMP_SMOKE_SOURCE_SHA: ${{ github.sha }}
       DATAPUMP_SMOKE_INVENTORY_SHA256: ''
       DEBIAN_FRONTEND: noninteractive
-      LIBGL_ALWAYS_SOFTWARE: "1"
-      # Keep software rendering from saturating the UI polling thread's CPUs.
+      LIBGL_ALWAYS_SOFTWARE: '1'
       LP_NUM_THREADS: ${{ inputs.linux_runner == 'ubuntu-24.04' && '1' || '2' }}
     steps:
-      - name: Load current package-fetch helper before installing Git
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-          path: .ci-bootstrap
-          sparse-checkout: tools/ci-apt.sh
-          sparse-checkout-cone-mode: false
-      - name: Prepare shared native conformance environment
-        run: |
-          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
-          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates git cmake ninja-build make g++ clang-19 clang-tools-19 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libxrandr-dev libgl-dev libglew-dev libfreetype-dev libxtst6 libgl1-mesa-dri xvfb xauth fonts-dejavu-core python3
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Set container-local smoke evidence paths
-        run: |
-          printf 'DATAPUMP_CI_SMOKE_WARNINGS_DIR=%s/build/ci-smoke-results\n' "$PWD" >> "$GITHUB_ENV"
-          printf 'DATAPUMP_CI_SMOKE_RUNNER=%s/tools/run-gui-smoke.py\n' "$PWD" >> "$GITHUB_ENV"
-      - name: Configure the same contract suite for the selected adapter
-        # The focused GUI diagnostic runs this same complete scope. Standard
-        # runners get bounded cumulative computation headroom, with a warning
-        # after a successful >600s smoke; all internal assertions stay strict.
-        run: >-
-          cmake -S . -B build-gui -G Ninja
-          -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19
-          -DCMAKE_BUILD_TYPE=Release -DDATAPUMP_PORTABLE=OFF
-          -DDATAPUMP_GUI_BACKEND=${{ matrix.backend }} -DDATAPUMP_TEST_NATIVE_GUI=ON
-          -DGUI_SMOKE_TIMEOUT=${{ inputs.linux_runner == 'ubuntu-24.04' && '1200' || '600' }} -DDART_TESTING_TIMEOUT=3600
-      - run: cmake --build build-gui --target datapump-tests-gui --parallel "$(python3 -B tools/build_capacity.py)"
-      - name: Check offline build and dependency tooling
-        if: matrix.backend == 'fltk'
-        run: |
-          cmake --build build-gui --target datapump-tests-build --parallel "$(python3 -B tools/build_capacity.py)"
-          ctest --test-dir build-gui --output-on-failure -L '^build$'
-      - name: Test shared behavior, native contract and simulated workflow
-        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 tools/run-native-tests.py --allow-budget-exhaustion --build-dir build-gui --label gui --report-dir "$DATAPUMP_CI_SMOKE_WARNINGS_DIR"
-      - name: Record focused GUI scope
-        if: inputs.devfast
-        run: echo 'This diagnostic runs both GUI contracts and records any incomplete smoke coverage. It does not run general native regression, calibration, SDK or package qualification; skipped scopes are not passes.' >> "$GITHUB_STEP_SUMMARY"
-      - name: Retain GUI timing report and failure logs
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: CI-GUI-${{ matrix.backend }}-attempt-${{ github.run_attempt }}
-          path: |
-            build-gui/ci-test-report.*
-            build-gui/Testing/Temporary/
-            build/ci-smoke-results/
-          if-no-files-found: warn
-          retention-days: 7
-
-  # Package producers do not wait for unit tests or calibration. Their exact
-  # archives still pass every required Release desktop/integrity check, and all
-  # independent test shards remain required for an overall successful workflow.
+    - name: Load current package-fetch helper before installing Git
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+        path: .ci-bootstrap
+        sparse-checkout: tools/ci-apt.sh
+        sparse-checkout-cone-mode: false
+    - name: Prepare shared native conformance environment
+      run: |
+        cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+        sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates git cmake ninja-build make g++ clang-19 clang-tools-19 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libxrandr-dev libgl-dev libglew-dev libfreetype-dev libxtst6 libgl1-mesa-dri xvfb xauth fonts-dejavu-core python3
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Set container-local smoke evidence paths
+      run: |
+        printf 'DATAPUMP_CI_SMOKE_WARNINGS_DIR=%s/build/ci-smoke-results\n' "$PWD" >> "$GITHUB_ENV"
+        printf 'DATAPUMP_CI_SMOKE_RUNNER=%s/tools/run-gui-smoke.py\n' "$PWD" >> "$GITHUB_ENV"
+    - name: Configure the same contract suite for the selected adapter
+      run: cmake -S . -B build-gui -G Ninja -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 -DCMAKE_BUILD_TYPE=Release
+        -DDATAPUMP_PORTABLE=OFF -DDATAPUMP_GUI_BACKEND=${{ matrix.backend }} -DDATAPUMP_TEST_NATIVE_GUI=ON -DGUI_SMOKE_TIMEOUT=${{
+        inputs.linux_runner == 'ubuntu-24.04' && '1200' || '600' }} -DDART_TESTING_TIMEOUT=3600
+    - run: cmake --build build-gui --target datapump-tests-gui --parallel "$(python3 -B tools/build_capacity.py)"
+    - name: Check offline build and dependency tooling
+      if: matrix.backend == 'fltk'
+      run: |
+        cmake --build build-gui --target datapump-tests-build --parallel "$(python3 -B tools/build_capacity.py)"
+        ctest --test-dir build-gui --output-on-failure -L '^build$'
+    - name: Test shared behavior, native contract and simulated workflow
+      run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 tools/run-native-tests.py
+        --build-dir build-gui --label gui --report-dir "$DATAPUMP_CI_SMOKE_WARNINGS_DIR"
+    - name: Record focused GUI scope
+      if: inputs.devfast
+      run: echo 'This diagnostic runs both GUI contracts and records any incomplete smoke coverage. It does not
+        run general native regression, SDK or package qualification; skipped scopes are not passes.'
+        >> "$GITHUB_STEP_SUMMARY"
+    - name: Retain GUI timing report and failure logs
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: CI-GUI-${{ matrix.backend }}-attempt-${{ github.run_attempt }}
+        path: |
+          build-gui/ci-test-report.*
+          build-gui/Testing/Temporary/
+          build/ci-smoke-results/
+        if-no-files-found: warn
+        retention-days: 7
   linux-package:
     if: github.event_name == 'workflow_dispatch' && !inputs.devfast
     name: Linux portable package (glibc 2.35)
@@ -311,7 +295,6 @@ jobs:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       build_type: Release
       scope: package
-
   windows-package:
     if: github.event_name == 'workflow_dispatch' && !inputs.devfast
     name: Windows portable package (static CRT)
@@ -319,294 +302,120 @@ jobs:
     with:
       windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
       scope: package
-
   linux-tests:
     if: github.event_name == 'workflow_dispatch' && !inputs.devfast
-    name: Linux ${{ matrix.build_type }} / ${{ matrix.shard.scope }} / ${{ matrix.shard.section }}
+    name: Linux ${{ matrix.build_type }} / ${{ matrix.scope }}
     strategy:
       fail-fast: false
       matrix:
-        build_type: [Release, Debug]
-        shard:
-          - {scope: core, section: all}
-          - {scope: preparation, section: all}
-          - {scope: fast, section: all}
-          - {scope: live, section: all}
-          - {scope: frontends, section: all}
-          - {scope: web, section: all}
-          - {scope: calibration, section: matrix}
-          - {scope: calibration, section: shaped}
-          - {scope: calibration, section: "null"}
-          - {scope: calibration, section: default-window}
-        exclude:
-          - build_type: Debug
-            shard: {scope: calibration, section: shaped}
-          - build_type: Debug
-            shard: {scope: core, section: all}
-          - build_type: Debug
-            shard: {scope: preparation, section: all}
+        build_type:
+        - Release
+        - Debug
+        scope:
+        - core
+        - fast
+        - legacy
+        - frontends
+        - web
     uses: ./.github/workflows/native-linux.yml
     with:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       build_type: ${{ matrix.build_type }}
-      scope: ${{ matrix.shard.scope }}
-      calibration_section: ${{ matrix.shard.section }}
+      scope: ${{ matrix.scope }}
       sanitizer_realtime: ${{ inputs.sanitizer_realtime }}
-
-  linux-preparation-debug:
-    if: github.event_name == 'workflow_dispatch' && (!inputs.devfast || inputs.diagnostic == 'preparation-partition')
-    name: Linux Debug / preparation / part ${{ matrix.part }}
-    strategy:
-      fail-fast: false
-      matrix:
-        part: ['0', '1', '2', '3']
-    uses: ./.github/workflows/native-linux.yml
-    with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
-      build_type: Debug
-      scope: preparation
-      preparation_part: ${{ matrix.part }}
-
-  linux-preparation-debug-aggregate:
-    if: always() && github.event_name == 'workflow_dispatch' && (!inputs.devfast || inputs.diagnostic == 'preparation-partition')
-    name: Require all original Debug preparation comparisons
-    needs: linux-preparation-debug
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: Preparation-Debug-part-0
-          path: build/preparation-parts/0
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: Preparation-Debug-part-1
-          path: build/preparation-parts/1
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: Preparation-Debug-part-2
-          path: build/preparation-parts/2
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: Preparation-Debug-part-3
-          path: build/preparation-parts/3
-      - name: Require all producer jobs and the complete original inventory
-        if: always()
-        env:
-          PART_JOBS_RESULT: ${{ needs.linux-preparation-debug.result }}
-        run: test "$PART_JOBS_RESULT" = success
-      - name: Verify every original comparison and assertion completed exactly once
-        run: >-
-          python3 tools/ci-preparation-plan.py aggregate
-          --parts build/preparation-parts/0/ci-preparation-part.json
-          build/preparation-parts/1/ci-preparation-part.json
-          build/preparation-parts/2/ci-preparation-part.json
-          build/preparation-parts/3/ci-preparation-part.json
-          --output build/preparation-aggregate.json
-      - name: Record focused preparation coverage scope
-        if: inputs.devfast && inputs.diagnostic == 'preparation-partition'
-        run: echo 'All four GNU11 Debug ASan/UBSan preparation comparison partitions and their strict aggregate completed. Other native scopes were not selected by this focused run.' >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: Preparation-Debug-aggregate
-          path: build/preparation-aggregate.json
-          if-no-files-found: error
-          retention-days: 7
-
-  linux-core-debug:
-    if: github.event_name == 'workflow_dispatch' && (!inputs.devfast || inputs.diagnostic == 'core-partition')
-    name: Linux Debug / core / part ${{ matrix.part }}
-    strategy:
-      fail-fast: false
-      matrix:
-        part: ['0', '1']
-    uses: ./.github/workflows/native-linux.yml
-    with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
-      build_type: Debug
-      scope: core
-      core_part: ${{ matrix.part }}
-      sanitizer_realtime: ${{ inputs.sanitizer_realtime }}
-
-  linux-core-debug-aggregate:
-    if: always() && github.event_name == 'workflow_dispatch' && (!inputs.devfast || inputs.diagnostic == 'core-partition')
-    name: Require both planned Debug core partitions
-    needs: linux-core-debug
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: Core-Debug-part-0
-          path: build/core-parts/0
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: Core-Debug-part-1
-          path: build/core-parts/1
-      - name: Require successful producer jobs and every non-CTest check
-        if: always()
-        env:
-          PART_JOBS_RESULT: ${{ needs.linux-core-debug.result }}
-        run: test "$PART_JOBS_RESULT" = success
-      - name: Verify complete Debug core partition results
-        run: >-
-          python3 tools/ci-test-plan.py aggregate
-          --scope core --config Debug
-          --plan build/core-parts/0/ci-selection-plan.json
-          --parts build/core-parts/0/ci-test-report.json build/core-parts/1/ci-test-report.json
-          --output build/core-aggregate.json
-      - name: Record focused core coverage scope
-        if: inputs.devfast && inputs.diagnostic == 'core-partition'
-        run: echo 'Both planned GNU11 Debug core partitions, their strict aggregate, and the part-0 CLI regression completed. This focused route does not qualify full native regression; all other scopes remain unrun.' >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: Core-Debug-aggregate
-          path: build/core-aggregate.json
-          if-no-files-found: warn
-          overwrite: true
-          retention-days: 7
-
   wasm:
     if: github.event_name == 'workflow_dispatch' && !inputs.devfast
     name: Browser Wasm / ${{ matrix.scope }}
     strategy:
       fail-fast: false
       matrix:
-        scope: [packages, tests]
+        scope:
+        - packages
+        - tests
     uses: ./.github/workflows/wasm-application.yml
     with:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       scope: ${{ matrix.scope }}
       artifact_name: DataPump-CI-Wasm
-
-  linux-shaped:
-    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
-    name: Debug shaped captures / part ${{ matrix.part }}
-    strategy:
-      fail-fast: false
-      matrix:
-        part: ['0', '1', '2', '3']
-    uses: ./.github/workflows/native-linux.yml
-    with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
-      build_type: Debug
-      scope: calibration
-      calibration_section: shaped
-      calibration_shard: ${{ matrix.part }}
-      calibration_shards: '4'
-
-  linux-shaped-aggregate:
-    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
-    name: Require complete shaped calibration and original aggregate assertions
-    needs: linux-shaped
-    uses: ./.github/workflows/native-linux.yml
-    with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
-      build_type: Debug
-      scope: calibration-aggregate
-      calibration_section: shaped
-      calibration_shards: '4'
-
-  sanitizer-gui:
-    if: github.event_name == 'workflow_dispatch' && ((inputs.devfast && inputs.diagnostic == 'sanitizer-gui') || (!inputs.devfast && inputs.sanitizer_smoke))
-    name: Separate instrumented desktop smoke
-    uses: ./.github/workflows/native-linux.yml
-    with:
-      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
-      build_type: Debug
-      scope: sanitizer-gui
-
   linux-compatibility:
     if: github.event_name == 'workflow_dispatch' && !inputs.devfast
     name: Copied Linux binaries on Ubuntu ${{ matrix.ubuntu }}
     needs: linux-package
     runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
     container: ubuntu:${{ matrix.ubuntu }}
-    # Both archive formats run the full workflow; measured checks exceed ten
-    # minutes even though devfast never runs these compatibility jobs.
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        ubuntu: ["22.04", "24.04"]
+        ubuntu:
+        - '22.04'
+        - '24.04'
     env:
-      DATAPUMP_CI_SMOKE_CAPTURE_FIXTURES: '1'
       DATAPUMP_SMOKE_TARGET: linux-x86_64-fltk
       DATAPUMP_SMOKE_SCOPE: published/ubuntu-${{ matrix.ubuntu }}
       DATAPUMP_SMOKE_SOURCE_SHA: ${{ github.sha }}
       DATAPUMP_SMOKE_INVENTORY_SHA256: ''
       DEBIAN_FRONTEND: noninteractive
     steps:
-      # No application development libraries or compiler: only the display and
-      # inspection tools used to check the downloaded, already built bundle.
-      - name: Load current package-fetch helper before installing Git
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-          path: .ci-bootstrap
-          sparse-checkout: tools/ci-apt.sh
-          sparse-checkout-cone-mode: false
-      - name: Prepare compatibility checks
-        env:
-          CI_APT_DOWNLOAD_TIMEOUT: '180'
-        run: |
-          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
-          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git python3 cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Set container-local smoke evidence paths
-        run: |
-          printf 'DATAPUMP_CI_SMOKE_WARNINGS_DIR=%s/build/ci-smoke-results\n' "$PWD" >> "$GITHUB_ENV"
-          printf 'DATAPUMP_CI_SMOKE_RUNNER=%s/tools/run-gui-smoke.py\n' "$PWD" >> "$GITHUB_ENV"
-      - name: Install the pinned dependency scanner
-        run: |
-          sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
-          echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: DataPump-Linux-x86_64-glibc-2.35
-          path: downloaded
-      - name: Run copied archives with isolated runtime paths
-        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.35 -DREQUIRE_MANUALS=ON -DREQUIRE_FRONTENDS=ON -P tools/verify-native-archives.cmake
-      - name: Retain smoke workload coverage and diagnostics
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: CI-copied-Linux-${{ matrix.ubuntu }}-smoke-attempt-${{ github.run_attempt }}
-          path: build/ci-smoke-results/
-          if-no-files-found: warn
-          retention-days: 7
-
+    - name: Load current package-fetch helper before installing Git
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+        ref: ${{ github.sha }}
+        path: .ci-bootstrap
+        sparse-checkout: tools/ci-apt.sh
+        sparse-checkout-cone-mode: false
+    - name: Prepare compatibility checks
+      env:
+        CI_APT_DOWNLOAD_TIMEOUT: '180'
+      run: |
+        cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+        sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git python3 cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Set container-local smoke evidence paths
+      run: |
+        printf 'DATAPUMP_CI_SMOKE_WARNINGS_DIR=%s/build/ci-smoke-results\n' "$PWD" >> "$GITHUB_ENV"
+        printf 'DATAPUMP_CI_SMOKE_RUNNER=%s/tools/run-gui-smoke.py\n' "$PWD" >> "$GITHUB_ENV"
+    - name: Install the pinned dependency scanner
+      run: |
+        sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
+        echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      with:
+        name: DataPump-Linux-x86_64-glibc-2.35
+        path: downloaded
+    - name: Run copied archives with isolated runtime paths
+      run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON
+        -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.35 -DREQUIRE_MANUALS=ON -DREQUIRE_FRONTENDS=ON -P tools/verify-native-archives.cmake
+    - name: Retain smoke workload coverage and diagnostics
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: CI-copied-Linux-${{ matrix.ubuntu }}-smoke-attempt-${{ github.run_attempt }}
+        path: build/ci-smoke-results/
+        if-no-files-found: warn
+        retention-days: 7
   windows-tests:
     if: github.event_name == 'workflow_dispatch' && !inputs.devfast
-    name: Windows Release / ${{ matrix.shard.scope }} / ${{ matrix.shard.section }}
+    name: Windows Release / ${{ matrix.scope }}
     strategy:
       fail-fast: false
       matrix:
-        shard:
-          - {scope: core, section: all}
-          - {scope: preparation, section: all}
-          - {scope: fast, section: all}
-          - {scope: live, section: all}
-          - {scope: frontends, section: all}
-          - {scope: web, section: all}
-          - {scope: calibration, section: matrix}
-          - {scope: calibration, section: shaped}
-          - {scope: calibration, section: "null"}
-          - {scope: calibration, section: default-window}
+        scope:
+        - core
+        - fast
+        - legacy
+        - frontends
+        - web
     uses: ./.github/workflows/native-windows.yml
     with:
       windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
-      scope: ${{ matrix.shard.scope }}
-      calibration_section: ${{ matrix.shard.section }}
+      scope: ${{ matrix.scope }}
+  triad-abbreviated:
+    if: ${{ !inputs.devfast }}
+    name: Abbreviated triad kernel estimates
+    uses: ./.github/workflows/triad-abbreviated.yml
+    with:
+      candidate_ref: ${{ github.sha }}

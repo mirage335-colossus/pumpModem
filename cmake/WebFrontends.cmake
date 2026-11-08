@@ -54,9 +54,9 @@ if(DATAPUMP_BUILD_WASM)
     add_test(NAME wasm_runtime COMMAND "${DATAPUMP_NODE_EXECUTABLE}"
       "${CMAKE_SOURCE_DIR}/tests/test_wasm_runtime.mjs"
       "$<TARGET_FILE:datapump-wasm>" "${CMAKE_CURRENT_BINARY_DIR}/datapump-wasm.wasm")
-    set_tests_properties(wasm_runtime PROPERTIES LABELS "web" TIMEOUT 240)
-    # Baseline compilation supplies a reproducible slower-engine workload;
-    # this is not an emulation or qualification of a particular browser.
+    set_tests_properties(wasm_runtime PROPERTIES LABELS "web" TIMEOUT 60)
+    # Fast Modem audio/fiber regression: this retained workload does not
+    # exercise Robust. Baseline compilation checks a slower browser engine.
     add_test(NAME wasm_live COMMAND "${DATAPUMP_NODE_EXECUTABLE}" --liftoff-only
       "${CMAKE_SOURCE_DIR}/tests/test_web_live.mjs" --wasm
       "$<TARGET_FILE:datapump-wasm>" "${CMAKE_CURRENT_BINARY_DIR}/datapump-wasm.wasm"

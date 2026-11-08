@@ -71,34 +71,3 @@ install-release-rev.py and prepare-native-sdl.py; cmake/GuiRev.cmake; and
 docs/building.md, docs/releases.md and docs/validation.md. The sibling
 software-foundation project's retained ARM64 SDK and disconnected acceptance
 implementation are useful references, subject to this project's requirements.
-
-
-
-
-
-
-
-
-2026-10-07 / Codex: remaining long-symbol receiver efficiency
-=============================================================
-
-Extend sharing of input projections, public pulse statistics and template work
-across timing/frequency/clock candidate families and rolling receiver banks.
-Reduce repeated work in currently expensive fallback geometries, rather than
-reimplementing the existing bounded search, pulse reuse or queueing.
-
-Evaluate reusable sufficient statistics and tiled correlation where complete
-execution profiles justify them; retain efficient direct paths for sparse banks. Keep caches and delayed processing within the DSP workspace.
-The goal is lower actual receiver CPU cost at unchanged waveform bandwidth,
-observation duration and required hypothesis coverage, including different audio
-carriers representing equivalent physical links.
-
-Preserve transmitted waveforms, cryptographic addressing, detector statistics,
-noise/energy accounting, incremental bit publication and observed-absence
-completion. Measure total preparation and execution cost, memory and latency,
-and validate sensitivity with matched original PCM; kernel throughput or lower
-planner coefficients alone do not establish an improvement.
-
-Use docs/search-compute.md for current implementations, recorded positive/negative
-results and remaining efficiency gaps. Follow its linked investigations before
-choosing another algorithm or cache design.

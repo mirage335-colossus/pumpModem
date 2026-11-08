@@ -17,7 +17,7 @@ void records() {
         check(packet.count==9,"wrong record width");
         check(packet.symbols[0]==(123456789%532480)*2/65,"incorrect time phase");
         const auto decoded=h::decode_metadata_packet(view(packet));
-        check(decoded&&decoded->callsign==text&&decoded->time_ticks==packet.symbols[0]&&!decoded->authenticated,"record round trip");
+        check(decoded&&decoded->callsign==text&&decoded->time_ticks==packet.symbols[0]&&!decoded->encrypted,"record round trip");
     }
     const auto vector=h::metadata_packet(0,"AB");
     check(vector.symbols[0]==0&&vector.symbols[1]==(65U<<7|66U),"wire layout");
@@ -45,7 +45,6 @@ void encrypted_records() {
     std::array<std::uint8_t,64> serpent{},aes{};
     for(unsigned i=0;i<serpent.size();++i) {serpent[i]=static_cast<std::uint8_t>(64+i);aes[i]=master[i%master.size()];}
     const auto key=datapump::Crypto::from_independent_roots(serpent,aes);
-    const std::array<datapump::Crypto,1> keys{key};
     const datapump::Crypto waveform_only(master);
     rejects([&]{h::metadata_packet(0,"N0CALL",&waveform_only);});
     struct Vector {std::uint64_t dwell,ticks;std::array<std::uint32_t,9> symbols;};
@@ -62,10 +61,10 @@ void encrypted_records() {
     for(const auto& vector:vectors) {
         const auto packet=h::metadata_packet(vector.ticks,"N0CALL",&key);
         check(packet.symbols==vector.symbols,"cascade independent vector mismatch");
-        check(!h::decode_metadata_packet(view(packet),keys),"keyed record decoded without capture clock");
-        const auto decoded=h::decode_metadata_packet(view(packet),keys,vector.ticks);
-        check(decoded&&decoded->kind==h::MetadataKind::encrypted_time&&decoded->callsign=="N0CALL"&&
-            decoded->time_ticks==packet.symbols[0]&&!decoded->authenticated,"cascade record did not decode");
+        check(!h::decode_metadata_packet(view(packet),&key),"keyed record decoded without capture clock");
+        const auto decoded=h::decode_metadata_packet(view(packet),&key,vector.ticks);
+        check(decoded&&decoded->encrypted&&decoded->callsign=="N0CALL"&&
+            decoded->time_ticks==packet.symbols[0],"cascade record did not decode");
     }
     // Exercise both sides of each six-second bucket and of the 8.125-second
     // phase wrap; the receiver calculates one absolute dwell, with no search.
@@ -74,7 +73,7 @@ void encrypted_records() {
         const auto packet=h::metadata_packet(ticks,"ABCDEFGHIJKLMNOP",&key);
         for(const auto offset:{-262144LL,-262143LL,-1LL,0LL,1LL,262143LL,262144LL}) {
             const auto anchor=static_cast<std::uint64_t>(static_cast<std::int64_t>(ticks)+offset);
-            const auto decoded=h::decode_metadata_packet(view(packet),keys,anchor);
+            const auto decoded=h::decode_metadata_packet(view(packet),&key,anchor);
             check(decoded&&decoded->callsign=="ABCDEFGHIJKLMNOP","cascade clock/bucket boundary disagreement");
         }
     }
@@ -85,13 +84,13 @@ void encrypted_records() {
     check(h::metadata_packet(0,"N0CALL",&key).symbols!=h::metadata_packet(26214,"N0CALL",&key).symbols,
         "cascade pad reused across adjacent dwells");
     rejects([&]{h::metadata_packet(1,"N0CALL",&key);});
-    const auto empty=h::timecode_packet(0,&key);
-    const auto empty_decoded=h::decode_metadata_packet(view(empty),keys,0);
+    const auto empty=h::metadata_packet(0,{},&key);
+    const auto empty_decoded=h::decode_metadata_packet(view(empty),&key,0);
     check(empty_decoded&&empty_decoded->callsign.empty(),"encrypted empty character field");
     struct Properties {~Properties() {EVP_set_default_properties(nullptr,"");}} restore;
     check(EVP_set_default_properties(nullptr,"provider=missing")==1,"provider exclusion setup failed");
     rejects([&]{h::metadata_packet(0,"N0CALL",&key);});
-    check(!h::decode_metadata_packet(view(first),keys,0),"missing cipher did not fail closed");
+    check(!h::decode_metadata_packet(view(first),&key,0),"missing cipher did not fail closed");
     check(h::decode_metadata_packet(view(h::metadata_packet(0,"N0CALL"))).has_value(),"clear codec requires AES");
 }
 }

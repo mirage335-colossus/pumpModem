@@ -101,7 +101,7 @@ class DurationModelTests(unittest.TestCase):
         n['physics']['effective_helper_w'] = 0
         p = plan_from_native(n, 8.)
         self.assertEqual(p['status'], 'receiver_unavailable')
-        self.assertFalse(p['export_supported'])
+        self.assertFalse(p['stream_geometry_supported'])
 
     def test_extreme_finite_arithmetic_and_invalid_inputs(self):
         for cn in (-60., 200.):
@@ -112,15 +112,15 @@ class DurationModelTests(unittest.TestCase):
                      dict(max_active_seconds=math.inf)]:
             with self.assertRaises(ValueError): plan_from_native(fixture(), 8., **opts)
 
-    def test_unavailable_helper_and_placement_are_not_exportable(self):
+    def test_unavailable_helper_and_placement_are_not_streamable(self):
         n=fixture();n['helper_enabled']=False
         p=plan_from_native(n,8.)
         self.assertEqual(p['status'],'receiver_unavailable')
-        self.assertFalse(p['export_supported'])
+        self.assertFalse(p['stream_geometry_supported'])
         n=fixture();n['helper_placement']=dict(feasible_at_requested_if=False)
         p=plan_from_native(n,8.)
         self.assertEqual(p['status'],'geometry_unavailable')
-        self.assertFalse(p['export_supported'])
+        self.assertFalse(p['stream_geometry_supported'])
 
     def test_message_clock_widening_grows_with_elapsed_calendar(self):
         a=plan_from_native(fixture(),8.,message_bits=22)

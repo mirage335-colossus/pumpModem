@@ -1,11 +1,10 @@
 #include "triad_fixture_key.hpp"
-// Isolated sampled fixture: production Helper transmitter + encrypted triad v3.
-// No ordinary Robust receive path is instantiated here.
+// Bounded source/basis bridge for the canonical Robust backend.
+// It contains no receiver, campaign runner or complete-capture export path.
 #include "datapump/helper_carrier.hpp"
 #include "datapump/triad_modem_v3.hpp"
 #include "datapump/triad_shaping.hpp"
 #include "datapump/triad_helper_burst.hpp"
-#include "datapump/triad_clock_follow.hpp"
 #include "datapump/tuning.hpp"
 #include "diagnostic_iq_noise_options.hpp"
 
@@ -44,35 +43,17 @@ constexpr std::uint32_t default_sample_rate = 18000;
 constexpr double data_start_seconds = 38;
 constexpr double thermal_n0_dbm_hz = -164;
 constexpr double spectral_skirt_allowance_hz = 200;
-constexpr std::uint64_t maximum_export_bytes = 2ULL * 1024 * 1024 * 1024;
 constexpr double tau = 2 * std::numbers::pi;
 constexpr std::size_t stream_chunk_samples = 4096;
-constexpr std::size_t template_bank_budget = 64 * 1024 * 1024;
-// Budget newly concurrent candidate caches and output rows. A single source
-// retains its existing bound even when it alone exceeds this batching budget.
-constexpr std::size_t template_bank_rows(std::size_t source_workspace) {
-    constexpr auto output_row_bytes = stream_chunk_samples * sizeof(Complex);
-    constexpr auto available = template_bank_budget - PatternSource::render_bank_scratch_bytes - output_row_bytes;
-    if (source_workspace > available - output_row_bytes) return 1;
-    return std::min<std::size_t>(26, available / (source_workspace + output_row_bytes));
-}
-static_assert(template_bank_rows(256 * 1024) == 26);
-static_assert(template_bank_rows(32 * 1024 * 1024) == 1);
-static_assert(template_bank_rows(std::numeric_limits<std::size_t>::max()) == 1);
-
 struct Options {
-    PatternRevision pattern_revision = PatternRevision::IndependentApskV2;
     double added_amplitude_depth = .25;
     std::string scenario = "hf", control = "selected", shaping = "auto";
-    std::string power_reference = "whole-active";
-    bool explicit_power_reference = false;
+    std::string power_reference = "bounded-tiles";
     bool stream_server = false, explicit_key_seed = false, explicit_epoch = false, now = false;
     std::string stream_kind = "channel";
-    bool clock_follow_bounded = false;
     std::filesystem::path key_file;
     std::optional<std::string> key_name;
     std::optional<std::filesystem::path> key_pad;
-    std::string helper_components = "full";
     std::string channel_evolution = "legacy";
     std::optional<double> random_doppler_width_hz, delay_excursion_ms, delay_knot_seconds;
     std::optional<std::string> base_oscillator, shift_oscillator;
@@ -80,7 +61,6 @@ struct Options {
     std::string timing_policy = "case-default";
     std::optional<double> rf_hz, spread_margin, selective_modulation_rate_hz;
     std::optional<double> data_power_w, helper_power_w;
-    std::filesystem::path output;
     std::uint64_t seed = 1, key_seed = 72001, epoch = 1793850000, symbol_ordinal = 0;
     std::optional<std::uint64_t> burst_wait_tiles;
     unsigned whole_bit_count = 1, whole_bit_wait_count = 0;
@@ -95,7 +75,7 @@ struct Options {
     std::optional<double> cn0, arrival;
     std::optional<bool> fhss;
     bool plan_only = false, power_plan_only = false;
-    bool data = true, helper = true, templates = false, explicit_data_if = false;
+    bool data = true, helper = true, explicit_data_if = false;
     bool oscillator_effects = true;
     datapump::triad::cli::DiagnosticIqNoiseOptions diagnostic_iq_noise;
 };
@@ -123,12 +103,6 @@ bool enabled(std::string_view text) {
     throw std::invalid_argument("component selection must be on or off");
 }
 
-PatternRevision parse_pattern_revision(std::string_view text) {
-    if (text == "legacy-v1") return PatternRevision::LegacyV1;
-    if (text == "independent-apsk-v2") return PatternRevision::IndependentApskV2;
-    throw std::invalid_argument("pattern revision must be legacy-v1 or independent-apsk-v2");
-}
-
 Options parse(int argc, char** argv) {
     Options o;
     for (int i = 1; i < argc; ++i) {
@@ -138,23 +112,22 @@ Options parse(int argc, char** argv) {
             return argv[i];
         };
         if (arg == "--help") {
-            std::cout << "triad_helper_export --case hf|eme --output NEW_DIRECTORY\n"
+            std::cout << "triad_helper_export --case hf|eme --stream-server | --plan-only\n"
                 "  [--seed N] [--key-seed N] [--epoch UTC_SECONDS] [--bit 0|1]\n"
                 "  [--diagnostic-iq-noise-bits N | --diagnostic-iq-noise-obscured-bits N | --diagnostic-iq-noise-db D]\n"
                 "  [--diagnostic-iq-noise-watts W] (relative to strongest active DATA or Helper watts)\n"
                 "  [--diagnostic-iq-noise-reference-watts W --diagnostic-iq-noise-reference-rms RMS]\n"
                 "  Diagnostic noise is confined to sampled complex-IQ Nyquist; it is not full-rate DAC/audio noise.\n"
                 "  [--seconds 16] [--rate HZ] [--added-symbols N] [--burst-wait-tiles N]\n"
-                "  [--pattern-revision independent-apsk-v2|legacy-v1] [--added-amplitude-depth D (0<D<1)]\n"
+                "  [--added-amplitude-depth D (0<D<1)]\n"
                 "  [--whole-bit-count 1..16] [--whole-bit-wait-count 0..1000]\n"
                 "  [--fhss on|off] [--shaping auto|legacy (default: auto)] [--shaping-tail-fraction F]\n"
                 "  [--data-if HZ] [--sample-rate INTEGER_HZ] [--cn0 DB_HZ] [--plan-only]\n"
                 "  --plan-only checks long integer geometry without generating waveform samples or templates.\n"
-                "  Sampled exports retain a2GiB budget; whole-active calibration has a4194304-sample budget.\n"
-                "  [--power-reference whole-active|legacy-window|bounded-tiles] [--power-plan-only]\n"
+                "  Source and basis requests retain bounded workspace independently of duration.\n"
+                "  [--power-reference bounded-tiles] [--power-plan-only]\n"
                 "  [--stream-server --stream-kind emitted|channel --key-file KEYFILE [--key-name NAME] [--pad PATH] | --key-seed TEST_SEED]\n"
                 "  [--now] Streaming defaults to the current epoch and bounded-tiles calibration.\n"
-                "  [--clock-follow-bounded] Opt-in slow DATA-only emitted stream; accepts clock TARGET_SECONDS.\n"
                 "  [--base-oscillator ID] [--shift-oscillator ID] [--ramp-seconds POSITIVE]\n"
                 "  [--oscillator-effects on|off] (off is an explicit diagnostic control)\n"
                 "  [--rf-hz HZ] [--spread-preset ID] [--margin FACTOR]\n"
@@ -165,15 +138,13 @@ Options parse(int argc, char** argv) {
                 "  [--data-power-w W] [--helper-power-w W]\n"
                 "  [--receiver-tail-seconds 0..1]\n"
                 "  [--control selected|flat] [--data on|off] [--helper on|off]\n"
-                "  [--helper-components full|pilots|auxiliary|low|high] (source diagnostic only)\n"
-                "  [--arrival-seconds T] [--symbol-ordinal N] [--templates]\n"
+                "  [--arrival-seconds T] [--symbol-ordinal N]\n"
                 "Default 18000 Hz complex samples; sample rate must be a multiple of 5.\n"
                 "Default DATA IF 1725 Hz HF, 4000 Hz legacy EME.\n"
                 "Physical C/N0 follows powers/loss/N0 unless\n"
                 "overridden. Templates contain all 13 public epoch alternatives and both bits.\n";
             std::exit(0);
         } else if (arg == "--case") o.scenario = next();
-        else if (arg == "--output") o.output = std::string(next());
         else if (arg == "--seed") o.seed = integer(next(), "seed");
         else if (arg == "--key-seed") { o.key_seed = integer(next(), "key seed"); o.explicit_key_seed = true; }
         else if (arg == "--key-file") o.key_file = std::string(next());
@@ -181,7 +152,6 @@ Options parse(int argc, char** argv) {
         else if (arg == "--pad") o.key_pad = std::filesystem::path(std::string(next()));
         else if (arg == "--stream-server") o.stream_server = true;
         else if (arg == "--stream-kind") o.stream_kind = next();
-        else if (arg == "--clock-follow-bounded") o.clock_follow_bounded = true;
         else if (arg == "--now") o.now = true;
         else if (arg == "--diagnostic-iq-noise-bits" || arg == "--diagnostic-iq-noise-obscured-bits" ||
                  arg == "--diagnostic-iq-noise-db" || arg == "--diagnostic-iq-noise-watts" ||
@@ -197,7 +167,6 @@ Options parse(int argc, char** argv) {
             o.bit = static_cast<unsigned>(bit);
         } else if (arg == "--seconds") o.seconds = real(next(), "duration");
         else if (arg == "--rate") o.inner_rate_hz = real(next(), "inner rate");
-        else if (arg == "--pattern-revision") o.pattern_revision = parse_pattern_revision(next());
         else if (arg == "--added-amplitude-depth") {
             o.added_amplitude_depth = real(next(), "Added Symbols amplitude depth");
             if (!(o.added_amplitude_depth > 0 && o.added_amplitude_depth < 1))
@@ -253,11 +222,9 @@ Options parse(int argc, char** argv) {
         else if (arg == "--control") o.control = next();
         else if (arg == "--data") o.data = enabled(next());
         else if (arg == "--helper") o.helper = enabled(next());
-        else if (arg == "--helper-components") o.helper_components = next();
-        else if (arg == "--templates") o.templates = true;
         else if (arg == "--plan-only") o.plan_only = true;
         else if (arg == "--power-plan-only") o.power_plan_only = true;
-        else if (arg == "--power-reference") { o.power_reference = next(); o.explicit_power_reference = true; }
+        else if (arg == "--power-reference") o.power_reference = next();
         else throw std::invalid_argument("unknown option: " + std::string(arg));
     }
     if (o.now && o.explicit_epoch) throw std::invalid_argument("--now and --epoch are mutually exclusive");
@@ -266,11 +233,10 @@ Options parse(int argc, char** argv) {
         if (now < 0) throw std::runtime_error("system clock is unavailable");
         o.epoch = static_cast<std::uint64_t>(now);
     }
-    if (o.stream_server && !o.explicit_power_reference) o.power_reference = "bounded-tiles";
     if (o.stream_kind != "emitted" && o.stream_kind != "channel")
         throw std::invalid_argument("stream kind must be emitted or channel");
-    if (o.stream_server && (o.plan_only || o.power_plan_only || o.templates || !o.output.empty()))
-        throw std::invalid_argument("stream server cannot export files, templates or plan-only output");
+    if (o.stream_server && (o.plan_only || o.power_plan_only))
+        throw std::invalid_argument("stream service and plan-only output are mutually exclusive");
     if (o.stream_server && o.whole_bit_count != 1)
         throw std::invalid_argument("stream server currently supports one complete bit per session");
     if (o.stream_server && o.key_file.empty() && !o.explicit_key_seed)
@@ -285,8 +251,8 @@ Options parse(int argc, char** argv) {
         throw std::invalid_argument("ramp duration must be positive");
     if (o.shaping != "legacy" && o.shaping != "auto")
         throw std::invalid_argument("shaping must be legacy or auto");
-    if (o.power_reference != "whole-active" && o.power_reference != "legacy-window" && o.power_reference != "bounded-tiles")
-        throw std::invalid_argument("power reference must be whole-active, legacy-window or bounded-tiles");
+    if (o.power_reference != "bounded-tiles")
+        throw std::invalid_argument("power reference must be bounded-tiles");
     if (o.plan_only && o.power_plan_only)
         throw std::invalid_argument("--plan-only and --power-plan-only are mutually exclusive");
     if (o.diagnostic_iq_noise.enabled() && (o.plan_only || o.power_plan_only))
@@ -313,9 +279,6 @@ Options parse(int argc, char** argv) {
     if (o.shaping_tail_fraction && (*o.shaping_tail_fraction <= 0 || *o.shaping_tail_fraction > .005))
         throw std::invalid_argument("spectral tail fraction must be in (0,0.005]");
     if (o.control != "selected" && o.control != "flat") throw std::invalid_argument("control must be selected or flat");
-    if (o.helper_components != "full" && o.helper_components != "pilots" &&
-        o.helper_components != "auxiliary" && o.helper_components != "low" && o.helper_components != "high")
-        throw std::invalid_argument("Helper components must be full, pilots, auxiliary, low or high");
     if (o.rf_hz && *o.rf_hz < 0) throw std::invalid_argument("RF shift must be nonnegative");
     if (o.spread_margin && (*o.spread_margin <= 0 || *o.spread_margin > 1000))
         throw std::invalid_argument("spread/search margin must be in (0,1000]");
@@ -340,8 +303,8 @@ Options parse(int argc, char** argv) {
         if (power && *power <= 0) throw std::invalid_argument("DATA and Helper powers must be positive");
     if (o.timing_policy != "case-default" && o.timing_policy != "bounded" && o.timing_policy != "broad")
         throw std::invalid_argument("timing policy must be case-default, bounded or broad");
-    if (o.output.empty() && !o.plan_only && !o.power_plan_only && !o.stream_server)
-        throw std::invalid_argument("--output is required unless a plan-only mode is selected");
+    if (!o.plan_only && !o.power_plan_only && !o.stream_server)
+        throw std::invalid_argument("--stream-server or --plan-only is required");
     if (!std::isfinite(o.seconds) || o.seconds <= 0)
         throw std::invalid_argument("seconds must be finite and positive");
     if (o.data_if_hz < 1725 || o.data_if_hz >= o.sample_rate / 2.)
@@ -418,7 +381,6 @@ Case case_for(const Options& o) {
 
 Format format_for(const Options& o) {
     Format f;
-    f.pattern_revision = o.pattern_revision;
     f.added_amplitude_depth = o.added_amplitude_depth;
     const bool eme = o.scenario == "eme";
     f.inner_rate_hz = o.inner_rate_hz.value_or(eme ? 360 : 36);
@@ -641,7 +603,7 @@ void print_plan_json(const Options& o, double data_if_hz,
     std::cout << ",\"shaping\":"; json_string(std::cout, o.shaping);
     std::cout << ",\"format\":{\"inner_rate_hz\":" << f.inner_rate_hz
         << ",\"symbol_ordinal\":" << f.symbol_ordinal
-        << ",\"pattern_revision\":\"" << pattern_revision_name(f.pattern_revision)
+        << ",\"pattern_revision\":\"" << pattern_revision_name()
         << "\",\"added_amplitude_depth\":" << f.added_amplitude_depth
         << ",\"added_symbols\":" << f.added_symbols << ",\"fine_chip_rate_hz\":" << g.fine_chip_rate_hz
         << ",\"occupied_bandwidth_hz\":" << nominal << ",\"fhss\":" << boolean(f.fhss)
@@ -664,10 +626,6 @@ void print_plan_json(const Options& o, double data_if_hz,
         << ",\"padded_source_samples\":" << g.source_samples
         << ",\"source_calendar_origin_sample\":" << g.calendar_origin_sample
         << ",\"bounded_source_workspace_bytes\":" << g.source_workspace_bytes
-        << ",\"template_bank_rows\":" << template_bank_rows(g.source_workspace_bytes)
-        << ",\"template_bank_budget_bytes\":" << template_bank_budget
-        << ",\"template_bank_single_source_fallback\":" << boolean(g.source_workspace_bytes >
-            template_bank_budget - PatternSource::render_bank_scratch_bytes - 2 * stream_chunk_samples * sizeof(Complex))
         << ",\"allocates_samples_or_templates\":false}"
         << ",\"spectral_certificate\":{\"placement_bandwidth_hz\":" << selected.spectrum.placement_bandwidth_hz
         << ",\"measured_bandwidth_hz\":" << selected.spectrum.measured_bandwidth_hz
@@ -698,13 +656,13 @@ void print_plan_json(const Options& o, double data_if_hz,
     std::cout << "},\"physics\":";
     physics_json(std::cout, o, physical, physics, data_if_hz);
     std::cout << ",\"export_constraints\":{\"sample_rate_hz\":" << sample_rate
-        << ",\"maximum_export_bytes\":" << maximum_export_bytes << ",\"fixed_helper_lead_seconds\":38"
+        << ",\"fixed_helper_lead_seconds\":38"
         << ",\"maximum_sampled_active_seconds\":null"
-        << ",\"sampled_duration_constraint\":\"No time cap; sampled export byte budget and chosen power-reference work budget remain enforced.\""
+        << ",\"sampled_duration_constraint\":\"Bounded pull requests and keyed-tile power work independent of complete duration.\""
         << ",\"plan_only_duration_limit\":\"checked uint64 geometry with no sampled-duration cap\""
         << ",\"power_reference_policy\":"; json_string(std::cout, o.power_reference);
     std::cout << ",\"stream_supported\":true"
-        << ",\"whole_active_calibration_sample_limit\":4194304"
+        << ",\"power_reference_maximum_tiles\":16"
         << ",\"pulse_halo_seconds\":" << 8 / g.fine_chip_rate_hz
         << ",\"pulse_halo_fits_lead\":" << boolean(g.calendar_origin_sample <= data_start_seconds * sample_rate)
         << ",\"message_epoch_count\":13}"
@@ -728,7 +686,7 @@ void print_infeasible_plan(const Options& o, std::string_view stage, std::string
     json_string(std::cout, o.scenario);
     std::cout << ",\"shaping\":";
     json_string(std::cout, o.shaping);
-    std::cout << ",\"pattern_revision\":\"" << pattern_revision_name(o.pattern_revision)
+    std::cout << ",\"pattern_revision\":\"" << pattern_revision_name()
         << "\",\"added_amplitude_depth\":" << o.added_amplitude_depth;
     std::cout << ",\"physics\":";
     physics_json(std::cout, o, physical, physics, data_if_hz);
@@ -737,42 +695,6 @@ void print_infeasible_plan(const Options& o, std::string_view stage, std::string
 
 Complex rotation(double frequency, long double seconds) {
     return std::polar(1., tau * static_cast<double>(std::remainder(frequency * seconds, 1.L)));
-}
-
-// Diagnostic decomposition only. Preserve the production Generator's literal
-// pilot calendar, quintic4ms envelopes, multiplication order and public power
-// fractions. The complete waveform still comes from Generator; its encrypted
-// auxiliary is obtained by subtracting these public straight-tone components.
-// Full/default emission does not call this function or alter a production sample.
-std::array<Complex, 2> public_helper_pilots(const helper::Plan& plan, std::uint64_t epoch,
-                                         long double seconds, long double begin, long double end) {
-    constexpr long double dwell = .4L, ramp = .004L;
-    const auto smooth = [](long double x) {
-        const auto t = static_cast<double>(std::clamp(x, 0.L, 1.L));
-        return t * t * t * (10 + t * (-15 + 6 * t));
-    };
-    auto local = std::fmod(static_cast<long double>(epoch % 2) + seconds, 2.L);
-    if (local < 0) local += 2;
-    local -= std::floor(local / dwell) * dwell;
-    auto envelope = plan.pilot_dwell_gating ? smooth(std::min(local, dwell - local) / ramp) : 1.;
-    envelope *= smooth((end - seconds) / ramp);
-    envelope *= smooth((seconds - begin) / ramp);
-    const auto high = std::polar(1., tau * static_cast<double>(
-        std::fmod(static_cast<long double>(plan.frequency_hz) * seconds, 1.L)));
-    std::array<Complex, 2> result{plan.helper_gain * envelope * (helper::pilot_amplitude_fraction * high), Complex{}};
-    if (plan.low_frequency_hz > 0) {
-        const auto low = std::polar(1., tau * static_cast<double>(
-            std::fmod(static_cast<long double>(plan.low_frequency_hz) * seconds, 1.L)));
-        result[1] = plan.helper_gain * envelope * helper::low_pilot_amplitude_fraction * low;
-    }
-    return result;
-}
-
-std::ofstream output_file(const std::filesystem::path& path, bool binary = false) {
-    std::ofstream out(path, std::ios::out | (binary ? std::ios::binary : std::ios::openmode{}));
-    out.exceptions(std::ios::badbit | std::ios::failbit);
-    out << std::setprecision(17);
-    return out;
 }
 
 void write_complex(std::ostream& out, std::span<const Complex> samples) {
@@ -799,92 +721,12 @@ void json_string(std::ostream& out, std::string_view text) {
 const char* boolean(bool value) { return value ? "true" : "false"; }
 
 struct DataPowerReference {
-    double active_seconds = 0, mean_norm = 0, refinement_relative_difference = 0;
+    double active_seconds = 0, mean_norm = 0;
     unsigned nodes = 0;
-    const char* method = "stratified-fractional-v1";
-    bool sampled_complete = false;
+    const char* method = "bounded-keyed-tile-quadrature-v1";
     unsigned sampled_tiles = 0;
     double tile_relative_standard_error = 0;
 };
-
-DataPowerReference whole_active_power(PatternSource& source, const Format& f, const Geometry& g) {
-    const auto sample_rate = f.sample_rate;
-    // Integrate the complete bit-0 source in active-time coordinates. Quiet
-    // FHSS intervals and burst waits cost elapsed time, never extra transmit
-    // power; nonzero ramps remain in the energy and the active denominator.
-    // This is source calibration only: no propagation/outage/noise is observed.
-    const long double active_dwell = f.dwell_seconds - 2 * f.quiet_seconds;
-    const long double active_tile = g.tile_seconds * (f.fhss ? active_dwell / f.dwell_seconds : 1.L);
-    const long double active_seconds = active_tile * g.tile_count;
-    if (!(active_seconds > 0) || !std::isfinite(active_seconds))
-        throw std::runtime_error("invalid whole-active DATA reference extent");
-    const auto estimate = [&](unsigned nodes) {
-        long double sum = 0;
-        for (unsigned i = 0; i < nodes; ++i) {
-            // Deterministic stratification avoids a periodic sampling lattice
-            // accidentally aliasing the three-carrier beat frequencies.
-            const auto jitter = mix64(f.epoch ^ (static_cast<std::uint64_t>(i) + 0x504f574552ULL));
-            const long double fraction = static_cast<long double>(jitter >> 11) / 9007199254740992.L;
-            auto coordinate = active_seconds * (i + fraction) / nodes;
-            const auto tile = std::min<std::uint64_t>(g.tile_count - 1,
-                static_cast<std::uint64_t>(std::floor(coordinate / active_tile)));
-            coordinate -= tile * active_tile;
-            long double within_tile = coordinate;
-            if (f.fhss) {
-                const auto dwell = std::floor(coordinate / active_dwell);
-                within_tile = dwell * f.dwell_seconds + f.quiet_seconds + coordinate - dwell * active_dwell;
-            }
-            const long double seconds = tile * (static_cast<long double>(f.burst_wait_tiles) + 1) *
-                                        g.tile_seconds + within_tile;
-            sum += std::norm(source.sample_at(g.calendar_origin_sample + seconds * sample_rate));
-        }
-        return static_cast<double>(sum / nodes);
-    };
-    DataPowerReference result;
-    result.active_seconds = static_cast<double>(active_seconds);
-    const auto sampled_reference = [&](double fractional_estimate) {
-        // A rich pattern can appear converged on two undersampled fractional
-        // grids. Calibrate such cases on EVERY emitted integer source sample,
-        // using bounded scalar state and the actual selected sample clock.
-        // This is exact for the sampled transmit-power definition; it is not
-        // a continuous-time quadrature or propagation normalization.
-        constexpr std::uint64_t maximum_power_samples = 4ULL * 1024 * 1024;
-        if (g.source_samples > maximum_power_samples)
-            throw std::runtime_error("whole-active DATA power requires complete sampled calibration beyond the explicit 4194304-source-sample work budget");
-        long double energy = 0;
-        for (std::uint64_t row = 0; row < g.source_samples; ++row)
-            energy += std::norm(source.sample_at(static_cast<long double>(row)));
-        auto exact = result;
-        exact.mean_norm = static_cast<double>(energy / (active_seconds * sample_rate));
-        if (!(exact.mean_norm > 0) || !std::isfinite(exact.mean_norm))
-            throw std::runtime_error("empty complete sampled DATA power reference");
-        exact.nodes = static_cast<unsigned>(g.source_samples);
-        exact.method = "complete-integer-source-v1";
-        exact.sampled_complete = true;
-        exact.refinement_relative_difference = fractional_estimate > 0 ?
-            std::abs(exact.mean_norm - fractional_estimate) / exact.mean_norm : 0.;
-        return exact;
-    };
-    // Sixteen fractional nodes per fine period is an engineering guard against
-    // accepting accidental coarse-grid agreement, not an integration theorem.
-    // The complete sampled calculation supplies the power definition when the
-    // first refinement would not meet it. Established smaller fixtures retain
-    // their historical gain and bytes.
-    if (active_seconds * g.fine_chip_rate_hz > helper::power_reference_nodes / 8.L)
-        return sampled_reference(0.);
-    auto previous = estimate(helper::power_reference_nodes);
-    for (unsigned nodes = 2 * helper::power_reference_nodes; nodes <= 8 * helper::power_reference_nodes; nodes *= 2) {
-        const auto current = estimate(nodes);
-        if (!(current > 0) || !std::isfinite(current))
-            throw std::runtime_error("empty whole-active DATA power reference");
-        result.mean_norm = current;
-        result.nodes = nodes;
-        result.refinement_relative_difference = std::abs(current - previous) / current;
-        if (result.refinement_relative_difference <= .001) return result;
-        previous = current;
-    }
-    return sampled_reference(previous);
-}
 
 DataPowerReference bounded_tile_power(PatternSource& source, const Format& f, const Geometry& g) {
     // Sample at most sixteen independently keyed active tiles. No duration-sized
@@ -896,7 +738,6 @@ DataPowerReference bounded_tile_power(PatternSource& source, const Format& f, co
     const long double active_tile = g.tile_seconds * (f.fhss ? active_dwell / f.dwell_seconds : 1.L);
     DataPowerReference result;
     result.active_seconds = static_cast<double>(active_tile * g.tile_count);
-    result.method = "bounded-keyed-tile-quadrature-v1";
     result.sampled_tiles = tiles;
     result.nodes = tiles * nodes_per_tile;
     long double sum = 0, squares = 0;
@@ -933,56 +774,21 @@ DataPowerReference bounded_tile_power(PatternSource& source, const Format& f, co
 void data_power_json(std::ostream& out, const Options& o, const DataPowerReference& power,
                      double calibration_gain, double data_gain) {
     out << "\"data_power_reference_policy\":"; json_string(out, o.power_reference);
-    out << ",\"pattern_revision\":\"" << pattern_revision_name(o.pattern_revision)
+    out << ",\"pattern_revision\":\"" << pattern_revision_name()
         << "\",\"added_amplitude_depth\":" << o.added_amplitude_depth
         << ",\"data_power_reference_version\":2,\"data_reference_bit\":0"
         << ",\"data_reference_integration_method\":"; json_string(out, power.method);
-    out << ",\"data_reference_complete_sampled_source\":" << boolean(power.sampled_complete)
+    out << ",\"data_reference_complete_sampled_source\":false"
         << ",\"data_reference_active_seconds\":" << power.active_seconds
         << ",\"data_reference_mean_norm\":" << power.mean_norm
         << ",\"data_reference_nodes\":" << power.nodes
-        << ",\"data_reference_refinement_relative_difference\":" << power.refinement_relative_difference
-        << ",\"data_reference_refinement_tolerance\":0.001"
         << ",\"data_reference_sampled_tiles\":" << power.sampled_tiles
         << ",\"data_reference_tile_relative_standard_error\":" << power.tile_relative_standard_error
         << ",\"data_reference_statistical_error_is_bound\":false"
         << ",\"post_plan_data_calibration_gain\":" << calibration_gain
         << ",\"template_data_gain\":" << data_gain
         << ",\"data_reference_scope\":";
-    json_string(out, o.power_reference == "bounded-tiles" ?
-        "fixed public bit0; at most16 stratified keyed tiles with2048 fractional nodes each; active-time mean omits finite outer halo; between-tile standard error is diagnostic, not a confidence bound or integration guarantee; one unchanged gain for the entire stream" : o.power_reference == "whole-active" ?
-        "fixed public bit0 before channel; full active tiles including nonzero ramps; excluding FHSS quiet and burst waits; all bits, epochs and controls retain this gain; refinement difference is not a proven integration bound" :
-        "historical39-41s active preview only, potentially inside low-rate birth ramp; active_seconds reports full-source denominator but is not the calibration extent; all bits, epochs and controls retain this gain");
-}
-
-void endpoint_json(std::ostream& out, const triad::Oscillator& endpoint) {
-    out << "{\"audio_ppm\":" << endpoint.audio_ppm << ",\"rf_ppm\":" << endpoint.rf_ppm
-        << ",\"phase_noise_rad_per_sqrt_second\":" << endpoint.phase_noise_rad_per_sqrt_second
-        << ",\"rf_drift_ppm_per_second\":" << endpoint.rf_drift_ppm_per_second << '}';
-}
-
-void selective_json(std::ostream& out, const std::optional<SelectivePerturbationReport>& selected) {
-    if (!selected) { out << "null"; return; }
-    const auto& r = *selected;
-    out << "{\"model\":\"dispersive-dft-v1\",\"coefficient_law\":";
-    json_string(out, r.coefficient_law == SelectiveCoefficientLaw::GaussianErf ? "gaussian-erf-v1" : "sinusoidal");
-    out << ",\"sample_rate_hz\":" << r.sample_rate_hz
-        << ",\"correlation_spacing_hz\":" << r.correlation_spacing_hz << ",\"center_hz\":" << r.center_hz
-        << ",\"response_period_hz\":" << r.response_period_hz << ",\"memory_samples\":" << r.memory_samples
-        << ",\"decay_tail_samples\":" << r.decay_tail_samples << ",\"seed\":" << r.seed
-        << ",\"processed_rows\":" << r.processed_rows
-        << ",\"pre_selective_energy_samples\":" << r.pre_selective_energy_samples
-        << ",\"post_selective_energy_samples\":" << r.post_selective_energy_samples
-        << ",\"component_depths\":[" << r.component_depths[0] << ',' << r.component_depths[1]
-        << "],\"component_rates_hz\":[" << r.component_rates_hz[0] << ',' << r.component_rates_hz[1]
-        << "],\"branch_delays_seconds\":[";
-    for (unsigned i = 0; i < 3; ++i) { if (i) out << ','; out << r.branch_delays_seconds[i]; }
-    out << "],\"initial_phases_radians\":[";
-    for (unsigned i = 0; i < 3; ++i) {
-        if (i) out << ',';
-        out << '[' << r.initial_phases_radians[i][0] << ',' << r.initial_phases_radians[i][1] << ']';
-    }
-    out << "]}";
+    json_string(out, "fixed public bit0; at most16 stratified keyed tiles with2048 fractional nodes each; active-time mean omits finite outer halo; between-tile standard error is diagnostic, not a confidence bound or integration guarantee; one unchanged gain for the entire stream");
 }
 
 int run(const Options& o) {
@@ -990,11 +796,9 @@ int run(const Options& o) {
     if constexpr (std::endian::native != std::endian::little)
         throw std::runtime_error("fixture export requires a little-endian host");
     const auto wall_start = std::chrono::steady_clock::now();
-    const auto cpu_start = std::clock();
     const auto physical = case_for(o);
     const auto physics = resolve_physics(o, physical);
     const auto& base_oscillator = physics.base;
-    const auto& shift_oscillator = physics.shift;
     if (o.arrival && (*o.arrival < physical.arrival_low || *o.arrival > physical.arrival_high))
         throw std::invalid_argument("diagnostic arrival override must stay inside the public arrival prior");
     const auto data_if_hz = data_if_for(o);
@@ -1010,11 +814,6 @@ int run(const Options& o) {
     const auto f = selected_shaping.format;
     const auto g = selected_shaping.geometry;
     const auto sample_rate = f.sample_rate;
-    if (o.clock_follow_bounded && (!o.stream_server || o.stream_kind != "emitted" ||
-        o.helper || !o.data || f.fhss || f.burst_wait_tiles || o.whole_bit_calendar ||
-        f.pattern_revision != PatternRevision::IndependentApskV2 ||
-        g.fine_chip_rate_hz > .001 * (1 + 16 * std::numeric_limits<double>::epsilon())))
-        throw std::invalid_argument("bounded clock following requires an emitted independent-apsk-v2 DATA-only stream, fine rate<=0.001Hz, no FHSS, Helper or burst calendar");
     // Exactly 400 ms for the accepted integer multiple-of-five sample clocks.
     const std::uint64_t dwell_samples = 2ULL * sample_rate / 5;
     // Keep the complete finite-envelope source bound until sampled validation
@@ -1027,8 +826,7 @@ int run(const Options& o) {
     const auto key = selected_key(o);
     PatternSource reference_source(f, key, 0);
     PatternSource data_source(f, key, static_cast<std::uint8_t>(o.bit));
-    const auto lead_samples = std::max(static_cast<std::uint64_t>(std::llround(data_start_seconds * sample_rate)),
-        o.clock_follow_bounded ? g.calendar_origin_sample : std::uint64_t{0});
+    const auto lead_samples = static_cast<std::uint64_t>(std::llround(data_start_seconds * sample_rate));
     if (!o.whole_bit_calendar && g.calendar_origin_sample > lead_samples)
         throw std::runtime_error("DATA pulse padding exceeds the fixed Helper lead");
     // Power planning retains its public historical preview coordinate. The
@@ -1040,13 +838,6 @@ int run(const Options& o) {
         throw std::runtime_error("composite source extent overflow");
     const auto data_end = data_offset + g.source_samples;
     auto composite_samples = ((data_end + dwell_samples - 1) / dwell_samples) * dwell_samples;
-    // Public worst-case endpoint: negative clock correction must not truncate
-    // the keyed source or its pulse tails. No duration-sized allocation.
-    if (o.clock_follow_bounded) {
-        if (composite_samples > UINT64_MAX - 2ULL * sample_rate)
-            throw std::runtime_error("clock-follow source extent overflow");
-        composite_samples += 2ULL * sample_rate;
-    }
     std::vector<HelperBurstSlot> whole_slots;
     std::optional<HelperBurstPlan> burst_plan;
     const HelperBurstCoordinate calendar_origin{f.epoch, 0};
@@ -1115,13 +906,8 @@ int run(const Options& o) {
     // correction enforces configured active transmit power without changing a
     // Helper sample, duty cycle, waveform, or propagation effect.
     const auto composite_gain = 1 / (plan.data_gain * std::sqrt(reference_mean_norm));
-    auto data_reference = o.power_reference == "bounded-tiles" ? bounded_tile_power(reference_source, f, g) :
-        o.power_reference == "whole-active" ? whole_active_power(reference_source, f, g) :
-        DataPowerReference{g.tile_count * g.tile_seconds * (f.fhss ? 1 - 2 * f.quiet_seconds / f.dwell_seconds : 1),
-                           reference_mean_norm, 0, reference_nodes};
-    if (o.power_reference == "legacy-window") data_reference.method = "legacy-window-v1";
-    const auto data_calibration_gain = o.power_reference != "legacy-window" ?
-        std::sqrt(reference_mean_norm / data_reference.mean_norm) : 1.;
+    const auto data_reference = bounded_tile_power(reference_source, f, g);
+    const auto data_calibration_gain = std::sqrt(reference_mean_norm / data_reference.mean_norm);
     const auto data_gain = plan.data_gain * composite_gain * data_calibration_gain;
     helper::Generator generator(helper_options, plan, f.epoch, true, key);
     long double measured_helper_norm = 0;
@@ -1140,7 +926,7 @@ int run(const Options& o) {
         if(o.key_file.empty())std::cout<<o.key_seed;else std::cout<<"null";
         std::cout << ",\"public_epoch_seconds\":" << f.epoch
             << ",\"format\":{\"inner_rate_hz\":" << f.inner_rate_hz << ",\"added_symbols\":" << f.added_symbols
-            << ",\"pattern_revision\":\"" << pattern_revision_name(f.pattern_revision)
+            << ",\"pattern_revision\":\"" << pattern_revision_name()
             << "\",\"added_amplitude_depth\":" << f.added_amplitude_depth
             << ",\"bit_seconds\":" << g.bit_seconds << ",\"tile_seconds\":" << g.tile_seconds
             << ",\"tile_count\":" << g.tile_count << ",\"burst_wait_tiles\":" << f.burst_wait_tiles
@@ -1157,7 +943,6 @@ int run(const Options& o) {
         return 0;
     }
 
-    const auto physical_cn0 = physics.physical_cn0;
     const auto cn0 = physics.data_cn0;
     StreamChannelConfig config;
     const double reference_data_mean_square = data_gain * data_gain * data_reference.mean_norm;
@@ -1169,9 +954,6 @@ int run(const Options& o) {
     if (o.diagnostic_iq_noise.enabled() && o.diagnostic_iq_noise.mode_name() == "watts-relative-to-strongest-signal" &&
         (strongest_reference_watts <= 0 || strongest_reference_mean_square <= 0))
         throw std::invalid_argument("relative diagnostic-IQ noise watts requires at least one active, power-referenced DATA or Helper signal");
-    if (o.diagnostic_iq_noise.mode_name() == "watts-relative-to-strongest-signal" &&
-        o.helper && o.helper_components != "full")
-        throw std::invalid_argument("relative diagnostic-IQ noise watts requires the complete production Helper waveform reference");
     config.diagnostic_iq_noise = o.diagnostic_iq_noise.resolved(1., strongest_reference_mean_square,
                                                           strongest_reference_watts);
     auto& effects = config.effects;
@@ -1211,7 +993,6 @@ int run(const Options& o) {
     effects.spread_doppler_hz = physics.doppler_hz;
     effects.perturbation_slow_depth = physics.slow_depth;
     effects.perturbation_fast_depth = physics.fast_depth;
-    config.selective_model.model = SelectiveModel::DispersiveDft;
     config.selective_model.correlation_spacing_hz = g.carrier_spacing_hz;
     config.selective_model.center_hz = 0;
     if (o.selective_modulation_rate_hz && o.control == "selected")
@@ -1229,24 +1010,12 @@ int run(const Options& o) {
     // arrival/clock realization from choosing the exported file length.
     const auto tx_min = 1 - base_half_ppm * 1e-6;
     const auto rx_max = 1 + base_half_ppm * 1e-6;
-    const auto pair_denominator = 1 - base_oscillator.clock_error_ppm * .5e-6;
-    const auto deterministic_cfo_bound_hz = (physical.rf_hz * physics.rf_pair_ppm +
-        data_if_hz * base_oscillator.clock_error_ppm) * 1e-6 / pair_denominator;
-    const auto sample_clock_pair_ppm = base_oscillator.clock_error_ppm / pair_denominator;
     const auto tail_bound_seconds = selected_delay_ms * .001 + physics.delay_excursion_seconds +
         2 / (3 * g.carrier_spacing_hz) + 32. / sample_rate;
     config.minimum_capture_samples = static_cast<std::uint64_t>(std::ceil(sample_rate * rx_max *
         (physical.capture_lead + static_cast<double>(helper_end) / tx_min + physical.arrival_high +
          physical.capture_trail + tail_bound_seconds))) +
         static_cast<std::uint64_t>(std::ceil(sample_rate * o.receiver_tail_seconds));
-    const auto template_tail = static_cast<std::uint64_t>(std::ceil(sample_rate * tail_bound_seconds));
-    const auto template_samples = g.source_samples + template_tail;
-    const auto export_bytes = static_cast<long double>(config.minimum_capture_samples) * 17 +
-        (o.templates ? static_cast<long double>(template_samples) * 26 * 16 * o.whole_bit_count : 0);
-    if (!o.stream_server && export_bytes > maximum_export_bytes) throw std::runtime_error("export exceeds the explicit 2 GiB fixture budget");
-
-    // The complete output bound is checked before allocating additional source
-    // workspaces for a multi-bit fixture that may be rejected for its span.
     std::vector<std::unique_ptr<PatternSource>> whole_sources;
     for (const auto& slot : whole_slots) {
         auto source_format = f;
@@ -1256,9 +1025,7 @@ int run(const Options& o) {
             static_cast<std::uint8_t>(o.bit ^ (slot.index & 1))));
     }
 
-    long double source_data_energy = 0, source_helper_energy = 0, source_composite_energy = 0;
-    std::vector<long double> whole_data_energy(whole_slots.size()), whole_lead_helper_energy(whole_slots.size());
-    long double whole_lead_data_energy = 0, whole_quiet_helper_energy = 0;
+    long double source_data_energy = 0, source_helper_energy = 0;
     std::uint64_t source_rows = 0;
     EmittedSource emitted;
     emitted.format = f;
@@ -1272,11 +1039,8 @@ int run(const Options& o) {
     emitted.working_bytes = data_source.working_bytes() + sizeof(generator);
     for (const auto& source : whole_sources) emitted.working_bytes += source->working_bytes();
     std::size_t whole_slot_index = 0;
-    SourceClockFollower source_clock;
     emitted.sample_at = [&](std::uint64_t n) {
         const auto seconds = static_cast<long double>(n) / sample_rate;
-        const auto data_sample = o.clock_follow_bounded ?
-            static_cast<long double>(n) + source_clock.sample(seconds).offset_seconds * sample_rate : static_cast<long double>(n);
         Complex raw_data;
         long double active_helper_begin = 0, active_helper_end = helper_end;
         bool helper_active = o.helper;
@@ -1292,45 +1056,23 @@ int run(const Options& o) {
             active_helper_end = burst_plan->relative_seconds(calendar_origin, slot.helper_end);
             helper_active = o.helper && seconds >= active_helper_begin && seconds < active_helper_end;
         } else if (o.data) {
-            if (!o.clock_follow_bounded && n >= data_offset && n - data_offset < g.source_samples)
+            if (n >= data_offset && n - data_offset < g.source_samples)
                 raw_data = data_source.sample_at(static_cast<long double>(n - data_offset));
-            else if (o.clock_follow_bounded && data_sample >= data_offset && data_sample - data_offset < g.source_samples)
-                raw_data = data_source.sample_at(data_sample - data_offset);
         }
         const auto up = rotation(data_if_hz, seconds);
         const auto data = raw_data * data_gain;
-        const auto helper_input = o.power_reference == "legacy-window" ? raw_data : raw_data * data_calibration_gain;
+        const auto helper_input = raw_data * data_calibration_gain;
         auto audio = helper_active ?
             generator.mix_analytic(helper_input * up, seconds, sample_rate, active_helper_end, active_helper_begin) * composite_gain : data * up;
         auto helper_component = helper_active ? audio - data * up : Complex{};
-        if (helper_active && o.helper_components != "full") {
-            const auto pilots = public_helper_pilots(plan, f.epoch, seconds, active_helper_begin, active_helper_end);
-            const auto high = pilots[0] * composite_gain, low = pilots[1] * composite_gain;
-            if (o.helper_components == "pilots") helper_component = high + low;
-            else if (o.helper_components == "auxiliary") helper_component -= high + low;
-            else if (o.helper_components == "high") helper_component = high;
-            else helper_component = low;
-            audio = data * up + helper_component;
-        }
         const auto value = audio * std::conj(up);
-        if (o.whole_bit_calendar) {
-            whole_data_energy[whole_slot_index] += std::norm(data);
-            const auto& slot = whole_slots[whole_slot_index];
-            if (n >= burst_plan->distance(calendar_origin, slot.helper_begin) &&
-                n < burst_plan->distance(calendar_origin, slot.support_begin)) {
-                whole_lead_data_energy += std::norm(data);
-                whole_lead_helper_energy[whole_slot_index] += std::norm(helper_component);
-            }
-            if (!helper_active) whole_quiet_helper_energy += std::norm(helper_component);
-        }
         source_data_energy += std::norm(data);
         source_helper_energy += std::norm(helper_component);
-        source_composite_energy += std::norm(value);
         ++source_rows;
         return value;
     };
     std::unique_ptr<StreamingChannel> channel;
-    if (!o.stream_server || o.stream_kind == "channel")
+    if (o.stream_kind == "channel")
         channel = std::make_unique<StreamingChannel>(emitted, config);
     if (channel && channel->total_samples() != config.minimum_capture_samples)
         throw std::runtime_error("public observation bound did not cover the complete channel tail");
@@ -1370,13 +1112,9 @@ int run(const Options& o) {
             << ",\"template_data_gain\":" << data_gain << ",\"data_if_hz\":" << data_if_hz
             << ",\"epoch\":" << candidate_format.epoch
             << ",\"symbol_ordinal\":" << candidate_format.symbol_ordinal
-            << ",\"pattern_revision\":\"" << pattern_revision_name(f.pattern_revision)
+            << ",\"pattern_revision\":\"" << pattern_revision_name()
             << "\",\"added_amplitude_depth\":" << f.added_amplitude_depth
             << ",\"helper_enabled\":" << boolean(o.helper)
-            << ",\"clock_follow_bounded\":" << boolean(o.clock_follow_bounded)
-            << ",\"clock_follow_limit_seconds\":" << (o.clock_follow_bounded ? 2 : 0)
-            << ",\"clock_follow_endpoint_padding_seconds\":" << (o.clock_follow_bounded ? 2 : 0)
-            << ",\"clock_follow_basis\":\"nominal affine; remote corrections are not supplied to receiver\""
             << ",\"conditional_gaussian_null_supported\":"
             << boolean(o.stream_kind == "channel" && !o.helper && !o.diagnostic_iq_noise.enabled())
             << ",\"helper_high_hz\":" << plan.frequency_hz
@@ -1447,19 +1185,6 @@ int run(const Options& o) {
                 write_complex(std::cout, std::span(samples).first(count));
                 std::cout.write(reinterpret_cast<const char*>(valid.data()), static_cast<std::streamsize>(count));
                 std::cout.flush();
-            } else if (name == "clock") {
-                std::string target_text;
-                if (!(command >> target_text)) throw std::invalid_argument("clock requires absolute TARGET_SECONDS relative to stream origin");
-                no_extra(command);
-                const auto target = real(target_text, "clock target");
-                const bool accepted = o.clock_follow_bounded && std::abs(target) <= 2;
-                if (accepted) source_clock.update(static_cast<long double>(cursor) / sample_rate, target);
-                const auto state = source_clock.sample(static_cast<long double>(cursor) / sample_rate);
-                std::cout << "{\"accepted\":" << boolean(accepted)
-                    << ",\"target_seconds\":" << target << ",\"first_unrendered_sample\":" << cursor
-                    << ",\"offset_seconds\":" << static_cast<double>(state.offset_seconds)
-                    << ",\"rate_scale\":" << static_cast<double>(state.rate_scale)
-                    << ",\"scope\":\"bounded DATA coordinate only; fixed epoch and uniform audio-center NCO\"}\n" << std::flush;
             } else if (name == "basis" || name == "basis-map") {
                 const bool mapped = name == "basis-map";
                 std::string first_text, count_text, columns_text, center_text;
@@ -1561,314 +1286,9 @@ int run(const Options& o) {
             } else throw std::invalid_argument("unknown stream command");
         }
     }
-    if (!std::filesystem::create_directory(o.output))
-        throw std::runtime_error("output must be a fresh directory; existing outputs are never overwritten");
-    auto observation = output_file(o.output / "observation.c128", true);
-    auto validity_file = output_file(o.output / "validity.u8", true);
-    std::vector<Complex> buffer(config.maximum_chunk_samples);
-    std::vector<std::uint8_t> validity(buffer.size());
-    std::uint64_t written = 0;
-    while (const auto count = channel->read(buffer, validity)) {
-        write_complex(observation, std::span(buffer).first(count));
-        validity_file.write(reinterpret_cast<const char*>(validity.data()), static_cast<std::streamsize>(count));
-        written += count;
-    }
-    observation.close(); validity_file.close();
-    if (written != channel->total_samples() || source_rows != composite_samples)
-        throw std::runtime_error("incomplete composite/capture export");
-
-    if (o.templates) {
-        auto templates = output_file(o.output / "templates.c128", true);
-        // Keep [slot, epoch, bit, sample] file layout. Public geometry is shared
-        // within bounded source groups; extreme-rate private caches never cause
-        // the formerly single-source workspace to be multiplied unconditionally.
-        const auto bank_rows = template_bank_rows(g.source_workspace_bytes);
-        std::vector<Complex> bank_buffer(bank_rows * buffer.size());
-        for (unsigned whole_bit = 0; whole_bit < o.whole_bit_count; ++whole_bit) {
-            for (std::size_t bank_first = 0; bank_first < 26; bank_first += bank_rows) {
-                const auto rows = std::min<std::size_t>(bank_rows, 26 - bank_first);
-                std::vector<std::unique_ptr<PatternSource>> candidates;
-                std::vector<PatternSource*> bank_sources;
-                candidates.reserve(rows); bank_sources.reserve(rows);
-                for (std::size_t row = bank_first; row < bank_first + rows; ++row) {
-                    auto candidate_format = f;
-                    const auto epoch_offset = static_cast<int>(row / 2) - 6;
-                    candidate_format.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(
-                        o.whole_bit_calendar ? whole_slots[whole_bit].pattern_begin.epoch : f.epoch) + epoch_offset);
-                    if (o.whole_bit_calendar) candidate_format.symbol_ordinal = f.symbol_ordinal + whole_bit;
-                    candidates.push_back(std::make_unique<PatternSource>(candidate_format, key, static_cast<std::uint8_t>(row % 2)));
-                    bank_sources.push_back(candidates.back().get());
-                }
-                for (std::uint64_t first = 0; first < template_samples;) {
-                    const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), template_samples - first));
-                    const auto output = std::span(bank_buffer).first(rows * count);
-                    PatternSource::render_bank(bank_sources, static_cast<long double>(first), 1, count, output);
-                    for (auto& value : output) value *= data_gain;
-                    for (std::size_t row = 0; row < rows; ++row) {
-                        const auto offset = ((26 * static_cast<std::uint64_t>(whole_bit) + bank_first + row) * template_samples + first) * 16;
-                        templates.seekp(static_cast<std::streamoff>(offset), std::ios::beg);
-                        write_complex(templates, output.subspan(row * count, count));
-                    }
-                    first += count;
-                }
-            }
-        }
-        templates.close();
-    }
-
-    const auto& report = channel->report();
-    const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - wall_start).count();
-    const auto cpu = static_cast<double>(std::clock() - cpu_start) / CLOCKS_PER_SEC;
-    auto truth = output_file(o.output / "evaluator-truth.json");
-    truth << "{\"schema\":\"triad-helper-evaluator-truth-v1\",\"receiver_input\":false,\"source_bit\":" << o.bit;
-    truth << ",\"helper_component_control\":"; json_string(truth, o.helper_components);
-    if (o.whole_bit_calendar) {
-        truth << ",\"source_bits\":[";
-        for (unsigned i = 0; i < o.whole_bit_count; ++i) { if (i) truth << ','; truth << (o.bit ^ (i & 1)); }
-        truth << "],\"whole_bit_source_checks\":{\"data_energy_by_slot\":[";
-        for (std::size_t i = 0; i < whole_data_energy.size(); ++i) { if (i) truth << ','; truth << whole_data_energy[i]; }
-        truth << "],\"helper_lead_energy_by_slot\":[";
-        for (std::size_t i = 0; i < whole_lead_helper_energy.size(); ++i) { if (i) truth << ','; truth << whole_lead_helper_energy[i]; }
-        truth << "],\"data_energy_inside_helper_leads\":" << whole_lead_data_energy
-            << ",\"helper_energy_inside_source_quiet\":" << whole_quiet_helper_energy
-            << ",\"scope\":\"sampled emission before propagation; receiver still contains continuous channel echoes\"}";
-    }
-    truth << ",\"source_epoch_offset_seconds\":0,\"arrival_seconds\":" << effects.timing_offset_seconds
-        << ",\"arrival_override\":" << boolean(o.arrival.has_value()) << ",\"unmodified_arrival_draw_seconds\":" << arrival_draw
-        << ",\"tx\":"; endpoint_json(truth, effects.tx);
-    truth << ",\"rx\":"; endpoint_json(truth, effects.rx);
-    truth << ",\"random_seed_roots\":{\"fixture\":" << o.seed << ",\"channel\":" << effects.seed
-        << ",\"static_endpoint\":" << static_seed << ",\"arrival\":" << arrival_seed
-        << ",\"oscillator\":" << *config.oscillator_seed << ",\"noise\":" << *config.noise_seed
-        << ",\"frontend\":" << *config.frontend_seed << ",\"path\":" << *config.path_seed
-        << "},\"source_energy\":{\"rows\":" << source_rows
-        << ",\"data_energy_samples\":" << source_data_energy << ",\"helper_energy_samples\":" << source_helper_energy
-        << ",\"composite_energy_samples\":" << source_composite_energy
-        << ",\"data_full_support_mean_norm\":" << source_data_energy / (g.source_samples * o.whole_bit_count)
-        << ",\"data_calendar_mean_norm\":" << source_data_energy / (g.bit_seconds * sample_rate * o.whole_bit_count)
-        << ",\"data_active_mean_norm\":" << source_data_energy / (data_reference.active_seconds * sample_rate * o.whole_bit_count)
-        << ",\"scope\":\"emitted components before shared propagation; one fixed public reference gain; no per-bit normalization\"}"
-        << ",\"channel_report\":{\"samples\":" << report.samples << ",\"source_samples\":" << report.source_samples
-        << ",\"tail_samples\":" << report.tail_samples << ",\"natural_complete_samples\":" << report.natural_complete_samples
-        << ",\"observation_padding_samples\":" << report.observation_padding_samples
-        << ",\"erased_samples\":" << report.erased_samples << ",\"out_of_passband_samples\":" << report.out_of_passband_samples
-        << ",\"signal_energy_samples\":" << report.signal_energy << ",\"observed_energy_samples\":" << report.observed_energy
-        << ",\"diagnostic_iq_noise\":{\"enabled\":" << boolean(report.diagnostic_iq_noise_enabled)
-        << ",\"sample_rate_hz\":" << report.diagnostic_iq_noise_sample_rate_hz
-        << ",\"diagnostic_iq_nyquist_hz\":[" << -report.diagnostic_iq_noise_sample_rate_hz/2 << ',' << report.diagnostic_iq_noise_sample_rate_hz/2 << ']'
-        << ",\"expected_variance_per_complex_sample\":" << report.diagnostic_iq_noise_expected_variance
-        << ",\"measured_variance_per_complex_sample\":" << (report.diagnostic_iq_noise_source_samples ?
-            report.diagnostic_iq_noise_source_energy / static_cast<double>(report.diagnostic_iq_noise_source_samples) : 0)
-        << ",\"samples\":" << report.diagnostic_iq_noise_source_samples
-        << ",\"stage\":\"narrow simulated complex-IQ source, before TX oscillator and propagation; source calendar only\",\"spectrum_scope\":\"sampled complex Nyquist only; propagation/front-end filters may color it; this is not full-rate DAC/audio noise and does not establish its floor; reconstruction images are not modeled\"}"
-        << ",\"working_bytes\":" << report.working_bytes << ",\"selective_perturbation\":";
-    selective_json(truth, report.selective_perturbation);
-    truth << "}}\n";
-    truth.close();
-
-    auto manifest = output_file(o.output / "manifest.json");
-    manifest << "{\"schema\":";
-    json_string(manifest, o.whole_bit_calendar ? "triad-helper-whole-bit-public-v1" : "triad-helper-public-v1");
-    manifest << ",\"case\":"; json_string(manifest, o.scenario);
-    manifest << ",\"control\":"; json_string(manifest, o.control);
-    manifest << ",\"diagnostic_iq_noise_request\":{\"mode\":";
-    json_string(manifest, o.diagnostic_iq_noise.mode_name());
-    manifest << ",\"value\":" << o.diagnostic_iq_noise.value()
-        << ",\"full_scale\":1"
-        << ",\"resolved_variance_per_complex_iq_sample\":"
-        << background_noise::resolve(config.diagnostic_iq_noise).variance
-        << ",\"reference_mean_square\":" << config.diagnostic_iq_noise.reference_mean_square
-        << ",\"reference_watts\":" << config.diagnostic_iq_noise.reference_watts
-        << ",\"reference_policy\":\"strongest of effective Helper and total DATA transmit watts; fixed whole-transmission RMS reference\"}";
-    manifest << ",\"sample_rate_hz\":" << sample_rate
-        << ",\"observation\":{\"file\":\"observation.c128\",\"dtype\":\"<c16\",\"shape\":[" << written
-        << "],\"frame\":\"zero-centered DATA; entire audio composite derotated by nominal DATA IF before TX oscillator\"}"
-        << ",\"validity\":{\"file\":\"validity.u8\",\"dtype\":\"u1\",\"shape\":[" << written << "]}"
-        << ",\"evaluator_truth_file\":\"evaluator-truth.json\",\"evaluator_truth_is_receiver_input\":false"
-        << ",\"data_enabled\":" << boolean(o.data) << ",\"helper_enabled\":" << boolean(o.helper)
-        << ",\"helper_component_control\":";
-    json_string(manifest, o.helper_components);
-    manifest << ",\"helper_component_control_scope\":\"full is the unchanged production waveform; partial modes are source-only metrology/fault diagnostics, with full production power calibration and all channel effects retained\""
-        << ",\"public_epoch_seconds\":" << f.epoch << ",\"key_source\":\"" << (o.key_file.empty()?"explicit-test-fixture-seed":"keyfile") << "\",\"key_seed\":";
-    if(o.key_file.empty())manifest<<o.key_seed;else manifest<<"null";
-    manifest << ",\"encrypted_source\":true,\"encrypted_helper_metadata\":true,\"helper_callsign\":\"TRIAD\""
-        << ",\"format\":{\"inner_rate_hz\":" << f.inner_rate_hz << ",\"added_symbols\":" << f.added_symbols
-        << ",\"symbol_ordinal\":" << f.symbol_ordinal
-        << ",\"pattern_revision\":\"" << pattern_revision_name(f.pattern_revision)
-        << "\",\"added_amplitude_depth\":" << f.added_amplitude_depth
-        << ",\"added_interleave\":true,\"requested_bit_seconds\":" << f.bit_seconds
-        << ",\"bit_seconds\":" << g.bit_seconds << ",\"fine_chip_rate_hz\":" << g.fine_chip_rate_hz
-        << ",\"carrier_spacing_hz\":" << g.carrier_spacing_hz << ",\"occupied_bandwidth_hz\":" << g.occupied_bandwidth_hz
-        << ",\"inner_coefficients\":" << g.inner_coefficients << ",\"fine_coefficients\":" << g.fine_coefficients
-        << ",\"tile_seconds\":" << g.tile_seconds << ",\"tile_count\":" << g.tile_count
-        << ",\"fhss_envelope_only\":" << boolean(f.fhss) << ",\"fhss_center_aligned\":" << boolean(f.fhss_center_aligned)
-        << ",\"pulse_shape\":";
-    json_string(manifest, triad::v3::pulse_shape_name(f.pulse_shape));
-    manifest
-        << ",\"physical_rf_retuning\":false,\"dwell_seconds\":" << f.dwell_seconds
-        << ",\"quiet_seconds\":" << f.quiet_seconds << ",\"ramp_seconds\":" << f.ramp_seconds
-        << ",\"margin_seconds\":" << f.margin_seconds << '}'
-        << ",\"calendar\":{\"data_calendar_start_seconds\":" <<
-            (o.whole_bit_calendar ? burst_plan->relative_seconds(calendar_origin, whole_slots.front().pattern_begin) : 38.L)
-        << ",\"data_sample_offset\":" << data_offset
-        << ",\"data_calendar_origin_sample\":" << g.calendar_origin_sample << ",\"data_source_samples\":" << g.source_samples
-        << ",\"composite_source_samples\":" << composite_samples << ",\"composite_calendar_origin_sample\":0"
-        << ",\"helper_start_seconds\":" <<
-            (o.whole_bit_calendar ? burst_plan->relative_seconds(calendar_origin, whole_slots.front().helper_begin) : 0.L)
-        << ",\"helper_end_seconds\":" << helper_end
-        << ",\"capture_lead_seconds\":" << physical.capture_lead << ",\"capture_trail_seconds\":" << physical.capture_trail
-        << ",\"arrival_prior_seconds\":[" << physical.arrival_low << ',' << physical.arrival_high << ']'
-        << ",\"capture_samples\":" << written << ",\"fixed_capture_tail_bound_seconds\":" << tail_bound_seconds
-        << ",\"receiver_tail_seconds\":" << o.receiver_tail_seconds
-        << ",\"sample_time_definition\":\"nominal capture time n/Fs-capture_lead_seconds; unknown physical RX clock retained in channel\"}";
-    if (o.whole_bit_calendar) {
-        manifest << ",\"whole_bit_calendar\":{\"count\":" << o.whole_bit_count
-            << ",\"wait_count\":" << o.whole_bit_wait_count << ",\"support_grid_seconds\":30"
-            << ",\"minimum_support_separation_seconds\":" << (o.helper ? 76 : 60)
-            << ",\"fresh_helper_lead_seconds\":" << (o.helper ? 38 : 0)
-            << ",\"key_addressing\":\"existing v3 integer-second epoch=floor(pattern UTC), symbol_ordinal=base ordinal plus slot index; fractional phase preserved in placement, not added to the unchanged key format\""
-            << ",\"emission\":\"complete independent keyed bit sources; alternating evaluator bits; one absolute-phase Helper generator and one continuous channel; only source is gated\",\"slots\":[";
-        for (std::size_t i = 0; i < whole_slots.size(); ++i) {
-            if (i) manifest << ',';
-            const auto& slot = whole_slots[i];
-            manifest << "{\"symbol_ordinal\":" << f.symbol_ordinal + slot.index
-                << ",\"key_epoch_seconds\":" << slot.pattern_begin.epoch
-                << ",\"pattern_phase_samples\":" << slot.pattern_begin.phase;
-            const std::array<std::pair<const char*, HelperBurstCoordinate>, 6> coordinates{{
-                {"helper_begin", slot.helper_begin}, {"support_begin", slot.support_begin},
-                {"pattern_begin", slot.pattern_begin}, {"pattern_end", slot.pattern_end},
-                {"support_end", slot.support_end}, {"helper_end", slot.helper_end}}};
-            for (const auto& [name, coordinate] : coordinates) {
-                manifest << ','; json_string(manifest, std::string(name) + "_sample");
-                manifest << ':' << burst_plan->distance(calendar_origin, coordinate);
-            }
-            manifest << '}';
-        }
-        manifest << "]}";
-    }
-    manifest << ",\"helper_plan\":{\"high_hz\":" << plan.frequency_hz << ",\"low_hz\":" << plan.low_frequency_hz
-        << ",\"auxiliary_hz\":" << plan.auxiliary_frequency_hz << ",\"data_gain\":" << plan.data_gain
-        << ",\"helper_gain\":" << plan.helper_gain << ",\"effective_power_w\":" << plan.effective_power_w
-        << ",\"pilot_dwell_gating\":" << boolean(plan.pilot_dwell_gating)
-        << ",\"placement_waveform_bandwidth_hz\":" << placement.waveform_bandwidth_hz
-        << ",\"placement_gate_bandwidth_hz\":" << placement.gate_bandwidth_hz << '}'
-        << ",\"shaping_plan\":{\"enabled\":" << boolean(o.shaping == "auto")
-        << ",\"selected_pulse_shape\":";
-    json_string(manifest, triad::v3::pulse_shape_name(f.pulse_shape));
-    manifest << ",\"selected_ramp_seconds\":" << f.ramp_seconds << ",\"certificate_method\":";
-    json_string(manifest, selected_shaping.spectrum.method);
-    manifest << ",\"certificate_limitation\":";
-    json_string(manifest, selected_shaping.spectrum.limitation);
-    manifest << ",\"placement_bandwidth_hz\":" << selected_shaping.spectrum.placement_bandwidth_hz
-        << ",\"measured_bandwidth_hz\":" << selected_shaping.spectrum.measured_bandwidth_hz
-        << ",\"measured_tail_fraction\":" << selected_shaping.spectrum.measured_tail_fraction
-        << ",\"requested_tail_fraction\":" << selected_shaping.spectrum.requested_tail_fraction
-        << ",\"coarse_width_hz\":" << selected_shaping.spectrum.coarse_width_hz
-        << ",\"refined_width_hz\":" << selected_shaping.spectrum.refined_width_hz
-        << ",\"phase_refinement_width_hz\":" << selected_shaping.spectrum.phase_refinement_width_hz
-        << ",\"phase_refinement_error_hz\":" << selected_shaping.spectrum.phase_refinement_error_hz
-        << ",\"sampling_refinement_error_hz\":" << selected_shaping.spectrum.sampling_refinement_error_hz
-        << ",\"frequency_bin_hz\":" << selected_shaping.spectrum.frequency_bin_hz
-        << ",\"far_outside_energy_fraction\":" << selected_shaping.spectrum.far_outside_energy_fraction
-        << ",\"normalized_pulse_energy\":" << selected_shaping.spectrum.normalized_pulse_energy
-        << ",\"phase_samples\":" << selected_shaping.spectrum.phase_samples
-        << ",\"fft_size\":" << selected_shaping.spectrum.fft_size
-        << ",\"kernel_ffts\":" << selected_shaping.spectrum.kernel_ffts
-        << ",\"total_kernel_ffts\":" << selected_shaping.spectrum.total_kernel_ffts
-        << ",\"phase_refinement_attempts\":" << selected_shaping.spectrum.phase_refinement_attempts
-        << ",\"converged\":" << boolean(selected_shaping.spectrum.converged)
-        << ",\"fallback\":" << boolean(selected_shaping.fallback) << ",\"fallback_reason\":";
-    json_string(manifest, selected_shaping.reason);
-    manifest << ",\"candidates_evaluated\":" << selected_shaping.candidate_count
-        << ",\"total_planner_kernel_ffts\":" << selected_shaping.total_kernel_ffts
-        << ",\"capture_placement_remains_conservative\":true}"
-        << ",\"power\":{\"data_w\":" << physical.data_w << ",\"helper_w\":" << physical.helper_w
-        << ",\"composite_w\":" << helper_options.power_w << ",\"path_loss_db\":" << physical.loss_db
-        << ",\"requested_helper_w\":" << physical.helper_w << ",\"effective_helper_w\":" << physics.effective_helper_w
-        << ",\"effective_composite_w\":" << physical.data_w + physics.effective_helper_w
-        << ",\"helper_power_limited\":" << boolean(physics.helper_power_limited)
-        << ",\"helper_ratio_limit_db\":" << helper_options.ratio_limit_db
-        << ",\"effective_helper_cn0_db_hz\":" << cn0 + 10 * std::log10(physics.effective_helper_w / physical.data_w)
-        << ",\"noise_n0_dbm_hz\":" << thermal_n0_dbm_hz << ",\"physical_data_cn0_db_hz\":" << physical_cn0
-        << ",\"data_cn0_db_hz\":" << cn0 << ",\"cn0_override\":" << boolean(o.cn0.has_value())
-        << ",\"planning_target_db_metadata_only\":" << physical.planning_target_db
-        << ",\"complex_noise_variance\":" << config.complex_noise_variance
-        << ",\"reference_bit\":0,\"reference_epoch_seconds\":" << f.epoch
-        << ",\"reference_window_seconds\":[39,41],\"reference_accepted_nodes\":" << reference_nodes
-        << ",\"reference_data_mean_norm\":" << reference_mean_norm
-        << ",\"reference_data_mean_real_power\":" << *reference.data_mean_power
-        << ",\"post_plan_composite_gain\":" << composite_gain << ',';
-    data_power_json(manifest, o, data_reference, data_calibration_gain, data_gain);
-    manifest
-        << ",\"reference_normalized_data_mean_norm\":1,\"reference_measured_helper_to_data_ratio\":" << reference_helper_ratio
-        << ",\"helper_preview_normalized_data_mean_norm\":" << data_gain * data_gain * reference_mean_norm
-        << ",\"nominal_helper_to_data_ratio\":" << physics.effective_helper_w / physical.data_w
-        << ",\"helper_component_reference_policy\":\"full production Helper power reference retained; diagnostic component removal does not redistribute power; actual emitted component energy is reported separately\""
-        << ",\"reference_scope\":\"39-41s preview belongs to production Helper planning only; measured Helper norm is relative to nominal active DATA norm1; DATA normalization follows data_power_reference_policy\"}"
-        << ",\"channel\":{\"rf_hz\":" << physical.rf_hz << ",\"nominal_conversion_if_hz\":" << data_if_hz
-        << ",\"base_oscillator\":"; json_string(manifest, base_oscillator.id);
-    manifest << ",\"shift_oscillator\":"; json_string(manifest, physics.shift_id);
-    manifest << ",\"oscillator_effects\":" << boolean(o.oscillator_effects)
-        << ",\"requested_base_relative_pair_ppm_bound\":" << physics.requested_base_pair_ppm
-        << ",\"requested_rf_relative_pair_ppm_bound\":" << physics.requested_rf_pair_ppm;
-    // The shared-clock request is a topology, not a separate oscillator preset.
-    // Keep the public request ID instead of silently substituting the base ID.
-    manifest << ",\"shift_reference\":"; json_string(manifest, physics.shift_id);
-    manifest << ",\"shift_model_preset\":"; json_string(manifest, shift_oscillator.id);
-    manifest << ",\"shift_active\":" << boolean(physics.shift_active)
-        << ",\"shared_shift_clock\":" << boolean(physics.shared_shift_clock)
-        << ",\"independent_base_and_shift\":" << boolean(physics.shift_active && !physics.shared_shift_clock)
-        << ",\"base_relative_pair_ppm_bound\":" << base_oscillator.clock_error_ppm
-        << ",\"rf_relative_pair_ppm_bound\":" << physics.rf_pair_ppm
-        << ",\"relative_pair_ppm_bound\":" << base_oscillator.clock_error_ppm
-        << ",\"endpoint_uniform_half_bound_ppm\":" << base_half_ppm
-        << ",\"rf_endpoint_uniform_half_bound_ppm\":" << shift_half_ppm
-        << ",\"sample_clock_pair_ppm\":" << sample_clock_pair_ppm
-        << ",\"nominal_shift_ppm_bound\":" << physics.rf_pair_ppm
-        << ",\"nominal_shift_hz_bound\":" << physical.rf_hz * physics.rf_pair_ppm * 1e-6
-        << ",\"relative_phase_diffusion_rad_sqrt_s\":" << relative_phase
-        << ",\"phase_convention\":\"triad_long: independent active RF uses hypot(base,shift); zero RF or shared reference uses base; relative diffusion divided by sqrt(2) per endpoint\""
-        << ",\"deterministic_cfo_bound_hz\":" << deterministic_cfo_bound_hz
-        << ",\"spread_preset\":"; json_string(manifest, physical.spread.id);
-    manifest << ",\"spread_margin\":" << physical.margin << ",\"spread_delay_ms\":" << effects.spread_delay_ms
-        << ",\"spread_doppler_hz\":" << effects.spread_doppler_hz
-        << ",\"selective_slow_depth\":" << effects.perturbation_slow_depth << ",\"selective_fast_depth\":" << effects.perturbation_fast_depth
-        << ",\"selective_perturbation\":"; json_string(manifest, physics.requested_modulation_id);
-    manifest << ",\"selective_modulation_rate_hz\":" << physics.modulation_rate_hz
-        << ",\"selective_enabled\":" << boolean(physics.modulation_rate_hz > 0 && (physics.slow_depth > 0 || physics.fast_depth > 0))
-        << ',';
-    evolution_json(manifest, o, physics, physical.rf_hz + data_if_hz);
-    manifest << ",\"selective_model\":\"dispersive-dft-v1\",\"selective_scale_hz\":" << g.carrier_spacing_hz
-        << ",\"selective_center_hz\":0,\"source_frequency_bounds_hz\":[" << emitted.minimum_frequency_hz << ',' << emitted.maximum_frequency_hz
-        << "],\"source_spectral_skirt_allowance_hz\":" << spectral_skirt_allowance_hz
-        << ",\"source_capture_design_bandwidth_hz\":" << complete_data_bandwidth
-        << ",\"bandwidth_scope\":\"Source/capture preflight retains nominal design width plus the complete legacy 2/ramp allowance and declared 200-Hz skirt; only the Helper placement band uses the key-independent shaping certificate. Finite pulse, gated transmission and stochastic channel spectra are not compact support.\""
-        << ",\"data_if_default_reason\":\"Legacy fixtures preserve HF1725Hz and EME4000Hz defaults. Auto shaping starts at standardized1725Hz; explicit DATA IF takes precedence.\""
-        << ",\"composition\":\"production Helper Generator and DATA summed before shared TX oscillator, spread, dispersive selective stage, RX oscillator and noise; no post-channel hop gate\"}"
-        << ",\"physics\":";
-    physics_json(manifest, o, physical, physics, data_if_hz);
-    manifest << ",\"templates\":{\"enabled\":" << boolean(o.templates) << ",\"file\":";
-    if (o.templates) manifest << "\"templates.c128\""; else manifest << "null";
-    manifest << ",\"dtype\":\"<c16\",\"shape\":[";
-    if (o.whole_bit_calendar) manifest << o.whole_bit_count << ',';
-    manifest << "13,2," << template_samples
-        << "],\"epoch_offsets_seconds\":[-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6],\"bits\":[0,1]"
-        << ",\"source_support_samples\":" << g.source_samples << ",\"zero_tail_samples\":" << template_tail
-        << ",\"frame\":";
-    json_string(manifest, o.whole_bit_calendar ?
-        "zero-centered per-slot DATA source; first dimension selects whole_bit_calendar.slots; insert at each support_begin_sample" :
-        "zero-centered DATA source; insert at calendar.data_sample_offset in composite source");
-    manifest << ",\"scope\":\"public encrypted source alternatives only; fixed shared calibration; no Helper, arrival or channel realization\"}"
-        << ",\"cost\":{\"wall_seconds\":" << elapsed << ",\"process_cpu_seconds\":" << cpu
-        << ",\"binary_export_bytes\":" << static_cast<std::uint64_t>(export_bytes)
-        << ",\"channel_working_bytes\":" << report.working_bytes
-        << ",\"source_reference_working_bytes\":" << reference_source.working_bytes()
-        << ",\"maximum_export_bytes\":" << maximum_export_bytes << "}}\n";
-    manifest.close();
-    std::cout << "Exported " << written << " samples to " << o.output.string()
-              << "; C/N0=" << std::setprecision(10) << cn0 << " dB-Hz; high pilot=" << plan.frequency_hz << " Hz\n";
-    return 0;
+    throw std::logic_error("native source requires a stream request");
 }
+
 } // namespace
 
 int main(int argc, char** argv) {

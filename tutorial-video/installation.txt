@@ -73,9 +73,7 @@ comes from the sending computer. The optical scan has no return data path from
 the receiving computer to the sender; the scanner's USB cable connects only
 to the receiving computer.
 
-ROBUST SIMULATION SHOWN IN THE VIDEO
-Select your key after launch:
-
-./datapump-gui --simulation --pattern auto-keystream --tx-dbm 3 --path-loss-db 150 --noise-dbm-hz -164 --oscillator gpsdo-xo --target-snr 6.326999095983183 --rate 3600 --carrier 1500 --dsp-workspace 50%
-
-The GPSDO selection is a simulation clock model; it does not synchronize hardware.
+ROBUST MODEM STATUS
+Robust controls remain visible in the GUI, but Robust operation is unavailable
+pending reconnection to the canonical native triad stack. This tutorial does
+not show the retired single-carrier Robust workflow.

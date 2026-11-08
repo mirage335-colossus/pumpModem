@@ -1,10 +1,10 @@
-.TH PUMP 1 "October 2026" "Data Pump 001_00" "User Commands"
+.TH PUMP 1 "November 2026" "Data Pump 001_00" "User Commands"
 .nh
 .ad l
 .nr HY 0
 .ds AD l
 .SH NAME
-pump \- transfer text and files over audio
+pump \- Data Pump command-line utilities
 .SH SYNOPSIS
 .B pump
 .I command
@@ -14,658 +14,138 @@ pump \- transfer text and files over audio
 .BR \-\-help " | " \-\-version
 .SH DESCRIPTION
 .B pump
-sends and receives text, files and exact bit strings through an audio device
-or a WAV file. It also simulates links, estimates airtime and produces QR images.
-The desktop interface is
-.BR datapump-gui (1).
-.PP
-Both ends must use matching modem, source compression, error correction and
-key settings. Bandwidth is not the payload bit rate. Use
-.B estimate
-before sending at a slow setting.
-.PP
-This page describes the regular modem. The independent Fast commands and their
-options are documented in
+provides keyfile, audio-device and QR utilities, plus the Fast modem
+subcommands. Fast modem behavior and options are documented in
 .BR pump-fast (1).
+.PP
+The former single-carrier Robust audio commands have been removed. Robust
+transmission and reception are unavailable in the GUI pending connection of the
+canonical native backend. The staged Python receiver components are not an
+end-to-end command-line service.
 .SH COMMANDS
 .TP
-.B tx
-Send text or a file. Requires
-.B \-\-output
-for a WAV file or
-.B \-\-device
-for live audio; choose one.
-.TP
-.B rx
-Decode a WAV selected by
-.BR \-\-input ,
-or record an audio device for
-.B \-\-seconds
-and decode the recording. Use
-.B \-\-save
-to write recovered source bytes.
-.TP
-.B listen
-Receive continuously from the default audio device, or the selected
-.BR \-\-device .
-Stop with Ctrl-C or set
-.BR \-\-seconds .
-With
-.B \-\-text
-or
-.BR \-\-input ,
-also transmit one message. A simulation preset selects a simulated channel.
-.TP
-.B simulate
-Transmit through a sampled channel and attempt blind reception. No audio device
-is used. Optionally save the simulated capture with
-.BR \-\-output .
-.TP
-.B estimate
-Print JSON containing encoded size, wire bits, airtime, modem settings and a
-relative low-probability-of-intercept model. Does not generate audio.
-Model estimates do not establish physical-link performance or secrecy.
-.TP
-.B analyze-link
-Print statistical link analysis as JSON. Requires
-.BR \-\-text ,
-.B \-\-input
-or
-.BR \-\-bits ,
-and either a simulation preset or both
-.B \-\-tx\-dbm
-and
-.BR \-\-attenuation\-db .
-Does not generate audio or run the receiver.
-.TP
-.B status-tx
-Send the exact 1\(en4096 binary digits given by
-.BR \-\-bits .
-Requires a WAV output or audio device. Leading zeros and partial bytes are
-significant; no header, padding, error correction or authentication is added.
-.TP
-.B status-rx
-Discover raw bits in a WAV, then compare them with
-.BR \-\-bits .
-Always prints JSON. The expected bits do not guide acquisition; a match is
-not authentication.
-.TP
 .B devices
-List audio device identifiers and descriptions, separated by tabs.
+List local audio device identifiers and descriptions, separated by tabs.
+Accepts no command-specific options.
 .TP
 .B keygen
-Create a symmetric keyfile at
-.BR \-\-output .
-The file contains a 128 MiB random header and an encrypted named key collection.
-It is created with owner-only access and must not already exist.
-Key generation collects fresh audio from the selected input as a supplemental
-entropy source. Use
-.BI \-\-device " id"
-to select an audio input; the default device is used if omitted. If the input
-is unavailable or unusable, generation uses operating-system randomness and
-prints a warning. Cancellation and operating-system random-source failures
-stop generation. Audio supplements separate operating-system randomness;
-sample variation does not prove entropy strength.
+Create a new owner-only symmetric keyfile. The file must not already exist.
+By default it contains one named entry, BDefaultR. Use
+.BR \-\-key-names
+for a comma-separated list of names. Key generation uses the selected audio
+input when available; an unavailable or unusable device can produce a warning
+if generation falls back to operating-system randomness.
 .TP
 .B keys
-List the names in
-.BR \-\-keyfile ,
-one per line.
+List named entries in the selected keyfile. Fast commands select one named key
+with
+.BR \-\-key\-name ;
+by default, they use the first entry in the file.
 .TP
 .B qr
-Encode UTF-8 input as a QR Level L image, up to 500 Unicode characters.
-Writes SVG by default, to standard output or
-.BR \-\-output .
-QR input is plaintext; key and audio options do not apply.
+Encode plaintext as an SVG or PBM QR image. Supply text with
+.BR \-\-text ,
+read a file with
+.BR \-\-input ,
+or read standard input when neither is specified. Input path
+.B -
+also selects standard input. Output goes to standard output unless
+.B \-\-output
+names a new file.
 .TP
-.BR fast-info ", " fast-tx ", " fast-rx ", " fast-listen
-Inspect, send or receive with the independent Fast modem. See
+.B fast-info
+Print Fast modem profile information as JSON. See
+.BR pump-fast (1).
+.TP
+.B fast-tx
+Transmit one Fast text or file source. See
+.BR pump-fast (1)
+for required destination and options.
+.TP
+.B fast-rx
+Receive a Fast WAV file. See
+.BR pump-fast (1).
+.TP
+.B fast-listen
+Receive a Fast live stream. See
 .BR pump-fast (1).
 .SH OPTIONS
-Options take the form
-.BI \-\-name " value"
+Options use
+.BR \-\-name=value
+or separate
+.BR \-\-name value
+forms. Duplicate options and unknown options are errors. Global
+.B \-\-help
+and
+.B \-\-version
+are available.
+.TP
+.BI \-\-output " path"
+For
+.BR keygen ,
+required destination keyfile. For
+.BR qr ,
+write the QR image to a new file instead of standard output. Existing files are
+not overwritten.
+.TP
+.BI \-\-key-names " names"
+For
+.BR keygen ,
+a comma-separated list of names. The default is
+.BR Default .
+Empty entries are rejected.
+.TP
+.BI \-\-device " id"
+For
+.BR keygen ,
+select the audio input device used for entropy collection. The default device
+is
+.BR default .
+.TP
+.BI \-\-pad " path"
+Use the optional pad associated with a keyfile for
+.B keygen
 or
-.BI \-\-name= value .
-Flags take no value. Duplicate and unknown options are errors.
-.SS Input and output
+.BR keys .
+.TP
+.BI \-\-keyfile " path"
+For
+.BR keys ,
+select the keyfile to list. This option is required.
 .TP
 .BI \-\-text " text"
-Text to send. Mutually exclusive with
+For
+.BR qr ,
+encode the provided plaintext. Choose either this option or
 .BR \-\-input .
 .TP
 .BI \-\-input " path"
-Source file for transmission, or WAV for reception. A single
-.B \-
-reads standard input. Transmit commands without
-.B \-\-text
-or
-.B \-\-input
-read standard input.
-.TP
-.BI \-\-kind " text|file|screenshot"
-Source kind. Defaults to text for
-.B \-\-text
-or standard input, and file for a named input path.
-.TP
-.BI \-\-filename " name"
-Display filename for an attachment; a basename, not a destination path.
-Defaults to the input basename.
-.TP
-.BI \-\-output " path"
-Create a WAV, keyfile or QR image. Existing files are never overwritten.
-.TP
-.BI \-\-save " path"
 For
-.B rx
-only: save exact decoded source bytes after physical completion.
-Fails if there is no complete decoded source or the path already exists.
-.TP
-.B \-\-json
-Print received content and diagnostics as JSON. See
-.B OUTPUT
-for completion and event handling.
-.TP
-.BI \-\-callsign " text"
-.TQ
-.BI \-\-grid " text"
-Set local callsign and grid metadata. These fields are not transmitted;
-include them in the text to send them.
-.TP
-.B \-\-repeatable
-Apply the local repeatable-text eligibility limit: two seconds of wire-bit
-airtime, with a one-byte minimum allowance. This flag is not transmitted
-and does not start a repeating transmit loop.
-.TP
-.BI \-\-bits " digits"
-Exact binary input for the status commands or
-.BR analyze-link .
-Only
-.B 0
-and
-.B 1
-are allowed; length is 1\(en4096.
+.BR qr ,
+read plaintext from a file. Use
+.B -
+to read standard input. Choose either this option or
+.BR \-\-text .
 .TP
 .BI \-\-format " svg|pbm"
-QR image format; default
-.BR svg .
-.SS Modem and reception
-.TP
-.BI \-\-bw " Hz"
-Nominal bandwidth, 0.001\(en30000000 Hz; default 1200.
-Decimal values and suffixes
-.BR Hz ,
-.BR k ,
-.B kHz
-and
-.B MHz
-are accepted. The usable audio-device passband still applies.
-.TP
-.BI \-\-target\-snr " dB-Hz"
-Transmit planning target C/N0; default 32. Selects automatic tuning.
-This is a configured target, not a measured signal-to-noise ratio.
-.TP
-.BI \-\-receive\-targets " list"
-Comma-separated receive C/N0 targets; default 32. Requires automatic tuning.
-Invalid lists reset to 32 with a diagnostic. Bandwidth and pattern stay fixed.
-For example:
-.BR "40,6,\-6" .
-.TP
-.BI \-\-pattern " mode"
-Select automatic tuning with
-.BR auto-keystream ,
-.B auto-pattern
-or
-.BR auto-tone ;
-or select
-.BI pattern- N
-with N = 3, 4, 6, 8, 12, 16, or
-.BI tone- N
-with N = 1, 2, 3, 4, 8, 32, 128, 1024, 4096, 16384.
-Defaults to auto-keystream with a keyfile, auto-pattern otherwise.
-Tone modes disable encryption and private spreading.
-.TP
-.BI \-\-sample\-rate " Hz"
-Manual internal DSP clock, 64\(en120000000 samples/second.
-Normally chosen from bandwidth and the real stream tone (Carrier minus Shift),
-at least four times each.
-The usual 1200 Hz bandwidth, Carrier 1500 Hz and Shift 0 use 6000 samples/second.
-Audio hardware negotiates its own clock and resamples as needed.
-.TP
-.BI \-\-carrier " FREQUENCY"
-Absolute transmitted/received carrier. At Shift 0, the default is the greater
-of 1500 Hz and 0.75 times bandwidth. Works with automatic planning.
-Carrier minus Shift must be positive and at most 30 MHz for the real USB stream.
-Case-insensitive Hz, kHz, MHz, GHz and THz suffixes, k/m/g/t shorthand, optional
-spaces and scientific notation are accepted; a plain number is in Hz.
-.B \-\-rf\-carrier
-is an alias; matching carrier aliases may be combined.
-.TP
-.BI \-\-shift " FREQUENCY"
-Nonnegative RF translation or LO; default 0.
-Accepts the same frequency units as Carrier.
-Carrier 1001500 and Shift 1000000 give a real 1500 Hz tone; at Shift 0 the same
-Carrier requires direct MHz-capable real samples.
-.B \-\-rf\-shift
-is an alias; choose one shift spelling.
-USB is fixed; \-\-sideband upper is a compatibility no-op and lower is rejected.
-No hardware tuning or external complex I/Q interface is added.
-.TP
-.BI \-\-spreading " N"
-Manual chips per symbol, 1\(en16384.
-.TP
-.B \-\-scramble
-Enable keyed pattern rotation. Requires a keyfile.
-.TP
-.B \-\-dsss
-Enable independent keyed direct-sequence spreading. Requires a keyfile.
-.PP
-Any manual sample-rate, spreading, scramble or DSSS option disables
-automatic tuning. These options cannot be combined with
-.B \-\-target\-snr
-or
-.BR \-\-pattern .
-.TP
-.BI \-\-fec " 20|60|off"
-Reed\(enSolomon parity overhead for interval sources; default 60.
-Does not add parity to short text or exact bit strings.
-.TP
-.B \-\-no\-compression
-Disable interval source compression. Both peers must select the same codec.
-The fixed short-text dictionary is unchanged.
-.TP
-.BI \-\-time " seconds"
-Local UNIX epoch in whole seconds; defaults to the current time.
-For saved keyed WAVs, supply the transmission epoch on reception, within
-the search window. Without an explicit epoch, live operation uses the actual
-transmit/capture start.
-.TP
-.BI \-\-search\-seconds " N"
-Search epochs within N seconds on either side, nearest first;
-0\(en32768, default 6.
-.TP
-.BI \-\-clock\-sync " SPEC"
-Default preserves the receiver search policy. With FHSS or Sched_Hop enabled,
-the shared GPS hop calendar uses default accuracy of +/-10ms per station;
-unknown payload start and symbol alignment remain separate search quantities.
-An explicit value such as
-GPS_1ms-400ms_region-2564ms_offset describes per-station system-clock accuracy,
-total propagation region width centered on a fixed offset. Durations accept
-ns/us/ms/s units. This does not select an oscillator or establish audio latency.
-Unsupported timing paths keep the full search.
-.TP
-.BI \-\-audio\-error " TIME"
-Per-station causal audio lag allowance [0,TIME] after reported queue compensation;
-Default resolves to 70ms. Accepts Default or nonnegative ns/us/ms/s durations
-up to 60s. Explicit numeric values, including older 50ms settings, are preserved.
-Separate from GPS
-accuracy, propagation and oscillator models; does not change the audio buffer.
-Insufficient timing allowance visibly falls back to ordinary playback before
-private output, without clipping provider uncertainty or enlarging the setting.
-Failures after private output begins stop transmission; they do not restart it.
-.TP
-.BI \-\-symbol\-burst " off|1|2|3|5|10"
-Space complete Robust symbols with the selected minimum number of symbol waits.
-The next complete support starts on a UTC 30-second boundary, at least 60 seconds
-after the previous start. Default is off. Both peers select matching settings.
-Capture retains complete symbols, pulse padding, 20-second guards and full timing
-uncertainty; proven silence is available for receiver backlog processing.
-This adds no bits, dwell or ramp. FHSS remains independent; simultaneous enabled
-Sched_Hop is rejected. Default clock accuracy retains the full ordinary search.
-.TP
-.BI \-\-symbol\-burst\-random " 0|1|2|3"
-Limit the additional cryptographically selected whole-symbol wait to 0 through
-this value, inclusive. Default is 0; effective extra wait is zero without a key.
-Planned silence does not end reception. A complete expected symbol must be
-scored absent under the ordinary physical-completion rule.
-.TP
-.BI \-\-dsss\-factor " 1|10|100|1000"
-Additional independent private outer spreading, with 1 preserving the existing
-waveform. Factors above one require a keyfile and retain the inner private bit
-patterns. Receiver sensitivity and interference qualification remain incomplete.
-.TP
-.BI \-\-progress
-Report timing search to standard error. With
-.B listen \-\-json
-also emit signal and preview events.
-.SS Keys and resource limits
-.TP
-.BI \-\-keyfile " path"
-Load symmetric keys. Both peers need the same key set and any bound pad.
-Without a keyfile, operation is unencrypted.
-.TP
-.BI \-\-key\-name " name"
-Select a named key set; default the first. Reception uses only this selected
-key set.
-.TP
-.BI \-\-key\-names " list"
-Comma-separated names to create with
-.BR keygen ;
-default
-.BR Default .
-.TP
-.BI \-\-pad " path"
-Bind a keyfile to an external pad at creation, or supply its bound pad at load.
-The pad must be larger than 1 GiB and remains a separate file.
-.TP
-.BI \-\-memory\-mb " N"
-Batch PCM workspace, 1\(en4096 MiB; default 256.
-.TP
-.BI \-\-cache\-mb " N"
-Source input and received-content limit, 1\(en4096 MiB; default 256.
-.TP
-.BI \-\-dsp\-mb " N"
-Streaming DSP workspace, 1\(en1024 MiB; default 64.
-These separate limits are not a total process memory cap.
-.SS Recovery
-These options apply to
-.BR rx ,
-.B simulate
-and
-.BR listen .
-Additional hard-bit recovery begins only after physical completion.
-.TP
-.BI \-\-recovery\-seconds " N"
-Recovery time budget, 0\(en86400 seconds; default 300. Zero disables it.
-.TP
-.BI \-\-recovery\-threads " N"
-Recovery workers, 0\(en1024; default 0 selects available CPU cores.
-.TP
-.BI \-\-recovery\-bits " N"
-Retained hard-bit slots, 1024\(en1048576; default 65536.
-Separate from the displayed raw-bit prefix.
-.TP
-.BI \-\-recovery\-errors " N"
-Reed\(enSolomon capacity reserved for additional byte errors, 0\(en24; default 2.
-.SS Audio and simulation
-.TP
-.BI \-\-device " id"
-Audio endpoint from
-.BR devices .
-Use
-.B default
-for the system default.
-.TP
-.B \-\-right\-mono
-Transmit on the right channel instead of the default left channel.
-A mono device uses its sole channel.
-.TP
-.B \-\-no\-mono
-Transmit on both stereo channels. Conflicts with
-.BR \-\-right\-mono .
-.TP
-.BI \-\-device\-type " audio"
-Select analog audio, the only implemented device type.
-.TP
-.BI \-\-seconds " N"
-For live
-.BR rx ,
-recording duration; default 15 seconds.
 For
+.BR qr ,
+select the output format. The default is
+.BR svg .
+.SH RETIRED COMMANDS
+The commands
+.BR tx ,
+.BR rx ,
 .BR listen ,
-wall-clock run limit, 0\(en86400 seconds; default 0 means continuous.
-Stopping a capture does not complete a reception.
-.TP
-.BI \-\-tx\-delay " N"
-Delay after live transmission, 6\(en3600 seconds; default 6.
-Automatically extended when the symbol-absence interval requires more time.
-.TP
-.BI \-\-snr " dB"
-Simulated sample-power signal/noise ratio; default 20. For
-.B simulate
-only; mutually exclusive with a simulation preset.
-.TP
-.BI \-\-simulation " preset"
-Link preset for
 .BR simulate ,
-.B listen
-or
-.BR analyze-link .
-Quote the two-part name. Presets are
-.B "3dBm \-6dB"
-and 3dBm at \-60, \-90, \-120, \-170, \-200 or \-230dB;
-50dBm at \-200 or \-270dB; and 70dBm at \-250dB.
-In
-.BR listen ,
-.B no
-or
-.B off
-selects live audio.
-.TP
-.BI \-\-seed " N"
-Simulation or statistical-analysis seed; default 1.
-.TP
-.BI \-\-delay\-samples " N"
-Initial sampled-channel delay for
-.B simulate
-or the assumed delay for
-.BR analyze-link ;
-default 137.
-.TP
-.BI \-\-frequency\-offset " Hz"
-Frequency offset for
-.B simulate
-or
-.BR analyze-link ;
-default 0.
-.TP
-.BI \-\-receiver\-time " seconds"
-Independent receive epoch for
-.BR simulate ;
-default the transmit epoch.
-.TP
-.BI \-\-oscillator " model"
-Baseband model for bounded receiver search and simulated impairments:
-.B crystal
-(default),
-.BR gpsdo-xo ,
-.B gpsdo-tcxo
-or
-.BR gpsdo-ocxo .
-Does not control hardware.
-.TP
-.BI \-\-rf\-oscillator " model"
-Shift model; same choices plus cb-ssb (combined CB/ATS Mini V4 SSB example)
-and ic-7100, default crystal. These radio-specific examples do not specify
-the sound-card clock and cannot be used for a shared radio clock. At Shift 0 all of its frequency and
-phase contributions are excluded, regardless of the reference setting.
-For a legacy positive-Shift shared reference, this flag selects the shared model.
-.TP
-.BI \-\-reference " independent|shared-radio"
-Independent Baseband and Shift references (default), or one shared sampling/mixer
-reference for a positive Shift. A positive shared Shift uses the rf-oscillator
-profile once for both effects; Shift 0 uses only the oscillator/Baseband profile.
-.B \-\-lf\-reference 0
-is a legacy shared-reference shorthand, unrelated to setting Shift to 0 Hz.
-.TP
-.BI \-\-search\-margin " N"
-Multiply declared frequency and clock accuracy bounds; default 3, minimum 1.
-It does not multiply simulated oscillator impairments. It does multiply both
-selected Doppler/delay spread values for simulation and physical output.
-.TP
-.BI \-\-spread\-preset " ID"
-Select a channel for
-.B simulate
-or outgoing audio from
-.BR listen :
-none, sub9-best, sub9-moderate, sub9-worst, hf-best, hf-moderate, hf-worst,
-aurora-best, aurora-worst, or eme-focused. The CLI defaults to none for
-compatibility. See simulation-estimates.md for values and model limits.
-.TP
-.BI \-\-selective\-perturbation " ID"
-Select off or slow-N, fast-N or each-N, where N is 1, 5, 10, 25 or 65 percent.
-An explicit spread preset defaults to off for none/Sub-9 kHz and each-65 for
-HF/Aurora/EME. Rates use the margin-adjusted Doppler spread. In listen these
-effects apply to outgoing DATA with or without simulation. They are not
-analytical link estimates and do not modify microphone capture.
-.TP
-.BI \-\-simulation\-trace " PATH"
-Create a new JSONL file with actual spread and perturbation seed,
-rates, ranges and phases. Supported for simulate or listen; the file
-must not already exist. This trace is opt-in and does not change standard output.
-.TP
-.BI \-\-clock\-error\-ppm " N"
-Override signed simulated relative clock error; crystal default 100 ppm.
-This changes channel truth without widening the declared receiver bounds.
-.TP
-.BI \-\-phase\-noise " N"
-Override phase diffusion in degrees per square root second;
-crystal default 0.5.
-.SS Statistical link analysis
-The following options apply only to
-.BR analyze-link .
-.TP
-.BI \-\-tx\-dbm " N"
-.TQ
-.BI \-\-attenuation\-db " N"
-Transmit power and nonpositive channel attenuation. Supply both, or use
-.BR \-\-simulation .
-.TP
-.BI \-\-noise\-figure\-db " N"
-Receiver noise figure; default 10 dB.
-.TP
-.BI \-\-symbol\-seconds " N"
-Override the analyzed symbol duration; default the transmit plan.
-.TP
-.BI \-\-coherent\-seconds " N"
-Maximum coherent segment; default 3600 seconds.
-.TP
-.BI \-\-trials " N"
-Monte Carlo trials per reference model, 1\(en1000000; default 10000.
-.TP
-.BI \-\-hypotheses " N"
-Searched alternatives, including both bits; default 1000000.
-.TP
-.BI \-\-false\-alarm " P"
-Global reference false-alarm budget; default 0.000001.
-.TP
-.BI \-\-residual\-frequency\-hz " N"
-Frequency error after hypothetical acquisition; default 0.
-.TP
-.BI \-\-template\-correlation " N"
-Assumed normalized template correlation; default 0.
-.SS General
-.TP
-.B \-\-help
-Print command help and exit.
-.TP
-.B \-\-version
-Print the application version and exit.
-.SH RECEPTION
-Nonempty text of 1\(en16 source bytes uses a fixed short dictionary.
-Short text and explicit bit strings have no header, transmitted length,
-padding, error correction or MAC. Longer text and all attachments use fixed
-128-coded-byte intervals, each preceded by a 192-bit marker.
-.PP
-Only observed signal absence ends reception. Consecutive fully scored absent
-symbols must cover six seconds; a long symbol must finish before it can be
-classified absent. EOF, cancellation, successful decoding and authentication
-do not complete a stream. Generated WAVs include quiet tail samples;
-truncated input WAVs do not acquire an artificial tail.
-.PP
-Newly accepted bits appear on the next progress poll. The diagnostic prefix
-retains at most 4096 raw bits; counts can continue beyond it. Missing slots
-are zero placeholders, not observed zero bits. Recovery status is separate
-from physical completion.
-.SH OUTPUT
-Text reception writes restricted ASCII to standard output. Letters, digits,
-comma, period, @, space, hyphen, underscore, slash, equals and newline are
-preserved; other received bytes are shown as underscores. Received filenames
-use the same restriction. Use
-.B rx \-\-save
-for original bytes. Attachments are not saved automatically.
-Diagnostics go to standard error.
-.PP
-With
-.BR \-\-json ,
-inspect
-.BR stream_complete ,
-.BR content_validated ,
-.B short_text_decoded
+.BR estimate ,
+.BR analyze-link ,
+.BR status-tx
 and
-.B authenticated
-separately. Decoded short text is not authenticated.
-.B estimate
-and
-.B analyze-link
-always produce JSON.
-.PP
-.B listen \-\-json
-produces one JSON object per line. Track each
-.B signal_id
-at its latest
-.BR revision ;
-clear the previous interpretation on revision and remove identities in
-.BR superseded_ids .
-A later receive profile may revise a completed interpretation back to pending.
-.B reception_update
-links an interpretation's
-.B reception_id
-to a completed payload's
-.BR id .
-.SH EXAMPLES
-Simulate a short message:
-.PP
-.nf
-.RS
-pump simulate \-\-text 'CQ hello' \-\-snr 12 \-\-json
-.RE
-.fi
-.PP
-Estimate a transmission, then send and receive a file using a fixed epoch:
-.PP
-.nf
-.RS
-pump estimate \-\-input note.txt
-pump tx \-\-input note.txt \-\-time 1800000000 \e
-    \-\-output transfer.wav
-pump rx \-\-input transfer.wav \-\-time 1800000000 \e
-    \-\-save received.txt
-.RE
-.fi
-.PP
-Receive live audio, or send on a separate invocation:
-.PP
-.nf
-.RS
-pump listen \-\-device default \-\-json
-pump tx \-\-text 'hello' \-\-device default
-.RE
-.fi
-.PP
-Create and inspect a shared keyfile:
-.PP
-.nf
-.RS
-pump keygen \-\-output shared.key \-\-key\-names Home,Portable \-\-device default
-pump keys \-\-keyfile shared.key
-.RE
-.fi
-.PP
-Add the same
-.B \-\-keyfile shared.key \-\-key\-name Home
-to both ends of an encrypted transfer.
-.SH EXIT STATUS
-.TP
-.B 0
-Command finished. This alone does not prove successful reception;
-check the JSON completion and validation fields.
-.TP
-.B 2
-Invalid arguments, input/output failure or another reported error.
-.SH FILES
-Input, output, keyfile and pad paths are explicit. Received content is retained
-in bounded memory; no receive disk cache is created. Output and save commands
-refuse to overwrite existing files.
-.SH ENVIRONMENT
-.TP
-.B ALSA_PLUGIN_DIR
-ALSA plugin directory for Linux live audio. An explicit value takes precedence
-over portable-bundle host-plugin discovery.
-.SH NOTES
-Keep keyed peers' clocks within the configured search window. Do not reuse a
-key and transmit schedule position: this can reveal relationships between
-plaintexts and permits replay. Interval authentication does not authenticate
-an intended whole-stream length.
+.B status-rx
+belonged to the retired single-carrier Robust modem and are unavailable.
+They return a clear error; use the independent Fast subcommands where their
+capabilities apply. This does not promise Fast wire compatibility.
 .SH SEE ALSO
 .BR pump-fast (1),
 .BR datapump-gui (1)

@@ -75,7 +75,6 @@ jobs:
       matrix:
         ubuntu: ["22.04", "24.04"]
     env:
-      DATAPUMP_CI_SMOKE_CAPTURE_FIXTURES: '1'
       DATAPUMP_SMOKE_TARGET: linux-x86_64-fltk
       DATAPUMP_SMOKE_SCOPE: published/ubuntu-${{ matrix.ubuntu }}
       DATAPUMP_SMOKE_SOURCE_SHA: ${{ needs.copy-inputs.outputs.source_sha }}

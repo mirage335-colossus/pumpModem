@@ -1,6 +1,5 @@
 #pragma once
 #include "datapump/helper_metadata.hpp"
-#include "datapump/pattern_pulse.hpp"
 #include <array>
 #include <complex>
 #include <cmath>
@@ -13,15 +12,6 @@
 #include <vector>
 
 namespace datapump::helper {
-// Match the waveform's own DC/Nyquist validation. Rate describes twice the
-// chip rate; a shaped pattern occupies its RRC support including rolloff.
-// Finite truncation/limiting tails still require the separate leakage guard.
-inline double occupied_bandwidth(const modem::Config& config) {
-    const auto waveform=modem::pattern_pulse_enabled(config)?
-        (1+modem::pattern_pulse_rolloff)*config.sample_rate/modem::pattern_chip_samples(config):
-        modem::waveform_bandwidth_hz(config);
-    return waveform+modem::waveform_gate_bandwidth_allowance_hz(config);
-}
 // Keep the valid unmodulated waveform separate from its additional gate
 // skirts. A real mono output folds a gate skirt crossing DC into positive
 // frequencies; it does not make an invalid nominal waveform valid.
@@ -32,11 +22,9 @@ struct PlacementBand {
 struct MonoPassband {double lower_hz=0,upper_hz=0;};
 // A nonzero minimum full width conservatively includes other already-valid
 // local profiles without reducing this configuration's own gate allowance.
-PlacementBand placement_band(const modem::Config&,double minimum_occupied_bandwidth_hz=0);
 MonoPassband mono_passband(const PlacementBand&);
-// Legacy enum values remain readable by settings migration; validate accepts
-// only High for the fixed-low, raised-high helper waveform.
-enum class Frequency { high, low, cochannel };
+// Canonical fixed-low, raised-high Helper placement.
+enum class Frequency { high };
 // Steady powers relative to the high pilot are 0, -3 and -9 dB.
 // Normalize their sum only to give helper_gain a useful bounded peak reference;
 // mean_power() separately accounts for the gates and auxiliary modulation.
@@ -50,8 +38,6 @@ inline const double pilot_amplitude_fraction=std::sqrt(pilot_power_fraction);
 inline const double low_pilot_amplitude_fraction=std::sqrt(low_pilot_power_fraction);
 inline const double auxiliary_amplitude_fraction=std::sqrt(auxiliary_power_fraction);
 inline constexpr double low_pilot_frequency_hz=550,auxiliary_frequency_hz=950;
-// Legacy receiver/laboratory geometry. Production auxiliary placement is fixed.
-inline constexpr double auxiliary_pilot_spacing_hz=400;
 struct Options {
     double power_w=0, data_power_w=4, ratio_limit_db=90;
     Frequency frequency=Frequency::high;
@@ -117,26 +103,6 @@ struct ReferenceLevel {
 ReferenceLevel reference_level(const Options&,double nominal_payload_cn0_db_hz,
     double amplitude_scale=1,double payload_power_fraction=1,double usable_tone_fraction=1);
 
-struct EnvelopeRequirements {
-    // Filter, converter and bounded-stage support contributes to capture-tail
-    // coverage. It never enlarges the fixed transmit lead.
-    double frequency_acquisition_seconds=0,frontend_lookahead_seconds=0;
-    // Retained for forecast reporting compatibility; it does not alter the
-    // fixed 38-second Helper-only lead or qualify a received reference.
-    double frequency_precision_extension_seconds=0;
-    // Total additional capture obligation from the payload endpoint, including
-    // any required absence coverage. This is frozen at source completion, not
-    // elapsed queue lag or a deadline renewed by later cold admissions.
-    double receiver_buffer_deficit_seconds=0,maximum_source_capture_ratio=1;
-};
-struct EnvelopePlan {
-    long double lead_seconds=0,tail_seconds=0,preparation_seconds=0,maximum_stop_extension_seconds=0;
-};
-// Helper callers opt in; ordinary helper-off callers need no planning call.
-// The fixed lead is exactly 38 seconds. Tail coverage uses complete 400 ms
-// dwells and retains ordinary absence, pulse support and capture margin.
-// Preparation reserves the lead; the stop bound retains tail alignment margin.
-EnvelopePlan plan_envelope(const modem::Config&,const EnvelopeRequirements& = {});
 void validate(const Options&);
 // Validates the options and preserves the calibrated payload gain independently
 // of helper placement, occupied-band geometry or output sample rate. Disabled
@@ -187,8 +153,7 @@ public:
     // seconds is the caller's waveform calendar since epoch. Live playback
     // and sampled simulation use the SAME Robust source coordinate as DATA/
     // FHSS; an adjustable playback resampler includes its continuous UTC rate
-    // correction here. A generic standalone beacon can use another calendar
-    // and does not certify any receiver-side DATA clock relation.
+    // correction here; receiver DATA clock inference remains a separate stage.
     // Payload PCM is assumed bounded by [-1,1]. Disabled mixing is bit exact.
     float mix(float payload,long double seconds,std::uint32_t rate,
               std::optional<long double> end_seconds={},
@@ -207,44 +172,4 @@ private:
     mutable std::size_t symbol_count_=0;
 };
 
-struct Observation {
-    bool present=false, confirmed=false;
-    double frequency_hz=0, snr_db=0, observed_seconds=0, absent_seconds=0;
-};
-// Bounded independent observer: 100 ms matched fits. New evidence groups use
-// K=4+ceil(2*log1p(completed_groups)) windows, bounded by 96, to accumulate more
-// evidence as the lifetime multiple-look admission threshold becomes stricter.
-// snr_db is excess fitted tone power / noise in a 10 Hz resolution cell,
-// not payload SNR. observed_seconds is consecutive qualifying group duration;
-// confirmed means >=6 s. Missing PCM must be signalled with reset(), never zeros.
-// AWGN familywise false-admission probability <=.01 per reset, including all
-// searched frequency cells and an unlimited sequence of evidence groups.
-// Once admitted, the >=6dB level gate maintains presence without another
-// multiple-look admission test. Six seconds of observed absence retires that
-// admission; a later signal must pass the original lifetime gate again.
-// This is a noise-model gate, not a posterior/authentication claim. Other tones
-// and colored interference can be present; metadata decoding is independent.
-class Tracker {
-public:
-    static constexpr std::size_t workspace_bound=5*1024;
-    explicit Tracker(double expected_frequency,double search_half_width_hz=20);
-    void push(std::span<const float>,std::uint32_t rate);
-    std::optional<Observation> take_update();
-    void reset();
-private:
-    struct Bin {
-        double frequency=0, cc=0, ss=0, cs=0, log_evidence=0, snr_sum=0, power=0;
-        std::complex<double> step{},oscillator{1,0},sum{};
-    };
-    double expected_,half_width_,present_seconds_=0,absent_seconds_=0;
-    bool admitted_=false;
-    std::uint32_t rate_=0;
-    std::size_t window_size_=0,window_count_=0,group_windows_=0;
-    std::uint64_t groups_=0;
-    double energy_=0;
-    std::vector<Bin> bins_;
-    std::optional<Observation> update_;
-    void configure(std::uint32_t rate);
-    void finish_window();
-};
-}
+} // namespace datapump::helper

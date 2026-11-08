@@ -90,7 +90,7 @@ function(check_gui_smoke_timeouts package_directory archive_directory fixture_bu
       endif()
     endforeach()
     if(NOT smoke_commands EQUAL 1 OR NOT other_commands EQUAL 4)
-      message(FATAL_ERROR "Expected one GUI workflow plus version, two simulations, and GUI self-check")
+      message(FATAL_ERROR "Expected one GUI workflow plus version, help, Fast profiles, and GUI self-check")
     endif()
   endforeach()
 

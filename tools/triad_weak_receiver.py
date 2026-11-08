@@ -13,10 +13,10 @@ import time
 import numpy as np
 import torch
 
-from triad_dynamic_campaign import public_geometry
+from triad_acquisition import public_geometry
 from triad_dynamic_variants import ScanJointReceiver, core_projection_bands
 from triad_realtime_fft import FFTScreen
-from triad_realtime_receiver import refinement_coordinates
+from triad_acquisition import refinement_coordinates
 from triad_segmented_fft import SegmentedFFTScreen
 from triad_weak_helper import estimate_weak_helper
 from triad_operational_admission import (DEFAULT_COHERENCES, DEFAULT_ALPHA_PER_DAY,
@@ -81,10 +81,10 @@ class WeakReceiver:
             frequencies_hz=(-self.cfo_bound,self.cfo_bound),clock_ppm=(-self.clock_bound,self.clock_bound))
         self.grid=public_grid(ch,manifest['calendar']['arrival_prior_seconds'],self.epochs)
         names=('triad_weak_receiver.py','triad_weak_helper.py','triad_segmented_fft.py',
-            'triad_operational_admission.py','triad_realtime_receiver.py','triad_realtime_fft.py',
+            'triad_operational_admission.py','triad_realtime_fft.py',
             'triad_dynamic_joint.py','triad_dynamic_frequency.py','triad_dynamic_variants.py',
             'triad_dynamic_scan.py','triad_gaussian_prepared.py','triad_gaussian_state.py',
-            'triad_helper_receiver.py','triad_dynamic_campaign.py')
+            'triad_acquisition.py')
         self.policy=dict(schema='triad-weak-procedure-v1',precision=precision,
             screen_mode=self.screen_mode,block_seconds=block_seconds,top_per_bit=top_per_bit,
             coherences=[str(x)for x in self.coherences],noise_inflation=noise_inflation,

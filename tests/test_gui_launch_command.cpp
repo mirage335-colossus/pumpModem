@@ -1,6 +1,5 @@
 #include "application.hpp"
 #include "launch_command.hpp"
-#include "gui_smoke_budget.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/clock_sync.hpp"
 #include <cmath>
@@ -403,23 +402,6 @@ void startup() {
     errors.str({});errors.clear();
     {
         struct Restore {std::streambuf* previous;~Restore(){std::cerr.rdbuf(previous);}} restore{std::cerr.rdbuf(errors.rdbuf())};
-        const smoke_detail::SampledWork work{13,2928175,.032,4.275,true,true,false,false,false,false,false};
-        const auto exhausted=[&](Launch) -> int {throw SmokeBudgetExhausted(17,600.011,600,work,.001);};
-        check(invoke({"--smoke-test","--smoke-timeout","600"},exhausted)==smoke_budget_exit_code,
-            "Typed advancing-work exhaustion did not retain its dedicated nonzero exit");
-        check(errors.str()==std::string(smoke_budget_marker)+
-            "phase=17 elapsed=600.011000 budget=600.000000 tx_id=13 fraction=0.032000 media_seconds=4.275000 samples=2928175 tail=0 progress_age=0.001000 result=incomplete\n",
-            "Smoke startup did not emit exactly one structured incomplete diagnostic");
-        errors.str({});errors.clear();
-        check(invoke({"--smoke-test","--smoke-timeout","1200"},[&](Launch launch) -> int {
-            throw SmokeBudgetExhausted(17,1200.011,launch.timeout,work,.001);
-        })==smoke_budget_exit_code&&errors.str().find("budget=1200.000000")!=std::string::npos,
-            "The extended smoke allowance swallowed its nonzero incomplete result");
-        errors.str({});errors.clear();
-        check(invoke({},exhausted)==1&&errors.str().starts_with("Data Pump test: ")&&
-            errors.str().find(smoke_budget_marker)==std::string::npos,
-            "Ordinary startup acquired a smoke-only advisory result");
-        errors.str({});errors.clear();
         check(invoke({"--smoke-test"},[](Launch) -> int {
             throw datapump::Error("Shared GUI smoke timed out in phase 17: stalled work");
         })==1&&errors.str().starts_with("Data Pump test: "),

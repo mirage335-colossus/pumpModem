@@ -31,9 +31,6 @@ def compose(scene,t,native,media):
             d=ImageDraw.Draw(im);text(d,(30,900),'BPSK31 · 1500 Hz',28,CYAN,bold=True);text(d,(30,949),'the quick brown fox jumps over the lazy dog',24)
         else:
             im.paste(native.resize((1228,960),Image.Resampling.LANCZOS),(106,49))
-            if scene['id']=='robust-result':
-                crop=native.crop((18,433,400,490)).resize((955,143),Image.Resampling.LANCZOS)
-                im.paste(crop,(242,574));ImageDraw.Draw(im).rectangle((240,572,1199,719),outline=CYAN,width=2)
     else:im=illustration(scene,t,media)
     d=ImageDraw.Draw(im);text(d,(26,15),scene['title'],24,bold=True)
     badge=scene['label'];excerpt=scene.get('audio_excerpt')

@@ -4,7 +4,6 @@
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/compression.hpp"
 #include "datapump/fast/modem.hpp"
-#include "datapump/live.hpp"
 #include "datapump/audio.hpp"
 #include <atomic>
 #include <chrono>
@@ -30,7 +29,7 @@ void reset(std::vector<float> samples={},bool pause=false,bool record_output=fal
 }
 }
 // Device fixture replaces hardware symbols only in this executable. It never
-// feeds transmitter decisions into either sampled receiver.
+// feeds transmitter decisions into the sampled receiver.
 namespace datapump::audio {
 void capture(std::uint32_t rate,const std::string&,const CaptureCallback& consume,std::stop_token stop,StreamFormatCallback format) {
     ++fixture::opened;++fixture::active;
@@ -76,39 +75,6 @@ void check(bool value,const char* message){if(!value)throw Error(message);}
 template<class P> void await(P predicate,const char* message) {
     const auto deadline=std::chrono::steady_clock::now()+10s;
     while(!predicate()){if(std::chrono::steady_clock::now()>deadline)throw Error(message);std::this_thread::sleep_for(5ms);}
-}
-live::Settings regular() {
-    live::Settings s;s.transfer.timestamp=1800000000;s.transfer.search_seconds=0;
-    s.transfer.modem.sample_rate=8000;s.transfer.modem.bandwidth_hz=1000;s.transfer.modem.carrier_hz=1500;
-    s.transfer.modem.spreading_factor=16;s.dsp_workspace_bytes=32*1024*1024;s.device="fixture";
-    return s;
-}
-void idle_release() {
-    fixture::reset();live::Session session;auto s=regular();session.start(s);
-    await([]{return fixture::active.load()>0;},"regular capture did not start");
-    await([&]{return session.try_suspend_capture();},"idle capture did not close");
-    check(fixture::active==0,"suspension acknowledged before device closure");
-    const auto opens=fixture::opened.load();
-    session.configure(s);std::this_thread::sleep_for(30ms);
-    check(fixture::opened==opens,"background regular configure stole fast audio reservation");
-    bool rejected=false;try{session.transmit_bits(Bytes{0});}catch(const Error&){rejected=true;}
-    check(rejected,"regular TX bypassed exclusive audio ownership");
-    session.resume_capture();await([&]{return fixture::opened>opens;},"regular capture did not resume");
-    check(session.snapshot().received.empty(),"idle suspension manufactured received content");session.stop();
-}
-void pending_preserved() {
-    auto s=regular();auto tx=transfer::binary_transmitter(Bytes{0,0,1},s.transfer);
-    std::vector<float> wave;
-    std::array<float,1024> block{};
-    while(auto n=tx->read(block))wave.insert(wave.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(n));
-    fixture::reset(std::move(wave),true);live::Session session;session.start(s);
-    bool pending=false;
-    await([&]{auto snapshot=session.snapshot();for(const auto& event:snapshot.signals)if(event.received_bits&&!event.complete)pending=true;return pending;},"regular sampled pending prefix was not admitted");
-    const auto opens=fixture::opened.load();
-    check(!session.try_suspend_capture(),"mode handoff interrupted an admitted regular reception");
-    std::this_thread::sleep_for(20ms);
-    check(fixture::opened==opens&&fixture::active>0,"regular pending receiver lost audio");
-    check(session.snapshot().received.empty(),"suspension attempt fabricated physical completion");session.stop();
 }
 void fast_cancel() {
     const auto path=std::filesystem::temp_directory_path()/("datapump-fast-session-"+
@@ -255,4 +221,4 @@ void damaged_cycle_continues() {
     check(refused,"Session allowed saving an incomplete file");
 }
 }
-int main(){try{idle_release();pending_preserved();fast_cancel();text_audio_roundtrip();damaged_cycle_continues();std::cout<<"fast session ownership, text transfer and damaged-cycle continuation passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{fast_cancel();text_audio_roundtrip();damaged_cycle_continues();std::cout<<"fast session ownership, text transfer and damaged-cycle continuation passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

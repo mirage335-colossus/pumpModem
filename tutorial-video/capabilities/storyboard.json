@@ -12,7 +12,7 @@
       "kind": "opening",
       "sentences": [
         "Data Pump was built to safely move data across security boundaries, using hardware computers already have.",
-        "Developers from the team turned that practical need into a demanding proving ground for reusable development practices."
+        "The team uses this practical project to exercise reusable development practices."
       ]
     },
     {
@@ -45,46 +45,12 @@
       "id": "rates",
       "title": "From bits to kilobits.",
       "subtitle": "Olivia’s origins: December 2004.",
-      "eyebrow": "02 / FAST MODEM",
+      "eyebrow": "01 / FAST MODEM",
       "kind": "rates",
       "sentences": [
         "Olivia dates back more than twenty years; its common text modes run at roughly Morse-code speeds.",
         "The illustrated Olivia mode carries about a hundred bits per second.",
         "Data Pump’s documented speaker-and-microphone trial exceeded twenty-eight thousand bits per second: roughly two hundred and sixty times that rate."
-      ]
-    },
-    {
-      "id": "private",
-      "title": "Minimize apparent interference.",
-      "subtitle": "Low received power. A private waveform.",
-      "eyebrow": "03 / ROBUST MODEM",
-      "kind": "private",
-      "sentences": [
-        "Robust Modem adds fixed-location radio capability as a useful extension.",
-        "Its encrypted private waveform combines received energy below the background noise with a noise-like appearance and no public acquisition marker.",
-        "The intended receiver knows what to collect."
-      ],
-      "audio_excerpt": {
-        "file": "robust-tx.wav",
-        "source_start": 2,
-        "at": 17.5,
-        "duration": 4
-      },
-      "minimum": 22
-    },
-    {
-      "id": "robust",
-      "title": "Plan. Transmit. Recover.",
-      "subtitle": "A received bit at 150 dB loss.",
-      "eyebrow": "RECORDED SIMULATION",
-      "kind": "native",
-      "file": "robust-result.mp4",
-      "trim_start": 0,
-      "trim_end": 1,
-      "note": "2 mW · 1.5 kHz carrier · keyed waveform · simulation",
-      "sentences": [
-        "Here, the recorded simulation recovers a bit with two milliwatts of transmit power and one hundred and fifty decibels of path loss.",
-        "That makes demanding link assumptions concrete and testable."
       ]
     },
     {
@@ -106,7 +72,7 @@
       "kind": "team",
       "sentences": [
         "The value reaches beyond reusable code.",
-        "Exercising these problems together exposes the boundaries, failure cases, and development practices that future projects would otherwise have to discover again."
+        "Exercising these practices exposes boundaries, failure cases, and lessons that future projects would otherwise have to discover again."
       ]
     },
     {

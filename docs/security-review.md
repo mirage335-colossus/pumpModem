@@ -2,12 +2,10 @@
 
 **Historical review, superseded by [security.md](security.md).** The findings and
 test results below describe the earlier packet/APSK implementation and are
-retained as history. They do not describe or validate the current fixed
-128-byte interval format, per-interval keyed HMAC, absent public digest, or
-physical-end-only source decoding. Current behavior is specified in
-[protocol.md](protocol.md), [security.md](security.md), and
-[crypto.md](crypto.md); current execution evidence belongs in
-[validation.md](validation.md).
+retained as history. Its packet, framing and receiver claims do not describe
+the current application. Current maintained security boundaries are in
+[security.md](security.md) and [crypto.md](crypto.md); current execution
+evidence belongs in [validation.md](validation.md).
 
 This is a focused source and behavior review updated for the version 0.5 implementation,
 not an independent security audit or a claim that the original specification is

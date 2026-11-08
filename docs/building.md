@@ -193,8 +193,8 @@ jobs fetch and relocate that prepared SDK; they never prepare missing dependenci
 Use explicit `sdk-base.yml` maintenance with `platform=wasm` (or `all`) when a
 new Wasm recipe needs publishing.
 
-Full native CI runs a separate `web` shard beside core, Live, calibration and
-frontend shards. Wasm package and regression jobs run independently as well.
+Native CI runs focused core, modem, frontend, native, package and web scopes.
+Wasm package and regression jobs run independently as well.
 The `web` label is excluded from `ci-core` in both its build prerequisites and
 test selection. SDK and release certification use the same separation; native
 and Wasm live tests therefore never compete on one runner. Automatic push/PR
@@ -294,12 +294,6 @@ Use `--stop-on-failure` with `test` or `sanitize` for early CI feedback after a
 failure; successful runs still execute the entire selected group.
 Native GUI tests must have a display, preferably an
 isolated Xvfb session; `./build.sh test native` builds and runs them explicitly.
-For the full sequence on a slower software-rendered desktop, pass
-`-- -DGUI_SMOKE_TIMEOUT=600` to use the same overall allowance as hosted
-certification. Individual reception and presentation assertions still apply.
-Standard-runner GUI contracts allow `GUI_SMOKE_TIMEOUT=1200` and warn after a
-successful run exceeds 600 seconds. CI retains a typed progressing workload
-limit as incomplete coverage with a warning, as described below.
 With Mesa software rendering, set `LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2`
 for H-sized hosts, or `LP_NUM_THREADS=1` as used on standard CI runners, so
 drawing leaves CPU time for sampled processing and GUI polling.
@@ -403,49 +397,17 @@ analysis, avoiding guesswork about include paths and compiler options.
 
 ## Test selection without stale executables
 
-Tests retain their individual executables, independent vectors and original
-assertions. They are excluded from the default application build. **Build the
-test prerequisites before invoking CTest**; CTest by itself does not rebuild.
+Tests are excluded from the default application build. Build a group's
+prerequisites before invoking CTest; CTest by itself does not rebuild. Use `./build.sh --help` for the current group list and group contracts maintained
+by the build. Shared GUI changes require affected frontend checks.
+Python-dependent tests are registered only when Python is available.
 
-| Group | Coverage |
-| --- | --- |
-| `contract` | The entire focused compatibility selection in [development.md](development.md), including slow probability calibration |
-| `regular` | Regular transport, DSP, hardware contract and CLI tests |
-| `fast` | Fast coding, transfer, modem and shared Fast GUI tests |
-| `legacy` | Legacy waveform/session and shared Legacy GUI tests |
-| `gui` | All shared GUI tests and native executable self-check; no display tests |
-| `frontends` | Terminal and framebuffer interactions, pixels and optional ncurses/SDL hosts |
-| `native` | Selected backend's display-dependent workflow and conformance probes |
-| `packaging` | Runtime collection, checksums, corruption detection and relocation |
-| `build` | Build orchestration, dependency preparation and vendored source integrity |
-| `triad` | Isolated v1/v2/v3 three-carrier modem, streaming channel/receiver, statistics, configuration and study smoke checks; no ordinary Robust receiver or native audio dependency |
-| `all` | All configured non-display tests, including expensive calibration |
-
-Groups overlap deliberately. `contract` is the maintenance gate for changes
-covered by the preservation contract; a faster subgroup never substitutes for
-it. Shared GUI changes also require native checks for affected backends under
-the existing [GUI maintenance rules](gui-architecture.md#verification-and-maintenance-guardrails).
-Python-dependent cases are registered only when Python is available. CI keeps
-its no-Python application build and explicit Python CLI checks.
-The differential receiver calibration runs independent captures on available
-cores, capped at 16 workers. CTest records that count and runs this test alone,
-even when the overall test-job limit is larger. Every matrix case still uses
-the same 64 seeds; numerical checks, full captures and deadlines are unchanged.
-Each capture keeps one DSP worker and a 4 MiB receiver budget. Parallelism
-increases capture-buffer and sanitizer memory proportionally, so constrain
-memory-limited machines with `-DDATAPUMP_CALIBRATION_WORKERS=4` after `--` in
-the build wrapper; the default `0` selects available cores. The larger default-
-duration controls remain sequential. For an inexpensive scheduling check, run
-`test_differential_receiver_probability --check-worker-plan`; this validates
-all 1..16 seed partitions without running the calibration. A direct invocation
-also accepts `--workers 1..16`. Avoid overlapping independent heavy build/test runs during timing
-and display qualification.
-
-Release certification runs this complete calibration in a separate job for each
-source target. GUI, contract and package checks run alongside it on independent
-runners, avoiding CPU contention within the target's main job. Both scopes are
-required, use the same source and dependency configuration, and retain separate
-logs. Ordinary local test groups still include calibration as before.
+`contract`, `regular`, `fast`, `legacy`, `gui`, `frontends`, `web`, `native`,
+`packaging`, `build`, `triad`, and `all` currently select their named build/test
+scopes. Group membership changes with maintained implementation. Old
+single-carrier Robust calibration suites are not current tests; standalone triad
+performance campaigns are replaced by the bounded method in
+[triad-performance.md](triad-performance.md).
 
 Direct CMake remains supported, including on Windows:
 
@@ -459,69 +421,28 @@ ctest --test-dir build/dev --output-on-failure -L '^contract$' -j 2
 Other aggregate targets are `datapump-apps`, `datapump-tests`, and
 `datapump-tests-GROUP`. For a Visual Studio/multi-configuration generator, add
 `--config Release` to builds and `-C Release` to CTest. CMake test presets select
-tests but do not compile them. For individual work, existing targets such as
-`test_compression_short` continue to work.
+tests but do not compile them. For individual work, build the corresponding
+`test_NAME` target first.
 
 ## Testing stages
 
-### Isolated three-carrier research
+### Robust modem
 
-For the new Robust modem experiment, use the
-[three-carrier development workflow](triad-development-workflow.md) to choose
-the smallest useful simulation and the checks affected by the change. The
-`triad_experiment` library and its study executables are excluded from the
-default application build and do not link the ordinary Robust receiver or native
-audio. `./build.sh test triad --cli` builds the isolated group's prerequisites
-and runs its registered checks; optional Python research tools also have their
-own focused tests that are not all registered in this group.
+The current [Robust architecture](robust-current.md) has a canonical native
+waveform, channel and Helper path; Python acquisition and tracking are sequential
+stages, not an integrated receiver or GUI feature. Start with the affected cheap
+deterministic tests. For computationally intensive estimates, follow the
+[abbreviated statistical policy](triad-performance.md): predeclare coverage,
+stopping and uncertainty, record source/configuration provenance, and use only
+small fixed-geometry kernel samples. The harness has no full or sustained mode
+and does not qualify end-to-end reception or physical links. Do not restore old
+full, sustained, multi-day, sweep, or calibration campaigns as fallback. RunPod
+accelerates the same method.
 
-The opt-in `triad_helper_export` executable reuses the production Helper
-transmitter through `datapump`; it does not run the ordinary receiver or open
-audio devices. Its `triad-helper` CTest label and optional Python checks are
-documented in [the isolated Helper integration](triad-helper.md). They are kept
-outside the hardware-free `triad` group's build dependencies.
-
-The [isolated receiver performance suite](triad-performance.md) runs in a
-separate normal-CI job unless `devfast` is selected. Its fast entrypoints are
-`triad_perf_guard.py --profile ci` for CPU and
-`triad_perf_guard.py --profile gpu-dev --device cuda` for GPU development.
-For regression work, follow
-the performance guide's [required efficient workflow](triad-performance.md#required-efficient-regression-workflow)
-and [confidence and material-slowdown policy](triad-performance.md#confidence-and-material-slowdown).
-Cover distinct paths without exhaustive Cartesian sweeps. Where this saves total
-work, use validated full or sustained references, abbreviated intermediate checks
-and a full-runtime predictive bound; otherwise measure the named full targets
-directly. The current guard directly measures its named full targets because
-that route costs less than model qualification; predictions remain source-bound
-alternatives, not blanket substitutes. Reuse compatible fixtures, builds and
-source-matched evidence.
-Choose the least computation that supports the required coverage, and expand it
-when uncertainty or a material slowdown warrants more evidence. Do not rebuild
-or requalify unchanged work, or pursue a narrow timing interval after the decision
-is supported. CPU and GPU guard budgets are effort limits, not coverage claims;
-hosted CI allows 600 seconds (standalone CPU defaults to 300 seconds and
-`gpu-dev` to 600 seconds). The 25-minute qualification target is an engineering
-target, not a minimum. Setup/build time is recorded separately. The dedicated
-job is not repeated in every CTest/sanitizer leg and excludes the ordinary Robust
-receiver. Shared runtime changes and ordinary-receiver integration still require
-their applicable regression and qualification stages; see the performance guide
-for timing boundaries, workflow multiplicity, the randomized balanced-block
-conditional-slot/no-carryover assumptions and unchanged-archive semantics.
-The [guard validation record](validation-data/triad-v3/2026-11-04-performance-guard/README.md) preserves
-measured decision errors and the serial-dependence limitation.
-
-A dated Monte Carlo, GPU or multi-day sensitivity campaign is not automatically
-a regression prerequisite for an isolated study edit. Reuse unchanged evidence,
-run the affected focused checks, and add fresh sampled observations or long-span
-checks when the changed assumptions or intended claims require them. Documentation
-edits need link, command and consistency checks, not a new sensitivity campaign.
-
-This is a scope boundary, not a waiver for shared runtime changes. The isolated
-library reuses source such as crypto, FFT, tuning presets and channel helpers;
-changes to those sources can affect the application. Ordinary-receiver/GUI
-integration and release candidates still follow the preservation contract and
-the applicable candidate-validation stages below. A passing triad study cannot
-be reported as ordinary Robust or release qualification.
+A shared security, codec, audio, or GUI change still needs its applicable
+component checks. Keep their contracts distinct from Robust performance
+estimation. Documentation edits need proportionate link and consistency checks,
+not modem benchmarks.
 
 ### CI package downloads
 
@@ -555,639 +476,50 @@ The offline regression `python3 tests/test_ci_apt.py` exercises mirror selection
 fetch recovery and fatal errors without changing the machine's package sources.
 It is also included in `./build.sh test build` and automatic helper checks.
 
-### Candidate validation
-
-Use focused feedback while a fault or feature is still changing, then broaden
-validation after the candidate is complete. A fast diagnostic pass establishes
-that a particular case works; it does not establish that the rest of the
-application, another compiler/platform or the distributed package still works.
-
-| Stage | Appropriate checks | Completion condition |
-| --- | --- | --- |
-| Investigate or iterate | Smallest relevant reproducer, target or affected group; `devfast=true` when its cases match the issue. Build only those prerequisites. | The regression fails before the fix and passes afterward, or the feature's intended behavior is demonstrated. |
-| Validate the completed candidate | Normal full source CI with `devfast=false`, plus applicable preservation-contract, GUI/native, SDK, platform and packaging coverage. | Required jobs actually finish successfully for the final source/configuration; failures return to focused diagnosis. |
-| Qualify a release | Publish the intended binaries after packaging checks, then run certification with `devfast=false` for their exact tag. | The attached report passes for the actual source and asset hashes being offered to users. |
-
-Agents should progress through the relevant stages without requiring another
-reminder after each focused success. Do not stop at the first row for a runtime
-fix or completed feature merely because full coverage takes longer. The slow
-tests belong at the validation stage instead of every edit. Documentation-only
-changes need proportionate checks, but do not erase outstanding validation for
-earlier code changes in the same task.
-
-Reuse passing results for the same source and configuration. Avoid scheduling
-duplicate push, PR and manual workflows; a full manual dispatch after temporary
-`[skip ci]` commits is sufficient when it covers the required final candidate.
-Do not rerun an expensive unchanged suite after recording a pass unless later
-changes or failures invalidate that evidence. Compile with available cores, but
-keep timing-sensitive test concurrency at its documented limits.
-
-For a pending-replay row assertion, build only `test_gui_controller` in an
-existing configured tree and run it with `--pending-replay-batch` first. This
-small fixture checks real reception reconciliation, explicit retirement chains
-and the smoke checker without running a modem replay. Follow a completed
-checker change with the affected `gui` and `native` groups. A retry against an
-unchanged published archive does not test a newer checker committed to source;
-retain and distinguish both results.
-
-Automatic `ci.yml` runs are bounded feedback: PRs and pushes to `main` run the
-small Linux/Windows Legacy diagnostic and offline build/SDK helper fixtures.
-Branch pushes do not launch a second copy of the PR checks, and documentation
-changes alone do not trigger them. Release and base workflows retain their
-path-specific helper checks. Automatic green checks do **not** mean the full
-application passed regression testing. Dispatch `ci.yml` with `devfast=false`
-when the candidate is ready; required native GUI, sanitizer regression, Windows,
-application and archive checks run in independent scopes. The instrumented GUI
-smoke is separately opt-in as described below. `sdk.yml` is manual so the additional
-SDK host-tool and copied Bookworm/Ubuntu matrix runs when relevant, without
-duplicating every push and PR. Ordinary consumers fail on a missing base recipe
-instead of silently building an SDK.
-
-### Parallel CI scopes and timing warnings
-
-#### Resource benchmark margins
-
-Only explicit CPU-work, construction/planner-runtime and absolute retained-memory
-benchmarks receive a CI margin. A nominal upper target `T` has a CI ceiling of
-**at least `1.25 × T`**; integer quantities round upward without floating-point
-conversion. Larger established allowances remain: for example, an instrumented
-CPU fixture's `3 × T` limit is not reduced or multiplied again. The nominal
-target still produces a warning when exceeded; completion of every functional
-assertion is required. An exhausted resource ceiling remains a failure, except
-for the already authorized, typed incomplete-coverage paths described below.
-
-The test-only helper [`resource_test_margin.hpp`](../tests/resource_test_margin.hpp)
-selects this allowance only with `GITHUB_ACTIONS=true` or `CI=true`. Local
-benchmark comparisons retain their original strict nominal bounds. Examples are
-the one-second analytic long-channel computation (1.25 seconds in CI), two-second
-open-tune construction (2.5 seconds), three-second GUI advice readiness (3.75
-seconds), and duration-independent cache/transmitter footprint targets. Dedicated
-`CpuWorkBudget` fixtures use the same minimum CI allowance; their independent
-media clocks and all decoding assertions remain. The existing nonfatal compact
-Live classifier retains its exact 40/120-second limits and explicit incomplete
-status, rather than changing the identity of its retained evidence.
-
-This is **not** a global test-timeout increase. Ordinary functional/poll timeouts,
-CTest/process watchdogs, exact operation counts and numerical/model checks,
-statistical gates, comparative memory-saving assertions, allocator grants and
-reservation/accounting bounds are unchanged. In particular, a receiver must
-never exceed its configured workspace: a benchmark footprint target is separate
-from that hard allocation invariant. Six seconds of fully scored physical
-absence, the ten-second graceful-stop limit, real-time hardware requirements,
-source-tail checks and cancellation deadlines retain their existing meaning.
-Tests which merely verify a CPU estimate or a fake-clock ledger get no margin.
-New resource benchmarks must identify their nominal target and use this shared
-policy; do not silently reclassify functional failures as throughput warnings.
-
-[`ci-resource-results.json`](ci-resource-results.json) is the single bounded
-latest-measurement set. Replace a profile's record after reviewing its actual
-results; Git history supplies comparisons. Records bind the measured source,
-compiler/configuration, runner, fixture and evidence, with explicit units and
-pass/warning/failure/incomplete/omitted/unavailable status. Wall time is not CPU
-time; an unavailable measurement is `null`. The snapshot does not replace full
-qualification or detailed retained failure evidence, and measurements never
-automatically raise acceptance thresholds. Compare like configurations and
-inputs; queue/mirror delays and a single variable hosted runner do not establish
-a code regression.
-
-Use `provenance.local_command` for local measurements and retain any dirty-input
-digest in `report_reference`. Keep unmeasured values unavailable; a configured
-budget or workspace loan is not an observed measurement.
-
-```sh
-python3 -B tools/resource-results.py check docs/ci-resource-results.json
-python3 -B tools/resource-results.py update docs/ci-resource-results.json --profile PROFILE --input 'RECORD_JSON'
-git diff COMMIT_A COMMIT_B -- docs/ci-resource-results.json
-```
-
-The updater atomically replaces one latest profile, rejects malformed/nonfinite
-or ambiguous results, and caps the whole file at 32 KiB (16 profiles, at most 64
-metrics each). Keep concise source-bound findings outside tracked run lists;
-do not append per-run histories or copy large logs into this snapshot. Diagnose
-an actual failed benchmark with its smallest relevant check, then run the
-affected full qualification once the candidate settles. Reuse unchanged
-completed coverage instead of restarting the full matrix after every small edit.
-
-Native CI builds portable packages independently of source regression jobs.
-Copied Linux checks depend only on the package producer, so sanitizer or
-calibration work cannot delay them. Linux Release/Debug and Windows split
-regressions into Core, Fast, Live and calibration jobs. Live contains the two
-CPU-intensive `live` and `live_profiles` suites and runs them serially on its
-own runner. Calibration runs its four existing independent sections
-(`matrix`, `shaped`, `null`, `default-window`) on
-separate runners; each preserves all its fixed seeds and aggregate assertions.
-The instrumented shaped section additionally divides its seeds across four
-runners, sixteen seeds per case. Each captures both original cases with fresh
-PCM and receiver state, and a required aggregation job
-rejects missing/duplicate seeds before applying the same per-case probability
-and combined RMS limits to all 64 seeds per case. Partial capture success is
-not full calibration qualification. Release and Windows retain whole sections.
-Local calibration still defaults to `all` and the existing CTest name. The
-`DATAPUMP_CALIBRATION_SECTION` CMake setting selects a section for CI.
-
-Local complete runs and the legacy two-part format remain available;
-`DATAPUMP_CALIBRATION_SHARDS` defaults to `2`, with `4` the
-explicit alternative for shaped parts. Four-part results declare their count
-separately from the two-case capture-plan identity and cannot mix with legacy
-results. The native Linux `calibration-plan` scope checks both plans and direct
-CLI parsing, including both placements of the count option, without sampled
-captures; it is a focused prerequisite check, not calibration qualification.
-
-[`tools/run-ci-tests.py`](../tools/run-ci-tests.py) assigns every registered test
-to exactly one functional scope. Contract labels intentionally overlap these
-scopes and are not another duplicated test selection. Each run checks its JUnit
-results against the selected inventory and retains JSON timing/coverage, JUnit
-and console logs. Passing tests that consume at least 80% of their individual
-timeout produce warnings. Assertions, sanitizer findings, skipped mandatory
-tests and unclassified timeouts remain failures; elapsed time alone cannot
-establish correctness.
-
-Instrumented native core runs unrelated core tests first, then runs
-`gui_timing_advice` alone and the original `gui_controller` and `gui_application`
-together at the configured CTest concurrency. This protects advice responsiveness
-and reserves the GUI pair's phase for its stop-critical receiver computation. Every
-selected test runs exactly once with its existing assertions and deadlines.
-The report retains the complete inventory, combined results, JUnit and console
-log, plus each phase's actual command, return code, timing, log and JUnit.
-Single-process scopes retain their existing report format.
-
-Conditional arithmetic fixtures remain selected when the current CTest inventory
-explicitly declares integer `SKIP_RETURN_CODE 77`. A matching JUnit `notrun` case
-with exactly `SKIP_RETURN_CODE=77` and no failure, error or disabled condition is
-reported as `omitted`. Its name remains in the selected inventory and results,
-with its reason and exit code; it receives no passing-assertion annotation.
-Reports enumerate `runtime_omissions` and separate passed, omitted and incomplete
-or failed counts. A scope with at least one passing case and only these declared
-omissions reports `passed_with_omissions`; an all-omitted scope fails for having
-no passed coverage. Undeclared skips, malformed results, nonzero CTest exits,
-assertions and timeouts still fail. The existing `omitted` field continues to
-record only preselected instrumented Fast exclusions. These conditional fixtures
-retain their existing eligibility checks; the GUI smoke budget policy and native
-direct-test runner keep their existing contracts. Historical failed jobs retain
-their actual outcomes.
-
-The complete GUI contract uses a 1200-second cumulative smoke budget on
-`ubuntu-24.04`, with a warning only after a successful smoke exceeds the normal
-600 seconds. Its renderer uses one worker. H runners retain 600 seconds and
-two renderer workers. Individual reception, cancellation and content checks
-are unchanged; an exhausted hard budget is still a mandatory Release failure.
-To repeat both complete GUI suites after a focused fix without rerunning
-unchanged calibration and package scopes, use:
-
-```sh
-gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=gui-contract -f linux_runner=ubuntu-24.04
-```
-
-This covers full GUI contracts only and does not substitute for general native
-qualification. Reuse completed checks only for their unchanged source/configuration.
-
-Package and test jobs share reusable workflow definitions, not configured build
-trees. This repeats a small amount of setup/compilation while avoiding brittle
-build-tree relocation and keeping test work disjoint. Linux retains two CTest
-slots, except Live, frontend and web scopes use one; Windows also uses one. Calibration detects
-available CPUs, capped at 16.
-SDK package producers likewise run independently of source qualification, so
-copied SDK binaries can be checked as soon as the packages are ready. Every
-required scope still contributes to the workflow result.
-
-Full GNU 11 Debug core uses two independent build/test partitions. Their build
-targets come from the prerequisite relation generated by `TestGroups.cmake`,
-cross-checked against complete configured CTest discovery. The controller and
-application GUI pair stays together in its existing isolated phase; developer
-CLI regressions run once in part zero. A required aggregate checks both parts
-against the original unpartitioned inventory and matching source, compiler,
-dependency and configuration identities. Declared omissions and hosted coverage
-warnings remain explicit. The standalone native `core_part=all` route is unchanged.
-For an affected-core rerun, manual `ci.yml` with `devfast=true` and
-`diagnostic=core-partition` runs both full Debug partitions, the CLI regressions
-and their required aggregate. It supplies only that scope's coverage.
-The common configuration identity excludes CTest's per-container dashboard
-`SITE` name; compiler flags, sanitizer settings, dependency bytes and registered
-test properties remain bound.
-
-Native Debug preparation uses four comparison partitions. Each keeps a complete
-serial/parallel comparison in one process; reservation, shared-storage, small-loan,
-tiled and the complete partial/zero/stopped-input cancellation sequence remain
-required. The executable's case inventory drives a required aggregate, which
-rejects missing, duplicated, failed or mismatched source/configuration results.
-The only differing configuration entry is the explicit preparation selector.
-The aggregate retains the original 9000-second workload cap using the sum of
-part test times, warning from 7200 seconds after complete success; this sum is
-reported separately from distributed wall-clock time.
-Each producer builds its own small prerequisite set and transfers only its
-result metadata. `preparation_part=all` and the original no-argument invocation
-retain the complete local test; Release, Windows and SDK continue to use it.
-Manual `ci.yml` with `devfast=true` and `diagnostic=preparation-partition` runs all
-four instrumented parts and their aggregate without selecting other native scopes.
-
-SDK FLTK qualification runs complete preparation and calibration invocations in
-separate jobs. General and Live share one build, then execute separately with
-their original concurrency. The general partition runs the original
-`symbol_burst_live` invocation after other CTest processes finish, preserving its
-wall budget while avoiding co-scheduling with CPU-intensive tests. Native Linux
-Release core uses the same isolated Burst phase. All four logical groups and the build/packaging
-checks remain required; the full standalone SDK test route remains available.
-Only small plans, reports and logs move between these jobs. Configured build
-trees and sanitizer executables are not transferred. `./build.sh configure`
-uses the normal profile and SDK validation, then stops before compilation.
-
-If copied SDK checks fail during setup, manual `sdk.yml` accepts `devfast=true`,
-`copy_run_id=RUN_ID` and `copy_source_sha=FULL_SHA` to run only the four original
-copied-runtime cases against existing packages. It requires successful package
-producers and immutable artifacts from that exact manually dispatched SDK run
-in the same repository. The retained receipt binds source, producer jobs,
-artifact IDs, sizes and digests; downloads reject digest mismatches. This route
-does not rerun source qualification or establish full SDK or release eligibility.
-
-Manual `ci.yml` with `devfast=true`, `diagnostic=native-copy-recovery`,
-`copy_run_id` and `copy_source_sha` checks an existing native package on Ubuntu
-22.04 and 24.04 using its exact producer run, source and artifact digest. It calls
-`native-copy-recovery.yml`, which also has a direct manual entry point once
-registered on the default branch.
-It retains all original archive, smoke and ABI checks without rebuilding the
-package; it supplies copied-package coverage only.
-
-The manual `native-linux.yml` scope `ci-build-probe` measures strict cold, warm
-and changed-source compiler-cache builds on standard native and SDK runners.
-It is diagnostic feedback, not qualification. Its bounded caches stay on the
-runner; it uploads metadata only and does not create persistent GitHub cache
-entries. Publication and exact delivered-binary certification keep their
-existing independent gates.
-
-The native Ubuntu 22.04 shard, native copied-runtime Ubuntu 22.04/24.04 checks
-(including exact-package recovery), and SDK copied-runtime Ubuntu 24.04 checks
-use a 180-second package-acquisition watchdog for their fixed dependency profiles.
-On expiry, the bootstrap helper closes its
-download workers and rotates only its official signed mirror list within the
-existing three attempts. Offline installation follows successful acquisition
-immediately and has no watchdog. Authentication, hashes and package failures
-remain fatal. Other callers retain the default acquisition path. Manual
-`native-linux.yml` scope `ci-apt-probe` accepts `apt_profile=native-ubuntu22` or
-`apt_profile=sdk-runtime-ubuntu24` to measure setup without building or qualifying
-the application. The latter diagnostic uses a conservative 600-second allowance.
-
-Standard GitHub-hosted runners are the defaults. Agents should explicitly select
-H pools when they expect them to save elapsed time:
-
-```sh
-gh workflow run ci.yml --ref REF -f devfast=false -f linux_runner=ubuntu-latest-h -f windows_runner=windows-latest-h
-gh workflow run sdk.yml --ref REF -f devfast=false -f linux_runner=ubuntu-latest-h
-```
-
-For changes confined to Linux distribution packaging, start with
-`python3 tests/test_apt_release.py`, `python3 tests/test_distro_release.py`,
-`python3 tests/test_arch_release.py`, `python3 tests/test_gentoo_sync.py` and
-the affected release/certification helper tests; `./build.sh test build` runs their normal group. Once complete, use
-`release.yml` with `source_release=SOURCE_RELEASE_TAG` to wrap existing verified archives in a new experiment and
-test the same packages on Debian/Ubuntu AMD64 and ARM64 and native Arch/Gentoo
-repositories with the selected runners. For update channels, also exercise a signed
-A-to-B update, idempotent refresh and rejected tampered/older metadata with the
-small local fixtures before native installation. Gentoo host dependencies must come from its
-binary repository; a missing binary fails with an actionable error instead of
-starting an expensive source build.
-This path does not rebuild application binaries or SDKs. Publication requires
-the new release to retain the original SDK/dependency triplets.
-Repackaging copies them from the source release, or resolves an older release's
-exact application-source recipe in `base`; missing or unprovable recipes fail.
-Follow publication with full `certify.yml`, `devfast=false`, for that new
-release; packaging-only checks are not a substitute for release certification. See
-[APT packaging and validation](releases.md#package-an-existing-release-without-rebuilding-it).
-
-Manual workflows expose `linux_runner`, `windows_runner` and, where applicable,
-`arm_runner` dropdowns. Defaults and automatic push/PR jobs use standard
-GitHub-hosted runners: `ubuntu-24.04`, `windows-2022` and `ubuntu-24.04-arm`.
-These hosts are free for public repositories. Heavy H pools require an explicit
-selection; agents should select them when expected to save elapsed time, without
-requiring a separate user request. Pass the chosen inputs through
-`gh workflow run -f`; merely pushing a change does not select heavy runners.
-The ARM64 L and H tiers provide 8 and 32 CPUs respectively. The ARM64 selector
-does not affect x86-64 routing. Package-manager checks, reusable workflows and
-base-maintenance helper jobs preserve explicit selections and use standard hosts
-when no runner is supplied.
-Use the [runner selection guide](releases.md#runner-selection-and-build-parallelism)
-to choose and verify access before a long run. `ci.yml` with `devfast=true` and
-`diagnostic=runner-capacity` checks routing, visible CPUs and small production
-compiler fixtures without building SDKs or running calibration. This routing
-check does not replace applicable source regression or release certification.
-
-Check a larger ARM64 pool without repeating x86-64 or Windows diagnostics:
-
-```sh
-gh workflow run ci.yml --ref REF -f devfast=true \
-  -f diagnostic=arm-runner-capacity -f arm_runner=ubuntu-24.04-arm-h
-```
-
-Reuse matching runner-capacity evidence instead of repeating checks solely to
-compare pools.
-Keep the applicable full regression and release certification sequence below
-after the focused checks.
-
-For a completed branch candidate, use the full workflow, and SDK qualification
-when the change touches its supported toolchains or portable packages:
-
-```sh
-gh workflow run ci.yml --ref REF -f devfast=false
-gh workflow run sdk.yml --ref REF -f devfast=false
-gh run watch RUN_ID --exit-status
-```
-
-Replace `REF` and `RUN_ID` with the intended revision and the actual dispatched
-run. Check each required result; a queued, running, skipped or cancelled job is
-not a pass. Diagnose a failure narrowly and rerun the affected full checks once
-fixed. Record source SHA, commands/run links, outcomes and untested boundaries in
-[validation](validation.md). If a check cannot finish, state what is blocked and
-what remains; do not describe the change as fully validated or the release as
-certified. See [release validation](releases.md#diagnose-a-branch-before-full-validation)
-for the separate publication/certification sequence and source-pinning rules.
-
-### Sanitizer throughput scope
-
-Native CI's manual `sanitizer_realtime` checkbox defaults to **false**. Only its
-instrumented Debug job omits `fast_session` and `gui_fast_live` by default. Both
-feed audio at wall-clock speed, so sanitizer overhead can exhaust the bounded
-capture queue before decoding catches up. This is not evidence of a hardware-only
-fault. The omission removes these scenarios' instrumented end-to-end coverage;
-the job notice and summary name it explicitly. No error is converted to success.
-
-Release jobs still require both tests, and all other sanitizer regression tests
-remain required across the independent scopes. Calibration, source contract
-checks and release certification retain their assertions. Include the two
-instrumented checks explicitly with:
-
-```sh
-gh workflow run ci.yml --ref REF -f devfast=false -f sanitizer_realtime=true
-```
-
-The checkbox has no effect with `devfast=true`. Local `./build.sh sanitize`
-selection is unchanged. To request just these two cases in an already configured
-`build/sanitize` tree, rebuild their executables first:
-
-```sh
-cmake --build build/sanitize --target test_fast_session test_gui_fast_live --parallel 2
-ctest --test-dir build/sanitize --output-on-failure --parallel 1 \
-  -R '^(fast_session|gui_fast_live)$' --no-tests=error
-```
-
-Failures remain fatal when requested. Keep the production FIFO, physical-end and
-pending-content assertions intact; do not classify unrelated sanitizer findings
-as performance warnings.
-
-The functional `live` and `live_profiles` fixtures, and the controlled-clock
-`symbol_burst_live` fixture, have bounded CPU-work allowances. Instrumented
-builds allow up to three times their normal workload budget and report
-`TEST_WORKLOAD_BUDGET` when they exceed the normal allowance. CI preserves these
-warnings from successful CTest output in its report and summary. Except for the
-typed incomplete-coverage case described below, every case must finish and pass
-its assertions within the bounded instrumented allowance. The Symbol_Burst
-fixture keeps its normal 25-second computation budget and uses 75 seconds under
-ASan/UBSan. Every capture-clock, content, queue-drain and physical-completion
-assertion remains required. Real-time throughput, cancellation, physical
-absence and queue-drain stabilization checks are unchanged.
-
-Standard-hosted native Live scopes and the FLTK SDK Live checks also run a
-separate functional-clock analogue. It uses ordinary modulation geometry for
-the positive raw, short and framed transmissions while retaining the original
-content, physical-absence, cancellation and error assertions. This analogue
-checks functional completion under ordinary transmission geometry; it does not
-qualify compact-geometry throughput. The original compact Live attempt remains
-mandatory: only a typed, healthy, recently progressing workload-limit result
-may be recorded as incomplete coverage with a warning. That result is never a
-compact Live pass. The standard-geometry analogue must finish every assertion;
-the compact attempt may be incomplete only under the typed rule above. The
-workflow reports this as `passed_with_warnings` with the coverage limit
-recorded. This exception is limited to standard-hosted Live scopes; local runs
-and all other scopes keep their existing behavior. The manual focused SDK Live
-scope runs the SDK build-isolation setup group separately and does not replace
-the remaining SDK contracts or calibration.
-
-The `gui_controller` fake-EU delayed sampled-arrival fixture has a separate
-CPU-functional allowance: five seconds normally and fifteen seconds with
-ASan/UBSan instrumentation. Continuation past five seconds requires the hop
-change and any required list cycle to have already satisfied their original
-five-second window. The original simultaneous cold advice/RX/noise setup and
-all fixture assertions remain required. The arrival warning is buffered until
-every FHSS fixture stage succeeds. A warning records exceeded computation time;
-it does not establish a strict five-second instrumented arrival pass or a
-performance improvement. Release retains five seconds. The three-second GUI
-timing-advice gate, hardware timing, immediate abort, cancellation, physical
-END and protected source-tail bounds are unchanged. The fifteen-second limit
-is fatal if full completion fails; this fixture has no incomplete-coverage or
-exit-75 classification.
-
-The instrumented native GUI smoke is an independent optional job. Normal full
-CI omits it and explicitly records missing instrumented desktop coverage;
-Release/package GUI smoke still runs. Select `sanitizer_smoke=true` to
-include it alongside full regression, or use the focused diagnostic below.
-It has a cumulative workload allowance,
-not a real-time receiver requirement. If that allowance expires while the same
-finite sampled transmission is demonstrably advancing, the application returns
-75 with `INCOMPLETE GUI_SMOKE_BUDGET:` and progress evidence. All existing smoke
-assertions run before this classification. A stalled transmission, idle noise,
-polling or advancing wall-clock compute time cannot establish progress. The
-recent-progress window is 30 seconds; errors and non-transmission waits keep
-their ordinary failure result.
-
-All CI smoke scopes, including Release, SDK, packaging and certification, treat
-this exact validated result as **incomplete GUI coverage with a warning**. The
-log and structured result are retained as workflow artifacts; certification also
-binds the warning to the exact source, checksum inventory, target and execution
-scope. It is not a smoke pass. This accepted workload limitation does not block
-workflow success or Latest eligibility for an otherwise qualified ordinary
-release. Local tests remain strict unless the CI helper is explicitly selected.
-
-The wrapper rejects malformed progress evidence, sanitizer diagnostics, crashes,
-external process timeouts and other failures. ASan/UBSan also halt on errors in
-the instrumented job. This exception does not apply to calibration or other test
-timeouts. Every ordinary assertion and physical completion requirement remains
-unchanged. `tools/run-native-tests.py` preserves the registered smoke command,
-environment, working directory and external timeout, and executes every other
-selected CTest case normally.
-
-To repeat the entire affected instrumented GUI workflow without
-repeating unrelated calibration or platform suites, use:
-
-```sh
-gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=sanitizer-gui
-```
-
-This uses the same Debug compiler, sanitizer flags, selected runner and
-600-second smoke allowance. It additionally checks the budget classifier
-and strict runner policy with bounded fixtures. A successful diagnostic with an
-incomplete warning is not full native qualification. Ordinary automatic CI
-remains limited to the existing lightweight checks. Full CLI regression runs in
-the independent Core jobs rather than being repeated by this GUI diagnostic.
-
-## Focused development diagnostics
-
-The manual `devfast` checkbox in native CI (`ci.yml`), SDK qualification
-(`sdk.yml`) and release certification (`certify.yml`) defaults to **false**.
-Default manual dispatches retain calibration and their normal regression
-selections, with the two instrumented real-time cases opt-in as described above.
-With `devfast=true`,
-each workflow defaults to the same small Legacy diagnostic on Linux and
-Windows: compile the production Legacy controller/session and existing
-`gui_legacy_live` fixture and deterministic `gui_legacy_poll` cancellation/error
-regression, then require three consecutive serial passes, stopping
-at the first failure. Builds use the runner's available CPU cores. This path
-does not build the SDK or full application, run the general platform matrix,
-create packages, use Actions artifacts/cache, or certify/promote a release.
-
-Dispatch one of these equivalent diagnostic entry points after pushing the
-branch under investigation:
-
-```sh
-gh workflow run ci.yml --ref codex/portable-releases -f devfast=true
-# Alternatively; no release_tag is needed for a source diagnostic:
-gh workflow run certify.yml --ref codex/portable-releases -f devfast=true
-```
-
-For a Windows Rev compiler or event-loop fault, native CI also offers a focused
-selection that first runs the dependency-free Win32 message regression, then
-downloads the existing Windows base and compiles only the actual Rev GUI:
-
-```sh
-gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=windows-rev
-```
-
-For the adapter, Windows DSP and ARM64 CLI regressions found by full
-certification, use the bounded selection:
-
-```sh
-gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=certification
-```
-
-It builds only the existing Linux FLTK/Rev adapter tests, Windows FLTK adapter
-plus `pattern_code`/`fast_low_rate`, and the ARM64 CLI differential-estimate
-case. Linux x86-64 and Windows dependencies come from the exact reusable base;
-ARM64 uses the same Clang baseline as the Rev release. Tests retain their
-assertions and individual deadlines. No calibration, full smoke sequence,
-package publication or certification runs in this diagnostic. Once fixed,
-run the affected full checks and publish/certify new binaries when runtime
-changes must reach users.
-
-For a standard-runner timeout in the full ARM Rev adapter, or in the SDK's
-functional Live fixtures, select only the affected unchanged source tests:
-
-```sh
-gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=arm-rev-adapter \
-  -f diagnostic_release=RELEASE_TAG -f arm_runner=ubuntu-24.04-arm
-gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=sdk-live \
-  -f diagnostic_release=RELEASE_TAG -f linux_runner=ubuntu-24.04
-```
-
-`diagnostic_release` selects the exact source tag/ref; omitting it uses `REF`.
-The ARM diagnostic runs every existing adapter assertion. Its outer cumulative
-cap matches the existing 900-second allowance on the standard ARM runner;
-other diagnostic runners retain 600 seconds. It warns only after complete
-success exceeds the normal 330-second CTest cap. Every assertion and internal
-deadline remains unchanged; failure or incomplete execution remains fatal.
-The SDK
-diagnostic runs the keyed acquisition reproducer, then both complete Live
-suites serially with their original deadlines. Neither runs general calibration
-or certifies a release. Full SDK and Linux certification also isolate these two
-Live suites before running the remaining contract cases with two test workers;
-the selections retain every contract case and assertion.
-
-Full certification gives only the standard ARM64 Rev adapter's cumulative
-workload a 900-second cap, after its unchanged assertions took 530 seconds in
-this diagnostic. Successful completion beyond the ordinary 330 seconds emits
-a timing warning. The source and published GUI smoke retain their 600-second
-caps; every adapter assertion and the other native cases remain mandatory.
-H runners retain the original adapter allowance. An incomplete adapter run,
-assertion or crash still fails certification. Independent certification attempts
-may test immutable source/assets concurrently; their final report uploads and
-release-note updates retain the per-release lock and never replace old reports.
-
-When Linux and ARM checks already passed and only the Windows fault is changing,
-reuse that evidence and retry the same three Windows regressions alone:
-
-```sh
-gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=windows-certification
-```
-
-This selects the reusable diagnostic's `scope=windows`; `certification` keeps
-`scope=all`. It still runs the complete Windows FLTK adapter, `pattern_code` and
-`fast_low_rate` checks, without rebuilding unchanged Linux or ARM targets.
-
-For a graphics-driver startup failure after publication, use the bounded
-environment diagnostic on the unchanged archive:
-
-```sh
-gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=graphics \
-  -f diagnostic_release=RELEASE_TAG
-```
-
-It inspects the Windows WGL bootstrap using the installed compiler/SDK and
-compares host GLX with the published ARM64 Rev binary on Ubuntu 24.04. It builds
-neither the application nor its dependencies. Loader output and bounded startup
-failures are diagnostics, not full smoke/certification results. Archives,
-drivers and registry settings remain unchanged.
-
-After correcting the ARM64 portable runtime, `devfast=true,
-diagnostic=arm-rev-package` builds only that Rev package on Ubuntu 22.04 and
-checks its unchanged archive on Ubuntu 24.04. The startup check requires a
-visible window and host Mesa/LLVM/C++ runtime mappings within 15 seconds.
-It does not run the full GUI smoke or calibration, upload artifacts, or publish
-a release. Follow a focused pass with applicable full validation.
-
-For a copied ARM64 Rev smoke failure, build only the affected package from the
-corrected branch and run its complete GUI smoke on Ubuntu 22.04 and Debian Trixie:
-
-```sh
-gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=arm-rev-smoke
-```
-
-This mode retains the Ubuntu 22.04 build baseline, verifies archive/package
-hashes and the glibc 2.35 ceiling, then runs both copied GUI smokes with their
-600-second allowances and the same display prerequisites as certification.
-It defaults to the standard ARM64 runner and uses the pinned runtime dependency
-scanner; it does not rebuild an SDK, run calibration or a general matrix, upload artifacts,
-publish or certify a release. Rerunning an older release cannot test this new
-checker; this diagnostic rebuilds the selected branch's package explicitly.
-
-The `windows-rev` path performs a bounded headless self-check; it creates no
-release or Actions artifact and does not qualify rendering, full regression
-coverage or published binaries. `diagnostic=legacy` remains the default. Choose the
-selection that reproduces the current fault, then follow with applicable full
-checks and certification once the candidate is complete.
-
-The diagnostic logs and run summary identify the checked-out branch SHA.
-A new dispatch selects the current branch commit; rerunning an earlier run
-uses its original commit. Full certification instead checks out the published
-release's recorded source revision and tests its published binary hashes.
-Diagnostic jobs have read-only repository permissions and never issue
-certification reports or change release status.
-
-The same focused build needs CMake 3.21+, a C++20 compiler and the selected
-build generator, without OpenSSL, native GUI dependencies or an SDK. On Linux:
-
-```sh
-cmake -S tests/devfast -B build/devfast -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build/devfast --parallel "$(nproc)"
-ctest --test-dir build/devfast --output-on-failure -R '^gui_legacy_(poll|live)$' \
-  --parallel 1 --repeat until-fail:3 --stop-on-failure --no-tests=error
-```
-
-On Windows with Visual Studio 2022 or 2026 and installed v143 tools, using
-PowerShell (CMake 4.2 or newer is required for VS2026):
-
-```powershell
-$toolchain = & ./tools/select-windows-toolchain.ps1
-cmake -S tests/devfast -B build/devfast -A x64
-cmake --build build/devfast --config Release --parallel $env:NUMBER_OF_PROCESSORS
-ctest --test-dir build/devfast -C Release --output-on-failure -R '^gui_legacy_(poll|live)$' `
-  --parallel 1 --repeat until-fail:3 --stop-on-failure --no-tests=error
-```
-
-Manual `devfast` does not suppress lightweight checks triggered by a preceding
-PR update or push to `main`.
-For intermediate diagnosis commits, a temporary `[skip ci]` commit-message
-marker can [skip automatic push/PR runs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs)
-while still allowing manual dispatch. After the candidate is complete,
-explicitly dispatch the ordinary workflows with `devfast=false` (or unchecked), including applicable
-contract, GUI/native and packaging checks. Wait for those outcomes as described
-in [testing stages](#testing-stages). A focused pass is development feedback,
-not a substitute for those gates.
+## Test selection and candidate validation
+
+Tests are excluded from the default application build. Build a group's
+prerequisites before invoking CTest; CTest by itself does not rebuild. Use
+`./build.sh --help` for the current group list and `./build.sh test GROUP` to
+build and run the selected scope. For individual work, build the matching test
+target first. Shared GUI changes need affected frontend checks; Python-dependent
+tests are registered only when Python is available.
+
+Start with the smallest deterministic check that covers the changed behavior.
+After the change is complete, run applicable groups for shared codecs, security,
+audio, GUI, Fast, Legacy, packaging, and frontends. Reuse results only when
+source, configuration, and relevant inputs match. Keep failed, skipped, and
+incomplete coverage visible; a focused pass does not qualify unrelated behavior
+or a release.
+
+### Robust computational checks
+
+The retained `triad` group covers concise native waveform, shaping, stream, and
+Helper Generator checks. Computationally intensive Robust performance work uses
+[`tools/triad_abbreviated.py`](../tools/triad_abbreviated.py) under the
+[abbreviated statistical policy](triad-performance.md). Predeclare the covered
+kernels and path strata, stage allocation, uncertainty decision, and provenance.
+The harness projects only repeated units of fixed kernel geometry; it does not
+estimate end-to-end receiver latency, physical success, or radio qualification.
+Do not restore full, sustained, multi-day, exhaustive, or heavy-calibration
+campaigns as routine tests or fallback. RunPod accelerates the same bounded
+approach.
+
+### CI, sanitizers, and release validation
+
+Automatic CI is fast feedback for its selected source scope and does not by
+itself certify a release. Use the current workflows in `.github/workflows/` for
+platform, SDK, package, and published-archive checks. Use
+`./build.sh sanitize GROUP` for the selected instrumented tests. Report the exact
+scope and any declared exclusions; sanitizers cover only executed instrumented
+paths. Follow [release validation](releases.md#diagnose-a-branch-before-full-validation)
+when release assurance is in scope. Publication, certification, and promotion
+remain separate operations.
+
+Documentation-only edits need proportionate link and consistency checks, not
+modem benchmarks. Keep maintained outcomes concise in
+[validation.md](validation.md); retain source-matched historical research with
+its provenance and limitations.
 
 ## Compile-time policy
 
@@ -1250,11 +582,8 @@ certification restores its Linux SDK and Windows dependencies from that release'
 own assets, so deleting `base` does not block it. Older schemas retain the base
 fallback. The current `tools/release-dependencies.py fetch` helper retrieves a
 full verified archive pair by default; use `--binary-only` when sources are not
-needed. Copied GUI checks use
-`-DGUI_SMOKE_TIMEOUT=600`. Rev replay/waterfall cadence misses emit visible
-warnings and do not prevent publication or certification; pending-progress,
-content, physical-completion and cancellation assertions remain mandatory.
-See [release warnings](releases.md#rev-display-warnings). Physical-device
+needed. Package verification checks the selected binaries, notices, checksums and
+relocation. Robust reception is unavailable in the GUI and physical-device
 qualification remains a separate scope.
 
 The [signed Debian repository](releases.md#debian-installation-from-github-releases)
@@ -1292,7 +621,7 @@ all required notices and ordinary documentation remain installed. See
 | Concern | Start here | First focused group |
 | --- | --- | --- |
 | Wire format, short bits, physical completion, pending rows | [development contract](development.md), `src/transfer.cpp`, `src/stream_codec.cpp`, `src/live.cpp` | `contract` |
-| Regular detector/search | [Robust topics](indexes/robust.md), `src/pattern_*`, `src/receiver_probability*` | `regular`, then `contract` |
+| Robust modem | [Current architecture and test policy](robust-current.md) | `triad`, then affected shared component groups |
 | Independent Fast/Legacy modem | [Fast topics](indexes/fast.md), [Legacy reference](legacy-modem.md), `src/fast/`, `src/legacy/` and matching public headers | `fast` / `legacy` |
 | Shared GUI behavior | [GUI architecture](gui-architecture.md), `src/gui/application.cpp`, `src/gui/controller.cpp` | `gui`, then affected native backends |
 | Native widgets/platform services | `src/gui/backend_fltk*`, `src/gui/backend_rev*` | `gui`, `native` |

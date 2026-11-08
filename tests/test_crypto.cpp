@@ -74,16 +74,20 @@ void test_streams() {
     for (auto purpose : {StreamPurpose::Dsss, StreamPurpose::Scrambler, StreamPurpose::Fhss}) {
         check(all != crypto.stream(purpose, 1720000000, 0, 1024), "purpose keys overlap");
     }
+    // Independently generated with Python hashlib/HMAC HKDF and OpenSSL enc
+    // AES-256-CTR, matching the public fixture recipe of the Data vector.
+    check(crypto.stream(StreamPurpose::Dsss,1720000000,0,64)==from_hex(
+        "0f916d2cc41666a80289468973791d940e1a93b5c60c7b57153ea3be0be88a8b"
+        "eeec793107dce392a7318418af7bbf960f80e2e4a95e6355de0c8df2d1e8dcf2"),
+        "DSSS purpose slot/label vector mismatch");
+    check(crypto.stream(StreamPurpose::Scrambler,1720000000,0,64)==from_hex(
+        "b482d23e9f728bee8dce8ac2bd9c87fd2a7103a03050d3808d16e1e2f8fdc8f4"
+        "ce6f6cf74cbfb4106885370f27cb244254e22e1b482456120a69865890b33177"),
+        "Scrambler purpose slot/label vector mismatch");
     for (auto offset : {0U, 1U, 15U, 16U, 17U, 255U, 511U}) {
         const auto slice = crypto.stream(StreamPurpose::Data, 1720000000, offset, 127);
         check(std::equal(slice.begin(), slice.end(), all.begin() + offset), "random access stream mismatch");
     }
-    auto plain = bytes("clipboard text\nsecond line");
-    const auto confidential=independent_key();
-    auto encrypted = confidential.xor_data(plain, 1720000000, 19);
-    check(plain != encrypted, "encryption did not alter data");
-    check(plain == confidential.xor_data(encrypted, 1720000000, 19), "CTR round trip failed");
-    check(confidential.xor_data({}, 0).empty(), "empty stream failed");
     rejects([&] { crypto.stream(static_cast<StreamPurpose>(99), 0, 0, 1); }, "invalid purpose accepted");
     rejects([&] { crypto.stream(StreamPurpose::Data, 0, std::numeric_limits<std::uint64_t>::max(), 2); },
             "stream offset wrapped");
@@ -95,246 +99,16 @@ void test_streams() {
     check(all != Crypto(other_master).stream(StreamPurpose::Data, 1720000000, 0, 1024), "master keys overlap");
 }
 
-void test_cover_domains() {
-    const Crypto key(Bytes(32,0x6a));
-    std::vector<Bytes> all;
-    for(const auto domain:{StreamDomain::Payload,StreamDomain::Preamble,StreamDomain::Suppression,
-        StreamDomain::PatternZeroV2,StreamDomain::PatternOneV2,
-        StreamDomain::CoverPreambleV1,StreamDomain::CoverSuppressionV1,StreamDomain::CoverWaitV1})
-        for(const auto purpose:{StreamPurpose::Data,StreamPurpose::Scrambler,StreamPurpose::Dsss,StreamPurpose::Fhss}) {
-            const auto bytes=key.stream(purpose,1800000321,0,1024,domain);
-            check(std::find(all.begin(),all.end(),bytes)==all.end(),"cover domain or purpose reused old stream bytes");
-            const auto part=key.stream(purpose,1800000321,509,131,domain);
-            check(std::equal(part.begin(),part.end(),bytes.begin()+509),"cover stream restarted across a cache/block boundary");
-            all.push_back(bytes);
-        }
-}
-
-void test_utc_hopping_domain() {
-    const Crypto key(Bytes(32,0x6a));
-    const auto bytes=key.stream(StreamPurpose::Fhss,0,0,2048,StreamDomain::FhssUtcV3);
-    for(const auto old:{StreamDomain::Payload,StreamDomain::FakeFhssV1,StreamDomain::FhssCycleV2})
-        check(bytes!=key.stream(StreamPurpose::Fhss,0,0,2048,old),"UTC hopping reused an earlier stream domain");
-    const auto part=key.stream(StreamPurpose::Fhss,0,1019,513,StreamDomain::FhssUtcV3);
-    check(std::equal(part.begin(),part.end(),bytes.begin()+1019),"UTC hopping stream restarted at a block boundary");
-    for(const auto purpose:{StreamPurpose::Data,StreamPurpose::Scrambler,StreamPurpose::Dsss})
-        rejects([&]{key.stream(purpose,0,0,1,StreamDomain::FhssUtcV3);},"UTC hopping accepted another stream purpose");
-}
-
-void test_preamble_domain() {
-    Bytes master(32);
-    for(std::size_t i=0;i<master.size();++i)master[i]=static_cast<std::uint8_t>(i);
-    const Crypto crypto(master);
-    constexpr std::uint64_t epoch=1720000000;
-    constexpr auto preamble=StreamDomain::Preamble;
-    constexpr auto final=std::numeric_limits<std::uint64_t>::max();
-    // Independent Python hashlib/hmac HKDF plus openssl enc AES-256-CTR:
-    // same frozen Data epoch key as test_streams, with only the high counter
-    // bytes replaced by ASCII "preamble". The final vector fixes all 64
-    // low counter bits, including the largest supported byte offset.
-    const auto beginning=from_hex("8338c986304db443a52d1127070e6003350b6900834a4384f7146632ddd3ddc3"
-                                  "22fbc085226fc6d659a8481cc9ad1c0d882899c85afbd6dba8582974ae27092b");
-    check(crypto.stream(StreamPurpose::Data,epoch,0,beginning.size(),preamble)==beginning,
-          "preamble counter format vector mismatch");
-    check(crypto.stream(StreamPurpose::Data,epoch,final-15,16,preamble)==
-          from_hex("73a09cfa4b394d4908a49a1fcf838baa"),"final preamble counter vector mismatch");
-    const auto data=crypto.stream(StreamPurpose::Data,epoch,0,1024,preamble);
-    for(auto purpose:{StreamPurpose::Data,StreamPurpose::Dsss,StreamPurpose::Scrambler,StreamPurpose::Fhss}) {
-        const auto payload=crypto.stream(purpose,epoch,0,1024);
-        check(payload==crypto.stream(purpose,epoch,0,1024,StreamDomain::Payload),
-              "explicit payload domain changed existing stream bytes");
-        const auto all=crypto.stream(purpose,epoch,0,1024,preamble);
-        check(all!=payload,"preamble and payload counter domains overlap");
-        check(all!=crypto.stream(purpose,epoch+1,0,1024,preamble),"preamble epoch keys overlap");
-        if(purpose!=StreamPurpose::Data)check(all!=data,"preamble purpose keys overlap");
-        for(auto offset:{0U,1U,15U,16U,17U,255U,511U}) {
-            const auto slice=crypto.stream(purpose,epoch,offset,127,preamble);
-            check(std::equal(slice.begin(),slice.end(),all.begin()+offset),"preamble random access mismatch");
-        }
-        Bytes chunks;
-        for(std::size_t offset=0,index=0;offset<all.size();++index) {
-            constexpr std::array<std::size_t,5> sizes{1,15,17,127,513};
-            const auto count=std::min(sizes[index%sizes.size()],all.size()-offset);
-            const auto slice=crypto.stream(purpose,epoch,offset,count,preamble);
-            chunks.insert(chunks.end(),slice.begin(),slice.end());offset+=count;
-        }
-        check(chunks==all,"preamble chunk boundaries changed bytes");
-        const auto tail=crypto.stream(purpose,epoch,final-30,31,preamble);
-        check(tail!=crypto.stream(purpose,epoch,final-30,31),"final offsets crossed preamble/payload domains");
-        for(std::uint64_t skip:{0ULL,1ULL,15ULL,16ULL,30ULL}) {
-            const auto slice=crypto.stream(purpose,epoch,final-30+skip,static_cast<std::size_t>(31-skip),preamble);
-            check(std::equal(slice.begin(),slice.end(),tail.begin()+static_cast<std::ptrdiff_t>(skip)),
-                  "final preamble byte offset lost random-access consistency");
-        }
-    }
-    check(crypto.stream(StreamPurpose::Data,epoch,final,0,preamble).empty(),"empty preamble stream failed");
-    rejects([&]{crypto.stream(StreamPurpose::Data,epoch,final,2,preamble);},"preamble byte offset wrapped");
-    rejects([&]{crypto.stream(StreamPurpose::Data,epoch,final-15,17,preamble);},"preamble final block overflow accepted");
-    rejects([&]{crypto.stream(StreamPurpose::Data,epoch,0,1,static_cast<StreamDomain>(99));},"invalid stream domain accepted");
-    rejects([&]{crypto.stream(StreamPurpose::Data,epoch,0,0,static_cast<StreamDomain>(99));},"empty stream ignored invalid domain");
-}
-
-void test_fresh_fhss_domain() {
-    Bytes master(32);for(unsigned i=0;i<32;++i)master[i]=static_cast<std::uint8_t>(i);
-    const Crypto key(master);constexpr auto domain=StreamDomain::FhssCycleV2;
-    constexpr std::uint64_t epoch=1720000000;
-    // Independent Python hashlib/hmac HKDF + openssl enc AES-256-CTR,
-    // high counter ASCII fh-cyc02, low counter byte_offset/16.
-    const auto first=from_hex("55ab83752a6e89b7fc0d36ac4bf8b7d92c326bef53d26224e5d0c41144f75233");
-    const auto second=from_hex("7940e22cafc1939c3cca246dfd7d655534dbf62d79aba58b3433cf5aa6efdc40");
-    check(key.stream(StreamPurpose::Fhss,epoch,0,32,domain)==first&&
-          key.stream(StreamPurpose::Fhss,epoch,1024,32,domain)==second,"fresh FHSS format vectors changed");
-    check(key.stream(StreamPurpose::Fhss,epoch,1025,31,domain)==Bytes(second.begin()+1,second.end()),
-          "fresh FHSS unaligned addressing changed");
-    check(first!=key.stream(StreamPurpose::Fhss,epoch+1,0,32,domain)&&
-          first!=Crypto(Bytes(32,7)).stream(StreamPurpose::Fhss,epoch,0,32,domain),"FHSS key/epoch separation lost");
-    for(auto purpose:{StreamPurpose::Data,StreamPurpose::Dsss,StreamPurpose::Scrambler})
-        for(auto count:{0U,32U})rejects([&]{key.stream(purpose,epoch,0,count,domain);},"FHSS domain accepted wrong purpose");
-    for(auto other:{StreamDomain::Payload,StreamDomain::Preamble,StreamDomain::Suppression,
-                   StreamDomain::PatternZeroV2,StreamDomain::PatternOneV2,StreamDomain::FakeFhssV1})
-        check(first!=key.stream(StreamPurpose::Fhss,epoch,0,32,other),"FHSS domain reused old addresses");
-    const auto last=std::numeric_limits<std::uint64_t>::max();
-    check(key.stream(StreamPurpose::Fhss,epoch,last-1023,1024,domain).size()==1024,"last FHSS region failed");
-    rejects([&]{key.stream(StreamPurpose::Fhss,epoch,last-1023,1025,domain);},"FHSS stream wrapped");
-}
-
 void test_authentication() {
     Crypto crypto(Bytes(32, 0x72));
-    const auto first = bytes("timestamp|metadata|message one");
-    const auto second = bytes("timestamp|metadata|message two");
-    const auto tag = crypto.mac(first);
-    check(tag == from_hex("5015234b16cbd11766fb59c5221930c5d32a883975576b716ab3af4b6105869d"),
+    const auto first=bytes("timestamp|metadata|message one");
+    const auto tag=crypto.mac(first);
+    check(tag==from_hex("5015234b16cbd11766fb59c5221930c5d32a883975576b716ab3af4b6105869d"),
           "HMAC format vector mismatch");
-    check(tag.size() == 32 && crypto.verify(first, tag), "MAC verification failed");
-    check(!crypto.verify(second, tag), "changed message accepted");
-    auto bad_tag = tag;
-    bad_tag[31] ^= 1;
-    check(!crypto.verify(first, bad_tag), "changed tag accepted");
-    check(!crypto.verify(first, std::span(tag).first(31)), "truncated tag accepted");
-    bad_tag.push_back(0);
-    check(!crypto.verify(first, bad_tag), "oversize tag accepted");
-    check(!Crypto(Bytes(32, 0x73)).verify(first, tag), "wrong MAC key accepted");
-    check(crypto.verify({}, crypto.mac({})), "empty-message MAC failed");
-    // Chosen plaintext and intentional CTR reuse reveal only reused stream
-    // positions, not a usable MAC for changed plaintext.
-    const auto confidential=independent_key();
-    auto cipher = confidential.xor_data(first, 99);
-    const auto stream = confidential.xor_data(Bytes(first.size()), 99);
-    for (std::size_t i = 0; i < cipher.size(); ++i) cipher[i] ^= stream[i];
-    check(cipher == first, "known plaintext reuse fixture failed");
-    cipher.back() ^= 1;
-    check(!crypto.verify(cipher, tag), "keystream knowledge forged authenticator");
-}
-
-void test_suppression_domain() {
-    Bytes master(32);
-    for(std::size_t i=0;i<master.size();++i)master[i]=static_cast<std::uint8_t>(i);
-    const Crypto crypto(master);
-    constexpr std::uint64_t epoch=1720000000;
-    constexpr auto domain=StreamDomain::Suppression;
-    // Independent Python hashlib/hmac HKDF plus openssl AES-256-CTR, using
-    // the existing Data epoch key and high counter bytes ASCII "suppress".
-    const auto vector=from_hex("43e0f33002feb8ada0341c2489c1a27a43457c9cb855eaf2ec443fa528abfc3b"
-                               "59ea5b82942cd8fb2d950e2714fa77b17989eedb47f45f47cfc2f72857c71432");
-    check(crypto.stream(StreamPurpose::Data,epoch,0,vector.size(),domain)==vector,
-          "suppression counter format vector mismatch");
-    for(auto purpose:{StreamPurpose::Data,StreamPurpose::Dsss,StreamPurpose::Scrambler,StreamPurpose::Fhss}) {
-        const auto all=crypto.stream(purpose,epoch,0,1024,domain);
-        check(all!=crypto.stream(purpose,epoch,0,1024) &&
-              all!=crypto.stream(purpose,epoch,0,1024,StreamDomain::Preamble),
-              "suppression must not reuse payload or preamble keystream bytes");
-        check(all!=crypto.stream(purpose,epoch+1,0,1024,domain),"suppression epoch keys overlap");
-        for(auto offset:{0U,1U,15U,16U,17U,255U,511U}) {
-            const auto slice=crypto.stream(purpose,epoch,offset,127,domain);
-            check(std::equal(slice.begin(),slice.end(),all.begin()+offset),"suppression random access mismatch");
-        }
-        constexpr auto final=std::numeric_limits<std::uint64_t>::max();
-        const auto tail=crypto.stream(purpose,epoch,final-30,31,domain);
-        const auto last=crypto.stream(purpose,epoch,final,1,domain);
-        check(tail.back()==last.front(),"suppression final byte lost random access");
-        rejects([&]{crypto.stream(purpose,epoch,final,2,domain);},"suppression byte offset wrapped");
-    }
-}
-
-void test_private_pattern_domains() {
-    Bytes master(32);
-    for(std::size_t i=0;i<master.size();++i)master[i]=static_cast<std::uint8_t>(i);
-    const Crypto crypto(master);
-    constexpr std::uint64_t epoch=1720000000;
-    // Independent Python hashlib/hmac HKDF plus openssl AES-256-CTR;
-    // fixed high counter bytes are ASCII pat-v2-0 and pat-v2-1.
-    check(crypto.stream(StreamPurpose::Scrambler,epoch,0,64,StreamDomain::PatternZeroV2)==
-        from_hex("51fa6125c11f500aca0dd70b71ac682cee81002fcfc6f7603ea963b0296a97ea"
-                 "19ca8d3d301b735545fb6f749ace1d944746274b15f2fd6b5851fd893337e323"),"private candidate counter vector mismatch");
-    check(crypto.stream(StreamPurpose::Scrambler,epoch,0,64,StreamDomain::PatternOneV2)==
-        from_hex("496e78c43f012621dee29e57d81300b8acb974dc637b46b52ec152555e41d49e"
-                 "8d96ae9de3ba4ab33b14b38c20b31e9df93b7cbaeb06f6da9fc287f02157a162"),"private candidate counter vector mismatch");
-    check(crypto.stream(StreamPurpose::Dsss,epoch,0,64,StreamDomain::PatternZeroV2)==
-        from_hex("4d9d774023174363c104e0342b2ae9914f8e28047d10b6512e2a8a39fbe69b7d"
-                 "e0e55f019585913a8ac83f8af22d88d843fb3244392444c9e80c4104b864aeb6"),"private candidate counter vector mismatch");
-    check(crypto.stream(StreamPurpose::Dsss,epoch,0,64,StreamDomain::PatternOneV2)==
-        from_hex("6d8b2552e7e0cf0e4ea2b5ff704690d7d09fd5f2a436fcba9447874d48b5c4b6"
-                 "4f54cbdabd94421d689aba72020ab6f1e8def17e8a05efb975ef53f9e9ea8a99"),"private candidate counter vector mismatch");
-    for(auto purpose:{StreamPurpose::Scrambler,StreamPurpose::Dsss})
-    for(auto domain:{StreamDomain::PatternZeroV2,StreamDomain::PatternOneV2}) {
-        const auto all=crypto.stream(purpose,epoch,0,1024,domain);
-        for(auto other:{StreamDomain::Payload,StreamDomain::Preamble,StreamDomain::Suppression,
-                        StreamDomain::PatternZeroV2,StreamDomain::PatternOneV2})
-            if(other!=domain)check(all!=crypto.stream(purpose,epoch,0,1024,other),
-                                  "private candidate domain overlaps another stream");
-        check(all!=crypto.stream(purpose,epoch+1,0,1024,domain),"private candidate epoch reused");
-        for(auto offset:{0U,1U,15U,16U,17U,255U,511U}) {
-            const auto part=crypto.stream(purpose,epoch,offset,127,domain);
-            check(std::equal(part.begin(),part.end(),all.begin()+offset),"private candidate seek mismatch");
-        }
-        constexpr auto final=std::numeric_limits<std::uint64_t>::max();
-        const auto tail=crypto.stream(purpose,epoch,final-30,31,domain);
-        check(tail.back()==crypto.stream(purpose,epoch,final,1,domain).front(),"private candidate final seek mismatch");
-        rejects([&]{crypto.stream(purpose,epoch,final,2,domain);},"private candidate byte offset wrapped");
-    }
-}
-
-void test_interleaved_dsss_domains() {
-    Bytes master(32);for(std::size_t i=0;i<master.size();++i)master[i]=static_cast<std::uint8_t>(i);
-    const Crypto crypto(master);
-    constexpr std::array domains{StreamDomain::OuterDsss10RotationV2,StreamDomain::OuterDsss100RotationV2,
-        StreamDomain::OuterDsss1000RotationV2,StreamDomain::OuterDsss10PermutationV2,
-        StreamDomain::OuterDsss100PermutationV2,StreamDomain::OuterDsss1000PermutationV2};
-    // Independent Python hashlib/hmac HKDF and openssl enc AES-256-CTR,
-    // high counter pads dr2-0010/dr2-0100/dr2-1000 and dp2 equivalents.
-    constexpr std::array vectors{
-        "4437244a4f39abf92eb2b81c8dfcd8f5bf3622b6954608607a0e24af7005fb70",
-        "3b1ce5c87fb12d048a3a3dffa9063eafe15b4d7f6324b7302049a4f11cb26bd8",
-        "570bfab8c1f7fc01895eeef0bbe72c2d3bc4bce3703b2610157fb52eee98caea",
-        "84c92df398776c7a5f87ca375dbf5e357f794e934d881b5029487108081b84ad",
-        "2c2ee8aa19ea48777398b0c7292011b6f6374e76df1e289865bf9db6d539bc50",
-        "4c1040d12f59a1b94c0bc5aff21fc63cce0d0b2b5d00e149d88230406c848cd7"};
-    constexpr std::uint64_t epoch=1720000000;
-    for(std::size_t i=0;i<domains.size();++i) {
-        const auto domain=domains[i];
-        check(crypto.stream(StreamPurpose::Dsss,epoch,0,32,domain)==from_hex(vectors[i]),
-              "interleaved DSSS counter vector mismatch");
-        const auto all=crypto.stream(StreamPurpose::Dsss,epoch,0,1024,domain);
-        for(const auto other:domains)if(other!=domain)
-            check(all!=crypto.stream(StreamPurpose::Dsss,epoch,0,1024,other),"V2 DSSS domains alias");
-        for(const auto other:{StreamDomain::Payload,StreamDomain::Preamble,StreamDomain::Suppression,
-            StreamDomain::PatternZeroV2,StreamDomain::PatternOneV2,StreamDomain::OuterDsss10V1,
-            StreamDomain::OuterDsss100V1,StreamDomain::OuterDsss1000V1})
-            check(all!=crypto.stream(StreamPurpose::Dsss,epoch,0,1024,other),"V2 DSSS aliases existing stream");
-        for(const auto purpose:{StreamPurpose::Data,StreamPurpose::Scrambler,StreamPurpose::Fhss}) {
-            rejects([&]{crypto.stream(purpose,epoch,0,32,domain);},"V2 DSSS accepted another purpose key");
-            rejects([&]{crypto.stream(purpose,epoch,0,0,domain);},"empty V2 DSSS accepted another purpose key");
-        }
-        for(const auto offset:{1U,15U,16U,31U,255U,511U}) {
-            const auto part=crypto.stream(StreamPurpose::Dsss,epoch,offset,127,domain);
-            check(std::equal(part.begin(),part.end(),all.begin()+offset),"V2 DSSS random seek mismatch");
-        }
-        check(all!=crypto.stream(StreamPurpose::Dsss,epoch+1,0,1024,domain),"V2 DSSS epoch aliases");
-        constexpr auto final=std::numeric_limits<std::uint64_t>::max();
-        rejects([&]{crypto.stream(StreamPurpose::Dsss,epoch,final,2,domain);},"V2 DSSS byte offset wraps");
-        check(crypto.stream(StreamPurpose::Dsss,epoch,final-31,32,domain).back()==
-              crypto.stream(StreamPurpose::Dsss,epoch,final,1,domain).front(),"V2 DSSS final seek mismatch");
-    }
+    check(tag.size()==32 && crypto.mac(first)==tag,"MAC is not fixed-width/deterministic");
+    check(crypto.mac(bytes("timestamp|metadata|message two"))!=tag,"changed message retained MAC");
+    check(Crypto(Bytes(32,0x73)).mac(first)!=tag,"changed key retained MAC");
+    check(crypto.mac({}).size()==32,"empty-message MAC failed");
 }
 
 void test_keyfiles() {
@@ -462,10 +236,11 @@ void test_confidentiality() {
     check(ach.confidentiality_stream(epoch,0,64)==ach_expected.confidentiality_stream(epoch,0,64),"child lane cross-feed from AES");
     check(child.confidentiality_stream(epoch,0,64)!=key.confidentiality_child(bytes("other")).confidentiality_stream(epoch,0,64),"child contexts overlap");
     const auto context=from_hex(cbc_context),salt=from_hex(cbc_salt),iv=from_hex(cbc_iv),plain=from_hex(cbc_plaintext);
-    const auto encrypted=key.encrypt_confidentiality_cbc(plain,context,salt,iv);
-    check(encrypted==from_hex(cbc_ciphertext) && key.decrypt_confidentiality_cbc(encrypted,context,salt,iv)==plain,"v4 independent CBC vector mismatch");
-    check(changed_s.encrypt_confidentiality_cbc(plain,context,salt,iv)==from_hex(lane_variations_serpent_changed_cbc_ciphertext) &&
-          changed_a.encrypt_confidentiality_cbc(plain,context,salt,iv)==from_hex(lane_variations_aes_changed_cbc_ciphertext),"CBC lane-isolation vectors mismatch");
+    auto prepared=key.prepare_confidentiality_cbc(context,salt);
+    const auto encrypted=prepared->encrypt(plain,iv);
+    check(encrypted==from_hex(cbc_ciphertext) && prepared->decrypt(encrypted,iv)==plain,"v4 independent CBC vector mismatch");
+    check(changed_s.prepare_confidentiality_cbc(context,salt)->encrypt(plain,iv)==from_hex(lane_variations_serpent_changed_cbc_ciphertext) &&
+          changed_a.prepare_confidentiality_cbc(context,salt)->encrypt(plain,iv)==from_hex(lane_variations_aes_changed_cbc_ciphertext),"CBC lane-isolation vectors mismatch");
     // Independently remove the outer AES layer with its frozen key to inspect
     // the inner Serpent ciphertext, including the same inner under changed A.
     const auto inner=[](const Bytes& cipher,const Bytes& akey,const Bytes& wire_iv) {
@@ -477,11 +252,11 @@ void test_confidentiality() {
         EVP_CIPHER_CTX_free(ctx);check(ok,"test AES layer removal failed");result.resize(static_cast<std::size_t>(n+last));return result;
     };
     check(inner(encrypted,from_hex(cbc_aes_key),iv)==from_hex(cbc_inner),"Serpent CBC inner vector mismatch");
-    check(inner(changed_a.encrypt_confidentiality_cbc(plain,context,salt,iv),from_hex(lane_variations_aes_changed_cbc_aes_key),iv)==from_hex(cbc_inner),"changing AES changed inner Serpent CBC");
-    check(inner(changed_s.encrypt_confidentiality_cbc(plain,context,salt,iv),from_hex(cbc_aes_key),iv)==from_hex(lane_variations_serpent_changed_cbc_inner),"changing Serpent changed AES CBC derivation");
-    rejects([&]{key.encrypt_confidentiality_cbc(Bytes(15),context,salt,iv);},"CBC accepted partial block");
-    rejects([&]{key.encrypt_confidentiality_cbc(plain,context,Bytes(31),iv);},"CBC accepted wrong salt width");
-    rejects([&]{key.decrypt_confidentiality_cbc(encrypted,context,salt,Bytes(15));},"CBC accepted wrong IV width");
+    check(inner(changed_a.prepare_confidentiality_cbc(context,salt)->encrypt(plain,iv),from_hex(lane_variations_aes_changed_cbc_aes_key),iv)==from_hex(cbc_inner),"changing AES changed inner Serpent CBC");
+    check(inner(changed_s.prepare_confidentiality_cbc(context,salt)->encrypt(plain,iv),from_hex(cbc_aes_key),iv)==from_hex(lane_variations_serpent_changed_cbc_inner),"changing Serpent changed AES CBC derivation");
+    rejects([&]{prepared->encrypt(Bytes(15),iv);},"CBC accepted partial block");
+    rejects([&]{key.prepare_confidentiality_cbc(context,Bytes(31));},"CBC accepted wrong salt width");
+    rejects([&]{prepared->decrypt(encrypted,Bytes(15));},"CBC accepted wrong IV width");
     for(auto count:{0U,1U})rejects([&]{waveform.confidentiality_stream(epoch,0,count);},"waveform-only key acquired confidentiality stream");
     rejects([&]{waveform.confidentiality_child({});},"waveform-only key acquired confidentiality child");
     rejects([&]{waveform.prepare_confidentiality_cbc(context,salt);},"waveform-only key acquired CBC");
@@ -491,28 +266,18 @@ void test_confidentiality() {
     Crypto copied=key;Crypto assigned(Bytes(32,9));assigned=child;
     check(copied.confidentiality_stream(epoch,0,64)==key.confidentiality_stream(epoch,0,64) && assigned.confidentiality_stream(epoch,0,64)==child.confidentiality_stream(epoch,0,64),"copy lost independent roots");
 }
-void test_confidentiality_authentication_and_identity() {
+void test_confidentiality_authentication() {
     using namespace v4_vectors;
     const auto key=independent_key(),changed_s=independent_key(129),changed_a=independent_key(128,1);
     const auto message=from_hex(mac_message),tag=key.confidentiality_mac(message);
-    check(tag==from_hex(mac_combined) && key.verify_confidentiality(message,tag),"dual MAC independent vector mismatch");
+    check(tag==from_hex(mac_combined),"dual MAC independent vector mismatch");
     check(xor_bytes(tag,from_hex(mac_aes))==from_hex(mac_serpent),"dual MAC component vector mismatch");
     check(xor_bytes(changed_s.confidentiality_mac(message),from_hex(lane_variations_serpent_changed_mac_aes))==from_hex(lane_variations_serpent_changed_mac_serpent),"Serpent auth lane cross-fed AES");
     check(xor_bytes(changed_a.confidentiality_mac(message),from_hex(lane_variations_aes_changed_mac_serpent))==from_hex(lane_variations_aes_changed_mac_aes),"AES auth lane cross-fed Serpent");
-    check(!key.verify_confidentiality(message,from_hex(mac_aes)) && !key.verify_confidentiality(message,from_hex(mac_serpent)),"single known auth lane forged combined MAC");
-    check(!changed_s.verify_confidentiality(message,tag) && !changed_a.verify_confidentiality(message,tag),"changed lane accepted old MAC");
-    auto changed=message;changed[0]^=1;check(!key.verify_confidentiality(changed,tag),"modified message accepted");
-    auto damaged=tag;damaged[0]^=1;check(!key.verify_confidentiality(message,damaged),"modified dual tag accepted");
-    check(!key.verify_confidentiality(message,std::span(tag).first(31)),"truncated dual tag accepted");
-    damaged.push_back(0);check(!key.verify_confidentiality(message,damaged),"oversized dual tag accepted");
-    check(key.verify_confidentiality({},key.confidentiality_mac({})),"empty dual MAC failed");
-    const auto context=from_hex(identity_context);
-    const auto waveform=Crypto(std::span<const std::uint8_t>(from_hex(aes_root)).first(32));
-    check(key.identity_fingerprint(context)==from_hex(identity_confidentiality) && waveform.identity_fingerprint(context)==from_hex(identity_waveform),"identity independent vectors mismatch");
-    check(key.identity_fingerprint(context)!=changed_s.identity_fingerprint(context),"same AES different Serpent keys share identity");
-    check(key.identity_fingerprint(context)==independent_key().identity_fingerprint(context),"equal key values have unequal identities");
-    check(key.identity_fingerprint(context)!=waveform.identity_fingerprint(context),"waveform and dual identities overlap");
-    check(key.identity_fingerprint(context)!=key.identity_fingerprint(bytes("other")),"identity contexts overlap");
+    check(tag!=from_hex(mac_aes) && tag!=from_hex(mac_serpent),"combined MAC equals a single lane");
+    check(changed_s.confidentiality_mac(message)!=tag && changed_a.confidentiality_mac(message)!=tag,"changed lane retained old MAC");
+    auto changed=message;changed[0]^=1;check(key.confidentiality_mac(changed)!=tag,"modified message retained MAC");
+    check(key.confidentiality_mac({}).size()==32,"empty dual MAC failed");
 }
 void test_audio_entropy_failures() {
     TempDir dir;const testing::KeyfilePolicy policy{64,8193};unsigned index=0;
@@ -543,36 +308,32 @@ void test_audio_entropy_failures() {
 }
 
 void test_shared_confidentiality_lifetime() {
-    const Crypto legacy(Bytes(32,0x42));
-    check(legacy.confidentiality_storage_id()==nullptr && legacy.confidentiality_storage_bytes()==0,
-          "legacy waveform root allocated confidentiality storage");
-    auto survivor=legacy;
-    Bytes expected;
-    const void* identity=nullptr;
+    const Crypto waveform(Bytes(32,0x42));
+    auto survivor=waveform;
+    Bytes expected,expected_mac;
     {
         const auto parent=independent_key().confidentiality_child(bytes("shared/lifetime"));
-        identity=parent.confidentiality_storage_id();
-        check(identity!=nullptr && parent.confidentiality_storage_bytes()>=128,
-              "independent root has no accounted storage");
         expected=parent.confidentiality_stream(73,15,65);
-        auto copied=parent;
-        survivor=copied;
-        check(copied.confidentiality_storage_id()==identity && survivor.confidentiality_storage_id()==identity,
-              "copying duplicated immutable confidentiality material");
-        copied=survivor; // Assignment between aliases must retain before release.
+        expected_mac=parent.confidentiality_mac(bytes("lifetime"));
+        auto copied=parent;survivor=copied;
+        check(copied.confidentiality_stream(73,15,65)==expected &&
+              survivor.confidentiality_mac(bytes("lifetime"))==expected_mac,"value copy lost confidentiality roots");
+        copied=survivor; // Alias assignment must retain before releasing.
         copied=copied;
-        copied=legacy;
-        check(copied.confidentiality_storage_bytes()==0 && parent.confidentiality_stream(73,15,65)==expected,
-              "replacing one copy changed another owner's root");
+        check(copied.confidentiality_stream(73,15,65)==expected,"alias/self assignment changed roots");
+        copied=waveform;
+        rejects([&]{copied.confidentiality_stream(73,15,65);},"waveform replacement retained confidentiality");
+        check(parent.confidentiality_stream(73,15,65)==expected,"replacing a copy changed another owner's root");
     }
-    check(survivor.confidentiality_storage_id()==identity && survivor.confidentiality_stream(73,15,65)==expected,
-          "confidentiality material expired with its original owner");
+    check(survivor.confidentiality_stream(73,15,65)==expected &&
+          survivor.confidentiality_mac(bytes("lifetime"))==expected_mac,"roots expired with their original owner");
     std::atomic<bool> valid{true};
     std::array<execution::Task,4> workers;
     for(auto& worker:workers)worker=execution::Task([&]{
         for(unsigned i=0;i<64;++i){
-            auto copied=survivor;auto assigned=legacy;assigned=copied;
-            if(assigned.confidentiality_storage_id()!=identity || assigned.confidentiality_stream(73,15,65)!=expected)
+            auto copied=survivor;auto assigned=waveform;assigned=copied;
+            if(assigned.confidentiality_stream(73,15,65)!=expected ||
+               assigned.confidentiality_mac(bytes("lifetime"))!=expected_mac)
                 valid.store(false,std::memory_order_relaxed);
         }
     });
@@ -589,26 +350,26 @@ void test_prepared_confidentiality_cbc() {
     for(const auto* key:{&legacy,&independent}) {
         auto prepared_a=key->prepare_confidentiality_cbc(context_a,salt_a);
         auto prepared_b=key->prepare_confidentiality_cbc(context_b,salt_b);
-        // The original one-shot path independently repeats full HKDF/key setup.
-        // Compare different/repeated IVs and sizes while alternating directions
-        // and two transfer contexts, so no previous CBC chain can leak through.
+        // Compare reused contexts with independently prepared fresh contexts.
+        // Frozen independent CBC vectors above fix algorithm correctness; these
+        // interleaved calls establish IV/chain reset and prepared-state lifetime.
         for(const auto size:{16U,32U,176U,288U,1024U,4096U}) {
             Bytes plain(size);for(std::size_t i=0;i<plain.size();++i)plain[i]=static_cast<std::uint8_t>(i*73+size);
             for(const auto iv_id:{0U,1U,255U,0U,1U}) {
                 Bytes iv(16);for(std::size_t i=0;i<iv.size();++i)iv[i]=static_cast<std::uint8_t>(iv_id+i*29);
-                const auto expected_a=key->encrypt_confidentiality_cbc(plain,context_a,salt_a,iv);
-                const auto expected_b=key->encrypt_confidentiality_cbc(plain,context_b,salt_b,iv);
+                const auto expected_a=key->prepare_confidentiality_cbc(context_a,salt_a)->encrypt(plain,iv);
+                const auto expected_b=key->prepare_confidentiality_cbc(context_b,salt_b)->encrypt(plain,iv);
                 check(expected_a!=expected_b,"prepared CBC transfer contexts overlap");
-                check(prepared_a->decrypt(expected_a,iv)==key->decrypt_confidentiality_cbc(expected_a,context_a,salt_a,iv),"prepared CBC decrypt-before-encrypt differs from one-shot");
-                check(prepared_b->encrypt(plain,iv)==expected_b,"prepared CBC other transfer differs from one-shot");
-                check(prepared_a->encrypt(plain,iv)==expected_a,"prepared CBC repeated/interleaved encryption differs from one-shot");
+                check(prepared_a->decrypt(expected_a,iv)==plain,"prepared CBC decrypt-before-encrypt differs from fresh setup");
+                check(prepared_b->encrypt(plain,iv)==expected_b,"prepared CBC other transfer differs from fresh setup");
+                check(prepared_a->encrypt(plain,iv)==expected_a,"prepared CBC repeated/interleaved encryption differs from fresh setup");
                 check(prepared_b->decrypt(expected_b,iv)==plain,"prepared CBC other transfer decryption mismatch");
                 check(prepared_a->decrypt(expected_a,iv)==plain,"prepared CBC interleaved decryption mismatch");
                 check(prepared_a->encrypt(plain,iv)==expected_a,"prepared CBC repeated IV changes ciphertext");
             }
         }
         const Bytes plain(32,0x61),iv(16,0x43);
-        const auto expected=key->encrypt_confidentiality_cbc(plain,context_a,salt_a,iv);
+        const auto expected=key->prepare_confidentiality_cbc(context_a,salt_a)->encrypt(plain,iv);
         rejects([&]{prepared_a->encrypt(Bytes(15),iv);},"prepared CBC accepted partial block");
         rejects([&]{prepared_a->decrypt(expected,Bytes(15));},"prepared CBC accepted short IV");
         rejects([&]{prepared_a->encrypt({},iv);},"prepared CBC accepted empty input");
@@ -617,22 +378,17 @@ void test_prepared_confidentiality_cbc() {
     rejects([&]{legacy.prepare_confidentiality_cbc(context_a,Bytes(31));},"prepared CBC accepted short salt");
     const auto owned=[&]{const auto temporary=independent_key();return temporary.prepare_confidentiality_cbc(context_a,salt_a);}();
     const Bytes plain(32,0x12),iv(16,0x34);
-    check(owned->encrypt(plain,iv)==legacy.encrypt_confidentiality_cbc(plain,context_a,salt_a,iv),"prepared CBC retained expired Crypto reference");
+    check(owned->encrypt(plain,iv)==legacy.prepare_confidentiality_cbc(context_a,salt_a)->encrypt(plain,iv),"prepared CBC retained expired Crypto reference");
 }
 
 } // namespace
 
 int main() {
     try {
-        test_streams();test_cover_domains();test_utc_hopping_domain();
-        test_preamble_domain();
-        test_suppression_domain();
-        test_private_pattern_domains();
-        test_interleaved_dsss_domains();
-        test_fresh_fhss_domain();
+        test_streams();
         test_authentication();
         test_confidentiality();
-        test_confidentiality_authentication_and_identity();
+        test_confidentiality_authentication();
         test_audio_entropy_failures();
         test_shared_confidentiality_lifetime();
         test_prepared_confidentiality_cbc();

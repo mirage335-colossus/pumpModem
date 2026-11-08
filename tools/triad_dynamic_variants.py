@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Explicit execution/projection alternatives to the frozen joint receiver.
+"""Canonical sparse refinement stage and its fixed public DATA projection.
 
-These never select an arm from its observed success. The core projection is a
-deliberately lossy public selector: it omits added-AM excursion when choosing
-retained bins, while the physical channel, captured sidebands and transmitted
-waveform remain unchanged. Its auxiliary leakage and reception require new
-full-waveform calibration. It is not a declaration of compact physical support.
+The projection changes only the receiver's retained modes, never the simulated
+channel, captured sidebands or transmitted waveform. Prepared affine scans use
+the same Gaussian model and a guarded serial numerical fallback.
 """
 from __future__ import annotations
 
@@ -60,7 +58,7 @@ def core_projection_bands(manifest, *, pilot_use="both", frequencies_hz=(0.,),
 
 
 class ScanJointReceiver(DynamicJointReceiver):
-    """Optional affine scan with the frozen receiver's exact mixture algebra."""
+    """Sparse refinement using the prepared Gaussian likelihood."""
 
     def __init__(self, *args, scan_residual_limit=5e-7,
                  scan_transition_norm_limit=8., scan_serial_below_blocks=0, **kwargs):
@@ -127,37 +125,3 @@ class ScanJointReceiver(DynamicJointReceiver):
                       scan=[scan.diagnostics() for scan in self.scans],
                       variant_policy=self.variant_policy)
         return result
-
-
-class CoreProjectionReceiver(ScanJointReceiver):
-    """Scan receiver with a fixed lossy core projection, explicitly requested."""
-
-    def __init__(self, manifest, raw_templates, epoch_offsets, **kwargs):
-        if (kwargs.get("required_bands_hz") is not None or
-                kwargs.get("auxiliary_exclusion_hz") is not None):
-            raise ValueError("core projection cannot be combined with caller-supplied bands")
-        required, excluded = core_projection_bands(manifest,
-            pilot_use=kwargs.get("pilot_use", "both"),
-            frequencies_hz=kwargs.get("frequencies_hz", (0.,)),
-            clock_ppm=kwargs.get("clock_ppm", (0.,)),
-            auxiliary_half_width_hz=kwargs.get("auxiliary_half_width_hz", 200.))
-        kwargs = dict(kwargs, required_bands_hz=required, auxiliary_exclusion_hz=excluded)
-        super().__init__(manifest, raw_templates, epoch_offsets, **kwargs)
-        _identity(self, dict(self.variant_policy,
-            projection="fixed core; added-AM excursion omitted only from bin planning",
-            physical_channel_unchanged=True,
-            helper_disabled_behavior="all available raw rows; core option has no effect",
-            limitation="lossy sideband selection and finite-window auxiliary leakage require actual-waveform calibration"))
-
-
-def make_receiver(manifest, raw_templates, epoch_offsets, *, execution="scan",
-                  projection="full-envelope", **kwargs):
-    """Explicit factory; no automatic fallback between statistical procedures."""
-    if execution not in ("serial", "scan") or projection not in ("full-envelope", "core"):
-        raise ValueError("execution must be serial/scan and projection full-envelope/core")
-    if projection == "core":
-        if execution != "scan":
-            raise ValueError("core variant currently uses scan execution")
-        return CoreProjectionReceiver(manifest, raw_templates, epoch_offsets, **kwargs)
-    cls = ScanJointReceiver if execution == "scan" else DynamicJointReceiver
-    return cls(manifest, raw_templates, epoch_offsets, **kwargs)

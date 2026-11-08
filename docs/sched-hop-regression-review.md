@@ -4,6 +4,9 @@ This local, unreleased review starts from `2a0f3dd142c97909f206145cd4f4eecb1cc72
 and compares against `52ace0a`, immediately before the first implementation
 commit. It covers every commit in `52ace0a..2a0f3dd`. It does not turn the
 unfinished Sched_Hop work into a qualified implementation or certify a release.
+The receiver, estimator, and CLI paths reviewed here have since been retired.
+The findings below describe those exact historical revisions, not current
+Robust APIs, UI behavior, performance, or qualification.
 
 ## Scope and preserved corrections
 
@@ -37,8 +40,9 @@ continues to use the shared abstraction.
   conservative symmetric aperture. A separate regression checks its first
   transform and subsequent hop at the actual input-sample boundaries, while
   retaining the shorter aperture of authoritative positive-clock pairs.
-- Settings-aware and standalone receiver estimates share Live's pure
-  capture/TX/plot/audio reservation calculation. Analytical diagnostics still
+- In the reviewed revision, settings-aware and standalone receiver estimates
+  shared Live's pure capture/TX/plot/audio reservation calculation. Analytical
+  diagnostics still
   accept their broader input range; exhausted workspace reports unavailable
   instead of acquiring Live-only validation requirements.
   A pre-existing compact-memory exemption without an oscillator model is also
@@ -78,7 +82,8 @@ continues to use the shared abstraction.
   playback and link diagnostics use the effective calendar clock policy.
 - The GUI suppresses observer time numbers and the observer graph without an
   encrypted private pattern, including immediate withdrawal of cached values.
-  The standalone explicitly hypothetical LPI API/CLI remains available.
+  The reviewed revision exposed a standalone, explicitly hypothetical LPI
+  API/CLI. That retired interface is not available in the current tree.
 - Shared native window dimensions are restored. Experimental scheduling
   controls remain in the responsive planner footer and developer visibility
   rules. Web menu options use system normal/disabled colors without inheriting

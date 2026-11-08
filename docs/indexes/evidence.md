@@ -5,33 +5,24 @@ and release status. [Latest resource measurements](../ci-resource-results.json)
 are one bounded snapshot; Git keeps prior versions. Historical results are not
 qualification of new source or binaries.
 
-## Separate three-carrier experiment
+## Retained triad research
 
-The [v3 state-likelihood study](../validation-data/triad-v3/2026-11-01-state/README.md)
-records independent long-span paths, conditional calibration, GPU acceleration,
-weak-signal failures and reproduction artifacts. Its
-[initial v3 study](../validation-data/triad-v3/2026-10-31/README.md) compares earlier
-receiver and acquisition approaches. Neither study qualifies ordinary Robust
-integration or a physical radio link.
+The [pattern](../validation-data/triad-v3/2026-11-06-independent-patterns/README.md),
+[spacing](../validation-data/triad-v3/2026-11-06-spacing/README.md), and
+[stochastic-channel](../validation-data/triad-v3/2026-11-05-stochastic/README.md)
+records retain selected techniques, source/input provenance, and limitations.
+They do not qualify the current receiver or GUI. Archive cleanup is described in
+[archive-content-retirement.json](../validation-data/triad-v3/archive-content-retirement.json);
+changed container hashes are not new qualification.
 
-## Helper Carrier
+## Former Robust and Helper data
 
-The [integration guide](../helper-integration.md) maps implemented inexpensive
-frequency narrowing, clock/phase correction, complete-dwell buffering and
-auxiliary inversion timing to source and focused tests. The
-[retained evidence package](../validation-data/helper/README.md) includes selected
-per-case results, failures, exact inputs, available provenance and a portable
-checker; ignored local logs are not required. Detailed conclusions and older
-experiments remain in the [continuation study](../helper-continuation.md) and
-its linked studies. Standalone results do not qualify ordinary Robust integration.
-
-## Robust and receive processing
-
-[Retained receiver data](../validation-data/robust/) supports the
-[receiver-efficiency prompt](../../FURTHER-agents.txt). The
-[Bookworm baseline](../validation-data/bookworm-offline-20260930/) supports the
-remaining offline-build qualification. Keep specific useful fixtures and
-findings, not whole build histories.
+The remaining single-carrier Robust and standalone Helper datasets are historical
+records only. Their implementation recipes and operating guides are not current
+requirements. A result must match its source, configuration, inputs, and
+computational regime before it can inform a current decision. It does not qualify
+the canonical transmitter/channel/Helper generator or the staged Python receiver
+components.
 
 ## Fast measurements and reproduction
 

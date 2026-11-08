@@ -17,7 +17,7 @@ and the [evidence index](evidence.md).
 | [Web protocol](../web-protocol.md) | Browser/worker message and execution protocol. |
 | [Browser implementation guide](../../web/README.md) | Source-tree browser assets, development and execution details. |
 | [Inspection](../inspection.md) | Modem-flow views, plots, transmit/receive inspection and interpretation limits. |
-| [Link Planner](../link-planner.md) | Controls, import/export and modeled link/compute estimates; see also [Robust planning](robust.md#low-expected-snr-integration-and-link-planning). |
+| [Link Planner](../link-planner.md) | Retained generic planning controls; Robust receiver estimates are unavailable pending backend integration. |
 | [QR](../qr.md) | QR transport and application behavior. |
 
 For operating commands see the [six interface manuals](../README.md#command-and-interface-manuals).

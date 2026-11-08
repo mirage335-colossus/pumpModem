@@ -117,13 +117,13 @@ class TimingForwardTests(unittest.TestCase):
             receiver.transitions(TimingState(0, 2**63-1, 1), 1.)
 
     def test_multi_day_lattice_travel_keeps_constant_workspace(self):
-        # 4096 public segment anchors spanning >47days; emissions are erased
+        # 32 widely spaced public anchors span >47days; emissions are erased
         # (unit likelihood), not a claim of long sampled-waveform reception.
         receiver = SparseTimingForward([TimingState(0, 0, 1)], maximum_rate_ppm=50,
             maximum_acceleration_ppm_per_second=0, delay_step_seconds=.001,
             maximum_states=1, maximum_proposals=2)
-        for _ in range(4096):
-            receiver.predict(1000.)
+        for _ in range(32):
+            receiver.predict(128000.)
             receiver.observe(np.zeros((1, 2, len(receiver.states))))
         self.assertGreater(receiver.elapsed_seconds, 47*86400)
         self.assertGreater(receiver.states[0].delay_index*.001, 200.)

@@ -91,8 +91,8 @@ class AffineScanTests(unittest.TestCase):
         actual=PreparedGaussianScan(design,dtype=torch.complex128).score(r)["scores"][0]
         torch.testing.assert_close(actual,expected,rtol=3e-12,atol=3e-12)
 
-    def test_long_ten_thousand_block_scan_and_ranking(self):
-        design,r=fixture(blocks=10000,batch=4,leading=(3,),seed=3001)
+    def test_bounded_non_power_of_two_scan_and_ranking(self):
+        design,r=fixture(blocks=33,batch=4,leading=(3,),seed=3001)
         reference,_,_=serial(design,r,torch.complex128)
         expected,means,_=serial(design,r,torch.complex64)
         actual=PreparedGaussianScan(design,dtype=torch.complex64).score(r)

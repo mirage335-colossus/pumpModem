@@ -4,7 +4,7 @@ import sys,unittest
 from unittest import mock
 import numpy as np
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
-from test_triad_dynamic_acquire import fixture
+from test_triad_dynamic_joint import fixture
 from triad_weak_receiver import WeakReceiver
 
 

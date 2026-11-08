@@ -1,122 +1,63 @@
 # Development requirements
 
-Use the [documentation index](docs/README.md) to find maintained guidance.
-Current compatibility requirements are in [the development contract](docs/development.md);
-build and test stages are in [the build guide](docs/building.md#testing-stages).
+Use the [documentation index](docs/README.md) for maintained guidance. Check
+[the development contract](docs/development.md), [build and test stages](docs/building.md#testing-stages),
+and [current Robust architecture](docs/robust-current.md) before changing those areas.
 Search `src/`, `include/`, `tests/` and `cmake/` first when locating implementation.
 
-For isolated three-carrier regression work, follow the required efficient
-workflow in the [performance guide](docs/triad-performance.md#required-efficient-regression-workflow)
-and its [confidence and material-slowdown policy](docs/triad-performance.md#confidence-and-material-slowdown).
-Use comprehensive distinct-path coverage and minimize computation. Where it
-saves total work, use validated full/sustained-to-abbreviated-to-full-runtime
-predictive chains; otherwise measure the named full target directly. Reuse
-source-matched evidence, and let uncertainty or a material slowdown determine
-whether more work is warranted. This scope does not replace ordinary/shared
-runtime regression and qualification requirements.
+## Robust architecture and intensive checks
 
-## New three-carrier Robust modem
+The canonical Robust transmitter/channel/Helper path is the native
+`IndependentApskV2` stack. Python WeakReceiver acquisition and
+PracticalTrackingReceiver tracking are sequential stages and are not connected
+to the GUI. Robust GUI controls remain visible but Robust operation is unavailable
+pending reconnection. Keep this boundary accurate in code, tests, and documentation.
 
-For implementing or integrating the isolated three-adjacent-carrier modem, start
-with the [development workflow](docs/triad-development-workflow.md), then the
-[current v3 guide](docs/triad-v3.md). The workflow maps reusable simulation tools,
-measured receiver choices, cheap diagnostics and validation escalation. Reuse
-retained complex workspaces before generating new sampled captures when the
-experiment permits it. Historical large campaigns are evidence, not routine
-regression prerequisites. Use the scope-based test guidance; shared-code changes
-and ordinary-receiver integration still require their applicable contracts and
-validation stages.
+Use one in-tree implementation. Protocol changes evolve the canonical source;
+maintain older protocol compatibility with Git tags and separate binary releases.
+Backport a necessary security fix narrowly to strictly sanitized dynamic-input
+surfaces.
 
-## GPU optimization and precision controls
+Computationally intensive Robust tests and performance estimates must use a
+hierarchical, computationally minimal statistical method. Predeclare the covered
+path strata, sample budget, uncertainty decision and stopping rule; use cheap
+deterministic checks first. Extrapolate only from abbreviated measurements when
+fixed-geometry assumptions, uncertainty, and source/configuration provenance are
+recorded and applicable. Do not use full, sustained, multi-day, exhaustive, or
+whole heavy-calibration runs as routine tests or fallbacks. RunPod may accelerate
+the same method but does not justify larger experiments. See
+[the maintained policy](docs/robust-current.md#testing-computationally-intensive-robust-changes)
+and [the abbreviated harness](docs/triad-performance.md).
 
-Before changing GPU arithmetic, precision selection or related performance
-estimates, read the [precision-control experiment guide](docs/gpu-precision-controls.md).
-Distinguish expensive bulk work that should support explicit lower/tensor
-arithmetic experiments from sensitive preparation/reductions whose higher
-precision may cost little. Measure both; do not hide substantial FP64 work
-behind a lower-precision selection or downcast every stage indiscriminately.
-Preserve the current dropdown's floor/force semantics, strict references and
-explicit fallback reporting. The guide separates implemented CPU controls from
-isolated GPU experiments and gives the evidence needed to change that scope.
+## Shared contracts
 
-## Simulation channel models
+Preserve received-content restrictions and input validation in
+[security](docs/security.md), [receive processing hardening](docs/receive-processing-hardening.md),
+and the [GUI contract](docs/gui-contract.md). Keep GUI behavior shared across
+native and optional frontends. Preserve Fast and Legacy behavior under their
+[topic guidance](docs/README.md#other-maintained-components); do not infer their
+compatibility from Robust research.
 
-Before adding or changing Robust simulation software, read the
-[Doppler/delay spread and frequency-selective amplitude modulation guide](docs/channel-models.md).
-Use the shared sampled channel implementations and preserve selected effects;
-do not silently omit them in a new simulation path. None/Off is a valid explicit
-baseline. The guide defines presets, effective parameters and seeds, exact bypass,
-continuous state, DATA/Helper composition, fixed headroom and complete tails.
-For FHSS, propagate the already-shaped transmitted waveform and retain echoes
-across hop guards; never gate the channel output again to enforce transmitter
-silence. Keep model metadata and software-test evidence distinct from physical
-device measurements.
+Before changing simulated channel paths, read the
+[Doppler/delay-spread guide](docs/channel-models.md) and preserve selected effects,
+continuous state, delayed tails, and explicit Off baselines. Before changing GPU
+precision controls, follow [the precision guide](docs/gpu-precision-controls.md)
+and retain explicit fallback reporting.
 
-## Helper Carrier priority
+## Validation and outputs
 
-For current integration constraints, measured inexpensive frequency/phase
-search-space narrowing approaches and their limits, start with the
-[Helper integration guide](docs/helper-integration.md). It is the current
-algorithm-neutral entry point; the studies it links describe bounded algorithms
-and results, not universal receiver architecture requirements.
+Use `./build.sh` and named groups in [the build guide](docs/building.md). Run the
+smallest relevant correctness checks during diagnosis, then the applicable
+affordable checks. Never weaken contracts or report omitted or incomplete
+coverage as passed. Documentation-only changes need proportionate link and
+consistency checks, not receiver benchmarking.
 
-Prioritize Helper Carrier's frequency and phase search-space narrowing for the
-ordinary Robust receiver, especially the HF GPSDO alternative and also microwave
-GPSDO supplementation. Do not make successful Helper auxiliary APSK decoding or
-improved APSK sensitivity a prerequisite for this work. See the
-[Helper Carrier priority and identification rationale](docs/helper-carrier.md#development-priority).
-Preserve applicable regression requirements and report actual failures honestly.
+When release assurance is in scope, follow [release validation](docs/releases.md)
+and record current outcomes and limits in [validation](docs/validation.md).
+Certification binds to exact source and binary hashes; publication, certification,
+and promotion are separate operations.
 
-For Helper-assisted ordinary Robust reception, assume the receiver is present
-for the full 36-second Helper observation needed for frequency narrowing before
-ordinary acquisition. The transmit lead is fixed at 95 400-ms dwells (38 seconds),
-whether or not FHSS is enabled: 90 dwells for observation and five for detection.
-Do not prioritize implementation or testing of receivers
-joining an ongoing transmission without that lead-in. See the
-[lead-in operating requirement](docs/helper-carrier.md#lead-in-operating-requirement).
-
-For high-pilot identification, follow the [quiet-spectrum assumption](docs/helper-carrier.md#quiet-spectrum-assumption).
-The strongest tone in the oscillator-model-derived expected high-pilot range may
-be assumed to be the pilot. Do not add elaborate competing-tone identification
-or tests for rejecting such tones solely to address interference excluded by this
-assumption.
-
-## Changes and validation
-
-- Preserve wire formats and bit progress: 1–16 source-byte text keeps its fixed
-  dictionary and exact endpoint; explicit binary input sends exactly its bits;
-  longer text and attachments keep the configured 192-bit marker plus 128-coded-byte
-  intervals. Do not add short-path overhead or let received lengths choose framing,
-  allocation or completion.
-- Decode source data only after physical completion. Reception ends only after
-  consecutive fully scored absent-symbol durations cover six seconds. Expose each
-  accepted bit on the next progress poll and update the same pending GUI row;
-  preserve exact prefixes and distinguish pending from completed data. Keep the
-  independent wire, physical-end and shared GUI regressions intact.
-- For runtime changes, use focused checks during diagnosis, then complete the
-  applicable regression and qualification stages. Never weaken a contract or
-  report skipped, incomplete or omitted coverage as passed. See the build guide's
-  [resource margins](docs/building.md#resource-benchmark-margins) and
-  [sanitizer coverage policy](docs/building.md#sanitizer-throughput-scope).
-- Build with `./build.sh`; run a group with `./build.sh test GROUP`. Reuse stable
-  compatible profiles under `build/`; do not rely on historical top-level
-  `build-*` trees as current results.
-- When release assurance is in scope, follow [release validation](docs/releases.md#diagnose-a-branch-before-full-validation)
-  and record actual results and limits in [validation](docs/validation.md).
-  Certification binds to the exact published source and binary hashes. Publication,
-  certification and promotion are separate release operations; diagnosis alone
-  authorizes none.
-
-## Shared work and outputs
-
-- Use the main chat and native subagents for delegated work. Keep write ownership
-  disjoint, preserve other contributors' edits, and serialize shared Git changes
-  and final integration. Coordinate timing-sensitive tests and device access.
-- Track launched processes until completion. Reuse compatible build outputs;
-  keep temporary evidence compact in ignored `local-evidence/`. Maintained
-  contracts, plans and current validation belong in `docs/`; use Git history for
-  superseded narratives. Do not create session or coordination registries.
-
-Documentation-only changes leave runtime behavior unchanged and need proportionate
-checks. Detailed compatibility, testing, release and platform requirements remain
-in their linked authoritative documents.
+Preserve unrelated edits and other contributors' work. Coordinate shared Git
+changes and timing-sensitive tests. Keep temporary evidence in ignored
+`local-evidence/`; maintained contracts and current validation belong in `docs/`.
+Do not create session or coordination registries.

@@ -1,38 +1,19 @@
-# Data Pump scope — version 001_00
+# Original scope record — version 001_00
 
-Version **001_00** is the feature-complete Data Pump baseline. The
-[requirements matrix](requirements.md) describes the supported software, the
-[protocol](protocol.md) defines regular-mode wire behavior, and the
-[Fast mode specification](fast-mode.md) defines the independent Fast transport.
-These documents replace the original proposal as the product scope.
+This page records the historical product scope associated with version `001_00`.
+It predates retirement of the single-carrier Robust implementation and does not
+define current Robust behavior or qualification.
 
-Data Pump is a civilian audio modem for transferring text, explicit bits,
-screenshots and files between computers, including through audio-connected
-radios. It provides regular pattern-based weak-signal operation and independent
-Fast transfer modes, with shared GUI and CLI operation. The separate
-[Legacy Modem](legacy-modem.md) console supports BPSK31, BPSK125 and Olivia-4/2k
-radio text. The [development contract](development.md) preserves exact short-message bit counts,
-fixed locally configured intervals, physical completion and incremental pending
-reception.
+The maintained components are the independent Fast and Legacy modems and the
+canonical native Robust transmitter/channel/Helper Generator stack. Robust GUI
+transmission and reception remain unavailable pending receiver integration.
+See [current requirements](requirements.md),
+[Robust architecture and limits](robust-current.md), [Fast](indexes/fast.md),
+and [Legacy](legacy-modem.md).
 
-## Operator procedures
-
-Operators establish written procedures for the carrier frequencies, compatible
-modem settings and interpretation of transmitted bits. Those procedures define
-whether `0` or `1` represents status or distress, and whether the meanings use
-the same carrier or different carriers. Data Pump transmits and displays the
-configured message; the operational meaning and response belong to the
-operators' agreed procedures.
-
-## Remaining implementation
-
-Automatic radio-frequency tuning to find usable HF shortwave ionospheric
-propagation frequencies is not yet implemented. This is the remaining planned
-capability, as an alternative to Automatic Link Establishment (ALE) and
-Frequency Hopping Spread Spectrum (FHSS). The existing modem parameter planner
-and bounded receive-frequency search operate within locally configured settings;
-they do not provide this radio-frequency selection function.
-
-Feature completeness describes the product scope, not a claim of universal
-hardware qualification, measured sensitivity or release certification. Actual
-validation evidence and its limits remain in [validation.md](validation.md).
+Historical copies of old binaries and protocols must be matched to their own
+source revision. The current tree does not promise in-place compatibility with
+retired single-carrier formats. Protocol changes evolve the canonical source;
+older protocol versions belong in separate tags and binary releases. Any
+security fix that needs a backport is applied narrowly to strictly sanitized
+dynamic-input surfaces.

@@ -6,14 +6,11 @@ and the version 001_00 [scope record](original-specification.md). These statemen
 describe its functionality; they are not a legal classification or a claim that
 a particular class of user could never use the software.
 
-The implementation uses publicly documented standard symmetric cryptographic
-primitives through OpenSSL: AES256-CTR, AES256-GCM, HKDF-SHA256, and HMAC-SHA256.
-The fixed 128-byte interval format and waveform are documented alongside the
-source. Public intervals contain no content digest; encrypted intervals carry
-HMAC-SHA256 bound to their canonical symbol addresses. Source decoding begins
-only after the physical six-second absence rule ends reception. The format has
-no transmitted packet length or metadata header. See [protocol.md](protocol.md)
-and [crypto.md](crypto.md).
+The maintained services use standard cryptographic primitives through OpenSSL;
+their current constructions and limits are documented in [crypto.md](crypto.md)
+and [security.md](security.md). Robust transmission and reception are
+unavailable in the GUI pending backend connection; this notice does not define
+a Robust wire format.
 No assertion is made that these choices alone establish an export-control
 classification, public-information exclusion, RF authorization, or exemption.
 
