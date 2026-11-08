@@ -28,6 +28,33 @@ cannot answer, and remove temporary experiments when their documented purpose
 ends. The [material lifecycle](development.md#material-lifecycle) applies to
 tracked files, ignored local evidence and remote storage alike.
 
+## Transmit key policy
+
+Selecting the public Amateur profile changes key material, not the Robust
+waveform or encryption protocol. Ordinary Robust DATA keeps its configured key
+and encryption setting; any enabled Helper uses the configured effective key.
+At the lower-level resolver, Message mode preserves the caller's DATA encryption
+flag; it does not disable keyed Helper metadata. Transmit-noise DATA always uses
+fresh, independent operating-system CSPRNG keys and effective encryption, even
+when Amateur is selected. Its dual-lane roots are created once per transmission
+and reused for its samples; private roots are never exported or logged. If Helper
+is enabled for noise transmission, its callsign uses the public Amateur key so
+listeners can decode it; the Helper timecode is public. The ordinary Helper
+callsign uses the configured effective key. The Helper callsign stream advances
+on absolute 400 ms dwell epochs; reusing the same key and the same dwell repeats
+its ciphertext.
+
+| Transmission | Robust DATA key and encryption | Helper callsign key |
+| --- | --- | --- |
+| Ordinary, private profile | Configured effective key; encrypted when enabled | Configured effective key |
+| Ordinary, Amateur profile | Public Amateur key; preserves the configured encryption setting and is publicly decodable when enabled | Public Amateur key; publicly decodable |
+| Transmit noise, either profile | Fresh independent CSPRNG keys; encrypted | Public Amateur key; publicly decodable, if Helper is enabled |
+
+The [background-noise generator](triad-background-noise.md) also creates its
+own independent CSPRNG key, separate from DATA and Helper keys. Ordinary export
+uses the resolver; transmit-noise behavior has API-level checks only. No
+operational noise command or connected Robust GUI transmitter is available.
+
 ## Testing computationally intensive Robust changes
 
 Use a hierarchical, computationally minimal statistical method. Predeclare the

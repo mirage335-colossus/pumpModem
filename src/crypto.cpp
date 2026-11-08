@@ -633,6 +633,16 @@ Crypto::Crypto(std::span<const std::uint8_t> master_key) {
         throw;
     }
 }
+Crypto Crypto::amateur() {
+    constexpr std::array<std::uint8_t,64> public_root{};
+    return from_independent_roots(public_root,public_root);
+}
+Crypto Crypto::temporary() {
+    Secret<64> serpent_root,aes_root;
+    system_random_fill(serpent_root.bytes);
+    system_random_fill(aes_root.bytes);
+    return from_independent_roots(serpent_root.bytes,aes_root.bytes);
+}
 Crypto::Crypto(const Crypto& other) noexcept:keys_(other.keys_),confidentiality_(other.confidentiality_) {
     if(confidentiality_)confidentiality_->retain();
 }

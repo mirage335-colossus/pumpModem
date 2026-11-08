@@ -5,6 +5,7 @@
 #include "datapump/triad_modem_v3.hpp"
 #include "datapump/triad_shaping.hpp"
 #include "datapump/triad_helper_burst.hpp"
+#include "datapump/triad_transmission_keys.hpp"
 #include "datapump/tuning.hpp"
 #include "diagnostic_iq_noise_options.hpp"
 
@@ -811,7 +812,7 @@ int run(const Options& o) {
         print_infeasible_plan(o, "bounded-layout-or-spectrum-search", error.what(), physical, physics, data_if_hz);
         return 0;
     }
-    const auto f = selected_shaping.format;
+    auto f = selected_shaping.format;
     const auto g = selected_shaping.geometry;
     const auto sample_rate = f.sample_rate;
     // Exactly 400 ms for the accepted integer multiple-of-five sample clocks.
@@ -823,7 +824,12 @@ int run(const Options& o) {
         print_plan_json(o, data_if_hz, selected_shaping, helper_options_for(physical), physical, physics);
         return 0;
     }
-    const auto key = selected_key(o);
+    const auto selected = selected_key(o);
+    const auto keys = datapump::triad::resolve_transmission_keys(
+        selected, f.encrypt, datapump::triad::TransmissionMode::Message);
+    f.encrypt = keys.encrypt_data;
+    const auto& key = keys.data;
+    const auto& helper_key = keys.helper;
     PatternSource reference_source(f, key, 0);
     PatternSource data_source(f, key, static_cast<std::uint8_t>(o.bit));
     const auto lead_samples = static_cast<std::uint64_t>(std::llround(data_start_seconds * sample_rate));
@@ -867,7 +873,7 @@ int run(const Options& o) {
     reference.epoch = f.epoch;
     reference.begin_seconds = 39;
     reference.end_seconds = 41;
-    reference.time_key = key;
+    reference.time_key = helper_key;
     reference.helper_start_seconds = 0;
     reference.helper_end_seconds = o.whole_bit_calendar ? std::max(helper_end, 42.L) : helper_end;
     reference.active = [f](long double seconds) {
@@ -909,7 +915,7 @@ int run(const Options& o) {
     const auto data_reference = bounded_tile_power(reference_source, f, g);
     const auto data_calibration_gain = std::sqrt(reference_mean_norm / data_reference.mean_norm);
     const auto data_gain = plan.data_gain * composite_gain * data_calibration_gain;
-    helper::Generator generator(helper_options, plan, f.epoch, true, key);
+    helper::Generator generator(helper_options, plan, f.epoch, true, helper_key);
     long double measured_helper_norm = 0;
     for (unsigned i = 0; i < helper::power_reference_nodes; ++i) {
         const auto seconds = helper::power_reference_node(reference, i);

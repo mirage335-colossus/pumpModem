@@ -16,12 +16,14 @@ entry points.
 ## Randomness and state
 
 Each enabled generator obtains a fresh private 256-bit key from OpenSSL's
-OS-seeded private RNG. AES-256-CTR encrypts zero blocks; counter exhaustion and
-RNG/EVP errors fail the operation. Temporary key and stream buffers are cleansed
-and never written to receipts. Off requests no entropy. A simulation seed does
-not reproduce new background noise: preserve the sampled output and its hash
-when an observation must be replayed. Do not add transmitter noise to a replay
-of an existing receiver capture.
+OS-seeded private RNG, independent of configured DATA and Helper keys.
+AES-256-CTR encrypts zero blocks; counter exhaustion and RNG/EVP errors fail
+the operation. Temporary key and stream buffers are cleansed and never written
+to receipts. Off requests no entropy. A simulation seed does not reproduce new
+background noise: preserve the sampled output and its hash when an observation
+must be replayed. Do not add transmitter noise to a replay of an existing
+receiver capture. This is separate from the transmit-noise DATA key policy in
+[Robust architecture](robust-current.md#transmit-key-policy).
 
 One output object owns one transmission, including its internal zero-valued
 samples, gaps and drained resampler output. Preroll and device preparation are

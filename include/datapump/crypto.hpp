@@ -43,6 +43,12 @@ public:
     Crypto(const Crypto&) noexcept;
     Crypto& operator=(const Crypto&);
 
+    // Public zero roots for the explicitly selected Amateur key mode. This
+    // retains normal waveform behavior but provides no confidentiality.
+    static Crypto amateur();
+    // Fresh independent operating-system CSPRNG roots for temporary use.
+    static Crypto temporary();
+
     // Explicit, independently supplied 64-byte roots. Serpent material never
     // enters an AES cipher, waveform or mac() derivation and AES material never
     // enters a Serpent derivation. AES root bytes 0..31 seed the existing five

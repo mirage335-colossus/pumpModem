@@ -14,6 +14,34 @@ this checkpoint is accepted unless a specific active validation or release
 requirement still needs them. The concise outcomes and limitations below are
 the maintained record.
 
+## Test timing investigation
+
+On 8 November 2026, the dirty working tree based on `64f7feb6` was timed with
+GCC 14.2, the native Release FLTK configuration and two test jobs. `test all`
+stopped before testing: `test_terminal_ui` and `test_framebuffer` failed to link
+native audio symbols. Separate web and build-tool runs also had preview socket
+permission failures and temporary GPG-key setup failures. Retain the three logs
+in `local-evidence/test-timing-2026-11-08/` to diagnose these failed checks;
+remove them when the link and environment failures are resolved or superseded
+by equivalent current evidence.
+
+## Transmit key policy checks
+
+The uncommitted policy change based on `64f7feb6f298ba844f45ecbf1c57f02219158d16`
+passed `./build.sh test contract` (26/26), `./build.sh test triad` (19/19), and
+`./build.sh test gui` (27/27) on 7 November 2026. These runs used the existing
+Release `build/dev` profile, two test jobs and four build jobs, with
+`CCACHE_DISABLE=1` because the sandbox could not write the compiler cache.
+The initial compile also exposed a missing test include, corrected before
+these passing runs. Documentation link checks and `git diff --check` passed.
+
+Coverage includes ordinary private/Amateur key parity, temporary noise DATA
+keys and forced encryption, public-Amateur Helper decoding, changing callsign
+ciphertext across absolute dwells, unchanged Helper vectors, independent
+background noise, and the unavailable Robust boundary. Noise-mode coverage is
+at the native policy/generator API; no GUI reconnection, operational noise
+endpoint, physical transmission, or release certification is claimed.
+
 ## Cleanup validation
 
 The CLI, FLTK GUI and pipe-worker applications rebuilt successfully. The FLTK

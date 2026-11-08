@@ -125,7 +125,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::compression_codes)control.font_size=12;
     if(slot==Slot::short_bits_detail)control.help="Raw patterns preserve the exact entered bits. Stream completion requires six seconds without symbols.";
     if(slot==Slot::transmit_noise||slot==Slot::short_transmit_noise)
-        control.help="Continuously transmit noise with the usual encrypted modulation and fresh temporary keys for all active keystreams until Stop noise is pressed. Keeps your message and selected keys. Uses the selected rate, carrier and audio routing.";
+        control.help="Unavailable until the canonical Robust backend is connected. Intended policy: noise DATA uses fresh temporary CSPRNG keys and encryption; enabled Helper callsign uses the public Amateur key. Does not change your message or selected-key settings.";
     if(slot==Slot::transmit_helper)
         control.help="Helper-only transmission is unavailable until the canonical triad backend is connected.";
     if(slot==Slot::copy_raw_signal)control.help="Copy the selected completed reception's exact transport bits, including leading zeros and compression bits.";

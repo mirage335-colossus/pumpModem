@@ -111,6 +111,29 @@ void test_authentication() {
     check(crypto.mac({}).size()==32,"empty-message MAC failed");
 }
 
+void test_factory_keys() {
+    const std::array<std::uint8_t,64> public_root{};
+    const auto amateur=Crypto::amateur();
+    const auto explicit_public=Crypto::from_independent_roots(public_root,public_root);
+    const auto message=bytes("factory key signature");
+    check(amateur.stream(StreamPurpose::Dsss,1720000000,0,64)==
+          explicit_public.stream(StreamPurpose::Dsss,1720000000,0,64),
+          "Amateur waveform key differs from the public zero-root key");
+    check(amateur.confidentiality_stream(1720000000,0,64)==
+          explicit_public.confidentiality_stream(1720000000,0,64) &&
+          amateur.confidentiality_mac(message)==explicit_public.confidentiality_mac(message),
+          "Amateur confidentiality key differs from the public zero-root key");
+
+    const auto first=Crypto::temporary(),second=Crypto::temporary();
+    check(first.stream(StreamPurpose::Dsss,1720000000,0,64)!=
+          second.stream(StreamPurpose::Dsss,1720000000,0,64),
+          "fresh temporary keys produced the same waveform signature");
+    check(first.confidentiality_stream(1720000000,0,64)!=
+          second.confidentiality_stream(1720000000,0,64) &&
+          first.confidentiality_mac(message)!=second.confidentiality_mac(message),
+          "fresh temporary keys produced the same confidentiality signature");
+}
+
 void test_keyfiles() {
     TempDir dir;
     const testing::KeyfilePolicy policy{4096, 8193};
@@ -387,6 +410,7 @@ int main() {
     try {
         test_streams();
         test_authentication();
+        test_factory_keys();
         test_confidentiality();
         test_confidentiality_authentication();
         test_audio_entropy_failures();

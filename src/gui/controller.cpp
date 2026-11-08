@@ -32,8 +32,7 @@ using Clock=std::chrono::steady_clock;
 // These roots are deliberately public and provide no confidentiality. They
 // enter the same key derivation and modem paths as file-backed keys.
 KeyEntry amateur_key() {
-    constexpr std::array<std::uint8_t,64> public_root{};
-    return {"WARNING-Amateur",Crypto::from_independent_roots(public_root,public_root)};
+    return {"WARNING-Amateur",Crypto::amateur()};
 }
 constexpr const char* backend_unavailable="Robust is unavailable until the canonical triad backend is connected.";
 std::string bit_text(std::span<const std::uint8_t> bits) {

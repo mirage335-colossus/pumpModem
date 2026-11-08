@@ -310,7 +310,7 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
     add_test(NAME ${component} COMMAND test_${component})
     set_tests_properties(${component} PROPERTIES LABELS "contract;regular")
   endforeach()
-  foreach(component triad_v3_source triad_mapped_basis triad_shaping
+  foreach(component triad_v3_source triad_mapped_basis triad_shaping triad_transmission_keys
       triad_v3_channel continuous_clock triad_helper_burst helper_carrier helper_metadata)
     add_executable(test_${component} EXCLUDE_FROM_ALL tests/test_${component}.cpp)
     target_include_directories(test_${component} PRIVATE src tools)

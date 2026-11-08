@@ -37,6 +37,9 @@ normalization must use the complete composed waveform. Total Helper power is
 not the power of the high pilot alone. The metadata codec accepts one selected
 key; a key file may contain selectable entries without enabling simultaneous
 decryption. Encrypted metadata is not, by itself, an authentication claim.
+For Amateur and transmit-noise key choices, including the publicly decodable
+callsign and public timecode behavior, see the canonical
+[Robust transmit key policy](robust-current.md#transmit-key-policy).
 
 Keep the DATA/Helper power ratio, headroom, shaping, envelopes and delayed tails
 in the shared channel model. Applying a transmitter guard again to channel
