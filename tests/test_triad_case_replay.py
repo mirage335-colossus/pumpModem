@@ -209,6 +209,73 @@ class ReplayTests(unittest.TestCase):
                 PreparedReplay('fixture', [], memory_limit_bytes=2*1024**3, threads=1,
                     seed=1, native_factory=non_hopping, screen_factory=screen, mapped_step=3)
 
+    def test_s60_fresh_profile_selects_5hz_rate_and_fullscreen_budgets(self):
+        class StopBeforeFullBank(Exception):
+            pass
+
+        def make_header(occupied_bandwidth, doppler, cfo):
+            class Header:
+                def __init__(self, *_args, **_kwargs):
+                    self.plan = dict(format=dict(inner_rate_hz=1., fhss=False,
+                            occupied_bandwidth_hz=occupied_bandwidth, elapsed_bit_seconds=576.4),
+                        physics=dict(spread_margin=1., spread_delay_ms=0., spread_doppler_hz=doppler,
+                            deterministic_cfo_bound_hz=cfo, sample_clock_pair_ppm=.0001,
+                            arrival_prior_seconds=[-7.035, 7.035]))
+                    self.descriptor = dict(sample_rate_hz=6000, source_samples=4_034_406,
+                        total_samples=4_650_000, capture_lead_seconds=8., data_offset_samples=12000,
+                        emitted_samples=4_250_000, data_if_hz=1725., helper_enabled=False,
+                        helper_low_hz=None, helper_high_hz=None, epoch=1793850000,
+                        noise_variance=1., fixed_workspace_bytes=0)
+
+                def close(self):
+                    pass
+            return Header
+
+        def capture_profile(occupied_bandwidth, doppler, cfo, *, accepted=True):
+            seen = {}
+            def screen(*_args, **kwargs):
+                seen.update(kwargs)
+                raise StopBeforeFullBank()
+            with (mock.patch.object(replay_module, '_validate_mapped_profile',
+                                    return_value={'accepted': accepted}) as validate,
+                  mock.patch.object(replay_module, '_mapped_identity', return_value='0'*64)):
+                with self.assertRaises(StopBeforeFullBank):
+                    PreparedReplay('fixture', [], memory_limit_bytes=2*1024**3, threads=1,
+                        seed=1, native_factory=make_header(occupied_bandwidth, doppler, cfo),
+                        screen_factory=screen)
+            return seen, validate
+
+        # required = occupied half-band + ray Doppler + public CFO bound.
+        # The narrow profile stays10Hz, this one selects5Hz, and a wider
+        # admissible slow waveform retains20Hz.
+        for occupied, doppler, cfo, expected_rate in (
+                (.2, 0., .1, 10), (1., .1, .2, 5), (4., 0., .5, 20)):
+            with self.subTest(expected_rate=expected_rate):
+                seen, validate = capture_profile(occupied, doppler, cfo)
+                self.assertEqual(validate.call_args.kwargs['output_fs'], expected_rate)
+                self.assertEqual(validate.call_args.kwargs['pass_edge'],
+                                 .4 if expected_rate == 10 else 2. if expected_rate == 5 else 4.)
+                self.assertEqual(validate.call_args.kwargs['stop_edge'],
+                                 4.9 if expected_rate == 10 else 2.45 if expected_rate == 5 else 9.8)
+                self.assertEqual(validate.call_args.kwargs['sampling_step'], 60)
+                self.assertEqual(seen['template_sampling_step'], 60)
+                self.assertEqual(seen['output_sample_rate'], expected_rate)
+                self.assertEqual(seen['maximum_frequency_points'], 4096)
+                self.assertEqual(seen['maximum_fft_products'], 32768)
+                self.assertEqual(seen['correlation_method'], 'auto')
+
+        class ValidationRejected(Exception):
+            pass
+        screen = mock.Mock(side_effect=StopBeforeFullBank())
+        with (mock.patch.object(replay_module, '_validate_mapped_profile',
+                                side_effect=ValidationRejected('fresh local gate failed')) as validate,
+              mock.patch.object(replay_module, '_mapped_identity', return_value='0'*64)):
+            with self.assertRaisesRegex(ValidationRejected, 'fresh local gate failed'):
+                PreparedReplay('fixture', [], memory_limit_bytes=2*1024**3, threads=1,
+                    seed=1, native_factory=make_header(1., .1, .2), screen_factory=screen)
+            validate.assert_called_once()
+            screen.assert_not_called()
+
     def test_public_mapped_basis_splits_both_native_coordinate_limits(self):
         source = NativeBasis()
         positions = np.arange(20_100, dtype=float) * 60
@@ -287,10 +354,11 @@ class ReplayTests(unittest.TestCase):
                 seen['noise_seed'] = seed
                 return {'projected_noise': projected, 'helper_raw_noise': prefix}
 
-        def helper(values, manifest, frequencies):
+        def helper(values, manifest, frequencies, *, config):
             seen['helper_values'] = np.array(values, copy=True)
             seen['helper_manifest_variance'] = manifest['power']['complex_noise_variance']
             seen['helper_frequencies'] = frequencies
+            seen['helper_config'] = config
             return {'status': 'fallback', 'frequency': {'status': 'fallback', 'expanded_intervals_hz': []}}
 
         with (mock.patch.object(replay_module, 'ProjectedNoise', Noise),
@@ -304,6 +372,10 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(seen['prefix_samples'], 4)
         self.assertEqual(seen['noise_seed'], 501)
         np.testing.assert_allclose(seen['helper_frequencies'], [-.1, 0., .1])
+        self.assertEqual(seen['helper_config']['frequency_config']['selection_geometry'],
+                         'continuous_interval')
+        self.assertEqual(seen['helper_config']['frequency_config']['future_horizon_seconds'],
+                         replay.represented_baseband_seconds)
         self.assertTrue(result['success'])
         self.assertFalse(result['raw_projection_included_in_receiver_ratio'])
         self.assertGreater(result['helper_transient_workspace_estimate_bytes'], 0)

@@ -98,6 +98,16 @@ class CaseReceiverTests(unittest.TestCase):
         options.update(kwargs)
         return PreparedCase('fixture', [], **options)
 
+    def test_helper_frequency_horizon_covers_searched_observation(self):
+        from triad_weak_helper import estimate_weak_helper
+        with self.prepare() as prepared, mock.patch(
+                'triad_case_receiver.estimate_weak_helper', wraps=estimate_weak_helper) as helper:
+            prepared.measure(1)
+            config = helper.call_args.kwargs['config']['frequency_config']
+            self.assertEqual(config['selection_geometry'], 'continuous_interval')
+            self.assertEqual(config['future_horizon_seconds'],
+                (prepared.raw_first_sample+len(prepared.raw))/prepared.sample_rate)
+
     def test_actual_kernels_keep_public_bank_and_fresh_tracking_state(self):
         with self.prepare() as prepared:
             self.assertEqual(prepared.coverage['epochs'], list(EPOCHS))

@@ -39,26 +39,6 @@ Off	Symbol_burst
 
 
 
-- Groundwave 500kHz Encrypted, GPS DO
-Yes	Encryption
-0 W	Helper Carrier Transmit Power
-4 W	Transmit Power
-180 dB	Path loss
-Default several seconds receiver search space	Clock sync / Region / Offset / Audio error
-GPSDO OCXO	Base Oscillator
-GPSDO OCXO	Shift Oscillator
-HF best 0.1Hz 0.5ms	Doppler/delay spread
-Each - 1%	Additional frequency selective amplitude modulation
-1x	Margin
-Off	DSSS
-0x	Spreading
-Off	FHSS
-Off	Symbol_burst
-1 Hz	Rate
-500 kHz	Shift
-
-
-
 - Groundwave 500kHz Encrypted, Helper Carrier
 Yes	Encryption
 40 W	Helper Carrier Transmit Power

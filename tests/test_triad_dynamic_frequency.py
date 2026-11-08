@@ -101,6 +101,13 @@ class DynamicFrequencyTests(unittest.TestCase):
             config=dict(future_horizon_seconds=100, drift_bound_hz_per_second=.01))
         self.assertGreater(long['selected_count'], short['selected_count'])
         self.assertGreater(long['applicable_horizon'], short['applicable_horizon'])
+        full_capture_duration = len(self.y)/self.m['sample_rate_hz']
+        whole = estimate_dynamic_frequency(self.y, self.m, self.bank,
+            config=dict(future_horizon_seconds=full_capture_duration))
+        last_searched_time = (len(self.y)-1)/self.m['sample_rate_hz']-self.m['calendar']['capture_lead_seconds']
+        self.assertGreaterEqual(whole['applicable_horizon'], last_searched_time)
+        self.assertAlmostEqual(whole['applicable_horizon'],
+            whole['available_at']+full_capture_duration)
         m = copy.deepcopy(self.m)
         m['channel']['sample_clock_pair_ppm'] = 4000
         m['channel']['endpoint_uniform_half_bound_ppm'] = 2000
@@ -120,6 +127,50 @@ class DynamicFrequencyTests(unittest.TestCase):
         result = estimate_dynamic_frequency(self.y, self.m, self.bank, config=dict(model_allowance_hz=30))
         self.assertEqual(result['reason'], 'profile_or_allowance_too_broad')
         self.assertEqual(result['selected_frequencies'], self.bank.tolist())
+        result = estimate_dynamic_frequency(self.y, self.m, self.bank,
+            config=dict(model_allowance_hz=30, selection_geometry='continuous_interval'))
+        self.assertEqual(result['reason'], 'profile_or_allowance_too_broad')
+        self.assertEqual(result['selected_frequencies'], self.bank.tolist())
+
+    def test_continuous_interval_admission_is_independent_of_bookkeeping_density(self):
+        # The same public profiles and prior are sampled on five and 101
+        # bookkeeping points. Neighbor padding makes the old discrete gate
+        # reject five points at exactly 80%, even though the continuous region
+        # itself occupies only about a third of the prior.
+        m, y, _ = fixture(cfo=.1)
+        m['channel']['random_doppler_width_hz'] = .05
+        m['channel']['selective_slow_depth'] = 0.
+        m['channel']['selective_fast_depth'] = 0.
+        grids = [np.linspace(-.6725336266813341, .6725336266813341, count)
+                 for count in (5, 101)]
+        legacy = [estimate_dynamic_frequency(y, m, bank) for bank in grids]
+        self.assertEqual([row['status'] for row in legacy], ['fallback', 'narrowed'])
+        results = [estimate_dynamic_frequency(y, m, bank,
+            config=dict(selection_geometry='continuous_interval')) for bank in grids]
+        self.assertEqual([row['status'] for row in results], ['narrowed', 'narrowed'])
+        np.testing.assert_allclose(results[0]['expanded_intervals_hz'],
+                                   results[1]['expanded_intervals_hz'], atol=1e-12)
+        self.assertAlmostEqual(results[0]['retained_fraction'],
+                               results[1]['retained_fraction'], places=12)
+        self.assertEqual(results[0]['selected_count'], 4)  # diagnostic neighbor padding
+        self.assertLess(results[0]['retained_fraction'], .8)
+
+    def test_continuous_admission_clips_and_sums_disjoint_union_measure(self):
+        from triad_dynamic_frequency import _continuous_intervals
+        intervals, fraction = _continuous_intervals(np.array([-1., 0., 1.]),
+            [(-2., -.5), (-.8, -.25), (.5, 2.)])
+        self.assertEqual(intervals, [[-1., -.25], [.5, 1.]])
+        self.assertAlmostEqual(fraction, .625)
+        intervals, fraction = _continuous_intervals(np.array([0.]), [[-.1, .1]])
+        self.assertEqual(intervals, [])
+        self.assertIsNone(fraction)
+
+    def test_continuous_prior_clipping_does_not_make_zero_width_prior_usable(self):
+        m, y, _ = fixture(cfo=0.)
+        result = estimate_dynamic_frequency(y, m, np.array([0.]),
+            config=dict(selection_geometry='continuous_interval'))
+        self.assertEqual(result['status'], 'fallback')
+        self.assertEqual(result['selected_frequencies'], [0.])
 
     def test_data_overlap_is_explicit_and_disjoint_fit_remains_usable(self):
         m = copy.deepcopy(self.m)
@@ -159,6 +210,8 @@ class DynamicFrequencyTests(unittest.TestCase):
         with self.assertRaises(ValueError): frequency_policy(dict(unrecognized=1))
         with self.assertRaises(ValueError): frequency_policy(dict(observation_seconds=35))
         with self.assertRaises(ValueError): frequency_policy(dict(profile_iterations=True))
+        with self.assertRaisesRegex(ValueError, 'selection_geometry'):
+            frequency_policy(dict(selection_geometry='guessed'))
         with self.assertRaises(ValueError): estimate_dynamic_frequency(self.y, self.m, [0., 0.])
 
 

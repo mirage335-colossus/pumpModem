@@ -350,7 +350,9 @@ class PreparedCase:
         frequencies = np.linspace(-self.frequency_bound, self.frequency_bound,
             2 * math.ceil(self.frequency_bound / .5) + 1) if self.frequency_bound else np.array([0.])
         helper = estimate_weak_helper(self.helper_raw, self.helper_manifest,
-            frequencies, valid=self.helper_valid)
+            frequencies, valid=self.helper_valid,
+            config={'frequency_config': {'selection_geometry': 'continuous_interval',
+                'future_horizon_seconds': (self.raw_first_sample+len(self.raw))/self.sample_rate}})
         frequency = helper.get('frequency') or {}
         intervals = (frequency['expanded_intervals_hz']
             if frequency.get('status') == 'narrowed' else [[-self.frequency_bound, self.frequency_bound]])
@@ -364,6 +366,11 @@ class PreparedCase:
             helper_observation_seconds=len(self.helper_raw) / self.sample_rate,
             helper_status=helper.get('status'), helper_reason=helper.get('reason'),
             helper_frequency_status=frequency.get('status'),
+            helper_frequency_future_horizon_seconds=(self.raw_first_sample+len(self.raw))/self.sample_rate,
+            helper_frequency_aperture_times=[dict(onset_cell_seconds=branch['onset_cell_seconds'],
+                available_at=branch['frequency'].get('available_at'),
+                applicable_horizon=branch['frequency'].get('applicable_horizon'))
+                for branch in helper.get('aperture_conditioning', {}).get('branches', [])],
             candidates=coarse.get('candidates', []), procedure_id=self.screen.procedure_id,
             workspace_bytes=self.screen.resident_estimate,
             exposure_scope='Actual complete public prefix filtered/scored for one abbreviated DATA template subwindow; not a complete-bit acquisition result.')

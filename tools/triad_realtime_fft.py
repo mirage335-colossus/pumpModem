@@ -253,6 +253,28 @@ def _quadratic_scores(correlations, inverse, *, explicit=True):
     return result
 
 
+def _candidate_peak_indices(score, sample_separation, maximum):
+    """Canonical SciPy interior peaks plus independently eligible endpoints."""
+    if len(score) == 1:
+        return np.array([0], dtype=np.intp)
+    peaks = signal.find_peaks(score, distance=sample_separation)[0]
+    leading, trailing = score[0] >= score[1], score[-1] >= score[-2]
+    if leading or trailing:
+        # find_peaks returns sorted distinct INTERIOR indices. Endpoints can
+        # be inserted in order without concatenation, sorting, or deduplication.
+        offset = int(leading)
+        selected = np.empty(len(peaks)+offset+int(trailing), dtype=np.intp)
+        selected[offset:offset+len(peaks)] = peaks
+        if leading:
+            selected[0] = 0
+        if trailing:
+            selected[-1] = len(score)-1
+        peaks = selected
+    if len(peaks) > maximum:
+        peaks = peaks[np.argpartition(score[peaks], -maximum)[-maximum:]]
+    return peaks
+
+
 class FFTScreen:
     """Reusable public templates and Fourier factors, independent of observations.
 
@@ -267,7 +289,7 @@ class FFTScreen:
                  precision='fp32', pass_edge_hz=400., stop_edge_hz=490.,
                  frequency_batch_size=8, workers=2,
                  memory_limit_bytes=1024**3, maximum_frequency_points=1024,
-                 maximum_fft_products=32768, template_provider=None,
+                 maximum_fft_products=32768, correlation_method='frequency', template_provider=None,
                  source_samples=None, template_identity=None, template_chunk_samples=16384,
                  mapped_template_provider=None, template_sampling_step=1):
         started = _clock()
@@ -287,6 +309,9 @@ class FFTScreen:
         self.memory_limit_bytes = _integer(memory_limit_bytes, 'memory limit')
         self.maximum_frequency_points = _integer(maximum_frequency_points, 'maximum frequency points')
         self.maximum_fft_products = _integer(maximum_fft_products, 'maximum FFT products')
+        if correlation_method not in ('frequency', 'lag', 'auto'):
+            raise ValueError("correlation_method must be 'frequency', 'lag', or 'auto'")
+        self.correlation_method = correlation_method
         self.epochs = tuple(int(x) for x in epoch_offsets)
         if not self.epochs or len(set(self.epochs)) != len(self.epochs):
             raise ValueError('epoch offsets must be nonempty and unique')
@@ -458,7 +483,8 @@ class FFTScreen:
             filter_model='causal full-tail FIR, zero-CFO templates, fixed observed coarse projection',
             bounded_fir_chunk_samples=template_chunk_samples,
             maximum_frequency_points=self.maximum_frequency_points,
-            maximum_fft_products=self.maximum_fft_products)
+            maximum_fft_products=self.maximum_fft_products,
+            correlation_method=self.correlation_method)
         if template_provider is not None:
             self.policy.update(template_storage='bounded integer-source callback; identical cubic/warp/FIR operator',
                 template_chunk_samples=template_chunk_samples, template_provider_identity=source_identity)
@@ -505,9 +531,132 @@ class FFTScreen:
             return None, 'frequency_work_limit'
         if max(abs(bank))+self.source_half_width+abs(self.doppler) > self.pass_edge:
             return None, 'frequency_bank_outside_nominal_passband'
-        if len(bank)*len(self.workspaces)*len(self.rays) > self.maximum_fft_products:
-            return None, 'fft_product_work_limit'
         return bank, None
+
+    def _lag_frequency_groups(self, frequencies_hz, frequency_intervals):
+        """Return the exact uniform grids supplied by the caller, if available.
+
+        A union of independently sampled intervals is not itself one ZoomFFT
+        grid. Keep its pieces separate, including any repeated endpoints, so
+        the lag-domain implementation evaluates exactly the same CFO values.
+        """
+        if frequency_intervals is not None:
+            groups = []
+            for interval in frequency_intervals:
+                lo, hi = map(float, interval)
+                count = math.ceil((hi-lo)/self.maximum_frequency_step)+1
+                groups.append(np.linspace(lo, hi, count))
+            return groups
+        values = np.sort(np.asarray(tuple(frequencies_hz), dtype=float))
+        if len(values) == 1:
+            return [values]
+        steps = np.diff(values)
+        step = float(steps[0])
+        tolerance = 32*np.finfo(float).eps*max(1., float(np.max(np.abs(values))), abs(step))
+        if step <= 0 or np.max(np.abs(steps-step)) > tolerance:
+            return None
+        return [values]
+
+    def _correlation_plan(self, frequencies, groups, *, raw_input, top_per_bit=4,
+                          separation=None):
+        """Choose an admitted implementation from bounded work and storage.
+
+        Work estimates count radix-2-equivalent FFT butterflies. ZoomFFT uses
+        Bluestein convolution: one cached kernel transform, then two transforms
+        per input row at the padded convolution length. They are estimates, not
+        measured seconds; both methods retain an independent product ceiling.
+        """
+        nf, nw, nr = len(frequencies), len(self.workspaces), len(self.rays)
+        legacy_products = nf*nw*nr
+        legacy_work = (nf + legacy_products)*self.nfft*math.log2(self.nfft)
+        candidates = []
+        if legacy_products <= self.maximum_fft_products:
+            candidates.append(('frequency', legacy_products, legacy_work))
+
+        zoom_groups = []
+        zoom_products = 0
+        zoom_fft_lanes = 0
+        zoom_work = 0.
+        zoom_lengths = []
+        if groups is not None:
+            for values in groups:
+                if len(values) == 1:
+                    # Singleton grids use the exact direct correlation below.
+                    zoom_groups.append((values, 0, 0))
+                    zoom_products += 2*nw*nr*self.lag_count
+                    zoom_work += nw*nr*self.lag_count*self.kernel_rows
+                    continue
+                length = fft.next_fast_len(self.kernel_rows + len(values) - 1)
+                zoom_lengths.append(length)
+                zoom_groups.append((values, length, float(values[1]-values[0])))
+                zoom_products += 2*nw*nr*self.lag_count+1
+                zoom_fft_lanes += 2*nw*nr*self.lag_count+1
+                zoom_work += length*math.log2(length)  # one cached Bluestein kernel
+                zoom_work += 2*nw*nr*self.lag_count*length*math.log2(length)
+            if zoom_products <= self.maximum_fft_products:
+                candidates.append(('lag', zoom_products, zoom_work))
+        selected = None
+        admitted = []
+        candidate_peaks = {}
+        sample_separation = max(1, math.ceil((
+            .5/float(self.manifest['format'].get('fine_chip_rate_hz', 60.))
+            if separation is None else separation)*self.output_fs))
+        for candidate in candidates:
+            peak = self._correlation_peak_estimate(dict(selected=candidate,
+                frequencies=frequencies, groups=zoom_groups,
+                top_per_bit=top_per_bit, sample_separation=sample_separation), raw_input=raw_input)
+            candidate_peaks[candidate[0]] = peak
+            if peak <= self.memory_limit_bytes:
+                admitted.append(candidate)
+        if self.correlation_method == 'frequency':
+            selected = next((x for x in admitted if x[0] == 'frequency'), None)
+        elif self.correlation_method == 'lag':
+            selected = next((x for x in admitted if x[0] == 'lag'), None)
+        else:
+            selected = min(admitted, key=lambda x:x[2]) if admitted else None
+        return dict(selected=selected, legacy_products=legacy_products,
+            legacy_work_butterfly_estimate=legacy_work,
+            lag_products=zoom_products, lag_work_butterfly_estimate=zoom_work,
+            lag_fft_lengths=zoom_lengths, groups=zoom_groups,
+            frequency_group_count=0 if groups is None else len(groups),
+            lag_fft_transform_lanes=zoom_fft_lanes,
+            available_methods=[x[0] for x in candidates],
+            estimated_peak_bytes_by_method=candidate_peaks,
+            work_scope='Radix-2-equivalent N log2(N) estimate. Lag method includes cached per-group Bluestein kernel FFTs and two padded FFTs per ray/workspace/arrival row. Singleton grids execute direct dot products and are conservatively charged two product-budget units per row, not two actual FFTs. Frequency mode preserves its existing correlation-product cap and separately reports observation FFTs. Does not include Python peak selection, pointwise products, or FIR filtering.')
+
+    def _correlation_peak_estimate(self, plan, *, raw_input):
+        """Conservative live-buffer estimate before any observation allocation."""
+        item = np.dtype(self.dtype).itemsize
+        base = self.resident_estimate + 64*(self.samples if raw_input else self.crop_rows) + 32*self.crop_rows
+        if plan['selected'] is None:
+            return None
+        method = plan['selected'][0]
+        # Each active workspace builds its own per-CFO peak list while the
+        # already retained epoch/clock alternatives remain live. The actual
+        # caller separation and top cap, including overrides, bound this list.
+        peak_rows = min(plan['top_per_bit'], self.lag_count,
+            math.ceil(self.lag_count/plan['sample_separation'])+2)
+        candidates = (len(plan['frequencies'])*peak_rows +
+            len(self.workspaces)*plan['top_per_bit'])*512
+        if method == 'frequency':
+            return (base + len(plan.get('frequencies', ())) * self.nfft * item +
+                self.batch_size * len(self.rays) * self.nfft * item * 3 + candidates)
+        groups = plan['groups']
+        count = sum(len(group[0]) for group in groups)
+        transformed = sum(group[1] for group in groups)
+        largest = max((group[1] for group in groups), default=0)
+        lag_batch = min(self.lag_count, self.batch_size)
+        # ZoomFFT's complex chirps and outputs use complex128 even for an
+        # fp32 template bank, so model these work arrays at their actual width.
+        zoom_item = np.dtype(np.complex128).itemsize
+        correlations = count*len(self.rays)*self.lag_count*zoom_item
+        scores = count*self.lag_count*np.dtype(np.float64).itemsize
+        quadratic_scratch = count*self.lag_count*64
+        phases = count*self.lag_count*zoom_item
+        gather = lag_batch*self.kernel_rows*zoom_item
+        zoom_scratch = lag_batch*largest*zoom_item*4 if largest else 0
+        zoom_plans = transformed*zoom_item*10
+        return base+correlations+scores+quadratic_scratch+phases+gather+zoom_scratch+zoom_plans+candidates
 
     def prepare_observation(self, raw, valid=None):
         """Filter the complete capture once, retaining the full finite FIR tail."""
@@ -588,7 +737,20 @@ class FFTScreen:
         separation = (0.5/float(self.manifest['format'].get('fine_chip_rate_hz', 60.))
                       if minimum_arrival_separation_seconds is None else
                       _number(minimum_arrival_separation_seconds, 'candidate separation', positive=True))
+        if frequency_intervals is None and frequencies_hz is not None:
+            frequencies_hz = tuple(frequencies_hz)
+        elif frequency_intervals is not None:
+            frequency_intervals = tuple(tuple(interval) for interval in frequency_intervals)
         frequencies, failure = self._frequencies(frequencies_hz, frequency_intervals)
+        groups = (None if frequencies is None or self.correlation_method == 'frequency' else
+            self._lag_frequency_groups(frequencies_hz, frequency_intervals))
+        plan = (None if frequencies is None else
+            self._correlation_plan(frequencies, groups, raw_input=projected_observation is None,
+                top_per_bit=top_per_bit, separation=separation))
+        if frequencies is not None and plan['selected'] is None:
+            product_admitted = any(method == self.correlation_method or self.correlation_method == 'auto'
+                for method in plan['available_methods'])
+            failure = 'correlation_working_memory_limit' if product_admitted else 'fft_product_work_limit'
         result = dict(schema='triad-realtime-fft-proposals-v1', status='unresolved', reason=failure,
             candidates=[], candidates_by_bit=[[], []], procedure_id=self.procedure_id,
             policy=self.policy, preparation_timing=self.preparation_timing,
@@ -596,8 +758,7 @@ class FFTScreen:
         if failure:
             result['timing'] = dict(total=_elapsed(started))
             return result
-        projected_count = len(frequencies)*self.nfft
-        batch_scratch = self.batch_size*len(self.rays)*self.nfft*np.dtype(self.dtype).itemsize*3
+        method = plan['selected'][0]
         if projected_observation is not None:
             if raw is not None or valid is not None:
                 raise ValueError('prepared projection requires raw=None and no separate validity')
@@ -605,8 +766,7 @@ class FFTScreen:
             if (observation.shape != (self.crop_rows,) or not np.iscomplexobj(observation) or
                     not np.isfinite(observation).all()):
                 raise ValueError('finite prepared projection must match this screen crop')
-        peak = (self.resident_estimate+projected_count*np.dtype(self.dtype).itemsize+
-                batch_scratch+64*(self.samples if projected_observation is None else self.crop_rows)+32*self.crop_rows)
+        peak = plan['estimated_peak_bytes_by_method'][method]
         if peak > self.memory_limit_bytes:
             result.update(reason='observation_fft_memory_limit', timing=dict(total=_elapsed(started)))
             return result
@@ -615,40 +775,77 @@ class FFTScreen:
             observation = self.prepare_observation(raw, valid)
         filtering_timing = _elapsed(mark)
         mark = _clock()
-        spectra = np.empty((len(frequencies), self.nfft), dtype=self.dtype)
-        times = np.arange(len(observation), dtype=float)/self.output_fs
-        for i, frequency in enumerate(frequencies):
-            rotation = np.exp(-2j*np.pi*np.remainder(frequency*times, 1.)).astype(self.dtype)
-            spectra[i] = fft.fft(observation*rotation, n=self.nfft, workers=self.workers)
+        spectra = None
+        if method == 'frequency':
+            spectra = np.empty((len(frequencies), self.nfft), dtype=self.dtype)
+            times = np.arange(len(observation), dtype=float)/self.output_fs
+            for i, frequency in enumerate(frequencies):
+                rotation = np.exp(-2j*np.pi*np.remainder(frequency*times, 1.)).astype(self.dtype)
+                spectra[i] = fft.fft(observation*rotation, n=self.nfft, workers=self.workers)
         observation_fft_timing = _elapsed(mark)
         mark = _clock()
         retained = [[], []]
         sample_separation = max(1, math.ceil(separation*self.output_fs))
         frequency_separation = 1/(2*self.duration)
+        def retain_rows(local, bit, workspace, frequency_values, score_values):
+            for frequency, score in zip(frequency_values, score_values):
+                peaks = _candidate_peak_indices(score, sample_separation, top_per_bit)
+                for lag in peaks:
+                    local.append(dict(bit=bit, epoch=workspace['epoch'],
+                        arrival=float(self.arrivals[lag]), frequency=float(frequency),
+                        clock_ppm=workspace['clock_ppm'], score=float(score[lag]), rank=workspace['rank']))
+        zoom_plans = []
+        if method == 'lag':
+            kernel_indices = np.arange(self.kernel_rows)
+            local_times = kernel_indices/self.output_fs
+            with fft.set_workers(self.workers):
+                for values, transform_length, _step in plan['groups']:
+                    transform = (signal.ZoomFFT(self.kernel_rows,
+                        (float(values[0]), float(values[-1])), m=len(values),
+                        fs=self.output_fs, endpoint=True) if len(values) > 1 else None)
+                    positions = np.searchsorted(frequencies, values)
+                    if not np.array_equal(frequencies[positions], values):
+                        raise RuntimeError('lag-domain CFO grid differs from the admitted public bank')
+                    zoom_plans.append((values, positions, transform, transform_length))
         for workspace in self.workspaces:
             bit = workspace['bit']
             # A bounded per-epoch/clock list avoids one strong event erasing all
             # alternatives before the other clock/epoch workspaces are visited.
             local = []
-            for first in range(0, len(frequencies), self.batch_size):
-                stop = min(first+self.batch_size, len(frequencies))
-                products = spectra[first:stop, None, :]*workspace['transform'][None]
-                correlations = fft.ifft(products, axis=-1, workers=self.workers)[..., :self.lag_count]
-                scores = _quadratic_scores(correlations, workspace['inverse'],
+            if method == 'frequency':
+                for first in range(0, len(frequencies), self.batch_size):
+                    stop = min(first+self.batch_size, len(frequencies))
+                    products = spectra[first:stop, None, :]*workspace['transform'][None]
+                    correlations = fft.ifft(products, axis=-1, workers=self.workers)[..., :self.lag_count]
+                    scores = _quadratic_scores(correlations, workspace['inverse'],
+                        explicit=workspace['quadratic_explicit'])/self.reference_variance
+                    retain_rows(local, bit, workspace, frequencies[first:stop], scores)
+            else:
+                correlation_bank = np.empty((len(frequencies), len(self.rays), self.lag_count), dtype=np.complex128)
+                with fft.set_workers(self.workers):
+                    for values, positions, transform, _transform_length in zoom_plans:
+                        for first_lag in range(0, self.lag_count, self.batch_size):
+                            stop_lag = min(first_lag+self.batch_size, self.lag_count)
+                            lags = np.arange(first_lag, stop_lag)
+                            windows = observation[lags[:, None]+kernel_indices[None, :]]
+                            phase = np.exp(-2j*np.pi*values[:, None]*
+                                (lags[None, :]/self.output_fs))
+                            for ray_index, column in enumerate(workspace['columns']):
+                                mixed = windows*column.conj()[None, :]
+                                if transform is None:
+                                    modulation = np.exp(-2j*np.pi*values[0]*local_times)
+                                    transformed = np.sum(mixed*modulation[None, :], axis=-1, keepdims=True)
+                                else:
+                                    transformed = transform(mixed, axis=-1)
+                                correlation_bank[positions, ray_index, first_lag:stop_lag] = (
+                                    transformed.T*phase).astype(self.dtype, copy=False)
+                                del mixed, transformed
+                            del windows, phase
+                scores = _quadratic_scores(correlation_bank, workspace['inverse'],
                     explicit=workspace['quadratic_explicit'])/self.reference_variance
-                for fi, score in enumerate(scores):
-                    peaks = signal.find_peaks(score, distance=sample_separation)[0]
-                    if len(score) == 1:
-                        peaks = np.array([0])
-                    else:
-                        peaks = np.unique(np.r_[peaks, 0 if score[0] >= score[1] else [],
-                            len(score)-1 if score[-1] >= score[-2] else []]).astype(int)
-                    if len(peaks) > top_per_bit:
-                        peaks = peaks[np.argpartition(score[peaks], -top_per_bit)[-top_per_bit:]]
-                    for lag in peaks:
-                        local.append(dict(bit=bit, epoch=workspace['epoch'],
-                            arrival=float(self.arrivals[lag]), frequency=float(frequencies[first+fi]),
-                            clock_ppm=workspace['clock_ppm'], score=float(score[lag]), rank=workspace['rank']))
+                retain_rows(local, bit, workspace, frequencies, scores)
+                # Release this workspace before allocating the next bank.
+                del correlation_bank, scores
             local.sort(key=lambda x: x['score'], reverse=True)
             unique = []
             for candidate in local:
@@ -668,11 +865,25 @@ class FFTScreen:
             work=dict(epochs=len(self.epochs), clocks=len(self.clocks), bits=2, rays=len(self.rays),
                 arrival_points=self.lag_count, frequency_points=len(frequencies),
                 synchronization_hypotheses=len(self.epochs)*len(self.clocks)*self.lag_count*len(frequencies),
-                fft_products=len(self.workspaces)*len(self.rays)*len(frequencies),
+                fft_products=plan['selected'][1],
+                selected_correlation_method=method,
+                correlation_work_butterfly_estimate=plan['selected'][2],
+                correlation_method_work_scope=plan['work_scope'],
+                frequency_grid_groups=plan['frequency_group_count'],
+                lag_domain_fft_lengths=plan['lag_fft_lengths'] if method == 'lag' else [],
+                lag_domain_cached_kernel_fft_count=(sum(size > 0 for size in plan['lag_fft_lengths'])
+                    if method == 'lag' else 0),
+                lag_domain_data_fft_count=(2*len(self.workspaces)*len(self.rays)*self.lag_count*
+                    sum(size > 0 for size in plan['lag_fft_lengths']) if method == 'lag' else 0),
+                lag_domain_correlation_products=plan['lag_products'] if method == 'lag' else 0,
+                lag_domain_fft_transform_lanes=plan['lag_fft_transform_lanes'] if method == 'lag' else 0,
                 fft_length=self.nfft, template_workspaces=len(self.workspaces),
                 explicit_quadratic_workspaces=sum(w['quadratic_explicit'] for w in self.workspaces),
                 guarded_quadratic_workspaces=sum(not w['quadratic_explicit'] for w in self.workspaces),
-                observation_ffts=len(frequencies), estimated_peak_bytes=peak,
+                observation_ffts=len(frequencies) if method == 'frequency' else 0,
+                actual_fft_transform_count=(len(frequencies)+plan['legacy_products']
+                    if method == 'frequency' else plan['lag_fft_transform_lanes']),
+                estimated_peak_bytes=peak,
                 source_support_complete=True, coarse_projection_only=True),
             timing=dict(filtering=filtering_timing, observation_fft=observation_fft_timing,
                         correlation_and_selection=score_timing, total=_elapsed(started)))

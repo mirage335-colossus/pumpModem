@@ -24,7 +24,8 @@ _DEFAULT = dict(observation_seconds=36., edge_guard_seconds=.02,
     ray_width_allowance=3., modulation_width_allowance=1.,
     model_allowance_hz=.02, drift_bound_hz_per_second=0.,
     data_frequency_aperture_seconds=.25, oscillator_tail_probability=.001,
-    future_horizon_seconds=None, pilot_use='both', require_data_free=False)
+    future_horizon_seconds=None, pilot_use='both', require_data_free=False,
+    selection_geometry='discrete_bank')
 
 
 def frequency_policy(config=None):
@@ -43,6 +44,9 @@ def frequency_policy(config=None):
         elif name == 'pilot_use':
             if value not in ('both', 'low', 'high'):
                 raise ValueError('pilot_use must be both, low or high')
+        elif name == 'selection_geometry':
+            if value not in ('discrete_bank', 'continuous_interval'):
+                raise ValueError('selection_geometry must be discrete_bank or continuous_interval')
         elif name == 'future_horizon_seconds' and value is None:
             continue
         elif isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, float, np.number)) or not math.isfinite(value) or value < 0:
@@ -99,6 +103,17 @@ def _subset(bank, intervals):
         b = np.searchsorted(ordered, hi, side='right')
         keep[order[max(0, a-1):min(len(bank), b+1)]] = True
     return bank[keep]
+
+
+def _continuous_intervals(bank, intervals):
+    """Clip/merge interval union to a nonzero continuous prior and measure it."""
+    prior_low, prior_high = float(bank.min()), float(bank.max())
+    prior_width = prior_high-prior_low
+    if prior_width <= 0:
+        return [], None
+    clipped = _merge([(max(prior_low, lo), min(prior_high, hi))
+        for lo, hi in intervals if max(prior_low, lo) <= min(prior_high, hi)])
+    return clipped, sum(hi-lo for lo, hi in clipped)/prior_width
 
 
 def _whittle_profile(power, frequencies, grid, separation, sigma, policy):
@@ -355,12 +370,24 @@ def estimate_dynamic_frequency(raw, manifest, original_frequencies, *, valid=Non
     # phase assumption authorizes an intersection or multiplying their scores.
     expanded = _merge([interval for _, regions in usable for interval in regions])
     selected = _subset(bank, expanded)
-    result.update(expanded_intervals_hz=expanded,
+    admitted = expanded
+    if policy['selection_geometry'] == 'continuous_interval':
+        admitted, retained_fraction = _continuous_intervals(bank, expanded)
+        if retained_fraction is None:
+            return finish('profile_or_allowance_too_broad')
+        # The case-suite caller consumes these continuous intervals. Measure
+        # their union against the continuous public prior, rather than letting
+        # coarse diagnostic points and neighbor padding veto a valid interval.
+    else:
+        retained_fraction = len(selected)/len(bank)
+    result.update(expanded_intervals_hz=admitted,
         competitive_intervals_hz=_merge([interval for name, _ in usable
             for interval in result['pilot_diagnostics'][name]['competitive_intervals_hz']]),
         usable_pilots=[name for name, _ in usable],
+        selection_geometry=policy['selection_geometry'],
+        retained_fraction=retained_fraction,
 )
-    if len(selected) == 0 or len(selected) >= len(bank)*policy['maximum_retained_fraction']:
+    if not admitted or retained_fraction >= policy['maximum_retained_fraction']:
         return finish('profile_or_allowance_too_broad')
     result.update(status='narrowed', selected_frequencies=selected.tolist(), selected_count=len(selected))
     return finish('engineering_frequency_regions_selected')

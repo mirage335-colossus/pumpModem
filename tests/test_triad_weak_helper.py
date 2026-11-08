@@ -103,6 +103,9 @@ class WeakHelperTests(unittest.TestCase):
         for config in ({'unknown':1},{'maximum_samples':True},{'onset_step_seconds':0},
                        {'frequency_config':{'require_data_free':False}}):
             with self.assertRaises(ValueError):weak_helper_policy(config)
+        self.assertEqual(weak_helper_policy(dict(frequency_config={
+            'selection_geometry':'continuous_interval'}))['frequency_policy']['selection_geometry'],
+            'continuous_interval')
         with self.assertRaises(ValueError):estimate_weak_helper(y.real,m,bank)
         with self.assertRaises(ValueError):estimate_weak_helper(y,m,[0.,0.])
 

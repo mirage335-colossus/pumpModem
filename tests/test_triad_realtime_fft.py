@@ -8,14 +8,15 @@ import math
 from pathlib import Path
 import sys
 import unittest
+from unittest import mock
 
 import numpy as np
-from scipy import fft
+from scipy import fft, signal
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
 from triad_realtime_fft import (FFTScreen, _quadratic_scores, _fir_decimate_chunks,
     _collapsed_cubic_fir, _project_coarse_column, _mapped_finite_source,
-    compare_template_projectors)
+    compare_template_projectors, _candidate_peak_indices)
 from triad_dynamic_joint import _sample_cubic
 
 
@@ -57,6 +58,255 @@ def waveform(m, source, epoch_index, bit, arrival, frequency, clock):
 
 
 class FFTScreenTests(unittest.TestCase):
+    def test_ordered_endpoint_insertion_preserves_canonical_peak_indices(self):
+        rng = np.random.default_rng(51291)
+        scores = [np.array(row, dtype=float) for row in (
+            [0.], [0., 0.], [1., 0.], [0., 1.], [0., 1., 0.],
+            [1., 1., 0.], [0., 1., 1.], [1., 1., 1.],
+            [0., 2., 2., 0., 2., 2., 0.], [2., 0., 2., 0., 2.],
+            [0., np.inf, 0.], [np.nan, 1., 0.])]
+        scores.extend([np.zeros(71), np.arange(71.), np.arange(71.)[::-1]])
+        scores.extend(rng.normal(size=(20, 71)))
+        scores.extend(rng.integers(-2, 3, size=(20, 71)).astype(float))
+        for score in scores:
+            for separation in (1, 2, 15, 100):
+                for maximum in (1, 2, 4, 64):
+                    original = signal.find_peaks(score, distance=separation)[0]
+                    if len(score) == 1:
+                        original = np.array([0])
+                    else:
+                        original = np.unique(np.r_[original,
+                            0 if score[0] >= score[1] else [],
+                            len(score)-1 if score[-1] >= score[-2] else []]).astype(int)
+                    if len(original) > maximum:
+                        original = original[np.argpartition(score[original], -maximum)[-maximum:]]
+                    np.testing.assert_array_equal(
+                        _candidate_peak_indices(score, separation, maximum), original)
+
+    def test_lag_zoomfft_matches_direct_complex_correlations_and_frequency_path(self):
+        m, source, epochs = fixture()
+        s = screen(m, source, epochs, precision='fp64', correlation_method='lag',
+                   frequency_batch_size=2)
+        raw = waveform(m, source, 1, 1, -.1, .17, 10000.)
+        projected = s.prepare_observation(raw)
+        frequencies = np.array([-.4, -.2, 0., .2, .4])
+        w = s.workspaces[0]
+        lags = np.arange(s.lag_count)
+        windows = projected[lags[:, None]+np.arange(s.kernel_rows)[None, :]]
+        direct = np.asarray([[[np.sum(projected[lag:lag+s.kernel_rows]*
+            w['columns'][ray].conj()*np.exp(-2j*np.pi*f*
+            (lag+np.arange(s.kernel_rows))/s.output_fs))
+            for lag in range(s.lag_count)] for ray in range(len(s.rays))]
+            for f in frequencies])
+        zoom_correlations = []
+        for column in w['columns']:
+            zoom = signal.ZoomFFT(s.kernel_rows, (frequencies[0], frequencies[-1]),
+                                  m=len(frequencies), fs=s.output_fs, endpoint=True)
+            transformed = zoom(windows*column.conj()[None, :], axis=-1).T
+            phase = np.exp(-2j*np.pi*frequencies[:, None]*(lags[None, :]/s.output_fs))
+            zoom_correlations.append(transformed*phase)
+        np.testing.assert_allclose(np.asarray(zoom_correlations).transpose(1,0,2),
+                                   direct, rtol=2e-11, atol=2e-11)
+        captured = {}
+        reference_quadratic = _quadratic_scores
+        def record_correlations(values, inverse, *, explicit=True):
+            if 'correlations' not in captured:
+                captured['correlations'] = np.array(values, copy=True)
+            scores = reference_quadratic(values, inverse, explicit=explicit)
+            if 'scores' not in captured:
+                captured['scores'] = np.array(scores, copy=True)
+            return scores
+        with mock.patch('triad_realtime_fft._quadratic_scores', side_effect=record_correlations):
+            lag_result = s.score_projected(projected, frequencies, top_per_bit=4,
+                projection_receipt=s.projection_receipt())
+        np.testing.assert_allclose(captured['correlations'], direct, rtol=2e-11, atol=2e-11)
+        direct_scores = reference_quadratic(direct, w['inverse'], explicit=w['quadratic_explicit'])/s.reference_variance
+        np.testing.assert_allclose(captured['scores']/s.reference_variance, direct_scores,
+                                   rtol=3e-11, atol=3e-11)
+        self.assertEqual(lag_result['status'], 'proposed')
+        self.assertEqual(lag_result['work']['selected_correlation_method'], 'lag')
+        # Score and candidate selection are compared with the existing path
+        # on the same projected observation, grid, templates and inverses.
+        legacy = screen(m, source, epochs, precision='fp64', correlation_method='frequency')
+        legacy_result = legacy.score_projected(legacy.prepare_observation(raw), frequencies, top_per_bit=4,
+            projection_receipt=legacy.projection_receipt())
+        self.assertEqual(legacy_result['status'], 'proposed')
+        for left, right in zip(lag_result['candidates'], legacy_result['candidates']):
+            self.assertEqual({k:v for k,v in left.items() if k != 'score'},
+                             {k:v for k,v in right.items() if k != 'score'})
+            self.assertAlmostEqual(left['score']/right['score'], 1., places=10)
+
+    def test_lag_zoomfft_handles_one_ray_rank_deficiency_and_interval_unions(self):
+        m, source, epochs = fixture()
+        m['channel'].update(spread_delay_ms=0., spread_doppler_hz=0.)
+        one_ray = screen(m, source, epochs, precision='fp64', correlation_method='lag')
+        observation = one_ray.prepare_observation(waveform(m, source, 0, 1, .1, 0., 0.))
+        intervals = [[-.4, 0.], [0., .4]]
+        result = one_ray.score_projected(observation, frequency_intervals=intervals, top_per_bit=3,
+            projection_receipt=one_ray.projection_receipt())
+        self.assertEqual(result['status'], 'proposed')
+        self.assertEqual(result['frequencies_hz'], [-.4, 0., .4])
+        self.assertEqual(result['work']['frequency_grid_groups'], 2)
+        self.assertTrue(all(np.isfinite(row['score']) for row in result['candidates']))
+        singleton = one_ray.score_projected(observation, frequency_intervals=[[-.2, -.2]],
+            top_per_bit=3, projection_receipt=one_ray.projection_receipt())
+        singleton_old = screen(m, source, epochs, precision='fp64', correlation_method='frequency')
+        singleton_reference = singleton_old.score_projected(
+            observation,
+            frequency_intervals=[[-.2, -.2]], top_per_bit=3,
+            projection_receipt=singleton_old.projection_receipt())
+        for a, b in zip(singleton['candidates'], singleton_reference['candidates']):
+            self.assertEqual({k:v for k,v in a.items() if k != 'score'},
+                             {k:v for k,v in b.items() if k != 'score'})
+            self.assertAlmostEqual(a['score']/b['score'], 1., places=10)
+        nonzero_singleton = one_ray.score_projected(observation,
+            frequency_intervals=[[.2, .2]], top_per_bit=3,
+            projection_receipt=one_ray.projection_receipt())
+        nonzero_reference = singleton_old.score_projected(
+            observation,
+            frequency_intervals=[[.2, .2]], top_per_bit=3,
+            projection_receipt=singleton_old.projection_receipt())
+        for a, b in zip(nonzero_singleton['candidates'], nonzero_reference['candidates']):
+            self.assertEqual({k:v for k,v in a.items() if k != 'score'},
+                             {k:v for k,v in b.items() if k != 'score'})
+            self.assertAlmostEqual(a['score']/b['score'], 1., places=10)
+
+        disjoint = one_ray.score_projected(observation,
+            frequency_intervals=[[-.4, -.2], [.2, .4]], top_per_bit=3,
+            projection_receipt=one_ray.projection_receipt())
+        disjoint_reference = singleton_old.score_projected(
+            observation,
+            frequency_intervals=[[-.4, -.2], [.2, .4]], top_per_bit=3,
+            projection_receipt=singleton_old.projection_receipt())
+        self.assertEqual(disjoint['frequencies_hz'], disjoint_reference['frequencies_hz'])
+        for a, b in zip(disjoint['candidates'], disjoint_reference['candidates']):
+            self.assertEqual({k:v for k,v in a.items() if k != 'score'},
+                             {k:v for k,v in b.items() if k != 'score'})
+            self.assertAlmostEqual(a['score']/b['score'], 1., places=10)
+
+        m, source, epochs = fixture()
+        rank_one = screen(m, source, epochs, precision='fp64', correlation_method='lag')
+        for w in rank_one.workspaces:
+            w['columns'][1] = w['columns'][0]
+            w['transform'][1] = w['transform'][0]
+            w['inverse'] = np.full((2, 2), .25, dtype=np.complex128)
+            w['rank'] = 1
+            w['quadratic_explicit'] = False
+        observed = rank_one.prepare_observation(waveform(m, source, 1, 1, .1, -.2, 0.))
+        lag = rank_one.score_projected(observed, np.linspace(-.4, .4, 5), top_per_bit=3,
+            projection_receipt=rank_one.projection_receipt())
+        old = screen(m, source, epochs, precision='fp64', correlation_method='frequency')
+        for w, copy_w in zip(old.workspaces, rank_one.workspaces):
+            w['columns'][1] = w['columns'][0]
+            w['transform'][1] = w['transform'][0]
+            w['inverse'] = copy_w['inverse']
+            w['rank'] = 1
+            w['quadratic_explicit'] = False
+        legacy = old.score_projected(old.prepare_observation(waveform(m, source, 1, 1, .1, -.2, 0.)),
+            np.linspace(-.4, .4, 5), top_per_bit=3, projection_receipt=old.projection_receipt())
+        self.assertEqual([x['bit'] for x in lag['candidates']], [x['bit'] for x in legacy['candidates']])
+        for a, b in zip(lag['candidates'], legacy['candidates']):
+            self.assertEqual({k:v for k,v in a.items() if k != 'score'},
+                             {k:v for k,v in b.items() if k != 'score'})
+            self.assertAlmostEqual(a['score']/b['score'], 1., places=9)
+
+    def test_auto_lag_budget_and_memory_preflight(self):
+        m, source, epochs = fixture()
+        auto = screen(m, source, epochs, correlation_method='auto',
+                      maximum_frequency_points=64, maximum_fft_products=100000)
+        observation = auto.prepare_observation(waveform(m, source, 1, 0, 0., .1, 0.))
+        bank = np.linspace(-.5, .5, 32)
+        result = auto.score_projected(observation, bank, projection_receipt=auto.projection_receipt())
+        plan = auto._correlation_plan(bank, [bank], raw_input=False)
+        self.assertEqual(result['work']['selected_correlation_method'], plan['selected'][0])
+        self.assertLessEqual(result['work']['fft_products'], auto.maximum_fft_products)
+
+        bounded = screen(m, source, epochs, correlation_method='lag')
+        bounded.memory_limit_bytes = 1
+        with mock.patch('triad_realtime_fft.signal.ZoomFFT') as zoom:
+            limited = bounded.score(np.zeros(bounded.samples, complex), frequency_intervals=[[-.5, .5]])
+        self.assertEqual(limited['reason'], 'correlation_working_memory_limit')
+        zoom.assert_not_called()
+
+        frequencies = np.linspace(-.5, .5, 32)
+        coarse = auto._correlation_plan(frequencies, [frequencies], raw_input=False,
+            top_per_bit=2, separation=1.)
+        fine = auto._correlation_plan(frequencies, [frequencies], raw_input=False,
+            top_per_bit=64, separation=1e-6)
+        self.assertGreater(fine['estimated_peak_bytes_by_method']['lag'],
+                           coarse['estimated_peak_bytes_by_method']['lag'])
+        bounded.memory_limit_bytes = coarse['estimated_peak_bytes_by_method']['lag']
+        with mock.patch('triad_realtime_fft.signal.ZoomFFT') as zoom:
+            limited = bounded.score_projected(observation, frequencies,
+                top_per_bit=64, minimum_arrival_separation_seconds=1e-6,
+                projection_receipt=bounded.projection_receipt())
+        self.assertEqual(limited['reason'], 'correlation_working_memory_limit')
+        zoom.assert_not_called()
+
+    def test_ground_geometry_zoom_matches_direct_edges_and_center(self):
+        # Arithmetic-only control at the long-kernel Ground search geometry.
+        # No channel simulation, receiver timing, or sensitivity trial is used.
+        fs, count = 20, 13448
+        times = np.arange(count)/fs
+        envelope = np.sin(np.pi*np.arange(count)/(count-1))**2
+        source = np.asarray([[envelope*np.exp(2j*np.pi*(.08*times+.00003*times**2)),
+                              envelope*np.exp(-2j*np.pi*(.1*times+.00002*times**2))]])
+        manifest = dict(sample_rate_hz=fs,
+            calendar=dict(capture_samples=14500, capture_lead_seconds=8.,
+                data_sample_offset=20, arrival_prior_seconds=[-7., 7.]),
+            channel=dict(spread_delay_ms=400., spread_doppler_hz=.03),
+            format=dict(occupied_bandwidth_hz=.4, fine_chip_rate_hz=1/6),
+            power=dict(complex_noise_variance=.1))
+        options = dict(clock_ppm=(0.,), output_sample_rate=5,
+            pass_edge_hz=2., stop_edge_hz=2.45, precision='fp64', workers=1,
+            maximum_frequency_points=4096, correlation_method='lag')
+        s = FFTScreen(manifest, source, (0,), **options)
+        self.assertEqual(s.lag_count, 71)
+        self.assertGreaterEqual(s.kernel_rows, 3370)
+        rng = np.random.default_rng(84201)
+        observation = rng.normal(size=s.crop_rows)+1j*rng.normal(size=s.crop_rows)
+        frequencies = np.linspace(-.377, .166, 1462)
+        captured = {}
+        def record(values, inverse, *, explicit=True):
+            scores = _quadratic_scores(values, inverse, explicit=explicit)
+            if not captured:
+                captured.update(correlations=np.array(values, copy=True),
+                                scores=np.array(scores, copy=True))
+            return scores
+        with (mock.patch('triad_realtime_fft._quadratic_scores', side_effect=record),
+              mock.patch('triad_realtime_fft.signal.ZoomFFT', wraps=signal.ZoomFFT) as zoom):
+            result = s.score_projected(observation, frequencies,
+                projection_receipt=s.projection_receipt())
+        self.assertEqual(result['status'], 'proposed')
+        self.assertEqual(zoom.call_count, 1)  # cached for every workspace/ray/lag batch
+        self.assertEqual(result['work']['actual_fft_transform_count'],
+                         1+2*len(s.workspaces)*len(s.rays)*s.lag_count)
+        indices = [0, len(frequencies)//2, len(frequencies)-1]
+        lags = [0, s.lag_count//2, s.lag_count-1]
+        workspace = s.workspaces[0]
+        direct = np.asarray([[[np.sum(observation[lag:lag+s.kernel_rows]*column.conj()*
+            np.exp(-2j*np.pi*frequency*(lag+np.arange(s.kernel_rows))/s.output_fs))
+            for lag in lags] for column in workspace['columns']]
+            for frequency in frequencies[indices]])
+        np.testing.assert_allclose(captured['correlations'][indices][:, :, lags],
+                                   direct, rtol=3e-10, atol=3e-10)
+        expected = _quadratic_scores(direct, workspace['inverse'],
+                                    explicit=workspace['quadratic_explicit'])
+        np.testing.assert_allclose(captured['scores'][indices][:, lags], expected,
+                                   rtol=6e-10, atol=3e-10)
+
+    def test_lag_explicit_bank_sorting_and_irregular_auto_fallback(self):
+        s = screen(precision='fp64', correlation_method='lag')
+        observation = s.prepare_observation(np.zeros(s.samples, complex))
+        result = s.score_projected(observation, [.2, -.2, 0.],
+            projection_receipt=s.projection_receipt())
+        self.assertEqual(result['status'], 'proposed')
+        self.assertEqual(result['frequencies_hz'], [-.2, 0., .2])
+        s = screen(precision='fp64', correlation_method='auto')
+        result = s.score(np.zeros(s.samples, complex), [-.2, -.01, .2])
+        self.assertEqual(result['status'], 'proposed')
+        self.assertEqual(result['work']['selected_correlation_method'], 'frequency')
+
     def test_mapped_source_preserves_fractional_zero_extension_at_both_edges(self):
         source = np.ones(12, complex)
         requests = []

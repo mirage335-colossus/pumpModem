@@ -85,7 +85,32 @@ report. The one-thread default reflects matched local measurements, including
 an FHSS case with no measured 12-thread speedup, and is
 not asserted to be globally optimal or to establish a whole-machine CPU ceiling.
 FHSS Helper gating follows the native plan; when the gated-pilot estimator is
-unsupported, EME case 9 must retain the full CFO range.
+unsupported, the EME configuration must retain the full CFO range. Case indexes
+are current row ordinals in `_tests-RobustModem.md` and can change when that
+manual list is edited; derive them from the freshly parsed list before a partial
+run.
+
+For the manual-case Groundwave Helper search, the caller opts into continuous
+interval admission because the DATA stage consumes Helper frequency intervals,
+not its diagnostic CFO points. For each retained onset aperture, clip and merge the proposed interval union to
+the public prior, then compare its total width with the prior width using the
+existing 80% fallback limit. Other callers keep discrete-bank admission. A
+flat pilot, prior-boundary profile, inconsistent pilot regions, gated
+or retuned Helper, no usable pilot, or an aperture's interval union covering at
+least 80% of the prior must keep the full public DATA search. Successful onset
+branches are then conservatively unioned without another width gate. Do not loosen these fallback rules to accommodate
+a coarse bookkeeping grid.
+
+For an eligible slow, non-hopping full-coarse template bank, a 5 Hz projected
+profile is available when the public required band is at least 0.4 Hz and below
+2 Hz (pass edge 2 Hz, stop edge 2.45 Hz). Revalidate the profile against the
+current exact native basis on the local window using rank agreement, the 1%
+projector and stored scoring-operator gates, and the remaining local fidelity
+checks. This rate gives a 0.2 second coarse arrival step; it is a search grid,
+not a continuous arrival-time certificate. Existing 10 Hz and 20 Hz profiles
+remain selected for their narrower and wider eligible bands. The tested 3 Hz
+profile failed the 1% fidelity gate and is not an available option. These
+profiles approximate template storage, not the channel or observation filter.
 When admitted, the suite also estimates complete coarse service as the measured
 streaming FIR plus the slower bit's full nominal-SNR Helper/FFT search; it
 excludes the separate `PracticalTrackingReceiver` and is not divided by the

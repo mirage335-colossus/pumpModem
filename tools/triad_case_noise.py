@@ -45,6 +45,42 @@ def _lag_ranges(p0, prefix, raw_samples, tap_count, decimation, count, delta):
     return valid_lo, full_lo, full_hi, valid_hi
 
 
+def _boundary_terms(p0, prefix, raw_samples, tap_count, decimation, delta, ranges):
+    """Yield exact half-open lag-product slices at the finite raw boundaries."""
+    valid_lo, full_lo, full_hi, valid_hi = ranges
+    for first, stop in ((valid_lo, full_lo), (full_hi, valid_hi)):
+        for j in range(first, stop):
+            p = p0+j*decimation
+            lo = max(0, p-raw_samples+1)
+            hi = min(tap_count-delta, p-prefix+1)
+            if hi > lo:
+                yield j, lo, hi
+
+
+def _boundary_plan(p0, prefix, raw_samples, tap_count, decimation, delta, ranges):
+    """Choose the cheaper exact direct or anchored-sum boundary evaluation."""
+    direct_work = double_work = rows = 0
+    forward = reverse = False
+    length = tap_count-delta
+    for _, lo, hi in _boundary_terms(p0, prefix, raw_samples, tap_count,
+                                    decimation, delta, ranges):
+        direct_work += hi-lo
+        rows += 1
+        if lo == 0:
+            forward = True
+        elif hi == length:
+            reverse = True
+        else:
+            double_work += hi-lo
+    # One product vector, each needed cumulative traversal, one lookup per
+    # boundary row, and direct dots for windows clipped at BOTH raw edges.
+    cumulative_work = length*(1+forward+reverse)+rows+double_work
+    cumulative = (forward or reverse) and cumulative_work < direct_work
+    return dict(work=cumulative_work if cumulative else direct_work,
+                direct_work=direct_work, cumulative=cumulative,
+                forward=forward, reverse=reverse)
+
+
 class ProjectedNoise:
     """Draw unit-variance complex noise after an FFTScreen finite FIR.
 
@@ -118,7 +154,7 @@ class ProjectedNoise:
         # SciPy's possible Fortran-order factorization copy at peak.
         self.owned_workspace_bytes = (3*band_cells*complex_bytes +
             8*self.output_count*complex_bytes + 4*self.helper_prefix_samples*complex_bytes +
-            len(tap_array)*complex_bytes)
+            3*len(tap_array)*complex_bytes)
         if self.owned_workspace_bytes > self.memory_limit_bytes:
             raise MemoryError('projected noise workspace exceeds declared memory limit')
         factor_work = self.output_count*(self.bandwidth+1)*(self.bandwidth+2)//2
@@ -126,26 +162,31 @@ class ProjectedNoise:
             raise ValueError('banded Cholesky work exceeds bounded operation limit')
         if self.helper_prefix_samples != self.raw_samples:
             boundary_work = 0
+            direct_work = cumulative_lags = 0
             p0 = self.crop_first*self.decimation
             for lag in range(self.bandwidth+1):
                 count = self.output_count-lag
                 if count <= 0:
                     break
                 delta = lag*self.decimation
-                valid_lo, full_lo, full_hi, valid_hi = _lag_ranges(
+                ranges = _lag_ranges(
                     p0, self.helper_prefix_samples, self.raw_samples, len(tap_array),
                     self.decimation, count, delta)
-                for start, stop in ((valid_lo, full_lo), (full_hi, valid_hi)):
-                    for j in range(start, stop):
-                        p = p0+j*self.decimation
-                        r0 = max(self.helper_prefix_samples, p+delta-len(tap_array)+1)
-                        r1 = min(self.raw_samples, p+1)
-                        boundary_work += max(0, r1-r0)
+                plan = _boundary_plan(p0, self.helper_prefix_samples, self.raw_samples,
+                    len(tap_array), self.decimation, delta, ranges)
+                boundary_work += plan['work']
+                direct_work += plan['direct_work']
+                cumulative_lags += int(plan['cumulative'])
             self.boundary_work_estimate = boundary_work
+            self.boundary_direct_dot_work_estimate = direct_work
+            self.boundary_cumulative_lags = cumulative_lags
             if boundary_work > _MAX_BOUNDARY_DOT_WORK:
                 raise ValueError('finite covariance boundary work exceeds bounded operation limit')
         else:
             self.boundary_work_estimate = 0
+            self.boundary_direct_dot_work_estimate = 0
+            self.boundary_cumulative_lags = 0
+        self.boundary_method = 'per_lag_minimum_direct_or_anchored_prefix_suffix'
 
         self._factor = None
         self._active_start = 0
@@ -184,30 +225,36 @@ class ProjectedNoise:
                 break
             delta = lag*d
             # Fully interior windows have the same full FIR autocorrelation.
-            valid_lo, full_lo, full_hi, valid_hi = _lag_ranges(
+            ranges = _lag_ranges(
                 p0, prefix, raw_n, len(h), d, count, delta)
+            valid_lo, full_lo, full_hi, valid_hi = ranges
             if full_hi > full_lo:
                 ab[lag, full_lo:full_hi] = np.dot(h[delta:], h[:len(h)-delta].conj())
-            # Boundary windows use direct clipped dot products. This avoids
-            # subtracting a nearly equal prefix covariance from a full one.
-            for j in range(valid_lo, full_lo):
-                p = p0+j*d
-                r0 = max(prefix, p+delta-len(h)+1)
-                r1 = min(raw_n, p+1)
-                if r1 <= r0:
+            plan = _boundary_plan(p0, prefix, raw_n, len(h), d, delta, ranges)
+            length = len(h)-delta
+            if plan['cumulative']:
+                product = h[delta:]*h[:length].conj()
+                if plan['forward']:
+                    cumulative = np.cumsum(product)
+                    for j, lo, hi in _boundary_terms(p0, prefix, raw_n, len(h), d, delta, ranges):
+                        if lo == 0:
+                            ab[lag, j] = cumulative[hi-1]
+                    del cumulative
+                if plan['reverse']:
+                    # Sum from the actual tail. Never obtain a tiny finite
+                    # suffix by subtracting two nearly equal full/prefix sums.
+                    cumulative = np.cumsum(product[::-1])
+                    for j, lo, hi in _boundary_terms(p0, prefix, raw_n, len(h), d, delta, ranges):
+                        if lo > 0 and hi == length:
+                            ab[lag, j] = cumulative[length-lo-1]
+                    del cumulative
+                del product
+            for j, lo, hi in _boundary_terms(p0, prefix, raw_n, len(h), d, delta, ranges):
+                if plan['cumulative'] and (lo == 0 or hi == length):
                     continue
-                left = h[p+delta-r1+1:p+delta-r0+1][::-1]
-                right = h[p-r1+1:p-r0+1][::-1]
-                ab[lag, j] = np.dot(left, right.conj())
-            for j in range(full_hi, valid_hi):
-                p = p0+j*d
-                r0 = max(prefix, p+delta-len(h)+1)
-                r1 = min(raw_n, p+1)
-                if r1 <= r0:
-                    continue
-                left = h[p+delta-r1+1:p+delta-r0+1][::-1]
-                right = h[p-r1+1:p-r0+1][::-1]
-                ab[lag, j] = np.dot(left, right.conj())
+                # A short remaining raw interval can clip both tap-vector
+                # ends. Keep its direct finite dot, with the existing order.
+                ab[lag, j] = np.dot(h[lo+delta:hi+delta][::-1], h[lo:hi][::-1].conj())
         return ab
 
     def draw(self, seed):

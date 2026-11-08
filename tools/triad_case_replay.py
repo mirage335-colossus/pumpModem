@@ -291,7 +291,8 @@ class PreparedReplay:
             self.profile_validation_seconds = 0.
             if selected_step > 1:
                 output_fs, pass_edge, stop_edge = ((600, 240., 294.) if selected_step == 3 else
-                    (10, .4, 4.9) if required < .4 else (20, 4., 9.8))
+                    (10, .4, 4.9) if required < .4 else
+                    (5, 2., 2.45) if required < 2. else (20, 4., 9.8))
                 profile_began = time.perf_counter()
                 self.mapped_profile_validation = _validate_mapped_profile(self.template_source,
                     self.manifest, self.clock_bank, output_fs=output_fs,
@@ -321,7 +322,9 @@ class PreparedReplay:
                 EPOCHS, clock_ppm=self.clock_bank, output_sample_rate=output_fs,
                 pass_edge_hz=pass_edge, stop_edge_hz=stop_edge,
                 workers=threads, precision='fp64', memory_limit_bytes=available,
-                maximum_frequency_points=1024, maximum_fft_products=32768,
+                maximum_frequency_points=4096 if selected_step == 60 else 1024,
+                maximum_fft_products=32768,
+                correlation_method='auto' if selected_step == 60 else 'frequency',
                 template_provider=raw_provider, source_samples=raw_source_samples,
                 template_identity=template_source_hash,
                 mapped_template_provider=mapped_provider,
@@ -352,10 +355,13 @@ class PreparedReplay:
                 source_sample_rate_hz=self.fs, projected_sample_rate_hz=output_fs,
                 raw_source_samples=raw_source_samples, raw_capture_samples=self.screen.samples,
                 projected_observation_samples=self.screen.crop_rows,
+                coarse_arrival_step_seconds=1/output_fs,
+                coarse_arrival_end_gap_seconds=grid.arrival_upper-float(self.screen.arrivals[-1]),
                 projection_receipt=self.screen.projection_receipt(),
                 complete_finite_filter_tail_retained=True,
                 helper_enabled=bool(descriptor['helper_enabled']),
                 helper_raw_prefix_samples=self.helper_prefix_samples,
+                helper_frequency_future_horizon_seconds=self.represented_baseband_seconds,
                 mapped_template_sampling_step=selected_step,
                 mapped_template_current_input_validation=self.mapped_profile_validation,
                 mapped_template_fidelity_scope=('Current native local-bank validation covers every epoch/bit/clock/ray with rank/projector checks and common clean/noise selectors; local checks are not a whole-waveform error bound.'
@@ -506,6 +512,12 @@ class PreparedReplay:
                     helper_prefix_samples=self.helper_prefix_samples,
                     memory_limit_bytes=remaining, maximum_factor_work=allowed_work)
                 self._noise_factor_seconds = time.perf_counter()-noise_factor_begin
+                self.preparation['noise_boundary_preparation'] = dict(
+                    method=getattr(self._noise, 'boundary_method', None),
+                    selected_work_estimate=getattr(self._noise, 'boundary_work_estimate', None),
+                    direct_dot_work_estimate=getattr(self._noise, 'boundary_direct_dot_work_estimate', None),
+                    cumulative_lags=getattr(self._noise, 'boundary_cumulative_lags', None),
+                    scope='Exact finite covariance preparation; Helper/DATA raw-prefix coupling is retained.')
             draw = self._noise.draw(noise_seed)
             unit_noise = draw['projected_noise']
             helper_noise = draw['helper_raw_noise']
@@ -536,11 +548,21 @@ class PreparedReplay:
             helper_manifest['power']['complex_noise_variance'] = 1.
             bank_size = max(1, 2*math.ceil(self.grid.frequency_bound/.5)+1)
             frequencies = np.linspace(-self.grid.frequency_bound, self.grid.frequency_bound, bank_size)
-            helper_result = estimate_weak_helper(helper, helper_manifest, frequencies)
+            helper_result = estimate_weak_helper(helper, helper_manifest, frequencies,
+                config={'frequency_config': {'selection_geometry': 'continuous_interval',
+                    'future_horizon_seconds': self.represented_baseband_seconds}})
             helper_status = helper_result.get('status', 'fallback')
             helper_reason = helper_result.get('reason')
             frequency = helper_result.get('frequency') or {}
-            helper_frequency = dict(status=frequency.get('status'), reason=frequency.get('reason'))
+            helper_frequency = dict(status=frequency.get('status'), reason=frequency.get('reason'),
+                expanded_intervals_hz=frequency.get('expanded_intervals_hz', []),
+                selection_geometry=frequency.get('selection_geometry'),
+                retained_fraction=frequency.get('retained_fraction'),
+                aperture_times=[dict(onset_cell_seconds=branch['onset_cell_seconds'],
+                    available_at=branch['frequency'].get('available_at'),
+                    applicable_horizon=branch['frequency'].get('applicable_horizon'))
+                    for branch in helper_result.get('aperture_conditioning', {}).get('branches', [])],
+                time_scope='Spectral aperture availability and frequency applicability, not whole Helper readiness.')
             intervals = (frequency['expanded_intervals_hz'] if frequency.get('status') == 'narrowed'
                 else [[-self.grid.frequency_bound, self.grid.frequency_bound]])
         else:
@@ -565,6 +587,7 @@ class PreparedReplay:
             candidate_scores=proposal.get('candidates_by_bit'),
             candidate_status=proposal.get('status'), candidate_reason=proposal.get('reason'),
             full_public_frequency_points=len(proposal.get('frequencies_hz', [])),
+            searched_frequency_intervals_hz=intervals, search_work=proposal.get('work'),
             raw_noise_seed=noise_seed if cn0_db_hz is not None else None,
             raw_noise_scope='One proper-complex finite raw variance-one Gaussian draw shared with Helper; its DATA projection uses the exact screen FIR/noise geometry.' if cn0_db_hz is not None else 'No noise; deterministic paired-bit gate.',
             receiver_service_seconds_per_baseband_second=elapsed/self.represented_baseband_seconds,

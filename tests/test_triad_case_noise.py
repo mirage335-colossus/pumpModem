@@ -6,12 +6,14 @@ import hashlib
 from pathlib import Path
 import sys
 import unittest
+from unittest import mock
 
 import numpy as np
 from scipy.signal import upfirdn
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
 from triad_case_noise import ProjectedNoise
+import triad_case_noise as noise_module
 
 
 def receipt(taps, *, raw=13, down=2, first=1, count=None, dtype=np.float64):
@@ -51,7 +53,11 @@ class ProjectedNoiseTests(unittest.TestCase):
                 ([.2, -.1, .5, .3, .2, -.05], 13, 2, 1, 0),
                 ([.1, .4, -.2, .3, .5, .1, -.05], 17, 3, 2, 4),
                 ([.7, .2], 10, 1, 0, 4),
-                ([.15, .5, -.2, .3, .11, -.04, .01], 31, 2, 0, 16)):
+                ([.15, .5, -.2, .3, .11, -.04, .01], 31, 2, 0, 16),
+                # Remaining raw support is shorter than the FIR: middle
+                # covariance windows are clipped at BOTH ends of the product.
+                ([.1, .23, -.12, .06, .45, .13, -.22, .18, .07, -.04, .015],
+                 7, 3, 1, 2)):
             rec, taps = receipt(h, raw=raw, down=down, first=first)
             sampler = ProjectedNoise(rec, taps, helper_prefix_samples=prefix)
             frest = dense_matrix(taps, raw, down, first, rec['cropped_output_count'], prefix)
@@ -76,6 +82,53 @@ class ProjectedNoiseTests(unittest.TestCase):
                                            rtol=3e-12, atol=3e-13)
                 if prefix and first == 0:
                     self.assertGreater(sampler._active_start, 0)
+
+    def test_anchored_sums_preserve_tiny_leading_and_trailing_variances(self):
+        rng = np.random.default_rng(511)
+        for reverse, first in ((False, 128), (True, 0)):
+            # Avoid a nearly rank-one geometric covariance while retaining
+            # finite-edge powers far below a full-minus-prefix subtraction.
+            taps = np.geomspace(1., 1e-12, 257)*rng.uniform(.5, 1.5, 257)
+            if reverse:
+                taps = taps[::-1].copy()
+            rec, taps = receipt(taps, raw=2048, down=16, first=first, count=16)
+            sampler = ProjectedNoise(rec, taps)
+            self.assertGreater(sampler.boundary_cumulative_lags, 0)
+            self.assertLess(sampler.boundary_work_estimate,
+                            sampler.boundary_direct_dot_work_estimate)
+            direct = dense_matrix(taps, 2048, 16, first, 16)
+            expected = direct @ direct.conj().T
+            band = sampler._rest_covariance()
+            self.assertGreater(float(expected.diagonal().real.min()), 0.)
+            self.assertLess(float(expected.diagonal().real.min()), 1e-20)
+            # A full-minus-prefix implementation loses these tiny tails.
+            for lag in range(16):
+                np.testing.assert_allclose(band[lag, :16-lag],
+                    expected[np.arange(lag, 16), np.arange(16-lag)],
+                    rtol=2e-13, atol=0.)
+            lower = np.zeros((16, 16), complex)
+            for lag in range(16):
+                lower[np.arange(lag, 16), np.arange(16-lag)] = sampler._factor[lag, :16-lag]
+            np.testing.assert_allclose(lower @ lower.conj().T, expected,
+                                       rtol=3e-12, atol=0.)
+
+    def test_boundary_admission_charges_selected_exact_algorithm(self):
+        rec, taps = receipt(np.ones(20_000), raw=100_000,
+                            down=100, first=0, count=400)
+        sampler = ProjectedNoise(rec, taps)
+        self.assertGreater(sampler.boundary_direct_dot_work_estimate, 100_000_000)
+        self.assertLess(sampler.boundary_work_estimate, 100_000_000)
+        self.assertGreater(sampler.boundary_cumulative_lags, 0)
+        self.assertTrue(np.isfinite(sampler._factor).all())
+        self.assertEqual(noise_module._MAX_BOUNDARY_DOT_WORK, 100_000_000)
+        # The selected algorithm still has a hard work refusal before covariance
+        # construction; this test-only ceiling leaves production limits intact.
+        with (mock.patch.object(noise_module, '_MAX_BOUNDARY_DOT_WORK',
+                                sampler.boundary_work_estimate-1),
+              mock.patch.object(ProjectedNoise, '_rest_covariance') as covariance):
+            with self.assertRaisesRegex(ValueError, 'boundary work'):
+                ProjectedNoise(rec, taps)
+        covariance.assert_not_called()
 
     def test_draw_is_proper_and_helper_prefix_is_the_same_convolution(self):
         rec, taps = receipt([.2, .7, -.1, .3, .05], raw=12, down=2, first=0, count=5)
@@ -164,10 +217,6 @@ class ProjectedNoiseTests(unittest.TestCase):
             ProjectedNoise(rec2, taps2, maximum_bandwidth=4)
         with self.assertRaises(MemoryError):
             ProjectedNoise(rec, taps, memory_limit_bytes=1)
-        large_rec, large_taps = receipt(np.ones(20_000), raw=100_000,
-            down=100, first=0, count=400)
-        with self.assertRaisesRegex(ValueError, 'boundary work'):
-            ProjectedNoise(large_rec, large_taps)
         long_prefix_rec, long_prefix_taps = receipt(np.ones(65_000),
             raw=10_000_000, down=256, first=0, count=1600)
         long_prefix = ProjectedNoise(long_prefix_rec, long_prefix_taps,

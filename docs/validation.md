@@ -16,16 +16,24 @@ the maintained record.
 
 ## Editable Robust case validation
 
-On 8 November 2026, the uncommitted suite extension based on
-`c578659143f400b7a56f444d4d9773b5a813394b` covered all nine current manual
-entries, with eight unique normalized configurations. Entries 2 and 3 explicitly
-reuse one measurement. The runner rereads and strictly validates the entire
-manual file on every invocation; optional row selection is labeled partial.
-The [current report](../local-evidence/robust-cases-current.md) and
+### Historical nine-entry baseline
+
+On 8 November 2026, the then-current nine-entry manual list was run on the
+uncommitted suite extension based on
+`c578659143f400b7a56f444d4d9773b5a813394b`. It had eight unique normalized
+configurations; its entries 2 and 3 explicitly reused one measurement. This is
+a historical all-entry baseline, not coverage of today's manually edited list.
+The runner rereads and strictly validates the entire manual file on every
+invocation; optional row selection is labeled partial. The
+[historical report](../local-evidence/robust-cases-current.md) and
 [JSON evidence](../local-evidence/robust-cases-current.json) contain the complete
 configuration, nominal DATA/Helper C/N0, bit/`fox` calendar, service intervals,
 workspace, preparation, success evidence, and limitations for every entry.
 Literal `fox` uses the canonical short-message dictionary and is 22 bits.
+
+The manual file has since changed to eight entries. Groundwave 500 kHz Encrypted
+with Helper is current row 3; row numbers in the baseline table below refer only
+to the old nine-entry list.
 
 The input SHA-256 is
 `03c85b3e6478836d9c2526b04d0fc1725706609d02c7e042d20114e2c2c1fee6`;
@@ -46,7 +54,7 @@ range from 0.0545 to 0.0899 s/s; they are not an integrated receiver total.
 The reused Python environment is Python 3.13.5, NumPy 2.5.4, SciPy 1.18.1,
 PyTorch 2.15.0+cpu and threadpoolctl 3.8.0.
 
-| Manual entry | Conditional coarse-bit DATA target, dB-Hz | Complete coarse CPU, s/s | Full coarse preparation, s |
+| Then-current entry in the old nine-row list | Conditional coarse-bit DATA target, dB-Hz | Complete coarse CPU, s/s | Full coarse preparation, s |
 | --- | --- | --- | --- |
 | 1, Sub9 | -25.02, confirmed | 0.000283 | 80.09 |
 | 2/3, groundwave GPSDO | -15.02, confirmed | 0.000322 | 8.81 |
@@ -78,15 +86,23 @@ pair: five successful pairs, then bit 1 failed in pair six (12 receives total).
 No fixed-budget probability bound is reported after this early stop, and no
 second candidate or extension followed. The >90% target remains provisional.
 The maintained `--paired-followup` option reproduces this separate lower-confidence
-tier: all 22 pairs would yield a 90% one-sided lower bound of 0.9006289 for the
+tier: all 22 pairs would yield a 90% one-sided lower bound of 0.9006280 for the
 paired event and hence either bit marginal, without meeting the standard 95%
 criterion or representing real-message success.
 
-Entry 4's same-prefix
-diagnostic found both Helper pilot profiles usable, but the expanded public
-uncertainty remained too broad (`profile_or_allowance_too_broad`). The estimator
-correctly retained the original prior, and the full FFT search exceeded its
-frequency-work limit. This is a receiver limitation, not a passed case.
+In that historical baseline, Groundwave Helper was row 4. Its low and high
+pilot profiles both passed their profile checks. The failure was the handoff:
+the case supplied a five-point discrete CFO bookkeeping bank, and interval-edge
+neighbor padding selected four of those five points, exactly the 80% fallback
+limit. That made the discrete selector report `profile_or_allowance_too_broad`
+even though the continuous interval union occupied only about 40% of the public
+prior. The caller consumes continuous intervals, so discrete point density was
+not a meaningful measure of the proposed search width. The full FFT search then
+also hit its frequency-work limit. These original failures remain part of the
+historical report; they are corrected by density-independent continuous
+admission at the manual-case Helper call site and an exact lag-domain
+ZoomFFT search, with unchanged weak/broad-pilot fallbacks and full public
+candidate coverage.
 
 The coarse CPU estimates that complete their coverage checks have approximately
 95.1–99.97% point-estimate margins, with high utilization of the allocated
@@ -124,12 +140,96 @@ capacity limits. Final `./build.sh test triad --jobs 2 --build-jobs 3 --
 -DDATAPUMP_COMPILER_CACHE=OFF` passed **20/20** in 11.91 seconds. Compiler-cache
 use was disabled for this sandbox. No RunPod instances were needed or deployed.
 
-Keep only the consolidated report/JSON as current evidence for the two
-unresolved receiver/sensitivity questions and this validation claim. Retire or
-replace them when equivalent current validation resolves/supersedes those
-questions, or when the manual configurations change. Resolved projection,
-thread, preparation-cost, preliminary runs and reproducer artifacts are
-distilled above and removed; useful existing build caches are retained.
+Keep the old all-entry report/JSON as a historical baseline, because it contains
+the other-case results and the original Groundwave failure. The current
+Groundwave report/JSON is the validation checkpoint. Its JSON retains a compact
+development history and neighboring regressions. Interim scalar-selection,
+boundary-failure, standalone probe, and intermediate report artifacts were
+removed after their findings were distilled; useful existing build caches are
+retained. Reassess evidence retention when the manual configurations change.
+
+### Current Groundwave Helper repair
+
+The current eight-row manual file has SHA-256
+`b04820861e1ffe4f8b22e2c1f7c0dfc77035cf43126f25f7f4a828fa0f5fdc6b`; Groundwave
+Helper is row 3. The run used base revision
+`24646bf65b71385085765ce29467d79ad391a5bc`, native binary SHA-256
+`f17a86ed10f529586a2e492aee6790650d0ca9d0669ec0a4ca456f362c1fec3a`, and
+`triad_realtime_fft.py` SHA-256
+`7dd9fb00c3dd6a40912225889c10c057160dbc016a76578bc2ac1048e5552e7a`. The
+manual file, source and binary were unchanged at completion. Only this row was
+selected, so the other seven rows remain uncovered by this rerun.
+
+The original failure had two causes: a five-point discrete Helper bookkeeping
+bank made neighbor padding count four of five points against the 80% threshold,
+despite a useful continuous interval union; then the full frequency-domain
+search exceeded its work cap. The case callers now explicitly use continuous
+interval admission, clipping and merging the proposal to the public prior and
+measuring total union width over prior width. The 80% fallback and weak, flat,
+boundary, inconsistent, gated and retuned pilot fallbacks remain. The two-pilot
+profile narrowed the prior to [-0.378964, 0.168427] Hz (40.70% width). The exact
+lag-domain ZoomFFT evaluated the entire admitted CFO grid rather than pruning
+hypotheses.
+
+At nominal DATA C/N0 20.0206 dB-Hz (nominal Helper C/N0 30.0206 dB-Hz), both
+transmitted bit alternatives produced a correct unique coarse proposal. Each
+search covered 1,474 frequency points, 13 epochs, both bit hypotheses, three
+clock values, two rays and all 71 arrival points. The high-SNR/nominal gate
+completed; this establishes complete coarse search for both bits on the sampled
+channel, not an integrated receiver or population guarantee.
+
+| Measured endpoint | Result |
+| --- | --- |
+| Complete coarse service at configured nominal SNR | 0.006148 processing seconds per received baseband second; 95% interval 0.005787–0.006611; 99.39% point-estimate service margin. Ryzen 5 PRO 5650U, one numerical thread, high utilization (0.99756–0.99959). |
+| Estimated coarse-test workspace | 646.9 MiB / 5,369.8 MiB budget; 87.95% estimated headroom. Conservative accounting, not an allocator certificate. |
+| Full-coarse receiver preparation | 14.21 seconds, above the five-second warning; no unavoidable minimum lead time established. |
+| Short receiver readiness probe | 1.71 seconds including its excluded warmup; distinct from full-coarse preparation. |
+
+The conditional duration model proposed -8.72375 dB-Hz for a single bit.
+The native transmission calendar is 710.401 seconds for one bit and 15,830.401
+seconds for literal 22-bit `fox`; these serialization times do not imply message
+success. The standard 95% confirmation forecast
+was 790.413 seconds, exceeding its 600-second candidate budget, so the standard
+95% threshold remains unresolved. Under the separate predeclared paired
+follow-up, all 22 independent common-noise pairs at -8.72375 dB-Hz decoded both
+bits correctly (44 receives). Helper did not yield an admitted narrowing in
+any of these receives, so all 44 outcomes used the full public ±0.672534 Hz CFO prior and
+3,619 frequency points across the complete public arrival, epoch, bit and clock
+bank. The 90% one-sided exact lower bound is
+0.9006280202 for the paired event, hence also each bit marginal. Its 414.026
+second forecast fit the paired budget. This lower-confidence bound concerns one
+fixed channel and the coarse receiver conditional on a transmission; it does
+not establish standard 95% confidence or literal-`fox` message success.
+
+The 5 Hz S=60 profile passed the fresh local fidelity checks and uses 0.2-second
+coarse arrival spacing; the tested 3 Hz profile failed the 1% gate and remains
+excluded. Finite projected-noise boundary work was reduced from an over-limit
+162 million direct-operation estimate to an exact selected-prefix/suffix sum
+of about 6.56 million, without raising the 100-million operation cap. A prior
+frequency-domain full search exceeded its frequency/product caps; the lag
+ZoomFFT completed the complete admitted search. These bounded results do not
+qualify physical-channel population performance, operational admission, full
+Robust reception, DSP allocator peaks, or the GUI path. Same-source,
+nominal-noise neighboring regressions also decoded both bits correctly:
+Groundwave GPSDO used its complete 2-CFO public bank, and HF Helper used all 44
+CFO points after a narrowed Helper proposal. Each used one seed on the same
+sampled channel; these two receives per case (four total) are path regressions, not
+probability or capacity requalification.
+
+The current named `triad` checks passed 20/20 in 12.40 seconds. The case-suite
+command returned its expected research-coverage status. The case suite measured
+only current Groundwave Helper row 3. The separate neighboring path checks do
+not requalify the other seven manual rows.
+
+Retain the final
+[current Groundwave report](../local-evidence/robust-groundwave-current.md) and
+[JSON evidence](../local-evidence/robust-groundwave-current.json) as the current
+checkpoint. Its JSON contains the source/configuration hashes, paired outcomes,
+work accounting, neighboring regressions, compact development history, and
+limitations. The superseded scalar-selection, boundary-failure, standalone
+probe, and intermediate files have been removed; keep the historical nine-entry
+report because it records the other configurations and the original failure.
+Reassess retention when the manual configurations or checkpoint are superseded.
 
 ## Test timing investigation
 

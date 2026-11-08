@@ -83,22 +83,23 @@ python3 tools/triad_abbreviated.py --cases \
 The case-mode CLI returns status 2 to mark that its staged results do not
 certify an integrated receiver.
 
-To rerun only selected current rows while debugging, for example:
+To rerun selected rows while debugging, first read the current
+`_tests-RobustModem.md` list and use its current row indexes:
 
 ```sh
 python3 tools/triad_abbreviated.py --cases \
-  --case-index 6 --case-index 9 \
-  --output local-evidence/robust-cases-6-9.json \
+  --case-index N --case-index M \
+  --output local-evidence/robust-cases-selected.json \
   --exporter build/dev/triad_helper_export
 ```
 
-The optional lower-confidence FHSS follow-up is explicitly opt-in. For the
-current seventh case, its invocation is:
+The optional lower-confidence fixed-point follow-up is explicitly opt-in. Read
+the current list and use the selected configuration's current row index:
 
 ```sh
 python3 tools/triad_abbreviated.py --cases \
-  --case-index 7 --paired-followup \
-  --output local-evidence/robust-fhss-paired-rerun.json \
+  --case-index N --paired-followup \
+  --output local-evidence/robust-cases-paired-rerun.json \
   --exporter build/dev/triad_helper_export
 ```
 
@@ -109,7 +110,7 @@ reuses a measurement only for an identical normalized configuration, with that
 reuse identified in output. It requires all 16 named fields and rejects unknown
 fields or unsupported values. It does not maintain a hardcoded case list.
 By default every current row is run. For an affordable targeted rerun, repeat
-`--case-index N`, for example `--case-index 6 --case-index 9`. The program
+`--case-index N` for each selected current index. The program
 still rereads and strictly validates the entire current list; a stale or
 missing index is an error. JSON records selected indices and the current-list
 size, and the Markdown report labels a partial rerun prominently. A partial
@@ -136,7 +137,7 @@ native Helper placement and generator. The Helper estimator explicitly returns
 `gated_or_retuned_pilots_unsupported` for gated or RF-retuned pilots. When that
 happens, retain the full public CFO/frequency search; do not interpret it as
 an ungated pilot estimate or narrow the search from unsupported pilot timing.
-The EME case (case 9) exercises this fallback and must keep the full CFO search.
+The EME configuration exercises this fallback and must keep the full CFO search.
 
 The primary capacity metric is elapsed stage service seconds divided by
 received baseband seconds for a prepared, single input stream. A ratio at or
@@ -203,6 +204,42 @@ Do not infer that a mapped profile is universally valid outside its admission
 conditions and current-input checks, or that this gate alone approves it as a
 general replacement.
 
+For case-suite Helper assistance, the caller explicitly requests continuous
+interval admission. For each retained onset aperture, the Helper estimates a continuous union, clips and merges
+it to the public CFO prior, and measures its total width against the prior
+width; the existing 80% threshold still triggers full-prior fallback. This
+prevents neighbor padding on a coarse diagnostic bank from rejecting a useful
+interval. Successful onset branches are conservatively unioned without another
+width gate. The default discrete-bank admission remains for other callers.
+No usable pilot, flat or boundary profiles, inconsistent regions, gated pilots,
+and retuned pilots preserve full-prior fallback; one usable pilot can suffice.
+
+Both case callers explicitly extend the frequency allowance over the entire
+searched DATA observation, rather than allowing the stored Helper prefix to
+set its horizon. Per-aperture `available_at` describes the spectral estimate,
+not the readiness time of the complete Helper procedure.
+
+S=60 has an additional 5 Hz observation/template projection profile for public
+required bands from 0.4 Hz to below 2 Hz, with 2 Hz pass and 2.45 Hz stop edges.
+It uses a 0.2 second coarse arrival step. The 10 Hz sub-0.4 Hz and 20 Hz wider
+band profiles remain available under their existing admission rules. A 3 Hz
+profile was tested and failed the required 1% local fidelity gate, so it is not
+used. Every selected profile still requires fresh validation against the
+current exact native local window; template approximation does not establish
+continuous timing accuracy or full-waveform equivalence.
+
+The S=60 full-coarse search may use an exact lag-domain
+[ZoomFFT](https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.ZoomFFT.html) optimization
+for uniform frequency groups. Its common-phase handling preserves the same
+scores and candidates as direct per-frequency correlations. The increased
+4096-frequency admission retains the existing 32768 transform-work cap, based
+on the selected correlation computation, and bounds both lag batches and
+workspace. It still evaluates the complete admitted frequency intervals,
+all 13 epochs, both bits, all three public clocks, and the full admitted arrival
+range; it does not prune from simulated truth. Numerical equivalence must pass
+before case simulations rely on this path. Measure prepared local CPU service
+on this computer before making any speed or realtime claim.
+
 The full-coarse workspace accounting includes retained DATA banks and paired
 clean observations, noise workspace, and a conservative Helper transient
 workspace estimate while the DATA bank remains live. The Helper estimate
@@ -225,7 +262,13 @@ Robust reception, physical-channel population performance, or `fox` message
 success.
 
 The projected-noise covariance factor keeps its default 100-million-operation
-work limit. Only an already current-input-validated S=3 mapped bank with Helper
+work limit. Finite-boundary covariance preparation also keeps its 100-million
+work ceiling. For each covariance lag it chooses the cheaper exact clipped dot
+products or cumulative sums anchored at the leading/trailing edge. It never
+obtains a tiny tail by subtracting nearly equal full and prefix sums; windows
+clipped at both ends retain direct dots. Scratch storage is included, and the
+shared raw Helper prefix and projected DATA covariance are unchanged.
+Only an already current-input-validated S=3 mapped bank with Helper
 disabled may request a limit up to 500 million operations. That exception first
 calibrates at most 8192 output rows using the same actual FIR and decimation
 phase, builds one probe factor, and times three noise draws. Forecasts scale
@@ -266,7 +309,7 @@ point: 22 independent common-noise pairs, where each fresh seed is used once
 for bit 0 and once for bit 1, and a pair succeeds only if both decisions are
 correct. Stop at the first failed pair; do not try a second point. All 22 pairs
 correct gives an exact 90% one-sided lower bound of
-`0.1**(1/22) = 0.9006289` for the paired event, and therefore for each
+`0.1**(1/22) = 0.9006280` for the paired event, and therefore for each
 marginal bit probability. This is not 44 independent trials, a real-message
 probability, or the standard joint 95% qualification; the standard result
 remains unresolved. This optional path uses at most 2 initial + 32 pilot + 44
