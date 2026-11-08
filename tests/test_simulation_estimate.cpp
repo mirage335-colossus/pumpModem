@@ -181,9 +181,9 @@ void symbol_burst_configured_bank() {
     settings.transfer.modem.receiver_cpu_budget=c.receiver_cpu_budget;
     settings.receive_keys.emplace_back(Bytes(32,0x62));settings.receive_keys.push_back(settings.receive_keys.back());
     const auto multiple=run();
-    check(multiple.symbol_burst.initial_key_families==2&&multiple.symbol_burst.initial_profiles==2&&
-        multiple.symbol_burst.acquisition_cpu_seconds>single.symbol_burst.acquisition_cpu_seconds,
-        "a distinct receive key must add its full acquisition/debt work while duplicate keys are deduplicated");
+    check(multiple.symbol_burst.initial_key_families==1&&multiple.symbol_burst.initial_profiles==1&&
+        multiple.symbol_burst.acquisition_cpu_seconds==single.symbol_burst.acquisition_cpu_seconds,
+        "unselected receive keys must not add acquisition work");
     settings.transfer.automatic_receive_profiles=true;settings.transfer.receive_targets_db_hz={0,20};
     settings.transfer.receive_pattern_mode=tuning::PatternMode::auto_keystream;
     const auto companions=run();
@@ -195,10 +195,10 @@ void symbol_burst_configured_bank() {
         "explicitly supplied bank profiles must not be expanded and charged a second time");
     o.key.reset();o.modem.scramble=false;settings.transfer=o;settings.receive_keys.erase(settings.receive_keys.begin()+1,settings.receive_keys.end());
     const auto public_and_private=run();
-    check(public_and_private.symbol_burst.initial_key_families==2&&public_and_private.symbol_burst.initial_profiles==2,
-        "TXnone must preserve a plaintext family alongside loaded private receive keys");
-    check(public_and_private.epoch_hypotheses==1&&public_and_private.symbol_burst.acquisition_new_epoch_admissions>0,
-        "public singleton acquisition must still charge retained private loaded-key cohorts before the bank barrier");
+    check(public_and_private.symbol_burst.initial_key_families==1&&public_and_private.symbol_burst.initial_profiles==1,
+        "None must estimate only the plaintext family");
+    check(public_and_private.epoch_hypotheses==1&&public_and_private.symbol_burst.acquisition_new_epoch_admissions==0,
+        "public singleton acquisition must not charge private epoch admissions");
     settings.transfer.key=settings.receive_keys.front();settings.transfer.modem.scramble=true;
     const auto forbidden=run();
     check(!forbidden.profile_matches&&!forbidden.receiver_workspace_supported&&!forbidden.symbol_burst.modeled&&

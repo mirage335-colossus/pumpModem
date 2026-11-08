@@ -1072,7 +1072,6 @@ struct Session::Impl {
         if(value.transfer.modem.data_key)roots.add(*value.transfer.modem.data_key);
         if(value.long_message_modem && value.long_message_modem->data_key)
             roots.add(*value.long_message_modem->data_key);
-        for(const auto& key:value.receive_keys)roots.add(key);
         if(bank.receiver_storage)for(const auto& receiver:bank.receivers())
             add_receiver_confidentiality_roots(roots,receiver);
         const auto changed=roots.bytes!=bank.confidentiality_roots.bytes ||
@@ -2296,8 +2295,7 @@ struct Session::Impl {
         if(!modem::detail::scheduled_acquisition_policy::requested())return;
         const auto& base=value.transfer.modem;
         if(!modem::scheduled_bursts(base))return;
-        const Crypto* key=value.transfer.key?&*value.transfer.key:
-            value.receive_keys.empty()?nullptr:&value.receive_keys.front();
+        const Crypto* key=value.transfer.key?&*value.transfer.key:nullptr;
         if(!key)return;
         auto profiles=value.transfer.automatic_receive_profiles?
             tuning::receive_profiles(base,value.transfer.receive_targets_db_hz,value.transfer.receive_pattern_mode,true):
@@ -2309,7 +2307,7 @@ struct Session::Impl {
                !modem::detail::scheduled_capture::shared_source_duration_eligible(n,c.sample_rate) || !modem::pattern_pulse_enabled(c))continue;
             eligible=true;
             const auto count=modem::receiver_strategy_bank_count(c,value.transfer.search_seconds,
-                std::max<std::size_t>(1,value.receive_keys.size()+std::size_t(value.transfer.key.has_value())),profiles.size());
+                1,profiles.size());
             if(count>(std::numeric_limits<std::size_t>::max()-128)/2)throw Error("shared capture consumer reservation overflow");
             consumers=std::max(consumers,2*count+128);
         }
@@ -3818,7 +3816,6 @@ struct Session::Impl {
             }
         };
         if (value.transfer.key) add(*value.transfer.key);
-        for (const auto& key : value.receive_keys) add(key);
         const auto now = observation_epoch(bank,value,bank.samples);
         if(!bank.public_amplitude_epoch_origin)
             bank.public_amplitude_epoch_origin=static_cast<long double>(now)-
@@ -6051,7 +6048,6 @@ struct Session::Impl {
             owner->reserved=required;owner->external_heap=external;owner->cpu.captured=work.next_raw;
             std::vector<Crypto> keys;keys.reserve(8);
             if(value.transfer.key)keys.push_back(*value.transfer.key);
-            for(const auto& key:value.receive_keys)if(keys.size()<8)keys.push_back(key);
             const auto plan=helper::plan(value.helper,detail::helper_placement_band(value),work.rate,
                 0,modem::outer_dsss_transmit_gain(value.transfer.modem));
             if(plan.frequency_hz!=work.expected || !(plan.auxiliary_frequency_hz>0))
@@ -6745,7 +6741,6 @@ struct Session::Impl {
             };
             if(value.permits_plaintext() && !family(nullptr))return false;
             if(value.transfer.key && !family(&*value.transfer.key))return false;
-            for(const auto& key:value.receive_keys)if(!family(&key))return false;
             return true;
         }catch(...) {return false;} // Optional catalogue checks never invalidate ordinary PCM.
     }
@@ -7850,7 +7845,6 @@ struct Session::Impl {
                 }
             };
             if(value.transfer.key)add(*value.transfer.key);
-            for(const auto& key:value.receive_keys)add(key);
             helper_workspace=std::make_unique<HelperWorkspace>(plan.frequency_hz,width,
                 std::move(keys),physical_rate,version,detail::helper_occupied_receive_band(value),value.transfer.modem,
                 wide_input_allowed);
@@ -8172,7 +8166,7 @@ struct Session::Impl {
             bool all_minimum=true,any_profile=false;
             double minimum_cell=std::numeric_limits<double>::infinity();
             for(const bool keyed:{false,true}) {
-                if(keyed ? (!value.transfer.key && value.receive_keys.empty()) : !value.permits_plaintext())continue;
+                if(keyed ? !value.transfer.key : !value.permits_plaintext())continue;
                 const auto profiles=value.transfer.automatic_receive_profiles?
                     tuning::receive_profiles(value.transfer.modem,value.transfer.receive_targets_db_hz,
                         value.transfer.receive_pattern_mode,keyed):std::vector<modem::Config>{value.transfer.modem};
@@ -8284,7 +8278,6 @@ struct Session::Impl {
                 }
             };
             if(value.transfer.key)add_key(*value.transfer.key);
-            for(const auto& key:value.receive_keys)add_key(key);
             if(keys.capacity()>SIZE_MAX/sizeof(Crypto))return;
             auto required=keys.capacity()*sizeof(Crypto);
             const auto append=[&](std::size_t n) {
@@ -11173,7 +11166,6 @@ struct Session::Impl {
                                 fingerprints.push_back(fingerprint);
                         };
                         if(value.transfer.key)add_family(*value.transfer.key);
-                        for(const auto& key:value.receive_keys)add_family(key);
                         const auto key_count=fingerprints.size()+static_cast<std::size_t>(value.permits_plaintext());
                         const auto profile_count=value.transfer.automatic_receive_profiles?
                             tuning::receive_profiles(value.transfer.modem,value.transfer.receive_targets_db_hz,
@@ -12278,7 +12270,7 @@ struct Session::Impl {
         const auto profiles=value.transfer.automatic_receive_profiles?
             tuning::receive_profiles(nominal,value.transfer.receive_targets_db_hz,value.transfer.receive_pattern_mode,true):
             std::vector<modem::Config>{nominal};
-        const auto key_count=value.receive_keys.size()+static_cast<std::size_t>(value.transfer.key.has_value());
+        const auto key_count=static_cast<std::size_t>(value.transfer.key.has_value());
         // Reserve enough for old + building certificates, allocator overhead and
         // temporary keys/profiles. Bound allocation before constructing calendars.
         const auto per_bound=sizeof(modem::SchedHopSourceMap)+sizeof(detail::SchedCaptureBound)+128;
@@ -12327,7 +12319,6 @@ struct Session::Impl {
         std::vector<Crypto> keys;
         if(value.permits_plaintext())return;
         if(value.transfer.key)keys.push_back(*value.transfer.key);
-        keys.insert(keys.end(),value.receive_keys.begin(),value.receive_keys.end());
         if(keys.empty())return;
         for(const auto& key:keys) {
             const auto tag=key.identity_fingerprint(Bytes{'D','P','-','R','X','-','B','A','N','K'});

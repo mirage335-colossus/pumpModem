@@ -1180,16 +1180,15 @@ ReceiverLayoutContext receiver_layout_context(const transfer::Options& options,
     };
     for(const auto& c:profiles)reserve(c,keys,profiles.size(),options.search_seconds,options.key);
     if(actual) {
-        // Reserve at least the same complete owner metadata as Live, including
-        // its conservative configured-key count. This is a pure layout; it
+        // Reserve at least the same complete owner metadata as Live for the
+        // selected key or plaintext family. This is a pure layout; it
         // never supplies an owner to runtime resolve_receiver_strategy.
         const auto& base=settings.transfer;
         const auto family=base.automatic_receive_profiles?
             tuning::receive_profiles(base.modem,base.receive_targets_db_hz,base.receive_pattern_mode,true):
             std::vector<modem::Config>{base.modem};
-        const auto count=std::max<std::size_t>(1,settings.receive_keys.size()+std::size_t(base.key.has_value()));
+        const std::size_t count=1;
         for(auto c:family) {
-            if(!c.data_key && !settings.receive_keys.empty())c.data_key=settings.receive_keys.front();
             reserve(c,count,family.size(),base.search_seconds,base.key);
         }
     }
@@ -3076,8 +3075,6 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
             }
         };
         if(settings.transfer.key)add_key(*settings.transfer.key);
-        for(const auto& key:settings.receive_keys)add_key(key);
-        if(options.key)add_key(*options.key);
         configured_burst_families=families.size();
         for(const auto& key:families) {
             auto family=settings.transfer.automatic_receive_profiles?
@@ -4261,7 +4258,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
             // checks. Neither interpolation nor another physical channel is
             // qualified by this evidence. Fewer draws retain a reference.
             const bool tested=raw_bits&&transmission.wire_bits==1&&tested_level&&probability.trials==4096&&
-                profiles.size()==1&&keys==1&&(!actual_settings||actual_settings->receive_keys.empty())&&
+                profiles.size()==1&&keys==1&&
                 config.search_arithmetic==modem::SearchArithmetic::default_mode&&
                 receiver_config.search_arithmetic==modem::SearchArithmetic::default_mode&&
                 work_mode==ReceiverWorkMode::hardware_fallback&&
@@ -4272,7 +4269,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
             result.probability_model_limit=tested?
                 "EME first-bit AWGN: tested signal level; accuracy within 15 percentage points at 95% simultaneous confidence for the preset bit/arrival ensemble. Interpolation, radio hardware and continuation are unqualified":
                 "EME first-bit acquisition AWGN reference outside tested conditions; receiver completion, radio hardware and continuation are unqualified";
-            if(profiles.size()>1||keys>1||(actual_settings&&!actual_settings->receive_keys.empty()))
+            if(profiles.size()>1||keys>1)
                 result.probability_model_limit+="; conditional matching bank only: other profiles/keys, rolling epochs and arbitration are not modeled";
             if(!raw_bits||transmission.wire_bits>1) {
                 result.confidence_available=false;result.probability_interval_available=false;

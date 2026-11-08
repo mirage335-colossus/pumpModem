@@ -94,9 +94,9 @@ then guarded full-symbol work per scheduled interval. It distinguishes the
 conditional successful-acquisition case from ongoing seeking. Extra random
 waits are not assumed to rescue the shortest permitted J=0 interval. Minimum,
 mean and maximum spacing are reported separately. Headline and curve calculations
-use the same configured receive keys and profiles. Memory sharing counts each
-profile's own residency instead of repeating the longest profile for every key
-and target. Finite acquisition can still exceed a short wait's CPU allowance;
+use the selected receive key or plaintext and the configured profiles. Memory sharing counts each
+profile's own residency instead of repeating the longest profile for every target.
+Finite acquisition can still exceed a short wait's CPU allowance;
 the planner retains that cost and can recommend a longer wait.
 
 Silence does not reduce peak DSP workspace, oscillator coverage or the work

@@ -179,9 +179,10 @@ independent preview target. With a file-backed keyring it also exports the absol
 For the public keyset it exports `--keyset amateur`; for an unloaded bank it
 exports `--keyset none`. The keyset option cannot be combined with `--keyfile`.
 `--keyset none` also conflicts with `--key-name` and `--tx-key named`.
-`--tx-key none` disables TX independently of the receive bank. No secret bytes
-are exported. All loaded ring entries remain receive keys. A real
-key named `none` remains distinct from disabled TX encryption. Keyfile loading is
+`--tx-key none` selects unencrypted transmission and reception. No secret bytes
+are exported. Reception uses only the selected key, or plaintext when None is
+selected; other loaded ring entries remain available for selection. A real
+key named `none` remains distinct from disabled encryption. Keyfile loading is
 asynchronous and transactional; missing files/names or invalid settings leave the
 previous ring/configuration intact. Commands use host-shell literal quoting. Its
 common `--target-snr` sets both short and long targets; the parser also accepts
@@ -249,10 +250,10 @@ Immutable documents and plots are cached across unchanged presentation polls.
 In automatic modes, edits to every target dropdown select an exact clock/RAM
 fit at all target levels, preferring the nearest checked weaker target and
 falling back stronger if needed. Already fitting values remain exact. Transmit
-entries include the other effective transmit target and the same deduplicated
-plaintext/key families as the configured RX estimate, leaving the other target
-unchanged. Each independently edited RX-list entry is checked with its companion
-targets and those same banks; the final complete list must fit. Planner target
+entries include the other effective transmit target and the selected encryption
+setting used by the configured RX estimate, leaving the other target unchanged.
+Each independently edited RX-list entry is checked with its companion targets
+and the same encryption setting; the final complete list must fit. Planner target
 checks one matching receive profile and never changes live TX/RX settings.
 If no fitting candidate is found, the affected settings or preview become
 unavailable and stale estimates are cleared. Fixed modes keep exact entries and
@@ -662,8 +663,8 @@ countdown such as **TX lock 10m01s** and the airtime/one-bit-preview line says
 **Earlier output used this key for a future symbol.** The current draft's short
 or long transmit profile determines the countdown. A backward clock adjustment
 can extend it; cancellation and profile changes do not clear the record.
-With no transmit key, this key-reuse lock is zero; receive-only keys do not
-change that. Selecting the same transmit key again restores its retained usage.
+With no selected key, this key-reuse lock is zero. Selecting the same key
+again restores its retained usage.
 
 **TX wait** identifies a separate silence interval after completed hardware
 output, including unencrypted output. A receiver must score whole absent symbols

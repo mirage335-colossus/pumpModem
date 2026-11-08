@@ -367,8 +367,9 @@ Its Launch command includes a file-backed keyring's path and named transmit key
 via \-\-keyfile, \-\-tx-key named and \-\-key-name (or \-\-tx-key none).
 It uses \-\-keyset amateur for the built-in public key and \-\-keyset none for
 an unloaded bank. The keyset option cannot be combined with \-\-keyfile.
-It contains no key bytes; all ring entries remain receive keys. Missing files or
-key names leave the previous settings unchanged.
+It contains no key bytes. Reception uses only the selected key, or plaintext
+when None is selected. Other loaded ring entries remain available for selection.
+Missing files or key names leave the previous settings unchanged.
 Its Launch command can be copied for reuse; Load applies validated settings
 without executing a shell command or starting a transmission.
 .PP

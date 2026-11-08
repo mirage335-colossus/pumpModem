@@ -99,8 +99,10 @@ Settings normalized_layout(Settings value) {
     if (value.dsp_workspace_bytes == runtime::default_dsp_workspace_bytes()) value.dsp_workspace_bytes = value.transfer.dsp_workspace_bytes;
     value.transfer.content_limit = value.content_limit;
     value.transfer.dsp_workspace_bytes = value.dsp_workspace_bytes;
+    // Legacy callers may still supply a receive bank; only the selected key is used.
+    value.receive_keys.clear();
     if (value.transfer.modem.spreading_mode == modem::SpreadingMode::tone) {
-        value.transfer.key.reset(); value.receive_keys.clear();
+        value.transfer.key.reset();
         value.transfer.modem.data_key.reset();
         value.transfer.modem.scramble = value.transfer.modem.dsss = false;
         value.transfer.modem.dsss_factor=1;
@@ -128,7 +130,7 @@ Settings normalized_layout(Settings value) {
             longer.spreading_seed.fill(0); longer.dsss_seed.fill(0);
         } else if (value.transfer.key) longer.scramble = true;
         modem::validate(longer);
-        if ((longer.scramble || longer.dsss) && !value.transfer.key && value.receive_keys.empty())
+        if ((longer.scramble || longer.dsss) && !value.transfer.key)
             throw Error("encrypted spreading requires a loaded key");
     }
     if (!value.simulation && modem::waveform_bandwidth_hz(value.transfer.modem) > 192000)
@@ -142,12 +144,11 @@ Settings normalized_layout(Settings value) {
     if (value.simulation_spectrum_gain_db && !std::isfinite(*value.simulation_spectrum_gain_db))
         throw Error("simulation spectrum display gain must be finite");
     modem::validate_channel(value.transfer.modem, channel_config(value));
-    if (value.receive_keys.size() > 128) throw Error("continuous receiver supports at most 128 loaded keys");
     // Explicit epochs retain their requested radius. Automatic admission and
     // pure estimates use the SAME normalized clock/propagation/audio bound.
     value.transfer.search_seconds=effective_epoch_search_seconds(value.transfer);
     if ((value.transfer.modem.scramble || value.transfer.modem.dsss) &&
-        !value.transfer.key && value.receive_keys.empty()) throw Error("encrypted spreading requires a loaded key");
+        !value.transfer.key) throw Error("encrypted spreading requires a loaded key");
     return value;
 }
 

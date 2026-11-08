@@ -628,7 +628,6 @@ auto receiver_layout_key(const transfer::Options& options,const live::Settings* 
     };
     if(settings) {
         if(settings->transfer.key)add(*settings->transfer.key);
-        for(const auto& key:settings->receive_keys)add(key);
     }
     std::sort(keys.begin(),keys.end());
     return std::tuple{bool(settings),settings?live::receiver_workspace_capacity(*settings):std::size_t{0},
@@ -638,7 +637,7 @@ auto receiver_layout_key(const transfer::Options& options,const live::Settings* 
         settings?settings->transfer.receive_targets_db_hz:std::vector<double>{},
         settings?settings->transfer.receive_pattern_mode:tuning::PatternMode::auto_pattern,
         settings?settings->transfer.automatic_receive_profiles:false,
-        settings?settings->receive_keys.size():std::size_t{0},settings?settings->transfer.key.has_value():false,
+        settings?settings->transfer.key.has_value():false,
         settings?curve_base_key(settings->transfer,modem::ChannelConfig{}):
             curve_base_key(transfer::Options{},modem::ChannelConfig{}),keys,planning_policy_key()};
 }

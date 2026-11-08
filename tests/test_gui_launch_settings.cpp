@@ -641,10 +641,10 @@ void symbol_burst_settings() {
         "Burst Off must retain the saved random preference");
     controller.select(F::symbol_burst,"2");
     load(controller,"--tx-key none");
-    check(!controller.settings().receive_keys.empty()&&!controller.settings().transfer.key&&
+    check(controller.settings().receive_keys.empty()&&!controller.settings().transfer.key&&
         !controller.settings().transfer.modem.data_key&&controller.field(F::symbol_burst).enabled&&
         !controller.field(F::symbol_burst_random).enabled&&controller.field(F::symbol_burst_random).display_text=="0 effective",
-        "Loaded receive keys must not enable TX randomization or disable plaintext Burst");
+        "None must disable keyed reception and preserve plaintext Burst");
     const auto accepted_rate=controller.settings().transfer.modem.bandwidth_hz;
     for(const auto* invalid:{"--rate 360 --symbol-burst 4","--rate 360 --symbol-burst-random 4"}) {
         load(controller,invalid);

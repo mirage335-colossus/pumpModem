@@ -123,21 +123,19 @@ void timestamp_certificates() {
           "later rate uncertainty escaped the original GPS timestamp envelope");
 }
 
-live::Settings settings(bool private_union) {
+live::Settings settings(bool private_selected) {
     live::Settings value;value.device=device;value.transfer.timestamp=0;value.transfer.search_seconds=6;
     value.transfer.clock_sync.reset();value.transfer.audio_timing_error_seconds=.07;
     auto& c=value.transfer.modem;
     c.sample_rate=rate;c.carrier_hz=32;c.bandwidth_hz=16;c.spreading_factor=64;
-    c.integration_seconds=8;c.pulse_shaping=private_union;c.symbol_burst={10,private_union?3U:0U};
+    c.integration_seconds=8;c.pulse_shaping=private_selected;c.symbol_burst={10,private_selected?3U:0U};
     c.receiver_strategy=modem::ReceiverStrategy::existing_only;
     c.oscillator_search.emplace();c.oscillator_search->lf={0,0};c.oscillator_search->rf={0,0};
-    value.transfer.automatic_receive_profiles=private_union;
+    value.transfer.automatic_receive_profiles=private_selected;
     value.transfer.receive_pattern_mode=tuning::PatternMode::auto_pattern;
     value.transfer.receive_targets_db_hz={12,8};
-    if(private_union) {
-        // TX stays public/None; these are independently loaded receive keys.
-        value.receive_keys.push_back(fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x68)));
-        value.receive_keys.push_back(fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x67)));
+    if(private_selected) {
+        value.transfer.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x67));
     }
     value.content_limit=value.transfer.content_limit=1024*1024;
     value.dsp_workspace_bytes=value.transfer.dsp_workspace_bytes=64*1024*1024;
@@ -175,7 +173,7 @@ CaptureScript* capture_script=nullptr;
 
 std::uint64_t private_retirement_end(const live::Settings& value,std::uint64_t last_waveform_end) {
     auto latest=last_waveform_end;
-    for(const bool keyed:{false,true}) {
+    for(const bool keyed:{true}) {
         const auto profiles=tuning::receive_profiles(value.transfer.modem,value.transfer.receive_targets_db_hz,
                                                      value.transfer.receive_pattern_mode,keyed);
         for(const auto& profile:profiles) {
@@ -191,7 +189,7 @@ std::uint64_t private_retirement_end(const live::Settings& value,std::uint64_t l
             const auto spacing=((minimum+quantum-1)/quantum)*quantum;
             const auto timing=static_cast<std::uint64_t>(std::ceil(2.L*
                 (value.transfer.search_seconds+1+value.transfer.audio_timing_error_seconds+.002)*rate));
-            // Bound EVERY retained key/profile, including an alternative that
+            // Bound every retained selected-key profile, including an alternative that
             // fits the last real symbol. It can need its longest random/grid
             // wait and a whole failed symbol before ending. Keep both timing
             // edges, pulse support and the 20s capture guard. For these zero-
@@ -428,7 +426,7 @@ std::uint64_t private_startup_tail(const live::Settings& value,std::uint64_t fro
     for(const auto& profile:profiles) {
         const auto symbol=modem::symbol_sample_count(profile);
         const auto padding=modem::pattern_pulse_padding_samples(profile);
-        // Independent worst case over all keys and whole-symbol random draws.
+        // Independent worst case over selected-key profiles and whole-symbol random draws.
         // One grid quantum covers a cohort admitted just ahead of the freeze;
         // the complete Default arrival/audio/date envelope remains captured.
         const auto quantum=30ULL*rate;
@@ -560,7 +558,7 @@ void hardware_case(bool secret,double clock_offset=0,bool guard_contradiction=fa
         for(std::size_t bit=1;bit<capture.bits.size() && capture.support[bit]+40*rate<=quiet_start-4*rate;++bit) {
             advance(capture.support[bit]+40*rate);
             check(observed.visible_lineage()&&!observed.complete,
-                  "key/profile startup debt lost its valid lineage or prematurely completed the full payload");
+                  "profile startup debt lost its valid lineage or prematurely completed the full payload");
         }
         advance(quiet_start-4*rate);
     } else {
@@ -697,9 +695,9 @@ void hardware_case(bool secret,double clock_offset=0,bool guard_contradiction=fa
           "Burst Live capture disposition lost physical coordinates");
     if(guard_contradiction)check(final.capture_certified_null_samples==0,
         "a later capture renewed quiet permission after the frozen timestamp contradiction");
-    if(secret)check(final.peak_receiver_instances>=3,"private union fixture did not admit its distinct receive families");
+    if(secret)check(final.peak_receiver_instances>=2,"private fixture did not admit its distinct selected-key profiles");
     session.stop();
-    std::cout<<(secret?"Private/key/profile union":"Public")<<" Burst Live: "
+    std::cout<<(secret?"Private profiles":"Public")<<" Burst Live: "
         <<final.capture_certified_null_samples<<" certified quiet samples, clock offset "<<clock_offset
         <<" s, guard contradiction "<<guard_contradiction<<", physical END and discovery resumed\n";
 }
@@ -1231,7 +1229,7 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
     }
     std::cout<<"],\"selector\":"<<paced_json_string(selector)
         <<",\"configuration\":{\"keyed\":"<<(keyed?"true":"false")<<",\"calendar\":\""<<(burst_on?"N10J0":"N0J0")
-        <<"\",\"sample_rate\":128,\"integration_seconds\":8,\"search_seconds\":6,\"workspace_bytes\":67108864,\"pace_factor\":64,\"callback_samples\":16,\"receive_keys\":"<<(keyed?2:0)
+        <<"\",\"sample_rate\":128,\"integration_seconds\":8,\"search_seconds\":6,\"workspace_bytes\":67108864,\"pace_factor\":64,\"callback_samples\":16,\"receive_keys\":0"
         <<",\"automatic_profiles\":"<<(keyed?"true":"false")<<",\"receiver_strategy\":\"existing_only\"}"
         <<",\"logical_bits\":"<<paced_json_string(capture.bits)<<",\"pcm_float_bytes\":"<<sizeof(float)
         <<",\"pcm_samples\":"<<capture.pcm.size()<<",\"pcm_byte_fnv1a64\":\""<<std::hex<<pcm_hash<<std::dec

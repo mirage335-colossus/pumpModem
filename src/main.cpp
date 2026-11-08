@@ -1543,10 +1543,6 @@ void listen(const Args& a,const transfer::Options& options,const helper::Options
     settings.simulation_spread_doppler_hz=oscillator.spread_doppler_hz;
     settings.simulation_perturbation_slow_depth=oscillator.perturbation_slow_depth;
     settings.simulation_perturbation_fast_depth=oscillator.perturbation_fast_depth;
-    if(options.modem.spreading_mode!=modem::SpreadingMode::tone && a.has("keyfile") && !a.has("key-name")) {
-        for(const auto& entry:load_keyring(a.get("keyfile"),a.has("pad")?
-            std::optional<std::filesystem::path>(a.get("pad")):std::nullopt)) settings.receive_keys.push_back(entry.key);
-    }
     const auto seconds=a.number("seconds",0);
     if(seconds<0 || seconds>86400) throw Error("listen seconds must be 0..86400 (0 means continuous)");
     std::optional<Message> outgoing;

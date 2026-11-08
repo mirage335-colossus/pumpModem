@@ -290,7 +290,7 @@ struct Smoke::Impl {
             if(!controller.field(F::key).enabled||!controller.estimate())break;
             const auto& keys=controller.field(F::key);
             require(keys.options.size()==3&&keys.options[1].label=="1. A|B"&&keys.options[2].label=="2. None"&&
-                    keys.selected=="key:A|B"&&controller.settings().transfer.key&&controller.settings().receive_keys.size()==2,
+                    keys.selected=="key:A|B"&&controller.settings().transfer.key&&controller.settings().receive_keys.empty(),
                     "Production key generation did not preserve literal names and select its first key");
             require(key_reception,"Production keyfile generation stopped continuous reception");
             key_size=std::filesystem::file_size(key_path);
@@ -319,7 +319,7 @@ struct Smoke::Impl {
         case Phase::key_failed:
             if(!controller.enabled(C::acknowledge_key_failure))break;
             require(!controller.enabled(C::transmit)&&controller.field(F::key).selected==first_key_id&&
-                    controller.settings().receive_keys.size()==2&&controller.settings().transfer.key->identity_fingerprint(file_bytes)==first_key_mac,
+                    controller.settings().receive_keys.empty()&&controller.settings().transfer.key->identity_fingerprint(file_bytes)==first_key_mac,
                     "Failed key load discarded the working keyring or permitted unacknowledged transmission");
             controller.select(F::key,first_key_id);
             require(controller.enabled(C::acknowledge_key_failure),"Unchanged key selection silently acknowledged a failed load");
@@ -354,7 +354,7 @@ struct Smoke::Impl {
             require(controller.field(F::message).text==message&&controller.revision()==noise_revision&&
                     controller.inspection()==noise_inspection&&controller.field(F::key).selected==first_key_id&&
                     controller.settings().transfer.key&&controller.settings().transfer.key->identity_fingerprint(file_bytes)==first_key_mac&&
-                    controller.settings().receive_keys.size()==2&&controller.inbox().items().empty()&&
+                    controller.settings().receive_keys.empty()&&controller.inbox().items().empty()&&
                     controller.signals().lines().empty()&&!controller.enabled(C::paste_previous),
                     "Noise changed the draft, prepared inspection, saved keys or message history");
             noise_inspection.reset();controller.select(F::key,"none");phase=Phase::text_ready;break;
@@ -577,7 +577,7 @@ void controller_self_check() {
         require(identities.emplace(control.page,kind,binding,control.instance).second,"Screen declares a duplicate binding identity");
     }
     require(controller.field(F::key).selected=="key:WARNING-Amateur"&&controller.settings().transfer.key&&
-            controller.settings().receive_keys.size()==1,"Public amateur key did not start loaded");
+            controller.settings().receive_keys.empty(),"Public amateur key did not start loaded");
     controller.activate(C::unload_keys);
     require(controller.field(F::key).selected=="none"&&!controller.settings().transfer.key&&
             controller.settings().receive_keys.empty(),"Empty key list selected an imaginary key");

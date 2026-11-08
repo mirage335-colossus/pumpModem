@@ -113,14 +113,7 @@ double number(const std::string& text,const char* name) {
     return value;
 }
 planner::ReceiveBanks receive_banks(const live::Settings& settings) {
-    std::vector<Bytes> tags;
-    const auto add=[&](const Crypto& key) {
-        auto tag=key.identity_fingerprint(Bytes{'D','P','-','R','X','-','B','A','N','K'});
-        if(std::find(tags.begin(),tags.end(),tag)==tags.end())tags.push_back(std::move(tag));
-    };
-    if(settings.transfer.key)add(*settings.transfer.key);
-    for(const auto& key:settings.receive_keys)add(key);
-    return {settings.permits_plaintext(),tags.size()};
+    return {settings.permits_plaintext(),std::size_t(settings.transfer.key.has_value())};
 }
 double frequency(std::string value,const char* name) {
     const auto parsed=frequency_input::parse(value);
@@ -992,7 +985,6 @@ struct Controller::Impl {
             if(options.smoke) next.transfer.search_seconds=0;
             next.transfer.fec=f(UiField::fec).selected=="rs20"?FecMode::rs20:f(UiField::fec).selected=="rs60"?FecMode::rs60:FecMode::off;
             if(next_encrypted)next.transfer.key=selected_entry->key;
-            if(!next_tone)for(const auto& key:next_keys)next.receive_keys.push_back(key.key);
             next.device=f(UiField::device).text.empty()?"default":f(UiField::device).text;
             next.transmit_gain=audio_controls::volume_gain(f(UiField::volume).selected);
             next.exclusive=f(UiField::exclusive).checked;
@@ -1335,7 +1327,7 @@ struct Controller::Impl {
             std::optional<std::pair<double,double>> next_spectrum;
             for(bool keyed:{false,true}) {
                 if(!keyed&&!next.permits_plaintext())continue;
-                if(keyed&&!next.transfer.key&&next.receive_keys.empty())continue;
+                if(keyed&&!next.transfer.key)continue;
                 const auto profiles=next.transfer.automatic_receive_profiles?
                     tuning::receive_profiles(next.transfer.modem,targets.values,next.transfer.receive_pattern_mode,keyed):
                     std::vector<modem::Config>{next.transfer.modem};
@@ -2249,7 +2241,7 @@ struct Controller::Impl {
                 try {
                     configure(false,false,std::nullopt,&*result.key_settings,result.key_simulation_off,&result.keys,&result.path);
                     key_failed=false;key_warning.clear();key_fields(f(UiField::key).selected);sync_launch_command(true);
-                    notice("Keyfile and settings loaded; selected transmit key and receive bank retained.");
+                    notice("Keyfile and settings loaded; selected encryption key retained.");
                 } catch(const std::exception& error) {
                     audio::trace::record("gui_settings_import_failure",[&](audio::trace::Fields& fields) {
                         fields.add("revision",revision);fields.add("advice_revision",advice_revision);

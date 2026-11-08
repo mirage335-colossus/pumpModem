@@ -43,6 +43,8 @@ struct Settings {
     double receive_buffer_seconds = 30;
     std::uint64_t simulation_seed = 1;
     double simulation_speed = 1;
+    // Deprecated compatibility input; receive sessions ignore this list.
+    // Select the sole receive key through transfer.key.
     std::vector<Crypto> receive_keys;
     // Hardware playback gain; unity leaves existing normalization unchanged.
     double transmit_gain = 1.0;

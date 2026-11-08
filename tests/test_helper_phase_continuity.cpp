@@ -76,20 +76,27 @@ void optional_geometry_and_audits() {
     hopping->dwell_seconds=.4;hopping->power_ramps=hopping->smooth_ramps=true;
     hopping->ramp_seconds=.02;
     config.fake_hopping=hopping;
+    const auto plain_with_legacy_key=live::detail::helper_occupied_receive_band(settings);
+    settings.receive_keys.clear();
+    const auto plain_only=live::detail::helper_occupied_receive_band(settings);
+    check(plain_only && plain_with_legacy_key &&
+          plain_with_legacy_key->lower_hz==plain_only->lower_hz &&
+          plain_with_legacy_key->upper_hz==plain_only->upper_hz,
+          "unselected key widened the plaintext helper conditioning band");
+    settings.transfer.key.emplace(key);
     const auto keyed_only=live::detail::helper_occupied_receive_band(settings);
-    check(keyed_only.has_value(),"receive-only keys were omitted from the public helper conditioning band");
-    for(const bool keyed:{false,true})for(const auto& profile:tuning::receive_profiles(config,
-            settings.transfer.receive_targets_db_hz,settings.transfer.receive_pattern_mode,keyed)) {
+    check(keyed_only.has_value(),"selected key omitted from helper conditioning band");
+    for(const auto& profile:tuning::receive_profiles(config,
+            settings.transfer.receive_targets_db_hz,settings.transfer.receive_pattern_mode,true)) {
         const auto support=helper::occupied_bandwidth(profile)/2;
         check(keyed_only->lower_hz<=profile.carrier_hz-support &&
               keyed_only->upper_hz>=profile.carrier_hz+support,
-              "public helper conditioning omitted a keyed/plaintext receive profile");
+              "helper conditioning omitted a selected keyed receive profile");
     }
-    settings.receive_keys.clear();
-    const auto plain_only=live::detail::helper_occupied_receive_band(settings);
-    check(plain_only && keyed_only->lower_hz<plain_only->lower_hz &&
+    check(keyed_only->lower_hz<plain_only->lower_hz &&
           keyed_only->upper_hz>plain_only->upper_hz,
-          "receive-only keyed FHSS gate support did not widen the public conditioning union");
+          "selected keyed FHSS gate support did not widen its conditioning band");
+    settings.transfer.key.reset();
     settings.transfer.automatic_receive_profiles=false;
     config.fake_hopping.reset();config.oscillator_search->lf.accuracy_ppm=100;
     settings.long_message_modem=config;settings.long_message_modem->fake_hopping=hopping;

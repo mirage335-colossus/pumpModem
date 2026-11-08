@@ -1849,10 +1849,8 @@ void real_keyfile_selection() {
     Controller controller({true,true});
     const auto public_key=[&]() {
         const auto& settings=controller.settings();
-        check(settings.transfer.key.has_value()&&settings.receive_keys.size()==1,
-              "amateur keyset did not provide one transmit and receive key");
-        check(identity(*settings.transfer.key)==identity(settings.receive_keys.front()),
-              "amateur transmit and receive keys differ");
+        check(settings.transfer.key.has_value()&&settings.receive_keys.empty(),
+              "amateur keyset did not select exactly one key");
         check(controller.field(F::key).selected=="key:WARNING-Amateur",
               "amateur key entry was not selected");
         const auto& entries=controller.field(F::key).options;
@@ -1884,18 +1882,17 @@ void real_keyfile_selection() {
     const auto exported=launch_command::parse(controller.field(F::planner_command).text);
     check(exported.keyset=="amateur"&&!exported.keyfile,"launch command lost built-in keyset identity");
     Controller restored({true,true,exported});
-    check(restored.settings().transfer.key && restored.settings().receive_keys.size()==1 &&
+    check(restored.settings().transfer.key && restored.settings().receive_keys.empty() &&
           identity(*restored.settings().transfer.key)==public_identity,
           "launch command did not restore the public keyset");
     restored.select(F::key,"none");
     const auto receive_only=launch_command::parse(restored.field(F::planner_command).text);
     check(receive_only.keyset=="amateur"&&receive_only.tx_key=="none"&&
-          !restored.settings().transfer.key&&restored.settings().receive_keys.size()==1,
-          "disabling public transmission discarded its receive key");
+          !restored.settings().transfer.key&&restored.settings().receive_keys.empty(),
+          "None retained a receive key");
     Controller receive_copy({true,true,receive_only});
-    check(!receive_copy.settings().transfer.key&&receive_copy.settings().receive_keys.size()==1&&
-          identity(receive_copy.settings().receive_keys.front())==public_identity,
-          "launch command lost public receive-only state");
+    check(!receive_copy.settings().transfer.key&&receive_copy.settings().receive_keys.empty(),
+          "launch command did not restore plaintext-only state");
     receive_copy.close();
     restored.close();
     Controller tone_controller({true,true});
@@ -1906,9 +1903,8 @@ void real_keyfile_selection() {
     check(tone_export.keyset=="amateur"&&tone_export.tx_key=="none",
           "tone mode lost the public keyset provenance");
     tone_controller.select(F::pattern,"auto-pattern");
-    check(!tone_controller.settings().transfer.key&&tone_controller.settings().receive_keys.size()==1&&
-          identity(tone_controller.settings().receive_keys.front())==public_identity,
-          "leaving tone mode lost the public receive bank or enabled transmission");
+    check(!tone_controller.settings().transfer.key&&tone_controller.settings().receive_keys.empty(),
+          "leaving tone mode enabled a key without selection");
     tone_controller.close();
     controller.activate(C::unload_keys);
     check(!controller.settings().transfer.key&&controller.settings().receive_keys.empty()&&
@@ -1946,10 +1942,7 @@ void real_keyfile_selection() {
         const auto& settings=controller.settings();
         check(settings.transfer.key&&identity(*settings.transfer.key)==identity(expected[selected].key),
               "transmit selection did not use the selected file entry");
-        check(settings.receive_keys.size()==expected.size(),"receive bank has the wrong number of file entries");
-        for(std::size_t i=0;i<expected.size();++i)
-            check(identity(settings.receive_keys[i])==identity(expected[i].key),
-                  "receive bank did not use the corresponding file entry");
+        check(settings.receive_keys.empty(),"unselected file entries were added to the receiver");
     };
     launch_command::Patch startup;
     startup.keyfile=second_path.string();startup.tx_key="named";startup.key_name="WARNING-Amateur";
@@ -1961,9 +1954,8 @@ void real_keyfile_selection() {
     while(startup_file.field(F::key_path).text=="Loading key entries..."&&std::chrono::steady_clock::now()<startup_deadline) {
         startup_file.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    check(startup_file.settings().transfer.key&&startup_file.settings().receive_keys.size()==1&&
-          identity(*startup_file.settings().transfer.key)==identity(second[0].key)&&
-          identity(startup_file.settings().receive_keys.front())==identity(second[0].key),
+    check(startup_file.settings().transfer.key&&startup_file.settings().receive_keys.empty()&&
+          identity(*startup_file.settings().transfer.key)==identity(second[0].key),
           "explicit startup file did not use its real transmit and receive key");
     startup_file.close();
     startup.keyfile=(fixture.dir/"missing-startup").string();
@@ -2201,25 +2193,25 @@ void dsss_voice_carrier_controls() {
     controller.select(F::key,"key:none");
     const auto keyed=launch_command::parse(controller.field(F::planner_command).text);
     check(keyed.keyfile==std::filesystem::absolute(fixture.path).string()&&keyed.key_name=="none"&&keyed.tx_key=="named"&&
-        controller.settings().receive_keys.size()==2,
-        "launch export lost the actual keyfile, named transmit selection or complete receive bank");
+        controller.settings().receive_keys.empty(),
+        "launch export lost the actual keyfile, named transmit selection or selected receive key");
     const auto seeded=transfer::seeded_config(controller.settings().transfer,1).spreading_seed;
     Controller restored({true,true,keyed});wait_keys(restored);prepare(restored);
-    check(restored.field(F::key).selected=="key:none"&&restored.settings().receive_keys.size()==2&&
+    check(restored.field(F::key).selected=="key:none"&&restored.settings().receive_keys.empty()&&
         restored.settings().transfer.key&&transfer::seeded_config(restored.settings().transfer,1).spreading_seed==seeded,
-        "startup failed to restore the exact named key and receive bank without exporting secret material");
+        "startup failed to restore the exact named key without exporting secret material");
     launch_command::Patch partial;partial.rate_hz=1200;partial.carrier_hz=900;
     import(restored,partial);
-    check(restored.field(F::key).selected=="key:none"&&restored.settings().receive_keys.size()==2&&restored.settings().transfer.key,
-        "partial numeric import discarded a retained transmit or receive key");
+    check(restored.field(F::key).selected=="key:none"&&restored.settings().receive_keys.empty()&&restored.settings().transfer.key,
+        "partial numeric import discarded a selected key");
     launch_command::Patch disabled;disabled.tx_key="none";import(restored,disabled);
     const auto receive_only=launch_command::parse(restored.field(F::planner_command).text);
-    check(!restored.settings().transfer.key&&restored.field(F::key).selected=="none"&&restored.settings().receive_keys.size()==2&&
+    check(!restored.settings().transfer.key&&restored.field(F::key).selected=="none"&&restored.settings().receive_keys.empty()&&
         receive_only.keyfile==keyed.keyfile&&receive_only.tx_key=="none"&&!receive_only.key_name,
-        "disabling the transmit key discarded the receive-only keyfile or confused its explicit selection");
+        "disabling the transmit key discarded the stored keyfile or confused its explicit selection");
     Controller receive_copy({true,true,receive_only});wait_keys(receive_copy);prepare(receive_copy);
-    check(!receive_copy.settings().transfer.key&&receive_copy.field(F::key).selected=="none"&&receive_copy.settings().receive_keys.size()==2,
-        "receive-only launch roundtrip accidentally selected the first transmit key");
+    check(!receive_copy.settings().transfer.key&&receive_copy.field(F::key).selected=="none"&&receive_copy.settings().receive_keys.empty(),
+        "plaintext launch roundtrip accidentally selected the first transmit key");
     receive_copy.close();
     launch_command::Patch select_named;select_named.key_name="none";import(restored,select_named);
     check(restored.field(F::key).selected=="key:none"&&restored.settings().transfer.key,
@@ -2228,7 +2220,7 @@ void dsss_voice_carrier_controls() {
     auto missing=keyed;missing.keyfile=*keyed.keyfile+".missing";missing.rate_hz=360;
     import(restored,missing);
     check(restored.enabled(C::acknowledge_key_failure)&&restored.settings().transfer.modem.bandwidth_hz==accepted_rate&&
-        restored.field(F::key).selected=="key:none"&&restored.settings().receive_keys.size()==2&&
+        restored.field(F::key).selected=="key:none"&&restored.settings().receive_keys.empty()&&
         transfer::seeded_config(restored.settings().transfer,1).spreading_seed==seeded&&
         restored.field(F::key_path).text==fixture.path.filename().string(),
         "missing keyfile import partially changed settings, keys or retained path");
@@ -2236,13 +2228,13 @@ void dsss_voice_carrier_controls() {
     auto wrong_name=keyed;wrong_name.key_name="not present";
     import(restored,wrong_name);
     check(restored.enabled(C::acknowledge_key_failure)&&restored.field(F::key).selected=="key:none"&&
-        restored.settings().transfer.modem.bandwidth_hz==accepted_rate&&restored.settings().receive_keys.size()==2,
+        restored.settings().transfer.modem.bandwidth_hz==accepted_rate&&restored.settings().receive_keys.empty(),
         "unknown named key import silently selected another key or changed geometry");
     restored.activate(C::acknowledge_key_failure);
     auto invalid_geometry=keyed;invalid_geometry.rate_hz=3600;invalid_geometry.carrier_hz=100;
     import(restored,invalid_geometry);
     check(restored.enabled(C::acknowledge_key_failure)&&restored.field(F::key).selected=="key:none"&&
-        restored.settings().transfer.modem.bandwidth_hz==accepted_rate&&restored.settings().receive_keys.size()==2,
+        restored.settings().transfer.modem.bandwidth_hz==accepted_rate&&restored.settings().receive_keys.empty(),
         "keyfile loaded before geometry validation partially committed an invalid launch");
     restored.activate(C::acknowledge_key_failure);restored.close();
     const auto work_metrics=[&](const char* state) {
@@ -2252,13 +2244,10 @@ void dsss_voice_carrier_controls() {
         channel.frequency_offset_hz=settings.simulation_frequency_offset_hz;
         channel.phase_noise_degrees_per_sqrt_second=settings.simulation_phase_noise_degrees_per_sqrt_second;
         channel.seed=settings.simulation_seed;
-        // This fixture loads distinct keys and selects one of them for TX, so
-        // the active bank contains each of the two private entries once.
+        // Only the selected key contributes a receive profile family.
         const auto family=tuning::receive_profiles(config,settings.transfer.receive_targets_db_hz,
             settings.transfer.receive_pattern_mode,true);
-        std::vector<modem::Config> profiles;
-        for(std::size_t key=0;key<settings.receive_keys.size();++key)
-            profiles.insert(profiles.end(),family.begin(),family.end());
+        const auto& profiles=family;
         const auto metric=simulation::estimate(*controller.estimate(),settings.transfer,true,channel,profiles,1,false);
         std::cout<<"DSSS GUI work model (not measured execution), "<<state
             <<": factor="<<config.dsss_factor<<" inner_Hz="<<config.bandwidth_hz
@@ -2611,7 +2600,7 @@ void tone_key_controls() {
               !controller.enabled(C::acknowledge_key_failure),"Tone policy keyfile load did not complete");
     };
     load();
-    check(controller.settings().transfer.key && controller.settings().receive_keys.size()==1,
+    check(controller.settings().transfer.key && controller.settings().receive_keys.empty(),
           "Production keyfile did not activate private transmission and reception");
     controller.start();noise_start_stop(controller);
     for(const auto mode:tuning::pattern_modes()) {
@@ -3427,7 +3416,7 @@ void amateur_sampled_reception() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
     check(controller.field(F::key).selected=="key:WARNING-Amateur"&&controller.settings().transfer.key&&
-          controller.settings().receive_keys.size()==1,"sampled amateur fixture did not start with its public key");
+          controller.settings().receive_keys.empty(),"sampled amateur fixture did not start with its selected public key");
     controller.edit(F::message,"e");prepare(controller);controller.start();controller.activate(C::transmit);
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
     bool received=false,generated=false;std::size_t pending=0;

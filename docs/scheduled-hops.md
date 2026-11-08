@@ -50,8 +50,8 @@ For `M=3, G=1`, the frame is 1.2 seconds and null intervals range from
 0.4 through 1.2 seconds. For `M=5, G=1`, the frame is two seconds and nulls
 range from 0.8 through 2.4 seconds. For `M=5, G=3`, active groups last
 1.2 seconds and nulls range from 0.4 through 1.2 seconds. These are calendar
-bounds, not measured processing deadlines. Multiple receive keys, arrival
-uncertainty and clock hypotheses can require recording overlapping groups.
+bounds, not measured processing deadlines. Arrival uncertainty and clock
+hypotheses can require recording overlapping groups.
 Default assumes a GPS-aligned calendar (±10 ms at each station), independently
 of the several-second unknown message-epoch search. Dated capture constrains
 arrival and canonical source phase jointly; it does not shift the calendar

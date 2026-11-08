@@ -24,7 +24,7 @@ Four example buttons replace the former −8 and +23 target-only buttons. They
 load complete configurations, including both transmit targets, and select
 **Simulation: No**, Default arithmetic, 50% DSP workspace, zero Doppler,
 default clock synchronization and Live/Duplex. They preserve the draft, audio
-device and loaded receive keys, and never start transmission.
+device and loaded keyring, and never start transmission.
 
 | Example | Power / path loss | Rate / absolute Carrier / Shift | Target | DSSS / Fake FHSS | Baseband / Shift oscillator | Audio error |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -38,8 +38,8 @@ margin. DSSS Off remembers the 10× Interleave selection. The first three requir
 a loaded encryption keyfile and retain the selected transmit key, selecting the
 first loaded entry if transmission encryption was off. They do not assume a
 particular path or entry name. EME explicitly uses an unkeyed automatic pattern;
-loaded receive keys remain present. Fake FHSS illustrates tuning without changing
-physical audio or radio tuning. These presets are starting points, not evidence
+loaded keys remain available for selection, while reception is unencrypted.
+Fake FHSS illustrates tuning without changing physical audio or radio tuning. These presets are starting points, not evidence
 of real-time CPU feasibility, regulatory compliance or successful propagation.
 
 The Sub-9kHz button selects 0.01 Hz. At the same target, manually choosing 0.1 Hz resolves to approximately 29.07 days per bit.

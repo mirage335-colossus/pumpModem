@@ -378,7 +378,7 @@ inline std::optional<std::uint64_t> helper_startup_minimum_symbol(const Settings
     };
     const auto family=[&](modem::Config c) {
         if(value.permits_plaintext()&&!visit(c,false))return false;
-        if((value.transfer.key||!value.receive_keys.empty())&&!visit(c,true))return false;
+        if(value.transfer.key&&!visit(c,true))return false;
         return true;
     };
     if(!family(value.transfer.modem) || (value.long_message_modem&&!family(*value.long_message_modem)))return {};
@@ -399,7 +399,7 @@ inline std::optional<helper::OccupiedBand> helper_occupied_receive_band(const Se
             } else profiles.push_back(settings.transfer.modem);
         };
         if(settings.permits_plaintext())add(false);
-        if(settings.transfer.key || !settings.receive_keys.empty())add(true);
+        if(settings.transfer.key)add(true);
         if(profiles.empty())return std::nullopt;
         if(settings.long_message_modem)profiles.push_back(*settings.long_message_modem);
         double lower=std::numeric_limits<double>::infinity(),upper=0;
@@ -501,7 +501,6 @@ inline HelperReceiveEnvelopeBound helper_receive_envelope_bound(const Settings& 
         }
     };
     if(settings.transfer.key)add_key(*settings.transfer.key);
-    for(const auto& key:settings.receive_keys)add_key(key);
     const auto add_profile=[&](const modem::Config& base,const modem::Config& row,
                                const std::optional<Crypto>& key) {
         auto options=settings.transfer;options.modem=row;options.key=key;

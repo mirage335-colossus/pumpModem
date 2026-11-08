@@ -334,9 +334,8 @@ Load symmetric keys. Both peers need the same key set and any bound pad.
 Without a keyfile, operation is unencrypted.
 .TP
 .BI \-\-key\-name " name"
-Select a named key set; default the first.
-.B listen
-without this option tries all sets in the keyfile on reception.
+Select a named key set; default the first. Reception uses only this selected
+key set.
 .TP
 .BI \-\-key\-names " list"
 Comma-separated names to create with

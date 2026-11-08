@@ -183,7 +183,7 @@ void startup_spectrum_reference_survives_replay() {
           "live startup progression recolored a frozen replay frame");
     session.stop();
 }
-void default_workspace_admits_long_key_banks() {
+void default_workspace_admits_long_key() {
     auto value=settings();value.transfer.modem.spreading_factor=16384;
     value.transfer.modem.scramble=value.transfer.modem.dsss=true;
     value.transfer.key=fixture_crypto::key(Bytes(32,0xd3),Bytes(32,0x31));
@@ -192,11 +192,11 @@ void default_workspace_admits_long_key_banks() {
     const auto result=wait_for(session,[&](const auto& snapshot) {
         bounded(snapshot,value);no_reception(snapshot);return snapshot.samples_received>=800;
     });
-    check(result.dsp_buffered_bytes>0,"long keyed receiver banks did not report their search allocation");
-    check(result.status.find("limited")==std::string::npos,"default workspace did not admit the requested long keyed search banks");
-    check(!result.receiver_health.failed(),"healthy long keyed search bank reported receiver failure");
+    check(result.dsp_buffered_bytes>0,"long keyed receiver did not report its search allocation");
+    check(result.status.find("limited")==std::string::npos,"default workspace did not admit the selected long keyed search");
+    check(!result.receiver_health.failed(),"healthy long keyed receiver reported failure");
 }
-void independent_serpent_roots_preserve_receiver_banks() {
+void legacy_keys_do_not_add_receiver_banks() {
     const auto first=fixture_crypto::key(Bytes(32,0x71),Bytes(32,0x52));
     const auto equal=fixture_crypto::key(Bytes(32,0x71),Bytes(32,0x52));
     const auto other=fixture_crypto::key(Bytes(32,0x72),Bytes(32,0x52));
@@ -206,9 +206,10 @@ void independent_serpent_roots_preserve_receiver_banks() {
           first.identity_fingerprint(context)!=other.identity_fingerprint(context),
           "receiver identity must compare root values and include the independent Serpent root");
     constexpr std::uint64_t epoch=1800000000;
-    const auto receivers=[&](std::vector<Crypto> keys) {
+    const auto receivers=[&](std::vector<Crypto> keys, bool keyed=true) {
         auto value=settings();value.transfer.timestamp=epoch;value.transfer.search_seconds=0;
-        value.transfer.automatic_receive_profiles=false;value.transfer.key=first;
+        value.transfer.automatic_receive_profiles=false;
+        if(keyed)value.transfer.key=first;
         value.receive_keys=std::move(keys);value.dsp_workspace_bytes=16*1024*1024;
         live::Session session([epoch]{return static_cast<double>(epoch);});session.start(value);
         const auto result=wait_for(session,[&](const auto& snapshot) {
@@ -220,10 +221,14 @@ void independent_serpent_roots_preserve_receiver_banks() {
     };
     const auto one=receivers({first,equal});
     const auto two=receivers({first,equal,other,other});
-    check(one>0 && two==2*one,
-          "Live must retain different Serpent roots sharing AES while collapsing equal complete keys");
+    check(one>0 && two==one,
+          "unselected legacy keys must not add receiver instances");
+    const auto public_one=receivers({},false);
+    const auto public_with_keys=receivers({first,other},false);
+    check(public_one>0 && public_with_keys==public_one,
+          "None must not add keyed receiver instances from legacy settings");
 }
-void independent_serpent_roots_preserve_helper_bounds() {
+void legacy_keys_do_not_change_helper_bounds() {
     auto value=settings();value.transfer.key=fixture_crypto::key(Bytes(32,0x71),Bytes(32,0x52));
     value.transfer.automatic_receive_profiles=false;
     const auto equal=fixture_crypto::key(Bytes(32,0x71),Bytes(32,0x52));
@@ -232,14 +237,20 @@ void independent_serpent_roots_preserve_helper_bounds() {
     const auto one=live::detail::helper_receive_envelope_bound(value);
     value.receive_keys.push_back(other);value.receive_keys.push_back(other);
     const auto two=live::detail::helper_receive_envelope_bound(value);
-    check(one.profiles==1 && two.profiles==2,
-          "Helper envelope must include each independent Serpent root and deduplicate equal complete keys");
+    check(one.profiles==1 && two.profiles==one.profiles,
+          "unselected legacy keys must not add Helper profiles");
     check(one.fft_seconds==two.fft_seconds && one.absence_seconds==two.absence_seconds &&
           one.pulse_seconds==two.pulse_seconds,
           "different confidentiality roots must preserve equal AES waveform geometry");
     value.receive_keys.emplace_back(Bytes(32,0x52));
     const auto waveform=live::detail::helper_receive_envelope_bound(value);
-    check(waveform.profiles==3,"AES-only waveform identity must not alias a confidential key");
+    check(waveform.profiles==one.profiles,"unselected waveform keys must not add Helper profiles");
+    value.transfer.key.reset();
+    const auto public_with_keys=live::detail::helper_receive_envelope_bound(value);
+    value.receive_keys.clear();
+    const auto public_only=live::detail::helper_receive_envelope_bound(value);
+    check(public_with_keys.profiles==public_only.profiles,
+          "None must not add keyed Helper profiles from legacy settings");
 }
 void noise_epochs_retire_with_bounded_workspace() {
     constexpr std::uint64_t origin=1800000000;
@@ -366,7 +377,7 @@ void version_four_roots_share_bank_workspace() {
         };
         one|=witness(1);two|=witness(2);
     }
-    check(one&&two,"Live root reservation did not deduplicate aliases and refresh the real v4 key union");
+    check(one&&!two,"Live root reservation must retain only the selected v4 key after reconfiguration");
 }
 void long_raw_symbol_is_bounded_and_cancellable() {
     auto value=settings();value.transfer.modem.bandwidth_hz=1;
@@ -478,9 +489,9 @@ int main(int argc,char** argv) {
         {"decoder CPU headroom",decoder_cpu_headroom},
         {"idle workspace and plots",idle_workspace_and_plots},
         {"startup spectrum reference survives replay",startup_spectrum_reference_survives_replay},
-        {"default workspace admits long key banks",default_workspace_admits_long_key_banks},
-        {"independent Serpent roots preserve receiver banks",independent_serpent_roots_preserve_receiver_banks},
-        {"independent Serpent roots preserve Helper bounds",independent_serpent_roots_preserve_helper_bounds},
+        {"default workspace admits long key",default_workspace_admits_long_key},
+        {"legacy keys do not add receiver banks",legacy_keys_do_not_add_receiver_banks},
+        {"legacy keys do not change Helper bounds",legacy_keys_do_not_change_helper_bounds},
         {"noise epochs retire with bounded workspace",noise_epochs_retire_with_bounded_workspace},
         {"growing stream shares receiver workspace",growing_stream_shares_receiver_workspace},
         {"version four roots share bank workspace",version_four_roots_share_bank_workspace},

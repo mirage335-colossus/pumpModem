@@ -376,7 +376,7 @@ void run_case(const std::vector<double>& targets, double target, const std::stri
     session.stop();
 }
 
-void independent_serpent_root_content_delivery() {
+void unselected_serpent_root_is_not_used() {
     Configuration configuration;configuration.keyed=true;
     const auto expected=waveform(55,"independent roots",false,configuration);
     check(expected.interval,"independent-root delivery must exercise authenticated interval content");
@@ -403,13 +403,7 @@ void independent_serpent_root_content_delivery() {
         check(!snapshot.receiver_health.failed(),"independent-root delivery lost receiver coverage");
         check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,
               "independent-root delivery exceeded its receiver workspace");
-        for(const auto& result:snapshot.received) {
-            ++received;
-            check(result.stream_complete && result.content_validated && result.content.authenticated,
-                  "wrong Serpent hypothesis published unauthenticated interval content");
-            check(std::string(result.content.message.data.begin(),result.content.message.data.end())==expected.text,
-                  "independent-root receiver delivered incorrect content");
-        }
+        received+=snapshot.received.size();
         const auto delivered=capture.delivered.load();
         if(delivered<capture.samples.size() && delivered>=capture.released.load() && !snapshot.buffered_samples)
             capture.released=delivered+std::min<std::size_t>(std::max<std::uint32_t>(8,capture.rate/10),
@@ -422,7 +416,7 @@ void independent_serpent_root_content_delivery() {
     }
     session.stop();
     check(drained,"independent-root controlled PCM capture did not drain");
-    check(received==1,"correct Serpent receive key was dropped or its content was published more than once");
+    check(received==0,"an unselected Serpent root was used to decrypt interval content");
 }
 
 void retired_public_streams_release_presentations(const std::vector<double>& targets) {
@@ -1755,7 +1749,7 @@ int main(int argc, char** argv) {
         check(suite == "independent_roots" || suite == "public_amplitude" || suite == "retired" || suite == "all" || suite == "hop_calendar" || suite == "exact_source" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "frontier_failure" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "duplex_spread" || suite == "hardware_channel" || suite == "hardware_fhss" || suite == "arrival_fallback" || suite == "tx_failure",
               "unknown profile test suite");
         if(suite=="all" || suite=="independent_roots") {
-            context="same-AES independent-Serpent content delivery";independent_serpent_root_content_delivery();
+            context="unselected same-AES Serpent root";unselected_serpent_root_is_not_used();
             if(suite=="independent_roots")return 0;
         }
         if(suite=="hardware_channel") {context="production hardware channel";hardware_channel_loopback();return 0;}
