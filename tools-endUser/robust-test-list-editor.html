@@ -72,7 +72,12 @@ input[type=text]:hover, select:hover { border-color: #89a6b2; }
   const fields = ['Encryption', 'Helper Carrier Transmit Power', 'Transmit Power', 'Path loss', 'Clock sync / Region / Offset / Audio error', 'Base Oscillator', 'Shift Oscillator', 'Doppler/delay spread', 'Additional frequency selective amplitude modulation', 'Margin', 'DSSS', 'Spreading', 'FHSS', 'Symbol_burst', 'Rate', 'Baseband Carrier', 'Shift', 'Target SNR dB/1Hz'];
   const fieldSet = new Set(fields);
   const builtins = {
-    Encryption: ['Yes', 'No'], DSSS: ['Off', 'Interleave'], FHSS: ['Off'], Symbol_burst: ['Off'],
+    Encryption: ['Yes', 'No'],
+    'Helper Carrier Transmit Power': ['0 W', '40 W', '15 kW'],
+    'Transmit Power': ['1 mW', '4 W', '40 W'],
+    'Path loss': ['180 dB', '200 dB'],
+    Margin: ['1x', '3x'], DSSS: ['Off', 'Interleave'], Spreading: ['0x', '10x'],
+    FHSS: ['Off', 'Fake: FCC'], Symbol_burst: ['Off'],
     Rate: ['0.001 Hz', '0.01 Hz', '0.1 Hz', '1 Hz', '3.6 Hz', '10 Hz', '36 Hz', '100 Hz', '360 Hz', '1.2 kHz', '2.4 kHz', '3.6 kHz', '12 kHz', '18 kHz', '24 kHz', '1 MHz', '30 MHz'],
     'Baseband Carrier': ['1.725 kHz', 'half of rate', '8.270kHz'],
     Shift: ['0 Hz', '500 kHz', '1 MHz', '3.5 MHz', '7 MHz', '10 MHz', '14 MHz', '30 MHz', '5.8 GHz'],

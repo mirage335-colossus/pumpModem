@@ -25,7 +25,7 @@ is not connected to the GUI and remains unavailable there; existing GUI controls
 are retained pending reconnection. See [current architecture and status](docs/robust-current.md).
 
 To edit the informal [Robust test list](_tests-RobustModem.md), open the
-[standalone editor](end-user-tools/robust-test-list-editor.html) in a browser, select the
+[standalone editor](tools-endUser/robust-test-list-editor.html) in a browser, select the
 list file, and download the edited result. Use the dropdowns for normal edits;
 choose “Custom value…” only to enter an override. The editor runs locally and
 does not run or validate modem tests.
