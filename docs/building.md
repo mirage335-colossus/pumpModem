@@ -352,14 +352,21 @@ session-named build copies. Use separate output under `build/` for a concurrent
 comparison; after its process exits, save only useful source, input,
 configuration and compact result evidence, then remove its compiled outputs. A
 failed run alone is not a reason to retain its whole build tree.
+Retire abandoned profiles, stale target trees and experiment-only outputs once
+their active comparison or diagnosis is complete; reuse compatible incremental
+outputs and caches that current work still uses. Do not purge caches wholesale
+or keep dated build copies as an informal archive.
 
 Keep only compatible local SDK/dependency caches that current work uses, plus
 downloaded inputs needed for offline rebuilding. Native and Wasm SDK caches are
 separate families. Before removing a superseded local SDK installation, build
 work tree or archive, close processes using it and migrate or reconfigure its
 dependents. Use explicit bounded paths; do not use broad cleanup globs or
-automatic age-based deletion. Immutable published assets and required original
-failure reports are preserved.
+automatic age-based deletion. Preserve immutable published assets under the
+release contract. Keep original failure reports while required for certification
+or an unresolved diagnosis; record the reason and retirement condition. Otherwise
+retain the concise conclusion and provenance, then remove redundant raw outputs
+when the work closes.
 
 Workspace contents have separate purposes:
 
@@ -370,13 +377,17 @@ Workspace contents have separate purposes:
   it. Prepared SDK/dependency caches remain useful only while compatible with
   current work or needed for offline rebuilding; follow their recipe, checksum
   and provenance requirements.
-- `local-evidence/` (ignored): compact source-bound results, required original
-  failure reports, essential reproduction inputs and pending source patches.
-  It is not a binary archive or a session, ownership or task registry, and is
-  not routine startup reading. Promote useful conclusions to maintained docs;
-  remove redundant captures once their purpose ends.
-- `docs/`: current contracts, concise validation status and useful unfinished plans.
-  Git history retains superseded tracked narratives; do not append session diaries.
+- `local-evidence/` (ignored): temporary, compact source-bound results,
+  essential reproduction inputs and patches for active unfinished work. Each
+  item needs a stated current purpose and cleanup trigger. It is not a
+  general evidence or binary archive, or a session, ownership or task registry,
+  and is not routine startup reading. Promote concise useful conclusions,
+  including negative findings and assumptions, to maintained docs; remove raw
+  captures and superseded reports when their purpose ends.
+- `docs/`: current contracts, concise validation status and unfinished plans
+  with a concrete next action and review/retirement condition. Git history
+  retains superseded tracked narratives; do not append session diaries or keep
+  obsolete implementation guides as historical documentation.
 
 Every configuration writes `build-info.txt` with source revision, compiler,
 backend and build flags; packaging includes it. This is configure-time
@@ -518,8 +529,9 @@ remain separate operations.
 
 Documentation-only edits need proportionate link and consistency checks, not
 modem benchmarks. Keep maintained outcomes concise in
-[validation.md](validation.md); retain source-matched historical research with
-its provenance and limitations.
+[validation.md](validation.md). Keep research only when a concise finding informs
+current work or a specific raw record is required to interpret it; record its
+provenance, limitations and cleanup reason. Do not accumulate historical runs.
 
 ## Compile-time policy
 
@@ -609,11 +621,13 @@ architecture, musl libc, absent X11/XWayland or inadequate OpenGL support for Re
 is outside that guarantee. ALSA plugins/configuration and hardware drivers remain
 host integration boundaries.
 
-Historical `docs/validation-data` captures are retained in the source repository
-but omitted from normal binary bundles (about 57 MiB at this change). Set
-`-DDATAPUMP_INSTALL_VALIDATION_DATA=ON` when an offline evidence bundle is wanted.
-Developer documents may link to those optional captures. Dependency provenance,
-all required notices and ordinary documentation remain installed. See
+Selected `docs/validation-data` research is omitted from normal binary bundles
+(about 57 MiB at this change). Keep an offline capture only when it supports a
+documented current finding or an active reproducible question, and retire
+redundant raw data when that purpose ends. Set
+`-DDATAPUMP_INSTALL_VALIDATION_DATA=ON` when a needed offline evidence bundle is
+wanted. Dependency provenance, all required notices and ordinary documentation
+remain installed. See
 [offline installation](offline-installation.md) for platform limits and checks.
 
 ## Where to make a change

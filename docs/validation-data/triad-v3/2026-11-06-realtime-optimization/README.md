@@ -159,15 +159,12 @@ PYTHONPATH=tools:tests OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 python3 -m unitt
 python3 tests/test_triad_stream_source.py build/dev-cli/triad_helper_export
 ```
 
-The optional cadence run takes about92seconds, plus fixture generation. Do not
-repeat it for documentation, identity-validation-only or unchanged numeric
-paths. Extract the evidence at the repository root, use its `generate.py` and
-`prepare_audio.py`, and rebase the frozen protocol's absolute repository paths.
-The Python environment needs NumPy, SciPy and CPU PyTorch. Then:
-
-```sh
-timeout --signal=TERM --kill-after=5s 180s env OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 python3 tools/triad_weak_throughput.py local-evidence/triad-realtime-improvement/sustained-v1/protocol.json --output local-evidence/NEW-CADENCE
-```
+The optional cadence run was a historical 92-second measurement plus fixture
+generation. Its original result and source identity remain recorded above; this
+page no longer provides a command to restore its fixtures or repeat the
+sustained run. Any necessary compute-heavy Robust check follows the
+[hierarchical abbreviated method](../../../triad-performance.md), and temporary
+evidence follows the [material lifecycle](../../../development.md#material-lifecycle).
 
 The final template helper added stricter metadata checks and four-response
 buffer accounting after the frozen campaign. Its numerical bank construction

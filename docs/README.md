@@ -4,6 +4,10 @@ Start with maintained contracts and current architecture. Historical findings
 remain useful only within their stated source, input, configuration and
 measurement limits.
 
+Follow the [material lifecycle](development.md#material-lifecycle): distill
+useful findings, keep only evidence with a concrete current purpose, and retire
+obsolete code, experiments and generated outputs when that purpose ends.
+
 ## Current Robust modem
 
 The [current architecture and status](robust-current.md) identifies the

@@ -291,8 +291,8 @@ allowed approximately 3 dB nearest-grid mismatch in the native random-chip/RRC
 triplet approximation. All six completed in approximately 143–146 seconds.
 The predicted group-work reduction is not a measured speedup over a completed
 fine-grid export. A proposed 1-ms grid would cross a triplet autocorrelation
-zero; it cannot be labeled a 3-dB timing grid. See the
-[resource followup](acquisition/coarse_fhss.py).
+zero; it cannot be labeled a 3-dB timing grid. The
+[historical acquisition followup](acquisition/README.md) records this limitation.
 
 The original nominal-bank erasure experiments also include middle, random-ten
 and random-25 dwell losses. Their post-erasure energy ratios were approximately
@@ -442,7 +442,7 @@ complete tails; rescaling a short observation is not equivalent.
 Use [the reproduction guide](reproduction/README.md) for frozen campaign plans,
 bounded stages, provenance requirements and explicit optional long-span work.
 For isolated implementation changes, start with the
-[scope-based test guidance](../../../building.md#isolated-three-carrier-research).
+[hierarchical abbreviated Robust test method](../../../triad-performance.md).
 The new lightweight tool checks are:
 
 ```sh
@@ -487,7 +487,7 @@ input. It is retained as a reproducibility record, not a self-contained fixture.
 | [Analytical bounds](evidence/coverage-bounds.json) | `236221bf37cbbdf79922a3da327ca07cb3a331ed55091b37e1425fd99324f2dd` |
 | [Theory note](evidence/theory.md) | `28aac87a8ce2ed6234f1f0e9294be9b4274364f02e0879adf0ce213c29ff59e0` |
 | [Harmonic diagnostic result](evidence/harmonic-probe.json) | `8756f1b368e22054e28592a56576f1c725bf8c4f96675b54faba98933d3215db` |
-| [Harmonic diagnostic source](evidence/harmonic-probe.py) | `19e05f8025708877d431f890e5550271b5d0db5205345e31c8f8980bfb88fc1f` |
+| Harmonic diagnostic source (`harmonic-probe.py`) | `19e05f8025708877d431f890e5550271b5d0db5205345e31c8f8980bfb88fc1f` |
 
 ## Evidence preservation and completed cloud cleanup
 

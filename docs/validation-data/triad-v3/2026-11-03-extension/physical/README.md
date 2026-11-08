@@ -25,114 +25,26 @@ wrong-key path per cell. These small cells do not qualify99% reception or a
 rare daily false-admission rate. Conditional reuse and the three receiver
 methods must not be counted as independent receptions.
 
-## Prepare and inspect
+## Historical scope and limits
 
-`prepare.py` never launches a simulation. Without `--freeze`, the output is a
-draft that `run.py` refuses to execute. Freeze only after the native and scorer
-changes have passed their applicable review/checks. Source hashes bind the
-native inputs and runner separately from the scorer, and the executable hash
-is explicit. This is identity binding, not an independent compilation
-attestation; retain the actual build command and its output separately.
+This plan and its associated runners describe a completed historical physical
+follow-up, not an active experiment recipe. The initial opt-in
+`max-spreading-rate0p1` geometry estimate was subsequently tested in the
+separate [additional physical evidence](evidence/additional-README.md): its
+−16 dB-Hz validation scored 16/16 correctly with the public CFO bank, while
+the zero-CFO comparison scored 1/16. That configuration requested 8 seconds
+but produced 3,842 seconds of source calendar and 3,843.398 seconds of sampled
+calendar. The 16-path result is not general reliability qualification. The
+design's restricted acquisition matrix omitted clock-rate and keyed-epoch
+search and did not qualify full multidimensional acquisition, 99% reception,
+rare daily false admissions, physical RF retuning, or sustained performance.
+The recorded results and failed jobs remain historical evidence; do not
+regenerate the cohort from this plan. Any present-day compute-heavy
+Robust test must follow the [hierarchical abbreviated method](../../../../triad-performance.md),
+and generated evidence follows the [material lifecycle](../../../../development.md#material-lifecycle).
 
-```sh
-STUDY=docs/validation-data/triad-v3/2026-11-03-extension/physical
-PARENT="$STUDY/baseline-input.json"
-python3 "$STUDY/prepare.py" --parent "$PARENT" --root "$PWD" \
-  --binary "$PWD/build/dev-cli/triad_long" --freeze --output FRESH_PLAN.json
-python3 -m unittest discover -s "$STUDY" -p test_plan.py
-```
-
-The compact checked-in input retains only the two baseline export definitions,
-their original definition hashes, and the original plan hash. It requires no
-old raw captures to upload. For a cloud rebuild, run the freeze command on that
-host **after** its build, binding its own executable hash. Use the same source
-and scripts; never edit a frozen plan to substitute a different binary hash.
-
-Use repeated `--cell NAME` for a bounded submatrix. `--suite validation`
-selects the independent seed schedule. `--cn0 6` or `--cn0 12` prepares a
-lower-power physical replay; it does not rescale old noisy data. `--seconds 80`
-prepares a genuine duration change, which may alter the source calendar and
-cost. Keep every resulting plan and output root distinct. Resource predictions
-below apply only to the default requests.
-
-The additional `--cell max-spreading-rate0p1` case is **opt-in** and leaves all
-ten default cell definitions and seed indices unchanged. It selects rate0.1Hz,
-Added1000,128samples/s, noFHSS, an8second minimum request, HF-best/Each65,
-30MHz shift,1725Hz nominal IF and independent OCXO profiles at margin1. The
-two-ray receiver uses0.5ms/0.1Hz taps and128sample blocks. Native geometry
-rounds that short request to approximately3,842seconds of source time; its
-public tight bank has15timings and the full-calendar CFO bank is about95bins.
-These are configuration/resource observations, not measured decode success.
-Prepare separate paired plans at `--cn0 -23` and `--cn0 -16`; only a promising
-paired result warrants `--suite validation --cn0 -16`. Do not treat the
-8second request as8seconds of actual energy allocation.
-
-## Execute separate stages
-
-```sh
-TRIAD_PYTHON=/tmp/triad-weak-env/bin/python
-"$TRIAD_PYTHON" "$STUDY/run.py" --plan FRESH_PLAN.json \
-  --root "$PWD" --binary "$PWD/build/dev-cli/triad_long" \
-  --python "$TRIAD_PYTHON" --output-root FRESH_OUTPUT \
-  --run-dir FRESH_CONFIGURE --stage configure --jobs 1 --global-seconds 120
-```
-
-Then run `--stage export` in a fresh run directory with
-`--prior-results FRESH_CONFIGURE/results.json`. Start with
-`--only-id loss-middle-paired-00-b0-signal`, then the internal-wait pilot,
-before scheduling all exports. Export child bounds are600seconds normally and
-900seconds for internal waits. A stage needs enough remaining time for its
-full declared child bound plus cleanup; otherwise the job is retained as
-`not_started_deadline`.
-
-The `acquire` stage requires the configure and export receipts, supplied with
-repeated `--prior-results`. It performs three declared methods on each same
-actual noisy observation:
-
-- `window`: the existing62.5ms independent-window model.
-- `global`: one constant complex-gain observation, with zero residual CFO.
-- `global-frequency`: the same global model with a public CFO bank spanning
-  the nominal oscillator bound, maximum spacing `1/(4T)` for the complete
-  sampled calendar. The grid is applied to original block correlations before
-  reblocking, and every timing/frequency pair enters the normalized mixture.
-
-The frequency reuse approximation has its own enforced0.01dB maximum original
-block phase-arc loss. That does not certify the complete continuous-channel
-likelihood. No simulator frequency, arrival or energy selects a receiver
-hypothesis. Clock-rate and keyed-epoch hypotheses remain zero in this matrix;
-successful rows are **not** full multidimensional acquisition qualification.
-
-The strict/relaxed gates preserve1440attempts/day,8duration alternatives and
-16method alternatives. The result independently recounts correct admissions,
-wrong admissions, misses, null/wrong-key admissions and each actual gate.
-Post-erasure signal energy is evaluation-only. The runner inventories raw
-outputs, rechecks source/executable identities, retains unsuccessful jobs and
-never overwrites or implicitly reruns a previous result. Exit0 means the
-selected jobs were accounted for with stable inputs, not that all jobs or
-receptions succeeded. Inspect `counts` and every job status.
-
-## Cost and remaining exclusions
-
-The earlier cloud host measured143–146seconds for one455-group,46second FHSS
-export (~260MB). Its export loop is CPU work; a GPU scorer does not remove that
-cost. The new internal-wait source lasts156.4seconds, suggesting roughly
-500seconds/~0.9GB per export before measurement. Rate1200/Added1 has153groups
-and44seconds; rate36/Added100 has455groups and54seconds. The complete30-export
-paired screen is roughly one serial CPU-hour and6GB under those assumptions.
-These are estimates, not new benchmarks. Pilot before choosing concurrency;
-default runner concurrency is one, maximum24, with512MiB declared per child.
-
-The unchanged no-loss and cycle-edge full-bank workspaces can be rescored
-separately without new exports. They cannot be exactly remasked into the new
-loss cases because retained blocks straddle dwell edges and contain no rawI/Q.
-FHSS is source-envelope shaping plus receiver I/Q erasure, not physical RF
-retuning. Internal waits are actual silent tile intervals; the whole-bit
-`--symbol-burst 3` calendar alone would not exercise those gaps.
-
-The default several-second timing range at600fine symbols/s would require
-about35,200timings on this3dB grid and exceeds both the native10,000-group cap
-and the current scorer's5,000-base-group cap (10,000bit candidates). The
-configure stage checks both limits before approving an export dependency.
-The plan preserves that exclusion explicitly. Automatic1MHz/30MHz rate
-geometry also remains outside this sampled matrix. Do not replace either with
-a narrower truth-based bank and label it tested.
+The default several-second timing range at600fine symbols/s was estimated to
+require about35,200timings on this3dB grid, exceeding the native10,000-group
+cap and the scorer's5,000-base-group cap (10,000bit candidates). Automatic
+1MHz/30MHz rate geometry was also outside the sampled matrix. These were
+historical scope exclusions, not measured outcomes.

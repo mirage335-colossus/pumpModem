@@ -47,7 +47,7 @@ distinctions.
 
 ## Grouped actual-observation acquisition
 
-[`triad_group_acquire.py`](../../../../tools/triad_group_acquire.py) consumes
+The retired `triad_group_acquire.py` consumed
 `triad-group-block-stats-v1`. Each fixed synchronization group contains both
 bit alternatives and their complete local column union. The current selected
 basis has two taps per bit; each tap waveform already contains the three
@@ -247,7 +247,7 @@ The accepted followup audit rechecked 204 full-score JSON/NPZ records and
 manifests, and 200 per-window score NPZs. These comprise 168 reused
 development captures, four paired duration extensions and 32 fresh physical
 cases; they are not 204 independent validation trials. The optional
-[`pattern_consistency.py`](reproduction/pattern_consistency.py) recomputes
+`pattern_consistency.py` recomputed
 window likelihoods at the **unchanged winning bit's post-data best group**.
 It neither changes the full-bank bit winner nor reruns acquisition with
 simulation truth.
@@ -345,9 +345,8 @@ normalization repair remain diagnostic history, not completed campaign results.
 
 ## Exact finite Gaussian reference
 
-[`triad_covariance_reference.py`](../../../../tools/triad_covariance_reference.py)
-and its [focused tests](../../../../tests/test_triad_covariance_reference.py)
-provide a deliberately bounded reference of at most 512 samples. The saved
+The retired `triad_covariance_reference.py` and its focused tests provided a
+deliberately bounded reference of at most 512 samples. The saved
 experiment uses 256 samples, not a dense multi-day receiver.
 
 For deterministic public tap waveform columns `a[b,k]`, independent
@@ -450,7 +449,7 @@ cannot be recovered merely by longer integration.
 
 ## Accepted numerical screen
 
-The [reproducer](reproduction/run_reference.py) reuses a public sampled
+The historical reproducer reused a public sampled
 two-tap waveform basis over sample indices `[1024,1280)` at 2048 samples/s:
 timestamps `0.5` through `0.62451171875 s`, or **0.125 s of sample-slot
 duration**. Each candidate/tap column is normalized to unit mean power, with
@@ -515,8 +514,8 @@ contracts are recorded inside each receipt.
 
 ## Confirmed fixed 1-dB classification comparison
 
-The accepted [confirmation driver](reproduction/gaussian_gpu_confirmation.py)
-fixes the same 256 samples, 0.125-second window, public basis, unit-power tap
+The accepted historical confirmation driver fixed the same 256 samples,
+0.125-second window, public basis, unit-power tap
 normalization, equal bit priors, `B=30 Hz` Gaussian channel and **Off-selective**
 law. Synchronization, key, prior and noise variance are known. It compares the
 exact-covariance classifier at **25.25 dB-Hz** with the block-16 classifier at
@@ -607,7 +606,7 @@ confirmation for the 1-dB statement.
 
 ## Marginal Chernoff diagnostic did not rescue the weak miss
 
-The accepted [Chernoff diagnostic](reproduction/chernoff_diagnostic.py) kept
+The accepted historical Chernoff diagnostic kept
 the weak high30/Each65, 8-dB-Hz capture's projection, strict noise UCB,
 Gaussian factors and FP32 score unchanged. It examined post-hoc group 59,
 bit 0. Under the stated proper-complex Gaussian null, its positive quadratic
@@ -830,14 +829,9 @@ followup execution added 36 exports/36 full scores and 200 consistency
 postprocessors. Those counts describe different evidence tasks, not one
 pooled independent reception population.
 
-For subsequent code changes, begin with cheap configure/export helper checks
-and the affected numerical suites, such as
-[`test_triad_group_acquire.py`](../../../../tests/test_triad_group_acquire.py)
-and [`test_triad_covariance_reference.py`](../../../../tests/test_triad_covariance_reference.py).
-Use the [isolated build stages](../../../building.md#isolated-three-carrier-research).
-Large batches reproduce research evidence when their scientific question
-requires them; they are **not mandatory regressions for every small change**.
-See the [reproduction guide](reproduction/README.md) for cheap bounded checks
-and explicit larger evidence recipes. Documentation-only checks for this
-update verified receipt/count/hash literals, local link targets and whitespace;
-they are separate from the recorded software and scientific execution above.
+For subsequent code changes, start with inexpensive deterministic checks and
+follow the [current abbreviated testing policy](../../../triad-performance.md).
+The [historical findings record](reproduction/README.md) summarizes relevant
+results and limitations; it is not a larger campaign recipe. The historical
+documentation checks verified receipt/count/hash literals, local link targets and
+whitespace; they are separate from the recorded execution above.

@@ -20,6 +20,14 @@ binary release, not a parallel in-tree implementation. If a security fix must
 cover a prior release, backport it narrowly to strictly sanitized dynamic-input
 surfaces.
 
+For alternative receiver techniques, retain concise current-relevant findings,
+including negative results, assumptions, limitations and provenance; do not keep
+obsolete receiver implementations or entire historical campaigns as examples.
+Keep underlying data only for a specific current question that its summary
+cannot answer, and remove temporary experiments when their documented purpose
+ends. The [material lifecycle](development.md#material-lifecycle) applies to
+tracked files, ignored local evidence and remote storage alike.
+
 ## Testing computationally intensive Robust changes
 
 Use a hierarchical, computationally minimal statistical method. Predeclare the

@@ -7,6 +7,33 @@ truth for shared stream and presentation behavior. Do not treat retired
 single-carrier or standalone triad/Helper implementations as compatibility
 requirements.
 
+## Material lifecycle
+
+Retain concise descriptions of alternative techniques and their useful test
+conclusions when they can inform the current implementation. Record the question,
+assumptions, relevant positive and negative results, limitations and enough
+source/configuration provenance to interpret them. A future possibility alone
+does not justify keeping a whole experiment or historical campaign.
+
+Keep raw evidence, captures, logs and intermediate artifacts only for a concrete
+current investigation, unresolved failure, validation claim or release duty.
+State the purpose and cleanup trigger in the existing relevant guide or validation
+entry; do not create a retention registry. When the purpose ends, replace
+superseded narratives with the concise findings, remove redundant data and
+generated outputs, and update references. Retain a minimal dataset beyond that
+only when a specific current question requires the underlying data and the
+summary cannot answer it; document why. Apply this rule to ignored local files,
+remote instances and volumes as well as tracked material.
+
+Maintain one canonical implementation for each supported path. Remove obsolete
+implementations and their obsolete tests, standalone copies, build wiring and
+executable code inside evidence bundles rather than moving them into archives.
+Protocol breaks use Git tags and separate binary releases; do not commit
+generated output just to preserve it in Git. Continue to protect required
+published-release assets, certification evidence, unresolved failures, active
+work and relevant third-party notices. The [build guide](building.md#local-output-retention)
+explains reuse and retirement of local build and SDK caches.
+
 ## Shared security and presentation
 
 Restrict received content before it reaches native GUI text, clipboard requests,

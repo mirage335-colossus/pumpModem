@@ -1,30 +1,31 @@
 # Selective-stage sampling refinement for the long-rate cases
 
-The selected long-tier sampling rates pass this **stage-specific** refinement.
-It tests the actual `DispersiveSelectivePerturbation` operator against its ideal
-physical-delay response; it does not establish whole-waveform, oscillator,
-compression or receiver convergence. No runtime source was changed.
+The historical report said the selected long-tier sampling rates passed this
+**stage-specific** refinement. It tested the actual
+`DispersiveSelectivePerturbation` operator against its ideal physical-delay
+response; it did not establish whole-waveform, oscillator, compression or
+receiver convergence. No runtime source was changed.
 
-The [48 retained profiles](response-results.jsonl) cover GUI rates 0.001 and
+The historical report covered 48 profiles at GUI rates 0.001 and
 0.01 Hz with Added Symbols ×1, ray separations 0.001 and 0.05 Hz, Each65,
 common input offsets ±0.00005 Hz and both ray-center offsets (0 and the selected
 separation). The base sample rates are 0.25 Hz for 0.001-Hz separation and
 0.5 Hz for 0.05-Hz separation; each is repeated at 2× and 4×. This is one fixed
 modulation seed, not 48 independent channel trials.
 
-For every profile, three isolated tone probes measure the actual complex
-response at the three carrier frequencies. A fourth instance processes their
-sum with the same uninterrupted FIR state. Its output is compared with the sum
-of isolated outputs and with the ideal delayed-branch construction. Tone gain
-is a diagnostic only: neither the production operator nor this simultaneous
-check demixes an overlapping waveform by carrier label.
+For each profile, three isolated tone probes measured the complex response at
+the carrier frequencies. A fourth instance processed their sum with the same
+uninterrupted FIR state. Its output was compared with the sum of isolated
+outputs and with the ideal delayed-branch construction. Tone gain was only a
+diagnostic: neither the production operator nor this simultaneous check
+demixed an overlapping waveform by carrier label.
 
-The probe discards the full finite initial FIR support plus 1,000 seconds, then
-measures 100 slow and 1,000 fast modulation cycles. This means 1,000,000 seconds
-per low-separation profile and 20,000 seconds per high-separation profile.
-Measured sidebands include both signs of both modulation frequencies. Phase
-error excludes samples where either compared amplitude is at most `1e-8`;
-complex and amplitude errors include every retained sample.
+The probe discarded the full finite initial FIR support plus 1,000 seconds,
+then measured 100 slow and 1,000 fast modulation cycles: 1,000,000 seconds per
+low-separation profile and 20,000 seconds per high-separation profile. Measured
+sidebands included both signs of both modulation frequencies. Phase error
+excluded samples where either compared amplitude was at most `1e-8`; complex
+and amplitude errors included every retained sample.
 
 | Maximum over the complete tested grid | Result |
 | --- | ---: |
@@ -50,35 +51,25 @@ spacings or sample clocks. All deterministic tone/modulation lines lie inside
 Nyquist; stochastic oscillator spectra and shaped-data sidelobes are outside
 this particular line-support check.
 
-The [source-bound summary](summary.json) passes the declared 0.1-dB energy-error
-and 0.01 complex-gain-error limits. The serial diagnostic completed in
-8.84 seconds; compilation took about one second. The [run receipt](run-receipt.json)
-retains both bounded-process outcomes and the executable/compiler identities.
-The source header matched its recorded Git revision. Ordinary-receiver tests,
-physical device measurements and receiver admissions were not part of this
-check.
+The [retained summary](summary.json) passed the declared 0.1-dB energy-error
+and 0.01 complex-gain-error limits. It recorded an 8.84-second serial
+diagnostic, about one second of compilation, and a source header matching its
+recorded Git revision; the [raw grid](response-results.jsonl) and
+[run receipt](run-receipt.json) remain available. The standalone probe source
+is no longer retained, so the archived measurements can be inspected but this
+specific executable cannot be rebuilt from this directory. Ordinary-receiver
+tests, physical device measurements and receiver admissions were not part of
+the check.
 
 ## Reproduction
 
-From the repository root, compile the small standalone probe and run it under
-the normal bounded runner. Use a fresh output directory and keep the complete
-JSONL file; the summary rejects missing or duplicate grid points.
-
-```sh
-mkdir -p local-evidence/triad-long-rate-refinement
-g++ -std=c++20 -O3 -DNDEBUG -Isrc -Iinclude \
-  docs/validation-data/triad-v3/2026-11-03-broad/sampling/long_rate_probe.cpp \
-  -o local-evidence/triad-long-rate-refinement/probe
-python3 tools/triad_bounded_run.py --cwd "$PWD" \
-  --log local-evidence/triad-long-rate-refinement/response-results.jsonl \
-  --status local-evidence/triad-long-rate-refinement/status.json \
-  --timeout 45 --max-seconds 45 --term-grace 1 -- \
-  local-evidence/triad-long-rate-refinement/probe
-python3 docs/validation-data/triad-v3/2026-11-03-broad/sampling/summarize.py \
-  --results local-evidence/triad-long-rate-refinement/response-results.jsonl \
-  --output local-evidence/triad-long-rate-refinement/summary.json
-```
+This historical check used a compiled deterministic probe and a bounded,
+single-process run. Its raw grid, summary and receipt remain as evidence for
+this interpolation finding; the probe is not retained as a routine test
+recipe. Future intensive Robust checks follow the
+[abbreviated statistical harness](../../../../triad-performance.md)
+and the [material lifecycle policy](../../../../development.md#material-lifecycle).
 
 The construction follows the earlier
 [selective-correction response probe](../../2026-11-02-selective-correction/response-v2/README.md)
-and the [versioned channel contract](../../../../channel-models.md#versioned-three-carrier-selective-modulation).
+and the [current channel-model guidance](../../../../channel-models.md).

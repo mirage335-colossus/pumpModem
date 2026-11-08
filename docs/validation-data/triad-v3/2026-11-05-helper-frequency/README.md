@@ -27,9 +27,9 @@ pilots coherently, or narrow the clock bank. If pilots are unusable, an interval
 is too broad, a gate fails, or the estimated region expires before the scored
 capture ends, the receiver falls back to the complete frequency bank.
 
-[`triad_dynamic_acquire.py`](../../../../tools/triad_dynamic_acquire.py) applies
-that per-capture subset while retaining the full-bank public projection, all
-clock candidates, and the independent timing/phase guard. In the tested cases,
+The historical `triad_dynamic_acquire.py` driver applied that per-capture
+subset while retaining the full-bank public projection, all clock candidates,
+and the independent timing/phase guard. In the tested cases,
 the Helper phase/timing relation was unresolved, so the guard selected the
 DATA-only mode (`helper_phase_timing_unresolved`) for every capture. Frequency
 narrowing still ran and retained the correct bank coordinate; it did not rely
@@ -190,40 +190,13 @@ TRIAD_PY=/tmp/triad-weak-env/bin/python
 "$TRIAD_PY" -m unittest discover -s tests -p 'test_triad_dynamic_frequency_study.py'
 ```
 
-For a fast frequency-selection/CLI check using the two saved diagnostic
-captures (no gate and no admission claim), choose a nonexistent output path:
-
-```sh
-TRIAD_PY=/tmp/triad-weak-env/bin/python
-"$TRIAD_PY" tools/triad_dynamic_frequency_study.py \
-  --schedule docs/validation-data/triad-v3/2026-11-05-helper-frequency/evidence/diagnostic-reception-schedule.json \
-  --templates local-evidence/triad-helper-frequency/hf-free-ic7100/diagnostic-00 \
-  --output /tmp/triad-helper-frequency-diagnostic-replay \
-  --frequency-step 0.5 --clock-ppm 0 --arrivals 0.013 --epochs 0 \
-  --arrival-model discrete --device cpu --threads 2 --batch-size 8 \
-  --block-seconds 0.25 --projection core --pilot-use both \
-  --no-include-baseline
-```
-
-The saved schedule points into `local-evidence/triad-helper-frequency`; restore
-the captured fixtures there if moving them to another checkout. This diagnostic
-uses the current source and has no calibration rows. It does not reuse the
-historical gates. A full qualification replay requires the original frozen
-source snapshot, all capture/template files, and the exact separated
-frequency/admission/validation schedule; the raw files are not duplicated in
-this compact evidence package.
-
-The small generation, frequency-calibration and audit programs are preserved in
-[`evidence/recipes/`](evidence/recipes/), alongside the three original
-`native-*-protocol.json` files containing exact native arguments and seed lists.
-Copy these programs back into `local-evidence/triad-helper-frequency/` before
-using their `--help`: their repository-root calculation deliberately depends on
-that original location. Use new output directories. `diagnostic.py` regenerates
-the small initial controls; `cohort.py` enforces the separate frequency-training,
-cutoff-freeze, admission-calibration and validation stages. `calibrate.py` fits
-the coverage cutoff only from its 99 training captures. The AM90 recipes are
-separate frequency-only diagnostics. Full cohort regeneration is occasional
-qualification, not a routine regression prerequisite.
+The saved schedule and compact evidence package retain the historical inputs,
+source identities and calibration/validation provenance needed to interpret
+the reported result. The copied recipe programs and archived protocols are
+historical artifacts, not current checkout tooling; do not restore them or use
+them to launch another cohort. Any necessary compute-heavy Robust check follows
+the [hierarchical abbreviated method](../../../triad-performance.md), with
+temporary evidence governed by the [material lifecycle](../../../development.md#material-lifecycle).
 
 This study does not show 99% correct reception, a rare false-admission rate,
 all-arrival acquisition, continuous-frequency worst-case coverage, physical

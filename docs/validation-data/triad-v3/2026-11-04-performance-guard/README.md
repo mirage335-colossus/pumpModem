@@ -224,8 +224,8 @@ plans, measurements, lifecycle costs and original reports:
 - [CPU initial integration](cpu-003.tar.gz) and [final CPU guard](cpu-004.tar.gz).
 - [GPU initial integration](gpu-002.tar.gz) and [final GPU guard](gpu-003.tar.gz).
 - [Injected actual-pipeline controls](injected-controls.tar.gz).
-- [Initial guard sources](initial-guard-sources.tar.gz), [unit output](all-harness-tests.log),
-  [external timer](time-command.py), and the coverage receipts above.
+- Initial guard source archive (not present in this record), [unit output](all-harness-tests.log),
+  historical external timer helper (not present in this record), and the coverage receipts above.
 
 The frozen source directories preserve the accepted median implementation and
 the rejected mean proposal. The control module retains per-scenario seeds,
@@ -233,19 +233,15 @@ plans, nominal/null classifications, raw event counts, uncertainty, and actual
 aggregator parity. Policy tests passed 18 checks; controls tests passed five.
 These unit results are not substitute receiver or prediction evidence.
 
-Reproduce the decision simulations on the matching source without rerunning
-receiver qualification:
-
-```sh
-python3 tools/triad_perf_guard_controls.py --campaign base --trials 5000 \
-  --parity-workflows 4 --ci-hypotheses 36 --dev-hypotheses 39 --seed 214231 \
-  --output local-evidence/triad-performance-guard/controls/median-base-repeat.json
-python3 tools/triad_perf_guard_controls.py --campaign extensions --trials 5000 \
-  --parity-workflows 4 --ci-hypotheses 36 --dev-hypotheses 39 --seed 224321 \
-  --output local-evidence/triad-performance-guard/controls/median-extra-repeat.json
-```
-
-Use the [routine commands](../../../triad-performance.md#fast-guard-commands-and-decision-contract)
-for physical guards, and [focused qualification](../../../triad-performance.md#focused-prediction-and-qualification-commands)
-only when a changed computational relation needs new full-run evidence. Historical
-cold/sustained campaigns remain qualification records, not routine prerequisites.
+The two historical median-policy simulations covered 38 and 16 scenarios with
+5,000 synthetic workflows each and matched 216 executions through the actual
+report aggregator. They were decision-model checks, not receiver timing. The
+serially persistent bimodal control produced 4,999/5,000 false blocks (99.98%);
+with latent cross-case correlation 0.8 it produced 3,495/5,000 (69.90%). The
+earlier five-pair Student-t proposal falsely blocked 3,442/5,000 symmetric
+bimodal workflows (68.84%). These results show that pair dependence can defeat
+nominal false-block budgets; they are retained as limitations, not commands to
+repeat. The current [Robust performance guide](../../../triad-performance.md)
+sets the abbreviated hierarchical statistical method for computationally
+intensive Robust testing and the routine guard workflow. Historical cold and
+sustained campaigns are not routine prerequisites.

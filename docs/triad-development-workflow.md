@@ -11,8 +11,11 @@ The former single-carrier receiver and standalone alternatives are retired.
 First identify whether the change concerns source geometry, channel continuity,
 acquisition, timing inference, admission accounting, or resource cost. A small
 deterministic check of that boundary is preferable to a sampled reception sweep.
-Reuse retained complex observations where source, inputs and assumptions match.
-Keep public receiver inputs separate from simulator truth and evaluator labels.
+Reuse a small, explicitly identified complex observation only when its source,
+inputs and assumptions match the current question. Keep public receiver inputs
+separate from simulator truth and evaluator labels. Once the finding is
+summarized with provenance and limitations, delete redundant captures and
+superseded local reports; historical data is not retained by default.
 
 For computationally intensive work, follow the [abbreviated policy](triad-performance.md):
 predeclare path strata, tiny sample allocation, uncertainty and stopping rules.
@@ -43,6 +46,10 @@ retains complex evidence under renewing rays. [Noise-model research](triad-noise
 explains why a correct likelihood with the wrong noise model can falsely admit.
 [Clock tracking](triad-clock-follow.md) separates known local resampling from
 unknown remote motion. These findings motivate checks; they are not new gates.
+Preserve concise reusable conclusions, assumptions and source provenance. Do
+not preserve duplicate raw outputs, executable experiment copies or retired
+implementations alongside the canonical source. Give unfinished investigations
+a specific question, next action and cleanup condition.
 
 ## Scope the checks to the change
 

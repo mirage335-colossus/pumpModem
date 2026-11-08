@@ -197,7 +197,7 @@ arrays are removed from selected JSON reports, with every transformation
 recorded. All three archived campaign gates/decisions were reverified after
 fresh extraction; no DSP rerun is needed for that check.
 
-Use the focused command in [the guide](../../../triad-helper.md#cheap-checks-and-reproducible-experiments).
+Use the [current abbreviated testing policy](../../../triad-performance.md).
 Current Python checks pass **82/82** in 10.47 s; native exporter checks pass five
 captures and five rejected invocations. Default observation, validity and truth
 bytes match the retained pre-change HF export. These are functional checks,
@@ -209,31 +209,14 @@ The frozen work ladder/full target pair is a named GPU prediction anchor, not
 permission to extrapolate across new arithmetic, memory or algorithm regimes.
 The existing ordinary receiver campaign is outside this study.
 
-```sh
-build/dev-cli/triad_helper_export --case hf --seconds 16 --seed 94101 \
-  --base-oscillator crystal --shift-oscillator ic-7100 \
-  --receiver-tail-seconds .25 --templates --output NEW_HF
-python3 tools/triad_helper_study.py --fixture NEW_HF --output NEW_RESULT.json \
-  --device cuda --fft-backend batched --frontend-profile wide \
-  --clock-step-ppm 101 --doppler-scale-count 3 --frequency-batch-size 32 \
-  --aligned-fft-grid --memory-limit-bytes 8589934592 --evaluate
-
-python3 tools/triad_helper_gpu_bench.py --fixture EME_CAPTURE --templates EME_TEMPLATES \
-  --output NEW_BENCH.json --fft-backend batched --frequency-batch-size 32 \
-  --max-cached-hypotheses 13 --memory-limit-bytes 8589934592 --cpu-threads 4
-
-build/dev-cli/triad_helper_export --case eme --seconds 16 --seed 94201 \
-  --data-if 1725 --ramp-seconds .006 --templates --output NEW_EME_TEMPLATES
-python3 tools/triad_helper_campaign.py --case eme --cn0 1.5 --seconds 16 \
-  --seed-base 94300 --templates NEW_EME_TEMPLATES \
-  --exporter build/dev-cli/triad_helper_export --output NEW_EME_CAMPAIGN \
-  --data-if 1725 --ramp-seconds .006 --device cuda --fft-backend batched \
-  --frequency-batch-size 32 --max-cached-hypotheses 13 \
-  --memory-limit-bytes 8589934592 --discard-iq
-```
-
-Use explicit `OPENBLAS_NUM_THREADS=4 OMP_NUM_THREADS=4` for the recorded GPU-host
-allocation. These expensive commands are optional qualification, not unit tests.
+The recorded HF and EME GPU jobs compared previously prepared fixtures and
+measured a bounded experimental receiver scope. Their timings and limitations
+are in this report; the study did not qualify arbitrary stochastic spread,
+actual RF retunes, live-radio distortion or operational reception/admission
+targets. Its thread allocation and `NEW_*` command examples are historical
+details, not current qualification instructions. Follow the maintained
+[abbreviated triad harness](../../../triad-performance.md) and
+[material lifecycle policy](../../../development.md#material-lifecycle).
 The empirical engineering channel is not a field measurement, and neither this
 study nor its GPU speedups qualify arbitrary stochastic spread, actual RF
 retunes, live-radio distortion, daily false admission or 99% correct reception.

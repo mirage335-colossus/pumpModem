@@ -391,28 +391,9 @@ and [checksums](SHA256SUMS) describe included records and omitted regenerable
 arrays. Archive SHA256:
 `b71959e934b71c80d05ae11940c8da0b1ef4016e4679e60a26ae3f491dcad45a`.
 
-From the repository root, inspect existing evidence before spending compute:
-
-```sh
-(cd docs/validation-data/triad-v3/2026-11-05-helper-broad && sha256sum -c SHA256SUMS)
-mkdir -p /tmp/triad-helper-evidence
-tar -xzf docs/validation-data/triad-v3/2026-11-05-helper-broad/compact-evidence.tar.gz -C /tmp/triad-helper-evidence
-OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 python -m unittest discover -s tests -p 'test_triad_helper*.py'
-```
-
-Use the project's compatible Python environment and `./build.sh` for native builds. A focused new cohort uses the
-recorded JSON protocol, a fresh output directory and the matching exporter:
-
-```sh
-python tools/triad_helper_broad_campaign.py --exporter build/dev-cli/triad_helper_export \
-  --protocol PROTOCOL.json --output NEW_OUTPUT --device cuda:0 \
-  --memory-limit-bytes 25769803776 --frequency-batch-size 32 --max-cached-hypotheses 13
-# Optional bounded GPSDO raw path, with a fresh matching gate:
-python tools/triad_helper_raw_study.py campaign --exporter build/dev-cli/triad_helper_export \
-  --protocol RAW_PROTOCOL.json --output NEW_RAW_OUTPUT --device cuda:0 \
-  --memory-limit-bytes 25769803776 --frequency-batch-size 32 --max-cached-hypotheses 13
-```
-
-Those are qualification commands, not recommended routine regression commands.
-Keep the specific failed cases and independent seeds when testing a repair;
-do not retry until a passing random outcome appears.
+This is a completed historical cohort, not an executable campaign recipe. Its
+manifest, checksums, retained failures and independent seed identities record
+the evidence boundary; they do not authorize restoring retired campaign code
+or extending the cohort. The current method for any necessary compute-heavy
+Robust check is the [hierarchical abbreviated harness](../../../triad-performance.md),
+and temporary evidence follows the [material lifecycle](../../../development.md#material-lifecycle).

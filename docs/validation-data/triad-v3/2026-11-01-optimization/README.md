@@ -17,8 +17,8 @@ qualifies the full operational false-admission requirement.
 See [hardware and complete-stage measurements](hardware.md),
 [reproduction commands](reproduce.md), [precision allocation](precision-stages.md),
 and the [pre-optimization protocol](../../../triad-gpu-optimization.md).
-The maintained [raw evidence archive](evidence.tar.gz), [source snapshot](source-overlay.tar.gz)
-and [fixed inputs](fixed-inputs.tar.gz) include [per-file evidence hashes](evidence-files.sha256.json).
+The maintained [raw evidence archive](evidence.tar.gz), [fixed inputs](fixed-inputs.tar.gz)
+and [source file hash manifest](source-files.sha256.json) retain the evidence provenance.
 
 The [v3 contract](../../../triad-v3.md) continues to govern encryption,
 clock-derived keystream, interleaving, channels, oscillators and continuous state.
@@ -276,22 +276,12 @@ physical campaigns separately bind their exporter source, binary and inputs. The
 `triad-long.cpp`; the contemporary current-source list matched the starting
 checkout. Historical files were not rewritten to conceal that discrepancy.
 
-## Ranked next experiments
+## Historical limits
 
-1. Compare oracle sampled channel/oscillator discrimination with the receiver on
-   identical boundary observations, including the 23 default misses. Separate
-   energy limits from discarded information/model mismatch; validate any policy
-   chosen from these diagnostics on fresh physical paths.
-2. Attribute native source-generation time to crypto/waveform, channel,
-   oscillator, RNG, projection and I/O; remove duplicated work before spending
-   another campaign on the smaller scoring fraction of physical validation.
-3. Establish a physical sampled null model for interference and independently
-   estimated covariance, with complete operational family accounting. Neither
-   higher precision nor FHSS alone fixes front-end overload.
-4. Freeze a promising precision/model policy and run paired boundary campaigns
-   with crossing intervals capable of resolving the four sensitivity budgets.
-5. Extend only the important unsupported boundaries: ill-conditioned channel
-   fits and rank decisions, broad timing/CFO/clock/epoch search, RF retuning and
-   hop collisions, gain recovery, erasures and rate/bandwidth changes. Revisit
-   overlap-save, search partitioning and device placement on those measured
-   shapes rather than on advertised low-precision peaks.
+The archived optimization results identify unresolved boundaries—sampled
+channel/oscillator mismatch, front-end interference, ill-conditioned fits,
+acquisition uncertainty, and receiver behavior under erasures and rate changes.
+They do not prescribe a standing campaign or justify a parallel receiver
+implementation. Any focused future investigation must first follow the
+[hierarchical abbreviated Robust test method](../../../triad-performance.md)
+and the [material lifecycle](../../../development.md#material-lifecycle).

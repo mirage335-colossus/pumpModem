@@ -94,77 +94,26 @@ CPU seconds combined. See [development results](development.json),
 [independent validation](independent-validation.json), and
 [FP64 comparison](precision-fp64.json).
 
-## Reproduce cheaply
+## Reproduction status
 
-Use the numerical environment described in the main development workflow:
-
-```sh
-TRIAD_PYTHON=/tmp/triad-weak-env/bin/python
-"$TRIAD_PYTHON" docs/validation-data/triad-v3/2026-11-03-extension/phase/diagnostic.py \
-  --output NEW/development.json --trials 128 --phase-states 32 64 128 \
-  --reblocks 1 4 --dt-over-tau .0125 --cn0 -63 -60 -57
-"$TRIAD_PYTHON" docs/validation-data/triad-v3/2026-11-03-extension/phase/diagnostic.py \
-  --output NEW/precision-fp64.json --trials 128 --phase-states 32 \
-  --dt-over-tau .0125 --cn0 -60 --precision fp64
-"$TRIAD_PYTHON" docs/validation-data/triad-v3/2026-11-03-extension/phase/diagnostic.py \
-  --output NEW/independent-validation.json --trials 256 --seed 703011 \
-  --phase-states 32 --dt-over-tau .0125 --cn0 -60 -57
-```
-
-The retained development JSON includes exact source hashes, environment,
-declared teacher, raw counts, convergence comparisons and null-scope limits.
-Compressed paired score arrays remain in ignored
-`local-evidence/triad-extension/phase/`. No ordinary receiver regression or
-integration is required to rerun this isolated diagnostic.
-Use fresh output paths: the retained `diagnostic.py` version overwrites an
-existing JSON/score-pair path. It is preserved unchanged to keep the executed
-source hashes reproducible; a future campaign should add explicit collision
-rejection as a separately bound source version. The actual-workspace wrapper
-already rejects an existing result path.
+The small synthetic diagnostic, precision comparison and independent-seed
+results are retained as historical evidence with source hashes, environment,
+teacher assumptions, counts and uncertainty limits. Their scripts are not a
+routine replay workflow. Any necessary compute-heavy Robust check follows the
+[hierarchical abbreviated method](../../../../triad-performance.md); temporary
+outputs follow the [material lifecycle](../../../../development.md#material-lifecycle).
 
 ## Sampled follow-up and original setup failure
 
-`score_actual.py` wraps the existing phase receiver for a two-candidate,
-one-tap, known-alignment, known-unit-gain actual-noisy workspace. It rejects
-non-Gaussian frontends and controls other than signal/null. It does not read
-noiseless simulator means. The one pilot export invoked a build path while
-another agent rebuilt it; its exact executable provenance was not bound before
-launch. That capture is retained as diagnostic-only evidence and must not be
-counted as a source-bound validation success. A fresh source-bound cohort was
-subsequently completed; its results below exclude this pilot entirely.
-
-The first scorer invocation rejected the pilot before scoring because it
-incorrectly required capture-relative arrival zero. The native workspace
-correctly includes a public 0.05-second capture lead. The repaired wrapper
-requires both candidate arrivals and the zero-width physical/public timing
-bounds to equal that declared lead, while CFO, clock drift, keyed-epoch offset,
-tap delay and tap Doppler remain zero. The failure and correction do not alter
-the above sufficient-statistic results.
-
-For a source-bound actual follow-up, bind the executable hash before and after
-this command and use a fresh output directory. This is a deliberately flat,
-known-acquisition isolation of phase inference, **not a full oscillator-profile
-or strong-selective-channel experiment**:
-
-```sh
-TRIAD_BINARY=/path/to/verified/triad_long
-"$TRIAD_BINARY" --mode export-stats --seconds 73440000 --rate .001 --added 1 \
-  --sample-rate 1 --sample-rate-denominator 4 --rf-hz 500000 \
-  --nominal-if-hz .0005 --channel none --phase-diffusion .001234134149488435 \
-  --basis flat --cn0 -60 --threads 1 --memory-mib 256 \
-  --export-max-samples 25000000 --export-max-mib 512 --block 250 \
-  --signal-bit 0 --control signal --output NEW/actual-flat-tcxo \
-  --stats-noisy --seed 603021
-"$TRIAD_PYTHON" docs/validation-data/triad-v3/2026-11-03-extension/phase/score_actual.py \
-  NEW/actual-flat-tcxo --output NEW/actual-score.json --phase-states 32 64
-```
-
-The pilot has 18,456,032 complex samples at 0.25 sample/s, 73,825 blocks and a
-complete 73,824,128-second capture calendar. Its source duration rounds upward
-from the 850-day request; all duration statements must distinguish that actual
-calendar. Existing `triad-state-study.py` remains the general conditional/actual
-workspace driver; this small wrapper fixes a simpler unit-gain prior to isolate
-the discriminator and should not become a second general receiver API.
+The pilot export had ambiguous executable provenance and is diagnostic-only,
+not a source-bound validation success. The first scorer attempt also rejected
+its valid 0.05-second capture lead; the wrapper was corrected to validate that
+public lead. The subsequent source-bound cohort excludes the pilot. These
+setup failure and correction records remain part of the historical evidence.
+The isolated flat-channel experiment and its 850-day capture calendar are
+already recorded above; this page no longer contains commands for repeating
+that heavy export. The wrapper's deliberately narrow unit-gain scope was not a
+second general receiver API.
 
 ## Equal energy: longer duration versus more power
 
@@ -196,88 +145,21 @@ unknown-phase achievability. In particular, using the one-completion alpha
 `1e-4` here would compare different operating requirements. See
 [equal-energy results](duration-power.json).
 
-```sh
-"$TRIAD_PYTHON" docs/validation-data/triad-v3/2026-11-03-extension/phase/duration_power.py \
-  --output NEW/duration-power.json
-```
+The compact result at [equal-energy results](duration-power.json) preserves
+the exact synthetic comparison and assumptions; the retired standalone
+generator is not a current test entry point.
 
 ## Source-bound actual batch and CPU/GPU comparison
 
-`prepare_actual.py --output NEW/actual-plan.json` freezes portable argument
-definitions and the source-file closure. It plans 16 independent signal paths
-(eight per bit) and four independent nulls, then scores all 20 together using
-the existing phase likelihood. The executor must bind and verify the actual
-native executable, source archive and real build proof before execution and
-check those identities again afterward. The plan does not invent a build
-attestation. Each child has a 900-second limit; exports permit at most 12
-concurrent one-thread jobs. Source/receiver outputs must be fresh, hash-bound,
-and include every failed, skipped or timed-out job.
-
-The resident wrapper `score_actual_batch.py` accepts one or more complete
-actual-noisy workspaces. Every path retains its own public Gram and observation;
-only identical public block calendars share the phase transition. No simulated
-signal mean or phase truth enters inference. A 20-path batch has a conservative
-resident host/device estimate around 283 MB and is bounded to 512 MiB by the
-plan. Resident inputs and receiver state/graph storage share that single bound;
-the state receives only the remaining budget. Framework runtime and allocator
-caches are outside this owned-array estimate. Its narrow flat, known-gain,
-known-acquisition scope is checked explicitly. The injected Gaussian noise
-variance is known from the manifest and normalizes the observations and Grams;
-this is not an unknown-noise calibrated receiver.
-Its Clopper–Pearson summaries assume independent identically distributed paths
-under that stipulated law; they do not validate the physical law or establish
-operational reliability from 16 signals and four nulls.
-
-Four single-capture benchmark jobs use the identical first capture: CPU reference and
-CUDA graph implementation, each in FP32 and FP64. GPU jobs must run serially.
-An additional predeclared CUDA FP32 batch scores the identical 20 observations
-used by the combined CPU run. This is a throughput comparison, not 20 new
-independent validation paths. All five benchmark jobs run sequentially.
-They preserve the finite prior and use the existing graph implementation;
-unavailable CUDA/Triton fails explicitly. Strict FP32 disables TF32 and retains
-the existing explicit FP64 evidence reductions. The report binds a hash of the
-prepared noisy statistics and separates input loading/validation, transfer and
-state preparation, synchronized resident updates, and script time including
-imports. Torch, CUDA and Triton versions are reported. The executor's external child time supplies full-process wall time,
-including interpreter startup and output writing. Compare both score/ranking/
-admission agreement and complete-job cost; GPU availability alone is no gain.
-
-Example single-capture backend calls after a verified export:
-
-```sh
-"$TRIAD_PYTHON" docs/validation-data/triad-v3/2026-11-03-extension/phase/score_actual_batch.py \
-  NEW/actual-flat-tcxo --output NEW/cpu-fp32.json --device cpu \
-  --precision fp32 --implementation reference
-"$TRIAD_PYTHON" docs/validation-data/triad-v3/2026-11-03-extension/phase/score_actual_batch.py \
-  NEW/actual-flat-tcxo --output NEW/cuda-fp32.json --device cuda:0 \
-  --precision fp32 --implementation graph
-```
-
-Repeat with explicit `--precision fp64` and fresh result names for the paired
-reference comparison. `test_phase_extension.py` checks the phase integral
-against independent quadrature, validates the public capture origin and scope
-rejections, compares batch versus individual and FP32 versus FP64 inference,
-checks the combined input/state memory limit, and checks path balance/seed
-uniqueness in the planned batch. All six focused checks passed. These are focused
-checks; they do not launch the long exports or GPU campaign.
-
-After the original batch completed, the plan generator gained explicit
-`--cn0` (default −60) and `--seed-offset` (default zero) parameters. The old
-default job argument lists and definitions are unchanged. C/N0 must be finite
-in [−80, 20] dB-Hz; the offset must be an exact integer in [0, 1,000,000,000].
-Every variant needs a fresh plan, source binding and output root. To test the
-synthetic −57-dB-Hz transition with independently seeded sampled captures:
-
-```sh
-"$TRIAD_PYTHON" docs/validation-data/triad-v3/2026-11-03-extension/phase/prepare_actual.py \
-  --output NEW/actual-plan-cn57.json --cn0 -57 --seed-offset 10000000
-```
-
-The offset moves all seven seed domains to new roots. Two additional focused
-tests check unchanged defaults, exact seed shifts and invalid/inexact/nonfinite
-inputs; all eight current checks pass. The original executed plan and archive
-retain their earlier generator hash. A newly generated variant is distinct
-evidence and must not overwrite or relabel that completed cohort.
+The completed source-bound cohort used 16 independent signal paths and four
+nulls, with CPU/CUDA FP32/FP64 comparisons on the same observations. The
+preserved result records bind source, executable, archive and noisy-input
+identities; backend repeats are timing/precision evidence, not extra trials.
+The original plan's 900-second child bounds and 512-MiB input/state limit are
+historical experiment details, not instructions for another run. Focused tests
+covered likelihood quadrature, capture-origin and scope checks, batch-versus-
+individual agreement, precision comparison, memory accounting and seed/path
+balance. The detailed acceptance results follow.
 
 ## Accepted sampled results and measured acceleration
 

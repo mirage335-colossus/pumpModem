@@ -28,6 +28,11 @@ shapes are reusable ideas. Their value depends on preparation reuse and the real
 workload. Search pruning must retain honest coverage and cannot count omitted
 hypotheses as completed work.
 
+One retired receiver experiment on an RTX 4090 found FP16 replay slower than
+strict FP32, while joint FP8 quantization added misses in a 96-capture sample.
+These are useful counterexamples, not predictions for the current receiver,
+different hardware or different inputs.
+
 ## Historical evidence
 
 [Optimization](validation-data/triad-v3/2026-11-01-optimization/README.md),
@@ -36,6 +41,9 @@ hypotheses as completed work.
 [consumer GPU evidence](validation-data/triad-v3/2026-11-01-consumer-gpu/README.md)
 retain measured tradeoffs and failed cases for their original implementations.
 They are not current dropdown guarantees or source-matched qualification.
+Keep underlying data only when it answers a specific current question that
+these findings cannot; follow the [material lifecycle](development.md#material-lifecycle)
+instead of accumulating old experiment outputs.
 
 New intensive experiments must predeclare small distinct-path strata, confidence
 and stopping rules, and applicable extrapolation. Unsupported prediction remains

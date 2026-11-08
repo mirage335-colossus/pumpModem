@@ -1,14 +1,18 @@
 # Validation status
 
-Updated 7 November 2026. This records the uncommitted Robust cleanup candidate
-based on `357a50970a0c6214eeaade7c5704bbc39abd4b79`; it is not release
+Updated 7 November 2026. This records the Robust cleanup candidate, then
+uncommitted and based on `357a50970a0c6214eeaade7c5704bbc39abd4b79`, now
+committed as `419e6bae8c4fe3b0f59be23a6dfb3b69fbaed80e`. It is not release
 certification. The [source and binary inventory](../local-evidence/robust-cleanup/source-binaries.json)
 records 2,904 surviving implementation, test and build files and selected binary
-hashes. Its source-inventory SHA-256 is
+hashes. This compact manifest substantiates this cleanup checkpoint; retire it
+when the checkpoint is superseded. Its source-inventory SHA-256 is
 `2405f259c050b68d7bbabad9628eb97ff750e53c6d9f51012f47530719f7c74b`.
 This is a post-validation inventory, excluding documentation/evidence, not a
-before/after timing comparison. Detailed run logs remain in the same ignored
-local-evidence directory.
+before/after timing comparison. Raw run logs are temporary; remove them after
+this checkpoint is accepted unless a specific active validation or release
+requirement still needs them. The concise outcomes and limitations below are
+the maintained record.
 
 ## Cleanup validation
 
@@ -74,7 +78,10 @@ qualification for changed code, configurations or physical devices.
 Useful [pattern](validation-data/triad-v3/2026-11-06-independent-patterns/README.md),
 [spacing](validation-data/triad-v3/2026-11-06-spacing/README.md), and
 [stochastic-channel](validation-data/triad-v3/2026-11-05-stochastic/README.md)
-measurements remain dated, source-bound research. The
+measurements remain curated, source-bound research because their conclusions
+inform the current triad. Preserve concise results, assumptions, limitations and
+needed provenance; do not accumulate duplicate raw captures or parallel
+implementations. The
 [archive-retirement manifest](validation-data/triad-v3/archive-content-retirement.json)
 records removed implementation copies and changed archive hashes; retained
 triad data leaves were preserved byte-for-byte. Original source/internal hashes

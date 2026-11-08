@@ -6,19 +6,14 @@ qualification cost. Entries are future-work prompts, not authorization to launch
 builds, change releases or claim pending checks have passed. Follow AGENTS.md and
 the maintained build and release requirements when taking one up.
 
-Keep additions from each AI session together under a dated session heading.
-Separate batches from different sessions with at least eight completely blank
-lines. Preserve that spacing when appending; do not merge unrelated sessions.
+Organize entries by an actionable outstanding problem, not by AI session.
+Update or remove an entry when it is resolved, superseded or no longer worth
+its maintenance cost. Keep concise useful conclusions in maintained guidance;
+do not accumulate session histories, obsolete experiment instructions or raw
+outputs here. Follow the material lifecycle in docs/development.md.
 
-
-
-
-
-
-
-
-2026-10-06 / Codex: complete the Bookworm offline build path
-=========================================================
+Complete the Bookworm offline build path
+=======================================
 
 Make the complete Linux application rebuildable on Debian Bookworm with only
 the matching project source, retained SDK/dependency archives and explicitly

@@ -38,64 +38,24 @@ explicit B=0, rather than the full sampled-channel likelihood.
 
 ## Prepare without executing
 
-Use the accepted core plan and independently recounted actual analysis:
-
-```sh
-python3 docs/validation-data/triad-v3/2026-11-03-broad/acquisition/prepare.py \
-  --root "$PWD" --core-plan CORE_PLAN.json --analysis ACTUAL_ANALYSIS.json \
-  --output FRESH_PLAN.json
-python3 -m unittest discover \
-  -s docs/validation-data/triad-v3/2026-11-03-broad/acquisition -p test_plan.py
-```
-
-The physical plan binds the native source/binary build proof separately from
-the numerical scorer. After accepting the scorer version, freeze its four
-source hashes in a fresh manifest. This allows a reviewed numerical fix to
-reuse already exported physical observations:
-
-```sh
-python3 docs/validation-data/triad-v3/2026-11-03-broad/acquisition/prepare.py \
-  --root "$PWD" --scorer-manifest-only --output FRESH_SCORER.json
-```
+The followup completed 15 paired acquisitions: five preselected cells, two
+signal bits and a null per cell, scored with both the short-window and global
+two-ray fits against the complete public timing bank. The source-bound
+[acquisition summary](../evidence/acquisition-summary.json) contains all 60
+scored rows, plan and receipt hashes, and scorer-source identities. The broad
+[study results](../README.md#complete-timing-banks-and-missed-hops) report
+10/10 correct signal bits, no wrong bits, and no null admissions for both
+methods. Paired nominal-timing controls missed the selected signals; the
+sampled paired cells are not independent reliability evidence. FHSS modeled
+transmitter envelope and receiver-I/Q erasures, not physical RF retuning.
 
 ## Run bounded stages
 
-`run.py` accepts `configure`, `export`, or `acquire`. It requires the original
-source archive and successful native build-provenance record; their hashes
-must match the immutable plan. It checks source and executable hashes before
-and after execution, verifies all reused receipt/output hashes, bounds every
-child, and retains failures. No retry or overwrite occurs implicitly.
-
-```sh
-TRIAD_PYTHON=/path/to/numerical/environment/bin/python
-"$TRIAD_PYTHON" docs/validation-data/triad-v3/2026-11-03-broad/acquisition/run.py \
-  --plan FRESH_PLAN.json --stage configure --root "$PWD" \
-  --binary "$PWD/build/dev-cli/triad_long" --python "$TRIAD_PYTHON" \
-  --build-provenance BUILD_PROVENANCE.json --source-archive SOURCE.tar.gz \
-  --output-root FRESH_OUTPUT --run-dir FRESH_CONFIGURE_RECEIPTS \
-  --jobs 2 --global-seconds 300
-```
-
-For exports, choose a fresh run directory,
-set `--stage export`, and add
-`--prior-results FRESH_CONFIGURE_RECEIPTS/results.json`. For acquisition,
-set `--stage acquire`, provide both configure and export receipts using
-repeated `--prior-results`, and add `--scorer-manifest FRESH_SCORER.json`.
-The default stage bound is 900 seconds, maximum 1800; children are bounded at
-180 seconds. Begin with `--only-id` for one predeclared pilot if resource
-behavior is uncertain. Other stages must receive all relevant pilot and
-remaining receipts; selected job IDs cannot be silently rerun.
-
-The receiver currently uses one CPU thread per child. Its tiny per-window
-GEMMs are not presumed to benefit from a separate GPU process. All fifteen
-exports are bounded individually at 2 GiB and 2 million sampled rows; these are
-ceilings rather than measured storage/time. A timeout remains incomplete
-evidence. A stage exit 0 means its selected jobs were accounted for without
-source mutation, **not** that every native job or reception succeeded. Inspect
-`counts`, individual status, `acquisition_summary`, and the source-variant hash.
-
-The primary outputs separate correct admissions, wrong admissions, misses,
-and null admissions at the existing strict and relaxed gates. Two signals
-and one paired null per cell cannot qualify 99% reception or a rare daily
-false-admission rate. Wrong-key controls and new independent paths remain
-separate experiments.
+The original configure/export/acquire machinery and its campaign-specific
+commands have been retired. Its bounded stages and source/build bindings are
+recorded in the compact summary; they are historical provenance, not a current
+runner contract. This paired study did not qualify 99% reception or rare
+false-admission rates. For future expensive Robust testing, use the
+[abbreviated statistical harness](../../../../triad-performance.md) and
+[material lifecycle policy](../../../../development.md#material-lifecycle);
+retain only evidence required by a concrete unresolved question.

@@ -5,7 +5,12 @@ baseline. Active regression fixtures live under `tests/`. The measurements and
 their recorded commands are historical provenance, not current execution
 instructions or qualification. The current
 [abbreviated testing policy](../triad-performance.md) supersedes old campaign
-recipes. Provenance completeness is stated by each record.
+recipes, including preservation and reproduction instructions inside dated
+records. Those records do not grant an exemption from the current
+[material lifecycle](../development.md#material-lifecycle): keep underlying
+data only for a concrete current purpose that a concise finding cannot serve,
+and retire redundant material when that purpose ends. Provenance completeness
+is stated by each record.
 
 The [triad archive-retirement manifest](triad-v3/archive-content-retirement.json)
 records removed archived source/build/test drivers and checksum updates.

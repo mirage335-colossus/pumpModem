@@ -13,6 +13,13 @@ and fixed geometry, covered path strata, target unit count, output location,
 uncertainty decision, and what the result can decide. Keep cheap deterministic
 correctness checks separate from performance measurements.
 
+Treat the JSON output as temporary evidence for that question, not a growing
+benchmark archive. Retain only the current compact result while it supports an
+active decision or validation claim; record reusable conclusions, negative
+findings, assumptions and provenance in maintained documentation, then remove
+raw and superseded outputs. Keep any unfinished comparison only with a stated
+purpose, next action and cleanup trigger.
+
 The harness measures four retained kernels: FFTScreen preparation and scoring
 separately, GaussianStateFilter update, and SparseTimingForward. Its fixed
 hierarchy uses 3, 5, then 9 outer trials, with 1- and 2-unit training
@@ -41,7 +48,8 @@ python3 tools/triad_abbreviated.py \
   --device cpu --target-units 1000
 ```
 
-For a matched comparison, provide `--baseline previous.json`. Keep candidate
+For a matched comparison, provide `--baseline previous.json` from an active,
+compatible comparison and remove it when that comparison closes. Keep candidate
 and baseline source, configuration, inputs, device and execution conditions
 matched; record their provenance in the output. RunPod may accelerate this same
 abbreviated process, but does not authorize more computation.

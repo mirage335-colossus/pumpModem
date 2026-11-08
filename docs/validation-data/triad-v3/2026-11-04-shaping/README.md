@@ -249,19 +249,12 @@ Python tests pass in 8.95 seconds; five complete exporter smoke captures plus
 planner/rejection checks pass in 22.86 seconds. Ordinary Robust integration and
 its unrelated campaign were not run.
 
-Use the following hierarchy; do not replay these 536 captures for routine CI:
-
-1. `./build.sh test triad --cli --jobs 2` for the isolated native group, or just
-   the shaping target while diagnosing that code. Default shaping costs about 10 s.
-2. Run the focused Helper Python checks and exporter smoke when their paths change.
-3. Use `triad_shaping_sweep.py` and native `test_triad_shaping --extended` for
-   geometry, source-energy and high-spreading qualification before channel captures.
-4. For a changed interference model, use matched four-control captures and a
-   DATA-overlapping Helper aperture. Reuse existing observations where identities
-   permit. Source-only, channel-oracle and actual receiver evidence are distinct.
-5. Run the frozen paired GPU campaign only when the waveform, channel or receiver
-   change warrants new sampled sensitivity evidence. Reuse one public template
-   bank/workspace per unchanged geometry; retain misses and wrong admissions.
+The 536-capture paired GPU campaign and its focused checks are historical
+qualification evidence. They distinguish source geometry, channel-oracle and
+actual receiver behavior, and preserve matched control outcomes. Do not replay
+the campaign as routine CI. For future computationally intensive Robust checks,
+use the maintained [abbreviated triad harness](../../../triad-performance.md)
+and [material lifecycle policy](../../../development.md#material-lifecycle).
 
 Two implementation corrections matter to provenance. An initial exporter seed
 of 6 ms for all auto FHSS rates silently reduced valid high-rate allocation;

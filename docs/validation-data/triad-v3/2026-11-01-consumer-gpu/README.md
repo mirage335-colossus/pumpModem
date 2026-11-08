@@ -265,20 +265,18 @@ repeated-attempt accounting remain mandatory. A cost per operationally validated
 result is undefined until a policy meets those reception and admission gates.
 No format is promoted to a default on the strength of these experiments.
 
-## Reproduction and remaining work
+## Historical artifact and check record
 
-Use [the frozen protocol and commands](PROTOCOL.md),
-[the input generator](generate-inputs.py), [the campaign runner](run-campaign.py)
-and [the analysis script](analyze.py). Preserve failed attempts and source-bound
-variants when reproducing. The input generator binds the existing exporter
-binary and the three unchanged physical-source files; it does not regenerate a
-different waveform under the same identity.
+The archived protocol, input generator, campaign runner and analysis script
+record how the historical result was produced. They are retained provenance,
+not a standing recipe for another GPU campaign. Their input hashes bind the
+sampled data and source identities used in this report.
 
 The [technical archive](technical-evidence.tar.gz) preserves final and failed
 records, source variants, sampled-input hashes/seeds, the exact exporter,
 NPZ scores, generated PTX/SASS and compressed CPU/CUDA traces. It includes the
-development IQ, while the 128 holdout waveforms can be regenerated from the
-included exporter and per-case commands. [SHA256SUMS](SHA256SUMS) binds the
+development IQ and records the holdout waveform hashes and seeds.
+[SHA256SUMS](SHA256SUMS) binds the
 archive, report and scripts; the archive also has per-member hashes.
 [Artifact verification](artifact-verification.json), the
 [analysis report](analysis/report.txt) and [machine-readable analysis](analysis/summary.json)
@@ -306,25 +304,10 @@ compilation, numerical and setup failures remain in the archive alongside the
 successful final checks. Python compilation and whitespace checks passed.
 No ordinary Robust integration or unrelated regression campaign was run.
 
-Priority follows the measured bottlenecks:
-
-1. Fuse/cache the phase stencil, probability reduction and state-update pipeline
-   while preserving every state and the FP64-reduction reference. These families
-   materially outweigh correlation; compare full receiver latency and likelihood
-   margins before any promotion.
-2. Build an independent-capture pipeline that reuses immutable key/epoch
-   templates, encrypts only new coordinates and overlaps preparation with GPU
-   work. Measure AES-NI dispatch and CPU/GPU encryption separately; cached
-   ciphertext is useful only for identical key/clock/waveform identity. The
-   current regenerated-input path and copied-batch replay do not prove this gain.
-3. Optimize large search banks only when correlation becomes a measured major
-   cost. Retain exhaustive coverage and include packing, reconstruction and
-   inference. The current 36-hypothesis state-heavy case cannot justify a
-   correlation-only architecture choice for a much larger search.
-4. Freeze a promising complete policy, then run a finer independent SNR sweep
-   and calibration/holdout split sized for the default and relaxed gates. Resolve
-   0.1/0.25/0.5/1 dB budgets with uncertainty before calling precision safe.
-5. Run the same evidence-bound checks on physical Turing/Ampere and actual
-   laptop/eGPU hardware; then repeat rich-channel, converter/interference,
-   ill-conditioned, long-duration and continuous streaming boundaries. No
-   consumer-device equivalence is inferred from the cloud Ada result.
+The archived measurements indicate that phase-state updates dominate the tested
+scoring workload, while correlation-only acceleration does not establish a
+complete-receiver gain. The reported GPU results apply to the tested cloud Ada
+device and do not establish consumer-device equivalence. No current hardware
+campaign or precision sweep is prescribed here. Any future compute-heavy
+Robust test follows the [hierarchical abbreviated method](../../../triad-performance.md)
+and [material lifecycle](../../../development.md#material-lifecycle).

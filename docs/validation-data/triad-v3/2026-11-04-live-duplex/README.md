@@ -228,16 +228,18 @@ The [compact evidence archive](compact-evidence.tar.gz) and
 [artifact manifest](artifact-manifest.json) retain exact source snapshots,
 plans, receipts, profiles, failures and diagnostic recipes. Small files reached
 through continuation links are materialized; the archive has no external
-symlink dependency. Raw PCM is deliberately omitted. Its hashes and retained
-local paths are recorded, so full waveform reanalysis requires those local
-captures or a new explicitly identified physical run. The
-[packaging script](package_evidence.py) can verify retained PCM and regenerate
-the compact record without replaying audio.
+symlink dependency. Raw PCM is deliberately omitted. Its hashes and original
+local-path records identify material outside this archive; they do not make
+the raw captures part of the retained package. The archive and artifact
+manifest record the compact evidence and provenance; the removed packaging
+utility is not part of the current workflow.
 
-Retain and reuse raw captures for analysis-only changes. A model change fitted
-using these holdouts needs new independent physical validation; reprocessing
-an old capture does not create another hardware trial. Device, route, PCM mode,
-rate or mixer changes invalidate the corresponding physical profile.
+The compact historical package records PCM hashes and local-path provenance;
+it does not establish that those raw captures are available now. This evidence
+is not a standing raw-data retention or replay requirement. Preserve new
+captures only for a concrete active validation question and remove them when
+that purpose ends, following the [material lifecycle](../../../development.md#material-lifecycle).
+Compute-heavy Robust validation follows the [hierarchical abbreviated method](../../../triad-performance.md).
 
 ## Time and efficient routine use
 
@@ -259,21 +261,20 @@ ownership was resolved. These are active work measurements, not proof of an
 uninterrupted session. Pilot runs, compilation, software development and the
 small separate model-fitting/figure costs are not hidden in the routine total.
 
-The new full plan explicitly freezes model order four and its separate
-validation variant. It has **26 physical stimuli**, 1737.84 seconds of stimulus,
-and a **2545.84-second (42.43-minute) planned envelope**, including 208 seconds
-of capture overhead and 600 seconds for analysis/finalization. It has not been
-replayed from scratch merely to obtain an uninterrupted green result. The
-original campaign, focused refinement and retained-capture checks supply its
-component evidence; the next routine run must still report its actual total.
+The full plan froze model order four and a separate validation variant. It had
+**26 physical stimuli**, 1737.84 seconds of stimulus, and a **2545.84-second
+(42.43-minute) planned envelope**, including 208 seconds of capture overhead
+and 600 seconds for analysis/finalization. It was not replayed from scratch;
+the original campaign, focused refinement and retained-capture checks supply
+component evidence, while a complete uninterrupted actual total was not
+measured.
 
-For receiver-only changes, reuse captured PCM and DSP preparation. For model
-changes, first replay retained captures; use new physical holdouts when model
-selection has used the old holdouts. For a route/device/mixer change, repeat
-training and independent verification. Near-DC identification and days-long
-stability require longer or different fixtures; no abbreviated test converts
-them into measured full-bit results. No cloud GPU was needed for this campaign:
-real-time cable observation dominates, and the remaining computation is short.
+This historical cable observation found that real-time capture dominated the
+remaining short analysis cost; no cloud GPU was used. The recorded experiment
+did not qualify near-DC identification or days-long stability. These limits
+are scope notes, not instructions to retain captures or repeat the original
+campaign. Current compute-heavy Robust checks follow the
+[hierarchical abbreviated method](../../../triad-performance.md).
 
 ## Software checks
 
