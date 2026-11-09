@@ -26,7 +26,13 @@ The [isolated triad regression policy](triad-performance.md) defines checks for
 degradation against a matched baseline. The distinct
 [manual-case capacity contract](robust-manual-capacity.md) requires complete
 receiver work, productive local CPU parallelism and absolute real-time/workspace
-margins for the freshly read manual configurations. They share efficient
+margins for the freshly read manual configurations. **Agents using
+`_tests-RobustModem.md` must follow the [CPU ceiling workflow](robust-manual-capacity.md#agent-workflow-for-cpu-ceiling-estimates):
+assess practical complete-receiver feasibility on this CPU using efficient
+algorithms, qualified reduced precision and all available hardware threads.**
+The [precision guide](gpu-precision-controls.md) distinguishes current fast
+arithmetic from tensor-compatible improvements requiring qualification.
+The manual suite and regression harness share efficient
 sampling methods; their pass decisions are different. Run `./build.sh test triad`
 before manual capacity measurements. Earlier partial-stage results do not
 qualify complete reception or whole-machine capacity.

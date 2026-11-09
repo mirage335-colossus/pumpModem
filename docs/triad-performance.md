@@ -5,7 +5,10 @@ The Robust tools answer two different questions. The ordinary
 bounded computational work against a matched baseline to detect relative
 degradation. The separate [`tools/triad_manual_cases.py`](../tools/triad_manual_cases.py)
 suite evaluates absolute receiver capacity for the freshly read manual case
-list. A pass in one mode does not imply a pass in the other.
+list. A pass in one mode does not imply a pass in the other. Agents working on
+the manual list must start with the
+[CPU ceiling workflow](robust-manual-capacity.md#agent-workflow-for-cpu-ceiling-estimates)
+and its practical algorithm, precision and productive-parallelism requirements.
 
 ## Relative regression harness
 
@@ -52,6 +55,23 @@ supply CPU costs for acquisition, fine work, recurring banks and fixed
 orchestration. Refresh only missing local cost classes, or the affected local
 calibration when the CPU work or runtime changes. A GPU-only change requires
 new applicable GPU evidence and preserves an unchanged CPU calibration.
+
+The target is complete service on the **local CPU**, with its full available
+logical-thread budget. GPU experiments accelerate workload observation; they
+do not substitute the pod's CPU or GPU throughput for the local receiver.
+Combine work demand with per-phase local elapsed costs at matched geometry,
+arithmetic, cache/state and productive concurrency. Narrow sustained local
+receiver tests and fresh holdouts establish those costs. Synthetic stress,
+advertised FLOPS, thread counts and aggregate GPU/CPU wall-time ratios cannot
+replace that calibration.
+
+Use the [mixed-precision policy](gpu-precision-controls.md) to accelerate the
+dominant work through efficient algorithms, batching and qualified lower or
+tensor-compatible arithmetic. Measure complete experiment time, including
+simulation, preparation and transfers. The current RTX PRO 6000 trace still
+spent about 80% of its time on native CPU simulation and bank preparation;
+optimizing only small GPU kernels misses that measured bottleneck. See the
+[current evidence](validation.md#gpu-assisted-receiver-measurement).
 
 Package the allowlisted source with the matching native exporter and mapped
 kernel. Transfer both artifacts separately with authenticated SSH/SCP and place
@@ -180,8 +200,19 @@ previous relative-only rule rejected the row-7 hybrid H0 acquisition timing.
 That failure remains in the [validation record](validation.md) under its own
 policy and source identity.
 
+The forecast tool's exit code 0 and `conditional_estimates` status indicate
+supported conditional estimates, **not an all-case real-time capacity pass**.
+Inspect each row's separate `nominal_service` and `complete_capacity` verdicts,
+intervals and point failures. The full report must cover the entire current
+ordered list, including duplicates; selected-row evidence needs an explicitly
+matched coverage assembly before any full-list conclusion.
+
 When a same-row timing check drifts while its input and work gates still match,
-refresh just that CPU phase. For a targeted forecast, supply the existing
+refresh just that CPU phase. `--refresh-cpu-phase` requires the same CPU source,
+native artifacts and runtime as the existing calibration. Changed CPU work or
+runtime needs a new applicable calibration report; this flag cannot bypass the
+identity gates, and old receipts must retain their original provenance.
+For a targeted forecast, supply the existing
 current local calibration, GPU work and paired references, and the earlier
 independent holdout for the selected row. Use one `--case-index N`, the matching
 `--holdout-case-index N` and a fresh output path. Add

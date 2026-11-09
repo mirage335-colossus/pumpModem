@@ -1,6 +1,8 @@
 # Robust manual-case receiver capacity
 
-The manually edited `_tests-RobustModem.md` defines absolute receiver-capacity
+The manually edited `_tests-RobustModem.md` asks **what this computer's CPU can
+sustain for the complete receiver in real time**, using practical efficient
+algorithms and all available hardware threads. These are absolute capacity
 checks. When applicable local calibration exists, start with the
 [GPU-assisted forecast](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast).
 Use `tools/triad_manual_cases.py` for fresh CPU calibration. The former
@@ -14,6 +16,69 @@ The current receiver implementation and validation are recorded in
 [current architecture](robust-current.md) and [validation](validation.md).
 Earlier coarse-only and isolated tracking measurements remain historical stage
 evidence; they do not satisfy the complete-receiver contract below.
+
+## Agent workflow for CPU ceiling estimates
+
+This is the starting procedure for development agents without prior chat
+context. The objective is a quick, defensible demonstration of local CPU
+feasibility where supported, and an actionable bottleneck or uncertainty where
+it is not. A passing relative regression, fast GPU kernel or hypothetical
+optimized receiver cannot establish that outcome.
+
+1. **Declare the question and freeze the measurement inputs.** Read the entire
+   current case list, preserve all selected channel effects, and predeclare
+   complete-work strata, measurement/error budgets and stopping rules. Record
+   source, native binaries, runtime, CPU allocation, workspace and arithmetic.
+   Run the applicable cheap correctness checks before timing; do not keep
+   changing the harness during the final measurements.
+2. **Use practical receiver algorithms and arithmetic.** Address dominant costs
+   with reusable preparation, efficient search, batching, vectorization and
+   parallel independent hypotheses within the same stream. Prefer qualified
+   lower precision and tensor-compatible bulk GPU operations where they shorten
+   the complete experiment. Expected quiet or mostly quiet spectrum, including
+   FHSS, does not require extreme in-band dynamic range. Use the
+   [precision policy](gpu-precision-controls.md) to check the actual sensitive
+   stages. Incidental serialization or unnecessarily expensive arithmetic is an
+   implementation constraint to improve, not proof of a hardware ceiling.
+   Implement and qualify an optimization before counting its CPU savings.
+3. **Reuse qualified evidence and measure only what is missing.** Follow the
+   [GPU-assisted commands](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast):
+   fast GPU traces supply receiver decisions, geometry and work demand;
+   source-matched local CPU phase costs supply elapsed service. Calibrate with
+   narrow sustained receiver work under the actual concurrency and cache/state
+   regime, then use independent bounded local holdouts. Use the brief continued
+   session below and record available operating conditions and duty cycle;
+   startup-only timings or transient boost do not establish sustained service.
+   Refresh drifting cost classes under unchanged identities; changed CPU work
+   or runtime needs a new applicable calibration report accepted by the identity
+   gates. Preserve other applicable calibration without relabeling old receipts.
+   Synthetic CPU stress characterizes hardware scaling;
+   it cannot replace receiver phase costs or supply a universal GPU/CPU factor.
+4. **Demonstrate productive use of the available CPU.** Keep the full logical
+   worker budget, one numerical-library thread per outer worker, and measured
+   same-stream useful work. Check elapsed throughput, busy cores and work counts
+   together. Investigate low utilization in the dominant stage; retain the full
+   budget despite thermal/power limits or minor local timing differences. Fewer
+   useful tasks in one stage do not justify a global cap. Follow the
+   [allocation contract](development.md#receiver-cpu-allocation).
+5. **Admit the forecast only after its checks.** Require applicable paired
+   arithmetic/decision/work gates and independent local timing holdouts. Charge
+   all [complete receiver work](#complete-receiver-work), including recurring
+   preparation, unsuccessful candidates and quiet completion. Use the continued
+   nominal measurement and the separate conservative state bound; do not replace
+   either with GPU elapsed time or isolated favorable kernels. A failed gate
+   calls for a bounded diagnosis or affected refresh, not looser thresholds or
+   a full-duration campaign.
+6. **Report capacity, not merely successful tool execution.** Cover every
+   current ordered row, or label partial coverage. Report nominal and
+   conservative seconds of CPU service per baseband second, their intervals,
+   margin to 1 s/s, workspace, actual allocation/utilization and measured versus
+   extrapolated work. Separate forecast accuracy, real-time capacity and
+   communication sensitivity. Missing work prevents a complete-capacity pass;
+   a point at or above 1 s/s is a point failure. Identify the dominant remaining
+   cost and next bounded discriminator if feasibility is unresolved.
+
+## Local calibration entry point
 
 To refresh the complete local calibration, use the numerical Python
 environment used by the build.
@@ -84,7 +149,9 @@ lane with the complete public-prior correction. The adaptive lane and combined
 scores remain diagnostic but are fully executed and charged. Fine Gaussian
 processing defaults explicitly to FP64 after a reproduced high-SNR FP32
 innovation failure; numerical guards remain enforced and precision does not
-change in response to an observation.
+change in response to an observation. This localized numerical requirement does
+not prohibit qualified lower-precision bulk work; see the
+[current stage distinctions](gpu-precision-controls.md#current-implementation).
 
 ## Local parallel capacity
 
@@ -220,12 +287,14 @@ applicable artifacts. A missing cost class gets a bounded local calibration.
 In the same-geometry encrypted-to-clear transfer, the noise-only fine class can
 be measured independently with `--calibration-stage noise-only-fine`.
 
-The earlier RTX PRO 6000 experiment qualified same-row nominal forecasts for
-rows 3–8. Rows 1–2 failed numerical or work agreement. The row-7 hybrid's
-relative-only H0 acquisition timing gate also failed. These results remain
-bound to their tested policy, source and hardware. See the [validation
-record](validation.md) for the measured speedups, rejected rows and forecast
-limits. A complete CPU capacity decision still requires every receiver phase.
+The [current validation record](validation.md#gpu-assisted-receiver-measurement)
+separates accepted full-list timing forecasts from capacity decisions. The
+current eight-row forecast passed its nominal and conservative timing gates;
+all nominal intervals are below 1 s/s, but conservative capacity remains
+unresolved, with conservative point failures in rows 4, 6 and 8. Earlier
+precision/work failures and the rejected encrypted-to-clear transfer retain
+their own source and policy identities. A successful forecasting gate does
+not erase these distinctions or establish an unconditional capacity pass.
 
 Use authenticated SSH/SCP for source and native artifacts. Reuse persistent
 storage when cache savings justify its cost, then terminate disposable

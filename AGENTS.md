@@ -16,6 +16,21 @@ backlog, other processors and changing workloads. Smaller stage dispatch is
 allowed when useful work is limited; it must not become a reduced global
 worker default. Follow the [CPU allocation contract](docs/development.md#receiver-cpu-allocation).
 
+## Manual tests target practical local CPU capacity
+
+The editable `_tests-RobustModem.md` asks what this computer's **complete
+receiver can sustain in real time**. Before using it, follow the
+[agent workflow](docs/robust-manual-capacity.md#agent-workflow-for-cpu-ceiling-estimates).
+Use efficient receiver algorithms and productive same-stream parallelism;
+investigate serialization instead of treating it as the CPU's hardware ceiling.
+Prefer qualified lower-precision and tensor-compatible GPU work with narrow,
+sustained local CPU phase calibration and fresh holdouts. Follow the
+[precision guide](docs/gpu-precision-controls.md) and reuse applicable evidence
+through the [GPU-assisted procedure](docs/triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast).
+GPU speed or a hypothetical optimization is not a CPU capacity result. Report
+complete nominal and conservative service, uncertainty, margin and unresolved
+work for every current row; a forecasting gate is distinct from a capacity pass.
+
 ## Prevent accumulation
 
 Remove obsolete implementations and their tests, copied source, old performance
@@ -69,12 +84,9 @@ whole heavy-calibration runs as routine tests or fallbacks. RunPod may accelerat
 the same method but does not justify larger experiments. See
 [the maintained policy](docs/robust-current.md#testing-computationally-intensive-robust-changes)
 and [the abbreviated harness](docs/triad-performance.md).
-For the editable manual cases, prefer the [GPU-assisted forecast](docs/triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast)
-when applicable source-matched local phase costs exist. Reuse qualified GPU
-references under the same backend and runtime, verify fresh bounded holdouts,
-and measure missing cost classes locally. Run `./build.sh test triad` before
-refreshing the local calibration with `tools/triad_manual_cases.py`. A changed
-CPU work or runtime identity needs fresh applicable local timings.
+Run `./build.sh test triad` before refreshing local calibration with
+`tools/triad_manual_cases.py`. Changed CPU work or runtime needs fresh affected
+local timings; unchanged applicable calibration remains reusable.
 Manual cases are absolute complete-receiver capacity tests, distinct from the
 usual abbreviated performance regressions that look for degradation. They share
 the efficient sampling method, not the meaning of a passing result. Follow

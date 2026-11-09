@@ -1,32 +1,70 @@
-# GPU precision guidance
+# Precision for GPU-assisted CPU forecasting
 
-This page summarizes GPU precision experiments on a retired single-carrier
-receiver. Its Search arithmetic dropdown, receiver APIs, and standalone
-precision switches are no longer current interfaces. The recorded measurements
-apply only to the cited source, hardware, inputs, and workload; they are not
-current Robust, Fast, or physical-link qualification.
+**Prefer practical lower-precision and tensor-compatible bulk arithmetic when
+it speeds up qualified manual-suite forecasting.** The intended receiver
+normally operates on quiet or mostly quiet spectrum, including FHSS; extreme
+in-band dynamic range is not a general usage requirement. Do not impose FP64
+on all work because one numerical stage needs it. Check the relevant error and
+decision sensitivity with the bounded method in the
+[CPU ceiling workflow](robust-manual-capacity.md#agent-workflow-for-cpu-ceiling-estimates).
 
-The [GPU optimization summary](triad-gpu-optimization.md) consolidates the
-transferable stage-cost, arithmetic and negative-result lessons with their
-limits. Follow the [material lifecycle](development.md#material-lifecycle)
-instead of retaining redundant captures or old implementations.
+Use efficient search, batched correlations, reusable device-resident templates
+and buffers, and suitable matrix shapes where measurements support them.
+Reduced input precision with higher-precision accumulation or small sensitive
+reductions is a candidate tradeoff. Keep computation on the GPU where useful;
+include packing, transfers, synchronization and remaining CPU preparation when
+judging the speedup. A faster isolated GEMM does not establish a faster test.
+Preserve the case's selected effects, public search coverage and receiver
+decisions rather than reducing required work to obtain a favorable timing.
 
-The bounded RunPod forecast uses CUDA for workload observation. The driver
-records the actual coarse and fine arithmetic and requires paired CPU evidence
-for each fine precision class it forecasts. Bulk fine work normally uses
-complex64. The compact tight-clock class uses complex128 where small ranking
-changes affect downstream work. Gram and Gaussian state calculations retain
-their explicit high-precision paths. The headless CPU receiver has separate
-fixed arithmetic.
+## Current implementation
 
-Keep candidate order, decision thresholds, state work and precision selection
-in paired checks. Small score changes can alter rankings and downstream
-decisions. The earlier RTX PRO 6000 run rejected rows 1–2 and left the row-7
-hybrid timing gate unresolved under its relative-only rule. See the
-[validation record](validation.md) for report paths and measured claim limits.
-Use source-matched local phase costs for CPU forecasts. Follow the
+The bounded RunPod workload uses CUDA for coarse search and fine bulk work.
+Bulk arithmetic normally uses FP32/complex64. The compact tight-clock class
+uses FP64/complex128 for the entire coarse grid before pruning and for fine
+rendering, because small changes affected candidate rankings and downstream
+work. Fine coordinates, Hermitian Gram calculations and Gaussian state retain
+their explicit higher-precision paths. The headless CPU receiver has its own
+explicit arithmetic; its fine Gaussian policy defaults to FP64 after a
+reproduced high-SNR FP32 innovation failure. That is a stage-specific finding,
+not a requirement for high dynamic range throughout the receiver.
+
+The current forecast backend does **not** implement a qualified FP16/BF16/TF32
+tensor-core path. These are development candidates, not available precision
+switches or claimed measurements. A low-precision dtype or matrix operation
+alone does not prove tensor-core execution. The existing Gaussian FP32 guard
+requires TF32 disabled; a new tensor path must have its own applicable checks.
+
+## Qualifying a faster path
+
+Declare the arithmetic/error budget and representative work classes before
+testing. Pair each used coarse/fine precision class with the CPU reference and
+check candidate order, acquisition coordinates, scores, fixed-affine decisions,
+state/work counts and native-cache behavior. Include noise-only, near-decision
+and relevant high-SNR or ill-conditioned states; quiet spectrum alone does not
+guarantee numerical conditioning. Keep higher precision in the small stages
+where the paired checks need it. Record requested and effective arithmetic,
+actual backend execution and any fallback; do not silently label CPU or FP64
+fallback work as low-precision GPU acceleration.
+
+A GPU-only optimization needs new applicable GPU precision/work evidence while
+unchanged CPU calibration remains reusable. A CPU algorithm or arithmetic
+change needs fresh affected local CPU costs. GPU speed determines how quickly
+work demand can be observed; source-matched CPU phase costs and independent
+local holdouts determine the forecast. Do not multiply GPU elapsed time by a
+generic FLOPS ratio. Follow the
 [GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast).
 
-New intensive Robust checks follow the
-[abbreviated statistical policy](triad-performance.md). GPU stage timing does
-not by itself estimate full receiver latency or physical performance.
+The [current validation](validation.md#gpu-assisted-receiver-measurement)
+distinguishes the accepted eight-row timing forecasts from unresolved
+conservative CPU capacity. Earlier precision and timing failures remain
+source-bound evidence, not blanket prohibitions on reduced precision.
+
+## Retained lessons
+
+The [GPU optimization summary](triad-gpu-optimization.md) preserves transferable
+arithmetic and negative-result lessons from retired receivers. Their Search
+arithmetic dropdown, standalone switches and receiver APIs are no longer current
+interfaces. Historical speedups or failures do not qualify the current receiver.
+Follow the [material lifecycle](development.md#material-lifecycle) rather than
+restoring old implementations or exhaustive precision campaigns.
