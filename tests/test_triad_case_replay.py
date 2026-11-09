@@ -8,7 +8,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import triad_case_replay as replay_module
-from triad_case_replay import PreparedReplay, _bounded_basis, _clean_options, _integer_basis
+from triad_case_replay import (PreparedReplay, build_public_screen, _bounded_basis,
+                               _clean_options, _integer_basis, _local_fidelity_manifest)
 
 
 class NativeBasis:
@@ -35,6 +36,7 @@ class FakeScreen:
         self.samples = 8
         self.taps = np.asarray([1., .25])
         self.resident_estimate = 32
+        self.preparation_peak_estimate_bytes = 64
 
     def projection_receipt(self):
         return {'test': 'same-projection', 'cropped_output_count': self.crop_rows, 'downsample': 1}
@@ -78,6 +80,140 @@ def replay_with(screen):
 
 
 class ReplayTests(unittest.TestCase):
+    def test_shared_public_screen_builder_binds_address_and_uses_source_extent(self):
+        class Source:
+            def __init__(self):
+                self.addresses = []
+                self.descriptor = dict(sample_rate_hz=6000, source_samples=1200,
+                    total_samples=1500, emitted_samples=1700, fixed_workspace_bytes=64)
+                self.plan = dict(format=dict(occupied_bandwidth_hz=1., inner_rate_hz=1.,
+                        fhss=False, elapsed_bit_seconds=.2, symbol_ordinal=4),
+                    physics=dict(spread_margin=1., spread_delay_ms=0., spread_doppler_hz=0.,
+                        deterministic_cfo_bound_hz=.1, sample_clock_pair_ppm=.0001,
+                        arrival_prior_seconds=[-.1, .1]))
+
+            def set_basis_address(self, epoch, ordinal):
+                self.addresses.append((epoch, ordinal))
+                return dict(basis_epoch=epoch, basis_symbol_ordinal=ordinal,
+                            template_cache_cleared=True)
+
+        class Screen:
+            crop_rows = 128
+            resident_estimate = 1024
+            preparation_peak_estimate_bytes = 2048
+
+        source = Source()
+        manifest = dict(sample_rate_hz=6000, calendar=dict(capture_samples=1500,
+            capture_lead_seconds=8., data_sample_offset=12000, physical_origin_sample=0),
+            format=dict(symbol_ordinal=4), channel=dict(spread_delay_ms=0.))
+        original_calendar = dict(manifest['calendar'])
+        seen = {}
+
+        def screen_factory(screen_manifest, templates, epochs, **kwargs):
+            seen.update(manifest=screen_manifest, templates=templates,
+                        epochs=epochs, kwargs=kwargs)
+            return Screen()
+
+        args = dict(public_address={'pattern_epoch': 1793850001, 'symbol_ordinal': 7},
+            source_identity={'case': 'fixture', 'sha256': 'abc'},
+            memory_limit_bytes=1_000_000, threads=1, mapped_step=1,
+            screen_factory=screen_factory)
+        result = build_public_screen(source, manifest, **args)
+        self.assertEqual(source.addresses, [(1793850001, 7)])
+        self.assertEqual(result['manifest']['calendar'], original_calendar)
+        self.assertEqual(result['manifest']['public_epoch_seconds'], 1793850001)
+        self.assertEqual(result['manifest']['format']['symbol_ordinal'], 7)
+        self.assertEqual(result['work']['raw_source_samples'], 1200)
+        self.assertEqual(result['work']['raw_capture_samples'], 1500)
+        self.assertEqual(result['work']['native_basis_sample_work_estimate'],
+                         1200*13*2*3)
+        self.assertEqual(seen['kwargs']['source_samples'], 1200)
+        self.assertEqual(seen['kwargs']['template_identity'], result['template_identity'])
+        other = build_public_screen(Source(), manifest,
+            **{**args, 'public_address': {'pattern_epoch': 1793850001, 'symbol_ordinal': 8}})
+        self.assertNotEqual(result['template_identity'], other['template_identity'])
+
+    def test_public_address_is_validated_before_mutating_native_source(self):
+        class Source:
+            called = False
+            def set_basis_address(self, *_args):
+                self.called = True
+        source = Source()
+        with self.assertRaisesRegex(ValueError, 'public address'):
+            build_public_screen(source, {}, public_address=(1, 2), source_identity='fixture',
+                memory_limit_bytes=1, threads=1)
+        self.assertFalse(source.called)
+
+    def test_local_fidelity_calendar_is_normalized_without_changing_full_calendar(self):
+        manifest = dict(calendar=dict(capture_lead_seconds=3., data_sample_offset=6000,
+                physical_origin_sample=41, capture_samples=90000,
+                arrival_prior_seconds=[-7.035, 7.035]),
+            channel=dict(spread_delay_ms=21.), format=dict(symbol_ordinal=3),
+            public_epoch_seconds=100)
+        original = {key: value.copy() if isinstance(value, dict) else value
+                    for key, value in manifest.items()}
+        local = _local_fidelity_manifest(manifest,
+            {'pattern_epoch': 200, 'symbol_ordinal': 9}, [-100., 0., 100.],
+            source_window_samples=6000, fs=6000)
+        self.assertEqual(manifest, original)
+        self.assertEqual(local['calendar']['capture_lead_seconds'], 8.)
+        self.assertEqual(local['calendar']['data_sample_offset'], 12000)
+        self.assertEqual(local['calendar']['physical_origin_sample'], 0)
+        self.assertGreaterEqual(local['calendar']['capture_samples'],
+                                (8+2+1+7.035+.021+1)*6000)
+        self.assertEqual(local['public_epoch_seconds'], 200)
+        self.assertEqual(local['format']['symbol_ordinal'], 9)
+
+    def test_current_mapped_fidelity_gate_runs_through_clean_and_noisy_controls(self):
+        class Source:
+            plan = dict(format=dict(tile_seconds=.1, elapsed_bit_seconds=.2),
+                        geometry=dict(source_calendar_origin_sample=0))
+            descriptor = dict(source_samples=9000)
+            def basis(self, first, count, rows):
+                return np.ones((len(rows), count), dtype=np.complex128)
+
+        class Screen:
+            arrivals = np.asarray([0.])
+            resident_estimate = 1024
+            preparation_peak_estimate_bytes = 2048
+            workspaces = [None]*26
+            kernel_rows = 32
+            rays = [0]
+            correlation_method = 'frequency'
+            def __init__(self, manifest, *_args, **_kwargs):
+                self.manifest = manifest
+            def _correlation_plan(self, *_args, **_kwargs):
+                return dict(selected=('frequency',),estimated_peak_bytes_by_method=dict(frequency=4096))
+            def score(self, _data, _frequencies, *, top_per_bit):
+                return {'candidates': [{'bit': 0, 'epoch': 900, 'score': 1.}]}
+
+        def compare(*_args):
+            return dict(rank_agreement=True, maximum_projector_distance=0.,
+                maximum_stored_scoring_operator_distance=0.,
+                maximum_column_relative_norm_error=0., maximum_gram_relative_norm_error=0.,
+                minimum_wrong_bit_projector_separation_ratio=1.)
+
+        manifest = dict(sample_rate_hz=6000, calendar=dict(
+                capture_lead_seconds=3., data_sample_offset=6000, physical_origin_sample=10,
+                capture_samples=20000, arrival_prior_seconds=[-7.035, 7.035]),
+            channel=dict(spread_delay_ms=21., spread_doppler_hz=0.),
+            format=dict(symbol_ordinal=1))
+        with (mock.patch.object(replay_module, 'FFTScreen', Screen),
+              mock.patch.object(replay_module, 'compare_template_projectors', compare)):
+            result = replay_module._validate_mapped_profile(Source(), manifest,
+                [-100., 0., 100.], output_fs=10, pass_edge=.4, stop_edge=4.9,
+                public_address={'pattern_epoch': 900, 'symbol_ordinal': 5},
+                memory_limit_bytes=128*1024**2, threads=1, sampling_step=60)
+            with self.assertRaisesRegex(MemoryError, 'comparison/control peak'):
+                replay_module._validate_mapped_profile(Source(), manifest,
+                    [-100., 0., 100.], output_fs=10, pass_edge=.4, stop_edge=4.9,
+                    public_address={'pattern_epoch': 900, 'symbol_ordinal': 5},
+                    memory_limit_bytes=64*1024**2, threads=1, sampling_step=60)
+        self.assertTrue(result['accepted'])
+        self.assertGreater(result['preparation_peak_estimate_bytes'], 4096)
+        self.assertEqual(result['common_clean_noisy_winner_controls'], [True, True])
+        self.assertEqual(manifest['calendar']['capture_lead_seconds'], 3.)
+
     def test_noise_work_cap_stays_default_without_s3_no_helper_probe(self):
         receipt = {'cropped_output_count': 100, 'downsample': 1,
                    'fir_taps_sha256': 'source-geometry'}
@@ -168,7 +304,10 @@ class ReplayTests(unittest.TestCase):
                     total_samples=1_800_000, capture_lead_seconds=8., data_offset_samples=12000,
                     emitted_samples=1_600_000, data_if_hz=1725., helper_enabled=False,
                     helper_low_hz=None, helper_high_hz=None, epoch=1793850000,
-                    noise_variance=1., fixed_workspace_bytes=0)
+                    symbol_ordinal=0, noise_variance=1., fixed_workspace_bytes=0)
+            def set_basis_address(self, epoch, symbol_ordinal):
+                return dict(basis_epoch=epoch, basis_symbol_ordinal=symbol_ordinal,
+                            template_cache_cleared=True)
             def close(self):
                 pass
         seen = {}
@@ -225,7 +364,11 @@ class ReplayTests(unittest.TestCase):
                         total_samples=4_650_000, capture_lead_seconds=8., data_offset_samples=12000,
                         emitted_samples=4_250_000, data_if_hz=1725., helper_enabled=False,
                         helper_low_hz=None, helper_high_hz=None, epoch=1793850000,
-                        noise_variance=1., fixed_workspace_bytes=0)
+                        symbol_ordinal=0, noise_variance=1., fixed_workspace_bytes=0)
+
+                def set_basis_address(self, epoch, symbol_ordinal):
+                    return dict(basis_epoch=epoch, basis_symbol_ordinal=symbol_ordinal,
+                                template_cache_cleared=True)
 
                 def close(self):
                     pass

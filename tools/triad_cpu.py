@@ -26,6 +26,116 @@ def _positive_integer(value, name):
     return value
 
 
+def detect_cpu_topology(*, logical_cpu_ids=None,
+                        sysfs_root=Path('/sys/devices/system/cpu'),
+                        linux=None):
+    """Identify physical cores represented by the process affinity, if known.
+
+    Linux sysfs reports physical package/core pairs for each logical CPU. The
+    count is complete only when that data is readable for every CPU in the
+    effective affinity mask. A partial read remains unknown: counting only the
+    readable nodes could silently omit a physical core. Other platforms report
+    topology as unavailable instead of estimating cores from SMT ratios.
+
+    ``logical_cpu_ids`` and ``sysfs_root`` are injection points for deterministic
+    tests; normal callers should omit them.
+    """
+    if linux is None:
+        linux = sys.platform.startswith('linux')
+    if not linux:
+        return dict(status='unavailable', logical_cpu_ids=None,
+                    logical_cpu_count=None, physical_core_count=None,
+                    physical_cores=None,
+                    scope='Physical topology is not available from this platform implementation.')
+
+    if logical_cpu_ids is None:
+        get_affinity = getattr(os, 'sched_getaffinity', None)
+        if get_affinity is None:
+            return dict(status='unavailable', logical_cpu_ids=None,
+                        logical_cpu_count=None, physical_core_count=None,
+                        physical_cores=None,
+                        scope='Linux effective process affinity is unavailable; physical topology is not guessed.')
+        try:
+            logical_cpu_ids = get_affinity(0)
+        except OSError as error:
+            return dict(status='unavailable', logical_cpu_ids=None,
+                        logical_cpu_count=None, physical_core_count=None,
+                        physical_cores=None,
+                        reason='Cannot read effective CPU affinity: ' + str(error),
+                        scope='Physical topology is not guessed when effective CPU affinity is unknown.')
+    try:
+        parsed_cpu_ids = []
+        for cpu in logical_cpu_ids:
+            if isinstance(cpu, bool) or not isinstance(cpu, int) or cpu < 0:
+                raise ValueError('logical CPU ids must be nonnegative integers')
+            parsed_cpu_ids.append(cpu)
+        logical_cpu_ids = sorted(set(parsed_cpu_ids))
+    except (TypeError, ValueError, OverflowError):
+        return dict(status='unavailable', logical_cpu_ids=None,
+                    logical_cpu_count=None, physical_core_count=None,
+                    physical_cores=None,
+                    reason='Effective CPU affinity contains invalid CPU identifiers.',
+                    scope='Physical topology is not guessed when effective CPU affinity is invalid.')
+    if not logical_cpu_ids:
+        return dict(status='unavailable', logical_cpu_ids=[],
+                    logical_cpu_count=0, physical_core_count=None,
+                    physical_cores=None, reason='Effective CPU affinity is empty.',
+                    scope='Physical topology requires at least one allowed logical CPU.')
+
+    cores = {}
+    errors = []
+    for cpu in logical_cpu_ids:
+        directory = Path(sysfs_root) / ('cpu' + str(cpu)) / 'topology'
+        try:
+            package = int((directory / 'physical_package_id').read_text().strip())
+            core = int((directory / 'core_id').read_text().strip())
+            if package < 0 or core < 0:
+                raise ValueError('negative package/core id')
+        except (OSError, ValueError, TypeError) as error:
+            errors.append(dict(logical_cpu=cpu, reason=str(error)))
+            continue
+        cores.setdefault((package, core), []).append(cpu)
+
+    if errors:
+        return dict(status='partial', logical_cpu_ids=logical_cpu_ids,
+                    logical_cpu_count=len(logical_cpu_ids), physical_core_count=None,
+                    physical_cores=None, incomplete_logical_cpus=errors,
+                    scope='Incomplete Linux sysfs topology; physical-core count is unknown, never inferred from the readable subset.')
+    groups = [dict(package_id=package, core_id=core,
+                   logical_cpu_ids=sorted(ids))
+              for (package, core), ids in sorted(cores.items())]
+    return dict(status='complete', logical_cpu_ids=logical_cpu_ids,
+                logical_cpu_count=len(logical_cpu_ids),
+                physical_core_count=len(groups), physical_cores=groups,
+                source='Linux sysfs physical_package_id/core_id for every allowed logical CPU.',
+                scope='Topology counts only cores represented in the current effective process affinity. It does not estimate memory, thermal, or task-scheduler capacity.')
+
+
+def receiver_worker_candidates(capacity):
+    """Return bounded worker counts to measure on one shared receive stream.
+
+    The candidate list is an experiment plan, not a predicted winner. It
+    includes serial operation, modest scaling points, known physical cores when
+    available, and the entire logical CPU budget so hyperthreads are tested
+    rather than assumed useful. It never multiplies independent receptions.
+    """
+    if isinstance(capacity, int) and not isinstance(capacity, bool):
+        receipt = dict(available_cpus=capacity)
+    elif isinstance(capacity, dict):
+        receipt = capacity
+    else:
+        raise ValueError('capacity must be a CPU detection record or positive integer')
+    budget = _positive_integer(receipt.get('available_cpus'), 'available CPUs')
+    candidates = {1, min(2, budget), min(4, budget), budget}
+    topology = receipt.get('topology')
+    if isinstance(topology, dict) and topology.get('status') == 'complete':
+        physical = topology.get('physical_core_count')
+        if physical is not None:
+            physical = _positive_integer(physical, 'physical cores')
+            candidates.add(min(physical, budget))
+    return sorted(candidates)
+
+
 def detect_cpu_budget(proc=Path('/proc')):
     """Report the current process allocation and visible Linux ancestor quotas.
 
@@ -69,8 +179,12 @@ def detect_cpu_budget(proc=Path('/proc')):
             status = 'unknown'
             warnings.append('cgroup CPU visibility: ' + str(error))
     budget = min([available, *(limit['cpus'] for limit in limits)])
+    topology = detect_cpu_topology()
     return dict(available_cpus=budget, os_available_cpus=available,
-                quota_status=status, quota_limits=limits, warnings=warnings,
+                quota_status=status, quota_limits=limits, topology=topology,
+                receiver_worker_candidates=receiver_worker_candidates(
+                    dict(available_cpus=budget, topology=topology)),
+                warnings=warnings,
                 scope='Process-visible logical CPUs and readable ancestor quotas; no CPU reserve. Hidden limits and future affinity changes are not inferred.')
 
 

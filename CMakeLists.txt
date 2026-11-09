@@ -563,7 +563,9 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       test_triad_dynamic_frequency test_triad_dynamic_joint test_triad_dynamic_scan
       test_triad_dynamic_sparse test_triad_gaussian_prepared test_triad_gaussian_state
       test_triad_incremental_receiver test_triad_operational_admission
-      test_triad_persistent_tracking test_triad_realtime_fft test_triad_segmented_fft
+      test_triad_persistent_tracking test_triad_realtime_fft test_triad_receiver
+      test_triad_regression_receiver
+      test_triad_message_receiver test_triad_stream_receiver test_triad_segmented_fft
       test_triad_stream_frontend test_triad_stream_scheduler test_triad_template_bank
       test_triad_timing_forward test_triad_tracking_basis test_triad_tracking_budget
       test_triad_tracking_preflight test_triad_weak_helper test_triad_weak_receiver)
@@ -575,7 +577,9 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
     set_tests_properties(triad_abbreviated PROPERTIES LABELS "triad" TIMEOUT 30)
     add_test(NAME triad_cases COMMAND ${Python3_EXECUTABLE} -m unittest
       tests.test_triad_cases tests.test_triad_case_metrics tests.test_triad_case_noise
-      tests.test_triad_case_receiver tests.test_triad_case_replay tests.test_triad_case_suite)
+      tests.test_triad_case_receiver tests.test_triad_case_replay tests.test_triad_case_suite
+      tests.test_triad_case_capacity tests.test_triad_orchestration_cost
+      tests.test_triad_quiet_diagnostic tests.test_triad_manual_confirmation)
     set_tests_properties(triad_cases PROPERTIES LABELS "triad" TIMEOUT 60
       WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
       ENVIRONMENT "OPENBLAS_NUM_THREADS=1;OMP_NUM_THREADS=1;MKL_NUM_THREADS=1")

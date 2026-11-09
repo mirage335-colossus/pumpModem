@@ -10,9 +10,19 @@ does not retain parallel Robust receivers for older wire formats.
 The current native Robust path is documented in
 [robust-current.md](robust-current.md). It defines a canonical native
 `IndependentApskV2` waveform, shaping, streaming sampled channel, and Helper
-Generator. The Python `WeakReceiver` acquisition and
-`PracticalTrackingReceiver` tracking stages are not an integrated receive
-service or GUI feature. No end-to-end Robust protocol qualification is claimed.
+Generator. A headless `CompleteStreamReceiver` also processes captured streams
+against public slot plans, runs complete fine tracking, and completes a message
+only after two fully scored quiet slots following DATA. Received length and
+transport EOF do not choose the physical endpoint; codec output is filtered
+text. Quiet evidence uses complete orthogonal likelihood blocks wholly inside
+the native public aperture: current DATA support intersected with the search
+window and bounded by neighboring latest/earliest DATA slots. All received
+samples remain in fine likelihoods. A single functional case result does not
+establish all-case, operational, physical-channel or message-success
+qualification. The headless path is not connected to the Robust GUI, which
+remains unavailable pending reconnection.
+See the distinct [manual capacity](robust-manual-capacity.md) and
+[relative regression](triad-performance.md) policies.
 
 Fast has its own maintained wire formats and codecs; see the [Fast format](fast-mode.md)
 and [capacity codec](fast-capacity-codec.md). Legacy has its own modem behavior

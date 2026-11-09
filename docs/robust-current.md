@@ -7,13 +7,17 @@ channel, and Helper generation share native code. The retained
 [shaping findings](triad-shaping.md), and [channel model contract](channel-models.md)
 provide relevant technique summaries and measured limits.
 
-The manual-case suite's acquisition stage uses noisy Helper estimates and
-`FFTScreen` proposals; its bounded tracking subwindow uses
-`PracticalTrackingReceiver`. These are sequential research stages, not an
-integrated end-to-end receiver and not connected to the ordinary Robust GUI.
-The GUI controls are retained, but Robust GUI transmission/reception remains
-unavailable until that connection is implemented. Do not describe these staged
-measurements as a qualified product path or imply GUI support.
+The headless `CompleteStreamReceiver` processes captured streams using native
+public slot plans, complete fine tracking and keyed fresh banks. It decides
+physical completion from two fully scored quiet slots after DATA; transport EOF
+and received length do not choose its endpoint. Its codec returns filtered
+text. The frozen native functional gate passed: it decoded `e` (`001`) after
+three DATA slots and two scored quiet slots, while the captured-prefix EOF
+negative control remained physically incomplete. This covers one bounded
+configuration and functional path only; it is not an all-case capacity,
+physical-channel or operational qualification. This headless receiver is not
+connected to the ordinary Robust GUI. GUI controls remain visible, but Robust
+GUI transmission/reception is unavailable pending reconnection.
 
 Older single-carrier Robust and standalone triad/Helper implementations are not
 supported current paths. Protocol breaks belong in a new Git tag and a separate
@@ -58,82 +62,58 @@ operational noise command or connected Robust GUI transmitter is available.
 
 ## Testing computationally intensive Robust changes
 
-For the current editable manual cases, first run `./build.sh test triad`, then
-run the local CPU-only subwindow suite:
+The bounded regression and absolute-capacity tools make separate decisions.
+For absolute manual-case capacity, run the native triad checks and then the
+dedicated manual-case suite:
 
 ```sh
-python3 tools/triad_abbreviated.py --cases \
+./build.sh test triad
+python3 tools/triad_manual_cases.py \
   --output local-evidence/robust-cases.json \
   --exporter build/dev/triad_helper_export
 ```
 
-For focused debugging, add `--case-index N` once per selected current row; the
-whole list is still freshly parsed and validated, and the report will be marked
-partial. A partial run does not cover the unselected cases.
+The suite rereads `_tests-RobustModem.md` on every invocation. Repeatable
+`--case-index N` is for a clearly marked partial debugging rerun; it does not
+qualify omitted rows. `triad_abbreviated.py --cases` is a compatibility
+forwarder. For method, caps and limits, see the
+[manual capacity contract](robust-manual-capacity.md). Ordinary
+[`triad_abbreviated.py`](../tools/triad_abbreviated.py) measures relative
+regression; its synthetic complete-fine timing is not native-channel, quiet
+message-completion, SNR or absolute-capacity evidence. See the
+[regression policy](triad-performance.md).
 
-The default case source is `_tests-RobustModem.md`; the parser rereads and
-hashes it, preserves row order and duplicates, validates all 16 fields
-strictly, and only reuses measurements for identical normalized configurations.
-See [the case-suite method, metrics, and limits](triad-performance.md#editable-manual-case-subwindow-suite)
-before interpreting output: acquisition is the noisy Helper plus `FFTScreen`
-public proposals and tracking is a bounded `PracticalTrackingReceiver`
-subwindow. Its conditional full-bit coarse sensitivity uses one fixed channel
-seed and does not establish operational admission or full Robust reception.
-Timing replicas are not independent reception trials; no whole-message or GUI
-qualification is claimed. Source, case-list, or binary changes invalidate a
-report. The one-thread default reflects matched local measurements, including
-an FHSS case with no measured 12-thread speedup, and is
-not asserted to be globally optimal or to establish a whole-machine CPU ceiling.
-FHSS Helper gating follows the native plan; when the gated-pilot estimator is
-unsupported, the EME configuration must retain the full CFO range. Case indexes
-are current row ordinals in `_tests-RobustModem.md` and can change when that
-manual list is edited; derive them from the freshly parsed list before a partial
-run.
+The absolute CPU metric is elapsed receive service per received baseband second
+for one stream: ratio 1 or higher fails the real-time criterion, while 0.1
+represents a 90% service-time margin. Never divide service by core count or
+infer a whole-machine ceiling from unmeasured work. Results are bound to their
+source, case-list and native binary. Earlier stage evidence remains historical
+and does not become a result for changed source or method. Consult the
+[validation record](validation.md) for current outcomes and provenance. RunPod
+may accelerate the same bounded method but cannot replace local CPU measurement
+or justify heavier experiments.
 
-For the manual-case Groundwave Helper search, the caller opts into continuous
-interval admission because the DATA stage consumes Helper frequency intervals,
-not its diagnostic CFO points. For each retained onset aperture, clip and merge the proposed interval union to
-the public prior, then compare its total width with the prior width using the
-existing 80% fallback limit. Other callers keep discrete-bank admission. A
-flat pilot, prior-boundary profile, inconsistent pilot regions, gated
-or retuned Helper, no usable pilot, or an aperture's interval union covering at
-least 80% of the prior must keep the full public DATA search. Successful onset
-branches are then conservatively unioned without another width gate. Do not loosen these fallback rules to accommodate
-a coarse bookkeeping grid.
+In the complete receiver, only the fixed affine lane supplies operational
+admission and the final bit. Adaptive and combined lanes still run and are
+timed, but remain diagnostic. Fine likelihoods use explicit FP64 after a
+high-SNR Gaussian FP32 attempt failed; precision does not adapt as fallback.
+Quiet evidence uses complete orthogonal likelihood blocks wholly inside the
+native public aperture (DATA support intersected with the search window and
+bounded by neighboring latest/earliest DATA slots). All input remains in fine
+likelihoods. Message completion still requires two scored quiet slots, without
+using packet length or transport EOF. The fresh one-second, two-segment
+256-initial-state transition probe is charged once per 0.5-second window
+segment in the cost gate to conservatively cover switching and merging.
 
-For an eligible slow, non-hopping full-coarse template bank, a 5 Hz projected
-profile is available when the public required band is at least 0.4 Hz and below
-2 Hz (pass edge 2 Hz, stop edge 2.45 Hz). Revalidate the profile against the
-current exact native basis on the local window using rank agreement, the 1%
-projector and stored scoring-operator gates, and the remaining local fidelity
-checks. This rate gives a 0.2 second coarse arrival step; it is a search grid,
-not a continuous arrival-time certificate. Existing 10 Hz and 20 Hz profiles
-remain selected for their narrower and wider eligible bands. The tested 3 Hz
-profile failed the 1% fidelity gate and is not an available option. These
-profiles approximate template storage, not the channel or observation filter.
-When admitted, the suite also estimates complete coarse service as the measured
-streaming FIR plus the slower bit's full nominal-SNR Helper/FFT search; it
-excludes the separate `PracticalTrackingReceiver` and is not divided by the
-host's CPU count. Confirmation is attempted only when its predeclared
-84-receive cost forecast is at most 600 seconds per candidate; above that, the
-model and pilot remain provisional and supply no empirical >90% bound.
-An explicit `--paired-followup` option can run a separate 90% paired-event
-check when its 44-receive cost gate also passes; the standard result remains
-unresolved and the paired outcome is not message success.
-Template-profile and preparation limits are in the linked method.
-
-Use a hierarchical, computationally minimal statistical method. Predeclare the
-decision, covered path strata, sample allocation and stopping rule. Begin with
-cheap deterministic checks, then only the smallest representative statistical
-samples needed to estimate the declared behavior. Use validated abbreviated
-measurements and extrapolation only when the assumptions, uncertainty and
-source/configuration provenance are explicit and applicable. Add samples only
-when the predeclared uncertainty rule requires them.
-
-Do not run or retain full-observation, sustained, multi-day, exhaustive sweep,
-or whole heavy-calibration campaigns as routine regression or as fallback when
-an abbreviated result is inconclusive. Resolve a gap with a smaller discriminating
-experiment or report the unresolved scope. Historical full-run measurements are
-anchors only for a matched source, inputs, configuration, and computational
-regime; they do not qualify changed code. RunPod may accelerate the same minimal
-statistical method, but does not justify heavier campaigns.
+The completed base run and persistent nominal follow-up measured all eight
+current manual cases with unresolved worst-state capacity margins; neither
+establishes a full capacity pass. The canonical default now uses persistent
+measurement v3. Eleven focused checks and the named `triad` group (20/20 in
+26.73 seconds) passed on that source. Historical v2 base and continuation phases retain their own
+hashes and policy; they are not relabeled as a v3 full rerun. See the
+[validation record](validation.md) for ratios and provenance. Sensitivity
+confirmation is incomplete after the memory guard remained unresolved, so
+there is no >90% qualification. The Groundwave comparison retained four
+threads because the 12-thread run was about 6.9% slower. `--skip-message-gate`
+is debug-only and prevents an integrated suite pass; the former
+`--paired-followup` option is removed.

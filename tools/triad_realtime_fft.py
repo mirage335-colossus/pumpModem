@@ -275,6 +275,35 @@ def _candidate_peak_indices(score, sample_separation, maximum):
     return peaks
 
 
+def _append_candidate_rows(local, workspace, frequencies, scores, arrivals,
+                           sample_separation, maximum):
+    """Retain the canonical per-CFO peaks before across-frequency selection."""
+    for frequency, score in zip(frequencies, scores):
+        for lag in _candidate_peak_indices(score, sample_separation, maximum):
+            local.append(dict(bit=workspace['bit'], epoch=workspace['epoch'],
+                arrival=float(arrivals[lag]), frequency=float(frequency),
+                clock_ppm=workspace['clock_ppm'], score=float(score[lag]), rank=workspace['rank']))
+
+
+def _select_workspace_candidates(local, maximum, separation, frequency_separation):
+    """Canonical stable ordering and NMS, shared by ordinary and tiled search."""
+    local.sort(key=lambda candidate: candidate['score'], reverse=True)
+    unique = []
+    for candidate in local:
+        if any(abs(candidate['arrival']-old['arrival']) < separation and
+               abs(candidate['frequency']-old['frequency']) < frequency_separation for old in unique):
+            continue
+        unique.append(candidate)
+        if len(unique) >= maximum:
+            break
+    return unique
+
+
+def _select_bit_candidates(retained, maximum):
+    return [sorted(rows, key=lambda candidate: candidate['score'], reverse=True)[:maximum]
+            for rows in retained]
+
+
 class FFTScreen:
     """Reusable public templates and Fourier factors, independent of observations.
 
@@ -412,7 +441,8 @@ class FFTScreen:
             provider_rows = min(source_samples, math.ceil(template_chunk_samples*float(max(scales))) + 4)
             scratch = (8*transform_rows*np.dtype(self.dtype).itemsize + 4*provider_rows*16 +
                        4*self.nfft*np.dtype(self.dtype).itemsize)
-        if self.resident_estimate+scratch > self.memory_limit_bytes:
+        self.preparation_peak_estimate_bytes = self.resident_estimate+scratch
+        if self.preparation_peak_estimate_bytes > self.memory_limit_bytes:
             raise MemoryError('coarse FFT template preparation exceeds memory limit')
         self.workspaces = []
         time_source = (self.origin+np.arange(self.raw_kernel_rows, dtype=float)/self.fs
@@ -502,7 +532,9 @@ class FFTScreen:
                           projected_noise_variance=self.reference_variance)))
         self.preparation_timing = _elapsed(started)
 
-    def _frequencies(self, frequencies_hz, frequency_intervals):
+    def _frequencies(self, frequencies_hz, frequency_intervals, *, maximum_points=None):
+        maximum_points = (self.maximum_frequency_points if maximum_points is None else
+                          _integer(maximum_points, 'maximum complete frequency points'))
         if (frequencies_hz is None) == (frequency_intervals is None):
             raise ValueError('supply exactly one frequency bank or interval union')
         if frequency_intervals is not None:
@@ -514,7 +546,7 @@ class FFTScreen:
                 if lo > hi:
                     raise ValueError('frequency interval must be ordered')
                 count = math.ceil((hi-lo)/self.maximum_frequency_step)+1
-                if count+sum(len(x) for x in pieces) > self.maximum_frequency_points:
+                if count+sum(len(x) for x in pieces) > maximum_points:
                     return None, 'frequency_work_limit'
                 pieces.append(np.linspace(lo, hi, count))
             if not pieces:
@@ -527,11 +559,118 @@ class FFTScreen:
             bank = np.sort(bank)
             if len(bank) > 1 and np.diff(bank).max() > self.maximum_frequency_step*(1+1e-10):
                 return None, 'explicit_frequency_grid_too_coarse'
-        if len(bank) > self.maximum_frequency_points:
+        if len(bank) > maximum_points:
             return None, 'frequency_work_limit'
         if max(abs(bank))+self.source_half_width+abs(self.doppler) > self.pass_edge:
             return None, 'frequency_bank_outside_nominal_passband'
         return bank, None
+
+    def _frequency_spectra(self, observation, frequencies, *, workers=None):
+        spectra = np.empty((len(frequencies), self.nfft), dtype=self.dtype)
+        times = np.arange(len(observation), dtype=float)/self.output_fs
+        for index, frequency in enumerate(frequencies):
+            rotation = np.exp(-2j*np.pi*np.remainder(frequency*times, 1.)).astype(self.dtype)
+            spectra[index] = fft.fft(observation*rotation, n=self.nfft,
+                workers=self.workers if workers is None else workers)
+        return spectra
+
+    def _frequency_peak_rows(self, workspace, spectra, frequencies, *,
+                             sample_separation, top_per_bit, workers=None):
+        """Unpruned per-CFO peaks; a tile boundary cannot change workspace NMS."""
+        local = []
+        for first in range(0, len(frequencies), self.batch_size):
+            stop = min(first+self.batch_size, len(frequencies))
+            products = spectra[first:stop, None, :]*workspace['transform'][None]
+            correlations = fft.ifft(products, axis=-1,
+                workers=self.workers if workers is None else workers)[..., :self.lag_count]
+            scores = _quadratic_scores(correlations, workspace['inverse'],
+                explicit=workspace['quadratic_explicit'])/self.reference_variance
+            _append_candidate_rows(local, workspace, frequencies[first:stop], scores,
+                self.arrivals, sample_separation, top_per_bit)
+        return local
+
+    def tiled_frequency_plan(self, frequencies_hz=None, *, frequency_intervals=None,
+                             top_per_bit=4, minimum_arrival_separation_seconds=None,
+                             frequency_unit_points=4, maximum_total_frequency_points=65536,
+                             workspace_workers=1):
+        """Plan an exact full grid as independently bounded frequency kernels.
+
+        The ordinary point/product ceilings still apply to EVERY kernel. The
+        separate explicit full-grid ceiling and global raw-peak storage budget
+        prevent an unbounded accumulated search. No partial tile is a proposal.
+        """
+        top_per_bit = _integer(top_per_bit, 'top candidates per bit')
+        if top_per_bit > 64:
+            raise ValueError('top candidates per bit exceeds64 proposal budget')
+        unit = _integer(frequency_unit_points, 'frequency unit points')
+        maximum = _integer(maximum_total_frequency_points, 'maximum complete frequency points')
+        if maximum > 65536:
+            raise ValueError('complete frequency grid exceeds65536-point local bound')
+        workers = min(_integer(workspace_workers, 'workspace workers'), len(self.workspaces))
+        separation = (.5/float(self.manifest['format'].get('fine_chip_rate_hz', 60.))
+            if minimum_arrival_separation_seconds is None else
+            _number(minimum_arrival_separation_seconds, 'candidate separation', positive=True))
+        if frequency_intervals is None and frequencies_hz is not None:
+            frequencies_hz = tuple(frequencies_hz)
+        elif frequency_intervals is not None:
+            frequency_intervals = tuple(tuple(interval) for interval in frequency_intervals)
+        frequencies, failure = self._frequencies(frequencies_hz, frequency_intervals,
+            maximum_points=maximum)
+        result = dict(schema='triad-tiled-frequency-plan-v1', status='unresolved', reason=failure,
+            frequency_unit_points=unit, maximum_total_frequency_points=maximum,
+            workspace_workers=workers, top_per_bit=top_per_bit,
+            minimum_arrival_separation_seconds=separation,
+            per_kernel_maximum_frequency_points=self.maximum_frequency_points,
+            per_kernel_maximum_fft_products=self.maximum_fft_products)
+        if failure:
+            return result
+        size = min(unit, len(frequencies))
+        products = size*len(self.workspaces)*len(self.rays)
+        if size > self.maximum_frequency_points or products > self.maximum_fft_products:
+            result['reason'] = 'frequency_tile_kernel_work_limit'
+            return result
+        sample_separation = max(1, math.ceil(separation*self.output_fs))
+        peak_rows = min(top_per_bit, self.lag_count,
+            math.ceil(self.lag_count/sample_separation)+2)
+        candidate_rows = len(frequencies)*len(self.workspaces)*peak_rows
+        candidate_bytes = candidate_rows*512
+        item = np.dtype(self.dtype).itemsize
+        active = min(size, self.batch_size)
+        scratch = workers*(active*len(self.rays)*self.nfft*item*3 +
+            active*self.lag_count*64)
+        spectra_bytes = size*self.nfft*item
+        # Includes the owned observation copy, times/modulation/FIR-related
+        # coordinates, and simultaneous global sort/key buffers in the512-byte
+        # per-row allowance. The caller must reserve its other input buffers.
+        peak = (self.resident_estimate + 96*self.crop_rows +
+            64*len(frequencies) + spectra_bytes + scratch + candidate_bytes)
+        units = math.ceil(len(frequencies)/unit)
+        result.update(frequencies_hz=frequencies.tolist(), frequency_points=len(frequencies),
+            units=units, terminal_unit_frequency_points=len(frequencies)-(units-1)*unit,
+            full_fft_products=len(frequencies)*len(self.workspaces)*len(self.rays),
+            full_observation_ffts=len(frequencies), maximum_kernel_fft_products=products,
+            raw_candidate_row_capacity=candidate_rows,
+            raw_candidate_storage_estimate_bytes=candidate_bytes,
+            parallel_kernel_scratch_estimate_bytes=scratch,
+            estimated_peak_bytes=peak, template_workspaces=len(self.workspaces),
+            arrival_points=self.lag_count, rays=len(self.rays), fft_length=self.nfft,
+            full_correlation_work_butterfly_estimate=(len(frequencies)+
+                len(frequencies)*len(self.workspaces)*len(self.rays))*self.nfft*math.log2(self.nfft),
+            storage_scope='All per-workspace per-CFO peaks remain live until canonical global selection.512 bytes per peak includes dictionary/list/sort allowance; caller input/native buffers remain separate.',
+            exactness_scope='Same canonical complete CFO lattice, per-CFO arrival peaks, stable workspace NMS and global per-bit selection. No tile-local across-frequency pruning.')
+        if peak > self.memory_limit_bytes:
+            result['reason'] = 'complete_tiled_frequency_memory_limit'
+        else:
+            result.update(status='ready', reason=None)
+        return result
+
+    def start_tiled_frequency(self, projected, frequencies_hz=None, *,
+                              projection_receipt=None, executor=None, **arguments):
+        """Create a resumable exact frequency search on one prepared input."""
+        if projection_receipt is not None and projection_receipt != self.projection_receipt():
+            raise ValueError('prepared projection receipt does not match this finite operator/source')
+        return TiledFrequencySession(self, projected, frequencies_hz,
+            executor=executor, **arguments)
 
     def _lag_frequency_groups(self, frequencies_hz, frequency_intervals):
         """Return the exact uniform grids supplied by the caller, if available.
@@ -777,23 +916,12 @@ class FFTScreen:
         mark = _clock()
         spectra = None
         if method == 'frequency':
-            spectra = np.empty((len(frequencies), self.nfft), dtype=self.dtype)
-            times = np.arange(len(observation), dtype=float)/self.output_fs
-            for i, frequency in enumerate(frequencies):
-                rotation = np.exp(-2j*np.pi*np.remainder(frequency*times, 1.)).astype(self.dtype)
-                spectra[i] = fft.fft(observation*rotation, n=self.nfft, workers=self.workers)
+            spectra = self._frequency_spectra(observation, frequencies)
         observation_fft_timing = _elapsed(mark)
         mark = _clock()
         retained = [[], []]
         sample_separation = max(1, math.ceil(separation*self.output_fs))
         frequency_separation = 1/(2*self.duration)
-        def retain_rows(local, bit, workspace, frequency_values, score_values):
-            for frequency, score in zip(frequency_values, score_values):
-                peaks = _candidate_peak_indices(score, sample_separation, top_per_bit)
-                for lag in peaks:
-                    local.append(dict(bit=bit, epoch=workspace['epoch'],
-                        arrival=float(self.arrivals[lag]), frequency=float(frequency),
-                        clock_ppm=workspace['clock_ppm'], score=float(score[lag]), rank=workspace['rank']))
         zoom_plans = []
         if method == 'lag':
             kernel_indices = np.arange(self.kernel_rows)
@@ -813,13 +941,8 @@ class FFTScreen:
             # alternatives before the other clock/epoch workspaces are visited.
             local = []
             if method == 'frequency':
-                for first in range(0, len(frequencies), self.batch_size):
-                    stop = min(first+self.batch_size, len(frequencies))
-                    products = spectra[first:stop, None, :]*workspace['transform'][None]
-                    correlations = fft.ifft(products, axis=-1, workers=self.workers)[..., :self.lag_count]
-                    scores = _quadratic_scores(correlations, workspace['inverse'],
-                        explicit=workspace['quadratic_explicit'])/self.reference_variance
-                    retain_rows(local, bit, workspace, frequencies[first:stop], scores)
+                local = self._frequency_peak_rows(workspace, spectra, frequencies,
+                    sample_separation=sample_separation, top_per_bit=top_per_bit)
             else:
                 correlation_bank = np.empty((len(frequencies), len(self.rays), self.lag_count), dtype=np.complex128)
                 with fft.set_workers(self.workers):
@@ -843,21 +966,13 @@ class FFTScreen:
                             del windows, phase
                 scores = _quadratic_scores(correlation_bank, workspace['inverse'],
                     explicit=workspace['quadratic_explicit'])/self.reference_variance
-                retain_rows(local, bit, workspace, frequencies, scores)
+                _append_candidate_rows(local, workspace, frequencies, scores,
+                    self.arrivals, sample_separation, top_per_bit)
                 # Release this workspace before allocating the next bank.
                 del correlation_bank, scores
-            local.sort(key=lambda x: x['score'], reverse=True)
-            unique = []
-            for candidate in local:
-                if any(abs(candidate['arrival']-old['arrival']) < separation and
-                       abs(candidate['frequency']-old['frequency']) < frequency_separation for old in unique):
-                    continue
-                unique.append(candidate)
-                if len(unique) >= top_per_bit:
-                    break
-            retained[bit].extend(unique)
-        for bit in (0, 1):
-            retained[bit] = sorted(retained[bit], key=lambda x: x['score'], reverse=True)[:top_per_bit]
+            retained[bit].extend(_select_workspace_candidates(local, top_per_bit,
+                separation, frequency_separation))
+        retained = _select_bit_candidates(retained, top_per_bit)
         score_timing = _elapsed(mark)
         result.update(status='proposed', reason='bounded_static_coarse_screen',
             candidates=retained[0]+retained[1], candidates_by_bit=retained,
@@ -888,3 +1003,221 @@ class FFTScreen:
             timing=dict(filtering=filtering_timing, observation_fft=observation_fft_timing,
                         correlation_and_selection=score_timing, total=_elapsed(started)))
         return result
+
+
+class TiledFrequencySession:
+    """One exact full-CFO search, resumed by a single coordinating owner.
+
+    Kernels keep their existing work ceilings. Raw arrival peaks are retained
+    separately for each canonical workspace until every CFO has been scored;
+    only then can the shared across-frequency NMS produce proposals. Executor
+    jobs process immutable numerical inputs and return rows in workspace order.
+    """
+
+    def __init__(self, screen, projected, frequencies_hz=None, *, executor=None,
+                 workspace_workers=1, **arguments):
+        started = _clock()
+        self.screen, self.executor = screen, executor
+        if executor is None and workspace_workers != 1:
+            raise ValueError('parallel workspace workers require an executor')
+        self.work_plan = screen.tiled_frequency_plan(frequencies_hz,
+            workspace_workers=workspace_workers, **arguments)
+        if self.work_plan['status'] != 'ready':
+            raise ValueError('exact tiled frequency search is unavailable: '+self.work_plan['reason'])
+        observation = np.asarray(projected)
+        if (observation.shape != (screen.crop_rows,) or not np.iscomplexobj(observation) or
+                not np.isfinite(observation).all()):
+            raise ValueError('finite prepared projection must match this screen crop')
+        self.observation = np.array(observation, copy=True)
+        self.observation.flags.writeable = False
+        self.frequencies = np.asarray(self.work_plan['frequencies_hz'], dtype=float)
+        self.frequencies.flags.writeable = False
+        self.top_per_bit = self.work_plan['top_per_bit']
+        self.separation = self.work_plan['minimum_arrival_separation_seconds']
+        self.sample_separation = max(1, math.ceil(self.separation*screen.output_fs))
+        self.workspace_workers = self.work_plan['workspace_workers']
+        self._rows = [[] for _ in screen.workspaces]
+        self._next_frequency = self._completed_units = 0
+        self._failed = self._closed = False
+        self._result = None
+        self.procedure_id = _digest(dict(screen=screen.procedure_id,
+            complete_frequency_plan=self.work_plan))
+        zero = lambda: dict(cpu_seconds=0., wall_seconds=0.)
+        self._timing = dict(filtering=zero(), observation_fft=zero(),
+            correlation_and_selection=zero(), total=_elapsed(started))
+
+    @staticmethod
+    def _add(target, value):
+        for key in ('cpu_seconds', 'wall_seconds'):
+            target[key] += value[key]
+
+    @property
+    def complete(self):
+        return not self._failed and self._next_frequency == self.work_plan['frequency_points']
+
+    def _base_result(self):
+        return dict(schema='triad-realtime-fft-proposals-v1', status='unresolved',
+            reason='closed_frequency_tiles' if self._closed else
+                'failed_frequency_tile' if self._failed else 'incomplete_frequency_tiles',
+            candidates=[], candidates_by_bit=[[], []], procedure_id=self.procedure_id,
+            policy=dict(self.screen.policy,
+                complete_frequency_search='exact resumable tiles; ordinary ceilings apply per kernel'),
+            preparation_timing=self.screen.preparation_timing,
+            admission='none; adaptive proposals require independent whole-procedure calibration',
+            frequency_tiles=dict(completed_units=self._completed_units,
+                completed_frequency_points=self._next_frequency,
+                complete_public_search=self.complete,
+                raw_candidate_rows=sum(map(len, self._rows)), work_plan=self.work_plan),
+            timing={key:dict(value) for key, value in self._timing.items()})
+
+    def step(self, units=1):
+        """Score at most64 bounded units; this never returns partial proposals."""
+        units = _integer(units, 'frequency units per step')
+        if units > 64:
+            raise ValueError('frequency step exceeds64 bounded units')
+        if self._closed or self._failed:
+            raise RuntimeError('frequency tile session is not usable')
+        if self._result is not None:
+            raise RuntimeError('frequency tile session was finalized')
+        started = _clock()
+        fft_timing = dict(cpu_seconds=0., wall_seconds=0.)
+        score_timing = dict(cpu_seconds=0., wall_seconds=0.)
+        completed_before = self._completed_units
+        first_frequency = self._next_frequency
+        try:
+            for _ in range(units):
+                if self.complete:
+                    break
+                first = self._next_frequency
+                stop = min(first+self.work_plan['frequency_unit_points'], len(self.frequencies))
+                frequencies = self.frequencies[first:stop]
+                mark = _clock()
+                spectra = self.screen._frequency_spectra(self.observation, frequencies,
+                    workers=1 if self.executor is not None else self.screen.workers)
+                spectra.flags.writeable = False
+                self._add(fft_timing, _elapsed(mark))
+                mark = _clock()
+                def group(indices):
+                    return [(index, self.screen._frequency_peak_rows(
+                        self.screen.workspaces[index], spectra, frequencies,
+                        sample_separation=self.sample_separation, top_per_bit=self.top_per_bit,
+                        workers=1 if self.executor is not None else self.screen.workers))
+                        for index in indices]
+                if self.executor is None:
+                    rows = group(range(len(self.screen.workspaces)))
+                else:
+                    groups = np.array_split(np.arange(len(self.screen.workspaces)),
+                        self.workspace_workers)
+                    futures, error = [], None
+                    for indices in groups:
+                        try:
+                            futures.append(self.executor.submit(group, indices))
+                        except BaseException as exc:
+                            error = exc
+                            break
+                    rows = []
+                    # Join every job even after a failure before releasing the
+                    # shared spectra or allowing an address/cache switch.
+                    for future in futures:
+                        try:
+                            rows.extend(future.result())
+                        except BaseException as exc:
+                            if error is None:
+                                error = exc
+                    if error is not None:
+                        raise error
+                for index, local in rows:
+                    self._rows[index].extend(local)
+                self._next_frequency = stop
+                self._completed_units += 1
+                del spectra, rows
+                self._add(score_timing, _elapsed(mark))
+        except BaseException:
+            self._failed = True
+            raise
+        finally:
+            elapsed = _elapsed(started)
+            self._add(self._timing['observation_fft'], fft_timing)
+            self._add(self._timing['correlation_and_selection'], score_timing)
+            self._add(self._timing['total'], elapsed)
+        return dict(schema='triad-frequency-tile-step-v1', status='scored_tiles',
+            complete_public_search=self.complete,
+            completed_units=self._completed_units-completed_before,
+            completed_frequency_points=self._next_frequency-first_frequency,
+            cumulative_units=self._completed_units,
+            cumulative_frequency_points=self._next_frequency,
+            raw_candidate_rows=sum(map(len, self._rows)),
+            raw_candidate_rows_by_workspace=list(map(len, self._rows)),
+            proposals_available=False,
+            timing=dict(observation_fft=fft_timing, correlation_and_peak_retention=score_timing,
+                total=elapsed))
+
+    def _select(self, *, copy_rows):
+        retained = [[], []]
+        for workspace, original in zip(self.screen.workspaces, self._rows):
+            local = list(original) if copy_rows else original
+            retained[workspace['bit']].extend(_select_workspace_candidates(local,
+                self.top_per_bit, self.separation, 1/(2*self.screen.duration)))
+        return _select_bit_candidates(retained, self.top_per_bit)
+
+    def selection_probe(self):
+        """Time current-row selection without producing admissible proposals.
+
+        The full selection cost grows with retained rows and their score order;
+        this diagnostic is not, by itself, a full-grid extrapolation guarantee.
+        """
+        if self._closed or self._failed:
+            raise RuntimeError('frequency tile session is not usable')
+        started = _clock()
+        self._select(copy_rows=True)
+        return dict(schema='triad-frequency-selection-probe-v1', status='diagnostic_only',
+            complete_public_search=self.complete, proposals_available=False,
+            raw_candidate_rows=sum(map(len, self._rows)),
+            completed_frequency_points=self._next_frequency,
+            included_in_receiver_service=False, timing=_elapsed(started))
+
+    def finish(self):
+        """Select proposals only after the exact full public grid completes."""
+        if self._result is not None:
+            return self._result
+        if not self.complete or self._closed:
+            return self._base_result()
+        started = _clock()
+        retained = self._select(copy_rows=False)
+        elapsed = _elapsed(started)
+        self._add(self._timing['correlation_and_selection'], elapsed)
+        self._add(self._timing['total'], elapsed)
+        result = self._base_result()
+        screen, plan = self.screen, self.work_plan
+        result.update(status='proposed', reason='bounded_exact_tiled_static_coarse_screen',
+            candidates=retained[0]+retained[1], candidates_by_bit=retained,
+            frequencies_hz=plan['frequencies_hz'],
+            work=dict(epochs=len(screen.epochs), clocks=len(screen.clocks), bits=2,
+                rays=len(screen.rays), arrival_points=screen.lag_count,
+                frequency_points=plan['frequency_points'],
+                synchronization_hypotheses=len(screen.epochs)*len(screen.clocks)*
+                    screen.lag_count*plan['frequency_points'],
+                fft_products=plan['full_fft_products'], selected_correlation_method='frequency',
+                correlation_work_butterfly_estimate=plan['full_correlation_work_butterfly_estimate'],
+                correlation_method_work_scope='Exact existing frequency kernel repeated over the full canonical grid; all per-CFO peaks precede shared canonical selection.',
+                frequency_grid_groups=0, lag_domain_fft_lengths=[],
+                lag_domain_cached_kernel_fft_count=0, lag_domain_data_fft_count=0,
+                lag_domain_correlation_products=0, lag_domain_fft_transform_lanes=0,
+                fft_length=screen.nfft, template_workspaces=len(screen.workspaces),
+                explicit_quadratic_workspaces=sum(w['quadratic_explicit'] for w in screen.workspaces),
+                guarded_quadratic_workspaces=sum(not w['quadratic_explicit'] for w in screen.workspaces),
+                observation_ffts=plan['frequency_points'],
+                actual_fft_transform_count=plan['frequency_points']+plan['full_fft_products'],
+                estimated_peak_bytes=plan['estimated_peak_bytes'],
+                source_support_complete=True, coarse_projection_only=True,
+                frequency_units=plan['units'],
+                raw_candidate_rows=sum(map(len, self._rows)),
+                raw_candidate_row_capacity=plan['raw_candidate_row_capacity']))
+        self._result = result
+        return result
+
+    def close(self):
+        """Release a completed or partial search without completing its grid."""
+        self._rows.clear()
+        self.observation = self.frequencies = None
+        self._closed = True

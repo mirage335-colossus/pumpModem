@@ -122,6 +122,17 @@ class CachedMappedBasis:
         small = relative+within_origin
         tile_delta = small//self.tile_samples
         within = small % self.tile_samples
+        # Public mapped-basis offsets are strictly increasing, but multiple
+        # interpolator gathers can still contain duplicate integer indices.
+        # When every requested sample occupies one tile, one advanced lookup
+        # preserves that order and avoids sorting the same tile ids for all
+        # four cubic neighbors. Keep the general grouped path for any boundary
+        # crossing or privately supplied nonmonotonic coordinates.
+        if len(tile_delta) and np.all(tile_delta == tile_delta[0]):
+            tile_index = tile_origin+int(tile_delta[0])
+            if 0 <= tile_index*self.tile_samples < self.dense_source_samples:
+                result[:] = self._tile(bit, epoch, tile_index)[within]
+            return result
         for delta in np.unique(tile_delta):
             tile = tile_origin+int(delta)
             if tile < 0 or tile*self.tile_samples >= self.dense_source_samples:

@@ -111,6 +111,23 @@ class GaussianStateTests(unittest.TestCase):
         single.update_many(r.to(torch.complex64), grams.to(torch.complex64), elapsed)
         self.assertTrue(torch.allclose(double.finish(), single.finish(), atol=2e-5, rtol=2e-5))
 
+    def test_fp64_preserves_identity_at_high_snr_collinear_rays(self):
+        # At this information scale, FP32 can round I+F.H G F to a
+        # singular matrix even though G is a valid rank-one Gram.  The
+        # complete CPU receiver predeclares FP64 rather than retrying only
+        # failed factorizations: inaccurate FP32 successes are also possible.
+        for difference in (0., 1e-10, 1e-8):
+            scale = 1e8
+            gram = scale*torch.tensor([[1., 1.-difference],
+                                       [1.-difference, 1.]], dtype=torch.complex128)
+            state = GaussianStateFilter(GaussianPrior((.5, .5), math.inf))
+            increment = state.update(torch.zeros((1, 2), dtype=torch.complex128), gram, 0.)
+            expected = -math.log1p(.5*scale*(2.-difference))-math.log1p(.5*scale*difference)
+            self.assertAlmostEqual(float(increment), expected, delta=2e-8)
+            self.assertTrue(torch.isfinite(state.finish()).all())
+            self.assertGreaterEqual(float(torch.linalg.eigvalsh(state.covariance).min()), 0.)
+            self.assertEqual(state.diagnostics()['state_dtype'], 'torch.complex128')
+
     def test_invalid_inputs_are_rejected(self):
         for prior in (((), 1.), ((-1.,), 1.), ((1.,), 0.)):
             with self.assertRaises(ValueError):

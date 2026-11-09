@@ -114,6 +114,79 @@ def deterministic_prediction(energy, rank, threshold):
         tail_scope='Fixed matched basis and fixed energy; no acquisition/model-mismatch guarantee')
 
 
+def _complete_admission_receipt(receipt):
+    """Validate and materialize a root-produced complete-path admission receipt."""
+    from triad_operational_admission import PublicGrid
+
+    if not isinstance(receipt, dict):
+        raise ValueError('complete admission receipt must be an object')
+    if receipt.get('schema') != 'triad-complete-admission-model-v1':
+        raise ValueError('unsupported complete admission receipt schema')
+    if receipt.get('operational_evidence') != 'fixed_initial_affine':
+        raise ValueError('complete admission requires fixed initial affine evidence')
+    full_grid = receipt.get('full_grid')
+    if not isinstance(full_grid, dict):
+        raise ValueError('complete admission receipt requires a public grid')
+    try:
+        grid = PublicGrid(**{**full_grid, 'epochs': tuple(full_grid['epochs'])})
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError('invalid public grid in complete admission receipt') from error
+    identity = receipt.get('full_grid_identity')
+    if not isinstance(identity, str) or identity != grid.identity():
+        raise ValueError('complete admission public grid identity mismatch')
+    count = receipt.get('full_grid_count')
+    if isinstance(count, bool) or not isinstance(count, int) or count != grid.candidate_count:
+        raise ValueError('complete admission public grid count mismatch')
+
+    budget = receipt.get('operational_budget')
+    if not isinstance(budget, dict):
+        raise ValueError('complete admission receipt requires an operational budget')
+    threshold = budget.get('log_e_threshold')
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(threshold):
+        raise ValueError('complete admission budget threshold must be finite')
+    alpha = budget.get('alpha_per_24h')
+    spacing = budget.get('minimum_attempt_spacing_seconds')
+    alternatives = budget.get('duration_alternatives')
+    if (isinstance(alpha, bool) or not isinstance(alpha, (int, float)) or
+            not math.isfinite(alpha) or not 0 < alpha < 1):
+        raise ValueError('complete admission budget alpha is invalid')
+    if (isinstance(spacing, bool) or not isinstance(spacing, (int, float)) or
+            not math.isfinite(spacing) or spacing <= 0):
+        raise ValueError('complete admission attempt spacing is invalid')
+    if isinstance(alternatives, bool) or not isinstance(alternatives, int) or alternatives < 1:
+        raise ValueError('complete admission duration alternatives are invalid')
+    penalty = budget.get('log_null_expectation_penalty')
+    if (isinstance(penalty, bool) or not isinstance(penalty, (int, float)) or
+            not math.isfinite(penalty) or penalty != 0.):
+        raise ValueError('complete admission model currently requires zero null-expectation penalty')
+    canonical_budget = operational_threshold(float(alpha), float(spacing), alternatives, 0.)
+    attempts = budget.get('attempts_per_24h_bound')
+    if (isinstance(attempts, bool) or not isinstance(attempts, int) or
+            attempts != canonical_budget['attempts_per_24h_bound'] or
+            not math.isclose(float(threshold), canonical_budget['log_e_threshold'],
+                             rel_tol=0., abs_tol=1e-12)):
+        raise ValueError('complete admission operational budget is not canonical')
+
+    def positive_integer(name):
+        value = receipt.get(name)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError('complete admission ' + name + ' must be a positive integer')
+        return value
+
+    model_count = positive_integer('model_count')
+    residual_count = positive_integer('residual_state_count')
+    weight = receipt.get('affine_lane_weight')
+    if (isinstance(weight, bool) or not isinstance(weight, (int, float)) or
+            not math.isfinite(weight) or weight != 1.):
+        raise ValueError('complete admission affine lane weight must be one')
+    slots = receipt.get('public_slot_indices')
+    if (not isinstance(slots, list) or len(slots) != 24 or
+            any(isinstance(value, bool) or not isinstance(value, int) for value in slots) or
+            slots != list(range(24))):
+        raise ValueError('complete admission public slots must be the fixed indices 0 through 23')
+    return grid, canonical_budget, model_count, residual_count
+
+
 def long_span_diagnostics(native, grid, *, active_seconds, elapsed_seconds,
                           message_bits, helper_lead_seconds, pulse_halo_seconds,
                           alpha_per_day, nominal_cn0_db_hz,
@@ -246,7 +319,7 @@ def plan_from_native(native, target_cn0_db_hz, *, correct_probability=.99,
                      attempt_spacing_seconds=.4, duration_alternatives=1,
                      outage_fraction=0., retained_fraction=1.,
                      max_active_seconds=315576000., max_evaluations=128,
-                     manual_seconds=None):
+                     manual_seconds=None, complete_admission=None):
     """Recommend a legal active tile count; native shaping owns the lattice.
 
     Half the requested per-message failure budget goes to true-atom detection.
@@ -266,6 +339,18 @@ def plan_from_native(native, target_cn0_db_hz, *, correct_probability=.99,
     limit = _positive(max_active_seconds, 'maximum active duration')
     if isinstance(max_evaluations, bool) or not isinstance(max_evaluations, int) or max_evaluations < 4:
         raise ValueError('at least four bounded planner evaluations required')
+    if complete_admission is not None and manual_seconds is None:
+        raise ValueError('complete admission receipts are supported only for fixed manual durations')
+    matched_grid = matched_budget = None
+    residual_state_count = None
+    if complete_admission is not None:
+        matched_grid, matched_budget, model_count, residual_state_count = _complete_admission_receipt(
+            complete_admission)
+        # All downstream accounting must use the receipt's matched operational policy.
+        budget = matched_budget
+        alpha_per_day = float(budget['alpha_per_24h'])
+        attempt_spacing_seconds = float(budget['minimum_attempt_spacing_seconds'])
+        duration_alternatives = budget['duration_alternatives']
     f, p = native['format'], native['physics']
     tile = _positive(float(f['tile_seconds']), 'native tile duration')
     waits = int(f['burst_wait_tiles'])
@@ -273,11 +358,16 @@ def plan_from_native(native, target_cn0_db_hz, *, correct_probability=.99,
         raise ValueError('negative burst wait')
     # One public 30-second support-grid slot: initial Helper waiting <30 s.
     # This is a conservative pre-export origin-shift allowance, not fitted timing.
-    budget = operational_threshold(alpha_per_day, attempt_spacing_seconds, duration_alternatives)
-    model_count = len(DEFAULT_COHERENCES)
+    if complete_admission is None:
+        budget = operational_threshold(alpha_per_day, attempt_spacing_seconds, duration_alternatives)
+        model_count = len(DEFAULT_COHERENCES)
     helper_lead = float(native['export_constraints']['fixed_helper_lead_seconds'])
     halo = float(native['export_constraints'].get('pulse_halo_seconds', 0))
     def grid_at(elapsed):
+        if matched_grid is not None:
+            q = (budget['log_e_threshold'] +
+                 math.log(2*matched_grid.candidate_count*model_count*residual_state_count))
+            return matched_grid, q, 0.
         # Later message slots can have a larger origin/clock displacement.
         # Include a complete 30s support-grid rounding allowance at every slot.
         origin = 30.+(message_bits-1)*(elapsed+helper_lead+30.+2*halo)
@@ -364,6 +454,11 @@ def plan_from_native(native, target_cn0_db_hz, *, correct_probability=.99,
         'Deterministic-channel phase diffusion uses a fractional effective fixed-energy rank surrogate, not Rayleigh amplitude fading.',
         'Finite-burst mode count uses elapsed span with uniformly distributed useful energy.',
         'Real audio/Helper noise null and end-to-end correct reception remain unqualified.']
+    if complete_admission is not None:
+        assumptions.extend([
+            'Complete-path planning uses the matched fixed initial-affine public-grid and operational-budget receipt.',
+            f'The true-component prior is uniform over {residual_state_count} residual states; the threshold charges 2*N*M*R with affine-lane weight one and no adaptive half-prior.',
+        ])
     unmodeled = []
     if p.get('selective_enabled'):
         unmodeled.append('Selected dispersive amplitude modulation and its non-Gaussian likelihood mismatch; no energy credit taken.')
@@ -375,13 +470,32 @@ def plan_from_native(native, target_cn0_db_hz, *, correct_probability=.99,
         unmodeled.append('FHSS ramp placement is native; receiver hop-loss distribution is not qualified.')
     if waits:
         unmodeled.append('Burst gaps: stationary elapsed-span approximation needs sampled validation.')
-    maximum_tests = 2*grid.candidate_count*model_count*budget['attempts_per_24h_bound']*duration_alternatives
-    ideal_energy = .5*(norm.isf(alpha_per_day/maximum_tests)+norm.isf(beta))**2
+    if complete_admission is None:
+        maximum_tests = 2*grid.candidate_count*model_count*budget['attempts_per_24h_bound']*duration_alternatives
+    else:
+        # The receipt threshold already contains attempts/durations/alpha.
+        # Bound exponentiation and multiplication for extreme finite receipts.
+        multiplier = 2*grid.candidate_count*model_count*residual_state_count
+        log_max_float = math.log(float.fromhex('0x1.fffffffffffffp+1023'))
+        log_min_float = math.log(math.nextafter(0., 1.))
+        # Algebraically this is exp(log_e_threshold) * multiplier, evaluated
+        # in log space and clamped to representable positive finite values.
+        maximum_tests = math.exp(min(log_max_float,
+                                     max(log_min_float, budget['log_e_threshold']+math.log(multiplier))))
+    if complete_admission is None:
+        ideal_tail_probability = alpha_per_day/maximum_tests
+    else:
+        # maximum_tests is exp(log_e_threshold) times the matched prior
+        # multiplicity; the threshold already includes 1/alpha.
+        ideal_tail_probability = 1/maximum_tests
+    ideal_tail_probability = min(.5, max(math.nextafter(0., 1.), ideal_tail_probability))
+    ideal_energy = .5*(norm.isf(ideal_tail_probability)+norm.isf(beta))**2
     helper_available = bool(native.get('helper_enabled', True)) and float(p.get('effective_helper_w', 0)) > 0
     placement_available = bool(native.get('helper_placement', {}).get('feasible_at_requested_if', True))
     if not helper_available:
-        status = 'receiver_unavailable'
-        unmodeled.append('Current weak receiver requires usable Helper and has no DATA-only acquisition fallback.')
+        if complete_admission is None:
+            status = 'receiver_unavailable'
+        unmodeled.append('Acquisition and Helper availability remain unqualified; no DATA-only fallback is modeled.')
     if not native['geometry_feasible'] or not placement_available:
         status = 'geometry_unavailable'
     result = dict(schema='triad-weak-duration-plan-v1', status=status,
@@ -408,9 +522,16 @@ def plan_from_native(native, target_cn0_db_hz, *, correct_probability=.99,
         ideal_scope='Known received waveform and declared search accounting; true-candidate detection reference only.',
         assumptions=assumptions, unmodeled_selected_effects=unmodeled,
         helper_present=helper_available, helper_acquisition_qualified=False,
-        stream_geometry_supported=chosen is not None and bool(native['geometry_feasible']) and helper_available and placement_available,
+        stream_geometry_supported=(chosen is not None and bool(native['geometry_feasible']) and
+            (helper_available or complete_admission is not None) and placement_available),
         stream_support_scope='Public geometry preflight only; bounded source, clock and receiver budgets remain independent checks.',
         native_plan=native)
+    if complete_admission is not None:
+        result['complete_admission_receipt'] = complete_admission
+        result['residual_state_count'] = residual_state_count
+        result['residual_state_prior'] = 1/residual_state_count
+        result['ideal_reference_maximum_tests'] = maximum_tests
+        result['ideal_reference_scope'] = 'Capped exp(receipt log threshold) times matched 2*N*M*R prior multiplicity; numerical reference only.'
     result['forecast_horizon'] = dict(configured_max_active_seconds=limit,
         configured_max_active_days=limit/SECONDS_PER_DAY,
         configured_max_active_julian_years=limit/JULIAN_YEAR_SECONDS,

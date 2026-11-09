@@ -3,6 +3,7 @@
 // It contains no receiver, campaign runner or complete-capture export path.
 #include "datapump/helper_carrier.hpp"
 #include "datapump/compression.hpp"
+#include "datapump/received_text.hpp"
 #include "datapump/triad_modem_v3.hpp"
 #include "datapump/triad_shaping.hpp"
 #include "datapump/triad_helper_burst.hpp"
@@ -47,6 +48,9 @@ constexpr double thermal_n0_dbm_hz = -164;
 constexpr double spectral_skirt_allowance_hz = 200;
 constexpr double tau = 2 * std::numbers::pi;
 constexpr std::size_t stream_chunk_samples = 4096;
+constexpr std::size_t maximum_sequence_bits = 256;
+constexpr std::size_t maximum_short_source_bytes = 16;
+constexpr std::size_t maximum_short_bits = 13 * maximum_short_source_bytes;
 struct Options {
     double added_amplitude_depth = .25;
     std::string scenario = "hf", control = "selected", shaping = "auto";
@@ -64,10 +68,13 @@ struct Options {
     std::optional<double> rf_hz, spread_margin, selective_modulation_rate_hz;
     std::optional<double> data_power_w, helper_power_w, path_loss_db;
     std::optional<std::string> short_message;
+    std::optional<std::string> data_bits, short_encode, short_decode;
     std::uint64_t seed = 1, key_seed = 72001, epoch = 1793850000, symbol_ordinal = 0;
     std::optional<std::uint64_t> burst_wait_tiles;
     unsigned whole_bit_count = 1, whole_bit_wait_count = 0;
+    std::optional<unsigned> observation_slots;
     bool whole_bit_calendar = false;
+    bool explicit_whole_bit_count = false, explicit_bit = false;
     unsigned bit = 0;
     std::uint32_t sample_rate = default_sample_rate;
     double seconds = 16, data_if_hz = 1725;
@@ -124,6 +131,8 @@ Options parse(int argc, char** argv) {
                 "  [--seconds 16] [--rate HZ] [--added-symbols N] [--burst-wait-tiles N]\n"
                 "  [--added-amplitude-depth D (0<D<1)]\n"
                 "  [--whole-bit-count 1..16] [--whole-bit-wait-count 0..1000]\n"
+                "  [--data-bits BITSTRING] (1..256 DATA bits in one continuous native channel)\n"
+                "  [--observation-slots 1..1024] (public receive horizon; requires a whole-bit calendar)\n"
                 "  [--fhss on|off] [--shaping auto|legacy (default: auto)] [--shaping-tail-fraction F]\n"
                 "  [--data-if HZ] [--sample-rate INTEGER_HZ] [--cn0 DB_HZ] [--plan-only]\n"
                 "  --plan-only checks long integer geometry without generating waveform samples or templates.\n"
@@ -142,6 +151,7 @@ Options parse(int argc, char** argv) {
                 "  [--encrypt on|off] [--added-interleave on|off]\n"
                 "  [--thermal-noise on|off] (receiver/channel thermal noise; default on)\n"
                 "  [--short-message TEXT] (plan metadata only; at most256 source bytes)\n"
+                "  --short-encode TEXT | --short-decode BITSTRING (standalone codec,16 bytes/208 bits maximum)\n"
                 "  [--receiver-tail-seconds 0..1]\n"
                 "  [--control selected|flat] [--data on|off] [--helper on|off]\n"
                 "  [--arrival-seconds T] [--symbol-ordinal N]\n"
@@ -171,6 +181,7 @@ Options parse(int argc, char** argv) {
             const auto bit = integer(next(), "source bit");
             if (bit > 1) throw std::invalid_argument("source bit must be 0 or 1");
             o.bit = static_cast<unsigned>(bit);
+            o.explicit_bit = true;
         } else if (arg == "--seconds") o.seconds = real(next(), "duration");
         else if (arg == "--rate") o.inner_rate_hz = real(next(), "inner rate");
         else if (arg == "--added-amplitude-depth") {
@@ -197,8 +208,13 @@ Options parse(int argc, char** argv) {
         } else if (arg == "--whole-bit-count" || arg == "--whole-bit-wait-count") {
             const auto value = integer(next(), "whole-bit calendar control");
             if (value > 1000) throw std::invalid_argument("whole-bit calendar control exceeds its bounded fixture range");
-            if (arg == "--whole-bit-count") { o.whole_bit_count = static_cast<unsigned>(value); o.whole_bit_calendar = true; }
+            if (arg == "--whole-bit-count") { o.whole_bit_count = static_cast<unsigned>(value); o.whole_bit_calendar = true; o.explicit_whole_bit_count = true; }
             else o.whole_bit_wait_count = static_cast<unsigned>(value);
+        } else if (arg == "--observation-slots") {
+            const auto value = integer(next(), "public observation slots");
+            if (value < 1 || value > 1024)
+                throw std::invalid_argument("public observation slots must be in[1,1024]");
+            o.observation_slots = static_cast<unsigned>(value);
         } else if (arg == "--fhss") o.fhss = enabled(next());
         else if (arg == "--shaping") o.shaping = next();
         else if (arg == "--shaping-tail-fraction")
@@ -223,6 +239,25 @@ Options parse(int argc, char** argv) {
         else if (arg == "--helper-power-w") o.helper_power_w = real(next(), "Helper power");
         else if (arg == "--path-loss-db") o.path_loss_db = real(next(), "path loss");
         else if (arg == "--short-message") o.short_message = std::string(next());
+        else if (arg == "--data-bits") {
+            const auto value = next();
+            if (value.empty() || value.size() > maximum_sequence_bits ||
+                value.find_first_not_of("01") != std::string_view::npos)
+                throw std::invalid_argument("DATA sequence must contain1..256 binary bits");
+            o.data_bits = std::string(value);
+        }
+        else if (arg == "--short-encode") {
+            const auto value = next();
+            if (value.size() > maximum_short_source_bytes)
+                throw std::invalid_argument("short encoder input exceeds16 source bytes");
+            o.short_encode = std::string(value);
+        }
+        else if (arg == "--short-decode") {
+            const auto value = next();
+            if (value.size() > maximum_short_bits || value.find_first_not_of("01") != std::string_view::npos)
+                throw std::invalid_argument("short decoder requires at most208 binary bits");
+            o.short_decode = std::string(value);
+        }
         else if (arg == "--ramp-seconds") o.ramp_seconds = real(next(), "ramp duration");
         else if (arg == "--receiver-tail-seconds") o.receiver_tail_seconds = real(next(), "receiver tail duration");
         else if (arg == "--cn0") o.cn0 = real(next(), "C/N0");
@@ -238,6 +273,19 @@ Options parse(int argc, char** argv) {
         else if (arg == "--power-reference") o.power_reference = next();
         else throw std::invalid_argument("unknown option: " + std::string(arg));
     }
+    if (o.short_encode || o.short_decode) {
+        if (argc != 3 || (o.short_encode && o.short_decode))
+            throw std::invalid_argument("short codec operation must be used alone with exactly one input");
+        return o;
+    }
+    if (o.data_bits) {
+        if (o.explicit_bit || o.short_message)
+            throw std::invalid_argument("--data-bits cannot be combined with --bit or --short-message metadata");
+        if (o.explicit_whole_bit_count && o.whole_bit_count != o.data_bits->size())
+            throw std::invalid_argument("explicit whole-bit count differs from DATA sequence");
+        o.whole_bit_count = static_cast<unsigned>(o.data_bits->size());
+        o.whole_bit_calendar = true;
+    }
     if (o.now && o.explicit_epoch) throw std::invalid_argument("--now and --epoch are mutually exclusive");
     if (o.now || (o.stream_server && !o.explicit_epoch)) {
         const auto now = std::time(nullptr);
@@ -248,8 +296,6 @@ Options parse(int argc, char** argv) {
         throw std::invalid_argument("stream kind must be emitted or channel");
     if (o.stream_server && (o.plan_only || o.power_plan_only))
         throw std::invalid_argument("stream service and plan-only output are mutually exclusive");
-    if (o.stream_server && o.whole_bit_count != 1)
-        throw std::invalid_argument("stream server currently supports one complete bit per session");
     if (o.stream_server && o.key_file.empty() && !o.explicit_key_seed)
         throw std::invalid_argument("stream server requires --key-file or explicit --key-seed for a reproducible test fixture");
     if (!o.key_file.empty() && o.explicit_key_seed)
@@ -279,10 +325,14 @@ Options parse(int argc, char** argv) {
         throw std::invalid_argument("Added Symbols must be in [1,1000]");
     if (o.burst_wait_tiles && *o.burst_wait_tiles > 1000)
         throw std::invalid_argument("burst wait tiles must be in [0,1000]");
-    if (o.whole_bit_count < 1 || o.whole_bit_count > 16)
+    if (!o.data_bits && (o.whole_bit_count < 1 || o.whole_bit_count > 16))
         throw std::invalid_argument("whole-bit count must be in [1,16]");
     if (o.symbol_ordinal > UINT64_MAX - (o.whole_bit_count - 1))
         throw std::invalid_argument("whole-bit symbol ordinal overflows");
+    if (o.observation_slots && (!o.whole_bit_calendar || *o.observation_slots < o.whole_bit_count))
+        throw std::invalid_argument("public observation slots require a whole-bit calendar and must contain its transmission");
+    if (o.observation_slots && o.symbol_ordinal > UINT64_MAX - (*o.observation_slots - 1))
+        throw std::invalid_argument("public observation symbol ordinal overflows");
     if (o.whole_bit_wait_count && !o.whole_bit_calendar)
         throw std::invalid_argument("whole-bit wait count requires explicit --whole-bit-count");
     if (o.whole_bit_calendar && o.plan_only)
@@ -868,6 +918,29 @@ int run(const Options& o) {
     static_assert(sizeof(double) == 8 && std::numeric_limits<double>::is_iec559);
     if constexpr (std::endian::native != std::endian::little)
         throw std::runtime_error("fixture export requires a little-endian host");
+    if (o.short_encode) {
+        const Bytes source(o.short_encode->begin(), o.short_encode->end());
+        const auto bits = compression::encode_short_bits(source, maximum_short_bits);
+        std::string encoded;
+        encoded.reserve(bits.size());
+        for (const auto bit : bits) encoded.push_back(static_cast<char>('0' + bit));
+        std::cout << "{\"schema\":\"triad-short-codec-v1\",\"operation\":\"encode\",\"codec\":\"short-prefix\",\"source_bytes\":"
+            << source.size() << ",\"encoded_bits\":" << bits.size() << ",\"bits\":";
+        json_string(std::cout, encoded);
+        std::cout << "}\n";
+        return 0;
+    }
+    if (o.short_decode) {
+        Bytes bits;
+        bits.reserve(o.short_decode->size());
+        for (const auto bit : *o.short_decode) bits.push_back(static_cast<std::uint8_t>(bit - '0'));
+        const auto decoded = compression::decode_short_bits(bits, maximum_short_source_bytes);
+        std::cout << "{\"schema\":\"triad-short-codec-v1\",\"operation\":\"decode\",\"codec\":\"short-prefix\",\"received_bits\":"
+            << bits.size() << ",\"decoded_bytes\":" << decoded.size() << ",\"text\":";
+        json_string(std::cout, received_text(decoded));
+        std::cout << ",\"scope\":\"Exact supplied bit endpoint; caller must establish physical completion before decoding. Text uses the shared received-content filter.\"}\n";
+        return 0;
+    }
     const auto wall_start = std::chrono::steady_clock::now();
     const auto physical = case_for(o);
     const auto physics = resolve_physics(o, physical);
@@ -927,6 +1000,7 @@ int run(const Options& o) {
         burst_plan.emplace(HelperBurstConfig{sample_rate, static_cast<std::uint64_t>(std::llround(bit_samples_real)),
             g.source_samples, g.calendar_origin_sample, o.whole_bit_wait_count, o.helper});
         auto slot = burst_plan->first_slot(burst_plan->add(calendar_origin, o.helper ? lead_samples : 0));
+        whole_slots.reserve(o.whole_bit_count);
         for (unsigned i = 0; i < o.whole_bit_count; ++i) {
             if (slot.pattern_begin.epoch < 6 || slot.pattern_begin.epoch > 4294967289ULL ||
                 slot.helper_end.epoch >= 4294967296ULL)
@@ -937,7 +1011,27 @@ int run(const Options& o) {
         data_offset = burst_plan->distance(calendar_origin, whole_slots.front().support_begin);
         composite_samples = burst_plan->distance(calendar_origin, whole_slots.back().helper_end);
     }
+    const auto public_slot = [&](std::uint64_t index) {
+        if (!burst_plan || index > 1023)
+            throw std::invalid_argument("slot-plan requires a whole-bit calendar and INDEX in[0,1023]");
+        if (f.symbol_ordinal > UINT64_MAX - index)
+            throw std::invalid_argument("public slot symbol ordinal overflows");
+        auto slot = burst_plan->first_slot(burst_plan->add(calendar_origin, o.helper ? lead_samples : 0));
+        for (std::uint64_t i = 0; i < index; ++i) slot = burst_plan->successor(slot);
+        if (slot.pattern_begin.epoch < 6 || slot.pattern_begin.epoch > 4294967289ULL ||
+            slot.helper_end.epoch >= 4294967296ULL)
+            throw std::runtime_error("public slot exceeds keyed epoch or Helper metadata range");
+        return slot;
+    };
     const long double helper_end = static_cast<long double>(composite_samples) / sample_rate;
+    long double observation_end = helper_end;
+    if (o.observation_slots) {
+        // This caller-selected observation budget is independent of DATA
+        // contents/count. The finite source still stops at its actual support;
+        // one channel continues through the remaining quiet scheduled slots.
+        const auto final_observation_slot = public_slot(*o.observation_slots - 1);
+        observation_end = burst_plan->relative_seconds(calendar_origin, final_observation_slot.helper_end);
+    }
     if (o.helper && static_cast<long double>(f.epoch) + std::ceil(helper_end) >= 4294967296.L)
         throw std::runtime_error("source endpoint exceeds Helper32-bit epoch calendar");
 
@@ -1094,20 +1188,61 @@ int run(const Options& o) {
     // arrival/clock realization from choosing the exported file length.
     const auto tx_min = 1 - base_half_ppm * 1e-6;
     const auto rx_max = 1 + base_half_ppm * 1e-6;
+    const auto tx_max = 1 + base_half_ppm * 1e-6;
+    const auto rx_min = 1 - base_half_ppm * 1e-6;
     const auto tail_bound_seconds = selected_delay_ms * .001 + physics.delay_excursion_seconds +
         2 / (3 * g.carrier_spacing_hz) + 32. / sample_rate;
-    config.minimum_capture_samples = static_cast<std::uint64_t>(std::ceil(sample_rate * rx_max *
-        (physical.capture_lead + static_cast<double>(helper_end) / tx_min + physical.arrival_high +
-         physical.capture_trail + tail_bound_seconds))) +
-        static_cast<std::uint64_t>(std::ceil(sample_rate * o.receiver_tail_seconds));
-    std::vector<std::unique_ptr<PatternSource>> whole_sources;
-    for (const auto& slot : whole_slots) {
-        auto source_format = f;
-        source_format.epoch = slot.pattern_begin.epoch;
-        source_format.symbol_ordinal = f.symbol_ordinal + slot.index;
-        whole_sources.push_back(std::make_unique<PatternSource>(source_format, key,
-            static_cast<std::uint8_t>(o.bit ^ (slot.index & 1))));
-    }
+    const auto receiver_tail_samples = static_cast<std::uint64_t>(std::ceil(sample_rate * o.receiver_tail_seconds));
+    const auto public_capture_stop = [&](long double source_end_seconds) {
+        const auto samples = std::ceil(sample_rate * rx_max *
+            (physical.capture_lead + static_cast<double>(source_end_seconds) / tx_min + physical.arrival_high +
+             physical.capture_trail + tail_bound_seconds));
+        if (!std::isfinite(samples) || samples < 0 ||
+            static_cast<long double>(samples) > static_cast<long double>(UINT64_MAX - receiver_tail_samples))
+            throw std::runtime_error("public receive window overflows sample coordinates");
+        return static_cast<std::uint64_t>(samples) + receiver_tail_samples;
+    };
+    const auto public_capture_first = [&](long double source_begin_seconds) {
+        // Keep one public capture-lead interval of preroll before the earliest
+        // possible Helper/DATA support. Global physical RX coordinates remain
+        // authoritative when this bounded per-slot observation is sliced.
+        const auto samples = std::floor(sample_rate * rx_min *
+            (static_cast<double>(source_begin_seconds) / tx_max + physical.arrival_low));
+        if (!std::isfinite(samples) || static_cast<long double>(samples) > UINT64_MAX)
+            throw std::runtime_error("public receive window overflows sample coordinates");
+        return samples > 0 ? static_cast<std::uint64_t>(samples) : std::uint64_t{0};
+    };
+    const bool selective_signal_tail = physics.modulation_rate_hz > 0 &&
+        (physics.slow_depth > 0 || physics.fast_depth > 0);
+    const auto signal_tail_seconds = physics.delay_ms * .001 + physics.delay_excursion_seconds +
+        (selective_signal_tail ? 2 / (3 * g.carrier_spacing_hz) : 0.) + 32. / sample_rate;
+    const auto public_signal_first = [&](long double source_begin_seconds) {
+        // The finite source interpolation can reach slightly before the
+        // nominal edge. Keep the same32-sample engineering guard as the
+        // public channel envelope, including the slowest TX clock.
+        const auto samples = std::floor(sample_rate * rx_min *
+            (physical.capture_lead + static_cast<double>(source_begin_seconds) / tx_max +
+             physical.arrival_low - 32. / (sample_rate * tx_min)));
+        if (!std::isfinite(samples) || static_cast<long double>(samples) > UINT64_MAX)
+            throw std::runtime_error("public signal envelope overflows sample coordinates");
+        return samples > 0 ? static_cast<std::uint64_t>(samples) : std::uint64_t{0};
+    };
+    const auto public_signal_stop = [&](long double source_end_seconds) {
+        // Signal support excludes observation-only capture trail/padding.
+        // The selective drain exists only when that public filter is enabled.
+        const auto samples = std::ceil(sample_rate * rx_max *
+            (physical.capture_lead + static_cast<double>(source_end_seconds) / tx_min +
+             physical.arrival_high + signal_tail_seconds));
+        if (!std::isfinite(samples) || samples < 0 || static_cast<long double>(samples) > UINT64_MAX)
+            throw std::runtime_error("public signal envelope overflows sample coordinates");
+        return static_cast<std::uint64_t>(samples);
+    };
+    config.minimum_capture_samples = public_capture_stop(observation_end);
+    // Only the current slot owns a DATA pattern cache. The complete transmitter
+    // callback and StreamingChannel remain alive across DATA, Helper and quiet
+    // intervals, so changing the source bit never resets propagation state.
+    std::unique_ptr<PatternSource> whole_source;
+    std::size_t whole_source_index = std::numeric_limits<std::size_t>::max();
 
     long double source_data_energy = 0, source_helper_energy = 0;
     std::uint64_t source_rows = 0;
@@ -1121,8 +1256,9 @@ int run(const Options& o) {
         -complete_data_bandwidth / 2 - spectral_skirt_allowance_hz;
     emitted.maximum_frequency_hz = std::max(complete_data_bandwidth / 2,
         o.helper ? plan.frequency_hz - data_if_hz : 0.) + spectral_skirt_allowance_hz;
-    emitted.working_bytes = data_source.working_bytes() + (generator ? sizeof(helper::Generator) : 0);
-    for (const auto& source : whole_sources) emitted.working_bytes += source->working_bytes();
+    emitted.working_bytes = data_source.working_bytes() + (generator ? sizeof(helper::Generator) : 0) +
+        whole_slots.capacity() * sizeof(HelperBurstSlot) + (o.data_bits ? o.data_bits->capacity() : 0) +
+        (o.whole_bit_calendar ? g.source_workspace_bytes : 0);
     std::size_t whole_slot_index = 0;
     emitted.sample_at = [&](std::uint64_t n) {
         const auto seconds = static_cast<long double>(n) / sample_rate;
@@ -1135,8 +1271,22 @@ int run(const Options& o) {
                 ++whole_slot_index;
             const auto& slot = whole_slots[whole_slot_index];
             const auto offset = burst_plan->distance(calendar_origin, slot.support_begin);
-            if (o.data && n >= offset && n - offset < g.source_samples)
-                raw_data = whole_sources[whole_slot_index]->sample_at(static_cast<long double>(n - offset));
+            if (o.data && n >= offset && n - offset < g.source_samples) {
+                if (whole_source_index != whole_slot_index) {
+                    auto source_format = f;
+                    source_format.epoch = slot.pattern_begin.epoch;
+                    source_format.symbol_ordinal = f.symbol_ordinal + slot.index;
+                    const auto bit = o.data_bits ? (*o.data_bits)[whole_slot_index] - '0' :
+                        static_cast<int>(o.bit ^ (slot.index & 1));
+                    // Free the previous private cache before allocating its
+                    // replacement, preserving the one-active-source bound.
+                    whole_source.reset();
+                    whole_source = std::make_unique<PatternSource>(source_format, key,
+                        static_cast<std::uint8_t>(bit));
+                    whole_source_index = whole_slot_index;
+                }
+                raw_data = whole_source->sample_at(static_cast<long double>(n - offset));
+            }
             active_helper_begin = burst_plan->relative_seconds(calendar_origin, slot.helper_begin);
             active_helper_end = burst_plan->relative_seconds(calendar_origin, slot.helper_end);
             helper_active = o.helper && seconds >= active_helper_begin && seconds < active_helper_end;
@@ -1177,6 +1327,7 @@ int run(const Options& o) {
         std::map<std::pair<int, unsigned>, std::unique_ptr<PatternSource>> templates;
         std::size_t template_bytes = 0;
         std::size_t template_cache_evictions = 0;
+        std::uint64_t basis_address_generation = 0;
         std::uint64_t cursor = 0;
         std::vector<Complex> samples(maximum_rows);
         std::vector<std::uint8_t> valid(maximum_rows, 1);
@@ -1212,11 +1363,16 @@ int run(const Options& o) {
         std::cout
             << ",\"maximum_rows\":" << maximum_rows << ",\"maximum_columns\":" << maximum_columns
             << ",\"mapped_basis_supported\":true,\"mapped_basis_maximum_offset_samples\":1048576"
+            << ",\"basis_address_supported\":true"
+            << ",\"slot_plan_supported\":" << boolean(o.whole_bit_calendar)
+            << ",\"public_observation_slots\":";
+        if (o.observation_slots) std::cout << *o.observation_slots; else std::cout << "null";
+        std::cout
             << ",\"workspace_budget_bytes\":" << stream_budget << ",\"fixed_workspace_bytes\":" << fixed_bytes
             << ",\"stream_kind\":"; json_string(std::cout, o.stream_kind);
         std::cout << ",\"key_source\":"; json_string(std::cout, o.key_file.empty() ? "explicit-test-fixture-seed" : "keyfile");
         std::cout << ",\"power\":{"; data_power_json(std::cout, o, data_reference, data_calibration_gain, data_gain);
-        std::cout << "},\"basis_scope\":\"Public DATA pattern only; arrival is absolute seconds in the requested observation coordinate. Fixed key/epoch per session; all three carriers retained.\""
+        std::cout << "},\"basis_scope\":\"Public DATA pattern only; arrival is absolute seconds in the requested observation coordinate. Key is fixed; basis-address selects public epoch/ordinal independently of emitted payload and channel. All three carriers retained.\""
             << ",\"scope\":\"Bounded pull source, not a receiver or real-time guarantee. Emitted kind has no channel or thermal noise. Physical null and full-duration power accuracy require qualification.\"}\n" << std::flush;
         const auto read_line = []() {
             std::string line;
@@ -1251,7 +1407,79 @@ int run(const Options& o) {
                     << ",\"template_cache_evictions\":" << template_cache_evictions << "}\n" << std::flush;
                 return 0;
             }
-            if (name == "next") {
+            if (name == "slot-plan") {
+                std::string index_text;
+                if (!(command >> index_text)) throw std::invalid_argument("slot-plan requires INDEX");
+                no_extra(command);
+                const auto index = integer(index_text, "public slot index");
+                const auto slot = public_slot(index);
+                const auto next = burst_plan->successor(slot);
+                const auto source_begin = burst_plan->distance(calendar_origin, slot.support_begin);
+                const auto next_source_begin = burst_plan->distance(calendar_origin, next.support_begin);
+                const auto helper_begin = burst_plan->distance(calendar_origin, slot.helper_begin);
+                const auto helper_stop = burst_plan->distance(calendar_origin, slot.helper_end);
+                const auto pattern_begin = burst_plan->distance(calendar_origin, slot.pattern_begin);
+                const auto pattern_stop = burst_plan->distance(calendar_origin, slot.pattern_end);
+                const auto source_stop = burst_plan->distance(calendar_origin, slot.support_end);
+                const auto first = public_capture_first(burst_plan->relative_seconds(calendar_origin, slot.helper_begin));
+                const auto stop = public_capture_stop(burst_plan->relative_seconds(calendar_origin, slot.helper_end));
+                const auto data_first = public_signal_first(burst_plan->relative_seconds(calendar_origin, slot.support_begin));
+                const auto data_stop = public_signal_stop(burst_plan->relative_seconds(calendar_origin, slot.support_end));
+                const auto previous_stop = index ? public_signal_stop(burst_plan->relative_seconds(
+                    calendar_origin, public_slot(index - 1).helper_end)) : std::uint64_t{0};
+                const auto next_first = public_signal_first(burst_plan->relative_seconds(calendar_origin, next.helper_begin));
+                if (stop <= first) throw std::runtime_error("public receive window is empty");
+                const auto quiet_first = std::min(stop, std::max({first, data_first, previous_stop}));
+                const auto quiet_stop = std::max(quiet_first, std::min({stop, data_stop, next_first}));
+                std::cout << "{\"schema\":\"triad-public-slot-plan-v1\",\"index\":" << index
+                    << ",\"sample_rate_hz\":" << sample_rate
+                    << ",\"pattern_epoch\":" << slot.pattern_begin.epoch
+                    << ",\"symbol_ordinal\":" << f.symbol_ordinal + index
+                    << ",\"source_begin_samples\":" << source_begin
+                    << ",\"next_source_begin_samples\":" << next_source_begin
+                    << ",\"source_samples\":" << g.source_samples
+                    << ",\"source_calendar_origin_sample\":" << g.calendar_origin_sample
+                    << ",\"helper_begin_samples\":" << helper_begin
+                    << ",\"pattern_begin_samples\":" << pattern_begin
+                    << ",\"pattern_end_samples\":" << pattern_stop
+                    << ",\"source_end_samples\":" << source_stop
+                    << ",\"helper_end_samples\":" << helper_stop
+                    << ",\"minimum_source_step_samples\":" << static_cast<std::uint64_t>(sample_rate) * (o.helper ? 76 : 60)
+                    << ",\"receiver_window_first_sample\":" << first
+                    << ",\"receiver_window_stop_sample\":" << stop
+                    << ",\"receiver_window_physical_origin_sample\":" << first
+                    << ",\"receiver_window_samples\":" << stop - first
+                    << ",\"receiver_data_first_sample\":" << data_first
+                    << ",\"receiver_data_stop_sample\":" << data_stop
+                    << ",\"receiver_previous_signal_stop_sample\":" << previous_stop
+                    << ",\"receiver_next_signal_first_sample\":" << next_first
+                    << ",\"quiet_aperture_first_sample\":" << quiet_first
+                    << ",\"quiet_aperture_stop_sample\":" << quiet_stop
+                    << ",\"quiet_aperture_available\":" << boolean(quiet_first < quiet_stop)
+                    << ",\"quiet_aperture_truncated\":" << boolean(quiet_first != data_first || quiet_stop != data_stop)
+                    << ",\"capture_lead_seconds\":" << physical.capture_lead
+                    << ",\"window_capture_lead_seconds\":" << physical.capture_lead - static_cast<long double>(first) / sample_rate
+                    << ",\"scope\":\"Public nominal source calendar and bounded RX window only; independent of transmitted payload/count, realized channel and physical message end. Source endpoints are relative to the fixed transmitter epoch; RX indices retain the global observation origin.\"}\n" << std::flush;
+            } else if (name == "basis-address") {
+                std::string epoch_text, ordinal_text;
+                if (!(command >> epoch_text >> ordinal_text))
+                    throw std::invalid_argument("basis-address requires EPOCH ORDINAL");
+                no_extra(command);
+                const auto epoch = integer(epoch_text, "basis public epoch");
+                const auto ordinal = integer(ordinal_text, "basis public symbol ordinal");
+                if (epoch < 6 || epoch > 4294967289ULL)
+                    throw std::invalid_argument("basis epoch must support all thirteen public alternatives");
+                if (basis_address_generation == UINT64_MAX)
+                    throw std::runtime_error("basis address generation overflow");
+                templates.clear();
+                template_bytes = 0;
+                ++template_cache_evictions;
+                candidate_format.epoch = epoch;
+                candidate_format.symbol_ordinal = ordinal;
+                ++basis_address_generation;
+                std::cout << "{\"basis_epoch\":" << epoch << ",\"basis_symbol_ordinal\":" << ordinal
+                    << ",\"template_cache_cleared\":true,\"generation\":" << basis_address_generation << "}\n" << std::flush;
+            } else if (name == "next") {
                 std::string count_text;
                 if (!(command >> count_text)) throw std::invalid_argument("next requires COUNT");
                 no_extra(command);

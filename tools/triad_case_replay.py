@@ -13,6 +13,7 @@ import json
 import math
 from pathlib import Path
 import time
+from collections.abc import Mapping
 
 import numpy as np
 from scipy.fft import next_fast_len
@@ -156,8 +157,24 @@ def _mapped_identity(command, binary, descriptor):
     return _sha256(data)
 
 
+def _local_fidelity_manifest(manifest, public_address, clocks, *, source_window_samples, fs):
+    """Make the bounded normalized calendar used only for profile admission."""
+    local = copy.deepcopy(manifest)
+    prior = local['calendar']['arrival_prior_seconds']
+    lead = 8.
+    tail = float(local['channel']['spread_delay_ms'])*.001
+    maximum_clock = max(map(abs, clocks), default=0.)*1e-6
+    capture = math.ceil((lead+2+source_window_samples/fs+max(0., float(prior[1]))+
+                         tail+1)*fs/(1-maximum_clock))
+    local['calendar'].update(capture_lead_seconds=lead, data_sample_offset=2*fs,
+        capture_samples=capture, physical_origin_sample=0)
+    local['public_epoch_seconds'] = public_address['pattern_epoch']
+    local.setdefault('format', {})['symbol_ordinal'] = public_address['symbol_ordinal']
+    return local
+
+
 def _validate_mapped_profile(source, manifest, clocks, *, output_fs, pass_edge,
-                             stop_edge, memory_limit_bytes, threads, sampling_step=60):
+                             stop_edge, public_address, memory_limit_bytes, threads, sampling_step=60):
     """Cheap current-input admission; no heading or historical fixture whitelist."""
     if isinstance(sampling_step, bool) or sampling_step not in (3, 60):
         raise ValueError('local mapped-profile validation supports only fixed S=3 or S=60')
@@ -166,26 +183,58 @@ def _validate_mapped_profile(source, manifest, clocks, *, output_fs, pass_edge,
     first = int(source.plan['geometry']['source_calendar_origin_sample'] +
         .5*min(float(fmt['tile_seconds']), float(fmt['elapsed_bit_seconds']))*fs)
     count = min(2*fs, int(source.descriptor['source_samples'])-first)
-    if count < 256 or count*26*16 > memory_limit_bytes//4:
+    native_workspace = max(int(source.descriptor.get('fixed_workspace_bytes', 0)),
+        int(source.descriptor.get('workspace_budget_bytes', 0)))
+    # Native pipe bytes, decoded basis and contiguous/hash views may coexist.
+    # Reserve all four template-sized copies before requesting any basis rows.
+    template_reserve = count*26*16*4
+    available = memory_limit_bytes-native_workspace-template_reserve
+    if count < 256 or available <= 0:
         raise MemoryError('local mapped-profile validation exceeds its bounded public bank')
     rows = [(bit, epoch, 0., 0., 0., 0., 0.) for epoch in EPOCHS for bit in (0, 1)]
     templates = source.basis(first, count, rows).reshape(13, 2, count)
-    local = copy.deepcopy(manifest)
-    prior = local['calendar']['arrival_prior_seconds']
-    lead = float(local['calendar']['capture_lead_seconds'])
+    # Only the short local fidelity diagnostic uses a normalized receive
+    # calendar. Its eight-second pre-roll contains the complete -7.035 s prior.
+    local = _local_fidelity_manifest(manifest, public_address, clocks,
+        source_window_samples=count, fs=fs)
+    lead = local['calendar']['capture_lead_seconds']
+    capture = local['calendar']['capture_samples']
     tail = float(local['channel']['spread_delay_ms'])*.001
-    capture = math.ceil((lead+2+count/fs+max(0., float(prior[1]))+tail+1)*fs)
-    local['calendar'].update(capture_lead_seconds=lead, data_sample_offset=2*fs,
-        capture_samples=capture)
     identity = _sha256(np.ascontiguousarray(templates).view(np.uint8))
     options = dict(clock_ppm=clocks, output_sample_rate=output_fs,
         pass_edge_hz=pass_edge, stop_edge_hz=stop_edge, precision='fp64',
-        workers=threads, memory_limit_bytes=memory_limit_bytes)
+        workers=threads, memory_limit_bytes=available)
     exact = FFTScreen(local, templates, EPOCHS, **options)
+    options['memory_limit_bytes'] = available-exact.resident_estimate
+    if options['memory_limit_bytes'] <= 0:
+        raise MemoryError('local mapped-profile pair exceeds preparation workspace')
     approximate = FFTScreen(local, None, EPOCHS, source_samples=count,
         template_identity=identity, template_sampling_step=sampling_step,
         mapped_template_provider=lambda epoch, bit, positions:
             _bounded_basis(source, epoch, bit, first+positions), **options)
+    residents = exact.resident_estimate+approximate.resident_estimate
+    # The comparison retains two orthonormal banks, plus the current QR/SVD
+    # operands. Controls reserve cubic interpolation, phase, clean/noisy input
+    # and RNG temporaries. These are separate phases, not simultaneous sums.
+    comparison_scratch = (2*len(exact.workspaces)+16)*exact.kernel_rows*len(exact.rays)*16+65536
+    control_scratch = 32*capture*16
+    score_peaks = []
+    for screen in (exact, approximate):
+        frequencies = np.asarray([0.])
+        groups = (None if screen.correlation_method == 'frequency' else
+            screen._lag_frequency_groups([0.], None))
+        score_plan = screen._correlation_plan(frequencies, groups, raw_input=True, top_per_bit=2)
+        if score_plan['selected'] is None:
+            raise MemoryError('local mapped-profile control score exceeds workspace or work limit')
+        score_peaks.append(score_plan['estimated_peak_bytes_by_method'][score_plan['selected'][0]]-
+                           screen.resident_estimate)
+    local_peak = native_workspace+template_reserve+max(
+        exact.preparation_peak_estimate_bytes,
+        exact.resident_estimate+approximate.preparation_peak_estimate_bytes,
+        residents+comparison_scratch,
+        residents+control_scratch+max(score_peaks))
+    if local_peak > memory_limit_bytes:
+        raise MemoryError('local mapped-profile comparison/control peak exceeds workspace')
     comparison = compare_template_projectors(exact, approximate)
     # Matched clean and common-noise controls exercise the actual selector.
     # This is a local working-model discriminator, never a success-rate trial.
@@ -208,6 +257,7 @@ def _validate_mapped_profile(source, manifest, clocks, *, output_fs, pass_edge,
         right = max(after['candidates'], key=lambda row:row['score'])
         controls.append((left['bit'], left['epoch']) == (right['bit'], right['epoch']))
     comparison.update(source_window_first=first, source_window_samples=count,
+        preparation_peak_estimate_bytes=local_peak,
         common_clean_noisy_winner_controls=controls, sampling_step=sampling_step,
         output_sample_rate_hz=output_fs, pass_edge_hz=pass_edge, stop_edge_hz=stop_edge)
     comparison['accepted'] = bool(comparison['rank_agreement'] and
@@ -220,6 +270,170 @@ def _validate_mapped_profile(source, manifest, clocks, *, output_fs, pass_edge,
         raise ValueError('current local mapped-template fidelity gate failed: '+
             json.dumps(comparison, sort_keys=True))
     return comparison
+
+
+def _normalize_public_address(public_address):
+    if not isinstance(public_address, Mapping) or set(public_address) != {
+            'pattern_epoch', 'symbol_ordinal'}:
+        raise ValueError('public address must map pattern_epoch and symbol_ordinal explicitly')
+    epoch, ordinal = public_address['pattern_epoch'], public_address['symbol_ordinal']
+    if (isinstance(epoch, bool) or not isinstance(epoch, int) or not 6 <= epoch <= 4_294_967_289 or
+            isinstance(ordinal, bool) or not isinstance(ordinal, int) or not 0 <= ordinal < 2**64):
+        raise ValueError('public address epoch or symbol ordinal is outside its native integer range')
+    return {'pattern_epoch': epoch, 'symbol_ordinal': ordinal}
+
+
+def _source_identity_digest(source_identity, address):
+    try:
+        serialized = json.dumps(dict(source_identity=source_identity,
+            public_address=address), sort_keys=True, separators=(',', ':'), allow_nan=False)
+    except (TypeError, ValueError) as error:
+        raise ValueError('source identity must be finite JSON data') from error
+    if source_identity is None or source_identity == '':
+        raise ValueError('a nonempty public source identity is required')
+    return _sha256(serialized.encode())
+
+
+def build_public_screen(source, manifest, *, public_address, source_identity,
+                        memory_limit_bytes, threads, mapped_step=None,
+                        screen_factory=FFTScreen):
+    """Build the public coarse bank for an explicit current native pattern.
+
+    The source descriptor describes its original stream/calendar. The public
+    template basis is independently addressed by ``public_address`` and bound
+    into the returned template identity. Any local fidelity capture changes
+    stay inside that diagnostic; the returned full-screen manifest retains the
+    caller's receive geometry.
+    """
+    began = time.perf_counter()
+    address = _normalize_public_address(public_address)
+    if (isinstance(threads, bool) or not isinstance(threads, int) or threads < 1 or
+            isinstance(memory_limit_bytes, bool) or not isinstance(memory_limit_bytes, int) or
+            memory_limit_bytes < 1):
+        raise ValueError('positive thread count and memory limit are required')
+    address_started = time.perf_counter()
+    address_receipt = source.set_basis_address(address['pattern_epoch'], address['symbol_ordinal'])
+    address_seconds = time.perf_counter()-address_started
+    if (address_receipt.get('basis_epoch') != address['pattern_epoch'] or
+            address_receipt.get('basis_symbol_ordinal') != address['symbol_ordinal'] or
+            address_receipt.get('template_cache_cleared') is not True):
+        raise ValueError('native source did not acknowledge the requested public basis address')
+    descriptor = source.descriptor
+    plan = source.plan
+    fs = int(descriptor['sample_rate_hz'])
+    if fs != 6000:
+        raise ValueError('whole-bit public screen currently requires 6000-Hz native input')
+    raw_source_samples = int(descriptor['source_samples'])
+    raw_capture_samples = int(descriptor['total_samples'])
+    if raw_source_samples < 4 or raw_capture_samples < 1:
+        raise ValueError('native full-bit source has incomplete finite geometry')
+    public_manifest = copy.deepcopy(manifest)
+    public_manifest['public_epoch_seconds'] = address['pattern_epoch']
+    public_manifest.setdefault('format', {})['symbol_ordinal'] = address['symbol_ordinal']
+    physics = plan['physics']
+    grid = public_grid(physics, physics['arrival_prior_seconds'], EPOCHS)
+    clock_bank = ((-grid.clock_bound, 0., grid.clock_bound) if grid.clock_bound else (0.,))
+    required = (float(plan['format']['occupied_bandwidth_hz'])/2 +
+        abs(float(physics['spread_doppler_hz'])) + grid.frequency_bound)
+    output_fs = next((rate for rate in range(1, fs+1)
+        if fs % rate == 0 and .4*rate > required), None)
+    if output_fs is None:
+        raise ValueError('full public DATA prior does not fit the projected Nyquist band')
+    eligible = (float(plan['format']['inner_rate_hz']) <= 1 and
+        not plan['format']['fhss'] and required < 4.)
+    exact_work = (raw_source_samples*len(EPOCHS)*2*len(clock_bank)*
+        (2 if physics['spread_delay_ms'] or physics['spread_doppler_hz'] else 1))
+    eligible_fhss = (exact_work > _MAX_INTEGER_TEMPLATE_WORK and
+        plan['format']['fhss'] and required < 240.)
+    selected_step = (60 if eligible else 3 if eligible_fhss else 1) if mapped_step is None else mapped_step
+    if isinstance(selected_step, bool) or selected_step not in (1, 3, 60):
+        raise ValueError('only fixed S=3 or S=60 mapped templates are supported')
+    if selected_step == 60 and not eligible:
+        raise ValueError('S=60 templates require a locally validated slow non-hopping waveform')
+    if selected_step == 3 and not eligible_fhss:
+        raise ValueError('S=3 templates require an over-budget exact FHSS bank within the 240 Hz prior band')
+    pass_edge, stop_edge = .4*output_fs, .49*output_fs
+    profile_validation, profile_validation_seconds = None, 0.
+    if selected_step > 1:
+        output_fs, pass_edge, stop_edge = ((600, 240., 294.) if selected_step == 3 else
+            (10, .4, 4.9) if required < .4 else
+            (5, 2., 2.45) if required < 2. else (20, 4., 9.8))
+        profile_started = time.perf_counter()
+        profile_validation = _validate_mapped_profile(source, public_manifest, clock_bank,
+            output_fs=output_fs, pass_edge=pass_edge, stop_edge=stop_edge,
+            public_address=address, memory_limit_bytes=memory_limit_bytes,
+            threads=threads, sampling_step=selected_step)
+        profile_validation_seconds = time.perf_counter()-profile_started
+    template_work = (math.ceil(raw_source_samples/selected_step)*len(EPOCHS)*2*len(clock_bank)*
+        (2 if physics['spread_delay_ms'] or physics['spread_doppler_hz'] else 1))
+    cap = _MAX_MAPPED_TEMPLATE_POINTS if selected_step > 1 else _MAX_INTEGER_TEMPLATE_WORK
+    if template_work > cap:
+        raise MemoryError('full public template preparation exceeds the bounded native-work limit')
+    source_digest = _source_identity_digest(source_identity, address)
+    mapped_provider = None
+    raw_provider = None
+    if selected_step > 1:
+        mapped_provider = lambda epoch, bit, positions: _bounded_basis(source, epoch, bit, positions)
+    else:
+        def raw_provider(epoch, bit, first, count):
+            return _integer_basis(source, epoch, bit, first, count)
+    started = time.perf_counter()
+    native_workspace = max(int(descriptor.get('fixed_workspace_bytes', 0)),
+                           int(descriptor.get('workspace_budget_bytes', 0)))
+    available = memory_limit_bytes-native_workspace
+    screen = screen_factory(public_manifest, None, EPOCHS,
+        clock_ppm=clock_bank, output_sample_rate=output_fs,
+        pass_edge_hz=pass_edge, stop_edge_hz=stop_edge,
+        workers=threads, precision='fp64', memory_limit_bytes=available,
+        maximum_frequency_points=4096 if selected_step == 60 else 1024,
+        maximum_fft_products=32768,
+        correlation_method='auto' if selected_step == 60 else 'frequency',
+        template_provider=raw_provider, source_samples=raw_source_samples,
+        template_identity=source_digest,
+        mapped_template_provider=mapped_provider,
+        template_sampling_step=selected_step)
+    screen_seconds = time.perf_counter()-started
+    preparation_peak = max(screen.preparation_peak_estimate_bytes+native_workspace,
+        (profile_validation or {}).get('preparation_peak_estimate_bytes', 0))
+    profile = dict(schema='triad-public-coarse-bank-profile-v1',
+        template_sampling_step=selected_step, projected_sample_rate_hz=output_fs,
+        pass_edge_hz=pass_edge, stop_edge_hz=stop_edge,
+        public_epochs=list(EPOCHS), public_clocks_ppm=list(clock_bank),
+        public_arrival_prior_seconds=list(physics['arrival_prior_seconds']),
+        public_frequency_bound_hz=grid.frequency_bound,
+        current_input_fidelity_validation=profile_validation,
+        address_bound_native_receipt=address_receipt,
+        fidelity_scope='A mapped profile is admitted only by its current-source local bank discriminator; this is not a full-waveform error bound.')
+    work = dict(raw_source_samples=raw_source_samples,
+        raw_capture_samples=raw_capture_samples,
+        public_template_lanes=len(EPOCHS)*2*len(clock_bank),
+        native_basis_sample_work_estimate=template_work,
+        native_basis_work_cap=cap,
+        complete_projected_rows=screen.crop_rows,
+        fft_workspace_bytes=screen.resident_estimate,
+        preparation_peak_estimate_bytes=preparation_peak,
+        mapped_template_profile_validation_seconds=profile_validation_seconds,
+        fft_bank_preparation_seconds=screen_seconds,
+        native_address_selection_seconds=address_seconds,
+        scope='Fixed public path geometry and current native source identity; admission bounds materialization work before full-bank construction.')
+    preparation = time.perf_counter()-began
+    receipt = dict(native_address_selection_seconds=address_seconds,
+        local_profile_validation_seconds=profile_validation_seconds,
+        public_fft_bank_preparation_seconds=screen_seconds,
+        native_source_sample_extent=raw_source_samples,
+        native_channel_capture_extent=raw_capture_samples,
+        complete_projected_output_rows=screen.crop_rows,
+        profile_native_template_point_estimate=template_work,
+        source_fft_workspace_estimate_bytes=screen.resident_estimate,
+        preparation_peak_estimate_bytes=preparation_peak,
+        scope='Bound to current native source, explicit pattern epoch/symbol ordinal, full receive geometry and public search. Local fidelity validation alone uses its normalized diagnostic calendar.')
+    return dict(screen=screen, manifest=public_manifest, grid=grid,
+        clock_bank=clock_bank, profile=profile, work=work,
+        template_identity=source_digest, source_identity=source_identity,
+        public_address=address, address_receipt=address_receipt,
+        receiver_preparation_seconds=preparation,
+        profile_validation_seconds=profile_validation_seconds,
+        work_receipt=receipt)
 
 
 class PreparedReplay:
@@ -259,80 +473,28 @@ class PreparedReplay:
             self.manifest = _manifest(self.plan, descriptor, raw_capture_samples, 0, 72001)
             self.manifest['power']['complex_noise_variance'] = 1.
             self.manifest['helper_enabled'] = bool(descriptor['helper_enabled'])
-            physics = self.plan['physics']
-            grid = public_grid(physics, physics['arrival_prior_seconds'], EPOCHS)
-            self.grid = grid
-            self.clock_bank = ((-grid.clock_bound, 0., grid.clock_bound)
-                if grid.clock_bound else (0.,))
-            occupied_half = float(self.plan['format']['occupied_bandwidth_hz']) / 2
-            required = occupied_half + abs(float(physics['spread_doppler_hz'])) + grid.frequency_bound
-            output_fs = next((rate for rate in range(1, self.fs+1)
-                if self.fs % rate == 0 and .4*rate > required), None)
-            if output_fs is None:
-                raise ValueError('full public DATA prior does not fit the projected Nyquist band')
-            # Each fixed mapped profile must pass the current native local
-            # bank gate. Other configurations keep the exact integer provider
-            # and its original bounded-work admission.
-            eligible = (float(self.plan['format']['inner_rate_hz']) <= 1 and
-                not self.plan['format']['fhss'] and required < 4.)
-            exact_work = (raw_source_samples*len(EPOCHS)*2*len(self.clock_bank)*
-                (2 if physics['spread_delay_ms'] or physics['spread_doppler_hz'] else 1))
-            eligible_fhss = (exact_work > _MAX_INTEGER_TEMPLATE_WORK and
-                self.plan['format']['fhss'] and required < 240.)
-            selected_step = (60 if eligible else 3 if eligible_fhss else 1) if mapped_step is None else mapped_step
-            if isinstance(selected_step, bool) or selected_step not in (1, 3, 60):
-                raise ValueError('only fixed S=3 or S=60 mapped templates are supported')
-            if selected_step == 60 and not eligible:
-                raise ValueError('S=60 templates require a locally validated slow non-hopping waveform')
-            if selected_step == 3 and not eligible_fhss:
-                raise ValueError('S=3 templates require an over-budget exact FHSS bank within the 240 Hz prior band')
-            pass_edge, stop_edge = .4*output_fs, .49*output_fs
-            self.mapped_profile_validation = None
-            self.profile_validation_seconds = 0.
-            if selected_step > 1:
-                output_fs, pass_edge, stop_edge = ((600, 240., 294.) if selected_step == 3 else
-                    (10, .4, 4.9) if required < .4 else
-                    (5, 2., 2.45) if required < 2. else (20, 4., 9.8))
-                profile_began = time.perf_counter()
-                self.mapped_profile_validation = _validate_mapped_profile(self.template_source,
-                    self.manifest, self.clock_bank, output_fs=output_fs,
-                    pass_edge=pass_edge, stop_edge=stop_edge,
-                    memory_limit_bytes=self.memory_limit, threads=threads,
-                    sampling_step=selected_step)
-                self.profile_validation_seconds = time.perf_counter()-profile_began
-            self.output_sample_rate = output_fs
-            workspace_count = len(EPOCHS)*2*len(self.clock_bank)
-            self.template_work_estimate = (math.ceil(raw_source_samples/selected_step) *
-                workspace_count * (2 if physics['spread_delay_ms'] or physics['spread_doppler_hz'] else 1))
-            cap = (_MAX_MAPPED_TEMPLATE_POINTS if selected_step > 1 else _MAX_INTEGER_TEMPLATE_WORK)
-            if self.template_work_estimate > cap:
-                raise MemoryError('full public template preparation exceeds the bounded native-work limit')
-            template_source_hash = _mapped_identity(command, executable, descriptor)
-            mapped_provider = None
-            raw_provider = None
-            if selected_step > 1:
-                mapped_provider = lambda epoch, bit, positions: _bounded_basis(
-                    self.template_source, epoch, bit, positions)
-            else:
-                def raw_provider(epoch, bit, first, count):
-                    return _integer_basis(self.template_source, epoch, bit, first, count)
-            before_screen = time.perf_counter()
-            available = self.memory_limit - int(descriptor.get('fixed_workspace_bytes', 0))
-            self.screen = screen_factory(self.manifest, None,
-                EPOCHS, clock_ppm=self.clock_bank, output_sample_rate=output_fs,
-                pass_edge_hz=pass_edge, stop_edge_hz=stop_edge,
-                workers=threads, precision='fp64', memory_limit_bytes=available,
-                maximum_frequency_points=4096 if selected_step == 60 else 1024,
-                maximum_fft_products=32768,
-                correlation_method='auto' if selected_step == 60 else 'frequency',
-                template_provider=raw_provider, source_samples=raw_source_samples,
-                template_identity=template_source_hash,
-                mapped_template_provider=mapped_provider,
-                template_sampling_step=selected_step)
-            self.receiver_preparation_seconds = time.perf_counter()-before_screen+self.profile_validation_seconds
+            public_address = {'pattern_epoch': int(descriptor['epoch']),
+                              'symbol_ordinal': int(descriptor['symbol_ordinal'])}
+            source_identity = _mapped_identity(command, executable, descriptor)
+            bank = build_public_screen(self.template_source, self.manifest,
+                public_address=public_address, source_identity=source_identity,
+                memory_limit_bytes=self.memory_limit, threads=threads,
+                mapped_step=mapped_step, screen_factory=screen_factory)
+            self.manifest = bank['manifest']
+            self.grid, self.clock_bank = bank['grid'], bank['clock_bank']
+            self.screen = bank['screen']
+            self.public_address = bank['public_address']
+            self.public_bank_profile = bank['profile']
+            self.public_bank_work = bank['work']
+            self.public_bank_work_receipt = bank['work_receipt']
+            self.output_sample_rate = self.public_bank_profile['projected_sample_rate_hz']
+            self.mapped_profile_validation = self.public_bank_profile['current_input_fidelity_validation']
+            self.profile_validation_seconds = bank['profile_validation_seconds']
+            self.template_work_estimate = self.public_bank_work['native_basis_sample_work_estimate']
+            self.receiver_preparation_seconds = bank['receiver_preparation_seconds']
             self.native_template_preparation_seconds = self.receiver_preparation_seconds
             self.native_source_setup_seconds = time.perf_counter()-setup_start-self.receiver_preparation_seconds
-            self.screen_identity = template_source_hash
+            self.screen_identity = bank['template_identity']
             self.native_clean_generation_seconds = 0.
             self.observation_samples = self.screen.samples
             self.represented_baseband_seconds = self.observation_samples/self.fs
@@ -342,30 +504,30 @@ class PreparedReplay:
                 helper_prefix = min(raw_capture_samples,
                     math.ceil((float(descriptor['capture_lead_seconds']) +
                                int(descriptor['data_offset_samples'])/self.fs +
-                               max(0., grid.arrival_upper)) * self.fs))
+                               max(0., self.grid.arrival_upper)) * self.fs))
                 if helper_prefix > _MAX_HELPER_SAMPLES:
                     raise MemoryError('public Helper aperture exceeds the bounded eight-million-sample input limit')
                 self.helper_prefix_samples = helper_prefix
             self.coverage = dict(schema='triad-full-bit-coarse-replay-v1',
                 endpoint='Static coarse complex FFT GLRT; conditional correct-bit sensitivity only.',
-                epochs=list(EPOCHS), public_arrival_prior_seconds=list(physics['arrival_prior_seconds']),
-                public_frequency_bound_hz=grid.frequency_bound,
+                epochs=list(EPOCHS), public_arrival_prior_seconds=list(self.plan['physics']['arrival_prior_seconds']),
+                public_frequency_bound_hz=self.grid.frequency_bound,
                 public_clock_bank_ppm=list(self.clock_bank),
                 bit_template_count=len(EPOCHS)*2*len(self.clock_bank),
-                source_sample_rate_hz=self.fs, projected_sample_rate_hz=output_fs,
+                source_sample_rate_hz=self.fs, projected_sample_rate_hz=self.output_sample_rate,
                 raw_source_samples=raw_source_samples, raw_capture_samples=self.screen.samples,
                 projected_observation_samples=self.screen.crop_rows,
-                coarse_arrival_step_seconds=1/output_fs,
-                coarse_arrival_end_gap_seconds=grid.arrival_upper-float(self.screen.arrivals[-1]),
+                coarse_arrival_step_seconds=1/self.output_sample_rate,
+                coarse_arrival_end_gap_seconds=self.grid.arrival_upper-float(self.screen.arrivals[-1]),
                 projection_receipt=self.screen.projection_receipt(),
                 complete_finite_filter_tail_retained=True,
                 helper_enabled=bool(descriptor['helper_enabled']),
                 helper_raw_prefix_samples=self.helper_prefix_samples,
                 helper_frequency_future_horizon_seconds=self.represented_baseband_seconds,
-                mapped_template_sampling_step=selected_step,
+                mapped_template_sampling_step=self.public_bank_profile['template_sampling_step'],
                 mapped_template_current_input_validation=self.mapped_profile_validation,
                 mapped_template_fidelity_scope=('Current native local-bank validation covers every epoch/bit/clock/ray with rank/projector checks and common clean/noise selectors; local checks are not a whole-waveform error bound.'
-                    if selected_step > 1 else 'Exact integer-source native basis provider, including cubic timing and original FIR.'),
+                    if self.public_bank_profile['template_sampling_step'] > 1 else 'Exact integer-source native basis provider, including cubic timing and original FIR.'),
                 decision_rule='Unique largest public bit score. Empty, incomplete, invalid, or tied candidate results are failures.',
                 truth_scope='The transmitted bit selects which clean observation to simulate. The evaluator label never selects the bank, search, or decision.',
                 excluded='PracticalTracking, physical false acceptance, deployed GUI, multi-bit fox decoding, and persistent receiver state.')

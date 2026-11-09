@@ -35,10 +35,11 @@ Apply the same lifecycle to local and remote storage. See the
 ## Robust architecture and intensive checks
 
 The canonical Robust transmitter/channel/Helper path is the native
-`IndependentApskV2` stack. Case-suite acquisition uses noisy Helper estimates
-and `FFTScreen` proposals; its following bounded tracking subwindow uses
-`PracticalTrackingReceiver`. They are sequential research stages, not a
-qualified integrated receiver, and are not connected to the GUI. Robust GUI
+`IndependentApskV2` stack. The headless `CompleteStreamReceiver` connects noisy
+Helper acquisition, full public `FFTScreen` proposals, fine persistent tracking,
+bit/null decisions and scored quiet-slot completion to the canonical short
+dictionary decoder. Implementation and short functional evidence do not qualify
+all configurations or success probabilities. This backend is not connected to the GUI. Robust GUI
 controls remain visible but Robust operation is unavailable pending
 reconnection. Keep this boundary accurate in code, tests, and documentation.
 
@@ -58,27 +59,46 @@ the same method but does not justify larger experiments. See
 [the maintained policy](docs/robust-current.md#testing-computationally-intensive-robust-changes)
 and [the abbreviated harness](docs/triad-performance.md).
 For the editable manual-case suite, run `./build.sh test triad` before
-`python3 tools/triad_abbreviated.py --cases --output local-evidence/robust-cases.json --exporter build/dev/triad_helper_export`.
+`python3 tools/triad_manual_cases.py --output local-evidence/robust-cases.json --exporter build/dev/triad_helper_export`.
+Manual cases are absolute complete-receiver capacity tests, distinct from the
+usual abbreviated performance regressions that look for degradation. They share
+the efficient sampling method, not the meaning of a passing result. Follow
+[the complete-work contract](docs/robust-manual-capacity.md): include fine search,
+tracking, unsuccessful candidates, quiet-slot completion, reacquisition, recurring
+preparation and orchestration. Measure productive parallelism within one received
+stream on the local CPU, including its physical-core and full logical-CPU
+allocations; independent simultaneous simulations are not receiver throughput.
+Missing or unmeasured required work must prevent a complete-receiver capacity pass.
+Nominal service uses a brief uninterrupted fine session with a fixed two-second
+prefix and 1/2/4-second continuation, verified cache fills and state/holdout gates.
+Charge recurring work and prefix/finish once per slot. Do not infer a warm-up
+benefit from fresh short sessions or replace the separate worst-state bound with
+a nominal estimate. A numerical estimate at least 1 s/s is a point failure even
+when its extrapolation uncertainty prevents a stronger capacity conclusion.
 It reads `_tests-RobustModem.md` by default, requires all 16 strict fields,
 preserves ordered duplicate rows, and reuses identical normalized inputs only
 when explicitly marked. Use repeatable `--case-index N` only for targeted
 debugging; the full list is still parsed and validated, and partial output does
-not cover unselected cases. `--paired-followup` is a separate opt-in lower
-confidence check under the method's cost gates, not the standard 95% criterion.
-Interpret its local single-stream service ratios,
-conditional full-bit coarse sensitivity, and estimated workspace under
-[the maintained case-suite limits](docs/triad-performance.md#editable-manual-case-subwindow-suite):
-no operational admission, full Robust path, whole-message/`fox` success,
-unsaturated whole-machine CPU ceiling, or full-bank memory qualification is
-claimed. Its one-thread default reflects matched local measurements, including
-an FHSS case with no measured 12-thread speedup; it is not a global optimum.
-Preserve the thread override and do not infer a whole-machine ceiling. Preserve
-selected native channel effects; timing
+not cover unselected cases. The obsolete coarse-only `--paired-followup` option
+is removed. Predeclare any separate complete-receiver sensitivity confirmation;
+communication trials cannot be reused as CPU-capacity measurements.
+Historical coarse-only sensitivity and isolated tracking results do not qualify
+this complete-receiver contract. A prior comparison of numerical-library thread
+counts is not evidence about parallel hypothesis/candidate processing. Preserve
+explicit allocation controls and selected native channel effects; timing
 replicas are not independent success trials. Keep raw case JSON/report
 temporary in ignored `local-evidence/` and remove them when their current
 validation purpose ends.
 
 ## Shared contracts
+
+Robust and Fast finish messages from scored physical absence in quiet slots.
+They must never use received packet lengths or arbitrary-length headers to select
+DSP geometry, allocations, or physical completion. Transport EOF, cancellation,
+local quotas and application metadata are not successful receiver completion.
+Preserve fixed public geometry and local resource bounds; interior missing slots
+remain erasures when transmission resumes. See the
+[physical-completion contract](docs/robust-manual-capacity.md#physical-completion-and-security).
 
 Preserve received-content restrictions and input validation in
 [security](docs/security.md), [receive processing hardening](docs/receive-processing-hardening.md),

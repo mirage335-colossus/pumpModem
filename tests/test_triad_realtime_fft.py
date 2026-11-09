@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import math
 from pathlib import Path
@@ -58,6 +59,155 @@ def waveform(m, source, epoch_index, bit, arrival, frequency, clock):
 
 
 class FFTScreenTests(unittest.TestCase):
+    def test_exact_frequency_tiles_match_complete_grid_and_defer_proposals(self):
+        m, source, epochs = fixture()
+        raw = waveform(m, source, 1, 1, .035, .37, 0.)
+        frequencies = np.linspace(-2., 2., 17)
+        reference = screen(m, source, epochs, precision='fp64',
+            maximum_frequency_points=64, maximum_fft_products=1024)
+        projected = reference.prepare_observation(raw)
+        expected = reference.score_projected(projected, frequencies, top_per_bit=4,
+            projection_receipt=reference.projection_receipt())
+        bounded = screen(m, source, epochs, precision='fp64',
+            maximum_frequency_points=4, maximum_fft_products=32)
+        ordinary = bounded.score_projected(projected, frequencies,
+            projection_receipt=bounded.projection_receipt())
+        self.assertEqual(ordinary['reason'], 'frequency_work_limit')
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            session = bounded.start_tiled_frequency(projected, frequencies,
+                projection_receipt=bounded.projection_receipt(), executor=executor,
+                workspace_workers=2, top_per_bit=4)
+            try:
+                plan = session.work_plan
+                self.assertEqual(plan['units'], 5)
+                self.assertEqual(plan['terminal_unit_frequency_points'], 1)
+                self.assertEqual(plan['full_fft_products'], 17*4*2)
+                self.assertLessEqual(plan['maximum_kernel_fft_products'], 32)
+                first = session.step(1)
+                self.assertEqual(first['completed_frequency_points'], 4)
+                self.assertFalse(first['proposals_available'])
+                partial = session.finish()
+                self.assertEqual(partial['status'], 'unresolved')
+                self.assertEqual(partial['reason'], 'incomplete_frequency_tiles')
+                self.assertEqual(partial['candidates'], [])
+                probe = session.selection_probe()
+                self.assertEqual(probe['status'], 'diagnostic_only')
+                self.assertFalse(probe['proposals_available'])
+                self.assertFalse(probe['included_in_receiver_service'])
+                session.step(2)
+                session.step(4)  # two remaining units, including the singleton
+                actual = session.finish()
+                self.assertTrue(session.complete)
+                self.assertEqual(actual['status'], 'proposed')
+                self.assertEqual(actual['frequencies_hz'], expected['frequencies_hz'])
+                self.assertEqual(actual['work']['fft_products'], expected['work']['fft_products'])
+                self.assertIs(session.finish(), actual)
+                for left, right in zip(actual['candidates'], expected['candidates']):
+                    self.assertEqual({k:v for k,v in left.items() if k != 'score'},
+                                     {k:v for k,v in right.items() if k != 'score'})
+                    self.assertAlmostEqual(left['score'], right['score'], places=11)
+            finally:
+                session.close()
+
+    def test_frequency_tiles_keep_suppressed_boundary_rows_until_global_nms(self):
+        manifest, source, epochs = fixture()
+        s = screen(manifest, source[:1], epochs[:1], precision='fp64',
+                   maximum_frequency_points=4, maximum_fft_products=32)
+        frequencies = np.array([-1.35, -.9, -.45, 0.])
+        values = dict(zip(frequencies, [99., 98., 100., 101.]))
+        def rows(workspace, spectra, supplied, **arguments):
+            return [dict(bit=workspace['bit'], epoch=workspace['epoch'], arrival=0.,
+                frequency=float(frequency), clock_ppm=workspace['clock_ppm'],
+                score=values[frequency], rank=workspace['rank']) for frequency in supplied]
+        projected = np.zeros(s.crop_rows, complex)
+        # In the first tile, -.45 suppresses -1.35. Once the final0Hz peak
+        # suppresses -.45, -1.35 must reappear as the second retained peak.
+        with mock.patch.object(s, '_frequency_peak_rows', side_effect=rows):
+            expected = s.score_projected(projected, frequencies, top_per_bit=2)
+            session = s.start_tiled_frequency(projected, frequencies,
+                frequency_unit_points=3, top_per_bit=2)
+            try:
+                session.step()
+                self.assertEqual(session.finish()['candidates'], [])
+                self.assertEqual(session.selection_probe()['raw_candidate_rows'], 6)
+                session.step()
+                actual = session.finish()
+            finally:
+                session.close()
+        self.assertEqual(actual['candidates'], expected['candidates'])
+        self.assertEqual([row['frequency'] for row in actual['candidates_by_bit'][0]],
+                         [0., -1.35])
+
+    def test_frequency_tiles_preserve_ties_interval_union_and_input_ownership(self):
+        s = screen(precision='fp64', maximum_frequency_points=16,
+                   maximum_fft_products=128)
+        projected = np.zeros(s.crop_rows, complex)
+        intervals = [[-.4, 0.], [0., .4], [1., 1.]]
+        expected = s.score_projected(projected, frequency_intervals=intervals,
+            top_per_bit=4)
+        session = s.start_tiled_frequency(projected, frequency_intervals=intervals,
+            frequency_unit_points=1, top_per_bit=4)
+        projected[:] = 100.+100.j  # the ongoing search owns its input copy
+        try:
+            while not session.complete:
+                session.step(2)
+            actual = session.finish()
+            self.assertEqual(actual['frequencies_hz'], [-.4, 0., .4, 1.])
+            self.assertEqual(actual['candidates'], expected['candidates'])
+        finally:
+            session.close()
+
+    def test_frequency_tiles_preflight_global_memory_and_kernel_limits(self):
+        s = screen(precision='fp64', maximum_frequency_points=4,
+                   maximum_fft_products=32)
+        frequencies = np.linspace(-2., 2., 17)
+        plan = s.tiled_frequency_plan(frequencies, top_per_bit=4, workspace_workers=2)
+        self.assertEqual(plan['status'], 'ready')
+        self.assertEqual(plan['raw_candidate_storage_estimate_bytes'],
+                         plan['raw_candidate_row_capacity']*512)
+        self.assertGreater(plan['raw_candidate_row_capacity'], 4*4*4)
+        self.assertGreater(s.preparation_peak_estimate_bytes, s.resident_estimate)
+        s.memory_limit_bytes = plan['estimated_peak_bytes']-1
+        with mock.patch.object(s, '_frequency_spectra') as transform:
+            rejected = s.tiled_frequency_plan(frequencies, workspace_workers=2)
+            self.assertEqual(rejected['reason'], 'complete_tiled_frequency_memory_limit')
+            with self.assertRaisesRegex(ValueError, 'complete_tiled_frequency_memory_limit'):
+                s.start_tiled_frequency(np.zeros(s.crop_rows, complex), frequencies,
+                    executor=mock.Mock(), workspace_workers=2)
+        transform.assert_not_called()
+        s.memory_limit_bytes = 1024**3
+        self.assertEqual(s.tiled_frequency_plan(frequencies, frequency_unit_points=5)['reason'],
+                         'frequency_tile_kernel_work_limit')
+        with self.assertRaises(ValueError):
+            s.tiled_frequency_plan(frequencies, maximum_total_frequency_points=65537)
+        with self.assertRaises(ValueError):
+            s.start_tiled_frequency(np.zeros(s.crop_rows, complex), frequencies,
+                workspace_workers=2)
+        session = s.start_tiled_frequency(np.zeros(s.crop_rows, complex), frequencies)
+        session.close()
+        self.assertEqual(session.finish()['status'], 'unresolved')
+        with self.assertRaises(RuntimeError):
+            session.step()
+
+    def test_frequency_tiles_join_submitted_work_before_reporting_executor_failure(self):
+        s = screen(precision='fp64')
+        future = mock.Mock()
+        future.result.return_value = []
+        executor = mock.Mock()
+        executor.submit.side_effect = [future, RuntimeError('executor stopped')]
+        session = s.start_tiled_frequency(np.zeros(s.crop_rows, complex), [0.],
+            executor=executor, workspace_workers=2)
+        try:
+            with self.assertRaisesRegex(RuntimeError, 'executor stopped'):
+                session.step()
+            future.result.assert_called_once_with()
+            failed = session.finish()
+            self.assertEqual(failed['reason'], 'failed_frequency_tile')
+            self.assertEqual(failed['candidates'], [])
+            self.assertFalse(failed['frequency_tiles']['complete_public_search'])
+        finally:
+            session.close()
+
     def test_ordered_endpoint_insertion_preserves_canonical_peak_indices(self):
         rng = np.random.default_rng(51291)
         scores = [np.array(row, dtype=float) for row in (

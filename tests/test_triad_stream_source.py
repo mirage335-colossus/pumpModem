@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Focused native pull-source checks; no multi-day waveform files are made."""
 import json
+import hashlib
+from fractions import Fraction
 import math
 from pathlib import Path
 import subprocess
@@ -104,6 +106,253 @@ class Source:
 
 @unittest.skipIf(BINARY is None, 'native binary path required')
 class PullSourceTests(unittest.TestCase):
+
+    def test_standalone_short_codec_preserves_bits_and_filters_received_text(self):
+        def codec(operation, value, *, check=True):
+            return subprocess.run([str(BINARY), operation, value], capture_output=True,
+                                  check=check, timeout=10)
+        fox = json.loads(codec('--short-encode', 'fox').stdout)
+        self.assertEqual(fox['encoded_bits'], 22)
+        self.assertEqual(json.loads(codec('--short-decode', fox['bits']).stdout)['text'], 'fox')
+        self.assertEqual(json.loads(codec('--short-encode', 'e').stdout)['bits'], '001')
+        self.assertEqual(json.loads(codec('--short-decode', '001').stdout)['text'], 'e')
+        # The exact canonical literal for NUL is valid source data, but must
+        # never escape the shared receive-presentation filter as raw text.
+        filtered = json.loads(codec('--short-decode', '1111100000000').stdout)
+        self.assertEqual((filtered['decoded_bytes'], filtered['text']), (1, '_'))
+        self.assertEqual(json.loads(codec('--short-decode', '').stdout)['text'], '')
+        for bad in ('0010', '001x', '1' * 209, '000' * 17):
+            self.assertNotEqual(codec('--short-decode', bad, check=False).returncode, 0)
+        self.assertNotEqual(codec('--short-encode', 'x' * 17, check=False).returncode, 0)
+        mixed = subprocess.run([str(BINARY), '--short-encode', 'e', '--plan-only'],
+                               capture_output=True, timeout=10)
+        self.assertNotEqual(mixed.returncode, 0)
+
+    def test_sequence_bits_and_public_template_addresses_match_each_slot(self):
+        bits = '001'
+        with Source(['--stream-kind', 'emitted', '--data-bits', bits,
+                     '--thermal-noise', 'off']) as source:
+            d = source.descriptor
+            fs = d['sample_rate_hz']
+            self.assertTrue(d['basis_address_supported'])
+            self.assertNotIn('data_bits', d)
+            self.assertNotIn('bit_count', d)
+            # This public test geometry has support shorter than the native
+            # no-Helper minimum sixty-second spacing. No RX uses this oracle.
+            self.assertLess(d['source_samples'], 60 * fs)
+            initial_epoch = d['epoch']
+            initial_ordinal = d['symbol_ordinal']
+            cursor = 0
+            for index, bit in enumerate(bits):
+                slot_offset = d['data_offset_samples'] + index * 60 * fs
+                first = slot_offset + d['source_samples'] // 2
+                while cursor < first:
+                    header, _, _ = source.next(min(16384, first - cursor))
+                    cursor = header['first_sample'] + header['count']
+                address = source.command(f'basis-address {initial_epoch + index * 60} {initial_ordinal + index}')
+                self.assertEqual(address['generation'], index + 1)
+                self.assertTrue(address['template_cache_cleared'])
+                rows = [[b, 0, slot_offset / fs, 0, 0, 0, 0] for b in (0, 1)]
+                _, alternatives = source.basis(first, 257, rows)
+                header, data, valid = source.next(257)
+                cursor = header['first_sample'] + header['count']
+                self.assertEqual(header['first_sample'], first)
+                self.assertEqual(valid, bytes([1]) * 257)
+                values = complex_values(data)
+                expected, wrong = alternatives[int(bit)], alternatives[1 - int(bit)]
+                self.assertTrue(all(abs(a-b) <= 1e-10 * (1+abs(b)) for a,b in zip(values, expected)))
+                self.assertGreater(max(abs(a-b) for a,b in zip(values, wrong)), 1e-3)
+            # Addressing a template beyond the emitted message is valid public
+            # hypothesis work. It must not require the actual message length.
+            address = source.command(f'basis-address {initial_epoch + 600} {initial_ordinal + 10}')
+            self.assertEqual(address['basis_symbol_ordinal'], initial_ordinal + 10)
+            _, beyond = source.basis(d['source_samples'] // 2, 17, [[0, 0, 0, 0, 0, 0, 0]])
+            self.assertGreater(max(abs(v) for v in beyond[0]), 0)
+
+    def test_public_basis_address_native_guards(self):
+        for command in ('basis-address 5 0', 'basis-address 4294967290 0',
+                        'basis-address 1793850000 -1', 'basis-address 1793850000 18446744073709551616',
+                        'basis-address 1793850000 0 extra', 'basis-address 1793850000'):
+            with self.subTest(command=command), Source(['--stream-kind', 'emitted']) as source:
+                source.process.communicate((command + '\n').encode('ascii'), timeout=10)
+                self.assertNotEqual(source.process.returncode, 0)
+
+    def test_public_slot_plans_do_not_depend_on_payload_channel_realization_or_basis_address(self):
+        for helper in ('off', 'on'):
+            def plans(bits, seed, arrival):
+                with Source(['--data-bits', bits, '--observation-slots', '4', '--helper', helper,
+                             '--seed', str(seed), '--arrival-seconds', str(arrival)]) as source:
+                    d = source.descriptor
+                    self.assertTrue(d['slot_plan_supported'])
+                    rows = [source.command(f'slot-plan {index}') for index in (0, 1, 2, 3, 10)]
+                    self.assertEqual(rows[0]['source_begin_samples'], d['data_offset_samples'])
+                    self.assertEqual(rows[0]['pattern_epoch'], d['epoch'])
+                    self.assertEqual(rows[0]['symbol_ordinal'], d['symbol_ordinal'])
+                    self.assertEqual(rows[0]['source_samples'], d['source_samples'])
+                    for current, successor in zip(rows[:3], rows[1:4]):
+                        self.assertEqual(current['next_source_begin_samples'], successor['source_begin_samples'])
+                        self.assertEqual(successor['symbol_ordinal'], current['symbol_ordinal'] + 1)
+                    for row in rows:
+                        self.assertEqual(row['pattern_begin_samples'] - row['source_begin_samples'],
+                                         row['source_calendar_origin_sample'])
+                        self.assertEqual(row['source_end_samples'] - row['source_begin_samples'],
+                                         row['source_samples'])
+                        self.assertEqual(row['receiver_window_physical_origin_sample'],
+                                         row['receiver_window_first_sample'])
+                        self.assertEqual(row['receiver_window_samples'],
+                                         row['receiver_window_stop_sample'] - row['receiver_window_first_sample'])
+                        self.assertAlmostEqual(row['window_capture_lead_seconds'],
+                            row['capture_lead_seconds'] - row['receiver_window_first_sample']/row['sample_rate_hz'])
+                    source.command(f'basis-address {d["epoch"] + 600} 91')
+                    self.assertEqual(source.command('slot-plan 1'), rows[1])
+                    self.assertEqual(source.next(3)[0]['first_sample'], 0)
+                    return rows
+            self.assertEqual(plans('0', 7, 0), plans('001', 19, .01))
+
+    def test_public_slot_plan_native_guards(self):
+        for command in ('slot-plan -1', 'slot-plan 1024', 'slot-plan', 'slot-plan 0 extra'):
+            with self.subTest(command=command), Source(['--data-bits', '0']) as source:
+                source.process.communicate((command + '\n').encode('ascii'), timeout=10)
+                self.assertNotEqual(source.process.returncode, 0)
+        with Source(['--stream-kind', 'emitted']) as source:
+            source.process.communicate(b'slot-plan 0\n', timeout=10)
+            self.assertNotEqual(source.process.returncode, 0)
+
+    def test_quiet_aperture_excludes_public_neighbor_tails_at_future_clock_limits(self):
+        args = ['--data-bits', '0', '--helper', 'on', '--rate', '1', '--added-symbols', '1',
+                '--added-interleave', 'off', '--seconds', '.001',
+                '--control', 'selected', '--oscillator-effects', 'on', '--base-oscillator', 'crystal',
+                '--shift-oscillator', 'ic-7100', '--rf-hz', '500000', '--spread-preset', 'hf-best',
+                '--margin', '1', '--selective-perturbation', 'each-1']
+        with Source(args) as source:
+            d = source.descriptor
+            fs = d['sample_rate_hz']
+            physics = source.plan['physics']
+            plans = {index: source.command(f'slot-plan {index}') for index in (0, 1, 2, 20, 21, 22, 23)}
+            half_ppm = physics['base_relative_pair_ppm_bound'] / 2
+            scales = [Fraction.from_float(1 + sign * half_ppm * 1e-6) for sign in (-1, 1)]
+            arrivals = [Fraction.from_float(x) for x in physics['arrival_prior_seconds']]
+            lead = Fraction.from_float(float(plans[0]['capture_lead_seconds']))
+            # Enumerate the endpoint clocks/arrivals independently. Eight
+            # interpolation rows plus the exact selected finite-filter tail
+            # remain inside the native envelope's larger32-row guard.
+            first_guard = Fraction(8, fs) / min(scales)
+            selective_tail = Fraction(2, 3) / Fraction.from_float(d['carrier_spacing_hz'])
+            tail = Fraction.from_float(physics['spread_delay_ms'] * .001) + selective_tail + Fraction(2, fs) / min(scales)
+            def first_edge(samples):
+                seconds = Fraction(samples, fs)
+                return min(fs * rx * (lead + seconds / tx + arrival - first_guard)
+                           for rx in scales for tx in scales for arrival in arrivals)
+            def last_edge(samples):
+                seconds = Fraction(samples, fs)
+                return max(fs * rx * (lead + seconds / tx + arrival + tail)
+                           for rx in scales for tx in scales for arrival in arrivals)
+            for index in (0, 1, 21, 22):
+                row = plans[index]
+                self.assertLessEqual(row['receiver_data_first_sample'], max(0, math.floor(first_edge(row['source_begin_samples']))))
+                self.assertGreaterEqual(row['receiver_data_stop_sample'], math.ceil(last_edge(row['source_end_samples'])))
+                if index:
+                    previous = plans[index - 1]
+                    self.assertGreaterEqual(row['receiver_previous_signal_stop_sample'], math.ceil(last_edge(previous['helper_end_samples'])))
+                else:
+                    self.assertEqual(row['receiver_previous_signal_stop_sample'], 0)
+                successor = plans[index + 1]
+                self.assertLessEqual(row['receiver_next_signal_first_sample'], max(0, math.floor(first_edge(successor['helper_begin_samples']))))
+                first = min(row['receiver_window_stop_sample'], max(row['receiver_window_first_sample'],
+                    row['receiver_data_first_sample'], row['receiver_previous_signal_stop_sample']))
+                stop = max(first, min(row['receiver_window_stop_sample'], row['receiver_data_stop_sample'],
+                    row['receiver_next_signal_first_sample']))
+                self.assertEqual((row['quiet_aperture_first_sample'], row['quiet_aperture_stop_sample']), (first, stop))
+                self.assertEqual(row['quiet_aperture_available'], first < stop)
+            # The old full-window statistic included a possible predecessor
+            # tail, whereas current DATA starts much later in this geometry.
+            self.assertLess(plans[22]['receiver_window_first_sample'], plans[21]['receiver_data_stop_sample'])
+            self.assertGreater(plans[22]['quiet_aperture_first_sample'], plans[22]['receiver_window_first_sample'])
+            selected_stop = plans[0]['receiver_data_stop_sample']
+        with Source([*args, '--control', 'flat']) as flat:
+            off = flat.command('slot-plan 0')
+            self.assertGreaterEqual(selected_stop - off['receiver_data_stop_sample'],
+                                    math.floor(float(selective_tail) * fs) - 2)
+
+    def test_sequence_channel_is_chunk_invariant_and_basis_control_does_not_reset_it(self):
+        args = ['--data-bits', '001', '--helper', 'on', '--control', 'selected', '--oscillator-effects', 'on',
+                '--spread-preset', 'hf-best', '--selective-perturbation', 'each-1',
+                '--channel-evolution', 'stochastic', '--random-doppler-width-hz', '.1',
+                '--delay-excursion-ms', '.001', '--delay-knot-seconds', '1']
+        # Hash samples and validity separately so caller chunk boundaries do
+        # not themselves change the digest input.
+        def sample_hash(chunks, change_basis):
+            with Source(args) as source:
+                d = source.descriptor
+                samples, validity = hashlib.sha256(), hashlib.sha256()
+                cursor = turn = 0
+                while cursor < d['total_samples']:
+                    if change_basis and turn in (1, 4):
+                        source.command(f'basis-address {d["epoch"] + 600 + turn} {91 + turn}')
+                        source.basis(2048, 3, [[0, 0, 0, 0, 0, 0, 0]])
+                    header, data, valid = source.next(chunks[turn % len(chunks)])
+                    self.assertEqual(header['first_sample'], cursor)
+                    self.assertGreater(header['count'], 0)
+                    samples.update(data)
+                    validity.update(valid)
+                    cursor += header['count']
+                    turn += 1
+                self.assertTrue(header['complete'])
+                self.assertGreater(d['capture_samples'], d['emitted_samples'])
+                receipt = source.close()
+                self.assertTrue(receipt['complete'])
+                self.assertEqual(receipt['source_generated_samples'], d['emitted_samples'])
+                return samples.hexdigest(), validity.hexdigest(), cursor
+        self.assertEqual(sample_hash((16384,), False), sample_hash((123, 4093, 8191), True))
+
+    def test_sequence_workspace_and_input_bounds(self):
+        with Source(['--stream-kind', 'emitted', '--data-bits', '0']) as short:
+            short_bytes = short.descriptor['fixed_workspace_bytes']
+        with Source(['--stream-kind', 'emitted', '--data-bits', '01' * 128]) as long:
+            d = long.descriptor
+            self.assertLess(d['fixed_workspace_bytes'] - short_bytes, 65536)
+            self.assertLess(d['fixed_workspace_bytes'], d['workspace_budget_bytes'])
+            self.assertEqual(long.next(3)[0]['count'], 3)
+        for extra in (['--data-bits', ''], ['--data-bits', '0x1'], ['--data-bits', '0' * 257],
+                      ['--data-bits', '001', '--whole-bit-count', '2'],
+                      ['--data-bits', '001', '--bit', '1']):
+            failed = subprocess.run([str(BINARY), *COMMON, '--stream-server', *extra],
+                                    input=b'', capture_output=True, timeout=10)
+            self.assertNotEqual(failed.returncode, 0)
+
+    def test_public_observation_horizon_contains_real_quiet_slots_independent_of_payload_length(self):
+        def quiet_window(bits):
+            with Source(['--data-bits', bits, '--observation-slots', '4']) as source:
+                d = source.descriptor
+                self.assertEqual(d['public_observation_slots'], 4)
+                self.assertNotIn('data_bits', d)
+                self.assertNotIn('bit_count', d)
+                fs = d['sample_rate_hz']
+                first = round(d['capture_lead_seconds'] * fs) + 180 * fs + d['source_samples'] // 2
+                cursor = 0
+                while cursor < first:
+                    header, _, _ = source.next(min(16384, first - cursor))
+                    cursor += header['count']
+                header, data, valid = source.next(257)
+                self.assertEqual(header['first_sample'], first)
+                self.assertEqual(valid, bytes([1]) * 257)
+                self.assertGreater(max(abs(v) for v in complex_values(data)), 0)
+                # Transport exhaustion is not message completion. Stopping
+                # before this fixed public observation budget stays incomplete.
+                receipt = source.close()
+                self.assertFalse(receipt['complete'])
+                return d['total_samples'], d['emitted_samples'], data
+        one, three = quiet_window('0'), quiet_window('001')
+        self.assertEqual(one[0], three[0])
+        self.assertLess(one[1], three[1])
+        self.assertEqual(one[2], three[2])
+        for args in (['--data-bits', '001', '--observation-slots', '2'],
+                     ['--data-bits', '0', '--observation-slots', '0'],
+                     ['--data-bits', '0', '--observation-slots', '1025'],
+                     ['--observation-slots', '4']):
+            failed = subprocess.run([str(BINARY), *COMMON, '--stream-server', *args],
+                                    input=b'', capture_output=True, timeout=10)
+            self.assertNotEqual(failed.returncode, 0)
 
     def test_plan_publishes_format_and_physics_controls(self):
         def plan(*extra):

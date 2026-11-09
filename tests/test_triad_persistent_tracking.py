@@ -84,6 +84,24 @@ class PersistentTrackingTests(unittest.TestCase):
             self.assertEqual(r['observed_rows'],37)
         np.testing.assert_allclose(answers,np.broadcast_to(answers[0],(3,2)),rtol=0,atol=5e-13)
 
+    def test_quiet_aperture_keeps_global_bounds_across_segments(self):
+        rng=np.random.default_rng(9825)
+        values=rng.normal(size=53)+1j*rng.normal(size=53)
+        values[:16] += 1000
+        full=self.make(samples=53)
+        clipped=self.make(samples=53,quiet_sample_bounds=(17,48))
+        for receiver in (full,clipped):
+            receiver.push(0,values)
+        expected,actual=full.finish(),clipped.finish()
+        np.testing.assert_array_equal(actual['bit_scores'],expected['bit_scores'])
+        self.assertEqual(actual['processed_rows'],53)
+        self.assertEqual(actual['quiet_sample_bounds'],(17,48))
+        # [16,24) crosses the first aperture boundary; [24,48) comprises
+        # three complete blocks from two different persistent segments.
+        self.assertEqual(actual['quiet_observed_projection_modes'],24)
+        self.assertAlmostEqual(actual['quiet_projected_energy'],
+            float(np.vdot(values[24:48],values[24:48]).real/1.7))
+
     def test_finite_channel_unequal_terminal_segment_and_large_mapped_origin(self):
         base=2**54+177
         n=np.arange(53,dtype=float);mapping=n+.031*np.sin(n/8)

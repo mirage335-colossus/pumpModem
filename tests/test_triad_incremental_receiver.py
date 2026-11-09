@@ -4,6 +4,8 @@ import math
 from pathlib import Path
 import sys
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from unittest import mock
 
 import numpy as np
 import torch
@@ -11,6 +13,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"tools"))
 from triad_dynamic_joint import ProjectedJointReceiver
 from triad_incremental_receiver import IncrementalGaussianReceiver
+from triad_cpu import configure_numerical_threads, initialize_numerical_worker
 
 
 class IncrementalReceiverTests(unittest.TestCase):
@@ -61,6 +64,70 @@ class IncrementalReceiverTests(unittest.TestCase):
     def test_batch_equivalence_raw_rows_two_chunk_sizes_and_short_tail_merge(self):
         self.compare("valid-rows", 5)
         self.compare("valid-rows", 13)
+
+    def test_parallel_global_model_updates_preserve_scores_posteriors_and_noise_statistic(self):
+        allocation = {'threads': 1, 'linear_algebra_threads': 1}
+        configure_numerical_threads(allocation)
+        raw, valid, kwargs = self.fixture(projection='valid-rows')
+        serial = IncrementalGaussianReceiver(**kwargs)
+        serial.push(0, raw, valid)
+        expected = serial.finish()
+        with ThreadPoolExecutor(max_workers=4, initializer=initialize_numerical_worker,
+                                initargs=(allocation,)) as executor:
+            parallel = IncrementalGaussianReceiver(**kwargs, hypothesis_executor=executor,
+                                                   hypothesis_shards=2)
+            parallel.push(0, raw, valid)
+            actual = parallel.finish()
+        np.testing.assert_allclose(actual['bit_scores'], expected['bit_scores'], rtol=0, atol=1e-12)
+        self.assertEqual(actual['observed_projection_modes'], int(valid.sum()))
+        self.assertAlmostEqual(actual['projected_energy'],
+            float(np.vdot(raw[valid.astype(bool)], raw[valid.astype(bool)]).real/kwargs['noise_variance']))
+        for first, second in zip(serial.runtimes, parallel.runtimes):
+            for left, right in zip(first.posterior(), second.posterior()):
+                np.testing.assert_allclose(left.numpy(), right.numpy(), rtol=0, atol=1e-13)
+        self.assertGreater(parallel.owned_bytes_estimate, serial.owned_bytes_estimate)
+
+    def test_partial_executor_submission_joins_already_started_model_jobs(self):
+        raw, valid, kwargs = self.fixture()
+        future = mock.Mock()
+        executor = mock.Mock()
+        executor.submit.side_effect = [future, RuntimeError('executor stopped')]
+        receiver = IncrementalGaussianReceiver(**kwargs, hypothesis_executor=executor)
+        with self.assertRaisesRegex(RuntimeError, 'executor stopped'):
+            receiver.push(0, raw, valid)
+        future.result.assert_called_once_with()
+        self.assertEqual(receiver.block_updates, 0)
+
+    def test_quiet_aperture_uses_complete_blocks_without_changing_likelihood(self):
+        raw, valid, kwargs = self.fixture(n=29, block=8, projection='dft')
+        raw[:8] += 1e3  # Previous-slot tail in the public search-window prefix.
+        full = IncrementalGaussianReceiver(**kwargs)
+        clipped = IncrementalGaussianReceiver(**kwargs, quiet_sample_bounds=(9, 29))
+        for receiver in (full, clipped):
+            receiver.push(0, raw, valid)
+        expected, actual = full.finish(), clipped.finish()
+        np.testing.assert_array_equal(actual['bit_scores'], expected['bit_scores'])
+        self.assertEqual(actual['processed_rows'], 29)
+        self.assertEqual(actual['observed_projection_modes'], expected['observed_projection_modes'])
+        self.assertEqual(actual['projected_energy'], expected['projected_energy'])
+        # [0,8) and boundary-crossing [8,16) are excluded. The merged
+        # terminal [16,29) contributes its original complete DFT projection.
+        from triad_dynamic_joint import BlockProjection
+        projection = BlockProjection.make(13, kwargs['sample_rate'], kwargs['required_bands'], ())
+        y = projection.numpy(raw[16:29])
+        self.assertEqual(actual['quiet_observed_projection_modes'], len(projection.indices))
+        self.assertAlmostEqual(actual['quiet_projected_energy'],
+            float(np.vdot(y, y).real/kwargs['noise_variance']))
+        self.assertLess(actual['quiet_projected_energy'], actual['projected_energy']/100)
+
+    def test_quiet_aperture_rejects_invalid_geometry_and_allows_empty(self):
+        raw, valid, kwargs = self.fixture(projection='dft')
+        for bounds in ((-1, 8), (9, 8), (0, 30), (False, 8), (0., 8)):
+            with self.subTest(bounds=bounds), self.assertRaises(ValueError):
+                IncrementalGaussianReceiver(**kwargs, quiet_sample_bounds=bounds)
+        receiver = IncrementalGaussianReceiver(**kwargs, quiet_sample_bounds=(8, 8))
+        receiver.push(0, raw, valid)
+        self.assertEqual(receiver.finish()['quiet_observed_projection_modes'], 0)
 
     def test_batch_equivalence_dft_static_and_ou(self):
         raw, valid, kwargs = self.fixture(projection="dft")

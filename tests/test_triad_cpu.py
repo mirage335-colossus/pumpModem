@@ -79,6 +79,76 @@ class TriadCpuTests(unittest.TestCase):
              patch.object(build_capacity.os, 'sched_getaffinity', side_effect=OSError, create=True):
             self.assertEqual(triad_cpu.detect_cpu_budget()['available_cpus'], 1)
 
+    def _write_topology(self, root, rows):
+        for cpu, package, core in rows:
+            topology = root / ('cpu' + str(cpu)) / 'topology'
+            topology.mkdir(parents=True, exist_ok=True)
+            (topology / 'physical_package_id').write_text(str(package))
+            (topology / 'core_id').write_text(str(core))
+
+    def test_topology_counts_distinct_package_core_pairs_within_affinity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            # CPUs 2 and 7 are SMT siblings; core 1 on package 1 is a distinct core.
+            self._write_topology(root, [(2, 0, 1), (7, 0, 1), (9, 1, 1)])
+            receipt = triad_cpu.detect_cpu_topology(
+                logical_cpu_ids={2, 7, 9}, sysfs_root=root, linux=True)
+        self.assertEqual(receipt['status'], 'complete')
+        self.assertEqual(receipt['logical_cpu_count'], 3)
+        self.assertEqual(receipt['physical_core_count'], 2)
+        self.assertEqual(receipt['physical_cores'], [
+            dict(package_id=0, core_id=1, logical_cpu_ids=[2, 7]),
+            dict(package_id=1, core_id=1, logical_cpu_ids=[9])])
+
+    def test_topology_uses_all_packages_and_does_not_guess_from_partial_sysfs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._write_topology(root, [(0, 0, 0), (1, 0, 1)])
+            complete = triad_cpu.detect_cpu_topology(
+                logical_cpu_ids={0, 1}, sysfs_root=root, linux=True)
+            incomplete = triad_cpu.detect_cpu_topology(
+                logical_cpu_ids={0, 1, 2}, sysfs_root=root, linux=True)
+        self.assertEqual(complete['physical_core_count'], 2)
+        self.assertEqual(incomplete['status'], 'partial')
+        self.assertIsNone(incomplete['physical_core_count'])
+        self.assertEqual(incomplete['incomplete_logical_cpus'][0]['logical_cpu'], 2)
+
+    def test_unknown_platform_and_invalid_affinity_keep_physical_count_unknown(self):
+        portable = triad_cpu.detect_cpu_topology(linux=False)
+        self.assertEqual(portable['status'], 'unavailable')
+        self.assertIsNone(portable['physical_core_count'])
+        with tempfile.TemporaryDirectory() as temporary:
+            invalid = triad_cpu.detect_cpu_topology(
+                logical_cpu_ids={-1}, sysfs_root=Path(temporary), linux=True)
+        self.assertEqual(invalid['status'], 'unavailable')
+        self.assertIsNone(invalid['physical_core_count'])
+
+    def test_receiver_worker_candidates_include_physical_and_full_logical_budget(self):
+        cases = [
+            (dict(available_cpus=1), [1]),
+            (dict(available_cpus=3), [1, 2, 3]),
+            (dict(available_cpus=12, topology=dict(status='complete',
+                physical_core_count=6)), [1, 2, 4, 6, 12]),
+            (dict(available_cpus=3, topology=dict(status='complete',
+                physical_core_count=6)), [1, 2, 3]),
+            (dict(available_cpus=12, topology=dict(status='partial',
+                physical_core_count=None)), [1, 2, 4, 12]),
+        ]
+        for capacity, expected in cases:
+            with self.subTest(capacity=capacity):
+                self.assertEqual(triad_cpu.receiver_worker_candidates(capacity), expected)
+                self.assertEqual(triad_cpu.receiver_worker_candidates(capacity),
+                                 sorted(set(expected)))
+                self.assertEqual(max(expected), capacity['available_cpus'])
+        self.assertEqual(triad_cpu.receiver_worker_candidates(12), [1, 2, 4, 12])
+
+    def test_receiver_worker_candidates_reject_invalid_budgets(self):
+        for capacity in (True, 0, -1, 1.5, '4', {},
+                         dict(available_cpus=4, topology=dict(
+                             status='complete', physical_core_count=0))):
+            with self.subTest(capacity=capacity), self.assertRaises(ValueError):
+                triad_cpu.receiver_worker_candidates(capacity)
+
     def test_v2_parent_quota_and_irrelevant_bad_memory(self):
         proc, mount = self.fixture()
         (mount / 'cpu.max').write_text('350000 100000')

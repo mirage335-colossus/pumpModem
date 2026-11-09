@@ -18,6 +18,47 @@ from triad_dynamic_joint import BlockProjection
 from triad_gaussian_state import GaussianPrior, GaussianStateFilter
 
 
+def fixed_block_bounds(samples, block_samples, index):
+    """Canonical finite DFT calendar, merging the terminal short remainder."""
+    if (type(samples) is not int or type(block_samples) is not int or
+            not 1 <= samples < 1 << 64 or not 1 <= block_samples < 1 << 64):
+        raise ValueError('positive finite sample and block counts required')
+    count = max(1, samples//block_samples)
+    if type(index) is not int or not 0 <= index < count:
+        raise IndexError('block index outside fixed observation')
+    start = index*block_samples
+    return start, samples if index == count-1 else start+block_samples
+
+
+class _CandidateGaussianFilter:
+    """Independent candidate slices with unchanged per-candidate recursion."""
+    def __init__(self, prior, candidates, shards, dtype):
+        self.parts = []
+        for indices in np.array_split(np.arange(candidates), min(candidates, shards)):
+            selected = slice(int(indices[0]), int(indices[-1])+1)
+            self.parts.append((selected, GaussianStateFilter(prior, dtype=dtype, check_inputs=True)))
+
+    def initialize_posterior(self, mean, covariance):
+        for selected, runtime in self.parts:
+            runtime.initialize_posterior(mean[:, selected], covariance[:, selected])
+
+    def jobs(self, correlations, gram, elapsed):
+        return [(runtime, correlations[:, selected], gram[:, selected], elapsed)
+                for selected, runtime in self.parts]
+
+    def scores(self):
+        return torch.cat([runtime.scores() for _, runtime in self.parts], dim=-1)
+
+    def posterior(self):
+        states = [runtime.posterior() for _, runtime in self.parts]
+        return tuple(torch.cat([state[index] for state in states], dim=1) for index in (0, 1))
+
+    def finish(self):
+        for _, runtime in self.parts:
+            runtime.finish()
+        return self.scores()
+
+
 class IncrementalGaussianReceiver:
     """Consume one continuous observation with a fixed candidate bank.
 
@@ -45,7 +86,8 @@ class IncrementalGaussianReceiver:
                  maximum_candidates=4096, candidate_count=1,
                  projection_mode="dft", maximum_input_chunk_samples=1_048_576,
                  block_center_seconds=None, initial_channel_state=None,
-                 first_block_elapsed_seconds=0.):
+                 first_block_elapsed_seconds=0., hypothesis_executor=None,
+                 hypothesis_shards=1, quiet_sample_bounds=None):
         started = time.perf_counter()
         self.sample_rate = float(sample_rate)
         if not math.isfinite(self.sample_rate) or self.sample_rate <= 0:
@@ -68,6 +110,12 @@ class IncrementalGaussianReceiver:
         if not isinstance(maximum_input_chunk_samples, int) or not 1 <= maximum_input_chunk_samples <= 1_048_576:
             raise ValueError("input chunk limit must be in [1,1048576]")
         self.samples, self.block_samples = samples, block_samples
+        bounds = (0, samples) if quiet_sample_bounds is None else quiet_sample_bounds
+        if (not isinstance(bounds, (tuple, list)) or len(bounds) != 2 or
+                any(isinstance(x, bool) or not isinstance(x, (int, np.integer)) for x in bounds) or
+                not 0 <= bounds[0] <= bounds[1] <= samples):
+            raise ValueError('quiet sample bounds must be an ordered local interval within the observation')
+        self.quiet_sample_bounds = tuple(int(x) for x in bounds)
         powers = tuple(float(x) for x in stationary_power)
         self.candidates, self.taps = candidate_count, len(powers)
         if not 1 <= self.taps <= 16:
@@ -92,6 +140,15 @@ class IncrementalGaussianReceiver:
                 raise ValueError("FP32 minimum requires TF32 disabled and highest matmul precision")
         self.projection_mode = projection_mode
         self.memory_limit_bytes = int(memory_limit_bytes)
+        if hypothesis_executor is not None and not callable(getattr(hypothesis_executor, 'submit', None)):
+            raise TypeError('hypothesis executor must support submit')
+        self.hypothesis_executor = hypothesis_executor
+        if (isinstance(hypothesis_shards, bool) or not isinstance(hypothesis_shards, int) or
+                not 1 <= hypothesis_shards <= 1024):
+            raise ValueError('hypothesis shards must be in[1,1024]')
+        if hypothesis_shards > 1 and hypothesis_executor is None:
+            raise ValueError('candidate shards require the shared hypothesis executor')
+        self.hypothesis_shards = min(hypothesis_shards, candidate_count)
         if self.memory_limit_bytes <= 0:
             raise MemoryError("positive workspace memory budget required")
         self.maximum_input_chunk_samples = maximum_input_chunk_samples
@@ -125,6 +182,9 @@ class IncrementalGaussianReceiver:
         estimate = (block * (item + 16) + hck * block * (item * 2 + 24) +
                     3 * candidate_count * self.taps * self.taps * (item * 4 + 64) +
                     len(coherences) * 3 * candidate_count * (self.taps * self.taps * item * 8 + self.taps * item * 4 + 64))
+        if hypothesis_executor is not None:
+            estimate += len(coherences)*3*candidate_count*(
+                self.taps*self.taps*item*12+self.taps*item*12+64)
         if estimate > self.memory_limit_bytes:
             raise MemoryError("incremental Gaussian block workspace exceeds memory limit before basis generation")
         self.owned_bytes_estimate = estimate
@@ -136,8 +196,10 @@ class IncrementalGaussianReceiver:
                 required_bands, excluded_bands)
         self.required_bands = tuple(tuple(x) for x in required_bands)
         self.excluded_bands = tuple(tuple(x) for x in excluded_bands)
-        self.runtimes = [GaussianStateFilter(GaussianPrior(powers, coh),
-            dtype=self.dtype, check_inputs=True) for coh in coherences]
+        self.runtimes = [(_CandidateGaussianFilter(GaussianPrior(powers, coh),
+            candidate_count, self.hypothesis_shards, self.dtype) if self.hypothesis_shards > 1
+            else GaussianStateFilter(GaussianPrior(powers, coh), dtype=self.dtype, check_inputs=True))
+            for coh in coherences]
         self.first_block_elapsed_seconds = float(first_block_elapsed_seconds)
         if not math.isfinite(self.first_block_elapsed_seconds) or self.first_block_elapsed_seconds < 0:
             raise ValueError("initial channel elapsed time must be finite and nonnegative")
@@ -163,20 +225,16 @@ class IncrementalGaussianReceiver:
         self.erased_rows = 0
         self.block_updates = 0
         self.projection_modes = 0
+        self.observed_projection_modes = 0
+        self.projected_energy = 0.
+        self.quiet_observed_projection_modes = 0
+        self.quiet_projected_energy = 0.
         self.complete_observation = False
         self.push_cpu_seconds = 0.
         self.preparation_seconds = time.perf_counter() - started
 
     def _block_bounds(self, index):
-        if not 0 <= index < self.block_count:
-            raise IndexError("block index outside fixed observation")
-        start = index * self.block_samples
-        if self.samples < self.block_samples:
-            return 0, self.samples
-        if self.merge_terminal_remainder and index == self.block_count - 1:
-            start = (self.block_count - 1) * self.block_samples
-            return start, self.samples
-        return start, min(start + self.block_samples, self.samples)
+        return fixed_block_bounds(self.samples, self.block_samples, index)
 
     def _score_block(self, start, stop, values, valid):
         rows = stop - start
@@ -196,6 +254,17 @@ class IncrementalGaussianReceiver:
             projection = BlockProjection.valid_rows(self.sample_rate, valid.astype(bool, copy=False))
             projected_y = values[projection.indices]
         self.projection_modes += len(projection.indices)
+        if np.any(valid):
+            self.observed_projection_modes += len(projection.indices)
+            normalized_energy = float(np.vdot(projected_y.astype(np.complex128),
+                projected_y.astype(np.complex128)).real/self.variance)
+            self.projected_energy += normalized_energy
+            # A complete orthogonal block retains the known-noise Gamma law.
+            # Cropping a DFT after projection would change that law. This
+            # public aperture affects absence evidence only, never likelihood.
+            if self.quiet_sample_bounds[0] <= start and stop <= self.quiet_sample_bounds[1]:
+                self.quiet_observed_projection_modes += len(projection.indices)
+                self.quiet_projected_energy += normalized_energy
         self.erased_rows += int(rows - np.count_nonzero(valid))
         self.scored_rows += rows
         if len(projection.indices) == 0 or not np.any(valid):
@@ -229,8 +298,32 @@ class IncrementalGaussianReceiver:
                 raise ValueError("physical block centers must be finite, nonnegative and strictly increasing")
             elapsed = self.first_block_elapsed_seconds if self.previous_physical_center is None else center-self.previous_physical_center
             self.previous_physical_center = center
-        for runtime in self.runtimes:
-            runtime.update(r, gram, elapsed)
+        if self.hypothesis_executor is None:
+            for runtime in self.runtimes:
+                runtime.update(r, gram, elapsed)
+        else:
+            # Models own independent channel states. They share only immutable
+            # observations; global timing/model mixing still occurs once above
+            # this component. Drain every task even when one update fails.
+            jobs = [job for runtime in self.runtimes for job in
+                (runtime.jobs(r, gram, elapsed) if isinstance(runtime, _CandidateGaussianFilter)
+                 else [(runtime, r, gram, elapsed)])]
+            futures, error = [], None
+            for runtime, correlations, information, dt in jobs:
+                try:
+                    futures.append(self.hypothesis_executor.submit(
+                        runtime.update, correlations, information, dt))
+                except BaseException as exc:
+                    error = exc
+                    break
+            for future in futures:
+                try:
+                    future.result()
+                except BaseException as exc:
+                    if error is None:
+                        error = exc
+            if error is not None:
+                raise error
         self.previous_center_twice = center_twice
         self.block_updates += 1
         self.processed_rows += rows
@@ -317,6 +410,13 @@ class IncrementalGaussianReceiver:
             hypothesis_log_evidence=candidate_by_model.detach().cpu().numpy().tolist(), consumed_samples=self.next_input_sample,
             processed_rows=self.processed_rows, scored_rows=self.scored_rows,
             observed_rows=self.observed_rows, erased_rows=self.erased_rows, blocks=self.block_updates,
+            observed_projection_modes=self.observed_projection_modes,
+            projected_energy=self.projected_energy,
+            quiet_observed_projection_modes=self.quiet_observed_projection_modes,
+            quiet_projected_energy=self.quiet_projected_energy,
+            quiet_sample_bounds=self.quiet_sample_bounds,
+            hypothesis_shards=self.hypothesis_shards,
+            hypothesis_update_tasks_per_block=self.hypothesis_shards*len(self.runtimes),
             pending_rows=len(self.pending), working_bytes_estimate=self.owned_bytes_estimate,
             push_process_cpu_seconds=self.push_cpu_seconds)
 

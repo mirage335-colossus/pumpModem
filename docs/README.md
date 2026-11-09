@@ -11,21 +11,30 @@ obsolete code, experiments and generated outputs when that purpose ends.
 ## Current Robust modem
 
 The [current architecture and status](robust-current.md) identifies the
-canonical native waveform/channel/Helper stack and the staged Python receiver
-boundary. Robust remains unavailable in the GUI pending reconnection. Retained
+canonical native waveform/channel/Helper stack and the complete headless
+receiver. Its frozen native message gate passed, including the captured-prefix
+EOF negative control. The completed base and persistent nominal runs measured
+all eight current manual cases, with worst-state capacity margins unresolved
+and no full-capacity pass. Persistent measurement v3 is now the canonical
+default; the named `triad` group passed 20/20 in 26.73 seconds, while
+sensitivity confirmation remains incomplete without a >90% qualification. See the
+[validation record](validation.md) for ratios and provenance.
+Robust remains unavailable in the GUI pending
+reconnection. Retained
 [pattern research](triad-patterns.md), [stochastic channel findings](triad-stochastic.md),
 [rate-aware shaping](triad-shaping.md), and [channel model contract](channel-models.md)
 provide bounded technique summaries and evidence limits.
 
 Computationally intensive Robust checks must follow the hierarchical,
 computationally minimal statistical method in [the current testing policy](robust-current.md#testing-computationally-intensive-robust-changes).
-The [isolated triad regression policy](triad-performance.md) states its
-predeclared coverage, uncertainty and provenance requirements. Run
-`./build.sh test triad` before the documented local CPU-only editable-case
-subwindow command; the method and its receiver-coverage limits are in
-[the case-suite section](triad-performance.md#editable-manual-case-subwindow-suite).
-That section also distinguishes its conditional one-channel-seed coarse
-full-bit sensitivity from operational admission and whole-message success.
+The [isolated triad regression policy](triad-performance.md) defines checks for
+degradation against a matched baseline. The distinct
+[manual-case capacity contract](robust-manual-capacity.md) requires complete
+receiver work, productive local CPU parallelism and absolute real-time/workspace
+margins for the freshly read manual configurations. They share efficient
+sampling methods; their pass decisions are different. Run `./build.sh test triad`
+before manual capacity measurements. Earlier partial-stage results do not
+qualify complete reception or whole-machine capacity.
 RunPod accelerates the same bounded method; it does not authorize full or
 sustained campaigns.
 

@@ -439,17 +439,27 @@ tests but do not compile them. For individual work, build the corresponding
 
 ### Robust modem
 
-The current [Robust architecture](robust-current.md) has a canonical native
-waveform, channel and Helper path; case-suite acquisition (`FFTScreen` proposals
-with a noisy Helper estimate) and `PracticalTrackingReceiver` tracking are
-sequential stages, not an integrated receiver or GUI feature. Start with the affected cheap
-deterministic tests. For computationally intensive estimates, follow the
-[abbreviated statistical policy](triad-performance.md): predeclare coverage,
-stopping and uncertainty, record source/configuration provenance, and use only
-small fixed-geometry kernel samples. The harness has no full or sustained mode
-and does not qualify end-to-end reception or physical links. Do not restore old
-full, sustained, multi-day, sweep, or calibration campaigns as fallback. RunPod
-accelerates the same method.
+The [current Robust architecture](robust-current.md) distinguishes the
+canonical native waveform/channel/Helper path, a headless complete-stream
+receiver, and the still unavailable GUI path. Run the affected cheap
+deterministic checks first. For the manual absolute-capacity question, run the
+native triad group and then the separate manual-case suite:
+
+```sh
+./build.sh test triad
+python3 tools/triad_manual_cases.py \
+  --output local-evidence/robust-cases.json \
+  --exporter build/dev/triad_helper_export
+```
+
+The `triad_abbreviated.py --cases` form remains a compatibility forwarder.
+Ordinary `triad_abbreviated.py` runs measure relative computational regression
+against a matched baseline; they are not absolute capacity results. See the
+[manual capacity contract](robust-manual-capacity.md) for complete work,
+statistical gates and limits, and the [regression guide](triad-performance.md)
+for relative timing. Do not replace the bounded method with full, sustained,
+multi-day, exhaustive, or heavy-calibration campaigns. RunPod may accelerate
+the same method but does not authorize larger experiments.
 
 A shared security, codec, audio, or GUI change still needs its applicable
 component checks. Keep their contracts distinct from Robust performance
@@ -507,11 +517,11 @@ or a release.
 ### Robust computational checks
 
 The retained `triad` group covers concise native waveform, shaping, stream, and
-Helper Generator checks. Run it before the editable manual-case subwindow suite:
+Helper Generator checks. Run it before absolute manual-case capacity work:
 
 ```sh
 ./build.sh test triad
-python3 tools/triad_abbreviated.py --cases \
+python3 tools/triad_manual_cases.py \
   --output local-evidence/robust-cases.json \
   --exporter build/dev/triad_helper_export
 ```
@@ -520,23 +530,30 @@ Use repeatable `--case-index N` for an explicitly partial debugging rerun; the
 runner validates the entire current list and marks the output partial, which
 does not qualify omitted rows.
 
-The case suite reads `_tests-RobustModem.md` by default and reports bounded
-single-stream acquisition/tracking service, conditional one-channel-seed
-full-bit coarse sensitivity when preflight admits it, an estimated streaming
-FIR plus nominal full Helper/FFT service sum, and workspace estimates.
-It does not qualify operational admission, full Robust reception, whole-message
-success, a whole-machine CPU ceiling, full-bank memory, or GUI reception. The
-one-thread default reflects matched local comparisons, with `--threads` still
-available as an override; it is not a global optimality claim. The empirical
-confirmation bound is reported only when its projected service fits the
-600-second per-candidate cost gate. Follow the detailed
-[case-suite policy](triad-performance.md#editable-manual-case-subwindow-suite).
-Other computationally intensive Robust performance work uses
-[`tools/triad_abbreviated.py`](../tools/triad_abbreviated.py) under the
-[abbreviated statistical policy](triad-performance.md). Predeclare the covered
-kernels and path strata, stage allocation, uncertainty decision, and provenance.
-The harness projects only repeated units of fixed kernel geometry; it does not
-estimate end-to-end receiver latency, physical success, or radio qualification.
+The manual suite reads and validates `_tests-RobustModem.md` by default and
+supports current-index partial reruns for debugging. Its exact coverage,
+workspace and cost gates, and interpretation limits are in the
+[manual capacity contract](robust-manual-capacity.md). A partial rerun cannot
+qualify omitted rows, and staged/coarse sensitivity does not qualify an
+operational receiver or physical message success. The ordinary
+[`tools/triad_abbreviated.py`](../tools/triad_abbreviated.py) harness instead
+measures relative degradation against a matched baseline; its synthetic
+complete-fine receiver fixture is not a native-channel or capacity pass. See
+the [regression guide](triad-performance.md) for its fixed-geometry limits.
+The frozen native message gate has passed, including its captured-prefix EOF
+negative control. This is one bounded functional check, not a capacity or
+all-case qualification. The manual suite's `--skip-message-gate` option is
+debug-only and prevents an integrated pass; do not use it for capacity
+qualification. The prior `--paired-followup` option has been removed. The
+completed base run measured all eight current manual cases with unresolved
+margins and no full worst-state capacity pass. Persistent measurement v3 is now
+the canonical default; eleven focused checks and the named `triad` group passed
+(20/20 in 26.73 seconds). Sensitivity confirmation is incomplete after an unresolved memory
+guard, so there is no >90% qualification. Historical v2 phases retain their
+original hashes and policy and are not a v3 full rerun. See the
+[validation record](validation.md) for per-case ratios and provenance. The
+Groundwave local thread comparison retained four threads; twelve were about
+6.9% slower.
 Do not restore full, sustained, multi-day, exhaustive, or heavy-calibration
 campaigns as routine tests or fallback. RunPod accelerates the same bounded
 approach.

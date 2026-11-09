@@ -132,6 +132,105 @@ class NativeStream:
         self.next_sample += n
         return values, valid
 
+    def set_basis_address(self, epoch, symbol_ordinal):
+        """Select a public template address without changing the received stream.
+
+        This is a single-owner pipe operation, like ``basis`` and ``next``.
+        Complete outstanding requests before calling it and discard any caller
+        template/interpolation caches afterwards. The original simulator
+        descriptor and observation cursor are deliberately left unchanged.
+        """
+        if (isinstance(epoch, bool) or not isinstance(epoch, int) or
+            not 6 <= epoch <= 4294967289 or isinstance(symbol_ordinal, bool) or
+            not isinstance(symbol_ordinal, int) or not 0 <= symbol_ordinal < (1 << 64)):
+            raise ValueError('public basis epoch/ordinal is outside its bounded integer domain')
+        if not self.descriptor.get('basis_address_supported', False):
+            raise ValueError('native source lacks public basis-address support; rebuild the exporter')
+        try:
+            receipt = self._request(f'basis-address {epoch} {symbol_ordinal}\n')
+            generation = receipt.get('generation')
+            if (type(receipt.get('basis_epoch')) is not int or receipt['basis_epoch'] != epoch or
+                type(receipt.get('basis_symbol_ordinal')) is not int or receipt['basis_symbol_ordinal'] != symbol_ordinal or
+                receipt.get('template_cache_cleared') is not True or
+                type(generation) is not int or generation <= getattr(self, 'basis_address_generation', 0)):
+                raise ValueError('native basis-address acknowledgement disagrees with public request')
+        except BaseException:
+            self.close()
+            raise
+        self.basis_address = (epoch, symbol_ordinal)
+        self.basis_address_generation = generation
+        return receipt
+
+    def slot_plan(self, index):
+        """Query one public nominal slot without changing templates or input.
+
+        The native calendar supplies exact source-clock offsets and a declared
+        RX search envelope even beyond the actual transmitted message. Caller
+        code must preserve the returned global physical RX origin when slicing
+        observations. This pipe transaction has one owner, like ``next``.
+        """
+        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index <= 1023:
+            raise ValueError('public slot index must be an integer in[0,1023]')
+        if not self.descriptor.get('slot_plan_supported', False):
+            raise ValueError('native source lacks public slot planning; use a whole-bit calendar and rebuild')
+        try:
+            receipt = self._request(f'slot-plan {index}\n')
+            integers = ('index', 'sample_rate_hz', 'pattern_epoch', 'symbol_ordinal',
+                'source_begin_samples', 'next_source_begin_samples', 'source_samples',
+                'source_calendar_origin_sample', 'helper_begin_samples', 'pattern_begin_samples',
+                'pattern_end_samples', 'source_end_samples', 'helper_end_samples',
+                'minimum_source_step_samples', 'receiver_window_first_sample',
+                'receiver_window_stop_sample', 'receiver_window_physical_origin_sample',
+                'receiver_window_samples', 'receiver_data_first_sample', 'receiver_data_stop_sample',
+                'receiver_previous_signal_stop_sample', 'receiver_next_signal_first_sample',
+                'quiet_aperture_first_sample', 'quiet_aperture_stop_sample')
+            if (receipt.get('schema') != 'triad-public-slot-plan-v1' or
+                any(type(receipt.get(key)) is not int or not 0 <= receipt[key] < (1 << 64)
+                    for key in integers) or receipt['index'] != index or
+                not 1 <= receipt['sample_rate_hz'] < (1 << 32) or
+                receipt['sample_rate_hz'] != self.descriptor['sample_rate_hz'] or
+                not 6 <= receipt['pattern_epoch'] <= 4294967289):
+                raise ValueError('native public slot plan has invalid integer geometry')
+            for key in ('capture_lead_seconds', 'window_capture_lead_seconds'):
+                value = receipt.get(key)
+                try:
+                    finite = math.isfinite(value)
+                except (TypeError, OverflowError):
+                    finite = False
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not finite:
+                    raise ValueError('native public slot plan has invalid clock origin')
+            start, stop = receipt['receiver_window_first_sample'], receipt['receiver_window_stop_sample']
+            source_start, source_stop = receipt['source_begin_samples'], receipt['source_end_samples']
+            quiet_first, quiet_stop = receipt['quiet_aperture_first_sample'], receipt['quiet_aperture_stop_sample']
+            if (receipt['helper_begin_samples'] > source_start or
+                not source_start <= receipt['pattern_begin_samples'] < receipt['pattern_end_samples'] <= source_stop or
+                source_stop > receipt['helper_end_samples'] or
+                source_stop-source_start != receipt['source_samples'] or
+                receipt['pattern_begin_samples']-source_start != receipt['source_calendar_origin_sample'] or
+                receipt['next_source_begin_samples']-source_start < receipt['minimum_source_step_samples'] or
+                receipt['next_source_begin_samples'] < source_stop or
+                receipt['minimum_source_step_samples'] <= 0 or
+                stop <= start or receipt['receiver_window_physical_origin_sample'] != start or
+                receipt['receiver_window_samples'] != stop-start or
+                not start <= receipt['receiver_data_first_sample'] < receipt['receiver_data_stop_sample'] <= stop or
+                not start <= quiet_first <= quiet_stop <= stop or
+                (quiet_first < quiet_stop and
+                    (quiet_first < max(receipt['receiver_data_first_sample'], receipt['receiver_previous_signal_stop_sample']) or
+                     quiet_stop > min(receipt['receiver_data_stop_sample'], receipt['receiver_next_signal_first_sample']))) or
+                type(receipt.get('quiet_aperture_available')) is not bool or
+                receipt['quiet_aperture_available'] != (quiet_first < quiet_stop) or
+                type(receipt.get('quiet_aperture_truncated')) is not bool or
+                receipt['quiet_aperture_truncated'] != (quiet_first != receipt['receiver_data_first_sample'] or
+                    quiet_stop != receipt['receiver_data_stop_sample']) or
+                not math.isclose(receipt['window_capture_lead_seconds'],
+                    receipt['capture_lead_seconds']-start/receipt['sample_rate_hz'],
+                    rel_tol=8*np.finfo(float).eps, abs_tol=8*np.finfo(float).eps)):
+                raise ValueError('native public slot plan has inconsistent window geometry')
+        except BaseException:
+            self.close()
+            raise
+        return receipt
+
     def basis(self, first, count, rows):
         if first < 0 or not 1 <= count <= 16384 or not 1 <= len(rows) <= 128:
             raise ValueError('bounded basis coordinates required')
@@ -213,20 +312,38 @@ def disciplined_capture_extent(samples, sample_rate, maximum_correction, coordin
 
 
 def tracking_source_basis(source, coordinates, taps, offset, timing_forward, audio_center_hz,
-                          *, template_backend='auto', cache_bytes=32*1024**2):
+                          *, template_backend='auto', cache_bytes=32*1024**2,
+                          source_offset_seconds=0.):
     """Physical ADC coordinates + public remote source-offset/rate states.
 
     Existing acquisition CFO includes the base affine-clock IF contribution.
     Subtract that contribution before mapped-basis adds the complete IF map,
-    so the old CFO convention is retained rather than counted twice.
+    so the old CFO convention is retained rather than counted twice. The
+    optional source-clock offset stays outside the receiver affine warp;
+    ``offset`` retains its existing receiver-time interpretation.
+
+    ``render.initial_affine`` shares the same bounded template cache and uses
+    the acquired TOTAL CFO for every fixed clock hypothesis. Its residual rate
+    is another constant affine clock, so its entire IF contribution is removed
+    before the native map adds it. The ordinary renderer retains the physical
+    dynamic-rate IF/gauge convention.
     """
     if template_backend not in ('auto', 'direct'):
         raise ValueError('tracking templates must use auto or direct')
+    if isinstance(source_offset_seconds, (bool, np.bool_)):
+        raise ValueError('source-clock offset must be finite')
+    try:
+        source_offset_seconds = float(source_offset_seconds)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError('source-clock offset must be finite') from error
+    if not math.isfinite(source_offset_seconds):
+        raise ValueError('source-clock offset must be finite')
     template_source = source
     if template_backend == 'auto':
         from triad_tracking_basis import CachedMappedBasis
         template_source = CachedMappedBasis(source, cache_bytes=cache_bytes)
-    def render(states, anchor_seconds, first, stop, physical_origin, physical_offsets):
+    def _render(states, anchor_seconds, first, stop, physical_origin, physical_offsets,
+                *, fixed_affine):
         count = stop-first
         rows = []
         for bit in (0, 1):
@@ -237,10 +354,12 @@ def tracking_source_basis(source, coordinates, taps, offset, timing_forward, aud
                 displacement = state.delay_index*timing_forward.delay_step_seconds
                 scale = base+velocity
                 if scale <= 0: raise ValueError('tracking source rate is nonpositive')
-                mapped_arrival = (base*(arrival+offset)-displacement+velocity*anchor_seconds)/scale
+                mapped_arrival = (base*(arrival+offset)+source_offset_seconds-
+                    displacement+velocity*anchor_seconds)/scale
                 for delay, doppler in taps:
                     rows.append((bit, epoch, mapped_arrival,
-                        frequency-audio_center_hz*(base-1), (scale-1)*1e6, delay, doppler))
+                        frequency-audio_center_hz*((scale if fixed_affine else base)-1),
+                        (scale-1)*1e6, delay, doppler))
         data = np.empty((len(rows), count), np.complex128)
         positions = np.asarray(physical_offsets, dtype=np.float64)
         for lo in range(0, count, 16384):
@@ -252,8 +371,16 @@ def tracking_source_basis(source, coordinates, taps, offset, timing_forward, aud
         result = np.zeros((3, len(states), len(taps), count), np.complex128)
         result[1:] = data.reshape(2, len(states), len(taps), count)
         return result
+    def render(states, anchor_seconds, first, stop, physical_origin, physical_offsets):
+        return _render(states, anchor_seconds, first, stop, physical_origin, physical_offsets,
+            fixed_affine=False)
     render.cache_report = (template_source.report if template_backend == 'auto'
                            else lambda: dict(method='direct-native-mapped-reference', cache_limit_bytes=0))
+    def initial_affine(states, anchor_seconds, first, stop, physical_origin, physical_offsets):
+        return _render(states, anchor_seconds, first, stop, physical_origin, physical_offsets,
+            fixed_affine=True)
+    initial_affine.cache_report = render.cache_report
+    render.initial_affine = initial_affine
     return render
 
 

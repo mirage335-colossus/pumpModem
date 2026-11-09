@@ -1,9 +1,17 @@
 import hashlib
+import io
 from pathlib import Path
+import sys
 import tempfile
 import unittest
+from unittest import mock
+from contextlib import redirect_stdout
 
 from tools.triad_cases import CaseParseError, FIELDS, ROOT, load_cases
+
+sys.path.insert(0, str(ROOT / "tools"))
+import triad_abbreviated
+import triad_manual_cases
 
 
 SOURCE = ROOT / "_tests-RobustModem.md"
@@ -11,6 +19,68 @@ FIXTURE = '- Parser fixture\nNo\tEncryption\n0 W\tHelper Carrier Transmit Power\
 
 
 class TriadCasesTests(unittest.TestCase):
+    @mock.patch("triad_case_suite.run_cases")
+    def test_dedicated_manual_cli_forwards_absolute_capacity_arguments_once(self, run_cases):
+        code = triad_manual_cases.main([
+            "--case-list", "current-manual.md", "--output", "capacity.json",
+            "--exporter", "exporter", "--measurement-seconds", "1.5",
+            "--threads", "6", "--case-index", "3", "--case-index", "5",
+            "--skip-message-gate",
+        ])
+        self.assertEqual(code, 2)  # No current-source functional gate was requested.
+        run_cases.assert_called_once_with(
+            executable=Path("exporter"), output=Path("capacity.json"),
+            case_list=Path("current-manual.md"), measurement_seconds=1.5,
+            threads=6, case_indices=[3, 5], message_gate=False,
+        )
+
+    def test_manual_cli_help_labels_capacity_and_separates_kernel_regression(self):
+        output = io.StringIO()
+        with redirect_stdout(output), self.assertRaises(SystemExit) as raised:
+            triad_manual_cases.main(["--help"])
+        self.assertEqual(raised.exception.code, 0)
+        help_text = " ".join(output.getvalue().split())
+        self.assertIn("Absolute local CPU and workspace capacity", help_text)
+        self.assertIn("not the kernel degradation regression suite", help_text)
+        self.assertIn("--case-list", help_text)
+        self.assertIn("--threads", help_text)
+        self.assertNotIn("--baseline", help_text)
+
+    @mock.patch("triad_manual_cases.main", return_value=2)
+    def test_legacy_cases_option_forwards_once_to_dedicated_entrypoint(self, manual_main):
+        code = triad_abbreviated.main([
+            "--output", "capacity.json", "--cases", "current-manual.md",
+            "--exporter", "exporter", "--probe-seconds", "1.5", "--threads", "6",
+            "--case-index", "3", "--skip-message-gate",
+        ])
+        self.assertEqual(code, 2)
+        manual_main.assert_called_once_with([
+            "--case-list", "current-manual.md", "--output", "capacity.json",
+            "--exporter", "exporter", "--measurement-seconds", "1.5",
+            "--threads", "6", "--case-index", "3", "--skip-message-gate",
+        ])
+
+    def test_legacy_manual_mode_rejects_explicit_kernel_regression_options(self):
+        for option, value in (("--baseline", "baseline.json"),
+                              ("--device", "cpu"),
+                              ("--target-units", "1000"),
+                              ("--target-units=1000", None),
+                              ("--dev", "cpu"),
+                              ("--target-u=1000", None)):
+            args = ["--output", "capacity.json", "--cases", "manual.md", option]
+            if value is not None:
+                args.append(value)
+            with self.subTest(option=option), self.assertRaises(SystemExit) as raised:
+                triad_abbreviated.main(args)
+            self.assertEqual(raised.exception.code, 2)
+
+    @mock.patch("triad_abbreviated.run", return_value={"status": "abbreviated_evidence_only", "kernels": {}})
+    def test_default_invocation_remains_the_kernel_regression_entrypoint(self, regression):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "result.json"
+            code = triad_abbreviated.main(["--output", str(output)])
+            self.assertEqual(code, 0)
+        regression.assert_called_once_with(target_units=1000, device="cpu", baseline=None)
     def test_current_manual_cases_are_consumed_without_frozen_inventory(self):
         result = load_cases()
         self.assertTrue(result["cases"])

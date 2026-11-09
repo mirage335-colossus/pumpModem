@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 import time
+import weakref
 
 import numpy as np
 import torch
@@ -62,12 +63,21 @@ class _TimingStream:
                  projection_mode="dft", memory_limit_bytes=512*1024**2,
                  maximum_input_chunk_samples=1_048_576,
                  maximum_segment_samples=1_048_576,
-                 require_physical_map=False, maximum_map_step_samples=2.):
+                 require_physical_map=False, maximum_map_step_samples=2.,
+                 hypothesis_executor=None, hypothesis_shards=1,
+                 quiet_sample_bounds=None):
         began = time.perf_counter()
         self.sample_rate = float(sample_rate)
         if not math.isfinite(self.sample_rate) or self.sample_rate <= 0:
             raise ValueError("sample rate must be finite and positive")
         self.samples = _integer(samples, "sample count")
+        bounds = (0, self.samples) if quiet_sample_bounds is None else quiet_sample_bounds
+        if not isinstance(bounds, (tuple, list)) or len(bounds) != 2:
+            raise ValueError('quiet sample bounds need two local endpoints')
+        self.quiet_sample_bounds = tuple(_integer(x, 'quiet sample bound', low=0,
+            high=self.samples) for x in bounds)
+        if self.quiet_sample_bounds[0] > self.quiet_sample_bounds[1]:
+            raise ValueError('quiet sample bounds must be ordered')
         self.block_samples = _integer(block_samples, "block sample count")
         self.segment_samples = _integer(segment_samples, "segment sample count")
         self.maximum_input_chunk_samples = _integer(maximum_input_chunk_samples,
@@ -110,7 +120,8 @@ class _TimingStream:
             device=device, precision=precision, projection_mode=projection_mode,
             memory_limit_bytes=self.memory_limit_bytes-buffer_bytes-timing_bytes,
             maximum_candidates=timing_forward.maximum_proposals,
-            maximum_input_chunk_samples=self.segment_capacity)
+            maximum_input_chunk_samples=self.segment_capacity,
+            hypothesis_executor=hypothesis_executor, hypothesis_shards=hypothesis_shards)
         # The maintained receiver validates arithmetic, bands, prior and its
         # worst candidate workspace without synthesizing any source template.
         probe = IncrementalReceiver(samples=self.segment_capacity,
@@ -132,6 +143,14 @@ class _TimingStream:
         self.requested_invalid_rows = self.processed_requested_invalid_rows = 0
         self.additional_discarded_rows = self.expanded_erasure_blocks = 0
         self.segment_updates = self.block_updates = 0
+        self.projected_energy = 0.
+        self.observed_projection_modes = 0
+        self.quiet_projected_energy = 0.
+        self.quiet_observed_projection_modes = 0
+        self.initial_state_count = len(timing_forward.states)
+        self.peak_emission_states = self.terminal_emission_states = 0
+        self.peak_retained_states = 0
+        self.hypothesis_update_tasks = self.maximum_hypothesis_tasks_per_block = 0
         self.complete_observation = False
         self.push_cpu_seconds = self.segment_cpu_seconds = 0.
         self.maximum_segment_cpu_seconds = self.maximum_segment_wall_seconds = 0.
@@ -197,6 +216,8 @@ class _TimingStream:
                 (origin-previous_origin)+(float(offsets[0])-previous_offset))/self.sample_rate
             self._predict_timing(elapsed, boundary_from_previous_anchor)
         states = self.timing.states
+        self.terminal_emission_states = len(states)
+        self.peak_emission_states = max(self.peak_emission_states, len(states))
         # This scalar is a convenience for source basis generation. The
         # authoritative map remains integer-origin plus relative offsets, and
         # elapsed times above never subtract large absolute floating values.
@@ -236,10 +257,18 @@ class _TimingStream:
         if np.any(unmixed[:, 0] != 0):
             raise FloatingPointError("tracking segment's common null acquired nonzero evidence")
         self._observe_segment(receiver, unmixed, origin, offsets, rows)
+        self.peak_retained_states = max(self.peak_retained_states, len(self.timing.states))
+        self.hypothesis_update_tasks += result['blocks']*result['hypothesis_update_tasks_per_block']
+        self.maximum_hypothesis_tasks_per_block = max(self.maximum_hypothesis_tasks_per_block,
+            result['hypothesis_update_tasks_per_block'])
         self._previous_anchor = (origin, midpoint)
         self._previous_last_point = (origin, float(offsets[-1]))
         self.segment_updates += 1
         self.block_updates += result["blocks"]
+        self.projected_energy += result['projected_energy']
+        self.observed_projection_modes += result['observed_projection_modes']
+        self.quiet_projected_energy += result['quiet_projected_energy']
+        self.quiet_observed_projection_modes += result['quiet_observed_projection_modes']
         self.processed_rows += rows
         self.observed_rows += result["observed_rows"]
         self.erased_rows += result["erased_rows"]
@@ -326,6 +355,22 @@ class _TimingStream:
             consumed_samples=self.next_input_sample, processed_rows=self.processed_rows,
             scored_rows=self.processed_rows, observed_rows=self.observed_rows,
             erased_rows=self.erased_rows, blocks=self.block_updates, segments=self.segment_updates,
+            projected_energy=self.projected_energy,
+            observed_projection_modes=self.observed_projection_modes,
+            quiet_projected_energy=self.quiet_projected_energy,
+            quiet_observed_projection_modes=self.quiet_observed_projection_modes,
+            quiet_sample_bounds=self.quiet_sample_bounds,
+            state_work_regime=dict(initial_states=self.initial_state_count,
+                peak_pre_emission_states=self.peak_emission_states,
+                terminal_pre_emission_states=self.terminal_emission_states,
+                peak_post_observation_states=self.peak_retained_states,
+                terminal_post_observation_states=len(self.timing.states),
+                state_cap=self.timing.maximum_states, proposal_cap=self.timing.maximum_proposals,
+                attained_state_cap=self.peak_retained_states >= self.timing.maximum_states,
+                attained_proposal_cap=self.peak_emission_states >= self.timing.maximum_proposals,
+                coherence_models=len(self.coherences),
+                requested_candidate_shards=self.receiver_arguments['hypothesis_shards'],
+                maximum_hypothesis_tasks_per_block=self.maximum_hypothesis_tasks_per_block),
             requested_invalid_rows=self.requested_invalid_rows,
             processed_requested_invalid_rows=self.processed_requested_invalid_rows,
             additional_discarded_rows=self.additional_discarded_rows,
@@ -356,6 +401,12 @@ class _TimingStream:
 
 class _PersistentTimingLane(_TimingStream):
     """Carry normalized channel posteriors through public timing updates.
+
+    Normalized predictive likelihoods refer to a bank fixed independently of
+    its scored samples. With full-input adaptive selection, global pruning
+    before moment matching can change an atom's predictor with the other
+    selected groups; a selected/full-grid correction alone is not established
+    for this lane. The fixed initial-affine lane remains separable.
 
     Incoming channel distributions at the same timing state are replaced by a
     proper Gaussian with their exact conditional mean and covariance (an
@@ -488,6 +539,8 @@ class _PersistentTimingLane(_TimingStream):
         return IncrementalReceiver(samples=rows, candidate_count=len(states), basis=counted_render,
             block_center_seconds=lambda lo, hi: .5*(float(offsets[lo])+float(offsets[hi-1]))/self.sample_rate,
             initial_channel_state=self._next_posteriors,
+            quiet_sample_bounds=tuple(max(0, min(rows, x-self.processed_rows))
+                for x in self.quiet_sample_bounds),
             first_block_elapsed_seconds=elapsed, **self.receiver_arguments)
 
     def _observe_segment(self, receiver, unmixed, origin, offsets, rows):
@@ -520,7 +573,8 @@ class _PersistentTimingLane(_TimingStream):
             work_counts=dict(transition_edges=self.transition_edges,
                 merged_channel_components=self.merged_channel_components,
                 basis_rows=self.basis_rows, candidate_block_updates=self.candidate_block_updates,
-                projection_mode_updates=self.projection_mode_updates),
+                projection_mode_updates=self.projection_mode_updates,
+                hypothesis_update_tasks=self.hypothesis_update_tasks),
             maximum_channel_mixing_variance=self.maximum_channel_mixing_variance)
         return result
 
@@ -532,13 +586,17 @@ class _InitialAffineReceiver(_PersistentTimingLane):
         self.initial_affine_anchor = None
         self.affine_elapsed_seconds = 0.
         initial_states = arguments['timing_forward'].states
+        reference = weakref.ref(self)
 
         def affine_basis(states, anchor, first, stop, origin, offsets):
+            current = reference()
+            if current is None:
+                raise RuntimeError('initial affine lane no longer owns its basis callback')
             if tuple(states) != initial_states:
                 raise RuntimeError('fixed affine bank changed its public state coordinates')
-            if self.initial_affine_anchor is None:
+            if current.initial_affine_anchor is None:
                 raise RuntimeError('fixed affine time anchor was not initialized before scoring')
-            return basis_provider(initial_states, self.initial_affine_anchor,
+            return basis_provider(initial_states, current.initial_affine_anchor,
                                   first, stop, origin, offsets)
 
         super().__init__(basis_provider=affine_basis, **arguments)
@@ -586,7 +644,8 @@ class PracticalTrackingReceiver:
     Physical ADC/ASRC covariance and endpoint policy remain the caller's scope.
     """
 
-    def __init__(self, *, timing_forward, memory_limit_bytes=512*1024**2, **arguments):
+    def __init__(self, *, timing_forward, memory_limit_bytes=512*1024**2,
+                 initial_affine_basis_provider=None, **arguments):
         began = time.perf_counter()
         if not isinstance(timing_forward, SparseTimingForward):
             raise TypeError('practical tracking requires a public timing-forward prior')
@@ -613,8 +672,13 @@ class PracticalTrackingReceiver:
         # template; each preflights its bounded storage before receiving data.
         # Its complete declared allocation is subtracted from the adaptive
         # budget, so combined owned storage never has two full-budget owners.
+        nominal_arguments = dict(arguments)
+        if initial_affine_basis_provider is not None:
+            if not callable(initial_affine_basis_provider):
+                raise TypeError('initial affine basis provider must be callable')
+            nominal_arguments['basis_provider'] = initial_affine_basis_provider
         self.nominal = _InitialAffineReceiver(timing_forward=nominal_forward,
-            memory_limit_bytes=self.memory_limit_bytes, **arguments)
+            memory_limit_bytes=self.memory_limit_bytes, **nominal_arguments)
         remaining = self.memory_limit_bytes-self.nominal.owned_bytes_estimate
         if remaining <= 0:
             raise MemoryError('initial affine lane exhausts combined tracking workspace')

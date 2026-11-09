@@ -21,12 +21,13 @@ import time
 
 LOOKS = (3, 5, 9)
 BATCHES = (1, 2, 4)  # Two training sizes followed by an independent holdout.
-KERNELS = ("acquisition_prepare", "acquisition_score", "gaussian_update", "timing_forward")
+KERNELS = ("acquisition_prepare", "acquisition_score", "gaussian_update", "timing_forward",
+           "complete_fine_receiver")
 ALPHA = .05
 PRECISION = .15
 MODEL_LIMIT = .30
 SLOWDOWN = 1.30
-SCHEMA = "triad-abbreviated-v1"
+SCHEMA = "triad-abbreviated-v2"
 
 
 def log_interval(values, *, alpha):
@@ -172,13 +173,18 @@ def kernels(device):
     calls = {"acquisition_prepare": prepare,
              "acquisition_score": lambda: prepared.score(raw, [0.], top_per_bit=1),
              "gaussian_update": gaussian, "timing_forward": timing}
+    from triad_regression_receiver import prepare_fine_receiver
+    fine = prepare_fine_receiver()
+    calls["complete_fine_receiver"] = fine['call']
+    calls["complete_fine_receiver"].close = fine['close']
     inputs = hashlib.sha256(source.tobytes()+raw.tobytes()+json.dumps(manifest, sort_keys=True).encode()).hexdigest()
     geometry = {"fixture": 1, "sample_rate": fs, "capture_samples": 2000,
         "template_samples": samples, "epochs": 1, "bits": 2, "rays": 2,
         "gaussian_batch": 4, "gaussian_taps": 2, "updates_per_unit": 4,
         "precision": "fp32 bulk / canonical fp64 preparation and reductions",
         "input_sha256": inputs, "seed": 73019,
-        "execution": {name: device if name == "gaussian_update" else "cpu" for name in KERNELS}}
+        "execution": {name: device if name == "gaussian_update" else "cpu" for name in KERNELS},
+        "complete_fine_receiver": fine['geometry']}
     return calls, geometry
 
 
@@ -228,7 +234,7 @@ def policy():
         "model": "additive cost of independent identical fixed-geometry kernel units",
         "projected_quantity": "geometric-mean unit cost multiplied by count; not arithmetic expected runtime or a future-run prediction interval",
         "assumptions": "independent stationary approximately normal outer log timings; same thermal/cache/device regime",
-        "coverage": "kernel preparation/scoring, Gaussian updates, timing forward only; not complete acquisition/tracking, physical admission or sensitivity",
+        "coverage": "Kernel preparation/scoring, Gaussian updates, timing forward, and canonical acquisition-to-fine tracking on one synthetic stream using the full visible CPU worker allocation. Relative degradation only; native channel, quiet message completion, sensitivity and absolute capacity belong to the separate manual suite.",
         "projection_limit": "changing only the count of identical independent units; not duration, state growth, geometry or end-to-end latency",
         "confidence_limit": "conditional log-mean intervals; observed model-error floor is not a future-regime bound",
         "excluded_cost": "interpreter/import/device startup; preparation is measured separately"}
@@ -242,8 +248,14 @@ def run(*, target_units=1000, device="cpu", baseline=None):
     # Load every numerical library first, then constrain all discovered pools.
     # Restoring the caller's pool limits prevents this module altering a host.
     from threadpoolctl import threadpool_limits
-    with threadpool_limits(limits=1):
-        return _measure(calls, geometry, sources, setup_seconds, target_units, device, baseline)
+    try:
+        with threadpool_limits(limits=1):
+            return _measure(calls, geometry, sources, setup_seconds, target_units, device, baseline)
+    finally:
+        for call in calls.values():
+            close = getattr(call, 'close', None)
+            if close is not None:
+                close()
 
 
 def _measure(calls, geometry, sources, setup_seconds, target_units, device, baseline):
@@ -290,35 +302,48 @@ def _measure(calls, geometry, sources, setup_seconds, target_units, device, base
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     parser.add_argument("--target-units", type=int, default=1000,
                         help="project repeated identical units; never execute this many")
     parser.add_argument("--cases", nargs="?", const=str(Path(__file__).resolve().parents[1] / "_tests-RobustModem.md"),
-                        help="run the current editable case list (default: _tests-RobustModem.md)")
+                        help="compatibility route to the absolute manual-case capacity suite; use triad_manual_cases.py directly")
     parser.add_argument("--exporter", type=Path,
                         default=Path(__file__).resolve().parents[1] / "build/dev/triad_helper_export")
     parser.add_argument("--probe-seconds", type=float, default=1.)
     parser.add_argument("--threads", type=int)
     parser.add_argument("--case-index", type=int, action="append",
                         help="explicit partial rerun of a current manual row; repeat to select several")
-    parser.add_argument("--paired-followup", action="store_true",
-                        help="optional 22 common-noise pairs with 90%% confidence when standard 95%% confirmation is too costly")
-    args = parser.parse_args(argv)
+    parser.add_argument("--skip-message-gate", action="store_true",
+                        help="explicitly partial manual-capacity debugging without the native message gate")
+    input_args = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(input_args)
     if args.cases is not None:
-        if args.baseline or args.device != "cpu":
-            parser.error("manual case capacity uses the local CPU; kernel baseline/CUDA options do not apply")
-        from triad_case_suite import run_cases
-        run_cases(executable=args.exporter, output=args.output, case_list=Path(args.cases),
-                  measurement_seconds=args.probe_seconds, threads=args.threads,
-                  case_indices=args.case_index, paired_followup=args.paired_followup)
-        return 2  # Staged subwindows do not certify a complete receiver.
+        regression_only = {arg.split("=", 1)[0] for arg in input_args} & {
+            "--baseline", "--device", "--target-units",
+        }
+        if regression_only:
+            parser.error("kernel regression options do not apply to manual capacity; use triad_manual_cases.py arguments")
+        from triad_manual_cases import main as manual_main
+        manual_args = [
+            "--case-list", args.cases,
+            "--output", str(args.output),
+            "--exporter", str(args.exporter),
+            "--measurement-seconds", str(args.probe_seconds),
+        ]
+        if args.threads is not None:
+            manual_args.extend(("--threads", str(args.threads)))
+        for case_index in args.case_index or ():
+            manual_args.extend(("--case-index", str(case_index)))
+        if args.skip_message_gate:
+            manual_args.append("--skip-message-gate")
+        return manual_main(manual_args)
     if args.case_index is not None:
         parser.error("--case-index requires --cases")
-    if args.paired_followup:
-        parser.error("--paired-followup requires --cases")
+    if args.skip_message_gate:
+        parser.error("--skip-message-gate requires --cases")
     if not 4 <= args.target_units <= 10**9:
         parser.error("target units must be in [4,1000000000]")
     baseline = json.loads(args.baseline.read_text()) if args.baseline else None

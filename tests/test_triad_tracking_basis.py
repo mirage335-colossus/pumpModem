@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 import unittest
+from unittest import mock
 
 import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
@@ -118,6 +119,54 @@ class CachedBasisTests(unittest.TestCase):
             cache._tile(bit, 0, tile)
             self.assertEqual(cache.bytes, sum(value.nbytes for value in cache.cache.values()))
             self.assertLessEqual(cache.bytes, cache.byte_limit)
+
+    def test_single_tile_gather_preserves_order_duplicates_and_skips_unique_sort(self):
+        source = AnalyticSource(samples=4096)
+        cache = CachedMappedBasis(source, tile_samples=128, cache_bytes=4096)
+        relative = np.array([3, 7, 7, 11, 64, 127], dtype=np.int64)
+        expected = cache._tile(1, 0, 0)[relative]
+        cache.cache.clear()
+        cache.bytes = 0
+        cache.cache_hits = cache.cache_misses = cache.native_calls = cache.evictions = 0
+        with mock.patch('triad_tracking_basis.np.unique',
+                                 side_effect=AssertionError('single-tile sort used')):
+            actual = cache._gather(1, 0, 0, relative)
+        np.testing.assert_array_equal(actual, expected)
+        self.assertEqual(cache.cache_misses, 1)
+        self.assertEqual(cache.evictions, 0)
+
+    def test_tile_crossing_keeps_grouped_gather_and_boundary_order(self):
+        cache = CachedMappedBasis(AnalyticSource(samples=4096), tile_samples=128,
+                                  cache_bytes=4096)
+        relative = np.array([0, .5, 1, 3], dtype=np.float64)
+        first = 126
+        origin, within_origin = divmod(first, cache.tile_samples)
+        integer = np.floor(relative).astype(np.int64)
+        small = integer+within_origin
+        expected = np.zeros(len(relative), dtype=np.complex128)
+        for delta in np.unique(small//cache.tile_samples):
+            selected = (small//cache.tile_samples) == delta
+            expected[selected] = cache._tile(0, 0, origin+int(delta))[
+                small[selected] % cache.tile_samples]
+        cache.cache.clear()
+        cache.bytes = 0
+        cache.cache_hits = cache.cache_misses = cache.native_calls = cache.evictions = 0
+        actual = cache._gather(0, 0, first, integer)
+        np.testing.assert_array_equal(actual, expected)
+        self.assertEqual(cache.cache_misses, 2)
+
+    def test_nonmonotonic_private_gather_retains_general_fallback(self):
+        cache = CachedMappedBasis(AnalyticSource(samples=4096), tile_samples=128,
+                                  cache_bytes=4096)
+        relative = np.array([128, 1, 127, 0], dtype=np.int64)
+        expected = np.array([cache._tile(0, 0, int(index)//128)[int(index)%128]
+                             for index in relative])
+        cache.cache.clear()
+        cache.bytes = 0
+        cache.cache_hits = cache.cache_misses = cache.native_calls = cache.evictions = 0
+        actual = cache._gather(0, 0, 0, relative)
+        np.testing.assert_array_equal(actual, expected)
+        self.assertEqual(cache.cache_misses, 2)
 
     def test_unwarped_integer_samples_are_exact_and_rows_do_not_use_observations(self):
         source = AnalyticSource()

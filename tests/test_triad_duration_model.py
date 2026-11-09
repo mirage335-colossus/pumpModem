@@ -7,9 +7,10 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
 import numpy as np
-from scipy.stats import ncx2
+from scipy.stats import ncx2, norm
 from triad_duration_model import (effective_modes, gaussian_prediction,
                                   deterministic_prediction, plan_from_native)
+from triad_operational_admission import DEFAULT_COHERENCES, PublicGrid, operational_threshold, public_grid
 
 
 def fixture(stochastic=True):
@@ -23,6 +24,20 @@ def fixture(stochastic=True):
             spread_doppler_hz=90., selective_enabled=True, delay_excursion_seconds=2e-7,
             data_w=4., effective_helper_w=40.),
         export_constraints=dict(fixed_helper_lead_seconds=38., sample_rate_hz=6000))
+
+
+def complete_receipt(native=None, *, residual_states=3, frequency_step=.01):
+    native = fixture() if native is None else native
+    grid = public_grid(native['physics'], native['physics']['arrival_prior_seconds'], tuple(range(-6, 7)))
+    if frequency_step != grid.frequency_step:
+        grid = PublicGrid(grid.epochs, grid.arrival_lower, grid.arrival_upper, grid.arrival_step,
+                          grid.frequency_bound, frequency_step, grid.clock_bound, grid.clock_intervals)
+    return dict(schema='triad-complete-admission-model-v1',
+        operational_evidence='fixed_initial_affine', full_grid=grid.__dict__,
+        full_grid_identity=grid.identity(), full_grid_count=grid.candidate_count,
+        operational_budget=operational_threshold(), model_count=len(DEFAULT_COHERENCES),
+        residual_state_count=residual_states, affine_lane_weight=1.,
+        public_slot_indices=list(range(24)))
 
 
 class DurationModelTests(unittest.TestCase):
@@ -104,6 +119,13 @@ class DurationModelTests(unittest.TestCase):
         self.assertFalse(p['stream_geometry_supported'])
 
     def test_extreme_finite_arithmetic_and_invalid_inputs(self):
+        ordinary = plan_from_native(fixture(), 8.)
+        old_maximum_tests = (2*ordinary['full_grid_count']*ordinary['model_count']*
+                             ordinary['operational_budget']['attempts_per_24h_bound']*
+                             ordinary['operational_budget']['duration_alternatives'])
+        old_ideal = .5*(norm.isf(ordinary['operational_budget']['alpha_per_24h']/old_maximum_tests)+
+                        norm.isf(ordinary['per_bit_detection_miss_budget']))**2
+        self.assertAlmostEqual(ordinary['ideal_known_mean_energy_n0'], old_ideal)
         for cn in (-60., 200.):
             p = plan_from_native(fixture(), cn)
             self.assertTrue(math.isfinite(p['ideal_known_mean_energy_n0']))
@@ -206,6 +228,68 @@ class DurationModelTests(unittest.TestCase):
             self.assertAlmostEqual(p['active_seconds'],expected)
             self.assertFalse(p['long_span_diagnostics']['current_receiver_long_span_qualified'])
             self.assertEqual(p['forecast_horizon']['configured_max_active_seconds'],315576000.)
+
+    def test_complete_receipt_uses_matched_fixed_grid_and_exact_prior_penalty(self):
+        native = fixture()
+        receipt = complete_receipt(native)
+        result = plan_from_native(native, 8., manual_seconds=11.6, complete_admission=receipt)
+        n, m, r = receipt['full_grid_count'], receipt['model_count'], receipt['residual_state_count']
+        expected = receipt['operational_budget']['log_e_threshold'] + math.log(2*n*m*r)
+        self.assertEqual(result['full_grid'], receipt['full_grid'])
+        self.assertAlmostEqual(result['true_atom_log_lr_threshold'], expected)
+        self.assertAlmostEqual(result['selected']['true_atom_log_lr_threshold'], expected)
+        self.assertAlmostEqual(result['residual_state_prior'], 1/r)
+        self.assertEqual(result['complete_admission_receipt'], receipt)
+        self.assertTrue(any('no adaptive half-prior' in assumption for assumption in result['assumptions']))
+        maximum_tests = math.exp(receipt['operational_budget']['log_e_threshold'])*2*n*m*r
+        beta = (1-result['requested_correct_probability'])/(2*result['message_bits'])
+        ideal = .5*(norm.isf(1/maximum_tests)+norm.isf(beta))**2
+        self.assertAlmostEqual(result['ideal_reference_maximum_tests']/maximum_tests, 1.)
+        self.assertAlmostEqual(result['ideal_known_mean_energy_n0'], ideal)
+
+    def test_finer_frequency_grid_and_more_residual_states_raise_threshold(self):
+        native = fixture()
+        base = complete_receipt(native)
+        fine = complete_receipt(native, frequency_step=.001)
+        more_residuals = complete_receipt(native, residual_states=6)
+        base_result = plan_from_native(native, 8., manual_seconds=11.6, complete_admission=base)
+        fine_result = plan_from_native(native, 8., manual_seconds=11.6, complete_admission=fine)
+        residual_result = plan_from_native(native, 8., manual_seconds=11.6, complete_admission=more_residuals)
+        self.assertGreater(fine['full_grid_count'], base['full_grid_count'])
+        self.assertGreater(fine_result['true_atom_log_lr_threshold'], base_result['true_atom_log_lr_threshold'])
+        self.assertAlmostEqual(residual_result['true_atom_log_lr_threshold']-base_result['true_atom_log_lr_threshold'],
+                               math.log(2))
+
+    def test_complete_receipts_are_fixed_duration_only_and_strictly_validated(self):
+        native = fixture()
+        receipt = complete_receipt(native)
+        with self.assertRaisesRegex(ValueError, 'fixed manual durations'):
+            plan_from_native(native, 8., complete_admission=receipt)
+        invalid = []
+        for field, value in (
+            ('operational_evidence', 'adaptive'), ('full_grid_identity', 'bad'),
+            ('full_grid_count', receipt['full_grid_count']+1), ('model_count', 0),
+            ('residual_state_count', True), ('affine_lane_weight', .5),
+            ('public_slot_indices', list(range(23))),
+        ):
+            changed = copy.deepcopy(receipt); changed[field] = value; invalid.append(changed)
+        changed = copy.deepcopy(receipt); changed['operational_budget']['log_e_threshold'] = math.inf; invalid.append(changed)
+        changed = copy.deepcopy(receipt); changed['operational_budget']['log_e_threshold'] += 1.; invalid.append(changed)
+        changed = copy.deepcopy(receipt); changed['operational_budget']['attempts_per_24h_bound'] += 1; invalid.append(changed)
+        changed = copy.deepcopy(receipt); changed['operational_budget']['log_null_expectation_penalty'] = .1; invalid.append(changed)
+        for changed in invalid:
+            with self.subTest(receipt=changed), self.assertRaises(ValueError):
+                plan_from_native(native, 8., manual_seconds=11.6, complete_admission=changed)
+
+    def test_complete_receipt_allows_helper_off_but_keeps_acquisition_unqualified(self):
+        native = fixture(False); native['helper_enabled'] = False
+        result = plan_from_native(native, 8., manual_seconds=11.6,
+                                  complete_admission=complete_receipt(native))
+        self.assertEqual(result['status'], 'manual_duration_override')
+        self.assertFalse(result['helper_present'])
+        self.assertTrue(result['stream_geometry_supported'])
+        self.assertTrue(any('acquisition' in text.lower() for text in result['unmodeled_selected_effects']))
+        self.assertTrue(result['selected'])
 
 
 if __name__ == '__main__':
