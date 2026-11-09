@@ -5,8 +5,15 @@ and [abbreviated testing](triad-performance.md). This note preserves research
 ideas and source-bound evidence, not a second implementation or a recipe to
 rerun retired campaigns. Historical results do not qualify changed code.
 
-The [state study](validation-data/triad-v3/2026-11-01-state/README.md) exposed a
-severe false-admission failure when assumed noise power was too small. The
+The retired November 1, 2026 v3 state study exposed a severe false-admission
+failure when assumed noise power was too small. A fixed public-Gram diagnostic
+with 1,024 noise trials and a fixed gate admitted 0/1,024 at the assumed
+variance, 319/1,024 when actual variance was 1.25 times the assumption, and
+1,024/1,024 at 1.5 and 2 times. This was a model diagnostic, not an operational
+false-admission rate. An earlier incorrectly normalized wrapper was retracted;
+the counts above came from its corrected comparison. The raw campaign is
+retired; this failure prevents transferring a known-variance guarantee to an
+unknown-variance receiver without an applicable model and evidence. The
 [diversity results](validation-data/triad-v3/2026-11-01-diversity/README.md)
 retain the corresponding model-dependent comparisons. Their alternative
 receivers and calibration drivers are removed; the mathematical lessons remain.

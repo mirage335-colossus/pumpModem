@@ -1,7 +1,9 @@
 # Robust manual-case receiver capacity
 
 The manually edited `_tests-RobustModem.md` defines absolute receiver-capacity
-checks. Run `tools/triad_manual_cases.py`; the former
+checks. When applicable local calibration exists, start with the
+[GPU-assisted forecast](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast).
+Use `tools/triad_manual_cases.py` for fresh CPU calibration. The former
 `triad_abbreviated.py --cases` invocation forwards to the same implementation.
 The ordinary `triad_abbreviated.py` performance regression asks whether measured
 work degraded against a comparable baseline. A regression pass cannot establish
@@ -13,21 +15,24 @@ The current receiver implementation and validation are recorded in
 Earlier coarse-only and isolated tracking measurements remain historical stage
 evidence; they do not satisfy the complete-receiver contract below.
 
-Run the local suite with the numerical Python environment used by the build:
+To refresh the complete local calibration, use the numerical Python
+environment used by the build.
 
 ```sh
+./build.sh test triad
 python tools/triad_manual_cases.py --exporter build/dev/triad_helper_export \
   --output local-evidence/robust-manual-capacity-current.json
 ```
 
-The default compares the supported local worker allocations and performs the
-current-source native message/quiet/EOF gate before measuring every current row.
+The default compares serial, physical-core and full visible logical allocations,
+then uses the full logical allocation for fresh inference. It performs the
+current-source native message/quiet/EOF gate before measuring the current rows.
+Use `--no-full-logical-inference` to select the pilot winner.
 `--case-index`, `--threads` and `--skip-message-gate` are diagnostic controls;
 partial coverage or a skipped gate cannot produce an integrated suite pass.
 For targeted comparison of sustained fine work, add
-`--sustained-allocation-probe` with the full worker pilot enabled. The option
-also applies to a replay calibration fit. It reuses the pilot-selected
-allocation's first three valid continued observations and takes at most three
+`--sustained-allocation-probe` with the worker pilot enabled. It reuses the
+inference allocation's first three valid continued observations and takes at most three
 fresh six-second observations at each distinct physical-core and full logical
 allocation, within the visible quota. The two alternate allocations add at
 most 36 seconds of repeated probe exposure to the same baseband slice and two
@@ -149,10 +154,10 @@ superseded probes after their useful findings are recorded.
 
 ### Fast local CPU capacity measurement
 
-The canonical result measures service on this computer. Run the functional
-group, then request a pilot over serial, physical-core and full logical-thread
-allocations and use a fresh, complete inference at all 12 logical CPUs for
-each manual row:
+The canonical CPU calibration measures service on this computer. The default
+pilot compares serial, physical-core and full logical-thread allocations and
+then measures fresh complete inference at all 12 visible logical CPUs on this
+host.
 
 ```sh
 ./build.sh test triad
@@ -160,8 +165,7 @@ mkdir -p local-evidence
 python3 tools/triad_manual_cases.py \
   --exporter build/dev/triad_helper_export \
   --output local-evidence/robust-cases.json \
-  --workspace-mib 4608 \
-  --full-logical-inference --sustained-allocation-probe
+  --workspace-mib 4608
 ```
 
 The 4608 MiB cap remains subject to the half-visible-memory guard. If a row
@@ -197,42 +201,32 @@ coverage assembly is valid only when it binds identical source, case-list and
 native-binary identities, records every original admission failure, and retains
 the matched constituent reports; label it assembled, not one uninterrupted
 run. Record the exact hashes and resolved CPU affinity, quota, topology,
-Python/numerical runtime and worker allocation. The direct suite is now the local estimator;
-old cross-machine replay receipts, cache identity guards and remote CPU
-conversion factors are not inputs to a current result.
+Python/numerical runtime and worker allocation. Reuse the applicable local
+phase costs for the GPU forecast. A change to the CPU work or runtime requires
+fresh affected local calibration.
 
-### Measured GPU-assisted diagnostic
+### GPU-assisted forecast and local fallback
 
-An eight-row RunPod trace on the RTX PRO 6000 completed in 421 seconds of trace
-time, including 148 seconds of native capture-generation wall time, using
-authenticated SSH/SCP to transfer about 1.5 MB of allowlisted source and 0.8 MB
-of matching native artifacts. Three paired CPU-reference gates passed. The
-final report records
-2.11–14.71x CUDA speed for coarse-data work and 1.73–2.33x for continued fine
-work versus the pod's 12-worker CPU. End-to-end native bank processing was only
-1.01–1.32x the pod CPU. These are useful fast development diagnostics, not a
-full GPU receiver or a local CPU throughput conversion.
+Use the [GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast)
+when the current CPU calibration covers the required work classes. The forecast
+combines GPU-observed work with local phase timings, then checks fresh bounded
+local measurements and reports nominal and conservative uncertainty separately.
+Keep the paired GPU reference, CPU calibration and holdout tied to their exact
+applicable artifacts. A missing cost class gets a bounded local calibration.
+In the same-geometry encrypted-to-clear transfer, the noise-only fine class can
+be measured independently with `--calibration-stage noise-only-fine`.
 
-Bulk CUDA arithmetic used FP32; small Gram/Gaussian decision work used FP64.
-Forecasts for manual rows 1 and 2 are rejected for this GPU run, while same-row
-and row-5-to-7 transfer runs demonstrate nominal estimates on an exact-cap,
-byte-identical local row-7 holdout. Pure transfer's nominal estimate differs
-by +9.318% from the holdout and -0.321% from the withheld full direct row; its
-cold cache-hit coverage has an observed 11.63% discrepancy, exceeding the
-predeclared 5% tolerance by 6.63 percentage points. Hybrid
-transfer likewise passes nominally, but its H0 acquisition cost is +46.92%
-against direct measurement, so overall validation remains `cost_drift`.
-Keep the numerical agreement and fallback checks explicit; small score changes
-can alter ranks and decisions. No complete-capacity forecast verdict or
-general GPU-to-CPU factor is qualified. The full measured workflow and raw
-reports are in the [validation record](validation.md).
+The earlier RTX PRO 6000 experiment qualified same-row nominal forecasts for
+rows 3–8. Rows 1–2 failed numerical or work agreement. The row-7 hybrid's
+relative-only H0 acquisition timing gate also failed. These results remain
+bound to their tested policy, source and hardware. See the [validation
+record](validation.md) for the measured speedups, rejected rows and forecast
+limits. A complete CPU capacity decision still requires every receiver phase.
 
-Use SSH/SCP and remote commands for software transfer, building and running;
-the provider console handles only pod lifecycle. Reuse persistent storage only
-when cache savings justify its cost. Terminate disposable instances after
-measurements. Retain the GPU report while it backs the current stage-speed and
-forecast-limit claims, then remove it when a source-matched replacement
-supersedes those findings.
+Use authenticated SSH/SCP for source and native artifacts. Reuse persistent
+storage when cache savings justify its cost, then terminate disposable
+instances after measurements. Keep only current validation evidence and
+applicable reference or calibration reports.
 
 ## Separate sensitivity checks
 

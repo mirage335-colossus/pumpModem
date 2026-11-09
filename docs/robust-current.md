@@ -63,16 +63,17 @@ operational noise command or connected Robust GUI transmitter is available.
 ## Testing computationally intensive Robust changes
 
 The bounded regression and absolute-capacity tools make separate decisions.
-For absolute manual-case capacity, run the native triad checks and then the
-dedicated manual-case suite:
+When applicable local phase costs exist, use the preferred
+[GPU-assisted manual-case forecast](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast).
+Refresh missing CPU cost classes or changed local calibration after the native
+triad checks. For a full new local calibration, run the dedicated suite.
 
 ```sh
 ./build.sh test triad
 python3 tools/triad_manual_cases.py \
   --output local-evidence/robust-cases.json \
   --exporter build/dev/triad_helper_export \
-  --workspace-mib 4608 \
-  --full-logical-inference --sustained-allocation-probe
+  --workspace-mib 4608
 ```
 
 The suite rereads `_tests-RobustModem.md` on every invocation. Repeatable
@@ -93,10 +94,10 @@ source, case-list and native binary. Earlier stage evidence remains historical
 and does not become a result for changed source or method. Consult the
 [validation record](validation.md) for current outcomes and provenance. Use the
 [manual capacity workflow](robust-manual-capacity.md#fast-local-cpu-capacity-measurement)
-for the same-stream 1/6/12 allocation comparison and fresh 12-worker inference.
-RunPod may assist GPU development, but only local source-matched timings measure
-this computer's CPU service. Use authenticated SSH/SCP for source and binary
-transfer; the provider console handles pod lifecycle.
+for the same-stream allocation pilot and default full-visible logical inference.
+On the 6-core/12-thread host the pilot uses 1, 6 and 12 workers. RunPod measures
+work demand for the forecast, and source-matched local phase timings determine
+this computer's service costs.
 
 In the complete receiver, only the fixed affine lane supplies operational
 admission and the final bit. Adaptive and combined lanes still run and are
@@ -110,16 +111,9 @@ using packet length or transport EOF. The fresh one-second, two-segment
 256-initial-state transition probe is charged once per 0.5-second window
 segment in the cost gate to conservatively cover switching and merging.
 
-The current eight-row full-logical suite reports nominal points below 1 s/s,
-but six conservative cold-state points are at or above 1 and every stronger
-capacity verdict remains unresolved. Although all 12 logical CPUs were
-available, continued fine work used about 1.8–2.0 busy cores; the measured
-12/6 fine ratio does not show consistent parallel gain. Optimize this
-fine-search bottleneck before claiming a near-maximum CPU ceiling. The bounded
-RTX PRO 6000 method accelerates selected CUDA stages; its whole native bank is
-near the pod CPU and its current local CPU forecast remains unqualified. See
-the [validation record](validation.md) for per-row ratios and limits. The named
-`triad` group passed 20/20 before this full run. Sensitivity confirmation
-remains incomplete, so there is no >90% qualification.
+The [validation record](validation.md) separates per-row nominal and cold-state
+estimates, actual busy-core measurements, GPU forecast evidence and sensitivity
+confirmation. An allocation count alone does not establish a CPU throughput
+ceiling.
 `--skip-message-gate` is debug-only and prevents an integrated suite pass; the
 former `--paired-followup` option is removed.

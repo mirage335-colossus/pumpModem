@@ -170,7 +170,8 @@ class PreparedCapacityCase:
     """
     def __init__(self, executable, case, plan, *, memory_limit_bytes,
                  measurement_seconds=1., channel_seed=74021, noise_seed=88200,
-                 source_bit=0, cn0_db_hz=None, bank_workers=1, screen_factory=FFTScreen):
+                 source_bit=0, cn0_db_hz=None, bank_workers=1, screen_factory=FFTScreen,
+                 noise_only=False):
         if (isinstance(source_bit, bool) or not isinstance(source_bit, int) or
                 source_bit not in (0, 1)):
             raise ValueError('evaluator source bit must be zero or one')
@@ -212,26 +213,32 @@ class PreparedCapacityCase:
             self.manifest['power']['complex_noise_variance'] = self.noise_variance
             self.cn0_db_hz = cn0
             self.arguments = list(self.bank.arguments)
-            command = _clean_options(executable, self.arguments, bit=source_bit, seed=channel_seed)
-            source = NativeStream(executable, command[1:], kind='channel')
+            source = None
+            if not noise_only:
+                command = _clean_options(executable, self.arguments, bit=source_bit, seed=channel_seed)
+                source = NativeStream(executable, command[1:], kind='channel')
             began = time.perf_counter()
             try:
-                if source.descriptor['total_samples'] != self.samples:
+                if source is not None and source.descriptor['total_samples'] != self.samples:
                     raise ValueError('native observation and public search geometry differ')
                 self.raw = np.empty(self.samples, dtype=np.complex128)
                 self.valid = np.empty(self.samples, dtype=np.uint8)
-                random = np.random.default_rng(noise_seed)
-                sigma = math.sqrt(self.noise_variance/2)
-                for first in range(0, self.samples, _CHUNK):
-                    count = min(_CHUNK, self.samples-first)
-                    values, valid = source.next(count)
-                    if len(values) != count or len(valid) != count:
-                        raise ValueError('native simulation ended before public window')
-                    noise = random.standard_normal((count, 2))
-                    self.raw[first:first+count] = values+sigma*(noise[:, 0]+1j*noise[:, 1])
-                    self.valid[first:first+count] = valid
+                if source is None:
+                    noise_only_observation(self)
+                else:
+                    random = np.random.default_rng(noise_seed)
+                    sigma = math.sqrt(self.noise_variance/2)
+                    for first in range(0, self.samples, _CHUNK):
+                        count = min(_CHUNK, self.samples-first)
+                        values, valid = source.next(count)
+                        if len(values) != count or len(valid) != count:
+                            raise ValueError('native simulation ended before public window')
+                        noise = random.standard_normal((count, 2))
+                        self.raw[first:first+count] = values+sigma*(noise[:, 0]+1j*noise[:, 1])
+                        self.valid[first:first+count] = valid
             finally:
-                source.close()
+                if source is not None:
+                    source.close()
             self.simulator_generation_seconds = time.perf_counter()-began
             # This independent service exposes public keyed alternatives only.
             # Its chosen emitted bit is irrelevant: observation reads are never
@@ -1426,6 +1433,34 @@ def noise_only_observation(prepared,seed=96341, *, samples=None):
     prepared.observation_work_stratum='proper_complex_noise_only'
 
 
+def measure_noise_only_fine_calibration(prepared, workers, *, family_size):
+    """Use public H0 acquisition to calibrate only its bounded fine work."""
+    if prepared.observation_work_stratum!='proper_complex_noise_only':
+        raise ValueError('noise-only fine calibration requires the declared H0 observation')
+    with prepared.receiver(workers) as receiver:
+        acquired = prepared.acquisition(receiver)['result']
+        session = acquired.pop('coarse_session',None)
+        if session is not None:
+            session.close()
+        if acquired['status']=='acquired' and acquired.get('coordinates'):
+            coordinates = tuple(acquired['coordinates'])
+        elif acquired['status']=='partial_acquisition' and session is not None:
+            coordinates = public_work_coordinates(receiver)
+        else:
+            raise ValueError('noise-only fine calibration could not establish its public work coordinates')
+        fine = measure_fine_stratum(prepared,receiver,coordinates,stratum='active',family_size=family_size)
+    if not (fine['all_observations_complete'] and fine['nonzero_templates_in_every_probe']):
+        raise ValueError('noise-only fine calibration did not execute complete bounded work')
+    peak = max(row['workspace_bytes'] for row in fine['work_samples']) + prepared.stream_workspace[
+        'simultaneous_outer_reserve_bytes']
+    if peak>prepared.memory_limit_bytes:
+        raise MemoryError('noise-only fine work exceeds the production workspace budget')
+    return dict(status='stage_calibration_measured',inference_workers=workers,
+        inference_allocation_mode='full_logical',noise_only_fine=fine,
+        workspace_margin=dict(status='within_budget',estimated_peak_bytes=peak,
+                              budget_bytes=prepared.memory_limit_bytes))
+
+
 def _scaled_component(summary,multiplier):
     row=copy.deepcopy(summary)
     for key in ('ratio_processing_seconds_per_baseband_second',
@@ -1747,7 +1782,7 @@ def capacity_status(report):
 def run_complete_cases(*,executable,output,case_list,measurement_seconds=1.,threads=None,
                        case_indices=None,paired_followup=False,message_gate=True,sustained_allocation_probe=False,
                        workspace_mib=None,
-                       full_logical_inference=False):
+                       full_logical_inference=None,calibration_stage=None):
     """Distinct absolute-capacity entry point; always reread the edited list."""
     import hashlib
     import json
@@ -1762,6 +1797,9 @@ def run_complete_cases(*,executable,output,case_list,measurement_seconds=1.,thre
     suite_started = time.perf_counter()
     if paired_followup:
         raise ValueError('coarse-only paired confirmation is not a complete-receiver capacity test')
+    if calibration_stage is not None and (calibration_stage!='noise-only-fine' or not case_indices or
+            workspace_mib is None or threads is not None or sustained_allocation_probe or full_logical_inference is False):
+        raise ValueError('noise-only fine calibration requires selected rows, a fixed workspace and full logical workers')
     parsed=load_cases(case_list)
     selected=select_cases(parsed,case_indices)
     if not math.isfinite(measurement_seconds) or not .1<=measurement_seconds<=2:
@@ -1777,11 +1815,13 @@ def run_complete_cases(*,executable,output,case_list,measurement_seconds=1.,thre
     allocations=machine['cpu']['receiver_worker_candidates']
     if type(sustained_allocation_probe) is not bool or (sustained_allocation_probe and threads is not None):
         raise ValueError('sustained allocation comparison requires the canonical full worker pilot')
+    if full_logical_inference is None:
+        full_logical_inference = threads is None
     if type(full_logical_inference) is not bool or (full_logical_inference and threads is not None):
         raise ValueError('full-logical inference requires a worker comparison')
     sustained_targets=sustained_allocation_targets(machine['cpu']) if sustained_allocation_probe else None
     inference_workers = None
-    if full_logical_inference:
+    if full_logical_inference and calibration_stage is None:
         targets = sustained_allocation_targets(machine['cpu'])
         inference_workers = targets['logical_workers']
         allocations = sorted({1, inference_workers,
@@ -1790,29 +1830,37 @@ def run_complete_cases(*,executable,output,case_list,measurement_seconds=1.,thre
         if isinstance(threads,bool) or not isinstance(threads,int) or threads not in range(1,machine['cpu']['available_cpus']+1):
             raise ValueError('explicit receiver workers must fit the local CPU budget')
         allocations=[threads]
+    if calibration_stage is not None:
+        inference_workers=machine['cpu']['available_cpus']
+        allocations=[inference_workers]
     configure_numerical_threads(resolve_cpu_budget(jobs=1,workers=max(allocations),threads=1))
     executable=Path(executable).resolve()
     provenance=identity(executable)
     runtime=environment('cpu')
-    report=dict(schema='triad-manual-complete-capacity-v3',status='running',
+    report=dict(schema=('triad-manual-complete-capacity-v3' if calibration_stage is None
+                        else 'triad-manual-stage-calibration-v1'),status='running',
         input={key:value for key,value in parsed.items() if key!='cases'},
         provenance=provenance,machine=machine,runtime=runtime,worker_allocations=allocations,
         workspace_limit_bytes=workspace_limit,
         policy=measurement_policy(len(parsed['cases']),max(1,round(measurement_seconds*2))*.5),
         sustained_allocation_targets=sustained_targets,
         selection=dict(indices=[case['index'] for case in selected],
-            complete_current_list=len(selected)==len(parsed['cases']),
-            complete_worker_comparison=threads is None,
+            complete_current_list=calibration_stage is None and len(selected)==len(parsed['cases']),
+            complete_worker_comparison=calibration_stage is None and threads is None,
             current_list_entries=len(parsed['cases'])),cases=[])
     report['policy']['unit_baseband_seconds_scope'] = (
         'Rounded requested unit. Each row records its actual, possibly shorter fine unit in public_geometry.')
-    if full_logical_inference:
+    if full_logical_inference and calibration_stage is None:
         report['policy'].update(
             allocation_selection='A serial, physical and full logical same-stream pilot. Inference uses the declared full logical allocation with fresh measurements.',
             allocation_counts='1, known physical cores, full visible logical CPU budget; deduplicated and bounded.',
             full_logical_inference_workers=inference_workers)
+    if calibration_stage is not None:
+        report['calibration_stage'] = calibration_stage
     write_result(output,report)
-    if message_gate:
+    if calibration_stage is not None:
+        report['message_gate']=dict(status='stage_calibration_only',passed=False)
+    elif message_gate:
         from triad_message_gate import run_native_message_gate
         print('current-source native message/quiet/EOF functional gate',flush=True)
         report['message_gate']=run_native_message_gate(executable,workspace_limit,
@@ -1834,12 +1882,10 @@ def run_complete_cases(*,executable,output,case_list,measurement_seconds=1.,thre
                 plan=native_plan(executable,case['native_args'])
                 item.update(native_plan=plan)
                 if not plan.get('geometry_feasible'):raise ValueError('native public geometry is infeasible')
+                options = {'noise_only':True} if calibration_stage is not None else {}
                 with PreparedCapacityCase(executable,case,plan,
                         memory_limit_bytes=workspace_limit,measurement_seconds=measurement_seconds,
-                        bank_workers=inference_workers or 1) as prepared:
-                    item['target_snr']=target_snr(plan,complete_admission=prepared.admission_model_receipt())
-                    print('  fixed-channel quiet-energy diagnostic',flush=True)
-                    item['quiet_energy_diagnostic']=prepared.quiet_energy_diagnostic(item['target_snr'])
+                        bank_workers=inference_workers or 1, **options) as prepared:
                     item['preparation']=dict(receiver_preparation_seconds=prepared.receiver_preparation_seconds,
                         simulator_generation_seconds=prepared.simulator_generation_seconds,
                         long_preparation_unavoidable=None)
@@ -1847,10 +1893,18 @@ def run_complete_cases(*,executable,output,case_list,measurement_seconds=1.,thre
                         noise_seed=prepared.noise_seed, source_bit=prepared.source_bit,
                         initial_noise_only_seed=96341, recurring_noise_only_seed=96342)
                     item['public_geometry']=prepared.public_geometry
-                    work=dict(family_size=report['policy']['family_size'],
-                        progress=lambda line:print(line,flush=True),sustained_targets=sustained_targets)
-                    item['measurement']=measure_complete_case(prepared,allocations,
-                        inference_workers=inference_workers,**work)
+                    family_size=report['policy']['family_size']
+                    if calibration_stage is not None:
+                        item['preparation']['observation_kind']='seeded_noise_only'
+                        item['measurement']=measure_noise_only_fine_calibration(prepared,inference_workers,
+                            family_size=family_size)
+                    else:
+                        item['target_snr']=target_snr(plan,complete_admission=prepared.admission_model_receipt())
+                        print('  fixed-channel quiet-energy diagnostic',flush=True)
+                        item['quiet_energy_diagnostic']=prepared.quiet_energy_diagnostic(item['target_snr'])
+                        item['measurement']=measure_complete_case(prepared,allocations,
+                            inference_workers=inference_workers,family_size=family_size,
+                            progress=lambda line:print(line,flush=True),sustained_targets=sustained_targets)
                     item['status']=item['measurement']['status']
             except (ValueError,RuntimeError,MemoryError,EOFError,OSError,subprocess.SubprocessError) as error:
                 item['error']=str(error)
@@ -1868,10 +1922,16 @@ def run_complete_cases(*,executable,output,case_list,measurement_seconds=1.,thre
         machine['cpu']==machine_resources()['cpu'])
     report['input']['unchanged_at_completion']=hashlib.sha256(Path(case_list).read_bytes()).hexdigest()==parsed['source_sha256']
     report['status']=capacity_status(report)
+    if calibration_stage is not None and report['status']!='invalidated_source_or_configuration_changed':
+        report['status']=('stage_calibration_measured' if all(
+            row['status']=='stage_calibration_measured' for row in report['cases']) else 'unresolved_stage_calibration')
     report['suite_observed_elapsed_seconds']=time.perf_counter()-suite_started
     report=_public_metrics(report)
     write_result(output,report)
-    path=Path(output).with_suffix('.md')
-    path.write_text(render_capacity_report(report))
-    print(json.dumps(dict(status=report['status'],output=str(output),report=str(path),cases=len(report['cases']))))
+    summary=dict(status=report['status'],output=str(output),cases=len(report['cases']))
+    if calibration_stage is None:
+        path=Path(output).with_suffix('.md')
+        path.write_text(render_capacity_report(report))
+        summary['report']=str(path)
+    print(json.dumps(summary))
     return report

@@ -99,6 +99,11 @@ class BlockProjection:
             raise ValueError("projection input length changed")
         if self.kind == "valid-rows":
             return values[..., self.indices]
+        if (self.kind == "dft" and self.samples > 0 and len(self.indices) == 1 and
+                self.indices[0] == 0 and values.dtype == np.complex128):
+            # The orthonormal DC coefficient retains every sample in the
+            # public block and has a constant weight of 1/sqrt(N).
+            return values.sum(axis=-1, keepdims=True) / math.sqrt(self.samples)
         return np.fft.fft(values, axis=-1, norm="ortho")[..., self.indices]
 
 

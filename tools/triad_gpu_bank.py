@@ -74,6 +74,11 @@ def make_gpu_screen_factory(*, device, workspace_bytes):
     return partial(GpuFFTScreen, cuda=_CudaBank(device, workspace_bytes))
 
 
+def needs_precise_grid(clock_ppm, output_sample_rate):
+    """Route the observed heavily decimated, sub-millippm clock class intact."""
+    return output_sample_rate <= 10 and 0 < max(clock_ppm)-min(clock_ppm) <= .001
+
+
 class GpuFFTScreen(FFTScreen):
     device_parallel = True
 
@@ -82,7 +87,16 @@ class GpuFFTScreen(FFTScreen):
         self.gpu_work = dict(mapped_projection_batches=0, integer_projection_columns=0,
             frequency_batches=0, lag_batches=0, gpu_peak_rows=0, host_peak_fallback_rows=0,
             projected_input_payload_bytes=0, mapped_template_payload_bytes=0)
-        kwargs['precision'] = 'fp32'
+        # The measured top clock gaps in this compact search class were below
+        # FP32 projection error. Use precise arithmetic for every cell before
+        # peak finding and proposal limits, including candidates an FP32 top-k
+        # could have discarded. This is an observed class, not an error bound
+        # for unrelated grids.
+        clocks = tuple(kwargs['clock_ppm']) if 'clock_ppm' in kwargs else ()
+        if 'clock_ppm' in kwargs:
+            kwargs['clock_ppm'] = clocks
+        self.precise_grid = bool(clocks) and needs_precise_grid(clocks, kwargs.get('output_sample_rate', 1000))
+        kwargs['precision'] = 'fp64' if self.precise_grid else 'fp32'
         with cuda.active():
             started = time.perf_counter()
             super().__init__(*args, **kwargs)
@@ -103,8 +117,10 @@ class GpuFFTScreen(FFTScreen):
                 fft_plan_cache_limit_count=self.cuda.plan_cache_count,
                 workspace_scope='Coarse array and cuFFT work-area allocations share one bounded pool. '
                                 'Pool values are snapshots, excluding CUDA runtime and separate Torch allocations.',
-                precision=dict(projection='complex64 with float32 FIR taps',
-                    frequency_fft='complex64', lag_zoom_fft='CuPy complex128 chirps; complex64 correlations',
+                precision=dict(projection=np.dtype(self.dtype).name,
+                    fir_taps=np.dtype(self.real_dtype).name, frequency_fft=np.dtype(self.dtype).name,
+                    lag_zoom_fft='CuPy complex128 chirps', lag_correlations=np.dtype(self.dtype).name,
+                    grid_selection=('precise_all_cells_before_pruning' if self.precise_grid else 'fp32_bulk'),
                     gram_and_rank='complex128', quadratic='complex128',
                     host_peak_fallback='exact ties, plateaus, and candidate caps above eight'),
                 payload_scope='Normalized array size before device work; not a bus traffic measurement.',
@@ -125,7 +141,7 @@ class GpuFFTScreen(FFTScreen):
         self.gpu_work['mapped_template_payload_bytes'] += coarse.size*np.dtype(self.dtype).itemsize
         destination[...] = _project_coarse_column(coarse, self.raw_kernel_rows, self.taps,
             self.template_sampling_step, self.decimation, *collapsed, self.dtype,
-            xp=self.cuda.cp, signal_api=self.cuda.signal, arithmetic=np.complex64)
+            xp=self.cuda.cp, signal_api=self.cuda.signal, arithmetic=self.dtype)
 
     def _project_integer_column(self, chunks):
         self.gpu_work['integer_projection_columns'] += 1
@@ -135,7 +151,7 @@ class GpuFFTScreen(FFTScreen):
 
     def _bank_arrays(self, bank_columns):
         cp = self.cuda.cp
-        values = bank_columns.astype(cp.complex128)
+        values = bank_columns.astype(cp.complex128, copy=False)
         grams = cp.asnumpy(values.conj() @ values.swapaxes(-1, -2))
         transformed = cp.fft.fft(bank_columns, n=self.nfft, axis=-1).conj()
         del values
@@ -153,7 +169,7 @@ class GpuFFTScreen(FFTScreen):
         with self.cuda.active():
             cp = self.cuda.cp
             self.gpu_work['projected_input_payload_bytes'] += raw.size*np.dtype(self.dtype).itemsize
-            result = self.cuda.signal.upfirdn(cp.asarray(self.taps, dtype=cp.float32),
+            result = self.cuda.signal.upfirdn(cp.asarray(self.taps, dtype=self.real_dtype),
                 cp.asarray(raw, dtype=self.dtype), down=self.decimation)
             cp.cuda.get_current_stream().synchronize()
             return result
@@ -181,7 +197,7 @@ class GpuFFTScreen(FFTScreen):
             for first in range(0, len(frequencies), self.batch_size):
                 stop = min(first+self.batch_size, len(frequencies))
                 cycles = cp.remainder(cp.asarray(frequencies[first:stop])[:, None]*times, 1.)
-                angles = (-2*math.pi*cycles).astype(cp.float32)
+                angles = (-2*math.pi*cycles).astype(self.real_dtype)
                 rotation = cp.exp(1j*angles).astype(self.dtype, copy=False)
                 spectra[first:stop] = cp.fft.fft(observation[None, :]*rotation,
                     n=self.nfft, axis=-1)
@@ -269,7 +285,7 @@ class GpuFFTScreen(FFTScreen):
         with self.cuda.active():
             cp = self.cuda.cp
             width = self.cuda.batch_width(len(self.workspaces),
-                min(self.batch_size, len(frequencies))*len(self.rays)*self.nfft*8*8)
+                min(self.batch_size, len(frequencies))*len(self.rays)*self.nfft*np.dtype(self.dtype).itemsize*8)
             for first in range(0, len(self.workspaces), width):
                 workspaces = self.workspaces[first:first+width]
                 transforms = cp.stack([row['transform'] for row in workspaces])

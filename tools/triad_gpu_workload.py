@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+from statistics import fmean
 import sys
 import tempfile
 import time
@@ -17,7 +18,8 @@ import numpy as np
 
 from triad_abbreviated import environment
 from triad_case_capacity import (PreparedCapacityCase, build_recurring_public_bank, measurement_policy,
-                                noise_only_observation, public_work_coordinates)
+                                measure_full_selection_metadata, noise_only_observation,
+                                public_work_coordinates)
 from triad_case_metrics import machine_resources
 from triad_case_suite import measured_source_hashes, native_plan, select_cases
 from triad_cases import DEFAULT_CASES, ROOT, load_cases
@@ -34,14 +36,28 @@ STRATA = ('nominal_continuation', 'maximum_state_transition', 'terminal',
 DISPATCH_FIELDS = ('requested_candidate_shards', 'maximum_hypothesis_tasks_per_block')
 
 
-def _source_hashes(device, coarse_cuda):
+def _source_hashes(device):
     leaves = ['triad_gpu_workload.py']
     if device == 'cuda':
-        leaves.append('triad_gpu_fine.py')
-    if coarse_cuda:
-        leaves.append('triad_gpu_bank.py')
+        leaves.extend(('triad_gpu_fine.py', 'triad_gpu_bank.py'))
     return {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
             for name in leaves}
+
+
+def _cuda_jit_identity(torch):
+    import triton
+
+    try:
+        output = subprocess.check_output(['nvidia-smi','--query-gpu=driver_version','--format=csv,noheader'],
+                                         text=True,stderr=subprocess.DEVNULL,timeout=5)
+        versions = {line.strip() for line in output.splitlines() if line.strip()}
+        driver = next(iter(versions)) if len(versions)==1 else None
+        if driver is not None and ('.' not in driver or not all(part.isdigit() for part in driver.split('.'))):
+            driver = None
+    except (OSError,subprocess.SubprocessError):
+        driver = None
+    return dict(triton_version=triton.__version__,driver_version=driver,
+                compute_capability=list(torch.cuda.get_device_capability()))
 
 
 def _write_probe_report(path, report):
@@ -252,7 +268,7 @@ def _compare_cost_regime(cpu, cuda):
     return dict(accepted=True, maximum_relative_adaptive_cost_driver_error=max(errors, default=0.))
 
 
-def _acquisition(prepared, instance):
+def _acquisition(prepared, instance, *, independent_cost_holdout=False):
     measured = prepared.acquisition(instance)
     result = measured.pop('result')
     session = result.pop('coarse_session', None)
@@ -283,6 +299,25 @@ def _acquisition(prepared, instance):
                 evidence['completed_bounded_grid'] = finished.get('work')
         finally:
             session.close()
+        if independent_cost_holdout:
+            evidence['full_selection_holdout'] = measure_full_selection_metadata(
+                prepared, instance, plan, family_size=1)
+    elif independent_cost_holdout and result['status']=='acquired':
+        ratio = 'ratio_processing_seconds_per_baseband_second'
+        samples = [measured[ratio]*prepared.slot_seconds]
+        for _ in range(2 if samples[0]<=.5 else 0):
+            trial = prepared.acquisition(instance)
+            observed = trial['result']
+            extra_session = observed.pop('coarse_session',None)
+            if extra_session is not None:
+                extra_session.close()
+            if (extra_session is not None or trial['acquisition_work_class']!=evidence['acquisition_work_class'] or
+                    any(observed.get(key)!=result.get(key) for key in
+                        ('status','coordinates','searched_frequency_intervals_hz'))):
+                raise ValueError('independent repeated acquisition work changed')
+            samples.append(trial[ratio]*prepared.slot_seconds)
+        evidence['elapsed_observations_seconds'] = samples
+        evidence['elapsed_seconds'] = fmean(samples)
     return evidence
 
 
@@ -303,9 +338,11 @@ def _compare_acquisition(cpu, cuda):
 
 def _case_probe(prepared, workers, devices, synchronize, result, *, cuda_basis_factory=None,
                 reference_screen=None):
+    gpu_basis = cuda_basis_factory(prepared.screen) if cuda_basis_factory is not None else None
+
     def receiver(device):
         screen = reference_screen if device == 'cpu' and reference_screen is not None else prepared.screen
-        options = dict(basis_factory=cuda_basis_factory) if device == 'cuda' else {}
+        options = dict(basis_factory=gpu_basis) if device == 'cuda' else {}
         return CompleteBitReceiver(prepared.manifest, screen, prepared.basis_source,
             workers=workers, memory_limit_bytes=prepared.receiver_memory_limit_bytes, **options)
 
@@ -320,7 +357,7 @@ def _case_probe(prepared, workers, devices, synchronize, result, *, cuda_basis_f
     for device in devices:
         with receiver(device) as instance:
             strata = {}
-            acquired = _acquisition(prepared, instance)
+            acquired = _acquisition(prepared, instance, independent_cost_holdout=devices==('cpu',))
             coordinates = tuple(acquired['coordinates'])
             if acquired['status'] != 'acquired' or not coordinates:
                 raise ValueError('complete DATA acquisition did not produce fine coordinates')
@@ -330,8 +367,9 @@ def _case_probe(prepared, workers, devices, synchronize, result, *, cuda_basis_f
             if device == 'cuda':
                 cache = strata['nominal_continuation']['records'][-1]['work']['native_cache']
                 acceleration = cache.get('accelerator', {})
-                if not acceleration.get('mapped_values') or not acceleration.get('dft_values'):
-                    raise ValueError('nominal probe did not execute both CUDA mapped basis and projected FFT work')
+                if (not acceleration.get('mapped_values') or
+                        not (acceleration.get('dft_values') or acceleration.get('dc_reduction_input_values'))):
+                    raise ValueError('nominal probe did not execute CUDA mapped basis and DFT projection work')
             strata['maximum_state_transition'] = _branch_sample(prepared, instance, coordinates,
                 synchronize[device], cap=True)
             strata['terminal'] = _branch_sample(prepared, instance, coordinates,
@@ -341,7 +379,7 @@ def _case_probe(prepared, workers, devices, synchronize, result, *, cuda_basis_f
     noise_only_observation(prepared)
     for device in devices:
         with receiver(device) as instance:
-            noise = _acquisition(prepared, instance)
+            noise = _acquisition(prepared, instance, independent_cost_holdout=devices==('cpu',))
             coordinates = tuple(noise['coordinates']) or public_work_coordinates(instance)
             result['devices'][device]['noise_acquisition'] = noise
             result['devices'][device]['strata']['noise_only'] = _branch_sample(
@@ -388,7 +426,8 @@ def _recurring_probe(prepared, workers, result, *, screen_factory=None):
             manifest['power']['complex_noise_variance'] = prepared.noise_variance
             with CompleteBitReceiver(manifest, bank['screen'], prepared.basis_source, workers=workers,
                                      memory_limit_bytes=prepared.receiver_memory_limit_bytes) as receiver:
-                result['recurring_acquisition'] = _acquisition(prepared, receiver)
+                result['recurring_acquisition'] = _acquisition(prepared, receiver,
+                    independent_cost_holdout=tuple(result['devices'])==('cpu',))
                 result['recurring_acquisition']['public_slot_index'] = index
         if hasattr(bank['screen'], 'gpu_workspace_receipt'):
             record['gpu_coarse'] = bank['screen'].gpu_workspace_receipt()
@@ -396,12 +435,14 @@ def _recurring_probe(prepared, workers, result, *, screen_factory=None):
 
 
 def run_probe(*, case_list, case_indices, executable, workers, device, output, paired_reference=False,
-              workspace_mib=4096, coarse_cuda=False, reference_cases=None):
+              workspace_mib=4096, coarse_cuda=None, reference_cases=None):
     import torch
 
     began = time.perf_counter()
     if device not in ('cpu','cuda'):
         raise ValueError('device must be cpu or cuda')
+    if coarse_cuda is None:
+        coarse_cuda = device == 'cuda'
     if device == 'cuda' and not torch.cuda.is_available():
         raise ValueError('CUDA requested but unavailable')
     parsed = load_cases(case_list)
@@ -417,6 +458,8 @@ def run_probe(*, case_list, case_indices, executable, workers, device, output, p
     machine = machine_resources()
     if machine['cpu'] is None or machine['memory_budget_bytes'] is None:
         raise ValueError('visible CPU and host memory bounds required')
+    if workers is None:
+        workers = machine['cpu']['available_cpus']
     allocation = resolve_cpu_budget(jobs=1,workers=workers,threads=1,capacity=machine['cpu'])
     if allocation['explicit_overcommit']:
         raise ValueError('worker count exceeds the visible CPU allocation')
@@ -425,25 +468,31 @@ def run_probe(*, case_list, case_indices, executable, workers, device, output, p
     if type(workspace_mib) is not int or workspace_mib < 1:
         raise ValueError('positive workspace MiB required')
     memory_limit = min(machine['memory_budget_bytes'], workspace_mib*1024**2)
+    if device=='cpu' and memory_limit!=workspace_mib*1024**2:
+        raise ValueError('requested CPU holdout workspace exceeds the visible receiver budget')
     cuda_basis_factory, screen_factory = None, None
     if device == 'cuda':
+        from triad_gpu_bank import make_gpu_screen_factory, needs_precise_grid
         from triad_gpu_fine import make_cuda_basis_factory
         cuda_device = f'cuda:{torch.cuda.current_device()}'
-        cuda_basis_factory = make_cuda_basis_factory(cuda_device)
+        def cuda_basis_factory(screen):
+            return make_cuda_basis_factory(cuda_device,
+                precise=needs_precise_grid(screen.clocks, screen.output_fs))
+
         memory_limit = min(memory_limit, torch.cuda.mem_get_info()[0]//2)
         torch.cuda.reset_peak_memory_stats()
         if coarse_cuda:
-            from triad_gpu_bank import make_gpu_screen_factory
             screen_factory = make_gpu_screen_factory(device=cuda_device, workspace_bytes=memory_limit)
     elif coarse_cuda:
         raise ValueError('GPU coarse work requires CUDA')
-    sources, shared_sources = _source_hashes(device, coarse_cuda), measured_source_hashes()
+    sources, shared_sources = _source_hashes(device), measured_source_hashes()
     exporter_sha256 = hashlib.sha256(Path(executable).read_bytes()).hexdigest()
     kernel_path = mapped_kernel_path(executable)
     kernel_sha256 = hashlib.sha256(kernel_path.read_bytes()).hexdigest()
     runtime = environment(device)
     if device == 'cuda':
         runtime.pop('host', None)
+        runtime['cuda_jit'] = _cuda_jit_identity(torch)
     runtime_limits['pools'] = [{key:value for key,value in pool.items() if key != 'filepath'}
         for pool in runtime_limits['pools']]
     report = dict(schema=SCHEMA, status='running', cases=[], device=device, workers=workers,
@@ -455,10 +504,13 @@ def run_probe(*, case_list, case_indices, executable, workers, device, output, p
         runtime_limits=runtime_limits, memory_limit_bytes=memory_limit,
         coarse_device='cuda' if coarse_cuda else 'cpu',
         local_cpu_service_established=False, complete_receiver_qualification=False,
-        policy=dict(strata=list(STRATA), precision='CUDA complex64 bulk, FP64 CPU state' if device == 'cuda' else 'fp64',
+        policy=dict(strata=list(STRATA), precision=('CUDA complex64 bulk, complex128 for the compact '
+            'tight-clock precision class, FP64 CPU state') if device == 'cuda' else 'fp64',
             score_atol=SCORE_ATOL, score_rtol=SCORE_RTOL, paired_reference_case_indices=sorted(reference_indices),
             adaptive_cost_driver_relative_limit=ADAPTIVE_COST_RTOL,
             broad_grid_maximum_frequency_tiles=4,
+            independent_acquisition_cost=dict(short_first_observation_seconds=.5,
+                                              short_repetitions=3,long_repetitions=1),
             dispatch_only_comparison_exclusions=[*DISPATCH_FIELDS, 'hypothesis_update_tasks'],
             scope='Bounded native DATA and H0 acquisition, fine branches and GPU work counts. '
                   'Partial broad search yields work only. Short endpoints are not message trials.'))
@@ -508,7 +560,7 @@ def run_probe(*, case_list, case_indices, executable, workers, device, output, p
         report['cases'].append(row)
         measured_cases[key] = row
         _write_probe_report(output,report)
-    stable = (sources == _source_hashes(device, coarse_cuda) and shared_sources == measured_source_hashes() and
+    stable = (sources == _source_hashes(device) and shared_sources == measured_source_hashes() and
         hashlib.sha256(Path(executable).read_bytes()).hexdigest() == exporter_sha256 and
         hashlib.sha256(kernel_path.read_bytes()).hexdigest() == kernel_sha256 and
         hashlib.sha256(Path(case_list).read_bytes()).hexdigest() == parsed['source_sha256'])
@@ -543,13 +595,14 @@ def main(argv=None):
     parser.add_argument('--case-index',type=int,action='append')
     parser.add_argument('--exporter',type=Path,default=ROOT/'build/dev/triad_helper_export')
     parser.add_argument('--output',type=Path,required=True)
-    parser.add_argument('--workers',type=int,default=2)
+    parser.add_argument('--workers',type=int,help='host receiver workers, defaulting to all visible logical CPUs')
     parser.add_argument('--device',choices=('cpu','cuda'),default='cuda')
     parser.add_argument('--paired-reference',action='store_true')
     parser.add_argument('--reference-case',type=int,action='append',
                         help='include a matched CPU comparison for this selected row, at most three')
     parser.add_argument('--workspace-mib',type=int,default=4096)
-    parser.add_argument('--coarse-cuda',action='store_true')
+    parser.add_argument('--coarse-cuda', action=argparse.BooleanOptionalAction,
+                        help='use CUDA coarse acquisition by default with CUDA; opt out for a CPU-coarse diagnostic')
     args = parser.parse_args(argv)
     try:
         result = run_probe(case_list=args.case_list,case_indices=args.case_index,

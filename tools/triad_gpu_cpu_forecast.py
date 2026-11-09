@@ -23,6 +23,11 @@ from triad_cases import DEFAULT_CASES, ROOT, load_cases
 RATIO = 'ratio_processing_seconds_per_baseband_second'
 INTERVAL = RATIO+'_interval'
 COST_LIMIT = .30
+_NOMINAL_TIMING = (('recurring_bank_preparation',), ('data_acquisition',), ('nominal_fine',))
+_ACQUISITION_TIMING = ('data_acquisition','noise_acquisition','recurring_acquisition')
+_FINE_TIMING = ('nominal_fine','terminal','noise_only','maximum_state_transition')
+_CEILING_TIMING = (_NOMINAL_TIMING[0], _ACQUISITION_TIMING, _FINE_TIMING)
+_HOLDOUT_BUDGETS = {'nominal_service': (.15,.10), 'complete_capacity': (.20,.15)}
 ADAPTIVE_WORK_LIMIT = .05
 CALLBACK_WORK_LIMIT = .10
 CALLBACK_ABSOLUTE_ALLOWANCE = 2
@@ -44,6 +49,9 @@ _ADAPTIVE_REGIME = ('initial_states','state_cap','proposal_cap','attained_state_
 _FINE_STRATA = ('nominal_continuation','maximum_state_transition','terminal','interior_erasure','noise_only')
 _ENDPOINT = ('status','classification','bit','quiet_projection_modes')
 _GPU_RUNTIME_LEAVES = ('triad_gpu_workload.py','triad_gpu_bank.py','triad_gpu_fine.py')
+_CUDA_REPORT_MATCH = ('runtime','runtime_limits','workers','memory_limit_bytes')
+_COARSE_RUNTIME = ('name','cupy','cuda_runtime','workspace_limit_bytes','array_pool_limit_bytes',
+                   'fft_plan_cache_limit_bytes','fft_plan_cache_limit_count')
 _DISPATCH = frozenset(('hypothesis_update_tasks', 'requested_candidate_shards',
                        'maximum_hypothesis_tasks_per_block'))
 _FIXED = ('stream_controller', 'quiet_state_and_canonical_codec', 'public_slot_planning',
@@ -435,15 +443,14 @@ def _forecast_row(cpu, gpu, *, allow_approximation=False, transfer=False, target
         return chosen
 
     ceiling = combine_components(dict(common,
-        acquisition=maximum(('data_acquisition','noise_acquisition','recurring_acquisition')),
-        complete_fine_search=maximum(('nominal_fine','terminal','noise_only','maximum_state_transition'))),
+        acquisition=maximum(_ACQUISITION_TIMING),complete_fine_search=maximum(_FINE_TIMING)),
         complete_work_covered='interior_erasure' not in missing)
     if nominal['realtime_status']=='fail':
         ceiling.update(realtime_status='fail',reason='nominal_service_failure')
     elif ceiling['realtime_status']=='fail' and ceiling['measured_complete_component_lower_bound']<1:
         ceiling.update(realtime_status='unresolved',reason='conservative_ceiling_point_does_not_prove_nominal_failure')
     fixed_total = sum(common[name][RATIO] for name in _FIXED)
-    nominal_names = ('data_acquisition','recurring_bank_preparation','nominal_fine')
+    nominal_names = tuple(group[0] for group in _NOMINAL_TIMING)
     independent_nominal = [rows[name].get('independent_local_holdout',{}).get(RATIO) for name in nominal_names]
     held = (fixed_total+sum(independent_nominal) if all(x is not None for x in independent_nominal) else None)
     unadjusted = (fixed_total+sum(rows[name]['calibrated_point_before_gpu_scaling'] for name in nominal_names)
@@ -483,6 +490,44 @@ def _runtime_leaf_hashes():
     return {name:hashlib.sha256((ROOT/'tools'/name).read_bytes()).hexdigest() for name in _GPU_RUNTIME_LEAVES}
 
 
+def _validate_cuda_trace(trace, source, leaf_hashes, *, needs_reference):
+    allowed = {'bounded_mixed_precision_cost_regime_observed'}
+    if not needs_reference:
+        allowed.add('bounded_cuda_work_observed')
+    _require(trace['schema']=='triad-gpu-workload-v2' and trace['unchanged_at_completion'] and
+             trace['device']=='cuda' and trace['coarse_device']=='cuda' and trace['cuda_peak_allocated_bytes']>0 and
+             trace['status'] in allowed, 'CUDA work trace has no qualified mixed-precision work reference')
+    _require(_trace_source_matches(trace,source), 'GPU trace source or native artifacts differ')
+    _require(_select(trace['sources'],leaf_hashes)==leaf_hashes,
+             'GPU runtime leaf source differs from the tested backend')
+
+
+def _same_cuda_reference_environment(trace, reference, indices):
+    def policy(report):
+        return {key:value for key,value in report['policy'].items() if key!='paired_reference_case_indices'}
+    def environment_identity(report):
+        identity = _select(report,_CUDA_REPORT_MATCH)
+        for section,inventory in (('runtime','numerical_thread_pools'),('runtime_limits','pools')):
+            values = identity[section]
+            if inventory in values:
+                ordered = sorted(values[inventory],key=lambda pool:json.dumps(pool,sort_keys=True))
+                identity[section] = dict(values,**{inventory:ordered})
+        return identity
+    _require(environment_identity(trace)==environment_identity(reference) and
+             policy(trace)==policy(reference),
+             'cached CUDA reference runtime, precision, worker allocation or workspace differs')
+    jit = trace['runtime'].get('cuda_jit',{})
+    capability = jit.get('compute_capability',[])
+    _require(bool(jit.get('triton_version')) and bool(jit.get('driver_version')) and
+             len(capability)==2 and all(type(value) is int and value>=0 for value in capability) and capability[0]>0,
+             'cached CUDA reference requires an observed Triton version, NVIDIA driver and GPU capability')
+    reference_rows = [row for row in reference['cases'] if row['case']['index'] in indices]
+    origin = _select(reference_rows[0]['gpu_coarse'],_COARSE_RUNTIME)
+    _require(all(_select(row['gpu_coarse'],_COARSE_RUNTIME)==origin
+                 for row in [*reference_rows,*trace['cases']]),
+             'cached CUDA reference device or coarse library differs')
+
+
 def _gpu_work_executed(row):
     coarse = row['gpu_coarse']['work']
     _require(coarse['frequency_batches']+coarse['lag_batches']>0 and
@@ -490,8 +535,10 @@ def _gpu_work_executed(row):
              'CUDA coarse search or template projection did not execute')
     fine = row['devices']['cuda']['strata']['nominal_continuation']['records'][-1]
     cuda = fine['work']['native_cache']['accelerator']
-    _require(cuda['mapped_values']>0 and cuda['block_statistics']>0,
-             'CUDA fine bulk did not execute')
+    _require(cuda['mapped_values']>0 and cuda['block_statistics']>0 and
+             (cuda.get('dft_values',0)>0 or cuda.get('dc_reduction_input_values',0)>0),
+             'CUDA fine mapped basis or DFT projection did not execute')
+    return (cuda['arithmetic']['precision_selection'],row['gpu_coarse']['precision']['grid_selection'])
 
 
 def _reference_coverage(gpu, parsed, expected=()):
@@ -502,13 +549,14 @@ def _reference_coverage(gpu, parsed, expected=()):
              0<=policy['score_atol']<=SCORE_ATOL and 0<=policy['score_rtol']<=SCORE_RTOL and
              policy['adaptive_cost_driver_relative_limit']==ADAPTIVE_WORK_LIMIT,
              'GPU reference coverage or preregistered tolerance differs')
-    public = {row['index']:row['configuration_hash'] for row in parsed['cases']}
+    public = {row['index']:row for row in parsed['cases']}
     observed = {row['case']['index']:row for row in gpu['cases']}
     acquisition = {'status_match','coordinates_match','helper_work_match','candidate_order_match',
                    'candidate_scores_match','bounded_tile_work_match'}
     for index in declared:
         row = observed[index]
-        _require(row['case']['configuration_hash']==public[index] and 'error' not in row and
+        config = ('configuration_hash','fields','native_args')
+        _require(_select(row['case'],config)==_select(public[index],config) and 'error' not in row and
                  row['bank_parity']['accepted'] is True, f'GPU reference bank failed for row {index}')
         _gpu_work_executed(row)
         _require(set(row['acquisition_parity'])=={'data_acquisition','noise_acquisition'} and all(
@@ -521,9 +569,87 @@ def _reference_coverage(gpu, parsed, expected=()):
     return declared
 
 
+def _guarded_interval(component, relative_budget):
+    interval = component.get(INTERVAL)
+    if interval is None:
+        return
+    low, high = interval
+    guarded = [low/(1+relative_budget), high/(1-relative_budget)]
+    component.update(local_calibration_interval=interval,
+                     margin_interval=[1-guarded[1],1-guarded[0]], **{INTERVAL:guarded})
+    if component['realtime_status']=='pass' and guarded[1]>=1:
+        component.update(realtime_status='unresolved',reason='holdout_error_allowance_reaches_realtime')
+
+
+def _holdout_service(residuals, mismatches, fixed, groups, forecast, limits):
+    """Use the same sum of maxima as the forecast, without cancellation."""
+    required = {name for group in groups for name in group}
+    missing = sorted((required-residuals.keys()) | (required & mismatches.keys()))
+    if missing:
+        return dict(accepted=False, status='partial_coverage', missing=missing)
+    actual = fixed+sum(max(residuals[name]['observed_s_per_s'] for name in group) for group in groups)
+    predicted = forecast[RATIO]
+    _require(math.isfinite(actual) and actual>0 and math.isfinite(predicted) and predicted>=0,
+             'invalid held-out whole-service estimate')
+    composed = fixed+sum(max(residuals[name]['forecast_s_per_s'] for name in group) for group in groups)
+    _require(math.isclose(predicted,composed,rel_tol=1.e-12), 'held-out and forecast cost composition differs')
+    stage_errors = {name:abs(residuals[name]['forecast_s_per_s']-residuals[name]['observed_s_per_s'])/actual
+                    for name in sorted(required)}
+    combined = sum(max(stage_errors[name] for name in group) for group in groups)
+    total_budget, stage_budget = limits
+    interval = forecast.get(INTERVAL)
+    inside = interval is None or interval[0]<=actual<=interval[1]
+    accepted = combined<=total_budget and max(stage_errors.values())<=stage_budget and inside
+    return dict(status='accepted' if accepted else 'cost_drift',accepted=accepted,
+        observed_s_per_s=actual,forecast_s_per_s=predicted,relative_error=predicted/actual-1,
+        no_cancellation_relative_error=combined,stage_absolute_error_share_of_observed=stage_errors,
+        whole_service_relative_error_budget=total_budget,individual_stage_error_share_budget=stage_budget,
+        inside_forecast_interval=inside if interval is not None else None)
+
+
+def _heldout_acquisition(cpu, gpu, slot):
+    """Check a fresh complete acquisition or its declared bounded cost work."""
+    _require(cpu['status']==gpu['status'] and cpu['coordinates']==gpu['coordinates'],
+             'independent local/GPU target acquisition differs')
+    _acquisition_demand_match(cpu,gpu)
+    if cpu['status']=='acquired':
+        samples = cpu['elapsed_observations_seconds']
+        _require(bool(samples) and len(samples)==(3 if samples[0]<=.5 else 1) and
+                 all(math.isfinite(x) and x>0 for x in samples) and cpu['elapsed_seconds']==fmean(samples),
+                 'held-out acquisition lacks the declared matched timing starts')
+        return fmean(samples)/slot
+    if cpu['status']!='partial_acquisition' or 'full_selection_holdout' not in cpu:
+        return None
+    plan, other_plan = cpu['full_plan'], gpu['full_plan']
+    _require(_select(plan,_TILE)==_select(other_plan,_TILE),'held-out broad search plan differs')
+    keys = ('completed_units','completed_frequency_points','raw_candidate_rows')
+    steps = cpu['bounded_tiles']
+    _require([_select(step,keys) for step in steps]==[_select(step,keys) for step in gpu['bounded_tiles']],
+             'held-out broad search executed different bounded tiles')
+    units = sum(step['completed_units'] for step in steps)
+    points = sum(step['completed_frequency_points'] for step in steps)
+    _require(units==min(4,plan['units']) and units>0 and
+             points==min(plan['frequency_points'],units*plan['frequency_unit_points']),
+             'held-out broad search lacks its declared four-unit work')
+    selection = cpu['full_selection_holdout']
+    _require(selection['exact_candidate_rows']==plan['raw_candidate_row_capacity'] and
+             selection['score_order_strata']==['monotone','alternating','shuffled'] and
+             len(selection['samples'])==3,
+             'held-out full-count candidate-selection work differs')
+    kernel_seconds = [step['timing']['total']['wall_seconds'] for step in steps]
+    setup_seconds = cpu['elapsed_seconds']
+    selection_cost = selection['samples']
+    _require(all(math.isfinite(x) and x>0 for x in [setup_seconds,*kernel_seconds,*selection_cost]),
+             'invalid held-out broad search timing')
+    return (setup_seconds+sum(kernel_seconds)*plan['units']/units)/slot + max(selection_cost)
+
+
 def _verification(forecast, calibration, trace, gpu_trace, *, transfer=False, target_noise=None):
     """Check a separately run CPU work observation against the GPU forecast."""
     input_relation = _holdout_input_relation(trace,gpu_trace)
+    if input_relation['status']!='identical_input':
+        return dict(status='unresolved',input_relation=input_relation,
+                    reason='independent CPU/GPU target IQ bytes differ')
     cpu = trace['devices']['cpu']
     matched = _forecast_row(calibration, dict(trace, devices={'cuda':cpu}),
                             allow_approximation=transfer,transfer=transfer,target_noise=target_noise)
@@ -532,12 +658,13 @@ def _verification(forecast, calibration, trace, gpu_trace, *, transfer=False, ta
     fine = cpu['strata']
     cuda = gpu_trace['devices']['cuda']
     cuda_fine = cuda['strata']
-    for local,gpu in ((cpu['data_acquisition'],cuda['data_acquisition']),
-                      (cpu['noise_acquisition'],cuda['noise_acquisition']),
-                      (trace['recurring_acquisition'],gpu_trace['recurring_acquisition'])):
-        _require(local['status']==gpu['status'] and local['coordinates']==gpu['coordinates'],
-                 'independent local/GPU target acquisition differs')
-        _acquisition_demand_match(local,gpu)
+    observed = {}
+    for name,local,gpu in (('data_acquisition',cpu['data_acquisition'],cuda['data_acquisition']),
+                           ('noise_acquisition',cpu['noise_acquisition'],cuda['noise_acquisition']),
+                           ('recurring_acquisition',trace['recurring_acquisition'],gpu_trace['recurring_acquisition'])):
+        value = _heldout_acquisition(local,gpu,slot)
+        if value is not None:
+            observed[name] = value
     for name in _FINE_STRATA:
         earlier = None
         for index,(local,gpu) in enumerate(zip(fine[name]['records'],cuda_fine[name]['records'],strict=True)):
@@ -557,41 +684,51 @@ def _verification(forecast, calibration, trace, gpu_trace, *, transfer=False, ta
              'held-out continuation phases incomplete')
     nominal_fine = (phase[0]['elapsed_seconds']+phase[-1]['elapsed_seconds']+
         (geometry['search_window_samples']/fs-2)*sum(row['elapsed_seconds'] for row in phase[1:4])/4)/slot
-    observed = {'nominal_fine': nominal_fine,
-        'recurring_bank_preparation':max(row['elapsed_seconds'] for row in trace['recurring_banks'])/slot}
-    for name,row in (('data_acquisition',cpu['data_acquisition']),
-                     ('noise_acquisition',cpu['noise_acquisition']),
-                     ('recurring_acquisition',trace['recurring_acquisition'])):
-        if row['status']=='acquired':
-            observed[name]=row['elapsed_seconds']/slot
+    observed.update(nominal_fine=nominal_fine,
+        recurring_bank_preparation=max(row['elapsed_seconds'] for row in trace['recurring_banks'])/slot)
     for name in ('terminal','noise_only','maximum_state_transition'):
         work = matched['components'][name].get('gpu_demand')
         if work is not None:
             observed[name] = fine[name]['elapsed_seconds']*work['forecast_work_rows']/work['probe_rows']/slot
+    erasure = fine['interior_erasure']
+    represented = erasure['represented_baseband_seconds']
+    _require(represented>0 and math.isfinite(represented) and
+             math.isfinite(erasure['elapsed_seconds']) and erasure['elapsed_seconds']>0,
+             'invalid held-out erasure timing')
+    erasure_service = erasure['elapsed_seconds']*geometry['maximum_capacity_window_seconds']/represented/slot
+    cap_service = observed.get('maximum_state_transition')
+    erasure_covered = cap_service is not None and erasure_service<=cap_service
     residuals = {}
     for name,actual in observed.items():
         predicted=forecast['components'].get(name,{}).get(RATIO)
         if predicted is not None:
-            _require(math.isfinite(actual) and actual>0, 'invalid independent CPU service timing')
+            _require(math.isfinite(actual) and actual>0 and math.isfinite(predicted) and predicted>=0,
+                     'invalid independent CPU service timing')
             residuals[name]=dict(forecast_s_per_s=predicted, observed_s_per_s=actual,
-                relative_error=predicted/actual-1,
-                accepted=1/(1+COST_LIMIT)<=predicted/actual<=1+COST_LIMIT)
-    nominal = ('data_acquisition','recurring_bank_preparation','nominal_fine')
-    _require(all(name in residuals for name in nominal), 'nominal independent CPU holdout incomplete')
+                absolute_error_s_per_s=abs(predicted-actual),relative_error=predicted/actual-1)
     fixed = sum(calibration['measurement']['nominal_service']['components'][name][RATIO] for name in _FIXED)
-    actual = fixed+sum(observed[name] for name in nominal)
-    predicted = forecast['nominal_service'][RATIO]
+    mismatches = matched['missing_or_mismatched'].copy()
+    if not erasure_covered:
+        mismatches['interior_erasure'] = 'held-out erasure cost exceeds independently observed capped work'
+    nominal = _holdout_service(residuals,mismatches,fixed,_NOMINAL_TIMING,forecast['nominal_service'],
+                              _HOLDOUT_BUDGETS['nominal_service'])
+    ceiling = _holdout_service(residuals,mismatches,fixed,_CEILING_TIMING,forecast['complete_capacity'],
+                              _HOLDOUT_BUDGETS['complete_capacity'])
+    if 'interior_erasure' in mismatches:
+        ceiling.update(status='partial_coverage',accepted=False,
+                       missing=sorted(set(ceiling.get('missing',()))|{'interior_erasure'}))
     missing = sorted(set(forecast['components'])-set(residuals)-{'interior_erasure'})
-    status = ('cost_drift' if any(not row['accepted'] for row in residuals.values()) else
-              'partial_coverage' if missing or matched['missing_or_mismatched'] else 'accepted')
+    status = ('cost_drift' if 'cost_drift' in (nominal['status'],ceiling['status']) else
+              'partial_coverage' if missing or mismatches else 'accepted')
     return dict(status=status,input_relation=input_relation,
-        nominal_holdout_accepted=all(residuals[name]['accepted'] and name not in matched['missing_or_mismatched']
-                                     for name in nominal),
-        components=residuals, actual_nominal_s_per_s=actual, forecast_nominal_s_per_s=predicted,
-        relative_nominal_error=predicted/actual-1,
+        nominal_holdout_accepted=nominal['accepted'], nominal_service=nominal,complete_capacity=ceiling,
+        components=residuals,actual_nominal_s_per_s=nominal.get('observed_s_per_s'),
+        forecast_nominal_s_per_s=nominal.get('forecast_s_per_s'),relative_nominal_error=nominal.get('relative_error'),
         missing_held_out_stage_timings=missing,
-        mismatched_held_out_calibration_stages=matched['missing_or_mismatched'],
-        scope='Separate CPU acquisition/short continuation/branch/ordinal observations with direct local fixed overhead. Bounded tiled holdouts have no direct full-grid elapsed observation.')
+        mismatched_held_out_calibration_stages=mismatches,fixed_cpu_calibration_s_per_s=fixed,
+        held_out_erasure=dict(observed_s_per_s=erasure_service,observed_state_ceiling_s_per_s=cap_service,
+                              covered_by_state_ceiling=erasure_covered),
+        scope='Independent bounded CPU DSP work and separately calibrated fixed CPU overhead. Broad search uses actual 1/2/4 tiles and full-count selection, not full-grid elapsed time.')
 
 
 def _holdout_input_relation(cpu, gpu):
@@ -627,8 +764,21 @@ def _gate_target_verdicts(row, direct):
         row.update(status='unresolved',held_out_target_contradictions=contradictions)
 
 
+def _validate_target_noise_report(report, parsed, source, runtime, cpu_budget, workspace_bytes):
+    _require(report['schema']=='triad-manual-stage-calibration-v1' and
+             report['calibration_stage']=='noise-only-fine' and report['status']=='stage_calibration_measured' and
+             report['provenance']['unchanged_at_completion'] and same_measured_source(report['provenance'],source) and
+             report['input']['unchanged_at_completion'] and report['input']['source_sha256']==parsed['source_sha256'] and
+             report['runtime']['unchanged_at_completion'] and
+             {key:value for key,value in report['runtime'].items() if key!='unchanged_at_completion'}==runtime and
+             report['machine']['cpu']==cpu_budget and report['worker_allocations']==[cpu_budget['available_cpus']] and
+             report['workspace_limit_bytes']==workspace_bytes,
+             'target noise-only calibration identity or allocation differs')
+
+
 def estimate(cpu, gpu, parsed, source, runtime, cpu_budget, *, holdout=None, holdout_indices=(),
-             reference_indices=(), transfers=(), target_noise_indices=()):
+             reference_indices=(), gpu_reference=None, transfers=(), target_noise_indices=(),
+             target_noise_report=None, case_indices=()):
     start = time.perf_counter()
     try:
         _require(cpu['schema']=='triad-manual-complete-capacity-v3' and gpu['schema']=='triad-gpu-workload-v2',
@@ -639,24 +789,26 @@ def estimate(cpu, gpu, parsed, source, runtime, cpu_budget, *, holdout=None, hol
         _require(same_measured_source(cpu['provenance'],source), 'current local source or binary differs')
         _require({key:value for key,value in cpu['runtime'].items() if key!='unchanged_at_completion'}==runtime
                  and cpu['machine']['cpu']==cpu_budget, 'local calibration CPU/runtime allocation differs')
-        _require(gpu['unchanged_at_completion'] and gpu['device']=='cuda' and
-                 gpu['coarse_device']=='cuda' and gpu['cuda_peak_allocated_bytes']>0 and
-                 gpu['status']=='bounded_mixed_precision_cost_regime_observed',
-                 'CUDA work trace has no qualified mixed-precision work reference')
-        _require(_trace_source_matches(gpu,source), 'GPU trace source or native artifacts differ')
         leaf_hashes = _runtime_leaf_hashes()
-        _require(_select(gpu['sources'],leaf_hashes)==leaf_hashes,
-                 'GPU runtime leaf source differs from the tested backend')
+        _validate_cuda_trace(gpu,source,leaf_hashes,needs_reference=gpu_reference is None)
         _require(gpu['input']['source_sha256']==parsed['source_sha256'],
                  'GPU trace manual list differs from current input')
         same_manual_list = cpu['input']['source_sha256']==parsed['source_sha256']
         _require(gpu['memory_limit_bytes']==cpu['workspace_limit_bytes'],
                  'GPU trace and target CPU workspace caps differ')
-        qualified_references = _reference_coverage(gpu,parsed,reference_indices)
+        reference = gpu if gpu_reference is None else gpu_reference
+        if gpu_reference is not None:
+            _validate_cuda_trace(reference,source,leaf_hashes,needs_reference=True)
+        qualified_references = _reference_coverage(reference,parsed,reference_indices)
+        precision_references = {_gpu_work_executed(row) for row in reference['cases']
+                                if row['case']['index'] in qualified_references}
+        if gpu_reference is not None:
+            _same_cuda_reference_environment(gpu,reference,qualified_references)
         problem = None
-    except (KeyError,TypeError,ValueError,OSError) as error:
+    except (IndexError,KeyError,TypeError,ValueError,OSError) as error:
         leaf_hashes = {}
         qualified_references = []
+        precision_references = set()
         problem = str(error)
     def ordered(rows):
         indexed = {}
@@ -670,6 +822,17 @@ def estimate(cpu, gpu, parsed, source, runtime, cpu_budget, *, holdout=None, hol
     except (KeyError,TypeError,ValueError) as error:
         local=remote={}
         problem=problem or str(error)
+    target_noise_rows = {}
+    target_noise_problem = None
+    if target_noise_report is not None:
+        try:
+            _validate_target_noise_report(target_noise_report,parsed,source,runtime,cpu_budget,
+                                          cpu['workspace_limit_bytes'])
+            target_noise_rows = ordered(target_noise_report['cases'])
+            _require(set(target_noise_rows)==set(target_noise_indices),
+                     'target noise-only calibration indices differ from declaration')
+        except (KeyError,TypeError,ValueError) as error:
+            target_noise_problem=str(error)
     independent = {}
     holdout_problem = None
     if holdout is not None:
@@ -697,6 +860,8 @@ def estimate(cpu, gpu, parsed, source, runtime, cpu_budget, *, holdout=None, hol
     current = {case['index']:case for case in parsed['cases']}
     for case in parsed['cases']:
         index=case['index']
+        if case_indices and index not in case_indices:
+            continue
         donor_index=donors.get(index,index)
         transfer=index!=donor_index
         target_noise = None
@@ -727,12 +892,15 @@ def estimate(cpu, gpu, parsed, source, runtime, cpu_budget, *, holdout=None, hol
             _require(local[donor_index]['measurement']['inference_workers']==cpu_budget['available_cpus'],
                      'CPU calibration did not measure the full logical allocation')
             if index in target_noise_indices:
-                _require(transfer and index in local and same_manual_list,
+                target_rows = local if target_noise_report is None else target_noise_rows
+                _require(target_noise_problem is None,target_noise_problem)
+                _require(transfer and index in target_rows and (target_noise_report is not None or same_manual_list),
                          'noise-only calibration requires a current target CPU report and an explicit donor')
-                target = local[index]
+                target = target_rows[index]
                 measured = target['measurement']
                 _require(target['case']['configuration_hash']==case['configuration_hash'] and
                          all(target['case'][key]==case[key] for key in ('fields','native_args')) and
+                         'error' not in target and
                          measured['inference_allocation_mode']=='full_logical' and
                          measured['inference_workers']==cpu_budget['available_cpus'] and
                          measured['workspace_margin']['status']=='within_budget' and
@@ -741,10 +909,14 @@ def estimate(cpu, gpu, parsed, source, runtime, cpu_budget, *, holdout=None, hol
                          'target noise-only calibration source, allocation or geometry differs')
                 target_noise = measured['noise_only_fine']
                 row['cross_case_calibration'].update(target_cpu_timing_excluded_from_fit=False,
-                                                     target_cpu_calibrated_stages=['noise_only'])
-            _gpu_work_executed(remote[index])
+                    target_cpu_calibrated_stages=['noise_only'],target_cpu_noise_calibration_source=(
+                        'full_current_cpu_report' if target_noise_report is None else 'standalone_noise_only_report'))
+            _require(_gpu_work_executed(remote[index]) in precision_references,
+                     'CUDA coarse/fine precision class lacks a paired reference')
             row.update(_forecast_row(local[donor_index],remote[index],
                 allow_approximation=bool(qualified_references),transfer=transfer,target_noise=target_noise))
+            for scope, (relative_budget, _) in _HOLDOUT_BUDGETS.items():
+                _guarded_interval(row[scope],relative_budget)
             points = (row['nominal_service'][RATIO] is not None and row['complete_capacity'][RATIO] is not None
                       and not row['missing_or_mismatched'])
             row['status'] = ('conditional_estimate' if points and
@@ -763,16 +935,18 @@ def estimate(cpu, gpu, parsed, source, runtime, cpu_budget, *, holdout=None, hol
                                                             transfer=transfer,target_noise=target_noise)
             except (KeyError,TypeError,ValueError,IndexError,OverflowError) as error:
                 row['independent_cpu_trace'] = dict(status='unresolved',reason=str(error))
+            trace_verification = row['independent_cpu_trace']
+            if trace_verification['status']!='accepted':
+                row['status'] = 'unresolved'
+                for name in _HOLDOUT_BUDGETS:
+                    component = row.get(name,{})
+                    if (not trace_verification.get(name,{}).get('accepted') and
+                            component.get('realtime_status') in ('pass','fail')):
+                        component.update(realtime_status='unresolved',reason='independent_target_holdout_not_accepted')
         if transfer:
             trace_verification = row.get('independent_cpu_trace',{})
             verification = trace_verification.get('status','unresolved')
             row['cross_case_calibration']['target_holdout_status'] = verification
-            if verification!='accepted':
-                row['status']='unresolved'
-                for name in ('nominal_service','complete_capacity'):
-                    accepted = name=='nominal_service' and trace_verification.get('nominal_holdout_accepted')
-                    if not accepted and row.get(name,{}).get('realtime_status') in ('pass','fail'):
-                        row[name].update(realtime_status='unresolved',reason='cross_case_target_holdout_not_accepted')
             direct = {}
             if problem is None and index in local and local[index]['case']['configuration_hash']==case['configuration_hash']:
                 direct = local[index].get('measurement',{})
@@ -792,40 +966,216 @@ def estimate(cpu, gpu, parsed, source, runtime, cpu_budget, *, holdout=None, hol
         rows.append(row)
     verified = [row['case_index'] for row in rows
                 if row.get('independent_cpu_trace',{}).get('status')=='accepted']
+    verified_nominal = [row['case_index'] for row in rows
+                        if row.get('independent_cpu_trace',{}).get('nominal_holdout_accepted')]
     status = ('unresolved' if not rows or any(row['status']=='unresolved' for row in rows)
               or set(verified)!=set(holdout_indices) else
               'conditional_estimates' if all(row['status']=='conditional_estimate' for row in rows) else
               'complete_point_estimates_with_unresolved_support')
-    return dict(schema='triad-gpu-local-cpu-forecast-v1', cases=rows,
+    return dict(schema='triad-gpu-local-cpu-forecast-v2', cases=rows,
         status=status,
         nominal_point_estimates=sum(row.get('nominal_service',{}).get(RATIO) is not None for row in rows),
         ceiling_point_estimates=sum(row.get('complete_capacity',{}).get(RATIO) is not None for row in rows),
         source_revision=source['revision'], manual_list_sha256=parsed['source_sha256'],
         cpu_calibration_manual_list_sha256=cpu.get('input',{}).get('source_sha256'),
+        forecast_selected_indices=[row['case_index'] for row in rows],
+        forecast_selects_complete_current_list=len(rows)==len(parsed['cases']),
         gpu_runtime_leaf_sha256=leaf_hashes,
         qualified_mixed_precision_reference_indices=qualified_references,
+        qualified_cuda_precision_classes=[dict(fine=fine,coarse=coarse)
+                                          for fine,coarse in sorted(precision_references)],
+        separate_cached_cuda_reference_used=gpu_reference is not None and bool(qualified_references),
         approximate_work_policy=dict(adaptive_relative_limit=ADAPTIVE_WORK_LIMIT,
             callback_relative_limit=CALLBACK_WORK_LIMIT,callback_absolute_allowance=CALLBACK_ABSOLUTE_ALLOWANCE,
             cross_case_native_full_tile_ratio_interval=[1/NATIVE_TRANSFER_RATIO_LIMIT,NATIVE_TRANSFER_RATIO_LIMIT]),
         calibration_elapsed_seconds=cpu.get('suite_observed_elapsed_seconds'),
+        target_noise_calibration_elapsed_seconds=(None if target_noise_report is None else
+                                                  target_noise_report.get('suite_observed_elapsed_seconds')),
         gpu_trace_elapsed_seconds=gpu.get('trace_observed_elapsed_seconds'),
         local_holdout_elapsed_seconds=holdout.get('trace_observed_elapsed_seconds') if holdout else None,
         local_holdout_declared_indices=list(holdout_indices), local_holdout_accepted_indices=verified,
+        local_nominal_holdout_accepted_indices=verified_nominal,
+        held_out_error_policy={scope:dict(maximum_whole_service_error=total,maximum_stage_contribution=stage)
+                               for scope,(total,stage) in _HOLDOUT_BUDGETS.items()},
         estimator_elapsed_seconds=time.perf_counter()-start,
         holdout_rule='Reserve the final local outer observation; use its four-unit result for fine branches. Recurring banks use the second independent ordinal. Fixed stages are measured locally and charged in full.')
+
+
+def _cpu_operating_conditions():
+    """Optional observations; never use instantaneous clocks to scale costs."""
+    def read(path):
+        try:
+            return Path(path).read_text().strip()
+        except OSError:
+            return None
+    temperatures = [value for directory in Path('/sys/class/hwmon').glob('hwmon*')
+                    if read(directory/'name') in ('k10temp','coretemp')
+                    if (value := read(directory/'temp1_input')) is not None]
+    return dict(platform_profile=read('/sys/firmware/acpi/platform_profile'),
+        energy_preference=read('/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference'),
+        governor=read('/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor'),
+        ac_online=read('/sys/class/power_supply/AC/online'),cpu_sensor_millidegrees_C=temperatures)
+
+
+def _refresh_cpu_phase(phase, previous, arguments, output, case_list, input_artifacts):
+    """Fit one phase, seal its forecast, then time one fresh receiver."""
+    from triad_abbreviated import environment
+    from triad_case_capacity import (PreparedCapacityCase, build_recurring_public_bank, measure_acquisition,
+                                    measure_sustained_fine, noise_only_observation)
+    from triad_case_metrics import machine_resources
+    from triad_case_suite import native_plan
+    from triad_gpu_workload import _acquisition as holdout_acquisition, _continuation_sample
+    from triad_receiver import CompleteBitReceiver
+
+    began = time.perf_counter()
+    nominal = phase=='nominal-fine'
+    scope = 'nominal_service' if nominal else 'complete_capacity'
+    prior, = previous['cases']
+    independent = prior.get('independent_cpu_trace',{})
+    _require(not prior.get('missing_or_mismatched') and
+             independent.get('input_relation',{}).get('status')=='identical_input' and
+             independent.get(scope,{}).get('observed_s_per_s') is not None,
+             'phase refresh requires matching original CPU, GPU and independent stage evidence')
+    index = prior['case_index']
+    cpu,gpu,holdout = (arguments[name] for name in ('cpu','gpu','holdout'))
+    source,runtime,budget = (arguments[name] for name in ('source','runtime','cpu_budget'))
+    case = next(row for row in arguments['parsed']['cases'] if row['index']==index)
+    local = next(row for row in cpu['cases'] if row['case']['index']==index)
+    remote = next(row for row in gpu['cases'] if row['case']['index']==index)
+    old_trace, = holdout['cases']
+    cap = cpu['workspace_limit_bytes']
+    workers = budget['available_cpus']
+    resources = machine_resources()
+    _require(resources['cpu']==budget and (resources['memory_budget_bytes'] or 0)>=cap,
+             'phase refresh requires the exact calibrated CPU allocation and workspace')
+    executable = Path(source['native_binary'])
+    plan = native_plan(executable,case['native_args'])
+    family_size = cpu['policy']['family_size']
+    tool_sha = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    before = _cpu_operating_conditions()
+    evidence = dict(phase=phase,case_index=index,configuration_hash=case['configuration_hash'],status='prediction_sealed',
+        family_size=family_size,workspace_bytes=cap,workers=workers,
+        measured_cpu_source=source,runtime=runtime,cpu_budget=budget,
+        input_artifacts=input_artifacts,estimator_sha256=tool_sha,operating_conditions_before=before,
+        previous_holdout=independent[scope],
+        scope='Only the selected CPU phase is refreshed in the recorded operating context. Unchanged independent component observations remain fixed verification evidence from their earlier runs.')
+    prepare_began = time.perf_counter()
+    with PreparedCapacityCase(executable,case,plan,memory_limit_bytes=cap,bank_workers=workers,
+                              noise_only=not nominal) as prepared:
+        _require(_select(prepared.public_geometry,_GEOMETRY)==_select(remote['public_geometry'],_GEOMETRY),
+                 'fresh phase fixture differs from public GPU geometry')
+        if nominal:
+            def open_receiver():
+                return prepared.receiver(workers)
+        else:
+            recurring = prepared.recurring_window['index']
+            _require(recurring==remote['recurring_acquisition']['public_slot_index']==
+                     old_trace['recurring_acquisition']['public_slot_index'], 'largest recurring ordinal differs')
+            slot = prepared.calendar['plans'][recurring]
+            prepared.screen = prepared.bank.screen = None
+            bank = build_recurring_public_bank(prepared,slot,workers=workers)
+            noise_only_observation(prepared,seed=remote['evaluator']['recurring_noise_only_seed'],
+                                   samples=slot['receiver_window_samples'])
+            manifest = dict(bank['manifest'],power=dict(bank['manifest']['power'],
+                                                       complex_noise_variance=prepared.noise_variance))
+            def open_receiver():
+                return CompleteBitReceiver(manifest,bank['screen'],prepared.basis_source,
+                    workers=workers,memory_limit_bytes=prepared.receiver_memory_limit_bytes)
+            evidence['recurring_public_slot_index'] = recurring
+        data_sha = hashlib.sha256(memoryview(prepared.raw).cast('B')).hexdigest()
+        mask_sha = hashlib.sha256(memoryview(prepared.valid).cast('B')).hexdigest()
+        if nominal:
+            _require(all((row['input_sha256'],row['validity_sha256'])==(data_sha,mask_sha) for row in (remote,old_trace)),
+                     'fresh nominal fixture differs from GPU or original local IQ')
+        evidence['fixture_preparation_seconds'] = time.perf_counter()-prepare_began
+        fit_began = time.perf_counter()
+        with open_receiver() as receiver:
+            if nominal:
+                acquired = prepared.acquisition(receiver)['result']
+                session = acquired.pop('coarse_session',None)
+                if session is not None:
+                    session.close()
+                coordinates = acquired.get('coordinates')
+                _require(acquired['status']=='acquired' and coordinates and
+                         json.loads(json.dumps(coordinates))==remote['devices']['cuda']['data_acquisition']['coordinates'],
+                         'fresh nominal fixture did not acquire the same public coordinates')
+                fit = measure_sustained_fine(prepared,receiver,coordinates,family_size=family_size,maximum_look=9)
+                _require(fit['successful_outer_observations'] in (3,5,9),'bounded nominal fine fit incomplete')
+                measured = dict(local['measurement'],fine_active=fit)
+            else:
+                fit = measure_acquisition(prepared,receiver,family_size=family_size)
+                window = dict(local['measurement']['recurring_window'],noise_only_acquisition=fit)
+                measured = dict(local['measurement'],recurring_window=window)
+        evidence['fit_seconds'] = time.perf_counter()-fit_began
+        updated = dict(local,measurement=measured)
+        prediction = _forecast_row(updated,remote,allow_approximation=True)
+        _require(not prediction['missing_or_mismatched'],'fresh CPU phase does not match GPU work')
+        for name,(limit,_) in _HOLDOUT_BUDGETS.items():
+            _guarded_interval(prediction[name],limit)
+        sealed = dict(training_observations=fit,prediction={name:_select(prediction[name],(RATIO,INTERVAL))
+                                                           for name in _HOLDOUT_BUDGETS})
+        evidence.update(fixture_kind='data' if nominal else 'seeded_recurring_h0',
+            input_sha256=data_sha,validity_sha256=mask_sha,pre_external_holdout=sealed,
+            pre_external_holdout_sha256=hashlib.sha256(json.dumps(sealed,sort_keys=True,allow_nan=False).encode()).hexdigest(),
+            operating_conditions_before_holdout=_cpu_operating_conditions())
+        output.parent.mkdir(parents=True,exist_ok=True)
+        output.touch(exist_ok=False)
+        write_result(output,dict(schema='triad-gpu-local-cpu-phase-refresh-v1',status='prediction_sealed',phase_refresh=evidence))
+        holdout_began = time.perf_counter()
+        with open_receiver() as receiver:
+            if nominal:
+                fresh = _continuation_sample(prepared,receiver,coordinates,lambda:None)
+            else:
+                fresh = holdout_acquisition(prepared,receiver,independent_cost_holdout=True)
+                fresh['public_slot_index'] = recurring
+        evidence['external_phase_holdout_seconds'] = time.perf_counter()-holdout_began
+    after = _cpu_operating_conditions()
+    _require(all(before[key]==after[key]==evidence['operating_conditions_before_holdout'][key]
+                 for key in ('platform_profile','energy_preference','governor','ac_online')) and
+             same_measured_source(source,identity(executable)) and environment('cpu')==runtime and
+             machine_resources()['cpu']==budget and load_cases(case_list)['source_sha256']==arguments['parsed']['source_sha256'] and
+             gpu['sources']==_runtime_leaf_hashes() and hashlib.sha256(Path(__file__).read_bytes()).hexdigest()==tool_sha,
+             'source, runtime, case list or operating profile changed during the phase refresh')
+    # Compare a live receipt using the same JSON shapes as archived traces.
+    fresh = json.loads(json.dumps(fresh,allow_nan=False))
+    if nominal:
+        old_cpu = old_trace['devices']['cpu']
+        mixed = dict(old_trace,devices={'cpu':dict(old_cpu,strata=dict(old_cpu['strata'],nominal_continuation=fresh))})
+    else:
+        mixed = dict(old_trace,recurring_acquisition=fresh)
+    refreshed_cpu = dict(cpu,cases=[updated if row['case']['index']==index else row for row in cpu['cases']])
+    result = estimate(**dict(arguments,cpu=refreshed_cpu,holdout=dict(holdout,cases=[mixed])))
+    current, = result['cases']
+    _require(all(_select(current[name],(RATIO,INTERVAL))==sealed['prediction'][name] for name in _HOLDOUT_BUDGETS),
+             'verified forecast differs from the sealed pre-holdout point or interval')
+    accepted = current.get('independent_cpu_trace',{}).get(scope,{}).get('accepted') is True
+    model_status = current['components']['nominal_fine' if nominal else 'recurring_acquisition']['model_status']
+    evidence.update(status='phase_timing_supported' if accepted else 'phase_timing_unresolved',
+        model_status=model_status,external_phase_observation=fresh,operating_conditions_after=after,
+        elapsed_seconds=time.perf_counter()-began)
+    result['phase_refresh'] = evidence
+    return result
 
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__,allow_abbrev=False)
     parser.add_argument('--cpu-report',type=Path,required=True)
     parser.add_argument('--gpu-report',type=Path,required=True)
+    parser.add_argument('--gpu-reference-report',type=Path,
+                        help='separate current-runtime qualified paired CUDA references for a targeted trace')
     parser.add_argument('--local-holdout-report',type=Path)
     parser.add_argument('--holdout-case-index',type=int,action='append',default=[])
     parser.add_argument('--reference-case-index',type=int,action='append',default=[])
+    parser.add_argument('--case-index',type=int,action='append',default=[],
+                        help='forecast a selected current row without implying full-list coverage')
+    parser.add_argument('--refresh-cpu-phase',choices=('nominal-fine','recurring-acquisition'),
+                        help='refit one same-row CPU phase and measure one fresh independent observation')
     parser.add_argument('--transfer-case',action='append',default=[],metavar='TARGET=DONOR',
                         help='predeclare a same-geometry encrypted donor for a clear target excluded from the fit')
     parser.add_argument('--calibrate-target-noise-case-index',type=int,action='append',default=[],
                         help='use only the target CPU noise-only fit for this explicit transfer')
+    parser.add_argument('--target-noise-calibration-report',type=Path,
+                        help='optional separate source-bound noise-only stage calibration for those targets')
     parser.add_argument('--case-list',type=Path,default=DEFAULT_CASES)
     parser.add_argument('--exporter',type=Path,default=ROOT/'build/dev/triad_helper_export')
     parser.add_argument('--output',type=Path,required=True)
@@ -837,13 +1187,23 @@ def main(argv=None):
         source=identity(args.exporter.resolve())
         cpu_budget=detect_cpu_budget()
         configure_numerical_threads(resolve_cpu_budget(jobs=1,workers=cpu_budget['available_cpus'],threads=1))
-        cpu=json.loads(args.cpu_report.read_text())
-        gpu=json.loads(args.gpu_report.read_text())
+        input_artifacts={}
+        def load_report(name,path):
+            raw=path.read_bytes()
+            if args.refresh_cpu_phase:
+                input_artifacts[name]=dict(path=str(path),sha256=hashlib.sha256(raw).hexdigest())
+            return json.loads(raw)
+        cpu=load_report('cpu_calibration',args.cpu_report)
+        gpu=load_report('gpu_work',args.gpu_report)
         declared=tuple(args.holdout_case_index)
         indices={case['index'] for case in parsed['cases']}
+        requested=tuple(args.case_index)
+        selected=set(requested) if requested else indices
+        if not selected<=indices or (requested and len(selected)!=len(requested)):
+            raise ValueError('selected case indices must be distinct current rows')
         if (bool(declared)!=bool(args.local_holdout_report) or len(declared)!=len(set(declared)) or
-                not set(declared)<=indices):
-            raise ValueError('supply the independent holdout report and its distinct predeclared current case indices together')
+                not set(declared)<=selected):
+            raise ValueError('supply the independent holdout report and its distinct predeclared selected indices together')
         transfers=[]
         for item in args.transfer_case:
             target,donor=map(int,item.split('='))
@@ -855,14 +1215,26 @@ def main(argv=None):
         target_noise = args.calibrate_target_noise_case_index
         if len(target_noise)!=len(set(target_noise)) or not set(target_noise)<=dict(transfers).keys():
             raise ValueError('noise-only calibration requires distinct explicit transfer targets')
-        holdout=json.loads(args.local_holdout_report.read_text()) if args.local_holdout_report else None
-        result=estimate(cpu,gpu,parsed,source,environment('cpu'),cpu_budget,
-                        holdout=holdout,holdout_indices=declared,reference_indices=args.reference_case_index,
-                        transfers=transfers,target_noise_indices=target_noise)
+        if args.target_noise_calibration_report and not target_noise:
+            raise ValueError('supply the separate stage report with its declared noise-only target indices')
+        holdout=load_report('prior_holdout',args.local_holdout_report) if args.local_holdout_report else None
+        gpu_reference=load_report('gpu_reference',args.gpu_reference_report) if args.gpu_reference_report else None
+        noise_report=(json.loads(args.target_noise_calibration_report.read_text())
+                      if args.target_noise_calibration_report else None)
+        if args.refresh_cpu_phase and (len(requested)!=1 or requested!=declared or transfers or args.output.exists()):
+            raise ValueError('phase refresh requires one same-row selection, its earlier holdout and a new output path')
+        options=dict(cpu=cpu,gpu=gpu,parsed=parsed,source=source,runtime=environment('cpu'),cpu_budget=cpu_budget,
+                     holdout=holdout,holdout_indices=declared,reference_indices=args.reference_case_index,
+                     gpu_reference=gpu_reference,transfers=transfers,target_noise_indices=target_noise,
+                     target_noise_report=noise_report,case_indices=requested)
+        result=estimate(**options)
+        if args.refresh_cpu_phase:
+            result=_refresh_cpu_phase(args.refresh_cpu_phase,result,options,args.output,args.case_list,input_artifacts)
         write_result(args.output,result)
     except (OSError,ValueError,RuntimeError) as error:
         parser.error(str(error))
-    print(result['status'])
+    print(json.dumps(dict(status=result['status'],phase_refresh=result['phase_refresh']['status']))
+          if args.refresh_cpu_phase else result['status'])
     return 0 if result['status']=='conditional_estimates' else 2
 
 

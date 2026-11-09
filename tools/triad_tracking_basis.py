@@ -58,6 +58,8 @@ class CachedMappedBasis:
     ``(bit, epoch, arrival, frequency, clock_ppm, path_delay, path_doppler)``
     convention. The full source-time shift is applied before all three carrier
     samples are summed; this is not a carrier-label channel approximation.
+    The CPU receiver may supply its own contiguous complex128 output block.
+    The renderer joins all writes before returning it.
     """
     def __init__(self, source, *, cache_bytes=32*1024**2, tile_samples=8192,
                  minimum_oversampling=8., maximum_dense_factor=4,
@@ -217,7 +219,7 @@ class CachedMappedBasis:
         self.mapped_worker_tasks += workers
         self.maximum_mapped_workers = max(self.maximum_mapped_workers, workers)
 
-    def basis_mapped(self, first, offsets, rows, audio_center_hz):
+    def basis_mapped(self, first, offsets, rows, audio_center_hz, *, out=None):
         offsets = np.asarray(offsets, dtype=np.float64)
         if (isinstance(first, bool) or not isinstance(first, int) or not 0 <= first < (1 << 64) or
             offsets.ndim != 1 or not 1 <= len(offsets) <= 16384 or not np.isfinite(offsets).all() or
@@ -235,14 +237,22 @@ class CachedMappedBasis:
                 clock <= -1e6 or delay < 0):
                 raise ValueError('invalid mapped template candidate')
             parsed.append((int(bit), int(epoch), float(arrival), float(frequency), float(clock), float(delay), float(doppler)))
+        shape = (len(parsed), len(offsets))
+        if out is not None and (self.accelerator is not None or type(out) is not np.ndarray or
+                out.shape != shape or out.dtype != np.complex128 or
+                not out.flags.c_contiguous or not out.flags.aligned or not out.flags.writeable or
+                np.may_share_memory(out, offsets)):
+            raise ValueError('mapped destination must be separate writable aligned contiguous complex128 CPU storage')
         self.calls += 1
-        if self.fallback_reason:
-            return self._direct(first, offsets, parsed, audio_center_hz)
         # Native mapped synthesis uses a long-double integer origin plus small
         # relative coordinates. Preserve that arithmetic instead of converting
         # first+offset to an absolute FP64 timestamp.
-        if np.finfo(np.longdouble).nmant < 63 and first > (1 << 48):
-            return self._direct(first, offsets, parsed, audio_center_hz)
+        if self.fallback_reason or (np.finfo(np.longdouble).nmant < 63 and first > (1 << 48)):
+            values = self._direct(first, offsets, parsed, audio_center_hz)
+            if out is None:
+                return values
+            out[:] = values
+            return out
         offsets = np.ascontiguousarray(offsets)
         fs = np.longdouble(self.sample_rate)
         first_ld = np.longdouble(first)
@@ -273,17 +283,19 @@ class CachedMappedBasis:
             phase_first = constant+slope*offsets[0]
             phase_last = constant+slope*offsets[-1]
 
-        shape = (len(parsed), len(offsets))
-        answer = (np.empty(shape, dtype=np.complex128) if self.accelerator is None
-                  else self.accelerator.empty(shape))
+        answer = out
+        if answer is None:
+            answer = (np.empty(shape, dtype=np.complex128) if self.accelerator is None
+                      else self.accelerator.empty(shape))
         answer_data = answer.ctypes.data if self.accelerator is None else None
-        pending, pinned = [], {}
+        pending, pinned, tile_tables = [], {}, {}
 
         def flush():
             if pending:
                 self._render(pending, offsets, answer, pinned)
                 pending.clear()
                 pinned.clear()
+                tile_tables.clear()
 
         for column, row in enumerate(parsed):
             bit, epoch = row[:2]
@@ -310,7 +322,15 @@ class CachedMappedBasis:
             keys = [(bit, epoch, tile) for tile in range(low_tile, high_tile+1)]
             if len(pinned)+sum(key not in pinned for key in keys) > _MAX_PINNED_TILES:
                 flush()
-            pointers = (ctypes.c_void_p*count)()
+            # Rows with the same span reference the same pinned arrays until
+            # flush joins all readers. Preserve each row's LRU touches.
+            span = (bit, epoch, low_tile, count) if self.accelerator is None else None
+            pointers = tile_tables.get(span) if span is not None else None
+            new_table = pointers is None
+            if new_table:
+                pointers = (ctypes.c_void_p*count)()
+                if span is not None:
+                    tile_tables[span] = pointers
             for i, key in enumerate(keys):
                 if key in pinned and key not in self.cache:
                     self.cache_hits += 1
@@ -320,7 +340,8 @@ class CachedMappedBasis:
                     # An earlier descriptor may still point to the old array
                     # if a sibling fill reintroduced this key into the LRU.
                     tile = pinned.setdefault(key, tile)
-                pointers[i] = tile.ctypes.data
+                if new_table:
+                    pointers[i] = tile.ctypes.data
             pending.append((_MappedRow(fraction[column], dense_scale[column], constant[column],
                 slope[column], origin-low_tile*self.tile_samples, count, ctypes.addressof(pointers),
                 answer_data+16*column*len(offsets) if answer_data is not None else column), pointers))

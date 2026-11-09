@@ -89,7 +89,9 @@ class CachedBasisTests(unittest.TestCase):
         expected = source.basis_mapped(50000, offsets, rows, 8270)
         self.assertLess(np.linalg.norm(actual-expected)/np.linalg.norm(expected), .0003)
         narrow = cached(source, maximum_dense_factor=1)
-        np.testing.assert_array_equal(narrow.basis_mapped(50000, offsets, rows, 8270), expected)
+        destination = np.empty_like(expected)
+        self.assertIs(narrow.basis_mapped(50000, offsets, rows, 8270, out=destination), destination)
+        np.testing.assert_array_equal(destination, expected)
         self.assertEqual(narrow.report()['fallback_reason'], 'insufficient-cache-oversampling')
         self.assertEqual(narrow.bytes, 0)
         legacy = cached(AnalyticSource(pulse='rrc-025-span8'))
@@ -128,20 +130,38 @@ class CachedBasisTests(unittest.TestCase):
         source = AnalyticSource(samples=4103)
         rows = [(bit, epoch, arrival, .2, -120, .002, -.17)
                 for epoch in range(-2, 3) for bit in (0, 1) for arrival in (-.6, .002, .016)]
+        rows.insert(2, rows[1])
         offsets = .15+np.arange(1024)*.5
         serial = cached(source, tile_samples=128, cache_bytes=4096)
         first = serial.basis_mapped(120, offsets, rows, 1725)
         expected = source.basis_mapped(120, offsets, rows, 1725)
         np.testing.assert_allclose(first, expected, atol=5e-5, rtol=5e-5)
+        sentinel = -22+7j
+        guarded = np.full((len(rows)+2, len(offsets)), sentinel)
+        destination = guarded[1:-1]
         with ThreadPoolExecutor(max_workers=4) as executor:
             parallel = cached(source, tile_samples=128, cache_bytes=4096, executor=executor, workers=4)
-            second = parallel.basis_mapped(120, offsets, rows, 1725)
-        np.testing.assert_array_equal(second, first)
+            second = parallel.basis_mapped(120, offsets, rows, 1725, out=destination)
+        self.assertIs(second, destination)
+        np.testing.assert_array_equal(destination, first)
+        np.testing.assert_array_equal(guarded[[0, -1]], sentinel)
         self.assertGreater(parallel.evictions, 0)
         self.assertEqual(parallel.maximum_mapped_workers, 4)
         for key in ('cache_hits', 'cache_misses', 'native_preparation_calls', 'native_preparation_samples',
                     'evictions', 'direct_rows', 'interpolated_rows'):
             self.assertEqual(parallel.report()[key], serial.report()[key])
+
+    def test_mapped_destination_rejects_strided_and_aliased_storage(self):
+        cache = cached(AnalyticSource())
+        rows = [(0, 0, 0, 0, 0, 0, 0)]
+        offsets = np.arange(8, dtype=np.float64)
+        with self.assertRaisesRegex(ValueError, 'separate writable aligned contiguous'):
+            cache.basis_mapped(10, offsets, rows, 0, out=np.empty((1, 16), np.complex128)[:, ::2])
+        destination = np.empty((1, 8), np.complex128)
+        overlapping = destination.view(np.float64).ravel()[:8]
+        overlapping[:] = offsets
+        with self.assertRaisesRegex(ValueError, 'separate writable aligned contiguous'):
+            cache.basis_mapped(10, overlapping, rows, 0, out=destination)
 
     def test_unwarped_integer_samples_are_exact_and_rows_do_not_use_observations(self):
         source = AnalyticSource()

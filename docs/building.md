@@ -442,8 +442,10 @@ tests but do not compile them. For individual work, build the corresponding
 The [current Robust architecture](robust-current.md) distinguishes the
 canonical native waveform/channel/Helper path, a headless complete-stream
 receiver, and the still unavailable GUI path. Run the affected cheap
-deterministic checks first. For the manual absolute-capacity question, run the
-native triad group and then the separate manual-case suite:
+deterministic checks first. Prefer the
+[GPU-assisted manual forecast](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast)
+when applicable local phase costs exist. When local calibration needs a full
+refresh, run the native triad group and the manual-case suite.
 
 ```sh
 ./build.sh test triad
@@ -517,7 +519,7 @@ or a release.
 ### Robust computational checks
 
 The retained `triad` group covers concise native waveform, shaping, stream, and
-Helper Generator checks. Run it before absolute manual-case capacity work:
+Helper Generator checks. Run it before refreshing local CPU calibration.
 
 ```sh
 ./build.sh test triad
@@ -531,7 +533,8 @@ runner validates the entire current list and marks the output partial, which
 does not qualify omitted rows.
 
 The manual suite reads and validates `_tests-RobustModem.md` by default and
-supports current-index partial reruns for debugging. Its exact coverage,
+supports current-index partial reruns. It defaults to fresh full-visible
+logical CPU inference after the allocation pilot. Its exact coverage,
 workspace and cost gates, and interpretation limits are in the
 [manual capacity contract](robust-manual-capacity.md). A partial rerun cannot
 qualify omitted rows, and staged/coarse sensitivity does not qualify an
@@ -540,17 +543,11 @@ operational receiver or physical message success. The ordinary
 measures relative degradation against a matched baseline; its synthetic
 complete-fine receiver fixture is not a native-channel or capacity pass. See
 the [regression guide](triad-performance.md) for its fixed-geometry limits.
-The frozen native message gate has passed, including its captured-prefix EOF
-negative control. This is one bounded functional check, not a capacity or
-all-case qualification. The manual suite's `--skip-message-gate` option is
-debug-only and prevents an integrated pass; do not use it for capacity
-qualification. The prior `--paired-followup` option has been removed. The
-full integrated v3 reevaluation measured all eight current manual cases with
-unresolved worst-state margins and no full-capacity pass. The named `triad`
-group passed 20/20 before that run. Sensitivity confirmation remains incomplete,
-so there is no >90% qualification. Historical v2 base and continuation phases
-retain their own hashes and policy. See the [validation record](validation.md)
-for per-case ratios and provenance.
+The manual suite's `--skip-message-gate` option is debug-only and prevents an
+integrated pass. Use the [GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast)
+to reuse matching local costs and qualified paired GPU references. Refresh
+missing phases with bounded local work. See the [validation record](validation.md)
+for actual functional results, per-case ratios and provenance.
 Do not restore full, sustained, multi-day, exhaustive, or heavy-calibration
 campaigns as routine tests or fallback. RunPod accelerates the same bounded
 approach.

@@ -12,16 +12,8 @@ obsolete code, experiments and generated outputs when that purpose ends.
 
 The [current architecture and status](robust-current.md) identifies the
 canonical native waveform/channel/Helper stack and the complete headless
-receiver. Its frozen native message gate passed, including the captured-prefix
-EOF negative control. The current full eight-row CPU suite has all eight
-nominal conditional points below 1 s/s, but six conservative cold points fail
-that threshold and all stronger capacity decisions remain unresolved. The
-12-thread CPU ceiling was not demonstrated: continued fine work used about
-1.8–2.0 busy cores, and the 12/6 fine comparison showed no consistent gain.
-The RTX PRO 6000 diagnostic demonstrated faster coarse and continued-fine
-stages but does not provide a local CPU conversion factor. Sensitivity
-confirmation remains incomplete without a >90% qualification. See the
-[validation record](validation.md) for provenance and limits.
+receiver. See the [validation record](validation.md) for the measured native
+message gate, local CPU margins, GPU stage speed and forecast coverage.
 Robust remains unavailable in the GUI pending
 reconnection. Retained
 [pattern research](triad-patterns.md), [stochastic channel findings](triad-stochastic.md),
@@ -38,12 +30,11 @@ margins for the freshly read manual configurations. They share efficient
 sampling methods; their pass decisions are different. Run `./build.sh test triad`
 before manual capacity measurements. Earlier partial-stage results do not
 qualify complete reception or whole-machine capacity.
-Use the full-logical inference option to report a fresh 12-worker run after
-the same-stream 1/6/12 allocation pilot. RunPod may assist development and
-workload exploration, but only local source-matched timings measure this
-computer's CPU service. Use authenticated SSH/SCP for source and binary transfer;
-the provider console is for pod lifecycle. See the [manual capacity
-contract](robust-manual-capacity.md) and [GPU procedure](triad-performance.md).
+For repeat manual checks, start with a GPU workload trace and applicable local
+phase calibration. Reuse qualified GPU references and measure missing CPU cost
+classes or fresh bounded holdouts locally. Headless measurement commands use the
+visible logical CPU budget by default and preserve explicit overrides. Follow
+the [GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast).
 
 ## Other maintained components
 

@@ -44,107 +44,199 @@ RunPod may accelerate this same bounded method but does not justify a larger
 campaign. Do not use full-observation, sustained, multi-day or exhaustive runs
 as routine checks or fallbacks for an inconclusive abbreviated result.
 
-## RunPod GPU-assisted full-workload diagnostic
+## RunPod GPU-assisted manual capacity forecast
 
-The current CUDA driver defaults to the complete eight-row list. Build a
-matching native exporter and `triad_mapped_kernel.so`; transfer both artifacts
-separately with the allowlisted source over authenticated SSH/SCP. The
-[`triad_gpu_bundle.py`](../tools/triad_gpu_bundle.py) utility creates the small
-source archive; transfer the matching exporter and kernel as separate files:
+Prefer this path for repeat manual checks with applicable local CPU phase
+calibration. RunPod supplies public work demand. Source-matched local timings
+supply CPU costs for acquisition, fine work, recurring banks and fixed
+orchestration. Refresh only missing local cost classes, or the affected local
+calibration when the CPU work or runtime changes. A GPU-only change requires
+new applicable GPU evidence and preserves an unchanged CPU calibration.
+
+Package the allowlisted source with the matching native exporter and mapped
+kernel. Transfer both artifacts separately with authenticated SSH/SCP and place
+the kernel beside the exporter. The provider console handles pod lifecycle.
 
 ```sh
 python3 tools/triad_gpu_bundle.py --output /tmp/robust-gpu-source.tar.gz
 ```
 
-Place the kernel beside the exporter so the driver resolves and hashes it.
-Run remotely through SSH:
+On the pod, run the bounded CUDA workload and predeclare representative paired
+reference rows spanning every arithmetic class. A full-list example uses rows
+1 and 2 for the tight-clock class and row 6 for the bulk FP32 class.
 
 ```sh
 python3 tools/triad_gpu_workload.py \
-  --device cuda --workers 12 --workspace-mib 4608 --coarse-cuda \
-  --reference-case 3 --reference-case 4 --reference-case 6 \
+  --device cuda --workers 12 --workspace-mib 4608 \
+  --reference-case 1 --reference-case 2 --reference-case 6 \
   --exporter build/dev/triad_helper_export \
-  --output local-evidence/gpu-rtx-4608-final.json
+  --output local-evidence/robust-gpu-paired.json
 ```
 
-The 4608 MiB workspace cap remains subject to the half-visible-memory guard.
+CUDA coarse acquisition is the default with `--device cuda`. With no
+`--workers` override, the workload uses the full visible logical host CPU
+budget and one numerical thread per receiver worker. The example pins 12
+workers so the paired and target runs use the same allocation. To repeat only
+a target row, use `--case-index N` and retain the qualified paired GPU report.
+The two reports must match the actual GPU backend, runtime, worker allocation,
+workspace cap and source/native artifacts. Reference rows must still match their
+current normalized configurations.
 
-This schema-2 `bounded_mixed_precision_cost_regime_observed` run measures the
-full workload with CUDA coarse search and selected fine work. The three
-`--reference-case` rows compare matched CPU reference stages. Measured results
-were 2.11–14.71x for CUDA coarse-data work and 1.73–2.33x for continued fine
-work versus the pod's 12-worker CPU, while native bank processing was only
-1.01–1.32x. Bulk CUDA used FP32; small Gram/Gaussian decision work used FP64.
-Three paired reference gates passed. This is a fast diagnostic workflow, not
-full receiver qualification or a local CPU throughput conversion.
+```sh
+python3 tools/triad_gpu_workload.py --case-index 7 --workers 12 --workspace-mib 4608 \
+  --exporter build/dev/triad_helper_export \
+  --output local-evidence/robust-gpu-target-7.json
+```
 
-Forecast only against source-matched full CPU/GPU reports and an independent
-local holdout at the same workspace cap. For pure row-5 to row-7 transfer, use:
+A bounded RTX PRO 6000 experiment ran two unpaired traces for rows 5 and 7
+in 31.01 seconds of SSH wall time. Each job used 12 workers and a 4608 MiB
+receiver workspace. Admission declared aggregate limits of 24 host workers,
+10 GiB of host memory and 19 GiB of device memory. Both traces reproduced the
+full trace's capture and useful work exactly. This was a two-job measurement
+with explicit resource limits. [Dual-job result](../local-evidence/robust-v2/gpu-dual-5-7.json)
 
-Create the independent local holdout with the same cap and fresh row-7 work:
+Predeclare independent local holdout rows for the applicable cost classes and
+any explicit cross-case transfer. Create fresh bounded CPU measurements using
+the same workspace cap. The following command checks only row 7.
 
 ```sh
 python3 tools/triad_gpu_workload.py \
-  --device cpu --workers 12 --case-index 7 --workspace-mib 4608 \
+  --device cpu --case-index 7 --workspace-mib 4608 \
   --exporter build/dev/triad_helper_export \
-  --output local-evidence/robust-cpu-holdout-7-4608.json
+  --output local-evidence/robust-cpu-holdout-7.json
 ```
 
-This selected-row run also obeys the half-visible-memory guard. Preserve any
-prior workspace-admission failure in the full CPU report; the holdout is a
-separate fresh measurement.
+An unavailable requested CPU workspace fails before measurement. Each acquired
+branch uses one fresh timing or three same-work timings when the first takes at
+most 0.5 seconds. Broad acquisition uses actual 1/2/4 bounded frequency tiles
+and separately measured full-count candidate selection on three public score
+orders. This yields a full-grid cost estimate while keeping the full scan out
+of the holdout. Timing repetitions use the same signal and work geometry.
+
+Example targeted transfer from encrypted row 5 to otherwise matching clear row
+7, using a separate target GPU trace and cached qualified GPU references.
 
 ```sh
 python3 tools/triad_gpu_cpu_forecast.py \
-  --cpu-report local-evidence/robust-cases-12-complete.json \
-  --gpu-report local-evidence/gpu-rtx-4608-final.json \
-  --local-holdout-report local-evidence/robust-cpu-holdout-7-4608.json \
+  --case-index 7 \
+  --cpu-report local-evidence/robust-cases.json \
+  --gpu-report local-evidence/robust-gpu-target-7.json \
+  --gpu-reference-report local-evidence/robust-gpu-paired.json \
+  --local-holdout-report local-evidence/robust-cpu-holdout-7.json \
   --holdout-case-index 7 \
-  --reference-case-index 3 --reference-case-index 4 --reference-case-index 6 \
+  --reference-case-index 1 --reference-case-index 2 --reference-case-index 6 \
   --transfer-case 7=5 \
-  --output local-evidence/robust-gpu-cpu-transfer-7-final.json
+  --output local-evidence/robust-gpu-cpu-target-7.json
 ```
 
-For the hybrid row-7 experiment, also add
-`--calibrate-target-noise-case-index 7` and write
-`local-evidence/robust-gpu-cpu-transfer-7-noise-final.json`. For the same-row
-report, omit `--transfer-case 7=5` and write
-`local-evidence/robust-gpu-cpu-same-row-final.json`. The same-row
-reports cover rows 3–8; rows 1–2 were rejected. Row-7 transfer matched
-nominally (+9.318% versus its
-independent holdout and -0.321% against the withheld full direct row), but the
-11.63% H0 cache-hit discrepancy exceeded the 5% tolerance. Hybrid transfer's
-nominal estimate passed while H0 acquisition cost drifted +46.92%, leaving
-overall validation unresolved. Preserve stage gates and complete-capacity
-verdicts; do not use a global GPU/CPU factor. These reports do not replace the
-complete eight-row local CPU suite.
+Use the paired report directly as `--gpu-report` for a full current-list
+forecast. Omit the row selection, separate reference report and transfer flags
+for ordinary same-row forecasting. Every invocation validates the entire
+manual list. A target-only run covers its selected rows.
 
-Use SSH/SCP and remote commands for software transfer, building and running;
-the provider console handles pod lifecycle. Terminate disposable instances
-after measurement and retain reports only while they support current claims.
+When the target has an uncalibrated H0 fine cost class, run its bounded local
+stage calibration and keep the independent holdout separate.
+
+```sh
+./build.sh test triad
+python3 tools/triad_manual_cases.py \
+  --calibration-stage noise-only-fine --case-index 7 --workspace-mib 4608 \
+  --exporter build/dev/triad_helper_export \
+  --output local-evidence/robust-noise-fine-7.json
+```
+
+Add `--calibrate-target-noise-case-index 7` and
+`--target-noise-calibration-report local-evidence/robust-noise-fine-7.json` to
+the transfer forecast. This measures only the H0 fine class on the seeded noise
+observation after public acquisition. The nominal fit still uses the donor's
+CPU timings. The H0 stage report carries its own source, configuration, CPU,
+workspace and elapsed cost.
+
+The measured row-7 target trace took 22.713 seconds inside the workload
+driver. Its separate H0 fine calibration took 20.574 seconds on the local CPU.
+Count the independent local holdout, process startup and any cloud transfer
+or setup in end-to-end elapsed time as well. The component times remain
+separate in the reports.
+
+Forecast v2 keeps signed and relative residuals for every held-out stage. For
+nominal service, the sum of absolute stage errors must fit within 15% of
+observed whole service, with each stage contributing at most 10%. For the
+conservative estimate, sum the absolute recurring-bank error, the largest
+absolute acquisition-branch error and the largest absolute fine-branch error.
+Their sum must fit within 20% of observed conservative service, with any
+individual stage contributing at most 15%. Measured fixed CPU costs are charged
+once in each service estimate. The budgets prevent cancellation between stages.
+Exact inputs, decisions, workload geometry and source/runtime gates still apply.
+The held-out erasure cost must fit under the observed state-ceiling estimate.
+
+The engineering error budget `b` guards the combined local calibration interval
+`[L, U]` as `[L/(1+b), U/(1-b)]` before the independent holdout. This allowance
+is separate from the statistical timing interval and its coverage limits. Report
+nominal and conservative estimates and any numerical point failure separately.
+Missing work or a failed holdout keeps the affected verdict unresolved. The
+previous relative-only rule rejected the row-7 hybrid H0 acquisition timing.
+That failure remains in the [validation record](validation.md) under its own
+policy and source identity.
+
+When a same-row timing check drifts while its input and work gates still match,
+refresh just that CPU phase. For a targeted forecast, supply the existing
+current local calibration, GPU work and paired references, and the earlier
+independent holdout for the selected row. Use one `--case-index N`, the matching
+`--holdout-case-index N` and a fresh output path. Add
+`--refresh-cpu-phase nominal-fine` for continued fine work or
+`--refresh-cpu-phase recurring-acquisition` for the largest recurring H0 search.
+
+The following example uses the 12-worker RTX trace and paired references from
+the current eight-row run.
+
+```sh
+python3 tools/triad_gpu_cpu_forecast.py \
+  --refresh-cpu-phase nominal-fine --case-index 2 \
+  --cpu-report local-evidence/robust-v2/calibration-complete.json \
+  --gpu-report local-evidence/robust-v2/gpu-full.json \
+  --local-holdout-report local-evidence/robust-v2/holdout-row-2.json \
+  --holdout-case-index 2 \
+  --reference-case-index 1 --reference-case-index 2 --reference-case-index 6 \
+  --exporter build/dev/triad_helper_export \
+  --output local-evidence/robust-v2/forecast-refresh-row-2-next.json
+```
+
+The refresh preserves the original suite's statistical family. It prepares one
+fixture, seals the new point and interval before timing a fresh receiver, and
+keeps the other independently measured phases from their earlier receipts. The
+nominal refresh regenerates DATA once. The recurring refresh uses seeded noise
+and a canonical public bank, with bounded tiles and measured full-count
+selection where required. The output records the observed operating profile,
+artifact hashes and separate elapsed costs. Its mixed-time evidence applies to
+the measured conditions. Read `phase_refresh.status` for the new timing check
+and the main verdict for the complete service estimate.
+
+Terminate disposable instances after the measurements. Keep only reports that
+support the current validation, cached reference or an unresolved claim.
 
 ## Absolute manual-case capacity
 
-After `./build.sh test triad`, run the distinct manual-case tool:
+When local timing calibration needs refreshing, run `./build.sh test triad`
+followed by the manual-case tool.
 
 ```sh
 python3 tools/triad_manual_cases.py \
   --output local-evidence/robust-cases.json \
   --exporter build/dev/triad_helper_export \
-  --workspace-mib 4608 \
-  --full-logical-inference --sustained-allocation-probe
+  --workspace-mib 4608
 ```
 
 The 4608 MiB cap remains subject to the half-visible-memory guard. Retain any
 workspace-admission failure and use a fresh matched selected-row continuation
 before assembling complete coverage.
 
-The full-logical option retains the same-stream 1/6/12-worker comparison and
-then performs a fresh complete inference with 12 workers for every row. Read
-the pilot selection and fresh 12-worker service, effective busy cores, work
-counters, windows and workspace separately. High utilization alone does not
-establish throughput; both measurements must complete the declared receiver
-work on one stream.
+The default compares serial, known physical cores and the full visible logical
+budget on one stream, then measures fresh complete inference at the full
+logical allocation. On this 6-core/12-thread CPU the pilot uses 1, 6 and 12
+workers. Use `--no-full-logical-inference` to select the pilot winner, or
+`--threads N` for an explicit diagnostic count. `--sustained-allocation-probe`
+adds a bounded matched six-second comparison when investigating scaling. Read
+elapsed service, busy cores, work counters, windows and workspace separately.
 
 The tool rereads and strictly validates `_tests-RobustModem.md` by default on
 every invocation. It supports `--case-list PATH` for another complete manual

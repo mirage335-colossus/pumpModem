@@ -58,8 +58,12 @@ whole heavy-calibration runs as routine tests or fallbacks. RunPod may accelerat
 the same method but does not justify larger experiments. See
 [the maintained policy](docs/robust-current.md#testing-computationally-intensive-robust-changes)
 and [the abbreviated harness](docs/triad-performance.md).
-For the editable manual-case suite, run `./build.sh test triad` before
-`python3 tools/triad_manual_cases.py --output local-evidence/robust-cases.json --exporter build/dev/triad_helper_export`.
+For the editable manual cases, prefer the [GPU-assisted forecast](docs/triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast)
+when applicable source-matched local phase costs exist. Reuse qualified GPU
+references under the same backend and runtime, verify fresh bounded holdouts,
+and measure missing cost classes locally. Run `./build.sh test triad` before
+refreshing the local calibration with `tools/triad_manual_cases.py`. A changed
+CPU work or runtime identity needs fresh applicable local timings.
 Manual cases are absolute complete-receiver capacity tests, distinct from the
 usual abbreviated performance regressions that look for degradation. They share
 the efficient sampling method, not the meaning of a passing result. Follow
@@ -67,7 +71,9 @@ the efficient sampling method, not the meaning of a passing result. Follow
 tracking, unsuccessful candidates, quiet-slot completion, reacquisition, recurring
 preparation and orchestration. Measure productive parallelism within one received
 stream on the local CPU, including its physical-core and full logical-CPU
-allocations; independent simultaneous simulations are not receiver throughput.
+allocations. Headless measurement commands default to the full visible logical
+budget, with one numerical thread per receiver worker and explicit overrides.
+Independent simultaneous simulations are not receiver throughput.
 Missing or unmeasured required work must prevent a complete-receiver capacity pass.
 Nominal service uses a brief uninterrupted fine session with a fixed two-second
 prefix and 1/2/4-second continuation, verified cache fills and state/holdout gates.
@@ -77,11 +83,10 @@ a nominal estimate. A numerical estimate at least 1 s/s is a point failure even
 when its extrapolation uncertainty prevents a stronger capacity conclusion.
 It reads `_tests-RobustModem.md` by default, requires all 16 strict fields,
 preserves ordered duplicate rows, and reuses identical normalized inputs only
-when explicitly marked. Use repeatable `--case-index N` only for targeted
-debugging; the full list is still parsed and validated, and partial output does
-not cover unselected cases. The obsolete coarse-only `--paired-followup` option
-is removed. Predeclare any separate complete-receiver sensitivity confirmation;
-communication trials cannot be reused as CPU-capacity measurements.
+when explicitly marked. Use repeatable `--case-index N` for explicitly scoped
+work. The full list is still parsed and validated, and partial output covers
+only selected cases. Predeclare separate complete-receiver sensitivity checks
+and keep those communication trials separate from CPU-capacity measurements.
 Historical coarse-only sensitivity and isolated tracking results do not qualify
 this complete-receiver contract. A prior comparison of numerical-library thread
 counts is not evidence about parallel hypothesis/candidate processing. Preserve

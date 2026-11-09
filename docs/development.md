@@ -67,9 +67,9 @@ selective-amplitude effects, continuous state and complete delayed tails. None/O
 is an explicit baseline. Keep simulated metadata and software-test evidence
 distinct from physical-device measurements.
 
-There is no current Robust GPU precision control. The
-[historical GPU precision research](gpu-precision-controls.md) records lessons
-from removed receiver experiments. Any future arithmetic feature needs an
-explicit current contract, strict references, and fallback reporting; validate
-intensive Robust work only under the abbreviated policy in
-[building.md](building.md#testing-stages).
+The headless Robust receiver keeps explicit CPU arithmetic. The RunPod
+workload probe records its automatic CUDA precision class for forecast work.
+Numerical changes need paired decision and work checks with explicit
+arithmetic and fallback reporting. Follow the
+[GPU precision guidance](gpu-precision-controls.md) and
+[abbreviated testing policy](building.md#testing-stages).

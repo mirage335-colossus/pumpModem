@@ -125,7 +125,7 @@ def select_cases(parsed, indices=None):
 
 def run_cases(*, executable, output, case_list=DEFAULT_CASES, measurement_seconds=1., threads=None,
               case_indices=None, paired_followup=False, message_gate=True, sustained_allocation_probe=False,
-              workspace_mib=None, full_logical_inference=False):
+              workspace_mib=None, full_logical_inference=None):
     """Compatibility wrapper for the dedicated absolute-capacity runner."""
     from triad_case_capacity import run_complete_cases
     return run_complete_cases(

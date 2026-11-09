@@ -1,7 +1,13 @@
 """Calibration prediction uses useful GPU demand and held-out target CPU time."""
 from pathlib import Path
 import copy
+from contextlib import nullcontext, redirect_stderr
+import hashlib
+import io
+import json
 import sys
+import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -99,6 +105,195 @@ class ForecastTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'coarse demand differs'):
             forecast._acquisition_demand_match(local,dict(acquisition(1,22153),frequency_intervals=[[-8.,7.]]))
 
+    def test_independent_broad_acquisition_requires_fresh_full_count_selection(self):
+        demand = dict(status='partial_acquisition')
+        plan = dict.fromkeys(forecast._TILE,1)
+        plan.update(units=20,frequency_unit_points=4,frequency_points=80,raw_candidate_row_capacity=160)
+        tiles = [dict(completed_units=n,completed_frequency_points=4*n,raw_candidate_rows=rows,
+                      timing={'total':{'wall_seconds':float(n)}})
+                 for n,rows in ((1,8),(1,16),(2,32))]
+        trace = dict(status='partial_acquisition',acquisition_work_class=demand,coordinates=[],
+                     full_plan=plan,bounded_tiles=tiles,elapsed_seconds=2.)
+        self.assertIsNone(forecast._heldout_acquisition(trace,trace,10.))
+        selection = dict(exact_candidate_rows=160,score_order_strata=['monotone','alternating','shuffled'],
+                         samples=[.1,.2,.3])
+        measured = dict(trace,full_selection_holdout=selection)
+        self.assertAlmostEqual(forecast._heldout_acquisition(measured,trace,10.),2.5)
+        selection['exact_candidate_rows'] = 159
+        with self.assertRaisesRegex(ValueError,'full-count candidate-selection'):
+            forecast._heldout_acquisition(measured,trace,10.)
+
+    def test_independent_acquired_time_repeats_only_short_work(self):
+        trace = dict(status='acquired',coordinates=[1],acquisition_work_class={'branch':'acquired'},
+                     elapsed_seconds=.375,elapsed_observations_seconds=[.25,.375,.5])
+        self.assertEqual(forecast._heldout_acquisition(trace,trace,10.),.0375)
+        long = dict(trace,elapsed_seconds=.75,elapsed_observations_seconds=[.75])
+        self.assertEqual(forecast._heldout_acquisition(long,long,10.),.075)
+        trace['elapsed_observations_seconds'].pop()
+        with self.assertRaisesRegex(ValueError,'declared matched timing starts'):
+            forecast._heldout_acquisition(trace,trace,10.)
+
+    def test_whole_service_budget_does_not_allow_cancellation(self):
+        residuals = {name:dict(observed_s_per_s=.4,forecast_s_per_s=prediction)
+                     for name,prediction in (('bank',.55),('fine',.25))}
+        result = forecast._holdout_service(residuals,{},.2,(('bank',),('fine',)),
+                                           {forecast.RATIO:1.},(.2,.16))
+        self.assertEqual(result['relative_error'],0.)
+        self.assertAlmostEqual(result['no_cancellation_relative_error'],.30)
+        self.assertEqual(result['status'],'cost_drift')
+
+    def test_ceiling_error_uses_maximum_within_alternatives_and_requires_each(self):
+        residuals = {name:dict(observed_s_per_s=actual,forecast_s_per_s=prediction)
+                     for name,actual,prediction in (('DATA',.015,.015),('H0',.001,.01),
+                                                    ('active',.21,.22),('cap',.70,.68))}
+        groups = (('DATA','H0'),('active','cap'))
+        expected = {forecast.RATIO:.715}
+        result = forecast._holdout_service(residuals,{},.02,groups,expected,(.20,.15))
+        self.assertTrue(result['accepted'])
+        self.assertAlmostEqual(result['no_cancellation_relative_error'],.029/.735)
+        result = forecast._holdout_service(residuals,{'H0':'different work'},.02,groups,expected,(.20,.15))
+        self.assertEqual(result['status'],'partial_coverage')
+        self.assertEqual(result['missing'],['H0'])
+
+    def test_guard_preserves_point_and_withholds_pass_when_upper_reaches_realtime(self):
+        service = dict(component(.7,.5,.9),realtime_status='pass')
+        forecast._guarded_interval(service,.15)
+        self.assertEqual(service[forecast.RATIO],.7)
+        self.assertEqual(service['local_calibration_interval'],[.5,.9])
+        self.assertAlmostEqual(service[forecast.INTERVAL][1],.9/.85)
+        self.assertEqual(service['realtime_status'],'unresolved')
+
+    def test_phase_refresh_seals_before_external_holdout_and_keeps_other_evidence(self):
+        cap = 4608*2**20
+        case = dict(index=2,configuration_hash='configuration',native_args=[])
+        geometry = dict.fromkeys(forecast._GEOMETRY,1)
+        data, valid = b'data',b'mask'
+        sha = lambda value:hashlib.sha256(value).hexdigest()
+        source = dict(native_binary='exporter')
+        budget, runtime = {'available_cpus':12}, {'threads':1}
+        local = dict(case=case,measurement={'fine_active':'original training'})
+        other = dict(case={'index':1},measurement={'unselected':'unchanged'})
+        remote = dict(case=case,public_geometry=geometry,input_sha256=sha(data),validity_sha256=sha(valid),
+                      devices={'cuda':{'data_acquisition':{'coordinates':[[0]]}}})
+        prior_trace = dict(input_sha256=sha(data),validity_sha256=sha(valid),devices={'cpu':{
+            'strata':{'nominal_continuation':'original holdout','noise_only':'unchanged holdout'}}})
+        baseline = dict(cases=[dict(case_index=2,missing_or_mismatched={},independent_cpu_trace=dict(
+            input_relation={'status':'identical_input'},nominal_service={'observed_s_per_s':.3}))])
+        arguments = dict(cpu=dict(cases=[other,local],workspace_limit_bytes=cap,policy={'family_size':72}),
+            gpu=dict(cases=[remote],sources={'driver':'exact'}),holdout=dict(cases=[prior_trace]),
+            parsed=dict(cases=[case],source_sha256='list'),source=source,runtime=runtime,cpu_budget=budget)
+        receiver=object()
+        prepared = SimpleNamespace(raw=data,valid=valid,public_geometry=geometry,
+            receiver=lambda _:nullcontext(receiver),
+            acquisition=lambda _:dict(result=dict(status='acquired',coordinates=((0,),))))
+        training = dict(successful_outer_observations=3)
+        predictions = dict(missing_or_mismatched={},
+            nominal_service=dict(component(.2,.15,.25),realtime_status='pass'),
+            complete_capacity=dict(component(.9,.7,1.2),realtime_status='unresolved'))
+        new_trace = {'fresh':('external timing',),'coordinates':()}
+        with tempfile.TemporaryDirectory() as directory:
+            output=Path(directory)/'new.json'
+            def fresh(*_):
+                sealed=json.loads(output.read_text())
+                self.assertEqual(sealed['status'],'prediction_sealed')
+                self.assertEqual(sealed['phase_refresh']['pre_external_holdout']['prediction']['nominal_service'][forecast.RATIO],.2)
+                return new_trace
+            def verify(**inputs):
+                self.assertIs(inputs['cpu']['cases'][0],other)
+                self.assertIs(inputs['cpu']['cases'][1]['measurement']['fine_active'],training)
+                strata=inputs['holdout']['cases'][0]['devices']['cpu']['strata']
+                self.assertEqual(strata['nominal_continuation'],{'fresh':['external timing'],'coordinates':[]})
+                self.assertEqual(strata['noise_only'],'unchanged holdout')
+                return dict(cases=[dict(predictions,components={'nominal_fine':component(.2,.15,.25)},
+                    independent_cpu_trace={'nominal_service':{'accepted':True}})])
+            operating={'platform_profile':'balanced','energy_preference':'performance','governor':'powersave','ac_online':'1'}
+            with mock.patch('triad_case_capacity.PreparedCapacityCase',return_value=nullcontext(prepared)), \
+                 mock.patch('triad_case_capacity.measure_sustained_fine',return_value=training) as fit, \
+                 mock.patch('triad_case_metrics.machine_resources',return_value={'cpu':budget,'memory_budget_bytes':cap}), \
+                 mock.patch('triad_case_suite.native_plan',return_value={}), \
+                 mock.patch('triad_abbreviated.environment',return_value=runtime), \
+                 mock.patch('triad_gpu_workload._continuation_sample',side_effect=fresh), \
+                 mock.patch.object(forecast,'identity',return_value=source), \
+                 mock.patch.object(forecast,'same_measured_source',return_value=True), \
+                 mock.patch.object(forecast,'load_cases',return_value={'source_sha256':'list'}), \
+                 mock.patch.object(forecast,'_runtime_leaf_hashes',return_value=arguments['gpu']['sources']), \
+                 mock.patch.object(forecast,'_cpu_operating_conditions',return_value=operating), \
+                 mock.patch.object(forecast,'_forecast_row',return_value=predictions), \
+                 mock.patch.object(forecast,'estimate',side_effect=verify) as reverify:
+                result=forecast._refresh_cpu_phase('nominal-fine',baseline,arguments,output,'cases.md',{})
+                fit.assert_called_once_with(prepared,receiver,((0,),),family_size=72,maximum_look=9)
+                output=Path(directory)/'changed-source.json'
+                with mock.patch.object(forecast,'same_measured_source',return_value=False), \
+                     self.assertRaisesRegex(ValueError,'changed during the phase refresh'):
+                    forecast._refresh_cpu_phase('nominal-fine',baseline,arguments,output,'cases.md',{})
+                reverify.assert_called_once()
+                self.assertEqual(json.loads(output.read_text())['status'],'prediction_sealed')
+        self.assertEqual(result['phase_refresh']['status'],'phase_timing_supported')
+        self.assertEqual(local['measurement']['fine_active'],'original training')
+        self.assertEqual(prior_trace['devices']['cpu']['strata']['nominal_continuation'],'original holdout')
+
+    def test_phase_refresh_cli_rejects_overwriting_existing_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'original.json'; path.write_text('{}')
+            args=['--refresh-cpu-phase','nominal-fine','--case-index','2','--holdout-case-index','2',
+                  '--cpu-report',str(path),'--gpu-report',str(path),'--local-holdout-report',str(path),'--output',str(path)]
+            with mock.patch.object(forecast,'load_cases',return_value={'cases':[{'index':2}]}), \
+                 mock.patch.object(forecast,'identity'),mock.patch.object(forecast,'estimate') as estimate, \
+                 mock.patch('triad_cpu.detect_cpu_budget',return_value={'available_cpus':12}), \
+                 mock.patch('triad_cpu.configure_numerical_threads'), \
+                 redirect_stderr(io.StringIO()),self.assertRaises(SystemExit) as exited:
+                forecast.main(args)
+            estimate.assert_not_called()
+            self.assertEqual(exited.exception.code,2)
+            self.assertEqual(path.read_text(),'{}')
+
+    def test_cached_gpu_reference_binds_precision_and_actual_coarse_runtime(self):
+        runtime = dict.fromkeys(forecast._CUDA_REPORT_MATCH,'matched')
+        pools = [{'prefix':'libgomp','threads':1},{'prefix':'openblas','threads':1}]
+        runtime['runtime'] = {'cuda_jit':dict(triton_version='3.4.0',driver_version='580.95.05',
+                                              compute_capability=[12,0]),'numerical_thread_pools':pools}
+        runtime['runtime_limits'] = {'pools':pools}
+        coarse = dict.fromkeys(forecast._COARSE_RUNTIME,'matched')
+        reference = dict(runtime,policy={'precision':'mixed'},cases=[{'case':{'index':1},'gpu_coarse':coarse}])
+        target = dict(copy.deepcopy(runtime),policy={'precision':'mixed'},
+                      cases=[{'case':{'index':7},'gpu_coarse':dict(coarse)}])
+        target['runtime']['numerical_thread_pools'].reverse()
+        target['runtime_limits']['pools'] = pools[::-1]
+        forecast._same_cuda_reference_environment(target,reference,[1])
+        duplicate = copy.deepcopy(target)
+        duplicate['runtime_limits']['pools'].append(pools[0])
+        with self.assertRaisesRegex(ValueError,'cached CUDA reference runtime'):
+            forecast._same_cuda_reference_environment(duplicate,reference,[1])
+        for field, value in [('driver_version','580.95.06'),('triton_version','3.4.1'),('compute_capability',[9,0])]:
+            changed = copy.deepcopy(target)
+            changed['runtime']['cuda_jit'][field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError,'cached CUDA reference runtime'):
+                forecast._same_cuda_reference_environment(changed,reference,[1])
+        unknown = copy.deepcopy(reference)
+        unknown['runtime']['cuda_jit']['driver_version'] = None
+        with self.assertRaisesRegex(ValueError,'observed Triton version, NVIDIA driver and GPU capability'):
+            forecast._same_cuda_reference_environment(unknown,unknown,[1])
+        target['cases'][0]['gpu_coarse']['cupy'] = 'different'
+        with self.assertRaisesRegex(ValueError,'device or coarse library differs'):
+            forecast._same_cuda_reference_environment(target,reference,[1])
+        target['policy']['precision'] = 'different'
+        with self.assertRaisesRegex(ValueError,'runtime, precision'):
+            forecast._same_cuda_reference_environment(target,reference,[1])
+
+    def test_standalone_noise_stage_receipt_binds_current_list_runtime_and_cap(self):
+        source = dict(sources={'receiver':'revision'},native_binary_sha256='exporter',native_artifacts={'kernel':'binary'})
+        runtime, cpus = {'threads':1},{'available_cpus':12}
+        parsed = {'source_sha256':'edited'}
+        report = dict(schema='triad-manual-stage-calibration-v1',calibration_stage='noise-only-fine',
+                      status='stage_calibration_measured',provenance=dict(source,unchanged_at_completion=True),
+                      input=dict(parsed,unchanged_at_completion=True),runtime=dict(runtime,unchanged_at_completion=True),
+                      machine={'cpu':cpus},worker_allocations=[12],workspace_limit_bytes=4608*2**20)
+        forecast._validate_target_noise_report(report,parsed,source,runtime,cpus,4608*2**20)
+        for edit in (dict(workspace_limit_bytes=4096*2**20),dict(worker_allocations=[6]),
+                     dict(input={'source_sha256':'stale','unchanged_at_completion':True})):
+            with self.subTest(edit=edit), self.assertRaisesRegex(ValueError,'calibration identity or allocation differs'):
+                forecast._validate_target_noise_report(dict(report,**edit),parsed,source,runtime,cpus,4608*2**20)
+
     def test_declared_reference_without_executed_row_is_not_coverage(self):
         policy = dict(paired_reference_case_indices=[3,4,6],score_atol=2e-3,score_rtol=2e-4,
                       adaptive_cost_driver_relative_limit=.05)
@@ -169,8 +364,8 @@ class ForecastTests(unittest.TestCase):
             components={})
         with mock.patch.object(forecast,'_trace_source_matches',return_value=True), \
              mock.patch.object(forecast,'_runtime_leaf_hashes',return_value=gpu['sources']), \
-             mock.patch.object(forecast,'_reference_coverage',return_value=[3,4,6]), \
-             mock.patch.object(forecast,'_gpu_work_executed'), \
+             mock.patch.object(forecast,'_reference_coverage',return_value=[5]), \
+             mock.patch.object(forecast,'_gpu_work_executed',return_value=('fp32_bulk','fp32_bulk')), \
              mock.patch.object(forecast,'_forecast_row',side_effect=lambda *_,**kw: copy.deepcopy(predicted)) as fit, \
              mock.patch.object(forecast,'_verification',return_value={
                  'status':'accepted','actual_nominal_s_per_s':.24}) as verify:

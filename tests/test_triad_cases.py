@@ -32,7 +32,7 @@ class TriadCasesTests(unittest.TestCase):
             executable=Path("exporter"), output=Path("capacity.json"),
             case_list=Path("current-manual.md"), measurement_seconds=1.5,
             threads=6, case_indices=[3, 5], message_gate=False, sustained_allocation_probe=False,
-            workspace_mib=4096, full_logical_inference=False,
+            workspace_mib=4096, full_logical_inference=None,
         )
 
     @mock.patch("triad_case_suite.run_cases")
@@ -44,6 +44,11 @@ class TriadCasesTests(unittest.TestCase):
         self.assertTrue(args["message_gate"])
         self.assertTrue(args["sustained_allocation_probe"])
         self.assertIsNone(args["case_indices"])
+
+    @mock.patch("triad_case_suite.run_cases")
+    def test_pilot_winner_remains_an_explicit_opt_out(self, run_cases):
+        triad_manual_cases.main(['--output','capacity.json','--no-full-logical-inference'])
+        self.assertIs(run_cases.call_args.kwargs['full_logical_inference'],False)
 
     def test_manual_cli_help_labels_capacity_and_separates_kernel_regression(self):
         output = io.StringIO()
@@ -57,6 +62,21 @@ class TriadCasesTests(unittest.TestCase):
         self.assertIn("--threads", help_text)
         self.assertIn("--sustained-allocation-probe", help_text)
         self.assertNotIn("--baseline", help_text)
+
+    @mock.patch("triad_case_capacity.run_complete_cases",return_value={'status':'stage_calibration_measured'})
+    def test_manual_cli_can_request_only_a_selected_noise_calibration(self, run):
+        result = triad_manual_cases.main(['--output','noise.json','--calibration-stage','noise-only-fine',
+                                          '--case-index','7','--workspace-mib','4608'])
+        self.assertEqual(result,0)
+        self.assertEqual(run.call_args.kwargs['calibration_stage'],'noise-only-fine')
+        self.assertEqual(run.call_args.kwargs['case_indices'],[7])
+        self.assertEqual(run.call_args.kwargs['workspace_mib'],4608)
+
+    def test_noise_calibration_cannot_opt_out_of_its_full_logical_budget(self):
+        with redirect_stdout(io.StringIO()),self.assertRaises(SystemExit) as raised:
+            triad_manual_cases.main(['--output','noise.json','--calibration-stage','noise-only-fine',
+                '--case-index','7','--workspace-mib','4608','--no-full-logical-inference'])
+        self.assertEqual(raised.exception.code,2)
 
     @mock.patch("triad_manual_cases.main", return_value=2)
     def test_legacy_cases_option_forwards_once_to_dedicated_entrypoint(self, manual_main):

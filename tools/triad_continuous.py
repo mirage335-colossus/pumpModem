@@ -373,8 +373,13 @@ def tracking_source_basis(source, coordinates, taps, offset, timing_forward, aud
             hi = min(count, lo+16384)
             shift = math.floor(float(positions[lo]))
             for col in range(0, len(rows), 128):
-                data[col:col+128, lo:hi] = template_source.basis_mapped(int(physical_origin)+shift,
-                    positions[lo:hi]-shift, rows[col:col+128], audio_center_hz)
+                dest = data[col:col+128, lo:hi]
+                arguments = (int(physical_origin)+shift, positions[lo:hi]-shift,
+                    rows[col:col+128], audio_center_hz)
+                if template_backend == 'auto' and accelerator is None and dest.flags.c_contiguous:
+                    template_source.basis_mapped(*arguments, out=dest)
+                else:
+                    dest[:] = template_source.basis_mapped(*arguments)
         return result
     def render(states, anchor_seconds, first, stop, physical_origin, physical_offsets):
         return _render(states, anchor_seconds, first, stop, physical_origin, physical_offsets,

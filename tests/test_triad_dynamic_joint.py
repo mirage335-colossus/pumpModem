@@ -116,6 +116,24 @@ class JointTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "block too short|bin width"):
             BlockProjection.make(8, 64., ((0., 1.),), ((2., 3.),))
 
+    def test_single_dc_mode_matches_full_block_unitary_fft(self):
+        count, fs = 1500, 6000.
+        rng = np.random.default_rng(81123)
+        values = rng.normal(size=(2, count)) + 1j * rng.normal(size=(2, count))
+        values[0] += 2 + 3j
+        dc = BlockProjection.make(count, fs, ((-.25, .25),))
+        self.assertEqual(dc.indices.tolist(), [0])
+        expected = np.fft.fft(values, axis=-1, norm="ortho")[..., :1]
+        np.testing.assert_allclose(dc.numpy(values), expected, rtol=1e-13, atol=1e-13)
+        constant = np.full(count, 2 + 3j)
+        np.testing.assert_allclose(dc.numpy(constant), [(2 + 3j) * math.sqrt(count)],
+                                   rtol=1e-13, atol=1e-13)
+
+        shifted = BlockProjection.make(count, fs, ((3.75, 4.25),))
+        self.assertEqual(shifted.indices.tolist(), [1])
+        np.testing.assert_array_equal(shifted.numpy(values),
+                                      np.fft.fft(values, axis=-1, norm="ortho")[..., 1:2])
+
     def test_shared_cubic_rows_preserve_exact_endpoint_stencils(self):
         rng = np.random.default_rng(813)
         source = rng.normal(size=(2, 9))+1j*rng.normal(size=(2, 9))

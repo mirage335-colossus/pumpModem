@@ -19,6 +19,28 @@ def component(point, low=None, high=None):
 
 
 class CapacityTests(unittest.TestCase):
+    def test_noise_stage_calibration_never_drains_partial_coarse_search(self):
+        receiver, session = object(), Mock()
+        coordinates = ((1,0.,0.,0.),)
+        prepared = SimpleNamespace(observation_work_stratum='proper_complex_noise_only',
+            receiver=Mock(return_value=nullcontext(receiver)), memory_limit_bytes=512,
+            stream_workspace={'simultaneous_outer_reserve_bytes':100},
+            acquisition=Mock(return_value={'result':dict(status='partial_acquisition',coarse_session=session)}))
+        summary = dict(all_observations_complete=True,nonzero_templates_in_every_probe=True,
+                       work_samples=[{'workspace_bytes':370}])
+        with patch.object(capacity,'public_work_coordinates',return_value=coordinates), \
+             patch.object(capacity,'measure_fine_stratum',return_value=summary) as measure:
+            result = capacity.measure_noise_only_fine_calibration(prepared,12,family_size=8)
+        prepared.receiver.assert_called_once_with(12)
+        prepared.acquisition.assert_called_once_with(receiver)
+        session.close.assert_called_once_with()
+        session.step.assert_not_called()
+        measure.assert_called_once_with(prepared,receiver,coordinates,stratum='active',family_size=8)
+        self.assertEqual(result['status'],'stage_calibration_measured')
+        self.assertEqual(result['workspace_margin']['estimated_peak_bytes'],470)
+        self.assertIs(result['noise_only_fine'],summary)
+        self.assertNotIn('complete_capacity',result)
+
     def test_acquisition_work_drift_withholds_timing_model(self):
         prepared = SimpleNamespace(acquisition=Mock(side_effect=[
             dict(result={'status': 'acquired', 'coordinates': ((0, 0., 0., 0.),)},

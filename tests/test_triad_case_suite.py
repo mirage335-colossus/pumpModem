@@ -66,7 +66,7 @@ class SuiteHelperTests(unittest.TestCase):
             executable="exporter", output="capacity.json", case_list=DEFAULT_CASES,
             measurement_seconds=1., threads=None, case_indices=None,
             paired_followup=False, message_gate=True, sustained_allocation_probe=False,
-            workspace_mib=None, full_logical_inference=False,
+            workspace_mib=None, full_logical_inference=None,
         )
 
     def test_wrapper_forwards_partial_measurement_and_message_gate(self):
@@ -78,7 +78,7 @@ class SuiteHelperTests(unittest.TestCase):
             executable=Path("exporter"), output=Path("out.json"), case_list=Path("edited.md"),
             measurement_seconds=.5, threads=6, case_indices=[2, 4],
             paired_followup=False, message_gate=False, sustained_allocation_probe=False,
-            workspace_mib=None, full_logical_inference=False,
+            workspace_mib=None, full_logical_inference=None,
         )
 
     def test_full_logical_suite_keeps_ordered_duplicate_rows_and_runs_one_canonical_measurement(self):
@@ -126,8 +126,7 @@ class SuiteHelperTests(unittest.TestCase):
             direct = stack.enter_context(mock.patch.object(capacity, 'measure_complete_case',
                                                             side_effect=measure))
             result = capacity.run_complete_cases(executable='exporter', output=root/'suite.json',
-                case_list=source, workspace_mib=4096, sustained_allocation_probe=True,
-                full_logical_inference=True)
+                case_list=source, workspace_mib=4096, sustained_allocation_probe=True)
 
             prepare.assert_called_once()
             self.assertEqual(prepare.call_args.kwargs['bank_workers'], 12)

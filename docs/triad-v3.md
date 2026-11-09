@@ -1,9 +1,12 @@
-# Canonical three-carrier source and receiver research
+# Three-carrier source and historical receiver findings
 
 The retained source is `IndependentApskV2`; its derivation is described in
 [independent patterns](triad-patterns.md). Earlier v3 measurements may use the
 retired cyclic-amplitude/QPSK pattern revision. Their waveforms and calibration
 identities are different. No legacy revision selector remains in current code.
+Use [current Robust architecture](robust-current.md) for implementation and
+validation status; the historical receiver studies below are not another
+supported backend.
 
 ## Format and streaming state
 
@@ -30,11 +33,12 @@ and sample-clock effects in the [channel contract](channel-models.md).
 
 ## Current receiver and search
 
-The Python API in `tools/triad_backend.py` exposes `WeakReceiver` acquisition
-and `PracticalTrackingReceiver` scheduled tracking. They are successive stages,
-not an integrated message backend. The GUI keeps controls and reports Robust
-unavailable pending connection. Native shaped-basis construction is shared by
-the current stages; the earlier native QR receiver is retired.
+The headless `CompleteStreamReceiver` joins public Helper/`FFTScreen`
+acquisition, persistent fine tracking, bit/null decisions and scored quiet-slot
+completion to the canonical short dictionary decoder. Native shaped-basis
+construction is shared by its stages. The backend is not connected to the GUI;
+Robust controls remain visible but operation is unavailable pending reconnection.
+The earlier native QR receiver and isolated v3 alternatives are retired.
 
 Research supports sharing complex FFT proposals across keyed time addresses,
 bit alternatives and clock hypotheses, then refining a bounded correlated
@@ -52,9 +56,16 @@ phase particles and bounded common/relative ray-frequency mixtures explored
 less Gaussian alternatives. Their computational cost, prior support and model
 mismatch are separate from the waveform.
 
-The [state study](validation-data/triad-v3/2026-11-01-state/README.md) exposed
-false admission when assumed noise power was too small. [Noise research](triad-noise-calibration.md)
-retains the common-scale and independent-residual arguments and their limits.
+The retired state study exposed false admission when assumed noise power was
+too small. [Noise research](triad-noise-calibration.md) retains that measured
+failure, the common-scale and independent-residual arguments and their limits.
+The October 31 aligned HF experiment accepted 320/320 one-bit messages at
+8 dB-Hz using a 23.2-second pattern; its one-sided 95% lower bound was 0.990682
+for that selected model. Much larger projected-Gaussian checks covered a fixed
+bank with known noise, not a sampled complete receiver. Later state-model
+results likewise did not qualify unknown noise, repeated blind search or the
+current architecture. Their redundant raw campaigns are removed; retain these
+scope limits and the [GPU findings](triad-gpu-optimization.md).
 The [broad study](validation-data/triad-v3/2026-11-03-broad/README.md),
 [extension](validation-data/triad-v3/2026-11-03-extension/README.md), and
 [FFT timing evidence](validation-data/triad-v3/2026-11-03-fft-timing/README.md)
