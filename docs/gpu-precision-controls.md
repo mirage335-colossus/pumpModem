@@ -29,11 +29,19 @@ explicit arithmetic; its fine Gaussian policy defaults to FP64 after a
 reproduced high-SNR FP32 innovation failure. That is a stage-specific finding,
 not a requirement for high dynamic range throughout the receiver.
 
-The current forecast backend does **not** implement a qualified FP16/BF16/TF32
-tensor-core path. These are development candidates, not available precision
-switches or claimed measurements. A low-precision dtype or matrix operation
-alone does not prove tensor-core execution. The existing Gaussian FP32 guard
-requires TF32 disabled; a new tensor path must have its own applicable checks.
+The maintained backend has **no enabled tensor-core DFT path**. TF32x3,
+rounded TF32 and power-of-two-scaled FP16 lag-search variants were implemented
+and passed the bounded row-3 receiver checks on RTX PRO 6000. None demonstrated
+a useful integrated speedup, so all three were removed. Scaled FP16 improved
+packing-inclusive isolated transforms by 1.33–1.88×, but the receiver's changed
+acquisition stages took longer and its common measured stages were effectively
+unchanged. See the [tensor experiment conclusion](validation.md#tensor-core-lag-search-conclusion).
+Do not repeat that direct-DFT replacement without a changed workload or a
+concrete way to remove its measured surrounding costs. Different batched or
+device-resident formulations remain development candidates, not available
+switches or measured speedups. A low-precision dtype or matrix operation alone does not prove tensor
+execution. The existing Gaussian FP32 guard requires TF32 disabled; a new
+tensor path must have its own applicable checks.
 
 ## Qualifying a faster path
 

@@ -87,7 +87,8 @@ class IncrementalGaussianReceiver:
                  projection_mode="dft", maximum_input_chunk_samples=1_048_576,
                  block_center_seconds=None, initial_channel_state=None,
                  first_block_elapsed_seconds=0., hypothesis_executor=None,
-                 hypothesis_shards=1, quiet_sample_bounds=None, bulk_statistics=None):
+                 hypothesis_shards=1, basis_projection_workers=1,
+                 quiet_sample_bounds=None, bulk_statistics=None):
         started = time.perf_counter()
         self.sample_rate = float(sample_rate)
         if not math.isfinite(self.sample_rate) or self.sample_rate <= 0:
@@ -149,6 +150,11 @@ class IncrementalGaussianReceiver:
         if hypothesis_shards > 1 and hypothesis_executor is None:
             raise ValueError('candidate shards require the shared hypothesis executor')
         self.hypothesis_shards = min(hypothesis_shards, candidate_count)
+        if (type(basis_projection_workers) is not int or basis_projection_workers < 1 or
+                (basis_projection_workers > 1 and (hypothesis_executor is None or
+                 self.device.type != 'cpu' or self.dtype != torch.complex128))):
+            raise ValueError('parallel basis projection requires the shared CPU FP64 executor')
+        self.basis_projection_workers = basis_projection_workers
         if self.memory_limit_bytes <= 0:
             raise MemoryError("positive workspace memory budget required")
         self.maximum_input_chunk_samples = maximum_input_chunk_samples
@@ -189,6 +195,8 @@ class IncrementalGaussianReceiver:
         if hypothesis_executor is not None:
             estimate += len(coherences)*3*candidate_count*(
                 self.taps*self.taps*item*12+self.taps*item*12+64)
+        if basis_projection_workers > 1:
+            estimate += min(basis_projection_workers, hck//8, hck*block//32768)*4096
         if estimate > self.memory_limit_bytes:
             raise MemoryError("incremental Gaussian block workspace exceeds memory limit before basis generation")
         self.owned_bytes_estimate = estimate
@@ -240,6 +248,41 @@ class IncrementalGaussianReceiver:
     def _block_bounds(self, index):
         return fixed_block_bounds(self.samples, self.block_samples, index)
 
+    def _project_basis(self, raw, projection):
+        def project(values):
+            if not np.isfinite(values).all():
+                raise ValueError("basis callback must return finite [3,candidates,taps,block_rows]")
+            return projection.numpy(values)
+
+        columns = raw.size//projection.samples
+        workers = min(self.basis_projection_workers, columns//8, raw.size//32768)
+        if (workers < 2 or projection.kind != 'dft' or len(projection.indices) <= 1 or
+                not raw.flags.c_contiguous):
+            return project(raw)
+
+        # Split independent DFTs, never one DFT's samples or the tracking
+        # recursion. Map and state-update work has joined before this stage.
+        flat = raw.reshape(columns, projection.samples)
+        futures, parts, error = [], [], None
+        for i in range(workers):
+            first, stop = i*columns//workers, (i+1)*columns//workers
+            try:
+                futures.append(self.hypothesis_executor.submit(project, flat[first:stop]))
+            except BaseException as exc:
+                error = exc
+                break
+        for future in futures:
+            try:
+                parts.append(future.result().T)
+            except BaseException as exc:
+                if error is None:
+                    error = exc
+        if error is not None:
+            raise error
+        # Join in input order. All full-FFT temporaries have been released,
+        # so copying the selected bins stays within the block allowance.
+        return np.concatenate(parts, axis=1).T.reshape((*raw.shape[:-1], len(projection.indices)))
+
     def _score_block(self, start, stop, values, valid):
         rows = stop - start
         if values.shape != (rows,) or valid.shape != (rows,):
@@ -281,10 +324,9 @@ class IncrementalGaussianReceiver:
             r, gram = self.bulk_statistics(raw_basis, projection, projected_y, self.variance)
         else:
             raw_basis = np.asarray(self.basis_callback(start, stop), dtype=np.complex128)
-            if (raw_basis.shape != (3, self.candidates, self.taps, rows) or
-                    not np.isfinite(raw_basis).all()):
+            if raw_basis.shape != (3, self.candidates, self.taps, rows):
                 raise ValueError("basis callback must return finite [3,candidates,taps,block_rows]")
-            projected_basis = projection.numpy(raw_basis)
+            projected_basis = self._project_basis(raw_basis, projection)
             if not np.isfinite(projected_basis).all() or not np.isfinite(projected_y).all():
                 raise ValueError("projected observations or basis are nonfinite")
             gram_np = np.einsum("hctn,hcsn->hcts", projected_basis.conj(), projected_basis,

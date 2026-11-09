@@ -252,6 +252,8 @@ class FineSession:
             # The larger independent mapped-basis work uses the full pool.
             hypothesis_shards=(1 if owner.fine_cuda_index is None else
                                max(1, math.ceil(owner.workers/len(owner.coherences)))),
+            basis_projection_workers=(owner.workers if bulk_statistics is None and
+                owner.fine_cuda_index is None and p['precision'] == 'fp64' else 1),
             quiet_sample_bounds=tuple(max(0, min(self.samples, x-self.origin))
                 for x in owner.quiet_aperture))
         self.initial_lattice = dict(states=len(states),

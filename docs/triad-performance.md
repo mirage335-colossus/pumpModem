@@ -76,6 +76,11 @@ optimizing only small GPU kernels misses that measured bottleneck. See the
 Package the allowlisted source with the matching native exporter and mapped
 kernel. Transfer both artifacts separately with authenticated SSH/SCP and place
 the kernel beside the exporter. The provider console handles pod lifecycle.
+RunPod temporary disks are disposable. Stopping task instances is authorized;
+do not keep them running merely to preserve temporary setup, builds or captures.
+Download and verify the small receipts needed for the current validation claim,
+then stop and remove the instance. Repository changes and retained local
+evidence have their separate preservation requirements.
 
 ```sh
 python3 tools/triad_gpu_bundle.py --output /tmp/robust-gpu-source.tar.gz

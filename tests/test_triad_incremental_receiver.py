@@ -87,6 +87,39 @@ class IncrementalReceiverTests(unittest.TestCase):
                 np.testing.assert_allclose(left.numpy(), right.numpy(), rtol=0, atol=1e-13)
         self.assertGreater(parallel.owned_bytes_estimate, serial.owned_bytes_estimate)
 
+    def test_parallel_basis_projection_preserves_candidate_order_and_finite_guard(self):
+        allocation = {'threads': 1, 'linear_algebra_threads': 1}
+        configure_numerical_threads(allocation)
+        rng = np.random.default_rng(818)
+        samples, candidates = 256, 96
+        shape = (3, candidates, 1, samples)
+        basis = .08*(rng.normal(size=shape)+1j*rng.normal(size=shape))
+        raw = rng.normal(size=samples)+1j*rng.normal(size=samples)
+        options = dict(sample_rate=6000, samples=samples, block_samples=samples,
+            basis=lambda lo, hi: basis[..., lo:hi], required_bands=((-900., 900.),),
+            stationary_power=(1.,), coherence_seconds=(math.inf,), precision='fp64',
+            candidate_count=candidates)
+        serial = IncrementalGaussianReceiver(**options)
+        serial.push(0, raw)
+        with ThreadPoolExecutor(max_workers=2, initializer=initialize_numerical_worker,
+                                initargs=(allocation,)) as executor:
+            with mock.patch.object(executor, 'submit', wraps=executor.submit) as submit:
+                parallel = IncrementalGaussianReceiver(**options, hypothesis_executor=executor,
+                                                       basis_projection_workers=2)
+                parallel.push(0, raw)
+                self.assertEqual(submit.call_count, 3)
+            np.testing.assert_allclose(parallel.unmixed_log_evidence(),
+                                       serial.unmixed_log_evidence(), rtol=0, atol=1e-12)
+            self.assertEqual(parallel.finish()['observed_projection_modes'],
+                             serial.finish()['observed_projection_modes'])
+
+            basis[-1, -1, 0, -1] = np.nan
+            invalid = IncrementalGaussianReceiver(**options, hypothesis_executor=executor,
+                                                  basis_projection_workers=2)
+            with self.assertRaisesRegex(ValueError, 'finite'):
+                invalid.push(0, raw)
+            self.assertEqual(invalid.block_updates, 0)
+
     def test_partial_executor_submission_joins_already_started_model_jobs(self):
         raw, valid, kwargs = self.fixture()
         future = mock.Mock()

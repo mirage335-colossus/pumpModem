@@ -65,6 +65,7 @@ class _TimingStream:
                  maximum_segment_samples=1_048_576,
                  require_physical_map=False, maximum_map_step_samples=2.,
                  hypothesis_executor=None, hypothesis_shards=1,
+                 basis_projection_workers=1,
                  quiet_sample_bounds=None, bulk_statistics=None):
         began = time.perf_counter()
         self.sample_rate = float(sample_rate)
@@ -122,6 +123,7 @@ class _TimingStream:
             maximum_candidates=timing_forward.maximum_proposals,
             maximum_input_chunk_samples=self.segment_capacity,
             hypothesis_executor=hypothesis_executor, hypothesis_shards=hypothesis_shards,
+            basis_projection_workers=basis_projection_workers,
             bulk_statistics=bulk_statistics)
         # The maintained receiver validates arithmetic, bands, prior and its
         # worst candidate workspace without synthesizing any source template.
