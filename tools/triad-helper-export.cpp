@@ -1320,7 +1320,7 @@ int run(const Options& o) {
         // backpressure, and neither observations nor templates are accumulated.
         // Emission and basis generation own separate PatternSource instances.
         constexpr std::size_t stream_budget = 64ULL * 1024 * 1024;
-        constexpr std::size_t maximum_rows = 16384, maximum_columns = 128;
+        constexpr std::size_t maximum_rows = 16384, maximum_columns = 128, public_bank_lanes = 26;
         const auto total = o.stream_kind == "channel" ? channel->total_samples() : composite_samples;
         auto candidate_format = f;
         if (o.whole_bit_calendar) candidate_format.epoch = whole_slots.front().pattern_begin.epoch;
@@ -1334,6 +1334,11 @@ int run(const Options& o) {
         const auto fixed_bytes = emitted.working_bytes + (channel ? channel->report().working_bytes : 0) +
             reference_source.working_bytes() + samples.size() * sizeof(Complex) * 2 + valid.size();
         if (fixed_bytes > stream_budget) throw std::runtime_error("stream source exceeds64MiB workspace budget");
+        const auto map_budget = maximum_rows * sizeof(double) + PatternSource::render_bank_scratch_bytes;
+        const auto lane_budget = g.source_workspace_bytes + 2 * maximum_rows * sizeof(Complex) +
+            sizeof(Candidate) + sizeof(PatternSource*) + sizeof(Tap);
+        const auto maximum_mapped_bank_lanes = std::min(public_bank_lanes,
+            (stream_budget - fixed_bytes - std::min(map_budget, stream_budget - fixed_bytes)) / lane_budget);
         std::cout.exceptions(std::ios::badbit | std::ios::failbit);
         print_plan_json(o, data_if_hz, selected_shaping, helper_options, physical, physics);
         std::cout << "{\"schema\":\"triad-stream-source-v1\",\"sample_rate_hz\":" << sample_rate
@@ -1362,6 +1367,7 @@ int run(const Options& o) {
         if (o.helper) std::cout << plan.low_frequency_hz; else std::cout << "null";
         std::cout
             << ",\"maximum_rows\":" << maximum_rows << ",\"maximum_columns\":" << maximum_columns
+            << ",\"maximum_mapped_bank_lanes\":" << maximum_mapped_bank_lanes
             << ",\"mapped_basis_supported\":true,\"mapped_basis_maximum_offset_samples\":1048576"
             << ",\"basis_address_supported\":true"
             << ",\"slot_plan_supported\":" << boolean(o.whole_bit_calendar)
@@ -1544,11 +1550,15 @@ int run(const Options& o) {
                         throw std::invalid_argument("basis clock must be positive-rate and delay nonnegative");
                     requests.push_back(candidate);
                 }
-                const bool raw_bank = !mapped && std::all_of(requests.begin(), requests.end(), [](const Candidate& c) {
+                // With zero receiver warp, phase and equal exporter/source
+                // rates, mapped coordinates are already source coordinates.
+                const bool shared_bank = (!mapped || maximum_mapped_bank_lanes) &&
+                    center_hz == 0 && effective_sample_rate(candidate_format) == sample_rate &&
+                    std::all_of(requests.begin(), requests.end(), [](const Candidate& c) {
                     return c.arrival_seconds == 0 && c.frequency_hz == 0 && c.clock_ppm == 0 &&
                         c.channel.taps.front().delay_seconds == 0 && c.channel.taps.front().doppler_hz == 0;
                 });
-                const auto bank_scratch = raw_bank ? PatternSource::render_bank_scratch_bytes : 0;
+                const auto bank_scratch = shared_bank ? PatternSource::render_bank_scratch_bytes : 0;
                 const auto output_bytes = columns * rows * sizeof(Complex);
                 const auto map_bytes = mapped ? rows * sizeof(double) : 0;
                 const auto command_bytes = columns * (sizeof(Candidate) + sizeof(PatternSource*) + sizeof(Tap));
@@ -1584,12 +1594,13 @@ int run(const Options& o) {
                 }
                 std::vector<Complex> output(columns * rows);
                 std::vector<PatternSource*> bank_sources;
-                if (raw_bank) bank_sources.reserve(columns);
+                if (shared_bank) bank_sources.reserve(columns);
                 std::size_t bank_group_first = 0;
                 const auto render_bank_group = [&]() {
                     if (bank_sources.empty()) return;
-                    auto destination = std::span(output).subspan(bank_group_first * rows, bank_sources.size() * rows);
-                    PatternSource::render_bank(bank_sources, static_cast<long double>(first), 1, rows, destination);
+                    auto destination = std::span(output).subspan(bank_group_first*rows, bank_sources.size()*rows);
+                    if (mapped) PatternSource::render_bank(bank_sources, first, offsets, destination);
+                    else PatternSource::render_bank(bank_sources, static_cast<long double>(first), 1, rows, destination);
                     bank_sources.clear();
                 };
                 for (std::size_t c = 0; c < columns; ++c) {
@@ -1599,7 +1610,7 @@ int run(const Options& o) {
                     if (found == templates.end()) {
                         const auto required = g.source_workspace_bytes;
                         if (templates.size() >= 26 || fixed_bytes + template_bytes + request_bytes + required > stream_budget) {
-                            if (raw_bank) render_bank_group();
+                            if (shared_bank) render_bank_group();
                             evict_templates();
                         }
                         if (fixed_bytes + request_bytes + required > stream_budget)
@@ -1609,7 +1620,7 @@ int run(const Options& o) {
                         auto source = std::make_unique<PatternSource>(format, key, candidate.source_bit);
                         const auto actual_bytes = source->working_bytes();
                         if (fixed_bytes + template_bytes + request_bytes + actual_bytes > stream_budget) {
-                            if (raw_bank) render_bank_group();
+                            if (shared_bank) render_bank_group();
                             evict_templates();
                             if (fixed_bytes + request_bytes + actual_bytes > stream_budget)
                                 throw std::runtime_error("one actual basis source exceeds64MiB workspace budget");
@@ -1618,7 +1629,7 @@ int run(const Options& o) {
                         found = templates.emplace(address, std::move(source)).first;
                     }
                     const auto destination = std::span(output).subspan(c * rows, rows);
-                    if (raw_bank) {
+                    if (shared_bank) {
                         if (bank_sources.empty()) bank_group_first = c;
                         bank_sources.push_back(found->second.get());
                     }
@@ -1627,12 +1638,12 @@ int run(const Options& o) {
                         else shaped_basis(*found->second, candidate, sample_rate, first, rows, destination);
                     }
                 }
-                if (raw_bank) render_bank_group();
+                if (shared_bank) render_bank_group();
                 for (auto& value : output) value *= data_gain;
                 std::cout << "{\"count\":" << rows << ",\"first_sample\":" << first
                     << ",\"columns\":" << columns << ",\"workspace_bytes\":" << fixed_bytes + template_bytes + request_bytes
                     << ",\"template_cache_evictions\":" << template_cache_evictions
-                    << ",\"shared_geometry_bank\":" << boolean(raw_bank)
+                    << ",\"shared_geometry_bank\":" << boolean(shared_bank)
                     << ",\"mapped\":" << boolean(mapped) << "}\n";
                 write_complex(std::cout, output);
                 std::cout.flush();

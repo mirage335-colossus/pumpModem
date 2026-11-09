@@ -32,16 +32,15 @@ class TriadCasesTests(unittest.TestCase):
             executable=Path("exporter"), output=Path("capacity.json"),
             case_list=Path("current-manual.md"), measurement_seconds=1.5,
             threads=6, case_indices=[3, 5], message_gate=False, sustained_allocation_probe=False,
-            workspace_mib=4096, calibration_receipt_prefix=None, allow_conditional_calibration_identity=False,
+            workspace_mib=4096, full_logical_inference=False,
         )
 
     @mock.patch("triad_case_suite.run_cases")
-    def test_private_fit_opt_in_preserves_full_list_and_message_gate(self, run_cases):
-        triad_manual_cases.main(["--output", "capacity.json", "--calibration-receipt-prefix",
-            "local-evidence/current-fit", "--allow-conditional-calibration-identity", "--sustained-allocation-probe"])
+    def test_full_logical_opt_in_preserves_full_list_and_message_gate(self, run_cases):
+        triad_manual_cases.main(["--output", "capacity.json", "--full-logical-inference",
+                                 "--sustained-allocation-probe"])
         args = run_cases.call_args.kwargs
-        self.assertEqual(args["calibration_receipt_prefix"], Path("local-evidence/current-fit"))
-        self.assertTrue(args["allow_conditional_calibration_identity"])
+        self.assertTrue(args["full_logical_inference"])
         self.assertTrue(args["message_gate"])
         self.assertTrue(args["sustained_allocation_probe"])
         self.assertIsNone(args["case_indices"])

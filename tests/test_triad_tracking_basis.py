@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 """Independent analytic and actual-native checks of reusable mapped DATA."""
+from concurrent.futures import ThreadPoolExecutor
 import math
 from pathlib import Path
 import subprocess
 import sys
-import time
 import unittest
-from unittest import mock
 
 import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
-from triad_tracking_basis import CachedMappedBasis
+from triad_tracking_basis import CachedMappedBasis, mapped_kernel_path
 
 NATIVE = Path(sys.argv[1]).resolve() if len(sys.argv) == 2 else None
 sys.argv = sys.argv[:1]
+
+
+def cached(source, **options):
+    return CachedMappedBasis(source, kernel_path=mapped_kernel_path(NATIVE), **options)
 
 
 class AnalyticSource:
@@ -56,10 +59,11 @@ class AnalyticSource:
         return np.asarray(answer, np.complex128)
 
 
+@unittest.skipUnless(NATIVE, 'supply the built triad_helper_export')
 class CachedBasisTests(unittest.TestCase):
     def test_candidate_warps_and_entire_audio_phase_match_analytic_reference(self):
         source = AnalyticSource()
-        cache = CachedMappedBasis(source)
+        cache = cached(source)
         n = np.arange(1200)
         offsets = .123+n+1e-5*n*n
         rows = [(bit, epoch, .0173, .19, clock, delay, -.11)
@@ -77,25 +81,25 @@ class CachedBasisTests(unittest.TestCase):
 
     def test_dense_grid_and_explicit_reference_fallback(self):
         source = AnalyticSource(fs=24000, width=9000)
-        cache = CachedMappedBasis(source)
+        cache = cached(source)
         self.assertEqual(cache.dense_factor, 3)
         rows = [(0, 0, 0, 0, 137, 0, 0), (1, 1, .0001, .2, -133, .00003, -.1)]
         offsets = np.arange(500)+.371
         actual = cache.basis_mapped(50000, offsets, rows, 8270)
         expected = source.basis_mapped(50000, offsets, rows, 8270)
         self.assertLess(np.linalg.norm(actual-expected)/np.linalg.norm(expected), .0003)
-        narrow = CachedMappedBasis(source, maximum_dense_factor=1)
+        narrow = cached(source, maximum_dense_factor=1)
         np.testing.assert_array_equal(narrow.basis_mapped(50000, offsets, rows, 8270), expected)
         self.assertEqual(narrow.report()['fallback_reason'], 'insufficient-cache-oversampling')
         self.assertEqual(narrow.bytes, 0)
-        legacy = CachedMappedBasis(AnalyticSource(pulse='rrc-025-span8'))
+        legacy = cached(AnalyticSource(pulse='rrc-025-span8'))
         legacy.basis_mapped(0, offsets, rows, 1725)
         self.assertEqual(legacy.interpolated_rows, 0)
         self.assertEqual(legacy.native_calls, 0)
 
     def test_integer_origins_chunking_support_and_memory_bound(self):
         source = AnalyticSource()
-        cache = CachedMappedBasis(source, tile_samples=128, cache_bytes=4096)
+        cache = cached(source, tile_samples=128, cache_bytes=4096)
         first = 2**54+137
         rows = [(1, 0, float((np.longdouble(first)-51000)/6000), .13, -90, .0013, -.07)]
         offsets = np.arange(600)*1.0002+.125
@@ -114,63 +118,34 @@ class CachedBasisTests(unittest.TestCase):
         np.testing.assert_array_equal(empty, 0)
 
     def test_split_sibling_eviction_does_not_double_count_replaced_arrays(self):
-        cache = CachedMappedBasis(AnalyticSource(), tile_samples=4, cache_bytes=192)
+        cache = cached(AnalyticSource(), tile_samples=4, cache_bytes=192)
         for bit, tile in ((0, 0), (0, 1), (0, 0), (1, 0)):
             cache._tile(bit, 0, tile)
             self.assertEqual(cache.bytes, sum(value.nbytes for value in cache.cache.values()))
             self.assertLessEqual(cache.bytes, cache.byte_limit)
 
-    def test_single_tile_gather_preserves_order_duplicates_and_skips_unique_sort(self):
-        source = AnalyticSource(samples=4096)
-        cache = CachedMappedBasis(source, tile_samples=128, cache_bytes=4096)
-        relative = np.array([3, 7, 7, 11, 64, 127], dtype=np.int64)
-        expected = cache._tile(1, 0, 0)[relative]
-        cache.cache.clear()
-        cache.bytes = 0
-        cache.cache_hits = cache.cache_misses = cache.native_calls = cache.evictions = 0
-        with mock.patch('triad_tracking_basis.np.unique',
-                                 side_effect=AssertionError('single-tile sort used')):
-            actual = cache._gather(1, 0, 0, relative)
-        np.testing.assert_array_equal(actual, expected)
-        self.assertEqual(cache.cache_misses, 1)
-        self.assertEqual(cache.evictions, 0)
-
-    def test_tile_crossing_keeps_grouped_gather_and_boundary_order(self):
-        cache = CachedMappedBasis(AnalyticSource(samples=4096), tile_samples=128,
-                                  cache_bytes=4096)
-        relative = np.array([0, .5, 1, 3], dtype=np.float64)
-        first = 126
-        origin, within_origin = divmod(first, cache.tile_samples)
-        integer = np.floor(relative).astype(np.int64)
-        small = integer+within_origin
-        expected = np.zeros(len(relative), dtype=np.complex128)
-        for delta in np.unique(small//cache.tile_samples):
-            selected = (small//cache.tile_samples) == delta
-            expected[selected] = cache._tile(0, 0, origin+int(delta))[
-                small[selected] % cache.tile_samples]
-        cache.cache.clear()
-        cache.bytes = 0
-        cache.cache_hits = cache.cache_misses = cache.native_calls = cache.evictions = 0
-        actual = cache._gather(0, 0, first, integer)
-        np.testing.assert_array_equal(actual, expected)
-        self.assertEqual(cache.cache_misses, 2)
-
-    def test_nonmonotonic_private_gather_retains_general_fallback(self):
-        cache = CachedMappedBasis(AnalyticSource(samples=4096), tile_samples=128,
-                                  cache_bytes=4096)
-        relative = np.array([128, 1, 127, 0], dtype=np.int64)
-        expected = np.array([cache._tile(0, 0, int(index)//128)[int(index)%128]
-                             for index in relative])
-        cache.cache.clear()
-        cache.bytes = 0
-        cache.cache_hits = cache.cache_misses = cache.native_calls = cache.evictions = 0
-        actual = cache._gather(0, 0, 0, relative)
-        np.testing.assert_array_equal(actual, expected)
-        self.assertEqual(cache.cache_misses, 2)
+    def test_workers_match_across_evictions_tile_edges_and_support(self):
+        source = AnalyticSource(samples=4103)
+        rows = [(bit, epoch, arrival, .2, -120, .002, -.17)
+                for epoch in range(-2, 3) for bit in (0, 1) for arrival in (-.6, .002, .016)]
+        offsets = .15+np.arange(1024)*.5
+        serial = cached(source, tile_samples=128, cache_bytes=4096)
+        first = serial.basis_mapped(120, offsets, rows, 1725)
+        expected = source.basis_mapped(120, offsets, rows, 1725)
+        np.testing.assert_allclose(first, expected, atol=5e-5, rtol=5e-5)
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            parallel = cached(source, tile_samples=128, cache_bytes=4096, executor=executor, workers=4)
+            second = parallel.basis_mapped(120, offsets, rows, 1725)
+        np.testing.assert_array_equal(second, first)
+        self.assertGreater(parallel.evictions, 0)
+        self.assertEqual(parallel.maximum_mapped_workers, 4)
+        for key in ('cache_hits', 'cache_misses', 'native_preparation_calls', 'native_preparation_samples',
+                    'evictions', 'direct_rows', 'interpolated_rows'):
+            self.assertEqual(parallel.report()[key], serial.report()[key])
 
     def test_unwarped_integer_samples_are_exact_and_rows_do_not_use_observations(self):
         source = AnalyticSource()
-        cache = CachedMappedBasis(source)
+        cache = cached(source)
         rows = [(0, 0, 0, 0, 0, 0, 0), (1, -2, 0, 0, 0, 0, 0)]
         expected = source.basis(50000, 1024, rows)
         np.testing.assert_array_equal(cache.basis_mapped(50000, np.arange(1024), rows, 0), expected)
@@ -179,7 +154,6 @@ class CachedBasisTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             cache.basis_mapped(0, [0, 1], [(0, 0, 0, 0, -1e6, 0, 0)], 1725)
 
-    @unittest.skipUnless(NATIVE, 'supply triad_helper_export for actual waveform qualification')
     def test_actual_native_shaping_fhss_burst_and_high_rate(self):
         from triad_continuous import NativeStream
         cases = [

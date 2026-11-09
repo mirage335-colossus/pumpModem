@@ -19,7 +19,7 @@ import numpy as np
 from scipy.fft import next_fast_len
 
 from triad_case_noise import ProjectedNoise
-from triad_case_receiver import EPOCHS, _manifest, _option
+from triad_case_receiver import EPOCHS, _manifest, _native_cpu_seconds, _option
 from triad_continuous import NativeStream
 from triad_operational_admission import public_grid
 from triad_realtime_fft import FFTScreen, compare_template_projectors
@@ -92,23 +92,20 @@ def _sha256(value):
     return hashlib.sha256(value).hexdigest()
 
 
-def _bounded_basis(source, epoch, bit, positions):
+def _bounded_basis(source, lanes, positions):
     """Use public native mapped-basis tiles under both native API limits."""
     positions = np.asarray(positions, dtype=np.float64)
-    result = np.empty(len(positions), dtype=np.complex128)
+    result = np.empty((len(lanes), len(positions)), dtype=np.complex128)
+    rows = [(bit, epoch, 0., 0., 0., 0., 0.) for epoch, bit in lanes]
     at = 0
     while at < len(positions):
         first = max(0, math.floor(float(positions[at])))
-        stop = at + 1
-        while stop < len(positions) and stop-at < _CHUNK:
-            if math.floor(float(positions[stop])) - first > 1_000_000:
-                break
-            stop += 1
-        integer_first = max(0, math.floor(float(positions[at])))
-        offsets = positions[at:stop] - integer_first
-        values = source.basis_mapped(integer_first, offsets,
-            [(bit, epoch, 0., 0., 0., 0., 0.)], 0.)[0]
-        result[at:stop] = values
+        limit = min(len(positions), at+_CHUNK)
+        stop = at+max(1, int(np.searchsorted(positions[at:limit], first+1_000_001)))
+        values = source.basis_mapped(first, positions[at:stop]-first, rows, 0.)
+        if values.shape != (len(rows), stop-at):
+            raise ValueError('native mapped basis response changed public lane extent')
+        result[:, at:stop] = values
         at = stop
     return result
 
@@ -210,8 +207,10 @@ def _validate_mapped_profile(source, manifest, clocks, *, output_fs, pass_edge,
         raise MemoryError('local mapped-profile pair exceeds preparation workspace')
     approximate = FFTScreen(local, None, EPOCHS, source_samples=count,
         template_identity=identity, template_sampling_step=sampling_step,
-        mapped_template_provider=lambda epoch, bit, positions:
-            _bounded_basis(source, epoch, bit, first+positions), **options)
+        mapped_template_provider=lambda lanes, positions:
+            _bounded_basis(source, lanes, first+positions),
+        mapped_template_batch_lanes=max(1, source.descriptor.get('maximum_mapped_bank_lanes', 1)),
+        **options)
     residents = exact.resident_estimate+approximate.resident_estimate
     # The comparison retains two orthonormal banks, plus the current QR/SVD
     # operands. Controls reserve cubic interpolation, phase, clean/noisy input
@@ -353,6 +352,8 @@ def build_public_screen(source, manifest, *, public_address, source_identity,
     caller's receive geometry.
     """
     began = time.perf_counter()
+    cpu_began = time.process_time()
+    native_cpu_began = _native_cpu_seconds(source)
     address = _normalize_public_address(public_address)
     if (isinstance(threads, bool) or not isinstance(threads, int) or threads < 1 or
             isinstance(memory_limit_bytes, bool) or not isinstance(memory_limit_bytes, int) or
@@ -389,7 +390,7 @@ def build_public_screen(source, manifest, *, public_address, source_identity,
     mapped_provider = None
     raw_provider = None
     if selected_step > 1:
-        mapped_provider = lambda epoch, bit, positions: _bounded_basis(source, epoch, bit, positions)
+        mapped_provider = lambda lanes, positions: _bounded_basis(source, lanes, positions)
     else:
         def raw_provider(epoch, bit, first, count):
             return _integer_basis(source, epoch, bit, first, count)
@@ -407,6 +408,7 @@ def build_public_screen(source, manifest, *, public_address, source_identity,
         template_provider=raw_provider, source_samples=raw_source_samples,
         template_identity=source_digest,
         mapped_template_provider=mapped_provider,
+        mapped_template_batch_lanes=max(1, descriptor.get('maximum_mapped_bank_lanes', 1)),
         template_sampling_step=selected_step)
     screen_seconds = time.perf_counter()-started
     preparation_peak = max(screen.preparation_peak_estimate_bytes+native_workspace,
@@ -433,6 +435,15 @@ def build_public_screen(source, manifest, *, public_address, source_identity,
         native_address_selection_seconds=address_seconds,
         scope='Fixed public path geometry and current native source identity; admission bounds materialization work before full-bank construction.')
     preparation = time.perf_counter()-began
+    native_cpu_after = _native_cpu_seconds(source)
+    native_cpu_seconds = (None if native_cpu_began is None or native_cpu_after is None
+                          else max(0., native_cpu_after-native_cpu_began))
+    process_cpu_seconds = time.process_time()-cpu_began
+    fft_bank_geometry = dict(crop_rows=screen.crop_rows, kernel_rows=getattr(screen, 'kernel_rows', None),
+        fft_rows=getattr(screen, 'nfft', None), ray_count=len(getattr(screen, 'rays', ())))
+    projection_workers = getattr(screen, 'policy', {}).get('preparation_projection_workers', 1)
+    work.update(fft_bank_geometry=fft_bank_geometry, bank_worker_budget=threads,
+                projection_workers=projection_workers)
     receipt = dict(native_address_selection_seconds=address_seconds,
         local_profile_validation_seconds=profile_validation_seconds,
         public_fft_bank_preparation_seconds=screen_seconds,
@@ -442,6 +453,12 @@ def build_public_screen(source, manifest, *, public_address, source_identity,
         profile_native_template_point_estimate=template_work,
         source_fft_workspace_estimate_bytes=screen.resident_estimate,
         preparation_peak_estimate_bytes=preparation_peak,
+        fft_bank_geometry=fft_bank_geometry, bank_worker_budget=threads,
+        projection_workers=projection_workers,
+        wall_seconds=preparation, process_cpu_seconds=process_cpu_seconds,
+        native_cpu_seconds=native_cpu_seconds,
+        effective_busy_cpus=((process_cpu_seconds+native_cpu_seconds)/preparation
+                             if native_cpu_seconds is not None and preparation > 0 else None),
         scope='Bound to current native source, explicit pattern epoch/symbol ordinal, full receive geometry and public search. Local fidelity validation alone uses its normalized diagnostic calendar.')
     return dict(screen=screen, manifest=public_manifest, grid=grid,
         clock_bank=clock_bank, profile=profile, work=work,
@@ -456,7 +473,7 @@ class PreparedReplay:
     """A complete public bit observation and two-alternative coarse receiver."""
     def __init__(self, executable, native_args, *, memory_limit_bytes, threads,
                  seed, native_factory=NativeStream, screen_factory=FFTScreen,
-                 mapped_step=None):
+                 mapped_step=None, bank_memory_limit=None):
         if (isinstance(threads, bool) or not isinstance(threads, int) or threads < 1 or
                 isinstance(memory_limit_bytes, bool) or not isinstance(memory_limit_bytes, int) or
                 memory_limit_bytes < 1):
@@ -492,9 +509,13 @@ class PreparedReplay:
             public_address = {'pattern_epoch': int(descriptor['epoch']),
                               'symbol_ordinal': int(descriptor['symbol_ordinal'])}
             source_identity = _mapped_identity(command, executable, descriptor)
+            bank_cap = (self.memory_limit if bank_memory_limit is None else
+                        bank_memory_limit(self.template_source))
+            if type(bank_cap) is not int or not 0 < bank_cap <= self.memory_limit:
+                raise MemoryError('public bank has no admitted workspace within the enclosing budget')
             bank = build_public_screen(self.template_source, self.manifest,
                 public_address=public_address, source_identity=source_identity,
-                memory_limit_bytes=self.memory_limit, threads=threads,
+                memory_limit_bytes=bank_cap, threads=threads,
                 mapped_step=mapped_step, screen_factory=screen_factory)
             self.manifest = bank['manifest']
             self.grid, self.clock_bank = bank['grid'], bank['clock_bank']

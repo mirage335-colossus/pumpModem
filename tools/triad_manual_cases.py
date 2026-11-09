@@ -46,6 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="bounded streaming measurement input, from 0.1 to 2 seconds")
     parser.add_argument("--threads", type=int,
                         help="explicit single receiver-worker allocation for debugging; default compares the supported local allocations")
+    parser.add_argument('--full-logical-inference', action='store_true',
+                        help='measure every receiver stage with all visible logical CPUs after a serial, physical-core and logical-CPU pilot')
     parser.add_argument("--case-index", type=int, action="append",
                         help="select a current manual row for explicitly partial debugging")
     parser.add_argument("--skip-message-gate", action="store_true",
@@ -54,10 +56,6 @@ def build_parser() -> argparse.ArgumentParser:
                         help='bounded exploratory continued fine work at physical and full logical allocations')
     parser.add_argument('--workspace-mib', type=int,
                         help='stable workspace ceiling within the visible local receiver budget')
-    parser.add_argument('--calibration-receipt-prefix', type=Path,
-                        help='save private per-row replay fits as PREFIX-N.json directly inside local-evidence')
-    parser.add_argument('--allow-conditional-calibration-identity', action='store_true',
-                        help='explicitly allow conditional local executable mapping identity in private fit receipts')
     return parser
 
 
@@ -73,12 +71,11 @@ def main(argv=None) -> int:
         case_list=args.case_list,
         measurement_seconds=args.measurement_seconds,
         threads=args.threads,
+        full_logical_inference=args.full_logical_inference,
         case_indices=args.case_index,
         message_gate=not args.skip_message_gate,
         sustained_allocation_probe=args.sustained_allocation_probe,
         workspace_mib=args.workspace_mib,
-        calibration_receipt_prefix=args.calibration_receipt_prefix,
-        allow_conditional_calibration_identity=args.allow_conditional_calibration_identity,
     )
     return (0 if result.get('status') == 'conditional_capacity_pass' else
             1 if result.get('status') == 'capacity_failures' else 2)

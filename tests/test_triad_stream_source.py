@@ -448,9 +448,16 @@ class PullSourceTests(unittest.TestCase):
             first, count = source.descriptor['source_samples']//3, 513
             header, bank = source.basis(first, count, rows)
             self.assertTrue(header['shared_geometry_bank'])
-            reference_header, reference = source.basis_map(first, list(range(count)), rows)
+            # Nonzero center forces the scalar mapped renderer. With zero
+            # warp its center phase is exactly zero.
+            reference_header, reference = source.basis_map(first, list(range(count)), rows, audio_center=1)
             self.assertFalse(reference_header['shared_geometry_bank'])
             self.assertEqual(bank, reference)
+            offsets = [i*1.0002+.125 for i in range(count)]
+            mapped_header, mapped = source.basis_map(first, offsets, rows)
+            self.assertTrue(mapped_header['shared_geometry_bank'])
+            _, mapped_reference = source.basis_map(first, offsets, rows, audio_center=1)
+            self.assertEqual(mapped, mapped_reference)
             _, repeated = source.basis(first, count, rows)
             self.assertEqual(bank, repeated)
         with Source(['--stream-kind', 'emitted', '--symbol-ordinal', '92']) as source:
@@ -490,6 +497,16 @@ class PullSourceTests(unittest.TestCase):
             _, left = source.basis_map(first, offsets[:7], rows, 1725)
             _, right = source.basis_map(first+7, [x-7 for x in offsets[7:]], rows, 1725)
             self.assertEqual(whole, [a+b for a, b in zip(left, right)])
+
+    def test_shared_mapped_bank_accepts_large_origin_with_distinct_offsets(self):
+        with Source(['--stream-kind', 'emitted']) as source:
+            rows = [(bit, 0, 0, 0, 0, 0, 0) for bit in (0, 1)]
+            # The offsets remain distinct even when adding either to this
+            # origin gives the same rounded native sample coordinate.
+            header, values = source.basis_map(1 << 63, [0., .125], rows)
+            self.assertTrue(header['shared_geometry_bank'])
+            self.assertEqual(header['first_sample'], 1 << 63)
+            self.assertEqual(values, [[0j, 0j], [0j, 0j]])
 
 
 

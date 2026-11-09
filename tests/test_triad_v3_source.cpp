@@ -236,6 +236,14 @@ void shared_geometry_bank_checks() {
         PatternSource::render_bank(std::span(&one,1),0,step,sparse.size(),sparse);
         for(std::size_t i=0;i<sparse.size();++i)
             check(sparse[i]==references.front().sample_at(i*step),"sparse bank fallback differs");
+        const std::array<double,5> offsets{0.,.125,1.25,17.75,53.75};
+        std::vector<Complex> mapped(pointers.size()*offsets.size());
+        const auto first=g.calendar_origin_sample;
+        PatternSource::render_bank(pointers,first,offsets,mapped);
+        for(std::size_t row=0;row<pointers.size();++row)
+            for(std::size_t i=0;i<offsets.size();++i)
+                check(mapped[row*offsets.size()+i]==references[row].sample_at(
+                    static_cast<long double>(first)+offsets[i]),"mapped bank differs from scalar source");
     }
     Format f;PatternSource a(f,key,0);f.ramp_seconds=.03;PatternSource b(f,key,1);
     std::array<PatternSource*,2> mismatch{&a,&b};std::array<Complex,2> output{};

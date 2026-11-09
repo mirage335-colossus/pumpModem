@@ -44,51 +44,84 @@ RunPod may accelerate this same bounded method but does not justify a larger
 campaign. Do not use full-observation, sustained, multi-day or exhaustive runs
 as routine checks or fallbacks for an inconclusive abbreviated result.
 
-## GPU fine-work parity probe
+## RunPod GPU-assisted full-workload diagnostic
 
-[`tools/triad_gpu_workload.py`](../tools/triad_gpu_workload.py) compares a
-small, predeclared selection of one to three current manual rows on CPU and
-CUDA using the same native capture and completed public acquisition. For
-example, after building the native exporter and installing the numerical Python
-dependencies on a CUDA host:
-
-```sh
-python3 tools/triad_gpu_workload.py --case-index 7 --device cuda --workers 2 \
-  --exporter build/dev/triad_helper_export \
-  --output local-evidence/robust-gpu-workload.json
-```
-
-Indices are zero-based and are validated against the entire freshly parsed
-manual list. This is a targeted diagnostic, not full-list coverage. One
-capture per selected row exercises the nominal two-second prefix and 1/2/4
-second continuations, a capped maximum-state transition and an interior
-erasure. FP64 lane scores and work counters are compared, with retained-state
-identities checked at the nominal checkpoints. The short endpoints can be
-ambiguous or incomplete. CUDA linear algebra is initialized serially before
-workers start; its startup and memory snapshots are reported separately from
-the timed probe. Synchronization is included in GPU timings. Setup failures
-may prevent a report entirely; recorded errors, changed source/list/binary
-hashes, or parity failures produce an unresolved result.
-
-`short_fine_work_parity_observed` is neither complete receiver qualification
-nor a local CPU throughput estimate. Cloud CPU/GPU elapsed time cannot be
-substituted for prepared service on this computer, and one paired short capture
-does not establish speed, full-message success, workspace headroom, or a
-statistical operating point. The requirements for local calibration and
-complete work are in the [manual capacity contract](robust-manual-capacity.md).
-
-For a remote diagnostic, [`tools/triad_gpu_bundle.py`](../tools/triad_gpu_bundle.py)
-builds a compact, deterministic source archive with a per-file hash manifest:
+The current CUDA driver defaults to the complete eight-row list. Build a
+matching native exporter and `triad_mapped_kernel.so`; transfer both artifacts
+separately with the allowlisted source over authenticated SSH/SCP. The
+[`triad_gpu_bundle.py`](../tools/triad_gpu_bundle.py) utility creates the small
+source archive; transfer the matching exporter and kernel as separate files:
 
 ```sh
 python3 tools/triad_gpu_bundle.py --output /tmp/robust-gpu-source.tar.gz
 ```
 
-Supply and verify a matching native exporter separately, record the source,
-list and exporter hashes, and keep credentials and machine-specific local
-calibration identities out of the bundle. The archive and temporary remote
-environment are investigation artifacts; remove them when their purpose ends.
-See the [validation record](validation.md) for the limited GPU observations.
+Place the kernel beside the exporter so the driver resolves and hashes it.
+Run remotely through SSH:
+
+```sh
+python3 tools/triad_gpu_workload.py \
+  --device cuda --workers 12 --workspace-mib 4608 --coarse-cuda \
+  --reference-case 3 --reference-case 4 --reference-case 6 \
+  --exporter build/dev/triad_helper_export \
+  --output local-evidence/gpu-rtx-4608-final.json
+```
+
+The 4608 MiB workspace cap remains subject to the half-visible-memory guard.
+
+This schema-2 `bounded_mixed_precision_cost_regime_observed` run measures the
+full workload with CUDA coarse search and selected fine work. The three
+`--reference-case` rows compare matched CPU reference stages. Measured results
+were 2.11–14.71x for CUDA coarse-data work and 1.73–2.33x for continued fine
+work versus the pod's 12-worker CPU, while native bank processing was only
+1.01–1.32x. Bulk CUDA used FP32; small Gram/Gaussian decision work used FP64.
+Three paired reference gates passed. This is a fast diagnostic workflow, not
+full receiver qualification or a local CPU throughput conversion.
+
+Forecast only against source-matched full CPU/GPU reports and an independent
+local holdout at the same workspace cap. For pure row-5 to row-7 transfer, use:
+
+Create the independent local holdout with the same cap and fresh row-7 work:
+
+```sh
+python3 tools/triad_gpu_workload.py \
+  --device cpu --workers 12 --case-index 7 --workspace-mib 4608 \
+  --exporter build/dev/triad_helper_export \
+  --output local-evidence/robust-cpu-holdout-7-4608.json
+```
+
+This selected-row run also obeys the half-visible-memory guard. Preserve any
+prior workspace-admission failure in the full CPU report; the holdout is a
+separate fresh measurement.
+
+```sh
+python3 tools/triad_gpu_cpu_forecast.py \
+  --cpu-report local-evidence/robust-cases-12-complete.json \
+  --gpu-report local-evidence/gpu-rtx-4608-final.json \
+  --local-holdout-report local-evidence/robust-cpu-holdout-7-4608.json \
+  --holdout-case-index 7 \
+  --reference-case-index 3 --reference-case-index 4 --reference-case-index 6 \
+  --transfer-case 7=5 \
+  --output local-evidence/robust-gpu-cpu-transfer-7-final.json
+```
+
+For the hybrid row-7 experiment, also add
+`--calibrate-target-noise-case-index 7` and write
+`local-evidence/robust-gpu-cpu-transfer-7-noise-final.json`. For the same-row
+report, omit `--transfer-case 7=5` and write
+`local-evidence/robust-gpu-cpu-same-row-final.json`. The same-row
+reports cover rows 3–8; rows 1–2 were rejected. Row-7 transfer matched
+nominally (+9.318% versus its
+independent holdout and -0.321% against the withheld full direct row), but the
+11.63% H0 cache-hit discrepancy exceeded the 5% tolerance. Hybrid transfer's
+nominal estimate passed while H0 acquisition cost drifted +46.92%, leaving
+overall validation unresolved. Preserve stage gates and complete-capacity
+verdicts; do not use a global GPU/CPU factor. These reports do not replace the
+complete eight-row local CPU suite.
+
+Use SSH/SCP and remote commands for software transfer, building and running;
+the provider console handles pod lifecycle. Terminate disposable instances
+after measurement and retain reports only while they support current claims.
 
 ## Absolute manual-case capacity
 
@@ -97,8 +130,21 @@ After `./build.sh test triad`, run the distinct manual-case tool:
 ```sh
 python3 tools/triad_manual_cases.py \
   --output local-evidence/robust-cases.json \
-  --exporter build/dev/triad_helper_export
+  --exporter build/dev/triad_helper_export \
+  --workspace-mib 4608 \
+  --full-logical-inference --sustained-allocation-probe
 ```
+
+The 4608 MiB cap remains subject to the half-visible-memory guard. Retain any
+workspace-admission failure and use a fresh matched selected-row continuation
+before assembling complete coverage.
+
+The full-logical option retains the same-stream 1/6/12-worker comparison and
+then performs a fresh complete inference with 12 workers for every row. Read
+the pilot selection and fresh 12-worker service, effective busy cores, work
+counters, windows and workspace separately. High utilization alone does not
+establish throughput; both measurements must complete the declared receiver
+work on one stream.
 
 The tool rereads and strictly validates `_tests-RobustModem.md` by default on
 every invocation. It supports `--case-list PATH` for another complete manual

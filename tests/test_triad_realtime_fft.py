@@ -458,14 +458,17 @@ class FFTScreenTests(unittest.TestCase):
         self.assertEqual(result['work']['selected_correlation_method'], 'frequency')
 
     def test_mapped_source_preserves_fractional_zero_extension_at_both_edges(self):
+        amplitudes = {(-3, 0): 1., (5, 1): -2j}
+        lanes = tuple(amplitudes)
         source = np.ones(12, complex)
         requests = []
-        def provider(epoch, bit, positions):
+        def provider(requested, positions):
             requests.append(positions.copy())
-            return np.ones(len(positions), complex)
+            return np.asarray([np.full(len(positions), amplitudes[lane], complex) for lane in requested])
         positions = np.array([-2., -1.1, -1e-6, 0., 1., 5., 10., 11., 11.9, 12.1, 13., 14.])
-        result = _mapped_finite_source(provider, 0, 0, positions, len(source), {})
-        np.testing.assert_allclose(result, _sample_cubic(source, positions), rtol=2e-14, atol=2e-14)
+        result = _mapped_finite_source(provider, lanes, positions, len(source), [])
+        expected = np.asarray([_sample_cubic(source*amplitudes[lane], positions) for lane in lanes])
+        np.testing.assert_allclose(result, expected, rtol=2e-14, atol=2e-14)
         self.assertTrue(all(np.min(request) >= 0 and np.max(request) < len(source) for request in requests))
 
     def test_collapsed_cubic_fir_matches_explicit_reconstruction_and_finite_edges(self):

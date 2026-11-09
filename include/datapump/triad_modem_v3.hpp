@@ -97,10 +97,19 @@ public:
     static void render_bank(std::span<PatternSource* const> sources,
                             long double first_sample, long double sample_step,
                             std::size_t samples_per_source, std::span<Complex> output);
+    // The same renderer on explicit increasing fractional offsets from a
+    // common integer origin. Preserves the mapped protocol's coordinates.
+    static void render_bank(std::span<PatternSource* const> sources,
+                            std::uint64_t first_sample, std::span<const double> offsets,
+                            std::span<Complex> output);
     static constexpr std::size_t render_bank_scratch_bytes =
         256 * 256 + 4096 * 3 * sizeof(Complex) + 4096;
     std::size_t working_bytes() const;
 private:
+    static void render_bank_impl(std::span<PatternSource* const> sources,
+                                 long double first_sample, long double sample_step,
+                                 std::size_t count, std::span<const double> offsets,
+                                 std::span<Complex> output);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

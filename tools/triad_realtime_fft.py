@@ -17,6 +17,8 @@ candidate-retention validation; it is not an exact raw-waveform likelihood.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 import hashlib
 import json
 import math
@@ -26,7 +28,7 @@ import time
 import numpy as np
 from scipy import fft, signal
 
-from triad_dynamic_joint import _sample_cubic
+from triad_dynamic_joint import _sample_cubic, _sample_cubic_rows
 from triad_acquisition import data_fir_taps
 
 
@@ -57,7 +59,7 @@ def _elapsed(start):
     return dict(cpu_seconds=time.process_time()-start[0], wall_seconds=time.perf_counter()-start[1])
 
 
-def _fir_decimate_chunks(chunks, taps, decimation, samples, dtype, chunk_samples):
+def _fir_decimate_chunks(chunks, taps, decimation, samples, dtype, chunk_samples, *, xp=np, fft_api=fft):
     """Exact finite causal FIR/downsample operator with bounded input tiles.
 
     Each tile's COMPLETE linear-convolution tail is added on the same global
@@ -66,9 +68,9 @@ def _fir_decimate_chunks(chunks, taps, decimation, samples, dtype, chunk_samples
     downsampling alone does not whiten it.
     """
     count = (samples + len(taps) - 2)//decimation + 1
-    output = np.zeros(count, dtype=dtype)
+    output = xp.zeros(count, dtype=dtype)
     transform_rows = fft.next_fast_len(chunk_samples + len(taps) - 1)
-    transformed_taps = fft.fft(np.asarray(taps, dtype=dtype), n=transform_rows)
+    transformed_taps = fft_api.fft(xp.asarray(taps, dtype=dtype), n=transform_rows)
     consumed = 0
     for source in chunks:
         values = np.asarray(source)
@@ -77,7 +79,7 @@ def _fir_decimate_chunks(chunks, taps, decimation, samples, dtype, chunk_samples
             raise ValueError('FIR chunks require bounded nonempty finite complex vectors')
         if consumed + len(values) > samples:
             raise ValueError('FIR stream exceeds the declared complete observation')
-        filtered = fft.ifft(fft.fft(values.astype(dtype), n=transform_rows) * transformed_taps)
+        filtered = fft_api.ifft(fft_api.fft(xp.asarray(values, dtype=dtype), n=transform_rows) * transformed_taps)
         filtered = filtered[:len(values) + len(taps) - 1]
         phase = (-consumed) % decimation
         first = (consumed + phase)//decimation
@@ -117,38 +119,40 @@ def _collapsed_cubic_fir(taps, step, downsample):
     return np.pad(kernel, (padding, 0)), (2*step+padding)//downsample
 
 
-def _mapped_finite_source(provider, epoch, bit, positions, source_samples, edge_cache):
+def _mapped_finite_source(provider, lanes, positions, source_samples, edge_cache):
     """Native mapped interior with the exact finite raw-cubic edge stencil."""
-    result = np.zeros(len(positions), np.complex128)
+    result = np.zeros((len(lanes), len(positions)), np.complex128)
     low = (positions >= -2) & (positions < 1)
     high = (positions > source_samples-2) & (positions <= source_samples+1)
     interior = (positions >= 1) & (positions <= source_samples-2)
     def render(coordinates):
-        values = np.asarray(provider(epoch, bit, coordinates))
-        if (values.shape != coordinates.shape or not np.iscomplexobj(values) or
+        values = np.asarray(provider(lanes, coordinates))
+        if (values.shape != (len(lanes), len(coordinates)) or not np.iscomplexobj(values) or
                 not np.isfinite(values).all()):
-            raise ValueError('mapped template provider must return finite complex samples matching positions')
+            raise ValueError('mapped template provider must return finite complex samples for each lane and position')
         return values
     if low.any() or high.any():
-        key = (epoch, bit)
-        if key not in edge_cache:
-            edge_cache[key] = (render(np.arange(4, dtype=float)),
-                render(source_samples-4+np.arange(4, dtype=float)))
-        first, last = edge_cache[key]
-        result[low] = _sample_cubic(first, positions[low])
-        result[high] = _sample_cubic(last, positions[high]-(source_samples-4))
+        if not edge_cache:
+            edge_cache.extend((render(np.arange(4, dtype=float)),
+                render(source_samples-4+np.arange(4, dtype=float))))
+        first, last = edge_cache
+        result[:, low] = _sample_cubic_rows(first, positions[low])
+        result[:, high] = _sample_cubic_rows(last, positions[high]-(source_samples-4))
     if interior.any():
-        result[interior] = render(positions[interior])
+        result[:, interior] = render(positions[interior])
     return result
 
 
-def _project_coarse_column(values, raw_samples, taps, step, downsample, kernel, shift, dtype):
+def _project_coarse_column(values, raw_samples, taps, step, downsample, kernel, shift, dtype,
+                           *, xp=np, signal_api=signal, arithmetic=np.complex128):
     """Project the finite coarse interpolant, removing its exterior spill."""
     rows = (raw_samples+len(taps)-2)//downsample+1
-    filtered = signal.upfirdn(kernel, values, up=step, down=downsample)
-    output = np.zeros(rows, np.complex128)
-    count = min(rows, max(0, len(filtered)-shift))
-    output[:count] = filtered[shift:shift+count]
+    real = np.float32 if arithmetic == np.complex64 else np.float64
+    filtered = signal_api.upfirdn(xp.asarray(kernel, dtype=real),
+        xp.asarray(values, dtype=arithmetic), up=step, down=downsample)
+    output = xp.zeros((*values.shape[:-1], rows), dtype=arithmetic)
+    count = min(rows, max(0, filtered.shape[-1]-shift))
+    output[..., :count] = filtered[..., shift:shift+count]
     # Cubic reconstruction has support outside the finite raw column. Those
     # samples were not part of the original operator and must be subtracted.
     output_coordinates = np.arange(rows)*downsample
@@ -158,11 +162,17 @@ def _project_coarse_column(values, raw_samples, taps, step, downsample, kernel, 
         coordinates = np.arange(first, first+(2 if first < 0 else 3)*step+2)
         if first < 0:
             coordinates = coordinates[coordinates < 0]
-        outside = _sample_cubic(values, coordinates/step)
-        correction = signal.oaconvolve(outside, taps, mode='full')
+        outside = (_sample_cubic(values, coordinates/step) if values.ndim == 1 else
+                   _sample_cubic_rows(values, coordinates/step))
+        device_taps = xp.asarray(taps, dtype=real)
+        if values.ndim == 1:
+            correction = signal_api.oaconvolve(xp.asarray(outside, dtype=arithmetic), device_taps, mode='full')
+        else:
+            correction = signal_api.oaconvolve(xp.asarray(outside, dtype=arithmetic), device_taps[None],
+                                               mode='full', axes=-1)
         indices = output_coordinates-first
-        keep = (indices >= 0) & (indices < len(correction))
-        output[keep] -= correction[indices[keep]]
+        keep = np.flatnonzero((indices >= 0) & (indices < correction.shape[-1]))
+        output[..., xp.asarray(keep)] -= correction[..., xp.asarray(indices[keep])]
     return output.astype(dtype)
 
 
@@ -231,7 +241,7 @@ def compare_template_projectors(exact, approximate):
         scope='Matched local public bank only; all supplied alternatives/rays retained. No full-waveform interpolation, physical channel, or receiver-success qualification.')
 
 
-def _quadratic_scores(correlations, inverse, *, explicit=True):
+def _quadratic_scores(correlations, inverse, *, explicit=True, xp=np):
     """Small Hermitian form without a strided BLAS contraction.
 
     FFT products remain FP32/FP64 as selected; the explicit two-ray arithmetic
@@ -241,15 +251,16 @@ def _quadratic_scores(correlations, inverse, *, explicit=True):
     """
     # NumPy's one-ray optimized contraction can form FP32 |c|² before its
     # FP64 scalar multiply.  Keep that existing rounding path unchanged.
-    if not explicit or correlations.shape[1] != 2:
-        return np.einsum('brl,rs,bsl->bl', correlations.conj(), inverse,
+    if not explicit or correlations.shape[-2] != 2:
+        expression = ('brl,rs,bsl->bl' if correlations.ndim == 3 else
+                      '...brl,...rs,...bsl->...bl')
+        return xp.einsum(expression, correlations.conj(), inverse,
                          correlations, optimize=True).real
-    a = np.asarray(correlations[:, 0], dtype=np.complex128)
-    result = inverse[0, 0].real*(a.real*a.real+a.imag*a.imag)
-    if correlations.shape[1] == 2:
-        b = np.asarray(correlations[:, 1], dtype=np.complex128)
-        result += inverse[1, 1].real*(b.real*b.real+b.imag*b.imag)
-        result += 2*np.real(a.conj()*inverse[0, 1]*b)
+    a = xp.asarray(correlations[..., 0, :], dtype=np.complex128)
+    result = inverse[..., 0, 0].real[..., None, None]*(a.real*a.real+a.imag*a.imag)
+    b = xp.asarray(correlations[..., 1, :], dtype=np.complex128)
+    result += inverse[..., 1, 1].real[..., None, None]*(b.real*b.real+b.imag*b.imag)
+    result += 2*xp.real(a.conj()*inverse[..., 0, 1][..., None, None]*b)
     return result
 
 
@@ -280,9 +291,13 @@ def _append_candidate_rows(local, workspace, frequencies, scores, arrivals,
     """Retain the canonical per-CFO peaks before across-frequency selection."""
     for frequency, score in zip(frequencies, scores):
         for lag in _candidate_peak_indices(score, sample_separation, maximum):
-            local.append(dict(bit=workspace['bit'], epoch=workspace['epoch'],
-                arrival=float(arrivals[lag]), frequency=float(frequency),
-                clock_ppm=workspace['clock_ppm'], score=float(score[lag]), rank=workspace['rank']))
+            local.append(_candidate_row(workspace, frequency, arrivals[lag], score[lag]))
+
+
+def _candidate_row(workspace, frequency, arrival, score):
+    return dict(bit=workspace['bit'], epoch=workspace['epoch'], arrival=float(arrival),
+        frequency=float(frequency), clock_ppm=workspace['clock_ppm'], score=float(score),
+        rank=workspace['rank'])
 
 
 def _select_workspace_candidates(local, maximum, separation, frequency_separation):
@@ -312,6 +327,7 @@ class FFTScreen:
     re-centering and refined by the caller.  ``score`` returns proposals for
     **both** bits; it does not commit a payload decision or an admission.
     """
+    device_parallel = False
 
     def __init__(self, manifest, raw_templates, epoch_offsets, *,
                  clock_ppm=(-300., 0., 300.), output_sample_rate=1000,
@@ -320,7 +336,8 @@ class FFTScreen:
                  memory_limit_bytes=1024**3, maximum_frequency_points=1024,
                  maximum_fft_products=32768, correlation_method='frequency', template_provider=None,
                  source_samples=None, template_identity=None, template_chunk_samples=16384,
-                 mapped_template_provider=None, template_sampling_step=1):
+                 mapped_template_provider=None, template_sampling_step=1,
+                 mapped_template_batch_lanes=26):
         started = _clock()
         self.manifest = manifest
         self.fs = _integer(manifest['sample_rate_hz'], 'sample rate')
@@ -430,12 +447,28 @@ class FFTScreen:
         workspace_count = len(self.epochs)*len(self.clocks)*2
         self.resident_estimate = (workspace_count*len(self.rays)*(self.nfft+self.kernel_rows)*
                                   np.dtype(self.dtype).itemsize + source_bytes)
+        mapped_batch_lanes = projection_workers = 1
         if template_provider is None and mapped_template_provider is None:
             scratch = 4*self.raw_kernel_rows*16+4*self.nfft*np.dtype(self.dtype).itemsize
         elif mapped_template_provider is not None:
             coarse_rows = math.ceil((self.raw_kernel_rows-1)/self.template_sampling_step)+1
-            scratch = (8*coarse_rows*16 + 16*(len(self.taps)+4*self.template_sampling_step)*16 +
-                4*self.nfft*np.dtype(self.dtype).itemsize)
+            staging = 8*min(coarse_rows, template_chunk_samples)*16+4*self.nfft*np.dtype(self.dtype).itemsize
+            projection_scratch = (8*self.kernel_rows*16 +
+                16*(len(self.taps)+4*self.template_sampling_step)*16)
+            # One coarse column per lane and the simultaneously live native
+            # response, decoded values, finite extension and phase temporaries.
+            lane_scratch = (coarse_rows+8*min(coarse_rows, template_chunk_samples)+8)*16
+            lane_limit = min(2*len(self.epochs),
+                _integer(mapped_template_batch_lanes, 'mapped template batch lanes'))
+            available = self.memory_limit_bytes-self.resident_estimate-staging
+            for projection_workers in range(min(self.workers, lane_limit), 0, -1):
+                mapped_batch_lanes = min(lane_limit,
+                    (available-projection_workers*projection_scratch)//lane_scratch)
+                if mapped_batch_lanes >= projection_workers:
+                    break
+            else:
+                raise MemoryError('coarse mapped bank has no workspace for one public lane')
+            scratch = staging+mapped_batch_lanes*lane_scratch+projection_workers*projection_scratch
         else:
             transform_rows = fft.next_fast_len(template_chunk_samples + len(self.taps) - 1)
             provider_rows = min(source_samples, math.ceil(template_chunk_samples*float(max(scales))) + 4)
@@ -444,64 +477,67 @@ class FFTScreen:
         self.preparation_peak_estimate_bytes = self.resident_estimate+scratch
         if self.preparation_peak_estimate_bytes > self.memory_limit_bytes:
             raise MemoryError('coarse FFT template preparation exceeds memory limit')
-        self.workspaces = []
+        self.workspaces = [None]*workspace_count
         time_source = (self.origin+np.arange(self.raw_kernel_rows, dtype=float)/self.fs
                        if template_provider is None and mapped_template_provider is None else None)
         collapsed = (_collapsed_cubic_fir(self.taps, self.template_sampling_step, self.decimation)
                      if mapped_template_provider is not None else None)
-        mapped_edges = {}
-        for ei, epoch in enumerate(self.epochs):
-            for clock, scale in zip(self.clocks, scales):
-                for bit in (0, 1):
-                    columns = []
-                    for delay, doppler in self.rays:
-                        if template_provider is None and mapped_template_provider is None:
-                            position = (((time_source-delay)*scale)-self.offset)*self.fs
-                            values = _sample_cubic(source[ei, bit], position)
-                            values *= np.exp(2j*np.pi*np.remainder(doppler*time_source, 1.))
-                            column = signal.oaconvolve(values.astype(self.dtype), self.taps,
-                                                       mode='full')[::self.decimation].astype(self.dtype)
-                        elif mapped_template_provider is not None:
+        lanes = tuple((epoch, bit) for epoch in self.epochs for bit in (0, 1))
+        pool = self._projection_pool(projection_workers)
+        with pool as projection:
+            for lane_first in range(0, len(lanes), mapped_batch_lanes):
+                batch = lanes[lane_first:lane_first+mapped_batch_lanes]
+                mapped_edges = []
+                for ci, (clock, scale) in enumerate(zip(self.clocks, scales)):
+                    bank_columns = self._allocate_bank_columns((len(batch), len(self.rays), self.kernel_rows))
+                    for ray, (delay, doppler) in enumerate(self.rays):
+                        if mapped_template_provider is not None:
                             step = self.template_sampling_step
-                            coarse = np.zeros(math.ceil((self.raw_kernel_rows-1)/step)+1, np.complex128)
-                            for first in range(0, len(coarse), template_chunk_samples):
-                                stop = min(len(coarse), first+template_chunk_samples)
+                            coarse = np.zeros((len(batch), coarse_rows), np.complex128)
+                            for first in range(0, coarse_rows, template_chunk_samples):
+                                stop = min(coarse_rows, first+template_chunk_samples)
                                 raw_indices = np.arange(first, stop)*step
                                 times = self.origin+raw_indices/self.fs
                                 positions = (((times-delay)*scale)-self.offset)*self.fs
                                 keep = raw_indices < self.raw_kernel_rows
                                 if keep.any():
-                                    supplied = _mapped_finite_source(mapped_template_provider, epoch, bit,
+                                    supplied = _mapped_finite_source(mapped_template_provider, batch,
                                         positions[keep], source_samples, mapped_edges)
-                                    coarse[first:stop][keep] = supplied*np.exp(
+                                    coarse[:, first:stop][:, keep] = supplied*np.exp(
                                         2j*np.pi*np.remainder(doppler*times[keep], 1.))
-                            column = _project_coarse_column(coarse, self.raw_kernel_rows, self.taps,
-                                step, self.decimation, *collapsed, self.dtype)
+                            self._project_mapped_bank(bank_columns[:, ray], coarse, collapsed, projection)
+                            del coarse
                         else:
-                            def chunks():
-                                for first in range(0, self.raw_kernel_rows, template_chunk_samples):
-                                    stop = min(self.raw_kernel_rows, first + template_chunk_samples)
-                                    times = self.origin + np.arange(first, stop, dtype=float)/self.fs
-                                    position = (((times-delay)*scale)-self.offset)*self.fs
-                                    values = _provider_cubic(template_provider, epoch, bit, position, source_samples)
-                                    yield values * np.exp(2j*np.pi*np.remainder(doppler*times, 1.))
-                            column = _fir_decimate_chunks(chunks(), self.taps, self.decimation,
-                                self.raw_kernel_rows, self.dtype, template_chunk_samples)
-                        columns.append(column)
-                    columns = np.asarray(columns, dtype=self.dtype)
-                    if columns.shape != (len(self.rays), self.kernel_rows):
-                        raise RuntimeError('coarse source support accounting changed')
-                    gram = columns.astype(np.complex128).conj() @ columns.astype(np.complex128).T
-                    eigenvalues, eigenvectors = np.linalg.eigh((gram+gram.conj().T)*.5)
-                    keep = eigenvalues > max(float(eigenvalues[-1]), 0.)*1e-10
-                    if not keep.any():
-                        raise ValueError('coarse pattern has no observable energy')
-                    inverse = (eigenvectors[:, keep]/eigenvalues[keep]) @ eigenvectors[:, keep].conj().T
-                    transformed = fft.fft(columns, n=self.nfft, axis=-1, workers=self.workers).conj()
-                    self.workspaces.append(dict(epoch=epoch, clock_ppm=clock, bit=bit,
-                        columns=columns, transform=transformed, gram=gram, inverse=inverse,
-                        rank=int(keep.sum()), quadratic_explicit=bool(len(self.rays) == 2 and keep.all() and
-                            eigenvalues[-1]/eigenvalues[0] <= 1e6)))
+                            epoch, bit = batch[0]
+                            ei = lane_first//2
+                            if template_provider is None and mapped_template_provider is None:
+                                position = (((time_source-delay)*scale)-self.offset)*self.fs
+                                values = _sample_cubic(source[ei, bit], position)
+                                values *= np.exp(2j*np.pi*np.remainder(doppler*time_source, 1.))
+                                column = self._filter_observation(values).astype(self.dtype)
+                            else:
+                                def chunks():
+                                    for first in range(0, self.raw_kernel_rows, template_chunk_samples):
+                                        stop = min(self.raw_kernel_rows, first + template_chunk_samples)
+                                        times = self.origin + np.arange(first, stop, dtype=float)/self.fs
+                                        position = (((times-delay)*scale)-self.offset)*self.fs
+                                        values = _provider_cubic(template_provider, epoch, bit, position, source_samples)
+                                        yield values * np.exp(2j*np.pi*np.remainder(doppler*times, 1.))
+                                column = self._project_integer_column(chunks())
+                            self._write_bank_column(bank_columns[0, ray], column)
+                    for bi, ((epoch, bit), (columns, gram, transformed)) in enumerate(
+                            zip(batch, self._bank_arrays(bank_columns))):
+                        eigenvalues, eigenvectors = np.linalg.eigh((gram+gram.conj().T)*.5)
+                        keep = eigenvalues > max(float(eigenvalues[-1]), 0.)*1e-10
+                        if not keep.any():
+                            raise ValueError('coarse pattern has no observable energy')
+                        inverse = (eigenvectors[:, keep]/eigenvalues[keep]) @ eigenvectors[:, keep].conj().T
+                        lane = lane_first+bi
+                        index = (lane//2*len(self.clocks)+ci)*2+bit
+                        self.workspaces[index] = dict(epoch=epoch, clock_ppm=clock, bit=bit,
+                            columns=columns, transform=transformed, gram=gram, inverse=inverse,
+                            rank=int(keep.sum()), quadratic_explicit=bool(len(self.rays) == 2 and keep.all() and
+                                eigenvalues[-1]/eigenvalues[0] <= 1e6))
         self.policy = dict(schema='triad-realtime-fft-policy-v1', precision=precision,
             output_sample_rate=self.output_fs, pass_edge_hz=self.pass_edge,
             stop_edge_hz=float(stop_edge_hz), epochs=self.epochs, clocks=self.clocks,
@@ -521,6 +557,8 @@ class FFTScreen:
         if mapped_template_provider is not None:
             self.policy.update(template_storage='bounded mapped native samples; coarse cubic reconstruction plus exact original FIR polyphase composition',
                 template_sampling_step=self.template_sampling_step,
+                template_batch_lanes=mapped_batch_lanes,
+                preparation_projection_workers=projection_workers,
                 template_provider_identity=source_identity,
                 approximation_scope='Template interpolation only; requires matched native fidelity checks for this source/configuration. Observation FIR/noise/effects are unchanged.')
         self.procedure_id = _digest(dict(policy=self.policy,
@@ -531,6 +569,38 @@ class FFTScreen:
                           lead=self.lead, delay=self.delay, doppler=self.doppler,
                           projected_noise_variance=self.reference_variance)))
         self.preparation_timing = _elapsed(started)
+
+    def _projection_pool(self, workers):
+        return (ThreadPoolExecutor(max_workers=workers, thread_name_prefix='triad-bank')
+                if workers > 1 else nullcontext())
+
+    def _allocate_bank_columns(self, shape):
+        return np.empty(shape, dtype=self.dtype)
+
+    def _write_bank_column(self, destination, column):
+        destination[...] = column
+
+    def _project_integer_column(self, chunks):
+        return _fir_decimate_chunks(chunks, self.taps, self.decimation,
+            self.raw_kernel_rows, self.dtype, self.template_chunk_samples)
+
+    def _project_mapped_bank(self, destination, coarse, collapsed, projection):
+        def project(index):
+            destination[index] = _project_coarse_column(coarse[index], self.raw_kernel_rows,
+                self.taps, self.template_sampling_step, self.decimation, *collapsed, self.dtype)
+        if projection is None:
+            for index in range(len(coarse)):
+                project(index)
+        else:
+            # Join every disjoint lane before the next native pipe request.
+            for _ in projection.map(project, range(len(coarse))):
+                pass
+
+    def _bank_arrays(self, bank_columns):
+        for columns in bank_columns:
+            gram = columns.astype(np.complex128).conj() @ columns.astype(np.complex128).T
+            transformed = fft.fft(columns, n=self.nfft, axis=-1, workers=self.workers).conj()
+            yield columns, gram, transformed
 
     def _frequencies(self, frequencies_hz, frequency_intervals, *, maximum_points=None):
         maximum_points = (self.maximum_frequency_points if maximum_points is None else
@@ -588,6 +658,11 @@ class FFTScreen:
             _append_candidate_rows(local, workspace, frequencies[first:stop], scores,
                 self.arrivals, sample_separation, top_per_bit)
         return local
+
+    def _frequency_workspace_rows(self, spectra, frequencies, *, sample_separation, top_per_bit):
+        for workspace in self.workspaces:
+            yield self._frequency_peak_rows(workspace, spectra, frequencies,
+                sample_separation=sample_separation, top_per_bit=top_per_bit)
 
     def tiled_frequency_plan(self, frequencies_hz=None, *, frequency_intervals=None,
                              top_per_bit=4, minimum_arrival_separation_seconds=None,
@@ -808,10 +883,26 @@ class FFTScreen:
                 raise ValueError('binary capture validity required')
             if not valid.all():
                 raise ValueError('coarse shift-invariant Gram screen does not support erasures')
-        filtered = signal.oaconvolve(raw.astype(self.dtype), self.taps, mode='full')[::self.decimation]
+        filtered = self._filter_observation(raw)
         if self.crop_stop > len(filtered):
             raise ValueError('complete filtered support outside capture')
-        return np.array(filtered[self.crop_first:self.crop_stop], dtype=self.dtype, copy=True)
+        return filtered[self.crop_first:self.crop_stop].copy()
+
+    def _filter_observation(self, raw):
+        return signal.oaconvolve(raw.astype(self.dtype), self.taps, mode='full')[::self.decimation]
+
+    def _coerce_projected(self, projected, *, copy=False):
+        observation = np.asarray(projected)
+        if (observation.shape != (self.crop_rows,) or not np.iscomplexobj(observation) or
+                not np.isfinite(observation).all()):
+            raise ValueError('finite prepared projection must match this screen crop')
+        if copy:
+            observation = np.array(observation, copy=True)
+            self._mark_readonly(observation)
+        return observation
+
+    def _mark_readonly(self, values):
+        values.flags.writeable = False
 
     def projection_receipt(self):
         """Exact finite complex-FIR coordinates; taps remain available as .taps.
@@ -866,6 +957,52 @@ class FFTScreen:
             raise ValueError('prepared projection receipt does not match this finite operator/source')
         return self.score(None, frequencies_hz, projected_observation=projected, **arguments)
 
+    def _lag_plans(self, frequencies, groups, zoomfft):
+        zoom_plans = []
+        for values, transform_length, _step in groups:
+            transform = (zoomfft(self.kernel_rows, (float(values[0]), float(values[-1])),
+                m=len(values), fs=self.output_fs, endpoint=True) if len(values) > 1 else None)
+            positions = np.searchsorted(frequencies, values)
+            if not np.array_equal(frequencies[positions], values):
+                raise RuntimeError('lag-domain CFO grid differs from the admitted public bank')
+            zoom_plans.append((values, positions, transform, transform_length))
+        return zoom_plans
+
+    def _lag_workspace_rows(self, observation, frequencies, groups, *, sample_separation, top_per_bit):
+        kernel_indices = np.arange(self.kernel_rows)
+        local_times = kernel_indices/self.output_fs
+        with fft.set_workers(self.workers):
+            zoom_plans = self._lag_plans(frequencies, groups, signal.ZoomFFT)
+        for workspace in self.workspaces:
+            local = []
+            correlation_bank = np.empty((len(frequencies), len(self.rays), self.lag_count), dtype=np.complex128)
+            with fft.set_workers(self.workers):
+                for values, positions, transform, _transform_length in zoom_plans:
+                    for first_lag in range(0, self.lag_count, self.batch_size):
+                        stop_lag = min(first_lag+self.batch_size, self.lag_count)
+                        lags = np.arange(first_lag, stop_lag)
+                        windows = observation[lags[:, None]+kernel_indices[None, :]]
+                        phase = np.exp(-2j*np.pi*values[:, None]*
+                            (lags[None, :]/self.output_fs))
+                        for ray_index, column in enumerate(workspace['columns']):
+                            mixed = windows*column.conj()[None, :]
+                            if transform is None:
+                                modulation = np.exp(-2j*np.pi*values[0]*local_times)
+                                transformed = np.sum(mixed*modulation[None, :], axis=-1, keepdims=True)
+                            else:
+                                transformed = transform(mixed, axis=-1)
+                            correlation_bank[positions, ray_index, first_lag:stop_lag] = (
+                                transformed.T*phase).astype(self.dtype, copy=False)
+                            del mixed, transformed
+                        del windows, phase
+            scores = _quadratic_scores(correlation_bank, workspace['inverse'],
+                explicit=workspace['quadratic_explicit'])/self.reference_variance
+            _append_candidate_rows(local, workspace, frequencies, scores,
+                self.arrivals, sample_separation, top_per_bit)
+            # Release this workspace before allocating the next bank.
+            del correlation_bank, scores
+            yield local
+
     def score(self, raw, frequencies_hz=None, *, frequency_intervals=None,
               valid=None, top_per_bit=4, minimum_arrival_separation_seconds=None,
               projected_observation=None):
@@ -901,10 +1038,7 @@ class FFTScreen:
         if projected_observation is not None:
             if raw is not None or valid is not None:
                 raise ValueError('prepared projection requires raw=None and no separate validity')
-            observation = np.asarray(projected_observation)
-            if (observation.shape != (self.crop_rows,) or not np.iscomplexobj(observation) or
-                    not np.isfinite(observation).all()):
-                raise ValueError('finite prepared projection must match this screen crop')
+            observation = self._coerce_projected(projected_observation)
         peak = plan['estimated_peak_bytes_by_method'][method]
         if peak > self.memory_limit_bytes:
             result.update(reason='observation_fft_memory_limit', timing=dict(total=_elapsed(started)))
@@ -922,55 +1056,15 @@ class FFTScreen:
         retained = [[], []]
         sample_separation = max(1, math.ceil(separation*self.output_fs))
         frequency_separation = 1/(2*self.duration)
-        zoom_plans = []
-        if method == 'lag':
-            kernel_indices = np.arange(self.kernel_rows)
-            local_times = kernel_indices/self.output_fs
-            with fft.set_workers(self.workers):
-                for values, transform_length, _step in plan['groups']:
-                    transform = (signal.ZoomFFT(self.kernel_rows,
-                        (float(values[0]), float(values[-1])), m=len(values),
-                        fs=self.output_fs, endpoint=True) if len(values) > 1 else None)
-                    positions = np.searchsorted(frequencies, values)
-                    if not np.array_equal(frequencies[positions], values):
-                        raise RuntimeError('lag-domain CFO grid differs from the admitted public bank')
-                    zoom_plans.append((values, positions, transform, transform_length))
-        for workspace in self.workspaces:
-            bit = workspace['bit']
-            # A bounded per-epoch/clock list avoids one strong event erasing all
-            # alternatives before the other clock/epoch workspaces are visited.
-            local = []
-            if method == 'frequency':
-                local = self._frequency_peak_rows(workspace, spectra, frequencies,
-                    sample_separation=sample_separation, top_per_bit=top_per_bit)
-            else:
-                correlation_bank = np.empty((len(frequencies), len(self.rays), self.lag_count), dtype=np.complex128)
-                with fft.set_workers(self.workers):
-                    for values, positions, transform, _transform_length in zoom_plans:
-                        for first_lag in range(0, self.lag_count, self.batch_size):
-                            stop_lag = min(first_lag+self.batch_size, self.lag_count)
-                            lags = np.arange(first_lag, stop_lag)
-                            windows = observation[lags[:, None]+kernel_indices[None, :]]
-                            phase = np.exp(-2j*np.pi*values[:, None]*
-                                (lags[None, :]/self.output_fs))
-                            for ray_index, column in enumerate(workspace['columns']):
-                                mixed = windows*column.conj()[None, :]
-                                if transform is None:
-                                    modulation = np.exp(-2j*np.pi*values[0]*local_times)
-                                    transformed = np.sum(mixed*modulation[None, :], axis=-1, keepdims=True)
-                                else:
-                                    transformed = transform(mixed, axis=-1)
-                                correlation_bank[positions, ray_index, first_lag:stop_lag] = (
-                                    transformed.T*phase).astype(self.dtype, copy=False)
-                                del mixed, transformed
-                            del windows, phase
-                scores = _quadratic_scores(correlation_bank, workspace['inverse'],
-                    explicit=workspace['quadratic_explicit'])/self.reference_variance
-                _append_candidate_rows(local, workspace, frequencies, scores,
-                    self.arrivals, sample_separation, top_per_bit)
-                # Release this workspace before allocating the next bank.
-                del correlation_bank, scores
-            retained[bit].extend(_select_workspace_candidates(local, top_per_bit,
+        if method == 'frequency':
+            rows = self._frequency_workspace_rows(spectra, frequencies,
+                sample_separation=sample_separation, top_per_bit=top_per_bit)
+        else:
+            rows = self._lag_workspace_rows(observation, frequencies, plan['groups'],
+                sample_separation=sample_separation, top_per_bit=top_per_bit)
+        for workspace, local in zip(self.workspaces, rows, strict=True):
+            # Preserve per-workspace retention before the final per-bit merge.
+            retained[workspace['bit']].extend(_select_workspace_candidates(local, top_per_bit,
                 separation, frequency_separation))
         retained = _select_bit_candidates(retained, top_per_bit)
         score_timing = _elapsed(mark)
@@ -1024,12 +1118,7 @@ class TiledFrequencySession:
             workspace_workers=workspace_workers, **arguments)
         if self.work_plan['status'] != 'ready':
             raise ValueError('exact tiled frequency search is unavailable: '+self.work_plan['reason'])
-        observation = np.asarray(projected)
-        if (observation.shape != (screen.crop_rows,) or not np.iscomplexobj(observation) or
-                not np.isfinite(observation).all()):
-            raise ValueError('finite prepared projection must match this screen crop')
-        self.observation = np.array(observation, copy=True)
-        self.observation.flags.writeable = False
+        self.observation = screen._coerce_projected(projected, copy=True)
         self.frequencies = np.asarray(self.work_plan['frequencies_hz'], dtype=float)
         self.frequencies.flags.writeable = False
         self.top_per_bit = self.work_plan['top_per_bit']
@@ -1094,7 +1183,7 @@ class TiledFrequencySession:
                 mark = _clock()
                 spectra = self.screen._frequency_spectra(self.observation, frequencies,
                     workers=1 if self.executor is not None else self.screen.workers)
-                spectra.flags.writeable = False
+                self.screen._mark_readonly(spectra)
                 self._add(fft_timing, _elapsed(mark))
                 mark = _clock()
                 def group(indices):
@@ -1104,7 +1193,8 @@ class TiledFrequencySession:
                         workers=1 if self.executor is not None else self.screen.workers))
                         for index in indices]
                 if self.executor is None:
-                    rows = group(range(len(self.screen.workspaces)))
+                    rows = enumerate(self.screen._frequency_workspace_rows(spectra, frequencies,
+                        sample_separation=self.sample_separation, top_per_bit=self.top_per_bit))
                 else:
                     groups = np.array_split(np.arange(len(self.screen.workspaces)),
                         self.workspace_workers)

@@ -122,20 +122,37 @@ def _push_units(prepared, units, *, chunk_samples=16384):
         stream.close()
 
 
-def _full_window_assembly(prepared):
-    plan = _public_plan(prepared.basis_source, 0)
-    if prepared.observation_first_sample != 0:
-        raise ValueError('orchestration fixture requires the actual global-zero input prefix')
+def _full_window_assembly(prepared, *, recurring_slot=None, resident_bank_bytes=None):
+    index = 0 if recurring_slot is None else recurring_slot
+    plan = _public_plan(prepared.basis_source, index)
     count = plan['receiver_window_samples']
-    first = plan['receiver_window_first_sample']
-    input_count=plan['receiver_window_stop_sample']
-    if first + count > len(prepared.raw):
+    native_first = plan['receiver_window_first_sample']
+    input_first = 0
+    if recurring_slot is None:
+        if prepared.observation_first_sample != 0:
+            raise ValueError('orchestration fixture requires the actual global-zero input prefix')
+        if resident_bank_bytes is None:
+            resident_bank_bytes = prepared.screen.resident_estimate
+    else:
+        # Exercise the real public successor geometry and its input gap.
+        # For overlapping windows, copying the entire current window is a
+        # conservative work fixture; an actual stream retains some old rows.
+        previous = prepared.calendar['plans'][index-1]
+        input_first = min(native_first, previous['receiver_window_stop_sample'])
+        if resident_bank_bytes is None:
+            raise ValueError('recurring orchestration requires its resident bank estimate')
+    first = native_first-input_first
+    input_count=plan['receiver_window_stop_sample']-input_first
+    if (len(prepared.raw) < (input_count if recurring_slot is None else count)
+            or input_count != first+count):
         raise ValueError('prepared native observation does not cover the complete public window')
     # Count the already resident observation once; the work fixture does not
     # regenerate native channel samples or allocate another full observation.
     chunk = 16384
-    expected = (prepared.raw.nbytes+prepared.valid.nbytes + 34*count+
-        chunk*17 + 418*16384 + prepared.screen.resident_estimate +
+    stream_reserve = getattr(prepared, 'stream_workspace', {}).get(
+        'simultaneous_outer_reserve_bytes', 17*(count+chunk)+418*16384)
+    expected = (prepared.raw.nbytes+prepared.valid.nbytes + 17*count+
+        stream_reserve + resident_bank_bytes +
         max(int(prepared.basis_source.descriptor.get('fixed_workspace_bytes',0)),
             int(prepared.basis_source.descriptor.get('workspace_budget_bytes',0))))
     if expected >= prepared.memory_limit_bytes:
@@ -147,7 +164,16 @@ def _full_window_assembly(prepared):
         def slot_plan(self, index):
             began = time.perf_counter()
             try:
-                return self._source.slot_plan(index)
+                row = self._source.slot_plan(index+(recurring_slot or 0))
+                if recurring_slot is not None:
+                    # Only physical assembly coordinates are consumed by
+                    # this inert endpoint. Local zero replaces the earlier
+                    # stream history; all sampled window/gap lengths survive.
+                    row = dict(row, index=index)
+                    for name in ('receiver_window_first_sample', 'receiver_window_stop_sample',
+                                 'receiver_window_physical_origin_sample'):
+                        row[name] -= input_first
+                return row
             finally:
                 self.elapsed += max(0.,time.perf_counter()-began)
         def __getattr__(self, name):
@@ -175,7 +201,16 @@ def _full_window_assembly(prepared):
         at = 0
         while at < input_count:
             stop = min(input_count, at+chunk)
-            stream.push(at, prepared.raw[at:stop], prepared.valid[at:stop])
+            if recurring_slot is None:
+                begin, end = at, stop
+            elif at < first:
+                stop = min(stop, first, at+len(prepared.raw))
+                # Reuse already-owned input only for the pre-window copy
+                # fixture. It cannot initialize a signal receiver.
+                begin, end = 0, stop-at
+            else:
+                begin, end = at-first, stop-first
+            stream.push(at, prepared.raw[begin:end], prepared.valid[begin:end])
             at = stop
         elapsed = time.perf_counter()-began
         seconds = input_count/prepared.fs
@@ -188,6 +223,7 @@ def _full_window_assembly(prepared):
             represented_baseband_seconds=seconds,
             exact_window_samples=count, exact_window_seconds=count/prepared.fs,
             physical_ingested_samples=input_count,
+            public_slot_index=index, native_window_first_sample=native_first,
             actual_prefix_samples=first,
             ingest_copy_assembly_dispatch_including_one_state_call=True,
             state_machine_elapsed_seconds_per_baseband_second=wrapper_elapsed/seconds,

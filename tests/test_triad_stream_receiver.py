@@ -346,17 +346,20 @@ class NativeMessageGateHarnessTests(unittest.TestCase):
         self.assertEqual(len(attempts), 8)
         self.assertEqual(plan.call_count, 8)
 
-    def test_source_or_manual_edits_invalidate_an_otherwise_passing_gate(self):
-        for change in ('none', 'source', 'manual'):
+    def test_measured_source_artifact_or_manual_edits_invalidate_an_otherwise_passing_gate(self):
+        for change in ('none', 'source', 'artifact', 'manual'):
             with self.subTest(change=change), tempfile.TemporaryDirectory() as temporary:
                 path = Path(temporary)/'manual.md'
                 path.write_text('current public fixture\n')
                 case = self.case(9, 'fast')
                 parsed = dict(source_path=str(path),
                     source_sha256=hashlib.sha256(path.read_bytes()).hexdigest(), cases=[case])
-                before = dict(sources={'tools/receiver.py': 'before'}, native_binary_sha256='binary')
+                before = dict(sources={'tools/receiver.py': 'before'}, native_binary_sha256='binary',
+                              native_artifacts={'/native-kernel': 'initial-kernel'})
                 after = dict(sources={'tools/receiver.py': 'after' if change == 'source' else 'before'},
-                             native_binary_sha256='binary')
+                             native_binary_sha256='binary',
+                             native_artifacts={'/native-kernel': 'replaced-kernel' if change == 'artifact'
+                                               else 'initial-kernel'})
                 def functional(*args, **kwargs):
                     if change == 'manual':
                         path.write_text('changed public fixture\n')

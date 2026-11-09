@@ -18,8 +18,7 @@ class NativeBasis:
 
     def basis_mapped(self, first, offsets, rows, _center):
         self.calls.append((first, len(offsets), float(np.max(offsets)-np.min(offsets))))
-        epoch, bit = rows[0][1], rows[0][0]
-        return np.asarray([first + offset + 1j*(epoch+bit) for offset in offsets])[None, :]
+        return np.asarray([first + offsets + 1j*(epoch+bit) for bit, epoch, *_ in rows])
 
     def basis(self, first, count, rows):
         if count > 16384:
@@ -421,10 +420,11 @@ class ReplayTests(unittest.TestCase):
 
     def test_public_mapped_basis_splits_both_native_coordinate_limits(self):
         source = NativeBasis()
-        positions = np.arange(20_100, dtype=float) * 60
-        rows = _bounded_basis(source, 3, 1, positions)
-        self.assertEqual(rows.shape, positions.shape)
-        np.testing.assert_allclose(rows.real, positions)
+        positions = np.arange(20_100, dtype=float) * 65
+        rows = _bounded_basis(source, ((3, 1), (-4, 0)), positions)
+        self.assertEqual(rows.shape, (2, len(positions)))
+        np.testing.assert_array_equal(rows[0], positions+4j)
+        np.testing.assert_array_equal(rows[1], positions-4j)
         self.assertGreater(len(source.calls), 1)
         self.assertTrue(all(count <= 16384 and span <= 1_000_000 for _, count, span in source.calls))
 

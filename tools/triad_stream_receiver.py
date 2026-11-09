@@ -244,7 +244,7 @@ class CompleteStreamReceiver:
         self._phase = 'recurring_public_bank_preparation'
         bank = self.bank_builder(self.source, manifest, public_address=address,
             source_identity=self.source_identity,
-            memory_limit_bytes=bank_limit, threads=1)
+            memory_limit_bytes=bank_limit, threads=self.workers)
         preparation_peak = bank.get('work_receipt', {}).get('preparation_peak_estimate_bytes')
         if (isinstance(preparation_peak, bool) or not isinstance(preparation_peak, (int, float)) or
                 not math.isfinite(preparation_peak) or preparation_peak < 0):

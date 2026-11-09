@@ -19,18 +19,16 @@ def component(point, low=None, high=None):
 
 
 class CapacityTests(unittest.TestCase):
-    def test_fingerprint_drift_does_not_truncate_absolute_acquisition_looks(self):
-        expected = {'work': 'initial'}
-        prepared = SimpleNamespace(acquisition=Mock(side_effect=lambda _: dict(
-            result={'status': 'acquired'}, ratio_processing_seconds_per_baseband_second=.2)))
-        receiver = SimpleNamespace(workers=2)
-        with patch.object(capacity, '_complete_acquisition_work',
-                side_effect=[expected, {'work': 'changed'}, expected]):
-            actual = capacity.measure_acquisition(prepared, receiver, family_size=8, expected_work=expected)
-        self.assertEqual(prepared.acquisition.call_count, 3)
-        self.assertEqual(actual['actual_work_match_count'], 2)
-        self.assertEqual(len(actual['samples']), 3)
-        self.assertAlmostEqual(actual['ratio_processing_seconds_per_baseband_second'], .2)
+    def test_acquisition_work_drift_withholds_timing_model(self):
+        prepared = SimpleNamespace(acquisition=Mock(side_effect=[
+            dict(result={'status': 'acquired', 'coordinates': ((0, 0., 0., 0.),)},
+                 ratio_processing_seconds_per_baseband_second=.2),
+            dict(result={'status': 'acquired', 'coordinates': ((1, 0., 0., 0.),)},
+                 ratio_processing_seconds_per_baseband_second=.2)]))
+        actual = capacity.measure_acquisition(prepared, object(), family_size=8)
+        self.assertEqual(prepared.acquisition.call_count, 2)
+        self.assertEqual(actual['model_status'], 'unresolved')
+        self.assertEqual(actual['reason'], 'acquisition_work_changed_between_looks')
 
     def test_continuation_stopping_uses_precision_without_raw_realtime_decision(self):
         from triad_case_metrics import summarize_service
@@ -47,71 +45,15 @@ class CapacityTests(unittest.TestCase):
             'relative_precision')
         self.assertEqual(capacity.continuation_look(dict(low, outer_trials=9)), 'bounded_limit')
 
-    def test_fixed_holdout_binds_its_measured_allocation_before_fresh_work(self):
-        workers=[1,2,4,6,12]
-        pilot=dict(selected_workers=4,samples=[dict(workers=count,selection_ratio=1 if count==4 else 2)
-            for count in workers])
-        class Bound(RuntimeError):
-            pass
-        def bind(count):
-            raise Bound(count)
-        receiver=Mock()
-        prepared=SimpleNamespace(receiver=receiver)
-        for fixed, expected in ((None,4),(2,2)):
-            with self.subTest(fixed=fixed), patch.object(capacity,'choose_allocation',
-                    return_value=pilot) as choose, self.assertRaisesRegex(Bound,str(expected)):
-                capacity.measure_complete_case(prepared,workers,family_size=64,
-                    progress=lambda message:None,on_inference_allocation=bind,fixed_holdout_workers=fixed)
-            choose.assert_called_once_with(prepared,workers)
-            receiver.assert_not_called()
-
-    def test_nominal_holdout_repeats_all_nominal_work_and_skips_only_ceiling_inference(self):
-        receiver=object()
-        prepared=SimpleNamespace(slot_seconds=100.,window_seconds=80.,memory_limit_bytes=1000,
-            raw=SimpleNamespace(nbytes=40),valid=SimpleNamespace(nbytes=20),
-            receiver=Mock(side_effect=lambda workers:nullcontext(receiver)), fine_probe=Mock())
-        coordinates=((0,0.,0.,0.),)
-        prepared.acquisition=Mock(return_value=dict(result=dict(status='acquired',coordinates=coordinates)))
-        banks=dict(component(.1),samples=[dict(preparation_peak_estimate_bytes=500,
-            rss=dict(sum_process_bytes=900))])
-        full=dict(nonoverlap_stream_orchestration_seconds_per_baseband_second=.2,
-            represented_baseband_seconds=80.,estimated_peak_bytes=400,
-            resident_sample_after=dict(sum_process_bytes=800))
-        orchestration=dict(full_window_assembly=full,
-            message_state_and_codec=dict(component(.03),public_slot_plan_service=component(.02)))
-        fine=dict(fine_component=component(.4),observations=[dict(workspace=dict(
-            estimated_peak_bytes=600,rss=dict(sum_process_bytes=700)))])
-        pilot=dict(selected_workers=4,samples=[dict(workers=n,selection_ratio=1) for n in (1,2,4,6,12)])
-        mocks=dict(choose_allocation=Mock(return_value=pilot),
-                measure_acquisition=Mock(return_value=dict(component(.05),samples=[dict(
-                    receiver_peak_estimate_bytes=720,rss=dict(sum_process_bytes=730))])),
-                measure_sustained_fine=Mock(return_value=fine),measure_recurring_banks=Mock(return_value=banks),
-                public_work_coordinates=Mock(),measure_fine_stratum=Mock(),noise_only_observation=Mock())
-        with patch.multiple(capacity,**mocks), patch(
-                    'triad_orchestration_cost.measure_orchestration',return_value=orchestration) as orchestrate:
-            measured=capacity.measure_complete_case(prepared,[1,2,4,6,12],family_size=64,
-                progress=lambda message:None,fixed_holdout_workers=2)
-        self.assertEqual(measured['status'],'measured_nominal_holdout')
-        self.assertEqual(measured['selected_workers'],4)
-        self.assertEqual(measured['inference_workers'],2)
-        self.assertEqual(set(measured['nominal_service']['components']),{
-            'acquisition','complete_fine_search','recurring_bank_preparation','stream_controller',
-            'quiet_state_and_canonical_codec','public_slot_planning','receiver_worker_lifecycle'})
-        for name in ('complete_capacity', *capacity.CEILING_ONLY_RECEIPTS):
-            self.assertNotIn(name,measured)
-        for name in ('public_work_coordinates','measure_fine_stratum','noise_only_observation'):
-            mocks[name].assert_not_called()
-        prepared.fine_probe.assert_not_called()
-        prepared.acquisition.assert_called_once_with(receiver)
-        self.assertEqual([row.args for row in prepared.receiver.call_args_list],[(2,),(2,),(2,)])
-        mocks['measure_acquisition'].assert_called_once_with(prepared,receiver,family_size=64)
-        mocks['measure_sustained_fine'].assert_called_once_with(prepared,receiver,coordinates,family_size=64)
-        orchestrate.assert_called_once_with(prepared,family_size=64)
-        mocks['measure_recurring_banks'].assert_called_once_with(prepared)
-        self.assertEqual(measured['workspace_margin']['estimated_peak_bytes'],720)
-        self.assertEqual(measured['workspace_margin']['observed_peak_bytes'],900)
-        self.assertEqual(measured['workspace_margin']['measurement_scope'],'nominal_holdout')
-        self.assertFalse(measured['full_local_cpu_ceiling_demonstrated'])
+    def test_full_logical_inference_requires_a_valid_pilot_observation(self):
+        pilot = dict(selected_workers=6, samples=[dict(workers=6, selection_ratio=.8),
+                                                  dict(workers=12)])
+        prepared = SimpleNamespace(receiver=Mock())
+        with patch.object(capacity, 'choose_allocation', return_value=pilot):
+            actual = capacity.measure_complete_case(prepared, [1, 6, 12], family_size=8,
+                inference_workers=12, progress=lambda message:None)
+        prepared.receiver.assert_not_called()
+        self.assertEqual(actual['reason'], 'declared_full_logical_allocation_not_measured')
 
     def test_sustained_allocation_probe_deduplicates_and_bounds_alternatives(self):
         receiver=object()
@@ -237,22 +179,26 @@ class CapacityTests(unittest.TestCase):
             nonoverlap_stream_orchestration_seconds_per_baseband_second=.01,
             represented_baseband_seconds=80., estimated_peak_bytes=100),
             message_state_and_codec=dict(component(.01), public_slot_plan_service=component(.01)))
-        banks = dict(component(.01), samples=[dict(preparation_peak_estimate_bytes=50)])
         cases = (
-            ('acquired', .2, True, 'below_one', 'pass'),
-            ('partial_acquisition', None, True, 'unresolved', 'unresolved'),
-            ('acquired', 1.05, True, 'fail', 'fail'),
-            ('acquired', 1.05, False, 'fail', 'unresolved'),
+            ('acquired', .2, True, True, 'below_one', 'pass'),
+            ('acquired', .2, True, False, 'below_one', 'unresolved'),
+            ('partial_acquisition', None, True, True, 'unresolved', 'unresolved'),
+            ('acquired', 1.05, True, True, 'fail', 'fail'),
+            ('acquired', 1.05, False, True, 'fail', 'unresolved'),
         )
-        for status, point, model_supported, point_status, capacity_status_expected in cases:
-            with self.subTest(status=status, point=point, model_supported=model_supported):
-                partial = Mock() if status == 'partial_acquisition' else None
-                acquisition = dict(status=status, coordinates=observed, coarse_session=partial)
+        for status, point, model_supported, recurring_measured, point_status, capacity_status_expected in cases:
+            with self.subTest(status=status, point=point, model_supported=model_supported,
+                              recurring_measured=recurring_measured):
+                acquisition = dict(status=status, coordinates=observed)
+                banks = dict(component(.01), samples=[dict(preparation_peak_estimate_bytes=50)],
+                    recurring_window=(dict(noise_only_acquisition=component(.015),
+                        full_window_assembly=orchestration['full_window_assembly'],
+                        sample_count=900, ingress_samples=1000) if recurring_measured else {}))
                 prepared = SimpleNamespace(slot_seconds=100., window_seconds=80.,
                     memory_limit_bytes=1000, raw=SimpleNamespace(nbytes=40), valid=SimpleNamespace(nbytes=20),
-                    receiver=lambda workers:nullcontext(receiver),
-                    acquisition=Mock(side_effect=[dict(result=acquisition),
-                        dict(result=dict(status='acquired', coordinates=cost_only))]),
+                    receiver=Mock(side_effect=lambda workers:nullcontext(receiver)),
+                    recurring_window=dict(window_samples=900, maximum_ingress_samples=1000),
+                    stream_workspace=dict(simultaneous_outer_reserve_bytes=120),
                     fine_probe=Mock(return_value=sample))
                 fine = component(point) if point is not None else {}
                 if not model_supported:
@@ -267,15 +213,21 @@ class CapacityTests(unittest.TestCase):
                 other = dict(component(.05), full_window_forecast_multiplier=.8, work_samples=[sample])
                 cold = Mock(side_effect=[cap, other, other])
                 with patch.multiple(capacity,
-                        choose_allocation=Mock(return_value={'selected_workers':4}),
+                        choose_allocation=Mock(return_value=dict(selected_workers=6,
+                            samples=[dict(workers=12, selection_ratio=.9)])),
                         public_work_coordinates=Mock(return_value=cost_only),
-                        measure_acquisition=Mock(return_value=component(.01)),
+                        measure_acquisition=Mock(side_effect=[dict(component(.01), coverage=acquisition),
+                            dict(component(.01), coverage=dict(coordinates=cost_only))]),
                         measure_sustained_fine=continuation, measure_fine_stratum=cold,
                         _probe_work=lambda row:row, noise_only_observation=Mock(),
                         measure_recurring_banks=Mock(return_value=banks)), patch(
                             'triad_orchestration_cost.measure_orchestration', return_value=orchestration):
-                    measured = capacity.measure_complete_case(prepared, [4,12], family_size=64,
-                                                              progress=lambda message:None)
+                    measured = capacity.measure_complete_case(prepared, [1,6,12], family_size=64,
+                        inference_workers=12, progress=lambda message:None)
+                self.assertEqual(measured['selected_workers'], 6)
+                self.assertEqual(measured['inference_workers'], 12)
+                self.assertTrue(all(call.args == (12,) for call in prepared.receiver.call_args_list))
+                self.assertEqual(measured['recurring_window']['covers_longest_public_geometry'], recurring_measured)
                 nominal = measured['nominal_service']
                 self.assertEqual(nominal['numeric_point_criterion'], point_status)
                 self.assertEqual(measured['complete_capacity']['realtime_status'], capacity_status_expected)
@@ -285,12 +237,11 @@ class CapacityTests(unittest.TestCase):
                     continuation.assert_called_once_with(prepared, receiver, observed, family_size=64)
                     self.assertEqual(nominal['components']['complete_fine_search'][
                         'ratio_processing_seconds_per_baseband_second'], point)
-                    self.assertEqual(measured['workspace_margin']['estimated_peak_bytes'],400)
+                    self.assertEqual(measured['workspace_margin']['estimated_peak_bytes'],520)
                     self.assertEqual(measured['workspace_margin']['observed_peak_bytes'],500)
                     self.assertEqual(measured['observed_allocated_cpu_utilization_fraction_range'],[.25,.8])
                 else:
                     continuation.assert_not_called()
-                    partial.close.assert_called_once_with()
                     self.assertIsNone(nominal['ratio_processing_seconds_per_baseband_second'])
                     self.assertEqual(measured['fine_active']['reason'],'complete_public_acquisition_required')
 
@@ -309,6 +260,17 @@ class CapacityTests(unittest.TestCase):
         self.assertEqual(result['intervals_seconds'],[60.,90.,60.])
         self.assertEqual(result['minimum_interval_seconds'],60.)
         self.assertEqual(result['maximum_interval_seconds'],90.)
+
+    def test_stream_workspace_reserves_overlap_receipts_and_assembled_input_together(self):
+        calendar = {'plans': [{'receiver_window_samples': n} for n in (800000, 950000, 900000)]}
+        with self.assertRaisesRegex(MemoryError, 'production stream input buffer'):
+            capacity._production_stream_workspace(calendar, 1000000, 950000*68-1)
+        budget = 96*1024**2
+        bound = capacity._production_stream_workspace(calendar, 1000000, budget)
+        self.assertGreater(bound['retained_input_bound_bytes'], 950000*17)
+        self.assertEqual(bound['assembled_input_bound_bytes'], 1000000*17)
+        self.assertEqual(bound['bank_limit_bytes']+bound['assembled_input_bound_bytes']+
+                         bound['simultaneous_outer_reserve_bytes'], budget)
 
     def test_calendar_does_not_hide_a_discontinuity(self):
         class Source:

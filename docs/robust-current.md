@@ -70,7 +70,9 @@ dedicated manual-case suite:
 ./build.sh test triad
 python3 tools/triad_manual_cases.py \
   --output local-evidence/robust-cases.json \
-  --exporter build/dev/triad_helper_export
+  --exporter build/dev/triad_helper_export \
+  --workspace-mib 4608 \
+  --full-logical-inference --sustained-allocation-probe
 ```
 
 The suite rereads `_tests-RobustModem.md` on every invocation. Repeatable
@@ -89,9 +91,12 @@ represents a 90% service-time margin. Never divide service by core count or
 infer a whole-machine ceiling from unmeasured work. Results are bound to their
 source, case-list and native binary. Earlier stage evidence remains historical
 and does not become a result for changed source or method. Consult the
-[validation record](validation.md) for current outcomes and provenance. RunPod
-may accelerate the same bounded method but cannot replace local CPU measurement
-or justify heavier experiments.
+[validation record](validation.md) for current outcomes and provenance. Use the
+[manual capacity workflow](robust-manual-capacity.md#fast-local-cpu-capacity-measurement)
+for the same-stream 1/6/12 allocation comparison and fresh 12-worker inference.
+RunPod may assist GPU development, but only local source-matched timings measure
+this computer's CPU service. Use authenticated SSH/SCP for source and binary
+transfer; the provider console handles pod lifecycle.
 
 In the complete receiver, only the fixed affine lane supplies operational
 admission and the final bit. Adaptive and combined lanes still run and are
@@ -105,11 +110,16 @@ using packet length or transport EOF. The fresh one-second, two-segment
 256-initial-state transition probe is charged once per 0.5-second window
 segment in the cost gate to conservatively cover switching and merging.
 
-The full integrated v3 reevaluation measured all eight current manual cases
-with unresolved worst-state capacity margins; it does not establish a full
-capacity pass. The named `triad` group passed 20/20 before the run. Historical
-v2 base and continuation phases retain their own hashes and policy. See the
-[validation record](validation.md) for ratios and provenance. Sensitivity
-confirmation remains incomplete, so there is no >90% qualification.
+The current eight-row full-logical suite reports nominal points below 1 s/s,
+but six conservative cold-state points are at or above 1 and every stronger
+capacity verdict remains unresolved. Although all 12 logical CPUs were
+available, continued fine work used about 1.8–2.0 busy cores; the measured
+12/6 fine ratio does not show consistent parallel gain. Optimize this
+fine-search bottleneck before claiming a near-maximum CPU ceiling. The bounded
+RTX PRO 6000 method accelerates selected CUDA stages; its whole native bank is
+near the pod CPU and its current local CPU forecast remains unqualified. See
+the [validation record](validation.md) for per-row ratios and limits. The named
+`triad` group passed 20/20 before this full run. Sensitivity confirmation
+remains incomplete, so there is no >90% qualification.
 `--skip-message-gate` is debug-only and prevents an integrated suite pass; the
 former `--paired-followup` option is removed.

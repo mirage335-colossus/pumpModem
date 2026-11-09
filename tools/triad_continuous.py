@@ -313,7 +313,8 @@ def disciplined_capture_extent(samples, sample_rate, maximum_correction, coordin
 
 def tracking_source_basis(source, coordinates, taps, offset, timing_forward, audio_center_hz,
                           *, template_backend='auto', cache_bytes=32*1024**2,
-                          source_offset_seconds=0.):
+                          source_offset_seconds=0., template_executor=None, template_workers=1,
+                          accelerator=None):
     """Physical ADC coordinates + public remote source-offset/rate states.
 
     Existing acquisition CFO includes the base affine-clock IF contribution.
@@ -341,7 +342,10 @@ def tracking_source_basis(source, coordinates, taps, offset, timing_forward, aud
     template_source = source
     if template_backend == 'auto':
         from triad_tracking_basis import CachedMappedBasis
-        template_source = CachedMappedBasis(source, cache_bytes=cache_bytes)
+        template_source = CachedMappedBasis(source, cache_bytes=cache_bytes,
+            executor=template_executor, workers=template_workers, accelerator=accelerator)
+    elif accelerator is not None:
+        raise ValueError('accelerated fine statistics require the bounded mapped template cache')
     def _render(states, anchor_seconds, first, stop, physical_origin, physical_offsets,
                 *, fixed_affine):
         count = stop-first
@@ -360,7 +364,10 @@ def tracking_source_basis(source, coordinates, taps, offset, timing_forward, aud
                     rows.append((bit, epoch, mapped_arrival,
                         frequency-audio_center_hz*((scale if fixed_affine else base)-1),
                         (scale-1)*1e6, delay, doppler))
-        data = np.empty((len(rows), count), np.complex128)
+        shape = (3, len(states), len(taps), count)
+        result = (np.empty(shape, np.complex128) if accelerator is None else accelerator.empty(shape))
+        result[0] = 0
+        data = result[1:].reshape(len(rows), count)
         positions = np.asarray(physical_offsets, dtype=np.float64)
         for lo in range(0, count, 16384):
             hi = min(count, lo+16384)
@@ -368,14 +375,17 @@ def tracking_source_basis(source, coordinates, taps, offset, timing_forward, aud
             for col in range(0, len(rows), 128):
                 data[col:col+128, lo:hi] = template_source.basis_mapped(int(physical_origin)+shift,
                     positions[lo:hi]-shift, rows[col:col+128], audio_center_hz)
-        result = np.zeros((3, len(states), len(taps), count), np.complex128)
-        result[1:] = data.reshape(2, len(states), len(taps), count)
         return result
     def render(states, anchor_seconds, first, stop, physical_origin, physical_offsets):
         return _render(states, anchor_seconds, first, stop, physical_origin, physical_offsets,
             fixed_affine=False)
     render.cache_report = (template_source.report if template_backend == 'auto'
                            else lambda: dict(method='direct-native-mapped-reference', cache_limit_bytes=0))
+    render.staging_workspace_bytes = (template_source.staging_workspace_bytes
+                                      if template_backend == 'auto' else 0)
+    if accelerator is not None:
+        render.bulk_statistics = accelerator.statistics
+        render.bulk_arithmetic = accelerator.arithmetic
     def initial_affine(states, anchor_seconds, first, stop, physical_origin, physical_offsets):
         return _render(states, anchor_seconds, first, stop, physical_origin, physical_offsets,
             fixed_affine=True)

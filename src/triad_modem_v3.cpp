@@ -357,11 +357,31 @@ void PatternSource::render_bank(std::span<PatternSource* const> sources,
         std::span<Complex> output){
     require(std::isfinite(first_sample)&&std::isfinite(sample_step)&&sample_step>0,
             "triad v3 bank requires a finite positive sample lattice");
+    require(!count||std::isfinite(first_sample+(count-1)*sample_step),
+            "triad v3 render bank coordinate overflow");
+    render_bank_impl(sources,first_sample,sample_step,count,{},output);
+}
+void PatternSource::render_bank(std::span<PatternSource* const> sources,
+        std::uint64_t first_sample,std::span<const double> offsets,
+        std::span<Complex> output){
+    const auto first=static_cast<long double>(first_sample);
+    double previous=-1;
+    for(const auto offset:offsets){
+        // The mapped protocol orders offsets before adding the integer
+        // origin. Valid offsets can round to the same absolute coordinate.
+        require(std::isfinite(offset)&&offset>=0&&
+                static_cast<long double>(offset)<=static_cast<long double>(UINT64_MAX-first_sample)&&
+                offset>previous,"triad v3 render bank has invalid mapped coordinates");
+        previous=offset;
+    }
+    render_bank_impl(sources,first,1,offsets.size(),offsets,output);
+}
+void PatternSource::render_bank_impl(std::span<PatternSource* const> sources,
+        long double first_sample,long double sample_step,std::size_t count,
+        std::span<const double> offsets,std::span<Complex> output){
     require(!count||sources.size()<=std::numeric_limits<std::size_t>::max()/count,
             "triad v3 render bank extent overflow");
     require(output.size()==sources.size()*count,"triad v3 render bank output extent mismatch");
-    require(!count||std::isfinite(first_sample+(count-1)*sample_step),
-            "triad v3 render bank coordinate overflow");
     for(auto* source:sources)require(source&&source->impl_,"triad v3 render bank has an empty source");
     if(sources.empty()||!count)return;
     // Deliberately compare all geometry inputs, not key-dependent controls.
@@ -388,7 +408,7 @@ void PatternSource::render_bank(std::span<PatternSource* const> sources,
         std::uint64_t minimum=UINT64_MAX,maximum=0;
         for(std::size_t i=0;i<n;++i){
             auto& point=points[i];point.length=0;
-            const auto sample=first_sample+(begin+i)*sample_step;
+            const auto sample=first_sample+(offsets.empty()?(begin+i)*sample_step:offsets[begin+i]);
             if(sample<0||sample>=g.source_samples)continue;
             const long double t=(sample-ref.halo)/ref.sample_rate;
             const auto envelope=ref.envelope(t);if(envelope==0)continue;

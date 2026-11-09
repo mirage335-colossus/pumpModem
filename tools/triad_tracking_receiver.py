@@ -65,7 +65,7 @@ class _TimingStream:
                  maximum_segment_samples=1_048_576,
                  require_physical_map=False, maximum_map_step_samples=2.,
                  hypothesis_executor=None, hypothesis_shards=1,
-                 quiet_sample_bounds=None):
+                 quiet_sample_bounds=None, bulk_statistics=None):
         began = time.perf_counter()
         self.sample_rate = float(sample_rate)
         if not math.isfinite(self.sample_rate) or self.sample_rate <= 0:
@@ -121,7 +121,8 @@ class _TimingStream:
             memory_limit_bytes=self.memory_limit_bytes-buffer_bytes-timing_bytes,
             maximum_candidates=timing_forward.maximum_proposals,
             maximum_input_chunk_samples=self.segment_capacity,
-            hypothesis_executor=hypothesis_executor, hypothesis_shards=hypothesis_shards)
+            hypothesis_executor=hypothesis_executor, hypothesis_shards=hypothesis_shards,
+            bulk_statistics=bulk_statistics)
         # The maintained receiver validates arithmetic, bands, prior and its
         # worst candidate workspace without synthesizing any source template.
         probe = IncrementalReceiver(samples=self.segment_capacity,
@@ -224,11 +225,13 @@ class _TimingStream:
         anchor_seconds = (np.longdouble(origin)+np.longdouble(midpoint))/np.longdouble(self.sample_rate)
 
         def render(lo, hi):
-            basis = np.asarray(self.basis_provider(states, anchor_seconds,
-                first+lo, first+hi, origin, offsets[lo:hi]), dtype=np.complex128)
+            basis = self.basis_provider(states, anchor_seconds,
+                first+lo, first+hi, origin, offsets[lo:hi])
+            if self.receiver_arguments['bulk_statistics'] is None:
+                basis = np.asarray(basis, dtype=np.complex128)
             if basis.shape != (3, len(states), len(self.receiver_arguments["stationary_power"]), hi-lo):
                 raise ValueError("tracking basis must return [3,state,tap,block_rows]")
-            if np.any(basis[0] != 0):
+            if self.receiver_arguments['bulk_statistics'] is None and np.any(basis[0] != 0):
                 raise ValueError("tracking's common Gaussian noise null requires an exactly zero H0 basis")
             return basis
 
@@ -645,13 +648,18 @@ class PracticalTrackingReceiver:
     """
 
     def __init__(self, *, timing_forward, memory_limit_bytes=512*1024**2,
-                 initial_affine_basis_provider=None, **arguments):
+                 initial_affine_basis_provider=None, shared_basis_workspace_bytes=0, **arguments):
         began = time.perf_counter()
         if not isinstance(timing_forward, SparseTimingForward):
             raise TypeError('practical tracking requires a public timing-forward prior')
         if timing_forward.observations or timing_forward.predictions:
             raise ValueError('practical tracking requires an unused timing-forward prior')
         self.memory_limit_bytes = _integer(memory_limit_bytes, 'workspace bytes')
+        shared_basis_workspace_bytes = _integer(shared_basis_workspace_bytes,
+            'shared basis workspace bytes', low=0)
+        lane_budget = self.memory_limit_bytes-shared_basis_workspace_bytes
+        if lane_budget < 1:
+            raise MemoryError('shared basis staging exhausts tracking workspace')
         weights = timing_forward.component_log_weights()
         model_probabilities = np.exp(_logsumexp(weights[:, 0, :], axis=-1))
         initial_probabilities = np.exp(_logsumexp(weights[:, 0, :], axis=0))
@@ -678,13 +686,14 @@ class PracticalTrackingReceiver:
                 raise TypeError('initial affine basis provider must be callable')
             nominal_arguments['basis_provider'] = initial_affine_basis_provider
         self.nominal = _InitialAffineReceiver(timing_forward=nominal_forward,
-            memory_limit_bytes=self.memory_limit_bytes, **nominal_arguments)
-        remaining = self.memory_limit_bytes-self.nominal.owned_bytes_estimate
+            memory_limit_bytes=lane_budget, **nominal_arguments)
+        remaining = lane_budget-self.nominal.owned_bytes_estimate
         if remaining <= 0:
             raise MemoryError('initial affine lane exhausts combined tracking workspace')
         self.adaptive = _PersistentTimingLane(timing_forward=timing_forward,
             memory_limit_bytes=remaining, **arguments)
-        self.owned_bytes_estimate = self.nominal.owned_bytes_estimate+self.adaptive.owned_bytes_estimate
+        self.owned_bytes_estimate = (shared_basis_workspace_bytes+
+            self.nominal.owned_bytes_estimate+self.adaptive.owned_bytes_estimate)
         for name in ('sample_rate','samples','block_samples','segment_samples','precision',
                      'receiver_arguments','timing'):
             setattr(self, name, getattr(self.adaptive, name))

@@ -192,7 +192,7 @@ def run_native_message_gate(executable, memory_limit_bytes, workers=1, *,
     invalidates qualification even if the observed fixture decoded correctly.
     """
     from triad_cases import DEFAULT_CASES, load_cases
-    from triad_case_suite import identity
+    from triad_case_suite import identity, same_measured_source
     from triad_cpu import configure_numerical_threads, resolve_cpu_budget
 
     parsed = load_cases(DEFAULT_CASES if case_list is None else case_list)
@@ -236,8 +236,7 @@ def run_native_message_gate(executable, memory_limit_bytes, workers=1, *,
     try:
         final = identity(executable)
         report['final_identity'] = final
-        source_unchanged = (provenance['sources'] == final['sources'] and
-            provenance['native_binary_sha256'] == final['native_binary_sha256'])
+        source_unchanged = same_measured_source(provenance, final)
     except Exception as error:
         source_unchanged = False
         report['final_identity'] = dict(error_type=type(error).__name__[:64])

@@ -1,6 +1,7 @@
 """Shared manual-case helper contracts; complete-runner orchestration is tested separately."""
 from pathlib import Path
 from contextlib import ExitStack
+import ast
 import hashlib
 import json
 import sys
@@ -10,11 +11,45 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from triad_cases import DEFAULT_CASES
-from triad_case_suite import run_cases, select_cases, target_snr, write_result
+from triad_case_suite import GPU_ONLY_SOURCES, run_cases, same_measured_source, select_cases, target_snr, write_result
 from tests.test_triad_duration_model import complete_receipt, fixture
 
 
 class SuiteHelperTests(unittest.TestCase):
+    def test_gpu_only_source_exclusions_remain_outside_manual_cpu_imports(self):
+        root = Path(__file__).resolve().parents[1]
+        tools = root / 'tools'
+        pending = [tools / 'triad_manual_cases.py']
+        seen = set()
+        while pending:
+            path = pending.pop()
+            if path in seen:
+                continue
+            seen.add(path)
+            self.assertNotIn(path.relative_to(root).as_posix(), GPU_ONLY_SOURCES)
+            for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
+                if isinstance(node, ast.Import):
+                    names = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module == 'tools':
+                    names = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module is not None:
+                    names = [node.module]
+                else:
+                    continue
+                for name in names:
+                    dep = tools / (name.removeprefix('tools.').split('.')[0]+'.py')
+                    self.assertNotIn(dep.relative_to(root).as_posix(), GPU_ONLY_SOURCES)
+                    if dep.is_file():
+                        pending.append(dep)
+
+    def test_identity_compares_loaded_artifacts_and_records_revision_as_context(self):
+        original = dict(revision='one', sources={'receiver': 'source'}, native_binary_sha256='binary',
+                        native_artifacts={'mapped': 'kernel'})
+        self.assertTrue(same_measured_source(original, dict(original, revision='two')))
+        self.assertFalse(same_measured_source(original, dict(original, native_artifacts={'mapped': 'changed'})))
+        self.assertFalse(same_measured_source(original, dict(original, sources={'receiver': 'changed'})))
+        self.assertFalse(same_measured_source(original, {'sources': original['sources']}))
+
     def test_explicit_selection_uses_fresh_indices_and_rejects_stale_rows(self):
         parsed = dict(cases=[dict(index=1), dict(index=2), dict(index=3)])
         self.assertIs(select_cases(parsed), parsed["cases"])
@@ -31,7 +66,7 @@ class SuiteHelperTests(unittest.TestCase):
             executable="exporter", output="capacity.json", case_list=DEFAULT_CASES,
             measurement_seconds=1., threads=None, case_indices=None,
             paired_followup=False, message_gate=True, sustained_allocation_probe=False,
-            workspace_mib=None, calibration_receipt_prefix=None, allow_conditional_calibration_identity=False,
+            workspace_mib=None, full_logical_inference=False,
         )
 
     def test_wrapper_forwards_partial_measurement_and_message_gate(self):
@@ -43,38 +78,33 @@ class SuiteHelperTests(unittest.TestCase):
             executable=Path("exporter"), output=Path("out.json"), case_list=Path("edited.md"),
             measurement_seconds=.5, threads=6, case_indices=[2, 4],
             paired_followup=False, message_gate=False, sustained_allocation_probe=False,
-            workspace_mib=None, calibration_receipt_prefix=None, allow_conditional_calibration_identity=False,
+            workspace_mib=None, full_logical_inference=False,
         )
 
-    def test_suite_saves_the_same_canonical_measurement_once_with_private_identity(self):
+    def test_full_logical_suite_keeps_ordered_duplicate_rows_and_runs_one_canonical_measurement(self):
         import triad_case_capacity as capacity
         import triad_case_suite as suite
-        import triad_cases
-        import triad_nonfine_calibration as calibration
 
         with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
             root = Path(directory)
-            evidence = root / 'local-evidence'; evidence.mkdir()
-            tools = root / 'tools'; tools.mkdir()
-            (tools / 'build_capacity.py').write_text('fixture source')
-            source = root / 'manual.md'; source.write_text('fixture list')
+            source = root / 'manual.md'
+            source.write_text('fixture list')
             digest = hashlib.sha256(source.read_bytes()).hexdigest()
             cases = [dict(index=index, heading=f'case {index}', id=f'id-{index}',
                 configuration_hash='shared', native_args=[]) for index in (1, 2)]
-            provenance = dict(revision='rev', sources={}, native_binary_sha256='exporter')
-            identity = dict(native_binary_sha256='exporter', sources={'tools/build_capacity.py':
-                hashlib.sha256((tools/'build_capacity.py').read_bytes()).hexdigest()}, private='identity')
-            measurement = dict(status='measured_complete_work_estimate', signal_work={'private': 'signal'},
-                complete_capacity={'realtime_status': 'fail'})
-            receipt = dict(schema=calibration.SCHEMA, status='recorded_unqualified', measurement=measurement,
-                identity_before={'identity': identity})
-            stack.enter_context(mock.patch.object(triad_cases, 'ROOT', root))
-            stack.enter_context(mock.patch.object(triad_cases, 'load_cases',
+            provenance = dict(revision='rev', sources={}, native_binary_sha256='exporter', native_artifacts={})
+            measurement = dict(status='measured_complete_work_estimate',
+                complete_capacity={'realtime_status': 'pass'})
+            stack.enter_context(mock.patch('triad_cases.load_cases',
                 return_value=dict(cases=cases, source_sha256=digest)))
             stack.enter_context(mock.patch('triad_case_metrics.machine_resources', return_value={
-                'cpu': {'receiver_worker_candidates': [1, 2], 'available_cpus': 2}, 'memory_budget_bytes': 2**33}))
+                'cpu': {'receiver_worker_candidates': [1,2,4,6,12], 'available_cpus': 12,
+                        'topology': {'status': 'complete', 'physical_core_count': 6}},
+                'memory_budget_bytes': 2**33}))
             stack.enter_context(mock.patch('triad_cpu.resolve_cpu_budget'))
             stack.enter_context(mock.patch('triad_cpu.configure_numerical_threads'))
+            stack.enter_context(mock.patch('triad_abbreviated.environment',
+                side_effect=lambda _: dict(torch_threads=1)))
             stack.enter_context(mock.patch.object(suite, 'identity', side_effect=lambda _: provenance.copy()))
             stack.enter_context(mock.patch.object(suite, 'native_plan', return_value={'geometry_feasible': True}))
             stack.enter_context(mock.patch.object(suite, 'target_snr', return_value={'status': 'checked'}))
@@ -84,65 +114,30 @@ class SuiteHelperTests(unittest.TestCase):
             prepare = stack.enter_context(mock.patch.object(capacity, 'PreparedCapacityCase'))
             prepared = prepare.return_value.__enter__.return_value
             prepared.receiver_preparation_seconds = prepared.simulator_generation_seconds = 1.
+            prepared.channel_seed, prepared.noise_seed, prepared.source_bit = 74021, 88200, 0
             prepared.public_geometry = {'fine_unit_seconds': .5}
             prepared.quiet_energy_diagnostic.return_value = {'status': 'observed'}
-            stack.enter_context(mock.patch.object(capacity, 'sustained_allocation_targets', return_value=[2]))
-            direct = stack.enter_context(mock.patch.object(capacity, 'measure_complete_case'))
 
-            def capture(*args, **kwargs):
+            def measure(*args, **kwargs):
                 gate.assert_called_once()
                 prepared.quiet_energy_diagnostic.assert_called_once_with({'status': 'checked'})
-                return receipt
+                return measurement
 
-            fit = stack.enter_context(mock.patch.object(calibration, 'capture_nonfine_calibration', side_effect=capture))
-            report_path = evidence / 'suite.json'
-            prefix = evidence / 'fit'
-            def run():
-                return capacity.run_complete_cases(executable='exporter', output=report_path,
-                    case_list=source, workspace_mib=4096, calibration_receipt_prefix=prefix,
-                    allow_conditional_calibration_identity=True, sustained_allocation_probe=True,
-                    measurement_seconds=.9)
+            direct = stack.enter_context(mock.patch.object(capacity, 'measure_complete_case',
+                                                            side_effect=measure))
+            result = capacity.run_complete_cases(executable='exporter', output=root/'suite.json',
+                case_list=source, workspace_mib=4096, sustained_allocation_probe=True,
+                full_logical_inference=True)
 
-            result = run()
-            direct.assert_not_called()
             prepare.assert_called_once()
+            self.assertEqual(prepare.call_args.kwargs['bank_workers'], 12)
             self.assertEqual(prepare.call_args.kwargs['memory_limit_bytes'], 4096*2**20)
-            fit.assert_called_once()
-            self.assertEqual(fit.call_args.kwargs['family_size'], 16)
-            self.assertEqual(fit.call_args.kwargs['sustained_targets'], [2])
-            self.assertEqual(fit.call_args.kwargs['suite_list_sha256'], digest)
-            self.assertTrue(fit.call_args.kwargs['allow_conditional'])
-            self.assertEqual(result['policy']['unit_baseband_seconds'], 1.)
-            self.assertIn('possibly shorter', result['policy']['unit_baseband_seconds_scope'])
-            self.assertEqual(result['cases'][0]['public_geometry']['fine_unit_seconds'], .5)
-            self.assertEqual(result['status'], 'capacity_failures')
+            direct.assert_called_once()
+            self.assertEqual(direct.call_args.args[1], [1,6,12])
+            self.assertEqual(direct.call_args.kwargs['inference_workers'], 12)
+            self.assertEqual(result['status'], 'conditional_capacity_pass')
             self.assertEqual(result['cases'][1]['reused_measurement_from'], cases[0]['id'])
-            self.assertEqual(result['cases'][0]['private_replay_fit']['status'], 'recorded_unqualified')
-            self.assertEqual(result['cases'][1]['private_replay_fit']['reason'],
-                'ordered_duplicate_reuses_absolute_measurement')
-            self.assertNotIn('signal_work', report_path.read_text())
-            self.assertNotIn('identity_before', report_path.read_text())
-            fit_path = evidence / 'fit-1.json'
-            self.assertEqual(fit_path.stat().st_mode & 0o777, 0o600)
-            saved_fit = json.loads(fit_path.read_text())
-            self.assertEqual(saved_fit['measurement'], measurement)
-            self.assertEqual(saved_fit['originating_suite_message_gate'], {'status': 'passed', 'passed': True})
-            self.assertEqual(json.loads((evidence/'fit-2.json').read_text())['status'], 'unresolved')
-            with self.assertRaisesRegex(ValueError, 'already exists'):
-                run()
-            fit.assert_called_once()
-
-            fit.side_effect = None
-            fit.return_value = receipt.copy()
-            failed_gate_report = capacity.run_complete_cases(executable='exporter', output=report_path,
-                case_list=source, workspace_mib=4096, calibration_receipt_prefix=evidence/'debug-fit',
-                message_gate=False)
-            self.assertEqual(failed_gate_report['cases'][0]['measurement']['complete_capacity']['realtime_status'], 'fail')
-            self.assertEqual(failed_gate_report['cases'][0]['private_replay_fit'], {
-                'status':'unresolved', 'reason':'originating_suite_message_gate_did_not_pass'})
-            gate.assert_called_once()
-            self.assertEqual(fit.call_count, 2)
-            direct.assert_not_called()
+            self.assertEqual(result['policy']['full_logical_inference_workers'], 12)
 
     def test_legacy_coarse_paired_followup_is_rejected_by_complete_runner(self):
         from triad_case_capacity import run_complete_cases

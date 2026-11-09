@@ -9,19 +9,46 @@ import subprocess
 from triad_cases import DEFAULT_CASES, ROOT, load_cases
 
 
-def identity(executable):
+# These leaf entry points/backends never enter the CPU suite import closure.
+# Shared receiver hooks and build artifacts are still part of its identity.
+GPU_ONLY_SOURCES = frozenset({
+    'tools/triad_gpu_bank.py', 'tools/triad_gpu_bundle.py',
+    'tools/triad_gpu_cpu_forecast.py', 'tools/triad_gpu_fine.py',
+    'tools/triad_gpu_workload.py',
+})
+
+
+def measured_source_hashes():
+    """Shared measured implementation closure, independent of Git metadata."""
     paths = sorted(set([*ROOT.glob("tools/triad*.*"), *ROOT.glob("src/triad*.*"),
                         *ROOT.glob("include/datapump/triad*.*"),
+                        ROOT / "tools/build_capacity.py",
                         ROOT / "src/compression_short.cpp", ROOT / "src/tuning_presets.cpp",
                         ROOT / "src/helper_carrier.cpp"]))
+    return {p.relative_to(ROOT).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in paths if p.is_file() and p.relative_to(ROOT).as_posix() not in GPU_ONLY_SOURCES}
+
+
+def identity(executable):
+    from triad_tracking_basis import mapped_kernel_path
+
+    kernel = mapped_kernel_path(executable)
+    if not kernel.is_file():
+        raise FileNotFoundError(f'mapped basis kernel unavailable; rebuild triad_helper_export: {kernel}')
     return {
         "revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         "dirty_paths": subprocess.check_output(["git", "status", "--short"], cwd=ROOT, text=True).splitlines(),
-        "sources": {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
-                    for p in paths if p.is_file()},
+        "sources": measured_source_hashes(),
         "native_binary": str(executable),
         "native_binary_sha256": hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
+        "native_artifacts": {str(kernel): hashlib.sha256(kernel.read_bytes()).hexdigest()},
     }
+
+
+def same_measured_source(before, after):
+    """Compare actual measurement inputs; Git revision is context."""
+    return all(key in before and key in after and before[key] == after[key] for key in
+               ('sources', 'native_binary_sha256', 'native_artifacts'))
 
 
 def native_plan(executable, native_args):
@@ -98,7 +125,7 @@ def select_cases(parsed, indices=None):
 
 def run_cases(*, executable, output, case_list=DEFAULT_CASES, measurement_seconds=1., threads=None,
               case_indices=None, paired_followup=False, message_gate=True, sustained_allocation_probe=False,
-              workspace_mib=None, calibration_receipt_prefix=None, allow_conditional_calibration_identity=False):
+              workspace_mib=None, full_logical_inference=False):
     """Compatibility wrapper for the dedicated absolute-capacity runner."""
     from triad_case_capacity import run_complete_cases
     return run_complete_cases(
@@ -107,11 +134,10 @@ def run_cases(*, executable, output, case_list=DEFAULT_CASES, measurement_second
         case_list=case_list,
         measurement_seconds=measurement_seconds,
         threads=threads,
+        full_logical_inference=full_logical_inference,
         case_indices=case_indices,
         paired_followup=paired_followup,
         message_gate=message_gate,
         sustained_allocation_probe=sustained_allocation_probe,
         workspace_mib=workspace_mib,
-        calibration_receipt_prefix=calibration_receipt_prefix,
-        allow_conditional_calibration_identity=allow_conditional_calibration_identity,
     )

@@ -68,6 +68,34 @@ class WorkOnlyFixtureTests(unittest.TestCase):
         self.assertEqual(sample['status'],'receiving')
         self.assertGreater(sample['peak_overlap_buffer_bytes'],0)
 
+    def test_recurring_assembly_ingests_gap_and_dispatches_the_whole_later_window(self):
+        class GappedSource(FakeSource):
+            def slot_plan(self, index):
+                row = super().slot_plan(index)
+                for key in ('receiver_window_first_sample', 'receiver_window_stop_sample',
+                            'receiver_window_physical_origin_sample'):
+                    row[key] += 85*index
+                return row
+
+        prepared = Prepared()
+        prepared.basis_source = GappedSource()
+        prepared.calendar = {'plans': [prepared.basis_source.slot_plan(i) for i in range(4)]}
+        prepared.raw = np.arange(100, dtype=np.complex128)
+        from triad_orchestration_cost import _WindowReceiptOnlyBackend
+        original = _WindowReceiptOnlyBackend.receive
+        seen = []
+        def receive(owner, values, valid):
+            seen.append(values.copy())
+            return original(owner, values, valid)
+        with mock.patch.object(_WindowReceiptOnlyBackend, 'receive', receive):
+            result = _full_window_assembly(prepared, recurring_slot=2, resident_bank_bytes=512)
+        np.testing.assert_array_equal(seen[0], prepared.raw)
+        self.assertEqual(result['public_slot_index'], 2)
+        self.assertEqual(result['native_window_first_sample'], 250)
+        self.assertEqual(result['actual_prefix_samples'], 25)
+        self.assertEqual(result['physical_ingested_samples'], 125)
+        self.assertEqual(result['exact_window_samples'], 100)
+
     def test_full_public_window_runs_assembly_dispatch_but_not_success(self):
         prepared=Prepared()
         prepared.raw=np.arange(100,dtype=float).astype(np.complex128)

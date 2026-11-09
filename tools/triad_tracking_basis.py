@@ -11,9 +11,43 @@ Unsupported pulse/oversampling regimes explicitly use the native reference.
 from __future__ import annotations
 
 from collections import OrderedDict
+import ctypes
+from functools import lru_cache
 import math
+from pathlib import Path
+import shutil
+import sys
 
 import numpy as np
+
+
+_MAX_PINNED_TILES = 32
+
+
+def mapped_kernel_path(exporter):
+    """The CMake-built mapped renderer is colocated with the native exporter."""
+    executable = Path(shutil.which(str(exporter)) or exporter).resolve()
+    suffix = '.dll' if sys.platform == 'win32' else '.dylib' if sys.platform == 'darwin' else '.so'
+    return executable.with_name('triad_mapped_kernel' + suffix)
+
+
+class _MappedRow(ctypes.Structure):
+    _fields_ = [('fraction', ctypes.c_double), ('scale', ctypes.c_double),
+        ('phase', ctypes.c_double), ('phase_step', ctypes.c_double),
+        ('origin', ctypes.c_int64), ('tile_count', ctypes.c_size_t),
+        ('tiles', ctypes.c_void_p), ('output', ctypes.c_void_p)]
+
+
+@lru_cache(maxsize=4)
+def _load_kernel(path):
+    try:
+        render = ctypes.CDLL(str(path)).triad_render_mapped_v1
+    except (OSError, AttributeError) as error:
+        raise OSError('mapped basis kernel unavailable; rebuild triad_helper_export: ' + str(path)) from error
+    render.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p,
+                       ctypes.c_size_t, ctypes.c_size_t]
+    render.restype = None
+    return render
 
 
 class CachedMappedBasis:
@@ -26,7 +60,8 @@ class CachedMappedBasis:
     samples are summed; this is not a carrier-label channel approximation.
     """
     def __init__(self, source, *, cache_bytes=32*1024**2, tile_samples=8192,
-                 minimum_oversampling=8., maximum_dense_factor=4):
+                 minimum_oversampling=8., maximum_dense_factor=4,
+                 executor=None, workers=1, kernel_path=None, accelerator=None):
         self.source = source
         if (isinstance(tile_samples, bool) or not isinstance(tile_samples, int) or not 4 <= tile_samples <= 16384 or
             isinstance(cache_bytes, bool) or not isinstance(cache_bytes, int) or not 2*tile_samples*16 <= cache_bytes <= 1024**3 or
@@ -40,6 +75,15 @@ class CachedMappedBasis:
         self.calls = self.cache_hits = self.cache_misses = self.native_calls = self.evictions = 0
         self.interpolated_rows = self.direct_rows = self.native_samples = 0
         self.large_phase_fallback_rows = 0
+        self.staging_fallback_rows = 0
+        self.mapped_worker_tasks = self.maximum_mapped_workers = 0
+        if (isinstance(workers, bool) or not isinstance(workers, int) or workers < 1 or
+                (workers > 1 and executor is None)):
+            raise ValueError('mapped basis workers require the shared receiver executor')
+        self.executor, self.workers = executor, workers
+        self.accelerator = accelerator
+        self.kernel = None
+        self.staging_workspace_bytes = 0
         d = source.descriptor
         self.sample_rate = float(d['sample_rate_hz'])
         self.source_samples = int(d['source_samples'])
@@ -72,6 +116,17 @@ class CachedMappedBasis:
         self.interpolation_proxy = (3/128)*(math.pi/self.oversampling_ratio)**4
         self.dense_source_samples = self.source_samples*self.dense_factor
         self.maximum_dense_factor = maximum_dense_factor
+        if not self.fallback_reason:
+            if accelerator is None:
+                if kernel_path is None:
+                    kernel_path = mapped_kernel_path(source.command[0])
+                self.kernel = _load_kernel(Path(kernel_path))
+            # Bounded pinned arrays may outlive eviction from the LRU until a
+            # batch joins. Include native response and descriptor/map staging.
+            self.staging_workspace_bytes = (
+                (_MAX_PINNED_TILES+4)*self.tile_samples*16+512*1024)
+        if accelerator is not None:
+            self.staging_workspace_bytes += accelerator.workspace_bytes
 
     def _insert(self, key, data):
         previous = self.cache.pop(key, None)
@@ -112,38 +167,55 @@ class CachedMappedBasis:
             # Fixed-size tiles keep the memory bound independent of endpoints.
             stored = np.zeros(self.tile_samples, dtype=np.complex128)
             stored[:count] = values[b]
+            stored.flags.writeable = False
             self._insert((b, epoch, tile), stored)
         self.cache.move_to_end(key)
         return self.cache[key]
 
-    def _gather(self, bit, epoch, origin, relative):
-        result = np.zeros(len(relative), dtype=np.complex128)
-        tile_origin, within_origin = divmod(origin, self.tile_samples)
-        small = relative+within_origin
-        tile_delta = small//self.tile_samples
-        within = small % self.tile_samples
-        # Public mapped-basis offsets are strictly increasing, but multiple
-        # interpolator gathers can still contain duplicate integer indices.
-        # When every requested sample occupies one tile, one advanced lookup
-        # preserves that order and avoids sorting the same tile ids for all
-        # four cubic neighbors. Keep the general grouped path for any boundary
-        # crossing or privately supplied nonmonotonic coordinates.
-        if len(tile_delta) and np.all(tile_delta == tile_delta[0]):
-            tile_index = tile_origin+int(tile_delta[0])
-            if 0 <= tile_index*self.tile_samples < self.dense_source_samples:
-                result[:] = self._tile(bit, epoch, tile_index)[within]
-            return result
-        for delta in np.unique(tile_delta):
-            tile = tile_origin+int(delta)
-            if tile < 0 or tile*self.tile_samples >= self.dense_source_samples:
-                continue
-            selected = tile_delta == delta
-            result[selected] = self._tile(bit, epoch, tile)[within[selected]]
-        return result
-
     def _direct(self, first, offsets, rows, center):
         self.direct_rows += len(rows)
-        return self.source.basis_mapped(first, offsets, rows, center)
+        values = self.source.basis_mapped(first, offsets, rows, center)
+        return values if self.accelerator is None else self.accelerator.transfer(values)
+
+    def _render(self, rows, offsets, answer, pinned):
+        if self.accelerator is not None:
+            self.accelerator.render(rows, offsets, answer, pinned)
+            self.interpolated_rows += len(rows)
+            return
+        descriptors = (_MappedRow*len(rows))(*(row for row, _ in rows))
+        offset_data = offsets.ctypes.data
+
+        def run(lo, hi, _keep_alive=(rows, answer, pinned)):
+            # Each future retains the pointer targets even if its controller
+            # is interrupted while waiting.
+            self.kernel(ctypes.byref(descriptors, lo*ctypes.sizeof(_MappedRow)), hi-lo,
+                        offset_data, len(offsets), self.tile_samples)
+
+        workers = min(self.workers, len(rows))
+        if workers == 1:
+            run(0, len(rows))
+        else:
+            futures, error = [], None
+            for worker in range(workers):
+                try:
+                    futures.append(self.executor.submit(run, worker*len(rows)//workers,
+                                                         (worker+1)*len(rows)//workers))
+                except BaseException as exc:
+                    error = exc
+                    break
+            # Join every worker before the controller can release its input
+            # tiles or output, even after a submission or worker error.
+            for future in futures:
+                try:
+                    future.result()
+                except BaseException as exc:
+                    if error is None:
+                        error = exc
+            if error is not None:
+                raise error
+        self.interpolated_rows += len(rows)
+        self.mapped_worker_tasks += workers
+        self.maximum_mapped_workers = max(self.maximum_mapped_workers, workers)
 
     def basis_mapped(self, first, offsets, rows, audio_center_hz):
         offsets = np.asarray(offsets, dtype=np.float64)
@@ -171,81 +243,94 @@ class CachedMappedBasis:
         # first+offset to an absolute FP64 timestamp.
         if np.finfo(np.longdouble).nmant < 63 and first > (1 << 48):
             return self._direct(first, offsets, parsed, audio_center_hz)
+        offsets = np.ascontiguousarray(offsets)
         fs = np.longdouble(self.sample_rate)
-        answer = np.empty((len(parsed), len(offsets)), dtype=np.complex128)
-        for column, (bit, epoch, arrival, frequency, clock, delay, doppler) in enumerate(parsed):
-            scale = 1+clock*1e-6  # Same binary64 scale as the native candidate.
-            shift = np.longdouble(arrival+delay)
-            # Only the scalar origin needs long-double arithmetic. Relative
-            # offsets stay small, enabling vectorized FP64 gathers and avoiding
-            # absolute floating-point sample coordinates at large origins.
-            dense_origin = ((np.longdouble(first)-shift*fs)*np.longdouble(scale))*self.dense_factor
-            relative = offsets*(scale*self.dense_factor)
-            if not np.isfinite(dense_origin) or not np.isfinite(relative).all():
-                answer[column] = self._direct(first, offsets, [parsed[column]], audio_center_hz)[0]
-                continue
-            origin = int(np.floor(dense_origin))
-            relative = relative+float(dense_origin-np.longdouble(origin))
-            if (origin+math.ceil(float(relative[-1])) < -2 or
-                    origin+math.floor(float(relative[0])) >= self.dense_source_samples+2):
-                answer[column] = 0
-                continue
-            if np.max(np.abs(relative)) > 2**31:
-                answer[column] = self._direct(first, offsets, [parsed[column]], audio_center_hz)[0]
-                continue
-            # Outside finite source support the native template is exactly0.
-            # Compare using a scalar integer origin and relative coordinates.
-            relevant = (relative >= -2-origin) & (relative < self.dense_source_samples+2-origin)
-            if not np.any(relevant):
-                answer[column] = 0
-                continue
-            selected = np.flatnonzero(relevant)
-            grid = relative[selected]
-            if np.max(grid) > np.iinfo(np.int64).max-self.tile_samples-4:
-                answer[column] = self._direct(first, offsets, [parsed[column]], audio_center_hz)[0]
-                continue
-            integer = np.floor(grid).astype(np.int64)
-            fraction = grid-integer
-            w0 = -fraction*(fraction-1)*(fraction-2)/6
-            w1 = (fraction+1)*(fraction-1)*(fraction-2)/2
-            w2 = -(fraction+1)*fraction*(fraction-2)/2
-            w3 = (fraction+1)*fraction*(fraction-1)/6
-            values = (w0*self._gather(bit, epoch, origin, integer-1) +
-                      w1*self._gather(bit, epoch, origin, integer) +
-                      w2*self._gather(bit, epoch, origin, integer+1) +
-                      w3*self._gather(bit, epoch, origin, integer+2))
-            # Reduce the large constant origin before evaluating the small
-            # varying phase. CFO/Doppler stay in physical time; IF includes
-            # the complete source-time warp, not just its common CFO.
-            initial_time = np.longdouble(first)/fs
-            difference = ((np.longdouble(scale)-1)*np.longdouble(first)-np.longdouble(scale)*shift*fs)/fs
-            if max(abs(np.longdouble(frequency)*initial_time),
-                   abs(np.longdouble(doppler)*initial_time),
-                   abs(np.longdouble(audio_center_hz)*difference)) > 2**40:
-                # At enormous canceled origins the reference reduces each
-                # full absolute phase separately; match it directly rather
-                # than claim a more accurate split origin is bit-equivalent.
-                self.large_phase_fallback_rows += 1
-                answer[column] = self._direct(first, offsets, [parsed[column]], audio_center_hz)[0]
-                continue
-            constant = (np.remainder(np.longdouble(frequency)*initial_time, 1) +
-                        np.remainder(np.longdouble(doppler)*initial_time, 1) +
-                        np.remainder(np.longdouble(audio_center_hz)*difference, 1))
+        first_ld = np.longdouble(first)
+        initial_time = first_ld/fs
+        # Compute only the per-row absolute origins in extended precision.
+        # Positive affine maps let their two endpoints bound all tile accesses.
+        values = np.asarray(parsed, dtype=np.float64)
+        _, _, arrival, frequency, clock, delay, doppler = values.T
+        # Extreme finite input can overflow an intermediate. The endpoint
+        # and phase guards below then use the bounded native reference.
+        with np.errstate(over='ignore', invalid='ignore'):
+            scale = 1+clock*1e-6
+            shift = (arrival+delay).astype(np.longdouble)*fs
+            wide_scale = scale.astype(np.longdouble)
+            dense_scale = scale*self.dense_factor
+            dense_origin = ((first_ld-shift)*wide_scale)*self.dense_factor
+            origin_floor = np.floor(dense_origin)
+            fraction = (dense_origin-origin_floor).astype(np.float64)
+            relative_first = offsets[0]*dense_scale+fraction
+            relative_last = offsets[-1]*dense_scale+fraction
+            difference = ((wide_scale-1)*first_ld-wide_scale*shift)/fs
+            terms = (frequency.astype(np.longdouble)*initial_time,
+                     doppler.astype(np.longdouble)*initial_time,
+                     np.longdouble(audio_center_hz)*difference)
+            large_phase = np.maximum.reduce([np.abs(term) for term in terms]) > 2**40
+            constant = np.remainder(sum(np.remainder(term, 1) for term in terms), 1).astype(np.float64)
             slope = (frequency+doppler+audio_center_hz*(scale-1))/self.sample_rate
-            phase = float(np.remainder(constant, 1))+slope*offsets[selected]
-            if not np.isfinite(phase).all() or np.max(np.abs(phase)) > 2**30:
-                answer[column] = self._direct(first, offsets, [parsed[column]], audio_center_hz)[0]
+            phase_first = constant+slope*offsets[0]
+            phase_last = constant+slope*offsets[-1]
+
+        shape = (len(parsed), len(offsets))
+        answer = (np.empty(shape, dtype=np.complex128) if self.accelerator is None
+                  else self.accelerator.empty(shape))
+        answer_data = answer.ctypes.data if self.accelerator is None else None
+        pending, pinned = [], {}
+
+        def flush():
+            if pending:
+                self._render(pending, offsets, answer, pinned)
+                pending.clear()
+                pinned.clear()
+
+        for column, row in enumerate(parsed):
+            bit, epoch = row[:2]
+            if not (math.isfinite(relative_first[column]) and math.isfinite(relative_last[column])):
+                answer[column] = self._direct(first, offsets, [row], audio_center_hz)[0]
                 continue
-            values *= np.exp(2j*math.pi*np.remainder(phase, 1))
-            answer[column] = 0
-            answer[column, selected] = values
-            self.interpolated_rows += 1
-        if not np.isfinite(answer).all():
+            origin = int(origin_floor[column])
+            lower = origin+math.floor(relative_first[column])-1
+            upper = origin+math.floor(relative_last[column])+2
+            if upper < 0 or lower >= self.dense_source_samples:
+                if self.accelerator is None:
+                    answer[column] = 0
+                continue
+            low_tile = max(0, lower)//self.tile_samples
+            high_tile = min(self.dense_source_samples-1, upper)//self.tile_samples
+            count = high_tile-low_tile+1
+            bounded = (abs(relative_last[column]) <= 2**31 and
+                       abs(phase_first[column]) <= 2**30 and abs(phase_last[column]) <= 2**30)
+            if large_phase[column] or not bounded or count > _MAX_PINNED_TILES:
+                self.large_phase_fallback_rows += int(large_phase[column])
+                self.staging_fallback_rows += int(count > _MAX_PINNED_TILES)
+                answer[column] = self._direct(first, offsets, [row], audio_center_hz)[0]
+                continue
+            keys = [(bit, epoch, tile) for tile in range(low_tile, high_tile+1)]
+            if len(pinned)+sum(key not in pinned for key in keys) > _MAX_PINNED_TILES:
+                flush()
+            pointers = (ctypes.c_void_p*count)()
+            for i, key in enumerate(keys):
+                if key in pinned and key not in self.cache:
+                    self.cache_hits += 1
+                    tile = pinned[key]
+                else:
+                    tile = self._tile(*key)
+                    # An earlier descriptor may still point to the old array
+                    # if a sibling fill reintroduced this key into the LRU.
+                    tile = pinned.setdefault(key, tile)
+                pointers[i] = tile.ctypes.data
+            pending.append((_MappedRow(fraction[column], dense_scale[column], constant[column],
+                slope[column], origin-low_tile*self.tile_samples, count, ctypes.addressof(pointers),
+                answer_data+16*column*len(offsets) if answer_data is not None else column), pointers))
+        flush()
+        if self.accelerator is None and not np.isfinite(answer).all():
             raise FloatingPointError('mapped template cache produced nonfinite samples')
         return answer
 
     def report(self):
-        return dict(method='uniform-DATA-cache-cubic-Lagrange-v1', calls=self.calls,
+        return dict(method='uniform-DATA-cache-native-cubic-Lagrange-v2', calls=self.calls,
             interpolated_rows=self.interpolated_rows, direct_rows=self.direct_rows,
             cache_hits=self.cache_hits, cache_misses=self.cache_misses,
             native_preparation_calls=self.native_calls, native_preparation_samples=self.native_samples,
@@ -253,5 +338,9 @@ class CachedMappedBasis:
             cache_limit_bytes=self.byte_limit, tile_samples=self.tile_samples,
             dense_factor=self.dense_factor, oversampling_ratio=self.oversampling_ratio,
             large_phase_fallback_rows=self.large_phase_fallback_rows,
+            staging_fallback_rows=self.staging_fallback_rows,
+            staging_workspace_bytes=self.staging_workspace_bytes,
+            mapped_worker_tasks=self.mapped_worker_tasks, maximum_mapped_workers=self.maximum_mapped_workers,
+            **({'accelerator': self.accelerator.report()} if self.accelerator is not None else {}),
             interpolation_amplitude_proxy=self.interpolation_proxy, fallback_reason=self.fallback_reason,
             scope='metadata-selected interpolation; finite-pulse proxy is not a strict spectral/error bound; direct native fallback retained')

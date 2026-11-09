@@ -23,7 +23,7 @@ import numpy as np
 from scipy.stats import gamma
 
 from triad_acquisition import refinement_coordinates
-from triad_continuous import tracking_source_basis
+from triad_continuous import file_identity, tracking_source_basis
 from triad_case_replay import helper_workspace_estimate
 from triad_cpu import initialize_numerical_worker
 from triad_dynamic_variants import core_projection_bands
@@ -31,6 +31,7 @@ from triad_operational_admission import (DEFAULT_COHERENCES, operational_decisio
     operational_threshold, public_grid)
 from triad_realtime_fft import FFTScreen
 from triad_timing_forward import SparseTimingForward, TimingState
+from triad_tracking_basis import mapped_kernel_path
 from triad_tracking_receiver import PracticalTrackingReceiver
 from triad_weak_helper import estimate_weak_helper
 
@@ -204,9 +205,11 @@ class FineSession:
         self.provider = owner.basis_factory(owner.basis_source, self.coordinates,
             taps, offset, self.forward, float(ch['nominal_conversion_if_hz']),
             template_backend='auto' if p['cache_bytes'] else 'direct', cache_bytes=p['cache_bytes'],
-            source_offset_seconds=source_offset)
+            source_offset_seconds=source_offset, template_executor=owner.executor,
+            template_workers=owner.workers)
         self.template_calls = self.template_rows = 0
-        self.template_energy = 0.
+        self._template_energy = 0.
+        bulk_statistics = getattr(self.provider, 'bulk_statistics', None)
         reference = weakref.ref(self)
         def counted(provider):
             def render(*arguments):
@@ -215,8 +218,13 @@ class FineSession:
                     raise RuntimeError('fine session no longer owns its basis callback')
                 result = provider(*arguments)
                 current.template_calls += 1
-                current.template_rows += result.size
-                current.template_energy += float(np.vdot(result, result).real)
+                if bulk_statistics is None:
+                    current.template_rows += result.size
+                    current._template_energy += float(np.vdot(result, result).real)
+                else:
+                    current.template_rows += result.numel()
+                    flat = result.reshape(-1)
+                    current._template_energy = current._template_energy+flat.vdot(flat).real
                 return result
             return render
         render = counted(self.provider)
@@ -236,9 +244,14 @@ class FineSession:
             coherence_seconds=owner.coherences, device=owner.fine_execution_device, precision=p['precision'],
             audio_center_hz=float(ch['nominal_conversion_if_hz']),
             projection_mode='dft', memory_limit_bytes=available,
+            shared_basis_workspace_bytes=getattr(self.provider, 'staging_workspace_bytes', 0),
+            bulk_statistics=bulk_statistics,
             maximum_input_chunk_samples=p['chunk_samples'], require_physical_map=True,
             hypothesis_executor=owner.executor,
-            hypothesis_shards=max(1, math.ceil(owner.workers/len(owner.coherences))),
+            # The CPU's small state solves work best batched per coherence.
+            # The larger independent mapped-basis work uses the full pool.
+            hypothesis_shards=(1 if owner.fine_cuda_index is None else
+                               max(1, math.ceil(owner.workers/len(owner.coherences)))),
             quiet_sample_bounds=tuple(max(0, min(self.samples, x-self.origin))
                 for x in owner.quiet_aperture))
         self.initial_lattice = dict(states=len(states),
@@ -250,6 +263,10 @@ class FineSession:
             initial_delay_index_min=min(state.delay_index for state in states),
             initial_delay_index_max=max(state.delay_index for state in states),
             scope='Public finite covering lattice for coarse cells; not a continuous-parameter certificate.')
+
+    @property
+    def template_energy(self):
+        return float(self._template_energy)
 
     def push(self, first, values, valid=None):
         if self.receiver is None:
@@ -274,6 +291,8 @@ class FineSession:
         result['arithmetic'] = dict(precision=self.owner.policy['precision'], device=self.owner.fine_execution_device,
             likelihood_accumulation='fp64',
             selection='Predeclared before observing samples; no data-dependent precision fallback.')
+        if hasattr(self.provider, 'bulk_arithmetic'):
+            result['arithmetic']['bulk_statistics'] = self.provider.bulk_arithmetic
         plan = self.receiver.nominal_work_plan
         taps = len(self.receiver.receiver_arguments['stationary_power'])
         states = self.receiver.timing.maximum_proposals
@@ -300,10 +319,9 @@ class FineSession:
 class FineReceiverContext:
     """Canonical persistent fine search and classification context.
 
-    A complete receiver supplies the geometry of its validated, resident FFT
-    screen. Measurement replay supplies locally derived public geometry and
-    a reservation for the absent bank. A reservation cannot reproduce resident
-    memory or cache pressure.
+    A complete receiver supplies the geometry and workspace reservation of its
+    validated resident FFT screen. The fine search holds the same native public
+    basis address and per-receiver allocation across each complete slot.
     """
     def __init__(self, manifest, basis_source, *, epochs, clocks, projected_sample_rate,
                  coarse_frequency_step, coarse_reserved_bytes, coarse_procedure_id,
@@ -386,6 +404,10 @@ class FineReceiverContext:
         self.required_bands, self.excluded_bands = core_projection_bands(manifest,
             pilot_use='none', frequencies_hz=(-self.grid.frequency_bound, self.grid.frequency_bound),
             clock_ppm=(-self.grid.clock_bound, self.grid.clock_bound))
+        mapped_kernel_digest = None
+        if (basis_factory is tracking_source_basis and self.policy['cache_bytes'] and
+                hasattr(basis_source, 'command')):
+            mapped_kernel_digest = file_identity(mapped_kernel_path(basis_source.command[0]))['sha256']
         self.input_workspace_bytes = 0
         self.executor = None
         if self.workers > 1:
@@ -413,9 +435,11 @@ class FineReceiverContext:
             public_quiet_aperture=self.quiet_aperture,
             public_quiet_aperture_declared=self.quiet_aperture_declared,
             coarse_reference_noise_variance=coarse_reference_variance,
+            mapped_kernel_sha256=mapped_kernel_digest,
             source={name: hashlib.sha256((Path(__file__).parent/name).read_bytes()).hexdigest()
                 for name in ('triad_receiver.py','triad_tracking_receiver.py','triad_incremental_receiver.py',
-                             'triad_gaussian_state.py','triad_continuous.py')}),
+                             'triad_dynamic_joint.py','triad_gaussian_state.py','triad_continuous.py',
+                             'triad_tracking_basis.py')}),
             sort_keys=True).encode()).hexdigest()
         self.receiver_preparation_seconds = time.perf_counter()-began
 
@@ -503,7 +527,7 @@ class CompleteBitReceiver(FineReceiverContext):
                  memory_limit_bytes, policy=None, coherences=DEFAULT_COHERENCES,
                  admission_policy=None, basis_factory=tracking_source_basis, fine_device='cpu'):
         began = time.perf_counter()
-        if type(screen) is not FFTScreen:
+        if not isinstance(screen, FFTScreen):
             raise TypeError('complete bit backend currently requires the canonical whole FFTScreen')
         if (int(manifest['sample_rate_hz']) != screen.fs or
                 int(manifest['calendar']['capture_samples']) != screen.samples):
@@ -546,9 +570,11 @@ class CompleteBitReceiver(FineReceiverContext):
             screen.maximum_fft_products//(len(screen.workspaces)*len(screen.rays)))
         if unit < 1:
             return dict(status='unresolved', reason='frequency_tile_kernel_work_limit', candidates=[])
+        device_parallel = getattr(screen, 'device_parallel', False)
+        workers = 1 if device_parallel else self.workers
         plan = screen.tiled_frequency_plan(frequency_intervals=intervals,
             top_per_bit=self.policy['top_per_bit'], frequency_unit_points=unit,
-            workspace_workers=self.workers)
+            workspace_workers=workers)
         if plan['status'] != 'ready':
             return dict(status='unresolved', reason=plan['reason'], candidates=[], work=plan)
         filter_peak = screen.resident_estimate+64*self.samples+32*screen.crop_rows
@@ -556,8 +582,8 @@ class CompleteBitReceiver(FineReceiverContext):
             return dict(status='unresolved', reason='complete_input_filter_working_memory_limit', candidates=[])
         projected = screen.prepare_observation(raw, valid)
         session = screen.start_tiled_frequency(projected, frequency_intervals=intervals,
-            projection_receipt=screen.projection_receipt(), executor=self.executor,
-            workspace_workers=self.workers, frequency_unit_points=unit,
+            projection_receipt=screen.projection_receipt(), executor=None if device_parallel else self.executor,
+            workspace_workers=workers, frequency_unit_points=unit,
             top_per_bit=self.policy['top_per_bit'])
         if unit_limit is not None:
             try:
@@ -606,7 +632,8 @@ class CompleteBitReceiver(FineReceiverContext):
             self.input_workspace_bytes+self.native_workspace_bytes)
         if input_filter_peak > self.memory_limit_bytes:
             return dict(status='unresolved', reason='complete_input_filter_working_memory_limit', candidates=[])
-        count = min(self.workers, len(self.screen.workspaces))
+        device_parallel = getattr(self.screen, 'device_parallel', False)
+        count = 1 if device_parallel else min(self.workers, len(self.screen.workspaces))
         parts = []
         while count:
             parts = []
@@ -638,7 +665,7 @@ class CompleteBitReceiver(FineReceiverContext):
         def score(part):
             return part.score_projected(projected, frequency_intervals=intervals,
                 projection_receipt=part.projection_receipt(), top_per_bit=self.policy['top_per_bit'])
-        if self.executor is None:
+        if self.executor is None or device_parallel:
             results = [score(part) for part in parts]
         else:
             futures, error = [], None

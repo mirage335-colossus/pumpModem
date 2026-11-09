@@ -87,7 +87,7 @@ class IncrementalGaussianReceiver:
                  projection_mode="dft", maximum_input_chunk_samples=1_048_576,
                  block_center_seconds=None, initial_channel_state=None,
                  first_block_elapsed_seconds=0., hypothesis_executor=None,
-                 hypothesis_shards=1, quiet_sample_bounds=None):
+                 hypothesis_shards=1, quiet_sample_bounds=None, bulk_statistics=None):
         started = time.perf_counter()
         self.sample_rate = float(sample_rate)
         if not math.isfinite(self.sample_rate) or self.sample_rate <= 0:
@@ -156,6 +156,10 @@ class IncrementalGaussianReceiver:
             raise TypeError("physical block-center provider must be callable")
         self.block_center_seconds = block_center_seconds
         self.basis_callback = basis
+        if bulk_statistics is not None and (not callable(bulk_statistics) or
+                self.device.type != 'cpu' or self.dtype != torch.complex128):
+            raise ValueError('accelerated block statistics require the CPU FP64 state update')
+        self.bulk_statistics = bulk_statistics
         # Determine the public block calendar without retaining an O(duration)
         # layout table. A short terminal remainder is merged into its previous
         # full block, matching the batch receiver's DFT noise convention.
@@ -270,6 +274,11 @@ class IncrementalGaussianReceiver:
         if len(projection.indices) == 0 or not np.any(valid):
             r = torch.zeros((3, self.candidates, self.taps), dtype=self.dtype, device=self.device)
             gram = torch.zeros((3, self.candidates, self.taps, self.taps), dtype=self.dtype, device=self.device)
+        elif self.bulk_statistics is not None:
+            raw_basis = self.basis_callback(start, stop)
+            if raw_basis.shape != (3, self.candidates, self.taps, rows):
+                raise ValueError('accelerated basis callback returned an unexpected block shape')
+            r, gram = self.bulk_statistics(raw_basis, projection, projected_y, self.variance)
         else:
             raw_basis = np.asarray(self.basis_callback(start, stop), dtype=np.complex128)
             if (raw_basis.shape != (3, self.candidates, self.taps, rows) or
