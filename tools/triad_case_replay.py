@@ -294,6 +294,53 @@ def _source_identity_digest(source_identity, address):
     return _sha256(serialized.encode())
 
 
+def public_screen_geometry(plan, descriptor, *, mapped_step=None):
+    """Derive fixed public bank geometry without materializing a template."""
+    fs = int(descriptor['sample_rate_hz'])
+    if fs != 6000:
+        raise ValueError('whole-bit public screen currently requires 6000-Hz native input')
+    raw_source_samples = int(descriptor['source_samples'])
+    raw_capture_samples = int(descriptor['total_samples'])
+    if raw_source_samples < 4 or raw_capture_samples < 1:
+        raise ValueError('native full-bit source has incomplete finite geometry')
+    physics = plan['physics']
+    grid = public_grid(physics, physics['arrival_prior_seconds'], EPOCHS)
+    clock_bank = ((-grid.clock_bound, 0., grid.clock_bound) if grid.clock_bound else (0.,))
+    required = (float(plan['format']['occupied_bandwidth_hz'])/2 +
+        abs(float(physics['spread_doppler_hz'])) + grid.frequency_bound)
+    output_fs = next((rate for rate in range(1, fs+1)
+        if fs % rate == 0 and .4*rate > required), None)
+    if output_fs is None:
+        raise ValueError('full public DATA prior does not fit the projected Nyquist band')
+    eligible = (float(plan['format']['inner_rate_hz']) <= 1 and
+        not plan['format']['fhss'] and required < 4.)
+    exact_work = (raw_source_samples*len(EPOCHS)*2*len(clock_bank)*
+        (2 if physics['spread_delay_ms'] or physics['spread_doppler_hz'] else 1))
+    eligible_fhss = (exact_work > _MAX_INTEGER_TEMPLATE_WORK and
+        plan['format']['fhss'] and required < 240.)
+    selected_step = (60 if eligible else 3 if eligible_fhss else 1) if mapped_step is None else mapped_step
+    if isinstance(selected_step, bool) or selected_step not in (1, 3, 60):
+        raise ValueError('only fixed S=3 or S=60 mapped templates are supported')
+    if selected_step == 60 and not eligible:
+        raise ValueError('S=60 templates require a locally validated slow non-hopping waveform')
+    if selected_step == 3 and not eligible_fhss:
+        raise ValueError('S=3 templates require an over-budget exact FHSS bank within the 240 Hz prior band')
+    pass_edge, stop_edge = .4*output_fs, .49*output_fs
+    if selected_step > 1:
+        output_fs, pass_edge, stop_edge = ((600, 240., 294.) if selected_step == 3 else
+            (10, .4, 4.9) if required < .4 else
+            (5, 2., 2.45) if required < 2. else (20, 4., 9.8))
+    template_work = (math.ceil(raw_source_samples/selected_step)*len(EPOCHS)*2*len(clock_bank)*
+        (2 if physics['spread_delay_ms'] or physics['spread_doppler_hz'] else 1))
+    cap = _MAX_MAPPED_TEMPLATE_POINTS if selected_step > 1 else _MAX_INTEGER_TEMPLATE_WORK
+    if template_work > cap:
+        raise MemoryError('full public template preparation exceeds the bounded native-work limit')
+    return dict(grid=grid, clock_bank=clock_bank, selected_step=selected_step,
+        output_fs=output_fs, pass_edge=pass_edge, stop_edge=stop_edge,
+        raw_source_samples=raw_source_samples, raw_capture_samples=raw_capture_samples,
+        template_work=template_work, work_cap=cap)
+
+
 def build_public_screen(source, manifest, *, public_address, source_identity,
                         memory_limit_bytes, threads, mapped_step=None,
                         screen_factory=FFTScreen):
@@ -319,56 +366,25 @@ def build_public_screen(source, manifest, *, public_address, source_identity,
             address_receipt.get('template_cache_cleared') is not True):
         raise ValueError('native source did not acknowledge the requested public basis address')
     descriptor = source.descriptor
-    plan = source.plan
-    fs = int(descriptor['sample_rate_hz'])
-    if fs != 6000:
-        raise ValueError('whole-bit public screen currently requires 6000-Hz native input')
-    raw_source_samples = int(descriptor['source_samples'])
-    raw_capture_samples = int(descriptor['total_samples'])
-    if raw_source_samples < 4 or raw_capture_samples < 1:
-        raise ValueError('native full-bit source has incomplete finite geometry')
+    geometry = public_screen_geometry(source.plan, descriptor, mapped_step=mapped_step)
+    grid, clock_bank = geometry['grid'], geometry['clock_bank']
+    raw_source_samples = geometry['raw_source_samples']
+    raw_capture_samples = geometry['raw_capture_samples']
+    selected_step, output_fs = geometry['selected_step'], geometry['output_fs']
+    pass_edge, stop_edge = geometry['pass_edge'], geometry['stop_edge']
+    template_work, cap = geometry['template_work'], geometry['work_cap']
+    physics = source.plan['physics']
     public_manifest = copy.deepcopy(manifest)
     public_manifest['public_epoch_seconds'] = address['pattern_epoch']
     public_manifest.setdefault('format', {})['symbol_ordinal'] = address['symbol_ordinal']
-    physics = plan['physics']
-    grid = public_grid(physics, physics['arrival_prior_seconds'], EPOCHS)
-    clock_bank = ((-grid.clock_bound, 0., grid.clock_bound) if grid.clock_bound else (0.,))
-    required = (float(plan['format']['occupied_bandwidth_hz'])/2 +
-        abs(float(physics['spread_doppler_hz'])) + grid.frequency_bound)
-    output_fs = next((rate for rate in range(1, fs+1)
-        if fs % rate == 0 and .4*rate > required), None)
-    if output_fs is None:
-        raise ValueError('full public DATA prior does not fit the projected Nyquist band')
-    eligible = (float(plan['format']['inner_rate_hz']) <= 1 and
-        not plan['format']['fhss'] and required < 4.)
-    exact_work = (raw_source_samples*len(EPOCHS)*2*len(clock_bank)*
-        (2 if physics['spread_delay_ms'] or physics['spread_doppler_hz'] else 1))
-    eligible_fhss = (exact_work > _MAX_INTEGER_TEMPLATE_WORK and
-        plan['format']['fhss'] and required < 240.)
-    selected_step = (60 if eligible else 3 if eligible_fhss else 1) if mapped_step is None else mapped_step
-    if isinstance(selected_step, bool) or selected_step not in (1, 3, 60):
-        raise ValueError('only fixed S=3 or S=60 mapped templates are supported')
-    if selected_step == 60 and not eligible:
-        raise ValueError('S=60 templates require a locally validated slow non-hopping waveform')
-    if selected_step == 3 and not eligible_fhss:
-        raise ValueError('S=3 templates require an over-budget exact FHSS bank within the 240 Hz prior band')
-    pass_edge, stop_edge = .4*output_fs, .49*output_fs
     profile_validation, profile_validation_seconds = None, 0.
     if selected_step > 1:
-        output_fs, pass_edge, stop_edge = ((600, 240., 294.) if selected_step == 3 else
-            (10, .4, 4.9) if required < .4 else
-            (5, 2., 2.45) if required < 2. else (20, 4., 9.8))
         profile_started = time.perf_counter()
         profile_validation = _validate_mapped_profile(source, public_manifest, clock_bank,
             output_fs=output_fs, pass_edge=pass_edge, stop_edge=stop_edge,
             public_address=address, memory_limit_bytes=memory_limit_bytes,
             threads=threads, sampling_step=selected_step)
         profile_validation_seconds = time.perf_counter()-profile_started
-    template_work = (math.ceil(raw_source_samples/selected_step)*len(EPOCHS)*2*len(clock_bank)*
-        (2 if physics['spread_delay_ms'] or physics['spread_doppler_hz'] else 1))
-    cap = _MAX_MAPPED_TEMPLATE_POINTS if selected_step > 1 else _MAX_INTEGER_TEMPLATE_WORK
-    if template_work > cap:
-        raise MemoryError('full public template preparation exceeds the bounded native-work limit')
     source_digest = _source_identity_digest(source_identity, address)
     mapped_provider = None
     raw_provider = None

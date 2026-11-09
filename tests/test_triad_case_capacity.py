@@ -2,6 +2,7 @@
 from contextlib import nullcontext
 from pathlib import Path
 import sys
+import numpy as np
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -18,6 +19,144 @@ def component(point, low=None, high=None):
 
 
 class CapacityTests(unittest.TestCase):
+    def test_fingerprint_drift_does_not_truncate_absolute_acquisition_looks(self):
+        expected = {'work': 'initial'}
+        prepared = SimpleNamespace(acquisition=Mock(side_effect=lambda _: dict(
+            result={'status': 'acquired'}, ratio_processing_seconds_per_baseband_second=.2)))
+        receiver = SimpleNamespace(workers=2)
+        with patch.object(capacity, '_complete_acquisition_work',
+                side_effect=[expected, {'work': 'changed'}, expected]):
+            actual = capacity.measure_acquisition(prepared, receiver, family_size=8, expected_work=expected)
+        self.assertEqual(prepared.acquisition.call_count, 3)
+        self.assertEqual(actual['actual_work_match_count'], 2)
+        self.assertEqual(len(actual['samples']), 3)
+        self.assertAlmostEqual(actual['ratio_processing_seconds_per_baseband_second'], .2)
+
+    def test_continuation_stopping_uses_precision_without_raw_realtime_decision(self):
+        from triad_case_metrics import summarize_service
+        # These per-window rates would stop the generic service sampler on
+        # either side of 1 s/s before charging real slot cadence and stages.
+        high = summarize_service([[1.1, 1.2, 1.15], [1.3, 1.2, 1.25], [1.2, 1.3, 1.2]])
+        self.assertEqual(high['stop_reason'], 'point_at_or_above_realtime_limit')
+        self.assertIsNone(capacity.continuation_look(high))
+        self.assertEqual(capacity.continuation_look(high,maximum_look=3),'bounded_limit')
+        low = dict(model_status='abbreviated_holdout_supported', relative_precision_fraction=.25,
+            outer_trials=5, stop=True, stop_reason='upper_interval_below_limit_and_holdout_supported')
+        self.assertIsNone(capacity.continuation_look(low))
+        self.assertEqual(capacity.continuation_look(dict(low, relative_precision_fraction=.1)),
+            'relative_precision')
+        self.assertEqual(capacity.continuation_look(dict(low, outer_trials=9)), 'bounded_limit')
+
+    def test_fixed_holdout_binds_its_measured_allocation_before_fresh_work(self):
+        workers=[1,2,4,6,12]
+        pilot=dict(selected_workers=4,samples=[dict(workers=count,selection_ratio=1 if count==4 else 2)
+            for count in workers])
+        class Bound(RuntimeError):
+            pass
+        def bind(count):
+            raise Bound(count)
+        receiver=Mock()
+        prepared=SimpleNamespace(receiver=receiver)
+        for fixed, expected in ((None,4),(2,2)):
+            with self.subTest(fixed=fixed), patch.object(capacity,'choose_allocation',
+                    return_value=pilot) as choose, self.assertRaisesRegex(Bound,str(expected)):
+                capacity.measure_complete_case(prepared,workers,family_size=64,
+                    progress=lambda message:None,on_inference_allocation=bind,fixed_holdout_workers=fixed)
+            choose.assert_called_once_with(prepared,workers)
+            receiver.assert_not_called()
+
+    def test_nominal_holdout_repeats_all_nominal_work_and_skips_only_ceiling_inference(self):
+        receiver=object()
+        prepared=SimpleNamespace(slot_seconds=100.,window_seconds=80.,memory_limit_bytes=1000,
+            raw=SimpleNamespace(nbytes=40),valid=SimpleNamespace(nbytes=20),
+            receiver=Mock(side_effect=lambda workers:nullcontext(receiver)), fine_probe=Mock())
+        coordinates=((0,0.,0.,0.),)
+        prepared.acquisition=Mock(return_value=dict(result=dict(status='acquired',coordinates=coordinates)))
+        banks=dict(component(.1),samples=[dict(preparation_peak_estimate_bytes=500,
+            rss=dict(sum_process_bytes=900))])
+        full=dict(nonoverlap_stream_orchestration_seconds_per_baseband_second=.2,
+            represented_baseband_seconds=80.,estimated_peak_bytes=400,
+            resident_sample_after=dict(sum_process_bytes=800))
+        orchestration=dict(full_window_assembly=full,
+            message_state_and_codec=dict(component(.03),public_slot_plan_service=component(.02)))
+        fine=dict(fine_component=component(.4),observations=[dict(workspace=dict(
+            estimated_peak_bytes=600,rss=dict(sum_process_bytes=700)))])
+        pilot=dict(selected_workers=4,samples=[dict(workers=n,selection_ratio=1) for n in (1,2,4,6,12)])
+        mocks=dict(choose_allocation=Mock(return_value=pilot),
+                measure_acquisition=Mock(return_value=dict(component(.05),samples=[dict(
+                    receiver_peak_estimate_bytes=720,rss=dict(sum_process_bytes=730))])),
+                measure_sustained_fine=Mock(return_value=fine),measure_recurring_banks=Mock(return_value=banks),
+                public_work_coordinates=Mock(),measure_fine_stratum=Mock(),noise_only_observation=Mock())
+        with patch.multiple(capacity,**mocks), patch(
+                    'triad_orchestration_cost.measure_orchestration',return_value=orchestration) as orchestrate:
+            measured=capacity.measure_complete_case(prepared,[1,2,4,6,12],family_size=64,
+                progress=lambda message:None,fixed_holdout_workers=2)
+        self.assertEqual(measured['status'],'measured_nominal_holdout')
+        self.assertEqual(measured['selected_workers'],4)
+        self.assertEqual(measured['inference_workers'],2)
+        self.assertEqual(set(measured['nominal_service']['components']),{
+            'acquisition','complete_fine_search','recurring_bank_preparation','stream_controller',
+            'quiet_state_and_canonical_codec','public_slot_planning','receiver_worker_lifecycle'})
+        for name in ('complete_capacity', *capacity.CEILING_ONLY_RECEIPTS):
+            self.assertNotIn(name,measured)
+        for name in ('public_work_coordinates','measure_fine_stratum','noise_only_observation'):
+            mocks[name].assert_not_called()
+        prepared.fine_probe.assert_not_called()
+        prepared.acquisition.assert_called_once_with(receiver)
+        self.assertEqual([row.args for row in prepared.receiver.call_args_list],[(2,),(2,),(2,)])
+        mocks['measure_acquisition'].assert_called_once_with(prepared,receiver,family_size=64)
+        mocks['measure_sustained_fine'].assert_called_once_with(prepared,receiver,coordinates,family_size=64)
+        orchestrate.assert_called_once_with(prepared,family_size=64)
+        mocks['measure_recurring_banks'].assert_called_once_with(prepared)
+        self.assertEqual(measured['workspace_margin']['estimated_peak_bytes'],720)
+        self.assertEqual(measured['workspace_margin']['observed_peak_bytes'],900)
+        self.assertEqual(measured['workspace_margin']['measurement_scope'],'nominal_holdout')
+        self.assertFalse(measured['full_local_cpu_ceiling_demonstrated'])
+
+    def test_sustained_allocation_probe_deduplicates_and_bounds_alternatives(self):
+        receiver=object()
+        coordinates=((0,0.,0.,0.),)
+        acquired=dict(status='acquired',coordinates=coordinates)
+        prepared=SimpleNamespace(receiver=Mock(side_effect=lambda count:nullcontext(receiver)),
+            acquisition=Mock(return_value=dict(result=acquired)))
+        selected={}
+        alternate=dict(observations=[{}, {}, {}])
+        match=(dict(observations=3), {'public_input_and_dsp_work':'same'}, np.zeros(2))
+        targets=dict(physical_workers=6,logical_workers=12)
+        with patch.object(capacity,'measure_sustained_fine',return_value=alternate) as fine, patch.object(
+                capacity,'_allocation_fine_sample',side_effect=[match,match]):
+            report=capacity.measure_sustained_allocation_probe(prepared,[1,2,4,6,12],6,coordinates,selected,
+                targets=targets,family_size=192)
+        self.assertEqual(report['status'],'matched_exploratory_measurements')
+        self.assertEqual([row['workers'] for row in report['comparisons']],[6,12])
+        self.assertEqual(report['extra_repeated_baseband_probe_seconds_maximum'],18)
+        self.assertEqual(report['extra_observations_attempted'],3)
+        self.assertEqual(report['extra_acquisition_attempts'],1)
+        prepared.receiver.assert_called_once_with(12)
+        fine.assert_called_once_with(prepared,receiver,coordinates,family_size=192,maximum_look=3)
+
+    def test_sustained_allocation_probe_refuses_partial_search_and_changed_work(self):
+        receiver=object()
+        coordinates=((0,0.,0.,0.),)
+        acquired=dict(status='acquired',coordinates=coordinates)
+        partial=Mock()
+        prepared=SimpleNamespace(receiver=lambda count:nullcontext(receiver),
+            acquisition=Mock(side_effect=[dict(result=dict(status='partial_acquisition',coarse_session=partial)),
+                dict(result=acquired)]))
+        selected={}
+        alternate=dict(observations=[{}, {}, {}])
+        with patch.object(capacity,'measure_sustained_fine',return_value=alternate) as fine, patch.object(
+                capacity,'_allocation_fine_sample',side_effect=[
+                    ({},{'work':'same'},np.zeros(2)), ({},{'work':'different'},np.zeros(2))]):
+            report=capacity.measure_sustained_allocation_probe(prepared,[1,2,4,6,12],4,coordinates,selected,
+                targets=dict(physical_workers=6,logical_workers=12),family_size=192)
+        self.assertEqual(report['status'],'unresolved')
+        self.assertEqual(report['extra_repeated_baseband_probe_seconds_maximum'],36)
+        self.assertEqual([row.get('reason') for row in report['comparisons']],[
+            None,'actual_complete_acquisition_or_proposals_differ','continued_state_cache_or_dsp_work_differs'])
+        partial.close.assert_called_once()
+        fine.assert_called_once_with(prepared,receiver,coordinates,family_size=192,maximum_look=3)
+
     def test_global_pass_requires_current_sources_full_list_and_worker_comparison(self):
         from copy import deepcopy
         report=dict(provenance=dict(unchanged_at_completion=True),

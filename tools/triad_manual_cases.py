@@ -50,6 +50,14 @@ def build_parser() -> argparse.ArgumentParser:
                         help="select a current manual row for explicitly partial debugging")
     parser.add_argument("--skip-message-gate", action="store_true",
                         help="debug measurements without the current-source native message gate; prevents an integrated suite pass")
+    parser.add_argument('--sustained-allocation-probe', action='store_true',
+                        help='bounded exploratory continued fine work at physical and full logical allocations')
+    parser.add_argument('--workspace-mib', type=int,
+                        help='stable workspace ceiling within the visible local receiver budget')
+    parser.add_argument('--calibration-receipt-prefix', type=Path,
+                        help='save private per-row replay fits as PREFIX-N.json directly inside local-evidence')
+    parser.add_argument('--allow-conditional-calibration-identity', action='store_true',
+                        help='explicitly allow conditional local executable mapping identity in private fit receipts')
     return parser
 
 
@@ -67,6 +75,10 @@ def main(argv=None) -> int:
         threads=args.threads,
         case_indices=args.case_index,
         message_gate=not args.skip_message_gate,
+        sustained_allocation_probe=args.sustained_allocation_probe,
+        workspace_mib=args.workspace_mib,
+        calibration_receipt_prefix=args.calibration_receipt_prefix,
+        allow_conditional_calibration_identity=args.allow_conditional_calibration_identity,
     )
     return (0 if result.get('status') == 'conditional_capacity_pass' else
             1 if result.get('status') == 'capacity_failures' else 2)

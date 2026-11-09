@@ -105,15 +105,11 @@ using packet length or transport EOF. The fresh one-second, two-segment
 256-initial-state transition probe is charged once per 0.5-second window
 segment in the cost gate to conservatively cover switching and merging.
 
-The completed base run and persistent nominal follow-up measured all eight
-current manual cases with unresolved worst-state capacity margins; neither
-establishes a full capacity pass. The canonical default now uses persistent
-measurement v3. Eleven focused checks and the named `triad` group (20/20 in
-26.73 seconds) passed on that source. Historical v2 base and continuation phases retain their own
-hashes and policy; they are not relabeled as a v3 full rerun. See the
+The full integrated v3 reevaluation measured all eight current manual cases
+with unresolved worst-state capacity margins; it does not establish a full
+capacity pass. The named `triad` group passed 20/20 before the run. Historical
+v2 base and continuation phases retain their own hashes and policy. See the
 [validation record](validation.md) for ratios and provenance. Sensitivity
-confirmation is incomplete after the memory guard remained unresolved, so
-there is no >90% qualification. The Groundwave comparison retained four
-threads because the 12-thread run was about 6.9% slower. `--skip-message-gate`
-is debug-only and prevents an integrated suite pass; the former
-`--paired-followup` option is removed.
+confirmation remains incomplete, so there is no >90% qualification.
+`--skip-message-gate` is debug-only and prevents an integrated suite pass; the
+former `--paired-followup` option is removed.

@@ -97,7 +97,8 @@ def select_cases(parsed, indices=None):
 
 
 def run_cases(*, executable, output, case_list=DEFAULT_CASES, measurement_seconds=1., threads=None,
-              case_indices=None, paired_followup=False, message_gate=True):
+              case_indices=None, paired_followup=False, message_gate=True, sustained_allocation_probe=False,
+              workspace_mib=None, calibration_receipt_prefix=None, allow_conditional_calibration_identity=False):
     """Compatibility wrapper for the dedicated absolute-capacity runner."""
     from triad_case_capacity import run_complete_cases
     return run_complete_cases(
@@ -109,4 +110,8 @@ def run_cases(*, executable, output, case_list=DEFAULT_CASES, measurement_second
         case_indices=case_indices,
         paired_followup=paired_followup,
         message_gate=message_gate,
+        sustained_allocation_probe=sustained_allocation_probe,
+        workspace_mib=workspace_mib,
+        calibration_receipt_prefix=calibration_receipt_prefix,
+        allow_conditional_calibration_identity=allow_conditional_calibration_identity,
     )

@@ -44,6 +44,52 @@ RunPod may accelerate this same bounded method but does not justify a larger
 campaign. Do not use full-observation, sustained, multi-day or exhaustive runs
 as routine checks or fallbacks for an inconclusive abbreviated result.
 
+## GPU fine-work parity probe
+
+[`tools/triad_gpu_workload.py`](../tools/triad_gpu_workload.py) compares a
+small, predeclared selection of one to three current manual rows on CPU and
+CUDA using the same native capture and completed public acquisition. For
+example, after building the native exporter and installing the numerical Python
+dependencies on a CUDA host:
+
+```sh
+python3 tools/triad_gpu_workload.py --case-index 7 --device cuda --workers 2 \
+  --exporter build/dev/triad_helper_export \
+  --output local-evidence/robust-gpu-workload.json
+```
+
+Indices are zero-based and are validated against the entire freshly parsed
+manual list. This is a targeted diagnostic, not full-list coverage. One
+capture per selected row exercises the nominal two-second prefix and 1/2/4
+second continuations, a capped maximum-state transition and an interior
+erasure. FP64 lane scores and work counters are compared, with retained-state
+identities checked at the nominal checkpoints. The short endpoints can be
+ambiguous or incomplete. CUDA linear algebra is initialized serially before
+workers start; its startup and memory snapshots are reported separately from
+the timed probe. Synchronization is included in GPU timings. Setup failures
+may prevent a report entirely; recorded errors, changed source/list/binary
+hashes, or parity failures produce an unresolved result.
+
+`short_fine_work_parity_observed` is neither complete receiver qualification
+nor a local CPU throughput estimate. Cloud CPU/GPU elapsed time cannot be
+substituted for prepared service on this computer, and one paired short capture
+does not establish speed, full-message success, workspace headroom, or a
+statistical operating point. The requirements for local calibration and
+complete work are in the [manual capacity contract](robust-manual-capacity.md).
+
+For a remote diagnostic, [`tools/triad_gpu_bundle.py`](../tools/triad_gpu_bundle.py)
+builds a compact, deterministic source archive with a per-file hash manifest:
+
+```sh
+python3 tools/triad_gpu_bundle.py --output /tmp/robust-gpu-source.tar.gz
+```
+
+Supply and verify a matching native exporter separately, record the source,
+list and exporter hashes, and keep credentials and machine-specific local
+calibration identities out of the bundle. The archive and temporary remote
+environment are investigation artifacts; remove them when their purpose ends.
+See the [validation record](validation.md) for the limited GPU observations.
+
 ## Absolute manual-case capacity
 
 After `./build.sh test triad`, run the distinct manual-case tool:
@@ -96,15 +142,11 @@ charges a fresh one-second, two-segment 256-initial-state transition probe once
 per 0.5-second window segment to cover switching and merge work conservatively.
 The frozen native functional gate passed, including its captured-prefix EOF
 negative control. This is one bounded functional check, not capacity or
-all-case qualification. The completed base run measured all eight current
-manual cases, and the persistent nominal follow-up has completed for all eight.
-Worst-state capacity margins remain unresolved, with no full capacity pass.
-Persistent measurement v3 is now the canonical default; eleven focused checks
-and the named `triad` group passed (20/20 in 26.73 seconds). Historical v2 base and continuation
-phases retain their original hashes and policy and are not relabeled as a v3
-full rerun. Sensitivity confirmation is incomplete after the memory guard
-remained unresolved, so there is no >90% qualification. Groundwave retained
-four threads because the 12-thread run was about 6.9% slower. See the
+all-case qualification. The full integrated v3 reevaluation measured all
+eight current manual cases with unresolved worst-state margins and no full
+capacity pass. The named `triad` group passed 20/20 before that run. Historical
+v2 base and continuation phases retain their own hashes and policy. Sensitivity
+confirmation remains incomplete, so there is no >90% qualification. See the
 [validation record](validation.md) for per-case ratios and provenance. Use
 `--skip-message-gate` only for debugging: it bypasses the
 current source message gate and prevents an integrated suite pass.

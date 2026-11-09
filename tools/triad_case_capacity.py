@@ -8,6 +8,8 @@ overlapping search-window durations, normalize sustained capacity forecasts.
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import math
 import time
 
@@ -56,6 +58,23 @@ def _receipt(began, cpu_began, source, child_before, seconds, workers):
         native_child_cpu_in_utilization=child is not None,
         utilization_scope='Python process and owned native basis service; CPU counters diagnose utilization, never substitute for elapsed service.',
         workers=workers, numerical_threads_per_worker=1)
+
+
+def active_probe_origin(plan, descriptor, fs, samples, coordinates, *, required_samples):
+    """Choose an interior public sample using an observed coarse proposal."""
+    source_first = int(plan['geometry']['source_calendar_origin_sample'])
+    interior = .5*min(float(plan['format']['tile_seconds']),
+                      float(plan['format']['elapsed_bit_seconds']))
+    # The public arrival prior can exceed the short HF waveform's length.
+    # A fixed capture midpoint may therefore contain no candidate template.
+    # Use an observed coarse proposal, never the simulator's true arrival.
+    if not coordinates:
+        raise ValueError('an observed public proposal is required for active fine work')
+    _, arrival, _, clock = coordinates[0]
+    first = round((float(descriptor['capture_lead_seconds'])+arrival)*fs+
+        (int(descriptor['data_offset_samples'])+source_first+interior*fs)/
+        (1+clock*1e-6))
+    return min(max(0, first), samples-required_samples)
 
 
 class PreparedCapacityCase:
@@ -246,20 +265,8 @@ class PreparedCapacityCase:
             return self.samples-length
         if stratum != 'active':
             raise ValueError('unknown public fine-work stratum')
-        descriptor = self.bank.descriptor
-        source_first = int(self.plan['geometry']['source_calendar_origin_sample'])
-        interior = .5*min(float(self.plan['format']['tile_seconds']),
-                          float(self.plan['format']['elapsed_bit_seconds']))
-        # The public arrival prior can exceed the short HF waveform's length.
-        # A fixed capture midpoint may therefore contain no candidate template.
-        # Use an observed coarse proposal, never the simulator's true arrival.
-        if not coordinates:
-            raise ValueError('an observed public proposal is required for active fine work')
-        _, arrival, _, clock = coordinates[0]
-        first = round((float(descriptor['capture_lead_seconds'])+arrival)*self.fs+
-            (int(descriptor['data_offset_samples'])+source_first+interior*self.fs)/
-            (1+clock*1e-6))
-        return min(max(0, first), self.samples-length)
+        return active_probe_origin(self.plan, self.bank.descriptor, self.fs,
+            self.samples, coordinates, required_samples=length)
 
     def fine_probe(self, receiver, coordinates, *, units, stratum='active', work_probe=False,
                    interior_erasure=False):
@@ -369,7 +376,21 @@ def measurement_policy(case_count, unit_seconds):
         nominal_continuation=dict(prefix_baseband_seconds=2, checkpoints_baseband_seconds=[1, 2, 4],
             maximum_actual_probe_seconds_per_row=54, maximum_outer_observations_per_row=9,
             adaptive_state_relative_range_limit=1.3, complete_public_acquisition_required=True,
-            stopping='Stop at the first material state, cache, cost holdout or coverage failure. Resolve timing uncertainty at the declared 3/5/9 looks.'),
+            stopping='Stop at the first material state, cache, cost holdout or coverage failure. Seek supported relative precision at the declared 3/5/9 looks.'),
+        nominal_stopping_scope='Continuation rate uses the search-window interval. Stop for supported relative precision, the bounded 3/5/9 limit or a failed work/holdout check; decide real time only after slot normalization and stage combination.',
+        sustained_allocation_probe=dict(opt_in=True,
+            scopes=['pilot-selected worker count', 'visible physical cores within quota', 'full logical CPU budget'],
+            observations_per_allocation=3, maximum_additional_repeated_baseband_probe_seconds_per_row=36,
+            family_size=3*max(1,case_count*8),
+            stopping='Reuse the selected first three valid observations; try each distinct alternate at most once. Stop an alternate on missing complete acquisition, work drift or its first declared look.',
+            decision='Exploratory resident fine work only; never selects inference allocation or qualifies capacity.'),
+        replay_holdout=dict(scope=NOMINAL_HOLDOUT_SCOPE,
+            allocation='Retain every declared exploratory allocation; measure fresh inference at the fit allocation.',
+            stages=['complete public acquisition', 'sustained nominal fine search and persistent tracking',
+                'recurring public ordinal bank preparation', 'stream controller', 'public slot planning',
+                'quiet state and canonical codec', 'receiver worker lifecycle', 'nominal workspace'],
+            ceiling_only_receipts_omitted=list(CEILING_ONLY_RECEIPTS),
+            timing='Use the same bounded nominal looks as the full fit; no separate ceiling inference.'),
         fine_forecast='Charge the measured two-second prefix and endpoint once per slot. Apply the continued-session rate to the remaining window. Terminal, listening and cold-state ceiling probes remain separate.',
         fine_state_ceiling='Fresh two-segment units start256 states per lane and execute a real transition/merge. Charge each entire unit once per full-window segment; this conservative geometry estimate includes repeated startup and double emission work.',
         physical_denominator='Shortest exact native successor interval in the fixed local24-slot reference; observed complete streams use unique actual received samples through the physical end.',
@@ -508,7 +529,7 @@ def measure_fine_stratum(prepared, receiver, coordinates, *, stratum, family_siz
     return summary
 
 
-def measure_sustained_fine(prepared, receiver, coordinates, *, family_size):
+def measure_sustained_fine(prepared, receiver, coordinates, *, family_size, maximum_look=None):
     """One native stream, one fixed prefix, then cumulative 1/2/4 s work.
 
     Each outer observation resets the native cache and creates ONE FineSession.
@@ -517,23 +538,62 @@ def measure_sustained_fine(prepared, receiver, coordinates, *, family_size):
     charged once. Diagnostic snapshots are outside the receiver-service timers.
     This normal-lane measurement is not a maximum-state qualification.
     """
-    from triad_case_metrics import LOOKS, summarize_service, arithmetic_interval
-    from triad_case_receiver import _native_cpu_seconds, _rss_snapshot
+    midpoint, origin, total_samples = continued_probe_extent(
+        prepared.plan, prepared.bank.descriptor, coordinates)
+    if origin is None:
+        return dict(status='unresolved', reason='public_window_cannot_hold_six_second_probe')
+    return measure_continued_fine(receiver, coordinates,
+        raw=prepared.raw[origin:origin+total_samples],
+        valid=prepared.valid[origin:origin+total_samples], origin=origin, midpoint=midpoint,
+        address=prepared.calendar['plans'][0], slot_seconds=prepared.slot_seconds,
+        family_size=family_size, maximum_look=maximum_look)
+
+
+def continued_probe_extent(plan, descriptor, coordinates):
+    """Locate the six-second public capacity observation without reading IQ."""
+    fs, samples = int(descriptor['sample_rate_hz']), int(descriptor['total_samples'])
+    total_samples = 6*fs
+    if total_samples > samples:
+        return None, None, total_samples
+    midpoint = active_probe_origin(plan, descriptor, fs, samples, coordinates,
+        required_samples=total_samples)
+    origin = min(max(0, midpoint-3*fs), samples-total_samples)
+    return midpoint, origin, total_samples
+
+
+def continuation_look(summary, *, maximum_look=None):
+    """Use component precision without deciding real time on the wrong duration."""
+    from triad_case_metrics import LOOKS, PRECISION
+    if (summary['model_status'] == 'abbreviated_holdout_supported' and
+            summary['relative_precision_fraction'] <= PRECISION):
+        return 'relative_precision'
+    if summary['outer_trials'] == (LOOKS[-1] if maximum_look is None else maximum_look):
+        return 'bounded_limit'
+    return None
+
+
+def measure_continued_fine(receiver, coordinates, *, raw, valid, origin, midpoint, address,
+                           slot_seconds, family_size, maximum_look=None):
+    """Canonical abbreviated fine service from a bounded actual native IQ slice."""
+    from triad_case_metrics import LOOKS, summarize_service
+
+    if maximum_look is not None and (type(maximum_look) is not int or maximum_look not in LOOKS):
+        raise ValueError('maximum fine look must be a declared sampling look')
+    stop_at = LOOKS[-1] if maximum_look is None else maximum_look
 
     prefix_seconds, checkpoints = 2., (1, 2, 4)
-    fs = prepared.fs
+    fs = receiver.sample_rate
     prefix_samples, total_samples = round(prefix_seconds*fs), round(6*fs)
-    if total_samples > prepared.samples or prefix_samples < 1:
+    window_seconds = receiver.samples/fs
+    if (origin < receiver.capture_origin or
+            origin+total_samples > receiver.capture_origin+receiver.samples or
+            np.shape(raw) != (total_samples,) or np.shape(valid) != (total_samples,)):
         return dict(status='unresolved', reason='public_window_cannot_hold_six_second_probe')
-    midpoint = prepared.probe_origin('active', coordinates, required_samples=total_samples)
-    origin = min(max(0, midpoint-round(3*fs)), prepared.samples-total_samples)
-    if not bool(prepared.valid[origin:origin+total_samples].all()):
+    if not bool(np.asarray(valid).all()):
         return dict(status='unresolved', reason='continued_probe_contains_invalid_input')
-    if prepared.window_seconds <= prefix_seconds:
-        return dict(status='unresolved', reason='public_window_not_longer_than_fixed_prefix')
 
     def cpu_start():
-        return time.process_time(), _native_cpu_seconds(prepared.basis_source)
+        return time.process_time(), _native_cpu_seconds(receiver.basis_source)
 
     def utilization(before, elapsed):
         cpu, child = cpu_start()
@@ -545,10 +605,18 @@ def measure_sustained_fine(prepared, receiver, coordinates, *, family_size):
 
     def snapshot(fine):
         progress = fine.receiver.progress()
+        scores = {name:row['bit_scores'] for name,row in progress['lanes'].items()}
+        if not all(np.asarray(values).shape == (2,) and np.isfinite(values).all()
+                for values in scores.values()):
+            raise ValueError('fine checkpoint requires finite lane scores')
         return dict(consumed_samples=progress['consumed_samples'],
             processed_rows=progress['processed_rows'], segments=progress['segments'],
             work_counts=copy.deepcopy(progress['work_counts']),
+            retained_states={name:[[state.group,state.delay_index,state.rate_index]
+                for state in lane.timing.states]
+                for name,lane in (('adaptive',fine.receiver.adaptive),('initial_affine',fine.receiver.nominal))},
             lanes={name:dict(state_work_regime=copy.deepcopy(row['state_work_regime']),
+                bit_scores=list(scores[name]),
                 timing={key:row['timing'][key] for key in (
                     'state_count','observations','predictions','peak_states','peak_transition_states')},
                 work_counts=copy.deepcopy(row['work_counts']))
@@ -606,19 +674,18 @@ def measure_sustained_fine(prepared, receiver, coordinates, *, family_size):
     def push_until(fine, first, stop):
         for at in range(first, stop, receiver.policy['chunk_samples']):
             end = min(stop, at+receiver.policy['chunk_samples'])
-            fine.push(at, prepared.raw[origin+at:origin+end], prepared.valid[origin+at:origin+end])
+            fine.push(at, raw[at:end], valid[at:end])
 
     rows, observations, prefix_ratios, finish_ratios = [], [], [], []
     stop_reason, summary, failure = None, None, None
-    for look in LOOKS:
+    for look in LOOKS[:LOOKS.index(stop_at)+1]:
         while len(rows) < look:
             observation = dict(index=len(observations)+1, checkpoints=[])
             fine = None
             try:
-                address = prepared.calendar['plans'][0]
                 before = cpu_start()
                 began = time.perf_counter()
-                reset = prepared.basis_source.set_basis_address(address['pattern_epoch'],address['symbol_ordinal'])
+                reset = receiver.basis_source.set_basis_address(address['pattern_epoch'],address['symbol_ordinal'])
                 if (reset.get('template_cache_cleared') is not True or
                         reset.get('basis_epoch') != address['pattern_epoch'] or
                         reset.get('basis_symbol_ordinal') != address['symbol_ordinal']):
@@ -696,8 +763,8 @@ def measure_sustained_fine(prepared, receiver, coordinates, *, family_size):
                 elapsed = time.perf_counter()-began
                 fine = None
                 observation['finish_classify_close'] = dict(
-                    ratio_processing_seconds_per_baseband_second=elapsed/prepared.slot_seconds,
-                    represented_baseband_seconds=prepared.slot_seconds,
+                    ratio_processing_seconds_per_baseband_second=elapsed/slot_seconds,
+                    represented_baseband_seconds=slot_seconds,
                     complete_six_second_probe=bool(tracked['complete_observation']),
                     endpoint=endpoint['slot_classification'],
                     whole_bit_admission_expected=False, **utilization(before,elapsed))
@@ -705,8 +772,8 @@ def measure_sustained_fine(prepared, receiver, coordinates, *, family_size):
                     raise ValueError('six-second FineSession did not finish complete')
                 observation['workspace'] = dict(estimated_peak_bytes=(
                     receiver.input_workspace_bytes+receiver.native_workspace_bytes+
-                    receiver.screen.resident_estimate+receiver.policy['cache_bytes']+
-                    tracked['working_bytes_estimate']), rss=_rss_snapshot(prepared.basis_source))
+                    receiver.coarse_reserved_bytes+receiver.policy['cache_bytes']+
+                    tracked['working_bytes_estimate']), rss=_rss_snapshot(receiver.basis_source))
                 rows.append(continuation_ratios)
                 prefix_ratios.append(observation['prefix']['ratio_processing_seconds_per_baseband_second'])
                 finish_ratios.append(observation['finish_classify_close']['ratio_processing_seconds_per_baseband_second'])
@@ -724,48 +791,184 @@ def measure_sustained_fine(prepared, receiver, coordinates, *, family_size):
             stop_reason = 'first_incomplete_or_material_geometry_or_cache_failure'
             break
         summary = summarize_service(rows, family_size=family_size)
+        summary.pop('margin_fraction', None)
+        summary.pop('margin_interval', None)
+        summary.update(realtime_status='not_applicable_to_continuation_rate',
+            reason='Use the slot-normalized complete receiver service.')
         if summary['observed_model_log_error_floor'] > math.log1p(.3):
             failure = 'observed four-second continuation holdout differs by more than30%'
             stop_reason = 'first_material_cost_holdout_drift'
+            summary.update(stop=True, stop_reason=stop_reason)
             break
-        if summary['stop']:
-            stop_reason = summary['stop_reason']
+        stop_reason = continuation_look(summary, maximum_look=stop_at)
+        summary.update(stop=stop_reason is not None,
+            stop_reason=stop_reason or 'next_abbreviated_look')
+        if stop_reason:
             break
     output = dict(schema='triad-sustained-fine-measurement-v1',
         status='unresolved' if failure else 'measured_continuation',
         reason=failure, stop_reason=stop_reason, continuation=summary,
-        observations=observations, successful_outer_observations=len(rows),
+        observations=observations, successful_outer_observations=len(rows), maximum_outer_observations=stop_at,
         public_origin_sample=origin, requested_center_sample=midpoint,
         public_probe_samples=total_samples, prefix_baseband_seconds=prefix_seconds,
         continuation_checkpoints_seconds=list(checkpoints), workers=receiver.workers,
         procedure_id=receiver.procedure_id,
         scope='Normal persistent FineSession only. One cold2s prefix and one finish per slot; continued1/2/4s service is observed, not inferred by subtracting a fitted startup intercept. Not full-bit success or worst-state capacity.')
     if summary is not None:
-        alpha = .05/(family_size*len(LOOKS)*3)
-        used = summary['outer_trials']
-        prefix_point,prefix_interval = arithmetic_interval(prefix_ratios[:used],alpha=alpha)
-        finish_point,finish_interval = arithmetic_interval(finish_ratios[:used],alpha=alpha)
-        prefix_scale = prefix_seconds/prepared.slot_seconds
-        continued_scale = (prepared.window_seconds-prefix_seconds)/prepared.slot_seconds
-        continued_point = summary['ratio_processing_seconds_per_baseband_second']
-        continued_interval = summary['ratio_processing_seconds_per_baseband_second_interval']
-        output['fine_component'] = dict(
-            ratio_processing_seconds_per_baseband_second=(
-                prefix_point*prefix_scale+continued_point*continued_scale+finish_point),
-            ratio_processing_seconds_per_baseband_second_interval=[
-                prefix_interval[index]*prefix_scale+continued_interval[index]*continued_scale+
-                finish_interval[index] for index in (0,1)],
-            model_status=summary['model_status'] if not failure else 'unresolved',
-            prefix=dict(ratio_processing_seconds_per_baseband_second=prefix_point,
-                ratio_processing_seconds_per_baseband_second_interval=prefix_interval,
-                represented_baseband_seconds=prefix_seconds),
-            finish_classify_close=dict(ratio_processing_seconds_per_baseband_second=finish_point,
-                ratio_processing_seconds_per_baseband_second_interval=finish_interval,
-                represented_baseband_seconds=prepared.slot_seconds),
-            prefix_per_slot_multiplier=prefix_scale,
-            continuation_per_slot_multiplier=continued_scale,
-            scope='Conditional full-window nominal forecast: measured prefix once + observed continuation rate for remaining input + finish/classify/close once. The cold-state capacity envelope is separate.')
+        output['fine_component'] = _continued_fine_component(summary, prefix_ratios, finish_ratios,
+            prefix_seconds=prefix_seconds, window_seconds=window_seconds, slot_seconds=slot_seconds,
+            family_size=family_size, supported=not failure)
     return output
+
+
+def _continued_fine_component(summary, prefix_ratios, finish_ratios, *, prefix_seconds,
+                              window_seconds, slot_seconds, family_size, supported=True):
+    from triad_case_metrics import LOOKS, arithmetic_interval
+
+    alpha = .05/(family_size*len(LOOKS)*3)
+    used = summary['outer_trials']
+    prefix_point,prefix_interval = arithmetic_interval(prefix_ratios[:used],alpha=alpha)
+    finish_point,finish_interval = arithmetic_interval(finish_ratios[:used],alpha=alpha)
+    prefix_scale = prefix_seconds/slot_seconds
+    continued_scale = (window_seconds-prefix_seconds)/slot_seconds
+    continued_point = summary['ratio_processing_seconds_per_baseband_second']
+    continued_interval = summary['ratio_processing_seconds_per_baseband_second_interval']
+    return dict(
+        ratio_processing_seconds_per_baseband_second=prefix_point*prefix_scale+continued_point*continued_scale+finish_point,
+        ratio_processing_seconds_per_baseband_second_interval=[
+            prefix_interval[index]*prefix_scale+continued_interval[index]*continued_scale+
+            finish_interval[index] for index in (0,1)],
+        model_status=summary['model_status'] if supported else 'unresolved',
+        prefix=dict(ratio_processing_seconds_per_baseband_second=prefix_point,
+            ratio_processing_seconds_per_baseband_second_interval=prefix_interval,
+            represented_baseband_seconds=prefix_seconds),
+        finish_classify_close=dict(ratio_processing_seconds_per_baseband_second=finish_point,
+            ratio_processing_seconds_per_baseband_second_interval=finish_interval,
+            represented_baseband_seconds=slot_seconds),
+        prefix_per_slot_multiplier=prefix_scale,
+        continuation_per_slot_multiplier=continued_scale,
+        scope='Conditional full-window nominal forecast: measured prefix once + observed continuation rate for remaining input + finish/classify/close once. The cold-state capacity envelope is separate.')
+
+
+def sustained_allocation_targets(cpu):
+    """Predeclare physical and full logical worker counts from the visible budget."""
+    logical = cpu['available_cpus']
+    topology = cpu.get('topology') or {}
+    physical = topology.get('physical_core_count') if topology.get('status') == 'complete' else None
+    return dict(physical_workers=min(physical,logical) if type(physical) is int and physical > 0 else None,
+        logical_workers=logical)
+
+
+def _allocation_fine_sample(measurement, prepared, family_size):
+    """Compare the first three uninterrupted nominal samples under a shared work key."""
+    from triad_case_metrics import arithmetic_interval, summarize_service
+
+    observations = measurement.get('observations', [])[:3]
+    if (measurement.get('status') != 'measured_continuation' or len(observations) != 3 or
+            any(row['status'] != 'complete_work_observation' or not row['geometry']['supported'] or
+                not row['continued_cache_boundary_work']['supported'] for row in observations)):
+        raise ValueError('three matched complete continued fine observations required')
+    ratio_key = 'ratio_processing_seconds_per_baseband_second'
+    continued, prefix, finish, work, scores, utilization = [], [], [], [], [], []
+    for observation in observations:
+        prefix.append(observation['prefix'][ratio_key])
+        finish.append(observation['finish_classify_close'][ratio_key])
+        continued.append([row[ratio_key] for row in observation['checkpoints']])
+        if (len(continued[-1]) != 3 or not observation['finish_classify_close']['complete_six_second_probe'] or
+                observation['finish_classify_close']['endpoint'] != 'AMBIGUOUS'):
+            raise ValueError('continued fine checkpoint coverage differs')
+        for stage in (observation['prefix'], *observation['checkpoints']):
+            counters = copy.deepcopy(stage['counters'])
+            # Dispatch counts change with the worker geometry. Preserve all
+            # state, DSP and native-cache work after removing just those counts.
+            counters['work_counts'].pop('hypothesis_update_tasks')
+            counters['native_templates'].pop('energy')
+            for name in ('adaptive','initial_affine'):
+                lane = counters['lanes'][name]
+                scores.append(lane.pop('bit_scores'))
+                lane['work_counts'].pop('hypothesis_update_tasks')
+                regime = lane['state_work_regime']
+                for key in ('requested_candidate_shards','maximum_hypothesis_tasks_per_block'):
+                    regime.pop(key)
+            work.append(counters)
+        for stage in (observation['prefix'],*observation['checkpoints'],observation['finish_classify_close']):
+            value = stage.get('observed_allocated_cpu_utilization_fraction')
+            if value is not None:
+                utilization.append(value)
+    summary = summarize_service(continued, family_size=family_size)
+    component = _continued_fine_component(summary, prefix, finish, prefix_seconds=2.,
+        window_seconds=prepared.window_seconds, slot_seconds=prepared.slot_seconds, family_size=family_size)
+    observed = [(p*2+c[-1]*4+f*prepared.slot_seconds)/6 for p,c,f in zip(prefix,continued,finish)]
+    point, bounds = arithmetic_interval(observed,alpha=.05/family_size)
+    evidence = dict(observations=3, measured_six_second_fine_service={ratio_key:point,
+        ratio_key+'_interval':bounds, 'samples':observed},
+        conditional_slot_fine_component=component if component['model_status']=='abbreviated_holdout_supported' else None,
+        slot_model_status=component['model_status'],
+        observed_allocated_cpu_utilization_fraction_range=[min(utilization),max(utilization)] if utilization else None,
+        workspace_peak_estimate_bytes=max(row['workspace']['estimated_peak_bytes'] for row in observations),
+        workspace_observed_rss_bytes=max((row['workspace']['rss']['sum_process_bytes'] for row in observations
+            if row['workspace']['rss']['sum_process_bytes'] is not None),default=None))
+    identity = dict(origin=measurement['public_origin_sample'], samples=measurement['public_probe_samples'],
+        prefix=measurement['prefix_baseband_seconds'], checkpoints=measurement['continuation_checkpoints_seconds'], work=work)
+    return evidence, identity, np.asarray(scores)
+
+
+def measure_sustained_allocation_probe(prepared, allocations, selected, coordinates, active, *, targets, family_size):
+    """Exploratory actual resident-bank comparison, never an allocation or capacity gate."""
+    if (type(targets) is not dict or set(targets) != {'physical_workers','logical_workers'} or
+            type(selected) is not int or type(targets['logical_workers']) is not int or
+            not 0 < selected <= targets['logical_workers'] or
+            (targets['physical_workers'] is not None and (type(targets['physical_workers']) is not int or
+                not 0 < targets['physical_workers'] <= targets['logical_workers']))):
+        raise ValueError('expected predeclared bounded physical and logical worker targets')
+    requested = dict(selected_workers=selected, **targets)
+    workers = list(dict.fromkeys(value for value in requested.values() if value is not None))
+    rows = []
+    report = dict(schema='triad-sustained-allocation-probe-v1', status='unresolved', allocations=requested,
+        comparisons=rows, extra_observations_maximum=3*(len(workers)-1),
+        extra_repeated_baseband_probe_seconds_maximum=18*(len(workers)-1), extra_observations_attempted=0,
+        extra_acquisition_attempts_maximum=len(workers)-1, extra_acquisition_attempts=0,
+        family_size=family_size,
+        scope='Exploratory repeated fine work on one actual resident-bank observation. No complete service, best allocation or CPU ceiling decision.')
+    if not coordinates:
+        report['reason'] = 'complete_public_acquisition_required'
+        return report
+    try:
+        selected_cost, identity, scores = _allocation_fine_sample(active, prepared, family_size)
+    except (KeyError,TypeError,ValueError,OverflowError):
+        report['reason'] = 'selected_continued_work_unresolved'
+        return report
+    rows.append(dict(workers=selected, status='selected_first_three_observations', **selected_cost))
+    for count in workers[1:]:
+        row = dict(workers=count, status='unresolved')
+        rows.append(row)
+        if count not in allocations:
+            row['reason'] = 'requested_allocation_not_in_original_pilot'
+            continue
+        try:
+            with prepared.receiver(count) as receiver:
+                report['extra_acquisition_attempts'] += 1
+                acquired = prepared.acquisition(receiver)['result']
+                session = acquired.pop('coarse_session',None)
+                if session is not None:
+                    session.close()
+                if acquired['status'] != 'acquired' or tuple(acquired['coordinates']) != coordinates:
+                    row['reason'] = 'actual_complete_acquisition_or_proposals_differ'
+                    continue
+                sample = measure_sustained_fine(prepared,receiver,coordinates,family_size=family_size,maximum_look=3)
+            report['extra_observations_attempted'] += len(sample.get('observations',()))
+            cost, actual_identity, actual_scores = _allocation_fine_sample(sample,prepared,family_size)
+            if actual_identity != identity or not np.allclose(actual_scores,scores,atol=1e-7,rtol=1e-10):
+                row['reason'] = 'continued_state_cache_or_dsp_work_differs'
+                continue
+            row.update(status='matched_exploratory_measurement', **cost)
+        except (KeyError,TypeError,ValueError,RuntimeError,MemoryError,EOFError,OSError,OverflowError):
+            row['reason'] = 'allocation_continued_work_unresolved'
+    if all(value is not None for value in requested.values()) and all(row['status']!='unresolved' for row in rows):
+        report['status']='matched_exploratory_measurements'
+    elif targets['physical_workers'] is None:
+        report['reason']='physical_core_topology_unavailable'
+    return report
 
 
 def choose_allocation(prepared, allocations):
@@ -984,10 +1187,127 @@ def public_work_coordinates(receiver, observed=()):
     return tuple(coordinates)
 
 
-def measure_acquisition(prepared, receiver, *, family_size):
+_SIGNAL_SCHEMA = 'triad-complete-public-signal-work-v1'
+
+
+def _work_digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'),
+        allow_nan=False).encode()).hexdigest()
+
+
+def _complete_acquisition_work(result, workers):
+    """Normalize an actual complete public search, keeping branch identity and counts."""
+    from triad_receiver import _public_metrics
+    coarse, helper = result['coarse'], result['helper']
+    if (result['status'] != 'acquired' or coarse['status'] != 'proposed' or
+            result.get('coarse_session') is not None or
+            coarse.get('frequency_tiles', {}).get('complete_public_search', True) is not True):
+        raise ValueError('complete actual public acquisition work required')
+    coordinates = [list(row) for row in result['coordinates']]
+    stages = result['stages']
+    if set(stages) != {'helper', 'coarse', 'refinement_selection'}:
+        raise ValueError('complete acquisition stages are required')
+    work = {key:coarse['work'][key] for key in ('workspaces', 'workers', 'frequency_points',
+        'arrival_points', 'fft_products', 'correlation_method')}
+    candidates = [{key:row[key] for key in ('bit', 'epoch', 'arrival', 'frequency', 'clock_ppm', 'rank')}
+        for row in coarse['candidates']]
+    return dict(status='acquired', complete_public_search=True, work_only=False,
+        receiver_workers=workers, helper_status=helper['status'], helper_reason=helper['reason'],
+        helper_result_sha256=_work_digest(_public_metrics(helper)),
+        coarse_work=work, coarse_reason=coarse['reason'], coarse_candidates=candidates,
+        searched_frequency_intervals_hz=result['searched_frequency_intervals_hz'],
+        refinement_candidates=stages['refinement_selection']['work']['candidates'],
+        coordinates=coordinates)
+
+
+def validate_signal_acquisition_work(value):
+    """Validate the bounded shape required for nominal acquisition reuse."""
+    def count(number, lower=1, upper=2**63-1):
+        return type(number) is int and lower <= number <= upper
+
+    def digest(value):
+        return (type(value) is str and len(value) == 64 and
+            all(char in '0123456789abcdef' for char in value))
+
+    def finite(number):
+        return (type(number) in (int, float) and abs(number) <= 1e9 and math.isfinite(number))
+
+    if (type(value) is not dict or set(value) != {'schema','sample_count','full_iq_sha256',
+            'full_validity_sha256','fine_slice_sha256','acquisition'} or
+            value['schema'] != _SIGNAL_SCHEMA or not count(value['sample_count'], 36000) or
+            not all(digest(value[name]) for name in ('full_iq_sha256','full_validity_sha256','fine_slice_sha256'))):
+        return False
+    actual = value['acquisition']
+    if (type(actual) is not dict or set(actual) != {'status','complete_public_search','work_only',
+            'receiver_workers','helper_status','helper_reason','helper_result_sha256','coarse_work',
+            'coarse_reason','coarse_candidates','searched_frequency_intervals_hz',
+            'refinement_candidates','coordinates'} or actual['status'] != 'acquired' or
+            actual['complete_public_search'] is not True or actual['work_only'] is not False or
+            not count(actual['receiver_workers'], upper=4096) or
+            actual['helper_status'] not in ('fallback','narrowed') or
+            type(actual['helper_reason']) is not str or not 1 <= len(actual['helper_reason']) <= 128 or
+            not digest(actual['helper_result_sha256']) or
+            actual['coarse_reason'] != 'complete_public_workspace_search'):
+        return False
+    work = actual['coarse_work']
+    if (type(work) is not dict or set(work) != {'workspaces','workers','frequency_points',
+            'arrival_points','fft_products','correlation_method'} or
+            not all(count(work[name]) for name in ('workspaces','workers','frequency_points','arrival_points','fft_products')) or
+            not work['workers'] <= min(work['workspaces'], actual['receiver_workers']) or
+            work['correlation_method'] not in ('frequency','lag')):
+        return False
+    coordinates = actual['coordinates']
+    if (type(coordinates) is not list or not count(actual['refinement_candidates'], upper=12) or
+            len(coordinates) != actual['refinement_candidates'] or
+            not all(type(row) is list and len(row) == 4 and count(row[0], -6, 6) and
+                all(finite(number) for number in row[1:]) for row in coordinates)):
+        return False
+    if len({tuple(row) for row in coordinates}) != len(coordinates):
+        return False
+    candidates = actual['coarse_candidates']
+    if (type(candidates) is not list or not 2 <= len(candidates) <= 4 or
+            not all(type(row) is dict and set(row) == {'bit','epoch','arrival','frequency','clock_ppm','rank'} and
+                count(row['bit'], 0, 1) and count(row['epoch'], -6, 6) and count(row['rank'], 1, 2) and
+                all(finite(row[name]) for name in ('arrival','frequency','clock_ppm')) for row in candidates) or
+            {row['bit'] for row in candidates} != {0,1}):
+        return False
+    intervals = actual['searched_frequency_intervals_hz']
+    return (type(intervals) is list and 1 <= len(intervals) <= 1024 and
+        all(type(row) is list and len(row) == 2 and all(finite(x) for x in row) and
+            row[0] <= row[1] for row in intervals))
+
+
+def signal_acquisition_work(prepared, acquired, *, receiver_workers):
+    """Digest the immutable full nominal observation and its actual search work.
+
+    Hashing occurs outside CPU-service timing. The canonical prepared simulation
+    is exclusively owned and no quiet/noise overwrite has happened yet.
+    """
+    raw, valid, samples = prepared.raw, prepared.valid, prepared.samples
+    if (raw.dtype != np.dtype('<c16') or valid.dtype != np.dtype('u1') or
+            raw.shape != (samples,) or valid.shape != raw.shape or
+            not raw.flags.c_contiguous or not valid.flags.c_contiguous):
+        raise ValueError('expected canonical contiguous little-endian simulation input')
+    work = _complete_acquisition_work(acquired, receiver_workers)
+    _, origin, extent = continued_probe_extent(prepared.plan, prepared.bank.descriptor, work['coordinates'])
+    if origin is None:
+        raise ValueError('current public window has no supported six-second fine slice')
+    fine_digest = hashlib.sha256(memoryview(raw[origin:origin+extent]).cast('B'))
+    fine_digest.update(memoryview(valid[origin:origin+extent]).cast('B'))
+    receipt = dict(schema=_SIGNAL_SCHEMA, sample_count=samples,
+        full_iq_sha256=hashlib.sha256(memoryview(raw).cast('B')).hexdigest(),
+        full_validity_sha256=hashlib.sha256(memoryview(valid).cast('B')).hexdigest(),
+        fine_slice_sha256=fine_digest.hexdigest(), acquisition=work)
+    if not validate_signal_acquisition_work(receipt):
+        raise ValueError('actual acquisition receipt is outside the nominal replay domain')
+    return receipt
+
+
+def measure_acquisition(prepared, receiver, *, family_size, expected_work=None):
     from triad_case_metrics import LOOKS,arithmetic_interval
     samples=[]
     representative=None
+    work_matches=0
     for look in LOOKS:
         while len(samples)<look:
             measured=prepared.acquisition(receiver)
@@ -999,6 +1319,11 @@ def measure_acquisition(prepared, receiver, *, family_size):
             if result['status']!='acquired':
                 return dict(model_status='unresolved',reason=result.get('reason'),
                     realtime_status='unresolved',coverage=result)
+            if expected_work is not None:
+                try:
+                    work_matches += int(_complete_acquisition_work(result, receiver.workers) == expected_work)
+                except (KeyError, TypeError, ValueError):
+                    pass
             representative=result
             samples.append({key:value for key,value in measured.items() if key!='result'})
         point,interval=arithmetic_interval([
@@ -1012,6 +1337,7 @@ def measure_acquisition(prepared, receiver, *, family_size):
             row['ratio_processing_seconds_per_baseband_second'] for row in samples),
         model_status='fixed_extent_measured_no_extrapolation',realtime_status=status,
         samples=samples,coverage=representative,
+        actual_work_match_count=work_matches if expected_work is not None else None,
         scope='Actual complete Helper, filtering, public coarse search and fine-coordinate selection; repeated fixed observation is timing evidence only.')
 
 
@@ -1053,16 +1379,42 @@ def _larger_component(rows):
     return result
 
 
-def measure_complete_case(prepared, allocations, *, family_size, progress=print):
-    """Account for implemented complete reception with abbreviated path strata."""
+FULL_MEASUREMENT_SCOPE = 'full_capacity'
+NOMINAL_HOLDOUT_SCOPE = 'nominal_holdout'
+CEILING_ONLY_RECEIPTS = ('fine_public_state_ceiling', 'fine_terminal', 'erasure_branch_holdout',
+    'noise_only_fine', 'noise_only_acquisition')
+
+
+def measure_complete_case(prepared, allocations, *, family_size, progress=print,
+                          record_signal_work=False, on_inference_allocation=None,
+                          fixed_holdout_workers=None, sustained_targets=None):
+    """Measure complete nominal reception and the separately required ceiling strata.
+
+    The fixed independent holdout repeats the canonical nominal path only.
+    The exploratory allocation pilot still executes every declared candidate.
+    """
     from triad_case_metrics import workspace_summary
     from triad_orchestration_cost import measure_orchestration
     progress('  comparing same-stream CPU worker allocations')
     allocation=choose_allocation(prepared,allocations)
-    workers=allocation['selected_workers']
-    if workers is None:
+    selected=allocation['selected_workers']
+    if selected is None:
         return dict(status='unresolved',allocation=allocation,
             reason='no_complete_or_bounded_tiled_work_for_worker_selection')
+    workers=selected
+    nominal_holdout = fixed_holdout_workers is not None
+    mode='pilot_selected'
+    if nominal_holdout:
+        if (type(fixed_holdout_workers) is not int or fixed_holdout_workers not in allocations or
+                not any(row['workers']==fixed_holdout_workers and row.get('selection_ratio') is not None
+                    for row in allocation['samples'])):
+            return dict(status='unresolved',allocation=allocation,
+                reason='predeclared_holdout_allocation_not_measured')
+        workers=fixed_holdout_workers
+        mode='fixed_holdout'
+        progress(f'  independent holdout uses {workers} workers; exploratory pilot selected {selected}')
+    if on_inference_allocation is not None:
+        on_inference_allocation(workers)
     progress(f'  fresh measurements with {workers} workers')
     lifecycle_samples=[]
     for _ in range(2):
@@ -1081,40 +1433,74 @@ def measure_complete_case(prepared, allocations, *, family_size, progress=print)
         session=None
         result = initial['result']
         observed = tuple(result.get('coordinates', ())) if result['status'] == 'acquired' else ()
-        work_coordinates = observed or public_work_coordinates(receiver)
-        nominal_acquisition = measure_acquisition(prepared, receiver, family_size=family_size)
+        signal_work = None
+        helper_prefix_anchor = None
+        if record_signal_work and observed:
+            try:
+                signal_work = signal_acquisition_work(prepared, result, receiver_workers=workers)
+            except (KeyError, TypeError, ValueError):
+                # Continue measuring the canonical absolute-capacity paths.
+                # Missing actual-work evidence cannot seed replay calibration.
+                signal_work = None
+        if signal_work is None:
+            nominal_acquisition = measure_acquisition(prepared, receiver, family_size=family_size)
+        else:
+            nominal_acquisition = measure_acquisition(prepared, receiver, family_size=family_size,
+                expected_work=signal_work['acquisition'])
+            count = len(nominal_acquisition.get('samples', ()))
+            if not count or nominal_acquisition.get('actual_work_match_count') != count:
+                signal_work = None
+        if signal_work is not None:
+            # Capture the independently generated local prefix while the full
+            # nominal input is still owned here. The later noise-only stratum
+            # mutates these arrays; its data must never become the fit anchor.
+            from triad_helper_prefix import capture_local_prefix_anchor
+            try:
+                helper_prefix_anchor = capture_local_prefix_anchor(prepared, receiver, signal_work)
+            except (ValueError, MemoryError):
+                # The optional portability path remains unavailable, without
+                # changing the ordinary exact-work calibration.
+                helper_prefix_anchor = None
         if observed:
             progress('  measuring sustained nominal fine tracking')
             active = measure_sustained_fine(prepared, receiver, observed, family_size=family_size)
         else:
             active = dict(schema='triad-sustained-fine-measurement-v1', status='unresolved',
                           reason='complete_public_acquisition_required', observations=[])
-        cap=measure_fine_stratum(prepared,receiver,public_work_coordinates(receiver,work_coordinates),
-            stratum='active',family_size=family_size,work_probe=True)
-        erasure=prepared.fine_probe(receiver,work_coordinates,units=2,stratum='active',
-            interior_erasure=True)
-        erasure=_probe_work(erasure)
-        cap_upper=cap.get('ratio_processing_seconds_per_baseband_second_interval')
-        erasure_supported=bool(cap_upper and erasure['requested_invalid_rows']==2 and
-            erasure['additional_discarded_rows']>0 and
-            erasure['ratio_processing_seconds_per_baseband_second']<=2*cap_upper[1])
-        if not erasure_supported:
-            cap.update(model_status='unresolved',reason='erasure_branch_cost_holdout_unresolved')
-        terminal=measure_fine_stratum(prepared,receiver,work_coordinates,
-            stratum='terminal',family_size=family_size)
+        if not nominal_holdout:
+            work_coordinates = observed or public_work_coordinates(receiver)
+            cap=measure_fine_stratum(prepared,receiver,public_work_coordinates(receiver,work_coordinates),
+                stratum='active',family_size=family_size,work_probe=True)
+            erasure=prepared.fine_probe(receiver,work_coordinates,units=2,stratum='active',
+                interior_erasure=True)
+            erasure=_probe_work(erasure)
+            cap_upper=cap.get('ratio_processing_seconds_per_baseband_second_interval')
+            erasure_supported=bool(cap_upper and erasure['requested_invalid_rows']==2 and
+                erasure['additional_discarded_rows']>0 and
+                erasure['ratio_processing_seconds_per_baseband_second']<=2*cap_upper[1])
+            if not erasure_supported:
+                cap.update(model_status='unresolved',reason='erasure_branch_cost_holdout_unresolved')
+            terminal=measure_fine_stratum(prepared,receiver,work_coordinates,
+                stratum='terminal',family_size=family_size)
+    sustained_probe = None
+    if sustained_targets is not None and not nominal_holdout:
+        progress('  comparing bounded sustained fine work at physical and logical allocations')
+        sustained_probe = measure_sustained_allocation_probe(prepared, allocations, workers, observed, active,
+            targets=sustained_targets, family_size=3*family_size)
     progress('  measuring actual input/quiet-state/codec orchestration work')
     orchestration=measure_orchestration(prepared,family_size=family_size)
-    progress('  measuring noise-only listening and full-prior fallback')
-    noise_only_observation(prepared)
-    with prepared.receiver(workers) as receiver:
-        initial=prepared.acquisition(receiver)
-        session=initial['result'].pop('coarse_session',None)
-        if session is not None:session.close()
-        session=None
-        noise_coordinates=tuple(initial['result'].get('coordinates',())) or public_work_coordinates(receiver)
-        noise_acquisition=measure_acquisition(prepared,receiver,family_size=family_size)
-        noise_fine=measure_fine_stratum(prepared,receiver,noise_coordinates,
-            stratum='active',family_size=family_size)
+    if not nominal_holdout:
+        progress('  measuring noise-only listening and full-prior fallback')
+        noise_only_observation(prepared)
+        with prepared.receiver(workers) as receiver:
+            initial=prepared.acquisition(receiver)
+            session=initial['result'].pop('coarse_session',None)
+            if session is not None:session.close()
+            session=None
+            noise_coordinates=tuple(initial['result'].get('coordinates',())) or public_work_coordinates(receiver)
+            noise_acquisition=measure_acquisition(prepared,receiver,family_size=family_size)
+            noise_fine=measure_fine_stratum(prepared,receiver,noise_coordinates,
+                stratum='active',family_size=family_size)
     # close() joins work, but the Python receiver still owns its screen.
     # Release that last reference before retiring the original bank below.
     del receiver
@@ -1137,24 +1523,32 @@ def measure_complete_case(prepared, allocations, *, family_size, progress=print)
         receiver_worker_lifecycle=lifecycle)
     normal_fine = active.get('fine_component') or dict(model_status='unresolved',
         reason=active.get('reason') or 'missing_sustained_fine_estimate')
-    noise_fine_component=_scaled_component(noise_fine,noise_fine['full_window_forecast_multiplier'])
-    terminal_component=_scaled_component(terminal,terminal['full_window_forecast_multiplier'])
-    cap_component=_scaled_component(cap,cap['full_window_forecast_multiplier'])
-    all_fine=(normal_fine,noise_fine_component,terminal_component,cap_component)
     nominal=combine_components(dict(common,acquisition=nominal_acquisition,
         complete_fine_search=normal_fine),complete_work_covered=True)
-    ceiling=combine_components(dict(common,
-        acquisition=_larger_component((nominal_acquisition,noise_acquisition)),
-        complete_fine_search=_larger_component(all_fine)),complete_work_covered=True)
-    # A deliberately overcounted256+256-state cold-cache/transition ceiling can prevent a
-    # pass, but cannot prove the actual ordinary receiver is slower than real time.
-    if nominal['realtime_status'] == 'fail':
-        ceiling.update(realtime_status='fail', reason='nominal_service_failure',
-                       nominal_failure_reason=nominal['reason'])
-    elif ceiling['realtime_status'] == 'fail' and ceiling['measured_complete_component_lower_bound'] < 1:
-        ceiling['realtime_status']='unresolved'
-        ceiling['reason']='conservative_work_ceiling_does_not_establish_positive_margin'
-    probes=[row for summary in (cap,terminal,noise_fine) for row in summary['work_samples']]+[erasure]
+    ceiling_work, probes = {}, []
+    acquisition_summaries = [nominal_acquisition]
+    if not nominal_holdout:
+        noise_fine_component=_scaled_component(noise_fine,noise_fine['full_window_forecast_multiplier'])
+        terminal_component=_scaled_component(terminal,terminal['full_window_forecast_multiplier'])
+        cap_component=_scaled_component(cap,cap['full_window_forecast_multiplier'])
+        all_fine=(normal_fine,noise_fine_component,terminal_component,cap_component)
+        ceiling=combine_components(dict(common,
+            acquisition=_larger_component((nominal_acquisition,noise_acquisition)),
+            complete_fine_search=_larger_component(all_fine)),complete_work_covered=True)
+        # A deliberately overcounted256+256-state cold-cache/transition ceiling can prevent a
+        # pass, but cannot prove the actual ordinary receiver is slower than real time.
+        if nominal['realtime_status'] == 'fail':
+            ceiling.update(realtime_status='fail', reason='nominal_service_failure',
+                           nominal_failure_reason=nominal['reason'])
+        elif ceiling['realtime_status'] == 'fail' and ceiling['measured_complete_component_lower_bound'] < 1:
+            ceiling['realtime_status']='unresolved'
+            ceiling['reason']='conservative_work_ceiling_does_not_establish_positive_margin'
+        probes=[row for summary in (cap,terminal,noise_fine) for row in summary['work_samples']]+[erasure]
+        acquisition_summaries.append(noise_acquisition)
+        ceiling_work = dict(complete_capacity=ceiling, fine_public_state_ceiling=cap, fine_terminal=terminal,
+            erasure_branch_holdout=dict(sample=erasure,supported_by_state_ceiling=erasure_supported,
+                scope='One actual invalid interval crossing a DFT block boundary; cost checked against the conservative complete-state ceiling, not a separate communication trial or universal erasure timing bound.'),
+            noise_only_fine=noise_fine, noise_only_acquisition=noise_acquisition)
     active_observations = active.get('observations', ())
     active_workspace = [row['workspace'] for row in active_observations if 'workspace' in row]
     estimates=[row['workspace_bytes'] for row in probes]
@@ -1164,7 +1558,10 @@ def measure_complete_case(prepared, allocations, *, family_size, progress=print)
     estimates.append(full['estimated_peak_bytes'])
     rss=[row['rss'].get('sum_process_bytes') for row in probes]
     rss.extend(row['rss'].get('sum_process_bytes') for row in active_workspace)
-    for summary in (nominal_acquisition,noise_acquisition):
+    rss.extend(row.get('rss',{}).get('sum_process_bytes') for row in banks['samples'])
+    rss.extend((full.get(key) or {}).get('sum_process_bytes')
+        for key in ('resident_sample_before','resident_sample_after'))
+    for summary in acquisition_summaries:
         estimates.extend(sample['receiver_peak_estimate_bytes']
             for sample in summary.get('samples',())
             if sample.get('receiver_peak_estimate_bytes') is not None)
@@ -1182,7 +1579,8 @@ def measure_complete_case(prepared, allocations, *, family_size, progress=print)
             rss.append(selection.get('rss',{}).get('sum_process_bytes'))
     workspace=workspace_summary(max(estimates),prepared.memory_limit_bytes,
         max((value for value in rss if value is not None),default=None))
-    if workspace['status']=='failure':
+    workspace['measurement_scope'] = NOMINAL_HOLDOUT_SCOPE if nominal_holdout else FULL_MEASUREMENT_SCOPE
+    if not nominal_holdout and workspace['status']=='failure':
         ceiling.update(realtime_status='fail',reason='workspace_budget_exceeded')
     utilization = [row['observed_cpu_utilization_fraction'] for row in probes]
     for observation in active_observations:
@@ -1190,18 +1588,22 @@ def measure_complete_case(prepared, allocations, *, family_size, progress=print)
                   observation.get('finish_classify_close', {}))
         utilization.extend(phase.get('observed_allocated_cpu_utilization_fraction') for phase in phases)
     utilization = [value for value in utilization if value is not None]
-    return dict(status='measured_complete_work_estimate',selected_workers=workers,
-        allocation=allocation,nominal_service=nominal,complete_capacity=ceiling,
-        fine_active=active,fine_public_state_ceiling=cap,fine_terminal=terminal,
-        erasure_branch_holdout=dict(sample=erasure,supported_by_state_ceiling=erasure_supported,
-            scope='One actual invalid interval crossing a DFT block boundary; cost checked against the conservative complete-state ceiling, not a separate communication trial or universal erasure timing bound.'),
-        noise_only_fine=noise_fine,noise_only_acquisition=noise_acquisition,
+    return dict(status='measured_nominal_holdout' if nominal_holdout else 'measured_complete_work_estimate',
+        measurement_scope=NOMINAL_HOLDOUT_SCOPE if nominal_holdout else FULL_MEASUREMENT_SCOPE,
+        selected_workers=selected, inference_workers=workers, inference_allocation_mode=mode,
+        allocation=allocation,nominal_service=nominal,
+        **({'signal_work': signal_work, 'helper_prefix_anchor': helper_prefix_anchor}
+            if record_signal_work else {}),
+        **({'ceiling_only_receipts_omitted': list(CEILING_ONLY_RECEIPTS)} if nominal_holdout else ceiling_work),
+        fine_active=active,
+        **({'sustained_allocation_probe':sustained_probe} if sustained_probe is not None else {}),
         nominal_acquisition=nominal_acquisition,orchestration=orchestration,
         recurring_banks=banks,workspace_margin=workspace,
         observed_allocated_cpu_utilization_fraction_range=[min(utilization),max(utilization)] if utilization else None,
         full_local_cpu_ceiling_demonstrated=False,
         utilization_scope='Actual same-stream supported allocations were compared. Idle/serial portions are retained in elapsed service; no hypothetical scaling to unused cores.',
-        reception_success_scope='This case has actual native input and complete implemented receiver work. Short work probes do not establish whole-bit or message success; the separate current-source native gate is configuration-specific.',
+        reception_success_scope='Short probes execute actual native nominal receiver work. The independent holdout omits ceiling-only inference and cannot establish capacity, whole-bit or message success.' if nominal_holdout else
+            'This case has actual native input and complete implemented receiver work. Short work probes do not establish whole-bit or message success; the separate current-source native gate is configuration-specific.',
         provisional_sensitivity_scope='Use the reported duration-model SNR target as a candidate, not a measured complete-message90% threshold.')
 
 
@@ -1245,6 +1647,11 @@ def render_capacity_report(report):
         ceiling=result.get('complete_capacity',{});workspace=result.get('workspace_margin',{})
         lines.append(f"Selected actual same-stream allocation: {result.get('selected_workers','unresolved')} workers. Nominal margin estimate: {number(100*nominal['margin_fraction'])+'%' if nominal.get('margin_fraction') is not None else 'unresolved'}. Conservative receiver-work margin: {number(100*ceiling['margin_fraction'])+'%' if ceiling.get('margin_fraction') is not None else 'unresolved'}. Decision: {ceiling.get('reason','unresolved')}.")
         lines.append(f"The conditional nominal service decision is {nominal.get('realtime_status', 'unresolved')}. The estimate charges the two-second prefix and finish once per slot and uses the observed continuation rate for the rest of the window.")
+        comparison=result.get('sustained_allocation_probe')
+        if comparison is not None:
+            measured=', '.join(f"{row['workers']} workers: {number(row.get('measured_six_second_fine_service',{}).get('ratio_processing_seconds_per_baseband_second'))} s/s"
+                for row in comparison['comparisons'])
+            lines.append(f"Exploratory sustained fine work over six-second observations: {measured or 'unresolved'}. This comparison does not select the inference allocation or establish a CPU ceiling.")
         lines.append('The state-ceiling probe starts256 adaptive and256 fixed-lane states, executes two segments including actual transition/merge work, and charges that entire cold-cache unit at every real segment. Its conservative estimate can withhold a pass; exceeding1 does not by itself prove ordinary receiver failure.')
         if workspace.get('estimated_margin_fraction') is not None:
             lines.append(f"Workspace budget {workspace['budget_bytes']/2**20:.1f} MiB; estimated headroom {100*workspace['estimated_margin_fraction']:.1f}%. Explicit peak buffers and sampled parent/native RSS are retained in JSON; this is not an allocation certificate.")
@@ -1281,7 +1688,8 @@ def capacity_status(report):
 
 
 def run_complete_cases(*,executable,output,case_list,measurement_seconds=1.,threads=None,
-                       case_indices=None,paired_followup=False,message_gate=True):
+                       case_indices=None,paired_followup=False,message_gate=True,sustained_allocation_probe=False,
+                       workspace_mib=None,calibration_receipt_prefix=None,allow_conditional_calibration_identity=False):
     """Distinct absolute-capacity entry point; always reread the edited list."""
     import hashlib
     import json
@@ -1301,32 +1709,69 @@ def run_complete_cases(*,executable,output,case_list,measurement_seconds=1.,thre
     machine=machine_resources()
     if machine['cpu'] is None or machine['memory_budget_bytes'] is None:
         raise RuntimeError('visible local CPU and memory budgets are required')
+    workspace_limit=machine['memory_budget_bytes']
+    if workspace_mib is not None:
+        if type(workspace_mib) is not int or not 0 < workspace_mib*2**20 <= workspace_limit:
+            raise ValueError('requested stable workspace exceeds the visible local receiver budget')
+        workspace_limit=workspace_mib*2**20
     allocations=machine['cpu']['receiver_worker_candidates']
+    if type(sustained_allocation_probe) is not bool or (sustained_allocation_probe and threads is not None):
+        raise ValueError('sustained allocation comparison requires the canonical full worker pilot')
+    sustained_targets=sustained_allocation_targets(machine['cpu']) if sustained_allocation_probe else None
     if threads is not None:
         if isinstance(threads,bool) or not isinstance(threads,int) or threads not in range(1,machine['cpu']['available_cpus']+1):
             raise ValueError('explicit receiver workers must fit the local CPU budget')
         allocations=[threads]
     configure_numerical_threads(resolve_cpu_budget(jobs=1,workers=max(allocations),threads=1))
     executable=Path(executable).resolve()
+    receipt_paths={}
+    if (type(allow_conditional_calibration_identity) is not bool or
+            (allow_conditional_calibration_identity and calibration_receipt_prefix is None)):
+        raise ValueError('conditional calibration identity requires a private receipt prefix')
+    if calibration_receipt_prefix is not None:
+        from triad_nonfine_calibration import (SCHEMA as FIT_SCHEMA, capture_nonfine_calibration,
+            local_receipt_destination, write_local_receipt)
+        if threads is not None or round(measurement_seconds*2) != 2:
+            raise ValueError('private replay fits require the full worker pilot and canonical one-second unit')
+        prefix=Path(calibration_receipt_prefix)
+        suite_path=Path(output)
+        report_paths={path.resolve() for path in (suite_path, suite_path.with_suffix('.md'),
+            suite_path.with_suffix(suite_path.suffix+'.tmp'))}
+        for case in selected:
+            path=local_receipt_destination(prefix.with_name(f"{prefix.name}-{case['index']}.json"))
+            if path in report_paths:
+                raise ValueError('private receipt path overlaps the suite report')
+            receipt_paths[case['index']]=path
+    provenance=identity(executable)
+    if receipt_paths:
+        from triad_calibration_identity import _hash_file
+        from triad_cases import ROOT
+        fit_sources=dict(provenance['sources'])
+        fit_sources['tools/build_capacity.py']=_hash_file(ROOT/'tools/build_capacity.py')
     report=dict(schema='triad-manual-complete-capacity-v3',status='running',
         input={key:value for key,value in parsed.items() if key!='cases'},
-        provenance=identity(executable),machine=machine,worker_allocations=allocations,
-        policy=measurement_policy(len(parsed['cases']),measurement_seconds),
+        provenance=provenance,machine=machine,worker_allocations=allocations,
+        workspace_limit_bytes=workspace_limit,
+        policy=measurement_policy(len(parsed['cases']),max(1,round(measurement_seconds*2))*.5),
+        sustained_allocation_targets=sustained_targets,
         selection=dict(indices=[case['index'] for case in selected],
             complete_current_list=len(selected)==len(parsed['cases']),
             complete_worker_comparison=allocations==machine['cpu']['receiver_worker_candidates'],
             current_list_entries=len(parsed['cases'])),cases=[])
+    report['policy']['unit_baseband_seconds_scope'] = (
+        'Rounded requested unit. Each row records its actual, possibly shorter fine unit in public_geometry.')
     write_result(output,report)
     if message_gate:
         from triad_message_gate import run_native_message_gate
         print('current-source native message/quiet/EOF functional gate',flush=True)
-        report['message_gate']=run_native_message_gate(executable,machine['memory_budget_bytes'],
+        report['message_gate']=run_native_message_gate(executable,workspace_limit,
             workers=min(2,machine['cpu']['available_cpus']),case_list=case_list,
             progress=lambda line:print('  '+line,flush=True))
     else:
         report['message_gate']=dict(status='explicitly_skipped',passed=False)
     measured={}
     for case in selected:
+        receipt=None
         print(f"case {case['index']}/{len(parsed['cases'])}: {case['heading']}",flush=True)
         if case['configuration_hash'] in measured:
             item=copy.deepcopy(measured[case['configuration_hash']])
@@ -1334,11 +1779,13 @@ def run_complete_cases(*,executable,output,case_list,measurement_seconds=1.,thre
         else:
             item=dict(case=case,status='unresolved')
             try:
+                if workspace_mib is not None and (machine_resources()['memory_budget_bytes'] or 0) < workspace_limit:
+                    raise ValueError('predeclared workspace exceeds the current visible receiver budget')
                 plan=native_plan(executable,case['native_args'])
                 item.update(native_plan=plan)
                 if not plan.get('geometry_feasible'):raise ValueError('native public geometry is infeasible')
                 with PreparedCapacityCase(executable,case,plan,
-                        memory_limit_bytes=machine['memory_budget_bytes'],measurement_seconds=measurement_seconds) as prepared:
+                        memory_limit_bytes=workspace_limit,measurement_seconds=measurement_seconds) as prepared:
                     item['target_snr']=target_snr(plan,complete_admission=prepared.admission_model_receipt())
                     print('  fixed-channel quiet-energy diagnostic',flush=True)
                     item['quiet_energy_diagnostic']=prepared.quiet_energy_diagnostic(item['target_snr'])
@@ -1346,12 +1793,45 @@ def run_complete_cases(*,executable,output,case_list,measurement_seconds=1.,thre
                         simulator_generation_seconds=prepared.simulator_generation_seconds,
                         long_preparation_unavoidable=None)
                     item['public_geometry']=prepared.public_geometry
-                    item['measurement']=measure_complete_case(prepared,allocations,
-                        family_size=report['policy']['family_size'],progress=lambda line:print(line,flush=True))
+                    work=dict(family_size=report['policy']['family_size'],
+                        progress=lambda line:print(line,flush=True),sustained_targets=sustained_targets)
+                    if receipt_paths:
+                        receipt=capture_nonfine_calibration(prepared,allocations,declared_workers=None,
+                            exporter=executable,case_list=case_list, suite_list_sha256=parsed['source_sha256'],
+                            allow_conditional=allow_conditional_calibration_identity, **work)
+                        if 'measurement' not in receipt:
+                            raise ValueError('canonical measurement unavailable for the private fit')
+                        item['measurement']={key:value for key,value in receipt['measurement'].items()
+                            if key not in ('signal_work', 'helper_prefix_anchor')}
+                    else:
+                        item['measurement']=measure_complete_case(prepared,allocations,**work)
                     item['status']=item['measurement']['status']
             except (ValueError,RuntimeError,MemoryError,EOFError,OSError,subprocess.SubprocessError) as error:
                 item['error']=str(error)
             measured[case['configuration_hash']]=item
+        if receipt_paths:
+            if receipt is None:
+                receipt=dict(schema=FIT_SCHEMA,status='unresolved',reason=(
+                    'ordered_duplicate_reuses_absolute_measurement' if 'reused_measurement_from' in item
+                    else 'canonical_measurement_unavailable'))
+            receipt.setdefault('case_index',case['index'])
+            receipt['originating_suite_message_gate']={key:report['message_gate'][key]
+                for key in ('status','passed')}
+            if receipt['status']=='recorded_unqualified':
+                observed=receipt['identity_before']['identity']
+                if not report['message_gate']['passed']:
+                    receipt.update(status='unresolved',reason='originating_suite_message_gate_did_not_pass')
+                elif (observed['native_binary_sha256']!=provenance['native_binary_sha256'] or
+                        observed['sources']!=fit_sources):
+                    receipt.update(status='unresolved',reason='source_or_exporter_changed_before_calibration')
+                elif receipt['measurement'].get('signal_work') is None:
+                    receipt.update(status='unresolved',reason='complete_actual_signal_work_unavailable')
+            try:
+                write_local_receipt(receipt_paths[case['index']],receipt)
+                item['private_replay_fit']={key:receipt[key] for key in ('status','reason') if key in receipt}
+            except (ValueError,OSError) as error:
+                item['private_replay_fit']=dict(status='unresolved',reason='local_receipt_not_written',
+                    error_type=type(error).__name__)
         report['cases'].append(item)
         write_result(output,_public_metrics(report))
     final=identity(executable)

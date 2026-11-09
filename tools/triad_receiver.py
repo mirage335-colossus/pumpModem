@@ -13,6 +13,7 @@ from dataclasses import replace
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import time
 import threading
@@ -40,6 +41,9 @@ _DEFAULT = dict(top_per_bit=2, maximum_fine_candidates=64,
     maximum_acceleration_ppm_per_second=10.,
     fine_delay_subdivisions=2, cache_bytes=32*1024**2,
     noise_upper_tail_probability=.001, precision='fp64')
+_APERTURE_NAMES = ('quiet_aperture_first_sample', 'quiet_aperture_stop_sample')
+_CUDA_LINALG_LOCK = threading.Lock()
+_CUDA_LINALG_READY = set()
 
 
 def _positive_integer(value, name):
@@ -52,6 +56,64 @@ def _stage(began, represented, work=None):
     return dict(included_in_service=True,
         ratio_processing_seconds_per_baseband_second=(time.perf_counter()-began)/represented,
         represented_baseband_seconds=represented, work=work or {})
+
+
+def fine_public_grid(manifest, epochs, coarse_frequency_step):
+    grid = public_grid(manifest['channel'], manifest['calendar']['arrival_prior_seconds'], epochs)
+    # Preserve long-window CFO resolution when the legacy .01 Hz grid is too coarse.
+    return replace(grid, frequency_step=min(grid.frequency_step, coarse_frequency_step))
+
+
+def _initialize_cuda_worker(allocation, device):
+    import torch
+    initialize_numerical_worker(allocation)
+    torch.cuda.set_device(device)
+    torch.cuda.set_stream(torch.cuda.default_stream(device))
+
+
+def _require_default_cuda_stream(device):
+    import torch
+    if (torch.cuda.current_device() != device or
+            torch.cuda.current_stream(device) != torch.cuda.default_stream(device)):
+        raise ValueError('CUDA fine work requires the selected device and its default stream')
+
+
+def _prepare_cuda_linalg(device):
+    """Initialize ATen's lazy CUDA linalg dispatch before concurrent updates."""
+    import torch
+
+    _require_default_cuda_stream(device)
+    key = (os.getpid(), device)
+    with _CUDA_LINALG_LOCK:
+        if key in _CUDA_LINALG_READY:
+            return dict(device=device, initialized_here=False)
+        # Even workers sharing a GPU stream can concurrently enter ATen's
+        # first-call registration on the host. Exercise the actual complex128
+        # operators serially before creating our executor (PyTorch #90613).
+        began = time.perf_counter()
+        free_before, total = torch.cuda.mem_get_info(device)
+        allocated_before = torch.cuda.memory_allocated(device)
+        reserved_before = torch.cuda.memory_reserved(device)
+        with torch.inference_mode():
+            sample = torch.eye(2, dtype=torch.complex128, device=f'cuda:{device}')
+            eigenvalues, vectors = torch.linalg.eigh(sample)
+            factor, info = torch.linalg.cholesky_ex(sample, check_errors=False)
+            if bool((info != 0).any()):
+                raise RuntimeError('CUDA fine linalg preflight failed Cholesky factorization')
+            solution = torch.cholesky_solve(sample, factor)
+            if not (torch.allclose(eigenvalues, sample.diagonal().real) and
+                    bool(torch.isfinite(vectors).all()) and torch.allclose(solution, sample)):
+                raise RuntimeError('CUDA fine linalg preflight returned invalid complex128 results')
+        torch.cuda.synchronize(device)
+        del sample, eigenvalues, vectors, factor, info, solution
+        result = dict(device=device, initialized_here=True, startup_wall_seconds=time.perf_counter()-began,
+            device_total_bytes=total, device_free_before_bytes=free_before,
+            device_free_after_bytes=torch.cuda.mem_get_info(device)[0],
+            torch_allocated_before_bytes=allocated_before, torch_allocated_after_bytes=torch.cuda.memory_allocated(device),
+            torch_reserved_before_bytes=reserved_before, torch_reserved_after_bytes=torch.cuda.memory_reserved(device),
+            scope='Serial CUDA linalg setup before work timers. Device-free snapshots include other device users.')
+        _CUDA_LINALG_READY.add(key)
+        return result
 
 
 def _public_metrics(value):
@@ -75,6 +137,7 @@ class FineSession:
     Absolute physical coordinates preserve source phase for interior probes.
     """
     def __init__(self, owner, coordinates, samples, physical_origin, work_probe=False):
+        owner._check_fine_context()
         self.owner = owner
         self.receiver = None
         self.provider = None
@@ -158,7 +221,7 @@ class FineSession:
             return render
         render = counted(self.provider)
         affine_render = counted(getattr(self.provider, 'initial_affine', self.provider))
-        available = (owner.memory_limit_bytes-owner.screen.resident_estimate-
+        available = (owner.memory_limit_bytes-owner.coarse_reserved_bytes-
             owner.input_workspace_bytes-owner.native_workspace_bytes-p['cache_bytes'])
         if available < 1:
             raise MemoryError('fine stage has no remaining combined workspace')
@@ -170,7 +233,7 @@ class FineSession:
             required_bands=owner.required_bands, excluded_bands=owner.excluded_bands,
             noise_variance=float(owner.manifest['power']['complex_noise_variance']),
             stationary_power=tuple(1/len(taps) for _ in taps),
-            coherence_seconds=owner.coherences, precision=p['precision'],
+            coherence_seconds=owner.coherences, device=owner.fine_execution_device, precision=p['precision'],
             audio_center_hz=float(ch['nominal_conversion_if_hz']),
             projection_mode='dft', memory_limit_bytes=available,
             maximum_input_chunk_samples=p['chunk_samples'], require_physical_map=True,
@@ -179,7 +242,7 @@ class FineSession:
             quiet_sample_bounds=tuple(max(0, min(self.samples, x-self.origin))
                 for x in owner.quiet_aperture))
         self.initial_lattice = dict(states=len(states),
-            delay_half_width_seconds=.5/owner.screen.output_fs,
+            delay_half_width_seconds=.5/owner.projected_sample_rate,
             delay_step_seconds=owner.initial_delay_step_seconds,
             rate_half_width_ppm=extent, rate_step_ppm=rate_step,
             initial_rate_indices=list(rates),
@@ -191,6 +254,7 @@ class FineSession:
     def push(self, first, values, valid=None):
         if self.receiver is None:
             raise RuntimeError('fine session is closed')
+        self.owner._check_fine_context()
         self.receiver.push(first, values, valid,
             physical_origin=self.origin+int(first),
             physical_offsets=np.arange(len(values), dtype=float))
@@ -198,6 +262,7 @@ class FineSession:
     def finish(self):
         if self.receiver is None:
             raise RuntimeError('fine session is closed')
+        self.owner._check_fine_context()
         result = self.receiver.finish()
         result['native_template_work'] = dict(calls=self.template_calls,
             returned_elements=self.template_rows, energy=self.template_energy,
@@ -206,7 +271,7 @@ class FineSession:
         result['coordinates'] = self.coordinates
         result['initial_lattice'] = self.initial_lattice
         result['work_probe_only'] = self.work_probe_only
-        result['arithmetic'] = dict(precision=self.owner.policy['precision'],
+        result['arithmetic'] = dict(precision=self.owner.policy['precision'], device=self.owner.fine_execution_device,
             likelihood_accumulation='fp64',
             selection='Predeclared before observing samples; no data-dependent precision fallback.')
         plan = self.receiver.nominal_work_plan
@@ -232,24 +297,26 @@ class FineSession:
         self.forward = None
 
 
-class CompleteBitReceiver:
-    """Prepared one-stream Helper→coarse→fine/persistent→bit/null backend.
+class FineReceiverContext:
+    """Canonical persistent fine search and classification context.
 
-    Numerical libraries must be configured by the controller before workers
-    start, with one numerical thread per hypothesis worker. The same executor
-    first scores independent coarse workspaces, then independent coherence
-    models; source-pipe rendering and global timing/pruning stay single-owner.
+    A complete receiver supplies the geometry of its validated, resident FFT
+    screen. Measurement replay supplies locally derived public geometry and
+    a reservation for the absent bank. A reservation cannot reproduce resident
+    memory or cache pressure.
     """
-    def __init__(self, manifest, screen, basis_source, *, workers=1,
-                 memory_limit_bytes, policy=None, coherences=DEFAULT_COHERENCES,
-                 admission_policy=None, basis_factory=tracking_source_basis):
+    def __init__(self, manifest, basis_source, *, epochs, clocks, projected_sample_rate,
+                 coarse_frequency_step, coarse_reserved_bytes, coarse_procedure_id,
+                 coarse_reference_variance, workers, memory_limit_bytes, policy=None,
+                 coherences=DEFAULT_COHERENCES, admission_policy=None,
+                 basis_factory=tracking_source_basis, fine_device='cpu'):
         began = time.perf_counter()
         self.workers = _positive_integer(workers, 'hypothesis workers')
         self.memory_limit_bytes = _positive_integer(memory_limit_bytes, 'memory limit')
-        if type(screen) is not FFTScreen:
-            raise TypeError('complete bit backend currently requires the canonical whole FFTScreen')
         self.manifest = copy.deepcopy(manifest)
-        self.screen, self.basis_source, self.basis_factory = screen, basis_source, basis_factory
+        self.basis_source, self.basis_factory = basis_source, basis_factory
+        self.projected_sample_rate = _positive_integer(projected_sample_rate, 'projected sample rate')
+        self.coarse_reserved_bytes = _positive_integer(coarse_reserved_bytes, 'coarse workspace reservation')
         descriptor = getattr(basis_source, 'descriptor', {})
         self.native_fixed_workspace_bytes = int(descriptor.get('fixed_workspace_bytes', 0))
         self.native_workspace_bytes = max(self.native_fixed_workspace_bytes,
@@ -260,23 +327,12 @@ class CompleteBitReceiver:
         if (isinstance(self.capture_origin, bool) or not isinstance(self.capture_origin, int) or
                 self.capture_origin < 0):
             raise ValueError('public physical window origin must be a nonnegative integer')
-        if self.sample_rate != screen.fs or self.samples != screen.samples:
-            raise ValueError('screen and public input window geometry differ')
-        declared, proposal = copy.deepcopy(manifest), copy.deepcopy(screen.manifest)
-        declared['power'].pop('complex_noise_variance', None)
-        proposal['power'].pop('complex_noise_variance', None)
-        aperture_names = ('quiet_aperture_first_sample', 'quiet_aperture_stop_sample')
-        for name in aperture_names:
-            declared['calendar'].pop(name, None)
-            proposal['calendar'].pop(name, None)
-        if declared != proposal:
-            raise ValueError('only noise normalization and declared quiet aperture may differ between proposal and fine manifests')
         calendar = manifest['calendar']
-        present = [name in calendar for name in aperture_names]
+        present = [name in calendar for name in _APERTURE_NAMES]
         if any(present) and not all(present):
             raise ValueError('both public quiet aperture endpoints are required')
         self.quiet_aperture_declared = all(present)
-        self.quiet_aperture = tuple(calendar[name] for name in aperture_names) if all(present) else (
+        self.quiet_aperture = tuple(calendar[name] for name in _APERTURE_NAMES) if all(present) else (
             self.capture_origin, self.capture_origin)
         if (any(isinstance(x, bool) or not isinstance(x, int) for x in self.quiet_aperture) or
                 not self.capture_origin <= self.quiet_aperture[0] <= self.quiet_aperture[1] <= self.capture_origin+self.samples):
@@ -308,29 +364,39 @@ class CompleteBitReceiver:
             raise ValueError('noise tail probability must lie in (0,1)')
         if self.policy['precision'] not in ('fp32', 'fp64'):
             raise ValueError('complete receiver precision must be fp32 or fp64')
+        if fine_device not in ('cpu', 'cuda'):
+            raise ValueError('fine device must be cpu or cuda')
+        self.fine_cuda_index = None
+        self.fine_execution_device = fine_device
+        if fine_device == 'cuda':
+            import torch
+            if self.policy['precision'] != 'fp64' or not torch.cuda.is_available():
+                raise ValueError('experimental CUDA fine work requires available CUDA and FP64')
+            self.fine_cuda_index = torch.cuda.current_device()
+            self.fine_execution_device = f'cuda:{self.fine_cuda_index}'
+            _prepare_cuda_linalg(self.fine_cuda_index)
         self.coherences = tuple(coherences)
         self.admission_policy = dict(admission_policy or {})
         operational_threshold(**self.admission_policy)
-        self.grid = public_grid(manifest['channel'], manifest['calendar']['arrival_prior_seconds'], screen.epochs)
-        # The legacy .01Hz final grid is adequate only for short observations.
-        # Preserve the publicly acquired long-window CFO resolution; a coarser
-        # snap can otherwise discard many cycles before coherent refinement.
-        self.grid = replace(self.grid, frequency_step=min(self.grid.frequency_step,
-            screen.maximum_frequency_step))
-        clocks = np.sort(screen.clocks)
+        self.grid = fine_public_grid(manifest, epochs, coarse_frequency_step)
+        clocks = np.sort(clocks)
         self.coarse_clock_gap_ppm = float(np.max(np.diff(clocks))) if len(clocks) > 1 else 0.
         self.initial_rate_half_width_ppm = self.coarse_clock_gap_ppm/4
-        self.initial_delay_step_seconds = 1/(screen.output_fs*self.policy['fine_delay_subdivisions'])
+        self.initial_delay_step_seconds = 1/(projected_sample_rate*self.policy['fine_delay_subdivisions'])
         self.required_bands, self.excluded_bands = core_projection_bands(manifest,
             pilot_use='none', frequencies_hz=(-self.grid.frequency_bound, self.grid.frequency_bound),
             clock_ppm=(-self.grid.clock_bound, self.grid.clock_bound))
         self.input_workspace_bytes = 0
-        self.helper_peak_bytes = 0
         self.executor = None
         if self.workers > 1:
+            allocation = {'threads': 1, 'linear_algebra_threads': 1}
+            initializer, initargs = (initialize_numerical_worker, (allocation,))
+            if self.fine_cuda_index is not None:
+                # Parent inputs and each dedicated worker share one explicit
+                # stream. Other streams require an event handoff protocol.
+                initializer, initargs = (_initialize_cuda_worker, (allocation, self.fine_cuda_index))
             self.executor = ThreadPoolExecutor(max_workers=self.workers,
-                initializer=initialize_numerical_worker,
-                initargs=({'threads': 1, 'linear_algebra_threads': 1},))
+                initializer=initializer, initargs=initargs)
             try:
                 barrier = threading.Barrier(self.workers)
                 def ready():
@@ -340,18 +406,22 @@ class CompleteBitReceiver:
             except BaseException:
                 self.close()
                 raise
-        self.procedure_id = hashlib.sha256(json.dumps(dict(policy=self.policy,
+        self.procedure_id = hashlib.sha256(json.dumps(dict(policy=self.policy, fine_device=self.fine_execution_device,
             grid=self.grid.__dict__, workers=self.workers, coherences=[str(x) for x in self.coherences],
-            screen=screen.procedure_id, admission=self.admission_policy,
+            screen=coarse_procedure_id, admission=self.admission_policy,
             raw_noise_variance=float(self.manifest['power']['complex_noise_variance']),
             public_quiet_aperture=self.quiet_aperture,
             public_quiet_aperture_declared=self.quiet_aperture_declared,
-            coarse_reference_noise_variance=screen.reference_variance,
+            coarse_reference_noise_variance=coarse_reference_variance,
             source={name: hashlib.sha256((Path(__file__).parent/name).read_bytes()).hexdigest()
                 for name in ('triad_receiver.py','triad_tracking_receiver.py','triad_incremental_receiver.py',
                              'triad_gaussian_state.py','triad_continuous.py')}),
             sort_keys=True).encode()).hexdigest()
         self.receiver_preparation_seconds = time.perf_counter()-began
+
+    def _check_fine_context(self):
+        if self.fine_cuda_index is not None:
+            _require_default_cuda_stream(self.fine_cuda_index)
 
     def close(self):
         if self.executor is not None:
@@ -363,6 +433,98 @@ class CompleteBitReceiver:
 
     def __exit__(self, *_):
         self.close()
+
+    def create_fine_session(self, coordinates, *, samples=None, physical_origin=None, work_probe=False):
+        return FineSession(self, coordinates, self.samples if samples is None else samples,
+            self.capture_origin if physical_origin is None else physical_origin, work_probe)
+
+    def classify(self, tracked, coordinates, *, all_input_valid):
+        """The same bounded endpoint code for complete reception and cost probes.
+
+        A short FineSession remains incomplete for this full public window;
+        measuring its endpoint work never turns it into a reception success.
+        """
+        nominal = tracked['lanes']['initial_affine']
+        # This lane has immutable public atoms and no timing-history pruning
+        # or merging. Adaptive moment matching depends on the selected bank,
+        # so its K/N subset bound is not established; it remains diagnostic.
+        scores = np.asarray(nominal['bit_scores'], dtype=float)
+        if scores.shape != (2,) or not np.isfinite(scores).all():
+            raise ValueError('two finite refined bit scores required')
+        templates = tracked['native_template_work']
+        complete = bool(tracked['complete_observation'] and tracked['processed_rows'] == self.samples and
+            templates['representative_work'] and not tracked.get('work_probe_only', False))
+        zero_h0 = bool(templates['calls'])  # every call's H0 was checked by _TimingStream
+        modes, energy = nominal['quiet_observed_projection_modes'], nominal['quiet_projected_energy']
+        noise_valid = bool(self.quiet_aperture_declared and modes > 0 and
+            math.isfinite(energy) and energy >= 0 and all_input_valid)
+        threshold = float(gamma.ppf(1-self.policy['noise_upper_tail_probability'], modes)) if noise_valid else None
+        operational = (operational_decision(scores, coordinates, self.grid,
+            zero_h0_verified=True, **self.admission_policy) if zero_h0 else None)
+        if operational is not None:
+            operational['evidence_source'] = 'fixed_initial_affine'
+            operational['adaptive_combined_evidence_diagnostic_only'] = True
+            operational['passes_conditional_bound'] = bool(complete and
+                operational['passes_conditional_bound'])
+        unique = scores[0] != scores[1]
+        bit = int(np.argmax(scores)) if unique else None
+        data = bool(complete and all_input_valid and unique and operational and
+                    operational['passes_conditional_bound'])
+        quiet = bool(complete and zero_h0 and noise_valid and energy <= threshold)
+        return dict(status='scored' if complete else 'incomplete',
+            slot_classification='DATA' if data else 'QUIET' if quiet else 'AMBIGUOUS',
+            decision_bit=bit if data else None, candidate_bit=bit, bit_scores=scores.tolist(),
+            operational=operational,
+            quiet=dict(noise_consistent=quiet, projected_energy=energy,
+                observed_projection_modes=modes, threshold=threshold,
+                public_physical_aperture_samples=list(self.quiet_aperture),
+                public_aperture_declared=self.quiet_aperture_declared,
+                projection_scope='Only complete orthogonal likelihood blocks wholly inside the public uncontaminated aperture; all input remains in fine likelihoods.',
+                noise_upper_tail_probability=self.policy['noise_upper_tail_probability'],
+                false_end_scope='DATA-to-quiet probability requires channel/fade validation; no universal signal-absence guarantee.'),
+            coverage=dict(complete_observation=complete, all_input_valid=bool(all_input_valid),
+                consumed_samples=tracked['consumed_samples'], expected_samples=self.samples,
+                zero_h0_verified=zero_h0, valid_noise_statistics=noise_valid,
+                fine_candidates=len(coordinates),
+                selected_grid_prior_mass=len(coordinates)/self.grid.candidate_count,
+                coarse_evidence_used_only_for_selection=True,
+                global_timing_pruning_once=True, physical_null_qualified=False))
+
+
+class CompleteBitReceiver(FineReceiverContext):
+    """Prepared one-stream Helper, coarse, fine and bit/null backend.
+
+    Numerical libraries must be configured by the controller before workers
+    start, with one numerical thread per hypothesis worker. The same executor
+    first scores independent coarse workspaces, then independent coherence
+    models; source-pipe rendering and global timing/pruning stay single-owner.
+    """
+    def __init__(self, manifest, screen, basis_source, *, workers=1,
+                 memory_limit_bytes, policy=None, coherences=DEFAULT_COHERENCES,
+                 admission_policy=None, basis_factory=tracking_source_basis, fine_device='cpu'):
+        began = time.perf_counter()
+        if type(screen) is not FFTScreen:
+            raise TypeError('complete bit backend currently requires the canonical whole FFTScreen')
+        if (int(manifest['sample_rate_hz']) != screen.fs or
+                int(manifest['calendar']['capture_samples']) != screen.samples):
+            raise ValueError('screen and public input window geometry differ')
+        declared, proposal = copy.deepcopy(manifest), copy.deepcopy(screen.manifest)
+        declared['power'].pop('complex_noise_variance', None)
+        proposal['power'].pop('complex_noise_variance', None)
+        for name in _APERTURE_NAMES:
+            declared['calendar'].pop(name, None)
+            proposal['calendar'].pop(name, None)
+        if declared != proposal:
+            raise ValueError('only noise normalization and declared quiet aperture may differ between proposal and fine manifests')
+        self.screen = screen
+        super().__init__(manifest, basis_source, epochs=screen.epochs, clocks=screen.clocks,
+            projected_sample_rate=screen.output_fs, coarse_frequency_step=screen.maximum_frequency_step,
+            coarse_reserved_bytes=screen.resident_estimate, coarse_procedure_id=screen.procedure_id,
+            coarse_reference_variance=screen.reference_variance, workers=workers,
+            memory_limit_bytes=memory_limit_bytes, policy=policy, coherences=coherences,
+            admission_policy=admission_policy, basis_factory=basis_factory, fine_device=fine_device)
+        self.helper_peak_bytes = 0
+        self.receiver_preparation_seconds = time.perf_counter()-began
 
     def _input(self, raw, valid):
         values = np.asarray(raw)
@@ -562,62 +724,6 @@ class CompleteBitReceiver:
         stages['refinement_selection'] = _stage(began, represented, dict(candidates=len(coordinates)))
         return dict(status='acquired', stages=stages, helper=helper, coarse=coarse,
             coordinates=coordinates, searched_frequency_intervals_hz=intervals)
-
-    def create_fine_session(self, coordinates, *, samples=None, physical_origin=None, work_probe=False):
-        return FineSession(self, coordinates, self.samples if samples is None else samples,
-            self.capture_origin if physical_origin is None else physical_origin, work_probe)
-
-    def classify(self, tracked, coordinates, *, all_input_valid):
-        """The same bounded endpoint code for complete reception and cost probes.
-
-        A short FineSession remains incomplete for this full public window;
-        measuring its endpoint work never turns it into a reception success.
-        """
-        nominal = tracked['lanes']['initial_affine']
-        # This lane has immutable public atoms and no timing-history pruning
-        # or merging. Adaptive moment matching depends on the selected bank,
-        # so its K/N subset bound is not established; it remains diagnostic.
-        scores = np.asarray(nominal['bit_scores'], dtype=float)
-        if scores.shape != (2,) or not np.isfinite(scores).all():
-            raise ValueError('two finite refined bit scores required')
-        templates = tracked['native_template_work']
-        complete = bool(tracked['complete_observation'] and tracked['processed_rows'] == self.samples and
-            templates['representative_work'] and not tracked.get('work_probe_only', False))
-        zero_h0 = bool(templates['calls'])  # every call's H0 was checked by _TimingStream
-        modes, energy = nominal['quiet_observed_projection_modes'], nominal['quiet_projected_energy']
-        noise_valid = bool(self.quiet_aperture_declared and modes > 0 and
-            math.isfinite(energy) and energy >= 0 and all_input_valid)
-        threshold = float(gamma.ppf(1-self.policy['noise_upper_tail_probability'], modes)) if noise_valid else None
-        operational = (operational_decision(scores, coordinates, self.grid,
-            zero_h0_verified=True, **self.admission_policy) if zero_h0 else None)
-        if operational is not None:
-            operational['evidence_source'] = 'fixed_initial_affine'
-            operational['adaptive_combined_evidence_diagnostic_only'] = True
-            operational['passes_conditional_bound'] = bool(complete and
-                operational['passes_conditional_bound'])
-        unique = scores[0] != scores[1]
-        bit = int(np.argmax(scores)) if unique else None
-        data = bool(complete and all_input_valid and unique and operational and
-                    operational['passes_conditional_bound'])
-        quiet = bool(complete and zero_h0 and noise_valid and energy <= threshold)
-        return dict(status='scored' if complete else 'incomplete',
-            slot_classification='DATA' if data else 'QUIET' if quiet else 'AMBIGUOUS',
-            decision_bit=bit if data else None, candidate_bit=bit, bit_scores=scores.tolist(),
-            operational=operational,
-            quiet=dict(noise_consistent=quiet, projected_energy=energy,
-                observed_projection_modes=modes, threshold=threshold,
-                public_physical_aperture_samples=list(self.quiet_aperture),
-                public_aperture_declared=self.quiet_aperture_declared,
-                projection_scope='Only complete orthogonal likelihood blocks wholly inside the public uncontaminated aperture; all input remains in fine likelihoods.',
-                noise_upper_tail_probability=self.policy['noise_upper_tail_probability'],
-                false_end_scope='DATA-to-quiet probability requires channel/fade validation; no universal signal-absence guarantee.'),
-            coverage=dict(complete_observation=complete, all_input_valid=bool(all_input_valid),
-                consumed_samples=tracked['consumed_samples'], expected_samples=self.samples,
-                zero_h0_verified=zero_h0, valid_noise_statistics=noise_valid,
-                fine_candidates=len(coordinates),
-                selected_grid_prior_mass=len(coordinates)/self.grid.candidate_count,
-                coarse_evidence_used_only_for_selection=True,
-                global_timing_pruning_once=True, physical_null_qualified=False))
 
     def receive(self, raw, valid=None, *, physical_origin=None):
         began = time.perf_counter()

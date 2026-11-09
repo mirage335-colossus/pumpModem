@@ -583,6 +583,17 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
     set_tests_properties(triad_cases PROPERTIES LABELS "triad" TIMEOUT 60
       WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
       ENVIRONMENT "OPENBLAS_NUM_THREADS=1;OMP_NUM_THREADS=1;MKL_NUM_THREADS=1")
+    if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+      add_test(NAME triad_cloud_replay COMMAND ${Python3_EXECUTABLE} -m unittest
+        tests.test_triad_calibration_identity tests.test_triad_gpu_bundle tests.test_triad_gpu_workload
+        tests.test_triad_nonfine_calibration tests.test_triad_helper_prefix
+        tests.test_triad_replay_cpu tests.test_triad_replay_estimate
+        tests.test_triad_replay_packet tests.test_triad_replay_producer tests.test_triad_producer_signal
+        tests.test_triad_replay_work)
+      set_tests_properties(triad_cloud_replay PROPERTIES LABELS "triad" TIMEOUT 60
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        ENVIRONMENT "OPENBLAS_NUM_THREADS=1;OMP_NUM_THREADS=1;MKL_NUM_THREADS=1;DATAPUMP_TRIAD_REPLAY_EXPORTER=$<TARGET_FILE:triad_helper_export>")
+    endif()
     add_test(NAME background_noise_cli COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_background_noise_cli.py $<TARGET_FILE:background_noise>)
     add_custom_target(test_background_noise_cli DEPENDS background_noise)

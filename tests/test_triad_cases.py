@@ -25,14 +25,26 @@ class TriadCasesTests(unittest.TestCase):
             "--case-list", "current-manual.md", "--output", "capacity.json",
             "--exporter", "exporter", "--measurement-seconds", "1.5",
             "--threads", "6", "--case-index", "3", "--case-index", "5",
-            "--skip-message-gate",
+            "--skip-message-gate", "--workspace-mib", "4096",
         ])
         self.assertEqual(code, 2)  # No current-source functional gate was requested.
         run_cases.assert_called_once_with(
             executable=Path("exporter"), output=Path("capacity.json"),
             case_list=Path("current-manual.md"), measurement_seconds=1.5,
-            threads=6, case_indices=[3, 5], message_gate=False,
+            threads=6, case_indices=[3, 5], message_gate=False, sustained_allocation_probe=False,
+            workspace_mib=4096, calibration_receipt_prefix=None, allow_conditional_calibration_identity=False,
         )
+
+    @mock.patch("triad_case_suite.run_cases")
+    def test_private_fit_opt_in_preserves_full_list_and_message_gate(self, run_cases):
+        triad_manual_cases.main(["--output", "capacity.json", "--calibration-receipt-prefix",
+            "local-evidence/current-fit", "--allow-conditional-calibration-identity", "--sustained-allocation-probe"])
+        args = run_cases.call_args.kwargs
+        self.assertEqual(args["calibration_receipt_prefix"], Path("local-evidence/current-fit"))
+        self.assertTrue(args["allow_conditional_calibration_identity"])
+        self.assertTrue(args["message_gate"])
+        self.assertTrue(args["sustained_allocation_probe"])
+        self.assertIsNone(args["case_indices"])
 
     def test_manual_cli_help_labels_capacity_and_separates_kernel_regression(self):
         output = io.StringIO()
@@ -44,6 +56,7 @@ class TriadCasesTests(unittest.TestCase):
         self.assertIn("not the kernel degradation regression suite", help_text)
         self.assertIn("--case-list", help_text)
         self.assertIn("--threads", help_text)
+        self.assertIn("--sustained-allocation-probe", help_text)
         self.assertNotIn("--baseline", help_text)
 
     @mock.patch("triad_manual_cases.main", return_value=2)

@@ -24,6 +24,20 @@ The default compares the supported local worker allocations and performs the
 current-source native message/quiet/EOF gate before measuring every current row.
 `--case-index`, `--threads` and `--skip-message-gate` are diagnostic controls;
 partial coverage or a skipped gate cannot produce an integrated suite pass.
+For targeted comparison of sustained fine work, add
+`--sustained-allocation-probe` with the full worker pilot enabled. The option
+also applies to a replay calibration fit. It reuses the pilot-selected
+allocation's first three valid continued observations and takes at most three
+fresh six-second observations at each distinct physical-core and full logical
+allocation, within the visible quota. The two alternate allocations add at
+most 36 seconds of repeated probe exposure to the same baseband slice and two
+actual acquisitions per row. These are not unique stream seconds or independent
+communication trials. All use
+the real resident bank and require matching public proposals, retained state,
+native cache work and DSP counts. Only declared worker dispatch counts may
+differ. The report separates measured fine service from any supported
+slot-normalized fine forecast. This exploratory comparison does not select
+the inference allocation or qualify whole-receiver service or CPU ceiling.
 Exit codes are 0 for conditional capacity pass, 1 for measured capacity failure,
 and 2 for unresolved or invalidated evidence. JSON and its neighboring Markdown
 report record the limits; a capacity pass is not a success-probability certificate.
@@ -103,6 +117,14 @@ prevent a supported extrapolation. The maximum is nine six-second observations
 per row, not a full long transmission. Partial acquisition cannot supply
 work-only coordinates to this nominal measurement.
 
+The continuation sampler stops for supported relative precision, the bounded
+look limit, or a failed work or holdout check. Apply the real-time decision
+only after normalizing the prefix, continuation and finish by slot cadence and
+adding the other required service. A review found that the historical v3 run
+stopped four rows using the raw continuation rate. Those intervals do not
+demonstrate correct stopping for final service. See the
+[validation record](validation.md#complete-headless-robust-and-manual-capacity).
+
 The separate conservative fine-state probe starts 256 states in
 each lane, executes two half-second segments and the real intervening posterior
 transition/phase transport/merge, and charges that entire unit once per actual
@@ -124,6 +146,165 @@ source, native binary, current list, configuration, machine and allocation
 provenance. Partial row selection must remain explicit. Retain only evidence
 supporting a current validation claim in ignored `local-evidence/`, and remove
 superseded probes after their useful findings are recorded.
+
+### Remote acceleration and local calibration
+
+Remote GPU work can reproduce and investigate selected short receiver strata;
+it cannot directly measure this computer's CPU service. A fast estimator must
+independently measure the applicable complete receiver work on this computer,
+including concurrent fine workers, resident search banks, recurring
+preparation and the remaining stages above. Match source, native binary, full
+manual list and normalized configuration, CPU topology/affinity/quota,
+numerical runtime and actual worker/thread allocation. Use independent local
+holdouts to validate extrapolation for each applicable work and memory regime;
+missing calibration, stages or holdout support leaves the estimate unresolved.
+GPU parity or a matching identity alone supplies none of those qualifications.
+Do not reuse older CPU reports as fresh calibration when their required runtime
+identity was not recorded.
+
+[`tools/triad_calibration_identity.py`](../tools/triad_calibration_identity.py)
+provides an identity guard for future local calibration, not an estimator. It
+requires before-and-after observations around both the recorded and current
+workloads, using the actual controlled Python and native processes. The caller
+must bind the real work and timing to those intervals and independently verify
+thread use, work coverage, workspace and holdout accuracy. The identity contains
+machine-specific data and must remain local. A mismatch or unavailable required
+identity fails closed. Its explicitly enabled conditional mapping mode records a
+kernel mapping-device discrepancy and returns a distinct conditional result;
+it is not an exact match or a capacity qualification. See the
+[GPU diagnostic procedure](triad-performance.md#gpu-fine-work-parity-probe)
+and [current findings](validation.md#gpu-fine-work-investigation).
+
+The experimental [`tools/triad_replay_estimate.py`](../tools/triad_replay_estimate.py)
+reads the complete current manual list and combines per-row local replay,
+calibration and independent resident holdout receipts only when their source,
+runtime, work, geometry and allocation gates match. It reports absent or
+unmatched rows as unresolved. Its possible result is a conditional nominal
+service estimate, not a complete receiver-capacity pass; the separate
+worst-state and workspace requirements still apply. Calibration and replay
+receipts contain local machine identity and must never be uploaded to the GPU
+host. The [validation record](validation.md#gpu-fine-work-investigation)
+distinguishes the measured full-list cached assessment from the cold local fit,
+replay and independent holdouts required to establish its applicability.
+
+Save the full suite's calibration fits during its ordinary measurement pass
+when preparing remote replay for several rows. Choose a common workspace cap
+before measurement that fits the computer's visible receiver budget. The
+example cap is in MiB.
+
+```sh
+mkdir -p local-evidence
+python tools/triad_manual_cases.py --exporter build/dev/triad_helper_export \
+  --output local-evidence/robust-cases.json --workspace-mib 4096 \
+  --sustained-allocation-probe --calibration-receipt-prefix local-evidence/current-fit
+```
+
+This saves new private files named `current-fit-N.json` for the current row
+numbers. It uses the full worker pilot and canonical one-second timing unit.
+The ordinary suite keeps its message/quiet/EOF gate, SNR and transmit-time
+diagnostics, and full CPU/workspace reporting. Each unique configuration
+prepares one actual observation and runs one canonical absolute measurement.
+An unavailable runtime identity or mismatched acquisition fingerprint makes
+its fit unresolved while retaining the ordinary measured result. A skipped
+or failed message gate leaves suite-captured fits unresolved. Ordered
+duplicate rows explicitly reuse the ordinary result and have no independent
+fit. Add `--allow-conditional-calibration-identity` only when the documented
+conditional mapping assumptions hold. Keep the cap fixed for each replay and
+holdout, and preserve any failed or unresolved gate without repeating the fit.
+
+For one row, first use
+[`triad_nonfine_calibration.py`](../tools/triad_nonfine_calibration.py) to record
+a local fit if a suite fit was not captured. The pilot measures all supported same-stream worker allocations
+and binds the selected count to the runtime before fresh inference. Next use
+that count for the remote acquisition and local
+[`triad_replay_cpu.py`](../tools/triad_replay_cpu.py) measurement. The replay
+must come from an independently authenticated complete-acquisition receipt and
+match the fit's exact input, work, allocation and workspace geometry. Packet
+bounds describe the full calibrated native capture, including any pre-roll.
+The original public calendar separately binds the stream scheduler's slot
+origin and extent. Replay does not rebase the captured samples.
+
+An experimental Helper-prefix path addresses a cross-host Helper diagnostic
+hash mismatch without changing the remote result. A new local fit must have
+captured its own prefix identity from the nominal observation before that
+buffer is reused for the noise-only probe. Older fits without this anchor
+cannot use this path. On the authenticated remote producer, add
+`--helper-prefix` and a predeclared `--memory-limit-bytes` to produce a bounded
+envelope containing the original fine packet and Helper input. Obtain the
+producer's original attestation independently over the authenticated channel;
+an attestation included in an envelope does not authenticate itself. Keep both
+the envelope and the independently obtained original attestation unchanged.
+
+For local replay, pass the envelope as `--packet`, that independent attestation
+as `--trusted-acquisition`, and the new private fit as `--helper-prefix-fit`.
+The verifier derives the prefix extent from the local public geometry, checks
+it against the independently captured fit anchor and full signal/non-Helper
+work identities, then recomputes the canonical Helper locally. It records a
+separate verification observation before the fine timer; it does not replace
+or relabel the original remote Helper hash. The prefix is capped at 1,000,000
+samples and the Helper scratch estimate at 768 MiB, with input, envelope,
+native and bank reservations also subject to the selected local workspace cap.
+Any absent or incompatible anchor, work, geometry, identity or workspace leaves
+the comparison unresolved. Keep the private fit and local timing receipts on
+the local computer; do not upload them to the remote host.
+
+When Helper verification is needed for the holdout, provide the same original
+evidence with `--helper-envelope PATH --helper-attestation PATH` alongside
+`--holdout-fit` and `--holdout-replay`. The holdout verifies this evidence
+before its declaration and must still match the fit's actual full signal work.
+For the estimator, use the paired `--helper-envelope N=PATH` and
+`--helper-attestation N=PATH` options for that row in addition to its fit,
+replay and holdout. The estimator recomputes verification from the evidence
+rather than accepting a supplied local verification claim. The unchanged
+strict match remains the default when these options are not provided. Supplying
+the paired evidence explicitly runs verification even if the remote Helper
+digest already matches; this permits a bounded exercise of the new path. One
+source-matched Groundwave case has exercised that path, with matching remote
+and local Helper digests; the differing-digest branch has only controlled-test
+coverage. See [the validation record](validation.md#gpu-fine-work-investigation).
+This evidence does not establish GPU acceleration, capacity, or transfer to a
+new signal.
+
+Predeclare one independent resident holdout by passing the trusted local
+receipt paths to the calibration command:
+
+```sh
+python tools/triad_nonfine_calibration.py --case-index 7 \
+  --exporter build/dev/triad_helper_export \
+  --holdout-fit local-evidence/case7-fit.json \
+  --holdout-replay local-evidence/case7-replay.json \
+  --output local-evidence/case7-holdout.json
+```
+
+Use the actual current row number. Include `--allow-conditional` only if
+the fit and replay used the documented conditional identity mode. The fit,
+replay and holdout run in separate local processes on the same boot. The
+holdout binds both exact receipt digests before preparation and pilot timing,
+compares the full set of worker candidates again, and reports its exploratory
+winner separately from its fresh inference at the fitted allocation. In a
+case 7 trial the fit pilot chose two workers and the next pilot chose four.
+The fixed holdout repeats actual acquisition, continued fine processing,
+recurring banks, stream control, planning, quiet state, codec and worker
+lifecycle work, with resident nominal workspace measurements. It skips the
+additional cold-state, noise-only, terminal and erasure inference; the full
+fit still measures those paths. Its distinct receipt cannot supply a full
+fit or worst-state result. This validates repeat timing at the fitted
+allocation for the exact sampled realization. It cannot establish the best
+allocation, the full CPU ceiling, or transfer to a different seed or path.
+The [earlier case 7 result](validation.md#gpu-fine-work-investigation) used
+the full-stratum holdout on its recorded source; the shorter holdout needs
+fresh source-matched measurements.
+
+Pass the three trusted local files to the estimator with
+`--calibration 7=PATH`, `--replay 7=PATH`, and `--holdout 7=PATH`. Use
+`--allow-conditional-identity` there only for conditional receipts. Keep a
+failed holdout as an unresolved result. The protocol assumes one
+predeclared holdout per fit and replay pair, with no retries to select a
+favorable outcome. Hashes and same-boot chronology check correspondence
+between trusted files. They do not authenticate the files or enforce that
+operator assumption. Keep raw receipts private and temporary. Once the
+matched validation or unresolved diagnosis is recorded, retain the concise
+findings and remove superseded raw evidence.
 
 ## Separate sensitivity checks
 

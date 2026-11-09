@@ -13,12 +13,11 @@ obsolete code, experiments and generated outputs when that purpose ends.
 The [current architecture and status](robust-current.md) identifies the
 canonical native waveform/channel/Helper stack and the complete headless
 receiver. Its frozen native message gate passed, including the captured-prefix
-EOF negative control. The completed base and persistent nominal runs measured
-all eight current manual cases, with worst-state capacity margins unresolved
-and no full-capacity pass. Persistent measurement v3 is now the canonical
-default; the named `triad` group passed 20/20 in 26.73 seconds, while
-sensitivity confirmation remains incomplete without a >90% qualification. See the
-[validation record](validation.md) for ratios and provenance.
+EOF negative control. The full integrated v3 reevaluation measured all eight
+current manual cases; worst-state capacity margins remain unresolved and no
+full-capacity pass is claimed. The named `triad` group passed 20/20 before the
+run. Sensitivity confirmation remains incomplete without a >90% qualification.
+See the [validation record](validation.md) for ratios and provenance.
 Robust remains unavailable in the GUI pending
 reconnection. Retained
 [pattern research](triad-patterns.md), [stochastic channel findings](triad-stochastic.md),

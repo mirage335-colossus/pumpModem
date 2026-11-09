@@ -545,15 +545,12 @@ negative control. This is one bounded functional check, not a capacity or
 all-case qualification. The manual suite's `--skip-message-gate` option is
 debug-only and prevents an integrated pass; do not use it for capacity
 qualification. The prior `--paired-followup` option has been removed. The
-completed base run measured all eight current manual cases with unresolved
-margins and no full worst-state capacity pass. Persistent measurement v3 is now
-the canonical default; eleven focused checks and the named `triad` group passed
-(20/20 in 26.73 seconds). Sensitivity confirmation is incomplete after an unresolved memory
-guard, so there is no >90% qualification. Historical v2 phases retain their
-original hashes and policy and are not a v3 full rerun. See the
-[validation record](validation.md) for per-case ratios and provenance. The
-Groundwave local thread comparison retained four threads; twelve were about
-6.9% slower.
+full integrated v3 reevaluation measured all eight current manual cases with
+unresolved worst-state margins and no full-capacity pass. The named `triad`
+group passed 20/20 before that run. Sensitivity confirmation remains incomplete,
+so there is no >90% qualification. Historical v2 base and continuation phases
+retain their own hashes and policy. See the [validation record](validation.md)
+for per-case ratios and provenance.
 Do not restore full, sustained, multi-day, exhaustive, or heavy-calibration
 campaigns as routine tests or fallback. RunPod accelerates the same bounded
 approach.
