@@ -112,6 +112,33 @@ overlapped candidate lanes is a more substantial future restructuring, requiring
 new numerical and transition-boundary qualification.
 [Final residual profile](../local-evidence/structural-fine/row-7-final-residual-attribution.json)
 
+A separate bounded chronological trace at source `3b423f9` now supports the
+[interactive cycle chart](receiver-parallelism.html#cycle). One warm look and
+four plain/traced ABBA looks took 4.34 s including fixture setup; no production
+instrumentation was retained. The traced four-second continuation contains 16
+candidate waves of twelve jobs, 16 model waves of three jobs and three native
+cache fills. It reaches twelve overlapping worker job intervals. Within its
+415.29 ms of instrumented push spans, 170.84 ms has no tracked worker job in
+progress. That is neither an idle-CPU measurement nor a whole-receiver serial
+fraction: controller work, native child work, gaps between wrappers and OS
+scheduling are distinct. The traced mean push time was 6.84% higher than the
+plain mean in these ABBA looks;
+untraced controls averaged 379.32 ms. Work, ordered states, scores, endpoints
+and channel posterior bytes at push boundaries matched exactly. These short
+controls establish trace fidelity, not a new sustained capacity estimate.
+The checked endpoint remained incomplete/ambiguous; this is not a successful
+message trial. The displayed 417.03 ms axis additionally includes 1.74 ms of
+probe checkpoint/digest gaps outside the push spans.
+The receiver advances its phase/clock hypotheses using captured sample
+timestamps, so CPU waiting does not age the captured waveform. Independent
+observation or fixed-affine basis preparation can potentially overlap current
+work, while adaptive state
+prediction and posterior publication retain chronological dependencies. The
+report's double-buffer schedule is an explicitly hypothetical model, with no
+measured speedup claimed. Keep the [timeline receipt](../local-evidence/structural-fine/row-7-execution-timeline.json)
+while it supports this current scheduling investigation; replace the snapshot
+and remove the receipt when a changed scheduler supersedes it.
+
 A bounded ready-lane overlap discriminator replayed a real row-7 segment's
 prepared candidate work alongside the other lane's ordered model updates on
 the same twelve-worker pool. Fresh model copies, pinned native owners and

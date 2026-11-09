@@ -34,6 +34,14 @@ improved 1.66–1.75×, but full receiver saturation remains unproven. Preserve 
 shared budget and sequential state semantics when removing remaining
 bottlenecks. See the [restructuring evidence](validation.md#receiver-restructuring)
 and [complete-suite results](validation.md#complete-headless-robust-and-manual-capacity).
+The [interactive architecture report](receiver-parallelism.html) distinguishes
+necessary state dependencies from implementation barriers. Its
+[cycle timeline](receiver-parallelism.html#cycle) shows measured controller and
+worker intervals, with separate signal-time coordinates, and explains where
+next-batch preparation could overlap current work. The pipeline and stage-speedup
+explorers are explicitly hypothetical. Its source and measurement
+identities are pinned in the report; recheck them before applying its numbers
+to changed receiver code.
 
 Older single-carrier Robust and standalone triad/Helper implementations are not
 supported current paths. Protocol breaks belong in a new Git tag and a separate
