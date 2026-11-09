@@ -38,10 +38,110 @@ class _MappedRow(ctypes.Structure):
         ('tiles', ctypes.c_void_p), ('output', ctypes.c_void_p)]
 
 
+_MAPPED_ROW_DTYPE = np.dtype(_MappedRow)
+
+
+class _MappedBlock:
+    """Prepared, disjoint DATA row writes and their pinned native inputs."""
+
+    def __init__(self, renderer, candidates, taps, samples):
+        self.renderer = renderer
+        self.raw = np.empty((2*candidates, taps, samples), dtype=np.complex128)
+        self.batches = []
+        self.pins = {}
+
+    def append(self, first, descriptors, offsets, tables, pins):
+        self.batches.append((first, descriptors, offsets, tables))
+        self.pins.update({id(tile): tile for tile in pins})
+
+    def dispatch(self):
+        if self.batches:
+            self.dispatch_group((self,), (None,))
+
+    def pack_pairs(self):
+        """Only re-layout an entirely staged block with no preceding writes."""
+        expected = 0
+        if not self.batches:
+            return None
+        offsets = self.batches[0][2]
+        for base, descriptors, coordinates, _ in self.batches:
+            if base != expected or coordinates is not offsets:
+                return None
+            expected += len(descriptors)
+        count, taps, samples = self.raw.shape
+        if expected != count*taps:
+            return None
+        candidates = count//2
+        descriptors = np.concatenate([entry[1] for entry in self.batches])
+        pairs = descriptors.reshape(2, candidates, taps).transpose(1, 2, 0).copy()
+        output_rows = np.arange(count*taps, dtype=np.uintp).reshape(candidates, 2, taps)
+        pairs['output'] = self.raw.ctypes.data+output_rows.transpose(0, 2, 1)*samples*16
+        return pairs, offsets
+
+    @staticmethod
+    def dispatch_group(blocks, statistics):
+        renderer = blocks[0].renderer
+        count, taps, _ = blocks[0].raw.shape
+        packed = ([block.pack_pairs() for block in blocks]
+                  if renderer.paired_kernel is not None and all(statistics) else None)
+        paired = packed is not None and all(plan is not None for plan in packed)
+        work_items = count//2 if paired else count
+        workers = min(renderer.workers, work_items)
+        # Keep all pointer targets in the submitted closure until its join.
+        prepared = tuple((block.raw, tuple(block.batches), tuple(block.pins.values()), statistic)
+                         for block, statistic in zip(blocks, statistics, strict=True))
+
+        def run(first, stop):
+            result = []
+            for index, (raw, batches, _pins, statistic) in enumerate(prepared):
+                if paired:
+                    descriptors, offsets = packed[index]
+                    renderer.paired_kernel(descriptors.ctypes.data+
+                        first*taps*2*_MAPPED_ROW_DTYPE.itemsize, (stop-first)*taps,
+                        offsets.ctypes.data, raw.shape[-1], renderer.tile_samples)
+                    result.append(statistic(raw[2*first:2*stop]))
+                else:
+                    row_first, row_stop = first*taps, stop*taps
+                    for base, desc, offsets, _tables in batches:
+                        lo, hi = max(base, row_first), min(base+len(desc), row_stop)
+                        if lo < hi:
+                            renderer.kernel(desc.ctypes.data+(lo-base)*_MAPPED_ROW_DTYPE.itemsize, hi-lo,
+                                            offsets.ctypes.data, raw.shape[-1], renderer.tile_samples)
+                    result.append(None if statistic is None else statistic(raw[first:stop]))
+            return result
+
+        if workers == 1:
+            results = [run(0, work_items)]
+        else:
+            futures, results, error = [], [], None
+            for worker in range(workers):
+                try:
+                    futures.append(renderer.executor.submit(
+                        run, worker*work_items//workers, (worker+1)*work_items//workers))
+                except BaseException as exc:
+                    error = exc
+                    break
+            for future in futures:
+                try:
+                    results.append(future.result())
+                except BaseException as exc:
+                    if error is None:
+                        error = exc
+            if error is not None:
+                raise error
+        if any(block.batches for block in blocks):
+            renderer.mapped_worker_tasks += workers
+            renderer.maximum_mapped_workers = max(renderer.maximum_mapped_workers, workers)
+        for block in blocks:
+            block.batches.clear()
+            block.pins.clear()
+        return list(zip(*results, strict=True)), paired
+
+
 @lru_cache(maxsize=4)
-def _load_kernel(path):
+def _load_kernel(path, symbol='triad_render_mapped_v1'):
     try:
-        render = ctypes.CDLL(str(path)).triad_render_mapped_v1
+        render = getattr(ctypes.CDLL(str(path)), symbol)
     except (OSError, AttributeError) as error:
         raise OSError('mapped basis kernel unavailable; rebuild triad_helper_export: ' + str(path)) from error
     render.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p,
@@ -76,6 +176,7 @@ class CachedMappedBasis:
         self.bytes = self.peak_bytes = 0
         self.calls = self.cache_hits = self.cache_misses = self.native_calls = self.evictions = 0
         self.interpolated_rows = self.direct_rows = self.native_samples = 0
+        self.row_tile_references = 0
         self.large_phase_fallback_rows = 0
         self.staging_fallback_rows = 0
         self.mapped_worker_tasks = self.maximum_mapped_workers = 0
@@ -85,6 +186,7 @@ class CachedMappedBasis:
         self.executor, self.workers = executor, workers
         self.accelerator = accelerator
         self.kernel = None
+        self.paired_kernel = None
         self.staging_workspace_bytes = 0
         d = source.descriptor
         self.sample_rate = float(d['sample_rate_hz'])
@@ -123,6 +225,7 @@ class CachedMappedBasis:
                 if kernel_path is None:
                     kernel_path = mapped_kernel_path(source.command[0])
                 self.kernel = _load_kernel(Path(kernel_path))
+                self.paired_kernel = _load_kernel(Path(kernel_path), 'triad_render_mapped_paired_v1')
             # Bounded pinned arrays may outlive eviction from the LRU until a
             # batch joins. Include native response and descriptor/map staging.
             self.staging_workspace_bytes = (
@@ -219,7 +322,119 @@ class CachedMappedBasis:
         self.mapped_worker_tasks += workers
         self.maximum_mapped_workers = max(self.maximum_mapped_workers, workers)
 
-    def basis_mapped(self, first, offsets, rows, audio_center_hz, *, out=None):
+    def _stage_mapped(self, block, values, offsets, answer, origin_floor, fraction,
+                      dense_scale, constant, slope, relative_first, relative_last,
+                      large_phase, phase_first, phase_last):
+        # A simple signed range makes all vectorized endpoint arithmetic
+        # exact. Extreme inputs and out-of-support rows use the normal map.
+        if (self.dense_source_samples >= 2**62 or np.any(large_phase) or
+                not (np.abs(origin_floor) < 2**60).all() or
+                not (np.abs(relative_first) <= 2**31).all() or
+                not (np.abs(relative_last) <= 2**31).all() or
+                not (np.abs(phase_first) <= 2**30).all() or
+                not (np.abs(phase_last) <= 2**30).all()):
+            return False
+        origin = origin_floor.astype(np.int64)
+        lower = origin+np.floor(relative_first).astype(np.int64)-1
+        upper = origin+np.floor(relative_last).astype(np.int64)+2
+        if np.any(upper < 0) or np.any(lower >= self.dense_source_samples):
+            return False
+        low = np.maximum(lower, 0)//self.tile_samples
+        high = np.minimum(upper, self.dense_source_samples-1)//self.tile_samples
+        spans = np.column_stack((values[:, :2].astype(np.int64), low, high))
+        boundaries = [0, *(np.flatnonzero(np.any(spans[1:] != spans[:-1], axis=1))+1),
+                      len(spans)]
+        # Count at most the current pin limit, including both members of
+        # every source tile fill, before preparing any native data.
+        keys = set()
+        for at in boundaries[:-1]:
+            bit, epoch, lo, hi = map(int, spans[at])
+            if hi-lo >= _MAX_PINNED_TILES:
+                return False
+            keys.update((bit, epoch, k) for k in range(lo, hi+1))
+            if len(keys) > _MAX_PINNED_TILES:
+                return False
+        if len(keys)*2*self.tile_samples*16 > self.byte_limit:
+            return False
+        if len(block.pins)+len(keys) > _MAX_PINNED_TILES:
+            block.dispatch()
+        descriptors = np.empty(len(values), dtype=_MAPPED_ROW_DTYPE)
+        descriptors['fraction'] = fraction
+        descriptors['scale'] = dense_scale
+        descriptors['phase'] = constant
+        descriptors['phase_step'] = slope
+        descriptors['origin'] = origin-low*self.tile_samples
+        descriptors['tile_count'] = high-low+1
+        descriptors['output'] = answer.ctypes.data+np.arange(len(values), dtype=np.uintp)*len(offsets)*16
+        tables, pins = [], {}
+        for at, stop in zip(boundaries, boundaries[1:]):
+            bit, epoch, lo, hi = map(int, spans[at])
+            keys = [(bit, epoch, k) for k in range(lo, hi+1)]
+            for key in keys:
+                # Filling the sibling may replace a resident array with the
+                # same key. Earlier descriptors still own the first array.
+                pins.setdefault(key, self._tile(*key))
+            table = (ctypes.c_void_p*len(keys))(*(pins[key].ctypes.data for key in keys))
+            tables.append(table)
+            descriptors['tiles'][at:stop] = ctypes.addressof(table)
+            if stop-at > 1:
+                # Repeated identical spans would touch these same live
+                # tiles in this order without another native fill.
+                for key in keys:
+                    self.cache.move_to_end(key)
+        first_row = (answer.ctypes.data-block.raw.ctypes.data)//(16*len(offsets))
+        block.append(first_row, descriptors, offsets, tables, pins.values())
+        self.interpolated_rows += len(values)
+        self.row_tile_references += int(np.sum(high-low+1))
+        return True
+
+    def block_statistics(self, requests, rows, center, candidates, taps):
+        """Render up to two prepared blocks on each candidate tile."""
+        if (self.kernel is None or not 1 <= len(requests) <= 2 or
+                len(rows) != 2*candidates*taps or len(rows) > 1024 or
+                any(not 1 <= len(offsets) <= 16384 for _, offsets, *_ in requests)):
+            return None
+
+        def make_statistic(projection, observation, variance):
+            def statistic(raw):
+                if not np.isfinite(raw).all():
+                    raise ValueError('mapped template cache produced nonfinite samples')
+                projected = projection.numpy(raw)
+                if not np.isfinite(projected).all():
+                    raise ValueError('projected basis is nonfinite')
+                conjugate = projected.conj()
+                gram = np.einsum('ctn,csn->cts', conjugate, projected, optimize=True)/variance
+                correlation = (conjugate.reshape(-1, projected.shape[-1]) @ observation).reshape(
+                    -1, taps)/variance
+                return correlation, gram, float(np.vdot(raw, raw).real)
+            return statistic
+
+        blocks, statistics = [], []
+        for first, offsets, projection, observation, variance in requests:
+            block = _MappedBlock(self, candidates, taps, len(offsets))
+            flat = block.raw.reshape(-1, len(offsets))
+            for at in range(0, len(rows), 128):
+                self.basis_mapped(first, offsets, rows[at:at+128], center,
+                                  out=flat[at:at+128], _stage=block)
+            blocks.append(block)
+            statistics.append(make_statistic(projection, observation, variance))
+        result = []
+        results, paired = _MappedBlock.dispatch_group(blocks, statistics)
+        for parts in results:
+            r = np.zeros((3, candidates, taps), dtype=np.complex128)
+            gram = np.zeros((3, candidates, taps, taps), dtype=np.complex128)
+            data_r = np.concatenate([part[0] for part in parts])
+            data_gram = np.concatenate([part[1] for part in parts])
+            if paired:
+                r[1:] = data_r.reshape(candidates, 2, taps).swapaxes(0, 1)
+                gram[1:] = data_gram.reshape(candidates, 2, taps, taps).swapaxes(0, 1)
+            else:
+                r[1:] = data_r.reshape(2, candidates, taps)
+                gram[1:] = data_gram.reshape(2, candidates, taps, taps)
+            result.append((r, gram, math.fsum(part[2] for part in parts)))
+        return result
+
+    def basis_mapped(self, first, offsets, rows, audio_center_hz, *, out=None, _stage=None):
         offsets = np.asarray(offsets, dtype=np.float64)
         if (isinstance(first, bool) or not isinstance(first, int) or not 0 <= first < (1 << 64) or
             offsets.ndim != 1 or not 1 <= len(offsets) <= 16384 or not np.isfinite(offsets).all() or
@@ -227,17 +442,27 @@ class CachedMappedBasis:
             np.longdouble(offsets[-1]) > np.longdouble((1 << 64)-1-first) or
             not 1 <= len(rows) <= 128 or not math.isfinite(audio_center_hz) or not 0 <= audio_center_hz <= 120e6):
             raise ValueError('bounded increasing mapped cache coordinates required')
-        parsed = []
-        for row in rows:
-            if len(row) != 7:
-                raise ValueError('mapped template rows need seven fields')
-            bit, epoch, arrival, frequency, clock, delay, doppler = row
-            if (bit not in (0, 1) or int(bit) != bit or not -6 <= epoch <= 6 or int(epoch) != epoch or
-                not all(math.isfinite(x) for x in (arrival, frequency, clock, delay, doppler)) or
-                clock <= -1e6 or delay < 0):
+        if _stage is None:
+            parsed = []
+            for row in rows:
+                if len(row) != 7:
+                    raise ValueError('mapped template rows need seven fields')
+                bit, epoch, arrival, frequency, clock, delay, doppler = row
+                if (bit not in (0, 1) or int(bit) != bit or not -6 <= epoch <= 6 or int(epoch) != epoch or
+                    not all(math.isfinite(x) for x in (arrival, frequency, clock, delay, doppler)) or
+                    clock <= -1e6 or delay < 0):
+                    raise ValueError('invalid mapped template candidate')
+                parsed.append((int(bit), int(epoch), float(arrival), float(frequency),
+                               float(clock), float(delay), float(doppler)))
+            values = np.asarray(parsed, dtype=np.float64)
+        else:
+            values = np.asarray(rows, dtype=np.float64)
+            if (values.shape != (len(rows), 7) or not np.isfinite(values).all() or
+                    np.any((values[:, 0] != 0) & (values[:, 0] != 1)) or
+                    np.any(np.abs(values[:, 1]) > 6) or np.any(values[:, 1] != np.floor(values[:, 1])) or
+                    np.any(values[:, 4] <= -1e6) or np.any(values[:, 5] < 0)):
                 raise ValueError('invalid mapped template candidate')
-            parsed.append((int(bit), int(epoch), float(arrival), float(frequency), float(clock), float(delay), float(doppler)))
-        shape = (len(parsed), len(offsets))
+        shape = (len(rows), len(offsets))
         if out is not None and (self.accelerator is not None or type(out) is not np.ndarray or
                 out.shape != shape or out.dtype != np.complex128 or
                 not out.flags.c_contiguous or not out.flags.aligned or not out.flags.writeable or
@@ -248,6 +473,10 @@ class CachedMappedBasis:
         # relative coordinates. Preserve that arithmetic instead of converting
         # first+offset to an absolute FP64 timestamp.
         if self.fallback_reason or (np.finfo(np.longdouble).nmant < 63 and first > (1 << 48)):
+            if _stage is not None:
+                _stage.dispatch()
+                parsed = [(int(bit), int(epoch), arrival, frequency, clock, delay, doppler)
+                          for bit, epoch, arrival, frequency, clock, delay, doppler in values]
             values = self._direct(first, offsets, parsed, audio_center_hz)
             if out is None:
                 return values
@@ -259,7 +488,6 @@ class CachedMappedBasis:
         initial_time = first_ld/fs
         # Compute only the per-row absolute origins in extended precision.
         # Positive affine maps let their two endpoints bound all tile accesses.
-        values = np.asarray(parsed, dtype=np.float64)
         _, _, arrival, frequency, clock, delay, doppler = values.T
         # Extreme finite input can overflow an intermediate. The endpoint
         # and phase guards below then use the bounded native reference.
@@ -283,6 +511,14 @@ class CachedMappedBasis:
             phase_first = constant+slope*offsets[0]
             phase_last = constant+slope*offsets[-1]
 
+        if _stage is not None:
+            if self._stage_mapped(_stage, values, offsets, out, origin_floor, fraction,
+                    dense_scale, constant, slope, relative_first, relative_last,
+                    large_phase, phase_first, phase_last):
+                return out
+            _stage.dispatch()
+            parsed = [(int(bit), int(epoch), arrival, frequency, clock, delay, doppler)
+                      for bit, epoch, arrival, frequency, clock, delay, doppler in values]
         answer = out
         if answer is None:
             answer = (np.empty(shape, dtype=np.complex128) if self.accelerator is None
@@ -320,6 +556,7 @@ class CachedMappedBasis:
                 answer[column] = self._direct(first, offsets, [row], audio_center_hz)[0]
                 continue
             keys = [(bit, epoch, tile) for tile in range(low_tile, high_tile+1)]
+            self.row_tile_references += count
             if len(pinned)+sum(key not in pinned for key in keys) > _MAX_PINNED_TILES:
                 flush()
             # Rows with the same span reference the same pinned arrays until
@@ -353,6 +590,7 @@ class CachedMappedBasis:
     def report(self):
         return dict(method='uniform-DATA-cache-native-cubic-Lagrange-v2', calls=self.calls,
             interpolated_rows=self.interpolated_rows, direct_rows=self.direct_rows,
+            row_tile_references=self.row_tile_references,
             cache_hits=self.cache_hits, cache_misses=self.cache_misses,
             native_preparation_calls=self.native_calls, native_preparation_samples=self.native_samples,
             evictions=self.evictions, cache_bytes=self.bytes, peak_cache_bytes=self.peak_bytes,

@@ -38,7 +38,7 @@ class ForecastTests(unittest.TestCase):
     def test_fine_estimate_charges_gpu_work_through_actual_public_slot(self):
         fs, samples, slot = 10, 100, 20.
         cache = {key:0 for key in forecast._CACHE}
-        cache.update(calls=30,interpolated_rows=100,cache_hits=200)
+        cache.update(calls=30,interpolated_rows=100,cache_hits=200,row_tile_references=240)
         records, counters = [], []
         for count in (20,30,40,60):
             regime = {key:1 for key in forecast._ADAPTIVE_REGIME}
@@ -80,6 +80,18 @@ class ForecastTests(unittest.TestCase):
         records[3]['work']['retained_states']['initial_affine'][0][0]=1
         with self.assertRaisesRegex(ValueError,'fixed-affine retained states'):
             forecast._nominal(cpu,{'records':records},geometry,allow_approximation=True)
+
+    def test_fine_demand_uses_row_references_not_physical_cache_lookups(self):
+        row = {'lanes':{'adaptive':{'work_counts':{'basis_rows':100}}}}
+        cache = dict(calls=3,interpolated_rows=100,cache_hits=20,row_tile_references=120)
+        expected = forecast._drivers(row,cache)
+        self.assertEqual(expected['cache.row_tile_references'],120)
+        self.assertNotIn('cache.cache_hits',expected)
+        self.assertEqual(expected,forecast._drivers(row,dict(cache,cache_hits=200)))
+        self.assertNotEqual(expected,forecast._drivers(row,dict(cache,row_tile_references=121)))
+        del cache['row_tile_references']
+        with self.assertRaises(KeyError):
+            forecast._drivers(row,cache)
 
     def test_partial_gpu_frequency_work_cannot_supply_a_complete_estimate(self):
         demand = dict(status='partial_acquisition', coarse={}, helper_reason='no_coarse_pilot')

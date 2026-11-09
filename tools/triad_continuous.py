@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 from fractions import Fraction
+from functools import partial
 import platform
 from pathlib import Path
 import subprocess
@@ -346,9 +347,7 @@ def tracking_source_basis(source, coordinates, taps, offset, timing_forward, aud
             executor=template_executor, workers=template_workers, accelerator=accelerator)
     elif accelerator is not None:
         raise ValueError('accelerated fine statistics require the bounded mapped template cache')
-    def _render(states, anchor_seconds, first, stop, physical_origin, physical_offsets,
-                *, fixed_affine):
-        count = stop-first
+    def _rows(states, anchor_seconds, fixed_affine):
         rows = []
         for bit in (0, 1):
             for state in states:
@@ -364,6 +363,11 @@ def tracking_source_basis(source, coordinates, taps, offset, timing_forward, aud
                     rows.append((bit, epoch, mapped_arrival,
                         frequency-audio_center_hz*((scale if fixed_affine else base)-1),
                         (scale-1)*1e6, delay, doppler))
+        return rows
+    def _render(states, anchor_seconds, first, stop, physical_origin, physical_offsets,
+                *, fixed_affine):
+        count = stop-first
+        rows = _rows(states, anchor_seconds, fixed_affine)
         shape = (3, len(states), len(taps), count)
         result = (np.empty(shape, np.complex128) if accelerator is None else accelerator.empty(shape))
         result[0] = 0
@@ -394,6 +398,25 @@ def tracking_source_basis(source, coordinates, taps, offset, timing_forward, aud
     def initial_affine(states, anchor_seconds, first, stop, physical_origin, physical_offsets):
         return _render(states, anchor_seconds, first, stop, physical_origin, physical_offsets,
             fixed_affine=True)
+    if template_backend == 'auto' and accelerator is None:
+        def block_statistics(states, anchor_seconds, requests, *, fixed_affine):
+            if not 1 <= 2*len(states)*len(taps) <= 1024:
+                return None
+            blocks = []
+            for first, stop, physical_origin, physical_offsets, projection, observation, variance in requests:
+                if not 1 <= stop-first <= 16384:
+                    return None
+                positions = np.asarray(physical_offsets, dtype=np.float64)
+                shift = math.floor(float(positions[0]))
+                blocks.append((int(physical_origin)+shift, positions-shift,
+                               projection, observation, variance))
+            return template_source.block_statistics(blocks,
+                _rows(states, anchor_seconds, fixed_affine), audio_center_hz, len(states), len(taps))
+        # Two controller-owned immutable plans can coexist. Their DATA-only
+        # render and FFT arrays fit the original three-hypothesis block bound.
+        render.staging_workspace_bytes *= 2
+        render.block_statistics = partial(block_statistics, fixed_affine=False)
+        initial_affine.block_statistics = partial(block_statistics, fixed_affine=True)
     initial_affine.cache_report = render.cache_report
     render.initial_affine = initial_affine
     return render

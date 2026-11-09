@@ -1,14 +1,21 @@
 """Guard the diagnostic workload comparison and explicit CUDA requirement."""
 import copy
+from contextlib import nullcontext
 import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
+import weakref
+
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
+from triad_gpu_bank import GpuFFTScreen
 from triad_gpu_workload import _write_probe_report, compare_work, run_probe
+from triad_realtime_fft import FFTScreen
 from triad_receiver import _prepare_cuda_linalg, _require_default_cuda_stream
 
 
@@ -36,6 +43,134 @@ class WorkloadComparisonTests(unittest.TestCase):
     def test_missing_checkpoints_cannot_match(self):
         for candidate in ([], self.records * 2):
             self.assertEqual(compare_work(self.records, candidate), dict(work_match=False, scores_match=False))
+
+    def test_large_cuda_observation_budget_accounts_for_bounded_upload(self):
+        screen = GpuFFTScreen.__new__(GpuFFTScreen)
+        screen.samples = 40_652_650
+        screen.crop_rows = 67_359
+        screen.decimation = 600
+        screen.dtype = np.complex128
+        screen.taps = range(3000)
+        screen.template_chunk_samples = 16384
+        screen.resident_estimate = 335_946_624
+        expected = screen.resident_estimate+16*(screen.samples+2*(1 << 20))
+        self.assertEqual(screen._observation_peak_estimate(), expected)
+        screen.memory_limit_bytes = expected-1
+        with self.assertRaisesRegex(MemoryError, 'observation filter exceeds the declared workspace'):
+            screen.prepare_observation(None)
+
+    def test_cuda_upload_synchronizes_live_host_chunks_including_on_enqueue_failure(self):
+        raw = (np.arange(14) + 1j*np.arange(14)[::-1])[::2]
+        for interrupt in (False, True):
+            with self.subTest(interrupt=interrupt):
+                expected = raw.astype(np.complex64)
+                storage = np.empty_like(expected)
+                pending, copied_sizes = [], []
+                device_raw = mock.MagicMock()
+
+                def synchronize():
+                    if pending:
+                        target, reference = pending.pop()
+                        host = reference()
+                        self.assertIsNotNone(host)
+                        np.copyto(target, host)
+                        copied_sizes.append(len(host))
+
+                stream = mock.Mock(synchronize=mock.Mock(side_effect=synchronize))
+
+                def device_view(indices):
+                    target = storage[indices]
+                    def set_host(host, *, stream):
+                        self.assertFalse(pending)
+                        self.assertTrue(host.flags.c_contiguous)
+                        self.assertEqual(host.dtype, target.dtype)
+                        self.assertEqual(host.shape, target.shape)
+                        pending.append((target, weakref.ref(host)))
+                        if interrupt:
+                            raise KeyboardInterrupt
+                    return SimpleNamespace(set=set_host)
+
+                device_raw.__getitem__.side_effect = device_view
+                filtered = object()
+                def filter_observation(taps, values, *, down):
+                    self.assertFalse(pending)
+                    self.assertIs(values, device_raw)
+                    self.assertEqual(down, 2)
+                    np.testing.assert_array_equal(storage, expected)
+                    return filtered
+
+                upfirdn = mock.Mock(side_effect=filter_observation)
+                screen = GpuFFTScreen.__new__(GpuFFTScreen)
+                screen.dtype, screen.real_dtype = np.complex64, np.float32
+                screen.taps, screen.decimation = [1.], 2
+                screen.gpu_work = dict(projected_input_payload_bytes=0,
+                    observation_filter_pool_live_snapshot_max_bytes=0)
+                screen.cuda = SimpleNamespace(active=nullcontext,
+                    cp=SimpleNamespace(empty=mock.Mock(return_value=device_raw), asarray=np.asarray,
+                        cuda=SimpleNamespace(get_current_stream=lambda: stream)),
+                    pool=SimpleNamespace(used_bytes=lambda: 123), signal=SimpleNamespace(upfirdn=upfirdn))
+                with mock.patch('triad_gpu_bank._OBSERVATION_UPLOAD_ROWS', 3):
+                    if interrupt:
+                        with self.assertRaises(KeyboardInterrupt):
+                            screen._filter_observation(raw)
+                        upfirdn.assert_not_called()
+                        self.assertEqual(copied_sizes, [3])
+                        np.testing.assert_array_equal(storage[:3], expected[:3])
+                        stream.synchronize.assert_called_once()
+                    else:
+                        self.assertIs(screen._filter_observation(raw), filtered)
+                        self.assertEqual(copied_sizes, [3, 3, 1])
+                        self.assertEqual(stream.synchronize.call_count, 4)
+                        self.assertEqual(screen.gpu_work['observation_filter_pool_live_snapshot_max_bytes'], 123)
+                screen.cuda.cp.empty.assert_called_once_with(raw.shape, dtype=np.complex64)
+
+    def test_standalone_cuda_score_reserves_raw_and_validity_before_filtering(self):
+        manifest = dict(sample_rate_hz=400,
+            calendar=dict(capture_samples=512, capture_lead_seconds=.2,
+                data_sample_offset=0, arrival_prior_seconds=[0., .05]),
+            channel=dict(spread_delay_ms=0., spread_doppler_hz=0.),
+            format=dict(occupied_bandwidth_hz=20.), power=dict(complex_noise_variance=1.))
+        cpu = FFTScreen(manifest, np.ones((1, 2, 128), dtype=np.complex128), (0,),
+            clock_ppm=(0.,), output_sample_rate=200, pass_edge_hz=60., stop_edge_hz=90.,
+            precision='fp64', workers=1)
+        screen = GpuFFTScreen.__new__(GpuFFTScreen)
+        screen.__dict__.update(cpu.__dict__)
+        screen.prepare_observation = mock.Mock(return_value=object())
+        screen._coerce_projected = mock.Mock(return_value=object())
+        screen._frequency_spectra = mock.Mock(return_value=object())
+        screen._frequency_workspace_rows = mock.Mock(return_value=[[], []])
+        raw = np.ones(screen.samples, dtype=np.complex128)
+        valid = np.ones(screen.samples, dtype=np.uint8)
+        frequencies = np.array([0.])
+        retained = raw.nbytes+valid.nbytes
+        kernel_peak = screen._correlation_plan(frequencies, None, raw_input=True)[
+            'estimated_peak_bytes_by_method']['frequency']
+
+        screen.memory_limit_bytes = kernel_peak+retained-1
+        result = screen.score(raw, frequencies, valid=valid)
+        self.assertEqual(result['reason'], 'correlation_working_memory_limit')
+        screen.prepare_observation.assert_not_called()
+
+        screen.memory_limit_bytes = kernel_peak+retained
+        result = screen.score(raw, frequencies, valid=valid)
+        self.assertEqual(result['status'], 'proposed')
+        self.assertEqual(result['work']['estimated_peak_bytes'], screen.memory_limit_bytes)
+        self.assertEqual(result['work']['standalone_retained_input_bytes'], retained)
+        screen.prepare_observation.assert_called_once_with(raw, valid)
+
+        projected = screen.score_projected(object(), frequencies)
+        self.assertEqual(projected['status'], 'proposed')
+        self.assertNotIn('standalone_retained_input_bytes', projected['work'])
+
+    def test_lookup_reuse_preserves_logical_template_demand(self):
+        reference = copy.deepcopy(self.records)
+        reference[0]['work']['native_cache'].update(cache_hits=20,row_tile_references=120)
+        candidate = copy.deepcopy(reference)
+        candidate[0]['work']['native_cache']['cache_hits'] = 200
+        self.assertTrue(compare_work(reference,candidate)['work_match'])
+        self.assertEqual(reference[0]['work']['native_cache']['cache_hits'],20)
+        candidate[0]['work']['native_cache']['row_tile_references'] += 1
+        self.assertFalse(compare_work(reference,candidate)['work_match'])
 
     def test_device_dispatch_can_differ_but_candidate_work_cannot(self):
         reference = copy.deepcopy(self.records)

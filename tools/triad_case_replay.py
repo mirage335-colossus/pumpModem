@@ -8,6 +8,8 @@ decoder, or operational admission test.
 from __future__ import annotations
 
 import copy
+import ctypes
+from functools import lru_cache
 import hashlib
 import json
 import math
@@ -24,6 +26,7 @@ from triad_continuous import NativeStream
 from triad_operational_admission import public_grid
 from triad_realtime_fft import FFTScreen, compare_template_projectors
 from triad_dynamic_joint import _sample_cubic
+from triad_tracking_basis import mapped_kernel_path
 from triad_weak_helper import estimate_weak_helper, weak_helper_policy
 
 
@@ -110,18 +113,68 @@ def _bounded_basis(source, lanes, positions):
     return result
 
 
-def _integer_basis(source, epoch, bit, first, count):
-    """Read an integer-source template span in API-sized native tiles."""
-    if isinstance(first, bool) or not isinstance(first, int) or first < 0:
-        raise ValueError('integer source start must be a nonnegative integer')
-    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
-        raise ValueError('integer source count must be nonnegative')
-    blocks = []
-    for at in range(0, count, _CHUNK):
-        amount = min(_CHUNK, count-at)
-        blocks.append(source.basis(first+at, amount,
-            [(bit, epoch, 0., 0., 0., 0., 0.)])[0])
-    return np.concatenate(blocks) if blocks else np.empty(0, np.complex128)
+@lru_cache(maxsize=4)
+def _load_integer_cubic_plan(path):
+    kernel = ctypes.CDLL(str(path)).triad_apply_cubic_plan_v1
+    kernel.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_void_p,
+                       ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
+    kernel.restype = ctypes.c_int
+
+    def apply(source, center, weights, rotation):
+        output = np.empty(len(center), dtype=np.complex128)
+        if not kernel(source.ctypes.data, len(source), center.ctypes.data, weights.ctypes.data,
+                      rotation.ctypes.data, output.ctypes.data, len(output)):
+            raise RuntimeError('native coarse cubic stencil rejected its bounded input')
+        return output
+
+    return apply
+
+
+class _IntegerTemplateProvider:
+    """Read exact source rows from one native address and one pipe owner."""
+
+    def __init__(self, source):
+        self.source = source
+        self.requests = 0
+        self.sample_values = 0
+        self.lease_groups = 0
+
+    def _read(self, lanes, first, count, chunk_samples):
+        if isinstance(first, bool) or not isinstance(first, int) or first < 0:
+            raise ValueError('integer source start must be a nonnegative integer')
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise ValueError('integer source count must be nonnegative')
+        rows = [(bit, epoch, 0., 0., 0., 0., 0.) for epoch, bit in lanes]
+        result = np.empty((len(rows), count), dtype=np.complex128)
+        unit = min(_CHUNK, chunk_samples)
+        for at in range(0, count, unit):
+            amount = min(unit, count-at)
+            block = self.source.basis(first+at, amount, rows)
+            if (block.shape != (len(rows), amount) or block.dtype.kind != 'c' or
+                    block.dtype.itemsize != np.dtype(np.complex128).itemsize):
+                raise ValueError('native integer basis response changed public lane extent or arithmetic')
+            result[:, at:at+amount] = block
+            self.requests += 1
+            self.sample_values += block.size
+        result.flags.writeable = False
+        return result
+
+    def __call__(self, epoch, bit, first, count):
+        return self._read(((epoch, bit),), first, count, _CHUNK)[0]
+
+    def lease(self, lanes, source_samples, chunk_samples):
+        result = self._read(lanes, 0, source_samples, chunk_samples)
+        self.lease_groups += 1
+        return result
+
+    def cubic_plan(self):
+        command = getattr(self.source, 'command', ())
+        if command:
+            try:
+                return _load_integer_cubic_plan(mapped_kernel_path(command[0]))
+            except (OSError, AttributeError):
+                pass  # An older or standalone exporter keeps the exact NumPy operator.
+        return None
 
 
 def _clean_options(executable, native_args, *, bit, seed):
@@ -392,8 +445,7 @@ def build_public_screen(source, manifest, *, public_address, source_identity,
     if selected_step > 1:
         mapped_provider = lambda lanes, positions: _bounded_basis(source, lanes, positions)
     else:
-        def raw_provider(epoch, bit, first, count):
-            return _integer_basis(source, epoch, bit, first, count)
+        raw_provider = _IntegerTemplateProvider(source)
     started = time.perf_counter()
     native_workspace = max(int(descriptor.get('fixed_workspace_bytes', 0)),
                            int(descriptor.get('workspace_budget_bytes', 0)))
@@ -434,6 +486,11 @@ def build_public_screen(source, manifest, *, public_address, source_identity,
         fft_bank_preparation_seconds=screen_seconds,
         native_address_selection_seconds=address_seconds,
         scope='Fixed public path geometry and current native source identity; admission bounds materialization work before full-bank construction.')
+    if raw_provider is not None:
+        work['integer_template_source'] = dict(native_requests=raw_provider.requests,
+            native_sample_values=raw_provider.sample_values, exact_lease_groups=raw_provider.lease_groups,
+            projection=getattr(screen, 'policy', {}).get('integer_template_projection'),
+            scope='Actual native source values read; the public projection work estimate still covers every clock and ray.')
     preparation = time.perf_counter()-began
     native_cpu_after = _native_cpu_seconds(source)
     native_cpu_seconds = (None if native_cpu_began is None or native_cpu_after is None
@@ -460,6 +517,8 @@ def build_public_screen(source, manifest, *, public_address, source_identity,
         effective_busy_cpus=((process_cpu_seconds+native_cpu_seconds)/preparation
                              if native_cpu_seconds is not None and preparation > 0 else None),
         scope='Bound to current native source, explicit pattern epoch/symbol ordinal, full receive geometry and public search. Local fidelity validation alone uses its normalized diagnostic calendar.')
+    if raw_provider is not None:
+        receipt['integer_template_source'] = work['integer_template_source']
     return dict(screen=screen, manifest=public_manifest, grid=grid,
         clock_bank=clock_bank, profile=profile, work=work,
         template_identity=source_digest, source_identity=source_identity,

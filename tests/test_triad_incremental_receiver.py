@@ -131,6 +131,65 @@ class IncrementalReceiverTests(unittest.TestCase):
         future.result.assert_called_once_with()
         self.assertEqual(receiver.block_updates, 0)
 
+    def test_prepared_segment_updates_each_model_in_order_and_preserves_erasure(self):
+        raw, valid, options = self.fixture(n=19, block=8, projection='dft')
+        basis = options['basis']
+        requests_seen = []
+
+        def statistics(requests):
+            requests_seen.append([(lo, hi) for lo, hi, *_ in requests])
+            result = []
+            for lo, hi, projection, observation, variance in requests:
+                projected = projection.numpy(basis(lo, hi))
+                correlations = np.einsum('hctn,n->hct', projected.conj(), observation)/variance
+                gram = np.einsum('hctn,hcsn->hcts', projected.conj(), projected)/variance
+                result.append((correlations, gram))
+            return result
+
+        for erased in (False, True):
+            with self.subTest(erased=erased):
+                if erased:
+                    valid[8:] = 0  # The complete merged terminal block.
+                serial = IncrementalGaussianReceiver(**options)
+                serial.push(0, raw, valid)
+                basis.block_statistics = statistics
+                try:
+                    prepared = IncrementalGaussianReceiver(**options)
+                    prepared.push(0, raw, valid)
+                finally:
+                    del basis.block_statistics
+                np.testing.assert_allclose(prepared.unmixed_log_evidence(),
+                    serial.unmixed_log_evidence(), rtol=0, atol=1e-12)
+                for first, second in zip(serial.runtimes, prepared.runtimes, strict=True):
+                    for left, right in zip(first.posterior(), second.posterior(), strict=True):
+                        np.testing.assert_allclose(left.numpy(), right.numpy(), rtol=0, atol=1e-12)
+                self.assertEqual(prepared.finish()['erased_rows'], 11 if erased else 0)
+                self.assertEqual(requests_seen[-1], [(0, 8)] if erased else [(0, 8), (8, 19)])
+                self.assertEqual(prepared.hypothesis_update_tasks, 4 if erased else 2)
+
+    def test_failed_prepared_segment_cannot_publish_or_resume(self):
+        raw, valid, options = self.fixture(n=19, block=8, projection='dft')
+        options['basis'].block_statistics = lambda requests: [
+            (np.zeros((3, 2, 2), dtype=np.complex128),
+             np.zeros((3, 2, 2, 2), dtype=np.complex128)) for _ in requests]
+        prepared = IncrementalGaussianReceiver(**options)
+        runtime = prepared.runtimes[0]
+        advance = runtime.update
+        with mock.patch.object(runtime, 'update') as update:
+            def fail_second(*arguments):
+                if update.call_count == 2:
+                    raise RuntimeError('injected ordered model failure')
+                return advance(*arguments)
+            update.side_effect = fail_second
+            with self.assertRaisesRegex(RuntimeError, 'injected ordered model failure'):
+                prepared.push(0, raw, valid)
+        self.assertEqual(runtime.blocks, 1)
+        self.assertEqual((prepared.block_updates, prepared.current_block_index,
+                          prepared.next_input_sample, prepared.processed_rows), (0, 0, 0, 0))
+        for operation in (prepared.finish, prepared.progress, lambda: prepared.push(0, raw, valid)):
+            with self.assertRaisesRegex(RuntimeError, 'failed during a prepared segment'):
+                operation()
+
     def test_quiet_aperture_uses_complete_blocks_without_changing_likelihood(self):
         raw, valid, kwargs = self.fixture(n=29, block=8, projection='dft')
         raw[:8] += 1e3  # Previous-slot tail in the public search-window prefix.

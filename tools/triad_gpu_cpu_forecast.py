@@ -103,7 +103,7 @@ def _score_match(cpu, gpu):
 
 def _drivers(row, cache, *, transfer=False):
     drivers = {'adaptive.'+key:value for key,value in _useful(row['lanes']['adaptive']['work_counts']).items()} | {
-        'cache.'+key:cache[key] for key in ('calls','interpolated_rows','cache_hits')}
+        'cache.'+key:cache[key] for key in ('calls','interpolated_rows','row_tile_references')}
     if transfer:
         calls = cache['native_preparation_calls']
         _require(cache['cache_misses']==calls and cache['evictions']==0 and cache['direct_rows']==0 and

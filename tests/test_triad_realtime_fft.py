@@ -8,6 +8,7 @@ import hashlib
 import math
 from pathlib import Path
 import sys
+import threading
 import unittest
 from unittest import mock
 
@@ -42,7 +43,8 @@ def screen(m=None, source=None, epochs=None, **kwargs):
     if m is None:
         m, source, epochs = fixture()
     return FFTScreen(m, source, epochs, clock_ppm=kwargs.pop('clock_ppm', (0.,)),
-        output_sample_rate=200, pass_edge_hz=60., stop_edge_hz=90., workers=1, **kwargs)
+        output_sample_rate=200, pass_edge_hz=60., stop_edge_hz=90.,
+        workers=kwargs.pop('workers', 1), **kwargs)
 
 
 def waveform(m, source, epoch_index, bit, arrival, frequency, clock):
@@ -59,6 +61,142 @@ def waveform(m, source, epoch_index, bit, arrival, frequency, clock):
 
 
 class FFTScreenTests(unittest.TestCase):
+    def test_integer_source_lease_keeps_identical_columns_and_native_owner(self):
+        m, source, epochs = fixture()
+        owner = threading.get_ident()
+        lanes = tuple((epoch, bit) for epoch in epochs for bit in (0, 1))
+        def read(epoch, bit, first, count):
+            self.assertEqual(threading.get_ident(), owner)
+            return source[epochs.index(epoch), bit, first:first+count]
+        class Provider:
+            def __init__(self):
+                self.leases = []
+                self.direct_calls = 0
+
+            def __call__(self, *args):
+                self.direct_calls += 1
+                return read(*args)
+
+            def lease(self, selected, count, _chunk):
+                self.leases.append(tuple(selected))
+                values = np.stack([read(epoch, bit, 0, count) for epoch, bit in selected])
+                values.flags.writeable = False
+                return values
+
+        options = dict(clock_ppm=(-10000., 0., 10000.), precision='fp64',
+            source_samples=source.shape[-1], template_identity='0'*64,
+            template_chunk_samples=31)
+        baseline = screen(m, None, epochs, template_provider=read, **options)
+        provider = Provider()
+        actual = screen(m, None, epochs, template_provider=provider, workers=4,
+                        mapped_template_batch_lanes=4, **options)
+        self.assertEqual(provider.leases, [lanes])
+        self.assertEqual(provider.direct_calls, 0)
+        self.assertEqual(actual.policy['preparation_projection_workers'], 4)
+
+        def load_plan():
+            def apply(source_row, center, weights, rotation):
+                for values in (source_row, center, weights, rotation):
+                    self.assertFalse(values.flags.writeable)
+                    self.assertTrue(values.flags.c_contiguous)
+                result = np.zeros(len(center), np.complex128)
+                for shift, weight in zip((-1, 0, 1, 2), weights, strict=True):
+                    indices = center+shift
+                    valid = (indices >= 0) & (indices < len(source_row))
+                    result[valid] += weight[valid]*source_row[indices[valid]]
+                return result*rotation
+            return apply
+
+        planned_provider = Provider()
+        planned_provider.cubic_plan = mock.Mock(side_effect=load_plan)
+        planned = screen(m, None, epochs, template_provider=planned_provider, workers=4,
+                         mapped_template_batch_lanes=4, **options)
+        self.assertEqual(planned.policy['integer_template_projection'], 'native_cubic_plan')
+        planned_provider.cubic_plan.assert_called_once_with()
+        planned_provider.cubic_plan.reset_mock()
+        plan_rejected = screen(m, None, epochs, template_provider=planned_provider, workers=4,
+                               mapped_template_batch_lanes=4,
+                               memory_limit_bytes=actual.preparation_peak_estimate_bytes, **options)
+        self.assertEqual(plan_rejected.policy['integer_template_projection'], 'numpy_cubic')
+        planned_provider.cubic_plan.assert_not_called()
+        fallback = Provider()
+        bounded = screen(m, None, epochs, template_provider=fallback, workers=4,
+            memory_limit_bytes=baseline.preparation_peak_estimate_bytes, **options)
+        self.assertEqual(fallback.leases, [])
+        self.assertGreater(fallback.direct_calls, 0)
+        for candidate in (actual, bounded, planned, plan_rejected):
+            self.assertEqual(candidate.projection_receipt(), baseline.projection_receipt())
+            for left, right in zip(baseline.workspaces, candidate.workspaces, strict=True):
+                for key in ('columns', 'gram', 'transform', 'inverse'):
+                    np.testing.assert_array_equal(right[key], left[key])
+                for key in ('rank', 'epoch', 'bit', 'clock_ppm', 'quadratic_explicit'):
+                    self.assertEqual(right[key], left[key])
+        raw = waveform(m, source, 1, 1, .03, 0., 0.)
+        self.assertEqual(actual.score(raw, [0.])['candidates'], baseline.score(raw, [0.])['candidates'])
+        rejected = Provider()
+        with self.assertRaises(MemoryError):
+            screen(m, None, epochs, template_provider=rejected, workers=4,
+                   memory_limit_bytes=baseline.preparation_peak_estimate_bytes-1, **options)
+        self.assertEqual(rejected.leases, [])
+        self.assertEqual(rejected.direct_calls, 0)
+
+    def test_integer_source_lease_validation_precedes_projection(self):
+        m, source, epochs = fixture()
+        def provider(*_args):
+            self.fail('an admitted lease must not use the native slice callback')
+        def create():
+            return screen(m, None, epochs, template_provider=provider, workers=2,
+                          source_samples=source.shape[-1], template_identity='0'*64)
+        with mock.patch.object(FFTScreen, '_project_integer_column') as project:
+            for mode in ('shape', 'writable', 'nonfinite', 'unaligned'):
+                def lease(lanes, count, _chunk):
+                    shape = (len(lanes), count-(mode=='shape'))
+                    if mode == 'unaligned':
+                        value = np.ndarray(shape, np.complex128,
+                            buffer=bytearray(16*len(lanes)*count+1), offset=1)
+                    else:
+                        value = np.zeros(shape, np.complex128)
+                    if mode == 'nonfinite':
+                        value.flat[0] = np.nan
+                    value.flags.writeable = mode == 'writable'
+                    return value
+                provider.lease = lease
+                with self.subTest(mode=mode), self.assertRaisesRegex(ValueError, 'integer source lease'):
+                    create()
+            project.assert_not_called()
+
+    def test_integer_source_projection_failure_drains_disjoint_jobs(self):
+        m, source, epochs = fixture()
+        def provider(*_args):
+            self.fail('the worker must not call the native provider')
+        def lease(lanes, count, _chunk):
+            values = np.ones((len(lanes), count), np.complex128)
+            values.flags.writeable = False
+            return values
+        provider.lease = lease
+        ready = threading.Barrier(2)
+        drained = threading.Event()
+        lock = threading.Lock()
+        calls = 0
+        def projection(instance, chunks):
+            nonlocal calls
+            with lock:
+                index = calls
+                calls += 1
+            if index < 2:
+                ready.wait(timeout=3)
+            if index == 0:
+                raise ValueError('controlled projection failure')
+            if index == 1:
+                next(chunks)
+                drained.set()
+            return np.zeros(instance.kernel_rows, np.complex128)
+        with mock.patch.object(FFTScreen, '_project_integer_column', projection), \
+                self.assertRaisesRegex(ValueError, 'controlled projection failure'):
+            screen(m, None, epochs, template_provider=provider, workers=2,
+                   source_samples=source.shape[-1], template_identity='0'*64)
+        self.assertTrue(drained.is_set())
+
     def test_exact_frequency_tiles_match_complete_grid_and_defer_proposals(self):
         m, source, epochs = fixture()
         raw = waveform(m, source, 1, 1, .035, .37, 0.)
@@ -534,6 +672,58 @@ class FFTScreenTests(unittest.TestCase):
                 self.assertAlmostEqual(before['score'], after['score'], places=10)
             self.assertLessEqual(max(count for _, count in requests), math.ceil(chunk * 1.01) + 4)
             self.assertLess(actual.resident_estimate, reference.resident_estimate)
+
+    def test_large_cpu_capture_uses_bounded_projection_and_counts_live_input(self):
+        m, source, epochs = fixture()
+        raw = waveform(m, source, 1, 1, .1, .12, 0.)
+        raw[-1] = 4+3j
+        valid = np.ones(len(raw), np.uint8)
+        for precision, tolerance in (('fp64', 3e-12), ('fp32', 2e-6)):
+            s = screen(m, source, epochs, precision=precision, template_chunk_samples=31)
+            expected = s.prepare_observation(raw, valid)
+            whole_peak = s._observation_peak_estimate()
+            with self.subTest(precision=precision), mock.patch(
+                    'triad_realtime_fft._STREAM_OBSERVATION_SAMPLES', len(raw)):
+                self.assertLess(s._observation_peak_estimate(), whole_peak)
+                actual = s.prepare_observation(raw, valid)
+                self.assertEqual(actual.dtype, expected.dtype)
+                np.testing.assert_allclose(actual, expected, rtol=tolerance, atol=tolerance*.1)
+                result = s.score(raw, [0.], valid=valid)
+                self.assertEqual(result['status'], 'proposed')
+                plan = s._correlation_plan(np.array([0.]), None, raw_input=True)
+                self.assertEqual(result['work']['estimated_peak_bytes'],
+                    plan['estimated_peak_bytes_by_method']['frequency']+raw.nbytes+valid.nbytes)
+                s.memory_limit_bytes = result['work']['estimated_peak_bytes']-1
+                with mock.patch.object(s, 'prepare_observation') as prepare:
+                    self.assertEqual(s.score(raw, [0.], valid=valid)['reason'],
+                                     'correlation_working_memory_limit')
+                    prepare.assert_not_called()
+                s.memory_limit_bytes = s._observation_peak_estimate()
+                self.assertEqual(len(s.prepare_observation(raw, valid)), s.crop_rows)
+                s.memory_limit_bytes -= 1
+                with mock.patch('triad_realtime_fft._fir_decimate_chunks') as fir:
+                    with self.assertRaisesRegex(MemoryError, 'streamed observation FIR'):
+                        s.prepare_observation(raw, valid)
+                    fir.assert_not_called()
+                s.memory_limit_bytes = whole_peak
+                for invalid, message in ((0, 'erasures'), (2, 'binary capture validity')):
+                    mask = valid.copy()
+                    mask[-1] = invalid
+                    with self.assertRaisesRegex(ValueError, message):
+                        s.prepare_observation(raw, mask)
+                with self.assertRaisesRegex(ValueError, 'binary capture validity'):
+                    s.prepare_observation(raw, valid[:-1])
+                with self.assertRaisesRegex(ValueError, 'finite complex'):
+                    s.prepare_observation(raw[:-1], valid)
+                invalid_raw = raw.copy()
+                invalid_raw[-1] = np.inf
+                with self.assertRaisesRegex(ValueError, 'finite complex'):
+                    s.prepare_observation(invalid_raw, valid)
+                with mock.patch.object(s, 'device_parallel', True), \
+                        mock.patch.object(s, 'prepare_observation_stream') as stream:
+                    self.assertEqual(s._observation_peak_estimate(), whole_peak)
+                    np.testing.assert_array_equal(s.prepare_observation(raw, valid), expected)
+                    stream.assert_not_called()
 
     def test_streamed_fir_noise_covariance_keeps_edges_and_color(self):
         # Independent finite convolution-matrix oracle. White unit complex

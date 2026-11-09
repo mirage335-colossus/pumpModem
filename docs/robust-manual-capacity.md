@@ -155,6 +155,27 @@ not prohibit qualified lower-precision bulk work; see the
 
 ## Local parallel capacity
 
+The CPU implementation prepares immutable candidate plans and fuses native
+rendering, projection and sufficient statistics in the shared worker pool.
+When both valid blocks of a segment are available, candidate tiles process
+them in one wave; each coherence model then advances the two observations in
+order before the existing timing/pruning boundary. Exact bit-pair geometry is
+shared without merging their independent signal hypotheses. Generic callbacks,
+partial erasures and unsupported staging retain their ordinary bounded paths.
+Recurring integer-source banks reuse each native epoch/bit lane across the
+clock/ray projections and apply a shared native cubic plan in parallel.
+These are changes to one received stream, not simultaneous simulation trials.
+
+Record actual dispatch and cache accesses separately from logical search work.
+`row_tile_references` counts template dependencies per rendered row; physical
+`cache_hits` can fall when plans share a lookup. Forecasts compare the former
+alongside states, decisions, cache fills and geometry. Never manufacture old
+cache-hit counts to make a more efficient implementation look unchanged.
+Less CPU time for equivalent work is a benefit even when average busy cores
+falls. Retain the full worker budget and investigate the remaining critical
+path; neither a pool size nor an isolated parallel kernel proves whole-receiver
+saturation. See the [matched evidence](validation.md#receiver-restructuring).
+
 Report prepared elapsed processing seconds per second of received baseband for
 one complete receiver workload. A ratio at least 1 fails real-time capacity;
 0.1 represents a 90% processing-time margin. Never divide elapsed service by
@@ -236,10 +257,10 @@ mkdir -p local-evidence
 python3 tools/triad_manual_cases.py \
   --exporter build/dev/triad_helper_export \
   --output local-evidence/robust-cases.json \
-  --workspace-mib 4608
+  --workspace-mib 3840
 ```
 
-The 4608 MiB cap remains subject to the half-visible-memory guard. If a row
+The example's 3840 MiB cap remains subject to the half-visible-memory guard. If a row
 fails workspace admission, retain that failure and run a fresh matching
 `--case-index N` continuation with the same source, cap and inputs; only an
 identity-matched replacement may fill that row in a clearly labeled coverage
@@ -287,14 +308,18 @@ applicable artifacts. A missing cost class gets a bounded local calibration.
 In the same-geometry encrypted-to-clear transfer, the noise-only fine class can
 be measured independently with `--calibration-stage noise-only-fine`.
 
-The [current validation record](validation.md#gpu-assisted-receiver-measurement)
+The [validation record](validation.md#gpu-assisted-receiver-measurement)
 separates accepted full-list timing forecasts from capacity decisions. The
-current eight-row forecast passed its nominal and conservative timing gates;
+pre-restructuring eight-row forecast passed its nominal and conservative timing gates;
 all nominal intervals are below 1 s/s, but conservative capacity remains
 unresolved, with conservative point failures in rows 4, 6 and 8. Earlier
 precision/work failures and the rejected encrypted-to-clear transfer retain
 their own source and policy identities. A successful forecasting gate does
 not erase these distinctions or establish an unconditional capacity pass.
+That earlier trace is not an applicable forecast for the restructured source.
+Use the current direct CPU calibration while fresh matching GPU evidence is
+unavailable; never silently substitute an old GPU trace or a generic GPU/CPU
+speed ratio.
 
 Use authenticated SSH/SCP for source and native artifacts. Reuse persistent
 storage when cache savings justify its cost, then terminate disposable

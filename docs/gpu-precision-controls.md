@@ -29,6 +29,13 @@ explicit arithmetic; its fine Gaussian policy defaults to FP64 after a
 reproduced high-SNR FP32 innovation failure. That is a stage-specific finding,
 not a requirement for high dynamic range throughout the receiver.
 
+The current GPU-only filter upload uses bounded host staging and retains
+CUDA polyphase filtering. Its revised memory admission and exceptional-upload
+lifetime have unit coverage, but the new source still needs execution on CUDA
+because replacement RunPod capacity was unavailable. The earlier device
+qualification does not qualify these edits; see the
+[current GPU limits](validation.md#gpu-assisted-receiver-measurement).
+
 The maintained backend has **no enabled tensor-core DFT path**. TF32x3,
 rounded TF32 and power-of-two-scaled FP16 lag-search variants were implemented
 and passed the bounded row-3 receiver checks on RTX PRO 6000. None demonstrated
@@ -42,6 +49,17 @@ device-resident formulations remain development candidates, not available
 switches or measured speedups. A low-precision dtype or matrix operation alone does not prove tensor
 execution. The existing Gaussian FP32 guard requires TF32 disabled; a new
 tensor path must have its own applicable checks.
+
+The restructured CPU path also removes repeated bank synthesis and combines
+fine render/projection work into candidate tiles. Reprofile the resulting
+complete workflow before choosing the next tensor operation: the old host/GPU
+cost split is not a current speedup forecast. A possible FHSS formulation is
+local pulse-stencil matrices multiplied by batched keyed coefficients, followed
+by accurate phase/gate handling and resident projection. Its coefficient/plan
+adapter is not implemented or qualified. Compare a fused CUDA stencil with a
+scaled FP16/FP32-accumulation implementation, including preparation, transfers
+and actual receiver decisions; do not restore the rejected direct-DFT path or
+advertise hypothetical tensor throughput as local CPU capacity.
 
 ## Qualifying a faster path
 
@@ -63,10 +81,11 @@ local holdouts determine the forecast. Do not multiply GPU elapsed time by a
 generic FLOPS ratio. Follow the
 [GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast).
 
-The [current validation](validation.md#gpu-assisted-receiver-measurement)
-distinguishes the accepted eight-row timing forecasts from unresolved
-conservative CPU capacity. Earlier precision and timing failures remain
-source-bound evidence, not blanket prohibitions on reduced precision.
+The [validation record](validation.md#gpu-assisted-receiver-measurement)
+distinguishes the earlier accepted eight-row timing forecasts from unresolved
+conservative CPU capacity and the restructuring's new source identity. Earlier
+precision and timing failures remain source-bound evidence, not blanket
+prohibitions on reduced precision.
 
 ## Retained lessons
 

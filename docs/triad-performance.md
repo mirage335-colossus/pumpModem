@@ -68,7 +68,7 @@ replace that calibration.
 Use the [mixed-precision policy](gpu-precision-controls.md) to accelerate the
 dominant work through efficient algorithms, batching and qualified lower or
 tensor-compatible arithmetic. Measure complete experiment time, including
-simulation, preparation and transfers. The current RTX PRO 6000 trace still
+simulation, preparation and transfers. The pre-restructuring RTX PRO 6000 trace
 spent about 80% of its time on native CPU simulation and bank preparation;
 optimizing only small GPU kernels misses that measured bottleneck. See the
 [current evidence](validation.md#gpu-assisted-receiver-measurement).
@@ -89,10 +89,13 @@ python3 tools/triad_gpu_bundle.py --output /tmp/robust-gpu-source.tar.gz
 On the pod, run the bounded CUDA workload and predeclare representative paired
 reference rows spanning every arithmetic class. A full-list example uses rows
 1 and 2 for the tight-clock class and row 6 for the bulk FP32 class.
+Use the same admitted workspace cap for the CPU calibration, GPU observation
+and local holdout. The examples use 3840 MiB; this is a measured-host example,
+not a portable memory limit. Older 4608 MiB receipts remain bound to that cap.
 
 ```sh
 python3 tools/triad_gpu_workload.py \
-  --device cuda --workers 12 --workspace-mib 4608 \
+  --device cuda --workers 12 --workspace-mib 3840 \
   --reference-case 1 --reference-case 2 --reference-case 6 \
   --exporter build/dev/triad_helper_export \
   --output local-evidence/robust-gpu-paired.json
@@ -110,7 +113,7 @@ workspace cap and source/native artifacts. Reference rows must still match their
 current normalized configurations.
 
 ```sh
-python3 tools/triad_gpu_workload.py --case-index 7 --workers 12 --workspace-mib 4608 \
+python3 tools/triad_gpu_workload.py --case-index 7 --workers 12 --workspace-mib 3840 \
   --exporter build/dev/triad_helper_export \
   --output local-evidence/robust-gpu-target-7.json
 ```
@@ -128,7 +131,7 @@ the same workspace cap. The following command checks only row 7.
 
 ```sh
 python3 tools/triad_gpu_workload.py \
-  --device cpu --case-index 7 --workspace-mib 4608 \
+  --device cpu --case-index 7 --workspace-mib 3840 \
   --exporter build/dev/triad_helper_export \
   --output local-evidence/robust-cpu-holdout-7.json
 ```
@@ -167,7 +170,7 @@ stage calibration and keep the independent holdout separate.
 ```sh
 ./build.sh test triad
 python3 tools/triad_manual_cases.py \
-  --calibration-stage noise-only-fine --case-index 7 --workspace-mib 4608 \
+  --calibration-stage noise-only-fine --case-index 7 --workspace-mib 3840 \
   --exporter build/dev/triad_helper_export \
   --output local-evidence/robust-noise-fine-7.json
 ```
@@ -261,10 +264,10 @@ followed by the manual-case tool.
 python3 tools/triad_manual_cases.py \
   --output local-evidence/robust-cases.json \
   --exporter build/dev/triad_helper_export \
-  --workspace-mib 4608
+  --workspace-mib 3840
 ```
 
-The 4608 MiB cap remains subject to the half-visible-memory guard. Retain any
+The example's 3840 MiB cap remains subject to the half-visible-memory guard. Retain any
 workspace-admission failure and use a fresh matched selected-row continuation
 before assembling complete coverage.
 

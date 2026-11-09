@@ -348,12 +348,17 @@ def _smooth(x):
     return x*x*x*(10+x*(-15+6*x))
 
 
-def _sample_cubic(source, position):
-    """Four-point source interpolation with explicit zero extension."""
+def _cubic_stencil(position):
     center = np.floor(position).astype(np.int64)
     u = position-center
     weights = (-u*(u-1)*(u-2)/6, (u+1)*(u-1)*(u-2)/2,
                -(u+1)*u*(u-2)/2, (u+1)*u*(u-1)/6)
+    return center, weights
+
+
+def _sample_cubic(source, position):
+    """Four-point source interpolation with explicit zero extension."""
+    center, weights = _cubic_stencil(position)
     result = np.zeros(position.shape, np.complex128)
     for shift, weight in zip((-1, 0, 1, 2), weights):
         ix = center+shift
@@ -364,10 +369,7 @@ def _sample_cubic(source, position):
 
 def _sample_cubic_rows(source, position):
     """The same four-point interpolation, sharing geometry across source rows."""
-    center = np.floor(position).astype(np.int64)
-    u = position-center
-    weights = (-u*(u-1)*(u-2)/6, (u+1)*(u-1)*(u-2)/2,
-               -(u+1)*u*(u-2)/2, (u+1)*u*(u-1)/6)
+    center, weights = _cubic_stencil(position)
     result = np.zeros((source.shape[0], *position.shape), np.complex128)
     for shift, weight in zip((-1, 0, 1, 2), weights):
         ix = center+shift

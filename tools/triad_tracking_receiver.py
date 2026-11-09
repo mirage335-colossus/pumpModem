@@ -237,6 +237,14 @@ class _TimingStream:
                 raise ValueError("tracking's common Gaussian noise null requires an exactly zero H0 basis")
             return basis
 
+        statistics = getattr(self.basis_provider, 'block_statistics', None)
+        if statistics is not None:
+            def block_statistics(requests):
+                return statistics(states, anchor_seconds, [
+                    (first+lo, first+hi, origin, offsets[lo:hi], projection, observation, variance)
+                    for lo, hi, projection, observation, variance in requests])
+            render.block_statistics = block_statistics
+
         receiver = self._make_segment_receiver(rows, states, render, origin, offsets)
         requested_invalid = rows-int(np.count_nonzero(self._valid[:rows]))
         extra_discarded = expanded_blocks = 0
@@ -263,7 +271,7 @@ class _TimingStream:
             raise FloatingPointError("tracking segment's common null acquired nonzero evidence")
         self._observe_segment(receiver, unmixed, origin, offsets, rows)
         self.peak_retained_states = max(self.peak_retained_states, len(self.timing.states))
-        self.hypothesis_update_tasks += result['blocks']*result['hypothesis_update_tasks_per_block']
+        self.hypothesis_update_tasks += result['hypothesis_update_tasks']
         self.maximum_hypothesis_tasks_per_block = max(self.maximum_hypothesis_tasks_per_block,
             result['hypothesis_update_tasks_per_block'])
         self._previous_anchor = (origin, midpoint)
@@ -541,6 +549,15 @@ class _PersistentTimingLane(_TimingStream):
         def counted_render(lo, hi):
             self.basis_rows += (hi-lo)*len(states)*2*len(self.receiver_arguments['stationary_power'])
             return render(lo, hi)
+        statistics = getattr(render, 'block_statistics', None)
+        if statistics is not None:
+            def counted_statistics(requests):
+                result = statistics(requests)
+                if result is not None:
+                    self.basis_rows += sum(hi-lo for lo, hi, *_ in requests)*len(states)*2*len(
+                        self.receiver_arguments['stationary_power'])
+                return result
+            counted_render.block_statistics = counted_statistics
         return IncrementalReceiver(samples=rows, candidate_count=len(states), basis=counted_render,
             block_center_seconds=lambda lo, hi: .5*(float(offsets[lo])+float(offsets[hi-1]))/self.sample_rate,
             initial_channel_state=self._next_posteriors,
@@ -593,17 +610,22 @@ class _InitialAffineReceiver(_PersistentTimingLane):
         initial_states = arguments['timing_forward'].states
         reference = weakref.ref(self)
 
-        def affine_basis(states, anchor, first, stop, origin, offsets):
-            current = reference()
-            if current is None:
-                raise RuntimeError('initial affine lane no longer owns its basis callback')
-            if tuple(states) != initial_states:
-                raise RuntimeError('fixed affine bank changed its public state coordinates')
-            if current.initial_affine_anchor is None:
-                raise RuntimeError('fixed affine time anchor was not initialized before scoring')
-            return basis_provider(initial_states, current.initial_affine_anchor,
-                                  first, stop, origin, offsets)
+        def anchored(provider):
+            def evaluate(states, anchor, *arguments):
+                current = reference()
+                if current is None:
+                    raise RuntimeError('initial affine lane no longer owns its basis callback')
+                if tuple(states) != initial_states:
+                    raise RuntimeError('fixed affine bank changed its public state coordinates')
+                if current.initial_affine_anchor is None:
+                    raise RuntimeError('fixed affine time anchor was not initialized before scoring')
+                return provider(initial_states, current.initial_affine_anchor, *arguments)
+            return evaluate
 
+        affine_basis = anchored(basis_provider)
+        statistics = getattr(basis_provider, 'block_statistics', None)
+        if statistics is not None:
+            affine_basis.block_statistics = anchored(statistics)
         super().__init__(basis_provider=affine_basis, **arguments)
 
     def _make_segment_receiver(self, rows, states, render, origin, offsets):

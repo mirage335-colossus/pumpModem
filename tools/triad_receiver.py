@@ -226,6 +226,24 @@ class FineSession:
                     flat = result.reshape(-1)
                     current._template_energy = current._template_energy+flat.vdot(flat).real
                 return result
+            statistics = getattr(provider, 'block_statistics', None)
+            if statistics is not None and p['precision'] == 'fp64' and owner.fine_cuda_index is None:
+                def block_statistics(states, anchor, requests):
+                    current = reference()
+                    if current is None:
+                        raise RuntimeError('fine session no longer owns its basis callback')
+                    result = statistics(states, anchor, requests)
+                    if result is None:
+                        return None
+                    prepared = []
+                    for (first, stop, *_), (r, gram, energy) in zip(requests, result, strict=True):
+                        current.template_calls += 1
+                        # Logical raw extent includes the exact common null.
+                        current.template_rows += 3*len(states)*len(taps)*(stop-first)
+                        current._template_energy += energy
+                        prepared.append((r, gram))
+                    return prepared
+                render.block_statistics = block_statistics
             return render
         render = counted(self.provider)
         affine_render = counted(getattr(self.provider, 'initial_affine', self.provider))
@@ -579,7 +597,7 @@ class CompleteBitReceiver(FineReceiverContext):
             workspace_workers=workers)
         if plan['status'] != 'ready':
             return dict(status='unresolved', reason=plan['reason'], candidates=[], work=plan)
-        filter_peak = screen.resident_estimate+64*self.samples+32*screen.crop_rows
+        filter_peak = screen._observation_peak_estimate()
         if filter_peak > remaining:
             return dict(status='unresolved', reason='complete_input_filter_working_memory_limit', candidates=[])
         projected = screen.prepare_observation(raw, valid)

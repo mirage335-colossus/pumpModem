@@ -9,7 +9,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import triad_case_replay as replay_module
 from triad_case_replay import (PreparedReplay, build_public_screen, _bounded_basis,
-                               _clean_options, _integer_basis, _local_fidelity_manifest)
+                               _clean_options, _IntegerTemplateProvider, _local_fidelity_manifest)
 
 
 class NativeBasis:
@@ -24,8 +24,7 @@ class NativeBasis:
         if count > 16384:
             raise ValueError('bounded basis coordinates required')
         self.calls.append((first, count, count-1))
-        epoch, bit = rows[0][1], rows[0][0]
-        return np.asarray([first+np.arange(count)+1j*(epoch+bit)])[...]
+        return np.asarray([first+np.arange(count)+1j*(epoch+bit) for bit, epoch, *_ in rows])
 
 
 class FakeScreen:
@@ -430,9 +429,17 @@ class ReplayTests(unittest.TestCase):
 
     def test_integer_basis_splits_clock_warped_ranges_at_native_request_limit(self):
         source = NativeBasis()
-        values = _integer_basis(source, 5, 1, 123, 40_010)
+        provider = _IntegerTemplateProvider(source)
+        values = provider(5, 1, 123, 40_010)
         self.assertEqual(values.shape, (40_010,))
         np.testing.assert_allclose(values.real, np.arange(123, 123+40_010))
+        lease = provider.lease(((5, 1), (-3, 0)), 40_010, 16_384)
+        self.assertFalse(lease.flags.writeable)
+        np.testing.assert_array_equal(lease[0], np.arange(40_010)+6j)
+        np.testing.assert_array_equal(lease[1], np.arange(40_010)-3j)
+        self.assertEqual(provider.requests, 6)
+        self.assertEqual(provider.sample_values, 3*40_010)
+        self.assertEqual(provider.lease_groups, 1)
         self.assertTrue(all(count <= 16384 for _, count, _ in source.calls))
 
     def test_template_and_channel_commands_retain_one_public_profile(self):

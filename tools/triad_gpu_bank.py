@@ -7,6 +7,7 @@ keyed native samples and the small FP64 rank decisions stay on the host.
 from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
+from copy import copy
 from functools import partial
 import hashlib
 import math
@@ -17,6 +18,9 @@ import numpy as np
 
 from triad_realtime_fft import (FFTScreen, _append_candidate_rows, _candidate_row, _digest,
     _fir_decimate_chunks, _project_coarse_column, _quadratic_scores)
+
+
+_OBSERVATION_UPLOAD_ROWS = 1 << 20
 
 
 class _CudaBank:
@@ -86,7 +90,8 @@ class GpuFFTScreen(FFTScreen):
         self.cuda = cuda
         self.gpu_work = dict(mapped_projection_batches=0, integer_projection_columns=0,
             frequency_batches=0, lag_batches=0, gpu_peak_rows=0, host_peak_fallback_rows=0,
-            projected_input_payload_bytes=0, mapped_template_payload_bytes=0)
+            projected_input_payload_bytes=0, mapped_template_payload_bytes=0,
+            observation_filter_pool_live_snapshot_max_bytes=0)
         # The measured top clock gaps in this compact search class were below
         # FP32 projection error. Use precise arithmetic for every cell before
         # peak finding and proposal limits, including candidates an FP32 top-k
@@ -115,8 +120,10 @@ class GpuFFTScreen(FFTScreen):
                 array_pool_reserved_bytes=self.cuda.pool.total_bytes(),
                 fft_plan_cache_limit_bytes=self.cuda.workspace_bytes,
                 fft_plan_cache_limit_count=self.cuda.plan_cache_count,
+                observation_filter_live_bound_bytes=self._observation_peak_estimate(),
                 workspace_scope='Coarse array and cuFFT work-area allocations share one bounded pool. '
-                                'Pool values are snapshots, excluding CUDA runtime and separate Torch allocations.',
+                                'The observation filter bound includes the bank and host staging. '
+                                'Pool values are device snapshots, excluding CUDA runtime and separate Torch allocations.',
                 precision=dict(projection=np.dtype(self.dtype).name,
                     fir_taps=np.dtype(self.real_dtype).name, frequency_fft=np.dtype(self.dtype).name,
                     lag_zoom_fft='CuPy complex128 chirps', lag_correlations=np.dtype(self.dtype).name,
@@ -157,9 +164,43 @@ class GpuFFTScreen(FFTScreen):
         del values
         yield from zip(bank_columns, grams, transformed, strict=True)
 
+    def _observation_peak_estimate(self):
+        item = np.dtype(self.dtype).itemsize
+        upload_rows = min(self.samples, _OBSERVATION_UPLOAD_ROWS)
+        output_rows = (self.samples+len(self.taps)-2)//self.decimation+1
+        # Validation, upload, polyphase filtering and the final crop execute
+        # in order. The upload includes both normalized host and H2D staging.
+        validation = self.samples+64*min(self.samples, self.template_chunk_samples)
+        upload = item*(self.samples+2*upload_rows)
+        filtering = item*(self.samples+output_rows+8*len(self.taps))
+        crop = item*(output_rows+self.crop_rows)
+        return self.resident_estimate+max(validation, upload, filtering, crop)
+
+    def _check_observation_validity(self, valid):
+        for first in range(0, len(valid), self.template_chunk_samples):
+            super()._check_observation_validity(valid[first:first+self.template_chunk_samples])
+
+    def score(self, raw, frequencies_hz=None, *, valid=None, projected_observation=None, **options):
+        if raw is None or projected_observation is not None:
+            return super().score(raw, frequencies_hz, valid=valid,
+                projected_observation=projected_observation, **options)
+        # Standalone raw scoring has no CompleteBitReceiver input reservation.
+        # Use the same conversion allowance as the standalone streamed CPU path.
+        retained = sum(value.nbytes if isinstance(value, np.ndarray) else 32*self.samples
+                       for value in (raw, valid) if value is not None)
+        limited = copy(self)
+        limited.memory_limit_bytes -= retained
+        result = FFTScreen.score(limited, raw, frequencies_hz, valid=valid, **options)
+        if 'work' in result:
+            result['work']['estimated_peak_bytes'] += retained
+            result['work']['standalone_retained_input_bytes'] = retained
+        return result
+
     def prepare_observation(self, raw, valid=None):
         # The inherited final crop also allocates, so keep the selected device
         # and bounded allocator active until that copy has completed.
+        if self._observation_peak_estimate() > self.memory_limit_bytes:
+            raise MemoryError('CUDA observation filter exceeds the declared workspace')
         with self.cuda.active():
             projected = super().prepare_observation(raw, valid)
             self.cuda.cp.cuda.get_current_stream().synchronize()
@@ -168,10 +209,26 @@ class GpuFFTScreen(FFTScreen):
     def _filter_observation(self, raw):
         with self.cuda.active():
             cp = self.cuda.cp
+            stream = cp.cuda.get_current_stream()
             self.gpu_work['projected_input_payload_bytes'] += raw.size*np.dtype(self.dtype).itemsize
+            # cp.asarray can retain a power-of-two pinned buffer for the whole
+            # capture. Use bounded copies into the one device input instead.
+            device_raw = cp.empty(raw.shape, dtype=self.dtype)
+            for first in range(0, len(raw), _OBSERVATION_UPLOAD_ROWS):
+                stop = min(first+_OBSERVATION_UPLOAD_ROWS, len(raw))
+                host = np.ascontiguousarray(raw[first:stop], dtype=self.dtype)
+                try:
+                    device_raw[first:stop].set(host, stream=stream)
+                finally:
+                    # Keep the pageable source alive even if enqueueing or
+                    # its caller is interrupted before the copy completes.
+                    stream.synchronize()
+            del host
             result = self.cuda.signal.upfirdn(cp.asarray(self.taps, dtype=self.real_dtype),
-                cp.asarray(raw, dtype=self.dtype), down=self.decimation)
-            cp.cuda.get_current_stream().synchronize()
+                device_raw, down=self.decimation)
+            stream.synchronize()
+            key = 'observation_filter_pool_live_snapshot_max_bytes'
+            self.gpu_work[key] = max(self.gpu_work[key], self.cuda.pool.used_bytes())
             return result
 
     def _coerce_projected(self, projected, *, copy=False):

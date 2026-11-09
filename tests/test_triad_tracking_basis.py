@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+import weakref
 
 import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
@@ -61,6 +62,26 @@ class AnalyticSource:
 
 @unittest.skipUnless(NATIVE, 'supply the built triad_helper_export')
 class CachedBasisTests(unittest.TestCase):
+    def test_native_coarse_plan_preserves_finite_cubic_support(self):
+        from triad_case_replay import _load_integer_cubic_plan
+        from triad_dynamic_joint import _cubic_stencil, _sample_cubic
+
+        apply = _load_integer_cubic_plan(mapped_kernel_path(NATIVE))
+        source = np.array([1+2j, -.5-.75j, 0., -1+1j, .5+.25j])
+        position = np.array([-25., -2., -1.5, -1., -.5, 0., .2, 1., 2.1, 4., 4.5, 5., 5.5, 24.])
+        rotation = np.exp(2j*np.pi*np.remainder(position*.13, 1.))
+        center, weights = _cubic_stencil(position)
+        weights = np.asarray(weights)
+        for values in (source, center, weights, rotation):
+            values.flags.writeable = False
+        expected = _sample_cubic(source, position)*rotation
+        np.testing.assert_allclose(apply(source, center, weights, rotation), expected, rtol=2e-12, atol=2e-13)
+        np.testing.assert_array_equal(apply(source[:0], center, weights, rotation), np.zeros_like(expected))
+        limits = np.array([np.iinfo(np.int64).min, np.iinfo(np.int64).max], np.int64)
+        np.testing.assert_array_equal(apply(source, limits, weights[:, :2].copy(), rotation[:2]), [0., 0.])
+        with self.assertRaisesRegex(RuntimeError, 'stencil rejected'):
+            apply(source, center[:0], weights[:, :0].copy(), rotation[:0])
+
     def test_candidate_warps_and_entire_audio_phase_match_analytic_reference(self):
         source = AnalyticSource()
         cache = cached(source)
@@ -162,6 +183,93 @@ class CachedBasisTests(unittest.TestCase):
         overlapping[:] = offsets
         with self.assertRaisesRegex(ValueError, 'separate writable aligned contiguous'):
             cache.basis_mapped(10, overlapping, rows, 0, out=destination)
+
+    def test_fused_data_statistics_match_full_projection_and_common_null(self):
+        from triad_dynamic_joint import BlockProjection
+
+        offsets = .15+np.arange(241, dtype=np.float64)**1.01
+        variance = 2.3
+        rng = np.random.default_rng(483)
+        raw = rng.normal(size=len(offsets))+1j*rng.normal(size=len(offsets))
+        for taps, band, first, center in (
+                (1, (-1., 1.), 50320, 1725.),
+                (2, (-500., 500.), 50320, 1725.),
+                (2, (-500., 500.), 2**54+137, 0.)):
+            with self.subTest(taps=taps, first=first):
+                candidates = 71
+                shift = 0. if first < 2**48 else float((np.longdouble(first)-51000)/6000)
+                rows = [(bit, candidate//24, shift+.0002*(candidate%4), .24, -32., tap*.002, -.17)
+                        for bit in (0, 1) for candidate in range(candidates) for tap in range(taps)]
+                projection = BlockProjection.make(len(offsets), 6000, (band,))
+                observation = projection.numpy(raw)
+                reference = cached(AnalyticSource())
+                basis = np.concatenate([reference.basis_mapped(first, offsets, rows[i:i+128], center)
+                                        for i in range(0, len(rows), 128)])
+                data = projection.numpy(basis).reshape(2, candidates, taps, -1)
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    fused = cached(AnalyticSource(), executor=executor, workers=4)
+                    (correlations, gram, energy), = fused.block_statistics(
+                        [(first, offsets, projection, observation, variance)], rows, center, candidates, taps)
+                np.testing.assert_array_equal(correlations[0], 0)
+                np.testing.assert_array_equal(gram[0], 0)
+                np.testing.assert_allclose(correlations[1:],
+                    np.einsum('bctn,n->bct', data.conj(), observation)/variance, rtol=2e-14, atol=2e-14)
+                np.testing.assert_allclose(gram[1:],
+                    (data.conj() @ data.swapaxes(-1, -2))/variance, rtol=2e-14, atol=2e-14)
+                np.testing.assert_allclose(energy, float(np.vdot(basis, basis).real), rtol=2e-14, atol=0.)
+                for key in ('calls', 'interpolated_rows', 'row_tile_references',
+                            'native_preparation_calls', 'native_preparation_samples', 'evictions'):
+                    self.assertEqual(reference.report()[key], fused.report()[key])
+                if reference.interpolated_rows:
+                    self.assertLess(fused.cache_hits, reference.cache_hits)
+
+    def test_fused_renderer_joins_started_writes_after_submission_failure(self):
+        from triad_dynamic_joint import BlockProjection
+
+        jobs = []
+        with ThreadPoolExecutor(max_workers=1) as backing:
+            class PartialExecutor:
+                def submit(self, *args, **kwargs):
+                    if jobs:
+                        raise RuntimeError('injected submission failure')
+                    jobs.append(backing.submit(*args, **kwargs))
+                    return jobs[0]
+            cache = cached(AnalyticSource(), executor=PartialExecutor(), workers=2)
+            offsets = np.arange(240, dtype=np.float64)
+            projection = BlockProjection.make(len(offsets), 6000, ((-100., 100.),))
+            observation = projection.numpy(np.ones(len(offsets), dtype=np.complex128))
+            rows = [(bit, 0, .0003*candidate, .2, 3., 0., 0.)
+                    for bit in (0, 1) for candidate in range(8)]
+            with self.assertRaisesRegex(RuntimeError, 'injected submission failure'):
+                cache.block_statistics([(51000, offsets, projection, observation, 1.)],
+                                       rows, 1725., 8, 1)
+            self.assertTrue(jobs[0].done())
+            self.assertIsNone(jobs[0].exception())
+
+    def test_fused_renderer_pins_first_array_through_sibling_replacement(self):
+        from triad_dynamic_joint import BlockProjection
+
+        first, samples, tile_samples = 51000, 240, 8192
+        cache = cached(AnalyticSource(), cache_bytes=4*tile_samples*16, tile_samples=tile_samples)
+        cache.paired_kernel = None
+        tile = first//tile_samples
+        for epoch in (0, 1, 0, 2):
+            cache._tile(0, epoch, tile)
+        self.assertIn((0, 0, tile), cache.cache)
+        self.assertNotIn((1, 0, tile), cache.cache)
+        earlier = weakref.ref(cache.cache[0, 0, tile])
+        kernel = cache.kernel
+        def checked_kernel(*arguments):
+            self.assertIsNotNone(earlier())
+            self.assertIsNot(earlier(), cache.cache[0, 0, tile])
+            return kernel(*arguments)
+        cache.kernel = checked_kernel
+        offsets = np.arange(samples, dtype=np.float64)
+        projection = BlockProjection.make(samples, 6000, ((-100., 100.),))
+        observation = projection.numpy(np.ones(samples, dtype=np.complex128))
+        rows = [(bit, 0, 0., .2, 3., 0., 0.) for bit in (0, 1, 0, 1)]
+        self.assertIsNotNone(cache.block_statistics(
+            [(first, offsets, projection, observation, 1.)], rows, 1725., 2, 1))
 
     def test_unwarped_integer_samples_are_exact_and_rows_do_not_use_observations(self):
         source = AnalyticSource()

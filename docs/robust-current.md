@@ -25,12 +25,15 @@ differences must not turn into a smaller portable default. Keep allocation
 overrides explicit and stage dispatch sized to useful work, following the
 [CPU allocation contract](development.md#receiver-cpu-allocation).
 
-Broad CPU fine processing shards independent basis DFT rows through that same
-receiver pool, then rejoins them in order before tracking updates. The current
-calibration measures 2.31–3.25 busy cores in continued fine work; full receiver
-saturation remains unproven. Preserve the shared budget and sequential state
-semantics when removing the remaining bottlenecks. See the
-[matched optimization and complete-suite results](validation.md#complete-headless-robust-and-manual-capacity).
+CPU fine processing fuses native render, projection and sufficient statistics
+across independent candidate tiles in that same pool. Two ready segment blocks
+share a dispatch wave; each channel model advances them chronologically before
+global pruning. Exact bit-pair geometry and recurring native source lanes are
+reused. Large CPU observations use bounded FIR tiles. Matched broad fine work
+improved 1.66–1.75×, but full receiver saturation remains unproven. Preserve the
+shared budget and sequential state semantics when removing remaining
+bottlenecks. See the [restructuring evidence](validation.md#receiver-restructuring)
+and [complete-suite results](validation.md#complete-headless-robust-and-manual-capacity).
 
 Older single-carrier Robust and standalone triad/Helper implementations are not
 supported current paths. Protocol breaks belong in a new Git tag and a separate
@@ -86,7 +89,7 @@ triad checks. For a full new local calibration, run the dedicated suite.
 python3 tools/triad_manual_cases.py \
   --output local-evidence/robust-cases.json \
   --exporter build/dev/triad_helper_export \
-  --workspace-mib 4608
+  --workspace-mib 3840
 ```
 
 The suite rereads `_tests-RobustModem.md` on every invocation. Repeatable

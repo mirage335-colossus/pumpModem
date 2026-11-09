@@ -166,6 +166,10 @@ class IncrementalGaussianReceiver:
                 self.device.type != 'cpu' or self.dtype != torch.complex128):
             raise ValueError('accelerated block statistics require the CPU FP64 state update')
         self.bulk_statistics = bulk_statistics
+        self.block_statistics = getattr(basis, 'block_statistics', None)
+        if self.block_statistics is not None and (not callable(self.block_statistics) or
+                self.device.type != 'cpu' or self.dtype != torch.complex128 or bulk_statistics is not None):
+            raise ValueError('mapped block statistics require the CPU FP64 state update')
         # Determine the public block calendar without retaining an O(duration)
         # layout table. A short terminal remainder is merged into its previous
         # full block, matching the batch receiver's DFT noise convention.
@@ -236,6 +240,8 @@ class IncrementalGaussianReceiver:
         self.observed_rows = 0
         self.erased_rows = 0
         self.block_updates = 0
+        self.hypothesis_update_tasks = 0
+        self._failed = False
         self.projection_modes = 0
         self.observed_projection_modes = 0
         self.projected_energy = 0.
@@ -283,16 +289,21 @@ class IncrementalGaussianReceiver:
         # so copying the selected bins stays within the block allowance.
         return np.concatenate(parts, axis=1).T.reshape((*raw.shape[:-1], len(projection.indices)))
 
-    def _score_block(self, start, stop, values, valid):
+    def _dft_projection(self, rows):
+        return (self.projection if rows == self.projection.samples else
+                BlockProjection.make(rows, self.sample_rate, self.required_bands, self.excluded_bands))
+
+    def _score_block(self, start, stop, values, valid, *, prepared=None, updates=None):
         rows = stop - start
         if values.shape != (rows,) or valid.shape != (rows,):
             raise ValueError("internal block extent mismatch")
-        if self.projection_mode == "dft":
+        if prepared is not None:
+            projection, projected_y, statistics = prepared
+        elif self.projection_mode == "dft":
             any_valid = bool(np.any(valid))
             if any_valid and not bool(np.all(valid)):
                 raise ValueError("partial erasures with auxiliary DFT projection require a covariance adapter")
-            projection = (self.projection if rows == self.projection.samples else
-                BlockProjection.make(rows, self.sample_rate, self.required_bands, self.excluded_bands))
+            projection = self._dft_projection(rows)
             if any_valid:
                 projected_y = projection.numpy(values)
             else:
@@ -323,20 +334,31 @@ class IncrementalGaussianReceiver:
                 raise ValueError('accelerated basis callback returned an unexpected block shape')
             r, gram = self.bulk_statistics(raw_basis, projection, projected_y, self.variance)
         else:
-            raw_basis = np.asarray(self.basis_callback(start, stop), dtype=np.complex128)
-            if raw_basis.shape != (3, self.candidates, self.taps, rows):
-                raise ValueError("basis callback must return finite [3,candidates,taps,block_rows]")
-            projected_basis = self._project_basis(raw_basis, projection)
-            if not np.isfinite(projected_basis).all() or not np.isfinite(projected_y).all():
-                raise ValueError("projected observations or basis are nonfinite")
-            gram_np = np.einsum("hctn,hcsn->hcts", projected_basis.conj(), projected_basis,
-                                optimize=True) / self.variance
-            # Same complex arithmetic floor and Gram/correlation definitions as
-            # the batch receiver; accumulated state likelihood remains FP64.
-            y = torch.as_tensor(np.asarray(projected_y).copy(), dtype=self.dtype, device=self.device)
-            b = torch.as_tensor(projected_basis, dtype=self.dtype, device=self.device)
-            flat = b.reshape(-1, b.shape[-1])
-            r = (y @ flat.conj().T / self.variance).reshape(3, self.candidates, self.taps)
+            if not np.isfinite(projected_y).all():
+                raise ValueError("projected observations are nonfinite")
+            if prepared is None:
+                batch = (self.block_statistics([(start, stop, projection, projected_y, self.variance)])
+                         if self.block_statistics is not None else None)
+                statistics = None if batch is None else batch[0]
+            if statistics is None:
+                raw_basis = np.asarray(self.basis_callback(start, stop), dtype=np.complex128)
+                if raw_basis.shape != (3, self.candidates, self.taps, rows):
+                    raise ValueError("basis callback must return finite [3,candidates,taps,block_rows]")
+                projected_basis = self._project_basis(raw_basis, projection)
+                if not np.isfinite(projected_basis).all():
+                    raise ValueError("projected basis is nonfinite")
+                gram_np = np.einsum("hctn,hcsn->hcts", projected_basis.conj(), projected_basis,
+                                    optimize=True) / self.variance
+                y = torch.as_tensor(np.asarray(projected_y).copy(), dtype=self.dtype, device=self.device)
+                b = torch.as_tensor(projected_basis, dtype=self.dtype, device=self.device)
+                flat = b.reshape(-1, b.shape[-1])
+                r = (y @ flat.conj().T / self.variance).reshape(3, self.candidates, self.taps)
+            else:
+                correlations, gram_np = statistics
+                if (correlations.shape != (3, self.candidates, self.taps) or
+                        gram_np.shape != (3, self.candidates, self.taps, self.taps)):
+                    raise ValueError('mapped block statistics returned an unexpected shape')
+                r = torch.as_tensor(correlations, dtype=self.dtype, device=self.device)
             gram = torch.as_tensor(gram_np, dtype=self.dtype, device=self.device)
         center_twice = start + stop - 1
         if self.block_center_seconds is None:
@@ -349,21 +371,40 @@ class IncrementalGaussianReceiver:
                 raise ValueError("physical block centers must be finite, nonnegative and strictly increasing")
             elapsed = self.first_block_elapsed_seconds if self.previous_physical_center is None else center-self.previous_physical_center
             self.previous_physical_center = center
-        if self.hypothesis_executor is None:
-            for runtime in self.runtimes:
-                runtime.update(r, gram, elapsed)
+        if updates is None:
+            self._advance_models([(r, gram, elapsed)])
         else:
-            # Models own independent channel states. They share only immutable
-            # observations; global timing/model mixing still occurs once above
-            # this component. Drain every task even when one update fails.
-            jobs = [job for runtime in self.runtimes for job in
-                (runtime.jobs(r, gram, elapsed) if isinstance(runtime, _CandidateGaussianFilter)
-                 else [(runtime, r, gram, elapsed)])]
+            updates.append((r, gram, elapsed))
+        self.previous_center_twice = center_twice
+        if updates is not None:
+            return
+        self.block_updates += 1
+        self.processed_rows += rows
+        self.observed_rows += int(np.count_nonzero(valid))
+        self.current_block_index += 1
+
+    def _advance_models(self, observations):
+        # Models share immutable observations and advance in chronological
+        # order. Their independent state jobs join before timing/pruning.
+        if len(observations) == 1:
+            r, gram, elapsed = observations[0]
+            jobs = [(part.update, (correlations, information, dt))
+                    for runtime in self.runtimes for part, correlations, information, dt in
+                    (runtime.jobs(r, gram, elapsed) if isinstance(runtime, _CandidateGaussianFilter)
+                     else [(runtime, r, gram, elapsed)])]
+        else:
+            def advance(runtime):
+                for r, gram, elapsed in observations:
+                    runtime.update(r, gram, elapsed)
+            jobs = [(advance, (runtime,)) for runtime in self.runtimes]
+        if self.hypothesis_executor is None:
+            for job, arguments in jobs:
+                job(*arguments)
+        else:
             futures, error = [], None
-            for runtime, correlations, information, dt in jobs:
+            for job, arguments in jobs:
                 try:
-                    futures.append(self.hypothesis_executor.submit(
-                        runtime.update, correlations, information, dt))
+                    futures.append(self.hypothesis_executor.submit(job, *arguments))
                 except BaseException as exc:
                     error = exc
                     break
@@ -375,14 +416,48 @@ class IncrementalGaussianReceiver:
                         error = exc
             if error is not None:
                 raise error
-        self.previous_center_twice = center_twice
-        self.block_updates += 1
-        self.processed_rows += rows
-        self.observed_rows += int(np.count_nonzero(valid))
-        self.current_block_index += 1
+        self.hypothesis_update_tasks += len(jobs)
+
+    def _score_complete_pair(self, source, mask):
+        if (self.block_statistics is None or self.projection_mode != "dft" or
+                self.hypothesis_shards != 1 or self.block_count != 2 or self.next_input_sample or
+                len(source) != self.samples or not mask.all()):
+            return False
+        requests = []
+        for index in range(2):
+            start, stop = self._block_bounds(index)
+            projection = self._dft_projection(stop-start)
+            observation = projection.numpy(source[start:stop])
+            if len(observation) == 0:
+                return False
+            if not np.isfinite(observation).all():
+                raise ValueError("projected observations are nonfinite")
+            requests.append((start, stop, projection, observation, self.variance))
+        statistics = self.block_statistics(requests)
+        if statistics is None:
+            return False
+        updates = []
+        try:
+            for (start, stop, projection, observation, _), pair in zip(requests, statistics, strict=True):
+                self._score_block(start, stop, source[start:stop], mask[start:stop],
+                                  prepared=(projection, observation, pair), updates=updates)
+            self._advance_models(updates)
+        except BaseException:
+            # Some model state may already have advanced. Never publish or
+            # retry an incomplete segment.
+            self._failed = True
+            raise
+        self.block_updates += 2
+        self.current_block_index += 2
+        self.processed_rows += len(source)
+        self.observed_rows += len(source)
+        self.next_input_sample += len(source)
+        return True
 
     def push(self, first_sample, values, valid=None):
         started = time.process_time()
+        if self._failed:
+            raise RuntimeError("incremental receiver failed during a prepared segment")
         if isinstance(first_sample, bool) or not isinstance(first_sample, (int, np.integer)):
             raise ValueError("first sample must be an integer")
         if int(first_sample) != self.next_input_sample:
@@ -405,6 +480,9 @@ class IncrementalGaussianReceiver:
         source = np.asarray(source, dtype=dtype)
         if not np.isfinite(source).all():
             raise ValueError("input overflows the selected arithmetic precision")
+        if self._score_complete_pair(source, mask):
+            self.push_cpu_seconds += time.process_time() - started
+            return
         offset = 0
         while offset < len(source):
             start, stop = self._block_bounds(self.current_block_index)
@@ -437,6 +515,8 @@ class IncrementalGaussianReceiver:
         acquisition and model mixtures used by :meth:`progress`. The caller
         owns those prior weights; adding them here would count them twice.
         """
+        if self._failed:
+            raise RuntimeError("incremental receiver failed during a prepared segment")
         if not self.block_updates:
             raise ValueError("no complete likelihood block has been observed")
         per_model = torch.stack([runtime.scores() for runtime in self.runtimes])
@@ -446,6 +526,8 @@ class IncrementalGaussianReceiver:
 
     def progress(self):
         """Return diagnostic prefix scores; never an admission decision."""
+        if self._failed:
+            raise RuntimeError("incremental receiver failed during a prepared segment")
         if not self.block_updates:
             raise ValueError("no complete likelihood block has been observed")
         per_model = torch.stack([runtime.scores() for runtime in self.runtimes])
@@ -468,10 +550,13 @@ class IncrementalGaussianReceiver:
             quiet_sample_bounds=self.quiet_sample_bounds,
             hypothesis_shards=self.hypothesis_shards,
             hypothesis_update_tasks_per_block=self.hypothesis_shards*len(self.runtimes),
+            hypothesis_update_tasks=self.hypothesis_update_tasks,
             pending_rows=len(self.pending), working_bytes_estimate=self.owned_bytes_estimate,
             push_process_cpu_seconds=self.push_cpu_seconds)
 
     def finish(self):
+        if self._failed:
+            raise RuntimeError("incremental receiver failed during a prepared segment")
         if self.next_input_sample != self.samples or self.current_block_index != self.block_count or len(self.pending):
             result = self.progress() if self.block_updates else dict(status="incomplete", admission=None,
                 complete_observation=False, consumed_samples=self.next_input_sample,

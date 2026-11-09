@@ -210,7 +210,11 @@ def _dsp_work(work):
         for name in DISPATCH_FIELDS:
             coverage.get(lane+'_state_regime', {}).pop(name, None)
     cache = result.get('native_cache', {})
-    for name in ('accelerator', 'staging_workspace_bytes', 'mapped_worker_tasks', 'maximum_mapped_workers'):
+    # Batched CPU planning performs one physical lookup for many logical rows;
+    # CUDA may still look them up separately. Keep the actual hits in receipts,
+    # and compare row_tile_references to preserve their useful template demand.
+    for name in ('accelerator', 'staging_workspace_bytes', 'mapped_worker_tasks', 'maximum_mapped_workers',
+                 'cache_hits'):
         cache.pop(name, None)
     return result
 
@@ -251,6 +255,11 @@ def _compare_cost_regime(cpu, cuda):
         callbacks = a['native_cache']['calls'], b['native_cache']['calls']
         if abs(callbacks[0]-callbacks[1]) > max(2, .10*callbacks[0]):
             return dict(accepted=False, reason='mapped_callback_count_changed')
+        references = a['native_cache']['row_tile_references'], b['native_cache']['row_tile_references']
+        error = abs(references[1]-references[0])/max(1, references[0])
+        errors.append(error)
+        if error > ADAPTIVE_COST_RTOL:
+            return dict(accepted=False, reason='mapped_row_tile_demand_changed', relative_error=error)
         aa, bb = (row['lanes']['adaptive'] for row in (a,b))
         for key in ('initial_states', 'state_cap', 'proposal_cap', 'attained_state_cap',
                     'attained_proposal_cap', 'coherence_models'):

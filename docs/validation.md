@@ -71,89 +71,174 @@ observations do not establish an intrinsic SMT bandwidth penalty. Keep the
 the worker-allocation decision and its telemetry limits. Remove the raw
 report when a matched scaling check supersedes that evidence.
 
+## Receiver restructuring
+
+The receiver now stages immutable candidate plans, fuses mapped rendering,
+DFT projection and sufficient statistics, and advances the two ready blocks
+of a segment in one model job. Exact bit-pair geometry is evaluated once for
+both independent DATA hypotheses. Global timing transitions and pruning retain
+their original boundaries. Partial erasures and generic nonzero-null callbacks
+keep the ordinary path. Worker failure drains submitted work, retains native
+pointer owners and prevents publication of an incomplete incremental result.
+
+At twelve workers, matched four-second continuation comparisons measured
+**1.750× throughput on row 7** and **1.664× on row 4**, with 37.0% and 31.4%
+less CPU time. The control disables the fused callback inside the same source
+and uses the same capture, coordinates, allocation and native artifact. These
+are fine-stage comparisons, not whole-service speedups or ratios against an
+older calibration. Useful work, retained states and endpoints matched; maximum
+lane-score differences were 5.68e-13 and 2.27e-13. Busy cores rose from 2.81 to
+3.09 and from 3.02 to 3.44. **Whole-receiver saturation is still unproven.**
+[Row 7](../local-evidence/structural-fine/row-7-12-final-overall.json) ·
+[Row 4](../local-evidence/structural-fine/row-4-12-final-overall.json)
+
+For the six-second row-7 session, Gaussian jobs fell from 144 to 72, mapped
+worker submissions from 1,776 to 288, and physical cache hits from 18,083 to
+236 while all 18,088 logical row/tile references remained. Exact bit-pair reuse
+alone saved 18.9% of CPU time and 6.3% of elapsed time in its twelve-worker
+comparison. The six-worker wall-time improvement was smaller and noisy; the
+DC control established CPU-time savings but no reliable separate elapsed gain.
+The full logical-thread default remains in force.
+
+The final-source row-7 residual profile preserved work, states, scores and
+endpoints in all five observations. Unmarked four-second continuations averaged
+0.423 s and 3.16 busy cores. Instrumentation added about 2% on average. In the
+marked path, mapping/statistics consumed 50% of elapsed time, model barriers
+24%, and adaptive transitions 9%. These inclusive spans and worker CPU counters
+must not be summed as independent elapsed costs. Fixed-affine setup, collection
+and prediction together accounted for only 5.6%, an optimistic bound on savings
+from persistence alone. A compiled batched state-update interface or safely
+overlapped candidate lanes is a more substantial future restructuring, requiring
+new numerical and transition-boundary qualification.
+[Final residual profile](../local-evidence/structural-fine/row-7-final-residual-attribution.json)
+
+A bounded ready-lane overlap discriminator replayed a real row-7 segment's
+prepared candidate work alongside the other lane's ordered model updates on
+the same twelve-worker pool. Fresh model copies, pinned native owners and
+49.22 MiB of scratch preserved statistics, posterior state and scores; raw
+energy reduction differences stayed within the declared tolerance. Five warm
+and twenty interleaved replays took 2.55 s internally. Six candidate jobs saved
+a paired median 0.818 ms, below the predeclared 3 ms useful-gain gate; nine jobs
+lost 0.924 ms. Even the positive result would save only about 1.5% of the final
+fine slice before live planning/commit overhead. This does not justify a live
+cross-lane scheduler change. The private driver was removed without changing
+production sources or repeating the calibration.
+[Overlap discriminator](../local-evidence/structural-fine/row-7-ready-lane-overlap.json)
+
+Recurring integer-source bank preparation now leases each epoch/bit source
+once, shares clock/ray plans and applies a native four-tap stencil in the worker
+pool. The representative row-7 preparation fell from 6.628 s to 1.504 s with
+source reuse, then to 0.490 s with the stencil. The final fresh stencil pair
+was 1.434 s versus 0.490 s. Source requests fell from 1,248 to five. The final
+twelve-worker observation averaged 3.51 busy cores; its six- and one-worker
+observations were 0.396 s and 0.613 s. These single observations do not select
+a smaller portable worker budget. All 78 workspace arrays agreed within
+9.44e-16 peak-relative error, and DATA/H0 candidate identities, order,
+coordinates and search work matched. A byte-equality gate failed and remains
+recorded; the qualified result uses the declared numerical tolerance.
+[Source reuse](../local-evidence/current-bank-lease/row7-pilot.json) ·
+[Native stencil](../local-evidence/current-bank-lease/row7-native-stencil-paired.json)
+
+A grouped NumPy projection variant increased CPU work without reducing
+elapsed time and was removed. The post-reuse row-7 native source takes about
+0.1 CPU-seconds, making further pulse-synthesis GPU acceleration a small target
+there. A different FHSS coefficient/stencil interface could also remove
+transport, but is not implemented or qualified. The earlier tensor-DFT
+conclusion below remains applicable; no tensor speedup is inferred from this
+CPU restructuring.
+
+Large CPU observations also reuse the existing bounded FIR overlap-add path.
+The branch depends on public sample count and backend, preserves finite tails,
+global decimation phase and validity checks, and shares its actual buffer
+estimate between ordinary and tiled acquisition. CUDA keeps its polyphase
+filter. In a bounded row-1 public-geometry check with synthetic noise and a
+tone, filtering fell from 6.715 s to 2.461 s and its modeled workspace from
+2.940 GB to 0.342 GB. Projection relative error was 8.28e-16; full and tiled
+search retained the same candidates and work. This is an operator/admission
+check, not a native-channel communication trial or a complete capacity result.
+[Filter qualification](../local-evidence/current-restructure/row1-streamed-observation-paired.json)
+
+The fine and bank comparison receipts predate this isolated large-input FIR
+routing change; their measured row-4/7 paths do not enter that branch. Keep
+the scoped receipts, original failures and current integration results while
+they support this qualification. Scratch implementations and copied sources
+have been removed. Retire raw receipts when matched replacements supersede
+the claims, retaining the concise algorithm and negative-result findings.
+
 ## Complete headless Robust and manual capacity
 
-The current direct calibration covers all eight rows on the Ryzen 5 PRO 5650U.
-It uses a fixed 4608 MiB workspace, compares 1/6/12 workers on one stream and
-measures fresh inference with all 12 workers. The original run completed rows
-1–6 and passed the native message gate. The then-visible workspace budget
-rejected admission for rows 7 and 8. Fresh isolated measurements filled those
-rows under the same workspace cap, with matching source, runtime, case list and
-native artifacts. The assembled report retains both original admission failures
-and binds each constituent to its hash. Summed constituent elapsed time was
-25 minutes 7.69 seconds across the three runs.
-[Report](../local-evidence/current-parallel/calibration-current-all8.md),
-[JSON and constituent hashes](../local-evidence/current-parallel/calibration-current-all8.json),
-[original run](../local-evidence/current-parallel/calibration-complete.json),
-[row 7](../local-evidence/current-parallel/calibration-row-7.json),
-[row 8](../local-evidence/current-parallel/calibration-row-8.json).
+The current direct calibration covers all eight rows on the Ryzen 5 PRO 5650U
+with a fixed **3840 MiB workspace and all 12 logical workers**. It compares
+1/6/12 allocations within one stream and includes the separate continued
+six-versus-twelve-worker check. The single uninterrupted full-list invocation
+took **17 minutes 58.36 seconds**, including the native message gate, fixture
+preparation and bounded measurements. All 61 measured source files, the case
+list and native artifacts remained unchanged through completion. This is an
+uncommitted restructuring of baseline `247b720`; exact identities are in the
+report, not a release certificate.
+[Current report](../local-evidence/current-restructure/calibration-all8.md) ·
+[Current JSON](../local-evidence/current-restructure/calibration-all8.json)
 
-Every row covers the required receiver work. All eight nominal intervals are
-below 1 s/s, with point margins of 60.72%–83.70%. The conservative interval
-and work gates support conditional capacity on rows 2, 5 and 7. The remaining
-conservative verdicts are unresolved. The conservative **points** for rows
-4, 6 and 8 fail the real-time criterion. Row 4's very wide interval is driven
-primarily by the unresolved largest-window noise-only acquisition model.
-The complete suite therefore reports unresolved margins. These conditional
-estimates apply to the observed operating conditions. Whole-receiver
-saturation and communication-success probabilities remain unqualified.
+Every row covers the required receiver work. All eight nominal service
+intervals are below 1 s/s, with point margins of **78.76%–92.66%**. The
+conservative work and model gates support conditional capacity only on row 1.
+Rows 2–8 remain unresolved even where their numerical intervals are below
+1 s/s: a required terminal or noise-only fine model did not establish its
+holdout gate. Row 4 also fails the conservative numerical point criterion.
+No omitted work, unsupported extrapolation or negative margin is relabeled as
+a pass. These estimates do not qualify communication-success probabilities
+or establish maximum whole-machine capacity.
 
 | Manual row | Nominal (s/s) | Nominal interval | Conservative point (s/s) | Conservative interval | Conservative decision | Continued fine busy cores |
 | --- | ---: | --- | ---: | --- | --- | ---: |
-| 1 Sub-9kHz | 0.166160 | 0.146607–0.188404 | 0.803708 | 0.586333–1.093536 | Unresolved | 2.307 |
-| 2 Groundwave GPSDO | 0.163044 | 0.139920–0.191862 | 0.770207 | 0.591796–0.997992 | Conditional pass | 2.380 |
-| 3 Groundwave Helper | 0.256045 | 0.192917–0.332388 | 0.821223 | 0.422765–1.455372 | Unresolved | 2.435 |
-| 4 HF Helper | 0.392845 | 0.316171–0.500705 | **7.488576** | 0.801072–18551.237744 | Unresolved | 3.250 |
-| 5 HF encrypted GPSDO | 0.231940 | 0.203746–0.300702 | 0.726290 | 0.589419–0.957768 | Conditional pass | 2.944 |
-| 6 FHSS | 0.270612 | 0.204054–0.357224 | **1.090006** | 0.873323–1.405219 | Unresolved | 2.698 |
-| 7 HF unencrypted GPSDO | 0.221163 | 0.195515–0.288502 | 0.752823 | 0.675466–0.893626 | Conditional pass | 2.999 |
-| 8 EME | 0.381753 | 0.298216–0.520121 | **1.359897** | 1.077178–2.605298 | Unresolved | 2.801 |
+| 1 Sub-9kHz | 0.105797 | 0.065142–0.160895 | 0.403813 | 0.317824–0.505933 | Conditional pass | 2.509 |
+| 2 Groundwave GPSDO | 0.107313 | 0.057771–0.179719 | 0.431828 | 0.332123–0.557078 | Unresolved | 2.604 |
+| 3 Groundwave Helper | 0.151933 | 0.109730–0.233736 | 0.426845 | 0.285671–0.646181 | Unresolved | 3.116 |
+| 4 HF Helper | 0.209542 | 0.106432–0.399960 | **10.503598** | 0.132542–1.706e+23 | Unresolved | 3.497 |
+| 5 HF encrypted GPSDO | 0.082533 | 0.046506–0.135198 | 0.348601 | 0.224880–0.525080 | Unresolved | 2.932 |
+| 6 FHSS | 0.212438 | 0.125459–0.397052 | 0.634457 | 0.466646–0.920861 | Unresolved | 2.597 |
+| 7 HF unencrypted GPSDO | 0.073359 | 0.054175–0.102080 | 0.324074 | 0.266107–0.399616 | Unresolved | 3.122 |
+| 8 EME | 0.170287 | 0.101504–0.905893 | 0.648012 | 0.458800–1.535051 | Unresolved | 2.803 |
 
-Broad FP64 fine blocks now split independent basis DFTs and finite checks
-across the existing receiver pool. The controller rejoins the selected bins
-in input order before the same Gram and state updates. The bounded row-7
-attribution measured 0.255 s of serial basis DFT in a marked 1.082 s fine
-observation. In interleaved same-stream comparisons with twelve workers,
-the new dispatch reduced continued fine elapsed time by **8.3% on row 7**
-and **10.1% on row 4**. Busy cores rose from 2.02 to 2.99 and from 1.99 to 3.34,
-respectively. The row-7 six-worker comparison also improved, with wider
-baseline scatter. Enabled row-7 elapsed time was about 0.707 s per four
-baseband seconds at either allocation. Every completed pair preserved
-work, retained states, scores and endpoint decisions exactly.
-[Attribution](../local-evidence/current-parallel/profile.json),
-[row 7 at twelve](../local-evidence/current-parallel/fft-qualification-7-12.json),
-[row 4 at twelve](../local-evidence/current-parallel/fft-qualification-4-12.json),
-[row 7 at six](../local-evidence/current-parallel/fft-qualification-7-6.json).
+Row 4's broad noise-only fallback covers 8,596 frequency points and 1,340,976
+FFT products. Ordinary abbreviated kernel forecasts were approximately
+4.8–6.3 s/s. One recurring two-unit timing took 2.189 s wall / 3.358 s CPU,
+versus 0.413–0.498 s wall / about 3.03 s CPU for its peers. Its cause is not
+established. Three outer observations and the declared family-wise log
+interval amplify that stall into the enormous upper bound above; it is not
+a credible precise maximum. Removing that anomaly would not establish
+real-time broad fallback. Preserve the failed gate rather than repeat until
+a favorable timing appears or relax the uncertainty rule.
 
-In the complete calibration, elapsed-weighted continued fine utilization
-ranged from 2.31 to 3.25 busy cores across the eight rows and from 2.70 to 3.25
-on broad-DFT rows 4–8. Nominal acquisition reached 8.51 on FHSS and maximum
-state fine work reached 3.63 on HF Helper. Template planning, sequential
-tracking transitions and small model batches still limit useful concurrency.
-The full logical worker budget continues to apply regardless of the
-six-worker timing comparison. [CPU allocation contract](development.md#receiver-cpu-allocation)
+Elapsed-weighted continued fine utilization ranges from **2.51 to 3.50 busy
+cores**; maximum-state fine reaches 4.80 and FHSS noise-only acquisition 8.32.
+Thus the restructuring saves substantial work but does not demonstrate
+saturation of all twelve threads. Sequential tracking transitions, controller
+planning and small model batches remain limits. The full logical worker
+budget applies regardless of the six-worker timing comparison or this
+laptop's power limits. [CPU allocation contract](development.md#receiver-cpu-allocation)
 
-The named `./build.sh test triad` passed **21/21** in 29.47 seconds. All **43**
-focused receiver and tracking tests passed after correcting a missing test
-import path in the first invocation. The separate timed row-2 control reached
-its time limit during preparation. The singleton-DC branch kept its normalized
-FP64 sum, and rows 1–3 exercised that branch in the complete calibration.
-[Named test log](../local-evidence/current-parallel/triad.log)
+In the separate matched six-versus-twelve-worker continuations, twelve workers
+used more busy cores in every row. Point throughput was 0.763–0.995× the
+six-worker result on rows 1–7 and 1.030× on row 8; the intervals do not establish
+a worker optimum. Preserve these unfavorable observations alongside the gains
+from the restructuring. They do not authorize reducing the portable default.
 
-Earlier matched native row-2/3 probes measured 1.32–1.35× nominal fine
-speedups from the singleton-DC sum. Direct template output and shared pinned
-pointer tables reduced matched fine elapsed time by 9.2% at six workers and
-4.7% at twelve. The earlier full calibration measured 1.91–2.44 busy cores
-for continued fine work. These source-bound observations describe separate
-optimization comparisons. A scratch 128→1024-row mapped batch ran 2–5%
-slower despite fewer calls, so it was rejected.
-[DC comparison](../local-evidence/robust-fine-dc-projection-ab.json),
-[materialization comparison](../local-evidence/robust-fine-materialization-ab.json).
+The named `./build.sh test triad` passed **21/21** in 30.02 seconds on the final
+CPU sources. Focused checks cover matched mapped plans, bit-pair arithmetic,
+partial erasures, generic nonzero-null callbacks, drained worker failures,
+aligned native buffers, finite FIR tails and large-input memory admission.
+The full calibration repeats the current native message/quiet/EOF gate.
+[Named test log](../local-evidence/current-restructure/triad.log)
 
-Keep the current calibration constituents, named test log and scoped fine
-receipts while they support the capacity and utilization claims above.
-Remove them when matched replacements supersede those claims and distill
-the useful findings here.
+Earlier singleton-DC normalized sums and basis-DFT dispatch remain in the
+canonical path; the new fused pipeline supersedes their separate attribution
+as a description of current utilization. A scratch 128→1024-row mapped batch
+was 2–5% slower despite fewer calls and remains rejected. Keep the current
+calibration and scoped restructuring receipts while they support these claims.
+The older CPU calibration constituents remain only where required to interpret
+the earlier source-matched GPU forecasting qualification below. Retire raw
+receipts when matched replacements supersede their stated purpose.
 
 Development checks exposed and corrected three reception defects before the
 current measurement: FP32 innovation arithmetic failed at very high SNR,
@@ -247,7 +332,27 @@ replaces the relevant claims. Their obsolete implementations are not retained.
 
 ## GPU-assisted receiver measurement
 
-The current-source [eight-row RTX PRO 6000 trace](../local-evidence/current-parallel/gpu-current-full.json)
+The completed campaign below **predates the receiver restructuring**. It
+demonstrates the forecasting procedure, not current-source GPU qualification.
+The new local CPU calibration must not be combined with these old GPU traces.
+During the restructuring, a disposable RTX PRO 6000 host never reached SSH
+readiness and was stopped and deleted. Replacement RTX PRO 6000 WK, RTX 5090
+and B200 deployments were refused for unavailable capacity. No new full GPU
+trace or GPU-derived CPU forecast is claimed from those attempts.
+
+The current GPU filter uploads at most 2^20 input samples per staging block,
+keeps each host block alive through stream synchronization, and drains an
+exceptional submission before releasing its buffers. It preserves CUDA
+polyphase filtering and explicitly budgets device input, full filter output,
+cropping and standalone caller-owned host input. The revised row-1 filter
+estimate is about 1.020 GB with its bank; this is an allocation model, not an
+observed CUDA peak. The named GPU diagnostics passed **40/40** tests,
+including fake-device copy/lifetime/interruption and exact-budget boundary
+checks. Actual new-source CUDA execution remains unqualified until a usable
+pod is available. CPU calibration does not include this GPU-only leaf.
+[GPU regression log](../local-evidence/current-restructure/gpu-tests.log)
+
+The earlier [eight-row RTX PRO 6000 trace](../local-evidence/current-parallel/gpu-current-full.json)
 took 426.221 seconds internally. Allowlisted source and matching native
 artifacts were only a few megabytes and transferred over authenticated SSH/SCP;
 the source archive was 1.58 MB. The three paired reference rows (1, 2 and 6)
@@ -259,7 +364,7 @@ simulation and bank preparation still consumed about 80% of end-to-end time.
 Do not attribute those CPU stages to GPU acceleration or use one global
 GPU-to-CPU multiplier.
 
-The [current full-list forecast](../local-evidence/current-parallel/forecast-current-all8.json)
+The earlier [full-list forecast](../local-evidence/current-parallel/forecast-current-all8.json)
 covers all eight rows with source-matched local CPU costs and
 [independent CPU traces](../local-evidence/current-parallel/holdout-current-all8.json).
 The eight isolated holdouts took 539.759 seconds inside the drivers. Row 5 was
@@ -267,7 +372,8 @@ once refused admission before any receiver observation; its original log is
 retained, and a fresh invocation admitted the same 4608 MiB cap and 12 workers.
 No memory guard or timing threshold changed.
 
-**All eight nominal and conservative timing checks pass.** The forecast reports
+In that earlier campaign, **all eight nominal and conservative timing checks
+passed**. Its forecast reports
 `complete_point_estimates_with_unresolved_support` after two bounded local
 phase refreshes described below.
 All nominal guarded intervals
@@ -276,17 +382,6 @@ conservative capacity support remains unresolved for every row after the
 forecast's engineering allowance. This is complete work accounting with explicit
 uncertainty, not a saturated CPU ceiling or
 all-case communication qualification.
-
-| Row | Nominal (s/s) | Guarded nominal interval | Conservative point (s/s) | Guarded conservative interval |
-| ---: | ---: | --- | ---: | --- |
-| 1 | 0.166658 | 0.127485–0.221652 | 0.802772 | 0.488611–1.366920 |
-| 2 | 0.144861 | 0.108060–0.199713 | 0.768478 | 0.493163–1.247490 |
-| 3 | 0.256398 | 0.167754–0.391045 | 0.826672 | 0.352304–1.819215 |
-| 4 | 0.393550 | 0.274931–0.589065 | **7.784513** | 0.667560–23189.047180 |
-| 5 | 0.231939 | 0.176971–0.354010 | 0.728116 | 0.487917–1.202898 |
-| 6 | 0.269880 | 0.177438–0.420264 | **1.093199** | 0.725847–1.762829 |
-| 7 | 0.220855 | 0.169454–0.340111 | 0.676108 | 0.430068–1.168338 |
-| 8 | 0.382316 | 0.259318–0.611907 | **1.368812** | 0.897649–3.256623 |
 
 Maximum accepted no-cancellation errors are 14.57% of nominal service and
 17.02% of conservative service. The
@@ -322,8 +417,8 @@ or relax a near-threshold limit. Both temporary wrappers were removed.
 
 The disposable RTX PRO 6000 pod was stopped and terminated after results were
 verified locally. No persistent volume was created. Temporary tensor sources,
-CPU experiment drivers and the upload archive were removed. Retain the current
-calibration, GPU references, holdouts, original failures and refresh receipts
+CPU experiment drivers and the upload archive were removed. Retain that
+campaign’s calibration, GPU references, holdouts, original failures and refresh receipts
 while they support these claims and unresolved comparisons; retire them when
 matched replacements supersede their purpose.
 
