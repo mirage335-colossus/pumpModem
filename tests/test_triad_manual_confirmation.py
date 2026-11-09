@@ -2,10 +2,12 @@
 from pathlib import Path
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from triad_manual_confirmation import _point_procedures, _slot_geometry, _successful_endpoint
 from triad_manual_confirmation import _worker_memory_estimates
+from triad_manual_confirmation import pilot_helper
 
 
 _MIB = 1024**2
@@ -19,6 +21,40 @@ def worker_pair(pid, python_mib, native_mib, **monitor_changes):
     sample.update(monitor_changes)
     return dict(worker_pid=pid, python_peak_rss_bytes=python_mib*_MIB,
                 outcomes=[dict(supported=True, native_rss=sample)])
+
+
+class SensitivityAllocationTests(unittest.TestCase):
+    def select(self, measurement, *, gate_matches=False):
+        case = dict(configuration_hash='current-case')
+        gate = dict(case=dict(configuration_hash='current-case' if gate_matches else 'other-case'),
+                    workers=2, simulator_generation_seconds=0., result=dict(
+                        observed_ratio_processing_seconds_per_baseband_second=.1,
+                        represented_baseband_seconds=1.))
+        item = dict(case=case, public_geometry=dict(sample_rate_hz=6000),
+                    measurement=dict(complete_capacity=dict(
+                        ratio_processing_seconds_per_baseband_second_interval=[.1, .2]),
+                        **measurement))
+        plans = [dict(receiver_window_stop_sample=6000, receiver_window_samples=6000)]*3
+        with mock.patch.object(pilot_helper, '_matched_target', return_value=(10., {}, plans)):
+            return pilot_helper.select_case(dict(message_gate=gate, cases=[item]),
+                                            dict(cases=[case]), 'unused-exporter')
+
+    def test_complete_cost_uses_actual_inference_not_smaller_pilot_winner(self):
+        chosen = self.select(dict(selected_workers=6, inference_workers=12))
+        self.assertEqual(chosen['workers'], 12)
+
+    def test_legacy_allocation_is_used_only_when_inference_is_absent(self):
+        self.assertEqual(self.select(dict(selected_workers=6))['workers'], 6)
+
+    def test_invalid_inference_does_not_fall_back_to_pilot(self):
+        for workers in (None, 0, -1, True):
+            with self.subTest(workers=workers), self.assertRaisesRegex(
+                    pilot_helper.PrerequisiteError, 'valid_measured_worker_allocation_required'):
+                self.select(dict(selected_workers=6, inference_workers=workers))
+
+    def test_functional_gate_keeps_its_own_explicit_measured_allocation(self):
+        chosen = self.select(dict(selected_workers=6, inference_workers=12), gate_matches=True)
+        self.assertEqual(chosen['workers'], 2)
 
 
 class ConfirmationMemoryTests(unittest.TestCase):

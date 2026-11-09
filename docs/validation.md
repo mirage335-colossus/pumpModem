@@ -35,6 +35,13 @@ workers averaged 11.45 busy logical CPUs in the primary run. These gains
 describe register-resident FMA work. Same-stream receiver timings establish
 how much of that parallel capacity the DSP can use.
 
+**Allocation policy:** these measurements must not be used to reduce the
+receiver's default worker budget. Keep all available logical hardware threads
+available despite power/thermal limits or temporary/minor timing effects on
+this host. Other processors and changing workloads can benefit from the
+additional capacity. Low utilization calls for bottleneck analysis, not a
+smaller global default; see the [CPU allocation contract](development.md#receiver-cpu-allocation).
+
 The clock estimates use pinned-worker APERF/MPERF deltas. Boost was enabled
 under `amd-pstate-epp` with the balanced profile and `balance_performance`
 preference. AMD specifies 6 cores, 12 threads, 2.3 GHz base and boost up to

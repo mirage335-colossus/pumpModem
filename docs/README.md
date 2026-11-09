@@ -33,7 +33,9 @@ qualify complete reception or whole-machine capacity.
 For repeat manual checks, start with a GPU workload trace and applicable local
 phase calibration. Reuse qualified GPU references and measure missing CPU cost
 classes or fresh bounded holdouts locally. Headless measurement commands use the
-visible logical CPU budget by default and preserve explicit overrides. Follow
+visible logical CPU budget by default and preserve explicit overrides. The
+[CPU allocation contract](development.md#receiver-cpu-allocation) prohibits
+reducing that default because of power/thermal limits or minor timing effects. Follow
 the [GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast).
 
 ## Other maintained components

@@ -7,6 +7,44 @@ truth for shared stream and presentation behavior. Do not treat retired
 single-carrier or standalone triad/Helper implementations as compatibility
 requirements.
 
+## Receiver CPU allocation
+
+**The Robust receiver's default worker budget is all available logical hardware
+threads.** Respect explicit caller/user allocations and actual OS affinity and
+CPU quota limits; detect the available budget rather than hard-coding this
+computer's 12 threads or its six physical cores. Receiver orchestration owns
+that budget and passes it to lower-level receivers. Preserve available capacity
+to keep up with incoming analog samples and accumulated backlog on other CPUs
+and under changing search, tracking and channel workloads.
+
+Do not lower this portable default because of thermal throttling, package-power
+or current limiting, reduced boost clocks, low average utilization, a local
+allocation-pilot winner, or temporary/minor throughput differences. A limitation
+on one laptop does not establish a better default for less constrained machines
+or even for another workload on that laptop. Such findings guide bottleneck
+optimization and interpretation or refresh of timing estimates; they do not
+authorize an automatic reduction to fewer workers. The current host gained
+9–11% from twelve versus six threads in sustained compute despite observed
+power limiting; see the [hardware measurements](validation.md#sustained-cpu-hardware-scaling).
+
+Distinguish the worker budget from stage dispatch. A stage may use fewer tasks
+when there is less useful independent work, or when finer subdivision adds
+measured overhead. Do not manufacture work to raise utilization, and do not
+turn that stage's batching choice into a global thread cap. Keep one aggregate
+concurrency budget and one numerical-library thread per outer receiver worker
+to avoid nested oversubscription. Low-level constructors and bounded correctness
+fixtures may receive explicit allocations; they do not select the normal
+receiver's portable default. Normal callers of `CompleteStreamReceiver` and
+`CompleteBitReceiver` must pass the controller's budget rather than rely on
+their one-worker low-level fallback.
+
+Retain explicit allocation controls for user limits and scoped diagnostics.
+The manual suite's `--no-full-logical-inference` deliberately opts into pilot
+selection; agents must not enable it to react to power/thermal limits or small
+timing differences. A cloud example pinned to `--workers 12` preserves a
+particular paired comparison, not a universal cap. Report allocation, useful
+work and actual busy-core measurements separately.
+
 ## Material lifecycle
 
 Retain concise descriptions of alternative techniques and their useful test

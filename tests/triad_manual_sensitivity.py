@@ -161,7 +161,8 @@ def select_case(capacity, parsed, executable):
             interval = estimate.get('ratio_processing_seconds_per_baseband_second_interval')
             _require(isinstance(interval, (list, tuple)) and len(interval) == 2 and
                 _finite(interval[1], positive=True), 'same_case_complete_cost_upper_receipt_required')
-            workers = measurement.get('selected_workers')
+            # The complete cost belongs to actual inference, not the pilot winner.
+            workers = measurement.get('inference_workers', measurement.get('selected_workers'))
             forecast = 2*(stop/fs)*interval[1]
             forecast_source = 'Same-case complete-work upper estimate, exact public three-slot exposure and2x allowance; actual total elapsed updates admission after every call.'
         _require(type(workers) is int and workers > 0 and _finite(forecast, positive=True),

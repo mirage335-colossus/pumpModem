@@ -76,7 +76,9 @@ python3 tools/triad_gpu_workload.py \
 CUDA coarse acquisition is the default with `--device cuda`. With no
 `--workers` override, the workload uses the full visible logical host CPU
 budget and one numerical thread per receiver worker. The example pins 12
-workers so the paired and target runs use the same allocation. To repeat only
+workers so the paired and target runs use the same allocation; it is not a
+portable thread cap. Preserve the [full-budget default](development.md#receiver-cpu-allocation)
+on other processors. To repeat only
 a target row, use `--case-index N` and retain the qualified paired GPU report.
 The two reports must match the actual GPU backend, runtime, worker allocation,
 workspace cap and source/native artifacts. Reference rows must still match their
@@ -233,8 +235,11 @@ before assembling complete coverage.
 The default compares serial, known physical cores and the full visible logical
 budget on one stream, then measures fresh complete inference at the full
 logical allocation. On this 6-core/12-thread CPU the pilot uses 1, 6 and 12
-workers. Use `--no-full-logical-inference` to select the pilot winner, or
-`--threads N` for an explicit diagnostic count. `--sustained-allocation-probe`
+workers. `--no-full-logical-inference` is an explicit diagnostic/user opt-out
+that selects the pilot winner; `--threads N` sets an explicit diagnostic count.
+Neither a pilot winner nor power/thermal limits or temporary/minor timing
+differences justify reducing the default. Follow the
+[CPU allocation contract](development.md#receiver-cpu-allocation). `--sustained-allocation-probe`
 adds a bounded matched six-second comparison when investigating scaling. Read
 elapsed service, busy cores, work counters, windows and workspace separately.
 

@@ -5,6 +5,17 @@ Use the [documentation index](docs/README.md) for maintained guidance. Check
 and [current Robust architecture](docs/robust-current.md) before changing those areas.
 Search `src/`, `include/`, `tests/` and `cmake/` first when locating implementation.
 
+## Preserve the full receiver CPU budget
+
+Default Robust receiver orchestration and capacity testing to **all available
+logical hardware threads**, respecting explicit allocations and actual OS
+affinity/quota limits. Do not reduce this default because of thermal or package
+power limiting, low observed utilization, a single-machine pilot winner, or
+temporary/minor timing differences. Preserve capacity for incoming sample
+backlog, other processors and changing workloads. Smaller stage dispatch is
+allowed when useful work is limited; it must not become a reduced global
+worker default. Follow the [CPU allocation contract](docs/development.md#receiver-cpu-allocation).
+
 ## Prevent accumulation
 
 Remove obsolete implementations and their tests, copied source, old performance

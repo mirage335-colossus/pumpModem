@@ -19,6 +19,12 @@ physical-channel or operational qualification. This headless receiver is not
 connected to the ordinary Robust GUI. GUI controls remain visible, but Robust
 GUI transmission/reception is unavailable pending reconnection.
 
+Receiver orchestration must preserve the **full available logical CPU worker
+budget** by default. Power or thermal limiting and temporary/minor benchmark
+differences must not turn into a smaller portable default. Keep allocation
+overrides explicit and stage dispatch sized to useful work, following the
+[CPU allocation contract](development.md#receiver-cpu-allocation).
+
 Older single-carrier Robust and standalone triad/Helper implementations are not
 supported current paths. Protocol breaks belong in a new Git tag and a separate
 binary release, not a parallel in-tree implementation. If a security fix must

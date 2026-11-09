@@ -27,7 +27,10 @@ python tools/triad_manual_cases.py --exporter build/dev/triad_helper_export \
 The default compares serial, physical-core and full visible logical allocations,
 then uses the full logical allocation for fresh inference. It performs the
 current-source native message/quiet/EOF gate before measuring the current rows.
-Use `--no-full-logical-inference` to select the pilot winner.
+`--no-full-logical-inference` is an explicit diagnostic/user opt-out that selects
+the pilot winner. Do not use it, or change the default, to compensate for power
+or thermal limiting or temporary/minor timing differences; follow the
+[CPU allocation contract](development.md#receiver-cpu-allocation).
 `--case-index`, `--threads` and `--skip-message-gate` are diagnostic controls;
 partial coverage or a skipped gate cannot produce an integrated suite pass.
 For targeted comparison of sustained fine work, add
@@ -93,7 +96,8 @@ from parallel independent simulation trials. CPU counters diagnose utilization.
 
 Detect visible affinity, quotas and physical-core topology. Compare a small
 declared set of same-stream worker allocations that includes the complete
-available logical-CPU budget and physical cores when known. Keep one aggregate
+available logical-CPU budget and physical cores when known. The pilot measures
+scaling; its winner does not replace the full-logical default. Keep one aggregate
 concurrency budget across numerical libraries and outer workers. Measure the
 actual dispatch, merge and native-template work; do not assume that requesting
 more library threads uses the CPU productively. Report remaining serial,
