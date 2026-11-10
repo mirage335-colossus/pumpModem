@@ -7,15 +7,16 @@ truth for shared stream and presentation behavior. Do not treat retired
 single-carrier or standalone triad/Helper implementations as compatibility
 requirements.
 
-## Receiver CPU allocation
+## Native processing and integration
 
-**The Robust receiver must preserve all available logical hardware threads.**
-Detect hardware availability `H` from actual OS affinity and quota limits. The
-automatic software-worker budget is **`W = 2*H`**: `H=1 → W=2`, `H=3 → W=6`,
-and `H=12 → W=24`. Explicit worker counts remain exact. Resolve this budget once
-in the receiver and share one bounded executor across slot and stage work;
-nested layers must not multiply it. Report the software ceiling separately
-from hardware utilization.
+**For modem, DSP and other computationally intensive numerical work inside a
+native application, prefer its integrated native implementation. In this project,
+extend the canonical C++ stack and compatible in-process compiled libraries or
+accelerator backends.** A convenient scripting library is not sufficient reason
+to introduce another modem implementation, runtime or process boundary. Keep
+signal generation, filtering, acquisition, tracking, decisions, codec processing
+and audio processing in the native operating path. This rule does not require
+rewriting ordinary orchestration/reporting scripts or optional frontend code.
 
 The operating modem is one compiled C++ stack linked into the GUI application.
 Helper generation/acquisition, DATA generation/scoring, ordered receiver state,
@@ -25,6 +26,61 @@ that implementation; it is not a modem runtime, receiver subprocess, or IPC
 transport. Python tools orchestrate compiled probes and analyze their returned
 statistics; receiver DSP and persistent state have one C++ implementation. See
 [current architecture](robust-current.md).
+
+Use that integration deliberately:
+
+- Share immutable input and prepared data directly. Give mutable receiver state,
+  scratch buffers and device workspace explicit owners and lifetimes. Avoid
+  per-stage serialization, copied transport and process-lifecycle machinery in
+  the operating chain.
+- Coordinate stage work through the shared [receiver CPU budget](#receiver-cpu-allocation).
+  Design batch interfaces so parallel numerical work can overlap less parallel
+  preparation of subsequent work where dependencies permit. Preserve chronological
+  state/commit dependencies, cancellation and full memory reservations. Native
+  threads and a compiled language alone do not establish productive overlap.
+- Pass Helper measurements and uncertainty directly to DATA processing so they
+  can narrow and maintain the relevant search bounds. Current Helper assistance
+  supplies frequency intervals; phase/timing transfer needs separate correctness
+  and performance qualification. Do not introduce IPC as the interface between
+  these cooperating signal-processing stages.
+- Keep CPU and GPU arithmetic behind native interfaces accepting useful batches,
+  with suitable contiguous layouts, explicit shapes/strides, reusable workspace
+  and qualified precision. Prefer extending the existing backend over building a
+  standalone Python DSP or GPU reference that later needs another port. The
+  [precision contract](gpu-precision-controls.md) still governs sensitive stages
+  and fallback reporting.
+- Test and benchmark the same compiled implementation used by the GUI. Extend
+  native probe entry points rather than duplicating DSP in measurement scripts.
+  On RunPod, build the minimal native source closure and run its compiled tests;
+  Python may handle launch, case parsing and statistics. Record compiler, native
+  library and device compatibility. A shared native stack does not imply one
+  dependency-free binary that runs on every GPU or host. Fresh native probe
+  processes for test isolation remain valid; they do not split the operating
+  DSP chain.
+
+The architectural lesson from the Python/native detour is to avoid making
+receiver development depend on extra process ownership, transport, deployment
+and cross-runtime integration concerns. The current native stack removes those
+operating-path boundaries and exposes shared-buffer and worker coordination
+directly. Historical measurements are not a controlled language comparison:
+the current native scheduler improved first-message latency while its measured
+total replay remained slower than the prior native baseline. Preserve the
+[actual results and limits](validation.md#native-throughput-and-precision-investigation).
+This preference does not claim that Python cannot call threaded native code,
+CUDA or Tensor Cores, or that a C++ rewrite alone proves higher utilization.
+See [NumPy's native threading guidance](https://numpy.org/doc/stable/reference/thread_safety.html)
+and [PyTorch's CUDA and Tensor Core controls](https://docs.pytorch.org/docs/2.15/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices).
+Measure complete useful work, backlog service and total test turnaround.
+
+## Receiver CPU allocation
+
+**The Robust receiver must preserve all available logical hardware threads.**
+Detect hardware availability `H` from actual OS affinity and quota limits. The
+automatic software-worker budget is **`W = 2*H`**: `H=1 → W=2`, `H=3 → W=6`,
+and `H=12 → W=24`. Explicit worker counts remain exact. Resolve this budget once
+in the receiver and share one bounded executor across slot and stage work;
+nested layers must not multiply it. Report the software ceiling separately
+from hardware utilization.
 
 `CompleteStreamReceiver` admits independent in-process slot owners lazily when
 complete public windows are ready. One receiver-specific executor lazily starts

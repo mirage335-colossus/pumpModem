@@ -9,6 +9,11 @@ belong to the compiled implementation. The default application requires neither
 Python nor Torch. An optional compiled ATen backend can supply bulk operations
 inside the same receiver control path.
 
+New modem and intensive numerical work must follow the
+[native processing and integration contract](development.md#native-processing-and-integration).
+Extend these in-process interfaces and compiled CPU/GPU backends; keep Python
+outside the operating DSP chain and persistent receiver state.
+
 The shared GUI controller connects this stack to simulation, live audio and
 presentation. Fast remains the launch default and retains its independent
 controller. Implementation availability is distinct from validation: see

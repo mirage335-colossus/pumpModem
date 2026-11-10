@@ -10,6 +10,11 @@ obsolete code, experiments and generated outputs when that purpose ends.
 
 ## Current Robust modem
 
+For new modem, DSP or intensive numerical work, follow the
+[native processing contract](development.md#native-processing-and-integration):
+prefer the integrated C++ implementation and compatible native backends; Python
+orchestrates tests and analysis rather than the operating signal chain.
+
 The [current architecture and status](robust-current.md) describes the native
 C++ Helper/DATA/complete-receiver stack linked into the GUI, with shared buffers
 and coordinated in-process workers. Python orchestrates native tests/benchmarks

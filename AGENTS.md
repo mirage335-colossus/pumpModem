@@ -5,6 +5,21 @@ Use the [documentation index](docs/README.md) for maintained guidance. Check
 and [current Robust architecture](docs/robust-current.md) before changing those areas.
 Search `src/`, `include/`, `tests/` and `cmake/` first when locating implementation.
 
+## Keep intensive processing in the native application
+
+**Prefer C++ and compatible in-process native libraries/backends for modem,
+signal processing and other intensive numerical work in this native application.**
+Extend the canonical compiled stack; do not introduce a Python DSP implementation
+or split the operating signal chain across Python/native processes for scripting
+convenience. Helper, DATA, receiver state, codecs and audio belong in the native
+application, with shared buffers, explicit ownership and coordinated workers.
+Choose batch interfaces and layouts that support CPU threads, GPU/low-precision
+work, and overlap with preparation where dependencies permit. Python may launch
+the native tests, collect measurements and analyze results; it must not own modem
+algorithms or persistent receiver state. Cloud tests must exercise that same
+compiled implementation. Follow the [native processing contract](docs/development.md#native-processing-and-integration)
+before selecting a runtime, parallelism mechanism or accelerator interface.
+
 ## Prefer modern GPUs for accelerated development
 
 **Default GPU development, accelerated tests and GPU-assisted forecasting to a

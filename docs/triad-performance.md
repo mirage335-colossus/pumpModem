@@ -6,6 +6,12 @@ contains no second receiver DSP implementation. The default application requires
 neither Python nor Torch. The optional compiled ATen backend uses the same native
 receiver control, persistent state, work accounting and completion rules.
 
+The [native processing contract](development.md#native-processing-and-integration)
+also governs new experiments and cloud testing: extend the compiled probe and
+production CPU/GPU backends, preserving shared buffers and worker ownership.
+Do not implement replacement receiver DSP in Python to make a benchmark easier
+to launch; Python remains the orchestration and analysis layer.
+
 The tools answer different questions:
 
 | Entry point | Decision |
