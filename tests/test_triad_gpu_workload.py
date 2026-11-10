@@ -205,6 +205,20 @@ class WorkloadComparisonTests(unittest.TestCase):
                     device='cuda', output=output)
             self.assertFalse(output.exists())
 
+    def test_host_workload_uses_automatic_and_explicit_worker_allocations(self):
+        machine = dict(cpu={'available_cpus': 12}, memory_budget_bytes=1024**3)
+        with mock.patch('triad_gpu_workload.load_cases', return_value={'cases': [{'index': 7}]}), \
+             mock.patch('triad_gpu_workload.machine_resources', return_value=machine), \
+             mock.patch('triad_gpu_workload.configure_numerical_threads',
+                        side_effect=RuntimeError('stop after resolving allocation')) as configure:
+            for workers, expected in ((None, 24), (12, 12), (18, 18), (30, 30)):
+                with self.subTest(workers=workers), self.assertRaisesRegex(RuntimeError, 'stop after resolving'):
+                    run_probe(case_list='unused', case_indices=[7], executable='unused', workers=workers,
+                              device='cpu', output='unused')
+                allocation = configure.call_args.args[0]
+                self.assertEqual((allocation['workers'], allocation['threads']), (expected, 1))
+                self.assertEqual(allocation['explicit_overcommit'], expected > 12)
+
     def test_cuda_requires_selected_device_and_default_stream(self):
         default, other = object(), object()
         with mock.patch('torch.cuda.current_device', return_value=0), \

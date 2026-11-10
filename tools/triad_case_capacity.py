@@ -991,6 +991,32 @@ def sustained_allocation_targets(cpu):
         logical_workers=logical)
 
 
+def manual_worker_plan(cpu, *, threads=None, full_logical_inference=None, calibration_stage=None):
+    """Choose a receiver allocation without changing the sampling policy."""
+    from triad_cpu import resolve_receiver_workers
+
+    if (full_logical_inference is not None and type(full_logical_inference) is not bool or
+            full_logical_inference is True and threads is not None):
+        raise ValueError('full-logical inference requires a worker comparison')
+    targets = sustained_allocation_targets(cpu)
+    hardware = targets['logical_workers']
+    automatic = resolve_receiver_workers(hardware_threads=hardware)
+    if calibration_stage is not None and (threads is not None or full_logical_inference is False):
+        raise ValueError('stage calibration requires the automatic or explicit full-logical allocation')
+    if threads is not None:
+        inference = resolve_receiver_workers(threads, hardware_threads=hardware)
+        allocations, mode = [inference], 'explicit'
+    elif full_logical_inference is False:
+        allocations, inference, mode = list(cpu['receiver_worker_candidates']), None, 'pilot_selected'
+    else:
+        inference = hardware if full_logical_inference is True else automatic
+        mode = 'full_logical' if full_logical_inference is True else 'automatic_receiver'
+        allocations = ([inference] if calibration_stage is not None else
+            sorted({1, targets['physical_workers'] or hardware, hardware, inference}))
+    return dict(allocations=allocations, inference_workers=inference, inference_mode=mode,
+        hardware_threads=hardware, automatic_receiver_workers=automatic)
+
+
 def _allocation_fine_sample(measurement, prepared, family_size):
     """Compare the first three uninterrupted nominal samples under a shared work key."""
     from triad_case_metrics import arithmetic_interval, summarize_service
@@ -1511,7 +1537,7 @@ def _larger_component(rows):
 
 
 def measure_complete_case(prepared, allocations, *, family_size, progress=print,
-                          sustained_targets=None, inference_workers=None):
+                          sustained_targets=None, inference_workers=None, inference_mode='full_logical'):
     """Measure complete nominal reception and the separate ceiling strata."""
     from triad_case_metrics import workspace_summary
     from triad_orchestration_cost import measure_orchestration
@@ -1525,13 +1551,16 @@ def measure_complete_case(prepared, allocations, *, family_size, progress=print,
     workers=selected
     mode='pilot_selected'
     if inference_workers is not None:
+        if inference_mode not in ('full_logical', 'automatic_receiver', 'explicit'):
+            raise ValueError('unknown declared receiver inference allocation')
         if (type(inference_workers) is not int or inference_workers not in allocations or
                 not any(row['workers']==inference_workers and row.get('selection_ratio') is not None
                         for row in allocation['samples'])):
             return dict(status='unresolved',allocation=allocation,
-                reason='declared_full_logical_allocation_not_measured')
+                reason=('declared_full_logical_allocation_not_measured' if inference_mode == 'full_logical'
+                        else 'declared_receiver_allocation_not_measured'))
         workers=inference_workers
-        mode='full_logical'
+        mode=inference_mode
     progress(f'  fresh measurements with {workers} workers')
     lifecycle_samples=[]
     for _ in range(2):
@@ -1832,40 +1861,30 @@ def run_complete_cases(*,executable,output,case_list,measurement_seconds=1.,thre
         raise ValueError('coarse-only paired confirmation is not a complete-receiver capacity test')
     if calibration_stage is not None and (calibration_stage!='noise-only-fine' or not case_indices or
             workspace_mib is None or threads is not None or sustained_allocation_probe or full_logical_inference is False):
-        raise ValueError('noise-only fine calibration requires selected rows, a fixed workspace and full logical workers')
+        raise ValueError('noise-only fine calibration requires selected rows, a fixed workspace and a declared receiver allocation')
     parsed=load_cases(case_list)
     selected=select_cases(parsed,case_indices)
     if not math.isfinite(measurement_seconds) or not .1<=measurement_seconds<=2:
         raise ValueError('measurement seconds must be in[0.1,2]')
     machine=machine_resources()
-    if machine['cpu'] is None or machine['memory_budget_bytes'] is None:
+    if machine['cpu'] is None or machine['available_memory_bytes'] is None:
         raise RuntimeError('visible local CPU and memory budgets are required')
     workspace_limit=machine['memory_budget_bytes']
-    if workspace_mib is not None:
-        if type(workspace_mib) is not int or not 0 < workspace_mib*2**20 <= workspace_limit:
-            raise ValueError('requested stable workspace exceeds the visible local receiver budget')
+    if workspace_mib is None:
+        if workspace_limit is None:
+            raise RuntimeError('insufficient available physical RAM for the receiver operating reserve')
+    else:
+        if (type(workspace_mib) is not int or
+                not 0 < workspace_mib*2**20 <= (machine['available_memory_bytes'] or 0)):
+            raise ValueError('requested stable workspace exceeds visible available physical/cgroup RAM')
         workspace_limit=workspace_mib*2**20
-    allocations=machine['cpu']['receiver_worker_candidates']
     if type(sustained_allocation_probe) is not bool or (sustained_allocation_probe and threads is not None):
         raise ValueError('sustained allocation comparison requires the canonical full worker pilot')
-    if full_logical_inference is None:
-        full_logical_inference = threads is None
-    if type(full_logical_inference) is not bool or (full_logical_inference and threads is not None):
-        raise ValueError('full-logical inference requires a worker comparison')
     sustained_targets=sustained_allocation_targets(machine['cpu']) if sustained_allocation_probe else None
-    inference_workers = None
-    if full_logical_inference and calibration_stage is None:
-        targets = sustained_allocation_targets(machine['cpu'])
-        inference_workers = targets['logical_workers']
-        allocations = sorted({1, inference_workers,
-                              targets['physical_workers'] or inference_workers})
-    if threads is not None:
-        if isinstance(threads,bool) or not isinstance(threads,int) or threads not in range(1,machine['cpu']['available_cpus']+1):
-            raise ValueError('explicit receiver workers must fit the local CPU budget')
-        allocations=[threads]
-    if calibration_stage is not None:
-        inference_workers=machine['cpu']['available_cpus']
-        allocations=[inference_workers]
+    allocation_plan=manual_worker_plan(machine['cpu'], threads=threads,
+        full_logical_inference=full_logical_inference, calibration_stage=calibration_stage)
+    allocations=allocation_plan['allocations']
+    inference_workers=allocation_plan['inference_workers']
     configure_numerical_threads(resolve_cpu_budget(jobs=1,workers=max(allocations),threads=1))
     executable=Path(executable).resolve()
     provenance=identity(executable)
@@ -1878,6 +1897,7 @@ def run_complete_cases(*,executable,output,case_list,measurement_seconds=1.,thre
         provenance=provenance,machine=machine,runtime=runtime,worker_allocations=allocations,
         workspace_limit_bytes=workspace_limit,
         policy=measurement_policy(len(parsed['cases']),max(1,round(measurement_seconds*2))*.5),
+        receiver_allocation=allocation_plan,
         sustained_allocation_targets=sustained_targets,
         selection=dict(indices=[case['index'] for case in selected],
             complete_current_list=calibration_stage is None and len(selected)==len(parsed['cases']),
@@ -1885,11 +1905,14 @@ def run_complete_cases(*,executable,output,case_list,measurement_seconds=1.,thre
             current_list_entries=len(parsed['cases'])),cases=[])
     report['policy']['unit_baseband_seconds_scope'] = (
         'Rounded requested unit. Each row records its actual, possibly shorter fine unit in public_geometry.')
-    if full_logical_inference and calibration_stage is None:
+    if inference_workers is not None and calibration_stage is None:
         report['policy'].update(
-            allocation_selection='A serial, physical and full logical same-stream pilot. Inference uses the declared full logical allocation with fresh measurements.',
-            allocation_counts='1, known physical cores, full visible logical CPU budget; deduplicated and bounded.',
-            full_logical_inference_workers=inference_workers)
+            allocation_selection='Fresh inference at the declared receiver allocation after its supported same-stream pilot observation.',
+            allocation_counts='Automatic:1, known physical cores, visible logical CPUs and receiver target; deduplicated. Explicit controls preserve their declared allocation.',
+            receiver_inference_mode=allocation_plan['inference_mode'],
+            receiver_inference_workers=inference_workers)
+        if allocation_plan['inference_mode'] == 'full_logical':
+            report['policy']['full_logical_inference_workers']=inference_workers
     if calibration_stage is not None:
         report['calibration_stage'] = calibration_stage
     write_result(output,report)
@@ -1912,8 +1935,8 @@ def run_complete_cases(*,executable,output,case_list,measurement_seconds=1.,thre
         else:
             item=dict(case=case,status='unresolved')
             try:
-                if workspace_mib is not None and (machine_resources()['memory_budget_bytes'] or 0) < workspace_limit:
-                    raise ValueError('predeclared workspace exceeds the current visible receiver budget')
+                if workspace_mib is not None and (machine_resources()['available_memory_bytes'] or 0) < workspace_limit:
+                    raise ValueError('predeclared workspace exceeds current available physical/cgroup RAM')
                 plan=native_plan(executable,case['native_args'])
                 item.update(native_plan=plan)
                 if not plan.get('geometry_feasible'):raise ValueError('native public geometry is infeasible')
@@ -1933,12 +1956,14 @@ def run_complete_cases(*,executable,output,case_list,measurement_seconds=1.,thre
                         item['preparation']['observation_kind']='seeded_noise_only'
                         item['measurement']=measure_noise_only_fine_calibration(prepared,inference_workers,
                             family_size=family_size)
+                        item['measurement']['inference_allocation_mode']=allocation_plan['inference_mode']
                     else:
                         item['target_snr']=target_snr(plan,complete_admission=prepared.admission_model_receipt())
                         print('  fixed-channel quiet-energy diagnostic',flush=True)
                         item['quiet_energy_diagnostic']=prepared.quiet_energy_diagnostic(item['target_snr'])
                         item['measurement']=measure_complete_case(prepared,allocations,
                             inference_workers=inference_workers,family_size=family_size,
+                            inference_mode=allocation_plan['inference_mode'],
                             progress=lambda line:print(line,flush=True),sustained_targets=sustained_targets)
                     item['status']=item['measurement']['status']
             except (ValueError,RuntimeError,MemoryError,EOFError,OSError,subprocess.SubprocessError) as error:

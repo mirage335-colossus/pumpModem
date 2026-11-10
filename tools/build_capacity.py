@@ -95,7 +95,9 @@ def linux_limits(proc=Path('/proc')):
                 if value in ('', 'max', '-1'):
                     continue
                 limit = int(value)
-                if 0 <= limit < (1 << 60):  # v1's effectively-unlimited sentinel
+                if limit < 0:
+                    raise ValueError('invalid negative cgroup memory limit')
+                if limit < (1 << 60):  # v1's effectively-unlimited sentinel
                     # A known finite limit without usage is indeterminate, not
                     # permission to use host-wide memory inside a container.
                     usage = int(read_text(directory / usage_name))

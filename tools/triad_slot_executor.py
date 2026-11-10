@@ -40,6 +40,236 @@ def _positive(value, name):
     return value
 
 
+def _shared_input_extent(samples):
+    import sys
+    samples = _positive(samples, 'slot samples')
+    if samples > sys.maxsize // 17:
+        raise ValueError('slot input exceeds the local address space')
+    return 17 * samples
+
+
+def _shared_input_layout(samples):
+    size = _shared_input_extent(samples)
+    page = os.sysconf('SC_PAGE_SIZE')
+    pages = (size+page-1)//page
+    # The file backing is charged once. Keep explicit bounds for mapping/FD
+    # metadata and both fill/reader page tables, including assembly overlap.
+    tables = ((8*pages+page-1)//page)*page
+    return size, pages*page, 64*1024+2*tables
+
+
+def shared_input_storage_bytes(samples):
+    _, backing, overhead = _shared_input_layout(samples)
+    return backing+overhead
+
+
+def shared_input_reservation_bytes(samples):
+    return shared_input_storage_bytes(samples)+_RESULT_BYTES
+
+
+def _shared_seals():
+    import fcntl
+    return (fcntl, fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW |
+            fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL)
+
+
+def clear_slot_exception_frames(error):
+    """Release input exports retained by completed exception traceback frames."""
+    import traceback
+    pending, seen = [error], set()
+    while pending:
+        retained = pending.pop()
+        if id(retained) in seen:
+            continue
+        seen.add(id(retained))
+        pending.extend(item for item in (retained.__cause__, retained.__context__)
+                       if item is not None)
+        traceback.clear_frames(retained.__traceback__)
+        retained.__traceback__ = retained.__cause__ = retained.__context__ = None
+
+
+def _receive_shared_fd(connection):
+    """Receive exactly stdlib send_handle's one Linux SCM_RIGHTS descriptor."""
+    import array
+    import socket
+    received = []
+    try:
+        integers = array.array('i')
+        with socket.fromfd(connection.fileno(), socket.AF_UNIX, socket.SOCK_STREAM) as channel:
+            data, ancillary, flags, _ = channel.recvmsg(
+                1, socket.CMSG_SPACE(integers.itemsize), socket.MSG_CMSG_CLOEXEC)
+            valid_ancillary = len(ancillary) == 1
+            for level, kind, content in ancillary:
+                if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS:
+                    # Own every complete descriptor before validating the token
+                    # or truncation, or closing the duplicate socket. Padding
+                    # in CMSG_SPACE can fit more than one int.
+                    count = len(content)//integers.itemsize
+                    descriptors = array.array('i')
+                    descriptors.frombytes(content[:count*integers.itemsize])
+                    received.extend(descriptors)
+                    valid_ancillary &= len(content) == integers.itemsize
+                else:
+                    valid_ancillary = False
+        if (data != b'\x01' or not valid_ancillary or len(received) != 1 or
+                flags & (socket.MSG_CTRUNC | socket.MSG_TRUNC)):
+            # Linux closes descriptors omitted by ancillary truncation; every
+            # descriptor actually delivered above remains our responsibility.
+            raise ValueError('shared slot handoff must contain exactly one descriptor')
+        fd = received.pop()
+        return fd
+    finally:
+        for fd in received:
+            os.close(fd)
+
+
+def select_slot_input_transport():
+    """Choose before admission; a later transfer failure never changes mode."""
+    fd = received = None
+    mapping = None
+    connections = ()
+    try:
+        import mmap
+        from multiprocessing.reduction import send_handle
+        fcntl, seals = _shared_seals()
+        fd = os.memfd_create('triad-slot-capability', os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+        os.ftruncate(fd, 1)
+        mapping = mmap.mmap(fd, 1, access=mmap.ACCESS_WRITE)
+        mapping[0] = 0
+        mapping.close()
+        mapping = None
+        fcntl.fcntl(fd, fcntl.F_ADD_SEALS, seals)
+        connections = multiprocessing.Pipe()
+        send_handle(connections[0], fd, os.getpid())
+        received = _receive_shared_fd(connections[1])
+        mapping = mmap.mmap(received, 1, access=mmap.ACCESS_READ)
+        if mapping[0] != 0 or fcntl.fcntl(received, fcntl.F_GET_SEALS) & seals != seals:
+            raise OSError('sealed input capability did not preserve its descriptor')
+        return dict(method='sealed_memfd', reason=None)
+    except (ImportError, AttributeError, OSError, ValueError, NotImplementedError) as error:
+        return dict(method='pipe_copy', reason='sealed_memfd_unavailable:'+type(error).__name__)
+    finally:
+        if mapping is not None:
+            mapping.close()
+        for connection in connections:
+            connection.close()
+        for handle in (received, fd):
+            if handle is not None:
+                os.close(handle)
+
+
+class _SharedSlotView:
+    """One read-only mapping; close must precede the release acknowledgement."""
+    def __init__(self, fd, descriptor, samples, *, own_fd):
+        self._fd, self._own_fd, self._mapping = fd, own_fd, None
+        self.values = self.valid = None
+        try:
+            import mmap
+            import numpy as np
+            size = _shared_input_extent(samples)
+            if (not isinstance(descriptor, dict) or descriptor.get('samples') != samples or
+                    type(descriptor.get('samples')) is not int or
+                    type(descriptor.get('bytes')) is not int or descriptor['bytes'] != size or
+                    descriptor.get('dtype') != 'complex128+uint8' or
+                    any(type(descriptor.get(key)) is not int or descriptor[key] < 0
+                        for key in ('device', 'inode'))):
+                raise ValueError('shared slot descriptor differs from its bounded public input')
+            stat = os.fstat(fd)
+            fcntl, seals = _shared_seals()
+            if (stat.st_size != size or stat.st_dev != descriptor['device'] or
+                    stat.st_ino != descriptor['inode'] or
+                    fcntl.fcntl(fd, fcntl.F_GET_SEALS) & seals != seals):
+                raise ValueError('shared slot extent, identity or immutable seals differ')
+            self._mapping = mmap.mmap(fd, size, access=mmap.ACCESS_READ)
+            self.values = np.frombuffer(self._mapping, np.complex128, count=samples)
+            self.valid = np.frombuffer(self._mapping, np.uint8, count=samples, offset=16*samples)
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self):
+        self.values = self.valid = None
+        if self._mapping is not None:
+            # BufferError retains the mapping/fd. Callers must fail closed,
+            # never acknowledge release while any exported view remains.
+            self._mapping.close()
+            self._mapping = None
+        if self._own_fd and self._fd is not None:
+            os.close(self._fd)
+            self._fd = None
+
+
+class SharedSlotInput:
+    """Parent-owned immutable backing retained through completion or retry."""
+    def __init__(self, fd, samples):
+        self.fd, self.samples = fd, samples
+        self.input_bytes = _shared_input_extent(samples)
+        self.storage_bytes = shared_input_storage_bytes(samples)
+        stat = os.fstat(fd)
+        self.descriptor = dict(samples=samples, bytes=self.input_bytes,
+            dtype='complex128+uint8', device=stat.st_dev, inode=stat.st_ino)
+
+    @classmethod
+    def from_arrays(cls, values, valid):
+        import mmap
+        import numpy as np
+        values, valid = np.asarray(values), np.asarray(valid)
+        if (values.ndim != 1 or valid.shape != values.shape or not values.size or
+                values.dtype != np.complex128 or valid.dtype != np.uint8):
+            raise ValueError('shared slot input requires matching complex128/uint8 vectors')
+        samples = int(values.size)
+        size = _shared_input_extent(samples)
+        # Establish a finalizable owner before creating the descriptor, so an
+        # interrupted fill or caller handoff cannot orphan a raw integer fd.
+        owned = cls.__new__(cls)
+        owned.fd = None
+        mapping = target_values = target_valid = None
+        try:
+            owned.fd = os.memfd_create('triad-slot-input', os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+            cls.__init__(owned, owned.fd, samples)
+            os.ftruncate(owned.fd, size)
+            mapping = mmap.mmap(owned.fd, size, access=mmap.ACCESS_WRITE)
+            target_values = np.frombuffer(mapping, np.complex128, count=samples)
+            target_valid = np.frombuffer(mapping, np.uint8, count=samples, offset=16*samples)
+            target_values[:] = values
+            target_valid[:] = valid
+            target_values = target_valid = None
+            mapping.close()
+            mapping = None
+            fcntl, seals = _shared_seals()
+            fcntl.fcntl(owned.fd, fcntl.F_ADD_SEALS, seals)
+            return owned
+        except BaseException:
+            target_values = target_valid = None
+            if mapping is not None:
+                mapping.close()
+            owned.close()
+            raise
+
+    def open_readonly(self):
+        if self.fd is None:
+            raise RuntimeError('shared slot input has already been released')
+        return _SharedSlotView(self.fd, self.descriptor, self.samples, own_fd=False)
+
+    def close(self):
+        fd = getattr(self, 'fd', None)
+        if fd is not None:
+            self.fd = None
+            os.close(fd)
+
+    def __del__(self):
+        try:
+            self.close()
+        except BaseException:
+            # Finalization is a last-resort fd guard, never a release receipt.
+            pass
+
+
+def _receive_shared_input(connection, descriptor, samples):
+    fd = _receive_shared_fd(connection)
+    return _SharedSlotView(fd, descriptor, samples, own_fd=True)
+
+
 def _rss(pid):
     try:
         for line in Path('/proc', str(pid), 'status').read_text().splitlines():
@@ -48,6 +278,28 @@ def _rss(pid):
     except (OSError, ValueError):
         pass
     return None
+
+
+
+def _bootstrap_rss(pid):
+    """Linux post-exec current/peak RSS from one process-mm snapshot.
+
+    VmHWM covers this spawned interpreter's imports, unlike a parent heap
+    estimate or process-accounting peaks that may cross the exec boundary.
+    The backend already requires Linux /proc RSS admission.
+    """
+    try:
+        fields = {line.split(':', 1)[0]: line.split(':', 1)[1].split()
+                  for line in Path('/proc', str(pid), 'status').read_text().splitlines()
+                  if line.startswith(('VmRSS:', 'VmHWM:'))}
+        if any(fields[key][1] != 'kB' for key in ('VmRSS', 'VmHWM')):
+            return None
+        resident, peak = (int(fields[key][0])*1024 for key in ('VmRSS', 'VmHWM'))
+        if resident < 0 or peak < resident:
+            return None
+        return resident, peak
+    except (OSError, KeyError, ValueError, IndexError):
+        return None
 
 
 def spawn_auxiliary_reservation_bytes():
@@ -112,6 +364,11 @@ def initialized_slot_source(source_spec, *, workers):
     from triad_cpu import configure_numerical_threads, resolve_cpu_budget
     configure_numerical_threads(resolve_cpu_budget(jobs=1,
         workers=_positive(workers, 'slot workers'), threads=1))
+    # Load the canonical receiver closure before the bootstrap handshake.
+    # These imports create no templates or observations; first-job imports must
+    # not sit outside the admitted interpreter bootstrap envelope.
+    import triad_case_replay  # noqa: F401
+    import triad_receiver  # noqa: F401
     from triad_continuous import NativeStream
     executable, arguments, kind = _source_spec(source_spec)
     source = NativeStream(executable, arguments, kind=kind)
@@ -268,8 +525,13 @@ def _slot_process(connection, source_spec, total_workers):
             os.setsid()
         with initialized_slot_source(source_spec, workers=total_workers) as source:
             descriptor = source.descriptor
+            process_bootstrap = _bootstrap_rss(os.getpid())
+            native_bootstrap = _bootstrap_rss(source.process.pid)
             _send(connection, dict(kind='ready', pid=os.getpid(), native_pid=source.process.pid,
-                process_rss_bytes=_rss(os.getpid()), native_rss_bytes=_rss(source.process.pid),
+                process_rss_bytes=process_bootstrap[0] if process_bootstrap else None,
+                native_rss_bytes=native_bootstrap[0] if native_bootstrap else None,
+                process_bootstrap_peak_rss_bytes=process_bootstrap[1] if process_bootstrap else None,
+                native_bootstrap_peak_rss_bytes=native_bootstrap[1] if native_bootstrap else None,
                 native_workspace_bytes=max(int(descriptor.get('fixed_workspace_bytes', 0)),
                     int(descriptor.get('workspace_budget_bytes', 0)))))
             while True:
@@ -280,26 +542,53 @@ def _slot_process(connection, source_spec, total_workers):
                     raise ValueError('unknown slot process command')
                 job_id = header['job_id']
                 started = time.perf_counter()
-                try:
-                    import numpy as np
-                    count = _positive(header['samples'], 'slot samples')
+                import numpy as np
+                count = _positive(header['samples'], 'slot samples')
+                limit = _positive(header['memory_limit_bytes'], 'slot memory limit')
+                declared_samples = header['manifest'].get('calendar', {}).get('capture_samples')
+                if (type(declared_samples) is not int or declared_samples != count or
+                        _shared_input_extent(count) >= limit):
+                    raise ValueError('slot transport changed its admitted public extent')
+                transport = header.get('input_transport', 'pipe_copy')
+                shared = raw = mask = result = None
+                # Framing/descriptor failure ends this owner. Continuing could
+                # interpret a pending SCM_RIGHTS token as the next JSON header.
+                if transport == 'sealed_memfd':
+                    shared = _receive_shared_input(connection, header.get('shared_input'), count)
+                elif transport == 'pipe_copy':
                     raw = connection.recv_bytes(16*count)
                     mask = connection.recv_bytes(count)
                     if len(raw) != 16*count or len(mask) != count:
                         raise ValueError('slot IPC input changed its public window extent')
+                else:
+                    raise ValueError('unknown slot input transport')
+                try:
                     _affinity(header['cpu_ids'], source.process.pid)
                     result = score_public_slot(source, header['manifest'],
                         public_address=header['public_address'], source_identity=header['source_identity'],
-                        values=np.frombuffer(raw, np.complex128), valid=np.frombuffer(mask, np.uint8),
+                        values=shared.values if shared is not None else np.frombuffer(raw, np.complex128),
+                        valid=shared.valid if shared is not None else np.frombuffer(mask, np.uint8),
                         workers=header['workers'], memory_limit_bytes=header['memory_limit_bytes'],
                         receiver_policy=header['receiver_policy'])
                     result = _transport_result(result)
-                    _send_completed(connection, job_id, started, dict(result=result))
-                    del result, raw, mask
+                    payload = dict(result=result)
                 except Exception as error:
-                    _send_completed(connection, job_id, started, dict(
+                    payload = dict(
                         error_type=type(error).__name__, error_phase='slot_preparation_or_scoring',
-                        error_message=str(error)[:1024]))
+                        error_message=str(error)[:1024])
+                    # Preparation/scoring traceback frames can retain ndarray
+                    # exports even after their scopes have returned.
+                    clear_slot_exception_frames(error)
+                finally:
+                    result = raw = mask = None
+                    if shared is not None:
+                        shared.close()
+                        shared = None
+                # A completion is also an input-release acknowledgement.
+                # Cleanup failures leave ownership with the parent until the
+                # failed process has been terminated/reaped.
+                _send_completed(connection, job_id, started, payload)
+                del payload
     except (EOFError, BrokenPipeError):
         pass
     except Exception as error:
@@ -313,28 +602,39 @@ def _slot_process(connection, source_spec, total_workers):
 
 
 class SlotProcessBackend:
-    """At most two independent owners sharing one immutable CPU allocation.
+    """Bounded independent owners sharing one immutable software-worker allocation.
 
     There is no hidden job queue. A lone all-worker job keeps every permit
     until its result is collected; a later job cannot oversubscribe it.
     Input and result ownership transfers are bounded; the parent keeps ordering.
     """
-    def __init__(self, source_spec, *, max_processes=2, total_workers=None,
-                 startup_timeout=10., close_timeout=3.):
-        from triad_cpu import resolve_cpu_budget, detect_cpu_topology
+    supports_shared_input = True
+
+    def __init__(self, source_spec, *, max_processes=None, total_workers=None,
+                 initial_processes=1, startup_timeout=10., close_timeout=3., input_transport=None):
+        from triad_cpu import resolve_receiver_workers, detect_cpu_topology
         _source_spec(source_spec)
-        if not hasattr(os, 'killpg') or not Path('/proc/self/status').is_file():
-            raise MemoryError('bounded slot process/RSS admission is unavailable on this platform')
-        self.max_processes = _positive(max_processes, 'slot owner count')
-        if self.max_processes > 2:
-            raise ValueError('the admitted slot backend supports at most two owners')
-        self.total_workers = _positive(resolve_cpu_budget()['threads'] if total_workers is None
-            else total_workers, 'aggregate slot workers')
+        self.total_workers = resolve_receiver_workers(total_workers)
+        self.max_processes = _positive(min(resolve_receiver_workers(), self.total_workers)
+            if max_processes is None else max_processes, 'slot owner count')
+        if self.max_processes > self.total_workers:
+            raise ValueError('slot owners exceed the aggregate software worker allocation')
+        initial_processes = _positive(initial_processes, 'initial slot owners')
+        if initial_processes > self.max_processes:
+            raise ValueError('initial slot owners exceed the owner cap')
         if not math.isfinite(startup_timeout) or startup_timeout <= 0 or not math.isfinite(close_timeout) or close_timeout <= 0:
             raise ValueError('slot process timeouts must be finite and positive')
+        if not hasattr(os, 'killpg') or not Path('/proc/self/status').is_file():
+            raise MemoryError('bounded slot process/RSS admission is unavailable on this platform')
+        if input_transport is not None and input_transport not in ('pipe_copy', 'sealed_memfd'):
+            raise ValueError('unknown slot input transport')
+        selected = (select_slot_input_transport() if input_transport is None else
+                    dict(method=input_transport, reason='explicit_transport'))
+        self.input_transport, self.input_transport_reason = selected['method'], selected['reason']
         self.close_timeout = float(close_timeout)
         self._owners, self._active, self._closed, self._failed = [], {}, False, False
         self._shutdown_complete = False
+        self._bootstrap_process_peak_bytes = self._bootstrap_native_peak_bytes = 0
         topology = detect_cpu_topology()
         if topology.get('status') == 'complete':
             cores = [core['logical_cpu_ids'] for core in topology['physical_cores']]
@@ -346,27 +646,45 @@ class SlotProcessBackend:
                 self._cpu_ids = []
         else:
             self._cpu_ids = []
+        self._source_spec = tuple(source_spec)
+        self.startup_timeout = float(startup_timeout)
+        self.startup_seconds = 0.
+        self.ensure_processes(initial_processes)
+
+    @property
+    def owner_count(self):
+        return len(self._owners)
+
+    def ensure_processes(self, count):
+        count = _positive(count, 'required slot owners')
+        if self._closed or self._failed:
+            raise RuntimeError('slot process backend is closed or failed')
+        if count > self.max_processes:
+            raise ValueError('required slot owners exceed the owner cap')
+        if count <= len(self._owners):
+            return
         started = time.perf_counter()
         context = multiprocessing.get_context('spawn')
+        pending = []
         try:
-            for _ in range(self.max_processes):
+            for _ in range(count-len(self._owners)):
                 parent, child = context.Pipe()
                 try:
                     process = context.Process(target=_slot_process,
-                        args=(child, tuple(source_spec), self.total_workers), daemon=False)
+                        args=(child, self._source_spec, self.total_workers), daemon=False)
                 except BaseException:
                     parent.close()
                     child.close()
                     raise
                 self._owners.append(dict(process=process, connection=parent, ready=None,
                     resident_snapshot=0, native_pid=None))
+                pending.append(self._owners[-1])
                 try:
                     process.start()
                 finally:
                     child.close()
-            pending = list(self._owners)
             while pending:
-                left = startup_timeout-(time.perf_counter()-started)
+                left = self.startup_timeout-(time.perf_counter()-started)
                 if left <= 0:
                     raise TimeoutError('slot owners did not finish their bounded startup')
                 ready = wait_connections([owner['connection'] for owner in pending], timeout=left)
@@ -383,19 +701,45 @@ class SlotProcessBackend:
                     if (reply.get('pid') != owner['process'].pid or
                             type(reply.get('native_pid')) is not int or
                             any(type(reply.get(key)) is not int or reply[key] < 0
-                                for key in ('process_rss_bytes', 'native_rss_bytes', 'native_workspace_bytes'))):
+                                for key in ('process_rss_bytes', 'native_rss_bytes', 'native_workspace_bytes',
+                                    'process_bootstrap_peak_rss_bytes', 'native_bootstrap_peak_rss_bytes')) or
+                            reply.get('process_bootstrap_peak_rss_bytes', -1) < reply['process_rss_bytes'] or
+                            reply.get('native_bootstrap_peak_rss_bytes', -1) < reply['native_rss_bytes']):
                         raise RuntimeError('slot owner omitted bounded runtime admission')
                     owner.update(ready=reply, native_pid=reply['native_pid'],
-                        resident_snapshot=reply['process_rss_bytes']+reply['native_rss_bytes'])
+                        resident_snapshot=reply['process_rss_bytes']+max(reply['native_rss_bytes'], reply['native_workspace_bytes']))
+                    self._bootstrap_process_peak_bytes = max(self._bootstrap_process_peak_bytes,
+                        reply['process_bootstrap_peak_rss_bytes'])
+                    self._bootstrap_native_peak_bytes = max(self._bootstrap_native_peak_bytes,
+                        reply['native_bootstrap_peak_rss_bytes'], reply['native_workspace_bytes'])
                     native_identity = _process_identity(reply['native_pid'])
                     if native_identity is None:
                         raise RuntimeError('native slot owner exited during startup')
                     owner['native_start_ticks'] = native_identity[0]
                     pending.remove(owner)
-            self.startup_seconds = time.perf_counter()-started
         except BaseException:
             self.close()
             raise
+        finally:
+            self.startup_seconds += time.perf_counter()-started
+
+    def retire_idle(self, count):
+        count = _positive(count, 'retained slot owners')
+        if self._closed or self._failed or self._active:
+            raise RuntimeError('slot owners can retire only at an idle healthy boundary')
+        if count >= len(self._owners):
+            return
+        retiring = self._owners[count:]
+        self._release_owners(retiring)
+        del self._owners[count:]
+
+    def prospective_owner_bytes(self, python_bytes, native_bytes):
+        # Spawned interpreters do not inherit the parent's live input heap.
+        # Keep immutable pre-DSP bootstrap peaks even after an owner retires.
+        # Current parent and existing-owner RSS remain in their own ledger.
+        if self._bootstrap_process_peak_bytes:
+            return self._bootstrap_process_peak_bytes+max(native_bytes, self._bootstrap_native_peak_bytes)
+        return python_bytes+native_bytes
 
     @staticmethod
     def input_reservation_bytes(samples):
@@ -404,7 +748,8 @@ class SlotProcessBackend:
     @property
     def resident_bytes(self):
         if self._closed:
-            return sum((_rss(owner['process'].pid) or 0) + (_rss(owner['native_pid']) or 0)
+            return sum((_rss(owner['process'].pid) or 0) + max(_rss(owner['native_pid']) or 0,
+                (owner.get('ready') or {}).get('native_workspace_bytes', 0))
                 for owner in self._owners if owner['process'].pid is not None and not owner.get('released', False))
         total = 0
         active_owners = {entry['owner'] for entry in self._active.values()}
@@ -412,9 +757,15 @@ class SlotProcessBackend:
             if i not in active_owners:
                 sizes = (_rss(owner['process'].pid), _rss(owner['native_pid']))
                 if all(value is not None for value in sizes):
-                    owner['resident_snapshot'] = sum(sizes)
+                    owner['resident_snapshot'] = sizes[0]+max(sizes[1], owner['ready']['native_workspace_bytes'])
             total += owner['resident_snapshot']
         return total
+
+    def resident_bytes_after_retirement(self, count):
+        if self._active or not 0 <= count <= len(self._owners):
+            raise RuntimeError('retirement estimate requires an idle owner prefix')
+        self.resident_bytes
+        return sum(owner['resident_snapshot'] for owner in self._owners[:count])
 
     @property
     def native_workspace_bytes(self):
@@ -425,8 +776,8 @@ class SlotProcessBackend:
     def active_workers(self):
         return sum(job['workers'] for job in self._active.values())
 
-    def submit(self, job_id, *, manifest, public_address, source_identity, values, valid,
-               workers, memory_limit_bytes, receiver_policy=None):
+    def submit(self, job_id, *, manifest, public_address, source_identity, values=None, valid=None,
+               shared_input=None, workers, memory_limit_bytes, receiver_policy=None):
         import numpy as np
         if self._closed or self._failed:
             raise RuntimeError('slot process backend is closed or failed')
@@ -438,11 +789,19 @@ class SlotProcessBackend:
         idle = [i for i in range(len(self._owners)) if i not in used]
         if not idle or self.active_workers+workers > self.total_workers:
             raise RuntimeError('slot job would exceed the shared owner/CPU allocation')
-        values, valid = np.asarray(values), np.asarray(valid)
         samples = manifest.get('calendar', {}).get('capture_samples')
-        if (type(samples) is not int or samples < 1 or values.shape != (samples,) or
-                valid.shape != (samples,) or values.dtype != np.complex128 or valid.dtype != np.uint8):
-            raise ValueError('slot IPC input must match its complete public window')
+        _shared_input_extent(samples)
+        if self.input_transport == 'sealed_memfd':
+            if (not isinstance(shared_input, SharedSlotInput) or shared_input.fd is None or
+                    shared_input.samples != samples or values is not None or valid is not None):
+                raise ValueError('sealed slot transport requires one matching owned input')
+        else:
+            if shared_input is not None:
+                raise ValueError('copied slot transport cannot borrow shared input')
+            values, valid = np.asarray(values), np.asarray(valid)
+            if (values.shape != (samples,) or valid.shape != (samples,) or
+                    values.dtype != np.complex128 or valid.dtype != np.uint8):
+                raise ValueError('slot IPC input must match its complete public window')
         if samples*17 >= memory_limit_bytes:
             raise MemoryError('slot input exhausts its workspace allocation')
         reserved = {cpu for job in self._active.values() for cpu in job['cpu_ids']}
@@ -453,17 +812,24 @@ class SlotProcessBackend:
         header = dict(kind='slot', job_id=job_id, manifest=manifest,
             public_address=public_address, source_identity=source_identity, samples=samples,
             workers=workers, cpu_ids=cpus, memory_limit_bytes=memory_limit_bytes,
-            receiver_policy=receiver_policy)
+            receiver_policy=receiver_policy, input_transport=self.input_transport)
+        if shared_input is not None:
+            header['shared_input'] = shared_input.descriptor
         encoded = json.dumps(header, allow_nan=False, separators=(',', ':')).encode()
         if len(encoded) > _HEADER_BYTES:
             raise ValueError('slot descriptor exceeds bounded IPC header')
         self._active[job_id] = dict(owner=i, workers=workers, cpu_ids=cpus,
             submit_start_monotonic=time.perf_counter(), memory_limit_bytes=memory_limit_bytes,
-            input_reservation_bytes=self.input_reservation_bytes(samples))
+            input_reservation_bytes=(shared_input_reservation_bytes(samples) if shared_input is not None
+                                     else self.input_reservation_bytes(samples)))
         try:
             owner['connection'].send_bytes(encoded)
-            owner['connection'].send_bytes(values.tobytes(order='C'))
-            owner['connection'].send_bytes(valid.tobytes(order='C'))
+            if shared_input is not None:
+                from multiprocessing.reduction import send_handle
+                send_handle(owner['connection'], shared_input.fd, owner['process'].pid)
+            else:
+                owner['connection'].send_bytes(values.tobytes(order='C'))
+                owner['connection'].send_bytes(valid.tobytes(order='C'))
         except BaseException:
             self.close()
             raise
@@ -522,8 +888,13 @@ class SlotProcessBackend:
         if self._closed and getattr(self, '_shutdown_complete', False):
             return
         self._closed = True
+        self._release_owners(self._owners)
+        self._active.clear()
+        self._shutdown_complete = True
+
+    def _release_owners(self, owners):
         end = time.perf_counter()+self.close_timeout
-        for owner in self._owners:
+        for owner in owners:
             if owner.get('released', False):
                 continue
             # Idle graceful shutdown is optional; never block on a busy pipe.
@@ -534,32 +905,33 @@ class SlotProcessBackend:
                     pass
         # Clean every owned group, including a native service whose Python
         # leader already exited. Do this before reaping the leader's PID.
-        for owner in self._owners:
+        for owner in owners:
             self._terminate(owner, signal.SIGTERM)
-        for owner in self._owners:
+        # Share the grace period and leave time to kill/reap every owner even
+        # with a short caller-supplied shutdown deadline.
+        term_end = min(end, time.perf_counter()+min(.5, self.close_timeout/3))
+        for owner in owners:
             process = owner['process']
             if process.pid is not None:
-                process.join(timeout=max(0., min(.5, end-time.perf_counter())))
-        for owner in self._owners:
+                process.join(timeout=max(0., term_end-time.perf_counter()))
+        for owner in owners:
             self._terminate(owner, signal.SIGKILL)
-        for owner in self._owners:
+        for owner in owners:
             process = owner['process']
             if process.pid is not None:
                 process.join(timeout=max(0., end-time.perf_counter()))
-        for owner in self._owners:
+        for owner in owners:
             owner['connection'].close()
         # SIGKILL delivery is asynchronous even after a dead leader was reaped.
         # Use only the already reserved close deadline for native exit delivery.
-        while time.perf_counter() < end and any(_native_alive(owner) for owner in self._owners):
+        while time.perf_counter() < end and any(_native_alive(owner) for owner in owners):
             time.sleep(min(.01, max(0., end-time.perf_counter())))
-        for owner in self._owners:
+        for owner in owners:
             owner['released'] = ((owner['process'].pid is None or not owner['process'].is_alive())
                 and not _native_alive(owner))
-        if any(not owner['released'] for owner in self._owners):
+        if any(not owner['released'] for owner in owners):
             self._failed = True
             raise RuntimeError('slot owner shutdown could not release its reserved resources')
-        self._active.clear()
-        self._shutdown_complete = True
 
     @staticmethod
     def _terminate(owner, sig):

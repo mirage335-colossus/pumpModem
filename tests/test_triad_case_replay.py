@@ -78,6 +78,79 @@ def replay_with(screen):
 
 
 class ReplayTests(unittest.TestCase):
+    def test_public_slot_workspace_plans_actual_window_and_both_bank_modes(self):
+        from triad_receiver import public_slot_workspace
+
+        class Source(NativeBasis):
+            def set_basis_address(self, epoch, ordinal):
+                return dict(basis_epoch=epoch, basis_symbol_ordinal=ordinal, template_cache_cleared=True)
+
+        source = Source()
+        source.descriptor = dict(sample_rate_hz=6000, source_samples=3000, total_samples=18000,
+            fixed_workspace_bytes=512, workspace_budget_bytes=1024, maximum_mapped_bank_lanes=2)
+        channel = dict(spread_margin=1., spread_delay_ms=17.5, spread_doppler_hz=.05,
+            deterministic_cfo_bound_hz=.2, sample_clock_pair_ppm=12.5)
+        calendar = dict(capture_samples=18000, capture_lead_seconds=1.,
+            data_sample_offset=600, arrival_prior_seconds=[-.1, .1])
+        fmt = dict(inner_rate_hz=12., occupied_bandwidth_hz=40., fhss=False,
+            tile_seconds=.5, elapsed_bit_seconds=.5, symbol_ordinal=2)
+        source.plan = dict(format=fmt, physics={**channel, 'arrival_prior_seconds': [-.1, .1]},
+            geometry=dict(source_calendar_origin_sample=0))
+        manifest = dict(sample_rate_hz=6000, public_epoch_seconds=1793850000, helper_enabled=False,
+            channel=channel, calendar=calendar, format=fmt, power=dict(complex_noise_variance=1.))
+        with (mock.patch.object(replay_module.FFTScreen, '_projection_pool',
+                               side_effect=AssertionError('preflight materialized a bank')),
+              mock.patch('triad_realtime_fft.data_fir_taps',
+                         side_effect=AssertionError('preflight allocated FIR taps'))):
+            original = public_slot_workspace(manifest, source.plan, source.descriptor, workers=2)
+            later = public_slot_workspace({**manifest, 'calendar': {**calendar, 'capture_samples': 20000}},
+                source.plan, source.descriptor, workers=2)
+            slow = {**fmt, 'inner_rate_hz': 1., 'occupied_bandwidth_hz': 1.}
+            mapped = public_slot_workspace({**manifest, 'format': slow},
+                {**source.plan, 'format': slow}, source.descriptor, workers=2)
+            _, _, minimal_bank = replay_module.public_screen_workspace(
+                manifest, source.plan, source.descriptor, workers=2)
+            _, _, more_lanes = replay_module.public_screen_workspace(
+                manifest, source.plan, {**source.descriptor, 'maximum_mapped_bank_lanes': 26}, workers=2)
+        self.assertFalse(source.calls)
+        self.assertEqual(original['input_bytes'], 17*calendar['capture_samples'])
+        self.assertEqual(original['native_bytes'], 1024)
+        self.assertGreater(later['stage_bound_bytes']['coarse_filter'], original['stage_bound_bytes']['coarse_filter'])
+        self.assertIn('mapped_fidelity', mapped['stage_bound_bytes'])
+        self.assertEqual(minimal_bank, more_lanes)
+        self.assertGreaterEqual(original['minimum_memory_limit_bytes'], max(original['stage_bound_bytes'].values()))
+        built = build_public_screen(source, manifest, public_address={'pattern_epoch': 1793850000,
+            'symbol_ordinal': 2}, source_identity={'fixture': 'workspace'},
+            memory_limit_bytes=original['minimum_memory_limit_bytes']-original['input_bytes'], threads=2)
+        self.assertLessEqual(built['work_receipt']['preparation_peak_estimate_bytes']+original['input_bytes'],
+                             original['stage_bound_bytes']['bank_preparation'])
+
+    def test_public_slot_workspace_handles_s3_mapped_geometry_without_materializing(self):
+        from triad_receiver import public_slot_workspace
+
+        descriptor = dict(sample_rate_hz=6000, source_samples=1_542_405, total_samples=1_800_000,
+            maximum_mapped_bank_lanes=26)
+        channel = dict(spread_margin=3., spread_delay_ms=21., spread_doppler_hz=90.,
+            deterministic_cfo_bound_hz=.003, sample_clock_pair_ppm=.0001)
+        fmt = dict(inner_rate_hz=36., fhss=True, occupied_bandwidth_hz=225.,
+            elapsed_bit_seconds=256.8, tile_seconds=10., symbol_ordinal=4)
+        arrival = [-7.035, 7.035]
+        native = dict(format=fmt, physics={**channel, 'arrival_prior_seconds': arrival},
+                      geometry=dict(source_calendar_origin_sample=0))
+        manifest = dict(sample_rate_hz=6000, public_epoch_seconds=1793850000, helper_enabled=False,
+            calendar=dict(capture_samples=descriptor['total_samples'], capture_lead_seconds=8.,
+                          data_sample_offset=12000, arrival_prior_seconds=arrival),
+            channel=channel, format=fmt, power=dict(complex_noise_variance=1.))
+        with mock.patch.object(replay_module.FFTScreen, '_projection_pool',
+                               side_effect=AssertionError('preflight materialized a bank')):
+            _, geometry, single = replay_module.public_screen_workspace(manifest, native, descriptor, workers=1)
+            _, _, parallel = replay_module.public_screen_workspace(manifest, native, descriptor, workers=2)
+            plan = public_slot_workspace(manifest, native, descriptor, workers=2)
+        self.assertEqual(geometry['selected_step'], 3)
+        self.assertGreater(parallel['bank_preparation'], single['bank_preparation'])
+        self.assertGreaterEqual(plan['stage_bound_bytes']['mapped_fidelity'],
+                                parallel['mapped_fidelity']+plan['input_bytes'])
+
     def test_shared_public_screen_builder_binds_address_and_uses_source_extent(self):
         class Source:
             def __init__(self):

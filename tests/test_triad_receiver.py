@@ -23,7 +23,8 @@ class CompleteReceiverTests(unittest.TestCase):
     def setUpClass(cls):
         configure_numerical_threads({'threads': 1, 'linear_algebra_threads': 1})
 
-    def inputs(self, workers=1, *, window_origin=0, clock_bound=0., helper=False, conversion_if=0.):
+    def inputs(self, workers=1, *, window_origin=0, clock_bound=0., helper=False, conversion_if=0.,
+               memory_limit_bytes=256*1024**2):
         m, source, epochs = fixture()
         m.update(helper_enabled=helper, key_seed=1, public_epoch_seconds=1000)
         m['calendar']['physical_origin_sample'] = window_origin
@@ -60,10 +61,34 @@ class CompleteReceiverTests(unittest.TestCase):
                 return output
             provider.cache_report = lambda: {'method': 'deterministic-test-basis'}
             return provider
-        receiver = CompleteBitReceiver(m, screen, None, workers=workers,
-            memory_limit_bytes=256*1024**2, basis_factory=basis_factory,
-            policy=dict(cache_bytes=0))
+        allocation = {} if workers is None else dict(workers=workers)
+        if memory_limit_bytes is not None:
+            allocation['memory_limit_bytes'] = memory_limit_bytes
+        receiver = CompleteBitReceiver(m, screen, None, **allocation,
+            basis_factory=basis_factory, policy=dict(cache_bytes=0))
         return receiver, m, source, epochs
+
+    def test_automatic_worker_budget_reaches_fine_session_once(self):
+        with mock.patch('triad_cpu.resolve_cpu_budget', return_value={'threads': 3}) as detect:
+            receiver, _, _, epochs = self.inputs(None)
+            with receiver, mock.patch.object(receiver, 'basis_factory', wraps=receiver.basis_factory) as factory:
+                self.assertEqual(receiver.workers, 6)
+                coordinate = receiver.grid.snap((epochs[0], 0., 0., 0.))
+                fine = receiver.create_fine_session((coordinate,), samples=80)
+                try:
+                    self.assertEqual(factory.call_args.kwargs['template_workers'], 6)
+                    self.assertIs(factory.call_args.kwargs['template_executor'], receiver.executor)
+                finally:
+                    fine.close()
+            with self.inputs(np.int64(2))[0] as explicit:
+                self.assertEqual(explicit.workers, 2)
+            detect.assert_called_once_with()
+
+    def test_default_memory_limit_reaches_direct_bit_receiver(self):
+        with mock.patch('triad_receiver.resolve_receiver_memory', return_value=192*1024**2) as resolve:
+            with self.inputs(memory_limit_bytes=None)[0] as receiver:
+                self.assertEqual(receiver.memory_limit_bytes, 192*1024**2)
+            resolve.assert_called_once_with(None)
 
     def test_complete_unknown_bit_both_alternatives_and_same_stream_parallelism(self):
         for bit in (0, 1):
@@ -175,7 +200,7 @@ class CompleteReceiverTests(unittest.TestCase):
         screen=FFTScreen(manifest,source,(0,),clock_ppm=(0.,),
             output_sample_rate=1,pass_edge_hz=.3,stop_edge_hz=.45,
             precision='fp64',workers=1)
-        with CompleteBitReceiver(manifest,screen,None,memory_limit_bytes=64*1024**2) as receiver:
+        with CompleteBitReceiver(manifest,screen,None,workers=1,memory_limit_bytes=64*1024**2) as receiver:
             step=screen.maximum_frequency_step
             self.assertEqual(receiver.grid.frequency_step,step)
             for frequency in (-.01999,-.00731,.00731,.01999):
@@ -279,7 +304,7 @@ class CompleteReceiverTests(unittest.TestCase):
         receiver.close()
         m['calendar']['data_sample_offset'] += 1
         with self.assertRaisesRegex(ValueError, 'only noise normalization'):
-            CompleteBitReceiver(m, receiver.screen, None, memory_limit_bytes=256*1024**2)
+            CompleteBitReceiver(m, receiver.screen, None, workers=1, memory_limit_bytes=256*1024**2)
 
     def test_broad_prior_partial_tiles_never_supply_coordinates_or_quiet(self):
         receiver, m, source, _ = self.inputs(4)
@@ -366,7 +391,7 @@ class CompleteReceiverTests(unittest.TestCase):
         receiver.close()
         for name in ('quiet_aperture_first_sample','quiet_aperture_stop_sample'):
             m['calendar'].pop(name)
-        with CompleteBitReceiver(m,receiver.screen,None,memory_limit_bytes=256*1024**2) as bare:
+        with CompleteBitReceiver(m,receiver.screen,None,workers=1,memory_limit_bytes=256*1024**2) as bare:
             coordinates=(bare.grid.snap((epochs[0],0.,0.,0.)),)
             tracked=dict(complete_observation=True,processed_rows=bare.samples,
                 consumed_samples=bare.samples,native_template_work=dict(calls=1,representative_work=True),

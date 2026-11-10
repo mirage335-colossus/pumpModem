@@ -7,9 +7,10 @@ Search `src/`, `include/`, `tests/` and `cmake/` first when locating implementat
 
 ## Preserve the full receiver CPU budget
 
-Default Robust receiver orchestration and capacity testing to **all available
-logical hardware threads**, respecting explicit allocations and actual OS
-affinity/quota limits. Do not reduce this default because of thermal or package
+Default Robust receiver orchestration and capacity testing to **twice the
+available logical hardware-thread count in software workers**, using all hardware
+threads while respecting explicit allocations and actual OS affinity/quota
+limits. Do not reduce this default because of thermal or package
 power limiting, low observed utilization, a single-machine pilot winner, or
 temporary/minor timing differences. Preserve capacity for incoming sample
 backlog, other processors and changing workloads. Smaller stage dispatch is
@@ -31,15 +32,40 @@ GPU speed or a hypothetical optimization is not a CPU capacity result. Report
 complete nominal and conservative service, uncertainty, margin and unresolved
 work for every current row; a forecasting gate is distinct from a capacity pass.
 Preserve the receiver scope: current complete-work calibration assumes a
-configured public calendar and keyed ordinal sequence. It does not qualify
-blind discovery of independently restarted transmitters. Report ordinary
-blind continuous-listening capacity as unresolved until that acquisition and
-occupied-signal competition are implemented and measured; a favorable scoped
+configured public calendar and keyed ordinal sequence. Acquisition of unknown
+waveform epochs, ordinals and timing remains unqualified. The receiver detects
+bits or nulls continuously; two scored quiet slots confirm message completion,
+and codec reset preserves the global waveform ordinal. No semantic transmitter
+identity classifier is required. Broader acquisition needs appropriate address
+hypotheses, incorrect-address checks and measured costs; a favorable scoped
 estimate cannot remove this missing work. See the
 [current findings](docs/validation.md#continuous-receiver-restructuring).
-The continuous native CPU receiver overlaps adjacent ready windows with two
-independent process owners, sharing one full hardware-thread budget and
-committing results in public-slot order. A lone job uses the full budget.
+The continuous native CPU receiver overlaps adjacent ready windows with
+independent process owners and commits results in public-slot order. The
+automatic software budget is twice the effective hardware-thread count, in
+every mode. Canonical continuous admission targets up to that many independent
+owners, admitting ready windows against their full DSP bounds and
+available RAM. Explicit worker and memory limits remain exact. Do not impose
+this computer's old three-owner, 3840 MiB or half-available-RAM test settings as
+portable operating limits. Keep software permits separate from the hardware
+utilization denominator; qualify changes with bounded same-stream work,
+throughput and memory evidence. Higher RAM consumption and modest productive
+utilization gains are worthwhile; energy efficiency is not this capacity goal.
+Estimate future spawned runtime from fully loaded child bootstrap measurements
+once available; the parent's input heap is not duplicated into spawned children.
+Keep parent, actual live-owner, native and DSP memory fully charged. Completed
+out-of-order windows may free owners before ordered commit; bound their retained
+results separately. Judge sustained utilization using predeclared backlog
+intervals, separately from startup/fill/drain averages and software-permit use.
+The Linux pipeline uses sealed read-only shared input where supported. Charge
+the backing throughout its FD/mapping lifetime and one assembly transient;
+preserve full copied-input reservations on unsupported systems. Do not infer
+shared storage from RSS alone or release its charge before confirmed cleanup.
+The three-controller comparison missed its original 15% throughput gate but
+improved useful throughput and utilization. The user's subsequent policy accepts
+that smaller gain for broader default utilization; retain both facts. Do not
+reduce concurrency merely because this host's thermal/power limits make the
+throughput gain modest. See the current validation record and allocation guide.
 Keep measured same-stream throughput separate from conditional concurrent
 cost-class forecasts; the old sequential calibration does not by itself
 qualify the process scheduler. Follow the

@@ -118,10 +118,10 @@ class ProbabilityAndResourceTests(TestCase):
             with self.subTest(args=args, kwargs=kwargs), self.assertRaises(ValueError):
                 metrics.success_interval(*args, **kwargs)
 
-    def test_machine_snapshot_uses_half_of_constrained_memory_and_retains_warnings(self):
+    def test_machine_snapshot_uses_operating_reserve_from_constrained_memory(self):
         with patch("triad_cpu.detect_cpu_budget", return_value={"available_cpus": 2}), \
-             patch("build_capacity.available_memory", return_value=1000), \
-             patch("build_capacity.linux_limits", return_value=([2], [600])), \
+             patch("build_capacity.available_memory", return_value=16*2**30), \
+             patch("build_capacity.linux_limits", return_value=([2], [6*2**30])), \
              patch.object(Path, "exists", return_value=False), \
              patch.object(metrics, "platform") as platform:
             platform.platform.return_value = "Linux"
@@ -130,19 +130,21 @@ class ProbabilityAndResourceTests(TestCase):
                 result = metrics.machine_resources()
         self.assertEqual(result["cpu"], {"available_cpus": 2})
         self.assertEqual(result["cpu_model"], "model-test")
-        self.assertEqual(result["available_memory_bytes"], 600)
-        self.assertEqual(result["memory_budget_bytes"], 300)
-        self.assertEqual(result["cgroup_memory"]["memory_headroom_bytes"], [600])
+        self.assertEqual(result["available_memory_bytes"], 6*2**30)
+        self.assertEqual(result["memory_reserve_bytes"], 6*2**30//10)
+        self.assertEqual(result["memory_budget_bytes"], 6*2**30-6*2**30//10)
+        self.assertEqual(result["cgroup_memory"]["memory_headroom_bytes"], [6*2**30])
 
     def test_machine_snapshot_surfaces_unknown_cgroup_capacity(self):
         with patch("triad_cpu.detect_cpu_budget", return_value={"available_cpus": 1}), \
-             patch("build_capacity.available_memory", return_value=100), \
+             patch("build_capacity.available_memory", return_value=8*2**30), \
              patch("build_capacity.linux_limits", side_effect=ValueError("cgroup mount not visible")), \
              patch.object(metrics, "platform") as platform, \
              patch("sys.platform", "linux"):
             platform.processor.return_value = "test"
             result = metrics.machine_resources()
-        self.assertEqual(result["memory_budget_bytes"], 50)
+        self.assertIsNone(result["memory_budget_bytes"])
+        self.assertIsNone(result["available_memory_bytes"])
         self.assertEqual(result["cgroup_memory"]["status"], "unknown")
         self.assertTrue(any("cgroup mount not visible" in warning for warning in result["warnings"]))
 

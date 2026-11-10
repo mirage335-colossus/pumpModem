@@ -178,7 +178,6 @@ def success_interval(successes, trials, *, alpha=.05):
 
 def machine_resources():
     """Take a visible CPU/memory snapshot using existing project detectors."""
-    import build_capacity
     import triad_cpu
 
     warnings = []
@@ -187,22 +186,8 @@ def machine_resources():
     except Exception as error:  # Resource introspection is advisory.
         cpu = None
         warnings.append("CPU detection: " + str(error))
-    try:
-        available = build_capacity.available_memory()
-    except Exception as error:
-        available = None
-        warnings.append("available-memory detection: " + str(error))
-
-    cgroup = {"status": "not_applicable", "memory_headroom_bytes": []}
-    if __import__("sys").platform.startswith("linux"):
-        try:
-            _, headrooms = build_capacity.linux_limits()
-            cgroup = {"status": "visible", "memory_headroom_bytes": headrooms}
-            if headrooms:
-                available = min([available, *headrooms]) if available is not None else min(headrooms)
-        except Exception as error:
-            cgroup = {"status": "unknown", "memory_headroom_bytes": []}
-            warnings.append("Linux cgroup visibility: " + str(error))
+    memory = triad_cpu.detect_receiver_memory()
+    warnings.extend(memory.pop('warnings'))
 
     processor = platform.processor()
     if Path("/proc/cpuinfo").exists():
@@ -215,9 +200,6 @@ def machine_resources():
     return {
         "cpu": cpu,
         "cpu_model": processor or None,
-        "available_memory_bytes": available,
-        "memory_budget_bytes": None if available is None else available // 2,
-        "memory_budget_policy": "50_percent_of_currently_available_memory",
-        "cgroup_memory": cgroup,
+        **memory,
         "warnings": warnings,
     }

@@ -6,6 +6,7 @@ be configured by the caller before workers start; this module imports none.
 """
 from __future__ import annotations
 
+from numbers import Integral
 from pathlib import Path
 import os
 import sys
@@ -231,6 +232,95 @@ def resolve_cpu_budget(*, jobs=1, workers=None, threads=None, capacity=None,
                 explicit_overcommit=total > budget, jobs=jobs,
                 requested=requested, capacity=dict(capacity),
                 policy='One aggregate worker × numerical-thread budget; automatic workspace fan-out is at most two. A caller-supplied linear-algebra limit applies only to automatic threads in its measured receiver family. Explicit thread counts are preserved for both stages.')
+
+
+def resolve_receiver_workers(workers=None, *, hardware_threads=None):
+    """Resolve the Robust software-worker budget from visible hardware capacity."""
+    for value, name in ((workers, 'receiver workers'), (hardware_threads, 'hardware threads')):
+        if value is not None and (isinstance(value, bool) or not isinstance(value, Integral) or value < 1):
+            raise ValueError(name + ' must be a positive integer')
+    if workers is not None:
+        return int(workers)
+    if hardware_threads is None:
+        hardware_threads = resolve_cpu_budget()['threads']
+    hardware_threads = int(hardware_threads)
+    return 2 * hardware_threads
+
+
+def resolve_receiver_memory(memory_limit_bytes=None, *, available_bytes=None):
+    """Resolve an exact explicit cap or the visible operating RAM budget.
+
+    Automatic admission reserves modest space for the OS and other applications.
+    It counts physical availability and cgroup headroom, never swap. The optional
+    availability argument is an already-constrained snapshot, not a second cap.
+    Explicit allocations remain exact; callers own their resource admission.
+    """
+    for value, name in ((memory_limit_bytes, 'receiver memory limit'),
+                        (available_bytes, 'available receiver memory')):
+        if value is not None and (isinstance(value, bool) or
+                not isinstance(value, Integral) or value < 1):
+            raise ValueError(name + ' must be a positive integer')
+    if memory_limit_bytes is not None:
+        return int(memory_limit_bytes)
+    if available_bytes is None:
+        resources = detect_receiver_memory()
+        if resources['memory_budget_bytes'] is None:
+            raise RuntimeError('receiver operating RAM is unavailable: ' +
+                               '; '.join(resources['warnings']))
+        return resources['memory_budget_bytes']
+    available = int(available_bytes)
+    reserve = min(2 * 2**30, max(512 * 2**20, available // 10))
+    if available <= reserve:
+        raise RuntimeError('insufficient available physical RAM after the receiver operating reserve')
+    return available - reserve
+
+
+def detect_receiver_memory():
+    """Return one physical/cgroup snapshot shared by production and forecasts.
+
+    No finite cgroup memory limit is normal and leaves host availability intact.
+    A detection error is different: automatic admission must not assume that an
+    unreadable container limit permits use of all host RAM.
+    """
+    import build_capacity
+
+    warnings = []
+    try:
+        available = build_capacity.available_memory()
+        if isinstance(available, bool) or not isinstance(available, Integral) or available < 0:
+            raise ValueError('physical-memory availability is unknown')
+        available = int(available)
+    except Exception as error:
+        available = None
+        warnings.append('available-memory detection: ' + str(error))
+    host_available = available
+    cgroup = dict(status='not_applicable', memory_headroom_bytes=[])
+    if sys.platform.startswith('linux'):
+        try:
+            _, headrooms = build_capacity.linux_limits()
+            if any(isinstance(value, bool) or not isinstance(value, Integral) or value < 0
+                   for value in headrooms):
+                raise ValueError('invalid cgroup physical-memory headroom')
+            headrooms = [int(value) for value in headrooms]
+            cgroup = dict(status='visible', memory_headroom_bytes=headrooms)
+            if available is not None and headrooms:
+                available = min(available, *headrooms)
+        except Exception as error:
+            available = None
+            cgroup = dict(status='unknown', memory_headroom_bytes=[])
+            warnings.append('Linux cgroup visibility: ' + str(error))
+    budget = reserve = None
+    if available is not None:
+        reserve = min(2 * 2**30, max(512 * 2**20, available // 10))
+        try:
+            budget = resolve_receiver_memory(available_bytes=available)
+        except (ValueError, RuntimeError) as error:
+            warnings.append(str(error))
+    return dict(available_memory_bytes=available,
+                host_available_memory_bytes=host_available,
+                memory_budget_bytes=budget, memory_reserve_bytes=reserve,
+                memory_budget_policy='available_physical_and_cgroup_memory_minus_operating_reserve',
+                cgroup_memory=cgroup, warnings=warnings)
 
 
 def configure_numerical_threads(allocation):

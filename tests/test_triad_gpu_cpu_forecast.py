@@ -1,7 +1,7 @@
 """Calibration prediction uses useful GPU demand and held-out target CPU time."""
 from pathlib import Path
 import copy
-from contextlib import nullcontext, redirect_stderr
+from contextlib import nullcontext, redirect_stderr, redirect_stdout
 import hashlib
 import io
 import json
@@ -21,6 +21,149 @@ def component(point, lo, hi):
 
 
 class ForecastTests(unittest.TestCase):
+    def _applicability_fixture(self):
+        before = dict(revision='revision', sources={name:'old' for name in forecast._APPLICABILITY_PATHS},
+                      native_binary_sha256='exporter',native_artifacts={'kernel':'native'})
+        before['sources']['tools/triad_receiver.py']='unchanged-dsp'
+        after=copy.deepcopy(before)
+        for name in forecast._APPLICABILITY_PATHS: after['sources'][name]='new'
+        runtime,budget={'numerical_threads':1},{'available_cpus':12}
+        case=dict(index=1,heading='first',configuration_hash='configuration')
+        cpu=dict(schema='triad-manual-complete-capacity-v3',capacity_scope='configured-public-calendar',
+            provenance=dict(before,unchanged_at_completion=True),runtime=dict(runtime,unchanged_at_completion=True),
+            machine={'cpu':budget},input={'source_sha256':'manual','unchanged_at_completion':True},
+            message_gate={'passed':True},workspace_limit_bytes=4096,worker_allocations=[1,6,12,24],
+            cases=[dict(case=case,measurement=dict(inference_workers=24,inference_allocation_mode='automatic_receiver'))])
+        raw=json.dumps(cpu).encode()
+        identities=[{k:identity[k] for k in forecast._IDENTITY_FIELDS} for identity in (before,after)]
+        receipt=dict(schema='triad-cpu-calibration-applicability-v1',status='independently_reviewed_applicable',
+            scope=forecast._APPLICABILITY_SCOPE,cpu_calibration_reports=[{'sha256':hashlib.sha256(raw).hexdigest()}],
+            measured_identity=identities[0],applicable_identity=identities[1],
+            changed_source_paths=sorted(forecast._APPLICABILITY_PATHS),
+            independent_audit=dict(status='completed',conclusion='unchanged_measured_work',independent=True,
+                reviewer='independent source reviewer',
+                source_pair_sha256=hashlib.sha256(json.dumps(identities,sort_keys=True,separators=(',',':')).encode()).hexdigest(),
+                findings={key:'Reviewed exact unchanged finite measured dependency.' for key in forecast._APPLICABILITY_REVIEW}),
+            calibration_invariants=dict(runtime=runtime,cpu_budget=budget,workspace_limit_bytes=4096,
+                worker_allocations=cpu['worker_allocations'],manual_list_sha256='manual',
+                inference_workers=24,inference_allocation_mode='automatic_receiver'))
+        gpu=dict(schema='triad-gpu-workload-v2',status='bounded_mixed_precision_cost_regime_observed',
+            unchanged_at_completion=True,device='cuda',coarse_device='cuda',cuda_peak_allocated_bytes=1,
+            shared_sources=after['sources'],native_binary_sha256='exporter',mapped_kernel_sha256='native',
+            memory_limit_bytes=4096,input={'source_sha256':'manual'},
+            sources={forecast._GPU_RUNTIME_LEAVES[0]:'gpu-driver'},cases=[{'case':case}])
+        return cpu,raw,receipt,before,after,gpu,runtime,budget,dict(source_sha256='manual',cases=[case])
+
+    def test_applicability_cli_preserves_numbers_and_strict_trace_gates(self):
+        cpu,raw,receipt,before,after,gpu,runtime,budget,parsed=self._applicability_fixture()
+        predicted=dict(missing_or_mismatched={},components={},
+            nominal_service=dict(component(.2,.15,.25),realtime_status='pass'),
+            complete_capacity=dict(component(.4,.3,.5),realtime_status='pass',all_component_models_supported=True))
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            def run(*,source=after,proof=receipt,cpu_bytes=raw,gpu_report=gpu,holdout=None):
+                (root/'cpu.json').write_bytes(cpu_bytes)
+                (root/'gpu.json').write_text(json.dumps(gpu_report))
+                args=['--cpu-report',str(root/'cpu.json'),'--gpu-report',str(root/'gpu.json'),'--output',str(root/'out.json')]
+                if proof is not None:
+                    (root/'proof.json').write_text(json.dumps(proof))
+                    args+=['--cpu-calibration-applicability',str(root/'proof.json')]
+                if holdout is not None:
+                    (root/'holdout.json').write_text(json.dumps(holdout))
+                    args+=['--local-holdout-report',str(root/'holdout.json'),'--holdout-case-index','1']
+                with mock.patch.object(forecast,'load_cases',return_value=parsed), \
+                     mock.patch.object(forecast,'identity',return_value=source), \
+                     mock.patch('triad_cpu.detect_cpu_budget',return_value=budget), \
+                     mock.patch('triad_cpu.configure_numerical_threads'), \
+                     mock.patch('triad_abbreviated.environment',return_value=runtime), \
+                     mock.patch.object(forecast,'_runtime_leaf_hashes',return_value=gpu['sources']), \
+                     mock.patch.object(forecast,'_reference_coverage',return_value=[1]), \
+                     mock.patch.object(forecast,'_gpu_work_executed',return_value=('mixed','mixed')), \
+                     mock.patch.object(forecast,'_forecast_row',side_effect=lambda *a,**k:copy.deepcopy(predicted)), \
+                     mock.patch.object(forecast,'_verification',return_value={'status':'accepted'}), \
+                     redirect_stdout(io.StringIO()):
+                    code=forecast.main(args)
+                return code,json.loads((root/'out.json').read_text())
+            old_gpu=dict(gpu,shared_sources=before['sources'])
+            baseline_code,baseline=run(source=before,proof=None,gpu_report=old_gpu)
+            code,bridged=run()
+            self.assertEqual((baseline_code,code),(0,0))
+            self.assertEqual(bridged['cases'],baseline['cases'])
+            self.assertEqual(bridged['cpu_calibration_applicability']['cpu_calibration_report_sha256'],hashlib.sha256(raw).hexdigest())
+            self.assertIn('historical measured-source',bridged['cpu_calibration_applicability']['limitation'])
+            for proof,bytes_,trace in ((None,raw,gpu),(receipt,raw+b'\n',gpu),(receipt,raw,old_gpu)):
+                with self.subTest(proof=proof is not None,changed_bytes=bytes_!=raw,old_gpu=trace==old_gpu):
+                    code,result=run(proof=proof,cpu_bytes=bytes_,gpu_report=trace)
+                    self.assertEqual(code,2)
+                    self.assertEqual(result['cases'][0]['status'],'unresolved')
+                    self.assertNotIn('nominal_service',result['cases'][0])
+            for field,value in (('scope','automatic-pipeline'),
+                                ('measured_identity',dict(receipt['measured_identity'],native_binary_sha256='other')),
+                                ('applicable_identity',dict(receipt['applicable_identity'],native_artifacts={'kernel':'other'})),
+                                ('independent_audit',dict(receipt['independent_audit'],status='pending'))):
+                with self.subTest(bad_receipt_field=field):
+                    bad=dict(receipt,**{field:value})
+                    code,result=run(proof=bad)
+                    self.assertEqual(code,2)
+                    self.assertNotIn('nominal_service',result['cases'][0])
+            holdout=dict(gpu,device='cpu',status='cpu_reference_only',runtime=runtime,cpu_budget=budget,workers=24)
+            self.assertEqual(run(holdout=holdout)[0],0)
+            holdout['shared_sources']=before['sources']
+            code,result=run(holdout=holdout)
+            self.assertEqual(code,2)
+            self.assertIn('provenance/allocation differs',result['cases'][0]['independent_cpu_trace']['reason'])
+            self.assertEqual(result['cases'][0]['nominal_service']['realtime_status'],'unresolved')
+
+    def test_applicability_rejects_changed_identity_scope_configuration_and_unreviewed_audit(self):
+        cpu,raw,receipt,before,after,*_=self._applicability_fixture()
+        edits=[lambda r:r.update(scope='automatic-pipeline'),
+               lambda r:r['measured_identity']['sources'].update({'tools/triad_receiver.py':'different'}),
+               lambda r:r['applicable_identity'].update(native_binary_sha256='different'),
+               lambda r:r['applicable_identity']['native_artifacts'].update(kernel='different'),
+               lambda r:r['independent_audit'].update(status='pending'),
+               lambda r:r['independent_audit'].update(source_pair_sha256='different'),
+               lambda r:r['independent_audit']['findings'].pop('invoked_globals'),
+               lambda r:r['calibration_invariants'].update(workspace_limit_bytes=8192),
+               lambda r:r['calibration_invariants'].update(inference_workers=12),
+               lambda r:r['cpu_calibration_reports'].clear()]
+        for edit in edits:
+            bad=copy.deepcopy(receipt);edit(bad)
+            with self.subTest(edit=edits.index(edit)),self.assertRaises((ValueError,KeyError)):
+                forecast._cpu_calibration_applicability(cpu,after,raw,json.dumps(bad).encode())
+        changed=copy.deepcopy(after);changed['sources']['tools/triad_receiver.py']='changed-dsp'
+        bad=copy.deepcopy(receipt);bad['applicable_identity']['sources']=changed['sources']
+        bad['changed_source_paths'].append('tools/triad_receiver.py')
+        with self.assertRaisesRegex(ValueError,'two reviewed pipeline'):
+            forecast._cpu_calibration_applicability(cpu,changed,raw,json.dumps(bad).encode())
+
+    def test_applicability_does_not_complete_interrupted_calibration_or_audit_union(self):
+        cpu,raw,receipt,before,after,gpu,runtime,budget,parsed=self._applicability_fixture()
+        for incomplete in (dict(cpu,schema='triad-audited-union-v1'),
+                           dict(cpu,provenance=before),dict(cpu,message_gate={'passed':False})):
+            result=forecast.estimate(incomplete,gpu,parsed,after,runtime,budget,
+                cpu_report_bytes=raw,cpu_calibration_applicability=json.dumps(receipt).encode())
+            self.assertEqual(result['cases'][0]['status'],'unresolved')
+            self.assertNotIn('cpu_calibration_applicability',result)
+
+    def test_applicability_is_excluded_from_measured_cpu_source_closure(self):
+        import triad_case_suite
+        self.assertIn('tools/triad_gpu_cpu_forecast.py',triad_case_suite.GPU_ONLY_SOURCES)
+        self.assertNotIn('tools/triad_gpu_cpu_forecast.py',triad_case_suite.measured_source_hashes())
+
+    def test_receiver_allocation_requires_exact_hardware_or_automatic_target(self):
+        for hardware in (1, 3, 12, 32):
+            for mode, workers in (('full_logical', hardware),
+                                  ('automatic_receiver', 2*hardware)):
+                with self.subTest(hardware=hardware, mode=mode):
+                    measured = dict(inference_allocation_mode=mode, inference_workers=workers)
+                    self.assertEqual(forecast._calibrated_workers(measured, hardware), workers)
+                    for wrong in (workers+1, hardware if mode=='automatic_receiver' else 2*hardware, True, None):
+                        with self.assertRaises(ValueError):
+                            forecast._calibrated_workers(dict(measured, inference_workers=wrong), hardware)
+        for mode in ('pilot_selected', 'explicit', 'unknown', None):
+            with self.subTest(mode=mode), self.assertRaises(ValueError):
+                forecast._calibrated_workers(dict(inference_allocation_mode=mode, inference_workers=18), 12)
+
     def test_acquisition_uses_cpu_fit_and_keeps_last_local_sample_outside_fit(self):
         demand = dict(status='acquired', coarse={'fft_products':48}, helper_reason='helper_disabled')
         cpu = dict(component(.45,.1,.9), coverage={'status':'acquired','coordinates':[[0,0,0,0]]}, acquisition_work_class=demand,
@@ -172,7 +315,7 @@ class ForecastTests(unittest.TestCase):
         def measured(value):
             return dict(component(value,value,value),calibrated_point_before_gpu_scaling=value,
                         independent_local_holdout={forecast.RATIO:value})
-        measurement=dict(inference_allocation_mode='full_logical',workspace_margin={'status':'within_budget'},
+        measurement=dict(inference_allocation_mode='full_logical',inference_workers=12,workspace_margin={'status':'within_budget'},
             recurring_window=dict(covers_longest_public_geometry=True,noise_only_acquisition=measured(.04)),
             nominal_service={'components':{name:measured(.01) for name in forecast._FIXED}},
             nominal_acquisition=measured(.02),noise_only_acquisition=measured(.01),recurring_banks=measured(.01),
@@ -190,14 +333,21 @@ class ForecastTests(unittest.TestCase):
              mock.patch.object(forecast,'_branch',side_effect=lambda row,*a,**k:row), \
              mock.patch.object(forecast,'_check_fine',return_value={}), \
              mock.patch.object(forecast,'_work_envelope',return_value={'relative_cost_scale_interval':[1.,1.]}):
-            historical=forecast._forecast_row(cpu,gpu)
+            historical=forecast._forecast_row(cpu,gpu,hardware_threads=12)
             self.assertEqual(historical['complete_capacity']['realtime_status'],'pass')
+            measurement.update(inference_allocation_mode='automatic_receiver', inference_workers=24)
+            automatic=forecast._forecast_row(cpu,gpu,hardware_threads=12)
+            self.assertEqual(automatic['complete_capacity'], historical['complete_capacity'])
+            measurement['inference_workers']=12
+            with self.assertRaisesRegex(ValueError, 'declared receiver allocation'):
+                forecast._forecast_row(cpu,gpu,hardware_threads=12)
+            measurement['inference_allocation_mode']='full_logical'
             self.assertEqual(historical['capacity_scope'],'historical-unspecified')
             self.assertEqual(historical['blind_fresh_start_capacity']['status'],'unqualified')
             self.assertIsNone(historical['blind_fresh_start_capacity'][forecast.RATIO])
             measurement.update(capacity_scope='configured-public-calendar',
                 blind_fresh_start_capacity=forecast.unqualified_blind_capacity(90.))
-            scoped=forecast._forecast_row(cpu,gpu)
+            scoped=forecast._forecast_row(cpu,gpu,hardware_threads=12)
             self.assertEqual(scoped['capacity_scope'],'configured-public-calendar')
             self.assertEqual(scoped['nominal_service']['capacity_scope'],'configured-public-calendar')
             self.assertEqual(scoped['complete_capacity']['capacity_scope'],'configured-public-calendar')
@@ -212,16 +362,16 @@ class ForecastTests(unittest.TestCase):
                 else:
                     measurement['noise_only_acquisition']['model_status']=model
                 with self.subTest(model=model):
-                    result=forecast._forecast_row(cpu,gpu)['complete_capacity']
+                    result=forecast._forecast_row(cpu,gpu,hardware_threads=12)['complete_capacity']
                     self.assertFalse(result['all_component_models_supported'])
                     self.assertEqual(result['realtime_status'],'unresolved')
             measurement['noise_only_acquisition']=dict(measured(.01),**{forecast.INTERVAL:None})
-            uncertain=forecast._forecast_row(cpu,gpu)['complete_capacity']
+            uncertain=forecast._forecast_row(cpu,gpu,hardware_threads=12)['complete_capacity']
             self.assertIsNone(uncertain[forecast.INTERVAL])
             self.assertNotEqual(uncertain['realtime_status'],'pass')
             measurement['noise_only_acquisition']=dict(model_status='unresolved',
                 measured_complete_component_lower_bound=1.2)
-            missing=forecast._forecast_row(cpu,gpu)['complete_capacity']
+            missing=forecast._forecast_row(cpu,gpu,hardware_threads=12)['complete_capacity']
             self.assertFalse(missing['all_component_models_supported'])
             self.assertEqual(missing['components']['acquisition']['measured_complete_component_lower_bound'],1.2)
             self.assertEqual(missing['realtime_status'],'fail')
@@ -242,7 +392,8 @@ class ForecastTests(unittest.TestCase):
         sha = lambda value:hashlib.sha256(value).hexdigest()
         source = dict(native_binary='exporter')
         budget, runtime = {'available_cpus':12}, {'threads':1}
-        local = dict(case=case,measurement={'fine_active':'original training'})
+        local = dict(case=case,measurement={'fine_active':'original training',
+            'inference_allocation_mode':'full_logical','inference_workers':12})
         other = dict(case={'index':1},measurement={'unselected':'unchanged'})
         remote = dict(case=case,public_geometry=geometry,input_sha256=sha(data),validity_sha256=sha(valid),
                       devices={'cuda':{'data_acquisition':{'coordinates':[[0]]}}})
@@ -358,12 +509,20 @@ class ForecastTests(unittest.TestCase):
         report = dict(schema='triad-manual-stage-calibration-v1',calibration_stage='noise-only-fine',
                       status='stage_calibration_measured',provenance=dict(source,unchanged_at_completion=True),
                       input=dict(parsed,unchanged_at_completion=True),runtime=dict(runtime,unchanged_at_completion=True),
-                      machine={'cpu':cpus},worker_allocations=[12],workspace_limit_bytes=4608*2**20)
+                      machine={'cpu':cpus},worker_allocations=[12],workspace_limit_bytes=4608*2**20,
+                      cases=[dict(measurement=dict(inference_allocation_mode='full_logical', inference_workers=12))])
         forecast._validate_target_noise_report(report,parsed,source,runtime,cpus,4608*2**20)
         for edit in (dict(workspace_limit_bytes=4096*2**20),dict(worker_allocations=[6]),
                      dict(input={'source_sha256':'stale','unchanged_at_completion':True})):
             with self.subTest(edit=edit), self.assertRaisesRegex(ValueError,'calibration identity or allocation differs'):
                 forecast._validate_target_noise_report(dict(report,**edit),parsed,source,runtime,cpus,4608*2**20)
+        automatic = copy.deepcopy(report)
+        automatic['worker_allocations']=[24]
+        automatic['cases'][0]['measurement'].update(inference_allocation_mode='automatic_receiver', inference_workers=24)
+        forecast._validate_target_noise_report(automatic,parsed,source,runtime,cpus,4608*2**20)
+        automatic['cases'][0]['measurement']['inference_workers']=12
+        with self.assertRaisesRegex(ValueError, 'declared receiver allocation'):
+            forecast._validate_target_noise_report(automatic,parsed,source,runtime,cpus,4608*2**20)
 
     def test_declared_reference_without_executed_row_is_not_coverage(self):
         policy = dict(paired_reference_case_indices=[3,4,6],score_atol=2e-3,score_rtol=2e-4,
@@ -422,8 +581,8 @@ class ForecastTests(unittest.TestCase):
             fields={'Encryption':False},native_args=['--encrypt','off'])
         source = dict(revision='rev',sources={},native_binary_sha256='binary',native_artifacts={})
         runtime, budget = {'torch_threads':1}, {'available_cpus':12}
-        local5 = {'case':donor,'measurement':{'inference_workers':12}}
-        local7 = {'case':target,'measurement':{'inference_workers':12,
+        local5 = {'case':donor,'measurement':{'inference_workers':12,'inference_allocation_mode':'full_logical'}}
+        local7 = {'case':target,'measurement':{'inference_workers':12,'inference_allocation_mode':'full_logical',
             'nominal_service':{forecast.RATIO:9.}, 'complete_capacity':{forecast.RATIO:10.}}}
         cpu = dict(schema='triad-manual-complete-capacity-v3',
             provenance=dict(source,unchanged_at_completion=True),
@@ -467,6 +626,20 @@ class ForecastTests(unittest.TestCase):
             self.assertIs(fit.call_args.args[0],local5)
             self.assertIs(fit.call_args.kwargs['target_noise'],noise)
             self.assertIs(verify.call_args.kwargs['target_noise'],noise)
+            holdout['workers']=18
+            mismatched=forecast.estimate(cpu,gpu,{'cases':[donor,target],'source_sha256':'list'},
+                source,runtime,budget,holdout=holdout,holdout_indices=[7],transfers=[(7,5)],
+                target_noise_indices=[7])
+            self.assertIn('holdout workers differ',mismatched['cases'][1]['reason'])
+            holdout['workers']=24
+            for local in (local5,local7):
+                local['measurement'].update(inference_allocation_mode='automatic_receiver', inference_workers=24)
+            calls=fit.call_count
+            forecast.estimate(cpu,gpu,{'cases':[donor,target],'source_sha256':'list'},
+                source,runtime,budget,holdout=holdout,holdout_indices=[7],transfers=[(7,5)],
+                target_noise_indices=[7])
+            self.assertEqual(fit.call_count,calls+2)  # Both current-list rows now use the automatic allocation.
+            self.assertEqual(fit.call_args.kwargs['hardware_threads'],12)
         transfer = result['cases'][1]['cross_case_calibration']
         self.assertTrue(transfer['target_cpu_timing_excluded_from_fit'])
         self.assertEqual(transfer['donor_manual_list_sha256'],'old-list')

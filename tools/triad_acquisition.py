@@ -93,6 +93,23 @@ def frontend_plan(profile="rate-aware", *, sample_rate=18000,
                 decimation=raw // output, pass_edge_hz=passed, stop_edge_hz=stopped,
                 design_attenuation_db=96.)
 
+def _data_fir_design(profile, sample_rate, output_sample_rate, pass_edge_hz, stop_edge_hz):
+    plan = frontend_plan(profile, sample_rate=sample_rate, output_sample_rate=output_sample_rate,
+                         pass_edge_hz=pass_edge_hz, stop_edge_hz=stop_edge_hz)
+    passed, stopped = plan["pass_edge_hz"], plan["stop_edge_hz"]
+    count, beta = signal.kaiserord(96., (stopped - passed) / (sample_rate / 2))
+    count += 1 - count % 2
+    if count > 1_000_001:
+        raise ValueError("frontend FIR exceeds the explicit 1000001-tap design budget")
+    return count, (passed + stopped) / 2, beta
+
+
+def data_fir_tap_count(profile="rate-aware", *, sample_rate=18000, output_sample_rate=900,
+                       pass_edge_hz=None, stop_edge_hz=None):
+    """Return the exact design length without allocating FIR taps."""
+    return _data_fir_design(profile, sample_rate, output_sample_rate, pass_edge_hz, stop_edge_hz)[0]
+
+
 def data_fir_taps(profile="rate-aware", *, sample_rate=18000,
                   output_sample_rate=900, pass_edge_hz=None,
                   stop_edge_hz=None):
@@ -101,11 +118,6 @@ def data_fir_taps(profile="rate-aware", *, sample_rate=18000,
     Kaiser design targets 96 dB, with margin over the required 80-dB stopband.
     No automatic frequency shift, energy normalization or observation tuning.
     """
-    plan = frontend_plan(profile, sample_rate=sample_rate, output_sample_rate=output_sample_rate,
-                         pass_edge_hz=pass_edge_hz, stop_edge_hz=stop_edge_hz)
-    passed, stopped = plan["pass_edge_hz"], plan["stop_edge_hz"]
-    count, beta = signal.kaiserord(96., (stopped - passed) / (sample_rate / 2))
-    count += 1 - count % 2
-    if count > 1_000_001:
-        raise ValueError("frontend FIR exceeds the explicit 1000001-tap design budget")
-    return signal.firwin(count, (passed + stopped) / 2, window=("kaiser", beta), fs=sample_rate)
+    count, cutoff, beta = _data_fir_design(profile, sample_rate, output_sample_rate,
+                                          pass_edge_hz, stop_edge_hz)
+    return signal.firwin(count, cutoff, window=("kaiser", beta), fs=sample_rate)

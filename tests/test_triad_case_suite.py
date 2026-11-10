@@ -81,7 +81,7 @@ class SuiteHelperTests(unittest.TestCase):
             workspace_mib=None, full_logical_inference=None,
         )
 
-    def test_full_logical_suite_keeps_ordered_duplicate_rows_and_runs_one_canonical_measurement(self):
+    def test_automatic_suite_keeps_ordered_duplicate_rows_and_runs_one_canonical_measurement(self):
         import triad_case_capacity as capacity
         import triad_case_suite as suite
 
@@ -100,7 +100,7 @@ class SuiteHelperTests(unittest.TestCase):
             stack.enter_context(mock.patch('triad_case_metrics.machine_resources', return_value={
                 'cpu': {'receiver_worker_candidates': [1,2,4,6,12], 'available_cpus': 12,
                         'topology': {'status': 'complete', 'physical_core_count': 6}},
-                'memory_budget_bytes': 2**33}))
+                'memory_budget_bytes': 3*2**30, 'available_memory_bytes': 8*2**30}))
             stack.enter_context(mock.patch('triad_cpu.resolve_cpu_budget'))
             stack.enter_context(mock.patch('triad_cpu.configure_numerical_threads'))
             stack.enter_context(mock.patch('triad_abbreviated.environment',
@@ -125,18 +125,65 @@ class SuiteHelperTests(unittest.TestCase):
 
             direct = stack.enter_context(mock.patch.object(capacity, 'measure_complete_case',
                                                             side_effect=measure))
+            with self.assertRaisesRegex(ValueError, 'physical/cgroup RAM'):
+                capacity.run_complete_cases(executable='exporter', output=root/'rejected.json',
+                    case_list=source, workspace_mib=8193)
             result = capacity.run_complete_cases(executable='exporter', output=root/'suite.json',
                 case_list=source, workspace_mib=4096, sustained_allocation_probe=True)
 
             prepare.assert_called_once()
-            self.assertEqual(prepare.call_args.kwargs['bank_workers'], 12)
+            self.assertEqual(prepare.call_args.kwargs['bank_workers'], 24)
             self.assertEqual(prepare.call_args.kwargs['memory_limit_bytes'], 4096*2**20)
             direct.assert_called_once()
-            self.assertEqual(direct.call_args.args[1], [1,6,12])
-            self.assertEqual(direct.call_args.kwargs['inference_workers'], 12)
+            self.assertEqual(direct.call_args.args[1], [1,6,12,24])
+            self.assertEqual(direct.call_args.kwargs['inference_workers'], 24)
+            self.assertEqual(direct.call_args.kwargs['inference_mode'], 'automatic_receiver')
             self.assertEqual(result['status'], 'conditional_capacity_pass')
             self.assertEqual(result['cases'][1]['reused_measurement_from'], cases[0]['id'])
-            self.assertEqual(result['policy']['full_logical_inference_workers'], 12)
+            self.assertEqual(result['policy']['receiver_inference_workers'], 24)
+            self.assertNotIn('full_logical_inference_workers', result['policy'])
+
+    def test_manual_worker_policy_distinguishes_automatic_hardware_and_explicit_controls(self):
+        from triad_case_capacity import manual_worker_plan
+        cpu = dict(available_cpus=12, receiver_worker_candidates=[1,2,4,6,12],
+            topology=dict(status='complete', physical_core_count=6))
+        automatic = manual_worker_plan(cpu)
+        self.assertEqual(automatic['allocations'], [1,6,12,24])
+        self.assertEqual(automatic['inference_workers'], 24)
+        self.assertEqual(automatic['inference_mode'], 'automatic_receiver')
+        hardware = manual_worker_plan(cpu, full_logical_inference=True)
+        self.assertEqual(hardware['allocations'], [1,6,12])
+        self.assertEqual(hardware['inference_workers'], 12)
+        self.assertEqual(hardware['inference_mode'], 'full_logical')
+        explicit = manual_worker_plan(cpu, threads=24)
+        self.assertEqual(explicit['allocations'], [24])
+        self.assertEqual(explicit['inference_workers'], 24)
+        self.assertEqual(explicit['inference_mode'], 'explicit')
+        pilot = manual_worker_plan(cpu, full_logical_inference=False)
+        self.assertEqual(pilot['allocations'], [1,2,4,6,12])
+        self.assertIsNone(pilot['inference_workers'])
+        self.assertEqual(pilot['inference_mode'], 'pilot_selected')
+        for invalid in (0, -1, True, 1.5):
+            with self.subTest(threads=invalid), self.assertRaises(ValueError):
+                manual_worker_plan(cpu, threads=invalid)
+        with self.assertRaises(ValueError):
+            manual_worker_plan(cpu, threads=24, full_logical_inference=True)
+
+    def test_automatic_stage_and_small_hardware_budgets_preserve_extra_workers(self):
+        from triad_case_capacity import manual_worker_plan
+        for hardware in (1, 3, 8, 12, 32):
+            with self.subTest(hardware=hardware):
+                cpu = dict(available_cpus=hardware, receiver_worker_candidates=[1,hardware],
+                    topology=dict(status='unknown'))
+                plan = manual_worker_plan(cpu)
+                self.assertEqual(plan['inference_workers'], 2*hardware)
+                self.assertGreater(plan['inference_workers'], hardware)
+                self.assertEqual(plan['allocations'], sorted(set(plan['allocations'])))
+                stage = manual_worker_plan(cpu, calibration_stage='noise-only-fine')
+                self.assertEqual(stage['allocations'], [plan['inference_workers']])
+                control = manual_worker_plan(cpu, calibration_stage='noise-only-fine',
+                    full_logical_inference=True)
+                self.assertEqual(control['allocations'], [hardware])
 
     def test_legacy_coarse_paired_followup_is_rejected_by_complete_runner(self):
         from triad_case_capacity import run_complete_cases

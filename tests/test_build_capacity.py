@@ -111,6 +111,17 @@ class BuildCapacity(unittest.TestCase):
              patch.object(capacity, 'linux_limits', side_effect=ValueError('unreadable')):
             self.assertEqual(capacity.default_jobs(), 1)
 
+    def test_negative_memory_limit_requires_the_known_unlimited_sentinel(self):
+        for kind, filename in (('v1', 'memory.limit_in_bytes'), ('v2', 'memory.max')):
+            with self.subTest(kind=kind):
+                proc, mount = self.fixture(kind)
+                (mount / filename).write_text('-1')
+                self.assertEqual(capacity.linux_limits(proc), ([], []))
+                for value in ('-2', str(-(1 << 63))):
+                    (mount / filename).write_text(value)
+                    with self.assertRaisesRegex(ValueError, 'negative cgroup memory limit'):
+                        capacity.linux_limits(proc)
+
     def test_memavailable_not_free_or_total(self):
         with patch.object(capacity.sys, 'platform', 'linux'), \
              patch.object(capacity, 'read_text', return_value='MemTotal: 999 kB\nMemFree: 1 kB\nMemAvailable: 123 kB\n'):

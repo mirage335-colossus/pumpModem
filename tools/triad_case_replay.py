@@ -223,16 +223,40 @@ def _local_fidelity_manifest(manifest, public_address, clocks, *, source_window_
     return local
 
 
+def _mapped_profile_source_window(plan, descriptor, fs):
+    fmt = plan['format']
+    first = int(plan['geometry']['source_calendar_origin_sample'] +
+        .5*min(float(fmt['tile_seconds']), float(fmt['elapsed_bit_seconds']))*fs)
+    return first, min(2*fs, int(descriptor['source_samples'])-first)
+
+
+def _mapped_profile_peak(exact, approximate, capture, template_reserve):
+    residents = exact.resident_estimate+approximate.resident_estimate
+    # The comparison retains both banks and current QR/SVD operands. Controls
+    # separately reserve cubic interpolation, phase, input and RNG scratch.
+    comparison_scratch = (2*len(exact.workspaces)+16)*exact.kernel_rows*len(exact.rays)*16+65536
+    control_scratch = 32*capture*16
+    score_peaks = []
+    for screen in (exact, approximate):
+        groups = (None if screen.correlation_method == 'frequency' else
+                  screen._lag_frequency_groups([0.], None))
+        score_plan = screen._correlation_plan(np.asarray([0.]), groups, raw_input=True, top_per_bit=2)
+        if score_plan['selected'] is None:
+            raise MemoryError('local mapped-profile control score exceeds workspace or work limit')
+        score_peaks.append(score_plan['estimated_peak_bytes_by_method'][score_plan['selected'][0]]-
+                           screen.resident_estimate)
+    return template_reserve+max(exact.preparation_peak_estimate_bytes,
+        exact.resident_estimate+approximate.preparation_peak_estimate_bytes,
+        residents+comparison_scratch, residents+control_scratch+max(score_peaks))
+
+
 def _validate_mapped_profile(source, manifest, clocks, *, output_fs, pass_edge,
                              stop_edge, public_address, memory_limit_bytes, threads, sampling_step=60):
     """Cheap current-input admission; no heading or historical fixture whitelist."""
     if isinstance(sampling_step, bool) or sampling_step not in (3, 60):
         raise ValueError('local mapped-profile validation supports only fixed S=3 or S=60')
     fs = int(manifest['sample_rate_hz'])
-    fmt = source.plan['format']
-    first = int(source.plan['geometry']['source_calendar_origin_sample'] +
-        .5*min(float(fmt['tile_seconds']), float(fmt['elapsed_bit_seconds']))*fs)
-    count = min(2*fs, int(source.descriptor['source_samples'])-first)
+    first, count = _mapped_profile_source_window(source.plan, source.descriptor, fs)
     native_workspace = max(int(source.descriptor.get('fixed_workspace_bytes', 0)),
         int(source.descriptor.get('workspace_budget_bytes', 0)))
     # Native pipe bytes, decoded basis and contiguous/hash views may coexist.
@@ -264,27 +288,7 @@ def _validate_mapped_profile(source, manifest, clocks, *, output_fs, pass_edge,
             _bounded_basis(source, lanes, first+positions),
         mapped_template_batch_lanes=max(1, source.descriptor.get('maximum_mapped_bank_lanes', 1)),
         **options)
-    residents = exact.resident_estimate+approximate.resident_estimate
-    # The comparison retains two orthonormal banks, plus the current QR/SVD
-    # operands. Controls reserve cubic interpolation, phase, clean/noisy input
-    # and RNG temporaries. These are separate phases, not simultaneous sums.
-    comparison_scratch = (2*len(exact.workspaces)+16)*exact.kernel_rows*len(exact.rays)*16+65536
-    control_scratch = 32*capture*16
-    score_peaks = []
-    for screen in (exact, approximate):
-        frequencies = np.asarray([0.])
-        groups = (None if screen.correlation_method == 'frequency' else
-            screen._lag_frequency_groups([0.], None))
-        score_plan = screen._correlation_plan(frequencies, groups, raw_input=True, top_per_bit=2)
-        if score_plan['selected'] is None:
-            raise MemoryError('local mapped-profile control score exceeds workspace or work limit')
-        score_peaks.append(score_plan['estimated_peak_bytes_by_method'][score_plan['selected'][0]]-
-                           screen.resident_estimate)
-    local_peak = native_workspace+template_reserve+max(
-        exact.preparation_peak_estimate_bytes,
-        exact.resident_estimate+approximate.preparation_peak_estimate_bytes,
-        residents+comparison_scratch,
-        residents+control_scratch+max(score_peaks))
+    local_peak = native_workspace+_mapped_profile_peak(exact, approximate, capture, template_reserve)
     if local_peak > memory_limit_bytes:
         raise MemoryError('local mapped-profile comparison/control peak exceeds workspace')
     comparison = compare_template_projectors(exact, approximate)
@@ -393,6 +397,69 @@ def public_screen_geometry(plan, descriptor, *, mapped_step=None):
         template_work=template_work, work_cap=cap)
 
 
+def _public_screen_options(geometry, descriptor, workers):
+    step = geometry['selected_step']
+    return dict(clock_ppm=geometry['clock_bank'], output_sample_rate=geometry['output_fs'],
+        pass_edge_hz=geometry['pass_edge'], stop_edge_hz=geometry['stop_edge'],
+        workers=workers, precision='fp64', maximum_frequency_points=4096 if step == 60 else 1024,
+        maximum_fft_products=32768, correlation_method='auto' if step == 60 else 'frequency',
+        source_samples=geometry['raw_source_samples'],
+        mapped_template_batch_lanes=max(1, descriptor.get('maximum_mapped_bank_lanes', 1)),
+        template_sampling_step=step)
+
+
+def public_screen_workspace(manifest, native_plan, descriptor, *, workers, memory_limit_bytes=None):
+    """Plan CPU coarse bank preparation from public metadata without templates."""
+    geometry = public_screen_geometry(native_plan, descriptor)
+    options = _public_screen_options(geometry, descriptor, workers)
+    # The first pass funds all requested useful projection workers and only
+    # their required lanes. At a concrete limit, quote the same extra batch
+    # lanes the constructor would admit. Native and input are reserved outside.
+    minimum = memory_limit_bytes is None
+    available = (1 << 63)-1 if minimum else memory_limit_bytes
+    unavailable = lambda *_: None
+    screen = FFTScreen(manifest, None, EPOCHS, **options,
+        template_provider=_IntegerTemplateProvider(None) if geometry['selected_step'] == 1 else None,
+        mapped_template_provider=unavailable if geometry['selected_step'] > 1 else None,
+        template_identity='0'*64, memory_limit_bytes=available, _workspace_only=True,
+        _minimum_batch=minimum)
+    peaks = dict(bank_preparation=screen.preparation_peak_estimate_bytes)
+    if not minimum and geometry['selected_step'] == 1:
+        # An unavailable native stencil can leave space for more generic
+        # lanes. Both accepted implementations must fit this same child cap.
+        generic = _IntegerTemplateProvider(None)
+        generic.cubic_plan = None
+        fallback = FFTScreen(manifest, None, EPOCHS, **options, template_provider=generic,
+            template_identity='0'*64, memory_limit_bytes=available, _workspace_only=True)
+        peaks['bank_preparation'] = max(peaks['bank_preparation'], fallback.preparation_peak_estimate_bytes)
+    if geometry['selected_step'] > 1:
+        fs = int(manifest['sample_rate_hz'])
+        _, count = _mapped_profile_source_window(native_plan, descriptor, fs)
+        if count < 256:
+            raise MemoryError('local mapped-profile validation exceeds its bounded public bank')
+        address = dict(pattern_epoch=manifest['public_epoch_seconds'],
+                       symbol_ordinal=manifest.get('format', {}).get('symbol_ordinal', 0))
+        local = _local_fidelity_manifest(manifest, address, geometry['clock_bank'],
+            source_window_samples=count, fs=fs)
+        template_bytes = count*len(EPOCHS)*2*16
+        profile_available = available-4*template_bytes
+        if profile_available <= 0:
+            raise MemoryError('local mapped-profile validation exceeds its bounded public bank')
+        short = dict(clock_ppm=geometry['clock_bank'], output_sample_rate=geometry['output_fs'],
+            pass_edge_hz=geometry['pass_edge'], stop_edge_hz=geometry['stop_edge'],
+            precision='fp64', workers=workers, source_samples=count,
+            _workspace_only=True, _minimum_batch=minimum)
+        exact = FFTScreen(local, None, EPOCHS, **short, _raw_template_bytes=template_bytes,
+            memory_limit_bytes=profile_available)
+        approximate = FFTScreen(local, None, EPOCHS, **short, template_identity='0'*64,
+            mapped_template_provider=unavailable, template_sampling_step=geometry['selected_step'],
+            mapped_template_batch_lanes=options['mapped_template_batch_lanes'],
+            memory_limit_bytes=profile_available-exact.resident_estimate)
+        peaks['mapped_fidelity'] = _mapped_profile_peak(exact, approximate,
+            local['calendar']['capture_samples'], 4*template_bytes)
+    return screen, geometry, peaks
+
+
 def build_public_screen(source, manifest, *, public_address, source_identity,
                         memory_limit_bytes, threads, mapped_step=None,
                         screen_factory=FFTScreen):
@@ -451,17 +518,9 @@ def build_public_screen(source, manifest, *, public_address, source_identity,
                            int(descriptor.get('workspace_budget_bytes', 0)))
     available = memory_limit_bytes-native_workspace
     screen = screen_factory(public_manifest, None, EPOCHS,
-        clock_ppm=clock_bank, output_sample_rate=output_fs,
-        pass_edge_hz=pass_edge, stop_edge_hz=stop_edge,
-        workers=threads, precision='fp64', memory_limit_bytes=available,
-        maximum_frequency_points=4096 if selected_step == 60 else 1024,
-        maximum_fft_products=32768,
-        correlation_method='auto' if selected_step == 60 else 'frequency',
-        template_provider=raw_provider, source_samples=raw_source_samples,
-        template_identity=source_digest,
-        mapped_template_provider=mapped_provider,
-        mapped_template_batch_lanes=max(1, descriptor.get('maximum_mapped_bank_lanes', 1)),
-        template_sampling_step=selected_step)
+        **_public_screen_options(geometry, descriptor, threads), memory_limit_bytes=available,
+        template_provider=raw_provider, template_identity=source_digest,
+        mapped_template_provider=mapped_provider)
     screen_seconds = time.perf_counter()-started
     preparation_peak = max(screen.preparation_peak_estimate_bytes+native_workspace,
         (profile_validation or {}).get('preparation_peak_estimate_bytes', 0))

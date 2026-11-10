@@ -338,7 +338,7 @@ class CompleteStreamReceiverTests(unittest.TestCase):
         self.assertFalse(other.cancel()['physical_complete'])
         self.assertEqual(other.drain_messages(), [])
 
-    def test_continuous_default_uses_the_full_visible_worker_budget(self):
+    def test_continuous_default_oversubscribes_the_visible_hardware_budget(self):
         with mock.patch('triad_stream_receiver.resolve_cpu_budget', return_value={'threads': 12}):
             receiver = CompleteStreamReceiver(public_manifest(), PublicSource(),
                 source_identity='public', memory_limit_bytes=4*2**20,
@@ -347,8 +347,9 @@ class CompleteStreamReceiverTests(unittest.TestCase):
                 receiver_factory=BitReceiver)
         self.addCleanup(receiver.close)
         self.assertTrue(receiver.continuous)
-        self.assertEqual(receiver.workers, 12)
-        self.assertEqual(receiver.result()['worker_allocation'], 12)
+        self.assertEqual(receiver.workers, 24)
+        self.assertEqual(receiver.result()['worker_allocation'], 24)
+        self.assertTrue(receiver.result()['automatic_worker_oversubscription'])
 
     def test_interior_and_leading_ambiguity_prevent_decoding_a_suffix(self):
         for markers, erased in (([1, 3, 2, 0, 0], 1), ([3, 1, 0, 0], 0)):
@@ -623,13 +624,25 @@ class NativeMessageGateHarnessTests(unittest.TestCase):
                 run_native_message_gate('/native', 2**20, continuous=invalid)
 
 
+def slot_workspace_planner(manifest, native_plan, descriptor, *, workers, receiver_policy=None):
+    count = manifest['calendar']['capture_samples']
+    native = max(descriptor.get('fixed_workspace_bytes', 0), descriptor.get('workspace_budget_bytes', 0))
+    minimum = 17*count+native+16384
+    return dict(minimum_memory_limit_bytes=minimum, input_bytes=17*count,
+                native_bytes=native, stage_bound_bytes={'fixture': minimum-1})
+
+
 class ControlledSlotBackend:
     """No concurrent numerical work: exercise the real parent scheduling seam."""
-    resident_bytes = 0
+    startup_owner_reservation_bytes = 0
+    runtime_bytes_per_owner = 0
     native_workspace_bytes = 0
 
     def __init__(self, source, **options):
         self.source, self.total_workers = source, options['total_workers']
+        self.max_processes = options['max_processes']
+        self.owner_count = options['initial_processes']
+        self.growth, self.retired = [self.owner_count], []
         self.pending, self.allocations, self.completed = {}, [], []
         self.release = False
         self.reverse = True
@@ -638,12 +651,33 @@ class ControlledSlotBackend:
         self.error = None
         source.backend = self
 
+    @property
+    def resident_bytes(self):
+        return self.owner_count*self.runtime_bytes_per_owner
+
+    def prospective_owner_bytes(self, python_bytes, native_bytes):
+        return python_bytes+native_bytes
+
+    def resident_bytes_after_retirement(self, count):
+        assert not self.pending
+        return count*self.runtime_bytes_per_owner
+
+    def ensure_processes(self, count):
+        assert count <= self.max_processes
+        self.owner_count = max(self.owner_count, count)
+        self.growth.append(self.owner_count)
+
+    def retire_idle(self, count):
+        assert not self.pending
+        self.owner_count = count
+        self.retired.append(count)
+
     @staticmethod
     def input_reservation_bytes(count):
         return 4*17*count+4*1024**2
 
     def submit(self, index, **job):
-        assert len(self.pending) < 2
+        assert len(self.pending) < self.owner_count
         assert sum(value['workers'] for value in self.pending.values())+job['workers'] <= self.total_workers
         self.pending[index] = job
         self.allocations.append((index, job['workers']))
@@ -673,6 +707,38 @@ class ControlledSlotBackend:
         self.pending.clear()
 
 
+class SharedControlledSlotBackend(ControlledSlotBackend):
+    supports_shared_input = True
+
+    def __init__(self, source, **options):
+        super().__init__(source, **options)
+        self.input_transport = options['input_transport']
+        self.inputs = []
+
+    def submit(self, index, **job):
+        if self.input_transport == 'sealed_memfd':
+            self.inputs.append(job['shared_input'])
+            assert 'values' not in job and 'valid' not in job
+        super().submit(index, **job)
+
+    def poll(self, *, wait=False):
+        if not self.pending or not (wait or self.release):
+            return []
+        index = (max if self.reverse else min)(self.pending)
+        job = self.pending[index]
+        owner = job.pop('shared_input', None)
+        if owner is None:
+            return super().poll(wait=wait)
+        view = owner.open_readonly()
+        try:
+            job['values'], job['valid'] = view.values, view.valid
+            return super().poll(wait=wait)
+        finally:
+            job.pop('values', None)
+            job.pop('valid', None)
+            view.close()
+
+
 class StreamPipelineTests(unittest.TestCase):
     setUp = CompleteStreamReceiverTests.setUp
     record = CompleteStreamReceiverTests.record
@@ -681,16 +747,374 @@ class StreamPipelineTests(unittest.TestCase):
         source = PublicSource()
         source.command = source
         options.setdefault('maximum_pending_messages', 4)
+        options.setdefault('slot_processes', 2)
+        options.setdefault('slot_workspace_planner', slot_workspace_planner)
         receiver = CompleteStreamReceiver(public_manifest(), source,
-            source_identity={}, memory_limit_bytes=64*1024**2, workers=12,
+            source_identity={}, memory_limit_bytes=options.pop('memory_limit_bytes',256*1024**2), workers=options.pop('workers',12),
             decode_short_message=self.decode, bank_builder=bank_builder,
             receiver_factory=BitReceiver, maximum_slots=8,
             maximum_input_chunk_samples=options.pop('maximum_input_chunk_samples', 32),
             maximum_buffer_samples=128,
             maximum_gap_samples=8, recent_slot_receipts=8,
-            process_backend_factory=ControlledSlotBackend, **options)
+            process_backend_factory=options.pop('process_backend_factory', ControlledSlotBackend), **options)
         self.addCleanup(receiver.close)
         return receiver, source
+
+    def automatic_receiver(self, hardware=12, **options):
+        source = PublicSource()
+        source.command = source
+        with mock.patch('triad_continuous.NativeStream', PublicSource), \
+                mock.patch('triad_stream_receiver.resolve_cpu_budget',
+                           return_value=dict(threads=hardware, available_cpus=hardware)):
+            receiver = CompleteStreamReceiver(public_manifest(), source,
+                source_identity={}, memory_limit_bytes=options.pop('memory_limit_bytes',256*1024**2),
+                decode_short_message=self.decode, maximum_slots=8,
+                maximum_input_chunk_samples=32, maximum_buffer_samples=128,
+                maximum_gap_samples=8, recent_slot_receipts=8,
+                process_backend_factory=ControlledSlotBackend,
+                slot_workspace_planner=options.pop('slot_workspace_planner', slot_workspace_planner), **options)
+        # Only DSP fixtures change after the constructor identifies a canonical
+        # source/default algorithm. The ordinary parent policy remains intact.
+        receiver.bank_builder, receiver.receiver_factory = bank_builder, BitReceiver
+        self.addCleanup(receiver.close)
+        return receiver, source
+
+    def test_automatic_canonical_cpu_policy_and_explicit_controls(self):
+        cases = [(1, {}, 2, 2), (2, {}, 4, 4), (12, {}, 24, 24),
+                 (12, {'slot_processes': 1}, 24, 1),
+                 (12, {'workers': 12}, 12, 12), (12, {'workers': 24}, 24, 24),
+                 (12, {'workers': 48}, 48, 24),
+                 (12, {'workers': 18, 'slot_processes': 3}, 18, 3),
+                 (12, {'continuous': False}, 24, 1)]
+        for hardware, options, workers, owners in cases:
+            with self.subTest(hardware=hardware, options=options):
+                receiver, _ = self.automatic_receiver(hardware, **options)
+                row = receiver.result()
+                self.assertEqual(row['worker_allocation'], workers)
+                self.assertEqual(row['visible_hardware_threads'], hardware)
+                self.assertEqual(row['slot_pipeline']['maximum_processes'], owners)
+                self.assertEqual(row['automatic_worker_oversubscription'],
+                                 'workers' not in options)
+                self.assertEqual(row['explicit_worker_oversubscription'],
+                                 options.get('workers', 0) > hardware)
+        # An explicit owner cap stays exact for custom DSP too.
+        with mock.patch('triad_stream_receiver.resolve_cpu_budget',
+                        return_value=dict(threads=12, available_cpus=12)):
+            receiver, _ = self.receiver(workers=None)
+        self.assertEqual(receiver.workers, 24)
+        self.assertEqual(receiver.maximum_slot_processes, 2)
+
+    def test_invalid_owner_count_or_worker_split_is_rejected_before_startup(self):
+        for owners, workers in ((0, 12), (True, 12), (3, 2)):
+            with self.subTest(owners=owners, workers=workers), self.assertRaises(ValueError):
+                self.receiver(workers=workers, slot_processes=owners)
+
+    def shared_receiver(self, **options):
+        from triad_slot_executor import select_slot_input_transport
+        if select_slot_input_transport()['method'] != 'sealed_memfd':
+            self.skipTest('sealed memfd input is unavailable')
+        return self.receiver(process_backend_factory=SharedControlledSlotBackend, **options)
+
+    def test_shared_input_is_selected_lazily_and_released_after_ordered_results(self):
+        from triad_slot_executor import select_slot_input_transport
+        with mock.patch('triad_stream_receiver.select_slot_input_transport', wraps=select_slot_input_transport) as choose:
+            receiver, source = self.shared_receiver()
+            choose.assert_not_called()
+            receiver.push(0, self.record([1, 1, 2, 0, 0]))
+            choose.assert_called_once()
+            self.assertTrue(all(job['values'] is None and job['valid'] is None for job in receiver._jobs.values()))
+            self.assertTrue(all(owner.fd is not None for owner in source.backend.inputs))
+            result = receiver.resume()
+        self.assertEqual(result['completed_slot_count'], 5)
+        self.assertEqual(result['slot_pipeline']['last_admission']['input_transport']['method'], 'sealed_memfd')
+        self.assertEqual(receiver.drain_messages()[0]['message']['received_bits'], [0, 0, 1])
+        self.assertTrue(all(owner.fd is None for owner in source.backend.inputs))
+        self.assertGreater(result['slot_pipeline']['last_admission']['assembly_scratch_bytes'], 0)
+        self.assertLessEqual(result['workspace']['peak_combined_estimate_bytes'], receiver.memory_limit)
+
+    def test_unavailable_shared_transport_uses_old_copy_reservations_before_dispatch(self):
+        from triad_slot_executor import SlotProcessBackend
+        with mock.patch('triad_stream_receiver.select_slot_input_transport',
+                return_value=dict(method='pipe_copy', reason='fixture_seals_unavailable')):
+            receiver, source = self.receiver(process_backend_factory=SharedControlledSlotBackend)
+            receiver.push(0, np.zeros(10, complex))
+        for job in receiver._jobs.values():
+            self.assertNotIn('shared_input', job)
+            self.assertIsNotNone(job['values'])
+            requirement = slot_workspace_planner(job['manifest'], None, source.descriptor, workers=job['workers'])
+            self.assertEqual(job['reservation'], requirement['minimum_memory_limit_bytes']-
+                requirement['native_bytes']+SlotProcessBackend.input_reservation_bytes(job['samples'])-17*job['samples'])
+        self.assertEqual(receiver.result()['slot_pipeline']['last_admission']['input_transport']['reason'], 'fixture_seals_unavailable')
+        self.assertEqual(receiver._last_admission['assembly_scratch_bytes'], 0)
+        self.assertEqual(receiver.resume()['completed_slot_count'], 2)
+
+    def test_serial_receiver_does_not_probe_or_allocate_shared_input(self):
+        with mock.patch('triad_stream_receiver.select_slot_input_transport', side_effect=AssertionError('serial probe')):
+            receiver, source = self.receiver(slot_processes=1)
+            receiver.push(0, np.zeros(6, complex))
+        self.assertEqual(receiver.result()['completed_slot_count'], 1)
+        self.assertFalse(hasattr(source, 'backend'))
+
+    def test_shared_wave_does_not_admit_without_its_one_assembly_scratch(self):
+        receiver, source = self.shared_receiver(workers=24, slot_processes=3)
+        ready = [receiver._get_plan(index) for index in range(3)]
+        choice = receiver._select_dispatch(ready, [])
+        self.assertEqual(len(choice['plans']), 3)
+        self.assertEqual(choice['allocations'], [8, 8, 8])
+        scratch = max(17*plan['receiver_window_samples'] for plan in ready)
+        self.assertEqual(choice['assembly_scratch_bytes'], scratch)
+        # A cap that accommodates the shared jobs but not the simultaneous
+        # private packing pair must narrow before any owner is started.
+        receiver.memory_limit = choice['aggregate_estimate_bytes']-1
+        narrowed = receiver._select_dispatch(ready, [])
+        self.assertLess(len(narrowed['plans']), 3)
+        self.assertFalse(hasattr(source, 'backend'))
+
+    def test_shared_workspace_retry_maps_readonly_after_all_owners_close(self):
+        receiver, source = self.shared_receiver()
+        receiver.push(0, np.zeros(10, complex))
+        source.backend.error = 'MemoryError'
+        original = receiver._score_serial
+        def retry(job):
+            self.assertTrue(source.backend.closed)
+            self.assertIsNotNone(job['shared_input'].fd)
+            self.assertFalse(job['values'].flags.writeable)
+            self.assertFalse(job['valid'].flags.writeable)
+            owner = job['shared_input']
+            self.assertEqual(job['reservation'], owner.input_bytes)
+            overhead = owner.storage_bytes-owner.input_bytes
+            self.assertGreaterEqual(receiver._inflight_input_bytes, overhead)
+            expected = (receiver.memory_limit-receiver._reserved_bytes()+owner.input_bytes+
+                        receiver._original_native_reservation_bytes)
+            result = original(job)
+            self.assertEqual(job['memory_limit_bytes'], expected)
+            self.assertGreaterEqual(job['parent_reservation'], overhead)
+            return result
+        with mock.patch.object(receiver, '_score_serial', side_effect=retry):
+            result = receiver.resume()
+        self.assertEqual(result['slot_pipeline']['workspace_retry_count'], 1)
+        self.assertEqual(result['completed_slot_count'], 2)
+        self.assertTrue(all(owner.fd is None for owner in source.backend.inputs))
+
+    def test_shared_retry_exception_releases_traceback_views_and_backing(self):
+        receiver, source = self.shared_receiver()
+        receiver.push(0, np.zeros(10, complex))
+        source.backend.error = 'MemoryError'
+        def failure(job):
+            retained = job['values'][:]
+            try:
+                raise RuntimeError('nested view failure')
+            except RuntimeError as error:
+                self.assertFalse(retained.flags.writeable)
+                raise ValueError('scoring failed') from error
+        with mock.patch.object(receiver, '_score_serial', side_effect=failure):
+            result = receiver.resume()
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['diagnostic']['exception_type'], 'ValueError')
+        self.assertTrue(all(owner.fd is None for owner in source.backend.inputs))
+
+    def test_unreleased_retry_view_keeps_shared_backing_until_actual_release(self):
+        receiver, source = self.shared_receiver()
+        receiver.push(0, np.zeros(10, complex))
+        source.backend.error = 'MemoryError'
+        exported = []
+        def failure(job):
+            exported.append(job['values'][:])
+            raise ValueError('external view outlived scoring')
+        with mock.patch.object(receiver, '_score_serial', side_effect=failure):
+            result = receiver.resume()
+        self.assertEqual(result['reason'], 'slot_owner_shutdown_failed')
+        retained = [job for job in receiver._jobs.values() if job.get('shared_view') is not None]
+        self.assertEqual(len(retained), 1)
+        self.assertIsNotNone(retained[0]['shared_input'].fd)
+        self.assertEqual(retained[0]['reservation'], retained[0]['shared_input'].storage_bytes)
+        exported.clear()
+        receiver.close()
+        self.assertTrue(all(owner.fd is None for owner in source.backend.inputs))
+
+    def test_shared_cancel_and_unexpected_transfer_failure_release_only_after_shutdown(self):
+        for fail_send in (False, True):
+            receiver, source = self.shared_receiver()
+            if fail_send:
+                def broken(backend, index, **job):
+                    backend.inputs.append(job['shared_input'])
+                    raise OSError('descriptor send failed')
+                with mock.patch.object(SharedControlledSlotBackend, 'submit', broken):
+                    result = receiver.push(0, np.zeros(10, complex))
+                self.assertEqual(result['status'], 'failed')
+            else:
+                receiver.push(0, np.zeros(10, complex))
+                result = receiver.cancel()
+                self.assertEqual(result['status'], 'cancelled')
+            self.assertTrue(source.backend.closed)
+            self.assertTrue(all(owner.fd is None for owner in source.backend.inputs))
+
+    def test_failed_owner_shutdown_keeps_shared_backing_and_reservation(self):
+        receiver, source = self.shared_receiver()
+        receiver.push(0, np.zeros(10, complex))
+        before = receiver._reserved_bytes()
+        with mock.patch.object(source.backend, 'close', side_effect=RuntimeError('owner not released')):
+            result = receiver.cancel()
+            self.assertEqual(result['reason'], 'slot_owner_shutdown_failed')
+            self.assertTrue(all(owner.fd is not None for owner in source.backend.inputs))
+            self.assertEqual(receiver._reserved_bytes(), before)
+        receiver.close()
+        self.assertTrue(all(owner.fd is None for owner in source.backend.inputs))
+
+    def test_default_lone_full_budget_then_one_worker_per_owner_refill(self):
+        receiver, source = self.automatic_receiver()
+        values = self.record([1, 1, 2, 0, 0]+[0]*20)
+        receiver.push(0, values[:8])
+        for first in range(8,len(values),32):
+            receiver.push(first,values[first:first+32])
+        self.assertEqual(source.backend.allocations, [(0, 24)])
+        result = receiver.resume()
+        self.assertEqual(source.backend.allocations, [(0, 24)]+[(i, 1) for i in range(1,25)])
+        self.assertEqual(source.backend.growth, [1, 24])
+        self.assertEqual(result['completed_slot_count'], 25)
+        self.assertTrue(result['complete_receiver_work_covered'])
+        self.assertEqual(receiver.drain_messages()[0]['message']['received_bits'], [0, 0, 1])
+        self.assertEqual([row['index'] for row in receiver.result()['slots']], list(range(17,25)))
+        self.assertEqual(result['slot_pipeline']['peak_processes'], 24)
+        self.assertEqual(result['slot_pipeline']['maximum_uncommitted_slots'], 48)
+
+    def test_largest_ready_width_uses_complete_workspace_not_input_only(self):
+        def large(manifest, native_plan, descriptor, **kwargs):
+            result = slot_workspace_planner(manifest, native_plan, descriptor, **kwargs)
+            result['minimum_memory_limit_bytes'] += 20*1024**2
+            return result
+        receiver, source = self.automatic_receiver(memory_limit_bytes=100*1024**2,
+                                                   slot_workspace_planner=large)
+        receiver.push(0, np.zeros(18, complex))  # Four complete windows, only two fit.
+        self.assertEqual(source.backend.owner_count, 2)
+        self.assertEqual(source.backend.allocations, [(0,12),(1,12)])
+        self.assertTrue(receiver._pipeline)
+        self.assertLessEqual(receiver._reserved_bytes(), receiver.memory_limit)
+        receiver.resume()
+        self.assertEqual(receiver.result()['completed_slot_count'], 4)
+
+    def test_unadmitted_child_uses_parent_without_latching_serial(self):
+        receiver, source = self.automatic_receiver(memory_limit_bytes=64*1024**2)
+        receiver._custom_backend = False
+        pages = 40*1024**2 // __import__('os').sysconf('SC_PAGE_SIZE')
+        with mock.patch('triad_stream_receiver.Path.read_text', return_value=f'0 {pages}'):
+            receiver.push(0, np.zeros(6,complex))
+        self.assertFalse(hasattr(source, 'backend'))
+        self.assertEqual(receiver.workers, 24)
+        self.assertTrue(receiver._pipeline)
+        self.assertEqual(receiver.result()['slot_pipeline']['serial_memory_admission_slots'], 1)
+        receiver._custom_backend = True
+        receiver.push(6, np.zeros(4,complex))
+        self.assertEqual(source.backend.allocations, [(1,24)])
+
+    def test_cheaper_actual_startup_never_dispatches_unstarted_owner(self):
+        receiver, source = self.automatic_receiver(memory_limit_bytes=100*1024**2)
+        receiver._custom_backend = False
+        pages = 20*1024**2 // __import__('os').sysconf('SC_PAGE_SIZE')
+        with mock.patch('triad_stream_receiver.Path.read_text', return_value=f'0 {pages}'):
+            receiver.push(0, np.zeros(22,complex))
+        self.assertEqual(source.backend.owner_count, 2)
+        self.assertEqual(len(source.backend.pending), 2)
+        self.assertEqual(source.backend.allocations, [(0,12),(1,12)])
+
+    def test_automatic_workspace_retry_preserves_software_budget_and_actual_slot_metadata(self):
+        receiver, source = self.automatic_receiver()
+        receiver.push(0, np.zeros(14, complex))
+        self.assertEqual(source.backend.allocations, [(0, 8), (1, 8), (2, 8)])
+        source.backend.error = 'MemoryError'
+        result = receiver.resume()
+        self.assertTrue(source.backend.closed)
+        self.assertEqual(result['worker_allocation'], 24)
+        self.assertTrue(result['automatic_worker_oversubscription'])
+        self.assertEqual(result['slot_pipeline']['workspace_retry_count'], 1)
+        self.assertEqual([slot['slot_workers'] for slot in receiver.result()['slots']], [8, 8, 24])
+        receiver.push(14, np.zeros(4, complex))
+        self.assertEqual(receiver.result()['slots'][-1]['slot_workers'], 24)
+
+    def test_explicit_three_owner_workspace_retry_preserves_explicit_worker_budget(self):
+        receiver, source = self.receiver(workers=24, slot_processes=3)
+        receiver.push(0, np.zeros(14, complex))
+        self.assertEqual(source.backend.allocations, [(0, 8), (1, 8), (2, 8)])
+        source.backend.error = 'MemoryError'
+        receiver.resume()
+        self.assertEqual(receiver.workers, 24)
+        self.assertEqual(receiver.result()['slots'][-1]['slot_workers'], 24)
+        self.assertTrue(source.backend.closed)
+
+    def test_slow_frontier_refills_idle_owners_but_bounds_uncommitted_results(self):
+        receiver, source = self.receiver(workers=6, slot_processes=3)
+        receiver.push(0, np.zeros(30,complex))
+        self.assertEqual(source.backend.allocations, [(0,2),(1,2),(2,2)])
+        source.backend.release = True
+        for _ in range(4):
+            receiver.resume(wait=False)
+            self.assertLessEqual(len(receiver._jobs), 6)
+            self.assertLessEqual(len(source.backend.pending), 3)
+            self.assertLessEqual(receiver._reserved_bytes(),receiver.memory_limit)
+        self.assertEqual(set(receiver._jobs),set(range(6)))
+        self.assertEqual(set(source.backend.pending),{0,1})
+        self.assertEqual(source.backend.allocations,[(i,2) for i in range(6)])
+        source.backend.reverse = False
+        receiver.resume(wait=False)
+        self.assertIn(6,source.backend.pending)
+        self.assertEqual(receiver.resume()['completed_slot_count'],7)
+        self.assertEqual([slot['index'] for slot in receiver.result()['slots']],list(range(7)))
+
+    def test_different_public_windows_receive_their_own_minimum_limits(self):
+        def unequal(manifest,native_plan,descriptor,**kwargs):
+            row=slot_workspace_planner(manifest,native_plan,descriptor,**kwargs)
+            row['minimum_memory_limit_bytes'] += manifest['format']['symbol_ordinal']*4096
+            return row
+        receiver,source=self.receiver(workers=6,slot_processes=3,slot_workspace_planner=unequal)
+        receiver.push(0,np.zeros(14,complex))
+        limits=[job['memory_limit_bytes'] for job in source.backend.pending.values()]
+        self.assertEqual([b-a for a,b in zip(limits,limits[1:])],[4096,4096])
+        self.assertLess(sum(job['reservation'] for job in receiver._jobs.values()),receiver.memory_limit//2)
+
+    def test_larger_later_window_retires_idle_owners_without_serial_latch(self):
+        class HeavyRuntime(ControlledSlotBackend):
+            startup_owner_reservation_bytes=10*1024**2
+            runtime_bytes_per_owner=10*1024**2
+        def growing(manifest,native_plan,descriptor,**kwargs):
+            row=slot_workspace_planner(manifest,native_plan,descriptor,**kwargs)
+            row['minimum_memory_limit_bytes'] += (40 if manifest['format']['symbol_ordinal']>=104 else 1)*1024**2
+            return row
+        receiver,source=self.automatic_receiver(hardware=4,memory_limit_bytes=100*1024**2,
+                                                slot_workspace_planner=growing)
+        receiver._backend_factory=HeavyRuntime
+        receiver.push(0,np.zeros(18,complex))
+        self.assertEqual(source.backend.owner_count,4)
+        receiver.resume()
+        receiver.push(18,np.zeros(4,complex))
+        self.assertEqual(source.backend.retired,[1])
+        self.assertEqual(source.backend.owner_count,1)
+        self.assertTrue(receiver._pipeline)
+        self.assertEqual(receiver.result()['slot_pipeline']['serial_memory_admission_slots'],0)
+        self.assertEqual(source.backend.allocations[-1],(4,8))
+        self.assertLessEqual(receiver._reserved_bytes(),receiver.memory_limit)
+
+    def test_unknown_custom_workspace_stays_serial_with_reason_and_full_budget(self):
+        receiver,source=self.receiver(workers=None,slot_workspace_planner=None)
+        self.assertFalse(receiver._pipeline)
+        self.assertEqual(receiver.result()['slot_pipeline']['serial_fallback_reason'],
+                         'custom_workspace_bound_unavailable')
+        self.assertGreater(receiver.workers,receiver.hardware_threads)
+        receiver.push(0,np.zeros(6,complex))
+        self.assertFalse(hasattr(source,'backend'))
+
+    def test_explicit_software_budgets_keep_hardware_denominator_separate(self):
+        for workers, owners in ((18, 2), (24, 2)):
+            with self.subTest(workers=workers, owners=owners), \
+                    mock.patch('triad_stream_receiver.resolve_cpu_budget',
+                               return_value=dict(threads=12, available_cpus=12)):
+                receiver, source = self.receiver(workers=workers, slot_processes=owners)
+                receiver.push(0, np.zeros(6, complex))
+                self.assertEqual(source.backend.allocations, [(0, workers)])
+                row = receiver.result()
+                self.assertEqual(row['visible_hardware_threads'], 12)
+                self.assertEqual(row['software_worker_allocation'], workers)
+                self.assertTrue(row['explicit_worker_oversubscription'])
+                self.assertEqual(row['slot_pipeline']['maximum_processes'], owners)
 
     def test_async_ingress_lone_full_budget_then_pair_and_ordered_commit(self):
         receiver, source = self.receiver()
@@ -705,7 +1129,7 @@ class StreamPipelineTests(unittest.TestCase):
         result = receiver.resume(wait=True)
         self.assertEqual(result['completed_slot_count'], 5)
         self.assertEqual(source.backend.allocations, [(0, 12), (1, 6), (2, 6), (3, 6), (4, 6)])
-        self.assertEqual(source.backend.completed, [0, 2, 1, 4, 3])
+        self.assertEqual(source.backend.completed, [0, 2, 3, 4, 1])
         self.assertEqual(result['received_samples_through_decision'], 22)
         self.assertTrue(result['complete_receiver_work_covered'])
         self.assertEqual(receiver.drain_messages()[0]['message']['received_bits'], [0, 0, 1])
@@ -735,23 +1159,17 @@ class StreamPipelineTests(unittest.TestCase):
             receiver.close()
             self.assertEqual(receiver.result()['workspace']['spawn_auxiliary_reserved_bytes'], reserve)
 
-    def test_tracker_prospective_reserve_can_prevent_launch_without_reducing_serial_budget(self):
-        receiver, _ = self.receiver()
+    def test_tracker_prospective_reserve_prevents_unadmitted_launch(self):
+        receiver, source = self.receiver(memory_limit_bytes=64*1024**2)
         receiver._custom_backend = False
-        receiver._backend_factory = mock.Mock()
-        before = receiver._reserved_bytes()
-        # Two24MiB owners fit64MiB; their32MiB helper changes admission.
-        owner, auxiliary = 24*1024**2, 32*1024**2
-        self.assertLess(before+2*owner, receiver.memory_limit)
-        self.assertLessEqual(receiver.memory_limit, before+2*owner+auxiliary)
-        pages = owner // __import__('os').sysconf('SC_PAGE_SIZE')
+        pages = 40*1024**2 // __import__('os').sysconf('SC_PAGE_SIZE')
         with mock.patch('triad_stream_receiver.Path.read_text', return_value=f'0 {pages}'), \
                 mock.patch('triad_stream_receiver.spawn_auxiliary_reservation_bytes', return_value=32*1024**2):
-            receiver._ensure_backend()
-        receiver._backend_factory.assert_not_called()
+            receiver.push(0, np.zeros(6,complex))
+        self.assertFalse(hasattr(source,'backend'))
         self.assertEqual(receiver._spawn_auxiliary_reserve, 0)
-        self.assertEqual(receiver._reserved_bytes(), before)
-        self.assertEqual(receiver._pipeline_fallback_reason, 'two_owner_startup_memory_admission')
+        self.assertEqual(receiver.workers,12)
+        self.assertEqual(receiver.result()['slot_pipeline']['serial_memory_admission_slots'],1)
 
     def test_ingress_waits_only_until_space_is_available_and_keeps_pair_running(self):
         receiver, source = self.receiver(maximum_input_chunk_samples=4)

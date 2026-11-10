@@ -6,11 +6,12 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 import weakref
 
 import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
-from triad_tracking_basis import CachedMappedBasis, mapped_kernel_path
+from triad_tracking_basis import CachedMappedBasis, mapped_basis_staging_bytes, mapped_kernel_path
 
 NATIVE = Path(sys.argv[1]).resolve() if len(sys.argv) == 2 else None
 sys.argv = sys.argv[:1]
@@ -62,6 +63,17 @@ class AnalyticSource:
 
 @unittest.skipUnless(NATIVE, 'supply the built triad_helper_export')
 class CachedBasisTests(unittest.TestCase):
+    def test_pure_staging_bound_matches_live_renderer_reservation(self):
+        for tile_samples in (4, 8192, 16384):
+            cache = cached(AnalyticSource(), tile_samples=tile_samples)
+            one = mapped_basis_staging_bytes(tile_samples, blocks=1)
+            self.assertEqual(cache.staging_workspace_bytes, one)
+            self.assertEqual(mapped_basis_staging_bytes(tile_samples), 2*one)
+        for options in (dict(tile_samples=True), dict(tile_samples=3), dict(tile_samples=16385),
+                        dict(blocks=True), dict(blocks=0), dict(blocks=3)):
+            with self.assertRaises(ValueError):
+                mapped_basis_staging_bytes(**options)
+
     def test_native_gaussian_batch_matches_seeded_fp64_filters(self):
         import torch
         from triad_gaussian_native import NativeGaussianBatch
@@ -322,11 +334,90 @@ class CachedBasisTests(unittest.TestCase):
                 np.testing.assert_allclose(gram[1:],
                     (data.conj() @ data.swapaxes(-1, -2))/variance, rtol=2e-14, atol=2e-14)
                 np.testing.assert_allclose(energy, float(np.vdot(basis, basis).real), rtol=2e-14, atol=0.)
-                for key in ('calls', 'interpolated_rows', 'row_tile_references',
+                for key in ('interpolated_rows', 'row_tile_references',
                             'native_preparation_calls', 'native_preparation_samples', 'evictions'):
                     self.assertEqual(reference.report()[key], fused.report()[key])
+                self.assertEqual(fused.row_geometry_builds, 1)
+                self.assertEqual(fused.row_geometry_rows, len(rows))
                 if reference.interpolated_rows:
                     self.assertLess(fused.cache_hits, reference.cache_hits)
+
+    def test_adjacent_blocks_share_full_bank_geometry_and_preserve_pin_fallback(self):
+        from triad_dynamic_joint import BlockProjection
+
+        candidates, taps = 256, 2
+        rows = [(bit, candidate//100, .0002*(candidate%4), .24, -32., tap*.002, -.17)
+                for bit in (0, 1) for candidate in range(candidates) for tap in range(taps)]
+        offsets = .15+np.arange(47, dtype=np.float64)**1.01
+        projection = BlockProjection.make(len(offsets), 6000, ((-500., 500.),))
+        observation = projection.numpy(np.exp(.03j*offsets))
+        requests = [(first, offsets, projection, observation, 2.3) for first in (50320, 50561)]
+        reference = cached(AnalyticSource())
+        expected = [np.concatenate([reference.basis_mapped(first, offsets, rows[at:at+128], 1725.)
+                    for at in range(0, len(rows), 128)]) for first, *_ in requests]
+        for cache_bytes in (32*1024**2, 2*8192*16):
+            with self.subTest(cache_bytes=cache_bytes), ThreadPoolExecutor(max_workers=4) as executor:
+                fused = cached(AnalyticSource(), cache_bytes=cache_bytes, executor=executor, workers=4)
+                with patch.object(fused, '_stage_mapped', wraps=fused._stage_mapped) as stage:
+                    results = fused.block_statistics(requests, rows, 1725., candidates, taps)
+                self.assertEqual(fused.row_geometry_builds, 1)
+                self.assertEqual(fused.row_geometry_rows, 1024)
+                attempted_rows = [len(call.args[1]) for call in stage.call_args_list]
+                self.assertEqual(attempted_rows.count(1024), 2)
+                if cache_bytes > 2*8192*16:
+                    self.assertEqual(attempted_rows, [1024, 1024])
+                else:
+                    self.assertEqual(attempted_rows.count(128), 16)
+                self.assertLessEqual(fused.peak_bytes, cache_bytes)
+                for (correlation, gram, energy), basis in zip(results, expected, strict=True):
+                    data = projection.numpy(basis).reshape(2, candidates, taps, -1)
+                    np.testing.assert_array_equal(correlation[0], 0)
+                    np.testing.assert_array_equal(gram[0], 0)
+                    np.testing.assert_allclose(correlation[1:],
+                        np.einsum('bctn,n->bct', data.conj(), observation)/2.3, rtol=2e-14, atol=2e-14)
+                    np.testing.assert_allclose(gram[1:],
+                        (data.conj() @ data.swapaxes(-1, -2))/2.3, rtol=2e-14, atol=2e-14)
+                    self.assertAlmostEqual(energy/float(np.vdot(basis, basis).real), 1., places=13)
+        with self.assertRaises(ValueError):
+            reference.basis_mapped(50320, offsets, rows[:129], 1725.)
+
+    def test_large_bank_direct_fallback_retains_128_row_native_limit(self):
+        from triad_dynamic_joint import BlockProjection
+
+        first, candidates = 2**54+137, 65
+        arrival = float((np.longdouble(first)-51000)/6000)
+        rows = [(bit, 0, arrival, .24, -32., 0., -.17)
+                for bit in (0, 1) for _ in range(candidates)]
+        offsets = .15+np.arange(31, dtype=np.float64)
+        projection = BlockProjection.make(len(offsets), 6000, ((-500., 500.),))
+        observation = projection.numpy(np.exp(.03j*offsets))
+        source = AnalyticSource()
+        fused = cached(source)
+        native = source.basis_mapped
+        calls = []
+        def bounded_direct(*arguments):
+            calls.append(len(arguments[2]))
+            self.assertLessEqual(calls[-1], 128)
+            return native(*arguments)
+        source.basis_mapped = bounded_direct
+        real_finfo = np.finfo
+        class NarrowLongDouble:
+            nmant = 52
+        with patch('triad_tracking_basis.np.finfo', side_effect=lambda dtype:
+                   NarrowLongDouble() if dtype is np.longdouble else real_finfo(dtype)):
+            (correlation, gram, energy), = fused.block_statistics(
+                [(first, offsets, projection, observation, 2.3)], rows, 0., candidates, 1)
+        self.assertEqual(calls, [128, 2])
+        basis = np.concatenate([native(first, offsets, rows[at:at+128], 0.)
+                                for at in range(0, len(rows), 128)])
+        data = projection.numpy(basis).reshape(2, candidates, 1, -1)
+        np.testing.assert_array_equal(correlation[0], 0)
+        np.testing.assert_array_equal(gram[0], 0)
+        np.testing.assert_allclose(correlation[1:],
+            np.einsum('bctn,n->bct', data.conj(), observation)/2.3, rtol=2e-14, atol=2e-14)
+        np.testing.assert_allclose(gram[1:], (data.conj() @ data.swapaxes(-1, -2))/2.3,
+                                   rtol=2e-14, atol=2e-14)
+        self.assertAlmostEqual(energy/float(np.vdot(basis, basis).real), 1., places=13)
 
     def test_fused_renderer_joins_started_writes_after_submission_failure(self):
         from triad_dynamic_joint import BlockProjection
@@ -350,6 +441,49 @@ class CachedBasisTests(unittest.TestCase):
                                        rows, 1725., 8, 1)
             self.assertTrue(jobs[0].done())
             self.assertIsNone(jobs[0].exception())
+
+    def test_staged_nonconsecutive_spans_share_tables_without_repeating_tile_calls(self):
+        from triad_dynamic_joint import BlockProjection
+        from triad_tracking_basis import _MappedBlock
+
+        epochs = (0, 1, 0, 2, 1, 0, 2, 1, 0)
+        rows = [(bit, epoch, 0., .2, 3., 0., 0.) for bit in (0, 1) for epoch in epochs]
+        offsets = np.arange(48, dtype=np.float64)
+        projection = BlockProjection.make(len(offsets), 6000, ((-100., 100.),))
+        observation = projection.numpy(np.exp(.03j*offsets))
+        reference_cache = cached(AnalyticSource())
+        reference = reference_cache.basis_mapped(51000, offsets, rows, 1725.)
+        cache = cached(AnalyticSource())
+        append = _MappedBlock.append
+        captured = []
+        def capture(block, first, descriptors, coordinates, tables, pins):
+            captured.append((descriptors['tiles'].copy(), len(tables)))
+            return append(block, first, descriptors, coordinates, tables, pins)
+        with patch.object(_MappedBlock, 'append', capture), patch.object(cache, '_tile', wraps=cache._tile) as tile:
+            (correlation, gram, energy), = cache.block_statistics(
+                [(51000, offsets, projection, observation, 2.3)], rows, 1725., len(epochs), 1)
+        self.assertEqual(tile.call_count, 6)
+        self.assertEqual([call.args for call in tile.call_args_list],
+                         [(bit, epoch, 51000//8192) for bit in (0, 1) for epoch in (0, 1, 2)])
+        for field in ('cache_hits', 'cache_misses', 'native_calls', 'evictions'):
+            self.assertEqual(getattr(cache, field), getattr(reference_cache, field))
+        self.assertEqual(list(cache.cache), list(reference_cache.cache))
+        self.assertEqual(len(captured), 1)
+        pointers, table_count = captured[0]
+        self.assertEqual(table_count, 6)
+        for bit in (0, 1):
+            for epoch in (0, 1, 2):
+                selected = pointers[bit*len(epochs): (bit+1)*len(epochs)][np.asarray(epochs) == epoch]
+                np.testing.assert_array_equal(selected, selected[0])
+        self.assertEqual(len(set(pointers)), 6)
+        data = projection.numpy(reference).reshape(2, len(epochs), 1, -1)
+        np.testing.assert_array_equal(correlation[0], 0)
+        np.testing.assert_array_equal(gram[0], 0)
+        np.testing.assert_allclose(correlation[1:],
+            np.einsum('bctn,n->bct', data.conj(), observation)/2.3, rtol=2e-14, atol=2e-14)
+        np.testing.assert_allclose(gram[1:], (data.conj() @ data.swapaxes(-1, -2))/2.3,
+                                   rtol=2e-14, atol=2e-14)
+        self.assertAlmostEqual(energy/float(np.vdot(reference, reference).real), 1., places=13)
 
     def test_fused_renderer_pins_first_array_through_sibling_replacement(self):
         from triad_dynamic_joint import BlockProjection

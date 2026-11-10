@@ -16,7 +16,7 @@ import weakref
 import numpy as np
 import torch
 
-from triad_incremental_receiver import IncrementalReceiver
+from triad_incremental_receiver import IncrementalReceiver, incremental_workspace_bytes
 from triad_timing_forward import SparseTimingForward, _logsumexp
 
 
@@ -24,6 +24,36 @@ def _integer(value, name, low=1, high=(1 << 64)-1):
     if isinstance(value, bool) or not isinstance(value, (int, np.integer)) or not low <= int(value) <= high:
         raise ValueError(f"{name} must be an integer in [{low},{high}]")
     return int(value)
+
+
+def _timing_workspace_bytes(segment_capacity, input_chunk, item, retained, rate_bound, models):
+    # One segment, an independent input conversion and the forward stencil.
+    transition_cap = 2*retained*(2*rate_bound+1)
+    return (segment_capacity+input_chunk)*(item+9)+transition_cap*(448+16*models)
+
+
+def _posterior_workspace_bytes(item, proposals, models, taps, edges):
+    # Old, transported, seeded and active states plus conditional edge
+    # moments/weights, including FP64 mixing weights and Python edge tuples.
+    return (8*models*3*proposals*(taps+taps*taps)*item +
+            edges*(160+models*2*(8+(6*taps+8*taps*taps)*item)))
+
+
+def practical_tracking_workspace_bytes(samples, block_samples, segment_samples, input_chunk,
+                                       precision, *, initial_states, maximum_states, maximum_proposals,
+                                       rate_bound, models, taps, workers):
+    """Bound both tracking lanes from public caps, without preparing templates."""
+    item = np.dtype(np.complex64 if precision == 'fp32' else np.complex128).itemsize
+    segment_capacity = min(samples, segment_samples)
+    projection_workers = workers if precision == 'fp64' else 1
+    total = 0
+    for retained, proposals in ((initial_states, initial_states), (maximum_states, maximum_proposals)):
+        edges = 2*max(retained, initial_states)*(2*rate_bound+1)
+        total += (_timing_workspace_bytes(segment_capacity, input_chunk, item, retained, rate_bound, models) +
+            incremental_workspace_bytes(segment_capacity, block_samples, proposals, taps, models,
+                precision, parallel=workers > 1, basis_projection_workers=projection_workers) +
+            _posterior_workspace_bytes(item, proposals, models, taps, edges))
+    return total
 
 
 class _TimingStream:
@@ -105,21 +135,17 @@ class _TimingStream:
         self.precision = precision
         self.dtype = np.dtype(np.complex64 if precision == "fp32" else np.complex128)
         self.memory_limit_bytes = _integer(memory_limit_bytes, "workspace bytes")
-        # One segment plus an independently supplied/conversion-sized input
-        # chunk; this bound is independent of total observation duration.
-        buffer_bytes = (self.segment_capacity + self.maximum_input_chunk_samples) * (self.dtype.itemsize + 9)
-        # Conservative Python/dict/array allowance for the pure forward step.
-        # This is a workspace estimate, not an allocator/RSS certificate.
-        transition_cap = 2 * timing_forward.maximum_states * (2*timing_forward.rate_index_bound+1)
-        timing_bytes = transition_cap * (448 + 16*timing_forward.model_count)
-        if buffer_bytes + timing_bytes >= self.memory_limit_bytes:
+        timing_bytes = _timing_workspace_bytes(self.segment_capacity, self.maximum_input_chunk_samples,
+            self.dtype.itemsize, timing_forward.maximum_states, timing_forward.rate_index_bound,
+            timing_forward.model_count)
+        if timing_bytes >= self.memory_limit_bytes:
             raise MemoryError("tracking buffers and timing transition workspace exceed memory limit")
         self.receiver_arguments = dict(sample_rate=self.sample_rate,
             block_samples=self.block_samples, required_bands=tuple(required_bands),
             excluded_bands=tuple(excluded_bands), noise_variance=noise_variance,
             stationary_power=tuple(stationary_power), coherence_seconds=self.coherences,
             device=device, precision=precision, projection_mode=projection_mode,
-            memory_limit_bytes=self.memory_limit_bytes-buffer_bytes-timing_bytes,
+            memory_limit_bytes=self.memory_limit_bytes-timing_bytes,
             maximum_candidates=timing_forward.maximum_proposals,
             maximum_input_chunk_samples=self.segment_capacity,
             hypothesis_executor=hypothesis_executor, hypothesis_shards=hypothesis_shards,
@@ -130,7 +156,7 @@ class _TimingStream:
         probe = IncrementalReceiver(samples=self.segment_capacity,
             candidate_count=timing_forward.maximum_proposals,
             basis=lambda start, stop: None, **self.receiver_arguments)
-        self.owned_bytes_estimate = buffer_bytes + timing_bytes + probe.owned_bytes_estimate
+        self.owned_bytes_estimate = timing_bytes+probe.owned_bytes_estimate
         self._values = np.empty(self.segment_capacity, dtype=self.dtype)
         self._valid = np.empty(self.segment_capacity, dtype=np.uint8)
         self._offsets = np.empty(self.segment_capacity, dtype=np.float64)
@@ -452,11 +478,8 @@ class _PersistentTimingLane(_TimingStream):
         states = self.timing.maximum_proposals
         models = self.timing.model_count
         taps = len(self.receiver_arguments['stationary_power'])
-        # Old, transported, seeded and active states plus conditional edge
-        # moments/weights.  Includes FP64 mixing weights and Python edge tuples.
         edges = self.timing.transition_workspace_state_bound
-        self.posterior_workspace_bytes = (8*models*3*states*(taps+taps*taps)*item +
-            edges*(160+models*2*(8+(6*taps+8*taps*taps)*item)))
+        self.posterior_workspace_bytes = _posterior_workspace_bytes(item, states, models, taps, edges)
         if self.owned_bytes_estimate+self.posterior_workspace_bytes > self.memory_limit_bytes:
             raise MemoryError("persistent timing/channel transport exceeds workspace limit")
         self.owned_bytes_estimate += self.posterior_workspace_bytes

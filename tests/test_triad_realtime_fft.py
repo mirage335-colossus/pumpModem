@@ -61,6 +61,45 @@ def waveform(m, source, epoch_index, bit, arrival, frequency, clock):
 
 
 class FFTScreenTests(unittest.TestCase):
+    def test_parallel_cpu_frequency_reserves_one_spectrum_and_all_private_scratch(self):
+        prepared = screen(precision='fp64')
+        count, partitions = 5, 4
+        shared = 96*prepared.crop_rows + count*prepared.nfft*16
+        private = 8192
+        partition_sum = partitions*(shared+private)
+        base = prepared.resident_estimate + 16*prepared.crop_rows
+        self.assertEqual(prepared._parallel_score_workspace('frequency', count, partitions, partition_sum),
+                         base+shared+partitions*private)
+        self.assertEqual(prepared._parallel_score_workspace('lag', count, partitions, partition_sum),
+                         base+partition_sum)
+        prepared.device_parallel = True
+        self.assertEqual(prepared._parallel_score_workspace('frequency', count, partitions, partition_sum),
+                         base+partition_sum)
+
+    def test_public_coarse_workspace_bounds_interval_methods_and_full_fallback(self):
+        manifest, source, epochs = fixture()
+        manifest['calendar']['arrival_prior_seconds'] = [-.1, 2.7]
+        prepared = screen(manifest, source[:, :, :32], epochs, precision='fp64',
+            correlation_method='auto')
+        intervals = [(-.9, -.5), (.1, .65)]
+        frequencies, reason = prepared._frequencies(None, intervals)
+        self.assertIsNone(reason)
+        self.assertGreater(prepared.lag_count, .7*prepared.nfft)
+        groups = prepared._lag_frequency_groups(None, intervals)
+        master = prepared._correlation_plan(frequencies, groups, raw_input=True, top_per_bit=2)
+        for workers in (1, 4):
+            bound = prepared.public_search_workspace(1., workers=workers, top_per_bit=2, interval_count=2)
+            for method in ('frequency', 'lag'):
+                self.assertGreaterEqual(bound['coarse_'+method],
+                                        master['estimated_peak_bytes_by_method'][method])
+            self.assertNotIn('coarse_tiled', bound)
+        prepared.maximum_frequency_points = 3
+        bound = prepared.public_search_workspace(8., workers=4, top_per_bit=2, interval_count=2)
+        tiled = prepared.tiled_frequency_plan(frequency_intervals=[(-8., 8.)], frequency_unit_points=3,
+                                              top_per_bit=2, workspace_workers=4)
+        self.assertEqual(tiled['status'], 'ready')
+        self.assertGreaterEqual(bound['coarse_tiled'], tiled['estimated_peak_bytes'])
+
     def test_integer_source_lease_keeps_identical_columns_and_native_owner(self):
         m, source, epochs = fixture()
         owner = threading.get_ident()

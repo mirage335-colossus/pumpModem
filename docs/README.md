@@ -15,11 +15,14 @@ canonical native waveform/channel/Helper stack and the complete headless
 receiver. See the [validation record](validation.md) for the measured native
 message gate, local CPU margins, GPU stage speed and forecast coverage.
 The [interactive receiver parallelism report](receiver-parallelism.html) shows
-the current two-owner [execution timeline](receiver-parallelism.html#cycle),
-including overlapping windows, controller waits and one detailed fine cycle.
-Its [historical comparison](receiver-parallelism.html#historical-cycle) preserves
-the earlier controller/worker trace. Processing wall time and physical sample
+the latest measured [CPU and execution timeline](receiver-parallelism.html#cycle),
+from the revision before shared-input transport: sustained backlog utilization, owner startup, overlapping windows and
+ordered controller work. Its [two-owner baseline](receiver-parallelism.html#two-owner-baseline)
+and [earlier fine-cycle comparison](receiver-parallelism.html#historical-cycle)
+preserve detailed stage/worker traces. Processing wall time and physical sample
 time are separate; recorded job spans do not establish simultaneous OS execution.
+The CPU series uses actual process counters, with monitor overhead and
+measurement limits reported separately.
 Historical stage costs and hypothetical optimization explorers retain their
 original scope. See the [current restructuring record](validation.md#continuous-receiver-restructuring)
 for qualified speed and capacity results; a timing trace is not a new capacity
@@ -49,7 +52,7 @@ qualify complete reception or whole-machine capacity.
 For repeat manual checks, start with a GPU workload trace and applicable local
 phase calibration. Reuse qualified GPU references and measure missing CPU cost
 classes or fresh bounded holdouts locally. Headless measurement commands use the
-visible logical CPU budget by default and preserve explicit overrides. The
+portable oversubscribed receiver worker budget by default and preserve explicit overrides. The
 [CPU allocation contract](development.md#receiver-cpu-allocation) prohibits
 reducing that default because of power/thermal limits or minor timing effects. Follow
 the [GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast).

@@ -4,6 +4,7 @@ from pathlib import Path
 import math
 import sys
 import unittest
+from unittest import mock
 
 import numpy as np
 import torch
@@ -11,7 +12,8 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
 from triad_gaussian_state import GaussianPrior, GaussianStateFilter
 from triad_incremental_receiver import IncrementalReceiver
-from triad_tracking_receiver import _PersistentTimingLane, PracticalTrackingReceiver
+from triad_tracking_receiver import (_PersistentTimingLane, PracticalTrackingReceiver,
+                                     practical_tracking_workspace_bytes)
 from triad_timing_forward import SparseTimingForward, TimingState
 
 
@@ -265,6 +267,24 @@ class PracticalTrackingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         torch.set_num_threads(1)
+
+    def test_metadata_workspace_admits_both_lanes_at_exact_cap(self):
+        states = [TimingState(0, delay, 1) for delay in range(5)]
+        for workers in (1, 2):
+            with self.subTest(workers=workers):
+                prior = SparseTimingForward(states, model_count=2, maximum_states=3,
+                    maximum_proposals=8, maximum_rate_ppm=50, rate_step_ppm=50)
+                budget = practical_tracking_workspace_bytes(53, 8, 16, 128, 'fp64',
+                    initial_states=5, maximum_states=3, maximum_proposals=8, rate_bound=1,
+                    models=2, taps=2, workers=workers)
+                receiver = PracticalTrackingReceiver(timing_forward=prior,
+                    sample_rate=16, samples=53, block_samples=8, segment_samples=16,
+                    maximum_input_chunk_samples=128, basis_provider=lambda *_: self.fail('materialized template'),
+                    required_bands=[[-7, 7]], stationary_power=(.8, .2), coherence_seconds=(.6, math.inf),
+                    precision='fp64', memory_limit_bytes=budget,
+                    hypothesis_executor=None if workers == 1 else mock.Mock(),
+                    basis_projection_workers=workers)
+                self.assertEqual(receiver.owned_bytes_estimate, budget)
 
     def test_fixed_prior_mixture_preserves_initial_affine_map_and_all_priors(self):
         base=2**54+177;fs=16.;center=17.253

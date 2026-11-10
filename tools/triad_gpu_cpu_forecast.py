@@ -19,6 +19,7 @@ import time
 from triad_case_capacity import combine_components, _larger_component, unqualified_blind_capacity
 from triad_case_suite import identity, same_measured_source, write_result
 from triad_cases import DEFAULT_CASES, ROOT, load_cases
+from triad_cpu import resolve_receiver_workers
 
 
 RATIO = 'ratio_processing_seconds_per_baseband_second'
@@ -57,6 +58,11 @@ _DISPATCH = frozenset(('hypothesis_update_tasks', 'requested_candidate_shards',
                        'maximum_hypothesis_tasks_per_block'))
 _FIXED = ('stream_controller', 'quiet_state_and_canonical_codec', 'public_slot_planning',
           'receiver_worker_lifecycle')
+_APPLICABILITY_PATHS = frozenset(('tools/triad_stream_receiver.py', 'tools/triad_slot_executor.py'))
+_APPLICABILITY_SCOPE = 'configured-public-calendar-single-pool'
+_IDENTITY_FIELDS = ('sources', 'native_binary_sha256', 'native_artifacts')
+_APPLICABILITY_REVIEW = frozenset(('core_dsp', 'finite_custom_timed_control',
+    'invoked_globals', 'module_and_constructor_initialization', 'measurement_boundaries'))
 
 
 def _require(condition, reason):
@@ -72,6 +78,71 @@ def _capacity_metadata(report):
     return dict(capacity_scope=report.get('capacity_scope','historical-unspecified'),
         blind_fresh_start_capacity=copy.deepcopy(report.get(
             'blind_fresh_start_capacity',unqualified_blind_capacity())))
+
+
+def _cpu_calibration_applicability(cpu, source, raw_cpu, raw_receipt):
+    """Accept one explicit reviewed transport-only applicability receipt.
+
+    This does not alter the original calibration, its completion/quality gates,
+    or the strict source identity of CUDA traces and independent CPU holdouts.
+    The caller supplies the original report bytes, not reserialized estimates.
+    """
+    _require(isinstance(raw_cpu, bytes) and isinstance(raw_receipt, bytes),
+             'CPU applicability requires original report and receipt bytes')
+    receipt = json.loads(raw_receipt)
+    _require(json.loads(raw_cpu)==cpu, 'CPU calibration differs from its byte-bound report')
+    report_sha = hashlib.sha256(raw_cpu).hexdigest()
+    _require(receipt['schema']=='triad-cpu-calibration-applicability-v1' and
+             receipt['status']=='independently_reviewed_applicable' and
+             receipt['scope']==_APPLICABILITY_SCOPE and
+             cpu.get('capacity_scope')=='configured-public-calendar',
+             'CPU applicability schema, review status or single-pool scope differs')
+    reports = receipt['cpu_calibration_reports']
+    _require(isinstance(reports,list) and reports and
+             len({row['sha256'] for row in reports})==len(reports) and
+             report_sha in {row['sha256'] for row in reports},
+             'CPU applicability does not bind these exact calibration report bytes')
+    before, after = receipt['measured_identity'], receipt['applicable_identity']
+    _require(before==_select(cpu['provenance'],_IDENTITY_FIELDS) and
+             after==_select(source,_IDENTITY_FIELDS),
+             'CPU applicability measured/current source identity differs')
+    _require(before['native_binary_sha256']==after['native_binary_sha256'] and
+             before['native_artifacts']==after['native_artifacts'] and
+             set(before['sources'])==set(after['sources']) and
+             _APPLICABILITY_PATHS<=set(before['sources']),
+             'CPU applicability changes native artifacts or the source closure')
+    changed = sorted(name for name in before['sources']
+                     if before['sources'][name]!=after['sources'][name])
+    _require(changed and set(changed)<=_APPLICABILITY_PATHS and
+             receipt['changed_source_paths']==changed,
+             'CPU applicability exceeds the two reviewed pipeline source files')
+    audit = receipt['independent_audit']
+    findings = audit['findings']
+    pair_sha = hashlib.sha256(json.dumps([before,after],sort_keys=True,separators=(',',':')).encode()).hexdigest()
+    _require(audit['status']=='completed' and audit['conclusion']=='unchanged_measured_work' and
+             audit['independent'] is True and isinstance(audit['reviewer'],str) and
+             bool(audit['reviewer'].strip()) and audit['source_pair_sha256']==pair_sha and
+             set(findings)==_APPLICABILITY_REVIEW and
+             all(isinstance(value,str) and len(value.strip())>=20 for value in findings.values()),
+             'CPU applicability lacks the completed independent path/global/initialization review')
+    invariants = receipt['calibration_invariants']
+    expected = dict(runtime={key:value for key,value in cpu['runtime'].items()
+                             if key!='unchanged_at_completion'},
+        cpu_budget=cpu['machine']['cpu'], workspace_limit_bytes=cpu['workspace_limit_bytes'],
+        worker_allocations=cpu['worker_allocations'], manual_list_sha256=cpu['input']['source_sha256'])
+    _require(_select(invariants,expected)==expected,
+             'CPU applicability runtime, allocation, workspace or manual input differs')
+    measured = [row['measurement'] for row in cpu['cases'] if 'measurement' in row]
+    _require(measured and invariants['inference_allocation_mode'] in ('full_logical','automatic_receiver') and
+             all(row.get('inference_allocation_mode')==invariants['inference_allocation_mode'] and
+                 _calibrated_workers(row,cpu['machine']['cpu']['available_cpus'])==invariants['inference_workers']
+                 for row in measured), 'CPU applicability inference allocation differs')
+    return dict(scope=_APPLICABILITY_SCOPE,
+        cpu_calibration_report_sha256=report_sha,
+        applicability_receipt_sha256=hashlib.sha256(raw_receipt).hexdigest(),
+        original_measured_identity=copy.deepcopy(before), applicable_identity=copy.deepcopy(after),
+        changed_source_paths=changed, independent_audit=copy.deepcopy(audit),
+        limitation='Unchanged single-pool CPU work only. The original message gate remains historical measured-source evidence; current continuous transport needs separate qualification. No pipeline ceiling, interrupted calibration, changed native work, CUDA trace or independent holdout is qualified by this receipt.')
 
 
 def _useful(row):
@@ -378,15 +449,28 @@ def _banks(cpu, gpu):
     return out
 
 
-def _forecast_row(cpu, gpu, *, allow_approximation=False, transfer=False, target_noise=None):
+def _calibrated_workers(measurement, hardware_threads):
+    """Accept only the recorded hardware control or exact automatic target."""
+    mode = measurement.get('inference_allocation_mode')
+    _require(mode in ('full_logical', 'automatic_receiver'),
+             'CPU calibration allocation mode is not supported')
+    expected = (resolve_receiver_workers(hardware_threads, hardware_threads=hardware_threads)
+                if mode == 'full_logical' else resolve_receiver_workers(hardware_threads=hardware_threads))
+    workers = measurement.get('inference_workers')
+    _require(type(workers) is int and workers == expected,
+             'CPU calibration did not measure its declared receiver allocation')
+    return workers
+
+
+def _forecast_row(cpu, gpu, *, hardware_threads, allow_approximation=False, transfer=False, target_noise=None):
     geometry = gpu['public_geometry']
     _require(_select(geometry,_GEOMETRY) == _select(cpu['public_geometry'],_GEOMETRY),
              'public slot/calendar geometry differs')
     _require(cpu['calibration_inputs'] == gpu['evaluator'], 'evaluator seeds or source bit differ')
     measurement = cpu['measurement']
-    _require(measurement['inference_allocation_mode'] == 'full_logical' and
-             measurement['workspace_margin']['status'] == 'within_budget',
-             'local full-logical allocation or workspace unavailable')
+    _calibrated_workers(measurement, hardware_threads)
+    _require(measurement['workspace_margin']['status'] == 'within_budget',
+             'local receiver workspace unavailable')
     _require(measurement['recurring_window']['covers_longest_public_geometry'],
              'local recurring DSP/ingress coverage incomplete')
     cuda = gpu['devices']['cuda']
@@ -641,7 +725,7 @@ def _heldout_acquisition(cpu, gpu, slot):
     return (setup_seconds+sum(kernel_seconds)*plan['units']/units)/slot + max(selection_cost)
 
 
-def _verification(forecast, calibration, trace, gpu_trace, *, transfer=False, target_noise=None):
+def _verification(forecast, calibration, trace, gpu_trace, *, hardware_threads, transfer=False, target_noise=None):
     """Check a separately run CPU work observation against the GPU forecast."""
     input_relation = _holdout_input_relation(trace,gpu_trace)
     if input_relation['status']!='identical_input':
@@ -649,6 +733,7 @@ def _verification(forecast, calibration, trace, gpu_trace, *, transfer=False, ta
                     reason='independent CPU/GPU target IQ bytes differ')
     cpu = trace['devices']['cpu']
     matched = _forecast_row(calibration, dict(trace, devices={'cuda':cpu}),
+                            hardware_threads=hardware_threads,
                             allow_approximation=transfer,transfer=transfer,target_noise=target_noise)
     geometry = trace['public_geometry']
     slot, fs = (geometry['conservative_public_slot_interval_seconds'],geometry['sample_rate_hz'])
@@ -768,22 +853,31 @@ def _validate_target_noise_report(report, parsed, source, runtime, cpu_budget, w
              report['input']['unchanged_at_completion'] and report['input']['source_sha256']==parsed['source_sha256'] and
              report['runtime']['unchanged_at_completion'] and
              {key:value for key,value in report['runtime'].items() if key!='unchanged_at_completion'}==runtime and
-             report['machine']['cpu']==cpu_budget and report['worker_allocations']==[cpu_budget['available_cpus']] and
+             report['machine']['cpu']==cpu_budget and
              report['workspace_limit_bytes']==workspace_bytes,
              'target noise-only calibration identity or allocation differs')
+    _require(bool(report['cases']) and all(report['worker_allocations']==[
+        _calibrated_workers(row['measurement'], cpu_budget['available_cpus'])] for row in report['cases']),
+        'target noise-only calibration identity or allocation differs')
 
 
 def estimate(cpu, gpu, parsed, source, runtime, cpu_budget, *, holdout=None, holdout_indices=(),
              reference_indices=(), gpu_reference=None, transfers=(), target_noise_indices=(),
-             target_noise_report=None, case_indices=()):
+             target_noise_report=None, case_indices=(), cpu_calibration_applicability=None,
+             cpu_report_bytes=None):
     start = time.perf_counter()
+    applicability = None
     try:
         _require(cpu['schema']=='triad-manual-complete-capacity-v3' and gpu['schema']=='triad-gpu-workload-v2',
                  'unsupported CPU calibration or GPU work trace schema')
         _require(cpu['provenance']['unchanged_at_completion'] and cpu['runtime']['unchanged_at_completion']
                  and cpu['input']['unchanged_at_completion'] and cpu['message_gate']['passed'],
                  'local calibration identity or functional message gate did not pass')
-        _require(same_measured_source(cpu['provenance'],source), 'current local source or binary differs')
+        if cpu_calibration_applicability is not None:
+            applicability = _cpu_calibration_applicability(
+                cpu,source,cpu_report_bytes,cpu_calibration_applicability)
+        _require(same_measured_source(cpu['provenance'],source) or applicability is not None,
+                 'current local source or binary differs')
         _require({key:value for key,value in cpu['runtime'].items() if key!='unchanged_at_completion'}==runtime
                  and cpu['machine']['cpu']==cpu_budget, 'local calibration CPU/runtime allocation differs')
         leaf_hashes = _runtime_leaf_hashes()
@@ -838,7 +932,8 @@ def estimate(cpu, gpu, parsed, source, runtime, cpu_budget, *, holdout=None, hol
                 holdout['device']=='cpu' and holdout['status']=='cpu_reference_only' and
                 holdout['unchanged_at_completion'] and _trace_source_matches(holdout,source) and
                 holdout['runtime']==runtime and holdout['cpu_budget']==cpu_budget and
-                holdout['workers']==cpu_budget['available_cpus'] and
+                type(holdout['workers']) is int and holdout['workers'] in (
+                    cpu_budget['available_cpus'], resolve_receiver_workers(hardware_threads=cpu_budget['available_cpus'])) and
                 holdout['input']['source_sha256']==parsed['source_sha256'],
                 'independent local CPU holdout provenance/allocation differs')
             _require(holdout['memory_limit_bytes']==cpu['workspace_limit_bytes'],
@@ -887,8 +982,10 @@ def estimate(cpu, gpu, parsed, source, runtime, cpu_budget, *, holdout=None, hol
             if transfer:
                 _require(all(local[donor_index]['case'][key]==current[donor_index][key]
                              for key in ('fields','native_args')), 'calibration donor configuration differs')
-            _require(local[donor_index]['measurement']['inference_workers']==cpu_budget['available_cpus'],
-                     'CPU calibration did not measure the full logical allocation')
+            calibrated_workers = _calibrated_workers(local[donor_index]['measurement'], cpu_budget['available_cpus'])
+            if index in holdout_indices:
+                _require(holdout is not None and holdout['workers']==calibrated_workers,
+                         'independent CPU holdout workers differ from the calibrated allocation')
             if index in target_noise_indices:
                 target_rows = local if target_noise_report is None else target_noise_rows
                 _require(target_noise_problem is None,target_noise_problem)
@@ -899,8 +996,7 @@ def estimate(cpu, gpu, parsed, source, runtime, cpu_budget, *, holdout=None, hol
                 _require(target['case']['configuration_hash']==case['configuration_hash'] and
                          all(target['case'][key]==case[key] for key in ('fields','native_args')) and
                          'error' not in target and
-                         measured['inference_allocation_mode']=='full_logical' and
-                         measured['inference_workers']==cpu_budget['available_cpus'] and
+                         _calibrated_workers(measured, cpu_budget['available_cpus'])==calibrated_workers and
                          measured['workspace_margin']['status']=='within_budget' and
                          target['calibration_inputs']==remote[index]['evaluator'] and
                          _select(target['public_geometry'],_GEOMETRY)==_select(remote[index]['public_geometry'],_GEOMETRY),
@@ -912,6 +1008,7 @@ def estimate(cpu, gpu, parsed, source, runtime, cpu_budget, *, holdout=None, hol
             _require(_gpu_work_executed(remote[index]) in precision_references,
                      'CUDA coarse/fine precision class lacks a paired reference')
             row.update(_forecast_row(local[donor_index],remote[index],
+                hardware_threads=cpu_budget['available_cpus'],
                 allow_approximation=bool(qualified_references),transfer=transfer,target_noise=target_noise))
             for scope, (relative_budget, _) in _HOLDOUT_BUDGETS.items():
                 _guarded_interval(row[scope],relative_budget)
@@ -930,7 +1027,8 @@ def estimate(cpu, gpu, parsed, source, runtime, cpu_budget, *, holdout=None, hol
                 _require(actual['case']['configuration_hash']==case['configuration_hash'] and
                          'error' not in actual and 'components' in row, 'held-out current row unavailable')
                 row['independent_cpu_trace'] = _verification(row,local[donor_index],actual,remote[index],
-                                                            transfer=transfer,target_noise=target_noise)
+                    hardware_threads=cpu_budget['available_cpus'],
+                    transfer=transfer,target_noise=target_noise)
             except (KeyError,TypeError,ValueError,IndexError,OverflowError) as error:
                 row['independent_cpu_trace'] = dict(status='unresolved',reason=str(error))
             trace_verification = row['independent_cpu_trace']
@@ -972,6 +1070,7 @@ def estimate(cpu, gpu, parsed, source, runtime, cpu_budget, *, holdout=None, hol
               'complete_point_estimates_with_unresolved_support')
     return dict(schema='triad-gpu-local-cpu-forecast-v2', cases=rows,
         status=status, **_capacity_metadata(cpu),
+        **({'cpu_calibration_applicability':applicability} if applicability is not None else {}),
         nominal_point_estimates=sum(row.get('nominal_service',{}).get(RATIO) is not None for row in rows),
         ceiling_point_estimates=sum(row.get('complete_capacity',{}).get(RATIO) is not None for row in rows),
         source_revision=source['revision'], manual_list_sha256=parsed['source_sha256'],
@@ -1042,7 +1141,7 @@ def _refresh_cpu_phase(phase, previous, arguments, output, case_list, input_arti
     remote = next(row for row in gpu['cases'] if row['case']['index']==index)
     old_trace, = holdout['cases']
     cap = cpu['workspace_limit_bytes']
-    workers = budget['available_cpus']
+    workers = _calibrated_workers(local['measurement'], budget['available_cpus'])
     resources = machine_resources()
     _require(resources['cpu']==budget and (resources['memory_budget_bytes'] or 0)>=cap,
              'phase refresh requires the exact calibrated CPU allocation and workspace')
@@ -1106,7 +1205,7 @@ def _refresh_cpu_phase(phase, previous, arguments, output, case_list, input_arti
                 measured = dict(local['measurement'],recurring_window=window)
         evidence['fit_seconds'] = time.perf_counter()-fit_began
         updated = dict(local,measurement=measured)
-        prediction = _forecast_row(updated,remote,allow_approximation=True)
+        prediction = _forecast_row(updated,remote,hardware_threads=budget['available_cpus'],allow_approximation=True)
         _require(not prediction['missing_or_mismatched'],'fresh CPU phase does not match GPU work')
         for name,(limit,_) in _HOLDOUT_BUDGETS.items():
             _guarded_interval(prediction[name],limit)
@@ -1158,6 +1257,8 @@ def _refresh_cpu_phase(phase, previous, arguments, output, case_list, input_arti
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__,allow_abbrev=False)
     parser.add_argument('--cpu-report',type=Path,required=True)
+    parser.add_argument('--cpu-calibration-applicability',type=Path,
+                        help='explicit independently reviewed transport-only applicability receipt for these exact CPU report bytes; never qualifies pipeline capacity')
     parser.add_argument('--gpu-report',type=Path,required=True)
     parser.add_argument('--gpu-reference-report',type=Path,
                         help='separate current-runtime qualified paired CUDA references for a targeted trace')
@@ -1178,6 +1279,8 @@ def main(argv=None):
     parser.add_argument('--exporter',type=Path,default=ROOT/'build/dev/triad_helper_export')
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args(argv)
+    if args.cpu_calibration_applicability and args.refresh_cpu_phase:
+        parser.error('CPU applicability binds an unchanged report; phase refresh requires a separately bound current calibration')
     from triad_abbreviated import environment
     from triad_cpu import configure_numerical_threads, detect_cpu_budget, resolve_cpu_budget
     try:
@@ -1191,7 +1294,12 @@ def main(argv=None):
             if args.refresh_cpu_phase:
                 input_artifacts[name]=dict(path=str(path),sha256=hashlib.sha256(raw).hexdigest())
             return json.loads(raw)
-        cpu=load_report('cpu_calibration',args.cpu_report)
+        cpu_raw=args.cpu_report.read_bytes()
+        cpu=json.loads(cpu_raw)
+        if args.refresh_cpu_phase:
+            input_artifacts['cpu_calibration']=dict(path=str(args.cpu_report),sha256=hashlib.sha256(cpu_raw).hexdigest())
+        applicability_raw=(args.cpu_calibration_applicability.read_bytes()
+                           if args.cpu_calibration_applicability else None)
         gpu=load_report('gpu_work',args.gpu_report)
         declared=tuple(args.holdout_case_index)
         indices={case['index'] for case in parsed['cases']}
@@ -1225,7 +1333,11 @@ def main(argv=None):
                      holdout=holdout,holdout_indices=declared,reference_indices=args.reference_case_index,
                      gpu_reference=gpu_reference,transfers=transfers,target_noise_indices=target_noise,
                      target_noise_report=noise_report,case_indices=requested)
+        if applicability_raw is not None:
+            options.update(cpu_calibration_applicability=applicability_raw,cpu_report_bytes=cpu_raw)
         result=estimate(**options)
+        if 'cpu_calibration_applicability' in result:
+            result['cpu_calibration_applicability']['receipt_path']=str(args.cpu_calibration_applicability)
         if args.refresh_cpu_phase:
             result=_refresh_cpu_phase(args.refresh_cpu_phase,result,options,args.output,args.case_list,input_artifacts)
         write_result(args.output,result)

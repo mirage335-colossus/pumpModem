@@ -23,7 +23,7 @@ from triad_case_capacity import (PreparedCapacityCase, build_recurring_public_ba
 from triad_case_metrics import machine_resources
 from triad_case_suite import measured_source_hashes, native_plan, select_cases
 from triad_cases import DEFAULT_CASES, ROOT, load_cases
-from triad_cpu import configure_numerical_threads, resolve_cpu_budget
+from triad_cpu import configure_numerical_threads, resolve_cpu_budget, resolve_receiver_workers
 from triad_receiver import CompleteBitReceiver
 from triad_tracking_basis import mapped_kernel_path
 
@@ -467,11 +467,8 @@ def run_probe(*, case_list, case_indices, executable, workers, device, output, p
     machine = machine_resources()
     if machine['cpu'] is None or machine['memory_budget_bytes'] is None:
         raise ValueError('visible CPU and host memory bounds required')
-    if workers is None:
-        workers = machine['cpu']['available_cpus']
+    workers = resolve_receiver_workers(workers, hardware_threads=machine['cpu']['available_cpus'])
     allocation = resolve_cpu_budget(jobs=1,workers=workers,threads=1,capacity=machine['cpu'])
-    if allocation['explicit_overcommit']:
-        raise ValueError('worker count exceeds the visible CPU allocation')
     runtime_limits = configure_numerical_threads(allocation)
     synchronize = dict(cpu=lambda:None,cuda=torch.cuda.synchronize)
     if type(workspace_mib) is not int or workspace_mib < 1:
@@ -604,7 +601,8 @@ def main(argv=None):
     parser.add_argument('--case-index',type=int,action='append')
     parser.add_argument('--exporter',type=Path,default=ROOT/'build/dev/triad_helper_export')
     parser.add_argument('--output',type=Path,required=True)
-    parser.add_argument('--workers',type=int,help='host receiver workers, defaulting to all visible logical CPUs')
+    parser.add_argument('--workers',type=int,
+                        help='host receiver workers (default: twice the visible logical CPUs)')
     parser.add_argument('--device',choices=('cpu','cuda'),default='cuda')
     parser.add_argument('--paired-reference',action='store_true')
     parser.add_argument('--reference-case',type=int,action='append',

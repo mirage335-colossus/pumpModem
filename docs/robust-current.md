@@ -8,17 +8,20 @@ channel, and Helper generation share native code. The retained
 provide relevant technique summaries and measured limits.
 
 **Current capacity scope is a configured public calendar and keyed ordinal.**
-Ordinary blind listening for independently restarted transmitters remains
+Acquisition of unconfigured waveform epochs, ordinals and timing remains
 unresolved. Numerical service below 1 s/s for the configured receiver does not
-establish that broader receiver's CPU ceiling or a general always-listening
-capacity pass. See the [scope and evidence](validation.md#continuous-receiver-restructuring).
+establish capacity for that additional search. See the
+[scope and evidence](validation.md#continuous-receiver-restructuring).
 
 The headless `CompleteStreamReceiver` defaults to continuous listening on a
 configured public calendar, using native slot plans, complete fine tracking
 and keyed fresh banks. It keeps listening through noise and after completed
 messages. Two fully scored quiet slots after DATA establish physical completion;
 transport EOF and received length do not choose its endpoint. Its codec returns
-filtered text. The native functional gate checks `e` (`001`) after three DATA
+filtered text. The receiver continuously decides bit or null; two qualifying
+null slots confirm the boundary and reset codec state while listening continues.
+There is no separate semantic new-transmitter decision in this contract.
+The native functional gate checks `e` (`001`) after three DATA
 slots and two scored quiet slots, plus a captured-prefix EOF negative control
 that must remain physically incomplete. Its continuous variant also scores a
 sixth quiet slot and remains listening after draining the completed message.
@@ -35,54 +38,115 @@ messages, then `resume(wait=True)` to drain already accepted ready/in-flight
 work; repeat as needed before retrying the unchanged rejected input.
 `resume(wait=False)` polls without waiting. EOF drains accepted work but never
 invents scored quiet. An over-limit or invalid episode is rejected;
-fully scored quiet is required before rearming, rather than decoding a suffix.
-This configured-calendar listener does not discover an ordinary restarted
-transmitter's independent onset and ordinal-zero message. Finite callers retain
-explicit `continuous=False`; continued-listening checks cover the configured
-calendar only.
+two fully scored quiet slots are required before rearming, rather than decoding
+a suffix.
+Waveform-address acquisition beyond the configured calendar remains unqualified.
+The native format does not require an ordinal reset at each message boundary;
+the standalone exporter's per-invocation epoch/ordinal defaults do not impose
+that rule on a continuous stream. Finite callers retain explicit
+`continuous=False`; continued-listening checks cover the configured calendar only.
 
-For the canonical continuous native path, `slot_processes=None` admits up to two
-persistent process owners when the shared memory budget permits. Each owns its
-native source, bank and mutable receiver caches. They process independent public
-windows from one captured stream while the parent commits classifications,
-quiet boundaries and codec results in order. A lone job receives the full
-logical-thread budget. At a dispatch boundary, two ready jobs share it: six each
-on this twelve-thread host, never twelve plus six. `push()` accepts bounded input
+Every automatic Robust receiver mode uses `S = 2*H` software workers, where `H`
+is visible hardware-thread capacity. This includes serial, finite and custom
+paths; this host resolves twenty-four software workers over twelve hardware
+threads. Explicit worker count `W` remains exact. The canonical continuous
+pipeline's automatic controller cap is `min(S, W)`; an explicit owner count may
+range from one through `W` without an arbitrary six-owner ceiling. Defaults admit
+up to `2*H` independent controllers sharing `2*H` software permits.
+
+Owners grow lazily for ready complete windows whose full public DSP and memory
+bounds fit. Each job has at least one worker; no owners are spawned for empty
+work. Exact per-job leases retain room for later input. Each process owns its
+native source, bank and mutable caches. Completed out-of-order results free
+their owners for more ready work. At most twice the resolved owner cap in
+uncommitted records (`4*H` by default) await ordered parent-side bit/null and codec
+decisions. Idle, job-free owners can
+retire when a later larger public geometry needs a narrower pool. Fewer owners
+or a late serial fallback retain `W`; inadmissible work is rejected rather than
+clamped to `H` workers. Resolve the automatic budget once and pass explicit
+shares downstream. Default operating RAM uses cgroup-aware available memory
+minus bounded host headroom, not a half-memory or fixed 3840 MiB ceiling. See the
+[allocation contract](development.md#receiver-cpu-allocation). `push()` accepts bounded input
 and dispatches/polls work without waiting for each slot; it may wait when the
 bounded backlog is full. Explicit `slot_processes=1`, finite mode and custom
 fixtures retain synchronous processing.
 
-Admission counts all resident owners, lookahead input and IPC buffers. A memory
-admission or full-window workspace failure closes the owners and latches the
+Admission counts the parent, all resident owners, lookahead input and IPC
+buffers. After the first fully loaded child handshake, prospective owner overhead
+uses its maximum pre-DSP bootstrap RSS/HWM rather than the parent's captured-IQ
+heap; actual live-owner and native workspace memory are still rechecked.
+Supported Linux pipelines use sealed, read-only `memfd` input instead of copied
+per-job payloads. One parent assembly transient remains charged before its array
+is released; the parent keeps the descriptor/metadata for retry, and children
+close read-only mappings before acknowledgement. Full DSP/native workspace,
+raw-ring and result leases stay charged. Unsupported systems use the original
+fully charged copied transport. Capability is checked lazily before pipeline
+admission, not in finite, custom or serial paths. The full-size transport check
+held three read-only 691,812,637-byte row-1 inputs at eight workers each. Full DSP
+reservations and one assembly transient fit within 9072 MiB, admitting three
+owners where copied transport admitted one. This is input/lifetime and admission
+evidence, not row-1 DSP execution or throughput. The completed native copied/shared
+comparison used three owners at eight workers each, matched 839 checked fields,
+decoded `001` to `e`, completed after two quiet slots and continued through a
+third; EOF alone still did not complete a message, and descriptors/children closed.
+No elapsed gain or all-row shared-transport envelope is established. A runtime
+full-window workspace failure closes the owners and latches the
 full-budget serial fallback; attempted work remains charged. Other failures
 stop processing rather than silently retrying another path. This pipeline's
 current qualification is in the [validation record](validation.md#continuous-receiver-restructuring).
-On the qualified row-7 five-window capture, cold complete receive time fell
+Before the `memfd` transport change, the enlarged automatic owner cap passed the
+independently audited 49-window continuous-capture check, preserving exact exposed
+DSP work on the first previously checked twenty-five windows and covering all
+forty-nine. The
+predeclared 55.337-second sustained-backlog interval averaged 9.730
+busy-core equivalents against twelve hardware threads (81.09%). It reached
+thirteen active services and fourteen resident owners within the twenty-four-permit
+and memory limits. This establishes useful
+same-stream parallelism for that capture, not full saturation, a paired speedup,
+current shared-transport utilization or all-row pipeline capacity. Earlier
+hardware-count-capped results keep their original scope.
+On the earlier qualified
+two-owner row-7 five-window capture, cold complete receive time fell
 from 21.679 to 18.952 seconds (12.58%), including owner startup; average busy
 cores rose from 2.909 to 3.566. A subsequent accounting correction reserved the
 shared multiprocessing resource tracker, with a fresh three-window parity and
 resource check. This is bounded row-7 evidence, not full twelve-thread saturation
 or all-eight-row parallel capacity qualification. The
-[current all-eight serial forecasts](validation.md#complete-headless-robust-and-manual-capacity)
-reuse reviewed unchanged DSP costs with fresh controller costs; they remain a
-separate execution mode. Automatic serial fallback also
+[current all-eight complete-work estimates](validation.md#complete-headless-robust-and-manual-capacity)
+now cover one twenty-four-worker pool on twelve hardware threads with a fixed
+9072 MiB cap. The audited assembly has conservative capacity passes for rows 3
+and 5 and nominal passes for rows 2–8. Row 4's conservative point estimate is
+4.11055 processing seconds per baseband second, a numeric failure; unresolved
+model gates remain. Row 7 retains its interrupted report's missing canonical
+final-runtime flag and separate external posttermination identity audit. This
+assembly predates the input-transport change. A reviewed applicability receipt
+and strict forecast consumer preserve its unchanged one-pool DSP/finite costs
+without altering raw timings or source identities. The bridge accepts the exact
+completed canonical reports for rows 1–6 and 8; row 7's interrupted report and the
+audited union remain ineligible. See the [GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast).
+This does not establish all-eight GPU qualification.
+It does not qualify automatic multiowner pipeline ceilings. Serial and
+parallel remain separate execution modes. Automatic serial fallback also
 retains auxiliary-process memory and must not inherit explicit
 `slot_processes=1` qualification.
 
 A tested fresh-onset prototype was removed after it admitted an existing active
-signal under the wrong new-message hypothesis. A DATA-versus-noise threshold
-does not distinguish a fresh transmission from an already occupied signal.
-The next design needs staged or Helper-assisted acquisition and an explicit
-occupied-signal comparison, with declared missed-start and false-start limits.
-Do not reset the keyed ordinal at every quiet boundary or repeat the entire
+signal under the wrong ordinal-zero hypothesis. Its DATA-versus-noise threshold
+did not resolve that competing waveform address. This rejects that supervisor
+design; it does not mandate a semantic fresh-transmission classifier. Further
+continuous bit acquisition needs appropriate epoch/ordinal/timing coverage,
+incorrect-address checks and declared detection/error bounds. Staged or
+Helper-assisted acquisition may reduce that work. Do not reset the keyed
+ordinal at every quiet boundary or repeat the entire
 long observation at every 30-second candidate start. Different native epochs
 use independent keyed waveform material, so overlapping UTC spans alone do not
 permit reuse of the old waveform prefix. Preserve these findings rather than
 restoring the failed prototype; details are in the
 [validation record](validation.md#continuous-receiver-restructuring).
 
-Receiver orchestration must preserve the **full available logical CPU worker
-budget** by default. Power or thermal limiting and temporary/minor benchmark
+Receiver orchestration must preserve **all available logical CPU hardware
+threads** by default, separately reporting admitted software workers. Power or
+thermal limiting and temporary/minor benchmark
 differences must not turn into a smaller portable default. Keep allocation
 overrides explicit and stage dispatch sized to useful work, following the
 [CPU allocation contract](development.md#receiver-cpu-allocation).
@@ -97,6 +161,19 @@ and device paths retain their bounded reference processing. Exact bit-pair
 geometry and recurring native source lanes are reused, and large observations
 use bounded FIR tiles.
 
+Mapped preparation now validates one bounded geometry bank and reuses its
+extended-precision affine terms across both chronological blocks. Numerical
+evaluation order and pin ownership stay unchanged. The matched fine-stage
+comparison saved 8.31% on row-7 continuation and 4.14% on row-4 cold maximum-state
+work with exact semantics and logical work. These are stage results, not
+all-row or GPU/tensor speedups. The three-owner comparison missed its original
+15% elapsed-gain gate. The user then adopted its modest gain and higher useful
+CPU occupancy to preserve utilization on this and less power-limited computers.
+Keep the original failed threshold distinct from this changed adoption decision.
+Continue reducing serial controller preparation as well as exposing ready work;
+see the
+[accepted and rejected changes](validation.md#continuous-receiver-restructuring).
+
 The CPU coarse path shares immutable observation spectra across workspace
 partitions. Supported two-ray batches combine quadratic scoring and bounded
 peak selection in a native call, with ambiguity fallback and canonical retained
@@ -106,10 +183,13 @@ old timing calibration to qualify changed CPU work. See the
 [continuous receiver restructuring](validation.md#continuous-receiver-restructuring)
 and [earlier restructuring evidence](validation.md#receiver-restructuring).
 The [interactive architecture report](receiver-parallelism.html) distinguishes
-necessary state dependencies from implementation barriers. Its current
-[execution timeline](receiver-parallelism.html#cycle) records the two-owner
-pipeline and a selected fine cycle, with controller waits, nested stages and
-worker jobs distinguished. The [historical trace](receiver-parallelism.html#historical-cycle)
+necessary state dependencies from implementation barriers. Its measured
+[CPU timeline](receiver-parallelism.html#cycle) records the pre-`memfd` 49-window
+resource-admitted scheduler and its predeclared backlog occupancy, separately
+from startup, fill and drain. It establishes neither current shared-transport
+utilization, full saturation nor all-row pipeline capacity. The [earlier two-owner timeline](receiver-parallelism.html#two-owner-baseline)
+retains its selected fine cycle, controller waits, nested stages and worker jobs.
+The [historical trace](receiver-parallelism.html#historical-cycle)
 preserves the pre-change `3b423f9` execution, including its former three-job
 Gaussian waves. Signal-time coordinates are separate from processing wall time;
 recorded job spans do not measure OS scheduling or establish full CPU saturation.
@@ -169,13 +249,13 @@ triad checks. For a full new local calibration, run the dedicated suite.
 ./build.sh test triad
 python3 tools/triad_manual_cases.py \
   --output local-evidence/robust-cases.json \
-  --exporter build/dev/triad_helper_export \
-  --workspace-mib 3840
+  --exporter build/dev/triad_helper_export
 ```
 
-This command's per-row service estimates use sequential windows at the full
-worker allocation. Its continuous native functional gate does not qualify the
-default two-owner pipeline's capacity across the manual rows. Report the
+This command's per-row service estimates use sequential windows at the automatic
+`S = 2*H` allocation (twenty-four workers over twelve hardware threads
+on this host). Its continuous native functional gate does not qualify the
+automatic pipeline's capacity across the manual rows. Report the
 execution mode explicitly; all-row parallel capacity remains unqualified.
 
 The suite rereads `_tests-RobustModem.md` on every invocation. Repeatable
@@ -196,8 +276,10 @@ source, case-list and native binary. Earlier stage evidence remains historical
 and does not become a result for changed source or method. Consult the
 [validation record](validation.md) for current outcomes and provenance. Use the
 [manual capacity workflow](robust-manual-capacity.md#fast-local-cpu-capacity-measurement)
-for the same-stream allocation pilot and default full-visible logical inference.
-On the 6-core/12-thread host the pilot uses 1, 6 and 12 workers. RunPod measures
+for the same-stream allocation pilot and automatic software-worker inference.
+On the 6-core/12-thread host the pilot uses 1, 6 and 12 workers; omitted
+allocation flags select twenty-four workers for inference. Explicit
+`--full-logical-inference` selects twelve as a diagnostic. RunPod measures
 work demand for the forecast, and source-matched local phase timings determine
 this computer's service costs.
 

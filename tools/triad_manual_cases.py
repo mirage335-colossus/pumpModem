@@ -45,9 +45,9 @@ def build_parser() -> argparse.ArgumentParser:
                         type=float, default=1.,
                         help="bounded streaming measurement input, from 0.1 to 2 seconds")
     parser.add_argument("--threads", type=int,
-                        help="explicit single receiver-worker allocation for debugging; default compares the supported local allocations")
+                        help="exact positive receiver-worker override, including intentional overcommit; a diagnostic single-allocation run")
     parser.add_argument('--full-logical-inference', action=argparse.BooleanOptionalAction,default=None,
-                        help='default to all visible logical CPUs after the pilot; opt out to use the pilot winner')
+                        help='explicitly infer at visible logical CPU count H; omitted uses automatic 2H software workers, while --no-full-logical-inference selects the pilot winner diagnostically')
     parser.add_argument("--case-index", type=int, action="append",
                         help="select a current manual row for explicitly partial debugging")
     parser.add_argument('--calibration-stage',choices=('noise-only-fine',),
@@ -57,7 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--sustained-allocation-probe', action='store_true',
                         help='bounded exploratory continued fine work at physical and full logical allocations')
     parser.add_argument('--workspace-mib', type=int,
-                        help='stable workspace ceiling within the visible local receiver budget')
+                        help='exact stable workspace ceiling within visible available physical/cgroup RAM; omitted reserves modest operating headroom')
     return parser
 
 
@@ -72,7 +72,7 @@ def main(argv=None) -> int:
     else:
         if (not args.case_index or args.workspace_mib is None or args.threads is not None or
                 args.sustained_allocation_probe or args.full_logical_inference is False):
-            parser.error('stage calibration requires selected rows, a fixed workspace and full logical workers')
+            parser.error('stage calibration requires selected rows, a fixed workspace and the automatic or explicit full-logical allocation')
         from triad_case_capacity import run_complete_cases as run_cases
         options['calibration_stage'] = args.calibration_stage
 

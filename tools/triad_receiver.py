@@ -24,16 +24,16 @@ from scipy.stats import gamma
 
 from triad_acquisition import refinement_coordinates
 from triad_continuous import file_identity, tracking_source_basis
-from triad_case_replay import helper_workspace_estimate
-from triad_cpu import initialize_numerical_worker
+from triad_case_replay import helper_workspace_estimate, public_screen_workspace
+from triad_cpu import initialize_numerical_worker, resolve_receiver_memory, resolve_receiver_workers
 from triad_dynamic_variants import core_projection_bands
 from triad_operational_admission import (DEFAULT_COHERENCES, operational_decision,
     operational_threshold, public_grid)
 from triad_realtime_fft import FFTScreen
 from triad_timing_forward import SparseTimingForward, TimingState
-from triad_tracking_basis import mapped_kernel_path
-from triad_tracking_receiver import PracticalTrackingReceiver
-from triad_weak_helper import estimate_weak_helper
+from triad_tracking_basis import mapped_basis_staging_bytes, mapped_kernel_path
+from triad_tracking_receiver import PracticalTrackingReceiver, practical_tracking_workspace_bytes
+from triad_weak_helper import estimate_weak_helper, weak_helper_policy
 
 
 _DEFAULT = dict(top_per_bit=2, maximum_fine_candidates=64,
@@ -51,6 +51,102 @@ def _positive_integer(value, name):
     if isinstance(value, bool) or not isinstance(value, (int, np.integer)) or value < 1:
         raise ValueError(name+' must be a positive integer')
     return int(value)
+
+
+def _receiver_policy(policy):
+    resolved = dict(_DEFAULT)
+    unknown = set(policy or ())-set(resolved)
+    if unknown:
+        raise ValueError('unknown complete receiver policy: '+', '.join(sorted(unknown)))
+    resolved.update(policy or {})
+    resolved['operational_evidence'] = 'fixed_initial_affine'
+    for name in ('top_per_bit', 'maximum_fine_candidates', 'chunk_samples',
+                 'maximum_states', 'maximum_proposals', 'fine_delay_subdivisions'):
+        resolved[name] = _positive_integer(resolved[name], name)
+    for name in ('block_seconds', 'segment_seconds',
+                 'residual_rate_step_ppm'):
+        if not math.isfinite(float(resolved[name])) or resolved[name] <= 0:
+            raise ValueError(name+' must be finite and positive')
+    for name in ('cache_bytes', 'maximum_acceleration_ppm_per_second'):
+        if isinstance(resolved[name], bool) or not math.isfinite(float(resolved[name])) or resolved[name] < 0:
+            raise ValueError(name+' must be finite and nonnegative')
+    if resolved['maximum_fine_candidates'] > 64 or resolved['top_per_bit'] > 64:
+        raise ValueError('complete receiver fine/proposal caps exceed64')
+    if resolved['fine_delay_subdivisions'] < 2 or resolved['fine_delay_subdivisions'] % 2:
+        raise ValueError('fine delay subdivisions must be even and at least2')
+    if not 0 < resolved['noise_upper_tail_probability'] < 1:
+        raise ValueError('noise tail probability must lie in (0,1)')
+    if resolved['precision'] not in ('fp32', 'fp64'):
+        raise ValueError('complete receiver precision must be fp32 or fp64')
+    return resolved
+
+
+def _fine_rate_grid(extent, policy):
+    radius = max(1, math.ceil(extent/policy['residual_rate_step_ppm'])) if extent else 0
+    if radius > 32:
+        raise ValueError('public residual clock lattice exceeds the bounded radius32')
+    return radius, extent/radius if radius else policy['residual_rate_step_ppm']
+
+
+def _helper_prefix_samples(manifest, sample_rate, samples, arrival_upper):
+    calendar = manifest['calendar']
+    return max(0, min(samples, math.ceil((float(calendar['capture_lead_seconds'])+
+        float(calendar['data_sample_offset'])/sample_rate+max(0., arrival_upper)+1)*sample_rate)))
+
+
+def public_slot_workspace(manifest, native_plan, descriptor, *, workers, receiver_policy=None):
+    """Bound a canonical CPU child's complete public receive work before dispatch.
+
+    The limit includes this child's input and native workspace. The caller
+    separately owns process runtime, IPC, parent input and queued receipts.
+    """
+    workers = _positive_integer(workers, 'slot workers')
+    policy = _receiver_policy(receiver_policy)
+    screen, _, peaks = public_screen_workspace(manifest, native_plan, descriptor, workers=workers)
+    grid = fine_public_grid(manifest, screen.epochs, screen.maximum_frequency_step)
+    native_bytes = max(int(descriptor.get('fixed_workspace_bytes', 0)),
+                       int(descriptor.get('workspace_budget_bytes', 0)))
+    input_bytes = 17*screen.samples  # Child complex128 samples plus uint8 validity.
+    helper_enabled = manifest.get('helper_enabled', True)
+    prefix = _helper_prefix_samples(manifest, screen.fs, screen.samples, grid.arrival_upper)
+    peaks['helper'] = screen.resident_estimate + (
+        helper_workspace_estimate(prefix, screen.fs) if helper_enabled else 0)
+    interval_count = 1
+    if helper_enabled and grid.frequency_bound:
+        # Every expanded region covers at least twice the default model
+        # allowance before public clipping. At most two edge intervals can
+        # become shorter. The Helper returns a merged disjoint union.
+        allowance = weak_helper_policy()['frequency_policy']['model_allowance_hz']
+        interval_count = math.ceil(grid.frequency_bound/allowance)+2
+    peaks.update(screen.public_search_workspace(grid.frequency_bound, workers=workers,
+        top_per_bit=policy['top_per_bit'], interval_count=interval_count))
+    clocks = sorted(screen.clocks)
+    gap = max((b-a for a, b in zip(clocks, clocks[1:])), default=0.)
+    radius, _ = _fine_rate_grid(gap/4, policy)
+    # Each retained coarse atom supplies at most three clock refinements.
+    # No timing refinement is added here. Snap/dedup can only reduce the bank.
+    coordinates = min(policy['maximum_fine_candidates'], grid.candidate_count,
+        2*policy['top_per_bit']*(3 if gap else 1))
+    initial_states = min(policy['maximum_proposals'],
+        coordinates*(policy['fine_delay_subdivisions']+1)*(3 if radius else 1))
+    block_samples = max(1, round(policy['block_seconds']*screen.fs))
+    segment_samples = max(1, round(policy['segment_seconds']*screen.fs))
+    fine = practical_tracking_workspace_bytes(screen.samples, block_samples, segment_samples,
+        policy['chunk_samples'], policy['precision'], initial_states=initial_states,
+        maximum_states=policy['maximum_states'], maximum_proposals=policy['maximum_proposals'],
+        rate_bound=radius, models=len(DEFAULT_COHERENCES), taps=len(screen.rays), workers=workers)
+    cache = math.ceil(policy['cache_bytes'])
+    peaks['fine'] = screen.resident_estimate + fine + cache + (mapped_basis_staging_bytes() if cache else 0)
+    # The input and staging admission checks require positive headroom.
+    available = 1+max(peaks.values())
+    _, _, prepared = public_screen_workspace(manifest, native_plan, descriptor, workers=workers,
+        memory_limit_bytes=available)
+    peaks.update(prepared)
+    if max(peaks.values()) > available:
+        raise MemoryError('complete public bank preparation exceeds planned workspace')
+    stages = {name: input_bytes+native_bytes+peak for name, peak in peaks.items()}
+    return dict(minimum_memory_limit_bytes=input_bytes+native_bytes+available, input_bytes=input_bytes,
+        native_bytes=native_bytes, stage_bound_bytes=stages)
 
 
 def _stage(began, represented, work=None):
@@ -155,10 +251,7 @@ class FineSession:
         self.work_probe_only = work_probe
         p, fs = owner.policy, owner.sample_rate
         extent = owner.initial_rate_half_width_ppm
-        radius = max(1, math.ceil(extent/p['residual_rate_step_ppm'])) if extent else 0
-        if radius > 32:
-            raise ValueError('public residual clock lattice exceeds the bounded radius32')
-        rate_step = extent/radius if radius else p['residual_rate_step_ppm']
+        radius, rate_step = _fine_rate_grid(extent, p)
         rates = (-radius, 0, radius) if radius else (0,)
         half = p['fine_delay_subdivisions']//2
         count = len(coordinates)*(2*half+1)*len(rates)
@@ -380,30 +473,7 @@ class FineReceiverContext:
         variance = float(manifest['power']['complex_noise_variance'])
         if not math.isfinite(variance) or variance <= 0:
             raise ValueError('raw fine-noise variance must be finite and positive')
-        self.policy = dict(_DEFAULT)
-        unknown = set(policy or ())-set(self.policy)
-        if unknown:
-            raise ValueError('unknown complete receiver policy: '+', '.join(sorted(unknown)))
-        self.policy.update(policy or {})
-        self.policy['operational_evidence'] = 'fixed_initial_affine'
-        for name in ('top_per_bit', 'maximum_fine_candidates', 'chunk_samples',
-                     'maximum_states', 'maximum_proposals', 'fine_delay_subdivisions'):
-            self.policy[name] = _positive_integer(self.policy[name], name)
-        for name in ('block_seconds', 'segment_seconds',
-                     'residual_rate_step_ppm'):
-            if not math.isfinite(float(self.policy[name])) or self.policy[name] <= 0:
-                raise ValueError(name+' must be finite and positive')
-        for name in ('cache_bytes', 'maximum_acceleration_ppm_per_second'):
-            if isinstance(self.policy[name], bool) or not math.isfinite(float(self.policy[name])) or self.policy[name] < 0:
-                raise ValueError(name+' must be finite and nonnegative')
-        if self.policy['maximum_fine_candidates'] > 64 or self.policy['top_per_bit'] > 64:
-            raise ValueError('complete receiver fine/proposal caps exceed64')
-        if self.policy['fine_delay_subdivisions'] < 2 or self.policy['fine_delay_subdivisions'] % 2:
-            raise ValueError('fine delay subdivisions must be even and at least2')
-        if not 0 < self.policy['noise_upper_tail_probability'] < 1:
-            raise ValueError('noise tail probability must lie in (0,1)')
-        if self.policy['precision'] not in ('fp32', 'fp64'):
-            raise ValueError('complete receiver precision must be fp32 or fp64')
+        self.policy = _receiver_policy(policy)
         if fine_device not in ('cpu', 'cuda'):
             raise ValueError('fine device must be cpu or cuda')
         self.fine_cuda_index = None
@@ -545,10 +615,11 @@ class CompleteBitReceiver(FineReceiverContext):
     first scores independent coarse workspaces, then independent coherence
     models; source-pipe rendering and global timing/pruning stay single-owner.
     """
-    def __init__(self, manifest, screen, basis_source, *, workers=1,
-                 memory_limit_bytes, policy=None, coherences=DEFAULT_COHERENCES,
+    def __init__(self, manifest, screen, basis_source, *, workers=None,
+                 memory_limit_bytes=None, policy=None, coherences=DEFAULT_COHERENCES,
                  admission_policy=None, basis_factory=tracking_source_basis, fine_device='cpu'):
         began = time.perf_counter()
+        workers = resolve_receiver_workers(workers)
         if not isinstance(screen, FFTScreen):
             raise TypeError('complete bit backend currently requires the canonical whole FFTScreen')
         if (int(manifest['sample_rate_hz']) != screen.fs or
@@ -562,6 +633,7 @@ class CompleteBitReceiver(FineReceiverContext):
             proposal['calendar'].pop(name, None)
         if declared != proposal:
             raise ValueError('only noise normalization and declared quiet aperture may differ between proposal and fine manifests')
+        memory_limit_bytes = resolve_receiver_memory(memory_limit_bytes)
         self.screen = screen
         command = getattr(basis_source, 'command', None)
         if (not getattr(screen, 'device_parallel', False) and
@@ -677,7 +749,7 @@ class CompleteBitReceiver(FineReceiverContext):
                 total_work += plan['selected'][1]
                 parts.append(part)
             peak = (self.input_workspace_bytes+self.native_workspace_bytes+
-                self.screen.resident_estimate+total_scratch+16*self.screen.crop_rows)
+                self.screen._parallel_score_workspace(method, len(frequencies), len(parts), total_scratch))
             if len(parts) == count and peak <= self.memory_limit_bytes and total_work <= self.screen.maximum_fft_products:
                 break
             count -= 1
@@ -690,10 +762,8 @@ class CompleteBitReceiver(FineReceiverContext):
             self.screen.memory_limit_bytes = original_limit
         shared_spectra = None
         if method == 'frequency' and not device_parallel:
-            # Every workspace partition uses the same observation/CFO lattice.
-            # Prepare it once; workers own only products and correlation scratch.
-            # The existing admission reserves a spectra copy per partition and
-            # therefore conservatively covers this one shared immutable bank.
+            # Every workspace partition reads one immutable observation/CFO
+            # bank. Workers own their products and correlation scratch.
             shared_spectra = self.screen._frequency_spectra(projected, frequencies,
                 workers=self.workers)
             self.screen._mark_readonly(shared_spectra)
@@ -754,10 +824,7 @@ class CompleteBitReceiver(FineReceiverContext):
         values, mask = self._input(raw, valid)
         represented = self.samples/self.sample_rate
         began = time.perf_counter()
-        cal = self.manifest['calendar']
-        prefix = max(0, min(self.samples, math.ceil((float(cal['capture_lead_seconds'])+
-            float(cal['data_sample_offset'])/self.sample_rate+
-            max(0., self.grid.arrival_upper)+1)*self.sample_rate)))
+        prefix = _helper_prefix_samples(self.manifest, self.sample_rate, self.samples, self.grid.arrival_upper)
         helper_manifest = copy.deepcopy(self.manifest)
         helper_manifest['calendar']['capture_samples'] = prefix
         helper_scratch = (helper_workspace_estimate(prefix, self.sample_rate)

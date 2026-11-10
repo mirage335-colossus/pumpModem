@@ -21,11 +21,14 @@ import time
 import numpy as np
 
 from triad_case_replay import build_public_screen
-from triad_cpu import resolve_cpu_budget
+from triad_cpu import resolve_cpu_budget, resolve_receiver_workers, resolve_receiver_memory
 from triad_message_receiver import QuietSlotMessageReceiver
-from triad_receiver import CompleteBitReceiver
+from triad_receiver import CompleteBitReceiver, public_slot_workspace
 from triad_slot_executor import (SlotProcessBackend, score_public_slot,
-                                 spawn_auxiliary_reservation_bytes)
+                                 spawn_auxiliary_reservation_bytes,
+                                 select_slot_input_transport, SharedSlotInput,
+                                 shared_input_reservation_bytes, shared_input_storage_bytes,
+                                 clear_slot_exception_frames)
 
 
 _MAXIMUM_SLOTS = 418
@@ -109,7 +112,7 @@ class CompleteStreamReceiver:
     mode discovers an arbitrary new transmitter's calendar or keyed ordinal.
     """
     def __init__(self, public_manifest, basis_source, *, source_identity,
-                 memory_limit_bytes, workers=None, native_executable=None,
+                 memory_limit_bytes=None, workers=None, native_executable=None,
                  decode_short_message=None, maximum_slots=_MAXIMUM_SLOTS,
                  maximum_data_bits=_MAXIMUM_BITS, quiet_slots=2,
                  maximum_input_chunk_samples=16384, maximum_buffer_samples=None,
@@ -117,15 +120,18 @@ class CompleteStreamReceiver:
                  receiver_factory=CompleteBitReceiver, receiver_policy=None,
                  continuous=True, maximum_pending_messages=16,
                  recent_slot_receipts=32, slot_processes=None,
-                 process_backend_factory=None):
+                 process_backend_factory=None, slot_workspace_planner=None):
         began = time.perf_counter()
         if not isinstance(public_manifest, dict):
             raise TypeError('a public receiver configuration is required')
         self.manifest = copy.deepcopy(public_manifest)
         self.sample_rate = _integer(self.manifest.get('sample_rate_hz'), 'sample rate')
-        self.memory_limit = _integer(memory_limit_bytes, 'receiver memory limit')
-        self.workers = _integer(resolve_cpu_budget()['threads'] if workers is None else workers,
-                                'receiver workers')
+        self.memory_limit = resolve_receiver_memory(memory_limit_bytes)
+        cpu_allocation = resolve_cpu_budget()
+        self.hardware_threads = _integer(cpu_allocation.get('available_cpus', cpu_allocation['threads']),
+                                         'visible hardware threads')
+        self._workers_explicit = workers is not None
+        self.workers = resolve_receiver_workers(workers, hardware_threads=self.hardware_threads)
         if type(continuous) is not bool:
             raise ValueError('continuous listening must be a boolean')
         self.continuous = continuous
@@ -160,20 +166,38 @@ class CompleteStreamReceiver:
         self.source_identity = source_identity
         self.bank_builder, self.receiver_factory = bank_builder, receiver_factory
         self.receiver_policy = copy.deepcopy(receiver_policy)
-        if slot_processes is not None and (type(slot_processes) is not int or slot_processes not in (1, 2)):
-            raise ValueError('slot processes must be1,2 or automatic')
+        if slot_processes is not None:
+            _integer(slot_processes, 'slot owner cap')
         from triad_continuous import NativeStream
         canonical = (isinstance(basis_source, NativeStream) and
                      bank_builder is build_public_screen and receiver_factory is CompleteBitReceiver)
-        self._pipeline = bool(continuous and self.workers >= 2 and slot_processes != 1 and
-                              (canonical or process_backend_factory is not None))
+        if slot_workspace_planner is not None and not callable(slot_workspace_planner):
+            raise TypeError('slot workspace planner must be callable')
+        self._slot_workspace_planner = (public_slot_workspace if canonical else None) if (
+            slot_workspace_planner is None) else slot_workspace_planner
+        self._automatic_slot_parallelism = slot_processes is None
+        self.maximum_slot_processes = (min(resolve_receiver_workers(hardware_threads=self.hardware_threads), self.workers) if
+            slot_processes is None else slot_processes)
+        self._requested_slot_processes = self.maximum_slot_processes
+        if self.maximum_slot_processes > self.workers:
+            raise ValueError('slot owners exceed the receiver software worker allocation')
         self._backend_factory = process_backend_factory or SlotProcessBackend
         self._custom_backend = process_backend_factory is not None
+        custom_runtime_known = (not self._custom_backend or
+            type(getattr(self._backend_factory, 'startup_owner_reservation_bytes', None)) is int and
+            self._backend_factory.startup_owner_reservation_bytes >= 0)
+        self._pipeline = bool(continuous and self.maximum_slot_processes >= 2 and
+            self._slot_workspace_planner is not None and custom_runtime_known and
+            (canonical or self._custom_backend))
+        unavailable = ('custom_workspace_bound_unavailable' if self._slot_workspace_planner is None else
+                       'custom_runtime_bound_unavailable' if not custom_runtime_known else None)
         if self._pipeline and not self._custom_backend and not sys.platform.startswith('linux'):
             self._pipeline = False
+            unavailable = 'bounded_process_runtime_unavailable'
         self._backend = None
         self._jobs = {}
         self._plan_cache = {}
+        self._workspace_plans = {}
         self._dispatch_index = 0
         self._dispatched_stop = 0
         self._pending_interval_valid = True
@@ -182,17 +206,27 @@ class CompleteStreamReceiver:
         self._slot_clock = _ServiceUnion() if self._pipeline else None
         self._open_service = []
         self._controller_resident_bytes = 0
+        self._original_native_reservation_bytes = 0
         self._spawn_auxiliary_reserve = 0
-        if self._pipeline and not self._custom_backend:
+        if canonical and not self._custom_backend:
             try:
                 resident = [int(Path('/proc', str(pid), 'statm').read_text().split()[1])*
                     os.sysconf('SC_PAGE_SIZE') for pid in (os.getpid(), self.source.process.pid)]
                 native_bound = max(int(self.source.descriptor.get('fixed_workspace_bytes', 0)),
                                    int(self.source.descriptor.get('workspace_budget_bytes', 0)))
+                self._original_native_reservation_bytes = native_bound
                 self._controller_resident_bytes = resident[0]+max(resident[1], native_bound)
             except (OSError, ValueError, IndexError):
                 self._pipeline = False
-        self._pipeline_fallback_reason = None
+        if not self._pipeline:
+            self.maximum_slot_processes = 1
+        self._slot_input_transport = dict(method='pipe_copy', reason='pipeline_transport_not_required')
+        self._input_transport_selected = not self._pipeline
+        self._pipeline_fallback_reason = unavailable
+        self._serial_memory_admissions = 0
+        self._peak_slot_processes = 0
+        self._largest_dispatch = 0
+        self._last_admission = None
         self._workspace_retry_count = 0
         self._pipeline_jobs_submitted = self._pipeline_parallel_jobs = 0
         self._owner_startup_seconds = 0.
@@ -350,6 +384,8 @@ class CompleteStreamReceiver:
         self._dispatch_index = plan['index']+1
         self._next_plan = next_plan
         self._plan_cache.pop(plan['index'], None)
+        self._workspace_plans = {key: value for key, value in self._workspace_plans.items()
+                                 if key[0] > plan['index']}
         self._prune(next_plan['receiver_window_first_sample'])
 
     def _disable_pipeline(self, reason):
@@ -357,43 +393,126 @@ class CompleteStreamReceiver:
             self._backend.close()
             self._backend = None
         self._pipeline = False
+        self.maximum_slot_processes = 1
         self._pipeline_fallback_reason = reason
-        # The legacy serial workspace already reserves its native owner.
-        self._controller_resident_bytes = 0
 
-    def _ensure_backend(self):
-        if self._backend is not None or not self._pipeline:
+    def _prospective_owner_bytes(self):
+        if self._custom_backend:
+            return self._backend_factory.startup_owner_reservation_bytes
+        resident = int(Path('/proc/self/statm').read_text().split()[1])*os.sysconf('SC_PAGE_SIZE')
+        native = max(int(self.source.descriptor.get('fixed_workspace_bytes', 0)),
+                     int(self.source.descriptor.get('workspace_budget_bytes', 0)))
+        return (resident+native if self._backend is None else
+                self._backend.prospective_owner_bytes(resident, native))
+
+    def _select_input_transport(self):
+        if not self._input_transport_selected:
+            self._slot_input_transport = (select_slot_input_transport() if
+                getattr(self._backend_factory, 'supports_shared_input', False) else
+                dict(method='pipe_copy', reason='custom_backend_uses_copied_input'))
+            self._input_transport_selected = True
+
+    def _ensure_backend(self, count=1):
+        if not self._pipeline or self._backend is not None and self._backend.owner_count >= count:
             return
-        prospective_auxiliary = max(self._spawn_auxiliary_reserve,
-                                    spawn_auxiliary_reservation_bytes())
-        if not self._custom_backend:
-            try:
-                resident = int(Path('/proc/self/statm').read_text().split()[1])*os.sysconf('SC_PAGE_SIZE')
-            except (OSError, ValueError, IndexError):
-                self._disable_pipeline('runtime_resident_memory_unavailable')
-                return
-            native = max(int(self.source.descriptor.get('fixed_workspace_bytes', 0)),
-                         int(self.source.descriptor.get('workspace_budget_bytes', 0)))
-            if (self._reserved_bytes()+prospective_auxiliary-self._spawn_auxiliary_reserve+
-                    2*(resident+native) >= self.memory_limit):
-                self._disable_pipeline('two_owner_startup_memory_admission')
-                return
-        # multiprocessing's process-scoped tracker can outlive both owners.
-        # Count it once before launch, and retain the allowance after any
-        # attempted launch, including a failed launch or serial fallback.
-        self._spawn_auxiliary_reserve = prospective_auxiliary
+        self._select_input_transport()
+        self._spawn_auxiliary_reserve = max(self._spawn_auxiliary_reserve,
+                                            spawn_auxiliary_reservation_bytes())
         startup_began = time.perf_counter()
         try:
-            self._backend = self._backend_factory(self.source.command, max_processes=2,
-                                                   total_workers=self.workers)
+            if self._backend is None:
+                transport = (dict(input_transport=self._slot_input_transport['method']) if
+                    not self._custom_backend or getattr(self._backend_factory, 'supports_shared_input', False) else {})
+                self._backend = self._backend_factory(self.source.command,
+                    max_processes=self.maximum_slot_processes, total_workers=self.workers,
+                    initial_processes=count, **transport)
+            else:
+                self._backend.ensure_processes(count)
         except MemoryError:
-            self._disable_pipeline('two_owner_startup_workspace_rejection')
+            if self._jobs:
+                raise
+            self._disable_pipeline('slot_owner_startup_workspace_rejection')
             return
         finally:
             self._owner_startup_seconds += time.perf_counter()-startup_began
+        native = max(int(self.source.descriptor.get('fixed_workspace_bytes', 0)),
+                     int(self.source.descriptor.get('workspace_budget_bytes', 0)))
+        if self._backend.native_workspace_bytes < native*self._backend.owner_count:
+            raise RuntimeError('slot backend omitted an intrinsic native owner reservation')
+        self._peak_slot_processes = max(self._peak_slot_processes, self._backend.owner_count)
         self._peak_owned_process_bytes = max(self._peak_owned_process_bytes, self._backend.resident_bytes)
-        if self._reserved_bytes() >= self.memory_limit:
-            self._disable_pipeline('two_owner_resident_memory_admission')
+        if self._reserved_bytes() > self.memory_limit:
+            raise MemoryError('slot owner startup exceeded aggregate runtime admission')
+
+    def _workspace_requirement(self, plan, workers):
+        key = (plan['index'], workers)
+        if key not in self._workspace_plans:
+            estimate = self._slot_workspace_planner(self._slot_manifest(plan),
+                getattr(self.source, 'plan', None), self.source.descriptor,
+                workers=workers, receiver_policy=self.receiver_policy)
+            if not isinstance(estimate, dict):
+                raise ValueError('slot planner omitted its bounded workspace receipt')
+            minimum = _integer(estimate.get('minimum_memory_limit_bytes'), 'slot workspace minimum')
+            child_input = _integer(estimate.get('input_bytes'), 'slot input workspace')
+            native = _integer(estimate.get('native_bytes'), 'slot native workspace', minimum=0)
+            if child_input != 17*plan['receiver_window_samples'] or minimum <= child_input+native:
+                raise ValueError('slot planner changed intrinsic input/native ownership')
+            declared_native = max(int(self.source.descriptor.get('fixed_workspace_bytes', 0)),
+                                  int(self.source.descriptor.get('workspace_budget_bytes', 0)))
+            if native != declared_native:
+                raise ValueError('slot planner changed the native owner reservation')
+            self._workspace_plans[key] = dict(estimate)
+        return self._workspace_plans[key]
+
+    def _select_dispatch(self, ready, running, *, retire_idle=False):
+        self._select_input_transport()
+        current = self._backend.owner_count if self._backend is not None else 0
+        base = self._reserved_bytes()
+        auxiliary = max(self._spawn_auxiliary_reserve, spawn_auxiliary_reservation_bytes())
+        base += auxiliary-self._spawn_auxiliary_reserve
+        # Only bounded current API scratch is reserved. Future raw input uses
+        # remaining RAM as it arrives; a lone job never consumes all surplus.
+        base += max(0, 64*self.maximum_input_chunk_samples-self._inflight_input_bytes)
+        extra_owner = self._prospective_owner_bytes()
+        available_workers = self.workers-sum(job['workers'] for job in running)
+        shared = self._slot_input_transport['method'] == 'sealed_memfd'
+        input_reservation = shared_input_reservation_bytes if shared else SlotProcessBackend.input_reservation_bytes
+        for width in range(len(ready), 0, -1):
+            share, remainder = divmod(available_workers, width)
+            allocations = [share+int(i >= width-remainder) for i in range(width)]
+            requirements = [self._workspace_requirement(plan, workers)
+                            for plan, workers in zip(ready[:width], allocations)]
+            keep = min(current, width) if retire_idle else current
+            if retire_idle and running:
+                raise RuntimeError('active owners cannot retire for memory admission')
+            resident_base = base
+            if retire_idle and self._backend is not None:
+                resident_base += self._backend.resident_bytes_after_retirement(keep)-self._backend.resident_bytes
+            target = max(keep, len(running)+width)
+            leases = [row['minimum_memory_limit_bytes']-row['native_bytes']+
+                input_reservation(plan['receiver_window_samples'])-row['input_bytes']
+                for plan, row in zip(ready[:width], requirements)]
+            # Only one private _window pair exists during sequential packing.
+            # Drop it after sealing; the retained retry owner is the shared FD.
+            assembly = max((row['input_bytes'] for row in requirements), default=0) if shared else 0
+            total = resident_base+max(0, target-keep)*extra_owner+sum(leases)+assembly
+            if total <= self.memory_limit:
+                return dict(plans=ready[:width], allocations=allocations, requirements=requirements,
+                    leases=leases, keep=keep, target=target, aggregate_estimate_bytes=total,
+                    assembly_scratch_bytes=assembly)
+        return None
+
+    @staticmethod
+    def _release_job_input(job):
+        job['values'] = job['valid'] = None
+        view = job.get('shared_view')
+        if view is not None:
+            view.close()
+            del job['shared_view']
+        owner = job.get('shared_input')
+        if owner is not None:
+            owner.close()
+            del job['shared_input']
 
     def _collect(self, *, wait=False):
         if self._backend is None:
@@ -406,11 +525,12 @@ class CompleteStreamReceiver:
             job['finished'] = True
             if 'result' in record:
                 job['result'] = record['result']
-                job['values'] = job['valid'] = None
+                self._release_job_input(job)
                 job['reservation'] = 4*1024**2
             elif record.get('error_type') == 'MemoryError':
                 job['workspace_rejected'] = True
-                job['reservation'] = 17*job['samples']
+                job['reservation'] = (shared_input_storage_bytes(job['samples']) if
+                    job.get('shared_input') is not None else 17*job['samples'])
             else:
                 self._error_phase = str(record.get('error_phase', 'slot_owner'))[:64]
                 raise RuntimeError('slot owner failed without a workspace retry condition')
@@ -435,9 +555,36 @@ class CompleteStreamReceiver:
         for job in sorted(self._jobs.values(), key=lambda item: item['index']):
             if job.get('workspace_rejected'):
                 self._workspace_retry_count += 1
-                job['result'] = self._score_serial(job)
+                owner = job.get('shared_input')
+                retained = job['reservation']
+                overhead = owner.storage_bytes-owner.input_bytes if owner is not None else 0
+                # Complete receiver D replaces input I, not page rounding or
+                # mapping/FD overhead. Keep that excess outside its refund.
+                job['reservation'] -= overhead
+                self._inflight_input_bytes += overhead
+                view = None
+                try:
+                    view = owner.open_readonly() if owner is not None else None
+                    if view is not None:
+                        job['shared_view'] = view
+                        job['values'], job['valid'] = view.values, view.valid
+                    job['result'] = self._score_serial(job)
+                except BaseException as error:
+                    # Completed scoring frames can retain ndarray exports. The
+                    # public error receipt carries type/phase, not those locals.
+                    clear_slot_exception_frames(error)
+                    raise
+                finally:
+                    try:
+                        if view is not None:
+                            job['values'] = job['valid'] = None
+                            view.close()
+                            del job['shared_view']
+                    finally:
+                        job['reservation'] = retained
+                        self._inflight_input_bytes -= overhead
                 job['workspace_rejected'] = False
-                job['values'] = job['valid'] = None
+                self._release_job_input(job)
                 job['reservation'] = 4*1024**2
         self._commit_ready()
         return True
@@ -452,44 +599,85 @@ class CompleteStreamReceiver:
             return
         if self._input_cursor < self._next_plan['receiver_window_stop_sample']:
             return
-        self._ensure_backend()
-        if not self._pipeline:
-            self._dispatch_ready()
-            return
         if any(job.get('workspace_rejected') for job in self._jobs.values()):
             return
         running = [job for job in self._jobs.values() if not job.get('finished')]
-        if len(self._jobs) >= 2 or any(job['workers'] == self.workers for job in running):
+        available = min(self.maximum_slot_processes-len(running),
+            2*self.maximum_slot_processes-len(self._jobs),
+            self.workers-sum(job['workers'] for job in running))
+        if available <= 0:
             return
-        ready = [self._next_plan]
-        if not self._jobs:
-            following = self._get_plan(self._dispatch_index+1)
-            if self._input_cursor >= following['receiver_window_stop_sample']:
-                ready.append(following)
-        allocations = ([self.workers//2, self.workers-self.workers//2] if len(ready) == 2 else
-                       [self.workers-running[0]['workers']] if running else [self.workers])
-        reserve_inputs = sum(self._backend.input_reservation_bytes(plan['receiver_window_samples']) for plan in ready)
-        ingress_headroom = max(0, 17*self._backlog_limit_samples()-self._buffer_bytes)
-        ingress_headroom += max(0, 64*self.maximum_input_chunk_samples-self._inflight_input_bytes)
-        available = self.memory_limit-self._reserved_bytes()-reserve_inputs-ingress_headroom
-        budget = available//len(ready)
-        if budget <= max(17*plan['receiver_window_samples'] for plan in ready):
+        ready = []
+        for offset in range(available):
+            plan = self._get_plan(self._dispatch_index+offset)
+            if self._input_cursor < plan['receiver_window_stop_sample']:
+                break
+            ready.append(plan)
+        choice = self._select_dispatch(ready, running)
+        if choice is None and not self._jobs and self._backend is not None:
+            choice = self._select_dispatch(ready, running, retire_idle=True)
+            if choice is not None and choice['keep'] < self._backend.owner_count:
+                self._backend.retire_idle(choice['keep'])
+        if choice is None:
             if not self._jobs:
-                self._disable_pipeline('parallel_slot_workspace_admission')
-                self._dispatch_ready()
+                # A larger public window may need the original owner alone.
+                # Re-evaluate subsequent geometry; do not latch serial mode.
+                if self._backend is not None:
+                    self._backend.close()
+                    self._backend = None
+                self._serial_memory_admissions += 1
+                self._last_admission = dict(reason='public_slot_requires_parent_workspace', width=1)
+                self._process_slot(self._next_plan)
             return
-        for plan, workers in zip(ready, allocations):
-            job = self._assemble_job(plan)
-            job.update(workers=workers, memory_limit_bytes=budget,
-                parent_reservation=self.memory_limit-budget,
-                reservation=budget+self._backend.input_reservation_bytes(job['samples']))
-            self._backend.submit(job['index'], manifest=job['manifest'], public_address=job['address'],
-                source_identity=self.source_identity, values=job['values'], valid=job['valid'],
-                workers=workers, memory_limit_bytes=budget, receiver_policy=self.receiver_policy)
-            self._jobs[job['index']] = job
-            self._pipeline_jobs_submitted += 1
-            self._pipeline_parallel_jobs += int(workers < self.workers)
-            self._advance_dispatch(plan)
+        self._ensure_backend(choice['target'])
+        if not self._pipeline:
+            self._dispatch_ready()
+            return
+        # Fresh runtime admission can be larger than its prospective bound.
+        # Re-evaluate actual ownership before any input/DSP is transferred.
+        resident_ready = ready[:self._backend.owner_count-len(running)]
+        choice = self._select_dispatch(resident_ready, running)
+        if choice is None:
+            if not self._jobs:
+                narrowed = self._select_dispatch(resident_ready, running, retire_idle=True)
+                if narrowed is not None:
+                    self._backend.retire_idle(narrowed['keep'])
+                    choice = narrowed
+            if choice is None:
+                raise MemoryError('actual slot runtimes leave no admitted DSP window')
+        self._largest_dispatch = max(self._largest_dispatch, len(choice['plans']))
+        self._last_admission = dict(reason='complete_public_workspace_admitted',
+            width=len(choice['plans']), aggregate_estimate_bytes=choice['aggregate_estimate_bytes'],
+            assembly_scratch_bytes=choice['assembly_scratch_bytes'],
+            input_transport=dict(self._slot_input_transport))
+        shared = self._slot_input_transport['method'] == 'sealed_memfd'
+        scratch = choice['assembly_scratch_bytes']
+        self._inflight_input_bytes += scratch
+        try:
+            for plan, workers, requirement, lease in zip(choice['plans'], choice['allocations'],
+                    choice['requirements'], choice['leases']):
+                budget = requirement['minimum_memory_limit_bytes']
+                job = self._assemble_job(plan)
+                job.update(workers=workers, memory_limit_bytes=budget,
+                    parent_reservation=choice['aggregate_estimate_bytes']-budget, reservation=lease)
+                if shared:
+                    # Register ownership before allocation or transfer can fail.
+                    self._jobs[job['index']] = job
+                    job['shared_input'] = SharedSlotInput.from_arrays(job['values'], job['valid'])
+                    job['values'] = job['valid'] = None
+                    input_arguments = dict(shared_input=job['shared_input'])
+                else:
+                    input_arguments = dict(values=job['values'], valid=job['valid'])
+                self._peak_combined_bytes = max(self._peak_combined_bytes, self._reserved_bytes())
+                self._backend.submit(job['index'], manifest=job['manifest'], public_address=job['address'],
+                    source_identity=self.source_identity, **input_arguments,
+                    workers=workers, memory_limit_bytes=budget, receiver_policy=self.receiver_policy)
+                self._jobs[job['index']] = job
+                self._pipeline_jobs_submitted += 1
+                self._pipeline_parallel_jobs += int(workers < self.workers)
+                self._advance_dispatch(plan)
+        finally:
+            self._inflight_input_bytes -= scratch
         self._peak_combined_bytes = max(self._peak_combined_bytes, self._reserved_bytes())
         if self._reserved_bytes() > self.memory_limit:
             raise MemoryError('owned slot processes exceed the aggregate receiver memory estimate')
@@ -497,7 +685,7 @@ class CompleteStreamReceiver:
     def _backlog_limit_samples(self):
         if not self._pipeline:
             return self.maximum_buffer_samples+self.maximum_input_chunk_samples
-        last = self._get_plan(self._dispatch_index+1)
+        last = self._get_plan(self._dispatch_index+self.maximum_slot_processes-1)
         span = last['receiver_window_stop_sample']-self._next_plan['receiver_window_first_sample']
         return min(self.maximum_buffer_samples+self.maximum_input_chunk_samples,
                    span+2*self.maximum_input_chunk_samples)
@@ -532,6 +720,8 @@ class CompleteStreamReceiver:
         if self._backend is not None:
             self._backend.close()
             self._backend = None
+        for job in self._jobs.values():
+            self._release_job_input(job)
         self._jobs.clear()
         self._settle_service()
 
@@ -685,7 +875,8 @@ class CompleteStreamReceiver:
 
     def _score_serial(self, job):
         self._phase = 'recurring_public_bank_preparation'
-        remaining = self.memory_limit-self._reserved_bytes()+job.get('reservation', 0)
+        remaining = (self.memory_limit-self._reserved_bytes()+job.get('reservation', 0)+
+                     self._original_native_reservation_bytes)
         job['memory_limit_bytes'] = remaining
         job['parent_reservation'] = self.memory_limit-remaining
         score = score_public_slot(self.source, job['manifest'], public_address=job['address'],
@@ -1004,7 +1195,19 @@ class CompleteStreamReceiver:
                             exception_type=self._error_type),
             message=message, physical_complete=bool(not self.continuous and message['physical_complete']),
             continuous_listening=self.continuous, worker_allocation=self.workers,
-            slot_pipeline=dict(enabled=self._pipeline, maximum_processes=2 if self._pipeline else 1,
+            visible_hardware_threads=self.hardware_threads,
+            software_worker_allocation=self.workers,
+            explicit_worker_oversubscription=self._workers_explicit and self.workers > self.hardware_threads,
+            automatic_worker_oversubscription=not self._workers_explicit and self.workers > self.hardware_threads,
+            slot_pipeline=dict(enabled=self._pipeline, maximum_processes=self.maximum_slot_processes,
+                automatic_parallelism=self._automatic_slot_parallelism,
+                requested_processes=self._requested_slot_processes,
+                resident_processes=self._backend.owner_count if self._backend is not None else 0,
+                peak_processes=self._peak_slot_processes,
+                maximum_uncommitted_slots=2*self._requested_slot_processes,
+                largest_dispatch=self._largest_dispatch,
+                serial_memory_admission_slots=self._serial_memory_admissions,
+                last_admission=self._last_admission,
                 pending_jobs=len(self._jobs), submitted_jobs=self._pipeline_jobs_submitted,
                 split_budget_jobs=self._pipeline_parallel_jobs,
                 workspace_retry_count=self._workspace_retry_count,

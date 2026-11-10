@@ -30,6 +30,22 @@ def fixed_block_bounds(samples, block_samples, index):
     return start, samples if index == count-1 else start+block_samples
 
 
+def incremental_workspace_bytes(samples, block_samples, candidate_count, taps, model_count,
+                                precision, *, parallel, basis_projection_workers):
+    """Bound a live incremental block, including the merged terminal extent."""
+    block = min(samples, block_samples+samples%block_samples)
+    hck = 3*candidate_count*taps
+    item = 8 if precision == "fp32" else 16
+    estimate = (block*(item+16) + hck*block*(item*2+24) +
+        3*candidate_count*taps*taps*(item*4+64) +
+        model_count*3*candidate_count*(taps*taps*item*8+taps*item*4+64))
+    if parallel:
+        estimate += model_count*3*candidate_count*(taps*taps*item*12+taps*item*12+64)
+    if basis_projection_workers > 1:
+        estimate += min(basis_projection_workers, hck//8, hck*block//32768)*4096
+    return estimate
+
+
 class _CandidateGaussianFilter:
     """Independent candidate slices with unchanged per-candidate recursion."""
     def __init__(self, prior, candidates, shards, dtype):
@@ -193,17 +209,9 @@ class IncrementalGaussianReceiver:
         # Conservative preflight for input, complex basis, projected basis,
         # transform scratch and the one-block state. Do this before calling the
         # basis provider, which may synthesize keyed templates.
-        hck = 3 * candidate_count * self.taps
-        item = 8 if precision == "fp32" else 16
-        block = self.maximum_block_rows
-        estimate = (block * (item + 16) + hck * block * (item * 2 + 24) +
-                    3 * candidate_count * self.taps * self.taps * (item * 4 + 64) +
-                    len(coherences) * 3 * candidate_count * (self.taps * self.taps * item * 8 + self.taps * item * 4 + 64))
-        if hypothesis_executor is not None:
-            estimate += len(coherences)*3*candidate_count*(
-                self.taps*self.taps*item*12+self.taps*item*12+64)
-        if basis_projection_workers > 1:
-            estimate += min(basis_projection_workers, hck//8, hck*block//32768)*4096
+        estimate = incremental_workspace_bytes(samples, block_samples, candidate_count,
+            self.taps, len(coherences), precision, parallel=hypothesis_executor is not None,
+            basis_projection_workers=basis_projection_workers)
         if estimate > self.memory_limit_bytes:
             raise MemoryError("incremental Gaussian block workspace exceeds memory limit before basis generation")
         self.owned_bytes_estimate = estimate

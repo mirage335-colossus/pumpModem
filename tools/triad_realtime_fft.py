@@ -29,7 +29,7 @@ import numpy as np
 from scipy import fft, signal
 
 from triad_dynamic_joint import _cubic_stencil, _sample_cubic, _sample_cubic_rows
-from triad_acquisition import data_fir_taps
+from triad_acquisition import data_fir_tap_count, data_fir_taps
 
 
 # Above this public geometry the whole-array estimate reserves at least512MiB
@@ -346,7 +346,8 @@ class FFTScreen:
                  maximum_fft_products=32768, correlation_method='frequency', template_provider=None,
                  source_samples=None, template_identity=None, template_chunk_samples=16384,
                  mapped_template_provider=None, template_sampling_step=1,
-                 mapped_template_batch_lanes=26):
+                 mapped_template_batch_lanes=26, _workspace_only=False,
+                 _minimum_batch=False, _raw_template_bytes=0):
         started = _clock()
         self.manifest = manifest
         self.fs = _integer(manifest['sample_rate_hz'], 'sample rate')
@@ -372,15 +373,20 @@ class FFTScreen:
         if not self.epochs or len(set(self.epochs)) != len(self.epochs):
             raise ValueError('epoch offsets must be nonempty and unique')
         if template_provider is None and mapped_template_provider is None:
-            if source_samples is not None or template_identity is not None:
+            if _workspace_only:
+                source_samples = _integer(source_samples, 'source samples', minimum=4)
+                source_bytes = _integer(_raw_template_bytes, 'raw template bytes', minimum=0)
+                source = source_identity = None
+            elif source_samples is not None or template_identity is not None:
                 raise ValueError('provider metadata requires a template provider')
-            source = np.asarray(raw_templates)
-            if (source.ndim != 3 or source.shape[:2] != (len(self.epochs), 2) or
-                    source.shape[2] < 4 or not np.iscomplexobj(source) or not np.isfinite(source).all()):
-                raise ValueError('finite complex templates need [epochs,2,source samples]')
-            source_samples = source.shape[-1]
-            source_bytes = source.nbytes
-            source_identity = hashlib.sha256(np.ascontiguousarray(source).view(np.uint8)).hexdigest()
+            else:
+                source = np.asarray(raw_templates)
+                if (source.ndim != 3 or source.shape[:2] != (len(self.epochs), 2) or
+                        source.shape[2] < 4 or not np.iscomplexobj(source) or not np.isfinite(source).all()):
+                    raise ValueError('finite complex templates need [epochs,2,source samples]')
+                source_samples = source.shape[-1]
+                source_bytes = source.nbytes
+                source_identity = hashlib.sha256(np.ascontiguousarray(source).view(np.uint8)).hexdigest()
         else:
             if (raw_templates is not None or
                     (template_provider is not None and mapped_template_provider is not None) or
@@ -421,11 +427,15 @@ class FFTScreen:
             raise ValueError('ray delay must be nonnegative')
         self.rays = ((0., 0.), (self.delay, self.doppler)) if self.delay or self.doppler else ((0., 0.),)
         self.pass_edge = _number(pass_edge_hz, 'pass edge', positive=True)
-        self.taps = data_fir_taps('rate-aware', sample_rate=self.fs,
-            output_sample_rate=self.output_fs, pass_edge_hz=self.pass_edge,
-            stop_edge_hz=stop_edge_hz).astype(self.real_dtype)
-        self.reference_variance = _number(manifest['power']['complex_noise_variance'],
-            'raw noise variance', positive=True)*float(np.dot(self.taps.astype(float), self.taps.astype(float)))
+        fir = dict(sample_rate=self.fs, output_sample_rate=self.output_fs,
+                   pass_edge_hz=self.pass_edge, stop_edge_hz=stop_edge_hz)
+        variance = _number(manifest['power']['complex_noise_variance'], 'raw noise variance', positive=True)
+        if _workspace_only:
+            self.tap_count = data_fir_tap_count('rate-aware', **fir)
+        else:
+            self.taps = data_fir_taps('rate-aware', **fir).astype(self.real_dtype)
+            self.tap_count = len(self.taps)
+            self.reference_variance = variance*float(np.dot(self.taps.astype(float), self.taps.astype(float)))
         self.source_half_width = _number(manifest['format']['occupied_bandwidth_hz'],
             'nominal DATA bandwidth', positive=True)*.5
         self.duration = source_samples/self.fs
@@ -439,13 +449,13 @@ class FFTScreen:
                        self.output_fs-self.lead-self.lower)
         latest = max((self.offset+(source_samples+2)/self.fs)/scales)+self.delay
         self.raw_kernel_rows = math.ceil((latest-self.origin)*self.fs)+1
-        self.kernel_rows = (self.raw_kernel_rows+len(self.taps)-2)//self.decimation+1
+        self.kernel_rows = (self.raw_kernel_rows+self.tap_count-2)//self.decimation+1
         self.lag_count = math.floor((self.upper-self.lower)*self.output_fs+1e-9)+1
-        self.arrivals = self.lower+np.arange(self.lag_count)/self.output_fs
+        last_arrival = self.lower + (self.lag_count-1)/self.output_fs
         self.crop_first = round((self.origin+self.lower+self.lead)*self.output_fs)
         self.crop_rows = self.kernel_rows+self.lag_count-1
         self.crop_stop = self.crop_first+self.crop_rows
-        raw_support_last = ((self.origin+self.arrivals[-1]+self.lead)*self.fs+
+        raw_support_last = ((self.origin+last_arrival+self.lead)*self.fs+
                             self.raw_kernel_rows-1)
         if self.crop_first < 0 or raw_support_last > self.samples-1+1e-6:
             raise ValueError('complete source support does not fit every declared arrival/clock in capture')
@@ -465,7 +475,7 @@ class FFTScreen:
             coarse_rows = math.ceil((self.raw_kernel_rows-1)/self.template_sampling_step)+1
             staging = 8*min(coarse_rows, template_chunk_samples)*16+4*self.nfft*np.dtype(self.dtype).itemsize
             projection_scratch = (8*self.kernel_rows*16 +
-                16*(len(self.taps)+4*self.template_sampling_step)*16)
+                16*(self.tap_count+4*self.template_sampling_step)*16)
             # One coarse column per lane and the simultaneously live native
             # response, decoded values, finite extension and phase temporaries.
             lane_scratch = (coarse_rows+8*min(coarse_rows, template_chunk_samples)+8)*16
@@ -476,12 +486,14 @@ class FFTScreen:
                 batch_lanes = min(lane_limit,
                     (available-projection_workers*projection_scratch)//lane_scratch)
                 if batch_lanes >= projection_workers:
+                    if _minimum_batch:
+                        batch_lanes = projection_workers
                     break
             else:
                 raise MemoryError('coarse mapped bank has no workspace for one public lane')
             scratch = staging+batch_lanes*lane_scratch+projection_workers*projection_scratch
         else:
-            transform_rows = fft.next_fast_len(template_chunk_samples + len(self.taps) - 1)
+            transform_rows = fft.next_fast_len(template_chunk_samples+self.tap_count-1)
             provider_rows = min(source_samples, math.ceil(template_chunk_samples*float(max(scales))) + 4)
             scratch = (8*transform_rows*np.dtype(self.dtype).itemsize + 4*provider_rows*16 +
                        4*self.nfft*np.dtype(self.dtype).itemsize)
@@ -496,27 +508,35 @@ class FFTScreen:
                 per_lane = (source_samples*16 + 4*min(source_samples, template_chunk_samples)*16 +
                             4*len(self.rays)*self.nfft*16)
                 available = self.memory_limit_bytes-self.resident_estimate
-                requested = 1 if self.device_parallel else self.workers
-                for count in range(min(requested, lane_limit*jobs_per_lane), 0, -1):
-                    admitted = min(lane_limit, (available-count*scratch)//per_lane)
-                    if admitted > 0 and admitted*jobs_per_lane >= count:
-                        batch_lanes, projection_workers, integer_lease = admitted, count, lease
-                        scratch = batch_lanes*per_lane + projection_workers*scratch
-                        break
+                requested = min(1 if self.device_parallel else self.workers, lane_limit*jobs_per_lane)
+                plan_reserve = 0
                 load_projector = getattr(template_provider, 'cubic_plan', None)
-                if integer_lease is not None and not self.device_parallel and callable(load_projector):
+                if not self.device_parallel and callable(load_projector):
                     tile_count = (self.raw_kernel_rows+template_chunk_samples-1)//template_chunk_samples
-                    # Int64 centers, four FP64 weights and complex128 rotations,
-                    # plus one setup tile's temporaries and plan metadata.
                     plan_bytes = (jobs_per_lane*(56*self.raw_kernel_rows+1024*tile_count) +
                                   128*template_chunk_samples)
-                    if scratch+plan_bytes <= available:
-                        cubic_projector = load_projector()
+                    minimum_lanes = (requested+jobs_per_lane-1)//jobs_per_lane
+                    if minimum_lanes*per_lane+requested*scratch+plan_bytes <= available:
+                        cubic_projector = True if _workspace_only else load_projector()
                         if cubic_projector is not None:
-                            scratch += plan_bytes
+                            # Keep the native plan before growing optional
+                            # batches beyond the lanes the workers need.
+                            plan_reserve = plan_bytes
+                for count in range(requested, 0, -1):
+                    admitted = min(lane_limit, (available-count*scratch-plan_reserve)//per_lane)
+                    if admitted > 0 and admitted*jobs_per_lane >= count:
+                        if _minimum_batch:
+                            admitted = (count+jobs_per_lane-1)//jobs_per_lane
+                        batch_lanes, projection_workers, integer_lease = admitted, count, lease
+                        scratch = batch_lanes*per_lane+projection_workers*scratch+plan_reserve
+                        break
         self.preparation_peak_estimate_bytes = self.resident_estimate+scratch
         if self.preparation_peak_estimate_bytes > self.memory_limit_bytes:
             raise MemoryError('coarse FFT template preparation exceeds memory limit')
+        if _workspace_only:
+            self.workspaces = range(workspace_count)
+            return
+        self.arrivals = self.lower+np.arange(self.lag_count)/self.output_fs
         self.workspaces = [None]*workspace_count
         time_source = (self.origin+np.arange(self.raw_kernel_rows, dtype=float)/self.fs
                        if template_provider is None and mapped_template_provider is None else None)
@@ -886,21 +906,8 @@ class FFTScreen:
         if size > self.maximum_frequency_points or products > self.maximum_fft_products:
             result['reason'] = 'frequency_tile_kernel_work_limit'
             return result
-        sample_separation = max(1, math.ceil(separation*self.output_fs))
-        peak_rows = min(top_per_bit, self.lag_count,
-            math.ceil(self.lag_count/sample_separation)+2)
-        candidate_rows = len(frequencies)*len(self.workspaces)*peak_rows
-        candidate_bytes = candidate_rows*512
-        item = np.dtype(self.dtype).itemsize
-        active = min(size, self.batch_size)
-        scratch = workers*(active*len(self.rays)*self.nfft*item*3 +
-            active*self.lag_count*64)
-        spectra_bytes = size*self.nfft*item
-        # Includes the owned observation copy, times/modulation/FIR-related
-        # coordinates, and simultaneous global sort/key buffers in the512-byte
-        # per-row allowance. The caller must reserve its other input buffers.
-        peak = (self.resident_estimate + 96*self.crop_rows +
-            64*len(frequencies) + spectra_bytes + scratch + candidate_bytes)
+        candidate_rows, candidate_bytes, scratch, peak = self._tiled_frequency_workspace(
+            len(frequencies), size, workers, top_per_bit, separation)
         units = math.ceil(len(frequencies)/unit)
         result.update(frequencies_hz=frequencies.tolist(), frequency_points=len(frequencies),
             units=units, terminal_unit_frequency_points=len(frequencies)-(units-1)*unit,
@@ -920,6 +927,28 @@ class FFTScreen:
         else:
             result.update(status='ready', reason=None)
         return result
+
+    def _tiled_frequency_workspace(self, frequency_count, size, workers, top_per_bit, separation):
+        sample_separation = max(1, math.ceil(separation*self.output_fs))
+        peak_rows = min(top_per_bit, self.lag_count,
+            math.ceil(self.lag_count/sample_separation)+2)
+        candidate_rows = frequency_count*len(self.workspaces)*peak_rows
+        candidate_bytes = candidate_rows*512
+        item = np.dtype(self.dtype).itemsize
+        active = min(size, self.batch_size)
+        scratch = workers*self._frequency_partition_workspace(active)
+        spectra_bytes = size*self.nfft*item
+        # Includes the owned observation copy, times/modulation/FIR-related
+        # coordinates, and simultaneous global sort/key buffers in the512-byte
+        # per-row allowance. The caller must reserve its other input buffers.
+        peak = (self.resident_estimate + 96*self.crop_rows +
+            64*frequency_count + spectra_bytes + scratch + candidate_bytes)
+        return candidate_rows, candidate_bytes, scratch, peak
+
+    def _frequency_partition_workspace(self, active):
+        """Private product, IFFT, score and peak scratch for one batch."""
+        item = np.dtype(self.dtype).itemsize
+        return active*(len(self.rays)*self.nfft*item*3+self.lag_count*64)
 
     def start_tiled_frequency(self, projected, frequencies_hz=None, *,
                               projection_receipt=None, executor=None, **arguments):
@@ -1023,46 +1052,102 @@ class FFTScreen:
 
     def _correlation_peak_estimate(self, plan, *, raw_input):
         """Conservative live-buffer estimate before any observation allocation."""
+        if plan['selected'] is None:
+            return None
+        method = plan['selected'][0]
+        groups = plan['groups'] if method == 'lag' else ()
+        return self._ordinary_score_workspace(method, len(plan['frequencies']),
+            len(self.workspaces), plan['top_per_bit'], plan['sample_separation'],
+            raw_input=raw_input, lag_count=sum(len(group[0]) for group in groups),
+            lag_transformed=sum(group[1] for group in groups),
+            lag_largest=max((group[1] for group in groups), default=0))
+
+    def _ordinary_score_workspace(self, method, frequency_count, workspace_count, top_per_bit,
+                                  sample_separation, *, raw_input, lag_count=0,
+                                  lag_transformed=0, lag_largest=0):
         item = np.dtype(self.dtype).itemsize
         base = self.resident_estimate+96*self.crop_rows
         if raw_input:
             base = max(base, self._observation_peak_estimate())
-        if plan['selected'] is None:
-            return None
-        method = plan['selected'][0]
         # Each active workspace builds its own per-CFO peak list while the
         # already retained epoch/clock alternatives remain live. The actual
         # caller separation and top cap, including overrides, bound this list.
-        peak_rows = min(plan['top_per_bit'], self.lag_count,
-            math.ceil(self.lag_count/plan['sample_separation'])+2)
-        candidates = (len(plan['frequencies'])*peak_rows +
-            len(self.workspaces)*plan['top_per_bit'])*512
+        peak_rows = min(top_per_bit, self.lag_count,
+            math.ceil(self.lag_count/sample_separation)+2)
+        candidates = (frequency_count*peak_rows + workspace_count*top_per_bit)*512
         if method == 'frequency':
-            return (base + len(plan.get('frequencies', ())) * self.nfft * item +
-                self.batch_size * len(self.rays) * self.nfft * item * 3 + candidates)
-        groups = plan['groups']
-        count = sum(len(group[0]) for group in groups)
-        transformed = sum(group[1] for group in groups)
-        largest = max((group[1] for group in groups), default=0)
+            return (base + frequency_count * self.nfft * item +
+                self._frequency_partition_workspace(min(self.batch_size, frequency_count)) + candidates)
         lag_batch = min(self.lag_count, self.batch_size)
         # ZoomFFT's complex chirps and outputs use complex128 even for an
         # fp32 template bank, so model these work arrays at their actual width.
         zoom_item = np.dtype(np.complex128).itemsize
-        correlations = count*len(self.rays)*self.lag_count*zoom_item
-        scores = count*self.lag_count*np.dtype(np.float64).itemsize
-        quadratic_scratch = count*self.lag_count*64
-        phases = count*self.lag_count*zoom_item
+        correlations = lag_count*len(self.rays)*self.lag_count*zoom_item
+        scores = lag_count*self.lag_count*np.dtype(np.float64).itemsize
+        quadratic_scratch = lag_count*self.lag_count*64
+        phases = lag_count*self.lag_count*zoom_item
         gather = lag_batch*self.kernel_rows*zoom_item
-        zoom_scratch = lag_batch*largest*zoom_item*4 if largest else 0
-        zoom_plans = transformed*zoom_item*10
+        zoom_scratch = lag_batch*lag_largest*zoom_item*4
+        zoom_plans = lag_transformed*zoom_item*10
         return base+correlations+scores+quadratic_scratch+phases+gather+zoom_scratch+zoom_plans+candidates
+
+    def _parallel_score_workspace(self, method, frequency_count, partitions, partition_scratch_bytes):
+        """Combine partition peaks with one resident bank and projected observation."""
+        if method == 'frequency' and not self.device_parallel and partitions > 1:
+            # CPU workers read one immutable spectra bank. The observation
+            # and its modulation scratch are live once during its preparation.
+            shared = 96*self.crop_rows+frequency_count*self.nfft*np.dtype(self.dtype).itemsize
+            partition_scratch_bytes -= (partitions-1)*shared
+        return self.resident_estimate+16*self.crop_rows+partition_scratch_bytes
+
+    def public_search_workspace(self, frequency_bound, *, workers, top_per_bit, interval_count):
+        """Bound full fallback and every admitted narrower coarse branch."""
+        workspaces, rays = len(self.workspaces), len(self.rays)
+        workers = min(workers, workspaces)
+        separation = .5/float(self.manifest['format'].get('fine_chip_rate_hz', 60.))
+        sample_separation = max(1, math.ceil(separation*self.output_fs))
+        full_count = math.ceil(2*frequency_bound/self.maximum_frequency_step)+1
+        # Disjoint intervals split the full span. Rounding and including both
+        # endpoints can add at most two lattice points per extra interval.
+        bounded_count = min(65536, full_count+2*(interval_count-1))
+        kernel_unit = min(4, self.maximum_frequency_points,
+                          self.maximum_fft_products//(workspaces*rays))
+        if full_count > 65536 or kernel_unit < 1:
+            raise ValueError('complete public frequency grid exceeds the local coarse work bound')
+        def ordinary(method, count, **lag):
+            master = self._ordinary_score_workspace(method, count, workspaces, top_per_bit,
+                sample_separation, raw_input=True, **lag)
+            # Sum the per-partition quote, then account for the same shared
+            # CPU frequency buffers as live receiver admission.
+            part = self._ordinary_score_workspace(method, count, 0, top_per_bit,
+                sample_separation, raw_input=False, **lag)-self.resident_estimate
+            return max(master, self._parallel_score_workspace(method, count, workers,
+                workers*part+workspaces*top_per_bit*512))
+
+        peaks = dict(coarse_filter=self._observation_peak_estimate())
+        ordinary_limit = min(self.maximum_frequency_points, self.maximum_fft_products//(workspaces*rays))
+        frequency_count = min(bounded_count, ordinary_limit)
+        if frequency_count and self.correlation_method != 'lag':
+            peaks['coarse_frequency'] = ordinary('frequency', frequency_count)
+        if bounded_count > ordinary_limit or self.correlation_method == 'lag':
+            _, _, _, peaks['coarse_tiled'] = self._tiled_frequency_workspace(
+                bounded_count, min(kernel_unit, bounded_count), workers, top_per_bit, separation)
+        group_count = min(interval_count, self.maximum_fft_products//(2*workspaces*rays*self.lag_count))
+        if group_count and self.correlation_method != 'frequency':
+            count = min(bounded_count, self.maximum_frequency_points)
+            # The padded length of a group is no greater than the next power
+            # of two. Sum the convolution support bounds over all groups.
+            transformed = 2*(min(group_count, count//2)*(self.kernel_rows-1)+count)
+            peaks['coarse_lag'] = ordinary('lag', count, lag_count=count,
+                lag_transformed=transformed, lag_largest=fft.next_fast_len(self.kernel_rows+count-1))
+        return peaks
 
     def _uses_streamed_observation(self):
         return not self.device_parallel and self.samples >= _STREAM_OBSERVATION_SAMPLES
 
     def _streamed_observation_peak_estimate(self):
-        output_rows = (self.samples + len(self.taps) - 2)//self.decimation + 1
-        transform_rows = fft.next_fast_len(self.template_chunk_samples + len(self.taps) - 1)
+        output_rows = (self.samples+self.tap_count-2)//self.decimation+1
+        transform_rows = fft.next_fast_len(self.template_chunk_samples+self.tap_count-1)
         # Complete decimated tail, cropped result, FFT buffers, and bounded
         # per-chunk conversion and validity scratch. The caller owns raw input.
         return (self.resident_estimate +

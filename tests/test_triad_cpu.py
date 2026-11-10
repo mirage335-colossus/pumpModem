@@ -59,6 +59,83 @@ class TriadCpuTests(unittest.TestCase):
         self.assertEqual(triad_cpu.resolve_cpu_budget(threads=6, capacity=12,
                          linear_algebra_limit=2)['linear_algebra_threads'], 6)
 
+    def test_robust_workers_default_above_visible_hardware(self):
+        for hardware, workers in ((1, 2), (2, 4), (3, 6), (12, 24), (37, 74)):
+            with self.subTest(hardware=hardware):
+                self.assertEqual(triad_cpu.resolve_receiver_workers(hardware_threads=hardware), workers)
+        with patch.object(triad_cpu, 'resolve_cpu_budget', return_value={'threads': 12}) as detect:
+            self.assertEqual(triad_cpu.resolve_receiver_workers(), 24)
+            detect.assert_called_once_with()
+
+    def test_robust_worker_overrides_remain_exact(self):
+        with patch.object(triad_cpu, 'resolve_cpu_budget', side_effect=AssertionError('unexpected detection')):
+            for workers in (1, 6, 12, 24):
+                self.assertEqual(triad_cpu.resolve_receiver_workers(workers), workers)
+                self.assertEqual(triad_cpu.resolve_receiver_workers(workers, hardware_threads=12), workers)
+        for name in ('workers', 'hardware_threads'):
+            for value in (True, 0, -1, 1.5, '2'):
+                with self.subTest(name=name, value=value), self.assertRaises(ValueError):
+                    triad_cpu.resolve_receiver_workers(**{name: value})
+
+    def test_receiver_memory_uses_available_ram_minus_a_bounded_reserve(self):
+        mib, gib = 2**20, 2**30
+        for available, reserve in ((gib, 512*mib), (10*gib, gib),
+                                   (64*gib, 2*gib)):
+            with self.subTest(available=available):
+                self.assertEqual(triad_cpu.resolve_receiver_memory(available_bytes=available),
+                                 available-reserve)
+        for available in (1, 512*mib):
+            with self.assertRaisesRegex(RuntimeError, 'insufficient'):
+                triad_cpu.resolve_receiver_memory(available_bytes=available)
+
+    def test_receiver_memory_explicit_cap_remains_exact_without_detection(self):
+        with patch.object(triad_cpu, 'detect_receiver_memory',
+                          side_effect=AssertionError('unexpected detection')):
+            for limit in (1, 3840*2**20, 64*2**30):
+                self.assertEqual(triad_cpu.resolve_receiver_memory(limit), limit)
+                self.assertEqual(triad_cpu.resolve_receiver_memory(limit, available_bytes=1), limit)
+        for name in ('memory_limit_bytes', 'available_bytes'):
+            for value in (True, 0, -1, 1.5, '2'):
+                with self.subTest(name=name, value=value), self.assertRaises(ValueError):
+                    triad_cpu.resolve_receiver_memory(**{name: value})
+
+    def test_receiver_memory_detection_obeys_cgroup_headroom(self):
+        gib = 2**30
+        with patch.object(triad_cpu.sys, 'platform', 'linux'), \
+             patch.object(build_capacity, 'available_memory', return_value=16*gib), \
+             patch.object(build_capacity, 'linux_limits', return_value=([], [8*gib, 6*gib])):
+            result = triad_cpu.detect_receiver_memory()
+            self.assertEqual(result['available_memory_bytes'], 6*gib)
+            self.assertEqual(result['memory_reserve_bytes'], 6*gib//10)
+            self.assertEqual(result['memory_budget_bytes'], 6*gib-6*gib//10)
+            self.assertEqual(triad_cpu.resolve_receiver_memory(), result['memory_budget_bytes'])
+
+    def test_receiver_memory_no_cgroup_limit_is_not_a_detection_failure(self):
+        gib = 2**30
+        with patch.object(triad_cpu.sys, 'platform', 'linux'), \
+             patch.object(build_capacity, 'available_memory', return_value=8*gib), \
+             patch.object(build_capacity, 'linux_limits', return_value=([], [])):
+            result = triad_cpu.detect_receiver_memory()
+            self.assertEqual(result['available_memory_bytes'], 8*gib)
+            self.assertEqual(result['cgroup_memory']['status'], 'visible')
+            self.assertEqual(triad_cpu.resolve_receiver_memory(), 8*gib-8*gib//10)
+
+    def test_receiver_memory_unknown_or_exhausted_limits_fail_closed(self):
+        gib = 2**30
+        for host, limits in ((None, ([], [gib])), (8*gib, ([], [0])),
+                             (8*gib, ValueError('unreadable cgroup'))):
+            with self.subTest(host=host, limits=limits), \
+                 patch.object(triad_cpu.sys, 'platform', 'linux'), \
+                 patch.object(build_capacity, 'available_memory', return_value=host), \
+                 patch.object(build_capacity, 'linux_limits') as detect:
+                if isinstance(limits, Exception):
+                    detect.side_effect = limits
+                else:
+                    detect.return_value = limits
+                self.assertIsNone(triad_cpu.detect_receiver_memory()['memory_budget_bytes'])
+                with self.assertRaisesRegex(RuntimeError, 'RAM is unavailable'):
+                    triad_cpu.resolve_receiver_memory()
+
     def test_invalid_counts_and_capacity_fail(self):
         for name in ('jobs', 'workers', 'threads', 'capacity', 'linear_algebra_limit'):
             for value in (True, 0, -1, 1.5, '2'):
