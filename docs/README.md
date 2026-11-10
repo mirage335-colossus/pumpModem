@@ -69,7 +69,7 @@ the [GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual-cap
 | Development and delivery | [Development contract](development.md), [build and test guide](building.md), [release procedures](releases.md), [offline installation](offline-installation.md) |
 | Helper Carrier | Native generation and acquisition share the [Robust stack](robust-current.md); historical measurements retain their original scope |
 | Simulation channels | [Doppler, delay spread, selective amplitude and FHSS tails](channel-models.md) |
-| GPU precision | [GPU precision guidance](gpu-precision-controls.md); bounded RTX PRO 6000 stage measurements are not a qualified full receiver |
+| GPU hardware and precision | [GPU selection contract](triad-performance.md#gpu-selection-for-accelerated-development): prefer a full RTX PRO 6000 Blackwell or a demonstrably more suitable modern accelerator; [precision guidance](gpu-precision-controls.md) defines qualification |
 | Fast Modem | [Fast topic index](indexes/fast.md) |
 | Legacy Modem | [Legacy reference](legacy-modem.md) and retained interoperability fixtures |
 | GUI and frontends | [Interfaces index](indexes/interfaces.md), [GUI contract](gui-contract.md), [frontend interfaces](frontend-interfaces.md) |

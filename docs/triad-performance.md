@@ -21,6 +21,58 @@ local timings and bounded holdouts. See [current validation](validation.md#nativ
 All receiver claims remain scoped to configured public timing and keyed ordinals.
 Unknown waveform epoch, ordinal and timing acquisition is unqualified.
 
+## GPU selection for accelerated development
+
+**Prefer a full NVIDIA RTX PRO 6000 Blackwell for native GPU development,
+accelerated regression tests and GPU-assisted CPU forecasting, or a demonstrably
+more suitable modern accelerator.** The project prioritizes fast qualified test
+turnaround and compatibility with highly parallel, lower-precision and Tensor
+Core hardware at high productive utilization. Give that hardware a serious
+development target: batch and arrange native bulk work to use its capabilities.
+Energy efficiency is not the objective, and the lowest hourly price does not
+necessarily produce the fastest or cheapest completed test.
+
+Do not default to A100/A5000-class devices because they are familiar, have Tensor
+Cores, or appeared in a historical rental proposal. Before selecting another
+device, record a concrete workload, compatibility, availability or budget reason
+in the existing experiment proposal or validation entry. An FP64-heavy stage or
+one unsuccessful small FP16 kernel does not by itself overturn the preferred
+hardware policy; evaluate the complete intended workload and its bulk arithmetic.
+Use the bounded method, applicable evidence and a cheap preflight, not a new
+benchmark campaign merely to justify a rental.
+
+Before choosing hardware:
+
+- Verify exact generation and edition, full GPU versus MIG partition, usable
+  memory, power envelope and the host resources needed to feed it. NVIDIA lists
+  Server, Workstation and Max-Q Workstation editions of the
+  [RTX PRO 6000 Blackwell family](https://www.nvidia.com/en-us/products/workstations/professional-desktop-gpus/rtx-pro-6000-family/).
+  Verify provider shorthand such as `WX` or `WK` against the actual SKU; do not
+  silently substitute an older RTX 6000/A6000, Max-Q edition or partial GPU.
+- Match the CUDA/LibTorch/compiler stack and native kernels to the device.
+  Compare supported **dense** precision/accumulation throughput and actual matrix
+  shapes; sparsity-qualified peak figures require a qualifying workload. The
+  [RTX Blackwell architecture](https://www.nvidia.com/content/dam/en-zz/Solutions/design-visualization/quadro-product-literature/pdf/NVIDIA-RTX-Blackwell-PRO-GPU-Architecture-v1_1.pdf)
+  provides newer Tensor Core hardware and lower-precision formats. Both
+  [A100](https://www.nvidia.com/en-us/data-center/a100/) and
+  [A5000](https://www.nvidia.com/content/dam/en-zz/Solutions/products/workstations/nvidia-rtx-a5000-datasheet.pdf)
+  already have Tensor Cores; their presence alone is not the selection criterion.
+  FP64-heavy or memory-bandwidth-bound work can favor a different device.
+- Judge total upload, build, execution and retrieval time, including packing,
+  transfers, synchronization and host preparation. Verify useful native work and
+  actual accelerator execution; GPU utilization, device names and peak FLOPS do
+  not establish a receiver speedup or a CPU capacity forecast.
+
+The RTX PRO 6000 preference remains applicable despite the slower small FP16
+Gram experiment in the [current validation record](validation.md#native-throughput-and-precision-investigation).
+Keep its faster qualified native path while investigating useful batch shapes
+or other bulk work when warranted. Useful Tensor Core acceleration remains a
+measured outcome, not a claim conferred by this hardware preference. Follow the
+[precision gates](gpu-precision-controls.md); GPU-observed work still needs
+source-matched local CPU costs and independent holdouts for CPU forecasting.
+Stay within the current spending authorization and cleanup contract; historical
+prices and the completed rental's budget are not new spending authority.
+
 ## Relative regression harness
 
 Run cheap native correctness checks before a declared timing comparison:
@@ -78,6 +130,9 @@ These measurements do not establish communication sensitivity, whole-case
 real-time capacity or physical-device reception.
 
 ## RunPod GPU-assisted manual capacity forecast
+
+Apply the [GPU selection contract](#gpu-selection-for-accelerated-development)
+before selecting a provider device or runner.
 
 GPU observations can accelerate collection of native work demand. Source-matched
 local CPU timings supply elapsed cost. Never multiply GPU time by a FLOPS ratio,

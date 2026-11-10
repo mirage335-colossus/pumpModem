@@ -8,6 +8,12 @@ on all work because one numerical stage needs it. Check the relevant error and
 decision sensitivity with the bounded method in the
 [CPU ceiling workflow](robust-manual-capacity.md#agent-workflow-for-cpu-ceiling-estimates).
 
+**Hardware selection follows the [GPU selection contract](triad-performance.md#gpu-selection-for-accelerated-development):
+prefer a full RTX PRO 6000 Blackwell or a demonstrably more suitable modern
+accelerator.** Do not let a familiar A100/A5000 or one slow small-matrix experiment
+silently determine the development target. Qualify the actual precision and
+complete-work speedup on the selected hardware.
+
 Use efficient search, batched correlations, reusable device-resident templates
 and buffers, and suitable matrix shapes where measurements support them.
 Reduced input precision with higher-precision accumulation or small sensitive

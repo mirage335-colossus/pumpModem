@@ -5,6 +5,21 @@ Use the [documentation index](docs/README.md) for maintained guidance. Check
 and [current Robust architecture](docs/robust-current.md) before changing those areas.
 Search `src/`, `include/`, `tests/` and `cmake/` first when locating implementation.
 
+## Prefer modern GPUs for accelerated development
+
+**Default GPU development, accelerated tests and GPU-assisted forecasting to a
+full NVIDIA RTX PRO 6000 Blackwell, or a demonstrably more suitable modern
+accelerator.** Prioritize rapid qualified testing and demonstrated high utilization
+of highly parallel, lower-precision and Tensor Core hardware. Energy efficiency
+is not this project's objective. Do not default to A100/A5000-class hardware
+because it is familiar, cheaper per hour or named in an old proposal. A different
+choice needs a recorded workload, compatibility, availability or budget reason.
+Verify the exact generation, edition and full-device allocation; provider labels
+such as `WX`/`WK` are not sufficient identification, and a MIG partition is not a
+full GPU. Follow the [GPU selection contract](docs/triad-performance.md#gpu-selection-for-accelerated-development)
+before choosing or renting hardware. Preserve spending authorization and bounded
+testing; this preference is not a universal speed claim or permission to spend.
+
 ## Preserve the full receiver CPU budget
 
 Default Robust receiver orchestration and capacity testing to **twice the
