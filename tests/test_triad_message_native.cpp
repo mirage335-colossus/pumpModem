@@ -1,5 +1,6 @@
 #include "datapump/triad_message_receiver.hpp"
 #include "datapump/compression.hpp"
+#include "datapump/triad_stream.hpp"
 
 #include <algorithm>
 #include <array>
@@ -131,7 +132,7 @@ void evidence_and_geometry() {
           "local ordinal discontinuity was ignored");
 }
 void continuous_lifecycle() {
-    ContinuousMessageReceiver receiver({},{}); // Empty callbacks must reject.
+    ContinuousMessageReceiver receiver(MessageDecoder{}, MessageReceiverOptions{});
 }
 void continuous_messages() {
     ContinuousMessageReceiver receiver(decode_short_message,{},10,1);
@@ -294,14 +295,224 @@ void fec_profiles() {
     rejects([&]{decode_message_bits(std::vector<MessageBit>(408,0),FecMode::rs60);},"overlong frame accepted");
     rejects([&]{message_decoder(static_cast<FecMode>(255));},"unknown FEC mode accepted");
 }
+
+MessageAddress test_address(std::uint64_t slot_index) {
+    return {1700000000+61*slot_index, 42+slot_index};
+}
+
+Bytes text_fixture(std::size_t size) {
+    Bytes text(size);
+    std::uint32_t state = 0x11f3;
+    for (auto& byte : text) {
+        state = state*1664525U+1013904223U;
+        byte = state>>24;
+    }
+    return text;
+}
+
+std::vector<MessageBit> collect(const PreparedTextMessage& draft, std::uint64_t first = 0,
+                                const MessageAddressLookup& address = test_address) {
+    auto read = draft.bit_source(first, address);
+    std::vector<MessageBit> result;
+    result.reserve(draft.wire_bits());
+    for (std::size_t i=0; i<draft.wire_bits(); ++i) result.emplace_back(read(i));
+    return result;
+}
+
+void feed(ContinuousMessageReceiver& receiver, std::span<const MessageBit> bits,
+          std::optional<std::size_t> interior_quiet = {}) {
+    for (std::size_t i=0; i<bits.size(); ++i) {
+        const auto decision = bits[i] ? SlotDecision::data : i==interior_quiet
+            ? SlotDecision::quiet : SlotDecision::ambiguous;
+        check(receiver.consume(slot(receiver.next_slot_index(), decision, bits[i].value_or(0))),
+              "native message feed unexpectedly backpressured");
+    }
+}
+
+MessageResult physical_end(ContinuousMessageReceiver& receiver) {
+    check(receiver.consume(slot(receiver.next_slot_index(), SlotDecision::quiet)) &&
+          receiver.pending_messages()==0 && !receiver.result().decoded_content,
+          "one scored quiet slot released a source");
+    check(receiver.consume(slot(receiver.next_slot_index(), SlotDecision::quiet)),
+          "second scored quiet slot backpressured");
+    auto messages = receiver.drain_messages();
+    check(messages.size()==1 && messages.front().message.physical_complete,
+          "two scored quiet slots did not record physical completion");
+    return std::move(messages.front().message);
+}
+
+void long_intervals() {
+    const auto text = text_fixture(257);
+    const std::array<std::uint8_t,12> marker_word{
+        0xe8,0x1c,0xac,0x57,0x5d,0xff,0x31,0xfa,0xea,0xa0,0xf8,0x40};
+    for (const auto mode : {FecMode::off,FecMode::rs20,FecMode::rs60}) {
+        // Off uses public exact occupancy cells. RS20 and RS60 exercise both
+        // public compression and addressed keyed source areas respectively.
+        NativeMessageProfile profile{mode, mode!=FecMode::off, 4096,
+            mode==FecMode::rs60 ? std::optional{Crypto::amateur()} : std::nullopt};
+        const auto draft = prepare_text_message(text, profile);
+        check(draft.long_form() && draft.wire_bits()>=2*message_interval_bits &&
+              draft.wire_bits()%message_interval_bits==0, "long source did not span fixed intervals");
+        constexpr std::uint64_t first = 10;
+        auto bits = collect(draft, first+1);
+        for (std::size_t base=0; base<bits.size(); base+=message_interval_bits)
+            for (std::size_t i=0; i<message_marker_bits; ++i)
+                check(bits[base+i] == ((marker_word[(i/8)%marker_word.size()]>>(7-i%8))&1),
+                      "canonical repeated marker changed");
+        const auto missing = message_marker_bits+9;
+        if (mode!=FecMode::off) {
+            bits[10].reset();
+            bits[missing].reset();
+            bits[message_interval_bits-1] = 1-*bits[message_interval_bits-1];
+            for (std::size_t i=32; i<40; ++i) bits[i] = 1-*bits[i];
+            for (std::size_t i=0; i<message_marker_bits; ++i)
+                bits[message_interval_bits+i] = 1-*bits[message_interval_bits+i];
+        }
+        ContinuousMessageReceiver receiver(profile, test_address, first);
+        // An isolated leading quiet slot is not the message's first address.
+        receiver.consume(slot(first, SlotDecision::quiet));
+        feed(receiver, bits, missing);
+        check(receiver.result().long_form && !receiver.result().decoded_content &&
+              receiver.pending_messages()==0, "interval or source endpoint completed early");
+        const auto end = physical_end(receiver);
+        check(end.state==MessageState::complete && end.decoded_content &&
+              end.decoded_content->message.data==text &&
+              end.decoded_content->authenticated==profile.key.has_value(), "long content or authentication changed");
+        check(end.long_form && end.observed_bits==bits.size()-(mode==FecMode::off ? 0 : 2) &&
+              end.missing_slots==(mode==FecMode::off ? 0 : 2) && end.bit_slots.empty(),
+              "long timed observations were lost or retained as a full bit array");
+        check(end.damaged_markers==(mode==FecMode::off ? 0 : 1) &&
+              end.recognized_markers+end.damaged_markers==bits.size()/message_interval_bits,
+              "damaged later marker shifted the fixed interval cadence");
+        const auto& stats = end.decoded_content->fec_stats;
+        check(stats.parity.corrected_bits==(mode==FecMode::off ? 0 : 1) &&
+              stats.data.missing_bits==(mode==FecMode::off ? 0 : 1),
+              "long interval repair and erasure statistics changed");
+        check(receiver.next_slot_index()==first+1+bits.size()+2, "long completion reset public ordinal");
+        const auto short_message = prepare_text_message(Bytes{'e'}, profile);
+        check(!short_message.long_form(), "short transmission selected interval format");
+        feed(receiver, collect(short_message));
+        check(physical_end(receiver).filtered_text=="e", "short message could not follow long completion");
+    }
+}
+
+void long_rejections() {
+    NativeMessageProfile profile{FecMode::rs20, true, 4096, Crypto::amateur()};
+    const auto draft = prepare_text_message(text_fixture(257), profile);
+    const auto bits = collect(draft);
+    check(bits.size()>=2*message_interval_bits, "long rejection fixture lacks later intervals");
+    rejects([&] { draft.bit_source(0); }, "keyed draft did not require local address");
+    rejects([&] { draft.bit_source(std::numeric_limits<std::uint64_t>::max()); },
+            "long draft accepted overflowing public slot extent");
+    auto wrong_address = [](std::uint64_t slot_index) { auto a=test_address(slot_index);++a.ordinal;return a; };
+    ContinuousMessageReceiver wrong(profile, wrong_address);
+    feed(wrong, bits);
+    check(!physical_end(wrong).decoded_content, "wrong address authenticated an interval");
+
+    auto damaged = bits;
+    for (std::size_t i=0; i<23; ++i) damaged[message_marker_bits+8*i].reset();
+    ContinuousMessageReceiver uncorrectable(profile, test_address);
+    feed(uncorrectable, damaged);
+    check(!physical_end(uncorrectable).decoded_content, "later correct intervals published a damaged prefix");
+
+    for (auto extent : {std::size_t{150}, message_marker_bits, message_interval_bits-1,
+                        message_interval_bits, message_interval_bits+message_marker_bits}) {
+        ContinuousMessageReceiver truncated(profile, test_address);
+        feed(truncated, std::span(bits).first(extent));
+        const auto end = physical_end(truncated);
+        check(end.long_form && !end.decoded_content, "truncated marker or interval decoded as complete content");
+    }
+    auto leading_loss = bits;
+    leading_loss.front().reset();
+    ContinuousMessageReceiver prefix(profile, test_address);
+    feed(prefix, leading_loss);
+    check(prefix.recovering() && prefix.pending_messages()==0,
+          "unqualified leading loss reacquired a suffix as a complete message");
+    prefix.consume(slot(prefix.next_slot_index(), SlotDecision::quiet));
+    check(prefix.recovering(), "one scored quiet slot rearmed the rejected prefix");
+    prefix.consume(slot(prefix.next_slot_index(), SlotDecision::quiet));
+    check(!prefix.recovering() && prefix.next_slot_index()==bits.size()+2,
+          "rearm after rejected prefix lost global ordinal");
+
+    for (const bool cancel : {false,true}) {
+        ContinuousMessageReceiver incomplete(profile, test_address);
+        feed(incomplete, bits);
+        incomplete.consume(slot(incomplete.next_slot_index(), SlotDecision::quiet));
+        if (cancel) incomplete.cancel();
+        else incomplete.finish_input();
+        check(!incomplete.result().physical_complete && !incomplete.result().decoded_content &&
+              incomplete.pending_messages()==0, "cancel or EOF invented long physical completion");
+    }
+
+    auto small_profile = profile;
+    small_profile.content_limit = 32;
+    rejects([&] { prepare_text_message(text_fixture(33), small_profile); }, "TX ignored local text quota");
+    ContinuousMessageReceiver small(small_profile, test_address);
+    feed(small, bits);
+    check(!physical_end(small).decoded_content, "source decompression ignored local text quota");
+
+    NativeMessageProfile off{FecMode::off, false, 1024, {}};
+    auto no_parity = collect(prepare_text_message(text_fixture(193), off));
+    no_parity[message_marker_bits+17].reset();
+    ContinuousMessageReceiver uncoded(off);
+    feed(uncoded, no_parity);
+    check(!physical_end(uncoded).decoded_content, "FEC Off invented an erased source byte");
+
+    // A six-slot historical marker prefix is the canonical short `y`. With
+    // only those six observed DATA slots there is no long-frame evidence.
+    ContinuousMessageReceiver early(off);
+    feed(early, std::span(bits).first(6));
+    const auto ambiguous_start = physical_end(early);
+    check(!ambiguous_start.long_form && ambiguous_start.filtered_text=="y",
+          "long format changed a valid indistinguishable short prefix");
+    for (const auto mode : {FecMode::rs20,FecMode::rs60})
+        for (std::size_t extent=8; extent<message_marker_bits; extent+=8)
+            rejects([&] { decode_message_bits(std::span(bits).first(extent), mode); },
+                    "exact historical marker prefix passed short RS validation");
+}
+
+void long_counted_source() {
+    const NativeMessageProfile profile{FecMode::rs60, false, 4096, {}};
+    const auto text = text_fixture(3840);
+    const auto draft = prepare_text_message(text, profile);
+    check(draft.wire_bits()>65536, "long source fixture did not exceed old materialized draft cap");
+    const auto bits = collect(draft);
+    ContinuousMessageReceiver receiver(profile);
+    feed(receiver, bits);
+    const auto end = physical_end(receiver);
+    check(end.decoded_content && end.decoded_content->message.data==text &&
+          end.observed_bits==bits.size() && end.received_bits.size()==4096 &&
+          !end.raw_bits_complete(), "long bounded diagnostic prefix misrepresented the source extent");
+
+    PublicProfileConfig config;
+    config.format.epoch=1700000000;
+    config.data_if_hz=240;
+    const PublicProfile calendar(config);
+    const auto coordinate = message_address(calendar, 3);
+    const auto native_slot = calendar.slot(3);
+    check(coordinate.epoch==native_slot.pattern_epoch && coordinate.ordinal==native_slot.symbol_ordinal,
+          "interval address diverged from native waveform address");
+    std::size_t calls = 0;
+    auto read = draft.bit_source(0);
+    EmissionOptions options;
+    options.slot_count = draft.wire_bits();
+    options.bit_at = [&](std::uint64_t relative) { ++calls;return read(relative); };
+    Emission emission(calendar, Crypto::amateur(), options);
+    check(!calls, "counted source generated a whole draft before playback");
+    const auto first = emission.report().first_data_sample;
+    std::vector<Complex> samples(first+1);
+    check(emission.read(samples)==samples.size() && calls==1,
+          "counted native emission did not consume exactly its requested DATA bit");
+}
 }
 
 int main() {
     try {
         short_completion();incomplete_and_erased();evidence_and_geometry();
         continuous_messages();decoder_boundary();fec_profiles();leading_fec_prefix();
+        long_intervals();long_rejections();long_counted_source();
         rejects(continuous_lifecycle,"empty decoder was accepted");
-        std::cout<<"native Robust message lifecycle and configured FEC checks passed\n";
+        std::cout<<"native Robust short/long message lifecycle and configured FEC checks passed\n";
     } catch(const std::exception& error) {
         std::cerr<<error.what()<<'\n';return 1;
     }

@@ -38,7 +38,7 @@ See [current architecture](robust-current.md) and
 | Symbol burst, Random extra | Shared whole-bit calendar waits; see [burst scheduling](symbol-burst.md). |
 | FHSS | Canonical envelope and illustrative frequency schedule; no external radio retuning. |
 | Target SNR dB/1Hz | One shared C/N0 target, default 32 dB-Hz, for provisional duration planning; separate from actual simulated C/N0. |
-| Error correction | Configured Off, RS20 or RS60 native short-message profile. Raw bits bypass FEC exactly. |
+| Error correction | Configured Off, RS20 or RS60 native short/long text profiles. Raw bits bypass text coding and FEC exactly. |
 | Simulation | Native emitted waveform through the selected continuous sampled channel and complete native receiver. |
 | Audio device, channel routing, Live/duplex, TX volume, Exclusive | Existing native device service, selected channel layout, capture/playback policy and output gain. |
 | Waterfall, Waveform, Receiver input I/Q | Bounded actual session observations; receiver I/Q is not a substitute TX trace. |
@@ -49,6 +49,21 @@ Robust keeps one Target SNR shared by Console, Link Planner and saved
 placement uses the fixed high/low pilots and separate auxiliary tone; an invalid
 selected IF/rate fails configuration explicitly. Pattern/tone and Helper
 frequency controls and their launch overrides remain removed.
+
+Robust text accepts up to 1 MiB of decoded bytes, with up to 4 MiB of escaped
+editor representation. Local edit frames allow up to 4 MiB for this declared
+Message control; the shared bridge enforces each control's published limit. Other
+event kinds and ordinary fields retain their 1 MiB ceiling. A 6 MiB JSON-text
+expansion preflight preserves the 8 MiB snapshot/frame envelope and rejects
+drafts whose escaped presentation would exceed it. Text of at most
+16 bytes keeps its short profile; longer
+text uses fixed marker/codeword intervals. Attachments remain unsupported by
+Robust. Exact raw-bit drafts remain 1–208 bits. Long compression and wire-length
+preparation run off the UI thread on Transmit; the active transmission retains
+its own count while the user edits the next draft. Received long messages retain
+bounded diagnostic bits, so exact-raw copy is available only when the complete
+bit sequence was retained. Source limits and authentication caveats are in
+[protocol](protocol.md#native-long-message-intervals).
 
 Transmit, Cancel TX, Transmit noise and Helper-only transmission dispatch to the
 same native session. Noise uses fresh independent DATA keys and encryption;

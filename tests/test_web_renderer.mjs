@@ -75,6 +75,24 @@ const replacement=renderer.views.get('1').input;assert.notEqual(input,replacemen
 const after=sent.length;input.value='stale unsafe';input.dispatch('compositionend');assert.equal(sent.length,after,'withdrawn editor callback restored old text');
 assert.equal(validText('\0',10),false);assert.equal(validText('é',1),false);assert.equal(validText('a\nb',10,false),false);
 assert.throws(()=>renderer.apply({...snapshot,version:2}));renderer.destroy();
+// Large local editor representations still obey the shared per-field byte
+// limit; the generic renderer and frame encoder do not truncate them.
+{
+    const events=[],r=new Renderer(doc.root,e=>events.push(e));
+    const escaped='\\x00'.repeat(1024*1024),limit=4*1024*1024;
+    const large={...control,byteLimit:limit,text:''};
+    r.apply({...snapshot,controls:[large]});const edit=r.views.get('1').input;
+    edit.value=escaped;edit.dispatch('input');
+    assert.equal(events.length,1);assert.equal(events[0].value,escaped);
+    assert(encodeEvent(events[0]).length<maxFrame);
+    r.apply({...snapshot,ack:'1',controls:[{...large,text:escaped}]});
+    edit.value=escaped+'x';edit.dispatch('input');
+    assert.equal(events.length,1,'Over-limit representation emitted an edit');
+    assert.equal(edit.value,escaped,'Rejected edit replaced the accepted representation');
+    assert.equal(validText(escaped,limit),true);
+    assert.equal(validText(escaped,limit-1),false);
+    r.destroy();
+}
 // Effective values belong only to disabled editor presentation. They neither
 // replace saved text nor emit edits, and cannot be hidden by a pending edit.
 {

@@ -740,8 +740,9 @@ void robust_boundary_keeps_polling() {
 void robust_native_settings() {
     using F=ui::Field;
     Controller controller({.simulation=true});
-    check(controller.settings().transfer.fec==FecMode::off&&!controller.settings().receiver_memory_limit,
-          "Robust must default to short uncoded text and automatic receiver headroom");
+    check(controller.settings().transfer.fec==FecMode::off&&!controller.settings().receiver_memory_limit&&
+          controller.settings().transfer.content_limit==1024*1024,
+          "Robust must preserve FEC Off, automatic receiver headroom, and the local decoded-byte quota");
     controller.edit(F::link_power,"1 W");controller.edit(F::link_loss,"90 dB");
     controller.edit(F::link_noise,"-164 dBm/Hz");controller.edit(F::snr,"20");
     controller.select(F::dsss_factor,"10");controller.edit(F::bandwidth,"36 Hz");

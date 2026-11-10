@@ -83,7 +83,7 @@ await wait(()=>control('Message')?.enabled);
 await act(1,control('Message').id,literal);
 await wait(()=>snapshot.controls.some(item=>item.text==='Robust needs the desktop native receiver workers. Use the native application for Robust.'));
 assert.equal(control('Transmit')?.enabled,false,'Wasm must report its native Robust worker requirement');
-assert.equal(control('Attach file')?.enabled,false,'Robust short-message profile must reject attachments');
+assert.equal(control('Attach file')?.enabled,false,'Robust text profile must reject attachments');
 assert(snapshot.tabs.some(tab=>tab.label==='Robust setup'),'configured-calendar setup missing');
 // Exercise browser glyph measurement through the compiled C++/libc++ parser,
 // then verify the common document engine refines its published geometry.

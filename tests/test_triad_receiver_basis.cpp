@@ -1,4 +1,5 @@
 #include "triad_receiver_basis.hpp"
+#include "triad_mapped_kernel.hpp"
 #include "triad_crypto_fixture.hpp"
 
 #include <algorithm>
@@ -182,6 +183,126 @@ void fallback_and_validation(const datapump::Crypto& crypto) {
     // Cancellation and rejected requests must release the admitted call slot.
     fallback.render_pair(row, taps, 6000, offsets, output);
 }
+
+struct ViewResult {
+    std::vector<v::Complex> values;
+    std::weak_ptr<const void> first_tile;
+    std::size_t callbacks = 0, mapped_columns = 0, direct_columns = 0, maximum_pins = 0;
+    std::string fallback_reason;
+};
+
+ViewResult render_view(r::MappedBasis& basis, const r::MappedBasisRow& row,
+                       std::span<const v::Tap> taps, std::uint64_t first,
+                       std::span<const double> offsets) {
+    ViewResult result;
+    result.values.resize(2*taps.size()*offsets.size());
+    basis.visit_pair(row, taps, first, offsets,
+        [&](std::span<const double> coordinates, std::span<const r::BulkMappedColumn> mapped,
+            std::span<const r::BulkDirectColumn> direct_columns) {
+            ++result.callbacks;
+            check(coordinates.data() == offsets.data() && coordinates.size() == offsets.size(),
+                  "prepared mapping changed borrowed coordinates");
+            std::size_t pins = 0;
+            for (const auto& column : mapped) {
+                check(column.output_column < 2*taps.size() && !column.tiles.empty(),
+                      "prepared mapping column outside destination");
+                std::vector<const double*> table;
+                for (const auto& tile : column.tiles) {
+                    check(tile.owner && tile.samples.size() == 8192,
+                          "prepared mapping lost immutable tile owner or extent");
+                    if (result.first_tile.expired()) result.first_tile = tile.owner;
+                    table.push_back(reinterpret_cast<const double*>(tile.samples.data()));
+                    ++pins;
+                }
+                const TriadMappedRow descriptor{column.fraction, column.scale, column.phase,
+                    column.phase_step, column.origin, table.size(), table.data(),
+                    reinterpret_cast<double*>(result.values.data()+column.output_column*offsets.size())};
+                triad_render_mapped_v1(&descriptor, 1, coordinates.data(), coordinates.size(), 8192);
+                ++result.mapped_columns;
+            }
+            for (const auto& column : direct_columns) {
+                check(column.output_column < 2*taps.size() && column.samples.size() == offsets.size() &&
+                      !column.reason.empty(), "prepared direct fallback lost its extent or reason");
+                std::copy(column.samples.begin(), column.samples.end(),
+                          result.values.begin()+static_cast<std::ptrdiff_t>(column.output_column*offsets.size()));
+                result.fallback_reason = column.reason;
+                ++result.direct_columns;
+            }
+            check(pins <= 32, "prepared mapping exceeded the synchronous pin bound");
+            result.maximum_pins = std::max(result.maximum_pins, pins);
+        });
+    return result;
+}
+
+void prepared_views(const datapump::Crypto& crypto) {
+    const auto settings = config();
+    const auto offsets = positions(257);
+    const std::array<v::Tap, 2> taps{{{0,.2},{.007,-.4}}};
+    const r::MappedBasisRow row{2,.013,1.25,127.25};
+    std::weak_ptr<const void> released_tile;
+    for (const bool dense : {false, true}) {
+        auto plan = slot();
+        if (dense) plan.format.inner_rate_hz = 3600;
+        const auto first = v::geometry(plan.format).calendar_origin_sample+1001;
+        r::MappedBasis basis(settings, plan, crypto, offsets.size(), 1);
+        auto view = render_view(basis, row, taps, first, offsets);
+        check(view.mapped_columns == 4 && !view.direct_columns && view.maximum_pins,
+              "supported view unexpectedly rendered a host fallback");
+        const auto prepared = basis.report();
+        check(prepared.prepared_calls == 1 && prepared.prepared_mapped_columns == 4 &&
+              !prepared.interpolated_rows && !prepared.direct_rows && prepared.native_preparation_calls,
+              "prepared view rendered CPU basis or lost preparation receipts");
+        std::vector<v::Complex> reference(view.values.size());
+        basis.render_pair(row, taps, first, offsets, reference);
+        check(view.values == reference, "prepared map changed canonical cubic/phase output");
+        const auto repeated = render_view(basis, row, taps, first, offsets);
+        check(!view.first_tile.owner_before(repeated.first_tile) &&
+              !repeated.first_tile.owner_before(view.first_tile), "cached tile identity changed without eviction");
+        released_tile = view.first_tile;
+        const auto end = v::geometry(plan.format).source_samples+10000;
+        const auto empty = render_view(basis, row, taps, end, offsets);
+        check(empty.callbacks == 0 && std::all_of(empty.values.begin(), empty.values.end(),
+              [](auto value) { return value == v::Complex{}; }), "empty support exposed invalid tiles");
+        check(basis.report().prepared_empty_columns == 4, "empty prepared support was not reported");
+        rejects([&] { basis.visit_pair(row, taps, first, offsets, {}); });
+        rejects([&] {
+            basis.visit_pair(row, taps, first, offsets,
+                [](auto, auto, auto) { throw datapump::Error("injected synchronous sink failure"); });
+        });
+        check(render_view(basis, row, taps, first, offsets).values == reference,
+              "failed mapping sink retained its admitted call or changed tiles");
+    }
+    check(released_tile.expired(), "prepared view retained a strong host tile lease after owner close");
+
+    auto plan = slot();
+    plan.format.pulse_shape = v::PulseShape::Rrc;
+    r::MappedBasis fallback(settings, plan, crypto, offsets.size(), 1);
+    const auto direct_view = render_view(fallback, row, taps, 25000, offsets);
+    check(direct_view.direct_columns == 4 && !direct_view.mapped_columns &&
+          direct_view.fallback_reason == "unsupported-or-abrupt-pulse" &&
+          direct_view.values == direct(settings, plan, crypto, row, taps, 25000, offsets),
+          "prepared fallback lost exact native mapping or its reason");
+    check(fallback.report().prepared_direct_columns == 4 && fallback.report().direct_rows == 4,
+          "prepared direct work was not charged");
+
+    plan = slot();
+    plan.format.bit_seconds = 50;
+    const std::array<v::Tap, 1> one_tap{{{0,0}}};
+    const r::MappedBasisRow simple{0,0,0,0};
+    const std::array<double, 2> wide_offsets{.17, 200000.21};
+    r::MappedBasis wide(settings, plan, crypto, wide_offsets.size(), 1);
+    const auto wide_view = render_view(wide, simple, one_tap, 25000, wide_offsets);
+    check(wide_view.callbacks == 2 && wide_view.mapped_columns == 2 &&
+          wide_view.maximum_pins > 16 && !wide_view.direct_columns,
+          "wide map did not split paired pin ownership into bounded callbacks");
+    std::vector<v::Complex> wide_cpu(4);
+    wide.render_pair(simple, one_tap, 25000, wide_offsets, wide_cpu);
+    check(wide_view.values == wide_cpu, "split prepared mapping changed source output");
+    const std::array<double, 2> excessive_offsets{.17, 300000.21};
+    const auto excessive = render_view(wide, simple, one_tap, 25000, excessive_offsets);
+    check(excessive.direct_columns == 2 && excessive.fallback_reason == "pinned-tile-limit",
+          "unpreparable map did not report the canonical direct fallback");
+}
 } // namespace
 
 int main() {
@@ -191,6 +312,7 @@ int main() {
         concurrent_pairs(crypto);
         dense_and_gated(crypto);
         fallback_and_validation(crypto);
+        prepared_views(crypto);
         std::cout << "native mapped receiver basis passed\n";
         return 0;
     } catch (const std::exception& error) {

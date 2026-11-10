@@ -1,11 +1,15 @@
 #pragma once
 #include "application.hpp"
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
 
 namespace datapump::gui::web {
 inline constexpr std::uint32_t protocol_version=1;
+// Allocation ceiling for edit frames. Shared declarations retain their own
+// input limits; only the Message editor currently declares this larger bound.
+inline constexpr std::size_t maximum_edit_value_bytes=4*1024*1024;
 // Transport-independent input. Decoders must bound strings before allocation.
 // Identifiers refer only to declarations in the current snapshot, never enums,
 // pointers, filesystem paths, HTML, or executable callbacks.

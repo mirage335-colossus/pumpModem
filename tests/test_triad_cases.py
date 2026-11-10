@@ -63,7 +63,7 @@ class TriadCasesTests(unittest.TestCase):
         self.assertIn("--sustained-allocation-probe", help_text)
         self.assertNotIn("--baseline", help_text)
 
-    @mock.patch("triad_case_capacity.run_complete_cases",return_value={'status':'stage_calibration_measured'})
+    @mock.patch("triad_case_suite.run_cases",return_value={'status':'stage_calibration_measured'})
     def test_manual_cli_can_request_only_a_selected_noise_calibration(self, run):
         result = triad_manual_cases.main(['--output','noise.json','--calibration-stage','noise-only-fine',
                                           '--case-index','7','--workspace-mib','4608'])
@@ -106,7 +106,7 @@ class TriadCasesTests(unittest.TestCase):
                 triad_abbreviated.main(args)
             self.assertEqual(raised.exception.code, 2)
 
-    @mock.patch("triad_abbreviated.run", return_value={"status": "abbreviated_evidence_only", "kernels": {}})
+    @mock.patch("triad_abbreviated.run", return_value={"status": "baseline_established", "kernels": {}})
     def test_default_invocation_remains_the_kernel_regression_entrypoint(self, regression):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "result.json"

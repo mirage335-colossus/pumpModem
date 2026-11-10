@@ -10,6 +10,8 @@
 
 namespace datapump::triad::v3 {
 
+namespace receiver_detail { class ReceiverBulkBackend; }
+
 inline constexpr std::array<std::int64_t, 13> receiver_epoch_offsets{
     -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6};
 inline constexpr std::size_t receiver_coherence_count = 3;
@@ -39,6 +41,9 @@ struct ReceiverConfig {
     double noise_variance = 0, data_basis_gain = 1;
     helper::Plan helper;
     bool helper_enabled = false, physical_rf_retuning = false;
+    // Optional compiled bulk arithmetic. The shared receiver still owns all
+    // tracking state, original priors, physical decisions and worker permits.
+    std::shared_ptr<receiver_detail::ReceiverBulkBackend> bulk_backend;
 };
 
 struct ReceiverSlotPlan {

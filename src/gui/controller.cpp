@@ -376,24 +376,39 @@ struct Controller::Impl {
     bool supported_draft() const {
         return !attachment&&!file_loading&&draft_error.empty()&&!empty_draft()&&
             (composer.raw_bits()?composer.raw_bits()->size()<=transfer::short_message_bits:
-                composer.bytes().size()<=transfer::short_message_bytes);
+                composer.bytes().size()<=std::min(BinaryEditor::payload_limit,settings.transfer.content_limit));
     }
     void refresh_airtime() {
-        if(attachment) {ordinary_airtime="Robust supports short text or exact bits; attachments are unavailable.";return;}
+        const auto show_count=[this](std::size_t count,std::string_view prefix={}) {
+            ordinary_airtime=std::string(prefix)+std::to_string(count)+" DATA + 2 scored quiet slots";
+            if(snapshot.slot_stride_seconds) {
+                std::ostringstream out;out<<std::setprecision(5)<<(count+2)* *snapshot.slot_stride_seconds;
+                ordinary_airtime+=" (~"+out.str()+" s)";
+            }
+        };
+        // The accepted TX owns this count, even if the user edits the next
+        // draft. Long compression and interval encoding stay off the UI thread.
+        if(snapshot.transmitting&&snapshot.transmit_trace.active) {
+            if(snapshot.transmit_trace.total_wire_bits)show_count(snapshot.transmit_trace.total_wire_bits,"TX: ");
+            else ordinary_airtime="TX preparation · exact length pending";
+            return;
+        }
+        if(attachment) {ordinary_airtime="Robust supports text or exact bits; attachments are unavailable.";return;}
         if(!draft_error.empty()) {ordinary_airtime=draft_error;return;}
-        if(empty_draft()) {ordinary_airtime="Enter 1–16 text bytes or 1–208 exact bits.";return;}
-        if(!supported_draft()) {ordinary_airtime="Robust text is limited to 16 bytes; exact bits to 208.";return;}
+        if(empty_draft()) {ordinary_airtime="Enter text (up to 1 MiB) or 1–208 exact bits.";return;}
+        if(!supported_draft()) {ordinary_airtime="Robust text exceeds its local byte limit, or exact bits exceed 208.";return;}
+        if(!composer.raw_bits()&&composer.bytes().size()>transfer::short_message_bytes) {
+            const auto fec=settings.transfer.fec==FecMode::off?"Off":settings.transfer.fec==FecMode::rs20?"RS20":"RS60";
+            ordinary_airtime="Long text · "+std::to_string(composer.bytes().size())+" bytes · FEC "+fec+" · length prepared on Transmit";
+            return;
+        }
         auto count=composer.raw_bits()?composer.raw_bits()->size():compression::encode_short_bits(composer.bytes()).size();
         if(!composer.raw_bits()&&settings.transfer.fec!=FecMode::off) {
             const auto bytes=1+(count+7)/8+4;
             const auto parity=settings.transfer.fec==FecMode::rs20?(bytes+4)/5:(3*bytes+4)/5;
             count=8*(bytes+parity);
         }
-        ordinary_airtime=std::to_string(count)+" DATA + 2 scored quiet slots";
-        if(snapshot.slot_stride_seconds) {
-            std::ostringstream out;out<<std::setprecision(5)<<(count+2)* *snapshot.slot_stride_seconds;
-            ordinary_airtime+=" (~"+out.str()+" s)";
-        }
+        show_count(count);
     }
     void lpi_estimate_status(const std::string& state) {
         f(UiField::lpi_estimate).text="Observer / receiver time: "+state;
@@ -584,6 +599,7 @@ struct Controller::Impl {
         settings.receiver_memory_limit=dsp_workspace_percent?std::optional<std::size_t>{runtime::dsp_workspace_budget(dsp_workspace_percent)}:std::nullopt;
         if(settings.receiver_memory_limit)settings.transfer.dsp_workspace_bytes=*settings.receiver_memory_limit;
         settings.transfer.fec=f(UiField::fec).selected=="off"?FecMode::off:f(UiField::fec).selected=="rs20"?FecMode::rs20:FecMode::rs60;
+        settings.transfer.content_limit=BinaryEditor::payload_limit;
         settings.helper.power_w=helper_power_w(f(UiField::helper_power).text);
         settings.helper.ratio_limit_db=number(f(UiField::helper_ratio_limit).selected,"Helper ratio");
         settings.helper.callsign=f(UiField::helper_callsign).text;validate_helper_callsign(settings.helper.callsign);
@@ -728,6 +744,8 @@ struct Controller::Impl {
         auto& detail=f(UiField::short_bits_detail).text;
         if(attachment||file_loading)detail="Attachment selected. Choose Use text\nto enter a short raw pattern.";
         else if(!draft_error.empty())detail=draft_error;
+        else if(!composer.raw_bits()&&composer.bytes().size()>transfer::short_message_bytes)
+            detail="Long text uses periodic markers and the selected FEC.\nTransmit from Console; this short raw editor does not contain a message prefix.";
         else if(f(UiField::short_bits).text.empty())detail="Enter 1 to "+std::to_string(transfer::short_message_bits)+" exact bits, or type a short Message.\nLeading zeros and incomplete codes are preserved.";
         else {
             const auto bits=parse_binary_bits(f(UiField::short_bits).text);

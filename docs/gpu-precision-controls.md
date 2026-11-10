@@ -19,47 +19,44 @@ decisions rather than reducing required work to obtain a favorable timing.
 
 ## Current implementation
 
-The bounded RunPod workload uses CUDA for coarse search and fine bulk work.
-Bulk arithmetic normally uses FP32/complex64. The compact tight-clock class
-uses FP64/complex128 for the entire coarse grid before pruning and for fine
-rendering, because small changes affected candidate rankings and downstream
-work. Fine coordinates, Hermitian Gram calculations and Gaussian state retain
-their explicit higher-precision paths. The headless CPU receiver has its own
-explicit arithmetic; its fine Gaussian policy defaults to FP64 after a
-reproduced high-SNR FP32 innovation failure. That is a stage-specific finding,
-not a requirement for high dynamic range throughout the receiver.
+The default compiled receiver uses its native CPU arithmetic and has no Torch
+runtime dependency. The optional `DATAPUMP_TRIAD_TENSOR` build links a C++ ATen
+bulk backend into that same receiver. Public coarse search, fine state, work
+accounting, decisions and completion remain in the production C++ control path;
+Python does not duplicate those algorithms.
 
-The current GPU-only filter upload uses bounded host staging and retains
-CUDA polyphase filtering. Its revised memory admission and exceptional-upload
-lifetime have unit coverage, but the new source still needs execution on CUDA
-because replacement RunPod capacity was unavailable. The earlier device
-qualification does not qualify these edits; see the
-[current GPU limits](validation.md#gpu-assisted-receiver-measurement).
+`TensorReceiverOptions` selects CPU or an exact CUDA device, a bounded shared
+workspace and `automatic` or `fp64` precision. The native workload CLI exposes
+`--tensor-precision automatic|fp64`. Automatic bulk work normally uses FP32 with
+FP64 coordinates and reductions. The compact tight-clock class (sample rate at
+most 10 Hz and positive clock span at most 0.001 ppm) selects FP64. Receipts
+report the actual coarse and fine arithmetic, device/runtime and memory use.
+Fine Gaussian state retains the native higher-precision policy. No arithmetic
+is silently selected from the observed score or transmitted truth.
 
-The maintained backend has **no enabled tensor-core DFT path**. TF32x3,
-rounded TF32 and power-of-two-scaled FP16 lag-search variants were implemented
-and passed the bounded row-3 receiver checks on RTX PRO 6000. None demonstrated
-a useful integrated speedup, so all three were removed. Scaled FP16 improved
-packing-inclusive isolated transforms by 1.33–1.88×, but the receiver's changed
-acquisition stages took longer and its common measured stages were effectively
-unchanged. See the [tensor experiment conclusion](validation.md#tensor-core-lag-search-conclusion).
-Do not repeat that direct-DFT replacement without a changed workload or a
-concrete way to remove its measured surrounding costs. Different batched or
-device-resident formulations remain development candidates, not available
-switches or measured speedups. A low-precision dtype or matrix operation alone does not prove tensor
-execution. The existing Gaussian FP32 guard requires TF32 disabled; a new
-tensor path must have its own applicable checks.
+A requested CUDA backend must execute on CUDA or report unavailable; CPU fallback
+is not GPU evidence. The CMake `DATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA` option requires
+a CUDA-capable LibTorch build and registers the actual CUDA receiver check.
+The current local environment has no available CUDA execution. CPU ATen checks,
+source/build closure checks, CUDA-branch host syntax and workflow tests do not
+qualify CUDA linking, device arithmetic, device-memory behavior or speed. See
+[current validation](validation.md#native-codec-and-measurement-migration).
 
-The restructured CPU path also removes repeated bank synthesis and combines
-fine render/projection work into candidate tiles. Reprofile the resulting
-complete workflow before choosing the next tensor operation: the old host/GPU
-cost split is not a current speedup forecast. A possible FHSS formulation is
-local pulse-stencil matrices multiplied by batched keyed coefficients, followed
-by accurate phase/gate handling and resident projection. Its coefficient/plan
-adapter is not implemented or qualified. Compare a fused CUDA stencil with a
-scaled FP16/FP32-accumulation implementation, including preparation, transfers
-and actual receiver decisions; do not restore the rejected direct-DFT path or
-advertise hypothetical tensor throughput as local CPU capacity.
+The workload pairs exact native CPU and CUDA observations for active, noise,
+cold-maximum, terminal and erasure work. The last three are non-admitting
+fine-only diagnostics; active/noise complete public acquisition. Separate full
+operational near-decision, high-C/N0 and scored-quiet noise challenges check
+decisions. The gate checks winner/order, fixed work, score tolerance
+`atol=2e-3, rtol=2e-4` and at most 5% adaptive work-demand drift. A paired report
+must cover the actual precision classes used by its target rows. Matching bits
+alone does not establish matched observations or useful arithmetic fidelity.
+Predeclare a `--near-cn0` override before the one-row challenge when needed;
+do not choose it after seeing a favorable outcome.
+
+A low-precision dtype, ATen operation or CUDA label does not prove tensor-core
+execution or a speedup. Use actual execution and elapsed measurements, including
+preparation, packing, transfers and synchronization. The present backend provides
+no claim of tensor-core acceleration merely because ATen is enabled.
 
 ## Qualifying a faster path
 
@@ -89,9 +86,32 @@ prohibitions on reduced precision.
 
 ## Retained lessons
 
-The [GPU optimization summary](triad-gpu-optimization.md) preserves transferable
-arithmetic and negative-result lessons from retired receivers. Their Search
-arithmetic dropdown, standalone switches and receiver APIs are no longer current
-interfaces. Historical speedups or failures do not qualify the current receiver.
-Follow the [material lifecycle](development.md#material-lifecycle) rather than
-restoring old implementations or exhaustive precision campaigns.
+These are source-bound findings from retired Python-orchestrated receivers, not
+qualification of the current native ATen implementation:
+
+- A high-SNR FP32 Gaussian innovation failure motivated FP64 state updates. This
+  is a sensitive-stage finding, not a blanket requirement for FP64 bulk work or
+  extreme in-band dynamic range.
+- Compact tight-clock acquisition needed FP64 before pruning because small score
+  changes altered candidate rankings and downstream work. Bulk and sensitive
+  arithmetic classes must be paired separately.
+- TF32x3, rounded TF32 and scaled FP16 direct-DFT lag-search experiments passed
+  bounded row-3 checks on RTX PRO 6000 but did not improve the integrated receiver.
+  Scaled FP16 sped up isolated packing-inclusive transforms by 1.33–1.88× while
+  acquisition stages took longer and common stages were effectively unchanged.
+  Those implementations were removed. Do not restore that replacement without a
+  changed workload or a concrete removal of surrounding costs.
+- A prior GPU filter-staging/memory-lifetime edit lacked fresh CUDA execution
+  after replacement capacity became unavailable. Earlier device qualification
+  did not cover the changed source.
+
+The [tensor experiment conclusion](validation.md#tensor-core-lag-search-conclusion),
+[historical GPU measurement limits](validation.md#gpu-assisted-receiver-measurement)
+and [optimization summary](triad-gpu-optimization.md) retain provenance and
+failures. Old precision switches, standalone receivers and calibration reports
+are not current APIs. Fresh native costs and independent holdouts are required;
+do not infer them from the old host/GPU split. Device-resident batched or fused
+formulations remain candidates until implemented and measured with complete work.
+Preserve these concise lessons under the
+[material lifecycle](development.md#material-lifecycle), not obsolete executable
+campaigns or copied source trees.

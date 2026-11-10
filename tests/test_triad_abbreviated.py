@@ -1,10 +1,32 @@
 """Cheap inference and refusal checks; no performance campaign is executed."""
 from pathlib import Path
+import copy
 import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"tools"))
 from triad_abbreviated import analyze, log_interval, policy, validate_baseline, KERNELS, SCHEMA
+from triad_native import ProbeError, runtime_identity, validate_receipt
+
+
+def device_receipt():
+    return {"schema": "datapump.triad.native-probe.v1", "command": "continuation", "status": "complete",
+            "configuration": {}, "budget": {}, "observation": {"input_sha256": "1" * 64},
+            "allocation": {"hardware_threads": 2, "workers": 4, "slot_owners": 4,
+                           "memory_limit_bytes": 2**30, "receiver_numerical_threads_per_worker": 1},
+            "identity": {
+                "backend": "cuda", "implementation": "native-production-receiver",
+                "source_manifest_sha256": "2" * 64, "build_options_sha256": "3" * 64, "compiler": "GNU-14",
+                "build_config": "Release", "configured_tensor_backend": True,
+                "receiver_arithmetic": "native_fp64_state_and_admission", "requested_tensor_precision": "automatic",
+                "backend_receipt": {"device": "cuda:0", "device_name": "Fixture GPU",
+                                    "library_version": "2.15", "cuda_runtime_version": 13000,
+                                    "cuda_driver_version": 13000, "cuda": True, "numerical_threads": 1,
+                                    "precision": "automatic", "executed": True, "mapped_values": 0,
+                                    "statistics_blocks": 4, "fft_calls": 0, "dc_reduction_values": 12,
+                                    "score_rows": 0}},
+            "phases": [{"name": "fine_work", "work": {}, "wall_seconds": .01, "represented_seconds": 1}],
+            "result": {"coordinate_scope": "declared_public_work_coordinate", "stratum": "terminal"}}
 
 
 class AbbreviatedTests(unittest.TestCase):
@@ -78,6 +100,40 @@ class AbbreviatedTests(unittest.TestCase):
         baseline["kernels"].pop(KERNELS[0])
         with self.assertRaises(ValueError):
             validate_baseline(baseline, baseline["geometry"], baseline["environment"])
+
+    def test_native_runtime_comparison_binds_build_and_nested_device_fields(self):
+        original = device_receipt()
+        expected = runtime_identity(original)
+        for field, value in (("build_config", "Debug"), ("build_options_sha256", "f" * 64),
+                             ("requested_tensor_precision", "fp64")):
+            changed = copy.deepcopy(original)
+            changed["identity"][field] = value
+            self.assertNotEqual(runtime_identity(changed), expected)
+        for field, value in (("library_version", "2.14"), ("device_name", "Other GPU"),
+                             ("cuda_driver_version", 12800), ("precision", "fp64")):
+            changed = copy.deepcopy(original)
+            changed["identity"]["backend_receipt"][field] = value
+            self.assertNotEqual(runtime_identity(changed), expected)
+        changed = copy.deepcopy(original)
+        changed["identity"]["source_manifest_sha256"] = "f" * 64
+        changed["identity"]["backend_receipt"]["dc_reduction_values"] += 8
+        self.assertEqual(runtime_identity(changed), expected)
+
+    def test_terminal_zero_mapping_requires_actual_accelerated_reductions(self):
+        receipt = device_receipt()
+        validate_receipt(receipt, command="continuation", backend="cuda", returncode=0)
+        for change in ("wrong_scope", "no_projection", "wrong_stratum", "fallback"):
+            wrong = copy.deepcopy(receipt)
+            if change == "wrong_scope":
+                wrong["result"]["coordinate_scope"] = "complete_public_selection"
+            elif change == "no_projection":
+                wrong["identity"]["backend_receipt"]["dc_reduction_values"] = 0
+            elif change == "wrong_stratum":
+                wrong["result"]["stratum"] = "cold-maximum"
+            else:
+                wrong["identity"]["backend_receipt"]["executed"] = False
+            with self.subTest(change=change), self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="continuation", backend="cuda", returncode=0)
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ likelihood windows (62.5 ms). There are 38,188 samples over 9.323242 s.
 Gaussian coefficient renewal width is zero; this does not remove the selected
 55 Hz deterministic ray separation or frequency-selective modulation.
 
-The [replay script](../../../../../local-evidence/triad-broad-coverage/admission-diagnosis/replay_wrong_key_raw.py)
+The replay script (retired historical source)
 retained all original seed arguments and physical options, changed export mode
 to `export-sampled`, and capped output at 128 MiB. The exact executed child and
 bounded-run argument arrays are in the JSON. The 30-second bounded child
@@ -37,7 +37,7 @@ the local binary is not asserted identical to the separately compiled cloud
 binary. Raw artifacts and scratch scripts are ignored local evidence, not
 files guaranteed present in a fresh checkout.
 
-The inspected [exporter](../../../../../tools/triad-long.cpp) derives the
+The inspected exporter (retired historical source) derives the
 transmitter key from `key_seed` and the wrong receiver key from
 `key_seed ^ 0x6a09e667f3bcc909ULL`. Its truth waveform uses the transmitter
 key; candidate patterns use the receiver key. The inspected

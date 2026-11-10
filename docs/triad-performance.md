@@ -1,569 +1,399 @@
 # Robust computational checks
 
-**Runtime applicability:** Robust operation now uses one native C++ stack linked
-into the GUI. Python remains a test/benchmark driver and, while migration parity
-questions remain, a numerical reference. The retained harness commands,
-process-scheduler measurements and GPU/CPU applicability receipts below keep
-their original source/runtime scope. They do not qualify the current native GUI
-receiver or its in-process scheduler. Changed native CPU work and orchestration
-need matched local phase costs and fresh bounded holdouts through that native
-implementation before a new capacity forecast. Preserve all historical numeric
-failures, uncertainty and margins. See [current validation](validation.md#native-gui-integration).
+The operating modem and measured receiver are the same compiled C++ stack.
+Python's standard library orchestrates native probes and analyzes receipts; it
+contains no second receiver DSP implementation. The default application requires
+neither Python nor Torch. The optional compiled ATen backend uses the same native
+receiver control, persistent state, work accounting and completion rules.
 
-The Robust tools answer two different questions. The ordinary
-[`tools/triad_abbreviated.py`](../tools/triad_abbreviated.py) harness compares
-bounded computational work against a matched baseline to detect relative
-degradation. The separate [`tools/triad_manual_cases.py`](../tools/triad_manual_cases.py)
-suite evaluates absolute receiver capacity for the freshly read manual case
-list. A pass in one mode does not imply a pass in the other. Agents working on
-the manual list must start with the
-[CPU ceiling workflow](robust-manual-capacity.md#agent-workflow-for-cpu-ceiling-estimates)
-and its practical algorithm, precision and productive-parallelism requirements.
+The tools answer different questions:
 
-**The retained complete-service estimates are scoped to the configured public
-calendar. Acquisition of unconfigured waveform epochs, ordinals and timing is
-unresolved, regardless of favorable numerical capacity points or forecast
-accuracy.** Keep that coverage limit in reports. The continuous bit/null model
-retains two-slot quiet confirmation; a semantic new-transmitter classifier is
-not a receiver requirement. See
-[the receiver scope](validation.md#continuous-receiver-restructuring).
+| Entry point | Decision |
+| --- | --- |
+| `triad_abbreviated.py` | Relative computational regression against a matched native baseline. |
+| `triad_manual_cases.py` | Absolute local CPU capacity for the current ordered manual cases. |
+| `triad_gpu_workload.py` and `triad_gpu_cpu_forecast.py` | GPU-observed native work combined with local native phase costs and independent CPU holdouts. |
+
+None inherits a pass from the historical Python runtime. Its timings, process
+transport applicability exceptions and old GPU forecasts are inadmissible as
+native calibration. Changed CPU work, runtime or concurrency needs fresh affected
+local timings and bounded holdouts. See [current validation](validation.md#native-codec-and-measurement-migration).
+All receiver claims remain scoped to configured public timing and keyed ordinals.
+Unknown waveform epoch, ordinal and timing acquisition is unqualified.
 
 ## Relative regression harness
 
-Run the native `triad` checks first, then the abbreviated regression harness for
-a declared performance comparison:
+Run cheap native correctness checks before a declared timing comparison:
 
 ```sh
 ./build.sh test triad
 python3 tools/triad_abbreviated.py \
-  --output local-evidence/triad-abbreviated.json \
-  --device cpu --target-units 1000
+  --probe build/dev/triad_receiver_probe --device cpu \
+  --output local-evidence/triad-abbreviated.json
 ```
 
-Use a matched `--baseline previous.json` only while that comparison is active;
-keep source, configuration, input, device and execution conditions matched.
-The v2 harness includes FFTScreen preparation and scoring, Gaussian state
-updates, sparse timing, and canonical complete-fine receiver processing. Its
-receiver fixture uses a synthetic same-stream input and fully visible worker
-allocation. This complete-fine timing is relative computational regression
-evidence. It does not measure the native channel, quiet message completion,
-nominal SNR sensitivity, full manual-case capacity, or physical reception.
+For a comparison, add `--baseline previous-native.json`. The
+`datapump.triad.native-regression.v1` schema binds native input observations,
+geometry, allocation, runtime, source and binary identity. Source may differ for
+a declared candidate/reference comparison; the work and environment must remain
+applicable. Old Python reports are rejected. A report without a comparison may
+establish a baseline; that is not a relative-regression pass.
 
-Predeclare the fixed geometry, path strata, target unit count, uncertainty
-decision, source/configuration provenance and output location. The hierarchy
-uses 3, 5, then 9 outer looks, with 1- and 2-unit training measurements and a
-4-unit holdout. The holdout checks the stated fixed-geometry repeated-unit
-assumption. `--target-units` changes only the extrapolation target, not the
-measurement budget. These conditional estimates do not qualify changed
-algorithms, memory or concurrency regimes, sample rates, devices, or receiver
-stages outside the measured workload.
+Active and noise strata measure actual native slot, coarse, fine and audio
+frontend work. Each uses bounded 1/2/4-unit batches and sequential looks at 3, 5
+and 9 observations. The four-unit holdout checks the fixed-geometry repeated-unit
+model. `--target-units` changes only the conditional projection, not the work
+budget. The measured model-error allowance does not disappear with repetition.
+The current policy uses a 30% material-slowdown threshold and separate model and
+uncertainty gates. An inconclusive interval is not a pass.
 
-Keep raw JSON only while it supports the current comparison or validation
-claim. Distill useful conclusions, negative findings and provenance into the
-maintained [validation record](validation.md), then remove superseded outputs.
-RunPod may accelerate this same bounded method but does not justify a larger
-campaign. Do not use full-observation, sustained, multi-day or exhaustive runs
-as routine checks or fallbacks for an inconclusive abbreviated result.
+`--threads`, `--slot-owners` and `--workspace-mib` preserve explicit native limits;
+omitted workers use `2*H`. `--deadline-ms` and `--max-samples` bound each native
+call. Unsupported or incomplete native work remains explicit in the report.
+These measurements do not establish communication sensitivity, whole-case
+real-time capacity or physical-device reception.
 
 ## RunPod GPU-assisted manual capacity forecast
 
-Prefer this path for repeat manual checks with applicable local CPU phase
-calibration. RunPod supplies public work demand. Source-matched local timings
-supply CPU costs for acquisition, fine work, recurring banks and fixed
-orchestration. Refresh only missing local cost classes, or the affected local
-calibration when the CPU work or runtime changes. A GPU-only change requires
-new applicable GPU evidence and preserves an unchanged CPU calibration.
-This procedure forecasts the implemented configured-calendar receiver phases;
-fast GPU observations cannot fill missing waveform-address acquisition work.
+GPU observations can accelerate collection of native work demand. Source-matched
+local CPU timings supply elapsed cost. Never multiply GPU time by a FLOPS ratio,
+use the cloud host's CPU as the local CPU, or credit a hypothetical optimization.
+Prefer qualified lower-precision bulk work where complete experiments benefit;
+follow the [precision guide](gpu-precision-controls.md).
 
-The target is complete service on the **local CPU**, with its full available
-logical-thread budget. GPU experiments accelerate workload observation; they
-do not substitute the pod's CPU or GPU throughput for the local receiver.
-Combine work demand with per-phase local elapsed costs at matched geometry,
-arithmetic, cache/state and productive concurrency. Narrow sustained local
-receiver tests and fresh holdouts establish those costs. Synthetic stress,
-advertised FLOPS, thread counts and aggregate GPU/CPU wall-time ratios cannot
-replace that calibration.
+First run the native correctness group and collect only needed current CPU costs
+through the [manual capacity entry point](robust-manual-capacity.md#local-calibration-entry-point).
+Predeclare cases, paired arithmetic classes, independent holdout seeds, worker
+and owner counts, host/device memory, sample/search bounds and deadlines. Use the
+same exact worker/owner/host-memory allocation on the GPU observation and local
+CPU calibration/holdout. Automatic `2*H` on a different host is not necessarily
+the same allocation. A cap recorded in bytes cannot be silently rounded to a
+MiB-only command and relabeled as matched.
 
-Use the [mixed-precision policy](gpu-precision-controls.md) to accelerate the
-dominant work through efficient algorithms, batching and qualified lower or
-tensor-compatible arithmetic. Measure complete experiment time, including
-simulation, preparation and transfers. The pre-restructuring RTX PRO 6000 trace
-spent about 80% of its time on native CPU simulation and bank preparation;
-optimizing only small GPU kernels misses that measured bottleneck. See the
-[current evidence](validation.md#gpu-assisted-receiver-measurement).
-
-The continuous-listener and native coarse/Gaussian restructuring changed CPU
-work. Refresh its affected local phase costs and require applicable matching GPU
-work/precision evidence before publishing a new GPU-assisted forecast. The
-pre-restructuring eight-row CPU/GPU receipts remain tied to their old
-implementation.
-The new native CPU kernels do not themselves qualify a faster CUDA path or
-tensor execution. See [current restructuring validation](validation.md#continuous-receiver-restructuring).
-
-The following ownership details describe the historical measured reference
-runtime, including its process transport. The current native stack shares
-immutable buffers in-process under the same aggregate `2*H` budget; see the
-[allocation contract](development.md#receiver-cpu-allocation).
-
-Every automatic Robust receiver mode uses `S = 2*H` software permits, including
-serial, finite and custom paths; explicit worker count `W` stays exact.
-The canonical continuous controller cap is `min(S, W)`, admitting up to `2*H`
-independent controllers sharing `2*H` permits by default. Owners grow lazily only
-for ready complete windows whose full public DSP bounds, at least one worker per
-job and exact memory leases fit; do not spawn owners for empty work. Completion
-frees an owner before ordered commit, bounded by twice the resolved owner cap in
-uncommitted records (`4*H` by default); job-free owners can retire for larger later
-geometries. Prospective owner overhead uses the fully loaded child's maximum
-pre-DSP bootstrap RSS/HWM after its first handshake, not the parent's captured-IQ
-heap. Actual parent, live-owner and native workspace memory remain charged and
-rechecked at admission. Memory admission may reduce owner count but retains `W`,
-including fallback. Hardware availability remains `H`. Supported Linux pipelines
-use sealed, read-only `memfd` input, charging one parent assembly transient before
-dropping its array and retaining the descriptor/metadata for retry. Child mappings
-close before acknowledgement. Remove only duplicate input-copy reserves; retain
-full DSP/native workspace, raw-ring and result leases. Unsupported copied
-transport retains its full charges. Capability probing is lazy, before pipeline
-admission, and excludes finite/custom/serial paths. Full-size read-only transport
-checks admitted three row-1 inputs at eight workers each where copied input
-admitted one, with full DSP reservations retained. This did not execute row-1 DSP
-or measure throughput. The completed native copied/shared functional comparison
-used three owners at eight workers each, with exact checked outcomes and correct
-quiet/EOF/lifetime behavior. Neither result establishes an elapsed gain or an
-all-row shared-transport admission envelope.
-
-A final-source 49-window same-stream observation with sealed input and automatic
-allocation averaged **8.325 busy threads of 12 (69.37%)** over 51.898 seconds
-of predeclared ready-backlog intervals. The longest uninterrupted interval was
-32.899 seconds at 7.921 busy threads; owner startup totaled 21.238 seconds
-separately. All 49 windows completed without fallback or retry. The original
-exact comparison gate **failed** because dispatched tracking-task counts
-changed in 17 slots. A separate post-hoc comparison excluded that
-allocation-dependent count; the other compared work, scores and decisions
-matched. This observation is not an all-row pipeline capacity result. Its
-automatic RAM cap was 8.748 GB versus the earlier fixed 9.513 GB; the observations
-do not isolate a transport speedup. [Final-source receipt](../local-evidence/final-backlog-cpu/result.json).
-
-Before the `memfd` change, the enlarged automatic owner cap passed an independently
-audited 49-window continuous-capture check; its predeclared sustained-backlog
-interval averaged 81.09% of twelve hardware threads. That is pre-transport evidence.
-It does not establish full saturation,
-a paired speedup or all-eight-row pipeline capacity. The pre-`memfd` admission bootstrap's
-owner widths are conditional on its transport, declared ring ranges, geometry
-and RAM. They are not current shared-transport or universal concurrency factors.
-Earlier hardware-count-capped and two-owner row-7 measurements retain their
-original scope. The
-[current all-eight complete-work estimates](validation.md#complete-headless-robust-and-manual-capacity)
-use one twenty-four-worker pool on twelve hardware threads at a fixed 9072 MiB
-cap. Conservative capacity passes cover rows 3 and 5; nominal passes cover rows
-2–8. Row 4 has a conservative numeric point failure and unresolved model gates
-remain. This audited union of matching per-row receipts is not a replacement
-canonical calibration report or an automatic multiowner pipeline ceiling. These
-receipts predate the input-transport change. The reviewed applicability receipt
-and strict forecast consumer preserve unchanged one-pool DSP/finite costs without
-changing raw timings or measured-source identities. Only the exact completed
-canonical reports for rows 1–6 and 8 are eligible, as described below. Row 7's
-interrupted raw report and the audited union are rejected before forecasting;
-its manual estimate does not supply the missing canonical completion flag.
-Preserve each constituent report and its limits, including row 7's external
-posttermination identity audit and unavailable canonical final-runtime flag.
-Record the external checks separately; do not fabricate that flag or carry
-these one-pool estimates into a concurrent mode without applicable costs.
-Automatic serial fallback retains auxiliary-process memory and cannot inherit
-explicit `slot_processes=1` qualification. Forecast overlapping work only with
-applicable costs for its shared worker allocations and a fresh outer-service
-holdout including native preparation, IPC and ordered commit. Neither summing
-overlapping slot wall times nor timing asynchronous input submission measures
-that service. Keep the configured-calendar scope and prefer qualified
-lower-precision GPU work for the implemented phases.
-
-Package the allowlisted source with the matching native exporter and mapped
-kernel. Transfer both artifacts separately with authenticated SSH/SCP and place
-the kernel beside the exporter. The provider console handles pod lifecycle.
-RunPod temporary disks are disposable. Stopping task instances is authorized;
-do not keep them running merely to preserve temporary setup, builds or captures.
-Download and verify the small receipts needed for the current validation claim,
-then stop and remove the instance. Repository changes and retained local
-evidence have their separate preservation requirements.
+The source bundle contains a deterministic native build closure, not copied
+Python DSP or a prebuilt exporter/kernel pair:
 
 ```sh
 python3 tools/triad_gpu_bundle.py --output /tmp/robust-gpu-source.tar.gz
 ```
 
-On the pod, run the bounded CUDA workload and predeclare representative paired
-reference rows spanning every arithmetic class. A full-list example uses rows
-1 and 2 for the tight-clock class and row 6 for the bulk FP32 class.
-Use the CPU calibration's worker count and exact admitted workspace cap for the
-GPU observation and local holdout; the pod's hardware count may differ. For a
-calibration intended for this GPU CLI, resolve operating RAM once, round down
-by less than 1 MiB before measurement, retain that preflight, and pass the
-derived `--workspace-mib` to the manual suite with worker flags omitted. Do not
-round an existing report's cap and pretend its identity still matches.
-
-When fresh local calibration is required, obtain that cap after loading the
-measurement runtime in the numerical Python environment:
+Build the probe from that closure with a CUDA-enabled C++11-ABI LibTorch install:
 
 ```sh
-mkdir -p local-evidence
-ROBUST_WORKSPACE_MIB=$(python3 - <<'PY'
-import json, sys
-from pathlib import Path
-sys.path.insert(0, 'tools')
-import triad_case_capacity
-from triad_cpu import detect_receiver_memory
-snapshot = detect_receiver_memory()
-budget = snapshot['memory_budget_bytes']
-if type(budget) is not int or budget < (1 << 20):
-    raise SystemExit('No admissible operating-RAM budget')
-mib = budget // (1 << 20)
-snapshot['rounded_workspace_limit_bytes'] = mib << 20
-Path('local-evidence/robust-ram-preflight.json').write_text(
-    json.dumps(snapshot, indent=2) + '\n')
-print(mib)
-PY
-)
+cmake -S . -B build/probe \
+  -DBUILD_TESTING=OFF -DDATAPUMP_BUILD_GUI=OFF -DDATAPUMP_BUILD_CLI=ON \
+  -DDATAPUMP_PORTABLE=OFF -DCMAKE_BUILD_TYPE=Release \
+  -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON \
+  -DCMAKE_PREFIX_PATH=/path/to/libtorch
+cmake --build build/probe --target triad_receiver_probe
 ```
 
-Pass `--workspace-mib "$ROBUST_WORKSPACE_MIB"` to the required calibration
-command. The snapshot records resource assumptions; it does not freeze other
-applications' RAM use, and normal admission still applies. Keep it with the
-calibration it supports, then remove it when that evidence is retired.
+The CLI configuration remains enabled to satisfy the native install-target
+contract; this command builds only the probe target. Use the full source and
+CI closure for general correctness groups. The bounded proposal below composes
+only the bundled tensor parity test through an external CMake hook. `DATAPUMP_TRIAD_TENSOR=OFF` is the default
+native build; no Torch dependency is introduced into that profile. A requested
+CUDA backend must execute on the selected CUDA device or report unavailable;
+CPU fallback cannot count as GPU evidence.
 
-Extract the shared values from an applicable current CPU report. This rejects
-mixed allocations or a byte cap that the MiB-only GPU CLI cannot represent.
-Use the same values on the pod and local host. Historical 3840/4608 MiB and
-twelve-worker receipts keep their original limits; they are not defaults.
-
-```sh
-ROBUST_CPU_REPORT=local-evidence/robust-cases.json
-read -r ROBUST_WORKERS ROBUST_WORKSPACE_MIB < <(
-python3 - "$ROBUST_CPU_REPORT" <<'PY'
-import json, sys
-with open(sys.argv[1]) as source:
-    report = json.load(source)
-workers = {row['measurement']['inference_workers'] for row in report['cases']}
-cap = report['workspace_limit_bytes']
-assert len(workers) == 1
-worker = next(iter(workers))
-assert type(worker) is int and worker > 0
-assert type(cap) is int and cap > 0 and cap % (1 << 20) == 0
-print(worker, cap // (1 << 20))
-PY
-)
-```
+The following placeholders are explicit declared limits, not portable defaults:
 
 ```sh
 python3 tools/triad_gpu_workload.py \
-  --device cuda --workers "$ROBUST_WORKERS" --workspace-mib "$ROBUST_WORKSPACE_MIB" \
-  --reference-case 1 --reference-case 2 --reference-case 6 \
-  --exporter build/dev/triad_helper_export \
+  --probe build/probe/triad_receiver_probe --device cuda \
+  --case-index N --reference-case N --seed 74021 \
+  --workers W --slot-owners O --workspace-mib M --device-memory-mib D \
+  --deadline-ms 30000 --row-deadline-ms 180000 \
+  --max-samples 4194304 --coarse-tiles 4096 \
   --output local-evidence/robust-gpu-paired.json
 ```
 
-CUDA coarse acquisition is the default with `--device cuda`. Record the resolved
-software-worker allocation: omitted `--workers` uses `S = 2*H` from the probe
-host's visible hardware count, while explicit `--workers W` remains exact.
-Keep one numerical thread per receiver worker.
-These commands pin the calibration's worker count so the paired and target
-runs use the same allocation; this is not a portable thread cap. Preserve the
-[automatic allocation contract](development.md#receiver-cpu-allocation)
-on other processors. To repeat only
-a target row, use `--case-index N` and retain the qualified paired GPU report.
-The two reports must match the actual GPU backend, runtime, worker allocation,
-workspace cap and source/native artifacts. Reference rows must still match their
-current normalized configurations.
+Repeat `--case-index` and `--reference-case` for the declared coverage. Each
+paired reference uses the exact native observation across CPU and CUDA, covering
+active, noise, cold-maximum, terminal and erasure work. Active/noise complete
+public acquisition; cold-maximum/terminal/erasure use declared non-admitting
+fine-only diagnostics and do not prove acquisition. Separate full operational
+near-decision, high-C/N0 and scored-quiet noise observations check decisions. `--near-cn0` can predeclare
+the target for one paired row; otherwise the planned target is used. Reports
+record requested and effective coarse/fine arithmetic. `--tensor-precision fp64`
+is an explicit diagnostic override, not a default qualification shortcut.
+Pairing requires winner/order and fixed-work agreement, score tolerance
+`atol=2e-3, rtol=2e-4`, and at most 5% adaptive work-demand drift. Equal final bits
+alone do not establish matched inputs or adequate precision.
 
-```sh
-python3 tools/triad_gpu_workload.py --case-index 7 \
-  --workers "$ROBUST_WORKERS" --workspace-mib "$ROBUST_WORKSPACE_MIB" \
-  --exporter build/dev/triad_helper_export \
-  --output local-evidence/robust-gpu-target-7.json
-```
+`--row-deadline-ms` bounds the whole row. An explicit
+`--fixed-active-seconds` must match a separately declared native CPU duration
+override; it cannot silently replace the case's modeled duration.
 
-A bounded RTX PRO 6000 experiment ran two unpaired traces for rows 5 and 7
-in 31.01 seconds of SSH wall time. Each job used 12 workers and a 4608 MiB
-receiver workspace. Admission declared aggregate limits of 24 host workers,
-10 GiB of host memory and 19 GiB of device memory. Both traces reproduced the
-full trace's capture and useful work exactly. This was a two-job measurement
-with explicit resource limits. [Dual-job result](../local-evidence/robust-v2/gpu-dual-5-7.json)
-
-Predeclare independent local holdout rows for the applicable cost classes and
-any explicit cross-case transfer. Create fresh bounded CPU measurements using
-the same workspace cap. The following command checks only row 7.
+Collect a fresh local CPU holdout using an independent seed and the matching
+allocation. Its seed and native observation digest must differ from both the
+CUDA trace and every local fit observation. For complete service, select the
+smallest horizon whose exact native preflight covers startup carryover within
+the declared sample/storage bounds, or declare an explicit `--backlog-slots B`.
+The workload command opts into that CPU backlog with a positive count; its
+default omits it and cannot qualify complete service:
 
 ```sh
 python3 tools/triad_gpu_workload.py \
-  --device cpu --case-index 7 \
-  --workers "$ROBUST_WORKERS" --workspace-mib "$ROBUST_WORKSPACE_MIB" \
-  --exporter build/dev/triad_helper_export \
-  --output local-evidence/robust-cpu-holdout-7.json
-```
-
-An unavailable requested CPU workspace fails before measurement. Each acquired
-branch uses one fresh timing or three same-work timings when the first takes at
-most 0.5 seconds. Broad acquisition uses actual 1/2/4 bounded frequency tiles
-and separately measured full-count candidate selection on three public score
-orders. This yields a full-grid cost estimate while keeping the full scan out
-of the holdout. Timing repetitions use the same signal and work geometry.
-
-Example targeted transfer from encrypted row 5 to otherwise matching clear row
-7, using a separate target GPU trace and cached qualified GPU references.
-
-```sh
+  --probe build/dev/triad_receiver_probe --device cpu \
+  --case-index N --seed 97021 --backlog-slots B \
+  --workers W --slot-owners O --workspace-mib M \
+  --deadline-ms 30000 --row-deadline-ms 180000 \
+  --max-samples 4194304 --coarse-tiles 4096 \
+  --output local-evidence/robust-cpu-holdout.json
 python3 tools/triad_gpu_cpu_forecast.py \
-  --case-index 7 \
+  --probe build/dev/triad_receiver_probe --case-index N \
   --cpu-report local-evidence/robust-cases.json \
-  --gpu-report local-evidence/robust-gpu-target-7.json \
-  --gpu-reference-report local-evidence/robust-gpu-paired.json \
-  --local-holdout-report local-evidence/robust-cpu-holdout-7.json \
-  --holdout-case-index 7 \
-  --reference-case-index 1 --reference-case-index 2 --reference-case-index 6 \
-  --transfer-case 7=5 \
-  --output local-evidence/robust-gpu-cpu-target-7.json
+  --gpu-report local-evidence/robust-gpu-paired.json \
+  --local-holdout-report local-evidence/robust-cpu-holdout.json \
+  --holdout-case-index N --reference-case-index N \
+  --output local-evidence/robust-native-forecast.json
 ```
 
-Use the paired report directly as `--gpu-report` for a full current-list
-forecast. Omit the row selection, separate reference report and transfer flags
-for ordinary same-row forecasting. Every invocation validates the entire
-manual list. A target-only run covers its selected rows.
+`--gpu-reference-report` supplies a separately retained applicable paired report
+when target and paired observations are separate. Every invocation validates the
+whole current case list; selected rows remain partial. Historical transport
+bridges, cross-case transfers and phase-refresh exceptions are removed. A missing
+native cost class requires a bounded current measurement, not an old report.
 
-The optional applicability receipt bridges only the reviewed input-transport
-change for configured-calendar, single-pool CPU coefficients. For example, after
-producing current-source paired GPU evidence and an independent row-2 CPU holdout
-at the matching allocation and cap:
+Forecasts retain signed and absolute stage errors so cancellation cannot conceal
+a bad fit. Nominal holdouts allow a sum of absolute stage errors within 15% of
+observed service and no individual contribution above 10%; conservative limits
+are 20% and 15%. Guarded intervals include the declared model allowance as well
+as timing uncertainty. A phase-forecast status of `conditional_phase_estimates`
+and exit 0 establishes supported conditional phase estimates, not automatically
+complete real-time capacity.
+
+Configured logical-rate complete service additionally requires full native
+strata; the current message/two-quiet/EOF gate; three actual ready-backlog CPU
+calibration intervals; a fresh matched holdout at the declared preflight horizon;
+measured controller work excluding condition-variable wait and separately
+quantified spool reads/hash; and local fixed 180-byte multiblock codec
+work with a matching holdout. Controller work is charged in full as a serialized
+upper bound even when it may overlap DSP. Do not add whole overlapped stream wall
+time to phase costs and count the DSP twice. Both the complete bound and measured
+backlog must support the real-time criterion. Missing work leaves complete
+capacity unresolved; a numeric point at or above 1 s/s fails. GUI presentation,
+hardware-rate resampling and unknown-calendar acquisition remain outside that
+logical-rate forecast. Preserve these limits in any application-level claim.
+
+Unavailable accelerators, insufficient samples, incomplete public grids or a
+deadline stop produce explicit unresolved workload results (exit 2). No CUDA
+execution is available in the current local environment; configured GPU code or
+workflow tests are not a hardware qualification. Use direct applicable native
+CPU measurements while CUDA evidence is missing.
+
+Use authenticated transfer for remote artifacts. Provider lifecycle and spending
+require their own authorization; the opt-in CI workflow assumes a preprovisioned
+runner and does not create cloud capacity. Retain small receipts needed for the
+current claim or unresolved failure, then retire superseded artifacts under the
+[material lifecycle](development.md#material-lifecycle).
+
+
+### Bounded RunPod proposal — 10 November 2026
+
+This proposal tests actual CUDA linking, native CPU/CUDA parity and bounded
+receiver execution. It does not qualify full manual-case capacity, forecast local
+CPU service, or repeat historical campaigns. No pod has been provisioned. Standing
+`CLOUD.md` authorization covers eligible compute, but account access, available
+budget and existing resources have not been reconciled for this proposal. Keep
+account-specific operational records outside the checkout.
+
+| Limit | Proposed bound |
+| --- | --- |
+| Instance | One Secure Cloud on-demand RTX A5000: 24 GB VRAM, published 25 GB host RAM and 9 vCPUs. |
+| Price | Published GPU price $0.27/hour, checked 10 November 2026; reject a launch quote above $0.50/hour. |
+| Total budget | At most $2 all-in for this task; no retry, larger instance, extra funding or AutoPay changes. |
+| Lifetime | At most 60 minutes from creation to confirmed deletion, including image pull and build. |
+| Storage | 50 GB ephemeral container disk; no volume disk or network volume. |
+
+At the published GPU price and $0.10/GB/month container-disk rate, one hour is
+approximately $0.28 before tax; the deployment quote and actual accounting
+remain authoritative. Compute/storage are billed by the second. Sources:
+[RunPod GPU pricing](https://www.runpod.io/pricing) and
+[Pod/storage pricing](https://docs.runpod.io/pods/pricing).
+
+Pin the image to
+`runpod/pytorch:1.2.0-cu1281-torch291-ubuntu2404@sha256:9b2667aebeb9e3005cd6b2ebcb0cfcef0a2e4562544669304d03d620e07e7037`
+(11.85 GB compressed). Its PyTorch/CUDA/Ubuntu family is documented in the
+[official image guide](https://github.com/runpod/containers/blob/main/official-templates/pytorch/README.md).
+Use the packaged C++ LibTorch libraries; Python may locate that package and
+orchestrate checks, but receiver DSP remains native. Fail readiness if the
+pinned image, toolchain, CUDA device or required ABI is unavailable.
+
+The creation-to-deletion schedule reserves 10 minutes for cold-pull/readiness,
+25 for the bounded build, 15 for checks, five for retrieval/deletion and five
+as margin. An early failure ends the run; unused time does not authorize larger
+work. Before any launch, verify a working external control-plane delete route
+and supervision through the deadline. Use an independent watchdog if readily
+available. There is no provider `--terminate-after` flag in this plan: command
+timeouts do not delete a pod or enforce a billing cap. Record confirmed deletion
+and reconcile actual spend; a failed delete needs immediate control-plane
+follow-up within the same envelope, not an unattended stopped resource.
+
+Build only the allowlisted [native bundle](../tools/triad_gpu_bundle.py), probe and
+[CUDA parity test](../tests/test_triad_tensor.cpp). The bundle includes that exact test and omits unrelated tests. Verify its SHA-256
+`4e7b734f09cf4b9270ff9b4df53ed8285f196683b5de8d82aeacdb512f13f2ee`.
+Place this locally checked compose hook outside the source as `contract.cmake`:
+
+```cmake
+add_executable(runpod_triad_tensor EXCLUDE_FROM_ALL "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_tensor.cpp")
+target_include_directories(runpod_triad_tensor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_features(runpod_triad_tensor PRIVATE cxx_std_20)
+target_link_libraries(runpod_triad_tensor PRIVATE datapump_triad_receiver)
+```
+
+Readiness must confirm one A5000/SM 8.6, driver/device memory, CUDA toolkit 12.8,
+CMake ≥3.21, C++20, Ninja and OpenSSL 3. The packaged Torch must report 2.9.1,
+CUDA 12.8 and C++11 ABI; obtain `LIBTORCH_PREFIX` from its
+`torch.utils.cmake_prefix_path`. Set `TORCH_CUDA_ARCH_LIST=8.6`,
+`PYTORCH_CUDA_ALLOC_CONF=backend:native`, and `OMP_NUM_THREADS`,
+`MKL_NUM_THREADS`, `OPENBLAS_NUM_THREADS` to 1. Preserve preflight output:
 
 ```sh
-python3 tools/triad_gpu_cpu_forecast.py --case-index 2 \
-  --cpu-report local-evidence/parallel-routes/all8-cpu-capacity.json \
-  --cpu-calibration-applicability local-evidence/parallel-routes/shared-input-cpu-applicability.json \
-  --gpu-report local-evidence/robust-gpu-paired.json \
-  --local-holdout-report local-evidence/robust-cpu-holdout-2.json \
-  --holdout-case-index 2 \
-  --reference-case-index 1 --reference-case-index 2 --reference-case-index 6 \
-  --output local-evidence/robust-gpu-cpu-target-2.json
+nvidia-smi --query-gpu=name,memory.total,compute_cap,driver_version --format=csv,noheader
+nvcc --version
+python3 -c 'import torch; assert torch.__version__.split("+")[0]=="2.9.1" and torch.version.cuda=="12.8" and torch.compiled_with_cxx11_abi(); print(torch.utils.cmake_prefix_path)'
+timeout -k 10s 5m cmake -S source -B build -G Ninja \
+  -DCMAKE_PROJECT_DataPump_INCLUDE="$PWD/contract.cmake" \
+  -DBUILD_TESTING=OFF -DDATAPUMP_BUILD_CLI=ON -DDATAPUMP_BUILD_GUI=OFF \
+  -DDATAPUMP_PORTABLE=OFF -DCMAKE_BUILD_TYPE=Release \
+  -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON \
+  -DCMAKE_PREFIX_PATH="$LIBTORCH_PREFIX"
+timeout -k 10s 20m cmake --build build --parallel 2 \
+  --target triad_receiver_probe runpod_triad_tensor
+ldd build/triad_receiver_probe
+ldd build/runpod_triad_tensor
+timeout -k 5s 45s build/runpod_triad_tensor --cuda
 ```
 
-This receipt accepts exact bytes of `all8-cpu-capacity.json` for rows 1–6 or
-`all8-cpu-residual-8.json` for row 8. It binds the reviewed source pair, permits
-only the two specified pipeline files to differ, and checks native artifacts,
-runtime, H=12/S=24 allocation, 9072 MiB cap and manual inputs. It does not alter
-`same_measured_source`, relax any quality gate or renew the historical message
-gate. CUDA target/reference reports and new independent CPU holdouts still need
-current exact source. Do not combine it with `--refresh-cpu-phase`. The interrupted
-row-7 report lacks `unchanged_at_completion` and is rejected, as is
-`all8-current-summary.json`; row 7 needs a completed canonical calibration before
-it can supply automatic forecast calibration. This bridge is not all-eight GPU
-qualification. The [validation record](validation.md#complete-headless-robust-and-manual-capacity)
-retains the structural proof, receipt and actual consumer check.
+Verify resolved CUDA/ATen libraries and absence of `libpython`/`libtorch_python`.
+An initial bundle omitted the spool and fixture-key headers. The allowlist now
+includes both, with a recursive local-header closure check; all nine focused
+bundle tests passed. The external hook's configuration and target/link graph
+were checked locally with CPU LibTorch. A fresh extraction then compiled the
+probe, bundled parity test and Helper exporter with two build jobs; CPU tensor
+parity passed, source identity matched the local build, and no Python linkage
+was present. The proposed CUDA build and checks have not been run. Build limits
+of two jobs are separate from receiver allocation. The following device check
+uses an explicit diagnostic W=2/O=1, 8 GiB host and 4 GiB device limit; it does
+not reduce the application's automatic `2*H` receiver policy.
 
-When the target has an uncalibrated H0 fine cost class, run its bounded local
-stage calibration and keep the independent holdout separate. This stage command
-uses local automatic `S=2*H`; the calibration's worker count must match it.
+Run the following block under `timeout -k 5s 90s python3`, with
+`EXPECTED_SOURCE_SHA256` set to the matched local CPU probe's current source
+manifest before transfer. Its [native wrapper](../tools/triad_native.py) requires
+actual accelerator execution; [runtime checks](../tools/triad_gpu_workload.py)
+validate the declared device and resource accounting. Save command failures and
+incomplete receipts as well as successful results.
+
+```python
+import os, sys
+sys.path.insert(0, "source/tools")
+from triad_native import NativeProbe, write_result
+from triad_gpu_workload import cuda_runtime
+p = NativeProbe("build/triad_receiver_probe", backend="cuda")
+flags = dict(workers=2, slot_owners=1, memory_limit_bytes=8 << 30,
+             device_index=0, device_memory_limit_bytes=4 << 30,
+             tensor_precision="automatic", deadline_ms=12000,
+             max_samples=100000, coarse_tiles=128, seed=74021)
+for stratum in (None, "active", "noise"):
+    r = p.call("describe", **flags) if stratum is None else p.call(
+        "regression", stratum=stratum, units=1, **flags)
+    write_result(f"receipts/{stratum or 'describe'}.json", r)
+    assert r["status"] == "complete"
+    identity = r["identity"]
+    assert identity["configured_tensor_backend"] is True
+    assert identity["source_manifest_sha256"] == os.environ["EXPECTED_SOURCE_SHA256"]
+    bulk = identity["backend_receipt"]
+    assert cuda_runtime(bulk)["device"] == "cuda:0"
+    if stratum is not None:
+        assert r["result"]["work_complete"] is True
+        assert r["result"]["units"] == 1 and r["result"]["stratum"] == stratum
+        assert r["result"]["evaluator_expected_decision_observed"] is True
+        assert all(bulk[k] > 0 for k in ("fft_calls", "score_rows", "mapped_values",
+            "statistics_blocks", "synchronizations", "upload_bytes", "download_bytes"))
+        assert bulk["peak_reserved_bytes"] <= 4 << 30
+        assert bulk["allocator_peak_reserved_bytes"] <= 4 << 30
+p.verify_unchanged()
+```
+
+The required check sequence is one actual-CUDA parity check followed by one
+native active and one noise regression unit, each bounded to 100,000 generated
+samples and 12 seconds. Preserve source/binary hashes, device/runtime/arithmetic,
+requested/effective allocation, memory, work/decisions and all failed/incomplete
+receipts. No CPU fallback can satisfy a requested CUDA check.
+
+Only if the core checks pass, at least ten minutes remain, and the remaining
+envelope permits it, try current
+manual row 6 and then row 2: full public selection and persistent 2/3/4/6-second
+fine checkpoints, at most 30 seconds each and at most 8,388,608 generated samples
+in total. Stop optional work at the first incomplete/failed result. These two
+rows are bounded device/work probes, not a full manual suite, sensitivity claim
+or CPU forecast. Do not change geometry, extend the cap or replace an incomplete
+public search with evaluator coordinates.
+
+Use freshly parsed `load_cases("source/_tests-RobustModem.md")` and each selected
+row's exact `native_args`. With the same `NativeProbe`, first call
+`plan` with a 5,000 ms deadline and 4,194,304 sample cap; require the modeled
+profile, eligible continuation, admitted workspace ≤8 GiB and complete public
+window within that cap. Then call `continuation` with those arguments,
+`stratum="active"`, `slot_index=0`, 30,000 ms and the same sample cap. Save the
+receipt before `validate_work(receipt, "cuda", "active")`; this checks full public
+selection, effective arithmetic and persistent 2/3/4/6-second work without
+fallback. Bound the whole optional wrapper by `timeout -k 5s 2m` and never proceed
+to row 2 after an incomplete row 6. Local geometry preflights reported 1,630,039
+rows/T=256.8 s for row 6 and 4,141,064/T=576.4 s for row 2; these are plans, not
+successful CUDA execution or measured runtime.
+
+Retrieve only the small source/build/runtime and check receipts required for the
+claim, verify local hashes, then delete the pod and its container disk. Retain
+receipts under the existing [validation lifecycle](development.md#material-lifecycle)
+until the scoped claim is summarized or superseded; remove copied source/build
+artifacts when that purpose ends. Never place account identifiers, credentials or
+billing records in this guide.
+
+## Absolute manual-case capacity
 
 ```sh
 ./build.sh test triad
 python3 tools/triad_manual_cases.py \
-  --calibration-stage noise-only-fine --case-index 7 \
-  --workspace-mib "$ROBUST_WORKSPACE_MIB" \
-  --exporter build/dev/triad_helper_export \
-  --output local-evidence/robust-noise-fine-7.json
+  --probe build/dev/triad_receiver_probe \
+  --output local-evidence/robust-cases.json
 ```
 
-Add `--calibrate-target-noise-case-index 7` and
-`--target-noise-calibration-report local-evidence/robust-noise-fine-7.json` to
-the transfer forecast. This measures only the H0 fine class on the seeded noise
-observation after public acquisition. The nominal fit still uses the donor's
-CPU timings. The H0 stage report carries its own source, configuration, CPU,
-workspace and elapsed cost.
+The native capacity schema retains raw work/phase receipts, nominal and
+conservative service, actual same-stream/backlog results, memory, intervals and
+margins. Default inference preserves `2*H` workers; explicit limits remain exact.
+The [manual capacity guide](robust-manual-capacity.md) defines required work,
+full-list coverage, bounds, residual runs and separate sensitivity trials.
+One processing second per received baseband second is the real-time threshold;
+do not divide by core count. A relative regression or accurate forecast does not
+establish a complete-capacity pass.
 
-The measured row-7 target trace took 22.713 seconds inside the workload
-driver. Its separate H0 fine calibration took 20.574 seconds on the local CPU.
-Count the independent local holdout, process startup and any cloud transfer
-or setup in end-to-end elapsed time as well. The component times remain
-separate in the reports.
+## Historical findings that remain applicable
 
-Forecast v2 keeps signed and relative residuals for every held-out stage. For
-nominal service, the sum of absolute stage errors must fit within 15% of
-observed whole service, with each stage contributing at most 10%. For the
-conservative estimate, sum the absolute recurring-bank error, the largest
-absolute acquisition-branch error and the largest absolute fine-branch error.
-Their sum must fit within 20% of observed conservative service, with any
-individual stage contributing at most 15%. Measured fixed CPU costs are charged
-once in each service estimate. The budgets prevent cancellation between stages.
-Exact inputs, decisions, workload geometry and source/runtime gates still apply.
-The held-out erasure cost must fit under the observed state-ceiling estimate.
+The [validation record](validation.md#complete-headless-robust-and-manual-capacity)
+retains constituent reports and failures rather than relabeling them as native
+calibration. The old all-eight one-pool estimates used 24 software workers over
+12 hardware threads and a 9072 MiB cap. Nominal passes covered rows 2–8;
+conservative passes covered rows 3 and 5. Row 4's conservative point was
+4.11055 s/s, with unresolved state/model gates elsewhere. The interrupted row-7
+report lacked its canonical final-runtime flag; an external audit did not create
+that flag. The old input-transport applicability bridge is not valid here.
 
-The engineering error budget `b` guards the combined local calibration interval
-`[L, U]` as `[L/(1+b), U/(1-b)]` before the independent holdout. This allowance
-is separate from the statistical timing interval and its coverage limits. Report
-nominal and conservative estimates and any numerical point failure separately.
-Missing work or a failed holdout keeps the affected verdict unresolved. The
-previous relative-only rule rejected the row-7 hybrid H0 acquisition timing.
-That failure remains in the [validation record](validation.md) under its own
-policy and source identity.
+The historical process scheduler missed its original 15% throughput-gain gate;
+the user subsequently accepted its smaller useful gain and increased productive
+utilization. Pre-transport backlog utilization was 81.09%; the later 49-window
+sealed-input run measured 8.325 busy threads of 12 (69.37%) over 51.898 seconds,
+with 21.238 seconds of startup reported separately. Different RAM caps prevent a
+causal transport-speed comparison. Its original exact gate failed on dispatch
+counts in 17 slots; the separate post-hoc comparison and missing post-run input
+hash remain explicit. Those results are not native scheduler capacity.
 
-The forecast tool's exit code 0 and `conditional_estimates` status indicate
-supported conditional estimates, **not an all-case real-time capacity pass**.
-Inspect each row's separate `nominal_service` and `complete_capacity` verdicts,
-intervals and point failures. The full report must cover the entire current
-ordered list, including duplicates; selected-row evidence needs an explicitly
-matched coverage assembly before any full-list conclusion.
-These verdicts remain within their configured-calendar scope. Report additional
-waveform-address acquisition capacity as unresolved until its algorithm, work
-and detection/error behavior are qualified.
-
-When a same-row timing check drifts while its input and work gates still match,
-refresh just that CPU phase. `--refresh-cpu-phase` requires the same CPU source,
-native artifacts and runtime as the existing calibration. Changed CPU work or
-runtime needs a new applicable calibration report; this flag cannot bypass the
-identity gates, and old receipts must retain their original provenance.
-For a targeted forecast, supply the existing
-current local calibration, GPU work and paired references, and the earlier
-independent holdout for the selected row. Use one `--case-index N`, the matching
-`--holdout-case-index N` and a fresh output path. Add
-`--refresh-cpu-phase nominal-fine` for continued fine work or
-`--refresh-cpu-phase recurring-acquisition` for the largest recurring H0 search.
-
-The following example shows the artifact layout of the earlier 12-worker RTX
-run. Replace these paths with applicable reports for the current source; old
-artifacts cannot bypass the identity checks.
-
-```sh
-python3 tools/triad_gpu_cpu_forecast.py \
-  --refresh-cpu-phase nominal-fine --case-index 2 \
-  --cpu-report local-evidence/robust-v2/calibration-complete.json \
-  --gpu-report local-evidence/robust-v2/gpu-full.json \
-  --local-holdout-report local-evidence/robust-v2/holdout-row-2.json \
-  --holdout-case-index 2 \
-  --reference-case-index 1 --reference-case-index 2 --reference-case-index 6 \
-  --exporter build/dev/triad_helper_export \
-  --output local-evidence/robust-v2/forecast-refresh-row-2-next.json
-```
-
-The refresh preserves the original suite's statistical family. It prepares one
-fixture, seals the new point and interval before timing a fresh receiver, and
-keeps the other independently measured phases from their earlier receipts. The
-nominal refresh regenerates DATA once. The recurring refresh uses seeded noise
-and a canonical public bank, with bounded tiles and measured full-count
-selection where required. The output records the observed operating profile,
-artifact hashes and separate elapsed costs. Its mixed-time evidence applies to
-the measured conditions. Read `phase_refresh.status` for the new timing check
-and the main verdict for the complete service estimate.
-
-Terminate disposable instances after the measurements. Keep only reports that
-support the current validation, cached reference or an unresolved claim.
-
-## Absolute manual-case capacity
-
-When local timing calibration needs refreshing, run `./build.sh test triad`
-followed by the manual-case tool.
-
-```sh
-python3 tools/triad_manual_cases.py \
-  --output local-evidence/robust-cases.json \
-  --exporter build/dev/triad_helper_export
-```
-
-**This command estimates per-row service with sequential windows and automatic
-`S = 2*H` software workers** (twenty-four over twelve hardware threads on
-this host). Its native continuous functional gate does not qualify
-the automatic pipeline's capacity across the manual rows. Keep that
-execution-mode distinction in every report; all-row parallel capacity is
-unqualified.
-
-Default operating RAM is cgroup-aware available memory minus
-`min(2 GiB, max(512 MiB, 10% of available memory))`, with no 50% or 3840 MiB
-default ceiling. Explicit workspace caps remain exact. Current free memory can
-cause a late per-row fixed-cap admission rejection. Retain that rejection and
-any timeout; continue only unfinished rows in fresh processes with unchanged
-source, method, inputs, error-budget family, workers and cap. Do not remeasure
-completed favorable rows or silently reduce the allocation. Label assembled
-coverage and retain each constituent receipt and its completion limits; follow
-the [residual-run rules](robust-manual-capacity.md#fast-local-cpu-capacity-measurement).
-
-The default compares serial, known physical cores and the full visible logical
-budget on one stream, then measures fresh complete inference with `S` when
-allocation flags are omitted. On this 6-core/12-thread CPU the pilot uses
-1, 6 and 12 workers and default inference uses twenty-four. Explicit
-`--full-logical-inference` selects `H`; `--threads W` preserves exactly `W`,
-including intentional overcommit. `--no-full-logical-inference` is an explicit
-diagnostic/user opt-out that selects the pilot winner.
-Neither a pilot winner nor power/thermal limits or temporary/minor timing
-differences justify reducing the default. Follow the
-[CPU allocation contract](development.md#receiver-cpu-allocation). `--sustained-allocation-probe`
-adds a bounded matched six-second comparison when investigating scaling. Read
-elapsed service, busy cores, work counters, windows and workspace separately.
-Automatic canonical continuous reception grows admitted owners with ready work;
-it is not capped at three. The hardware-utilization denominator remains twelve
-on this host while default software permits are twenty-four. Explicit worker
-caps remain exact. Memory admission can select fewer owners, preserving the
-worker budget; finite and explicit-serial modes also default to `S`. The earlier
-three-controller 15% gain gate failed, but the user accepted its modest
-throughput gain and higher productive utilization under a changed criterion.
-That is historical evidence, not the new scheduler's qualification.
-Keep that history separate, keep numerical libraries single-threaded, and
-qualify the actual regime's costs. See the
-[allocation contract](development.md#receiver-cpu-allocation).
-
-The tool rereads and strictly validates `_tests-RobustModem.md` by default on
-every invocation. It supports `--case-list PATH` for another complete manual
-list and repeatable `--case-index N` for an explicitly partial debugging rerun;
-it still validates the whole list, rejects stale indices, and marks partial
-reports. A partial result cannot support a full-list conclusion. The
-compatibility invocation `triad_abbreviated.py --cases` forwards to this same
-absolute-capacity implementation.
-
-For debugging without the current-source native message gate, add
-`--skip-message-gate` (and normally a selected current `--case-index N`):
-
-```sh
-python3 tools/triad_manual_cases.py --case-index N --skip-message-gate \
-  --output local-evidence/robust-cases-debug.json \
-  --exporter build/dev/triad_helper_export
-```
-
-This mode cannot produce an integrated suite pass. Do not use it for a
-capacity qualification. The former `--paired-followup` option is removed.
-
-The absolute CPU metric is elapsed, prepared receive service per second of
-received baseband for a single input stream: a ratio at or above 1 fails the
-real-time criterion, while 0.1 represents a 90% service-time margin. Do not
-divide elapsed service by core count or infer the whole-machine ceiling from
-an unmeasured stage. The complete receiver's fixed affine-only lane supplies
-operational admission and the final bit; adaptive and combined lanes remain
-diagnostic, though their work is still fully executed and timed. Fine
-likelihoods default explicitly to FP64 after high-SNR Gaussian FP32 failed;
-there is no adaptive precision fallback. Coarse sensitivity alone does not
-establish operational admission, full Robust reception, physical-channel
-population performance, or message success. Exact caps and uncertainty rules
-are in the [manual capacity contract](robust-manual-capacity.md).
-
-Physical quiet evidence uses complete orthogonal likelihood blocks wholly
-inside the native public aperture: DATA public support intersected with the
-search window and bounded by the neighboring latest/earliest possible DATA
-slots. All received samples remain inputs to fine likelihoods. Neither packet
-length nor transport EOF controls physical completion. The bounded cost gate
-charges a fresh one-second, two-segment 256-initial-state transition probe once
-per 0.5-second window segment to cover switching and merge work conservatively.
-The frozen native functional gate passed, including its captured-prefix EOF
-negative control. This is one bounded functional check, not capacity or
-all-case qualification. The earlier integrated v3 reevaluation measured its
-eight manual cases with unresolved worst-state margins and no full capacity
-pass. Its named `triad` group passed 20/20 before that run. Those receipts and
-the historical v2 phases retain their own hashes and policy; they do not qualify
-the latest native CPU changes. Sensitivity
-confirmation remains incomplete, so there is no >90% qualification. See the
-[validation record](validation.md) for per-case ratios and provenance. Use
-`--skip-message-gate` only for debugging: it bypasses the
-current source message gate and prevents an integrated suite pass.
-
-The historical reference `CompleteStreamReceiver` defaults to continuous captured-stream
-listening on its configured public calendar, with the full visible logical CPU
-budget, bounded output/backpressure and scored-quiet recovery. Two scored quiet
-slots establish physical completion; transport EOF and received length do not
-select the endpoint. Finite gates explicitly use `continuous=False`. This does
-not qualify unconfigured waveform epoch/ordinal/timing acquisition. The GUI now
-uses the native C++ complete receiver; these reference-harness results are not
-its functional or capacity qualification.
-See [current architecture](robust-current.md) and
-[protocol status](protocol.md).
+Earlier GPU work found that preparation and simulation dominated a receiver
+trace, and that faster isolated tensor transforms did not improve the complete
+receiver. Earlier accepted forecast timing gates still had unresolved
+conservative capacity, including numeric point failures. Preserve those lessons
+and [precision failures](gpu-precision-controls.md#retained-lessons), not obsolete
+executable campaigns. No full, sustained, multi-day, exhaustive or heavy run is
+a routine fallback when bounded current evidence is inconclusive.

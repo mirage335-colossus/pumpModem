@@ -20,7 +20,11 @@ gui::web::Event read_event(Reader& in) {
     e.kind=static_cast<gui::web::EventKind>(in.u32());const auto flags=in.u32();
     if(flags&~31U)throw Error("unknown host event flags");
     e.checked=flags&1;e.cancelled=flags&2;e.ctrl=flags&4;e.shift=flags&8;e.alt=flags&16;
-    e.amount=std::bit_cast<std::int32_t>(in.u32());e.value=in.text();e.error=in.text(4096);return e;
+    e.amount=std::bit_cast<std::int32_t>(in.u32());
+    // The bridge resolves the opaque target and applies its shared declaration's
+    // input bound. The larger Message representation does not widen other fields.
+    e.value=in.text(e.kind==gui::web::EventKind::edit?gui::web::maximum_edit_value_bytes:protocol::max_text);
+    e.error=in.text(4096);return e;
 }
 std::string filename(std::string value) {
     // A name is presentation metadata, never a host path. Preserve ordinary

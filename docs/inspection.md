@@ -15,8 +15,8 @@ receive-probability and CPU forecasts also remain unqualified for the native
 receiver; provisional duration planning does not establish them.
 
 Robust uses one C++ source/Helper/complete-receiver stack linked into the GUI.
-Python is a test/benchmark tool and temporary numerical reference, not an
-operating receiver. Live operation has configured-calendar, keyed-ordinal and
+Python tools orchestrate native tests/benchmarks and analyze returned statistics;
+receiver processing stays in C++. Live operation has configured-calendar, keyed-ordinal and
 local noise-model requirements. Functional coverage does not qualify unknown
 waveform-address acquisition, native real-time capacity or physical hardware.
 See the [GUI contract](gui-contract.md), [current Robust status](robust-current.md),

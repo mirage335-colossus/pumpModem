@@ -21,8 +21,8 @@ Helper generation/acquisition, DATA generation/scoring, ordered receiver state,
 and audio have explicit internal interfaces. They share native buffers and
 coordinate worker ownership in one process. Python may invoke, test or benchmark
 that implementation; it is not a modem runtime, receiver subprocess, or IPC
-transport. Existing Python numerical references serve bounded migration parity
-and historical measurement interpretation only; see
+transport. Python tools orchestrate compiled probes and analyze their returned
+statistics; receiver DSP and persistent state have one C++ implementation. See
 [current architecture](robust-current.md).
 
 `CompleteStreamReceiver` admits independent in-process slot owners lazily when
@@ -92,7 +92,7 @@ ordinal through one twenty-four-worker pool on twelve hardware threads at a
 9072 MiB cap. Nominal passes covered rows 2–8 and conservative passes rows 3
 and 5; row 4's conservative estimate was a numeric failure and model gates
 remain unresolved. Row 7's interrupted report lacks its canonical final-runtime
-flag. The strict historical forecast bridge accepts completed canonical reports
+flag. The former strict forecast bridge accepted completed canonical reports
 for rows 1–6 and 8, not row 7 or the audited union. These facts qualify neither
 the native GUI runtime nor automatic multiowner capacity. See
 [the original scope and margins](validation.md#complete-headless-robust-and-manual-capacity).

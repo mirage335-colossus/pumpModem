@@ -4,14 +4,14 @@ The native Helper generator, single-key metadata codec and weak Helper
 acquisition share the canonical C++ triad stack linked into the GUI. Helper
 power, ratio limit and callsign configure that native source; the complete
 receiver supplies noisy Helper proposals to DATA refinement. Helper-only and
-noise transmissions use the same source interface. Python references are used
-for bounded migration parity, not operating acquisition. Retire superseded
-reference code and captures when those numerical questions close.
+noise transmissions use the same source interface. Python may invoke the native
+probe and analyze its statistics; Helper DSP has one C++ implementation. The old
+Python receiver and copied experiment implementations are retired.
 
 The older ordinary receiver and standalone Helper tracking/conditioning
 implementations remain removed. Current component checks do not qualify every
 Helper/DATA configuration or physical channel; see
-[native integration validation](validation.md#native-gui-integration).
+[native integration validation](validation.md#native-codec-and-measurement-migration).
 
 ## Transmitter facts and assumptions
 

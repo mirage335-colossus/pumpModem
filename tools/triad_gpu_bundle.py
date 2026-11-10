@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Create a small deterministic source archive for the Robust GPU parity run.
+"""Create a deterministic source archive for the compiled Robust GPU probe.
 
 The input set is intentionally allowlisted: native project sources and headers,
-the CMake build description, triad tools/tests, and the two vendored libraries
-in the native library closure (XZ and qrcodegen). System OpenSSL, CMake, Python,
-and compiler packages are provided by the remote image, never downloaded here.
+the CMake build description, the native probe and its orchestration scripts,
+and the pinned XZ and qrcodegen sources. LibTorch, CUDA and system build
+dependencies come from the remote build environment.
 """
 from __future__ import annotations
 
@@ -22,8 +22,9 @@ import sys
 import tarfile
 
 
-_TOP_FILES = ("CMakeLists.txt", "CMakePresets.json", "build.sh", "_tests-RobustModem.md")
-_NATIVE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inc", ".inl", ".s"}
+_TOP_FILES = ("CMakeLists.txt", "CMakePresets.json", "LICENSE", "build.sh", "_tests-RobustModem.md")
+_NATIVE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx",
+                    ".inc", ".inl", ".s", ".cu", ".cuh"}
 _XZ_INVENTORY = "third_party/xz/UPSTREAM.sha256"
 _XZ_BUILD_METADATA = {
     "AUTHORS", "CMakeLists.txt", "COPYING", "COPYING.0BSD", "COPYING.LGPLv2.1", "INSTALL", "README",
@@ -32,8 +33,16 @@ _XZ_BUILD_METADATA = {
     "src/liblzma/liblzma_generic.map", "src/liblzma/liblzma_linux.map",
     "src/liblzma/liblzma_w32res.rc", "src/liblzma/validate_map.sh",
 }
+_PROBE_TOOLS = (
+    "triad-receiver-probe.cpp", "triad_probe_json.hpp", "triad_probe_spool.hpp",
+    "triad-helper-export.cpp", "triad_fixture_key.hpp", "triad-audio-stream.cpp",
+    "triad_native.py", "triad_cases.py", "triad_gpu_workload.py", "triad_gpu_bundle.py",
+    "triad_gpu_cpu_forecast.py", "triad_case_metrics.py", "triad_case_capacity.py",
+)
 _EXACT_FILES = (*_TOP_FILES, "src/pump.manifest", "tools/build_capacity.py",
-                "tools/diagnostic_iq_noise_options.hpp", "third_party/xz/README.datapump.md",
+                *("tools/" + name for name in _PROBE_TOOLS),
+                "tools/diagnostic_iq_noise_options.hpp", "tests/test_triad_tensor.cpp",
+                "third_party/xz/README.datapump.md",
                 "third_party/qrcodegen/LICENSE", "third_party/qrcodegen/qrcodegen.cpp",
                 "third_party/qrcodegen/qrcodegen.hpp")
 _SECRET_NAME = re.compile(r"(?:secret|credential|password|token|private.?key|id_(?:rsa|ed25519))", re.I)
@@ -159,19 +168,9 @@ def _collect(root_fd: int) -> list[tuple[str, os.stat_result, str | None]]:
             raise BundleError(f"invalid or disallowed XZ inventory entry: {path!r}")
         selected[rel] = (_inventory_file(root_fd, rel), digest)
 
-    # Tools/tests are selected by the stable triad name family, rather than by
-    # recursively copying arbitrary test data or hidden fixture directories.
-    for rel_dir, prefix, suffixes in (("tools", "triad", {".py", ".cpp", ".hpp"}),
-                                      ("tests", "test_triad", {".py", ".cpp", ".hpp", ".cmake"})):
-        with _open_directory(PurePosixPath(rel_dir), dir_fd=root_fd) as directory:
-            for name in os.listdir(directory):
-                rel = _safe_rel(f"{rel_dir}/{name}")
-                if name.startswith(prefix) and PurePosixPath(name).suffix.lower() in suffixes and _eligible(rel):
-                    info = os.stat(name, dir_fd=directory, follow_symlinks=False)
-                    if stat.S_ISREG(info.st_mode):
-                        selected[rel] = (info, None)
     required = {"cmake/VendoredLzma.cmake", "cmake/XzReceiveHardening.cmake",
-                "third_party/xz/CMakeLists.txt", "tools/triad-helper-export.cpp", "tools/triad_gpu_workload.py"}
+                "cmake/TriadTensor.cmake", "third_party/xz/CMakeLists.txt",
+                "src/triad_tensor_backend.cpp", "include/datapump/triad_acceleration.hpp"}
     absent = sorted(required - selected.keys())
     if absent:
         raise BundleError("source/build closure is incomplete; missing: " + ", ".join(absent))
@@ -203,7 +202,7 @@ def create_bundle(root: Path | str, destination: Path | str) -> dict[str, object
                 raise BundleError(f"modified pinned XZ source: {rel}")
             records.append({"path": rel, "size": len(data), "sha256": digest})
             payloads.append((rel, data))
-    manifest = {"format": "triad-gpu-source-bundle-v1", "files": records}
+    manifest = {"format": "datapump.triad.native-gpu-source.v1", "files": records}
     manifest_bytes = (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
     # Build to memory first so failures cannot leave a partial destination.

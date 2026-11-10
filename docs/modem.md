@@ -3,11 +3,11 @@
 [Robust](robust-current.md) has one compiled C++ three-carrier stack for source,
 Helper, channel simulation, complete receiver processing and audio. The shared
 GUI session links that implementation and uses in-process owners and shared
-buffers. Python is a testing/benchmarking tool and temporary numerical reference,
-not an operating receiver. Live operation uses the configured public calendar,
+buffers. Python orchestrates native tests and benchmarks and analyzes their
+statistics; it is not an operating receiver. Live operation uses the configured public calendar,
 keyed ordinal and declared local noise model. Unknown-start acquisition and
 native real-time capacity remain unqualified; see
-[current validation](validation.md#native-gui-integration).
+[current validation](validation.md#native-codec-and-measurement-migration).
 
 Robust GUI operation and CLI availability are separate: the former Robust audio
 CLI commands remain retired. Old single-carrier protocol, planner and command

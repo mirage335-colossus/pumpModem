@@ -38,6 +38,11 @@ foreach(_alias IN LISTS _aliases)
   set(_prerequisites_${_name} ${_dependency})
 endforeach()
 set(_prerequisites_native_relocation ${datapump_executables})
+# These suites validate only orchestration/statistics. Native subprocess suites
+# declare test_<name> targets so the production receiver is always built first.
+foreach(_pure_triad triad_abbreviated triad_cases triad_gpu_diagnostics)
+  set(_prerequisites_${_pure_triad} "")
+endforeach()
 foreach(_test IN LISTS _tests)
   get_property(_labels TEST ${_test} PROPERTY LABELS)
   if(_test MATCHES "^fast_" OR _test MATCHES "^gui_fast")
@@ -66,7 +71,7 @@ foreach(_test IN LISTS _tests)
     set(_dependencies test_${_test})
   elseif(_test MATCHES "^fast_acoustic_short_snr_")
     set(_dependencies test_fast_acoustic_short)
-  elseif(_test MATCHES "^build_" OR _test MATCHES "^triad_" OR
+  elseif(_test MATCHES "^build_" OR
       _test MATCHES "^(legacy_boundary|fast_boundary|vendored_lzma_source|gui_adapter_boundary|gui_boundary_regression|packaging_support|packaging_cxx_runtime|sdk_packaging|web_renderer|browser_audio|web_preview_client)$")
     set(_dependencies "")
   else()

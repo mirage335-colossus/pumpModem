@@ -1,7 +1,7 @@
 #include "datapump/triad_receiver.hpp"
 
 #include "triad_receiver_coarse.hpp"
-#include "triad_receiver_fine.hpp"
+#include "triad_receiver_driver.hpp"
 #include "triad_receiver_helper.hpp"
 
 #include <algorithm>
@@ -105,7 +105,47 @@ FineCoordinate snap(FineCoordinate coordinate, const AdmissionGrid& grid) {
     return coordinate;
 }
 
-void classify(ReceiverSlotScore& score, const AdmissionGrid& grid) {
+} // namespace
+
+std::span<const FrequencyInterval> receiver_detail::public_frequency_intervals(
+        const ReceiverConfig& config, const HelperResult& helper, FrequencyInterval& fallback) {
+    require(helper.intervals.size() <= maximum_helper_intervals &&
+        helper.narrowed == !helper.intervals.empty(), "invalid Robust Helper frequency assistance");
+    for (const auto& interval : helper.intervals)
+        require(std::isfinite(interval.lower_hz) && std::isfinite(interval.upper_hz) &&
+            -config.frequency_bound_hz <= interval.lower_hz && interval.lower_hz <= interval.upper_hz &&
+            interval.upper_hz <= config.frequency_bound_hz, "Robust Helper interval exceeds the public frequency prior");
+    fallback = {-config.frequency_bound_hz, config.frequency_bound_hz};
+    return helper.narrowed ? std::span<const FrequencyInterval>(helper.intervals) :
+        std::span<const FrequencyInterval>(&fallback, 1);
+}
+
+FinePreparation receiver_detail::prepare_fine_coordinates(const ReceiverConfig& config,
+        const ReceiverSlotPlan& slot, const CoarseResult& coarse) {
+    const auto& receipt = coarse.work;
+    require(receipt.state == CoarseState::finished && receipt.plan.total_tiles > 0 &&
+            receipt.completed_tiles == receipt.plan.total_tiles && receipt.plan.public_slot == slot.index &&
+            receipt.plan.pattern_epoch == slot.format.epoch && receipt.plan.symbol_ordinal == slot.format.symbol_ordinal &&
+            receipt.plan.first_sample == slot.first_sample && receipt.plan.stop_sample == slot.stop_sample &&
+            receipt.refined_coordinates == coarse.coordinates.size(),
+            "Robust fine preparation requires a finished coarse search for the same public slot");
+    require(!coarse.coordinates.empty() && coarse.coordinates.size() <= maximum_fine_coordinates,
+            "Robust coarse refinements require a complete bounded fine bank");
+    require(std::isfinite(coarse.maximum_frequency_step_hz) && coarse.maximum_frequency_step_hz > 0,
+            "invalid Robust coarse frequency resolution");
+    FinePreparation result{{slot.arrival_lower_seconds, slot.arrival_upper_seconds,
+        config.frequency_bound_hz, config.clock_bound_ppm, std::min(.01, coarse.maximum_frequency_step_hz)}, {}};
+    result.coordinates.reserve(coarse.coordinates.size());
+    for (const auto& proposed : coarse.coordinates) {
+        const auto coordinate = snap(proposed, result.grid);
+        if (std::find(result.coordinates.begin(), result.coordinates.end(), coordinate) == result.coordinates.end())
+            result.coordinates.push_back(coordinate);
+    }
+    return result;
+}
+
+void receiver_detail::classify_fine_slot(ReceiverSlotScore& score, const AdmissionGrid& grid) {
+    require(score.fine_candidates > 0, "Robust fine evidence requires a public coordinate bank");
     score.operational_threshold = receiver_operational_threshold();
     const double log_mass = std::log(static_cast<double>(score.fine_candidates)) - grid.log_count();
     score.selected_prior_mass = std::exp(log_mass);
@@ -128,6 +168,7 @@ void classify(ReceiverSlotScore& score, const AdmissionGrid& grid) {
     }
 }
 
+namespace {
 double elapsed(Clock::time_point began) {
     return std::chrono::duration<double>(Clock::now() - began).count();
 }
@@ -169,12 +210,8 @@ ReceiverSlotScore score_receiver_slot(const ReceiverConfig& config, const Receiv
     auto helper = score_helper(config, slot, iq, valid, workspace.helper, stop);
     score.helper_seconds = elapsed(began);
     score.helper_status = std::move(helper.reason);
-    require(helper.intervals.size() <= maximum_helper_intervals &&
-        helper.narrowed == !helper.intervals.empty(), "invalid Robust Helper frequency assistance");
-    for (const auto& interval : helper.intervals)
-        require(std::isfinite(interval.lower_hz) && std::isfinite(interval.upper_hz) &&
-            -config.frequency_bound_hz <= interval.lower_hz && interval.lower_hz <= interval.upper_hz &&
-            interval.upper_hz <= config.frequency_bound_hz, "Robust Helper interval exceeds the public frequency prior");
+    FrequencyInterval fallback;
+    const auto intervals = public_frequency_intervals(config, helper, fallback);
     // The canonical full coarse screen requires a wholly valid observation.
     // Known erasures cannot become observed silence or complete a message.
     if (!score.all_valid) {
@@ -183,9 +220,6 @@ ReceiverSlotScore score_receiver_slot(const ReceiverConfig& config, const Receiv
     }
 
     began = Clock::now();
-    const std::array full_prior{FrequencyInterval{-config.frequency_bound_hz, config.frequency_bound_hz}};
-    const auto intervals = helper.narrowed ? std::span<const FrequencyInterval>(helper.intervals) :
-        std::span<const FrequencyInterval>(full_prior);
     auto coarse = score_coarse(config, slot, key, iq, intervals, workers, workspace.coarse, stop);
     score.coarse_seconds = elapsed(began);
     score.coarse_workspaces = coarse.workspaces;
@@ -195,24 +229,12 @@ ReceiverSlotScore score_receiver_slot(const ReceiverConfig& config, const Receiv
         score.reason = std::move(coarse.reason);
         return score;
     }
-    require(coarse.coordinates.size() <= maximum_fine_coordinates, "Robust coarse refinements exceed the fine bank cap");
-    require(std::isfinite(coarse.maximum_frequency_step_hz) && coarse.maximum_frequency_step_hz > 0,
-            "invalid Robust coarse frequency resolution");
-    const AdmissionGrid grid(slot.arrival_lower_seconds, slot.arrival_upper_seconds,
-        config.frequency_bound_hz, config.clock_bound_ppm, std::min(.01, coarse.maximum_frequency_step_hz));
-    std::vector<FineCoordinate> coordinates;
-    coordinates.reserve(coarse.coordinates.size());
-    for (const auto& proposed : coarse.coordinates) {
-        const auto coordinate = snap(proposed, grid);
-        if (std::find(coordinates.begin(), coordinates.end(), coordinate) == coordinates.end())
-            coordinates.push_back(coordinate);
-    }
-    score.fine_candidates = coordinates.size();
+    const auto fine = prepare_fine_coordinates(config, slot, coarse);
 
     began = Clock::now();
-    score_fine(config, slot, key, iq, coordinates, coarse.projected_sample_rate_hz,
-               coarse.clock_gap_ppm, workers, score, stop);
-    classify(score, grid);
+    score_fine(config, slot, key, iq, fine.coordinates, coarse.projected_sample_rate_hz,
+               coarse.clock_gap_ppm, workers, score, workspace.fine, stop);
+    classify_fine_slot(score, fine.grid);
     score.fine_seconds = elapsed(began);
     check_cancelled(stop);
     return score;

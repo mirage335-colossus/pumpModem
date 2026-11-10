@@ -1,228 +1,86 @@
-"""Shared manual-case helper contracts; complete-runner orchestration is tested separately."""
+"""Case selection and native suite boundaries without timing a calibration."""
 from pathlib import Path
-from contextlib import ExitStack
 import ast
-import hashlib
-import json
 import sys
 import tempfile
 import unittest
-from unittest import mock
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from triad_cases import DEFAULT_CASES
-from triad_case_suite import GPU_ONLY_SOURCES, run_cases, same_measured_source, select_cases, target_snr, write_result
-from tests.test_triad_duration_model import complete_receipt, fixture
+from triad_case_suite import SCHEMA, _format, run_cases, select_cases
+from triad_native import ProbeError, read_report
+from tests.test_triad_cases import FIXTURE
 
 
-class SuiteHelperTests(unittest.TestCase):
-    def test_gpu_only_source_exclusions_remain_outside_manual_cpu_imports(self):
-        root = Path(__file__).resolve().parents[1]
-        tools = root / 'tools'
-        pending = [tools / 'triad_manual_cases.py']
-        seen = set()
+class SuiteTests(unittest.TestCase):
+    def test_markdown_preserves_a_measured_numeric_failure_with_missing_work(self):
+        measured = {"realtime_status": "fail", "measured_complete_component_lower_bound": 1.2}
+        self.assertEqual(_format(measured), "≥1.2 measured required work (fail, total unresolved)")
+
+    def test_selected_indices_preserve_source_order_and_parse_every_row(self):
+        parsed = {"cases": [{"index": 1}, {"index": 2}, {"index": 3}]}
+        self.assertEqual(select_cases(parsed, [3, 1, 3]), [parsed["cases"][0], parsed["cases"][2]])
+        for invalid in ([], [4], [True], [1.0]):
+            with self.assertRaises(ProbeError):
+                select_cases(parsed, invalid)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cases = root / "cases.md"
+            cases.write_text(FIXTURE + "\n- Invalid unselected row\n", encoding="utf-8")
+            with self.assertRaises(ValueError), patch("triad_case_suite.NativeProbe") as native:
+                run_cases(executable="native", output=root / "result.json", case_list=cases, case_indices=[1])
+            native.assert_not_called()
+
+    def test_ordered_duplicate_reuse_is_opt_in_and_marked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cases = root / "cases.md"
+            cases.write_text(FIXTURE + "\n" + FIXTURE, encoding="utf-8")
+            description = {"status": "complete", "identity": {"backend": "cpu"},
+                           "allocation": {"hardware_threads": 3, "workers": 6, "slot_owners": 6,
+                                          "receiver_numerical_threads_per_worker": 1,
+                                          "memory_limit_bytes": 2**30}}
+            for reuse, measurements in ((False, 2), (True, 1)):
+                with patch("triad_case_suite.NativeProbe") as native, \
+                        patch("triad_case_suite.measure_complete_case") as measure:
+                    native.return_value.backend = "cpu"
+                    native.return_value.call.return_value = description
+                    measure.side_effect = lambda case, **unused: {"case": case, "status": "unresolved"}
+                    result = run_cases(executable="native", output=root / "result.json", case_list=cases,
+                                       message_gate=False, reuse_identical=reuse)
+                self.assertEqual(measure.call_count, measurements)
+                self.assertEqual([row["case"]["index"] for row in result["cases"]], [1, 2])
+                self.assertEqual(result["schema"], SCHEMA)
+                self.assertEqual(result["status"], "measured_with_unresolved_margins")
+                self.assertEqual("reused_measurement_from" in result["cases"][1], reuse)
+                self.assertEqual(read_report(root / "result.json")["status"], result["status"])
+
+    def test_cpu_cli_import_closure_contains_only_current_orchestration(self):
+        tools = Path(__file__).resolve().parents[1] / "tools"
+        allowed = {"triad_manual_cases", "triad_abbreviated", "triad_case_suite", "triad_case_capacity",
+                   "triad_case_metrics", "triad_cases", "triad_native", "triad_cpu"}
+        pending = ["triad_manual_cases", "triad_abbreviated"]
+        visited = set()
         while pending:
-            path = pending.pop()
-            if path in seen:
+            module = pending.pop()
+            if module in visited:
                 continue
-            seen.add(path)
-            self.assertNotIn(path.relative_to(root).as_posix(), GPU_ONLY_SOURCES)
-            for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
+            self.assertIn(module, allowed)
+            visited.add(module)
+            tree = ast.parse((tools / (module + ".py")).read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     names = [alias.name for alias in node.names]
-                elif isinstance(node, ast.ImportFrom) and node.module == 'tools':
-                    names = [alias.name for alias in node.names]
-                elif isinstance(node, ast.ImportFrom) and node.module is not None:
+                elif isinstance(node, ast.ImportFrom) and node.module:
                     names = [node.module]
                 else:
                     continue
                 for name in names:
-                    dep = tools / (name.removeprefix('tools.').split('.')[0]+'.py')
-                    self.assertNotIn(dep.relative_to(root).as_posix(), GPU_ONLY_SOURCES)
-                    if dep.is_file():
-                        pending.append(dep)
+                    base = name.split(".")[0]
+                    self.assertNotIn(base, {"numpy", "scipy", "torch", "cupy", "triton"})
+                    if base.startswith("triad_"):
+                        pending.append(base)
 
-    def test_identity_compares_loaded_artifacts_and_records_revision_as_context(self):
-        original = dict(revision='one', sources={'receiver': 'source'}, native_binary_sha256='binary',
-                        native_artifacts={'mapped': 'kernel'})
-        self.assertTrue(same_measured_source(original, dict(original, revision='two')))
-        self.assertFalse(same_measured_source(original, dict(original, native_artifacts={'mapped': 'changed'})))
-        self.assertFalse(same_measured_source(original, dict(original, sources={'receiver': 'changed'})))
-        self.assertFalse(same_measured_source(original, {'sources': original['sources']}))
-
-    def test_explicit_selection_uses_fresh_indices_and_rejects_stale_rows(self):
-        parsed = dict(cases=[dict(index=1), dict(index=2), dict(index=3)])
-        self.assertIs(select_cases(parsed), parsed["cases"])
-        self.assertEqual(select_cases(parsed, [3, 1, 3]), [dict(index=1), dict(index=3)])
-        for invalid in ([], [4], [True], [1.0]):
-            with self.assertRaises(ValueError):
-                select_cases(parsed, invalid)
-
-    def test_default_complete_case_wrapper_rereads_default_path_in_new_runner(self):
-        with mock.patch("triad_case_capacity.run_complete_cases", return_value="received") as runner:
-            result = run_cases(executable="exporter", output="capacity.json")
-        self.assertEqual(result, "received")
-        runner.assert_called_once_with(
-            executable="exporter", output="capacity.json", case_list=DEFAULT_CASES,
-            measurement_seconds=1., threads=None, case_indices=None,
-            paired_followup=False, message_gate=True, sustained_allocation_probe=False,
-            workspace_mib=None, full_logical_inference=None,
-        )
-
-    def test_wrapper_forwards_partial_measurement_and_message_gate(self):
-        with mock.patch("triad_case_capacity.run_complete_cases") as runner:
-            run_cases(executable=Path("exporter"), output=Path("out.json"),
-                case_list=Path("edited.md"), measurement_seconds=.5, threads=6,
-                case_indices=[2, 4], message_gate=False)
-        runner.assert_called_once_with(
-            executable=Path("exporter"), output=Path("out.json"), case_list=Path("edited.md"),
-            measurement_seconds=.5, threads=6, case_indices=[2, 4],
-            paired_followup=False, message_gate=False, sustained_allocation_probe=False,
-            workspace_mib=None, full_logical_inference=None,
-        )
-
-    def test_automatic_suite_keeps_ordered_duplicate_rows_and_runs_one_canonical_measurement(self):
-        import triad_case_capacity as capacity
-        import triad_case_suite as suite
-
-        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
-            root = Path(directory)
-            source = root / 'manual.md'
-            source.write_text('fixture list')
-            digest = hashlib.sha256(source.read_bytes()).hexdigest()
-            cases = [dict(index=index, heading=f'case {index}', id=f'id-{index}',
-                configuration_hash='shared', native_args=[]) for index in (1, 2)]
-            provenance = dict(revision='rev', sources={}, native_binary_sha256='exporter', native_artifacts={})
-            measurement = dict(status='measured_complete_work_estimate',
-                complete_capacity={'realtime_status': 'pass'})
-            stack.enter_context(mock.patch('triad_cases.load_cases',
-                return_value=dict(cases=cases, source_sha256=digest)))
-            stack.enter_context(mock.patch('triad_case_metrics.machine_resources', return_value={
-                'cpu': {'receiver_worker_candidates': [1,2,4,6,12], 'available_cpus': 12,
-                        'topology': {'status': 'complete', 'physical_core_count': 6}},
-                'memory_budget_bytes': 3*2**30, 'available_memory_bytes': 8*2**30}))
-            stack.enter_context(mock.patch('triad_cpu.resolve_cpu_budget'))
-            stack.enter_context(mock.patch('triad_cpu.configure_numerical_threads'))
-            stack.enter_context(mock.patch('triad_abbreviated.environment',
-                side_effect=lambda _: dict(torch_threads=1)))
-            stack.enter_context(mock.patch.object(suite, 'identity', side_effect=lambda _: provenance.copy()))
-            stack.enter_context(mock.patch.object(suite, 'native_plan', return_value={'geometry_feasible': True}))
-            stack.enter_context(mock.patch.object(suite, 'target_snr', return_value={'status': 'checked'}))
-            stack.enter_context(mock.patch.object(capacity, 'render_capacity_report', return_value='markdown'))
-            gate = stack.enter_context(mock.patch('triad_message_gate.run_native_message_gate',
-                return_value={'status': 'passed', 'passed': True}))
-            prepare = stack.enter_context(mock.patch.object(capacity, 'PreparedCapacityCase'))
-            prepared = prepare.return_value.__enter__.return_value
-            prepared.receiver_preparation_seconds = prepared.simulator_generation_seconds = 1.
-            prepared.channel_seed, prepared.noise_seed, prepared.source_bit = 74021, 88200, 0
-            prepared.public_geometry = {'fine_unit_seconds': .5}
-            prepared.quiet_energy_diagnostic.return_value = {'status': 'observed'}
-
-            def measure(*args, **kwargs):
-                gate.assert_called_once()
-                prepared.quiet_energy_diagnostic.assert_called_once_with({'status': 'checked'})
-                return measurement
-
-            direct = stack.enter_context(mock.patch.object(capacity, 'measure_complete_case',
-                                                            side_effect=measure))
-            with self.assertRaisesRegex(ValueError, 'physical/cgroup RAM'):
-                capacity.run_complete_cases(executable='exporter', output=root/'rejected.json',
-                    case_list=source, workspace_mib=8193)
-            result = capacity.run_complete_cases(executable='exporter', output=root/'suite.json',
-                case_list=source, workspace_mib=4096, sustained_allocation_probe=True)
-
-            prepare.assert_called_once()
-            self.assertEqual(prepare.call_args.kwargs['bank_workers'], 24)
-            self.assertEqual(prepare.call_args.kwargs['memory_limit_bytes'], 4096*2**20)
-            direct.assert_called_once()
-            self.assertEqual(direct.call_args.args[1], [1,6,12,24])
-            self.assertEqual(direct.call_args.kwargs['inference_workers'], 24)
-            self.assertEqual(direct.call_args.kwargs['inference_mode'], 'automatic_receiver')
-            self.assertEqual(result['status'], 'conditional_capacity_pass')
-            self.assertEqual(result['cases'][1]['reused_measurement_from'], cases[0]['id'])
-            self.assertEqual(result['policy']['receiver_inference_workers'], 24)
-            self.assertNotIn('full_logical_inference_workers', result['policy'])
-
-    def test_manual_worker_policy_distinguishes_automatic_hardware_and_explicit_controls(self):
-        from triad_case_capacity import manual_worker_plan
-        cpu = dict(available_cpus=12, receiver_worker_candidates=[1,2,4,6,12],
-            topology=dict(status='complete', physical_core_count=6))
-        automatic = manual_worker_plan(cpu)
-        self.assertEqual(automatic['allocations'], [1,6,12,24])
-        self.assertEqual(automatic['inference_workers'], 24)
-        self.assertEqual(automatic['inference_mode'], 'automatic_receiver')
-        hardware = manual_worker_plan(cpu, full_logical_inference=True)
-        self.assertEqual(hardware['allocations'], [1,6,12])
-        self.assertEqual(hardware['inference_workers'], 12)
-        self.assertEqual(hardware['inference_mode'], 'full_logical')
-        explicit = manual_worker_plan(cpu, threads=24)
-        self.assertEqual(explicit['allocations'], [24])
-        self.assertEqual(explicit['inference_workers'], 24)
-        self.assertEqual(explicit['inference_mode'], 'explicit')
-        pilot = manual_worker_plan(cpu, full_logical_inference=False)
-        self.assertEqual(pilot['allocations'], [1,2,4,6,12])
-        self.assertIsNone(pilot['inference_workers'])
-        self.assertEqual(pilot['inference_mode'], 'pilot_selected')
-        for invalid in (0, -1, True, 1.5):
-            with self.subTest(threads=invalid), self.assertRaises(ValueError):
-                manual_worker_plan(cpu, threads=invalid)
-        with self.assertRaises(ValueError):
-            manual_worker_plan(cpu, threads=24, full_logical_inference=True)
-
-    def test_automatic_stage_and_small_hardware_budgets_preserve_extra_workers(self):
-        from triad_case_capacity import manual_worker_plan
-        for hardware in (1, 3, 8, 12, 32):
-            with self.subTest(hardware=hardware):
-                cpu = dict(available_cpus=hardware, receiver_worker_candidates=[1,hardware],
-                    topology=dict(status='unknown'))
-                plan = manual_worker_plan(cpu)
-                self.assertEqual(plan['inference_workers'], 2*hardware)
-                self.assertGreater(plan['inference_workers'], hardware)
-                self.assertEqual(plan['allocations'], sorted(set(plan['allocations'])))
-                stage = manual_worker_plan(cpu, calibration_stage='noise-only-fine')
-                self.assertEqual(stage['allocations'], [plan['inference_workers']])
-                control = manual_worker_plan(cpu, calibration_stage='noise-only-fine',
-                    full_logical_inference=True)
-                self.assertEqual(control['allocations'], [hardware])
-
-    def test_legacy_coarse_paired_followup_is_rejected_by_complete_runner(self):
-        from triad_case_capacity import run_complete_cases
-
-        with self.assertRaisesRegex(ValueError, "coarse-only paired confirmation"):
-            run_complete_cases(executable="unused", output="unused.json", case_list=DEFAULT_CASES,
-                               paired_followup=True)
-
-    def test_write_result_replaces_json_without_leaving_a_temporary_file(self):
-        import json
-
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "result.json"
-            write_result(path, {"status": "complete", "rows": [1, 2]})
-            self.assertEqual(json.loads(path.read_text()), {"status": "complete", "rows": [1, 2]})
-            self.assertFalse(path.with_suffix(".json.tmp").exists())
-
-    def test_duration_model_is_reported_only_as_a_provisional_target(self):
-        plan = fixture(False)
-        plan.update(geometry={"active_data_seconds": 11.6}, short_message={"encoded_bits": 22})
-        receipt = complete_receipt(plan)
-        result = target_snr(plan, receipt)
-        self.assertFalse(result["whole_bit_or_message_probability_demonstrated"])
-        self.assertEqual(result["status"], "provisional_model_target")
-        self.assertEqual(result["complete_admission_receipt"], receipt)
-        self.assertEqual(result["fox"]["source_bits"], 22)
-        self.assertGreater(result["fox"]["target_cn0_db_hz"], result["single_bit"]["target_cn0_db_hz"])
-        self.assertLess(result["fox"]["bracket_db_hz"][1]-result["fox"]["bracket_db_hz"][0], .001)
-
-    def test_duration_target_rejects_missing_or_infeasible_upper_endpoint(self):
-        plan = fixture(False)
-        plan.update(geometry={"active_data_seconds": 11.6}, short_message={"encoded_bits": 22})
-        receipt = complete_receipt(plan)
-        self.assertEqual(target_snr(plan)["status"], "unavailable")
-        for prediction in ({"selected": None}, {"selected": {"meets_detection_allocation": False}}):
-            with mock.patch("triad_duration_model.plan_from_native", return_value=prediction):
-                result = target_snr(plan, receipt)
-                self.assertEqual(result["status"], "unavailable")
-                self.assertNotIn("single_bit", result)
 
 if __name__ == "__main__":
     unittest.main()

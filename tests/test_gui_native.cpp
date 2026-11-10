@@ -1,6 +1,7 @@
 #include "../src/gui/state.hpp"
 #include "../src/gui/record_presentations.hpp"
 #include "../src/gui/application.hpp"
+#include "../src/gui/transmit_scope.hpp"
 #include "datapump/live.hpp"
 #include <algorithm>
 #include <iostream>
@@ -78,18 +79,18 @@ void shared_robust_target() {
     try {gui::Application bad(std::move(invalid));} catch(const Error&) {rejected=true;}
     check(rejected);
 }
-void short_draft_boundaries() {
+void text_and_raw_draft_boundaries() {
     using F=gui::ui::Field;using C=gui::ui::Command;
     gui::Application app({.simulation=true});
     app.select(F::fast_mode,"robust");
-    // The retained developer draft tool cannot make an oversized native
-    // short message eligible, and unsupported attachments cannot replace it.
+    // The developer prefix uses the long text path; unsupported attachments
+    // cannot replace the draft or trigger a native service.
     app.edit(F::message,std::string(236,'x'));
     check(app.field(F::repeatable).enabled);
     app.toggle(F::repeatable,true);
     check(app.field(F::repeatable).checked&&app.field(F::message).text.size()==256);
     const auto draft=app.field(F::message).text;
-    check(app.field(F::short_bits).text.empty()&&app.field(F::airtime).text.find("limited to 16 bytes")!=std::string::npos);
+    check(app.field(F::short_bits).text.empty()&&app.field(F::airtime).text.starts_with("Long text · 256 bytes · FEC Off"));
     check(!app.enabled(C::attach_file));
     app.activate(C::attach_file);
     check(app.take_services().empty()&&app.field(F::message).text==draft);
@@ -104,9 +105,25 @@ void short_draft_boundaries() {
     check(!app.field(F::short_bits).text.empty()&&app.field(F::airtime).text.find(" DATA + 2 scored quiet slots")!=std::string::npos);
     app.edit(F::message,std::string(17,'x'));
     check(app.field(F::message).text.size()==17&&app.field(F::short_bits).text.empty());
-    check(app.field(F::airtime).text.find("limited to 16 bytes")!=std::string::npos);
+    check(app.field(F::airtime).text.starts_with("Long text · 17 bytes · FEC Off"));
+    check(app.field(F::short_bits_detail).text.starts_with("Long text uses periodic markers")&&!app.enabled(C::transmit_short_bits));
+
+    // Long drafts retain the existing byte quota and bounded previews. They
+    // have no invented short-prefix TX or pre-compression wire-length estimate.
+    const auto long_text=std::string(1024*1024,'x');
+    app.edit(F::message,long_text);
+    check(app.field(F::message).text==long_text&&app.field(F::binary).text.size()<=16*9);
+    check(app.field(F::short_bits).text.empty()&&app.field(F::airtime).text.find("length prepared on Transmit")!=std::string::npos);
+    app.edit(F::message,long_text+"x");
+    check(app.field(F::message).text==long_text);
+    app.edit(F::message,std::string(32,'x'));
+    std::string prefix;
+    for(unsigned i=0;i<16;++i)prefix+="01111001";
+    app.edit(F::binary,prefix);
+    check(app.field(F::message).text==std::string(16,'y')+std::string(16,'x')&&app.field(F::short_bits).text.empty());
 
     app.select(F::fec,"rs60");
+    check(app.field(F::airtime).text.starts_with("Long text · 32 bytes · FEC RS60"));
     const auto raw=std::string(207,'0')+"1";
     app.edit(F::short_bits,raw);
     check(app.field(F::short_bits).text==raw&&app.field(F::binary_label).text=="Raw bits / 208 bits");
@@ -126,6 +143,23 @@ void short_draft_boundaries() {
           app.field(F::airtime).text.starts_with("3 DATA + 2 scored quiet slots"));
     app.edit(F::message,"text");
     check(app.field(F::fec).enabled&&app.field(F::fec).selected=="rs60"&&app.field(F::fec).display_text.empty());
+}
+void pending_transmit_trace() {
+    modem::TransmitTrace trace;trace.active=true;trace.source_available=true;trace.source=Bytes(64,'x');
+    check(gui::transmit_scope_caption(trace).find("preparing exact wire length")!=std::string::npos);
+    check(gui::transmit_scope_caption(trace).find("0 / 0")==std::string::npos);
+    const auto contains=[&](std::string_view text) {
+        const auto rows=gui::transmit_scope_records(trace,false);
+        for(const auto& row:rows)for(const auto& cell:row.cells)if(cell.text.find(text)!=std::string::npos)return true;
+        return false;
+    };
+    check(contains("source-coding preview unavailable")&&!contains("raw bits bypass compression"));
+    trace.total_wire_bits=1216;trace.generated_bits=17;
+    check(gui::transmit_scope_caption(trace).find("17 / 1216 wire bits begun")!=std::string::npos);
+    trace.raw=true;
+    check(contains("raw bits bypass compression"));
+    trace.active=false;trace.temporary_key=true;trace.total_wire_bits=0;
+    check(gui::transmit_scope_caption(trace).find("17 temporary-key noise bits begun")!=std::string::npos);
 }
 void retained_raw_bits() {
     gui::Signals signals;
@@ -247,7 +281,8 @@ int main() {
     try {
         planner_quick_references();
         shared_robust_target();
-        short_draft_boundaries();
+        text_and_raw_draft_boundaries();
+        pending_transmit_trace();
         retained_raw_bits();
         received_text_boundary();
         check(gui::parse_binary_bits("0")==Bytes({0}));

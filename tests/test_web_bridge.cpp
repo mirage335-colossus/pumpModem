@@ -131,6 +131,56 @@ void envelopes_and_edits() {
     const auto old=event(bridge,web::EventKind::edit,message,7);bridge.reconnect();bridge.snapshot();
     check(!bridge.accept(old).accepted,"Reconnect accepted old callback");app.close();
 }
+void robust_long_editor_bounds() {
+    using F=ui::Field;
+    Application app({.simulation=true});
+    app.edit(F::binary,"00000000"); // Select the lossless escaped-byte editor.
+    web::Bridge bridge(app);
+    auto snapshot=bridge.snapshot();
+    const auto editor_at=snapshot.find("\"byteLimit\":4194304");
+    check(editor_at!=std::string::npos,"Robust escaped editor declaration missing");
+    const auto editor=std::stoull(snapshot.substr(snapshot.rfind("{\"id\":\"",editor_at)+7));
+    std::string escaped;
+    escaped.reserve(4*1024*1024);
+    for(std::size_t i=0;i<1024*1024;++i)escaped+="\\x00";
+    auto edit=event(bridge,web::EventKind::edit,editor,1);edit.value=escaped;
+    check(bridge.accept(edit).accepted,"Legal 4 MiB escaped Robust edit rejected by bridge");
+    check(app.field(F::message).text==escaped&&app.field(F::airtime).text.starts_with("Long text · 1048576 bytes · FEC Off"),
+          "Escaped editor did not preserve its 1 MiB decoded payload");
+    snapshot=bridge.snapshot();
+    check(snapshot.size()<8*1024*1024&&snapshot.find("\\\\x00")!=std::string::npos,
+          "Maximum escaped edit escaped its bounded literal presentation");
+    edit=event(bridge,web::EventKind::edit,editor,2);edit.value=std::string(2*1024*1024,'<');
+    const auto expansion=bridge.accept(edit);
+    bool bounded=true;
+    try {(void)bridge.snapshot();} catch(const std::length_error&) {bounded=false;}
+    check(!expansion.accepted&&bounded&&app.field(F::message).text==escaped,
+          "Invalid escaped draft exceeded the bounded JSON presentation");
+    edit=event(bridge,web::EventKind::edit,editor,3);edit.value=escaped+"x";
+    check(!bridge.accept(edit).accepted&&app.field(F::message).text==escaped,
+          "Escaped editor accepted more than its 4 MiB representation bound");
+    edit=event(bridge,web::EventKind::edit,id(snapshot,"Carrier"),4);edit.value=std::string(1024*1024+1,'x');
+    const auto carrier=app.field(F::carrier).text;
+    check(!bridge.accept(edit).accepted&&app.field(F::carrier).text==carrier,
+          "Extended Message allowance leaked into another field");
+    edit=event(bridge,web::EventKind::select,editor,5);edit.value=std::string(1024*1024+1,'x');
+    check(!bridge.accept(edit).accepted,"Extended edit allowance leaked into another event kind");
+    edit=event(bridge,web::EventKind::edit,editor,6);edit.value="";
+    check(bridge.accept(edit).accepted&&app.field(F::message).text.empty(),"Long editor could not return to plain text");
+    bridge.snapshot();
+    const std::string plain(1024*1024,'x');
+    edit=event(bridge,web::EventKind::edit,editor,7);edit.value=plain;
+    check(bridge.accept(edit).accepted&&app.field(F::message).text==plain,"Maximum decoded plain text rejected");
+    bridge.snapshot();
+    edit=event(bridge,web::EventKind::edit,editor,8);edit.value=plain+"x";
+    check(bridge.accept(edit).accepted&&app.field(F::message).text==plain,
+          "Extended representation allowance bypassed decoded byte quota");
+    bridge.snapshot();
+    edit=event(bridge,web::EventKind::edit,editor,9);edit.value=std::string(1024*1024,'<');
+    check(bridge.accept(edit).accepted&&app.field(F::message).text==edit.value&&bridge.snapshot().size()<8*1024*1024,
+          "Legal maximum text lost its literal HTML-safe presentation");
+    app.close();
+}
 void layers_and_services() {
     Application app({});web::Bridge bridge(app);auto snapshot=bridge.snapshot();
     const auto message=id(snapshot,"Message");const auto old=event(bridge,web::EventKind::edit,message,1);
@@ -275,7 +325,7 @@ void measured_document_geometry() {
 int main(int argc,char** argv) {
     try {
         if(argc==2&&std::string(argv[1])=="--snapshot") {Application app({});web::Bridge bridge(app);std::cout<<bridge.snapshot(360,640);app.close();return 0;}
-        pixel_runs();bitmap_history();disabled_editor_presentation();option_presentation();envelopes_and_edits();layers_and_services();document_withdrawal();service_completion_routing();shared_submit_policy();shared_geometry_and_stable_snapshots();measured_document_geometry();
+        pixel_runs();bitmap_history();disabled_editor_presentation();option_presentation();envelopes_and_edits();robust_long_editor_bounds();layers_and_services();document_withdrawal();service_completion_routing();shared_submit_policy();shared_geometry_and_stable_snapshots();measured_document_geometry();
         std::cout<<"web bridge envelopes, literal text, declarations, generations, layers and services passed\n";return 0;
     } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

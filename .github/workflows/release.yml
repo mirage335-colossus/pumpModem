@@ -423,7 +423,7 @@ jobs:
 
   triad-abbreviated:
     if: github.event_name == 'workflow_dispatch' && !inputs.source_release && inputs.package_check == 'none'
-    name: Check abbreviated triad kernels before release builds
+    name: Check native Robust bounded regression before release builds
     needs: metadata
     uses: ./.github/workflows/triad-abbreviated.yml
     with:

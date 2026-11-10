@@ -4,14 +4,13 @@ Native `triad_duration.hpp` supplies the provisional duration model used by
 `robust_profile` and the GUI. Target C/N0, oscillator/channel assumptions and
 public waveform geometry determine the modeled bit duration. Planning uses a
 fixed public one-bit assumption rather than transmitted draft length. The
-Python `triad_duration_model` remains a numerical comparison reference while
-migration parity and historical forecasts require it; it is not in the operating
-path. Remove superseded reference code and captures when those questions close.
+former Python `triad_duration_model` is retired. Tests and benchmark orchestration
+call the native planner rather than carrying a second numerical implementation.
 
 A duration forecast is a model calculation, not receiver sensitivity,
 reliability, real-time capacity or physical-link qualification. Native source
 geometry owns exact tile, sample, pulse, clock-address and burst calendars.
-[Current integration checks](validation.md#native-gui-integration) are separate
+[Current integration checks](validation.md#native-codec-and-measurement-migration) are separate
 from the dated research below.
 
 The [duration-planner evidence](validation-data/triad-v3/2026-11-06-duration-planner/README.md)

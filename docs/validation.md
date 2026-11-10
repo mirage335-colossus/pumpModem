@@ -1,15 +1,162 @@
 # Validation status
 
-Updated 10 November 2026. The native migration below is an uncommitted
-integration checkpoint, not release certification. Historical measurements
-retain their original source/runtime and do not qualify native GUI performance.
+Updated 10 November 2026. The native codec and measurement migration's local
+functional checks are complete. Current outcomes and their source identities
+are recorded below. Earlier checkpoints and historical measurements retain their
+original source/runtime; they do not qualify changed code or supply current
+native CPU/GPU calibration. None is release certification.
 
 The historical cleanup checkpoint was based on
 `357a50970a0c6214eeaade7c5704bbc39abd4b79` and committed as
 `419e6bae8c4fe3b0f59be23a6dfb3b69fbaed80e`. Its concise outcomes and limitations
 remain below; they are not release certification or validation of changed code.
 
+## Native codec and measurement migration
+
+The migration from `1c58507a5178c7700cd15d0fcdd05a0091c6dba9` adds bounded native
+long-message intervals, lazy emission,
+shared native CPU/tensor measurement paths and a native real-audio frontend,
+while retiring Python receiver DSP. The default application requires neither
+Python nor Torch; optional compiled ATen bulk operations retain production receiver
+control and state. CUDA execution is unavailable in the current environment.
+Implementation, numerical comparison and capacity qualification remain separate.
+
+The long profile keeps the short codec through 16 bytes and uses fixed 1,216-slot
+marker/codeword intervals beyond that boundary. Its private-key tag binds each
+word to its actual public calendar address; it does not authenticate the whole
+endpoint. Early short-prefix ambiguity and missing whole final uncompressed
+intervals retain the limits in [protocol](protocol.md#completion-and-authentication-limits).
+No new pass is inferred from the earlier short-profile GUI checkpoint below.
+
+Final local checks and scoped supporting evidence are:
+
+| Check | Outcome and scope |
+| --- | --- |
+| `./build.sh test triad` | 32/32 passed, 29.99 s, after the final spool/Helper rounding correction. |
+| `./build.sh test contract` | 35/35 passed, 21.32 s. |
+| `./build.sh test gui` | 28/28 passed, 106.67 s, including Fast and Legacy. |
+| Default application | `datapump-gui` rebuilt and `gui_self_check` passed; `ldd` reports no Python or Torch dependency in this build. |
+| CPU ATen integration | Current optional LibTorch check 1/1 passed, 1.33 s. An actual `tensor-cpu` regression unit completed the expected DATA decision with the common current source manifest. No CUDA execution. |
+| Session/audio/Helper repair | Earlier focused `gui_robust_live`, `robust_audio_frontend` and `triad_helper_burst` 3/3 passed, 4.30 s. Long PCM/cancellation, quotas and full-duplex reservations are covered by these checks and the final groups; memory handling was independently reviewed. |
+| Independent receiver parity | Four complete native slots and both full coarse routes matched the baseline exactly. Execution-witness defects were reproduced and repaired, with focused checks passing. |
+| GPU tooling and build closure | 21 focused tests passed, including full synthetic forecast serialization, plus actual native CPU slot/terminal smoke checks. Requiring unavailable CUDA was correctly rejected. The later proposal bundle passed nine focused packaging tests and the current `triad_gpu_diagnostics` CTest (1/1, 0.77 s) after the full 32-test group; fresh extracted CPU LibTorch compilation, parity execution and `describe` also passed. These are not CUDA results. |
+| Extended Message edit path | `gui_adapter_boundary`, `web_bridge`, `web_worker`, `web_renderer` and `web_preview_client` 5/5 passed, 2.42 s; loopback `build_preview` and `web_preview` 2/2 passed, 3.63 s in the permitted run. Native pipe/relay and client coverage only, not actual TX or Wasm runtime. |
+| Native probe/spool | Earlier focused `triad_receiver_probe` and `triad_probe_spool` 2/2 passed, 5.13 s, on source manifest `2a309b945ea1a2397313156567014503441ed75e40fda91e06227c80e618b2d2`. The bounded pilot passed after backing-accounting repair; the final triad group passed after the subsequent portable rounding fix, which leaves this host's reservation unchanged. This is not manual-case calibration. |
+
+The final compiled source manifest is
+`c9a797431bd9d35a0bd2c17149dbcf6211a2296c02ff8c67499c90e236099226`;
+the native probe SHA-256 is
+`8b197fb56c98774bba2548f73a61e0dea6aa871de279c41be6b43e0f0b1c027b`.
+These identities bind this local checkpoint, not a published release.
+
+One bounded native CPU abbreviated run followed the final groups. Automatic
+allocation resolved H=12, W=24 and owner cap 24, with one numerical thread per
+worker and a 9,983,840,256-byte memory cap. All eight active/noise slot, coarse,
+fine and audio models reported `abbreviated_holdout_supported`; the run status
+was `baseline_established`, with comparisons `uncompared`. Active used 27 batch
+receipts through nine looks, noise 15 through five looks, with only the declared
+1/2/4-unit batches. This establishes a current native baseline, not a cross-revision
+regression pass, real-time capacity or communication sensitivity.
+
+The temporary [native regression baseline](../local-evidence/native-cpp-migration/regression-baseline.json)
+contains 559,086 bytes with SHA-256
+`08380276aa9c15e53718d32dbb9e2d95000648031affdfa36f1079ea1f370905`.
+It supports the current bounded regression/harness claim. Retire it when its
+source or configuration becomes inapplicable and this summary or a qualified
+replacement preserves the needed evidence; no duplicate Markdown report is kept.
+
+The independent clock-envelope reproduction first rejected a legal signed-arrival
+case (`−1000`, zero Helper lead) in `PublicProfile`. The repaired public window
+admitted it with a 46,938,976-byte workspace bound. Nominal physical draws and TX
+addresses remain unchanged; only the quiet-evidence aperture narrows where needed.
+This fixes the public-window bound rather than altering the simulated signal.
+
+The frontend regression first reproduced rejection of a legal 4 MiB escaped
+Message edit, then an invalid 2 MiB `<` draft overflowing snapshot JSON. The
+repair raises only edit-frame allocation to 4 MiB, enforces published control
+limits and preflights JSON expansion at 6 MiB within the existing 8 MiB envelope.
+Decoded Message content remains limited to 1 MiB; other event values retain
+1 MiB and errors 4096 bytes. The passing checks retain those rejection boundaries.
+
+A bounded native spool fixture generated 827,637 I/Q rows, stored 14,069,829 bytes
+and retained no full-capture array in RAM. Exact-input W=2/O=2 and W=1/O=1 replays
+on H=12 each committed ten valid slots, two actual `e`/quiet episodes and the
+predeclared ready interval from commit 3 through 6. Both peaked at one active
+owner, so this does not measure a multiowner speedup or manual-case capacity.
+Service includes separately quantified spool reads/hash; generation and spool
+writes are excluded. Full logical PCM projection is a separate measured phase.
+Controller wall removes measured condition-variable wait and spool I/O/hash but
+may overlap DSP; controller thread CPU still includes spool work.
+
+The fixture's tmpfs file occupied 14,073,856 charged RAM bytes. A separate
+low-memory preflight planned 22,967,637 samples within sample/disk bounds, but
+its 390,451,200-byte temporary backing exceeded the 256 MiB total budget. It
+exited 2 before capture, after profile preparation. Verified ordinary disk has
+a separate storage budget; tmpfs or unknown backing conservatively reserves
+file extent against memory. These are bounded lifecycle/admission checks, not
+CPU capacity or sensitivity results.
+
+The CUDA-enabled C++ host branch passed a GCC 14.2/C++20 syntax check with
+`DATAPUMP_TRIAD_TENSOR_CUDA=1`, CPU LibTorch 2.15 headers and verified NVIDIA
+CUDA 13.0.2 runtime/CRT/CCCL headers (2.56 MB). The source SHA-256 was
+`29e9fc8dbaa0ca8db3757636a7387c96f00a499e63d28a8ba3acde77907994b6`.
+The upstream `C10_CUDA_NO_CMAKE_CONFIGURE_FILE` switch skipped the CPU package's
+absent generated CUDA configuration; no substitute headers were invented. The
+check exited 0 without warnings. Header provenance used the
+[NVIDIA redistribution manifest](https://developer.download.nvidia.com/compute/cuda/redist/redistrib_13.0.2.json);
+temporary downloads were removed. This does not test CUDA linking, device
+execution, numerical fidelity, memory or performance.
+
+The user-requested [bounded RunPod proposal](triad-performance.md#bounded-runpod-proposal--10-november-2026)
+prepares actual CUDA checks without provisioning. Its initial archive omitted
+`triad_probe_spool.hpp` and `triad_fixture_key.hpp`; an explicit allowlist repair
+and recursive local-header closure test corrected that packaging failure. The
+fresh extraction built the probe, exact bundled tensor parity test and Helper
+exporter, with no unresolved or Python libraries and the same compiled source
+manifest as the local CPU build. The corrected archive has 512 files and
+1,370,721 bytes, SHA-256
+`2bfe44676020d21a88023c5f57a7df5b26fb0537404f865ab299709a4da5adad`;
+its internal manifest is
+`dd17c1c270cc750d5c7dfd0a254cdf0fb15393fd1427e700013918962fa4a22a`.
+The bundled test SHA-256 is
+`4e7b734f09cf4b9270ff9b4df53ed8285f196683b5de8d82aeacdb512f13f2ee`.
+The archive is retained outside the checkout only for this current proposal,
+with cleanup after execution, cancellation or source obsolescence. No account
+metadata or provider action forms part of this preparation.
+
+No local functional check remains pending in this checkpoint. Actual CUDA
+linking/device execution/performance, Windows runtime, physical audio devices,
+Wasm runtime, full manual-case capacity and multiowner throughput qualification
+remain unrun. No hosted CI job, publication or release certification was performed.
+The configured-calendar scope remains; unknown waveform epoch/ordinal/timing
+acquisition is unqualified.
+
+Python retirement removed 38 obsolete modem/DSP tools, 35 implementation-only
+tests and two old sensitivity/confirmation scripts. Remaining Python modules
+handle native orchestration, statistics, case parsing and physical topology.
+Obsolete copied source, bytecode, bridge build artifacts and mixed/source
+archives were removed from ignored evidence; numeric inventories, expanded
+failed-check receipts, source-hash provenance and release assets were preserved.
+Old numeric captures are not a dependency of the native implementation. Retain
+any raw data only for a specifically identified unresolved question or release
+duty, then remove it when that purpose ends.
+
+Current native benchmark commands are documented in the
+[computational guide](triad-performance.md). The bounded baseline above does not
+supply a full manual-case capacity result; that requires applicable complete-work
+coverage, source identity, uncertainty and independent holdout checks. Historical
+Python calibration, transport applicability exceptions and old GPU forecasts
+are inadmissible for that native runtime. Preserve their original failures and
+margins as historical findings. The new native Fejer real-audio path replaces
+an unused Python Kaiser experiment; that replacement is not a numerical-parity
+claim. No heavy calibration campaign is authorized by this documentation update.
+
 ## Native GUI integration
+
+**Earlier short-profile checkpoint.** The outcomes below predate native long
+messages and the current benchmark/tensor/frontend migration. They retain their
+own source and coverage; their passing counts do not qualify those later changes.
+
 
 The operating architecture is now a single C++ stack linked into the GUI:
 canonical source/Helper, complete slot scoring, bounded message/FEC processing,

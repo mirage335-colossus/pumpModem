@@ -113,10 +113,12 @@ from \-250 to 0 dBFS/Hz. Default unspecified leaves live reception unconfigured.
 This is separate from simulated link noise in dBm/Hz and does not calibrate a device.
 .TP
 .BI \-\-fec " off|rs20|rs60"
-Configured native short-text error correction; default off. Both peers must agree.
-RS modes add bounded Reed-Solomon parity and CRC error detection after short
-coding; decoding still requires two fully scored quiet slots. CRC is not sender
-authentication. Exact raw-bit transmission bypasses FEC.
+Configured native short/long text error correction; default off. Peers must agree.
+Short RS modes retain their CRC profile. Long text uses fixed 128-byte codewords:
+Off, RS(128,106), or RS(128,80), each preceded by a 192-bit marker. Keyed long
+words include a 32-byte interval tag. Decoding still requires two fully scored
+quiet slots. CRC is not sender authentication; public AMATEUR keys do not supply
+sender authentication. Exact raw-bit transmission bypasses text coding and FEC.
 .TP
 .BI \-\-helper\-power " POWER"
 Requested Helper transmit power, separate from DATA power. Zero disables Helper.
@@ -236,7 +238,7 @@ Multiply declared frequency and clock accuracy bounds; default 3, minimum 1.
 .BI \-\-target\-snr " DB-HZ"
 Set the single Robust target carrier-to-noise-density ratio, from \-200 to
 200 dB-Hz. Default: 32. Console and Link Planner edit the same value for all
-short-message planning. It drives a provisional native duration model, not a
+native per-bit duration planning. It drives a provisional model, not a
 sensitivity guarantee, measured in-band SNR or native CPU-capacity forecast.
 .TP
 .BI \-\-rate " FREQUENCY"
@@ -321,9 +323,13 @@ Cancel stops the current transmission or simulation.
 .PP
 Robust text of 1\(en16 source bytes uses the native short dictionary. Off sends
 its exact short bits; RS20 and RS60 use the configured bounded text-FEC profile.
+Longer text uses fixed 1216-slot marker/codeword intervals and the selected FEC,
+with raw LZMA2 compression under the native profile. The GUI accepts up to 1 MiB
+of decoded text bytes; escaped editor representation has a separate 4 MiB bound.
+Long preparation runs in the background on Transmit, with one coded interval
+generated at a time. Attachments remain unsupported by Robust.
 Explicit raw-bit input accepts 1\(en208 bits and sends them exactly, preserving
-leading zeros and partial bytes without FEC. Longer text and attachments are
-not supported by Robust; use a modem with an applicable file/text profile.
+leading zeros and partial bytes without text coding or FEC.
 .PP
 The Robust controller starts with the built-in public keyset
 .BR WARNING\-Amateur .
@@ -343,6 +349,11 @@ Reception completes only after two fully scored quiet public DATA slots.
 Interior missing slots remain erasures if DATA resumes; transport EOF,
 cancellation, received length and a decodable prefix do not complete a message.
 Pending content cannot be copied or saved as a completed message.
+Long receptions retain bounded diagnostic prefixes; exact raw-bit copy requires
+the full sequence to have been retained. An early short prefix can also begin a
+long marker. Missing all later complete uncompressed intervals can leave a valid
+shorter stream, even after an underfilled source area. Private-key interval tags
+authenticate individual words, not the whole-message endpoint.
 .PP
 Completed text can be copied or pasted into the message draft.
 Received text and suggested filenames use a restricted ASCII presentation;

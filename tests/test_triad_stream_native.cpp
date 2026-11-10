@@ -288,6 +288,51 @@ void resource_resolution() {
     check(explicit_limits.workers==*automatic.workers && explicit_limits.slot_owners==*automatic.slot_owners,
           "explicit intentional overcommit was changed");
 }
+
+void long_addressed_episode_and_decode_reservation() {
+    const auto p = profile();
+    constexpr std::uint64_t first = 11;
+    const auto key = Crypto::amateur();
+    const NativeMessageProfile message{FecMode::rs60, true, 512, key};
+    const Bytes text(17, 'e');
+    const auto draft = prepare_text_message(text, message);
+    check(draft.wire_bits()==message_interval_bits, "bounded long scheduler fixture changed geometry");
+    auto generate = draft.bit_source(first, [&](std::uint64_t index) { return message_address(p, index); });
+    Bytes bits(draft.wire_bits());
+    for (std::size_t i=0; i<bits.size(); ++i) bits[i] = generate(i);
+    for (const auto grow_before_decode : {false,true}) {
+        auto o = options();
+        o.first_slot = first;
+        o.first_input_sample = p.slot(first).observation.first;
+        o.maximum_pending_messages = 1;
+        std::atomic<std::size_t> footprint = 8*1024*1024;
+        auto score = [&](const ReceiverConfig& c, const ReceiverSlotPlan& plan, const Crypto&,
+                        auto, auto, unsigned, std::size_t, std::stop_token) {
+            const auto relative = plan.index-first;
+            if (relative<bits.size()) return row(c, plan, SlotDecision::data, bits[relative]);
+            if (grow_before_decode && relative==bits.size()+1) footprint = *o.memory_limit_bytes;
+            return row(c, plan, SlotDecision::quiet);
+        };
+        auto stream = StreamReceiverFixture::make(p, receiver(p), key, o, workspace, score,
+            message_decoder(message.fec), message_receiver_options(message), [&] { return footprint.load(); });
+        const auto endpoint = p.slot(first+bits.size()+1).observation.stop;
+        check(endpoint-*o.first_input_sample<8'000'000, "long scheduler fixture exceeded sample budget");
+        feed(stream, endpoint);
+        const auto report = stream.resume(true);
+        const auto messages = stream.drain_messages();
+        if (grow_before_decode) {
+            check(report.state==StreamReceiverState::resource_limit && messages.empty(),
+                  "application growth spent the reserved native source decoder workspace");
+        } else {
+            check(messages.size()==1 && messages.front().first_public_slot==first &&
+                  messages.front().stop_public_slot==first+bits.size()+2 &&
+                  messages.front().message.decoded_content &&
+                  messages.front().message.decoded_content->authenticated &&
+                  messages.front().message.decoded_content->message.data==text,
+                  "native stream did not commit the addressed long content in slot order");
+        }
+    }
+}
 } // namespace
 
 int main() {
@@ -297,6 +342,7 @@ int main() {
         inter_window_gap_and_rearm();
         application_growth_keeps_live_dsp_reservations();
         eof_cancel_and_workspace();
+        long_addressed_episode_and_decode_reservation();
         std::cout << "Native Robust stream scheduler checks passed\n";
         return 0;
     } catch (const std::exception& e) {

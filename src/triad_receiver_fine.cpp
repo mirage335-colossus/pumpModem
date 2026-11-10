@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <compare>
 #include <exception>
@@ -29,6 +30,11 @@ constexpr std::array<double, receiver_coherence_count> coherence_seconds{.5, 2.,
 constexpr std::size_t models = coherence_seconds.size(), components = 2 * models;
 constexpr double log_two = std::numbers::ln2;
 constexpr double tau = 2 * std::numbers::pi;
+using FineClock = std::chrono::steady_clock;
+
+double seconds_since(FineClock::time_point began) {
+    return std::chrono::duration<double>(FineClock::now() - began).count();
+}
 
 double log_add(double a, double b) {
     if (a == -infinity) return b;
@@ -160,6 +166,7 @@ public:
 
     std::size_t rows() const { return rows_; }
     std::size_t modes() const { return indices_.size(); }
+    std::span<const std::size_t> indices() const { return indices_; }
 
     // Destructive only on caller-private render scratch.
     void apply(std::span<Complex> values, std::span<Complex> scratch, std::stop_token stop) const {
@@ -270,22 +277,16 @@ private:
     bool closing_ = false;
 };
 
-struct StateKey {
-    unsigned group = 0;
-    std::int64_t delay = 0;
-    int rate = 0;
-    auto operator<=>(const StateKey&) const = default;
-};
-
 struct ChannelPosterior {
     std::array<Complex, 2> mean{};
     std::array<Complex, 4> covariance{};
 };
 
 struct State {
-    StateKey key;
+    FineStateKey key;
     std::array<double, components> weights{};
     std::array<ChannelPosterior, components> posterior{};
+    double prior_mass = 0;
     bool nonzero_basis = false;
 };
 
@@ -321,43 +322,64 @@ struct TimingGrid {
         }
     }
 
-    std::vector<State> initial(std::size_t coordinates, std::size_t taps) const {
+    std::vector<State> initial(std::size_t coordinates, std::size_t taps, bool cold_maximum) const {
         const auto count = coordinates * 3 * (radius ? 3 : 1);
         if (!count || count > maximum_proposals)
             throw Error("Robust initial timing bank exceeds the proposal cap");
-        const auto log_prior = -std::log(static_cast<double>(count)) - std::log(static_cast<double>(models));
         std::vector<State> states;
-        states.reserve(count);
-        const auto append = [&](unsigned group, int delay, int rate) {
+        states.reserve(cold_maximum ? maximum_proposals : count);
+        const auto append = [&](FineStateKey key) {
             State state;
-            state.key = {group, delay, rate};
-            state.weights.fill(log_prior);
-            for (auto& channel : state.posterior)
-                for (std::size_t tap = 0; tap < taps; ++tap)
-                    channel.covariance[tap * taps + tap] = 1. / static_cast<double>(taps);
+            state.key = key;
             states.push_back(state);
         };
         for (unsigned group = 0; group < coordinates; ++group)
             for (int delay = -1; delay <= 1; ++delay) {
-                if (radius) append(group, delay, -radius);
-                append(group, delay, 0);
-                if (radius) append(group, delay, radius);
+                if (radius) append({group, delay, -radius});
+                append({group, delay, 0});
+                if (radius) append({group, delay, radius});
             }
+        if (cold_maximum) {
+            // Fill the same legal rate/delay lattice as the normal lane. The
+            // extra states exist solely to exercise the cold DSP ceiling.
+            for (int extent = 1; states.size() < maximum_proposals; ++extent) {
+                for (unsigned group = 0; group < coordinates && states.size() < maximum_proposals; ++group) {
+                    const auto delays = extent == 1 ? std::array{-1, 0, 1} : std::array{-extent, extent, extent};
+                    for (const auto delay : std::span(delays).first(extent == 1 ? 3 : 2)) {
+                        for (int rate = -radius; rate <= radius && states.size() < maximum_proposals; ++rate) {
+                            const FineStateKey key{group, delay, rate};
+                            if (extent != 1 || std::none_of(states.begin(), states.end(),
+                                    [&](const State& state) { return state.key == key; })) append(key);
+                        }
+                    }
+                }
+            }
+            std::sort(states.begin(), states.end(), [](const State& a, const State& b) { return a.key < b.key; });
+        }
+        const auto log_prior = -std::log(static_cast<double>(states.size())) - std::log(static_cast<double>(models));
+        for (auto& state : states) {
+            state.prior_mass = 1. / static_cast<double>(states.size());
+            state.weights.fill(log_prior);
+            for (auto& channel : state.posterior)
+                for (std::size_t tap = 0; tap < taps; ++tap)
+                    channel.covariance[tap * taps + tap] = 1. / static_cast<double>(taps);
+        }
         return states;
     }
 };
 
 struct TransitionEdge {
-    StateKey target;
+    FineStateKey target;
     std::size_t source;
     double log_probability;
     Complex phase;
 };
 
 struct TransitionTarget {
-    StateKey key;
+    FineStateKey key;
     std::array<double, components> weights;
     std::size_t first_edge, stop_edge;
+    double prior_mass = 0;
 };
 
 void append_edges(std::vector<TransitionEdge>& edges, const State& source, std::size_t index,
@@ -396,7 +418,7 @@ void append_edges(std::vector<TransitionEdge>& edges, const State& source, std::
 
 std::vector<State> predict(const std::vector<State>& previous, const TimingGrid& grid,
                            double elapsed, double boundary, double center, std::size_t taps,
-                           std::uint64_t& edges_scored, std::stop_token stop) {
+                           std::uint64_t& edges_scored, FineLaneWork* work, std::stop_token stop) {
     std::vector<TransitionEdge> edges;
     edges.reserve(2 * previous.size() * (2 * grid.radius + 1));
     for (std::size_t i = 0; i < previous.size(); ++i) {
@@ -422,9 +444,17 @@ std::vector<State> predict(const std::vector<State>& previous, const TimingGrid&
                 const auto weight = previous[edge.source].weights[c] + edge.log_probability;
                 target.weights[c] = log_add(target.weights[c], weight);
             }
+            if (work) target.prior_mass += previous[edge.source].prior_mass * std::exp(edge.log_probability);
         } while (i < edges.size() && edges[i].target == target.key);
         target.stop_edge = i;
         targets.push_back(target);
+    }
+    if (work) {
+        work->peak_transition_targets = std::max(work->peak_transition_targets, targets.size());
+        if (targets.size() > maximum_proposals) {
+            ++work->pruning_events;
+            work->states_dropped += targets.size() - maximum_proposals;
+        }
     }
     retain(targets, maximum_proposals);
 
@@ -435,6 +465,10 @@ std::vector<State> predict(const std::vector<State>& previous, const TimingGrid&
         State state;
         state.key = target.key;
         state.weights = target.weights;
+        if (work) {
+            state.prior_mass = target.prior_mass;
+            work->merged_channel_components += target.stop_edge - target.first_edge - 1;
+        }
         for (std::size_t c = 0; c < components; ++c) {
             auto& out = state.posterior[c];
             const auto weight = [&](const TransitionEdge& edge) {
@@ -474,11 +508,13 @@ struct ObservationBlock {
     std::vector<Complex> projected;
     std::size_t first = 0;
     double elapsed = 0;
+    bool observed = true;
 };
 
 struct WorkerScratch {
     std::vector<Complex> raw, chunk, fft;
     std::vector<double> offsets;
+    double basis_statistics_seconds = 0, gaussian_seconds = 0;
 
     WorkerScratch(std::size_t block_rows, std::size_t fft_rows)
         : raw(4 * block_rows), chunk(block_rows > maximum_basis_rows ? 4 * maximum_basis_rows : 0),
@@ -533,7 +569,7 @@ void sufficient_statistics(MappedBasis& basis, const MappedBasisRow& row, std::s
 }
 
 MappedBasisRow mapped_row(const ReceiverConfig& config, const ReceiverSlotPlan& plan,
-                          const TimingGrid& grid, const FineCoordinate& coordinate, const StateKey& key,
+                          const TimingGrid& grid, const FineCoordinate& coordinate, const FineStateKey& key,
                           long double anchor, bool fixed) {
     const double base = 1 + coordinate.clock_ppm * 1e-6;
     const double velocity = key.rate * grid.rate_step_ppm * 1e-6;
@@ -547,18 +583,45 @@ MappedBasisRow mapped_row(const ReceiverConfig& config, const ReceiverSlotPlan& 
             (scale - 1) * 1e6};
 }
 
+struct StateBlockWork {
+    std::uint64_t positive_basis_blocks = 0;
+    long double template_energy = 0;
+};
+
 void advance_state(State& state, const MappedBasisRow& row, MappedBasis& basis,
                    std::span<const Tap> taps, std::span<const ObservationBlock> blocks,
-                   double variance, WorkerScratch& scratch, std::stop_token stop) {
+                   const std::array<const FineBulkStatistics*, 2>& prepared,
+                   double variance, WorkerScratch& scratch, StateBlockWork* work, std::stop_token stop) {
     const auto tap_count = taps.size(), tap_square = tap_count * tap_count;
     std::array<Complex, 2 * 3 * 2> correlations{};
     std::array<Complex, 2 * 3 * 4> grams{};
     std::array<double, 4 * 2 * models> transitions{};
     std::array<double, 2> powers{1. / tap_count, 1. / tap_count};
+    if (work) *work = {};
+    const auto basis_began = work ? FineClock::now() : FineClock::time_point{};
     for (std::size_t i = 0; i < blocks.size(); ++i) {
-        sufficient_statistics(basis, row, taps, blocks[i], variance, scratch,
-            std::span(correlations).subspan(i * 3 * tap_count, 3 * tap_count),
-            std::span(grams).subspan(i * 3 * tap_square, 3 * tap_square), state.nonzero_basis, stop);
+        if (blocks[i].observed) {
+            const auto gram = std::span(grams).subspan(i * 3 * tap_square, 3 * tap_square);
+            const auto correlation = std::span(correlations).subspan(i * 3 * tap_count, 3 * tap_count);
+            if (const auto* bulk = prepared[i]) {
+                std::copy_n(bulk->correlations.begin(), correlation.size(), correlation.begin());
+                std::copy_n(bulk->gram.begin(), gram.size(), gram.begin());
+                state.nonzero_basis |= bulk->nonzero_basis;
+            } else {
+                sufficient_statistics(basis, row, taps, blocks[i], variance, scratch,
+                    correlation, gram, state.nonzero_basis, stop);
+            }
+            if (work) {
+                long double energy = 0;
+                for (std::size_t bit = 1; bit <= 2; ++bit)
+                    for (std::size_t tap = 0; tap < tap_count; ++tap)
+                        energy += static_cast<long double>(gram[bit * tap_square + tap * tap_count + tap].real()) * variance;
+                work->template_energy += energy;
+                work->positive_basis_blocks += energy > 0;
+            }
+        }
+        // Missing blocks have no sufficient statistics. The real elapsed
+        // block interval still evolves every channel posterior.
         for (std::size_t model = 0; model < models; ++model) {
             const auto offset = 4 * (i * models + model);
             const auto exponent = -blocks[i].elapsed / coherence_seconds[model];
@@ -568,6 +631,8 @@ void advance_state(State& state, const MappedBasisRow& row, MappedBasis& basis,
             transitions[offset + 2] = decay;
         }
     }
+    if (work) scratch.basis_statistics_seconds += seconds_since(basis_began);
+    const auto gaussian_began = work ? FineClock::now() : FineClock::time_point{};
 
     std::array<Complex, models * 3 * 2> means{};
     std::array<Complex, models * 3 * 4> covariance{};
@@ -605,6 +670,7 @@ void advance_state(State& state, const MappedBasisRow& row, MappedBasis& basis,
                 throw Error("Robust Gaussian likelihood evidence is nonfinite");
         }
     }
+    if (work) scratch.gaussian_seconds += seconds_since(gaussian_began);
 }
 
 std::array<double, 2> bit_scores(const std::vector<State>& states) {
@@ -659,8 +725,45 @@ double quiet_noise_threshold(std::size_t modes) {
     return static_cast<double>(upper);
 }
 
-std::size_t fine_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& plan, unsigned workers) {
-    const BlockCalendar calendar(config, plan);
+namespace {
+FineObservation whole_slot(const ReceiverSlotPlan& slot) {
+    if (slot.stop_sample <= slot.first_sample || slot.stop_sample - slot.first_sample > SIZE_MAX)
+        throw Error("invalid public fine observation size");
+    return {slot.first_sample, static_cast<std::size_t>(slot.stop_sample - slot.first_sample)};
+}
+
+ReceiverSlotPlan observation_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                                  FineObservation observation) {
+    const auto whole = whole_slot(slot);
+    if (!std::isfinite(config.sample_rate_hz) || config.sample_rate_hz < 1 ||
+        !std::isfinite(config.noise_variance) || config.noise_variance <= 0 ||
+        slot.quiet_first_sample < slot.first_sample || slot.quiet_stop_sample < slot.quiet_first_sample ||
+        slot.quiet_stop_sample > slot.stop_sample || !observation.rows ||
+        observation.first_sample < slot.first_sample || observation.first_sample >= slot.stop_sample ||
+        observation.rows > slot.stop_sample - observation.first_sample)
+        throw Error("fine observation lies outside its public slot");
+    if (observation.kind == FineRunKind::operational &&
+        (observation.first_sample != whole.first_sample || observation.rows != whole.rows))
+        throw Error("operational fine observation requires the whole public slot");
+    if (observation.kind != FineRunKind::operational && observation.kind != FineRunKind::probe &&
+        observation.kind != FineRunKind::cold_maximum)
+        throw Error("invalid fine observation kind");
+
+    auto plan = slot;
+    plan.first_sample = observation.first_sample;
+    plan.stop_sample = plan.first_sample + observation.rows;
+    plan.quiet_first_sample = std::clamp(slot.quiet_first_sample, plan.first_sample, plan.stop_sample);
+    plan.quiet_stop_sample = std::clamp(slot.quiet_stop_sample, plan.first_sample, plan.stop_sample);
+    plan.window_capture_lead_seconds -=
+        static_cast<long double>(plan.first_sample - slot.first_sample) / config.sample_rate_hz;
+    if (!std::isfinite(plan.window_capture_lead_seconds))
+        throw Error("fine observation lead is nonfinite");
+    return plan;
+}
+
+std::size_t workspace_for_plan(const ReceiverConfig& config, const ReceiverSlotPlan& plan,
+                               const BlockCalendar& calendar, unsigned workers, bool record_work) {
+    if (!workers) throw Error("fine observation requires a positive worker share");
     // Reject unsupported public support before leasing a slot.
     const ProjectionBands validated(config, plan);
     (void)validated;
@@ -681,127 +784,526 @@ std::size_t fine_workspace(const ReceiverConfig& config, const ReceiverSlotPlan&
     add(3 * maximum_proposals, sizeof(State));
     add(2 * maximum_states * (2 * maximum_rate_radius + 1),
         sizeof(TransitionTarget) + sizeof(TransitionEdge));
+    if (record_work) add(2 * maximum_proposals, sizeof(StateBlockWork));
     const auto active = useful_fine_workers(workers);
     const auto mapped_rows = std::min(max_rows, maximum_basis_rows);
-    add(active, checked_add(checked_multiply(fft_rows + 4 * max_rows +
-        (max_rows > mapped_rows ? 4 * mapped_rows : 0), sizeof(Complex)),
-        checked_multiply(mapped_rows, sizeof(double))));
+    if (config.bulk_backend) {
+        const auto taps = config.spread_delay_seconds || config.spread_doppler_hz ? 2U : 1U;
+        bytes = checked_add(bytes, config.bulk_backend->fine_host_bytes(max_rows, taps));
+        add(4 * maximum_proposals, sizeof(FineBulkStatistics));
+        add(2 * maximum_proposals, sizeof(MappedBasisRow));
+        add(2 * maximum_proposals, sizeof(std::size_t));
+        add(mapped_rows, sizeof(double));
+        add(active, sizeof(WorkerScratch));
+    } else {
+        add(active, checked_add(checked_multiply(fft_rows + 4 * max_rows +
+            (max_rows > mapped_rows ? 4 * mapped_rows : 0), sizeof(Complex)),
+            checked_multiply(mapped_rows, sizeof(double))));
+    }
     return checked_add(bytes, MappedBasis::workspace_bytes(config, plan, mapped_rows, active));
 }
 
-void score_fine(const ReceiverConfig& config, const ReceiverSlotPlan& plan, const Crypto& key,
-                std::span<const Complex> iq, std::span<const FineCoordinate> coordinates,
-                double projected_sample_rate_hz, double coarse_clock_gap_ppm,
-                unsigned workers, ReceiverSlotScore& score, std::stop_token stop) {
-    const BlockCalendar calendar(config, plan);
-    const TimingGrid grid(projected_sample_rate_hz, coarse_clock_gap_ppm);
-    const std::array<Tap, 2> paths{{{0, 0}, {config.spread_delay_seconds, config.spread_doppler_hz}}};
-    const auto taps = std::span(paths).first(paths[1].delay_seconds || paths[1].doppler_hz ? 2 : 1);
-    auto nominal = grid.initial(coordinates.size(), taps.size()), adaptive = nominal;
+void add_work(std::uint64_t& counter, std::uint64_t amount) {
+    if (amount > UINT64_MAX - counter) throw Error("Robust fine work counter overflows");
+    counter += amount;
+}
 
-    const auto lengths = calendar.lengths();
-    std::vector<Projection> projections;
-    projections.reserve(lengths.size());
-    const ProjectionBands bands(config, plan);
-    std::size_t fft_rows = 0, max_rows = 0;
-    for (const auto rows : lengths) {
-        if (!rows) continue;
-        projections.emplace_back(rows, bands, stop);
-        fft_rows = std::max(fft_rows, DftPlan::scratch_samples(rows));
-        max_rows = std::max(max_rows, rows);
+void check_bulk_statistics(std::span<const FineBulkStatistics> output, std::size_t taps) {
+    const auto finite = [](Complex value) { return std::isfinite(value.real()) && std::isfinite(value.imag()); };
+    const auto null_is_zero = [](Complex value) { return value == Complex{}; };
+    for (const auto& row : output) {
+        const auto correlations = std::span(row.correlations).first(3 * taps);
+        const auto gram = std::span(row.gram).first(3 * taps * taps);
+        if (!std::all_of(correlations.begin(), correlations.end(), finite) ||
+            !std::all_of(gram.begin(), gram.end(), finite))
+            throw Error("Robust bulk backend did not supply finite complete sufficient statistics");
+        const auto null_correlations = correlations.first(taps);
+        const auto null_gram = gram.first(taps * taps);
+        if (!std::all_of(null_correlations.begin(), null_correlations.end(), null_is_zero) ||
+            !std::all_of(null_gram.begin(), null_gram.end(), null_is_zero))
+            throw Error("Robust bulk likelihood must preserve the exact zero-signal null");
     }
-    std::vector<Complex> observation_scratch(fft_rows);
-    const auto active = useful_fine_workers(workers);
-    MappedBasis basis(config, plan, key, std::min(max_rows, maximum_basis_rows), active);
+}
+} // namespace
+
+FineBlockGeometry fine_block_geometry(double sample_rate_hz) {
+    if (!std::isfinite(sample_rate_hz) || sample_rate_hz < 1)
+        throw Error("Invalid Robust fine sample rate");
+    return {round_rows(.25, sample_rate_hz), round_rows(.5, sample_rate_hz)};
+}
+
+std::size_t fine_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                           FineObservation observation, unsigned workers) {
+    const auto plan = observation_plan(config, slot, observation);
+    const BlockCalendar calendar(config, plan);
+    return workspace_for_plan(config, plan, calendar, workers, observation.record_work);
+}
+
+std::size_t fine_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers) {
+    return fine_workspace(config, slot, whole_slot(slot), workers);
+}
+
+struct FineSession::Impl {
+    ReceiverConfig config;
+    FineObservation observation;
+    ReceiverSlotPlan plan;
+    std::span<const Complex> iq;
+    std::span<const std::uint8_t> validity;
+    std::stop_token stop;
+    BlockCalendar calendar;
+    TimingGrid grid;
+    std::vector<FineCoordinate> coordinates;
+    std::array<Tap, 2> paths;
+    std::size_t tap_count;
+    unsigned workers, stage_workers;
+
+    std::vector<Projection> projections;
+    std::vector<Complex> observation_scratch;
+    std::unique_ptr<MappedBasis> basis;
+    std::unique_ptr<FineBulk> bulk;
+    FineBulkWork bulk_work;
+    std::vector<MappedBasisRow> bulk_rows;
+    std::vector<double> bulk_offsets;
+    std::vector<std::size_t> bulk_progress;
+    std::array<std::vector<FineBulkStatistics>, 2> bulk_statistics;
     std::vector<WorkerScratch> scratch;
-    scratch.reserve(active);
-    for (unsigned worker = 0; worker < active; ++worker) scratch.emplace_back(max_rows, fft_rows);
-    FineWorkers executor(active);
+    std::unique_ptr<FineWorkers> executor;
+    std::array<ObservationBlock, 2> blocks;
+    std::vector<StateBlockWork> state_work;
+    std::vector<State> nominal, adaptive;
 
-    std::array<ObservationBlock, 2> observations;
-    for (auto& block : observations) block.projected.reserve(max_rows);
     long double first_anchor = 0, previous_anchor = 0, previous_last = 0, previous_block_center = 0;
-    const auto fs = static_cast<long double>(config.sample_rate_hz);
-    const auto quiet_first = plan.quiet_first_sample - plan.first_sample;
-    const auto quiet_stop = plan.quiet_stop_sample - plan.first_sample;
-    std::size_t first = 0;
+    std::size_t available = 0, processed = 0, segments = 0, scored_blocks = 0, last_block_rows = 0;
+    std::size_t invalid_rows = 0, discarded_rows = 0, erased_blocks = 0;
+    std::size_t quiet_modes = 0, observed_modes = 0, workspace = 0;
+    std::uint64_t basis_rows = 0, adaptive_edges = 0;
+    double quiet_energy = 0, quiet_threshold = 0;
     bool nominal_nonzero = false, adaptive_nonzero = false;
-    while (first < iq.size()) {
-        check_cancelled(stop);
-        const auto segment_rows = std::min(calendar.segment_rows, iq.size() - first);
-        const auto anchor = (static_cast<long double>(first) + (segment_rows - 1) / 2.L) / fs;
-        if (!first) first_anchor = anchor;
-        else {
-            const auto boundary = (previous_last + static_cast<long double>(first) / fs) / 2 - previous_anchor;
-            adaptive = predict(adaptive, grid, static_cast<double>(anchor - previous_anchor),
-                static_cast<double>(boundary), config.data_if_hz, taps.size(),
-                score.adaptive_transition_edges, stop);
-        }
-        score.adaptive_peak_states = std::max(score.adaptive_peak_states, adaptive.size());
+    bool finished = false, poisoned = false;
+    FineLaneWork nominal_work, adaptive_work;
+    FinePhaseTimes times;
 
-        auto block_first = first;
-        const auto block_count = calendar.block_count(segment_rows);
-        for (std::size_t base = 0; base < block_count; base += observations.size()) {
-            const auto pair = std::min(observations.size(), block_count - base);
-            std::uint64_t rows_rendered = 0;
-            for (std::size_t block = 0; block < pair; ++block) {
-                const auto rows = calendar.block_length(segment_rows, base + block);
-                const auto projection = std::find_if(projections.begin(), projections.end(),
-                    [&](const Projection& candidate) { return candidate.rows() == rows; });
-                if (projection == projections.end()) throw Error("Robust likelihood block has no public projection");
-                auto& item = observations[block];
-                item.first = block_first;
-                item.projection = &*projection;
-                const auto raw = iq.subspan(block_first, rows);
-                item.projected.assign(raw.begin(), raw.end());
-                projection->apply(item.projected, observation_scratch, stop);
-                item.projected.resize(projection->modes());
-                const auto center = (static_cast<long double>(block_first) + (rows - 1) / 2.L) / fs;
-                item.elapsed = block_first ? static_cast<double>(center - previous_block_center) : 0.;
-                previous_block_center = center;
-                if (quiet_first <= block_first && block_first + rows <= quiet_stop) {
-                    score.quiet_modes += projection->modes();
-                    score.quiet_energy += finite_energy(item.projected) / config.noise_variance;
-                    if (!std::isfinite(score.quiet_energy)) throw Error("Robust quiet energy is nonfinite");
-                }
-                block_first += rows;
-                rows_rendered += rows;
+    Impl(const ReceiverConfig& input_config, const ReceiverSlotPlan& slot, const Crypto& key,
+         FineObservation extent, std::span<const Complex> samples, std::span<const std::uint8_t> valid,
+         std::span<const FineCoordinate> selected, double projected_rate, double clock_gap,
+         unsigned allocation, std::size_t scratch_limit, std::stop_token cancellation)
+        : config(input_config), observation(extent), plan(observation_plan(config, slot, observation)),
+          iq(samples), validity(valid), stop(cancellation), calendar(config, plan), grid(projected_rate, clock_gap),
+          paths{{{0, 0}, {config.spread_delay_seconds, config.spread_doppler_hz}}},
+          tap_count(paths[1].delay_seconds || paths[1].doppler_hz ? 2 : 1), workers(allocation),
+          stage_workers(useful_fine_workers(workers)) {
+        check_cancelled(stop);
+        if (iq.size() != observation.rows || (!validity.empty() && validity.size() != iq.size()))
+            throw Error("fine input lease differs from the declared observation");
+        if (selected.empty() || selected.size() > 64)
+            throw Error("fine coordinate bank exceeds its bounded public size");
+        for (std::size_t i = 0; i < selected.size(); ++i) {
+            const auto& coordinate = selected[i];
+            if (coordinate.epoch_offset_seconds < receiver_epoch_offsets.front() ||
+                coordinate.epoch_offset_seconds > receiver_epoch_offsets.back() ||
+                !std::isfinite(coordinate.arrival_seconds) || !std::isfinite(coordinate.frequency_hz) ||
+                !std::isfinite(coordinate.clock_ppm) ||
+                std::find(selected.begin(), selected.begin() + static_cast<std::ptrdiff_t>(i), coordinate) !=
+                    selected.begin() + static_cast<std::ptrdiff_t>(i))
+                throw Error("fine coordinate bank requires finite, distinct public atoms");
+        }
+        const bool cold = observation.kind == FineRunKind::cold_maximum;
+        if (cold && observation.rows != 2 * calendar.segment_rows)
+            throw Error("cold maximum-state work requires exactly two complete fine segments");
+
+        workspace = workspace_for_plan(config, plan, calendar, workers, observation.record_work);
+        if (workspace > scratch_limit)
+            throw ReceiverWorkspaceError("complete fine receiver exceeds its admitted workspace");
+        coordinates.assign(selected.begin(), selected.end());
+        nominal = grid.initial(coordinates.size(), tap_count, cold);
+        adaptive = nominal;
+        nominal_work.initial_states = adaptive_work.initial_states = nominal.size();
+        nominal_work.state_cap = nominal_work.proposal_cap = nominal.size();
+        adaptive_work.state_cap = maximum_states;
+        adaptive_work.proposal_cap = maximum_proposals;
+
+        const auto lengths = calendar.lengths();
+        projections.reserve(lengths.size());
+        const ProjectionBands bands(config, plan);
+        std::size_t fft_rows = 0, max_rows = 0;
+        for (const auto rows : lengths) {
+            if (!rows) continue;
+            projections.emplace_back(rows, bands, stop);
+            fft_rows = std::max(fft_rows, DftPlan::scratch_samples(rows));
+            max_rows = std::max(max_rows, rows);
+        }
+        observation_scratch.resize(fft_rows);
+        const auto mapped_rows = std::min(max_rows, maximum_basis_rows);
+        basis = std::make_unique<MappedBasis>(config, plan, key, mapped_rows, stage_workers);
+        if (config.bulk_backend) {
+            bulk = config.bulk_backend->make_fine(projected_rate, 2 * config.clock_bound_ppm);
+            if (!bulk) throw Error("requested Robust bulk backend did not construct a fine session");
+            bulk_work = bulk->completed_work();
+            bulk_rows.reserve(2 * maximum_proposals);
+            bulk_progress.reserve(2 * maximum_proposals);
+            bulk_offsets.resize(mapped_rows);
+            std::iota(bulk_offsets.begin(), bulk_offsets.end(), 0.);
+            for (auto& item : bulk_statistics) item.reserve(2 * maximum_proposals);
+        }
+        scratch.reserve(stage_workers);
+        for (unsigned worker = 0; worker < stage_workers; ++worker)
+            scratch.emplace_back(bulk ? 0 : max_rows, bulk ? 0 : fft_rows);
+        executor = std::make_unique<FineWorkers>(stage_workers);
+        for (auto& block : blocks) block.projected.reserve(max_rows);
+        if (observation.record_work) state_work.resize(2 * maximum_proposals);
+    }
+
+    template<class Operation>
+    void time(double& receipt, Operation operation) {
+        const auto began = observation.record_work ? FineClock::now() : FineClock::time_point{};
+        operation();
+        if (observation.record_work) receipt += seconds_since(began);
+    }
+
+    bool observation_complete() const { return processed == observation.rows; }
+    bool representative_work() const { return nominal_nonzero && adaptive_nonzero; }
+
+    void prepare(ObservationBlock& block, std::size_t first, std::size_t rows) {
+        const auto projection = std::find_if(projections.begin(), projections.end(),
+            [&](const Projection& candidate) { return candidate.rows() == rows; });
+        if (projection == projections.end()) throw Error("Robust likelihood block has no public projection");
+        block.first = first;
+        block.projection = &*projection;
+        const auto center = (static_cast<long double>(first) + (rows - 1) / 2.L) / config.sample_rate_hz;
+        block.elapsed = first ? static_cast<double>(center - previous_block_center) : 0.;
+        previous_block_center = center;
+        last_block_rows = rows;
+
+        const auto valid = validity.empty() ? validity : validity.subspan(first, rows);
+        const auto missing = valid.empty() ? 0 : static_cast<std::size_t>(std::count(valid.begin(), valid.end(), 0));
+        block.observed = missing == 0;
+        if (!block.observed) {
+            ++erased_blocks;
+            discarded_rows += rows - missing;
+            block.projected.clear();
+            return;
+        }
+        const auto raw = iq.subspan(first, rows);
+        block.projected.assign(raw.begin(), raw.end());
+        projection->apply(block.projected, observation_scratch, stop);
+        block.projected.resize(projection->modes());
+        observed_modes += projection->modes();
+        const auto quiet_first = plan.quiet_first_sample - plan.first_sample;
+        const auto quiet_stop = plan.quiet_stop_sample - plan.first_sample;
+        if (quiet_first <= first && first + rows <= quiet_stop) {
+            quiet_modes += projection->modes();
+            quiet_energy += finite_energy(block.projected) / config.noise_variance;
+            if (!std::isfinite(quiet_energy)) throw Error("Robust quiet energy is nonfinite");
+        }
+    }
+
+    void dispatch(std::size_t count, long double anchor) {
+        const auto observations = std::span(blocks).first(count);
+        const auto states = nominal.size() + adaptive.size();
+        const auto taps = std::span(paths).first(tap_count);
+        std::uint64_t observed_rows = 0, modes = 0, basis_calls = 0;
+        std::array<std::uint64_t, 2> bulk_calls{};
+        for (const auto& block : observations) {
+            if (!block.observed) continue;
+            const auto rows = block.projection->rows();
+            observed_rows += rows;
+            modes += block.projection->modes();
+            basis_calls += 1 + (rows - 1) / maximum_basis_rows;
+        }
+        if (bulk && observed_rows) time(times.bulk_statistics_seconds, [&] {
+            bulk_rows.clear();
+            const auto append = [&](const std::vector<State>& states, bool fixed) {
+                for (const auto& state : states)
+                    bulk_rows.push_back(mapped_row(config, plan, grid, coordinates[state.key.group], state.key,
+                                                   fixed ? first_anchor : anchor, fixed));
+            };
+            append(nominal, true);
+            append(adaptive, false);
+            for (std::size_t i = 0; i < observations.size(); ++i) {
+                const auto& block = observations[i];
+                if (!block.observed) continue;
+                const auto rows = block.projection->rows();
+                auto& output = bulk_statistics[i];
+                // Leave unwritten required fields distinguishable from
+                // legitimate all-zero statistics outside DATA support.
+                constexpr auto missing = std::numeric_limits<double>::quiet_NaN();
+                FineBulkStatistics unset;
+                unset.correlations.fill({missing, missing});
+                unset.gram.fill({missing, missing});
+                output.assign(states, unset);
+                bulk_progress.assign(states, 0);
+                const FineBulkBlock shape{rows, tap_count, block.projection->indices(),
+                                          block.projected, config.noise_variance};
+                bulk->statistics(shape, states, [&](std::size_t candidate, std::size_t first,
+                        std::size_t take, const BulkMappedSink& sink) {
+                    if (candidate >= states || first != bulk_progress[candidate] || first > rows || take > rows - first ||
+                        !take || take > bulk_offsets.size())
+                        throw Error("Robust bulk backend requested a map outside its public block");
+                    basis->visit_pair(bulk_rows[candidate], taps, block.first + first,
+                                      std::span(bulk_offsets).first(take), sink, stop);
+                    bulk_progress[candidate] += take;
+                    ++bulk_calls[candidate < nominal.size() ? 0 : 1];
+                }, output, stop);
+                if (!std::all_of(bulk_progress.begin(), bulk_progress.end(), [&](auto extent) { return extent == rows; }))
+                    throw Error("Robust bulk backend did not process its complete public block");
+                const auto completed = bulk->completed_work();
+                const auto expected_values = static_cast<std::uint64_t>(states) * 2 * tap_count *
+                    shape.projection_indices.size();
+                if (!completed.executed || completed.statistics_blocks < bulk_work.statistics_blocks ||
+                    completed.statistics_blocks - bulk_work.statistics_blocks != states ||
+                    completed.projected_values < bulk_work.projected_values ||
+                    completed.projected_values - bulk_work.projected_values != expected_values)
+                    throw Error("Robust bulk backend did not execute its complete public statistics work");
+                check_bulk_statistics(output, tap_count);
+                bulk_work = completed;
             }
-            const auto states = nominal.size() + adaptive.size();
-            const auto work = rows_rendered * 2 * taps.size() * states;
-            if (work > UINT64_MAX - score.basis_rows) throw Error("Robust basis work counter overflows");
-            score.basis_rows += work;
-            executor.dispatch(states, [&](unsigned worker, std::size_t index) {
+        });
+        time(times.dispatch_seconds, [&] {
+            executor->dispatch(states, [&](unsigned worker, std::size_t index) {
                 check_cancelled(stop);
                 const bool fixed = index < nominal.size();
                 auto& state = fixed ? nominal[index] : adaptive[index - nominal.size()];
-                const auto row = mapped_row(config, plan, grid, coordinates[state.key.group], state.key,
-                                            fixed ? first_anchor : anchor, fixed);
-                advance_state(state, row, basis, taps, std::span(observations).first(pair),
-                              config.noise_variance, scratch[worker], stop);
+                MappedBasisRow row;
+                std::array<const FineBulkStatistics*, 2> prepared{};
+                if (bulk) {
+                    for (std::size_t i = 0; i < observations.size(); ++i)
+                        if (observations[i].observed) prepared[i] = &bulk_statistics[i][index];
+                } else {
+                    row = mapped_row(config, plan, grid, coordinates[state.key.group], state.key,
+                                     fixed ? first_anchor : anchor, fixed);
+                }
+                advance_state(state, row, *basis, taps, observations, prepared, config.noise_variance,
+                              scratch[worker], observation.record_work ? &state_work[index] : nullptr, stop);
             });
-            score.affine_blocks += pair;
-            score.adaptive_blocks += pair;
+        });
+        add_work(basis_rows, observed_rows * 2 * tap_count * states);
+        if (observation.record_work) {
+            const auto charge = [&](FineLaneWork& work, std::size_t first, std::size_t size, std::size_t lane) {
+                add_work(work.basis_rows, observed_rows * 2 * tap_count * size);
+                add_work(work.basis_calls, bulk ? bulk_calls[lane] : basis_calls * size);
+                add_work(work.projection_modes, modes * 2 * tap_count * size);
+                add_work(work.gaussian_updates, count * size * 3 * models);
+                for (std::size_t i = first; i < first + size; ++i) {
+                    add_work(work.positive_basis_blocks, state_work[i].positive_basis_blocks);
+                    work.projected_template_energy += state_work[i].template_energy;
+                }
+            };
+            charge(nominal_work, 0, nominal.size(), 0);
+            charge(adaptive_work, nominal.size(), adaptive.size(), 1);
+        }
+        scored_blocks += count;
+    }
+
+    void segment(std::size_t rows) {
+        const auto first = processed;
+        const auto fs = static_cast<long double>(config.sample_rate_hz);
+        const auto anchor = (static_cast<long double>(first) + (rows - 1) / 2.L) / fs;
+        if (!first) first_anchor = anchor;
+        else {
+            const auto boundary = (previous_last + static_cast<long double>(first) / fs) / 2 - previous_anchor;
+            time(times.transition_seconds, [&] {
+                adaptive = predict(adaptive, grid, static_cast<double>(anchor - previous_anchor),
+                    static_cast<double>(boundary), config.data_if_hz, tap_count, adaptive_edges,
+                    observation.record_work ? &adaptive_work : nullptr, stop);
+            });
+            adaptive_work.transition_edges = adaptive_edges;
+        }
+        nominal_work.last_emission_states = nominal.size();
+        nominal_work.peak_emission_states = nominal.size();
+        adaptive_work.last_emission_states = adaptive.size();
+        adaptive_work.peak_emission_states = std::max(adaptive_work.peak_emission_states, adaptive.size());
+
+        auto block_first = first;
+        const auto count = calendar.block_count(rows);
+        for (std::size_t base = 0; base < count; base += blocks.size()) {
+            const auto pair = std::min(blocks.size(), count - base);
+            time(times.observation_seconds, [&] {
+                for (std::size_t block = 0; block < pair; ++block) {
+                    const auto length = calendar.block_length(rows, base + block);
+                    prepare(blocks[block], block_first, length);
+                    block_first += length;
+                }
+            });
+            dispatch(pair, anchor);
         }
         nominal_nonzero |= std::any_of(nominal.begin(), nominal.end(),
             [](const State& state) { return state.nonzero_basis; });
         adaptive_nonzero |= std::any_of(adaptive.begin(), adaptive.end(),
             [](const State& state) { return state.nonzero_basis; });
-        retain(adaptive, maximum_states);
+        time(times.pruning_seconds, [&] {
+            if (observation.record_work && adaptive.size() > maximum_states) {
+                ++adaptive_work.pruning_events;
+                adaptive_work.states_dropped += adaptive.size() - maximum_states;
+            }
+            retain(adaptive, maximum_states);
+        });
+        nominal_work.peak_retained_states = nominal.size();
+        adaptive_work.peak_retained_states = std::max(adaptive_work.peak_retained_states, adaptive.size());
         previous_anchor = anchor;
-        previous_last = static_cast<long double>(first + segment_rows - 1) / fs;
-        first += segment_rows;
+        previous_last = static_cast<long double>(first + rows - 1) / fs;
+        processed += rows;
+        ++segments;
     }
+};
 
-    score.bit_evidence = bit_scores(nominal);
-    score.adaptive_bit_evidence = bit_scores(adaptive);
-    for (std::size_t bit = 0; bit < 2; ++bit)
-        score.combined_bit_evidence[bit] = log_add(score.bit_evidence[bit], score.adaptive_bit_evidence[bit]) - log_two;
-    score.consumed_samples = first;
-    score.complete = nominal_nonzero && adaptive_nonzero && first == iq.size() &&
-        score.affine_blocks && score.adaptive_blocks;
-    score.zero_h0_verified = score.affine_blocks && score.adaptive_blocks;
-    score.noise_statistics_valid = score.complete && score.all_valid && score.quiet_modes;
-    if (score.noise_statistics_valid) score.quiet_threshold = quiet_noise_threshold(score.quiet_modes);
+FineSession::FineSession(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
+                         FineObservation observation, std::span<const Complex> iq,
+                         std::span<const std::uint8_t> valid, std::span<const FineCoordinate> coordinates,
+                         double projected_rate, double clock_gap, unsigned workers,
+                         std::size_t scratch_limit, std::stop_token stop) {
+    const auto began = observation.record_work ? FineClock::now() : FineClock::time_point{};
+    impl_ = std::make_unique<Impl>(config, slot, key, observation, iq, valid, coordinates,
+                                   projected_rate, clock_gap, workers, scratch_limit, stop);
+    if (observation.record_work) impl_->times.preparation_seconds = seconds_since(began);
 }
+
+FineSession::~FineSession() = default;
+
+void FineSession::advance_to(std::size_t available_rows) {
+    auto& p = *impl_;
+    if (p.finished || p.poisoned) throw Error("fine session cannot advance after finish or failed work");
+    if (available_rows < p.available || available_rows > p.observation.rows)
+        throw Error("fine checkpoint regresses or exceeds its immutable observation");
+    try {
+        check_cancelled(p.stop);
+        // Production input was checked by the complete slot driver before
+        // Helper/coarse work. Diagnostic probes and explicit masks have no
+        // such witness and validate only the newly exposed samples.
+        if (p.observation.kind != FineRunKind::operational || !p.validity.empty()) {
+            p.time(p.times.input_check_seconds, [&] {
+                for (auto i = p.available; i < available_rows; ++i) {
+                    if (!(i % 4096)) check_cancelled(p.stop);
+                    const auto mask = p.validity.empty() ? 1 : p.validity[i];
+                    if (mask > 1 || !std::isfinite(p.iq[i].real()) || !std::isfinite(p.iq[i].imag()))
+                        throw Error("fine input must be finite with a binary validity mask");
+                    p.invalid_rows += mask == 0;
+                }
+            });
+        }
+        p.available = available_rows;
+        while (!p.observation_complete()) {
+            const auto rows = std::min(p.calendar.segment_rows, p.observation.rows - p.processed);
+            if (rows > p.available - p.processed) break;
+            check_cancelled(p.stop);
+            p.segment(rows);
+        }
+        check_cancelled(p.stop);
+    } catch (...) {
+        // Never retry a partially updated pair of likelihood lanes.
+        p.poisoned = true;
+        throw;
+    }
+}
+
+FineProgress FineSession::progress() const {
+    const auto& p = *impl_;
+    if (p.poisoned) throw Error("fine session progress is unavailable after failed work");
+    FineProgress result;
+    result.observation = p.observation;
+    result.public_slot = p.plan.index;
+    result.pattern_epoch = p.plan.format.epoch;
+    result.symbol_ordinal = p.plan.format.symbol_ordinal;
+    result.available_rows = p.available;
+    result.processed_rows = p.processed;
+    result.segments = p.segments;
+    result.blocks = p.scored_blocks;
+    result.block_rows = p.calendar.block_rows;
+    result.segment_rows = p.calendar.segment_rows;
+    result.last_block_rows = p.last_block_rows;
+    result.requested_invalid_rows = p.invalid_rows;
+    result.additional_discarded_rows = p.discarded_rows;
+    result.erased_blocks = p.erased_blocks;
+    result.observed_projection_modes = p.observed_modes;
+    result.quiet_modes = p.quiet_modes;
+    result.workspace_bytes = p.workspace;
+    result.sample_rate_hz = p.config.sample_rate_hz;
+    result.delay_step_seconds = p.grid.delay_step_seconds;
+    result.rate_step_ppm = p.grid.rate_step_ppm;
+    result.quiet_energy = p.quiet_energy;
+    result.quiet_threshold = p.quiet_threshold;
+    result.workers = p.workers;
+    result.stage_workers = p.stage_workers;
+    result.tap_count = static_cast<unsigned>(p.tap_count);
+    result.rate_radius = p.grid.radius;
+    result.observation_complete = p.observation_complete();
+    result.representative_work = p.representative_work();
+    result.finished = p.finished;
+    result.cache = p.basis->report();
+    if (p.bulk) result.bulk = p.bulk->receipt();
+    result.times = p.times;
+    const auto lane = [&](FineLaneWork& out, const FineLaneWork& work, const std::vector<State>& states) {
+        out = work;
+        out.bit_scores = bit_scores(states);
+        out.retained_states.reserve(states.size());
+        for (const auto& state : states) {
+            out.retained_states.push_back(state.key);
+            if (p.observation.record_work) out.retained_prior_mass += state.prior_mass;
+        }
+    };
+    lane(result.initial_affine, p.nominal_work, p.nominal);
+    lane(result.adaptive, p.adaptive_work, p.adaptive);
+    for (const auto& worker : p.scratch) {
+        result.times.worker_basis_statistics_seconds += worker.basis_statistics_seconds;
+        result.times.worker_gaussian_seconds += worker.gaussian_seconds;
+    }
+    return result;
+}
+
+void FineSession::finish(ReceiverSlotScore& score) {
+    auto& p = *impl_;
+    if (p.finished || p.poisoned) throw Error("fine session cannot finish after finish or failed work");
+    try {
+        p.time(p.times.finish_seconds, [&] {
+            check_cancelled(p.stop);
+            const auto nominal = bit_scores(p.nominal);
+            const auto adaptive = bit_scores(p.adaptive);
+            const bool all_valid = p.observation_complete() && !p.invalid_rows;
+            if (all_valid && p.quiet_modes) p.quiet_threshold = quiet_noise_threshold(p.quiet_modes);
+            check_cancelled(p.stop);
+
+            score.index = p.plan.index;
+            score.first_sample = p.plan.first_sample;
+            score.stop_sample = p.plan.stop_sample;
+            score.quiet_first_sample = p.plan.quiet_first_sample;
+            score.quiet_stop_sample = p.plan.quiet_stop_sample;
+            score.consumed_samples = p.processed;
+            score.sample_rate_hz = p.config.sample_rate_hz;
+            score.decision = SlotDecision::ambiguous;
+            score.bit.reset();
+            score.operational_passes_conditional_bound = false;
+            score.all_valid = all_valid;
+            score.complete = p.observation.kind == FineRunKind::operational &&
+                p.observation_complete() && p.representative_work() && p.scored_blocks;
+            score.zero_h0_verified = p.scored_blocks != 0;
+            score.noise_statistics_valid = score.complete && score.all_valid && p.quiet_modes;
+            score.bit_evidence = nominal;
+            score.adaptive_bit_evidence = adaptive;
+            for (std::size_t bit = 0; bit < 2; ++bit)
+                score.combined_bit_evidence[bit] = log_add(nominal[bit], adaptive[bit]) - log_two;
+            score.quiet_energy = p.quiet_energy;
+            score.quiet_threshold = p.quiet_threshold;
+            score.quiet_modes = p.quiet_modes;
+            score.fine_candidates = p.coordinates.size();
+            score.affine_blocks = score.adaptive_blocks = p.scored_blocks;
+            score.adaptive_peak_states = p.adaptive_work.peak_emission_states;
+            score.adaptive_transition_edges = p.adaptive_edges;
+            score.basis_rows = p.basis_rows;
+            p.finished = true;
+        });
+    } catch (...) {
+        p.poisoned = true;
+        throw;
+    }
+}
+
+void score_fine(const ReceiverConfig& config, const ReceiverSlotPlan& plan, const Crypto& key,
+                std::span<const Complex> iq, std::span<const FineCoordinate> coordinates,
+                double projected_sample_rate_hz, double coarse_clock_gap_ppm,
+                unsigned workers, ReceiverSlotScore& score, std::size_t scratch_limit, std::stop_token stop) {
+    FineSession session(config, plan, key, whole_slot(plan), iq, {}, coordinates, projected_sample_rate_hz,
+                        coarse_clock_gap_ppm, workers, scratch_limit, stop);
+    session.advance_to(iq.size());
+    session.finish(score);
+}
+
 } // namespace datapump::triad::v3::receiver_detail

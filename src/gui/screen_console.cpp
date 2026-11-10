@@ -52,7 +52,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::helper_callsign)control.help="Up to 16 printable ASCII characters in keyed Helper metadata. Editing this field does not change the message.";
     if(slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
     if(slot==Slot::callsign)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. A valid value of at most 16 printable ASCII characters also copies to Helper Carrier Callsign. Helper-only edits never change this value or the message.";
-    if(slot==Slot::repeatable)control.help="Developer draft tool: prepends REPEATABLE-XXXXXXXX and a space, with 8 new random consonants or digits per edit. The 20-byte prefix exceeds the native Robust 16-byte text limit; turn it off before transmitting. Automatically turns off above 256 draft bytes, including the prefix.";
+    if(slot==Slot::repeatable)control.help="Prepends REPEATABLE-XXXXXXXX and a space, with 8 new random consonants or digits per edit. The prefix selects long-message framing. Automatically turns off above 256 draft bytes, including the prefix.";
     if(slot==Slot::simulation)
         control.help="Yes feeds the canonical emitted waveform through the selected sampled channel and native receiver. No uses the selected audio device and configured public calendar.";
     if(slot==Slot::live_duplex) {
@@ -101,7 +101,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.submit=Command::none;control.submit_mode=Field::count;control.tab_navigation=true;
         control.help="Shift frequencies: one per line, or comma/semicolon separated. Hz, kHz, MHz, GHz and THz; 2–200 distinct frequencies. Apply list commits the draft. Fake display only; audio/radio tuning stay fixed.";
     }
-    if(slot==Slot::message)control.help="Edits also update the first 16 bytes in Binary. In escaped-byte mode, use \\xNN for byte values and \\\\ for a literal backslash. Enter transmits; Shift+Enter inserts a newline.";
+    if(slot==Slot::message)control.help="Transmit up to 1 MiB of decoded text bytes (4 MiB of escaped editor text). Up to 16 bytes use the short dictionary; longer messages use periodic markers and the selected Error correction. Edits also update the first 16 bytes in Binary. In escaped-byte mode, use \\xNN for byte values and \\\\ for a literal backslash. Enter transmits; Shift+Enter inserts a newline.";
     if(slot==Slot::binary)control.help="Edit the first 16 message bytes, most significant bit first. Whitespace is optional. Inputs up to 128 bits can transmit exact bits, including incomplete bytes. Raw reception shows exact bits or whole bytes; use Compression / raw bits to inspect the retained observations. Ctrl+C copies and Ctrl+V pastes. Enter transmits; Shift+Enter inserts a newline.";
     if(slot==Slot::short_bits) {
         control.font_size=14;control.submit=Command::transmit_short_bits;control.submit_mode=Field::send_key;
@@ -311,7 +311,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::compression,0,
             "With Error correction Off, 1-16 text bytes use only dictionary bits: quick brown = 70 bits.\n"
             "Edit up to 208 exact bits below; complete codes show the expected text. Raw 010 stays exactly 010.\n"
-            "Text is limited to 16 bytes. Optional Reed-Solomon protects the short frame; raw bits always bypass FEC."}, Slot::compression_explanation),
+            "Longer text uses periodic markers and the selected FEC; its exact length is prepared in the background on Transmit. Raw bits always bypass FEC."}, Slot::compression_explanation),
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::compression,1,"Dictionary / exact raw bits (1-208)"}, Slot::short_bits_label),
         placed({Kind::text,Field::short_bits,Command::none,Bitmap::none,Page::compression,1,"",1,true,416}, Slot::short_bits),
         placed({Kind::label,Field::short_bits_detail,Command::none,Bitmap::none,Page::compression,2,""}, Slot::short_bits_detail),

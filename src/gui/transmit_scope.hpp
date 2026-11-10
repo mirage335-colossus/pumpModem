@@ -82,10 +82,11 @@ inline std::vector<ui::Record> transmit_scope_records(const modem::TransmitTrace
     rows.push_back(std::move(source));
     auto compressed=row("tx-compressed",captured&&!trace.short_text?"Transmitted Compressed Plaintext (source coding)":"Transmitted Compressed Plaintext");
     if(trace.temporary_key)note(compressed,"Unused: temporary-key noise bypasses source encoding");
-    else if(captured&&!trace.compressed_available)note(compressed,"Unused: explicit raw bits bypass compression");
+    else if(captured&&!trace.compressed_available)note(compressed,trace.raw?
+        "Unused: explicit raw bits bypass compression":"Not captured: source-coding preview unavailable");
     else bits(compressed,trace.compressed_bits,detailed);
     rows.push_back(std::move(compressed));
-    auto plain=row("tx-wire-plain",captured&&!trace.raw&&!trace.short_text?"Wire Plaintext (includes markers / FEC)":"Wire Plaintext (exact payload bits)");
+    auto plain=row("tx-wire-plain",captured&&!trace.raw?"Wire Plaintext (configured framing / FEC)":"Wire Plaintext (exact payload bits)");
     bits(plain,trace.wire_plain_bits,detailed);rows.push_back(std::move(plain));
     auto data_key=row("tx-data-key","Encryption Keystream Bytes");
     if(trace.temporary_key)note(data_key,"Not captured: temporary noise Data stream");
@@ -130,7 +131,8 @@ inline std::string transmit_scope_caption(const modem::TransmitTrace& trace,std:
     if(!trace.active && !trace.temporary_key)return "TX generation scope: waiting for transmission | source pairs; pattern: 8 bytes / symbol start; choose Hex / Bits";
     std::string caption="TX generation scope: ";
     caption+=status.empty()?"captured":status;
-    caption+=" | "+std::to_string(trace.generated_bits)+(trace.temporary_key?" temporary-key noise bits begun":
+    if(!trace.temporary_key&&!trace.total_wire_bits)caption+=" | preparing exact wire length";
+    else caption+=" | "+std::to_string(trace.generated_bits)+(trace.temporary_key?" temporary-key noise bits begun":
         " / "+std::to_string(trace.total_wire_bits)+" wire bits begun");
     caption+=" | separate offsets; pattern: 8 bytes / symbol start";
     return caption;

@@ -214,7 +214,9 @@ add_library(datapump_triad_receiver STATIC
   src/triad_stream_receiver.cpp src/triad_stream_resources.cpp)
 target_include_directories(datapump_triad_receiver PUBLIC include PRIVATE src third_party/xz/src/liblzma/api)
 target_link_libraries(datapump_triad_receiver PUBLIC datapump_triad PRIVATE liblzma)
-add_library(datapump_robust_session STATIC src/live.cpp src/robust_profile.cpp)
+include(cmake/TriadTensor.cmake)
+add_library(datapump_robust_session STATIC src/live.cpp src/robust_profile.cpp
+  src/robust_audio_frontend.cpp)
 target_include_directories(datapump_robust_session PUBLIC include PRIVATE src)
 target_link_libraries(datapump_robust_session PUBLIC datapump_triad_receiver)
 if(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$")
@@ -227,18 +229,6 @@ endif()
 add_executable(triad_helper_export EXCLUDE_FROM_ALL tools/triad-helper-export.cpp)
 target_include_directories(triad_helper_export PRIVATE src tools)
 target_link_libraries(triad_helper_export PRIVATE datapump_triad)
-if(NOT DATAPUMP_BUILD_WASM)
-  add_library(triad_mapped_kernel SHARED EXCLUDE_FROM_ALL
-    src/triad_mapped_kernel.cpp src/triad_gaussian_kernel.cpp
-    src/triad_coarse_kernel.cpp)
-  set_target_properties(triad_mapped_kernel PROPERTIES PREFIX "" CXX_VISIBILITY_PRESET hidden)
-  if(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$")
-    target_compile_options(triad_mapped_kernel PRIVATE -Wall -Wextra -Wpedantic -ffp-contract=off -fno-fast-math)
-  elseif(MSVC)
-    target_compile_options(triad_mapped_kernel PRIVATE /fp:strict)
-  endif()
-  add_dependencies(triad_helper_export triad_mapped_kernel)
-endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_executable(triad_audio_stream EXCLUDE_FROM_ALL tools/triad-audio-stream.cpp)
   target_link_libraries(triad_audio_stream PRIVATE datapump_audio_native datapump)
@@ -329,6 +319,20 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   target_compile_definitions(test_gui_robust_live PRIVATE DATAPUMP_TEST_UTC_CAPTURE_PROVIDER=1)
   add_test(NAME gui_robust_live COMMAND test_gui_robust_live)
   set_tests_properties(gui_robust_live PROPERTIES LABELS "gui;triad" TIMEOUT 120)
+  add_executable(test_robust_audio_frontend EXCLUDE_FROM_ALL tests/test_robust_audio_frontend.cpp)
+  target_link_libraries(test_robust_audio_frontend PRIVATE datapump_robust_session)
+  add_test(NAME robust_audio_frontend COMMAND test_robust_audio_frontend)
+  set_tests_properties(robust_audio_frontend PROPERTIES LABELS "triad;contract;audio" TIMEOUT 30)
+  add_executable(test_triad_probe_spool EXCLUDE_FROM_ALL tests/test_triad_probe_spool.cpp)
+  target_include_directories(test_triad_probe_spool PRIVATE tools)
+  target_link_libraries(test_triad_probe_spool PRIVATE datapump)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang)$")
+    target_compile_definitions(test_triad_probe_spool PRIVATE DATAPUMP_TEST_SPOOL_IO_WRAPPERS=1)
+    target_link_options(test_triad_probe_spool PRIVATE
+      "-Wl,--wrap=fread,--wrap=fwrite,--wrap=fflush,--wrap=fseek")
+  endif()
+  add_test(NAME triad_probe_spool COMMAND test_triad_probe_spool)
+  set_tests_properties(triad_probe_spool PROPERTIES LABELS "triad;contract" TIMEOUT 30)
   add_test(NAME vendored_lzma_source COMMAND ${CMAKE_COMMAND}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/vendored_lzma.cmake)
   foreach(component crypto keyring stream_codec attachment compression_short
@@ -343,7 +347,7 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
     set_tests_properties(${component} PROPERTIES LABELS "contract;regular")
   endforeach()
   foreach(component triad_message_native triad_native_helper triad_duration_native triad_receiver_basis
-      triad_native_receiver triad_coarse_native triad_stream_native)
+      triad_native_receiver triad_coarse_native triad_stream_native triad_fine_session)
     add_executable(test_${component} EXCLUDE_FROM_ALL tests/test_${component}.cpp)
     target_include_directories(test_${component} PRIVATE src tests)
     target_link_libraries(test_${component} PRIVATE datapump_triad_receiver)
@@ -588,44 +592,18 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       $<TARGET_FILE:triad_helper_export> $<TARGET_FILE:test_triad_keyfile_fixture>)
     add_custom_target(test_triad_stream_source DEPENDS triad_helper_export test_triad_keyfile_fixture)
     set_tests_properties(triad_stream_source PROPERTIES LABELS "triad" TIMEOUT 90)
-    add_test(NAME triad_tracking_basis_native COMMAND ${Python3_EXECUTABLE}
-      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_tracking_basis.py $<TARGET_FILE:triad_helper_export>)
-    add_custom_target(test_triad_tracking_basis_native DEPENDS triad_helper_export)
-    set_tests_properties(triad_tracking_basis_native PROPERTIES LABELS "triad" TIMEOUT 60)
-    add_test(NAME triad_coarse_kernel_native COMMAND ${Python3_EXECUTABLE}
-      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_coarse_kernel.py $<TARGET_FILE:triad_helper_export>)
-    add_custom_target(test_triad_coarse_kernel_native DEPENDS triad_helper_export)
-    set_tests_properties(triad_coarse_kernel_native PROPERTIES LABELS "triad" TIMEOUT 60
-      ENVIRONMENT "OPENBLAS_NUM_THREADS=1;OMP_NUM_THREADS=1;MKL_NUM_THREADS=1")
     if(TARGET triad_audio_stream)
       add_test(NAME triad_audio_stream COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_audio_stream.py $<TARGET_FILE:triad_audio_stream>)
       add_custom_target(test_triad_audio_stream DEPENDS triad_audio_stream)
       set_tests_properties(triad_audio_stream PROPERTIES LABELS "triad" TIMEOUT 30)
     endif()
-    add_test(NAME triad_python COMMAND ${Python3_EXECUTABLE} -m unittest
-      test_triad_audio_mapping test_triad_continuous test_triad_cpu test_triad_duration_model
-      test_triad_dynamic_frequency test_triad_dynamic_joint test_triad_dynamic_scan
-      test_triad_dynamic_sparse test_triad_gaussian_prepared test_triad_gaussian_state
-      test_triad_incremental_receiver test_triad_operational_admission
-      test_triad_persistent_tracking test_triad_realtime_fft test_triad_receiver
-      test_triad_regression_receiver
-      test_triad_message_receiver test_triad_stream_receiver test_triad_slot_executor
-      test_triad_segmented_fft
-      test_triad_stream_frontend test_triad_stream_scheduler test_triad_template_bank
-      test_triad_timing_forward test_triad_tracking_budget
-      test_triad_tracking_preflight test_triad_weak_helper test_triad_weak_receiver)
-    set_tests_properties(triad_python PROPERTIES LABELS "triad" TIMEOUT 60
-      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests"
-      ENVIRONMENT "OPENBLAS_NUM_THREADS=1;OMP_NUM_THREADS=1;MKL_NUM_THREADS=1")
     add_test(NAME triad_abbreviated COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_abbreviated.py)
     set_tests_properties(triad_abbreviated PROPERTIES LABELS "triad" TIMEOUT 30)
     add_test(NAME triad_cases COMMAND ${Python3_EXECUTABLE} -m unittest
-      tests.test_triad_cases tests.test_triad_case_metrics tests.test_triad_case_noise
-      tests.test_triad_case_receiver tests.test_triad_case_replay tests.test_triad_case_suite
-      tests.test_triad_case_capacity tests.test_triad_orchestration_cost
-      tests.test_triad_quiet_diagnostic tests.test_triad_manual_confirmation)
+      tests.test_triad_cases tests.test_triad_case_metrics tests.test_triad_case_suite
+      tests.test_triad_case_capacity tests.test_triad_cpu)
     set_tests_properties(triad_cases PROPERTIES LABELS "triad" TIMEOUT 60
       WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
       ENVIRONMENT "OPENBLAS_NUM_THREADS=1;OMP_NUM_THREADS=1;MKL_NUM_THREADS=1")
@@ -754,6 +732,14 @@ install(FILES third_party/ldpc/WIFI-LICENSE DESTINATION share/doc/datapump RENAM
 install(FILES third_party/botan/LICENSE DESTINATION share/doc/datapump RENAME BOTAN-LICENSE)
 install(FILES third_party/ldpc/README.md DESTINATION share/doc/datapump RENAME LDPC-SOURCE.md)
 include(cmake/BuildInfo.cmake)
+include(cmake/TriadBench.cmake)
+if(BUILD_TESTING AND TARGET triad_receiver_probe AND Python3_Interpreter_FOUND)
+  add_test(NAME triad_native_orchestration COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_native_orchestration.py"
+    "$<TARGET_FILE:triad_receiver_probe>")
+  add_custom_target(test_triad_native_orchestration DEPENDS triad_receiver_probe)
+  set_tests_properties(triad_native_orchestration PROPERTIES LABELS "triad" TIMEOUT 60)
+endif()
 if(NOT DATAPUMP_BUILD_WASM)
   include(cmake/Portable.cmake)
   datapump_install_native(TARGETS ${datapump_executables})

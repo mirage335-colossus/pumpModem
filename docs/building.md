@@ -23,7 +23,9 @@ Python is optional for CLI/build-tool tests, and required only by the opt-in Rev
 resource builder or optional dependency preparation helper. Python is not part
 of the installed application. The Robust Helper, DATA, receiver and session
 static libraries link into the GUI binary; no receiver subprocess or Python
-runtime is installed. The browser profile additionally uses Python to
+runtime is installed. The default receiver also has no Torch dependency; an
+explicit optional native ATen build uses LibTorch C++ libraries. The browser
+profile additionally uses Python to
 assemble its self-contained static page; it is not a browser runtime dependency.
 
 For Debian/Ubuntu, see the package list in the [README](../README.md#build-and-run).
@@ -444,20 +446,20 @@ tests but do not compile them. For individual work, build the corresponding
 The [current Robust architecture](robust-current.md) is one compiled C++
 waveform/Helper/receiver stack linked into the GUI session. Run affected cheap
 deterministic native checks first, then the shared GUI/audio groups. Python
-numerical references remain test tools for bounded migration comparisons; they
-are not the application receiver. Old process-runtime costs do not calibrate
-the in-process native scheduler. See the
-[native integration results](validation.md#native-gui-integration).
+tools orchestrate native probes and statistics; receiver DSP and persistent
+state remain C++. Old Python/process-runtime costs are inadmissible as native
+calibration. See the
+[native integration results](validation.md#native-codec-and-measurement-migration).
 
 ```sh
 ./build.sh test triad
 ./build.sh test gui
 ```
 
-The retained `tools/triad_manual_cases.py` and its `triad_abbreviated.py --cases`
-forwarder have source-bound reference coverage. They require a matched native
-measurement route and applicable complete-work costs before qualifying the
-current GUI receiver.
+`tools/triad_manual_cases.py --probe build/dev/triad_receiver_probe` and its
+`triad_abbreviated.py --cases` forwarder measure the compiled receiver. Their
+native report schemas require current source, binary, configuration and work
+receipts; old Python calibration is rejected.
 Ordinary `triad_abbreviated.py` runs measure relative computational regression
 against a matched baseline; they are not absolute capacity results. See the
 [manual capacity contract](robust-manual-capacity.md) for complete work,
@@ -522,47 +524,60 @@ or a release.
 ### Robust computational checks
 
 The `triad` group covers bounded native source, Helper, complete receiver,
-message/FEC and stream checks, plus available Python reference tests. Run it
-before refreshing local CPU calibration. The manual harness below measures its
-reference runtime; its historical costs are not native GUI calibration. Bind a
-native benchmark route to the current complete receiver before making a new
-application capacity claim.
+short/long message/FEC, stream and audio checks, plus Python orchestration and
+report-validation tests when Python is available. Run it before refreshing local
+CPU calibration. The measurement driver uses Python's standard library; all
+receiver DSP, source generation and persistent measurement state are compiled.
 
 ```sh
 ./build.sh test triad
 python3 tools/triad_manual_cases.py \
-  --output local-evidence/robust-cases.json \
-  --exporter build/dev/triad_helper_export
+  --probe build/dev/triad_receiver_probe \
+  --output local-evidence/robust-cases.json
 ```
 
-Use repeatable `--case-index N` for an explicitly partial debugging rerun; the
-runner validates the entire current list and marks the output partial, which
-does not qualify omitted rows.
+The manual suite validates the whole current `_tests-RobustModem.md`, including
+all sixteen required fields and ordered duplicates. Repeatable `--case-index N`
+selects explicitly partial coverage. Default inference uses `2*H` workers after
+a serial/physical/logical allocation pilot; explicit limits remain exact. Use
+`--deadline-ms`, `--row-deadline-ms`, `--max-samples` and `--coarse-tiles` to declare
+bounded work. Hitting a bound leaves coverage unresolved. The
+[manual capacity contract](robust-manual-capacity.md) defines full work, memory,
+uncertainty and margin gates. `--skip-message-gate` is diagnostic and prevents
+an integrated pass. Separate `--sensitivity` trials measure native message
+reception and cannot supply CPU capacity.
 
-The manual suite reads and validates `_tests-RobustModem.md` by default and
-supports current-index partial reruns. Its default inference allocation is twice effective logical hardware capacity
-after the allocation pilot; explicit allocations remain exact. Its exact coverage,
-workspace and cost gates, and interpretation limits are in the
-[manual capacity contract](robust-manual-capacity.md). A partial rerun cannot
-qualify omitted rows, and staged/coarse sensitivity does not qualify an
-operational receiver or physical message success. The ordinary
-[`tools/triad_abbreviated.py`](../tools/triad_abbreviated.py) harness instead
-measures relative degradation against a matched baseline; its synthetic
-complete-fine receiver fixture is not a native-channel or capacity pass. See
-the [regression guide](triad-performance.md) for its fixed-geometry limits.
-The manual suite's `--skip-message-gate` option is debug-only and prevents an
-integrated pass. Use the [GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast)
-to reuse matching local costs and qualified paired GPU references. Refresh
-missing phases with bounded local work. See the [validation record](validation.md)
-for actual functional results, per-case ratios and provenance.
-Do not restore full, sustained, multi-day, exhaustive, or heavy-calibration
-campaigns as routine tests or fallback. RunPod accelerates the same bounded
-approach.
+The ordinary [`triad_abbreviated.py`](../tools/triad_abbreviated.py) harness uses
+native slot/coarse/fine/audio receipts for relative regression, with matched
+native baselines and 1/2/4-unit, 3/5/9-look limits. Baseline establishment is not a
+relative-regression pass. See [computational checks](triad-performance.md) for
+commands, optional compiled ATen/CUDA builds and GPU-assisted phase forecasts.
+Old Python reports are inadmissible as native timing calibration. A forecast
+pass is separate from complete real-time capacity or communication sensitivity.
+No full, sustained, multi-day, exhaustive or heavy-calibration campaign is a
+routine fallback for unresolved abbreviated evidence.
 
 ### CI, sanitizers, and release validation
 
 Automatic CI is fast feedback for its selected source scope and does not by
-itself certify a release. Use the current workflows in `.github/workflows/` for
+itself certify a release. The native Linux and Windows manual matrices
+include the `triad` group and its `datapump-tests-triad` build target. The CPU
+`triad-abbreviated` workflow builds both candidate and same-run native reference
+probes before comparison; it does not install numerical Python packages. The
+one-time native protocol transition from `1c58507a` may establish a baseline,
+reported with `relative_regression_pass=false`. Later missing or broken
+references fail; an explicit manual diagnostic establishment remains separate.
+
+The opt-in `triad-gpu` workflow requires a preprovisioned self-hosted
+`linux/x64/datapump-cuda` runner and CUDA-enabled C++11-ABI LibTorch. It builds the
+same native stack with `DATAPUMP_TRIAD_TENSOR=ON` and
+`DATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON`, executes `triad_tensor_cuda` and a probe
+that requires actual accelerator execution, then performs a bounded matched
+CUDA regression. The workflow does not launch or purchase cloud capacity.
+Configured workflow coverage is not evidence of an actual hosted/platform run;
+see [recorded outcomes](validation.md#native-codec-and-measurement-migration).
+
+Use the current workflows in `.github/workflows/` for
 platform, SDK, package, and published-archive checks. Use
 `./build.sh sanitize GROUP` for the selected instrumented tests. Report the exact
 scope and any declared exclusions; sanitizers cover only executed instrumented

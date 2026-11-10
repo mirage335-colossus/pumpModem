@@ -17,6 +17,7 @@ name: Native Windows validation shard
         - core
         - fast
         - legacy
+        - triad
         - frontends
         - web
         - gui
@@ -68,7 +69,7 @@ jobs:
         switch ($env:CI_SCOPE) {
           'package' { $target = 'datapump-apps' }
           'core' { $target = 'datapump-tests-regular' }
-          { $_ -in 'fast','legacy','frontends','web','gui' } { $target = "datapump-tests-$env:CI_SCOPE" }
+          { $_ -in 'fast','legacy','triad','frontends','web','gui' } { $target = "datapump-tests-$env:CI_SCOPE" }
           default { throw "Unknown native scope: $env:CI_SCOPE" }
         }
         $env:CL_MPCount = python -B tools/build_capacity.py

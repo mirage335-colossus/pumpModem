@@ -315,6 +315,7 @@ jobs:
         - core
         - fast
         - legacy
+        - triad
         - frontends
         - web
     uses: ./.github/workflows/native-linux.yml
@@ -407,6 +408,7 @@ jobs:
         - core
         - fast
         - legacy
+        - triad
         - frontends
         - web
     uses: ./.github/workflows/native-windows.yml
@@ -415,7 +417,7 @@ jobs:
       scope: ${{ matrix.scope }}
   triad-abbreviated:
     if: ${{ !inputs.devfast }}
-    name: Abbreviated triad kernel estimates
+    name: Native Robust bounded regression
     uses: ./.github/workflows/triad-abbreviated.yml
     with:
       candidate_ref: ${{ github.sha }}

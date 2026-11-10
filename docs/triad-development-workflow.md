@@ -4,10 +4,10 @@ Start with [current architecture](robust-current.md), [independent patterns](tri
 and the [channel model contract](channel-models.md). There is one compiled C++
 waveform, channel, Helper and complete receiver stack, linked into the GUI
 through a native session. Python can test and benchmark the stack but is not
-part of its operating path. Retained numerical references serve bounded
-migration parity and interpretation of old measurements only; remove them when
-those concrete questions are resolved. The former single-carrier receiver and
-standalone alternatives remain retired.
+part of its operating path. Receiver DSP, persistent state and workload probes
+use native production code. Python is limited to orchestration and statistical
+analysis. Superseded DSP modules, copied experiments, the former single-carrier
+receiver and standalone alternatives are retired.
 
 ## Choose the smallest discriminating check
 
@@ -38,10 +38,15 @@ this same method. Do not restore an old campaign executable to obtain evidence.
   lanes. Only the fixed-affine lane supplies operational admission; the other
   lanes remain diagnostics. All required work is charged.
 - `CompleteStreamReceiver` owns one aggregate worker budget, shared immutable
-  windows, ordered commit and bounded queues. The message receiver handles
-  codec state only after two scored quiet slots; EOF never invents completion.
-- Frontend, template, timing and Gaussian-state modules are reusable kernels.
-  Preparation/cache ownership and actual numeric thread limits are part of cost.
+  windows, ordered commit and bounded queues. The message receiver checks fixed
+  intervals incrementally and publishes validated content only after two scored
+  quiet slots; EOF never invents completion.
+- Native `FineSession` and `CoarseSession` expose bounded persistent work from
+  production stages. Optional compiled ATen bulk operations share their control/state
+  contracts and report actual arithmetic; CUDA requests cannot silently run CPU.
+- The native real-audio frontend, templates and Gaussian state preserve full
+  filter support and sample validity. Preparation/cache ownership and actual
+  worker/resource limits are part of cost.
 
 ## Findings worth carrying forward
 
@@ -59,10 +64,12 @@ a specific question, next action and cleanup condition.
 
 ## Scope the checks to the change
 
-Use `./build.sh test triad` for the retained bounded native and Python checks in
-a configured scientific Python environment. Native operation itself must build
-and run without Python. Use applicable shared security, audio, Fast, Legacy and
-frontend groups when those components change. GUI controls must preserve actual
+Use `./build.sh test triad` for bounded native checks and the available
+Python orchestration/statistics checks. Native operation must build and run
+without Python or Torch. Optional ATen/CUDA checks require their explicitly
+selected compiled backend and actual device evidence; an unavailable CUDA
+device is not a successful GPU check. Use applicable shared security, audio,
+Fast, Legacy and frontend groups when those components change. GUI controls must preserve actual
 receiver diagnostics and expose unconfigured/unsupported action reasons.
 Test counts and results belong in [validation](validation.md).
 Protocol breaks evolve this implementation; older binaries belong to Git tags

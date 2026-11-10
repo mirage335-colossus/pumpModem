@@ -3,8 +3,11 @@
 Robust uses one compiled C++ `IndependentApskV2` modem stack linked into the GUI
 application. Native Helper, DATA, complete receiver processing and audio connect
 through internal interfaces and shared buffers. There is no operating Python
-receiver, receiver subprocess or receiver IPC. Python remains available for
-numerical reference comparisons, tests and benchmarks.
+receiver, receiver subprocess or receiver IPC. Python tools orchestrate native
+tests/benchmarks and analyze their returned statistics; receiver DSP and state
+belong to the compiled implementation. The default application requires neither
+Python nor Torch. An optional compiled ATen backend can supply bulk operations
+inside the same receiver control path.
 
 The shared GUI controller connects this stack to simulation, live audio and
 presentation. Fast remains the launch default and retains its independent
@@ -21,9 +24,10 @@ qualification follows from these connections.
 | `triad_stream.hpp` | Public profile and slot geometry, bounded DATA/Helper/noise emission, and the shared source used by GUI and exporter. |
 | `triad_receiver.hpp` | Complete slot scoring: noisy Helper proposals, full public FFT screening, persistent fine tracking, bit/null evidence and resource preflight. |
 | `triad_stream_receiver.hpp` | Bounded continuous ingress, in-process slot ownership, ordered commit, backpressure and cancellation. |
-| `triad_message_receiver.hpp` | Bounded native short-message codec, configured FEC and two-scored-quiet completion. |
+| `triad_message_receiver.hpp` | Bounded native short/long text profiles, lazy interval emission, configured FEC and two-scored-quiet completion. |
 | `robust_profile.hpp`, `live.hpp` | Validated GUI settings, duration/profile preparation, simulation/live session and bounded presentation snapshots. |
-| `audio.hpp` | Device ownership, routing, playback gain and timestamped capture through the existing native audio service. |
+| `audio.hpp`, `robust_audio_frontend.hpp` | Native device ownership, routing, gain, timestamped capture and bounded real-PCM-to-I/Q filtering. |
+| `triad_acceleration.hpp` | Optional compiled tensor leaves under the production receiver's control, state and resource contracts. |
 
 The GUI links `datapump_robust_session`, `datapump_triad_receiver` and
 `datapump_triad` statically. Source generation, Helper acquisition, coarse
@@ -95,12 +99,22 @@ control the canonical envelope and illustrative schedule; they do not retune
 external radio hardware. See [duration planning](triad-duration-planning.md),
 [burst scheduling](symbol-burst.md) and [channel models](channel-models.md).
 
-Normal text uses the bounded native short dictionary codec. FEC is explicitly
-configured as Off, RS20 or RS60; raw-bit transmission bypasses FEC and preserves
-exact bits. Decoding follows physical completion, with fixed local bounds and
-no received-length-driven allocation. The new FEC layout is documented in
-[protocol](protocol.md). It is a new wire profile, not compatibility with the
-retired single-carrier receiver.
+Text up to 16 bytes retains the native short dictionary profile. Longer text
+uses periodic 192-bit markers and 128-byte fixed codewords with configured Off,
+RS20 or RS60 coding, optional raw LZMA2 compression and a private-key interval
+tag when keyed. The GUI byte limit is 1 MiB; its escaped text representation has
+a separate 4 MiB limit. Native profile quotas are local resource settings.
+Transmit preparation and codewords are generated off the GUI thread; lazy
+emission avoids a whole-message bit vector. Exact 1–208-bit raw drafts still
+bypass text coding and FEC.
+
+Physical completion remains two scored quiet slots. No received length selects
+DSP geometry, memory bounds or a message endpoint. The marker cadence does not
+reset the global waveform ordinal. The keyed interval domain is new; it does
+not promise compatibility with retired long-message formats. Valid short
+prefixes can overlap an incomplete marker, and missing whole final uncompressed
+intervals can look like a shorter valid stream. Interval authentication is not
+whole-message endpoint authentication. See [protocol](protocol.md).
 
 Waveform, waterfall, receiver I/Q and pattern evidence/steps consume bounded
 session diagnostics. Receive evidence comes from actual received observations
@@ -128,14 +142,16 @@ later acceptance of its smaller productive gain does not change that failure.
 The [architecture timeline](receiver-parallelism.html) depicts the measured
 historical runtime and must not be read as the current application's scheduler.
 
-Python numerical references are retained while matched-input migration parity,
-unresolved numerical differences and interpretation of old calibration require
-them. They are neither a second supported modem nor an operating fallback.
-When those questions are resolved, preserve concise findings and remove
-superseded implementations, tests and temporary captures. Keep raw evidence only
-for a concrete unresolved comparison or required validation claim, with cleanup
-when that purpose ends. Follow [material lifecycle](development.md#material-lifecycle).
-Older protocols belong in Git tags and separately versioned binaries.
+Python DSP implementations, their implementation-only tests and copied
+experiment source are retired. Current tools call
+the production C++ stack; Python is limited to orchestration and statistical
+analysis. Preserve concise historical choices, failures and provenance, not a
+second operating implementation. Historical Python timings are inadmissible as
+native CPU calibration; changed native work needs fresh affected timings and
+independent holdouts. Keep raw evidence only for a concrete unresolved comparison
+or required validation claim, with cleanup when that purpose ends. Follow
+[material lifecycle](development.md#material-lifecycle). Older protocols belong
+in Git tags and separately versioned binaries.
 
 ## Transmit key policy
 
@@ -181,14 +197,16 @@ same-stream phase timings before a CPU forecast can qualify it. Old Python
 orchestration timings and process-bootstrap costs cannot simply be relabeled
 as native calibration.
 
-The retained `tools/triad_manual_cases.py` and `tools/triad_abbreviated.py`
-harnesses have source-bound reference coverage. The former reads all sixteen
+`tools/triad_manual_cases.py --probe build/dev/triad_receiver_probe` measures the
+current compiled receiver through bounded native receipts. It reads all sixteen
 strict fields in `_tests-RobustModem.md`, preserves ordered duplicates and can
-select explicit partial rows with repeatable `--case-index N`. The latter tests
-relative regression. Neither tool's historical result becomes a native GUI
-capacity result without a matched native measurement route and complete work
-accounting. Follow the [manual capacity contract](robust-manual-capacity.md)
-and [GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast).
+select explicit partial rows with repeatable `--case-index N`. Reuse of identical
+normalized inputs requires `--reuse-identical`. `tools/triad_abbreviated.py`
+compares native computational regression against a matched native baseline.
+Python performs orchestration and statistical analysis only. Neither old Python
+reports nor transport applicability exceptions supply current calibration. Follow
+the [manual capacity contract](robust-manual-capacity.md) and
+[GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast).
 
 Computationally intensive checks must predeclare path strata, minimal sample
 budget, uncertainty decision and stopping rule. Run native triad checks before

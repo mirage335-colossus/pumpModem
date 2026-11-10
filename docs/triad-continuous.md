@@ -4,9 +4,9 @@ The operating interfaces are native C++: `triad_stream.hpp` supplies bounded
 source and public slot geometry; `triad_receiver.hpp` scores complete slots;
 `triad_stream_receiver.hpp` owns continuous ingress and ordered completion.
 The GUI links these components through `live::Session`, sharing immutable input
-between in-process scorer owners. Python numerical modules are retained only
-for bounded migration comparisons and historical measurement interpretation,
-not as an application runtime. See [current architecture](robust-current.md).
+between in-process scorer owners. Python tools invoke native probes and analyze
+returned statistics; they do not implement receiver DSP. See
+[current architecture](robust-current.md).
 
 ## What streams
 
@@ -16,11 +16,17 @@ observation; do not send simulated receiver noise as the intended DAC waveform.
 Current shaping/channel state and all delayed tails remain shared and continuous.
 Whole-source exports and full-duration normalization/calibration are retired.
 
-The numerical-reference `IncrementalReceiver` retains bounded input and Gaussian likelihood state for
-a declared candidate bank. Its accumulated score alone does not admit a bit.
-Observation endpoint, priors and permitted attempts remain explicit; incomplete
-input cannot be padded with fictitious observed zeros. Persistent timing lanes
-extend this state without resetting the keyed source or prior evidence.
+Native `FineSession` retains Gaussian and timing state across bounded input
+continuations. Native `CoarseSession` exposes preparation, bounded search
+progress and completion from the same production coarse path. Probe prefixes
+are diagnostics, not additional operational admission attempts. Observation
+endpoints, priors and permitted attempts remain explicit; incomplete input
+cannot be padded with fictitious observed zeros. Continuation does not reset
+the keyed source or prior evidence.
+
+Long text similarly streams one fixed marker/codeword interval at a time,
+retaining bounded source bytes and diagnostic prefixes. Message completion
+remains two fully scored quiet slots, independent of codec length.
 
 ## Resource and timing boundaries
 
@@ -30,14 +36,19 @@ of constructing long sample arrays. CPU allocation respects affinity/quotas;
 actual numerical thread pools and cold preparation remain part of measured cost.
 A larger thread count does not guarantee faster small-matrix updates.
 
-The native full-audio bridge retains byte/format/limit/EOF checks and
+The native Fejer-tapered Hilbert frontend converts real PCM to analytic I/Q,
+propagates validity across the full filter support and labels centered sample
+coordinates. Startup transients are excluded; EOF never supplies invented
+filter-tail observations. This replaces the unused Python Kaiser experiment,
+not a numerically equivalent implementation of it. Native audio retains
+byte/format/limit/EOF checks and
 [continuous clock discipline](triad-clock-follow.md). Known ADC mapping does not
 whiten interpolation noise or identify arbitrary remote motion. Adaptive
 tracking remains distinct from physical-noise qualification.
 
 The native complete receiver separately maintains bounded ingress, independent
 slot ownership, ordered commit, quiet completion and continued listening. Its
-current scope and checks are in [validation](validation.md#native-gui-integration).
+current scope and checks are in [validation](validation.md#native-codec-and-measurement-migration).
 
 The historical [continuous record](validation-data/triad-v3/2026-11-06-continuous/README.md)
 and [CPU follow-up](validation-data/triad-v3/2026-11-06-cpu-default/README.md)

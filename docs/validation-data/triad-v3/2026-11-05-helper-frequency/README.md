@@ -18,7 +18,7 @@ simulated distribution, not a 99% reception qualification.
 
 ## Algorithm and phase guard
 
-[`triad_dynamic_frequency.py`](../../../../tools/triad_dynamic_frequency.py)
+[`triad_dynamic_frequency.py`](https://github.com/mirage335-colossus/pumpModem/blob/1c58507a5178c7700cd15d0fcdd05a0091c6dba9/tools/triad_dynamic_frequency.py)
 profiles the low and high Helper pilot spectra separately, maps their
 competitive frequency regions onto the original DATA CFO bank with declared
 channel, modulation, oscillator and future-aperture allowances, and selects the

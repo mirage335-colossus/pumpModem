@@ -1,15 +1,15 @@
-# Current weak acquisition and streaming research
+# Weak acquisition and streaming lessons
 
 Native Helper estimation, full public coarse FFT proposals and persistent fine
 tracking now implement these stages inside the C++ complete receiver linked to
 the GUI. Reception uses a configured public calendar and keyed ordinal; it does
 not acquire arbitrary waveform addresses. See [current architecture](robust-current.md).
 
-The Python `WeakReceiver`, weak Helper estimator and
-`PracticalTrackingReceiver` remain numerical references for matched-input
-migration parity and interpretation of the historical studies below. They are
-not a supported operating receiver. Preserve concise findings and remove
-superseded modules/captures once those comparison questions are resolved.
+The former Python `WeakReceiver`, weak Helper estimator and
+`PracticalTrackingReceiver` are retired implementations. The studies below are
+historical algorithm findings, with their original source and limits. Current
+checks execute native Helper acquisition and the persistent C++ `CoarseSession`
+and `FineSession`; historical timings do not calibrate them.
 
 ## Acquisition without discarding complex evidence
 

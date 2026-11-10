@@ -1,0 +1,113 @@
+name: Native Robust CUDA validation
+'on':
+  workflow_dispatch:
+    inputs:
+      libtorch_prefix:
+        description: Absolute path to preinstalled CUDA-enabled C++11 ABI LibTorch
+        type: string
+        required: true
+      reference_ref:
+        description: Native reference commit; empty selects the candidate's first parent
+        type: string
+        default: ''
+      establish_baseline:
+        description: Diagnostic GPU baseline establishment without a relative regression comparison
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  cuda:
+    # Requires a deliberately provisioned runner; this workflow rents no hardware.
+    runs-on: [self-hosted, linux, x64, datapump-cuda]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      LIBTORCH_PREFIX: ${{ inputs.libtorch_prefix }}
+      REFERENCE_REF: ${{ inputs.reference_ref }}
+      ESTABLISH_BASELINE: ${{ inputs.establish_baseline }}
+      OMP_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+        fetch-depth: 0
+    - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+      with:
+        python-version: '3.12'
+    - name: Select native reference
+      id: reference
+      run: |
+        options=()
+        if [ "$ESTABLISH_BASELINE" = true ]; then options+=(--establish-baseline); fi
+        python tools/triad-ci-reference.py --reference-ref "$REFERENCE_REF" "${options[@]}" --output build/triad-cuda-reference-selection.json --github-output "$GITHUB_OUTPUT"
+    - name: Build native CUDA receiver and correctness checks
+      run: |
+        test -d "$LIBTORCH_PREFIX"
+        ./build.sh configure --cli --build-dir build/triad-cuda --jobs 2 -- -DCMAKE_PREFIX_PATH="$LIBTORCH_PREFIX" -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON
+        cmake --build build/triad-cuda --target triad_receiver_probe test_triad_tensor_cuda --parallel 2
+    - name: Require actual CUDA execution and precision checks
+      run: |
+        ctest --test-dir build/triad-cuda --output-on-failure -R '^triad_tensor_cuda$' --no-tests=error
+        build/triad-cuda/triad_receiver_probe describe --backend cuda --require-accelerator on > build/triad-cuda-device.json
+    - name: Build same-run native CUDA reference
+      if: steps.reference.outputs.mode == 'compare'
+      env:
+        REFERENCE_SHA: ${{ steps.reference.outputs.reference_sha }}
+      run: |
+        git worktree add --detach "$RUNNER_TEMP/triad-cuda-reference" "$REFERENCE_SHA"
+        (
+          cd "$RUNNER_TEMP/triad-cuda-reference"
+          ./build.sh configure --cli --build-dir "$RUNNER_TEMP/triad-cuda-reference-build" --jobs 2 -- -DCMAKE_PREFIX_PATH="$LIBTORCH_PREFIX" -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON
+          cmake --build "$RUNNER_TEMP/triad-cuda-reference-build" --target triad_receiver_probe --parallel 2
+        )
+    - name: Measure bounded native CUDA reference
+      if: steps.reference.outputs.mode == 'compare'
+      run: |
+        python tools/triad_abbreviated.py --output build/triad-cuda-reference.json --probe "$RUNNER_TEMP/triad-cuda-reference-build/triad_receiver_probe" --device cuda
+    - name: Measure bounded native CUDA candidate
+      env:
+        REFERENCE_MODE: ${{ steps.reference.outputs.mode }}
+      run: |
+        options=()
+        if [ "$REFERENCE_MODE" = compare ]; then options+=(--baseline build/triad-cuda-reference.json); fi
+        python tools/triad_abbreviated.py --output build/triad-cuda-candidate.json --probe build/triad-cuda/triad_receiver_probe --device cuda "${options[@]}"
+    - name: Record CUDA qualification limits
+      if: always()
+      env:
+        REFERENCE_MODE: ${{ steps.reference.outputs.mode }}
+      run: |
+        python - <<'PY'
+        import json, os
+        from pathlib import Path
+        path = Path('build/triad-cuda-candidate.json')
+        result = json.loads(path.read_text()) if path.is_file() else {}
+        status = result.get('status', 'not_measured')
+        relative_pass = os.environ['REFERENCE_MODE'] == 'compare' and status == 'no_material_slowdown_for_measured_kernels'
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+            stream.write(f'Native CUDA performance status: **{status}**.\n\n')
+            stream.write(f'Relative regression pass: **{str(relative_pass).lower()}**. '
+                         'This bounded check does not establish complete CPU capacity or a GPU-to-CPU forecast. '
+                         'Forecasts require current local native phase calibration and independent holdouts.\n')
+        PY
+    - name: Retain native CUDA receipts
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: triad-native-cuda-${{ github.run_attempt }}
+        path: |
+          build/triad-cuda-*.json
+          build/triad-cuda/Testing/Temporary/
+        if-no-files-found: warn
+        retention-days: 7
+    - name: Remove temporary CUDA reference checkout and build
+      if: always()
+      run: |
+        if [ -d "$RUNNER_TEMP/triad-cuda-reference" ]; then
+          git worktree remove --force "$RUNNER_TEMP/triad-cuda-reference"
+        fi
+        rm -rf -- "$RUNNER_TEMP/triad-cuda-reference-build"

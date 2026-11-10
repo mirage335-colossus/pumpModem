@@ -12,13 +12,16 @@ obsolete code, experiments and generated outputs when that purpose ends.
 
 The [current architecture and status](robust-current.md) describes the native
 C++ Helper/DATA/complete-receiver stack linked into the GUI, with shared buffers
-and coordinated in-process workers. Python is a testing/benchmarking tool, not
-the operating receiver. The [GUI contract](gui-contract.md) maps the controls
+and coordinated in-process workers. Python orchestrates native tests/benchmarks
+and analyzes statistics; it does not implement receiver DSP. The default
+application needs neither Python nor Torch; an optional compiled ATen backend
+shares production receiver control. The [GUI contract](gui-contract.md) maps the controls
 and requires a shared public calendar and keyed ordinal for live operation;
 unknown-start acquisition remains outside scope.
 
-See [native integration validation](validation.md#native-gui-integration) for
-native functional checks and qualification limits. Historical local
+See [native migration validation](validation.md#native-codec-and-measurement-migration)
+for current checks and limits. The earlier short-profile GUI checkpoint does not
+qualify later long-message, audio-frontend or benchmark changes. Historical local
 CPU margins, GPU comparisons and process-scheduler measurements retain their
 original source and execution mode in the [validation record](validation.md).
 They do not qualify native GUI capacity. The
@@ -36,7 +39,7 @@ source-matched numerical parity alone is not performance calibration.
 
 Computationally intensive Robust checks must follow the hierarchical,
 computationally minimal statistical method in [the current testing policy](robust-current.md#testing-computationally-intensive-robust-changes).
-The [isolated triad regression policy](triad-performance.md) defines checks for
+The [native regression policy](triad-performance.md) defines checks for
 degradation against a matched baseline. The distinct
 [manual-case capacity contract](robust-manual-capacity.md) requires complete
 receiver work, productive local CPU parallelism and absolute real-time/workspace

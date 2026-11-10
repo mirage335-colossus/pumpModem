@@ -21,6 +21,7 @@ struct StreamReceiverOptions {
     std::size_t maximum_gap_samples = 16384;
     std::size_t maximum_pending_messages = 16;
     std::size_t recent_slot_receipts = 32;
+    bool record_commit_timing = false; // Optional native measurement receipt.
 };
 
 struct StreamReceiverResources {
@@ -30,13 +31,29 @@ struct StreamReceiverResources {
 
 StreamReceiverResources resolve_stream_receiver_resources(const StreamReceiverOptions& = {});
 
+// Shared public geometry. Stream admission separately charges its complete
+// input lease and checks the selected local buffer and workspace limits.
+ReceiverSlotPlan make_receiver_slot_plan(const PublicProfile&, const ReceiverConfig&, std::uint64_t index);
+
 enum class StreamPushResult { accepted, backpressured };
 enum class StreamReceiverState { receiving, input_ended, cancelled, resource_limit, failed };
+
+struct StreamCommitTiming {
+    // Wall clock relative to controller construction. Snapshot after commit.
+    double wall_seconds = 0;
+    std::uint64_t input_stop = 0;
+    std::size_t uncommitted_slots = 0;
+    unsigned active_owners = 0;
+    bool next_ready = false;
+    // Cumulative process CPU at the same committed-slot boundary.
+    std::optional<double> process_cpu_seconds;
+};
 
 struct StreamSlotReceipt {
     ReceiverSlotScore score;
     std::uint64_t pattern_epoch = 0, symbol_ordinal = 0;
     unsigned workers = 0;
+    std::optional<StreamCommitTiming> commit_timing;
 };
 
 struct StreamReceiverReport {
@@ -49,6 +66,8 @@ struct StreamReceiverReport {
     std::optional<std::uint64_t> episode_first_public_slot;
     std::size_t observed_bits = 0, erasures = 0;
     bool input_closed = false, output_backpressured = false, recovering = false;
+    // Measured time spent inside the controller's condition-variable wait.
+    std::optional<double> controller_wait_seconds;
 };
 
 namespace detail { struct StreamReceiverFixture; }
@@ -61,6 +80,8 @@ public:
     CompleteStreamReceiver(PublicProfile, ReceiverConfig, Crypto,
         StreamReceiverOptions = {}, MessageDecoder = decode_short_message,
         MessageReceiverOptions = {});
+    CompleteStreamReceiver(PublicProfile, ReceiverConfig, Crypto,
+        StreamReceiverOptions, NativeMessageProfile);
     ~CompleteStreamReceiver();
     CompleteStreamReceiver(const CompleteStreamReceiver&) = delete;
     CompleteStreamReceiver& operator=(const CompleteStreamReceiver&) = delete;

@@ -35,12 +35,13 @@ and sample-clock effects in the [channel contract](channel-models.md).
 
 The native C++ `CompleteStreamReceiver` joins noisy Helper acquisition, full
 public FFT proposals, persistent fine tracking, bit/null decisions and scored
-quiet-slot completion to the bounded short-message/FEC decoder. Native shaped
+quiet-slot completion to bounded native short/long-message and configured FEC
+processing. Native shaped
 bases and shared immutable input support its stages. The GUI session links this
 same stack; no Python receiver or receiver IPC is in the operating path.
 Reception uses a configured public calendar and keyed ordinal. Current
 functional checks do not qualify unknown-start acquisition, native CPU capacity
-or physical hardware; see [validation](validation.md#native-gui-integration).
+or physical hardware; see [validation](validation.md#native-codec-and-measurement-migration).
 The earlier native QR receiver and isolated v3 alternatives are retired.
 
 Research supports sharing complex FFT proposals across keyed time addresses,

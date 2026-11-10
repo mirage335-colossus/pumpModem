@@ -44,9 +44,22 @@ and canonical stream address reproduces bytes; key/address reuse is unsafe.
 Purpose separation and waveform evidence do not authenticate a sender or
 provide replay protection. The native Robust session integrates transmission
 and reception, but that connection does not establish a physical-link security
-guarantee. Configured text FEC uses a public CRC for error detection, not sender
-authentication. Public AMATEUR key material and unencrypted operation provide
-no confidentiality; applicable tests and limits remain in [validation](validation.md#native-gui-integration).
+guarantee. Short text FEC uses a public CRC for error detection, not sender
+authentication. Long keyed codewords carry a 32-byte tag bound to the FEC,
+compression mode and actual first coded-slot epoch/ordinal. This authenticates
+individual words under a private key, not the whole-message endpoint. Public
+AMATEUR material supplies neither confidentiality nor sender authentication;
+unencrypted operation supplies no confidentiality.
+
+A valid short prefix can also begin a long marker. Moreover, any valid
+uncompressed prefix ending at a complete codeword can remain valid when all
+later whole intervals are absent, including after an underfilled source area.
+Per-word tags cannot detect that unobserved suffix. Preserve the two-scored-quiet
+completion rule without claiming endpoint authentication or introducing a
+received length into DSP geometry. Long source accumulation, output queues and
+post-completion decompression remain charged to local quotas. See the
+[exact protocol limits](protocol.md#completion-and-authentication-limits) and
+[current validation](validation.md#native-codec-and-measurement-migration).
 
 Keyfiles use the current `DPMKEY04` format; older versions are rejected. Audio
 collected during key generation is supplementary input, not a source of

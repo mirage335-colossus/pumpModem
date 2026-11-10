@@ -2,6 +2,7 @@
 
 #include "datapump/execution.hpp"
 #include "datapump/received_text.hpp"
+#include "datapump/robust_audio_frontend.hpp"
 #include "datapump/robust_profile.hpp"
 #include "datapump/triad_stream_receiver.hpp"
 #include "search_fft.hpp"
@@ -21,13 +22,21 @@
 namespace datapump::live {
 namespace {
 using namespace triad::v3;
+using detail::AudioInput;
 using detail::Profile;
+using detail::real_pcm;
 using Clock = std::chrono::steady_clock;
 using KeyTag = std::array<std::uint8_t, 32>;
 
 constexpr std::size_t audio_chunk = 4096, plot_size = 1024, history_size = 32;
+// Binding can briefly hold two interval readers. Playback's native provider
+// allowance covers its converter, PCM blocks, and the dated PipeWire ring.
+constexpr std::size_t lazy_bit_workspace = 64 * 1024U;
+constexpr std::size_t playback_provider_workspace = 2 * 1024 * 1024U;
+constexpr std::size_t playback_controller_workspace = 2 * 1024 * 1024U;
 constexpr auto no_transmitter = "Select Robust to start its session.";
 constexpr auto preparing = "Preparing the configured Robust profile.";
+constexpr auto duplex_workspace_error = "Robust full-duplex transmit workspace exceeds the receiver memory limit";
 
 long double utc_now() {
     return std::chrono::duration<long double>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -63,21 +72,66 @@ KeyTag tag(const Crypto& key) {
     return result;
 }
 
-Complex carrier(std::uint64_t sample, double frequency, std::uint32_t rate) {
-    const auto cycles = std::remainder(static_cast<long double>(sample) * frequency / rate, 1.L);
-    return std::polar(1., static_cast<double>(2 * std::numbers::pi_v<long double> * cycles));
-}
-
-float real_pcm(Complex baseband, std::uint64_t sample, double if_hz, std::uint32_t rate, double scale = 1) {
-    return static_cast<float>(std::sqrt(2.) * (baseband * carrier(sample, if_hz, rate)).real() * scale);
-}
-
 struct TxRequest {
     EmissionMode mode = EmissionMode::Message;
-    Bytes bits;
-    Bytes source;
+    Bytes input;
     bool force = false, raw = false;
+    std::optional<PreparedTextMessage> prepared;
+
+    std::size_t wire_bits() const { return prepared ? prepared->wire_bits() : (raw ? input.size() : 0); }
 };
+
+NativeMessageProfile message_profile(const Settings& settings) {
+    return {settings.transfer.fec, settings.transfer.compression,
+        std::min(settings.transfer.content_limit, native_message_editor_limit), settings.transfer.key};
+}
+
+std::size_t checked_workspace(std::size_t left, std::size_t right) {
+    if (right > SIZE_MAX - left) throw Error("Robust workspace exceeds its address range");
+    return left + right;
+}
+
+std::size_t retained_request_workspace(const TxRequest& send) {
+    return send.prepared ? checked_workspace(send.prepared->working_bytes(), lazy_bit_workspace) :
+        send.input.capacity();
+}
+
+std::size_t live_transmit_reservation(const Settings& settings, const Profile& profile) {
+    const auto message = message_profile(settings);
+    const auto queued = std::max(message.content_limit, transfer::short_message_bits);
+    // Half-duplex may hold an accepted input while capture is stopping.
+    // Compression starts after capture has joined. Full-duplex covers the
+    // larger of codec preparation and the subsequent live waveform phase.
+    if (!settings.full_duplex) return queued;
+    const auto storage = text_message_transmit_storage(message);
+    const auto playback = checked_workspace(profile.waveform.geometry().source_workspace_bytes,
+        playback_provider_workspace + playback_controller_workspace + lazy_bit_workspace);
+    return std::max(storage.preparation_bytes,
+        checked_workspace(std::max(storage.prepared_bytes, queued), playback));
+}
+
+std::size_t live_transmit_reservation_checked(const Settings& settings, const Profile& profile) {
+    const auto reserved = live_transmit_reservation(settings, profile);
+    StreamReceiverOptions options;
+    options.memory_limit_bytes = settings.receiver_memory_limit;
+    if (reserved >= resolve_stream_receiver_resources(options).memory_limit_bytes)
+        throw Error(settings.full_duplex ? duplex_workspace_error :
+            "Robust queued transmit input exceeds the receiver memory limit");
+    return reserved;
+}
+
+EmissionOptions emission_options(const TxRequest& request, const PublicProfile& calendar,
+                                 std::uint64_t first, std::uint64_t count,
+                                 std::uint64_t source_first, std::stop_token stop) {
+    EmissionOptions options{request.mode, first, {}, count, source_first, stop};
+    if (request.raw) options.bits = request.input;
+    else if (request.prepared) {
+        options.bit_at = request.prepared->bit_source(first, [&calendar](std::uint64_t index) {
+            return message_address(calendar, index);
+        });
+    }
+    return options;
+}
 
 struct HopPosition {
     std::uint64_t dwell = 0, cycle = 0;
@@ -157,65 +211,6 @@ private:
     Clock::time_point next_{};
 };
 
-// At an audio rate with admitted nonoverlapping real spectral images, retain
-// the positive sideband, then translate it to the DATA center. The Fejer taper
-// gives a nonnegative normalized frequency-domain convolution of the ideal
-// Hilbert response. Its operator norm is at most one. For normalized real PCM
-// with covariance <= sigma² I, the real-augmented analytic output covariance
-// is <= sigma² I, including after rotation. This supports the declared proper
-// complex covariance envelope E|n|² = 2 sigma². Actual hardware noise can
-// violate that model and live field coverage remains conditional.
-class AudioInput {
-public:
-    AudioInput(std::uint32_t rate, double carrier_hz, double lower, double upper)
-        : rate_(rate), carrier_(carrier_hz) {
-        const auto edge = std::min(lower, rate / 2. - upper);
-        const auto half = std::ceil(8 * rate / edge);
-        if (!std::isfinite(half) || half < 1 || half > 2048)
-            throw Error("Robust live audio requires more separation from DC or Nyquist");
-        half_ = static_cast<std::size_t>(half);
-        length_ = 2 * half_ + 1;
-        samples_.resize(2 * length_);
-        for (std::size_t offset = 1; offset <= half_; offset += 2)
-            taps_.push_back(2 / (std::numbers::pi * static_cast<double>(offset)) *
-                (1 - static_cast<double>(offset) / static_cast<double>(half_ + 1)));
-    }
-
-    std::uint64_t first_valid_sample() const { return half_; }
-
-    // Output sample zero describes input content time half_ once the FIR's
-    // complete real history is available. The startup transient is excluded.
-    std::uint64_t project(std::span<const float> pcm, std::vector<Complex>& output) {
-        output.clear();
-        std::uint64_t first = input_ > half_ ? input_ - half_ : 0;
-        for (const auto sample : pcm) {
-            if (!std::isfinite(sample)) throw Error("Robust capture returned nonfinite audio");
-            samples_[at_] = samples_[at_ + length_] = sample;
-            if (++at_ == length_) at_ = 0;
-            if (input_ >= length_ - 1) {
-                const auto center = input_ - half_;
-                const auto* history = samples_.data() + at_ + half_;
-                double quadrature = 0;
-                for (std::size_t i = 0; i < taps_.size(); ++i) {
-                    const auto offset = static_cast<std::ptrdiff_t>(2 * i + 1);
-                    quadrature += taps_[i] * (history[-offset] - history[offset]);
-                }
-                if (output.empty()) first = center;
-                output.push_back(Complex{*history, quadrature} * std::numbers::sqrt2 / 2. *
-                                 std::conj(carrier(center, carrier_, rate_)));
-            }
-            ++input_;
-        }
-        return first;
-    }
-private:
-    std::uint32_t rate_;
-    double carrier_;
-    std::uint64_t input_ = 0;
-    std::size_t half_ = 0, length_ = 0, at_ = 0;
-    std::vector<double> samples_, taps_;
-};
-
 PatternStep pattern_step(const StreamSlotReceipt& receipt) {
     const auto& s = receipt.score;
     PatternStep row;
@@ -262,12 +257,19 @@ StreamReceiverOptions stream_options(const Settings& settings, std::size_t exter
     StreamReceiverOptions options;
     options.memory_limit_bytes = settings.receiver_memory_limit;
     const auto resources = resolve_stream_receiver_resources(options);
+    // Keep one bounded completed GUI receipt outside the stream's own result
+    // queue. Capture backpressure resumes when the UI consumes that receipt.
+    const auto presentation = message_profile(settings).content_limit + 64 * 1024U;
+    if (external_memory > SIZE_MAX - presentation)
+        throw Error("Robust presentation workspace exceeds its address range");
+    external_memory += presentation;
     if (external_memory >= resources.memory_limit_bytes)
         throw Error("Robust input and channel workspace exceed the receiver memory limit");
     options.workers = resources.workers;
     options.slot_owners = resources.slot_owners;
     options.memory_limit_bytes = resources.memory_limit_bytes - external_memory;
     options.maximum_input_chunk_samples = audio_chunk;
+    options.maximum_pending_messages = 1;
     return options;
 }
 
@@ -313,6 +315,8 @@ struct Session::Impl {
     std::stop_source generation_stop, tx_stop;
     Settings settings;
     Snapshot current;
+    std::vector<SignalUpdate> signal_events;
+    std::vector<transfer::Received> received_events;
     std::shared_ptr<const Profile> profile;
     std::optional<TxRequest> request;
     std::uint64_t generation = 0, next_id = 1, spectrum_revision = 0;
@@ -381,20 +385,68 @@ struct Session::Impl {
         });
     }
 
-    static void append_signal(Snapshot& out, SignalUpdate signal) {
-        const auto same = std::find_if(out.signals.begin(), out.signals.end(),
+    void prepare_send(TxRequest& send, const Settings& configuration, std::uint64_t owner,
+                      std::stop_token stop) {
+        cancelled(stop);
+        if (send.mode != EmissionMode::Message || send.raw) return;
+        // Bind authenticated intervals lazily after selecting the actual
+        // calendar slot. The encoder scratch is gone before waveform emission.
+        const auto profile = message_profile(configuration);
+        send.prepared.emplace(prepare_text_message(send.input, profile));
+        Bytes{}.swap(send.input);
+        if (send.prepared->working_bytes() > text_message_transmit_storage(profile).prepared_bytes)
+            throw Error("Robust prepared text exceeded its workspace bound");
+        cancelled(stop);
+        publish(owner, stop, [&](Snapshot& out) {
+            auto& trace = out.transmit_trace;
+            trace.total_wire_bits = send.wire_bits();
+            trace.short_text = !send.prepared->long_form();
+            ++trace.revision;
+        });
+    }
+
+    void trace_bound_bits(const EmissionOptions& emission, std::uint64_t owner, std::stop_token stop) {
+        if (!emission.bit_at) return;
+        cancelled(stop);
+        Bytes prefix;
+        const auto count = std::min<std::uint64_t>(emission.slot_count, modem::TransmitTrace::bit_limit);
+        prefix.reserve(static_cast<std::size_t>(count));
+        for (std::uint64_t i = 0; i < count; ++i) prefix.push_back(emission.bit_at(i));
+        publish(owner, stop, [&](Snapshot& out) {
+            out.transmit_trace.wire_plain_bits = std::move(prefix);
+            ++out.transmit_trace.revision;
+        });
+    }
+
+    Emission make_emission(const TxRequest& send, const Profile& profile, std::uint64_t first,
+                           std::uint64_t count, std::uint64_t source_first, std::uint64_t owner,
+                           std::stop_token stop) {
+        auto options = emission_options(send, profile.waveform, first, count, source_first, stop);
+        trace_bound_bits(options, owner, stop);
+        return Emission(profile.waveform, profile.key, options);
+    }
+
+    void append_signal(SignalUpdate signal) {
+        const auto same = std::find_if(signal_events.begin(), signal_events.end(),
             [&](const auto& old) { return old.id == signal.id; });
-        if (same != out.signals.end()) {
+        if (same != signal_events.end()) {
             *same = std::move(signal);
             return;
         }
-        if (out.signals.size() == history_size) out.signals.erase(out.signals.begin());
-        out.signals.push_back(std::move(signal));
+        if (signal_events.size() == history_size) signal_events.erase(signal_events.begin());
+        signal_events.push_back(std::move(signal));
     }
 
     void deliver(CompleteStreamReceiver& receiver, ReceiveDisplay& display, const Settings& s,
                  std::uint64_t owner, std::stop_token stop) {
         auto slots = receiver.drain_recent_slots();
+        if (receiver.report().pending_messages) {
+            std::unique_lock lock(mutex);
+            changed.wait(lock, stop, [&] {
+                return owner != generation || suspended || stopping || received_events.empty();
+            });
+            if (stop.stop_requested() || owner != generation || suspended || stopping) return;
+        }
         auto messages = receiver.drain_messages();
         const auto report = receiver.report();
         if (slots.empty() && messages.empty()) return;
@@ -412,32 +464,32 @@ struct Session::Impl {
                 signal.revision = matched ? display.revision + 1 : 1;
                 signal.frequency_hz = s.transfer.modem.carrier_hz;
                 signal.complete = true;
-                signal.received_bits = message.received_bits.size();
-                signal.missing_symbols = message.erasure_slot_indices.size();
+                signal.received_bits = message.observed_bits;
+                signal.missing_symbols = message.missing_slots;
                 // Raw presentation requires an exact physical bit sequence.
-                if (message.erasure_slot_indices.empty())
+                if (message.raw_bits_complete())
                     for (const auto bit : message.received_bits) signal.raw_bits.push_back(bit ? '1' : '0');
                 if (message.decoded_content) {
                     transfer::Received received;
                     received.content = std::move(*message.decoded_content);
                     signal.reception_id = message_id(received.content.message, signal.id);
-                    signal.text = received_text(received.content.message.data);
+                    const auto& payload = received.content.message.data;
+                    signal.text = received_text(std::span(payload).first(std::min<std::size_t>(4096, payload.size())));
                     signal.validated = true;
                     signal.fec_stats = received.content.fec_stats;
                     signal.pre_fec_accuracy = received.content.pre_fec_accuracy;
-                    if (message.erasure_slot_indices.empty()) received.raw_bits = message.received_bits;
+                    if (message.raw_bits_complete()) received.raw_bits = std::move(message.received_bits);
                     received.observed_bits = signal.received_bits;
                     received.missing_symbols = signal.missing_symbols;
                     received.stream_complete = true;
                     received.content_validated = true;
-                    received.short_text_decoded = true;
-                    if (out.received.size() == history_size) out.received.erase(out.received.begin());
-                    out.received.push_back(std::move(received));
+                    received.short_text_decoded = !message.long_form;
+                    received_events.push_back(std::move(received));
                 } else {
                     signal.binary = true;
                     signal.text = signal.raw_bits.empty() ? "Incomplete Robust content" : signal.raw_bits;
                 }
-                append_signal(out, std::move(signal));
+                append_signal(std::move(signal));
                 if (matched) display = {};
             }
             if (!report.episode_first_public_slot || !report.observed_bits) return;
@@ -458,7 +510,7 @@ struct Session::Impl {
             signal.received_bits = display.observed_bits;
             signal.missing_symbols = display.missing;
             signal.text = report.recovering ? "Robust episode rejected; listening for two quiet slots" : "Receiving Robust content";
-            append_signal(out, std::move(signal));
+            append_signal(std::move(signal));
         });
     }
 
@@ -497,7 +549,7 @@ struct Session::Impl {
 
     void invalidate_pending(ReceiveDisplay& display, const Settings& s, std::uint64_t owner) {
         if (!display.pending_slot) return;
-        publish(owner, {}, [&](Snapshot& out) {
+        publish(owner, {}, [&](Snapshot&) {
             SignalUpdate signal;
             signal.id = display.pending_id;
             signal.revision = ++display.revision;
@@ -505,13 +557,14 @@ struct Session::Impl {
             signal.received_bits = display.observed_bits;
             signal.missing_symbols = display.missing;
             signal.text = "Robust input ended before physical completion";
-            append_signal(out, std::move(signal));
+            append_signal(std::move(signal));
         });
         display = {};
     }
 
     void receive_live(const Profile& base, const Settings& s, std::uint64_t owner, std::stop_token stop) {
         const auto rate = s.transfer.modem.sample_rate;
+        const auto transmit_reservation = live_transmit_reservation_checked(s, base);
         AudioInput input(rate, base.receiver.data_if_hz, base.minimum_audio_hz, base.maximum_audio_hz);
         PlotMeter meter(rate);
         const auto segment = new_plot_segment();
@@ -626,7 +679,7 @@ struct Session::Impl {
                         throw Error("Robust input timestamp is outside the configured calendar");
                     const auto epoch_ambiguity = std::abs(age) * base.waveform.config().audio_pair_ppm * 1e-6L;
                     const auto adjusted = detail::with_capture_uncertainty(base, stamp.uncertainty_seconds + 1. / rate,
-                        static_cast<double>(epoch_ambiguity), input.first_valid_sample());
+                        static_cast<double>(epoch_ambiguity), input.halo_samples());
                     capture_first = std::llround((age + adjusted.waveform.config().capture_lead_seconds) * rate);
                     const auto valid_first = capture_first + static_cast<std::int64_t>(input.first_valid_sample());
                     const auto earliest = coordinate(std::max<long double>(stamp.utc_seconds, adjusted.waveform.origin().epoch), rate);
@@ -646,14 +699,14 @@ struct Session::Impl {
                     }
                     observation_first = first;
                     constexpr auto overhead = 2 * 1024 * 1024U;
-                    if (provider_bytes > SIZE_MAX - overhead - queue_limit * sizeof(float))
-                        throw Error("Robust audio workspace exceeds its address range");
-                    auto options = stream_options(s, provider_bytes + overhead + queue_limit * sizeof(float));
+                    const auto ingress_workspace = overhead + queue_limit * sizeof(float) + input.working_bytes();
+                    auto options = stream_options(s, checked_workspace(transmit_reservation,
+                        checked_workspace(provider_bytes, ingress_workspace)));
                     options.first_slot = slot;
                     options.first_input_sample = first;
                     options.require_quiet_rearm = slot > 0;
                     receiver = std::make_unique<CompleteStreamReceiver>(adjusted.waveform, adjusted.receiver,
-                        adjusted.key, options, message_decoder(s.transfer.fec), message_receiver_options(s.transfer.fec));
+                        adjusted.key, options, message_profile(s));
                     interrupt.emplace(stop, [owned = receiver.get()] { owned->request_cancel(); });
                     publish(owner, stop, [&](Snapshot& out) {
                         out.receiver_error.clear();
@@ -706,10 +759,13 @@ struct Session::Impl {
         const auto rate = s.transfer.modem.sample_rate;
         const auto& calendar = prepared.waveform;
         const auto noise = send.mode == EmissionMode::Noise;
+        const auto wire_bits = send.wire_bits();
         const auto slots = noise ? add_slot(calendar.last_slot(), 1) :
-            send.mode == EmissionMode::Message ? send.bits.size() : std::size_t{1};
+            send.mode == EmissionMode::Message ? wire_bits : std::size_t{1};
         const auto end_slot = noise ? std::uint64_t{0} : add_slot(slots, 1);
-        Emission emission(calendar, prepared.key, {send.mode, 0, send.bits, slots, 0, stop});
+        if (!noise && end_slot > calendar.last_slot())
+            throw Error("The configured Robust calendar has no room for the draft and two quiet slots");
+        auto emission = make_emission(send, prepared, 0, slots, 0, owner, stop);
         auto config = prepared.channel;
         if (!noise) config.minimum_capture_samples = calendar.slot(end_slot).observation.stop;
         const auto source = emission.source();
@@ -717,9 +773,12 @@ struct Session::Impl {
         StreamingChannel channel(source, config);
         std::unique_ptr<CompleteStreamReceiver> receiver;
         if (!noise) {
-            const auto options = stream_options(s, channel.report().working_bytes + 2 * 1024 * 1024U);
+            // Channel working bytes include the waveform source but exclude
+            // the prepared text shared by its lazy interval reader.
+            const auto options = stream_options(s, checked_workspace(channel.report().working_bytes,
+                checked_workspace(retained_request_workspace(send), 2 * 1024 * 1024U)));
             receiver = std::make_unique<CompleteStreamReceiver>(calendar, prepared.receiver,
-                prepared.key, options, message_decoder(s.transfer.fec), message_receiver_options(s.transfer.fec));
+                prepared.key, options, message_profile(s));
         }
         std::stop_callback interrupt(stop, [&] { if (receiver) receiver->request_cancel(); });
         std::array<Complex, audio_chunk> iq{};
@@ -749,10 +808,10 @@ struct Session::Impl {
                 if (receiver) accept(*receiver, display, s, first, samples, std::span(valid).first(count), owner, stop);
                 if (send.mode == EmissionMode::Message) {
                     const auto generated = emission.report().generated_samples;
-                    while (generated_bits < send.bits.size() &&
+                    while (generated_bits < wire_bits &&
                            generated >= calendar.calendar().distance(calendar.origin(), tx_slot.support_end)) {
                         ++generated_bits;
-                        if (generated_bits < send.bits.size()) tx_slot = calendar.transmit_slot(generated_bits);
+                        if (generated_bits < wire_bits) tx_slot = calendar.transmit_slot(generated_bits);
                     }
                     publish(owner, stop, [&](Snapshot& out) {
                         if (out.transmit_trace.generated_bits != generated_bits) {
@@ -834,6 +893,7 @@ struct Session::Impl {
         const auto rate = s.transfer.modem.sample_rate;
         const auto& calendar = active.waveform;
         const auto noise = send.mode == EmissionMode::Noise;
+        const auto wire_bits = send.wire_bits();
         std::optional<Emission> emission;
         std::uint64_t first_slot = 0, last_slot = 0, source_first = 0, next_reservation = 0;
         std::size_t generated_bits = 0;
@@ -889,7 +949,7 @@ struct Session::Impl {
                     set_plot(owner, stop, std::move(*frame), false, segment);
             }
             if (send.mode == EmissionMode::Message) {
-                while (generated_bits < send.bits.size() && end >= calendar.calendar().distance(calendar.origin(),
+                while (generated_bits < wire_bits && end >= calendar.calendar().distance(calendar.origin(),
                         calendar.transmit_slot(first_slot + generated_bits).support_end))
                     ++generated_bits;
                 publish(owner, stop, [&](Snapshot& snapshot) {
@@ -903,6 +963,9 @@ struct Session::Impl {
         }, stop, [&](const audio::StreamFormat& format) {
             if (format.usable_passband_hz < active.maximum_audio_hz)
                 throw Error("Robust transmit band exceeds the selected device passband");
+            if (s.full_duplex && s.live_noise_dbfs_hz &&
+                format.workspace_bytes > playback_provider_workspace)
+                throw Error("Robust playback provider exceeded the full-duplex audio workspace allowance");
             if (emission) return;
             // The provider has opened and completed timing preflight. Allow
             // bounded source preparation before the scheduled first sample.
@@ -916,14 +979,18 @@ struct Session::Impl {
                     throw Error("Robust transmit is waiting for its two quiet public slots");
             }
             const auto slots = noise ? calendar.last_slot() - first_slot + 1 :
-                send.mode == EmissionMode::Message ? send.bits.size() : std::size_t{1};
+                send.mode == EmissionMode::Message ? wire_bits : std::size_t{1};
             last_slot = add_slot(first_slot, slots - 1);
             if (!noise && add_slot(last_slot, 2) > calendar.last_slot())
                 throw Error("The configured Robust calendar has no room for two quiet slots after this draft");
             next_reservation = first_slot;
             const auto first = calendar.transmit_slot(first_slot);
             source_first = calendar.calendar().distance(calendar.origin(), first.helper_begin);
-            emission.emplace(calendar, active.key, EmissionOptions{send.mode, first_slot, send.bits, slots, source_first, stop});
+            emission.emplace(make_emission(send, active, first_slot, slots, source_first, owner, stop));
+            if (s.full_duplex && s.live_noise_dbfs_hz &&
+                emission->source().working_bytes > checked_workspace(
+                    calendar.geometry().source_workspace_bytes, playback_controller_workspace))
+                throw Error("Robust waveform exceeded its full-duplex source workspace allowance");
             const auto& report = emission->report();
             const auto helper_peak = report.helper_plan.helper_gain * report.composite_gain *
                 (helper::pilot_amplitude_fraction + helper::low_pilot_amplitude_fraction + helper::auxiliary_amplitude_fraction);
@@ -1072,10 +1139,17 @@ struct Session::Impl {
                         transmit_settings.channel_mode = settings.channel_mode;
                     }
                     std::stop_callback cancel_on_reconfigure(stop, [source = tx_stop]() mutable { source.request_stop(); });
-                    if (!s.simulation && !s.full_duplex) close_capture();
+                    bool capture_paused = false;
                     std::string failure;
                     try {
                         cancelled(transmission);
+                        if (!s.simulation && s.full_duplex && s.live_noise_dbfs_hz)
+                            (void)live_transmit_reservation_checked(transmit_settings, *active);
+                        if (!s.simulation && !s.full_duplex) {
+                            close_capture();
+                            capture_paused = true;
+                        }
+                        prepare_send(send, transmit_settings, owner, transmission);
                         if (s.simulation) simulate(*active, transmit_settings, send, owner, transmission);
                         else play_live(*active, transmit_settings, send, owner, transmission);
                     } catch (const std::exception& error) {
@@ -1096,12 +1170,12 @@ struct Session::Impl {
                         // A new simulation is a new local source experiment.
                         // Retain a monotonically increasing address between
                         // runs without scoring the idle time between them.
-                        const auto advance = send.mode == EmissionMode::Message ? send.bits.size() + 2 : 3;
+                        const auto advance = send.mode == EmissionMode::Message ? send.wire_bits() + 2 : 3;
                         next_simulation_ordinal = add_slot(calendar.config().format.symbol_ordinal, advance);
                         const auto first = calendar.transmit_slot(0);
                         last_simulation_epoch = add_slot(first.support_begin.epoch, 30);
                         prepare();
-                    } else if (!s.full_duplex) start_capture();
+                    } else if (capture_paused) start_capture();
                 }
             } catch (const std::exception& error) {
                 publish(owner, stop, [&](Snapshot& out) {
@@ -1129,22 +1203,26 @@ struct Session::Impl {
         changed.notify_all();
     }
 
-    void enqueue(TxRequest send) {
+    void enqueue(EmissionMode mode, std::span<const std::uint8_t> input = {}, bool force = false, bool raw = false) {
         std::lock_guard lock(mutex);
         if (stopping || suspended || !started) throw Error(no_transmitter);
         if (current.transmitting || request) throw Error("A Robust transmission is already active");
         if (!profile) throw Error(current.transmit_unavailable.value_or(preparing));
-        if (send.mode == EmissionMode::HelperOnly && !profile->receiver.helper_enabled)
+        if (mode == EmissionMode::Message && !raw &&
+            (input.empty() || input.size() > message_profile(settings).content_limit))
+            throw Error("Robust text is empty or exceeds its local content quota");
+        if (mode == EmissionMode::HelperOnly && !profile->receiver.helper_enabled)
             throw Error("Set nonzero Helper Carrier power before transmitting Helper only");
         if (!settings.simulation) {
             const auto index = earliest_tx_slot(*profile, 5);
-            const auto locked = overlap_locked(*profile, index, send.mode);
-            if (send.force && !locked) throw Error("There is no current Robust key-use lock to override");
-            if (!send.force && locked) throw Error("Robust transmit locked: this key already used a future address");
-            if (!send.force && utc_time(profile->waveform.transmit_slot(index).helper_begin,
+            const auto locked = overlap_locked(*profile, index, mode);
+            if (force && !locked) throw Error("There is no current Robust key-use lock to override");
+            if (!force && locked) throw Error("Robust transmit locked: this key already used a future address");
+            if (!force && utc_time(profile->waveform.transmit_slot(index).helper_begin,
                     profile->waveform.config().format.sample_rate) < separated_after)
                 throw Error("Waiting for two quiet public slots before the next Robust transmission");
-        } else if (send.force) throw Error("Robust simulation has no hardware key-use lock");
+        } else if (force) throw Error("Robust simulation has no hardware key-use lock");
+        TxRequest send{mode, {input.begin(), input.end()}, force, raw, {}};
         tx_stop = std::stop_source{};
         current.transmitting = true;
         current.error.clear();
@@ -1163,12 +1241,16 @@ struct Session::Impl {
         trace.temporary_key = send.mode == EmissionMode::Noise;
         if (trace.active) {
             trace.raw = send.raw;
-            trace.short_text = !send.raw;
-            trace.source_available = !send.source.empty();
-            trace.source = send.source;
-            trace.total_wire_bits = send.bits.size();
-            const auto count = std::min(send.bits.size(), modem::TransmitTrace::bit_limit);
-            trace.wire_plain_bits.assign(send.bits.begin(), send.bits.begin() + static_cast<std::ptrdiff_t>(count));
+            trace.short_text = !send.raw && send.input.size() <= transfer::short_message_bytes;
+            if (send.raw) {
+                trace.total_wire_bits = send.input.size();
+                const auto count = std::min(send.input.size(), modem::TransmitTrace::bit_limit);
+                trace.wire_plain_bits.assign(send.input.begin(), send.input.begin() + static_cast<std::ptrdiff_t>(count));
+            } else {
+                const auto count = std::min(send.input.size(), modem::TransmitTrace::source_limit);
+                trace.source_available = true;
+                trace.source.assign(send.input.begin(), send.input.begin() + static_cast<std::ptrdiff_t>(count));
+            }
         }
         request = std::move(send);
         changed.notify_all();
@@ -1210,6 +1292,8 @@ void Session::configure(const Settings& value) {
         p.settings = value;
         p.profile.reset();
         p.current = {};
+        p.received_events.clear();
+        p.signal_events.clear();
         p.current.simulation = value.simulation;
         p.current.status = p.started && !p.suspended ? preparing : no_transmitter;
         p.current.transmit_unavailable = p.current.status;
@@ -1290,31 +1374,29 @@ void Session::resume_capture() {
 
 void Session::clear_received() {
     auto& p = *impl_;
-    std::lock_guard lock(p.mutex);
-    p.current.signals.clear();
-    p.current.received.clear();
+    {
+        std::lock_guard lock(p.mutex);
+        p.signal_events.clear();
+        p.received_events.clear();
+    }
+    p.changed.notify_all();
 }
 
 void Session::transmit(const Message& message, bool force) {
-    if (!transfer::uses_raw_message(message))
-        throw Error("Robust currently sends 1 to 16 bytes of text or explicit raw bits");
-    FecMode fec;
-    {
-        std::lock_guard lock(impl_->mutex);
-        fec = impl_->settings.transfer.fec;
-    }
-    impl_->enqueue({EmissionMode::Message, encode_message_bits(message.data, fec), message.data, force, false});
+    if (message.kind != MessageKind::text || message.data.empty() || message.data.size() > native_message_editor_limit)
+        throw Error("Robust sends nonempty text within its local content quota or explicit raw bits");
+    impl_->enqueue(EmissionMode::Message, message.data, force);
 }
 
 void Session::transmit_bits(std::span<const std::uint8_t> bits, bool force) {
     if (bits.empty() || bits.size() > transfer::short_message_bits ||
         std::any_of(bits.begin(), bits.end(), [](std::uint8_t bit) { return bit > 1; }))
         throw Error("Robust raw transmission requires 1 to 208 binary symbols");
-    impl_->enqueue({EmissionMode::Message, {bits.begin(), bits.end()}, {}, force, true});
+    impl_->enqueue(EmissionMode::Message, bits, force, true);
 }
 
-void Session::transmit_noise() { impl_->enqueue({EmissionMode::Noise, {}, {}, false, false}); }
-void Session::transmit_helper() { impl_->enqueue({EmissionMode::HelperOnly, {}, {}, false, false}); }
+void Session::transmit_noise() { impl_->enqueue(EmissionMode::Noise); }
+void Session::transmit_helper() { impl_->enqueue(EmissionMode::HelperOnly); }
 
 void Session::cancel_transmit() {
     auto& p = *impl_;
@@ -1334,11 +1416,15 @@ void Session::cancel_recovery(std::uint64_t) {}
 
 Snapshot Session::snapshot() {
     auto& p = *impl_;
-    std::lock_guard lock(p.mutex);
-    Snapshot result = p.current;
-    p.current.signals.clear();
-    p.current.received.clear();
-    p.lock_status(result);
+    Snapshot result;
+    {
+        std::lock_guard lock(p.mutex);
+        result = p.current;
+        result.signals.swap(p.signal_events);
+        result.received.swap(p.received_events);
+        p.lock_status(result);
+    }
+    if (!result.received.empty()) p.changed.notify_all();
     return result;
 }
 

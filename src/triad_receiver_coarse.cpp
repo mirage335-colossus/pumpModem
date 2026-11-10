@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <exception>
 #include <limits>
@@ -62,6 +63,64 @@ std::size_t ceil_div(std::size_t size, std::size_t step) {
 void check_stop(std::stop_token stop) {
     if (stop.stop_requested()) throw Error("coarse receiver cancelled");
     execution::checkpoint();
+}
+
+using PhaseClock = std::chrono::steady_clock;
+
+double elapsed(PhaseClock::time_point began) {
+    return std::chrono::duration<double>(PhaseClock::now() - began).count();
+}
+
+void note(std::uint64_t& target, std::uint64_t amount) {
+    require_coarse(amount <= UINT64_MAX - target, "coarse operation count overflow");
+    target += amount;
+}
+
+void combine(CoarseOperationCounts& total, const CoarseOperationCounts& part) {
+    note(total.forward_ffts, part.forward_ffts);
+    note(total.inverse_ffts, part.inverse_ffts);
+    note(total.fft_rows, part.fft_rows);
+    note(total.fft_row_stages, part.fft_row_stages);
+    note(total.source_render_calls, part.source_render_calls);
+    note(total.source_render_rows, part.source_render_rows);
+    note(total.projected_columns, part.projected_columns);
+    note(total.fir_input_rows, part.fir_input_rows);
+    note(total.fir_output_contributions, part.fir_output_contributions);
+    note(total.workspace_frequency_pairs, part.workspace_frequency_pairs);
+    note(total.score_rows, part.score_rows);
+    note(total.singleton_dot_terms, part.singleton_dot_terms);
+    note(total.retained_peaks, part.retained_peaks);
+    note(total.selection_peak_rows, part.selection_peak_rows);
+}
+
+void combine(CoarseOperationCounts& total, const CoarseBulkWork& part) {
+    note(total.forward_ffts, part.forward_ffts);
+    note(total.inverse_ffts, part.inverse_ffts);
+    note(total.fft_rows, part.fft_rows);
+    note(total.fft_row_stages, part.fft_row_stages);
+    note(total.fir_input_rows, part.fir_input_rows);
+    note(total.fir_output_contributions, part.fir_output_contributions);
+    note(total.workspace_frequency_pairs, part.workspace_frequency_pairs);
+    note(total.score_rows, part.score_rows);
+    note(total.singleton_dot_terms, part.singleton_dot_terms);
+}
+
+void tracked_fft(std::span<Complex> values, bool inverse, const native_fft::DoublePlan& plan,
+                 CoarseOperationCounts& work, std::stop_token stop) {
+    native_fft::fft(values, inverse, plan, stop);
+    note(inverse ? work.inverse_ffts : work.forward_ffts, 1);
+    note(work.fft_rows, values.size());
+    const auto levels = static_cast<std::uint64_t>(std::countr_zero(values.size()));
+    require_coarse(!levels || values.size() <= UINT64_MAX / levels, "coarse transform work count overflow");
+    note(work.fft_row_stages, levels * values.size());
+}
+
+void tracked_render(PatternSource& source, long double first, long double step,
+                    std::span<Complex> output, CoarseOperationCounts& work) {
+    std::array sources{&source};
+    PatternSource::render_bank(sources, first, step, output.size(), output);
+    note(work.source_render_calls, 1);
+    note(work.source_render_rows, output.size());
 }
 
 template<class Job>
@@ -307,20 +366,38 @@ std::vector<double> fir_taps(const Plan& plan, std::stop_token stop) {
 
 class Projection {
 public:
-    Projection(const Plan& plan, const native_fft::DoublePlan& fft, std::stop_token stop)
-        : plan_(plan), fft_(fft), taps_(fir_taps(plan, stop)), spectrum_(plan.filter_fft) {
-        std::copy(taps_.begin(), taps_.end(), spectrum_.begin());
-        native_fft::fft(spectrum_, false, fft_, stop);
+    Projection(const Plan& plan, const native_fft::DoublePlan* fft, CoarseBulk* bulk,
+               CoarseOperationCounts& work, std::stop_token stop)
+        : plan_(plan), fft_(fft), taps_(fir_taps(plan, stop)), bulk_(bulk) {
+        if (bulk_) {
+            CoarseBulkWork operations;
+            device_filter_ = bulk_->prepare_filter(taps_, plan_.filter_fft, operations, stop);
+            require_coarse(static_cast<bool>(device_filter_), "coarse bulk FIR filter setup returned no filter");
+            combine(work, operations);
+        } else {
+            spectrum_.resize(plan.filter_fft);
+            std::copy(taps_.begin(), taps_.end(), spectrum_.begin());
+            tracked_fft(spectrum_, false, *fft_, work, stop);
+        }
     }
 
     double variance(double raw) const {
         return raw * std::inner_product(taps_.begin(), taps_.end(), taps_.begin(), 0.);
     }
     std::span<const double> taps() const { return taps_; }
+    CoarseBulk* bulk() const { return bulk_; }
 
     template<class Fill>
     std::vector<Complex> apply(std::size_t total, std::size_t crop_first, std::size_t crop_rows,
-                               Fill fill, std::stop_token stop) const {
+                               Fill fill, CoarseOperationCounts& work, std::stop_token stop) const {
+        if (bulk_) {
+            CoarseBulkWork operations;
+            auto out = bulk_->project_fir(*device_filter_, {total, chunk_samples, 0, plan_.decimation,
+                crop_first, crop_rows}, fill, operations, stop);
+            require_coarse(out.size() == crop_rows, "coarse bulk FIR returned the wrong observation crop");
+            combine(work, operations);
+            return out;
+        }
         std::vector<Complex> out(crop_rows), scratch(plan_.filter_fft);
         // Overlap-add complete finite convolution tails onto phase zero.
         // Only rows outside the requested output crop can be discarded.
@@ -334,11 +411,13 @@ public:
             if (output_first < output_stop) {
                 fill(first, std::span(scratch).first(size));
                 std::fill(scratch.begin() + size, scratch.end(), Complex{});
-                native_fft::fft(scratch, false, fft_, stop);
+                tracked_fft(scratch, false, *fft_, work, stop);
                 for (std::size_t i = 0; i < scratch.size(); ++i) scratch[i] *= spectrum_[i];
-                native_fft::fft(scratch, true, fft_, stop);
+                tracked_fft(scratch, true, *fft_, work, stop);
                 for (auto row = output_first; row < output_stop; ++row)
                     out[row - crop_first] += scratch[row * plan_.decimation - first];
+                note(work.fir_input_rows, size);
+                note(work.fir_output_contributions, output_stop - output_first);
             }
             first += size;
         }
@@ -347,9 +426,11 @@ public:
 
 private:
     const Plan& plan_;
-    const native_fft::DoublePlan& fft_;
+    const native_fft::DoublePlan* fft_;
     std::vector<double> taps_;
     std::vector<Complex> spectrum_;
+    CoarseBulk* bulk_;
+    std::shared_ptr<const CoarseBulkFilter> device_filter_;
 };
 
 std::array<double, 4> cubic_weights(double u) {
@@ -389,7 +470,7 @@ RayGeometry ray_geometry(const Plan& plan, const Layout& layout, const ReceiverC
 
 std::vector<Complex> exact_column(const Layout& layout, const Projection& projection,
                                   std::span<const Complex> raw, const RayGeometry& ray,
-                                  std::stop_token stop) {
+                                  CoarseOperationCounts& work, std::stop_token stop) {
     return projection.apply(layout.raw_rows, 0, layout.kernel_rows,
         [&](std::size_t first, std::span<Complex> values) {
             for (std::size_t i = 0; i < values.size(); ++i) {
@@ -397,19 +478,17 @@ std::vector<Complex> exact_column(const Layout& layout, const Projection& projec
                 values[i] = cubic(raw, ray.first_position + index * ray.scale) *
                             rotation(ray.first_cycles + index * ray.cycle_step);
             }
-        }, stop);
+        }, work, stop);
 }
 
 std::vector<Complex> integer_source(const Plan& plan, const Layout& layout, PatternSource& source,
-                                    std::size_t source_first, std::stop_token stop) {
+                                    std::size_t source_first, CoarseOperationCounts& work, std::stop_token stop) {
     std::vector<Complex> raw(layout.source_rows);
     const auto scale = static_cast<long double>(plan.source_rate) / plan.fs;
-    std::array sources{&source};
     for (std::size_t i = 0; i < raw.size();) {
         check_stop(stop);
         const auto count = std::min(chunk_samples, raw.size() - i);
-        PatternSource::render_bank(sources, (source_first + i) * scale, scale, count,
-                                   std::span(raw).subspan(i, count));
+        tracked_render(source, (source_first + i) * scale, scale, std::span(raw).subspan(i, count), work);
         i += count;
     }
     return raw;
@@ -417,8 +496,8 @@ std::vector<Complex> integer_source(const Plan& plan, const Layout& layout, Patt
 
 class MappedProjection {
 public:
-    MappedProjection(const Plan& plan, const Projection& projection, const native_fft::DoublePlan& fft,
-                     std::stop_token stop)
+    MappedProjection(const Plan& plan, const Projection& projection, const native_fft::DoublePlan* fft,
+                     CoarseOperationCounts& work, std::stop_token stop)
         : plan_(plan), projection_(projection), fft_(fft) {
         const auto step = plan_.source_step;
         const auto taps = projection_.taps();
@@ -437,11 +516,21 @@ public:
             const auto first_coordinate = add(mul(i, plan_.decimation), 2 * step);
             const auto phase = first_coordinate % step;
             const auto count = (collapsed.size() - 1 - phase) / step + 1;
+            const auto fft_rows = fft_size(add(chunk_samples, count - 1));
             auto& filter = phases_.emplace_back(Phase{
-                count, first_coordinate / step, mul(period, plan_.decimation) / step,
-                std::vector<Complex>(fft_size(add(chunk_samples, count - 1)))});
-            for (std::size_t j = 0; j < count; ++j) filter.spectrum[j] = collapsed[phase + j * step];
-            native_fft::fft(filter.spectrum, false, fft_, stop);
+                count, first_coordinate / step, mul(period, plan_.decimation) / step, {}, {}});
+            if (auto* bulk = projection_.bulk()) {
+                std::vector<double> phase_taps(count);
+                for (std::size_t j = 0; j < count; ++j) phase_taps[j] = collapsed[phase + j * step];
+                CoarseBulkWork operations;
+                filter.device_filter = bulk->prepare_filter(phase_taps, fft_rows, operations, stop);
+                require_coarse(static_cast<bool>(filter.device_filter), "coarse bulk mapped FIR setup returned no filter");
+                combine(work, operations);
+            } else {
+                filter.spectrum.resize(fft_rows);
+                for (std::size_t j = 0; j < count; ++j) filter.spectrum[j] = collapsed[phase + j * step];
+                tracked_fft(filter.spectrum, false, *fft_, work, stop);
+            }
         }
     }
 
@@ -450,13 +539,25 @@ public:
     }
 
     std::vector<Complex> apply(std::span<const Complex> knots, const Layout& layout,
-                               std::stop_token stop) const {
+                               CoarseOperationCounts& work, std::stop_token stop) const {
         std::vector<Complex> out(layout.kernel_rows);
         const auto period = phases_.size();
         for (std::size_t phase = 0; phase < period && phase < out.size(); ++phase) {
             const auto& filter = phases_[phase];
-            std::vector<Complex> scratch(filter.spectrum.size());
             const auto phase_rows = ceil_div(out.size() - phase, period);
+            if (auto* bulk = projection_.bulk()) {
+                CoarseBulkWork operations;
+                const auto projected = bulk->project_fir(*filter.device_filter,
+                    {knots.size(), chunk_samples, filter.start, filter.stride, 0, phase_rows},
+                    [&](std::size_t first, std::span<Complex> values) {
+                        std::copy_n(knots.begin() + first, values.size(), values.begin());
+                    }, operations, stop);
+                require_coarse(projected.size() == phase_rows, "coarse bulk FIR returned the wrong mapped phase crop");
+                for (std::size_t i = 0; i < projected.size(); ++i) out[phase + i * period] = projected[i];
+                combine(work, operations);
+                continue;
+            }
+            std::vector<Complex> scratch(filter.spectrum.size());
             for (std::size_t first = 0; first < knots.size();) {
                 check_stop(stop);
                 const auto count = std::min(chunk_samples, knots.size() - first);
@@ -467,11 +568,13 @@ public:
                 if (output_first < output_stop) {
                     std::copy_n(knots.begin() + first, count, scratch.begin());
                     std::fill(scratch.begin() + count, scratch.end(), Complex{});
-                    native_fft::fft(scratch, false, fft_, stop);
+                    tracked_fft(scratch, false, *fft_, work, stop);
                     for (std::size_t i = 0; i < scratch.size(); ++i) scratch[i] *= filter.spectrum[i];
-                    native_fft::fft(scratch, true, fft_, stop);
+                    tracked_fft(scratch, true, *fft_, work, stop);
                     for (auto i = output_first; i < output_stop; ++i)
                         out[phase + i * period] += scratch[filter.start + i * filter.stride - first];
+                    note(work.fir_input_rows, count);
+                    note(work.fir_output_contributions, output_stop - output_first);
                 }
                 first += count;
             }
@@ -494,6 +597,7 @@ public:
                 const auto end = std::min(out.size(), ceil_div(static_cast<std::size_t>(stop_raw), plan_.decimation));
                 for (auto i = begin; i < end; ++i)
                     out[i] -= value * taps[static_cast<std::size_t>(static_cast<std::int64_t>(i) * decimation - index)];
+                if (end > begin) note(work.fir_output_contributions, end - begin);
             }
         };
         subtract(-2 * step, 0);
@@ -505,26 +609,27 @@ private:
     struct Phase {
         std::size_t taps, start, stride;
         std::vector<Complex> spectrum;
+        std::shared_ptr<const CoarseBulkFilter> device_filter;
     };
     const Plan& plan_;
     const Projection& projection_;
-    const native_fft::DoublePlan& fft_;
+    const native_fft::DoublePlan* fft_;
     std::vector<Phase> phases_;
 };
 
 std::vector<Complex> mapped_column(const Plan& plan, const Layout& layout, PatternSource& source,
                                    std::size_t source_first, const MappedProjection& projection,
-                                   const RayGeometry& ray, std::stop_token stop) {
+                                   const RayGeometry& ray, CoarseOperationCounts& work,
+                                   std::stop_token stop) {
     const auto step = plan.source_step;
     std::vector<Complex> knots(add(ceil_div(layout.raw_rows - 1, step), 1));
     const auto rate_ratio = static_cast<long double>(plan.source_rate) / plan.fs;
     const auto position = [&](std::size_t index) { return ray.first_position + index * step * ray.scale; };
     const auto last_interior = static_cast<long double>(layout.source_rows - 2);
     std::array<Complex, 4> first_edge{}, last_edge{};
-    std::array sources{&source};
-    PatternSource::render_bank(sources, source_first * rate_ratio, rate_ratio, first_edge.size(), first_edge);
-    PatternSource::render_bank(sources, add(source_first, layout.source_rows - last_edge.size()) * rate_ratio,
-                               rate_ratio, last_edge.size(), last_edge);
+    tracked_render(source, source_first * rate_ratio, rate_ratio, first_edge, work);
+    tracked_render(source, add(source_first, layout.source_rows - last_edge.size()) * rate_ratio,
+                   rate_ratio, last_edge, work);
     for (std::size_t first = 0; first < knots.size();) {
         check_stop(stop);
         const auto stop_at = add(first, std::min(chunk_samples, knots.size() - first));
@@ -539,9 +644,9 @@ std::vector<Complex> mapped_column(const Plan& plan, const Layout& layout, Patte
             knots[end] = cubic(last_edge, position(end) - (layout.source_rows - last_edge.size()));
         }
         if (middle < end) {
-            PatternSource::render_bank(sources, (source_first + position(middle)) * rate_ratio,
-                                       step * ray.scale * rate_ratio, end - middle,
-                                       std::span(knots).subspan(middle, end - middle));
+            tracked_render(source, (source_first + position(middle)) * rate_ratio,
+                           step * ray.scale * rate_ratio,
+                           std::span(knots).subspan(middle, end - middle), work);
         }
         for (auto i = first; i < stop_at; ++i)
             if (knots[i] != Complex{}) knots[i] *= rotation(ray.first_cycles + i * step * ray.cycle_step);
@@ -549,7 +654,7 @@ std::vector<Complex> mapped_column(const Plan& plan, const Layout& layout, Patte
     }
     // The terminal interpolation knot beyond the raw endpoint is defined zero.
     if ((knots.size() - 1) * step >= layout.raw_rows) knots.back() = {};
-    return projection.apply(knots, layout, stop);
+    return projection.apply(knots, layout, work, stop);
 }
 
 using Columns = std::array<std::vector<Complex>, 2>;
@@ -611,12 +716,13 @@ double quadratic(const Hermitian& inv, Complex a, Complex b) {
 Columns make_columns(const Plan& plan, const Layout& layout, const ReceiverConfig& config,
                      const Projection& projection, const MappedProjection* mapped,
                      PatternSource& source, std::size_t source_first, std::span<const Complex> integer,
-                     double clock, std::stop_token stop) {
+                     double clock, CoarseOperationCounts& work, std::stop_token stop) {
     Columns out;
     for (std::size_t ray = 0; ray < plan.ray_count; ++ray) {
         const auto g = ray_geometry(plan, layout, config, clock, ray);
-        out[ray] = mapped ? mapped_column(plan, layout, source, source_first, *mapped, g, stop) :
-                            exact_column(layout, projection, integer, g, stop);
+        out[ray] = mapped ? mapped_column(plan, layout, source, source_first, *mapped, g, work, stop) :
+                            exact_column(layout, projection, integer, g, work, stop);
+        note(work.projected_columns, 1);
     }
     return out;
 }
@@ -627,11 +733,11 @@ struct Workspace {
 };
 
 void to_spectrum(Columns& columns, const Layout& layout, const native_fft::DoublePlan& fft,
-                 std::stop_token stop) {
+                 CoarseOperationCounts& work, std::stop_token stop) {
     for (auto& ray : columns) if (!ray.empty()) {
         std::vector<Complex> spectrum(layout.nfft);
         std::copy(ray.begin(), ray.end(), spectrum.begin());
-        native_fft::fft(spectrum, false, fft, stop);
+        tracked_fft(spectrum, false, fft, work, stop);
         for (auto& value : spectrum) value = std::conj(value);
         ray = std::move(spectrum);
     }
@@ -640,24 +746,27 @@ void to_spectrum(Columns& columns, const Layout& layout, const native_fft::Doubl
 std::vector<Workspace> prepare_bank(const Plan& plan, const ReceiverConfig& config,
                                    const ReceiverSlotPlan& slot, const Crypto& key,
                                    const Projection& projection, const MappedProjection* mapped,
-                                   const native_fft::DoublePlan& fft, bool frequency_domain,
-                                   unsigned workers, std::stop_token stop) {
+                                   const native_fft::DoublePlan* fft, bool frequency_domain,
+                                   unsigned workers, CoarseOperationCounts& work, std::stop_token stop) {
     std::vector<Workspace> bank(plan.workspaces());
+    std::array<CoarseOperationCounts, lanes> lane_work{};
     parallel(lanes, workers, stop, [&](std::size_t lane, std::stop_token job_stop) {
         auto format = slot.format;
         format.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(format.epoch) + receiver_epoch_offsets[lane / 2]);
         PatternSource source(format, key, static_cast<std::uint8_t>(lane % 2));
-        const auto integer = mapped ? std::vector<Complex>{} : integer_source(plan, plan.layout, source, 0, job_stop);
+        auto& counts = lane_work[lane];
+        const auto integer = mapped ? std::vector<Complex>{} : integer_source(plan, plan.layout, source, 0, counts, job_stop);
         for (std::size_t clock = 0; clock < plan.clock_count; ++clock) {
             check_stop(job_stop);
             auto columns = make_columns(plan, plan.layout, config, projection, mapped, source, 0, integer,
-                                        plan.clocks[clock], job_stop);
+                                        plan.clocks[clock], counts, job_stop);
             auto& destination = bank[plan.workspace_index(lane, clock)];
             destination.inverse = invert(gram(columns, plan.ray_count), plan.ray_count);
-            if (frequency_domain) to_spectrum(columns, plan.layout, fft, job_stop);
+            if (frequency_domain) to_spectrum(columns, plan.layout, *fft, counts, job_stop);
             destination.columns = std::move(columns);
         }
     });
+    for (const auto& counts : lane_work) combine(work, counts);
     return bank;
 }
 
@@ -679,14 +788,15 @@ std::array<Peak, retained_per_bit> arrival_peaks(std::span<const double> values,
 
 std::vector<double> correlation_scores(const Plan& plan, const Layout& layout, const Workspace& workspace,
                                        std::span<const Complex> observation, double variance,
-                                       const native_fft::DoublePlan& fft, std::stop_token stop) {
+                                       const native_fft::DoublePlan& fft, CoarseOperationCounts& work,
+                                       std::stop_token stop) {
     Columns products;
     for (std::size_t ray = 0; ray < plan.ray_count; ++ray) {
         auto& product = products[ray];
         product.resize(layout.nfft);
         for (std::size_t i = 0; i < product.size(); ++i)
             product[i] = observation[i] * workspace.columns[ray][i];
-        native_fft::fft(product, true, fft, stop);
+        tracked_fft(product, true, fft, work, stop);
     }
     std::vector<double> scores(layout.lag_count);
     for (std::size_t lag = 0; lag < scores.size(); ++lag) {
@@ -694,12 +804,15 @@ std::vector<double> correlation_scores(const Plan& plan, const Layout& layout, c
         scores[lag] = quadratic(workspace.inverse.matrix, products[0][lag], second) / variance;
         require_coarse(std::isfinite(scores[lag]), "nonfinite coarse correlation score");
     }
+    note(work.workspace_frequency_pairs, 1);
+    note(work.score_rows, scores.size());
     return scores;
 }
 
 std::vector<Complex> observation_spectrum(const Layout& layout, std::span<const Complex> observation,
                                           double frequency, std::size_t output_fs,
-                                          const native_fft::DoublePlan& fft, std::stop_token stop) {
+                                          const native_fft::DoublePlan& fft, CoarseOperationCounts& work,
+                                          std::stop_token stop) {
     std::vector<Complex> spectrum(layout.nfft);
     if (!frequency) {
         std::copy(observation.begin(), observation.end(), spectrum.begin());
@@ -713,7 +826,7 @@ std::vector<Complex> observation_spectrum(const Layout& layout, std::span<const 
             phase *= increment;
         }
     }
-    native_fft::fft(spectrum, false, fft, stop);
+    tracked_fft(spectrum, false, fft, work, stop);
     return spectrum;
 }
 
@@ -796,10 +909,10 @@ double scoring_operator_error(const Orthonormal& q, const Columns& columns, cons
 
 std::array<std::vector<Complex>, 2> fidelity_controls(const Plan& plan, const ReceiverConfig& config,
         const ReceiverSlotPlan& slot, const Crypto& key, const Projection& projection,
-        const native_fft::DoublePlan& fft, std::stop_token stop) {
+        const native_fft::DoublePlan& fft, CoarseOperationCounts& work, std::stop_token stop) {
     const auto& layout = plan.fidelity_layout;
     PatternSource source(slot.format, key, 0);
-    const auto source_slice = integer_source(plan, layout, source, plan.fidelity_source_first, stop);
+    const auto source_slice = integer_source(plan, layout, source, plan.fidelity_source_first, work, stop);
     const auto best_zero_lag = std::min(layout.lag_count - 1, extent(std::max(0.,
         std::round(-slot.arrival_lower_seconds * plan.output_fs))));
     const auto arrival = slot.arrival_lower_seconds + static_cast<double>(best_zero_lag) / plan.output_fs;
@@ -820,33 +933,36 @@ std::array<std::vector<Complex>, 2> fidelity_controls(const Plan& plan, const Re
                     }
                     values[i] = value;
                 }
-            }, stop);
-        controls[mode] = observation_spectrum(layout, projected, 0, plan.output_fs, fft, stop);
+            }, work, stop);
+        controls[mode] = observation_spectrum(layout, projected, 0, plan.output_fs, fft, work, stop);
     }
     return controls;
 }
 
 void validate_mapped_profile(const Plan& plan, const ReceiverConfig& config, const ReceiverSlotPlan& slot,
                              const Crypto& key, const Projection& projection, const MappedProjection& mapped,
-                             const native_fft::DoublePlan& fft, unsigned workers, std::stop_token stop) {
+                             const native_fft::DoublePlan& fft, unsigned workers, CoarseOperationCounts& work,
+                             std::stop_token stop) {
     const auto& layout = plan.fidelity_layout;
-    const auto observations = fidelity_controls(plan, config, slot, key, projection, fft, stop);
+    const auto observations = fidelity_controls(plan, config, slot, key, projection, fft, work, stop);
     using Scores = std::array<std::array<double, 2>, 2>; // exact/mapped, clean/noisy
     std::vector<Scores> scores(plan.workspaces());
+    std::array<CoarseOperationCounts, receiver_epoch_offsets.size()> epoch_work{};
     parallel(receiver_epoch_offsets.size(), workers, stop, [&](std::size_t epoch, std::stop_token job_stop) {
         auto format = slot.format;
         format.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(format.epoch) + receiver_epoch_offsets[epoch]);
         std::array<PatternSource, 2> sources{PatternSource(format, key, 0), PatternSource(format, key, 1)};
         std::array<std::vector<Complex>, 2> integer;
+        auto& counts = epoch_work[epoch];
         for (std::size_t bit = 0; bit < 2; ++bit)
-            integer[bit] = integer_source(plan, layout, sources[bit], plan.fidelity_source_first, job_stop);
+            integer[bit] = integer_source(plan, layout, sources[bit], plan.fidelity_source_first, counts, job_stop);
         for (std::size_t clock = 0; clock < plan.clock_count; ++clock) {
             std::array<Orthonormal, 2> reference_basis, mapped_basis;
             for (std::size_t bit = 0; bit < 2; ++bit) {
                 auto exact = make_columns(plan, layout, config, projection, nullptr, sources[bit],
-                    plan.fidelity_source_first, integer[bit], plan.clocks[clock], job_stop);
+                    plan.fidelity_source_first, integer[bit], plan.clocks[clock], counts, job_stop);
                 auto approximate = make_columns(plan, layout, config, projection, &mapped, sources[bit],
-                    plan.fidelity_source_first, {}, plan.clocks[clock], job_stop);
+                    plan.fidelity_source_first, {}, plan.clocks[clock], counts, job_stop);
                 const auto exact_g = gram(exact, plan.ray_count), mapped_g = gram(approximate, plan.ray_count);
                 const auto exact_inverse = invert(exact_g, plan.ray_count), mapped_inverse = invert(mapped_g, plan.ray_count);
                 require_coarse(exact_inverse.rank == mapped_inverse.rank,
@@ -865,13 +981,13 @@ void validate_mapped_profile(const Plan& plan, const ReceiverConfig& config, con
                     difference <= .01 * .01 * (exact_g.a + exact_g.d) &&
                     frobenius_squared(gram_delta) <= .02 * .02 * frobenius_squared(exact_g),
                     "local mapped-template projector fidelity gate failed");
-                to_spectrum(exact, layout, fft, job_stop);
-                to_spectrum(approximate, layout, fft, job_stop);
+                to_spectrum(exact, layout, fft, counts, job_stop);
+                to_spectrum(approximate, layout, fft, counts, job_stop);
                 std::array<Workspace, 2> pair{{{std::move(exact), exact_inverse}, {std::move(approximate), mapped_inverse}}};
                 auto& result = scores[plan.workspace_index(2 * epoch + bit, clock)];
                 for (std::size_t method = 0; method < pair.size(); ++method)
                     for (std::size_t input = 0; input < observations.size(); ++input) {
-                        const auto row = correlation_scores(plan, layout, pair[method], observations[input], 1, fft, job_stop);
+                        const auto row = correlation_scores(plan, layout, pair[method], observations[input], 1, fft, counts, job_stop);
                         result[method][input] = *std::max_element(row.begin(), row.end());
                     }
             }
@@ -880,6 +996,7 @@ void validate_mapped_profile(const Plan& plan, const ReceiverConfig& config, con
                 "local mapped-template wrong-bit separation gate failed");
         }
     });
+    for (const auto& counts : epoch_work) combine(work, counts);
     for (std::size_t input = 0; input < observations.size(); ++input) {
         std::array<std::size_t, 2> winners{};
         for (std::size_t method = 0; method < winners.size(); ++method) {
@@ -1003,8 +1120,10 @@ std::size_t scoring_worker_workspace(const Layout& layout, const Plan& plan) {
     return add(storage(mul(layout.nfft, plan.ray_count)), mul(layout.lag_count, sizeof(double)));
 }
 
-std::size_t scratch_workspace(const Plan& plan, const ReceiverConfig& config,
-                              std::size_t frequency_count, unsigned workers) {
+struct WorkspaceQuote { std::size_t total = 0, bulk_host = 0; };
+
+WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
+                                 std::size_t frequency_count, unsigned workers) {
     require_coarse(workers > 0, "coarse receiver requires an explicit positive worker share");
     const auto& layout = plan.layout;
     const auto lag_points = std::min(frequency_count, max_lag_frequency_points);
@@ -1016,6 +1135,7 @@ std::size_t scratch_workspace(const Plan& plan, const ReceiverConfig& config,
     // bounded controller metadata. Input and the fine stage are external.
     auto base = storage(add(nfft, mul(1 + phases, plan.filter_fft)));
     base = add(base, mul(add(mul(2, plan.taps), 4 * plan.source_step), sizeof(double)));
+    base = add(base, mul(frequency_count, sizeof(double)));
     base = add(base, 128 * 1024);
     auto bank = storage(mul(mul(plan.workspaces(), plan.ray_count), layout.nfft));
     bank = add(bank, mul(plan.workspaces(), sizeof(Workspace)));
@@ -1025,10 +1145,11 @@ std::size_t scratch_workspace(const Plan& plan, const ReceiverConfig& config,
     // The current columns and their expanded FFT destinations may coexist
     // during a vector resize. Already retained destinations are in bank.
     per_bank_worker = add(per_bank_worker, storage(add(mul(plan.ray_count, layout.kernel_rows), layout.nfft)));
+    if (config.bulk_backend && phases)
+        per_bank_worker = add(per_bank_worker, storage(layout.kernel_rows));
     const auto prep = add(bank, mul(std::min<std::size_t>(workers, lanes), per_bank_worker));
     const auto tile = tile_points(plan, frequency_count, workers);
     auto score = add(bank, storage(add(layout.crop_rows, mul(tile, layout.nfft))));
-    score = add(score, mul(frequency_count, sizeof(double)));
     score = add(score, mul(mul(frequency_count, plan.workspaces()), retained_per_bit * sizeof(Peak)));
     score = add(score, mul(std::min<std::size_t>(workers, mul(tile, plan.workspaces())),
                            scoring_worker_workspace(layout, plan)));
@@ -1043,8 +1164,8 @@ std::size_t scratch_workspace(const Plan& plan, const ReceiverConfig& config,
         auto lag = add(bank, storage(layout.crop_rows));
         lag = add(lag, zoom_plans);
         lag = add(lag, mul(std::min<std::size_t>(workers, plan.workspaces()), worker));
-        lag = add(lag, mul(frequency_count, sizeof(double)));
         lag = add(lag, mul(mul(lag_points, plan.workspaces()), retained_per_bit * sizeof(Peak)));
+        lag = add(lag, mul(plan.workspaces(), retained_per_bit * sizeof(CoarseProposal)));
         high = std::max(high, lag);
     }
     if (phases) {
@@ -1061,34 +1182,45 @@ std::size_t scratch_workspace(const Plan& plan, const ReceiverConfig& config,
     // Task metadata and the bounded active native call stack are charged
     // separately from shared immutable tables and algorithm buffers.
     const auto task_overhead = mul(std::min<std::size_t>(workers, tile * plan.workspaces()), 128 * 1024);
-    return add(add(base, high), task_overhead);
+    const auto bulk_host = config.bulk_backend ? config.bulk_backend->coarse_host_bytes(
+        nfft, std::max(tile, lag_groups ? lag_points : 0), layout.lag_count) : 0;
+    return {add(add(add(base, high), task_overhead), bulk_host), bulk_host};
 }
 
-std::vector<Peak> screen_frequency_tiles(const Plan& plan, const std::vector<Workspace>& bank,
-                                         std::span<const Complex> observation, std::span<const double> grid,
-                                         double variance, const native_fft::DoublePlan& fft,
-                                         unsigned workers, std::stop_token stop) {
+CoarseOperationCounts score_frequency_tile(const Plan& plan, std::span<const Workspace> bank,
+                                            std::span<const Complex> observation, std::span<const double> grid,
+                                            std::span<Peak> peaks, std::size_t first, std::size_t count,
+                                            double variance, const native_fft::DoublePlan& fft,
+                                            unsigned workers, std::stop_token stop) {
     const auto& layout = plan.layout;
     const auto local_count = mul(grid.size(), retained_per_bit);
-    std::vector<Peak> peaks(mul(bank.size(), local_count));
     const auto distance = std::max<std::size_t>(1, extent(std::ceil(plan.separation * plan.output_fs)));
-    const auto width = tile_points(plan, grid.size(), workers);
-    for (std::size_t first = 0; first < grid.size(); first += width) {
-        const auto count = std::min(width, grid.size() - first);
-        std::vector<std::vector<Complex>> spectra(count);
-        parallel(count, workers, stop, [&](std::size_t index, std::stop_token job_stop) {
-            spectra[index] = observation_spectrum(layout, observation, grid[first + index], plan.output_fs, fft, job_stop);
-        });
-        parallel(mul(bank.size(), count), workers, stop, [&](std::size_t index, std::stop_token job_stop) {
+    std::vector<std::vector<Complex>> spectra(count);
+    std::vector<CoarseOperationCounts> spectrum_work(count);
+    parallel(count, workers, stop, [&](std::size_t index, std::stop_token job_stop) {
+        spectra[index] = observation_spectrum(layout, observation, grid[first + index], plan.output_fs,
+                                               fft, spectrum_work[index], job_stop);
+    });
+    const auto jobs = mul(bank.size(), count);
+    const auto active = std::min<std::size_t>(workers, jobs);
+    std::vector<CoarseOperationCounts> worker_work(active);
+    parallel(active, workers, stop, [&](std::size_t task, std::stop_token job_stop) {
+        auto& work = worker_work[task];
+        for (auto index = task; index < jobs; index += active) {
             const auto workspace = index / count;
             const auto local_frequency = index % count;
             const auto frequency = first + local_frequency;
-            const auto scores = correlation_scores(plan, layout, bank[workspace], spectra[local_frequency], variance, fft, job_stop);
+            const auto scores = correlation_scores(plan, layout, bank[workspace], spectra[local_frequency],
+                                                    variance, fft, work, job_stop);
             const auto selected = arrival_peaks(scores, distance, frequency);
             std::copy(selected.begin(), selected.end(), peaks.begin() + workspace * local_count + frequency * retained_per_bit);
-        });
-    }
-    return peaks;
+            for (const auto& peak : selected) if (std::isfinite(peak.score)) note(work.retained_peaks, 1);
+        }
+    });
+    CoarseOperationCounts complete;
+    for (const auto& work : spectrum_work) combine(complete, work);
+    for (const auto& work : worker_work) combine(complete, work);
+    return complete;
 }
 
 struct ZoomKernel {
@@ -1097,7 +1229,8 @@ struct ZoomKernel {
 };
 
 std::vector<ZoomKernel> zoom_kernels(const Plan& plan, const FrequencyGrid& grid,
-                                     const native_fft::DoublePlan& fft, std::stop_token stop) {
+                                     const native_fft::DoublePlan* fft, CoarseOperationCounts& work,
+                                     std::stop_token stop) {
     std::vector<ZoomKernel> kernels;
     kernels.reserve(grid.groups.size());
     const auto rows = plan.layout.kernel_rows;
@@ -1122,48 +1255,48 @@ std::vector<ZoomKernel> zoom_kernels(const Plan& plan, const FrequencyGrid& grid
             const auto n = static_cast<long double>(i);
             kernel.convolution[nfft - i] = rotation(.5L * step * n * n);
         }
-        native_fft::fft(kernel.convolution, false, fft, stop);
+        if (fft) tracked_fft(kernel.convolution, false, *fft, work, stop);
     }
     return kernels;
 }
 
 void correlate_lag_group(std::span<const Complex> window, std::span<const Complex> column,
                          const ZoomKernel& kernel, std::span<Complex> products, std::span<Complex> output,
-                         const native_fft::DoublePlan& fft, std::stop_token stop) {
+                         const native_fft::DoublePlan& fft, CoarseOperationCounts& work,
+                         std::stop_token stop) {
     auto row = output.subspan(kernel.group.first, kernel.group.count);
     if (kernel.convolution.empty()) {
         Complex score{};
         for (std::size_t i = 0; i < window.size(); ++i)
             score += window[i] * std::conj(column[i]) * kernel.input_phase[i];
         row[0] = score;
+        note(work.singleton_dot_terms, window.size());
         return;
     }
     auto padded = products.first(kernel.convolution.size());
     for (std::size_t i = 0; i < window.size(); ++i)
         padded[i] = window[i] * std::conj(column[i]) * kernel.input_phase[i];
     std::fill(padded.begin() + window.size(), padded.end(), Complex{});
-    native_fft::fft(padded, false, fft, stop);
+    tracked_fft(padded, false, fft, work, stop);
     for (std::size_t i = 0; i < padded.size(); ++i) padded[i] *= kernel.convolution[i];
-    native_fft::fft(padded, true, fft, stop);
+    tracked_fft(padded, true, fft, work, stop);
     // The omitted output chirp and lag-origin rotation multiply both rays
     // by the same unit phase at each CFO. The Hermitian score cancels it.
     std::copy_n(padded.begin(), row.size(), row.begin());
 }
 
-std::vector<Peak> screen_lag(const Plan& plan, const std::vector<Workspace>& bank,
-                             std::span<const Complex> observation, const FrequencyGrid& grid,
-                             double variance, const native_fft::DoublePlan& fft,
-                             unsigned workers, std::stop_token stop) {
+CoarseOperationCounts score_lag_tile(const Plan& plan, std::span<const Workspace> bank,
+                                     std::span<const Complex> observation, std::span<const ZoomKernel> kernels,
+                                     std::size_t frequencies, std::size_t largest_fft, std::span<Peak> peaks,
+                                     double variance, const native_fft::DoublePlan& fft,
+                                     unsigned workers, std::stop_token stop) {
     const auto& layout = plan.layout;
-    const auto kernels = zoom_kernels(plan, grid, fft, stop);
-    const auto frequencies = grid.values.size();
     const auto local_count = mul(frequencies, retained_per_bit);
-    std::vector<Peak> peaks(mul(bank.size(), local_count));
-    std::size_t largest = 0;
-    for (const auto& kernel : kernels) largest = std::max(largest, kernel.convolution.size());
     const auto distance = std::max<std::size_t>(1, extent(std::ceil(plan.separation * plan.output_fs)));
+    std::vector<CoarseOperationCounts> worker_work(bank.size());
     parallel(bank.size(), workers, stop, [&](std::size_t index, std::stop_token job_stop) {
-        std::vector<Complex> products(largest);
+        auto& work = worker_work[index];
+        std::vector<Complex> products(largest_fft);
         Columns correlations;
         for (std::size_t ray = 0; ray < plan.ray_count; ++ray) correlations[ray].resize(frequencies);
         std::vector<double> scores(mul(frequencies, layout.lag_count));
@@ -1173,7 +1306,8 @@ std::vector<Peak> screen_lag(const Plan& plan, const std::vector<Workspace>& ban
             const auto window = observation.subspan(lag, layout.kernel_rows);
             for (std::size_t ray = 0; ray < plan.ray_count; ++ray)
                 for (const auto& kernel : kernels)
-                    correlate_lag_group(window, workspace.columns[ray], kernel, products, correlations[ray], fft, job_stop);
+                    correlate_lag_group(window, workspace.columns[ray], kernel, products, correlations[ray],
+                                        fft, work, job_stop);
             for (std::size_t f = 0; f < frequencies; ++f) {
                 const auto second = plan.ray_count == 2 ? correlations[1][f] : Complex{};
                 const auto score = quadratic(workspace.inverse.matrix, correlations[0][f], second) / variance;
@@ -1184,9 +1318,14 @@ std::vector<Peak> screen_lag(const Plan& plan, const std::vector<Workspace>& ban
         for (std::size_t f = 0; f < frequencies; ++f) {
             const auto selected = arrival_peaks(std::span(scores).subspan(f * layout.lag_count, layout.lag_count), distance, f);
             std::copy(selected.begin(), selected.end(), peaks.begin() + index * local_count + f * retained_per_bit);
+            for (const auto& peak : selected) if (std::isfinite(peak.score)) note(work.retained_peaks, 1);
         }
+        note(work.workspace_frequency_pairs, frequencies);
+        note(work.score_rows, scores.size());
     });
-    return peaks;
+    CoarseOperationCounts complete;
+    for (const auto& work : worker_work) combine(complete, work);
+    return complete;
 }
 
 void retain_proposals(CoarseResult& result, const Plan& plan, const ReceiverSlotPlan& slot,
@@ -1331,55 +1470,395 @@ CoarseArrivalPeaks select_coarse_arrivals(std::span<const double> scores, std::s
 
 std::size_t coarse_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers) {
     const auto plan = make_plan(config, slot);
-    return scratch_workspace(plan, config, frequency_bound(plan, config), workers);
+    return scratch_workspace(plan, config, frequency_bound(plan, config), workers).total;
+}
+
+CoarseFineGeometry coarse_fine_geometry(const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
+    const auto plan = make_plan(config, slot);
+    return {static_cast<double>(plan.output_fs), plan.max_frequency_step, config.clock_bound_ppm};
+}
+
+struct CoarseSession::Impl {
+    struct PropagateStop {
+        std::stop_source& cancellation;
+        void operator()() const noexcept { cancellation.request_stop(); }
+    };
+
+    const ReceiverConfig config;
+    const ReceiverSlotPlan slot;
+    Plan geometry;
+    FrequencyGrid grid;
+    CoarseProgress receipt;
+    std::unique_ptr<native_fft::DoublePlan> fft;
+    std::unique_ptr<CoarseBulk> bulk;
+    CoarseBulkCompletedWork bulk_completed;
+    std::vector<Workspace> bank;
+    std::vector<Complex> observation;
+    std::vector<ZoomKernel> kernels;
+    std::vector<Peak> peaks;
+    std::optional<CoarseResult> result;
+    double variance = 0;
+    std::size_t cursor = 0;
+    std::stop_source cancellation;
+    std::stop_callback<PropagateStop> external_stop;
+
+    Impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
+         std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
+         unsigned workers, std::size_t limit, std::stop_token outer_stop)
+        : config(config), slot(slot), external_stop(outer_stop, PropagateStop{cancellation}) {
+        const auto began = PhaseClock::now();
+        const auto stop = cancellation.get_token();
+        check_stop(stop);
+        geometry = make_plan(config, slot);
+        const auto& layout = geometry.layout;
+        require_coarse(iq.size() == capture_samples(slot), "coarse receiver input does not match its public window");
+        const auto workspace = scratch_workspace(geometry, config, frequency_bound(geometry, config), workers);
+        if (workspace.total > limit) throw ReceiverWorkspaceError("complete coarse receiver exceeds its admitted workspace");
+        grid = frequencies(geometry, config, intervals);
+        const bool lag = choose_lag(geometry, grid);
+        auto& work = receipt.plan;
+        work.route = lag ? CoarseRoute::lag_groups : CoarseRoute::frequency_tiles;
+        work.public_slot = slot.index;
+        work.pattern_epoch = slot.format.epoch;
+        work.symbol_ordinal = slot.format.symbol_ordinal;
+        work.first_sample = slot.first_sample;
+        work.stop_sample = slot.stop_sample;
+        work.workers = workers;
+        work.source_rows = layout.source_rows;
+        work.raw_template_rows = layout.raw_rows;
+        work.projected_template_rows = layout.kernel_rows;
+        work.projected_observation_rows = layout.crop_rows;
+        work.template_sampling_step = geometry.source_step;
+        work.fir_taps = geometry.taps;
+        work.fir_fft_rows = geometry.filter_fft;
+        work.correlation_fft_rows = lag ? 0 : layout.nfft;
+        if (lag)
+            for (const auto& group : grid.groups)
+                work.correlation_fft_rows = std::max(work.correlation_fft_rows, lag_group_fft(layout, group.count));
+        work.frequency_groups = grid.groups.size();
+        work.frequency_points = grid.values.size();
+        work.arrival_points = layout.lag_count;
+        work.workspaces = geometry.workspaces();
+        work.rays = geometry.ray_count;
+        work.clocks = geometry.clock_count;
+        work.tile_width = lag ? std::min<std::size_t>(workers, work.workspaces) :
+                                tile_points(geometry, work.frequency_points, workers);
+        work.total_tiles = ceil_div(lag ? work.workspaces : work.frequency_points, work.tile_width);
+        work.workspace_reserved_bytes = workspace.total;
+        work.workspace_limit_bytes = limit;
+        work.bulk_host_workspace_bytes = workspace.bulk_host;
+        work.input_sample_rate_hz = config.sample_rate_hz;
+        work.projected_sample_rate_hz = static_cast<double>(geometry.output_fs);
+        work.maximum_frequency_step_hz = geometry.max_frequency_step;
+        work.clock_gap_ppm = config.clock_bound_ppm;
+        work.arrival_lower_seconds = slot.arrival_lower_seconds;
+        work.arrival_upper_seconds = slot.arrival_upper_seconds;
+        work.mapped_fidelity_native_fp64 = geometry.source_step > 1;
+
+        // Check every borrowed sample, including those beyond the finite crop.
+        for (std::size_t i = 0; i < iq.size(); ++i) {
+            if ((i & (chunk_samples - 1)) == 0) check_stop(stop);
+            require_coarse(std::isfinite(iq[i].real()) && std::isfinite(iq[i].imag()), "coarse receiver requires finite input");
+        }
+        if (config.bulk_backend) {
+            const auto setup = PhaseClock::now();
+            bulk = config.bulk_backend->make_coarse(work.projected_sample_rate_hz, 2 * config.clock_bound_ppm);
+            require_coarse(static_cast<bool>(bulk), "requested coarse bulk backend did not create an execution session");
+            receipt.filter_setup.wall_seconds = elapsed(setup);
+            if (geometry.source_step > 1) {
+                // This small current-address interpolation gate deliberately
+                // stays independent FP64 native work. The full operational
+                // bank and observation below use the selected bulk backend.
+                const auto fidelity = PhaseClock::now();
+                auto& operations = receipt.mapped_fidelity.operations;
+                const native_fft::DoublePlan reference_fft(std::max(geometry.filter_fft, geometry.fidelity_layout.nfft), stop);
+                const Projection reference(geometry, &reference_fft, nullptr, operations, stop);
+                const MappedProjection mapped(geometry, reference, &reference_fft, operations, stop);
+                validate_mapped_profile(geometry, config, slot, key, reference, mapped, reference_fft,
+                                        workers, operations, stop);
+                receipt.mapped_fidelity.wall_seconds = elapsed(fidelity);
+            }
+        }
+        {
+            const auto setup = PhaseClock::now();
+            if (!bulk) {
+                const auto fft_rows = std::max({layout.nfft, geometry.filter_fft, geometry.fidelity_layout.nfft,
+                                                work.correlation_fft_rows});
+                fft = std::make_unique<native_fft::DoublePlan>(fft_rows, stop);
+            }
+            const Projection projection(geometry, fft.get(), bulk.get(), receipt.filter_setup.operations, stop);
+            variance = projection.variance(config.noise_variance);
+            require_coarse(std::isfinite(variance) && variance > 0, "coarse projected noise variance is invalid");
+            std::optional<MappedProjection> mapped;
+            if (geometry.source_step > 1)
+                mapped.emplace(geometry, projection, fft.get(), receipt.filter_setup.operations, stop);
+            receipt.filter_setup.wall_seconds += elapsed(setup);
+            if (mapped && !bulk) {
+                const auto fidelity = PhaseClock::now();
+                validate_mapped_profile(geometry, config, slot, key, projection, *mapped, *fft,
+                                        workers, receipt.mapped_fidelity.operations, stop);
+                receipt.mapped_fidelity.wall_seconds = elapsed(fidelity);
+            }
+            const auto bank_started = PhaseClock::now();
+            bank = prepare_bank(geometry, config, slot, key, projection, mapped ? &*mapped : nullptr,
+                                fft.get(), !bulk && !lag, workers, receipt.template_bank.operations, stop);
+            receipt.template_bank.wall_seconds = elapsed(bank_started);
+            mapped.reset();
+            const auto input_started = PhaseClock::now();
+            observation = projection.apply(iq.size(), layout.crop_first, layout.crop_rows,
+                [&](std::size_t first, std::span<Complex> values) {
+                    std::copy_n(iq.begin() + first, values.size(), values.begin());
+                }, receipt.observation.operations, stop);
+            receipt.observation.wall_seconds = elapsed(input_started);
+        }
+        if (lag) {
+            const auto lag_started = PhaseClock::now();
+            kernels = zoom_kernels(geometry, grid, fft.get(), receipt.lag_setup.operations, stop);
+            receipt.lag_setup.wall_seconds = elapsed(lag_started);
+        }
+        if (bulk) prepare_bulk(stop);
+        peaks.resize(mul(mul(bank.size(), grid.values.size()), retained_per_bit));
+        refresh_retained_bytes();
+        check_stop(stop);
+        receipt.preparation_seconds = elapsed(began);
+    }
+
+    void prepare_bulk(std::stop_token stop) {
+        const auto started = PhaseClock::now();
+        const auto& plan = receipt.plan;
+        std::vector<CoarseBulkWorkspace> columns;
+        columns.reserve(bank.size());
+        for (const auto& workspace : bank) {
+            const auto& inverse = workspace.inverse.matrix;
+            columns.push_back({{workspace.columns[0], workspace.columns[1]}, inverse.a, inverse.d, inverse.b});
+        }
+        std::vector<CoarseZoomGroup> zoom;
+        zoom.reserve(kernels.size());
+        for (const auto& kernel : kernels)
+            zoom.push_back({kernel.group.first, kernel.group.count, kernel.input_phase, kernel.convolution});
+        CoarseBulkWork operations;
+        bulk->prepare({plan.rays, plan.projected_template_rows, plan.correlation_fft_rows,
+                       plan.arrival_points, plan.frequency_points, plan.projected_sample_rate_hz, variance},
+                      observation, columns, zoom, operations, stop);
+        bulk_completed = bulk->completed_work();
+        combine(receipt.bulk_prepare.operations, operations);
+        // Preparation synchronously transfers the bank; final native NMS
+        // retains only ranks and the full address/peak frontier on the host.
+        for (auto& workspace : bank)
+            for (auto& column : workspace.columns) std::vector<Complex>().swap(column);
+        std::vector<Complex>().swap(observation);
+        std::vector<ZoomKernel>().swap(kernels);
+        receipt.bulk_prepare.wall_seconds = elapsed(started);
+    }
+
+    CoarseOperationCounts score_bulk(std::size_t first, std::size_t count, std::stop_token stop) {
+        const auto& plan = receipt.plan;
+        const bool lag = plan.route == CoarseRoute::lag_groups;
+        const auto first_workspace = lag ? first : 0;
+        const auto stop_workspace = lag ? add(first, count) : plan.workspaces;
+        const auto first_frequency = lag ? 0 : first;
+        const auto frequencies = lag ? plan.frequency_points : count;
+        const auto row_width = mul(plan.frequency_points, retained_per_bit);
+        const auto scores_per_workspace = mul(frequencies, plan.arrival_points);
+        const auto distance = std::max<std::size_t>(1, extent(std::ceil(geometry.separation * geometry.output_fs)));
+        auto next_workspace = first_workspace;
+        CoarseOperationCounts completed;
+        const auto sink = [&](std::size_t workspace, std::size_t rows, std::span<const double> scores) {
+            check_stop(stop);
+            require_coarse(workspace == next_workspace && rows > 0 && rows <= stop_workspace - next_workspace &&
+                           scores.size() == mul(rows, scores_per_workspace),
+                           "coarse bulk returned scores outside the requested canonical grid");
+            for (std::size_t row = 0; row < rows; ++row) {
+                for (std::size_t f = 0; f < frequencies; ++f) {
+                    const auto values = scores.subspan(add(mul(row, scores_per_workspace), mul(f, plan.arrival_points)),
+                                                       plan.arrival_points);
+                    require_coarse(std::ranges::all_of(values, [](double x) { return std::isfinite(x); }),
+                                   "nonfinite coarse bulk correlation score");
+                    const auto frequency = first_frequency + f;
+                    const auto selected = arrival_peaks(values, distance, frequency);
+                    std::copy(selected.begin(), selected.end(), peaks.begin() +
+                              (workspace + row) * row_width + frequency * retained_per_bit);
+                    for (const auto& peak : selected) if (std::isfinite(peak.score)) note(completed.retained_peaks, 1);
+                }
+            }
+            next_workspace += rows;
+        };
+        CoarseBulkWork operations;
+        if (lag) bulk->lag_tile(first, count, sink, operations, stop);
+        else bulk->frequency_tile(std::span(grid.values).subspan(first, count), sink, operations, stop);
+        const auto expected_pairs = mul(stop_workspace - first_workspace, frequencies);
+        const auto expected_scores = mul(expected_pairs, plan.arrival_points);
+        require_coarse(next_workspace == stop_workspace && operations.workspace_frequency_pairs == expected_pairs &&
+                       operations.score_rows == expected_scores,
+                       "coarse bulk did not score every requested public workspace and frequency");
+        // The returned shape and work argument are separate from a fresh
+        // backend completion witness. Setup or an earlier tile can already
+        // have set executed, so require this tile's exact score-row delta.
+        const auto execution = bulk->completed_work();
+        require_coarse(execution.executed && execution.score_rows >= bulk_completed.score_rows &&
+                       execution.score_rows - bulk_completed.score_rows == expected_scores,
+                       "coarse bulk tile lacks fresh execution evidence for its score rows");
+        bulk_completed = execution;
+        combine(completed, operations);
+        return completed;
+    }
+
+    CoarseState state() const noexcept {
+        if (cancellation.stop_requested() && receipt.state != CoarseState::finished && receipt.state != CoarseState::failed)
+            return CoarseState::cancelled;
+        return receipt.state;
+    }
+
+    void refresh_retained_bytes() {
+        auto bytes = add(sizeof(*this), fft ? fft->working_bytes() : 0);
+        bytes = add(bytes, mul(grid.values.capacity(), sizeof(double)));
+        bytes = add(bytes, mul(grid.groups.capacity(), sizeof(FrequencyGroup)));
+        bytes = add(bytes, mul(bank.capacity(), sizeof(Workspace)));
+        for (const auto& workspace : bank)
+            for (const auto& column : workspace.columns) bytes = add(bytes, storage(column.capacity()));
+        bytes = add(bytes, storage(observation.capacity()));
+        bytes = add(bytes, mul(kernels.capacity(), sizeof(ZoomKernel)));
+        for (const auto& kernel : kernels) {
+            bytes = add(bytes, storage(kernel.input_phase.capacity()));
+            bytes = add(bytes, storage(kernel.convolution.capacity()));
+        }
+        bytes = add(bytes, mul(peaks.capacity(), sizeof(Peak)));
+        if (result) {
+            bytes = add(bytes, mul(result->coordinates.capacity(), sizeof(FineCoordinate)));
+            bytes = add(bytes, result->reason.capacity() + 1);
+        }
+        if (bytes > receipt.plan.workspace_reserved_bytes)
+            throw ReceiverWorkspaceError("retained coarse session exceeds its admitted workspace");
+        receipt.retained_bytes = bytes;
+    }
+};
+
+CoarseSession::CoarseSession(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
+                             std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
+                             unsigned workers, std::size_t limit, std::stop_token stop)
+    : impl_(std::make_unique<Impl>(config, slot, key, iq, intervals, workers, limit, stop)) {}
+
+CoarseSession::~CoarseSession() = default;
+CoarseSession::CoarseSession(CoarseSession&&) noexcept = default;
+CoarseSession& CoarseSession::operator=(CoarseSession&&) noexcept = default;
+
+CoarseProgress CoarseSession::progress() const {
+    auto result = impl_->receipt;
+    result.state = impl_->state();
+    if (impl_->bulk) result.bulk = impl_->bulk->receipt();
+    return result;
+}
+
+CoarseState CoarseSession::state() const noexcept { return impl_->state(); }
+
+std::span<const double> CoarseSession::frequency_grid() const { return impl_->grid.values; }
+
+void CoarseSession::cancel() noexcept {
+    if (impl_) impl_->cancellation.request_stop();
+}
+
+void CoarseSession::advance(std::size_t maximum_tiles) {
+    require_coarse(maximum_tiles > 0 && maximum_tiles <= 64, "coarse advance requires 1..64 tiles");
+    auto& impl = *impl_;
+    auto& receipt = impl.receipt;
+    require_coarse(receipt.state != CoarseState::finished && receipt.state != CoarseState::failed,
+                   "coarse session cannot advance from its terminal state");
+    const auto stop = impl.cancellation.get_token();
+    check_stop(stop);
+    const auto& plan = receipt.plan;
+    const bool lag = plan.route == CoarseRoute::lag_groups;
+    const auto extent = lag ? plan.workspaces : plan.frequency_points;
+    const auto began = PhaseClock::now();
+    try {
+        for (std::size_t tile = 0; tile < maximum_tiles && impl.cursor < extent; ++tile) {
+            check_stop(stop);
+            const auto count = std::min(plan.tile_width, extent - impl.cursor);
+            CoarseOperationCounts completed;
+            if (impl.bulk) {
+                completed = impl.score_bulk(impl.cursor, count, stop);
+            } else if (lag) {
+                const auto row_width = mul(plan.frequency_points, retained_per_bit);
+                completed = score_lag_tile(impl.geometry, std::span(impl.bank).subspan(impl.cursor, count),
+                    impl.observation, impl.kernels, plan.frequency_points, plan.correlation_fft_rows,
+                    std::span(impl.peaks).subspan(mul(impl.cursor, row_width), mul(count, row_width)),
+                    impl.variance, *impl.fft, plan.workers, stop);
+            } else {
+                completed = score_frequency_tile(impl.geometry, impl.bank, impl.observation, impl.grid.values,
+                    impl.peaks, impl.cursor, count, impl.variance, *impl.fft, plan.workers, stop);
+            }
+            combine(receipt.search.operations, completed);
+            impl.cursor += count;
+            ++receipt.completed_tiles;
+        }
+        receipt.state = impl.cursor == extent ? CoarseState::searched : CoarseState::searching;
+    } catch (...) {
+        receipt.search.wall_seconds += elapsed(began);
+        receipt.state = stop.stop_requested() ? CoarseState::cancelled : CoarseState::failed;
+        throw;
+    }
+    receipt.search.wall_seconds += elapsed(began);
+}
+
+std::optional<CoarseResult> CoarseSession::finish() {
+    auto& impl = *impl_;
+    auto& receipt = impl.receipt;
+    if (impl.state() == CoarseState::finished) return impl.result;
+    if (impl.state() != CoarseState::searched) return {};
+    const auto stop = impl.cancellation.get_token();
+    const auto began = PhaseClock::now();
+    try {
+        const auto& plan = receipt.plan;
+        CoarseResult result;
+        result.projected_sample_rate_hz = plan.projected_sample_rate_hz;
+        result.maximum_frequency_step_hz = plan.maximum_frequency_step_hz;
+        result.clock_gap_ppm = plan.clock_gap_ppm;
+        result.workspace_peak_bytes = plan.workspace_reserved_bytes;
+        result.frequency_points = plan.frequency_points;
+        result.arrival_points = plan.arrival_points;
+        result.workspaces = plan.workspaces;
+        result.lag_frequency_search = plan.route == CoarseRoute::lag_groups;
+        retain_proposals(result, impl.geometry, impl.slot, impl.bank, impl.peaks, impl.grid.values, plan.workers, stop);
+        refine(result, impl.geometry, impl.config, impl.slot);
+        check_stop(stop);
+        impl.result.emplace(std::move(result));
+        impl.refresh_retained_bytes();
+        if (impl.bulk) {
+            receipt.bulk = impl.bulk->receipt();
+            require_coarse(receipt.bulk->executed && receipt.bulk->score_rows == impl.bulk_completed.score_rows,
+                           "coarse bulk completed without a matching backend execution receipt");
+        }
+        check_stop(stop);
+        receipt.selection.operations.selection_peak_rows = impl.peaks.size();
+        receipt.proposals = impl.result->proposal_count;
+        receipt.refined_coordinates = impl.result->coordinates.size();
+        receipt.selection.wall_seconds = elapsed(began);
+        receipt.state = CoarseState::finished;
+        impl.result->work = receipt;
+    } catch (...) {
+        impl.result.reset();
+        receipt.selection.wall_seconds = elapsed(began);
+        if (stop.stop_requested()) {
+            receipt.state = CoarseState::cancelled;
+            return {};
+        }
+        receipt.state = CoarseState::failed;
+        throw;
+    }
+    return impl.result;
 }
 
 CoarseResult score_coarse(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
                           std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
                           unsigned workers, std::size_t scratch_limit_bytes, std::stop_token stop) {
-    check_stop(stop);
-    const auto plan = make_plan(config, slot);
-    const auto& layout = plan.layout;
-    require_coarse(iq.size() == capture_samples(slot), "coarse receiver input does not match its public window");
-    CoarseResult result;
-    result.projected_sample_rate_hz = static_cast<double>(plan.output_fs);
-    result.maximum_frequency_step_hz = plan.max_frequency_step;
-    result.clock_gap_ppm = config.clock_bound_ppm;
-    result.workspaces = plan.workspaces();
-    result.arrival_points = layout.lag_count;
-    // The small public frequency bank also belongs to the preflight bound.
-    const auto peak = scratch_workspace(plan, config, frequency_bound(plan, config), workers);
-    if (peak > scratch_limit_bytes) throw ReceiverWorkspaceError("complete coarse receiver exceeds its admitted workspace");
-    result.workspace_peak_bytes = peak;
-    const auto grid = frequencies(plan, config, intervals);
-    result.frequency_points = grid.values.size();
-    result.lag_frequency_search = choose_lag(plan, grid);
-    // Check every borrowed sample, including those beyond the finite crop.
-    for (std::size_t i = 0; i < iq.size(); ++i) {
-        if ((i & (chunk_samples - 1)) == 0) check_stop(stop);
-        require_coarse(std::isfinite(iq[i].real()) && std::isfinite(iq[i].imag()), "coarse receiver requires finite input");
+    CoarseSession session(config, slot, key, iq, intervals, workers, scratch_limit_bytes, stop);
+    for (auto state = session.state(); state != CoarseState::searched; state = session.state()) {
+        if (state == CoarseState::cancelled || state == CoarseState::failed)
+            throw Error("coarse receiver stopped before completing its public grid");
+        session.advance(64);
     }
-    auto fft_rows = std::max({layout.nfft, plan.filter_fft, plan.fidelity_layout.nfft});
-    if (result.lag_frequency_search)
-        for (const auto& group : grid.groups) fft_rows = std::max(fft_rows, lag_group_fft(layout, group.count));
-    const native_fft::DoublePlan fft(fft_rows, stop);
-    const Projection projection(plan, fft, stop);
-    const auto variance = projection.variance(config.noise_variance);
-    require_coarse(std::isfinite(variance) && variance > 0, "coarse projected noise variance is invalid");
-    std::optional<MappedProjection> mapped;
-    if (plan.source_step > 1) {
-        mapped.emplace(plan, projection, fft, stop);
-        validate_mapped_profile(plan, config, slot, key, projection, *mapped, fft, workers, stop);
-    }
-    const auto bank = prepare_bank(plan, config, slot, key, projection, mapped ? &*mapped : nullptr, fft,
-                                   !result.lag_frequency_search, workers, stop);
-    const auto observation = projection.apply(iq.size(), layout.crop_first, layout.crop_rows,
-        [&](std::size_t first, std::span<Complex> values) { std::copy_n(iq.begin() + first, values.size(), values.begin()); }, stop);
-    auto peaks = result.lag_frequency_search ? screen_lag(plan, bank, observation, grid, variance, fft, workers, stop) :
-        screen_frequency_tiles(plan, bank, observation, grid.values, variance, fft, workers, stop);
-    retain_proposals(result, plan, slot, bank, peaks, grid.values, workers, stop);
-    refine(result, plan, config, slot);
-    return result;
+    auto result = session.finish();
+    if (!result) throw Error("coarse receiver cancelled before full selection");
+    return std::move(*result);
 }
 
 } // namespace datapump::triad::v3::receiver_detail

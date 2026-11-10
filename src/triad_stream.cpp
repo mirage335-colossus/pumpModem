@@ -29,7 +29,7 @@ std::uint64_t add(std::uint64_t left, std::uint64_t right) {
     return left + right;
 }
 
-std::uint64_t receive_coordinate(double value, bool clamp_before_origin) {
+std::uint64_t receive_coordinate(long double value, bool clamp_before_origin) {
     require(std::isfinite(value) && value < std::ldexp(1.L, 64) &&
         (clamp_before_origin || value >= 0), "public receive window overflows sample coordinates");
     return value > 0 ? static_cast<std::uint64_t>(value) : 0;
@@ -131,10 +131,21 @@ PublicProfile::PublicProfile(PublicProfileConfig config, std::optional<Crypto> c
             config_.clock_bound_ppm, config_.cfo_bound_hz, config_.spread_delay_ms, config_.spread_doppler_hz,
             config_.signal_delay_ms.value_or(0), config_.delay_excursion_seconds, config_.gate_bandwidth_hz})
         require(std::isfinite(value) && value >= 0, "invalid Robust public search or channel bounds");
-    require(config_.audio_pair_ppm < 2e6 && std::isfinite(config_.arrival_low_seconds) &&
+    require(config_.audio_pair_ppm < 2e6 && config_.clock_bound_ppm < 1e6 &&
+        std::isfinite(config_.arrival_low_seconds) &&
         std::isfinite(config_.arrival_high_seconds) && config_.arrival_low_seconds <= config_.arrival_high_seconds &&
         config_.signal_delay_ms.value_or(0) <= config_.spread_delay_ms,
         "invalid Robust public arrival, clock, or delay range");
+    nominal_endpoint_ = config_.audio_pair_ppm * .5e-6L;
+    const auto clock = config_.clock_bound_ppm * 1e-6;
+    affine_min_scale_ = 1 - clock;
+    affine_max_scale_ = 1 + clock;
+    require(affine_min_scale_ > 0, "invalid Robust affine clock scale");
+    // The affine scorer uses 1/(1 +/- clock). For independently bounded
+    // endpoints, (1 + endpoint)/(1 - endpoint) reaches 1/(1 - clock)
+    // at clock/(2 - clock). That endpoint also covers the earlier edge.
+    const long double slow = affine_min_scale_;
+    receive_endpoint_ = std::max(nominal_endpoint_, (1 - slow) / (1 + slow));
     if (!config_.lead_samples)
         config_.lead_samples = config_.helper_enabled ? std::uint64_t{helper_lead_seconds} * config_.format.sample_rate : 0;
     const auto first = transmit_slot(0);
@@ -197,40 +208,60 @@ std::uint64_t PublicProfile::last_slot() const {
 }
 
 std::uint64_t PublicProfile::capture_stop(long double source_end_seconds) const {
-    const auto rate = effective_sample_rate();
-    const auto half = config_.audio_pair_ppm / 2;
-    const auto tx_min = 1 - half * 1e-6, rx_max = 1 + half * 1e-6;
+    return capture_stop(source_end_seconds, true);
+}
+
+std::uint64_t PublicProfile::capture_stop(long double source_end_seconds, bool search) const {
+    const long double rate = effective_sample_rate();
+    const auto endpoint = search ? receive_endpoint_ : nominal_endpoint_;
+    const auto tx_min = 1 - endpoint, rx_max = 1 + endpoint;
     const auto tail = config_.spread_delay_ms * .001 + config_.delay_excursion_seconds +
         2 / (3 * geometry_.carrier_spacing_hz) + 32. / rate;
-    const auto samples = std::ceil(rate * rx_max * (config_.capture_lead_seconds +
-        static_cast<double>(source_end_seconds) / tx_min + config_.arrival_high_seconds + config_.capture_trail_seconds + tail));
-    return add(add(receive_coordinate(samples, false), config_.receiver_tail_samples),
+    const auto offset = static_cast<long double>(config_.capture_lead_seconds) + config_.arrival_high_seconds +
+        config_.capture_trail_seconds + tail;
+    auto end = rx_max * (source_end_seconds / tx_min + offset);
+    if (search) {
+        // The coarse source includes two rows past the finite support. Keep
+        // signed lead and arrival offsets additive in its affine coordinates.
+        end = std::max(end, (source_end_seconds + 2 / rate) / affine_min_scale_ + offset);
+    }
+    return add(add(receive_coordinate(std::ceil(rate * end), false), config_.receiver_tail_samples),
         config_.receiver_filter_halo_samples);
 }
 
-std::uint64_t PublicProfile::capture_first(long double source_begin_seconds) const {
-    const auto half = config_.audio_pair_ppm / 2;
-    const auto tx_max = 1 + half * 1e-6, rx_min = 1 - half * 1e-6;
-    return receive_coordinate(std::floor(effective_sample_rate() * rx_min *
-        (static_cast<double>(source_begin_seconds) / tx_max + config_.arrival_low_seconds)), true);
+std::uint64_t PublicProfile::capture_first(long double source_begin_seconds, bool search) const {
+    const long double rate = effective_sample_rate();
+    const auto endpoint = search ? receive_endpoint_ : nominal_endpoint_;
+    const auto tx_max = 1 + endpoint, rx_min = 1 - endpoint;
+    auto begin = rx_min * (source_begin_seconds / tx_max + config_.arrival_low_seconds);
+    if (search) {
+        const auto edge = source_begin_seconds - 2 / rate;
+        const auto scale = edge < 0 ? affine_min_scale_ : affine_max_scale_;
+        begin = std::min(begin, edge / scale + config_.capture_lead_seconds + config_.arrival_low_seconds);
+    }
+    return receive_coordinate(std::floor(rate * begin), true);
 }
 
-std::uint64_t PublicProfile::signal_first(long double source_begin_seconds) const {
-    const auto rate = effective_sample_rate();
-    const auto half = config_.audio_pair_ppm / 2;
-    const auto tx_max = 1 + half * 1e-6, tx_min = 1 - half * 1e-6;
-    return receive_coordinate(std::floor(rate * tx_min * (config_.capture_lead_seconds +
-        static_cast<double>(source_begin_seconds) / tx_max + config_.arrival_low_seconds - 32. / (rate * tx_min))), true);
+std::uint64_t PublicProfile::signal_first(long double source_begin_seconds, bool search) const {
+    const long double rate = effective_sample_rate();
+    const auto endpoint = search ? receive_endpoint_ : nominal_endpoint_;
+    const auto tx_max = 1 + endpoint, tx_min = 1 - endpoint;
+    const auto offset = static_cast<long double>(config_.capture_lead_seconds) + config_.arrival_low_seconds;
+    auto begin = tx_min * (source_begin_seconds / tx_max + offset);
+    if (search) begin = std::min(begin, source_begin_seconds / affine_max_scale_ + offset);
+    return receive_coordinate(std::floor(rate * begin - 32), true);
 }
 
-std::uint64_t PublicProfile::signal_stop(long double source_end_seconds) const {
-    const auto rate = effective_sample_rate();
-    const auto half = config_.audio_pair_ppm / 2;
-    const auto tx_min = 1 - half * 1e-6, rx_max = 1 + half * 1e-6;
+std::uint64_t PublicProfile::signal_stop(long double source_end_seconds, bool search) const {
+    const long double rate = effective_sample_rate();
+    const auto endpoint = search ? receive_endpoint_ : nominal_endpoint_;
+    const auto tx_min = 1 - endpoint, rx_max = 1 + endpoint;
     const auto tail = config_.signal_delay_ms.value_or(config_.spread_delay_ms) * .001 + config_.delay_excursion_seconds +
         (config_.selective_signal_tail ? 2 / (3 * geometry_.carrier_spacing_hz) : 0.) + 32. / rate;
-    return receive_coordinate(std::ceil(rate * rx_max * (config_.capture_lead_seconds +
-        static_cast<double>(source_end_seconds) / tx_min + config_.arrival_high_seconds + tail)), false);
+    const auto offset = static_cast<long double>(config_.capture_lead_seconds) + config_.arrival_high_seconds + tail;
+    auto end = rx_max * (source_end_seconds / tx_min + offset);
+    if (search) end = std::max(end, source_end_seconds / affine_min_scale_ + offset);
+    return receive_coordinate(std::ceil(rate * end), false);
 }
 
 PublicSlot PublicProfile::slot(std::uint64_t index) const {
@@ -239,18 +270,20 @@ PublicSlot PublicProfile::slot(std::uint64_t index) const {
     const auto seconds = [&](HelperBurstCoordinate value) { return calendar_.relative_seconds(origin(), value); };
     const auto halo = config_.receiver_filter_halo_samples;
     const auto earlier = [halo](std::uint64_t sample) { return sample - std::min(sample, halo); };
-    const auto filtered_stop = capture_stop(seconds(tx.helper_end));
-    const SampleRange original_observation{capture_first(seconds(tx.helper_begin)), filtered_stop - halo};
-    require(original_observation.stop > original_observation.first, "public receive window is empty");
-    const SampleRange observation{earlier(original_observation.first), filtered_stop};
-    const SampleRange data{signal_first(seconds(tx.support_begin)), signal_stop(seconds(tx.support_end))};
-    const auto previous_stop = index ? add(signal_stop(seconds(transmit_slot(index - 1).helper_end)), halo) : 0;
-    const auto next_first = earlier(signal_first(seconds(next.helper_begin)));
-    // Extra samples retain filter support in the scorer. They cannot enlarge
-    // the existing quiet aperture, and adjacent pulse tails can narrow it.
-    const auto quiet_first = std::min(original_observation.stop,
-        std::max({original_observation.first, data.first, previous_stop}));
-    const auto quiet_stop = std::max(quiet_first, std::min({original_observation.stop, data.stop, next_first}));
+    const auto begin = seconds(tx.helper_begin), end = seconds(tx.helper_end);
+    const SampleRange observation{earlier(capture_first(begin, true)), capture_stop(end)};
+    const SampleRange nominal_observation{capture_first(begin, false), capture_stop(end, false) - halo};
+    require(observation.stop > observation.first && nominal_observation.stop > nominal_observation.first,
+        "public receive window is empty");
+    const SampleRange data{signal_first(seconds(tx.support_begin), false),
+        signal_stop(seconds(tx.support_end), false)};
+    const auto previous_stop = index ? add(signal_stop(seconds(transmit_slot(index - 1).helper_end), true), halo) : 0;
+    const auto next_first = earlier(signal_first(seconds(next.helper_begin), true));
+    // Larger clock support and the filter halo cannot extend the quiet
+    // aperture. Their adjacent signal exclusions can only narrow it.
+    const auto quiet_first = std::min(nominal_observation.stop,
+        std::max({nominal_observation.first, data.first, previous_stop}));
+    const auto quiet_stop = std::max(quiet_first, std::min({nominal_observation.stop, data.stop, next_first}));
     return {index, tx.pattern_begin.epoch, config_.format.symbol_ordinal + index, tx,
         observation, data, {quiet_first, quiet_stop}, previous_stop, next_first};
 }
@@ -274,11 +307,12 @@ struct Emission::Impl {
     TransmissionKeys keys;
     EmissionReport report;
     Bytes bits;
+    std::function<std::uint8_t(std::uint64_t)> bit_at;
     std::stop_token stop;
     std::unique_ptr<PatternSource> data;
     std::unique_ptr<helper::Generator> helper;
     std::optional<HelperBurstSlot> current;
-    std::uint64_t last_slot = 0, source_first = 0, source_stop = 0, data_first = 0;
+    std::uint64_t first_slot = 0, last_slot = 0, source_first = 0, source_stop = 0, data_first = 0;
     std::uint64_t active_helper_first = 0, active_helper_stop = 0;
     long double active_helper_begin_seconds = 0, active_helper_end_seconds = 0;
     bool data_enabled = false, helper_enabled = false;
@@ -290,7 +324,8 @@ struct Emission::Impl {
         : profile(selected_profile), format(profile.config().format),
           keys(resolve_transmission_keys(key, format.encrypt,
               options.mode == EmissionMode::Noise ? TransmissionMode::Noise : TransmissionMode::Message)),
-          stop(options.stop), source_first(options.source_first_sample) {
+          bit_at(options.bit_at), stop(options.stop), first_slot(options.first_slot),
+          source_first(options.source_first_sample) {
         check_stop(stop);
         format.encrypt = keys.encrypt_data;
         noise = options.mode == EmissionMode::Noise;
@@ -315,10 +350,11 @@ struct Emission::Impl {
             require(!helper_enabled || static_cast<long double>(format.epoch) + std::ceil(active_helper_end_seconds) < helper_epoch_limit,
                 "source endpoint exceeds Helper32-bit epoch calendar");
         } else {
-            const auto count = options.mode == EmissionMode::Message ? options.bits.size() : options.slot_count;
-            require(count > 0 && (options.mode == EmissionMode::Message || options.bits.empty()),
+            const auto count = options.mode == EmissionMode::Message && !bit_at ? options.bits.size() : options.slot_count;
+            require(count > 0 && (options.mode == EmissionMode::Message || (options.bits.empty() && !bit_at)) &&
+                (!bit_at || options.bits.empty()),
                 "invalid Robust transmission slot count or unexpected draft");
-            // Draft allocation is bounded locally before examining its bits.
+            // Only the materialized convenience input makes a per-bit copy.
             require(options.bits.size() <= 65536 && std::all_of(options.bits.begin(), options.bits.end(),
                 [](std::uint8_t bit) { return bit <= 1; }), "invalid or oversized Robust transmit draft");
             bits.assign(options.bits.begin(), options.bits.end());
@@ -400,8 +436,9 @@ struct Emission::Impl {
                     addressed_format.epoch = current->pattern_begin.epoch;
                     addressed_format.symbol_ordinal += current->index;
                     if (!noise) {
-                        const auto first_slot = last_slot - (bits.size() - 1);
-                        bit = bits[static_cast<std::size_t>(current->index - first_slot)];
+                        const auto relative = current->index-first_slot;
+                        bit = bit_at ? bit_at(relative) : bits[static_cast<std::size_t>(relative)];
+                        require(bit <= 1, "invalid Robust generated transmit bit");
                     }
                 }
                 data = std::make_unique<PatternSource>(addressed_format, keys.data, bit);

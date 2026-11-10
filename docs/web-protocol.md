@@ -53,7 +53,11 @@ An `Event` payload is:
 | Primitive kind | `u32`: edit=1, select=2, toggle=3, activate=4, preset=5, submit=6, record=7, click=8, double click=9, wheel=10, navigate=11, key=12, service=13, close=14, measure=15 |
 | Flags | `u32`: checked=1, cancelled=2, Ctrl=4, Shift=8, Alt=16; other bits rejected |
 | Amount | Signed 32-bit integer encoded as its bits |
-| Value, error | Two counted strings; at most 1 MiB and 4096 bytes respectively, with tighter declaration limits afterward |
+| Value, error | Two counted strings; ordinary values at most 1 MiB and errors 4096 bytes. Edit-frame allocation permits up to 4 MiB, then the bridge enforces the published control limit; currently only the regular Message control declares that larger escaped-text limit. Its decoded payload stays at most 1 MiB. |
+
+The bridge preflights JSON text expansion against 6 MiB before accepting an edit.
+This preserves the 8 MiB frame/snapshot envelope, admits valid maximum Message
+drafts and rejects invalid drafts whose escaped presentation would overflow it.
 
 IDs and sequences in JSON snapshots are decimal strings, preserving full `u64`
 precision in JavaScript. A client uses the snapshot generation and a strictly

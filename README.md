@@ -24,12 +24,13 @@ buffers and one aggregate CPU budget. Python is a testing/benchmarking tool,
 not an application runtime.
 
 Live operation requires peers to share a configured calendar, keyed ordinal,
-waveform/FEC settings and key, plus a declared local input-noise model. Text is
-bounded to 16 bytes; exact raw bits and configured Off/RS20/RS60 text FEC use the
-same native session. Unknown-start acquisition, physical-device qualification
-and native real-time capacity remain unqualified. The former Robust audio CLI
+waveform/FEC settings and key, plus a declared local input-noise model. The GUI
+accepts text up to 1 MiB, preserving the short profile through 16 bytes and using
+fixed marker/codeword intervals for longer text. Exact raw bits and configured
+Off/RS20/RS60 text FEC use the same native session. Unknown-start acquisition,
+physical-device qualification and native real-time capacity remain unqualified. The former Robust audio CLI
 commands remain retired. See [current architecture](docs/robust-current.md),
-[GUI controls](docs/gui-contract.md) and [validation](docs/validation.md#native-gui-integration).
+[GUI controls](docs/gui-contract.md) and [validation](docs/validation.md#native-codec-and-measurement-migration).
 
 To edit the informal [Robust test list](_tests-RobustModem.md), open the
 [standalone editor](tools-endUser/robust-test-list-editor.html) in a browser, select the

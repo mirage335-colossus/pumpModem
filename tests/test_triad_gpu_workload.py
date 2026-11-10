@@ -1,276 +1,157 @@
-"""Guard the diagnostic workload comparison and explicit CUDA requirement."""
-import copy
-from contextlib import nullcontext
-import json
+"""Deterministic admission tests. These fixtures do not execute CUDA."""
+from copy import deepcopy
 from pathlib import Path
 import sys
 import tempfile
-from types import SimpleNamespace
 import unittest
-from unittest import mock
-import weakref
+from unittest.mock import patch
 
-import numpy as np
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from triad_gpu_bank import GpuFFTScreen
-from triad_gpu_workload import _write_probe_report, compare_work, run_probe
-from triad_realtime_fft import FFTScreen
-from triad_receiver import _prepare_cuda_linalg, _require_default_cuda_stream
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+import triad_gpu_workload as workload
 
 
-class WorkloadComparisonTests(unittest.TestCase):
-    def setUp(self):
-        self.records = [dict(work=dict(consumed_samples=12000, native_cache=dict(cache_misses=2)),
-            lane_scores=dict(initial_affine=[.1, -.2], adaptive=[.2, -.3]))]
-
-    def test_close_scores_require_identical_work(self):
-        candidate = copy.deepcopy(self.records)
-        candidate[0]['lane_scores']['adaptive'][0] += 1e-9
-        self.assertEqual(compare_work(self.records, candidate), dict(work_match=True, scores_match=True))
-        candidate[0]['work']['native_cache']['cache_misses'] += 1
-        self.assertEqual(compare_work(self.records, candidate), dict(work_match=False, scores_match=True))
-        candidate[0]['lane_scores']['adaptive'][0] += 2e-2
-        self.assertEqual(compare_work(self.records, candidate), dict(work_match=False, scores_match=False))
-
-    def test_close_scores_cannot_reverse_the_bit_order(self):
-        reference = copy.deepcopy(self.records)
-        candidate = copy.deepcopy(self.records)
-        reference[0]['lane_scores']['adaptive'] = [1., 1.0001]
-        candidate[0]['lane_scores']['adaptive'] = [1.0001, 1.]
-        self.assertEqual(compare_work(reference, candidate), dict(work_match=True, scores_match=False))
-
-    def test_missing_checkpoints_cannot_match(self):
-        for candidate in ([], self.records * 2):
-            self.assertEqual(compare_work(self.records, candidate), dict(work_match=False, scores_match=False))
-
-    def test_large_cuda_observation_budget_accounts_for_bounded_upload(self):
-        screen = GpuFFTScreen.__new__(GpuFFTScreen)
-        screen.samples = 40_652_650
-        screen.crop_rows = 67_359
-        screen.decimation = 600
-        screen.dtype = np.complex128
-        screen.taps = range(3000)
-        screen.template_chunk_samples = 16384
-        screen.resident_estimate = 335_946_624
-        expected = screen.resident_estimate+16*(screen.samples+2*(1 << 20))
-        self.assertEqual(screen._observation_peak_estimate(), expected)
-        screen.memory_limit_bytes = expected-1
-        with self.assertRaisesRegex(MemoryError, 'observation filter exceeds the declared workspace'):
-            screen.prepare_observation(None)
-
-    def test_cuda_upload_synchronizes_live_host_chunks_including_on_enqueue_failure(self):
-        raw = (np.arange(14) + 1j*np.arange(14)[::-1])[::2]
-        for interrupt in (False, True):
-            with self.subTest(interrupt=interrupt):
-                expected = raw.astype(np.complex64)
-                storage = np.empty_like(expected)
-                pending, copied_sizes = [], []
-                device_raw = mock.MagicMock()
-
-                def synchronize():
-                    if pending:
-                        target, reference = pending.pop()
-                        host = reference()
-                        self.assertIsNotNone(host)
-                        np.copyto(target, host)
-                        copied_sizes.append(len(host))
-
-                stream = mock.Mock(synchronize=mock.Mock(side_effect=synchronize))
-
-                def device_view(indices):
-                    target = storage[indices]
-                    def set_host(host, *, stream):
-                        self.assertFalse(pending)
-                        self.assertTrue(host.flags.c_contiguous)
-                        self.assertEqual(host.dtype, target.dtype)
-                        self.assertEqual(host.shape, target.shape)
-                        pending.append((target, weakref.ref(host)))
-                        if interrupt:
-                            raise KeyboardInterrupt
-                    return SimpleNamespace(set=set_host)
-
-                device_raw.__getitem__.side_effect = device_view
-                filtered = object()
-                def filter_observation(taps, values, *, down):
-                    self.assertFalse(pending)
-                    self.assertIs(values, device_raw)
-                    self.assertEqual(down, 2)
-                    np.testing.assert_array_equal(storage, expected)
-                    return filtered
-
-                upfirdn = mock.Mock(side_effect=filter_observation)
-                screen = GpuFFTScreen.__new__(GpuFFTScreen)
-                screen.dtype, screen.real_dtype = np.complex64, np.float32
-                screen.taps, screen.decimation = [1.], 2
-                screen.gpu_work = dict(projected_input_payload_bytes=0,
-                    observation_filter_pool_live_snapshot_max_bytes=0)
-                screen.cuda = SimpleNamespace(active=nullcontext,
-                    cp=SimpleNamespace(empty=mock.Mock(return_value=device_raw), asarray=np.asarray,
-                        cuda=SimpleNamespace(get_current_stream=lambda: stream)),
-                    pool=SimpleNamespace(used_bytes=lambda: 123), signal=SimpleNamespace(upfirdn=upfirdn))
-                with mock.patch('triad_gpu_bank._OBSERVATION_UPLOAD_ROWS', 3):
-                    if interrupt:
-                        with self.assertRaises(KeyboardInterrupt):
-                            screen._filter_observation(raw)
-                        upfirdn.assert_not_called()
-                        self.assertEqual(copied_sizes, [3])
-                        np.testing.assert_array_equal(storage[:3], expected[:3])
-                        stream.synchronize.assert_called_once()
-                    else:
-                        self.assertIs(screen._filter_observation(raw), filtered)
-                        self.assertEqual(copied_sizes, [3, 3, 1])
-                        self.assertEqual(stream.synchronize.call_count, 4)
-                        self.assertEqual(screen.gpu_work['observation_filter_pool_live_snapshot_max_bytes'], 123)
-                screen.cuda.cp.empty.assert_called_once_with(raw.shape, dtype=np.complex64)
-
-    def test_standalone_cuda_score_reserves_raw_and_validity_before_filtering(self):
-        manifest = dict(sample_rate_hz=400,
-            calendar=dict(capture_samples=512, capture_lead_seconds=.2,
-                data_sample_offset=0, arrival_prior_seconds=[0., .05]),
-            channel=dict(spread_delay_ms=0., spread_doppler_hz=0.),
-            format=dict(occupied_bandwidth_hz=20.), power=dict(complex_noise_variance=1.))
-        cpu = FFTScreen(manifest, np.ones((1, 2, 128), dtype=np.complex128), (0,),
-            clock_ppm=(0.,), output_sample_rate=200, pass_edge_hz=60., stop_edge_hz=90.,
-            precision='fp64', workers=1)
-        screen = GpuFFTScreen.__new__(GpuFFTScreen)
-        screen.__dict__.update(cpu.__dict__)
-        screen.prepare_observation = mock.Mock(return_value=object())
-        screen._coerce_projected = mock.Mock(return_value=object())
-        screen._frequency_spectra = mock.Mock(return_value=object())
-        screen._frequency_workspace_rows = mock.Mock(return_value=[[], []])
-        raw = np.ones(screen.samples, dtype=np.complex128)
-        valid = np.ones(screen.samples, dtype=np.uint8)
-        frequencies = np.array([0.])
-        retained = raw.nbytes+valid.nbytes
-        kernel_peak = screen._correlation_plan(frequencies, None, raw_input=True)[
-            'estimated_peak_bytes_by_method']['frequency']
-
-        screen.memory_limit_bytes = kernel_peak+retained-1
-        result = screen.score(raw, frequencies, valid=valid)
-        self.assertEqual(result['reason'], 'correlation_working_memory_limit')
-        screen.prepare_observation.assert_not_called()
-
-        screen.memory_limit_bytes = kernel_peak+retained
-        result = screen.score(raw, frequencies, valid=valid)
-        self.assertEqual(result['status'], 'proposed')
-        self.assertEqual(result['work']['estimated_peak_bytes'], screen.memory_limit_bytes)
-        self.assertEqual(result['work']['standalone_retained_input_bytes'], retained)
-        screen.prepare_observation.assert_called_once_with(raw, valid)
-
-        projected = screen.score_projected(object(), frequencies)
-        self.assertEqual(projected['status'], 'proposed')
-        self.assertNotIn('standalone_retained_input_bytes', projected['work'])
-
-    def test_lookup_reuse_preserves_logical_template_demand(self):
-        reference = copy.deepcopy(self.records)
-        reference[0]['work']['native_cache'].update(cache_hits=20,row_tile_references=120)
-        candidate = copy.deepcopy(reference)
-        candidate[0]['work']['native_cache']['cache_hits'] = 200
-        self.assertTrue(compare_work(reference,candidate)['work_match'])
-        self.assertEqual(reference[0]['work']['native_cache']['cache_hits'],20)
-        candidate[0]['work']['native_cache']['row_tile_references'] += 1
-        self.assertFalse(compare_work(reference,candidate)['work_match'])
-
-    def test_device_dispatch_can_differ_but_candidate_work_cannot(self):
-        reference = copy.deepcopy(self.records)
-        reference[0]['work']['lanes'] = dict(initial_affine=dict(
-            work_counts=dict(hypothesis_update_tasks=12, candidate_block_updates=36),
-            state_work_regime=dict(initial_states=12, requested_candidate_shards=4,
-                maximum_hypothesis_tasks_per_block=12)))
-        reference[0]['work']['capacity_transition_coverage'] = dict(
-            adaptive_work=dict(hypothesis_update_tasks=12, candidate_block_updates=36),
-            adaptive_state_regime=dict(requested_candidate_shards=4, state_cap=256))
-        candidate = copy.deepcopy(reference)
-        lane = candidate[0]['work']['lanes']['initial_affine']
-        lane['work_counts']['hypothesis_update_tasks'] = 3
-        lane['state_work_regime'].update(requested_candidate_shards=1,
-            maximum_hypothesis_tasks_per_block=3)
-        coverage = candidate[0]['work']['capacity_transition_coverage']
-        coverage['adaptive_work']['hypothesis_update_tasks'] = 3
-        coverage['adaptive_state_regime']['requested_candidate_shards'] = 1
-        self.assertTrue(compare_work(reference, candidate)['work_match'])
-        self.assertEqual(reference[0]['work']['lanes']['initial_affine']['work_counts']['hypothesis_update_tasks'], 12)
-        lane['work_counts']['candidate_block_updates'] += 1
-        self.assertFalse(compare_work(reference, candidate)['work_match'])
-        lane['work_counts']['candidate_block_updates'] -= 1
-        coverage['adaptive_state_regime']['state_cap'] = 128
-        self.assertFalse(compare_work(reference, candidate)['work_match'])
-
-    def test_unavailable_cuda_never_runs_cpu_fallback(self):
-        with tempfile.TemporaryDirectory() as path, mock.patch('torch.cuda.is_available', return_value=False):
-            output = Path(path) / 'probe.json'
-            with self.assertRaisesRegex(ValueError, 'CUDA requested but unavailable'):
-                run_probe(case_list='unread', case_indices=[7], executable='unrun', workers=2,
-                    device='cuda', output=output)
-            self.assertFalse(output.exists())
-
-    def test_host_workload_uses_automatic_and_explicit_worker_allocations(self):
-        machine = dict(cpu={'available_cpus': 12}, memory_budget_bytes=1024**3)
-        with mock.patch('triad_gpu_workload.load_cases', return_value={'cases': [{'index': 7}]}), \
-             mock.patch('triad_gpu_workload.machine_resources', return_value=machine), \
-             mock.patch('triad_gpu_workload.configure_numerical_threads',
-                        side_effect=RuntimeError('stop after resolving allocation')) as configure:
-            for workers, expected in ((None, 24), (12, 12), (18, 18), (30, 30)):
-                with self.subTest(workers=workers), self.assertRaisesRegex(RuntimeError, 'stop after resolving'):
-                    run_probe(case_list='unused', case_indices=[7], executable='unused', workers=workers,
-                              device='cpu', output='unused')
-                allocation = configure.call_args.args[0]
-                self.assertEqual((allocation['workers'], allocation['threads']), (expected, 1))
-                self.assertEqual(allocation['explicit_overcommit'], expected > 12)
-
-    def test_cuda_requires_selected_device_and_default_stream(self):
-        default, other = object(), object()
-        with mock.patch('torch.cuda.current_device', return_value=0), \
-                mock.patch('torch.cuda.default_stream', return_value=default), \
-                mock.patch('torch.cuda.current_stream', return_value=default) as stream:
-            _require_default_cuda_stream(0)
-            with self.assertRaisesRegex(ValueError, 'selected device'):
-                _require_default_cuda_stream(1)
-            stream.return_value = other
-            with self.assertRaisesRegex(ValueError, 'default stream'):
-                _require_default_cuda_stream(0)
-
-    def test_linalg_preflight_only_publishes_successful_initialization(self):
-        import torch
-
-        cpu_eye = torch.eye
-        def cpu_fixture(*args, **kwargs):
-            self.assertEqual(kwargs['device'], 'cuda:0')
-            self.assertEqual(kwargs['dtype'], torch.complex128)
-            return cpu_eye(*args, **{**kwargs, 'device': 'cpu'})
-
-        with mock.patch('triad_receiver._CUDA_LINALG_READY', set()) as ready, \
-                mock.patch('triad_receiver._require_default_cuda_stream'), \
-                mock.patch.multiple(torch.cuda, mem_get_info=mock.Mock(return_value=(1000, 2000)),
-                    memory_allocated=mock.Mock(return_value=0), memory_reserved=mock.Mock(return_value=0),
-                    synchronize=mock.DEFAULT) as cuda, \
-                mock.patch('torch.eye', side_effect=cpu_fixture) as fixture:
-            with mock.patch('torch.linalg.eigh', side_effect=RuntimeError('simulated linalg failure')):
-                with self.assertRaisesRegex(RuntimeError, 'simulated linalg failure'):
-                    _prepare_cuda_linalg(0)
-            self.assertEqual(ready, set())
-            receipt = _prepare_cuda_linalg(0)
-            self.assertTrue(receipt['initialized_here'])
-            self.assertIn('startup_wall_seconds', receipt)
-            self.assertEqual(receipt['device_total_bytes'], 2000)
-            cuda['synchronize'].assert_called_once_with(0)
-            self.assertEqual(_prepare_cuda_linalg(0), {'device': 0, 'initialized_here': False})
-            self.assertEqual(fixture.call_count, 2)
-
-    def test_exclusive_staging_preserves_existing_sidecar_symlink_target(self):
-        with tempfile.TemporaryDirectory() as path:
-            directory = Path(path)
-            output, target = directory / 'probe.json', directory / 'sentinel'
-            target.write_text('preserve this')
-            sidecar = output.with_suffix('.json.tmp')
-            sidecar.symlink_to(target)
-            _write_probe_report(output, {'status': 'running'})
-            _write_probe_report(output, {'status': 'unresolved'})
-            self.assertEqual(target.read_text(), 'preserve this')
-            self.assertTrue(sidecar.is_symlink())
-            self.assertEqual(json.loads(output.read_text()), {'status': 'unresolved'})
+def resources():
+    return dict(hardware_threads=4, workers=8, slot_owners=8, memory_limit_bytes=1 << 30,
+                receiver_numerical_threads_per_worker=1)
 
 
-if __name__ == '__main__':
+def bulk():
+    return dict(device="cuda:0", device_name="fixture-device", library_version="fixture-library",
+                cuda=True, cuda_driver_version=12500, cuda_runtime_version=12400, numerical_threads=1,
+                workspace_limit_bytes=1 << 26, runtime_headroom_bytes=1 << 25,
+                initial_free_device_bytes=1 << 28, total_device_bytes=1 << 29,
+                fft_plan_cache_count=2, fft_plan_cache_limit=4,
+                precision="fp32_bulk_fp64_coordinates_and_reductions", executed=True,
+                synchronizations=11, upload_bytes=12, download_bytes=13, fft_calls=14, dc_reduction_values=0,
+                score_rows=15, fir_output_contributions=16, statistics_blocks=17,
+                mapped_values=18, projected_values=19, direct_columns=0, direct_fallback_counts={"other": 0},
+                peak_reserved_bytes=100, allocator_peak_live_bytes=75, allocator_peak_reserved_bytes=110)
+
+
+def make_phase(name, work, *, seconds=1, wall=.1):
+    return dict(name=name, work=work, represented_seconds=seconds, wall_seconds=wall,
+                process_cpu_seconds=.1, scope="receiver")
+
+
+def slot_receipt(backend="cuda", *, command="continuation", stratum="active"):
+    accelerator = bulk() if backend == "cuda" else None
+    coarse = dict.fromkeys(workload.COARSE_GEOMETRY, 1)
+    coordinate = dict(epoch_offset_seconds=0, arrival_seconds=0, frequency_hz=0, clock_ppm=0)
+    coarse.update(planned_tiles=4, completed_tiles=4, bulk=accelerator,
+                  refined_coordinates_detail=[coordinate],
+                  proposals_detail=[dict(coordinate=coordinate, bit=0, rank=0, score=2.)])
+    lane = dict.fromkeys(workload.LANE_CAPS + workload.LANE_COUNTS, 20)
+    lane.update(states_sha256="2" * 64, bit_scores=[1., 0.])
+    fine = dict.fromkeys(workload.FINE_GEOMETRY, 1)
+    fine.update(observation_complete=True, representative_work=True, input_sha256="3" * 64,
+                observation_first_sample=0, quiet_modes=10, initial_affine=lane, adaptive=deepcopy(lane),
+                cache=dict.fromkeys(workload.CACHE_GEOMETRY + workload.CACHE_WORK, 10),
+                bulk=accelerator)
+    fine["cache"]["fallback_reason"] = ""
+    phases = [make_phase("coarse_prepare", {"frequency_grid_sha256": "1" * 64})]
+    phases += [make_phase("coarse_tiles", dict(step_tiles=step, completed_tiles=done, planned_tiles=4))
+               for step, done in ((1, 1), (1, 2), (2, 4))]
+    phases.append(make_phase("coarse_selection", coarse))
+    if command == "continuation" and stratum in ("active", "noise"):
+        phases.append(make_phase("fine_prefix", fine | {"checkpoint_seconds": 2}, seconds=2))
+        phases += [make_phase("fine_continuation", fine | {"checkpoint_seconds": seconds}, seconds=1)
+                   for seconds in (3, 4, 6)]
+    else:
+        phases.append(make_phase("fine_work", fine))
+    phases.append(make_phase("fine_finish", fine))
+    score = dict(decision="data" if command == "slot" else "ambiguous", bit=0 if command == "slot" else None,
+                 complete=command == "slot", all_valid=True, zero_h0_verified=True, quiet_modes=10,
+                 operational_passes_conditional_bound=True, operational_log_e=20., operational_threshold=21.)
+    score.update({key: [1., 0.] for key in
+                  ("bit_evidence", "adaptive_bit_evidence", "combined_bit_evidence")})
+    return dict(schema="datapump.triad.native-probe.v1", command=command, status="complete",
+                configuration=dict(receiver_slot_workspace_bytes=10 if accelerator else 5,
+                                   actual_cn0_db_hz=55., target_cn0_db_hz=30.),
+                allocation=resources(), observation=dict(input_sha256="4" * 64, seed=123, public_slot=0,
+                                                           pattern_epoch=12, symbol_ordinal=23),
+                identity=dict(backend=backend), phases=phases,
+                result=dict(work_complete=True, checkpoints_complete=True, continued_cache_fill=True,
+                            coordinate_scope="complete_public_selection",
+                            maximum_state_transition_covered=True, explicit_erasure_covered=True,
+                            receiver_decision_eligible=command == "slot",
+                            evaluator_expected_decision_observed=True, stratum=stratum, score=score))
+
+
+class NativeWorkloadTests(unittest.TestCase):
+    def test_cuda_only_accepts_actual_device_work_and_bounded_allocator(self):
+        work = slot_receipt()["phases"][-1]["work"]
+        work["bulk"]["fft_calls"] = 0
+        work["bulk"]["dc_reduction_values"] = 9
+        self.assertEqual(workload.accelerator_stage(work, "fine")[1], workload.PRECISION[1])
+        work["bulk"]["dc_reduction_values"] = 0
+        with self.assertRaisesRegex(workload.ProbeError, "FFT or explicit DC"):
+            workload.accelerator_stage(work, "fine")
+        work["bulk"]["fft_calls"] = 1
+        work["bulk"]["allocator_peak_reserved_bytes"] = work["bulk"]["workspace_limit_bytes"] + 1
+        with self.assertRaisesRegex(workload.ProbeError, "memory exceeded"):
+            workload.accelerator_stage(work, "fine")
+        work["bulk"].update(allocator_peak_reserved_bytes=100, cuda=False, device="cpu")
+        with self.assertRaisesRegex(workload.ProbeError, "CUDA device"):
+            workload.accelerator_stage(work, "fine")
+
+    def test_cuda_direct_native_fallback_cannot_qualify_mapped_path(self):
+        work = slot_receipt()["phases"][-1]["work"]
+        work["bulk"]["direct_fallback_counts"]["other"] = 1
+        with self.assertRaisesRegex(workload.ProbeError, "direct rendering fallback"):
+            workload.accelerator_stage(work, "fine")
+
+    def test_paired_same_input_work_and_scores(self):
+        cpu, cuda = slot_receipt("cpu"), slot_receipt()
+        self.assertTrue(workload.compare_work(cpu, cuda, "active")["accepted"])
+        cuda["observation"]["input_sha256"] = "b" * 64
+        self.assertFalse(workload.compare_work(cpu, cuda, "active")["same_input"])
+        cuda["observation"]["input_sha256"] = cpu["observation"]["input_sha256"]
+        cuda["phases"][-1]["work"]["adaptive"]["transition_edges"] = 22
+        self.assertGreater(workload.compare_work(cpu, cuda, "active")["maximum_relative_adaptive_cost_drift"], .05)
+
+    def test_paired_threshold_challenge_checks_observation_regime(self):
+        cpu, cuda = (slot_receipt(backend, command="slot") for backend in ("cpu", "cuda"))
+        self.assertTrue(workload.reference_challenge(cpu, cuda, "near-decision")["accepted"])
+        self.assertTrue(workload.reference_challenge(cpu, cuda, "high-snr")["accepted"])
+        cpu["result"]["score"]["operational_log_e"] = 100
+        self.assertFalse(workload.reference_challenge(cpu, cuda, "near-decision")["accepted"])
+
+    def test_partial_coarse_or_missing_fine_checkpoint_rejected(self):
+        receipt = slot_receipt()
+        receipt["phases"][2]["work"]["completed_tiles"] = 1
+        with self.assertRaisesRegex(workload.ProbeError, "not consecutive"):
+            workload.validate_work(receipt, "cuda", "active")
+        receipt = slot_receipt()
+        receipt["phases"] = [p for p in receipt["phases"] if p["name"] != "fine_continuation"]
+        with self.assertRaisesRegex(workload.ProbeError, "persistent"):
+            workload.validate_work(receipt, "cuda", "active")
+
+    def test_terminal_work_only_credits_cuda_statistics_without_claiming_acquisition(self):
+        receipt = slot_receipt(stratum="terminal")
+        receipt["phases"] = [p for p in receipt["phases"] if p["name"].startswith("fine_")]
+        receipt["observation"]["channel_scope"] = "independently_seeded_native_thermal_noise_at_local_crop"
+        receipt["result"].update(coordinate_scope="declared_public_work_coordinate", complete_receiver_service=False)
+        fine = receipt["phases"][-1]["work"]
+        fine["representative_work"] = False
+        fine["bulk"]["mapped_values"] = 0
+        precision, _ = workload.validate_work(receipt, "cuda", "terminal", declared=True)
+        self.assertEqual(precision, (None, workload.PRECISION[1]))
+        with self.assertRaisesRegex(workload.ProbeError, "complete public selection"):
+            workload.validate_work(receipt, "cuda", "terminal")
+        fine["bulk"]["statistics_blocks"] = 0
+        with self.assertRaisesRegex(workload.ProbeError, "statistics_blocks"):
+            workload.validate_work(receipt, "cuda", "terminal", declared=True)
+
+    def test_unavailable_device_writes_receipt_and_stops_before_case_plan(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(workload, "NativeProbe") as native:
+            probe = native.return_value
+            probe.call.return_value = {"status": "unavailable", "reason": "No native CUDA device"}
+            report = workload.run_probe(case_indices=[1], output=Path(temp) / "trace.json")
+            self.assertEqual(report["status"], "unresolved")
+            self.assertEqual(report["reason"], "No native CUDA device")
+            self.assertEqual(report["cases"], [])
+            self.assertEqual(probe.call.call_count, 1)
+
+
+if __name__ == "__main__":
     unittest.main()

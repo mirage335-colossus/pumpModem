@@ -25,6 +25,7 @@ name: Native Linux validation shard
         - core
         - fast
         - legacy
+        - triad
         - frontends
         - web
         - gui
@@ -121,7 +122,7 @@ jobs:
         case "$CI_SCOPE" in
           package) target=datapump-apps ;;
           core) target=datapump-tests-regular ;;
-          fast|legacy|frontends|web|gui) target=datapump-tests-$CI_SCOPE ;;
+          fast|legacy|triad|frontends|web|gui) target=datapump-tests-$CI_SCOPE ;;
           *) echo "Unknown native scope: $CI_SCOPE" >&2; exit 2 ;;
         esac
         cmake --build build --target "$target" --parallel "$(python3 -B tools/build_capacity.py)"

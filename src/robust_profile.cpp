@@ -147,6 +147,7 @@ void validate_settings(const Settings& s) {
         check(in_range(*s.live_noise_dbfs_hz, -250, 0), "Live input noise must be -250 to 0 dBFS/Hz");
     if (s.receiver_memory_limit)
         check(*s.receiver_memory_limit > 0, "Robust receiver memory limit must be positive");
+    check(s.transfer.content_limit > 0, "Robust content quota must be positive");
     check(s.added_symbols > 0 && s.added_symbols <= 1000,
           "Robust Added Symbols must be between 1 and 1000");
     check(s.symbol_burst_wait == 0 || s.symbol_burst_wait == 1 || s.symbol_burst_wait == 2 ||
@@ -184,7 +185,8 @@ void validate_settings(const Settings& s) {
 }
 
 namespace detail {
-Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token stop) {
+Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token stop,
+                        ProfilePreparationOptions options) {
     using namespace triad::v3;
     if (stop.stop_requested()) throw Error("Robust preparation cancelled");
     const auto& modem = s.transfer.modem;
@@ -248,6 +250,7 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     duration.arrival_upper_seconds = arrival.upper;
     duration.helper_lead_seconds = rx.helper_enabled ? helper_lead_seconds : 0;
     duration.pulse_halo_seconds = static_cast<double>(minimum.geometry.calendar_origin_sample) / fs;
+    duration.manual_active_seconds = options.fixture_active_seconds;
     // Limit the public model to a locally representable source interval. The
     // receiver separately admits its exact per-window workspace.
     const auto plan = plan_duration(minimum, rx, duration);
@@ -311,7 +314,7 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     channel.selective_model.correlation_spacing_hz = geometry.carrier_spacing_hz;
     channel.maximum_chunk_samples = 4096;
     if (s.simulation) {
-        effects.seed = simulation_seed();
+        effects.seed = options.simulation_seed ? *options.simulation_seed : simulation_seed();
         std::mt19937_64 random(effects.seed);
         const auto draw = [&](double radius) {
             return std::uniform_real_distribution<double>(-radius, radius)(random);

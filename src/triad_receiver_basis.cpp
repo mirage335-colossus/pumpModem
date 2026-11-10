@@ -110,7 +110,10 @@ struct MappedBasis::Impl {
         require(std::isfinite(extent) && extent > 0 && extent < static_cast<long double>(UINT64_MAX),
                 "mapped basis dense extent outside uint64 range");
         dense_samples = static_cast<std::uint64_t>(extent);
+        statistics.tile_samples = tile_samples;
+        statistics.cache_limit_bytes = cache_limit;
         statistics.dense_factor = dense_factor;
+        statistics.dense_sample_rate_hz = config.sample_rate_hz * dense_factor;
         statistics.oversampling_ratio = config.sample_rate_hz*dense_factor/width;
         statistics.interpolation_amplitude_proxy = (3./128)*
             std::pow(std::numbers::pi/statistics.oversampling_ratio, 4);
@@ -233,6 +236,7 @@ struct MappedBasis::Impl {
         std::uint64_t low_tile = 0;
         std::size_t count = 0;
         bool empty = false, fallback = false, large_phase = false, staging = false;
+        std::string_view fallback_reason;
     };
 
     Map mapping(const MappedBasisRow& row, const Tap& tap, std::uint64_t first,
@@ -259,6 +263,7 @@ struct MappedBasis::Impl {
         if (!std::isfinite(relative_first) || !std::isfinite(relative_last) || !std::isfinite(map.origin) ||
                 !std::isfinite(map.phase) || !std::isfinite(map.phase_step)) {
             map.fallback = true;
+            map.fallback_reason = "nonfinite-relative-map";
             return map;
         }
         const auto lower = map.origin+std::floor(relative_first)-1;
@@ -276,15 +281,16 @@ struct MappedBasis::Impl {
             std::abs(map.phase+map.phase_step*offsets.front()) > 0x1p30 ||
             std::abs(map.phase+map.phase_step*offsets.back()) > 0x1p30 ||
             origin < static_cast<long double>(INT64_MIN) || origin > static_cast<long double>(INT64_MAX);
+        if (map.fallback) map.fallback_reason = map.large_phase ? "large-phase" :
+            map.staging ? "pinned-tile-limit" : "relative-map-range";
         if (!map.fallback) map.count = static_cast<std::size_t>(count);
         return map;
     }
 
-    void render(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
-                std::span<const double> offsets, std::span<Complex> output, std::stop_token stop) {
-        cancelled(stop);
+    unsigned validate_request(const MappedBasisRow& row, std::span<const Tap> taps,
+                              std::uint64_t first, std::span<const double> offsets) const {
         require(!offsets.empty() && offsets.size() <= maximum_rows && !taps.empty() && taps.size() <= maximum_taps &&
-                output.size() == 2*taps.size()*offsets.size(), "mapped basis output extent mismatch");
+                offsets.size() <= maximum_samples, "mapped basis output extent mismatch");
         require(std::isfinite(row.arrival_seconds) && std::isfinite(row.frequency_hz) &&
                 std::isfinite(row.clock_ppm) && row.clock_ppm > -1e6, "invalid mapped basis candidate");
         const auto epoch = source_index(row.epoch_offset_seconds);
@@ -300,6 +306,14 @@ struct MappedBasis::Impl {
         for (const auto& tap : taps)
             require(std::isfinite(tap.delay_seconds) && tap.delay_seconds >= 0 && std::isfinite(tap.doppler_hz),
                     "invalid mapped basis channel tap");
+        return epoch;
+    }
+
+    void render(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
+                std::span<const double> offsets, std::span<Complex> output, std::stop_token stop) {
+        cancelled(stop);
+        require(output.size() == 2*taps.size()*offsets.size(), "mapped basis output extent mismatch");
+        const auto epoch = validate_request(row, taps, first, offsets);
         {
             std::lock_guard lock(mutex);
             ++statistics.calls;
@@ -361,6 +375,79 @@ struct MappedBasis::Impl {
         for (const auto value : output)
             require(std::isfinite(value.real()) && std::isfinite(value.imag()), "mapped basis produced nonfinite samples");
     }
+
+    void visit(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
+               std::span<const double> offsets, const BulkMappedSink& sink, std::stop_token stop) {
+        cancelled(stop);
+        require(static_cast<bool>(sink), "mapped basis requires a synchronous mapping sink");
+        const auto epoch = validate_request(row, taps, first, offsets);
+        {
+            std::lock_guard lock(mutex);
+            ++statistics.calls;
+            ++statistics.prepared_calls;
+        }
+        auto fallback_reason = std::string_view(statistics.fallback_reason);
+        if (fallback_reason.empty() && std::numeric_limits<long double>::digits < 64 && first > (UINT64_C(1)<<48))
+            fallback_reason = "native-origin-precision";
+        const auto direct_columns = [&](std::size_t tap, std::string_view reason) {
+            // At most one exact native bit-pair is materialized. This is the
+            // existing canonical fallback, never the normal device path.
+            std::vector<Complex> values(2*offsets.size());
+            direct(row, taps.subspan(tap, 1), first, offsets, values, stop);
+            const std::array<BulkDirectColumn, 2> columns{{
+                {tap, std::span<const Complex>(values).first(offsets.size()), reason},
+                {taps.size()+tap, std::span<const Complex>(values).subspan(offsets.size()), reason}}};
+            sink(offsets, {}, columns);
+            cancelled(stop);
+            std::lock_guard lock(mutex);
+            statistics.prepared_direct_columns += columns.size();
+        };
+        for (std::size_t tap = 0; tap != taps.size(); ++tap) {
+            cancelled(stop);
+            if (!fallback_reason.empty()) {
+                direct_columns(tap, fallback_reason);
+                continue;
+            }
+            const auto map = mapping(row, taps[tap], first, offsets);
+            if (map.fallback) {
+                direct_columns(tap, map.fallback_reason);
+                std::lock_guard lock(mutex);
+                statistics.large_phase_fallback_rows += 2*map.large_phase;
+                statistics.staging_fallback_rows += 2*map.staging;
+                continue;
+            }
+            if (map.empty) {
+                std::lock_guard lock(mutex);
+                statistics.prepared_empty_columns += 2;
+                continue;
+            }
+            const unsigned group = map.count <= maximum_pins/2 ? 2 : 1;
+            for (unsigned begin = 0; begin != 2; begin += group) {
+                std::array<BulkMappedColumn, 2> columns;
+                for (unsigned b = 0; b != group; ++b) {
+                    auto& column = columns[b];
+                    column.fraction = map.fraction;
+                    column.scale = map.scale;
+                    column.phase = map.phase;
+                    column.phase_step = map.phase_step;
+                    column.origin = static_cast<std::int64_t>(
+                        map.origin-static_cast<long double>(map.low_tile)*tile_samples);
+                    column.output_column = (begin+b)*taps.size()+tap;
+                    column.tiles.reserve(map.count);
+                    for (std::size_t i = 0; i != map.count; ++i) {
+                        auto data = tile(begin+b, epoch, map.low_tile+i, stop);
+                        column.tiles.push_back({data, std::span<const Complex>(*data)});
+                    }
+                }
+                cancelled(stop);
+                sink(offsets, std::span<const BulkMappedColumn>(columns).first(group), {});
+                cancelled(stop);
+                std::lock_guard lock(mutex);
+                statistics.prepared_mapped_columns += group;
+                statistics.peak_pinned_tiles = std::max(statistics.peak_pinned_tiles, group*map.count);
+            }
+        }
+    }
 };
 
 MappedBasis::MappedBasis(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
@@ -391,6 +478,15 @@ void MappedBasis::render_pair(const MappedBasisRow& row, std::span<const Tap> ta
     struct Release { std::atomic<unsigned>& active; ~Release() { active.fetch_sub(1); } } release{impl_->active};
     require(before < impl_->workers, "mapped basis concurrency exceeds admitted worker share");
     impl_->render(row, taps, first, offsets, output, stop);
+}
+
+void MappedBasis::visit_pair(const MappedBasisRow& row, std::span<const Tap> taps,
+                             std::uint64_t first, std::span<const double> offsets,
+                             const BulkMappedSink& sink, std::stop_token stop) {
+    const auto before = impl_->active.fetch_add(1);
+    struct Release { std::atomic<unsigned>& active; ~Release() { active.fetch_sub(1); } } release{impl_->active};
+    require(before < impl_->workers, "mapped basis concurrency exceeds admitted worker share");
+    impl_->visit(row, taps, first, offsets, sink, stop);
 }
 
 MappedBasisReport MappedBasis::report() const {

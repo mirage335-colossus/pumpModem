@@ -100,15 +100,20 @@ Apply the same lifecycle to local and remote storage. See the
 The canonical Robust stack is native `IndependentApskV2`. Its C++
 `CompleteStreamReceiver` connects noisy Helper acquisition, full public FFT
 proposals, fine persistent tracking, bit/null decisions and scored quiet-slot
-completion to the bounded native short-message/FEC decoder. The shared GUI
-session links this same stack and exposes configured-calendar operation.
+completion to bounded native short/long-message and configured FEC processing.
+The shared GUI session links this same stack and exposes configured-calendar
+operation. Source generation, DSP, persistent receiver state and real-audio
+projection are C++. Python tools only orchestrate native probes and analyze
+statistics; the former Python numerical receiver implementations are retired.
+The default application needs neither Python nor Torch. Optional compiled ATen
+bulk operations share the production receiver control and bounded ownership;
+requested CUDA must execute on CUDA or report unavailable.
 Implementation and component parity do not qualify all configurations,
 communication success probabilities, real-time capacity or physical hardware.
-Keep current checks and remaining integration gates accurate in
-[validation](docs/validation.md#native-gui-integration). Retain Python numerical
-references only for bounded migration parity, unresolved numerical questions
-and interpretation of historical measurements; remove superseded code and
-captures when those concrete purposes end.
+Keep current checks and remaining gates accurate in
+[validation](docs/validation.md#native-codec-and-measurement-migration).
+Historical Python costs and transport exceptions cannot calibrate the native
+runtime; changed CPU work requires fresh affected timings and holdouts.
 
 Use one in-tree implementation. Protocol changes evolve the canonical source;
 maintain older protocol compatibility with Git tags and separate binary releases.

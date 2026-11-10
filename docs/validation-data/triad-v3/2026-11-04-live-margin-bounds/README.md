@@ -30,7 +30,7 @@ has only 11.71875-Hz spectral resolution and does not identify this very-low-
 frequency noise law. Increasing all simulated in-band noise by 4 dB would be
 the wrong correction.
 
-The optional [`triad_live_narrowband.py`](../../../../tools/triad_live_narrowband.py)
+The optional `triad_live_narrowband.py` (retired historical source)
 operator applies the same fixed causal low-pass to observations and every public
 template column. Its pass edge is half the nominal triplet bandwidth, stop edge
 0.6 times that bandwidth. Both tested geometries use **115 FP32 taps**; measured

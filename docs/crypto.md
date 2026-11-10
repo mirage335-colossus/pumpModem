@@ -41,8 +41,9 @@ context to derive a child waveform seed. The dual-lane message APIs are kept
 separate from this AES-only waveform path. The native C++ complete receiver
 and GUI session share these canonical components. Python tools test and compare
 the implementation; they are not an operating receiver. GUI connection does
-not add sender authentication or replay protection to waveform evidence, and
-text FEC/CRC is error correction/detection rather than authentication.
+not add sender authentication or replay protection to waveform evidence. Short
+text FEC/CRC is error correction/detection rather than authentication. Native
+long text uses the separate interval tag described below.
 
 ## Dual-lane confidentiality and authentication
 
@@ -74,6 +75,17 @@ context and framing. Authentication does not
 replace source sanitization or establish sender identity outside that framed
 construction. `mac` is the waveform-purpose HMAC utility; it is not a
 confidentiality tag for user data.
+
+Native Robust long intervals use `confidentiality_mac` with ASCII
+`DP-TRIAD-INTERVAL`, version byte 1, FEC and compression bytes, big-endian
+64-bit epoch/ordinal of the actual first coded slot, and the source area.
+The full 32-byte tag precedes RS parity. This domain is not the retired long
+keyed format. Verification binds an individual word to its configured native
+calendar context; it does not authenticate the total number of words or the
+physical endpoint. A valid uncompressed prefix ending at any complete word can
+remain a valid shorter stream if all later words are absent. Public AMATEUR
+material cannot establish sender authenticity. The short profile is unchanged;
+see [native long intervals and limits](protocol.md#native-long-message-intervals).
 
 Fast uses a prepared per-transfer `ConfidentialityCbc` context. Its
 `prepare_confidentiality_cbc` setup derives Serpent and AES CBC keys from

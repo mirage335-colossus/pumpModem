@@ -4,6 +4,7 @@
 #include "datapump/triad_modem_v3.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -43,8 +44,8 @@ struct PublicProfileConfig {
     std::uint64_t receiver_filter_halo_samples = 0;
     double capture_lead_seconds = 0, capture_trail_seconds = 0;
     double arrival_low_seconds = 0, arrival_high_seconds = 0;
-    // Endpoint uncertainty is for public window construction. Search clock
-    // and CFO bounds can include additional configured margins.
+    // Nominal physical endpoint uncertainty. The observation and adjacent
+    // signal bounds also cover the complete declared affine clock search.
     double audio_pair_ppm = 0, clock_bound_ppm = 0, cfo_bound_hz = 0;
     double spread_delay_ms = 0, spread_doppler_hz = 0;
     std::optional<double> signal_delay_ms; // Defaults to the declared spread bound.
@@ -73,14 +74,17 @@ public:
     Format basis_format(const PublicSlot&) const;
     std::uint64_t capture_stop(long double source_end_seconds) const;
 private:
-    std::uint64_t capture_first(long double source_begin_seconds) const;
-    std::uint64_t signal_first(long double source_begin_seconds) const;
-    std::uint64_t signal_stop(long double source_end_seconds) const;
+    std::uint64_t capture_first(long double source_begin_seconds, bool search) const;
+    std::uint64_t capture_stop(long double source_end_seconds, bool search) const;
+    std::uint64_t signal_first(long double source_begin_seconds, bool search) const;
+    std::uint64_t signal_stop(long double source_end_seconds, bool search) const;
     PublicProfileConfig config_;
     Geometry geometry_;
     HelperBurstPlan calendar_;
     helper::PlacementBand placement_;
     helper::Plan helper_plan_;
+    long double nominal_endpoint_ = 0, receive_endpoint_ = 0;
+    double affine_min_scale_ = 1, affine_max_scale_ = 1;
 };
 
 struct DataPowerReference {
@@ -99,13 +103,16 @@ struct EmissionOptions {
     EmissionMode mode = EmissionMode::Message;
     std::uint64_t first_slot = 0;
     std::span<const std::uint8_t> bits;
-    // For modes without a draft. Message uses bits.size(). No slot-sized
-    // allocation is made for noise, Helper-only, or quiet runs.
+    // Message uses bits.size() for a materialized draft, or this count when
+    // bit_at is supplied. Other modes use this count without a bit allocation.
     std::uint64_t slot_count = 1;
     // A local playback may begin at Helper's first sample. Simulator fixtures
     // use zero to preserve the configured source observation origin.
     std::uint64_t source_first_sample = 0;
     std::stop_token stop;
+    // Message mode only, with an empty bits span. The reader receives a
+    // draft-relative slot and supplies exactly one 0/1 value on demand.
+    std::function<std::uint8_t(std::uint64_t)> bit_at = {};
 };
 
 struct EmissionReport {

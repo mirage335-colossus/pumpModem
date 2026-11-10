@@ -89,7 +89,7 @@ finally:
         process.wait()
 
 # Host file paths cross only the separate inherited capability pipe. Import
-# opaque source data through Fast; the native Robust short-message profile
+# opaque source data through Fast; the native Robust text profile
 # deliberately does not accept attachments.
 def string(value):
     data = value.encode("utf-8")
@@ -130,12 +130,53 @@ with tempfile.TemporaryDirectory(prefix="datapump-file-contract-") as directory:
             else:
                 process.stdin.write(packet)
             wait_for(lambda: int(snapshot["ack"]) >= sequence)
+        def reject_event(kind, target, value, expected):
+            global snapshot
+            sequence = int(snapshot["ack"]) + 1
+            payload = (struct.pack("<IQQQIII", 1, int(snapshot["generation"]), sequence,
+                                   int(target), kind, 0, 0) + string(value) + string(""))
+            process.stdin.write(frame(2, payload))
+            rejected = False
+            deadline = time.monotonic() + 15
+            while True:
+                assert time.monotonic() < deadline, "rejected edit did not publish bounded completion"
+                output_kind, output = read_frame(process, 15)
+                if output_kind == 103:
+                    assert expected in output[4:].decode(), output[4:].decode()
+                    rejected = True
+                elif output_kind == 101:
+                    snapshot = json.loads(output)
+                    if rejected:
+                        return
         wait_for(lambda: snapshot is not None)
         wait_for(lambda: any(item.get("text") == "Robust simulation ready"
                              for item in snapshot["controls"]))
-        assert not control("Attach file")["enabled"], "Robust short-message profile accepted attachments"
+        assert not control("Attach file")["enabled"], "Robust text profile accepted attachments"
         assert not control("Transmit")["enabled"], "empty Robust draft enabled transmission"
         assert any(tab["label"] == "Robust setup" for tab in snapshot["tabs"]), "configured-calendar setup missing"
+        message = next(item for item in snapshot["controls"]
+                       if item["kind"] == "text" and item.get("byteLimit") == 4 * 1024 * 1024)
+        binary = next(item for item in snapshot["controls"]
+                      if item["kind"] == "text" and item.get("help", "").startswith("Edit the first 16 message bytes"))
+        event(1, binary["id"], "00000000")
+        escaped = "\\x00" * (1024 * 1024)
+        event(1, message["id"], escaped)
+        current_message = next(item for item in snapshot["controls"] if item["id"] == message["id"])
+        assert current_message["text"] == escaped, "pipe transport truncated escaped Robust text"
+        assert any(item.get("text", "").startswith("Long text · 1048576 bytes · FEC Off")
+                   for item in snapshot["controls"]), "pipe transport bypassed native long-text preparation"
+        assert not control("Cancel TX")["enabled"], "editing long text started a transmission"
+        reject_event(1, message["id"], "<" * (2 * 1024 * 1024), "JSON presentation limit")
+        current_message = next(item for item in snapshot["controls"] if item["id"] == message["id"])
+        assert current_message["text"] == escaped, "invalid expanded draft replaced accepted payload"
+        carrier = control("Carrier")
+        reject_event(1, carrier["id"], "x" * (1024 * 1024 + 1), "this control's input limit")
+        assert control("Carrier")["text"] == carrier["text"], "extended edit allowance changed another field"
+        reject_event(1, message["id"], escaped + "x", "host text exceeds its bound")
+        current_message = next(item for item in snapshot["controls"] if item["id"] == message["id"])
+        assert current_message["text"] == escaped, "over-limit edit replaced the accepted payload"
+        reject_event(2, message["id"], "x" * (1024 * 1024 + 1), "host text exceeds its bound")
+        event(1, message["id"], "")
         modem = next(item for item in snapshot["controls"]
                      if any(option["label"] == "Fast Modem" for option in item.get("options", [])))
         fast = next(option for option in modem["options"] if option["label"] == "Fast Modem")

@@ -19,6 +19,17 @@
 namespace datapump::gui::web {
 namespace {
 constexpr std::size_t maximum_text=1024*1024,maximum_snapshot=8*1024*1024;
+bool bounded_json_text(std::string_view value) {
+    // Keep the previous 1 MiB envelope's worst-case six-byte JSON expansion.
+    // Invalid escaped drafts can remain editable, but cannot exhaust a snapshot.
+    constexpr std::size_t limit=6*maximum_text;
+    std::size_t bytes=0;
+    for(const unsigned char c:value) {
+        bytes+=c=='"'||c=='\\'?2:c<32||c=='<'||c=='>'||c=='&'?6:1;
+        if(bytes>limit)return false;
+    }
+    return true;
+}
 std::string json_string(std::string_view value) {
     constexpr char hex[]="0123456789abcdef";
     std::string out;out.reserve(value.size()+2);out+='"';
@@ -457,7 +468,9 @@ Result Bridge::accept(const Event& e) {
     auto& s=*impl_;
     const auto reject=[](const char* error){return Result{false,error};};
     if(e.version!=protocol_version)return reject("Web protocol version mismatch");
-    if(e.value.size()>maximum_text||e.error.size()>4096)return reject("Web event exceeds input limit");
+    const bool extended_edit=e.kind==EventKind::edit&&e.value.size()<=maximum_edit_value_bytes;
+    if((e.value.size()>maximum_text&&!extended_edit)||e.error.size()>4096)return reject("Web event exceeds input limit");
+    if(e.value.size()>maximum_text&&!bounded_json_text(e.value))return reject("Web edit exceeds JSON presentation limit");
     if(!s.initialized)return reject("A full snapshot is required before input");
     if(s.current_signature()!=s.signature) {++s.epoch;s.initialized=false;return reject("Presentation changed; obtain a fresh snapshot");}
     if(e.generation!=s.epoch)return reject("Stale web presentation generation");
@@ -516,6 +529,8 @@ Result Bridge::accept(const Event& e) {
         s.app.dispatch(target.action);return {true,{}};
     }
     const auto& c=target.control;const auto p=s.app.control(c);const auto& state=p.state;
+    if(e.value.size()>maximum_text&&e.value.size()>c.byte_limit)
+        return reject("Web event exceeds this control's input limit");
     const auto layers=s.app.overlay_layers();
     if(!p.enabled||!p.visible||(c.surface?!layers.enable_overlay:!layers.enable_background))return reject("Web control is unavailable");
     const auto option=[&]{return std::any_of(state.options.begin(),state.options.end(),[&](const auto& v){return v.id==e.value&&v.enabled;});};

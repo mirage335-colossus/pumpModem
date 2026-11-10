@@ -118,35 +118,19 @@ class ProbabilityAndResourceTests(TestCase):
             with self.subTest(args=args, kwargs=kwargs), self.assertRaises(ValueError):
                 metrics.success_interval(*args, **kwargs)
 
-    def test_machine_snapshot_uses_operating_reserve_from_constrained_memory(self):
-        with patch("triad_cpu.detect_cpu_budget", return_value={"available_cpus": 2}), \
-             patch("build_capacity.available_memory", return_value=16*2**30), \
-             patch("build_capacity.linux_limits", return_value=([2], [6*2**30])), \
-             patch.object(Path, "exists", return_value=False), \
-             patch.object(metrics, "platform") as platform:
-            platform.platform.return_value = "Linux"
-            platform.processor.return_value = "model-test"
-            with patch("sys.platform", "linux"):
-                result = metrics.machine_resources()
-        self.assertEqual(result["cpu"], {"available_cpus": 2})
-        self.assertEqual(result["cpu_model"], "model-test")
-        self.assertEqual(result["available_memory_bytes"], 6*2**30)
-        self.assertEqual(result["memory_reserve_bytes"], 6*2**30//10)
-        self.assertEqual(result["memory_budget_bytes"], 6*2**30-6*2**30//10)
-        self.assertEqual(result["cgroup_memory"]["memory_headroom_bytes"], [6*2**30])
+    def test_student_critical_and_interior_exact_binomial_bounds(self):
+        # Reference values independently computed from the corresponding distributions.
+        self.assertAlmostEqual(metrics.t_critical(.05, 2), 4.30265272975, places=8)
+        self.assertAlmostEqual(metrics.t_critical(.05, 8), 2.30600413520, places=8)
+        self.assertAlmostEqual(metrics.success_interval(2, 4)[0], .097611462886, places=9)
+        self.assertAlmostEqual(metrics.success_interval(2, 4)[1], .902388537114, places=9)
 
-    def test_machine_snapshot_surfaces_unknown_cgroup_capacity(self):
-        with patch("triad_cpu.detect_cpu_budget", return_value={"available_cpus": 1}), \
-             patch("build_capacity.available_memory", return_value=8*2**30), \
-             patch("build_capacity.linux_limits", side_effect=ValueError("cgroup mount not visible")), \
-             patch.object(metrics, "platform") as platform, \
-             patch("sys.platform", "linux"):
-            platform.processor.return_value = "test"
-            result = metrics.machine_resources()
-        self.assertIsNone(result["memory_budget_bytes"])
-        self.assertIsNone(result["available_memory_bytes"])
-        self.assertEqual(result["cgroup_memory"]["status"], "unknown")
-        self.assertTrue(any("cgroup mount not visible" in warning for warning in result["warnings"]))
+    def test_upper_exact_binomial_bound_inverts_the_small_tail_directly(self):
+        alpha = 1e-12
+        expected = -math.expm1(math.log(alpha) / 29)
+        observed = metrics.success_interval(0, 29, alpha=alpha)[1]
+        self.assertGreaterEqual(observed, expected)
+        self.assertAlmostEqual(observed, expected, places=14)
 
 
 if __name__ == "__main__":

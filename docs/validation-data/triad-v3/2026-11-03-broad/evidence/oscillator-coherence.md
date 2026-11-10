@@ -3,7 +3,7 @@
 This note separates three issues: capture of a frequency-offset signal, loss in
 one untracked coherent correlation, and information available to a better phase
 receiver. A bad untracked correlation is **not** a universal receiver limit.
-The [calculation](oscillator-coherence.py) and [results](oscillator-coherence.json)
+The calculation (retired historical source) and [results](oscillator-coherence.json)
 use the actual isolated CLI preset composition. Three native `configure` calls
 and small scalar checks completed; no new sampled transmission was generated.
 
@@ -51,7 +51,7 @@ constant-power rectangular observation has mean retained coherent energy
 
 This follows by integrating the covariance over the observation square.
 It is also the Brownian term of the existing
-[`expected_correlation_coherence`](../../../../../src/correlation_experiment.cpp)
+`expected_correlation_coherence` (retired historical source)
 helper. The calculation uses a small-x series and `expm1`, avoiding precision
 loss without requiring higher-than-FP64 arithmetic.
 
@@ -83,7 +83,7 @@ proof that all pre-multiplication information survives. Delayed TX phase and
 frequency-selective paths also need their actual joint channel model.
 
 The favorable known-waveform presence floors in
-[`triad_coverage_bounds.py`](../../../../../tools/triad_coverage_bounds.py)
+`triad_coverage_bounds.py` (retired historical source)
 remain unchanged: 211.50 days for 99%/10⁻⁴ or 75.33 days for 90%/.01 at
 −60 dB-Hz and unit useful-energy efficiency, before unknown-channel penalties.
 

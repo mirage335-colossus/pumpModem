@@ -159,10 +159,178 @@ void slow_mapped(const datapump::Crypto& crypto) {
     const std::array<r::FrequencyInterval, 1> intervals{{{-.005, .005}}};
     constexpr unsigned workers = 3;
     const auto limit = r::coarse_workspace(f.config, f.slot, workers);
-    const auto result = r::score_coarse(f.config, f.slot, crypto, f.iq, intervals, workers, limit, {});
-    check_winner(f, result);
-    check(result.projected_sample_rate_hz == 10 && result.workspaces == 26 && result.lag_frequency_search,
+    r::CoarseSession session(f.config, f.slot, crypto, f.iq, intervals, workers, limit);
+    const auto initial = session.progress();
+    check(initial.plan.route == r::CoarseRoute::lag_groups && initial.plan.total_tiles > 1 &&
+          initial.mapped_fidelity.operations.projected_columns > 0 && initial.lag_setup.operations.forward_ffts == 1,
+          "lag-domain session missed its prepared reusable work");
+    session.advance(1);
+    const auto prefix = session.progress();
+    const auto pairs = initial.plan.tile_width * initial.plan.frequency_points;
+    check(prefix.state == r::CoarseState::searching && prefix.completed_tiles == 1 &&
+          prefix.search.operations.workspace_frequency_pairs == pairs &&
+          prefix.search.operations.score_rows == pairs * initial.plan.arrival_points && !session.finish(),
+          "lag-domain prefix changed its full grid or published incomplete proposals");
+    session.advance(64);
+    const auto result = session.finish();
+    check(result.has_value(), "complete lag-domain search did not release its proposals");
+    check_winner(f, *result);
+    check(result->projected_sample_rate_hz == 10 && result->workspaces == 26 && result->lag_frequency_search,
           "slow full coarse search did not use the mapped lag-domain projection geometry");
+    const auto expected_pairs = initial.plan.workspaces * initial.plan.frequency_points;
+    const auto expected_ffts = initial.plan.workspaces * initial.plan.arrival_points * initial.plan.rays;
+    check(result->work.search.operations.workspace_frequency_pairs == expected_pairs &&
+          result->work.search.operations.forward_ffts == expected_ffts &&
+          result->work.search.operations.inverse_ffts == expected_ffts,
+          "lag-domain session lost or repeated an admitted correlation");
+}
+
+void frequency_continuation(const datapump::Crypto& crypto) {
+    const auto f = capture(crypto, false);
+    const std::array<r::FrequencyInterval, 1> intervals{{{-.2, .2}}};
+    constexpr unsigned workers = 3;
+    const auto limit = r::coarse_workspace(f.config, f.slot, workers);
+    r::CoarseSession session(f.config, f.slot, crypto, f.iq, intervals, workers, limit);
+    const auto initial = session.progress();
+    const auto& plan = initial.plan;
+    check(initial.state == r::CoarseState::prepared && plan.route == r::CoarseRoute::frequency_tiles &&
+          plan.total_tiles > 4 && plan.workers == workers && initial.completed_tiles == 0 && !session.finish() &&
+          initial.retained_bytes > 0 && initial.retained_bytes <= limit,
+          "coarse session did not retain a complete fixed prepared geometry");
+    rejects([&] { session.advance(0); }, "zero-work coarse advance was accepted");
+    rejects([&] { session.advance(65); }, "unbounded coarse advance was accepted");
+    const std::vector<double> grid(session.frequency_grid().begin(), session.frequency_grid().end());
+    std::size_t advanced = 0;
+    for (const auto count : {1U, 1U, 2U}) {
+        session.advance(count);
+        advanced += count;
+        const auto step = session.progress();
+        const auto frequencies = advanced * plan.tile_width;
+        const auto pairs = frequencies * plan.workspaces;
+        check(step.completed_tiles == advanced && step.state == r::CoarseState::searching && !session.finish() &&
+              step.proposals == 0 && step.refined_coordinates == 0 &&
+              step.search.operations.forward_ffts == frequencies &&
+              step.search.operations.inverse_ffts == pairs * plan.rays &&
+              step.search.operations.workspace_frequency_pairs == pairs &&
+              step.search.operations.score_rows == pairs * plan.arrival_points &&
+              step.template_bank.operations.source_render_rows == initial.template_bank.operations.source_render_rows &&
+              step.retained_bytes == initial.retained_bytes &&
+              std::ranges::equal(session.frequency_grid(), grid),
+              "coarse checkpoint changed the fixed grid, bank, admitted work or incomplete state");
+    }
+    session.advance(64);
+    const auto searched = session.progress();
+    check(searched.state == r::CoarseState::searched && searched.completed_tiles == plan.total_tiles &&
+          searched.search.operations.workspace_frequency_pairs == plan.frequency_points * plan.workspaces &&
+          searched.proposals == 0 && searched.selection.operations.selection_peak_rows == 0,
+          "coarse session selected proposals before explicit finish");
+    const auto resumed = session.finish();
+    const auto whole = r::score_coarse(f.config, f.slot, crypto, f.iq, intervals, workers, limit, {});
+    check(resumed && resumed->work.state == r::CoarseState::finished &&
+          resumed->work.selection.operations.selection_peak_rows == 2 * plan.frequency_points * plan.workspaces &&
+          resumed->coordinates == whole.coordinates && resumed->proposal_count == whole.proposal_count,
+          "finished coarse continuation differs from the production whole search");
+    for (std::size_t i = 0; i < whole.proposal_count; ++i)
+        check(resumed->proposals[i].score == whole.proposals[i].score &&
+              resumed->proposals[i].coordinate == whole.proposals[i].coordinate,
+              "coarse checkpoint changed an ordered proposal");
+    check(session.finish()->coordinates == whole.coordinates, "coarse finish was not repeatable");
+    rejects([&] { session.advance(1); }, "finished coarse work restarted");
+
+    std::stop_source stop;
+    r::CoarseSession cancelled(f.config, f.slot, crypto, f.iq, intervals, workers, limit, stop.get_token());
+    cancelled.advance(1);
+    stop.request_stop();
+    check(cancelled.progress().state == r::CoarseState::cancelled && !cancelled.finish(),
+          "cancelled coarse prefix was published");
+    rejects([&] { cancelled.advance(1); }, "cancelled coarse work resumed");
+}
+
+enum class BulkFault { missing_workspace, missing_execution, stale_execution };
+
+class IncompleteCoarseTile final : public r::CoarseBulk {
+public:
+    explicit IncompleteCoarseTile(BulkFault fault) : fault_(fault) {}
+
+    std::shared_ptr<const r::CoarseBulkFilter> prepare_filter(
+        std::span<const double>, std::size_t, r::CoarseBulkWork&, std::stop_token) override {
+        return std::make_shared<r::CoarseBulkFilter>();
+    }
+    std::vector<v::Complex> project_fir(const r::CoarseBulkFilter&, const r::CoarseFirCrop& crop,
+        const r::CoarseFirSource&, r::CoarseBulkWork&, std::stop_token) override {
+        // Synthetic columns only. This fixture exercises fail-closed score
+        // coverage and makes no claim about tensor projection arithmetic.
+        return std::vector<v::Complex>(crop.output_rows, 1.);
+    }
+    void prepare(const r::CoarseBulkGeometry& geometry, std::span<const v::Complex>,
+                 std::span<const r::CoarseBulkWorkspace> bank, std::span<const r::CoarseZoomGroup>,
+                 r::CoarseBulkWork&, std::stop_token) override {
+        workspaces_ = bank.size();
+        arrivals_ = geometry.lag_count;
+    }
+    void frequency_tile(std::span<const double> frequencies, const r::CoarseScoreSink& emit,
+                        r::CoarseBulkWork& work, std::stop_token) override {
+        const auto published = fault_ == BulkFault::missing_workspace ? workspaces_ - 1 : workspaces_;
+        const std::vector<double> scores(published * frequencies.size() * arrivals_);
+        emit(0, published, scores);
+        work.workspace_frequency_pairs = workspaces_ * frequencies.size();
+        work.score_rows = work.workspace_frequency_pairs * arrivals_;
+        if (fault_ == BulkFault::stale_execution && calls_ == 0) {
+            receipt_.executed = true;
+            receipt_.score_rows = work.score_rows;
+        }
+        ++calls_;
+    }
+    void lag_tile(std::size_t, std::size_t, const r::CoarseScoreSink&,
+                  r::CoarseBulkWork&, std::stop_token) override {
+        throw std::runtime_error("unexpected lag route in missing coarse rows fixture");
+    }
+    r::BulkReceipt receipt() const override { return receipt_; }
+
+private:
+    BulkFault fault_;
+    r::BulkReceipt receipt_;
+    std::size_t workspaces_ = 0, arrivals_ = 0, calls_ = 0;
+};
+
+class IncompleteCoarseBackend final : public r::ReceiverBulkBackend {
+public:
+    explicit IncompleteCoarseBackend(BulkFault fault) : fault_(fault) {}
+
+    std::unique_ptr<r::FineBulk> make_fine(double, double) override { return {}; }
+    std::unique_ptr<r::CoarseBulk> make_coarse(double, double) override {
+        return std::make_unique<IncompleteCoarseTile>(fault_);
+    }
+    std::size_t fine_host_bytes(std::size_t, std::size_t) const override { return 0; }
+    std::size_t coarse_host_bytes(std::size_t, std::size_t frequencies, std::size_t arrivals) const override {
+        return 78 * frequencies * arrivals * sizeof(double);
+    }
+    r::BulkReceipt receipt() const override { return {}; }
+
+private:
+    BulkFault fault_;
+};
+
+void incomplete_bulk_cannot_publish(const datapump::Crypto& crypto) {
+    auto f = capture(crypto, false);
+    const std::array<r::FrequencyInterval, 1> intervals{{{-.2, .2}}};
+    constexpr unsigned workers = 3;
+    for (auto fault : {BulkFault::missing_workspace, BulkFault::missing_execution, BulkFault::stale_execution}) {
+        f.config.bulk_backend = std::make_shared<IncompleteCoarseBackend>(fault);
+        const auto limit = r::coarse_workspace(f.config, f.slot, workers);
+        r::CoarseSession session(f.config, f.slot, crypto, f.iq, intervals, workers, limit);
+        check(session.progress().plan.bulk_host_workspace_bytes > 0, "coarse bulk host staging was not reserved");
+        if (fault == BulkFault::stale_execution) session.advance(1);
+        const auto before = session.progress();
+        if (fault == BulkFault::stale_execution)
+            check(before.completed_tiles == 1 && before.bulk && before.bulk->executed && before.bulk->score_rows > 0,
+                  "stale execution fixture did not first commit a complete witnessed tile");
+        rejects([&] { session.advance(1); }, "coarse bulk accepted a missing or unwitnessed score tile");
+        const auto failed = session.progress();
+        check(failed.state == r::CoarseState::failed && failed.completed_tiles == before.completed_tiles &&
+              failed.search.operations.score_rows == before.search.operations.score_rows && !session.finish(),
+              "incomplete coarse bulk work was credited or published");
+    }
 }
 
 void tied_arrival_frontier() {
@@ -184,6 +352,8 @@ int main() try {
     const auto crypto = key();
     tied_arrival_frontier();
     exact_two_ray(crypto);
+    frequency_continuation(crypto);
+    incomplete_bulk_cannot_publish(crypto);
     slow_mapped(crypto);
     return 0;
 } catch (const std::exception& error) {

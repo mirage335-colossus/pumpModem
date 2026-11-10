@@ -1,5 +1,8 @@
 #include "datapump/live.hpp"
+#include "datapump/robust_audio_frontend.hpp"
 #include "datapump/robust_profile.hpp"
+#include "datapump/triad_message_receiver.hpp"
+#include "datapump/triad_stream_receiver.hpp"
 
 #include <algorithm>
 #include <array>
@@ -24,6 +27,8 @@ audio::Options capture_options, playback_options;
 audio::ChannelMode playback_channels = audio::ChannelMode::stereo;
 std::size_t playback_samples = 0;
 bool scheduled = false;
+std::optional<long double> scheduled_epoch;
+std::vector<float> playback_prefix;
 struct CaptureInput {
     std::vector<float> samples;
     long double first_utc = 0;
@@ -32,7 +37,7 @@ std::shared_ptr<const CaptureInput> capture_input;
 }
 
 // Only device I/O is replaced. The Session, channel, waveform, complete native
-// receiver, physical quiet decisions, short codec, and plot meter remain real.
+// receiver, physical quiet decisions, message codecs, and plot meter remain real.
 namespace datapump::audio {
 std::vector<Device> devices() { return {{"robust-fixture", "Robust fixture"}}; }
 
@@ -87,6 +92,8 @@ void playback(std::uint32_t rate, const std::string& device, const PlaybackCallb
         fixture::playback_channels = channels;
         fixture::playback_samples = 0;
         fixture::scheduled = false;
+        fixture::scheduled_epoch.reset();
+        fixture::playback_prefix.clear();
     }
     ++fixture::playback_opens;
     detail::UtcPlaybackScope timed(options.follow_system_clock);
@@ -94,6 +101,7 @@ void playback(std::uint32_t rate, const std::string& device, const PlaybackCallb
     {
         std::lock_guard lock(fixture::mutex);
         fixture::scheduled = detail::utc_playback_epoch.has_value();
+        fixture::scheduled_epoch = detail::utc_playback_epoch;
     }
     std::array<float, 4096> block{};
     while (!stop.stop_requested()) {
@@ -105,6 +113,8 @@ void playback(std::uint32_t rate, const std::string& device, const PlaybackCallb
                 throw Error("Robust playback violated finite PCM headroom");
         {
             std::lock_guard lock(fixture::mutex);
+            if (fixture::playback_prefix.empty())
+                fixture::playback_prefix.assign(block.begin(), block.begin() + static_cast<std::ptrdiff_t>(count));
             fixture::playback_samples += count;
         }
         while (fixture::hold_playback && !stop.stop_requested()) std::this_thread::sleep_for(2ms);
@@ -138,6 +148,7 @@ live::Settings settings(bool simulation) {
     s.simulation = simulation;
     s.device = "robust-fixture";
     s.transfer.fec = FecMode::off;
+    s.transfer.content_limit = 1024U * 1024;
     s.transfer.modem.sample_rate = 6000;
     s.transfer.modem.carrier_hz = 1725;
     s.transfer.modem.bandwidth_hz = 120;
@@ -297,6 +308,182 @@ void simulation_cancel_is_not_completion() {
           "Cancelled simulation emitted a late message or acquired audio");
 }
 
+void long_live_prefix_and_cancel() {
+    using namespace triad::v3;
+    auto s = settings(false);
+    s.transfer.modem.bandwidth_hz = 3600;
+    s.transfer.fec = FecMode::rs20;
+    s.transfer.key = Crypto::amateur();
+    // One highly compressible long draft. Validate its first physical DATA
+    // waveform, then cancel. Whole-interval codec and quiet completion are
+    // covered by the separate native codec/short waveform gates.
+    Message draft;
+    draft.data.assign(97, 'e');
+    fixture::hold_playback = true;
+    live::Session session;
+    session.start(s);
+    ready(session);
+    session.transmit(draft);
+    const auto sending = wait(session, [](const auto& out) {
+        check(out.error.empty(), "Long Robust TX failed: " + out.error);
+        std::lock_guard lock(fixture::mutex);
+        return fixture::playback_active == 1 && fixture::scheduled_epoch && !fixture::playback_prefix.empty();
+    }, "Long Robust draft did not reach scheduled native PCM");
+    const auto& trace = sending.transmit_trace;
+    check(trace.active && !trace.raw && !trace.short_text && trace.total_wire_bits == message_interval_bits &&
+          trace.source.size() == modem::TransmitTrace::source_limit &&
+          trace.wire_plain_bits.size() == modem::TransmitTrace::bit_limit,
+          "Long Robust TX lost its exact interval extent or bounded trace");
+    // First 96 bits of SHA-256("DataPump/byte-boundary/v1"), twice on wire.
+    constexpr std::array<std::uint8_t, 12> marker{
+        0xe8,0x1c,0xac,0x57,0x5d,0xff,0x31,0xfa,0xea,0xa0,0xf8,0x40};
+    for (std::size_t i = 0; i < message_marker_bits; ++i) {
+        const auto at = i % 96;
+        check(trace.wire_plain_bits[i] == ((marker[at / 8] >> (7 - at % 8)) & 1),
+              "The long Robust session did not bind the canonical interval marker");
+    }
+
+    std::vector<float> played;
+    std::uint64_t epoch = 0;
+    {
+        std::lock_guard lock(fixture::mutex);
+        played = fixture::playback_prefix;
+        epoch = static_cast<std::uint64_t>(*fixture::scheduled_epoch);
+    }
+    const auto profile = live::detail::prepare_profile(s, *s.calendar, {});
+    const auto& calendar = profile.waveform;
+    const auto slot = calendar.first_slot_not_before({epoch, 0});
+    const auto start = calendar.transmit_slot(slot).helper_begin;
+    check(start == HelperBurstCoordinate{epoch,0}, "Long Robust TX began outside its configured public slot");
+    const auto first = calendar.calendar().distance(calendar.origin(), start);
+    constexpr std::array<std::uint8_t, 1> first_marker_bit{1};
+    Emission expected(calendar, profile.key, {EmissionMode::Message, slot, first_marker_bit, 1, first, {}});
+    std::vector<Complex> iq(played.size());
+    check(expected.read(iq) == played.size(), "The reference first marker bit did not cover the PCM prefix");
+    const auto scale = .5 / (std::sqrt(2.) * profile.maximum_unscaled_data * expected.report().data_gain);
+    unsigned active = 0;
+    for (std::size_t i = 0; i < played.size(); ++i) {
+        const auto sample = live::detail::real_pcm(iq[i], first + i, profile.receiver.data_if_hz,
+            s.transfer.modem.sample_rate, scale);
+        check(std::abs(sample - played[i]) < 1e-6, "Long Robust playback emitted a different first waveform bit");
+        if (std::abs(played[i]) > 1e-4) ++active;
+    }
+    check(active > 64, "The long Robust playback fixture observed only an idle prefix");
+    session.cancel_transmit();
+    const auto ended = wait(session, [](const auto& out) {
+        return !out.transmitting && fixture::playback_active == 0;
+    }, "Cancelling the long Robust draft did not stop playback");
+    check(ended.received.empty() && ended.pattern_steps.empty() &&
+          std::none_of(ended.signals.begin(), ended.signals.end(), [](const auto& signal) { return signal.complete; }),
+          "Cancelling the long Robust draft fabricated a receive result");
+    close(session);
+    fixture::hold_playback = false;
+}
+
+void full_duplex_reserves_long_preparation() {
+    auto s = settings(false);
+    s.full_duplex = true;
+    s.live_noise_dbfs_hz = -100;
+    s.transfer.compression = true;
+    s.receiver_memory_limit = 48U * 1024 * 1024;
+    const auto captures = fixture::capture_opens.load();
+    const auto playbacks = fixture::playback_opens.load();
+    constexpr std::string_view failure = "Robust full-duplex transmit workspace exceeds the receiver memory limit";
+    live::Session session;
+    session.start(s);
+    ready(session);
+    wait(session, [&](const auto& out) { return out.receiver_error == failure; },
+         "Full-duplex receive did not check prospective TX compression memory");
+    Message draft;
+    draft.data.assign(97, 'e');
+    session.transmit(draft);
+    const auto rejected = wait(session, [](const auto& out) { return !out.transmitting; },
+        "Full-duplex TX did not reject an insufficient shared memory limit");
+    check(rejected.error == failure && rejected.transmit_trace.total_wire_bits == 0 &&
+          fixture::capture_opens == captures && fixture::playback_opens == playbacks,
+          "Full-duplex preparation spent an unreserved workspace or opened audio");
+    close(session);
+}
+
+void late_affine_clock_support() {
+    using namespace triad::v3;
+    const auto check_support = [](const PublicProfile& waveform, const ReceiverConfig& receiver, std::uint64_t index) {
+        const auto plan = make_receiver_slot_plan(waveform, receiver, index);
+        const auto& config = waveform.config();
+        const auto clock = receiver.clock_bound_ppm * 1e-6L;
+        const auto fs = waveform.effective_sample_rate();
+        const auto earliest = fs * (config.capture_lead_seconds +
+            (plan.source_start_seconds - 2 / fs) / (1 + clock) + config.arrival_low_seconds);
+        const auto latest = fs * (config.capture_lead_seconds +
+            (plan.source_start_seconds + (waveform.geometry().source_samples + 2) / fs) / (1 - clock) +
+            config.arrival_high_seconds + receiver.spread_delay_seconds);
+        check(plan.first_sample <= std::floor(earliest) && plan.stop_sample >= std::ceil(latest),
+              "The public Robust window does not contain both affine scorer edges");
+        return plan;
+    };
+    auto s = settings(true);
+    s.transfer.modem.bandwidth_hz = 36;
+    s.transfer.modem.oscillator_search =
+        modem::OscillatorSearchConfig{.lf = {100, .5}, .rf = {1, .05}, .rf_shift_hz = 30e6, .margin = 3};
+    s.transfer.key = Crypto::amateur();
+    s.helper.power_w = 40;
+    s.tx_dbm = 10 * std::log10(4000.);
+    s.path_loss_db = 180;
+    s.noise_dbm_hz = -164;
+    s.target_cn0_db_hz = 32;
+    s.added_symbols = 10;
+    s.added_interleave = true;
+    s.spread_preset = "hf-worst";
+    s.selective_perturbation = "each-65";
+    constexpr std::uint64_t seed = 0x726f62757374ULL;
+    for (const bool broad : {false, true}) {
+        s.transfer.clock_sync = broad ? clock_sync::Policy{0, 14, 0} : clock_sync::Policy{.001, .001, 0};
+        s.transfer.audio_timing_error_seconds = broad ? .07 : 0;
+        const auto profile = live::detail::prepare_profile(s, *s.calendar, {}, {.simulation_seed = seed});
+        const auto& waveform = profile.waveform;
+        const auto& effects = profile.channel.effects;
+        check(waveform.config().audio_pair_ppm == 100 && profile.receiver.clock_bound_ppm > 300 &&
+              std::abs(effects.tx.audio_ppm) <= 50 && std::abs(effects.rx.audio_ppm) <= 50,
+              "Robust search margin changed the nominal physical oscillator model");
+        auto nominal_config = waveform.config();
+        nominal_config.clock_bound_ppm = 0;
+        const PublicProfile nominal(nominal_config, s.transfer.key);
+        for (const auto index : std::array<std::uint64_t, 5>{0, 15, 23, 100, waveform.last_slot() / 2}) {
+            const auto slot = waveform.slot(index);
+            const auto baseline = nominal.slot(index);
+            check(slot.tx.pattern_begin == baseline.tx.pattern_begin && slot.symbol_ordinal == baseline.symbol_ordinal &&
+                  slot.observation.first <= baseline.observation.first && slot.observation.stop >= baseline.observation.stop &&
+                  slot.data_support.first == baseline.data_support.first && slot.data_support.stop == baseline.data_support.stop,
+                  "Widening Robust receive support changed the physical source or shrank observation");
+            check(slot.quiet_aperture.first == slot.quiet_aperture.stop ||
+                  (slot.quiet_aperture.first >= baseline.quiet_aperture.first &&
+                   slot.quiet_aperture.stop <= baseline.quiet_aperture.stop),
+                  "Robust clock margin expanded the scored quiet aperture");
+            const auto plan = check_support(waveform, profile.receiver, index);
+            if (index <= 100) check(receiver_slot_workspace(profile.receiver, plan, 1) > 0,
+                "Native DSP could not plan the late Robust observation");
+        }
+    }
+
+    PublicProfileConfig signed_arrival;
+    signed_arrival.format.sample_rate = 6000;
+    signed_arrival.format.inner_rate_hz = 100;
+    signed_arrival.format.added_symbols = 1;
+    signed_arrival.format.added_interleave = false;
+    signed_arrival.format.bit_seconds = 8;
+    signed_arrival.audio_pair_ppm = 100;
+    signed_arrival.clock_bound_ppm = 300.015;
+    signed_arrival.arrival_low_seconds = signed_arrival.arrival_high_seconds = -1000;
+    const PublicProfile waveform(signed_arrival);
+    ReceiverConfig receiver;
+    receiver.sample_rate_hz = signed_arrival.format.sample_rate;
+    receiver.data_if_hz = signed_arrival.data_if_hz;
+    receiver.clock_bound_ppm = signed_arrival.clock_bound_ppm;
+    receiver.noise_variance = 1;
+    check(receiver_slot_workspace(receiver, check_support(waveform, receiver, 100), 1) > 0,
+          "Native DSP could not plan a public clock window with a negative arrival offset");
+}
+
 void dated_live_data_then_eof() {
     using namespace triad::v3;
     auto s = settings(false);
@@ -419,6 +606,9 @@ int main() {
         inactive_and_audio_ownership();
         live_transmit_and_cancel(false);
         live_transmit_and_cancel(true);
+        long_live_prefix_and_cancel();
+        full_duplex_reserves_long_preparation();
+        late_affine_clock_support();
         simulation_cancel_is_not_completion();
         std::cout << "Native Robust lifecycle, duplex routing, and cancellation passed\n" << std::flush;
         complete_native_simulation();

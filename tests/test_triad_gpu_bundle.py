@@ -4,6 +4,8 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import posixpath
+import re
 import tarfile
 import tempfile
 import unittest
@@ -27,18 +29,24 @@ class TriadGpuBundleTests(unittest.TestCase):
         for rel, content in {
             "CMakeLists.txt": "project(x)\n",
             "CMakePresets.json": "{}\n",
+            "LICENSE": "Fixture license\n",
             "build.sh": "#!/bin/sh\n",
             "_tests-RobustModem.md": "# Manual cases\n",
             "cmake/VendoredLzma.cmake": "# xz\n",
             "cmake/XzReceiveHardening.cmake": "# overlay\n",
-            "tools/triad-helper-export.cpp": "int main() {}\n",
-            "tools/triad_gpu_workload.py": "VALUE = 3\n",
+            "cmake/TriadTensor.cmake": "# native accelerator\n",
+            **{"tools/" + name: "" for name in bundle._PROBE_TOOLS},
             "tools/build_capacity.py": "def usable_cpus(): return 1\n",
             "tools/diagnostic_iq_noise_options.hpp": "#pragma once\n",
+            "tests/test_triad_tensor.cpp": "int main() {}\n",
             "tests/test_triad_gpu_workload.py": "VALUE = 4\n",
+            "tools/triad_gpu_bank.py": "# retired Python DSP\n",
+            "tools/triad_receiver.py": "# retired Python receiver\n",
             "src/decoder.cpp": "int decode() { return 0; }\n",
+            "src/triad_tensor_backend.cpp": "// native GPU source\n",
             "src/pump.manifest": "<assembly/>\n",
             "include/decoder.hpp": "#pragma once\n",
+            "include/datapump/triad_acceleration.hpp": "#pragma once\n",
             "third_party/xz/README.datapump.md": "# Upstream license\n",
             "third_party/xz/UPSTREAM.sha256": "".join(
                 f"{hashlib.sha256(content.encode()).hexdigest()}  {name}\n"
@@ -135,6 +143,36 @@ class TriadGpuBundleTests(unittest.TestCase):
             names = tar.getnames()
         self.assertIn("tools/build_capacity.py", names)
         self.assertIn("tools/diagnostic_iq_noise_options.hpp", names)
+        self.assertIn("tools/triad-receiver-probe.cpp", names)
+        self.assertIn("tools/triad_probe_spool.hpp", names)
+        self.assertIn("tools/triad_fixture_key.hpp", names)
+        self.assertIn("tests/test_triad_tensor.cpp", names)
+        self.assertIn("cmake/TriadTensor.cmake", names)
+        self.assertIn("src/triad_tensor_backend.cpp", names)
+        self.assertNotIn("tools/triad_gpu_bank.py", names)
+        self.assertNotIn("tools/triad_receiver.py", names)
+
+    def test_native_entrypoints_have_their_quoted_header_closure(self):
+        out = self.base / "project.tar.gz"
+        bundle.create_bundle(MODULE.parents[1], out)
+        pending = ["tools/triad-receiver-probe.cpp", "tools/triad-helper-export.cpp",
+                   "tools/triad-audio-stream.cpp", "tests/test_triad_tensor.cpp"]
+        seen = set()
+        with tarfile.open(out, "r:gz") as tar:
+            names = set(tar.getnames())
+            while pending:
+                source = pending.pop()
+                if source in seen:
+                    continue
+                seen.add(source)
+                with tar.extractfile(source) as member:
+                    includes = re.findall(rb'^\s*#\s*include\s*"([^"\r\n]+)"', member.read(), re.MULTILINE)
+                for header in includes:
+                    candidates = [posixpath.normpath(posixpath.join(directory, header.decode("ascii")))
+                                  for directory in (posixpath.dirname(source), "src", "include", "tools")]
+                    shipped = next((path for path in candidates if path in names), None)
+                    self.assertIsNotNone(shipped, f"Bundle omits {header!r} included by {source}")
+                    pending.append(shipped)
 
     def test_rejects_replacement_after_inventory(self):
         outside = self.base / "outside.cpp"

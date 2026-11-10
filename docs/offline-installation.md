@@ -6,7 +6,10 @@ A working installation can be copied as one directory to another compatible
 computer and run immediately. Robust Helper, DATA, complete receiver processing
 and audio session code are compiled into the GUI through static C++ libraries.
 No Python receiver, receiver worker executable or receiver IPC is required.
-Python tools may test and benchmark the native implementation during development.
+Python tools may orchestrate tests and benchmarks of the native implementation
+during development. The default application does not require Torch. An explicitly
+selected optional ATen build uses native LibTorch dependencies; it is not a Python
+modem runtime or part of the default standalone dependency set.
 This does not change the separate existing audio-entropy helper or platform
 library packaging. See [current Robust scope](robust-current.md).
 

@@ -6,10 +6,19 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <ctime>
 #include <deque>
 #include <limits>
 #include <utility>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace datapump::triad::v3 {
 namespace {
@@ -19,6 +28,7 @@ constexpr std::size_t input_overhead = 4096;
 constexpr std::size_t raw_block_overhead = 512;
 constexpr std::size_t slot_receipt_bytes = 4096;
 constexpr std::size_t maximum_chunk = 16384;
+static_assert(sizeof(StreamSlotReceipt) + 2 * 256 < slot_receipt_bytes);
 
 std::size_t add(std::size_t a, std::size_t b) {
     if (b>std::numeric_limits<std::size_t>::max()-a) throw ReceiverWorkspaceError("Robust workspace overflow");
@@ -42,12 +52,17 @@ std::size_t receipt_reservation(const StreamReceiverOptions& stream, const Messa
                                 unsigned owners) {
     // Charge bounded episode work, queued message metadata and the returned
     // copy, plus each live and completed slot record and one callback chunk.
-    const auto message_bytes = add(4096, add(times(8, message.maximum_decoded_bytes),
-        add(times(64, message.maximum_slots), times(8, message.maximum_data_bits))));
+    const auto storage = message_receiver_storage(message);
     const auto message_records = add(4, times(2, stream.maximum_pending_messages));
     const auto slot_records = add(times(2, stream.recent_slot_receipts), times(2, owners));
-    return add(add(times(message_bytes, message_records), times(slot_receipt_bytes, slot_records)),
-               times(64, stream.maximum_input_chunk_samples));
+    return add(add(storage.episode_bytes, times(storage.receipt_bytes, message_records)),
+        add(times(slot_receipt_bytes, slot_records), times(64, stream.maximum_input_chunk_samples)));
+}
+
+MessageReceiverOptions with_public_message_address(MessageReceiverOptions message, const PublicProfile& profile) {
+    if (message.native_profile)
+        message.address = [&profile](std::uint64_t index) { return message_address(profile, index); };
+    return message;
 }
 
 struct StreamWindow {
@@ -126,7 +141,55 @@ struct Job {
 
 } // namespace
 
+std::optional<double> detail::stream_process_cpu_seconds() {
+#ifdef _WIN32
+    FILETIME created{}, exited{}, kernel{}, user{};
+    if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) return {};
+    const auto ticks = [](FILETIME t) {
+        return (static_cast<std::uint64_t>(t.dwHighDateTime) << 32) | t.dwLowDateTime;
+    };
+    return (static_cast<double>(ticks(kernel)) + static_cast<double>(ticks(user))) * 1e-7;
+#else
+    const auto clock = std::clock();
+    if (clock == static_cast<std::clock_t>(-1)) return {};
+    return static_cast<double>(clock) / CLOCKS_PER_SEC;
+#endif
+}
+
+ReceiverSlotPlan make_receiver_slot_plan(const PublicProfile& profile, const ReceiverConfig& config,
+                                         std::uint64_t index) {
+    const auto& declared = profile.config();
+    if (config.sample_rate_hz!=profile.effective_sample_rate() || config.data_if_hz!=profile.data_if_hz() ||
+        config.clock_bound_ppm!=declared.clock_bound_ppm || config.frequency_bound_hz!=declared.cfo_bound_hz ||
+        config.helper_enabled!=declared.helper_enabled)
+        throw Error("Robust scorer and public stream profile differ");
+    const auto slot = profile.slot(index);
+    const auto seconds = [&](HelperBurstCoordinate coordinate) {
+        return profile.calendar().relative_seconds(profile.origin(), coordinate);
+    };
+    ReceiverSlotPlan result;
+    result.index = slot.index;
+    result.first_sample = slot.observation.first;
+    result.stop_sample = slot.observation.stop;
+    result.quiet_first_sample = slot.quiet_aperture.first;
+    result.quiet_stop_sample = slot.quiet_aperture.stop;
+    result.format = profile.basis_format(slot);
+    result.arrival_lower_seconds = declared.arrival_low_seconds;
+    result.arrival_upper_seconds = declared.arrival_high_seconds;
+    result.window_capture_lead_seconds = declared.capture_lead_seconds-
+        static_cast<long double>(result.first_sample)/config.sample_rate_hz;
+    result.source_start_seconds = seconds(slot.tx.support_begin);
+    result.helper_begin_seconds = seconds(slot.tx.helper_begin);
+    result.helper_end_seconds = seconds(slot.tx.helper_end);
+    (void)window_samples(result);
+    if (result.quiet_first_sample<result.first_sample || result.quiet_stop_sample<result.quiet_first_sample ||
+        result.quiet_stop_sample>result.stop_sample)
+        throw Error("Invalid Robust public quiet aperture");
+    return result;
+}
+
 struct CompleteStreamReceiver::Impl {
+    using Clock = std::chrono::steady_clock;
     PublicProfile profile;
     ReceiverConfig config;
     Crypto key;
@@ -150,6 +213,8 @@ struct CompleteStreamReceiver::Impl {
     SlotWake wake;
     std::deque<Job> jobs;
     std::deque<StreamSlotReceipt> receipts;
+    const Clock::time_point commit_origin = options.record_commit_timing ? Clock::now() : Clock::time_point{};
+    double controller_wait_seconds = 0;
 
     Impl(PublicProfile profile_value, ReceiverConfig config_value, Crypto key_value,
          StreamReceiverOptions stream, MessageDecoder decoder, MessageReceiverOptions message,
@@ -158,7 +223,8 @@ struct CompleteStreamReceiver::Impl {
           options(stream), resources(resolve_stream_receiver_resources(options)),
           workspace(std::move(workspace_fn)), scorer(std::move(score_fn)),
           footprint(footprint_fn ? std::move(footprint_fn) : StreamFootprint(stream_controller_footprint_bytes)),
-          codec(std::move(decoder), message, options.first_slot, options.maximum_pending_messages),
+          codec(std::move(decoder), with_public_message_address(message, profile),
+              options.first_slot, options.maximum_pending_messages),
           last_public_slot(profile.last_slot()), initial_footprint(footprint()),
           stack_bytes(stream_worker_stack_bytes()),
           fixed_reservation(receipt_reservation(options, message, resources.slot_owners)),
@@ -169,11 +235,6 @@ struct CompleteStreamReceiver::Impl {
             options.maximum_gap_samples>maximum_buffer ||
             !options.recent_slot_receipts || options.recent_slot_receipts>1024)
             throw Error("Invalid local Robust stream input or receipt limits");
-        const auto& declared = profile.config();
-        if (config.sample_rate_hz!=profile.effective_sample_rate() || config.data_if_hz!=profile.data_if_hz() ||
-            config.clock_bound_ppm!=declared.clock_bound_ppm || config.frequency_bound_hz!=declared.cfo_bound_hz ||
-            config.helper_enabled!=declared.helper_enabled)
-            throw Error("Robust scorer and public stream profile differ");
         if (options.first_slot>last_public_slot) throw Error("Robust initial slot is outside the configured calendar");
         peak_reserved = add(initial_footprint, fixed_reservation);
         if (peak_reserved>=resources.memory_limit_bytes)
@@ -188,26 +249,8 @@ struct CompleteStreamReceiver::Impl {
     ~Impl() { stop.request_stop(); }
 
     ReceiverSlotPlan plan(std::uint64_t index) const {
-        const auto slot = profile.slot(index);
-        const auto seconds = [&](HelperBurstCoordinate coordinate) {
-            return profile.calendar().relative_seconds(profile.origin(), coordinate);
-        };
-        ReceiverSlotPlan result;
-        result.index = slot.index;
-        result.first_sample = slot.observation.first;
-        result.stop_sample = slot.observation.stop;
-        result.quiet_first_sample = slot.quiet_aperture.first;
-        result.quiet_stop_sample = slot.quiet_aperture.stop;
-        result.format = profile.basis_format(slot);
-        result.arrival_lower_seconds = profile.config().arrival_low_seconds;
-        result.arrival_upper_seconds = profile.config().arrival_high_seconds;
-        result.window_capture_lead_seconds = profile.config().capture_lead_seconds-
-            static_cast<long double>(result.first_sample)/config.sample_rate_hz;
-        result.source_start_seconds = seconds(slot.tx.support_begin);
-        result.helper_begin_seconds = seconds(slot.tx.helper_begin);
-        result.helper_end_seconds = seconds(slot.tx.helper_end);
-        if (window_samples(result)>maximum_buffer || result.quiet_first_sample<result.first_sample ||
-            result.quiet_stop_sample<result.quiet_first_sample || result.quiet_stop_sample>result.stop_sample)
+        auto result = make_receiver_slot_plan(profile, config, index);
+        if (window_samples(result)>maximum_buffer)
             throw ReceiverWorkspaceError("Robust public observation exceeds the local input bound");
         return result;
     }
@@ -313,7 +356,7 @@ struct CompleteStreamReceiver::Impl {
         const auto permits = resources.workers-active_workers();
         const auto capacity = std::min({static_cast<std::size_t>(permits),
             static_cast<std::size_t>(resources.slot_owners-active()),
-            2*static_cast<std::size_t>(resources.slot_owners)-jobs.size()});
+            stream_uncommitted_slot_limit(resources.slot_owners)-jobs.size()});
         std::vector<ReceiverSlotPlan> available;
         auto item = *next;
         for (std::size_t n=0; n<capacity; ++n) {
@@ -356,7 +399,7 @@ struct CompleteStreamReceiver::Impl {
 
     void dispatch() {
         if (!ready() || backpressured() || active()>=resources.slot_owners ||
-            active_workers()>=resources.workers || jobs.size()>=2*static_cast<std::size_t>(resources.slot_owners)) return;
+            active_workers()>=resources.workers || jobs.size()>=stream_uncommitted_slot_limit(resources.slot_owners)) return;
         const auto work = choose();
         if (work.empty() && !active())
             throw ReceiverWorkspaceError("Robust public window exceeds the admitted workspace");
@@ -402,11 +445,26 @@ struct CompleteStreamReceiver::Impl {
             auto& job = jobs.front();
             if (!job.valid_observation || !job.valid_interval)
                 codec.invalidate_episode("physical_input_was_incomplete");
+            // The one source decoder workspace is reserved alongside all
+            // active DSP owners. Recheck the footprint before materializing
+            // that workspace so intervening application growth cannot spend it.
+            if (codec.result().long_form && codec.result().state==MessageState::awaiting_end_or_resume &&
+                QuietSlotMessageReceiver::classification(*job.score)==SlotDecision::quiet) {
+                const auto admitted = reserved();
+                if (admitted>resources.memory_limit_bytes)
+                    throw ReceiverWorkspaceError("Robust source decoder exceeds the local memory limit");
+                peak_reserved = std::max(peak_reserved, admitted);
+            }
             if (!codec.consume(*job.score) || codec.stopped()) throw Error("Robust public slot commit failed");
             if (receipts.size()==options.recent_slot_receipts) receipts.pop_front();
             receipts.push_back({std::move(*job.score), job.work.plan.format.epoch,
-                job.work.plan.format.symbol_ordinal, job.work.workers});
+                job.work.plan.format.symbol_ordinal, job.work.workers, {}});
             jobs.pop_front();
+            if (options.record_commit_timing) {
+                receipts.back().commit_timing = StreamCommitTiming{
+                    std::chrono::duration<double>(Clock::now() - commit_origin).count(),
+                    input_stop, jobs.size(), active(), ready(), stream_process_cpu_seconds()};
+            }
         }
     }
 
@@ -432,11 +490,14 @@ struct CompleteStreamReceiver::Impl {
                 }
                 if (!wait || !active()) return;
                 std::unique_lock lock(wake.mutex);
+                const auto wait_start = options.record_commit_timing ? Clock::now() : Clock::time_point{};
                 wake.changed.wait(lock, stop.get_token(), [&] {
                     return std::any_of(jobs.begin(), jobs.end(), [](const Job& job) {
                         return job.task && job.task->ready();
                     });
                 });
+                if (options.record_commit_timing)
+                    controller_wait_seconds += std::chrono::duration<double>(Clock::now() - wait_start).count();
             } while (true);
         } catch (const ReceiverWorkspaceError&) {
             terminate(StreamReceiverState::resource_limit, "receiver_workspace_limit");
@@ -511,13 +572,14 @@ struct CompleteStreamReceiver::Impl {
         result.uncommitted_slots = jobs.size();
         result.peak_reserved_bytes = peak_reserved;
         const auto& current = codec.result();
-        result.observed_bits = current.received_bits.size();
-        result.erasures = current.erasure_slot_indices.size();
+        result.observed_bits = current.observed_bits;
+        result.erasures = current.missing_slots;
         if (current.slots_consumed && !codec.recovering())
             result.episode_first_public_slot = codec.next_slot_index()-current.slots_consumed;
         result.input_closed = closed;
         result.output_backpressured = backpressured();
         result.recovering = codec.recovering();
+        if (options.record_commit_timing) result.controller_wait_seconds = controller_wait_seconds;
         return result;
     }
 };
@@ -526,6 +588,10 @@ CompleteStreamReceiver::CompleteStreamReceiver(PublicProfile profile, ReceiverCo
     StreamReceiverOptions options, MessageDecoder decoder, MessageReceiverOptions message)
     : impl_(std::make_unique<Impl>(std::move(profile), std::move(config), std::move(key), options,
         std::move(decoder), message, receiver_slot_workspace, score_receiver_slot, StreamFootprint{})) {}
+CompleteStreamReceiver::CompleteStreamReceiver(PublicProfile profile, ReceiverConfig config, Crypto key,
+    StreamReceiverOptions options, NativeMessageProfile message)
+    : CompleteStreamReceiver(std::move(profile), std::move(config), std::move(key), options,
+        message_decoder(message.fec), message_receiver_options(message)) {}
 CompleteStreamReceiver::CompleteStreamReceiver(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 CompleteStreamReceiver::~CompleteStreamReceiver() = default;
 
