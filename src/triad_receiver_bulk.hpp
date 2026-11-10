@@ -29,6 +29,10 @@ struct BulkReceipt {
     std::uint64_t fft_calls = 0, fft_rows = 0, fir_input_rows = 0, fir_output_contributions = 0;
     std::uint64_t score_rows = 0, statistics_blocks = 0, projected_values = 0, dc_reduction_values = 0;
     std::uint64_t mapped_columns = 0, mapped_values = 0, uploaded_tiles = 0, tile_hits = 0;
+    // CUDA mapped work credited after the batch's blocking statistics readback.
+    std::uint64_t cuda_fused_mapped_launches = 0, cuda_fused_mapped_values = 0;
+    // CUDA Gram elements credited after the same readback.
+    std::uint64_t cuda_direct_gram_values = 0, cuda_bmm_gram_values = 0;
     std::uint64_t direct_columns = 0, direct_values = 0;
     std::array<std::uint64_t, bulk_direct_fallback_reasons.size()> direct_fallback_counts{};
     double wall_seconds = 0;

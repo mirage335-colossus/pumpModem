@@ -47,7 +47,16 @@ whiten interpolation noise or identify arbitrary remote motion. Adaptive
 tracking remains distinct from physical-noise qualification.
 
 The native complete receiver separately maintains bounded ingress, independent
-slot ownership, ordered commit, quiet completion and continued listening. Its
+slot ownership, ordered commit, quiet completion and continued listening. Slot
+roots and coarse/fine leaves share one lazy bounded executor; each owner keeps
+its admitted scratch bound, and started idle stacks remain charged until close.
+Admission quotes the largest ready prefix at full-`W` scratch per owner,
+preferring balanced scratch only when its complete bound admits a strictly wider
+ready prefix. Ready leaves prioritize the oldest eligible public
+slot, and queued roots use otherwise unneeded lanes.
+Ingress backpressure waits for one completion before retry; EOF drains all
+accepted work. Standalone phase probes retain their local executor, so their
+timings alone do not qualify shared-pool throughput. Its
 current scope and checks are in [validation](validation.md#native-codec-and-measurement-migration).
 
 The historical [continuous record](validation-data/triad-v3/2026-11-06-continuous/README.md)

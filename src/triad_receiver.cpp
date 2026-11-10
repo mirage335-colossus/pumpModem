@@ -2,6 +2,7 @@
 
 #include "triad_receiver_coarse.hpp"
 #include "triad_receiver_driver.hpp"
+#include "triad_receiver_executor.hpp"
 #include "triad_receiver_helper.hpp"
 
 #include <algorithm>
@@ -178,10 +179,10 @@ std::size_t receiver_slot_workspace(const ReceiverConfig& config, const Receiver
     return plan_workspace(config, slot, workers).total;
 }
 
-ReceiverSlotScore score_receiver_slot(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+ReceiverSlotScore receiver_detail::score_slot(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
                                      const Crypto& key, std::span<const Complex> iq,
                                      std::span<const std::uint8_t> valid, unsigned workers,
-                                     std::size_t memory_limit_bytes, std::stop_token stop) {
+                                     std::size_t memory_limit_bytes, std::stop_token stop, ReceiverExecutor* executor) {
     check_cancelled(stop);
     const auto workspace = plan_workspace(config, slot, workers);
     require(iq.size() == slot.stop_sample - slot.first_sample &&
@@ -220,7 +221,7 @@ ReceiverSlotScore score_receiver_slot(const ReceiverConfig& config, const Receiv
     }
 
     began = Clock::now();
-    auto coarse = score_coarse(config, slot, key, iq, intervals, workers, workspace.coarse, stop);
+    auto coarse = score_coarse(config, slot, key, iq, intervals, workers, workspace.coarse, stop, executor);
     score.coarse_seconds = elapsed(began);
     score.coarse_workspaces = coarse.workspaces;
     score.coarse_frequency_points = coarse.frequency_points;
@@ -233,11 +234,18 @@ ReceiverSlotScore score_receiver_slot(const ReceiverConfig& config, const Receiv
 
     began = Clock::now();
     score_fine(config, slot, key, iq, fine.coordinates, coarse.projected_sample_rate_hz,
-               coarse.clock_gap_ppm, workers, score, workspace.fine, stop);
+               coarse.clock_gap_ppm, workers, score, workspace.fine, stop, executor);
     classify_fine_slot(score, fine.grid);
     score.fine_seconds = elapsed(began);
     check_cancelled(stop);
     return score;
+}
+
+ReceiverSlotScore score_receiver_slot(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                                     const Crypto& key, std::span<const Complex> iq,
+                                     std::span<const std::uint8_t> valid, unsigned workers,
+                                     std::size_t memory_limit_bytes, std::stop_token stop) {
+    return receiver_detail::score_slot(config, slot, key, iq, valid, workers, memory_limit_bytes, stop, nullptr);
 }
 
 } // namespace datapump::triad::v3

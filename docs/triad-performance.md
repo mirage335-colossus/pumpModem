@@ -33,14 +33,34 @@ python3 tools/triad_abbreviated.py \
 ```
 
 For a comparison, add `--baseline previous-native.json`. The
-`datapump.triad.native-regression.v1` schema binds native input observations,
+`datapump.triad.native-regression.v2` schema binds native input observations,
 geometry, allocation, runtime, source and binary identity. Source may differ for
 a declared candidate/reference comparison; the work and environment must remain
-applicable. Old Python reports are rejected. A report without a comparison may
-establish a baseline; that is not a relative-regression pass.
+applicable. Saved v1 and old Python reports are rejected. The current driver
+measures both reference and candidate binaries using their existing native
+commands; this schema change does not grant a CI baseline-transition exception.
+A report without a comparison may establish a baseline; that is not a
+relative-regression pass.
 
 Active and noise strata measure actual native slot, coarse, fine and audio
-frontend work. Each uses bounded 1/2/4-unit batches and sequential looks at 3, 5
+frontend work, giving eight phase/stratum combinations. A ninth `native_stream`
+measurement uses the native `message` command: one fresh five-window `DDDQQ`
+replay must decode bits `001` as `e` and complete after two scored quiet slots.
+A one-unit preflight must pass before statistical looks. Stream batches sum
+the fresh calls' `receiver_service` time, including receiver construction,
+ingress/backpressure, spool reads/hash, drain and destruction. Process startup,
+profile preparation, simulation, audio projection and the separate incomplete-EOF
+control are outside that service phase but count toward the overall run budget.
+This short mixed stream does not establish sustained backlog throughput.
+
+Every active/noise batch unit is also a fresh native process executing
+`regression --units 1`; the driver sums its native phase times. This measures
+the first scored slot in a fresh process, not a fully cold GPU device or
+steady-state service. Earlier same-process v2 reports have a different policy
+and are rejected. Mixing the first and subsequent slot costs failed the GPU
+fixed-geometry model gate; extra observations are not a repair for that mixture.
+
+Each measurement uses bounded 1/2/4-unit batches and sequential looks at 3, 5
 and 9 observations. The four-unit holdout checks the fixed-geometry repeated-unit
 model. `--target-units` changes only the conditional projection, not the work
 budget. The measured model-error allowance does not disappear with repetition.
@@ -49,7 +69,11 @@ uncertainty gates. An inconclusive interval is not a pass.
 
 `--threads`, `--slot-owners` and `--workspace-mib` preserve explicit native limits;
 omitted workers use `2*H`. `--deadline-ms` and `--max-samples` bound each native
-call. Unsupported or incomplete native work remains explicit in the report.
+call. `--benchmark-deadline-ms` defaults to 300,000 ms and includes all subprocess
+and excluded service work; exhaustion retains the partial report as incomplete.
+The explicit sample cap must admit the complete five-window message (below
+600,000 samples); the driver never raises a user cap to make a GPU run pass.
+Unsupported or incomplete native work remains explicit in the report.
 These measurements do not establish communication sensitivity, whole-case
 real-time capacity or physical-device reception.
 
@@ -90,8 +114,8 @@ cmake --build build/probe --target triad_receiver_probe
 
 The CLI configuration remains enabled to satisfy the native install-target
 contract; this command builds only the probe target. Use the full source and
-CI closure for general correctness groups. The bounded proposal below composes
-only the bundled tensor parity test through an external CMake hook. `DATAPUMP_TRIAD_TENSOR=OFF` is the default
+CI closure for general correctness groups. The allowlisted bundle also includes
+the tensor parity test for a separately declared bounded check. `DATAPUMP_TRIAD_TENSOR=OFF` is the default
 native build; no Torch dependency is introduced into that profile. A requested
 CUDA backend must execute on the selected CUDA device or report unavailable;
 CPU fallback cannot count as GPU evidence.
@@ -178,10 +202,12 @@ hardware-rate resampling and unknown-calendar acquisition remain outside that
 logical-rate forecast. Preserve these limits in any application-level claim.
 
 Unavailable accelerators, insufficient samples, incomplete public grids or a
-deadline stop produce explicit unresolved workload results (exit 2). No CUDA
-execution is available in the current local environment; configured GPU code or
-workflow tests are not a hardware qualification. Use direct applicable native
-CPU measurements while CUDA evidence is missing.
+deadline stop produce explicit unresolved workload results (exit 2). The
+completed remote checkpoint has scoped CUDA and component-forecast evidence;
+changed work/precision classes still require applicable device checks. Configured GPU
+code, workflow tests or a functional pass do not establish throughput or CPU
+forecast qualification. Use direct applicable native CPU measurements while a
+required GPU work or precision class remains unqualified.
 
 Use authenticated transfer for remote artifacts. Provider lifecycle and spending
 require their own authorization; the opt-in CI workflow assumes a preprovisioned
@@ -190,167 +216,94 @@ current claim or unresolved failure, then retire superseded artifacts under the
 [material lifecycle](development.md#material-lifecycle).
 
 
-### Bounded RunPod proposal — 10 November 2026
+### Native throughput and precision investigation — 10 November 2026
 
-This proposal tests actual CUDA linking, native CPU/CUDA parity and bounded
-receiver execution. It does not qualify full manual-case capacity, forecast local
-CPU service, or repeat historical campaigns. No pod has been provisioned. Standing
-`CLOUD.md` authorization covers eligible compute, but account access, available
-budget and existing resources have not been reconciled for this proposal. Keep
-account-specific operational records outside the checkout.
+The completed bounded investigation started from clean source
+`6bc9b0e3dd0ca91b3b8e3f4851301e6cf1b1371d` and compiled baseline manifest
+`c9a797431bd9d35a0bd2c17149dbcf6211a2296c02ff8c67499c90e236099226`.
+It measured native same-stream throughput, precision choices, useful GPU
+acceleration and applicable local CPU forecasting. Changed implementations need
+matched observations, full work/decision checks, affected local CPU costs and
+independent bounded holdouts before a performance or capacity claim. The earlier
+native regression baseline was established without a comparison; it is not a
+pass for later changes.
 
-| Limit | Proposed bound |
-| --- | --- |
-| Instance | One Secure Cloud on-demand RTX A5000: 24 GB VRAM, published 25 GB host RAM and 9 vCPUs. |
-| Price | Published GPU price $0.27/hour, checked 10 November 2026; reject a launch quote above $0.50/hour. |
-| Total budget | At most $2 all-in for this task; no retry, larger instance, extra funding or AutoPay changes. |
-| Lifetime | At most 60 minutes from creation to confirmed deletion, including image pull and build. |
-| Storage | 50 GB ephemeral container disk; no volume disk or network volume. |
+The user authorized RunPod use for up to eight hours at an aggregate ceiling of
+$20/hour. This superseded the earlier $2/60-minute A5000 proposal. The selected
+task allocation was one full RTX PRO 6000, with a conservative $2.50/hour price
+ceiling and $25 total task budget, for at most eight hours and without a
+persistent volume. The roughly 100-minute rental was deleted by 20:47:10 UTC;
+no pod or cloud volume remains. The observed balance decrease was about $4.08,
+not a finalized invoice. Spending is separate from receiver performance. Pod identifiers,
+account balances, billing records and operational logs remain outside the
+checkout; do not copy them into documentation.
 
-At the published GPU price and $0.10/GB/month container-disk rate, one hour is
-approximately $0.28 before tax; the deployment quote and actual accounting
-remain authoritative. Compute/storage are billed by the second. Sources:
-[RunPod GPU pricing](https://www.runpod.io/pricing) and
-[Pod/storage pricing](https://docs.runpod.io/pods/pricing).
+Preserve the automatic `2*H` receiver-worker budget and exact explicit limits.
+Measure productive work in one stream and distinguish ready-input backlog from
+startup, fill and drain. A running CUDA backend or a lower-precision dtype does
+not prove tensor-core execution, numerical qualification or useful integrated
+speedup. The exact baseline has passed bounded CUDA parity and active/noise
+functional checks on the full RTX PRO 6000. Paired fused-mapper and direct-FP64
+Gram checks show scoped fine/receiver-phase reductions for one row/seed and
+bounded continuation. Three partial explicit-FP64 component forecasts are
+supported. Tensor-core execution, nominal/conservative GPU-assisted service and
+whole-stream capacity remain unqualified. The
+[current validation entry](validation.md#native-throughput-and-precision-investigation)
+records source, limits, original setup failures and measured device checks.
+Initial matched O=2 and default-allocation shared-executor points
+were slower, with a large first-slot latency regression and unqualified
+carryover intervals. Later pilot timeouts remain part of the evidence. There is
+no CPU throughput/utilization gain claim. Full-W scratch and oldest-slot leaf
+priority are now implemented: the current point improves first-message latency
+while remaining 1.73% slower overall than the baseline. The first fused GPU
+mapper pair failed exact adaptive-work parity; the narrow final-FMA repair and
+subsequent paired phase improvements retain their installed-runtime scope,
+not a portable bitwise guarantee. The FP16 Gram-shape experiment was slower and
+is not selected for integration. The accepted direct-FP64 Gram path covers its
+bounded CUDA shape, rather than using that slower low-precision experiment.
 
-Pin the image to
-`runpod/pytorch:1.2.0-cu1281-torch291-ubuntu2404@sha256:9b2667aebeb9e3005cd6b2ebcb0cfcef0a2e4562544669304d03d620e07e7037`
-(11.85 GB compressed). Its PyTorch/CUDA/Ubuntu family is documented in the
-[official image guide](https://github.com/runpod/containers/blob/main/official-templates/pytorch/README.md).
-Use the packaged C++ LibTorch libraries; Python may locate that package and
-orchestrate checks, but receiver DSP remains native. Fail readiness if the
-pinned image, toolchain, CUDA device or required ABI is unavailable.
+The matched comparison is complete. Its obsolete copied executables, source
+archives and superseded v1 baseline no longer have a retention purpose. Their
+hashes and original coverage remain in
+[baseline validation](validation.md#native-codec-and-measurement-migration).
+Retain current raw observations and original failed receipts only for the final
+scoped claims and unresolved gates. Retire them when applicable replacement
+evidence resolves those gates and preserves the findings, margins and
+source/configuration provenance. This does not require preserving obsolete
+implementations or duplicate campaigns.
 
-The creation-to-deletion schedule reserves 10 minutes for cold-pull/readiness,
-25 for the bounded build, 15 for checks, five for retrieval/deletion and five
-as margin. An early failure ends the run; unused time does not authorize larger
-work. Before any launch, verify a working external control-plane delete route
-and supervision through the deadline. Use an independent watchdog if readily
-available. There is no provider `--terminate-after` flag in this plan: command
-timeouts do not delete a pod or enforce a billing cap. Record confirmed deletion
-and reconcile actual spend; a failed delete needs immediate control-plane
-follow-up within the same envelope, not an unattended stopped resource.
+The fresh-call regression policy has passed 77 focused checks. CPU reference and
+candidate both supported all nine models. Their mixed stream passed the 1.30
+slowdown gate, but the eight standalone phase intervals remained inconclusive
+at the bounded limit, so the overall comparison is inconclusive. The GPU
+fresh-call run established a baseline with all nine models supported; it is not
+a GPU relative-regression comparison. Forecast accounting now charges continuous
+PCM time and checks independent adaptive-work counters. The current row-5
+automatic-precision challenge still fails exact acquisition-coordinate agreement,
+and the first predeclared near-decision bracket failed. A separately bounded
+CPU-only construction subsequently fixed an 8.0 dB-Hz challenge. Explicit FP64
+then passed all five strata and three operational challenges, with exact
+work/acquisition and zero adaptive drift. The official report supports cold,
+terminal and erasure component estimates; active/quiet work differs from local
+calibration by 9–11%, outside the unchanged 5% cost-regime gate. Nominal and
+conservative GPU-assisted service remain unresolved. CPU-only row-5 points and
+replay margins do not establish a full interval capacity pass; the other seven
+rows have geometry-only coverage. See the final intervals and retained failures
+in [validation](validation.md#native-throughput-and-precision-investigation).
 
-Build only the allowlisted [native bundle](../tools/triad_gpu_bundle.py), probe and
-[CUDA parity test](../tests/test_triad_tensor.cpp). The bundle includes that exact test and omits unrelated tests. Verify its SHA-256
-`4e7b734f09cf4b9270ff9b4df53ed8285f196683b5de8d82aeacdb512f13f2ee`.
-Place this locally checked compose hook outside the source as `contract.cmake`:
+The current CUDA build requires NVCC and the CUDA SDK. For the actual SM 120
+Blackwell device, the build uses `-DCMAKE_CUDA_ARCHITECTURES=120` with
+`TORCH_CUDA_ARCH_LIST=12.0`. Verify the installed LibTorch/compiler/device
+arithmetic with the exact oracle; the final-FMA match is source/runtime-specific.
+Default builds without Torch and the optional CPU ATen path keep their separate
+dependency contracts.
 
-```cmake
-add_executable(runpod_triad_tensor EXCLUDE_FROM_ALL "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_tensor.cpp")
-target_include_directories(runpod_triad_tensor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_compile_features(runpod_triad_tensor PRIVATE cxx_std_20)
-target_link_libraries(runpod_triad_tensor PRIVATE datapump_triad_receiver)
-```
-
-Readiness must confirm one A5000/SM 8.6, driver/device memory, CUDA toolkit 12.8,
-CMake ≥3.21, C++20, Ninja and OpenSSL 3. The packaged Torch must report 2.9.1,
-CUDA 12.8 and C++11 ABI; obtain `LIBTORCH_PREFIX` from its
-`torch.utils.cmake_prefix_path`. Set `TORCH_CUDA_ARCH_LIST=8.6`,
-`PYTORCH_CUDA_ALLOC_CONF=backend:native`, and `OMP_NUM_THREADS`,
-`MKL_NUM_THREADS`, `OPENBLAS_NUM_THREADS` to 1. Preserve preflight output:
-
-```sh
-nvidia-smi --query-gpu=name,memory.total,compute_cap,driver_version --format=csv,noheader
-nvcc --version
-python3 -c 'import torch; assert torch.__version__.split("+")[0]=="2.9.1" and torch.version.cuda=="12.8" and torch.compiled_with_cxx11_abi(); print(torch.utils.cmake_prefix_path)'
-timeout -k 10s 5m cmake -S source -B build -G Ninja \
-  -DCMAKE_PROJECT_DataPump_INCLUDE="$PWD/contract.cmake" \
-  -DBUILD_TESTING=OFF -DDATAPUMP_BUILD_CLI=ON -DDATAPUMP_BUILD_GUI=OFF \
-  -DDATAPUMP_PORTABLE=OFF -DCMAKE_BUILD_TYPE=Release \
-  -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON \
-  -DCMAKE_PREFIX_PATH="$LIBTORCH_PREFIX"
-timeout -k 10s 20m cmake --build build --parallel 2 \
-  --target triad_receiver_probe runpod_triad_tensor
-ldd build/triad_receiver_probe
-ldd build/runpod_triad_tensor
-timeout -k 5s 45s build/runpod_triad_tensor --cuda
-```
-
-Verify resolved CUDA/ATen libraries and absence of `libpython`/`libtorch_python`.
-An initial bundle omitted the spool and fixture-key headers. The allowlist now
-includes both, with a recursive local-header closure check; all nine focused
-bundle tests passed. The external hook's configuration and target/link graph
-were checked locally with CPU LibTorch. A fresh extraction then compiled the
-probe, bundled parity test and Helper exporter with two build jobs; CPU tensor
-parity passed, source identity matched the local build, and no Python linkage
-was present. The proposed CUDA build and checks have not been run. Build limits
-of two jobs are separate from receiver allocation. The following device check
-uses an explicit diagnostic W=2/O=1, 8 GiB host and 4 GiB device limit; it does
-not reduce the application's automatic `2*H` receiver policy.
-
-Run the following block under `timeout -k 5s 90s python3`, with
-`EXPECTED_SOURCE_SHA256` set to the matched local CPU probe's current source
-manifest before transfer. Its [native wrapper](../tools/triad_native.py) requires
-actual accelerator execution; [runtime checks](../tools/triad_gpu_workload.py)
-validate the declared device and resource accounting. Save command failures and
-incomplete receipts as well as successful results.
-
-```python
-import os, sys
-sys.path.insert(0, "source/tools")
-from triad_native import NativeProbe, write_result
-from triad_gpu_workload import cuda_runtime
-p = NativeProbe("build/triad_receiver_probe", backend="cuda")
-flags = dict(workers=2, slot_owners=1, memory_limit_bytes=8 << 30,
-             device_index=0, device_memory_limit_bytes=4 << 30,
-             tensor_precision="automatic", deadline_ms=12000,
-             max_samples=100000, coarse_tiles=128, seed=74021)
-for stratum in (None, "active", "noise"):
-    r = p.call("describe", **flags) if stratum is None else p.call(
-        "regression", stratum=stratum, units=1, **flags)
-    write_result(f"receipts/{stratum or 'describe'}.json", r)
-    assert r["status"] == "complete"
-    identity = r["identity"]
-    assert identity["configured_tensor_backend"] is True
-    assert identity["source_manifest_sha256"] == os.environ["EXPECTED_SOURCE_SHA256"]
-    bulk = identity["backend_receipt"]
-    assert cuda_runtime(bulk)["device"] == "cuda:0"
-    if stratum is not None:
-        assert r["result"]["work_complete"] is True
-        assert r["result"]["units"] == 1 and r["result"]["stratum"] == stratum
-        assert r["result"]["evaluator_expected_decision_observed"] is True
-        assert all(bulk[k] > 0 for k in ("fft_calls", "score_rows", "mapped_values",
-            "statistics_blocks", "synchronizations", "upload_bytes", "download_bytes"))
-        assert bulk["peak_reserved_bytes"] <= 4 << 30
-        assert bulk["allocator_peak_reserved_bytes"] <= 4 << 30
-p.verify_unchanged()
-```
-
-The required check sequence is one actual-CUDA parity check followed by one
-native active and one noise regression unit, each bounded to 100,000 generated
-samples and 12 seconds. Preserve source/binary hashes, device/runtime/arithmetic,
-requested/effective allocation, memory, work/decisions and all failed/incomplete
-receipts. No CPU fallback can satisfy a requested CUDA check.
-
-Only if the core checks pass, at least ten minutes remain, and the remaining
-envelope permits it, try current
-manual row 6 and then row 2: full public selection and persistent 2/3/4/6-second
-fine checkpoints, at most 30 seconds each and at most 8,388,608 generated samples
-in total. Stop optional work at the first incomplete/failed result. These two
-rows are bounded device/work probes, not a full manual suite, sensitivity claim
-or CPU forecast. Do not change geometry, extend the cap or replace an incomplete
-public search with evaluator coordinates.
-
-Use freshly parsed `load_cases("source/_tests-RobustModem.md")` and each selected
-row's exact `native_args`. With the same `NativeProbe`, first call
-`plan` with a 5,000 ms deadline and 4,194,304 sample cap; require the modeled
-profile, eligible continuation, admitted workspace ≤8 GiB and complete public
-window within that cap. Then call `continuation` with those arguments,
-`stratum="active"`, `slot_index=0`, 30,000 ms and the same sample cap. Save the
-receipt before `validate_work(receipt, "cuda", "active")`; this checks full public
-selection, effective arithmetic and persistent 2/3/4/6-second work without
-fallback. Bound the whole optional wrapper by `timeout -k 5s 2m` and never proceed
-to row 2 after an incomplete row 6. Local geometry preflights reported 1,630,039
-rows/T=256.8 s for row 6 and 4,141,064/T=576.4 s for row 2; these are plans, not
-successful CUDA execution or measured runtime.
-
-Retrieve only the small source/build/runtime and check receipts required for the
-claim, verify local hashes, then delete the pod and its container disk. Retain
-receipts under the existing [validation lifecycle](development.md#material-lifecycle)
-until the scoped claim is summarized or superseded; remove copied source/build
-artifacts when that purpose ends. Never place account identifiers, credentials or
-billing records in this guide.
+Each measurement remains predeclared and bounded within the existing
+[hierarchical method](robust-manual-capacity.md#efficient-measurement); the larger
+authorized cloud envelope does not authorize exhaustive or heavy campaigns.
+Receiver completion, configured-calendar scope and unmeasured acquisition work
+remain unchanged. Needed receipts were retrieved and cloud deletion was
+confirmed. Command timeouts alone do not enforce deletion or a billing cap.
 
 ## Absolute manual-case capacity
 

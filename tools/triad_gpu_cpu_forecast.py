@@ -185,8 +185,11 @@ def observation(receipt, stratum, *, measure_timing=True):
         coarse = phase_once(receipt, "coarse_selection")["work"]
         selection = coarse["selection"]
         grid = _select(coarse, COARSE_GEOMETRY)
+        # Express continuous PCM projection as a cost for the whole cadence.
+        # Input validation is still charged once per scored window.
+        audio_per_slot = interval * (costs["audio_frontend"] / costs["audio_frontend_output_seconds"])
         timed.update({
-            "frontend": (costs["audio_frontend"] + costs["input_validation"],
+            "frontend": (audio_per_slot + costs["input_validation"],
                          (_select(frontend, ("input_rows", "output_rows", "halo_samples")),
                           tuple(sorted(input_check))), _counts(frontend, ("input_rows", "output_rows"))),
             "helper": (costs["helper"], _select(helper, ("reason", "narrowed")),

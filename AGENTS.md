@@ -46,8 +46,15 @@ benchmark the native implementation but is not in the operating path. The
 continuous native receiver overlaps ready windows with independent in-process
 scorer owners sharing immutable input buffers, and commits public slots in
 order. Resolve the automatic software budget once as twice effective
-hardware-thread capacity and divide it among owners and their stage workers.
-Explicit worker, owner and memory limits remain exact. Do not impose this
+hardware-thread capacity. Slot roots and coarse/fine work share one bounded
+receiver executor; per-owner admitted lane/scratch shapes are full DSP bounds,
+not exclusive worker permits held for a whole slot. Quote the largest ready
+prefix with full-`W` scratch per owner; prefer an admitted balanced shape only
+when it admits a strictly wider ready prefix. Keep each shape fixed through its
+slot. Ready leaves prioritize the oldest eligible public slot, while queued roots use unneeded
+lanes. The aggregate `W` ceiling does not change.
+Started idle pool stacks remain charged until close. Explicit worker, owner and
+memory limits remain exact, with owner count at most `W`. Do not impose this
 computer's old three-owner, 3840 MiB or half-available-RAM settings as portable
 limits. Charge application baseline, actual live owners, stacks, full DSP bounds,
 input assembly/storage and retained results throughout their ownership lifetimes.

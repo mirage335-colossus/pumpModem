@@ -14,6 +14,7 @@ SCOPE = "configured_public_calendar_and_keyed_ordinal"
 SUPPORTED = frozenset(("abbreviated_holdout_supported", "measured_fixed_geometry",
                        "measured_conservative_state_envelope"))
 ACQUISITION = ("input_validation", "helper", "coarse_prepare", "coarse_tiles", "coarse_selection")
+STATE_COUNTS = ("states", "last_emission_states")
 RATIO = "ratio_processing_seconds_per_baseband_second"
 INTERVAL = RATIO + "_interval"
 
@@ -140,6 +141,15 @@ def partial_acquisition(receipt, *, cadence):
     return out
 
 
+def _compatible_state_counts(lane, counts):
+    if lane == "initial_affine":
+        fixed_count = counts["states"][0]
+        return all(value == fixed_count for values in counts.values() for value in values)
+    # Emission expands the retained states before pruning. Compare each
+    # counter across observations, without treating that expansion as drift.
+    return all(max(values) / min(values) <= 1.3 for values in counts.values())
+
+
 def fine_continuation(receipt):
     """Check one uninterrupted native session and return its measured rates."""
     result = receipt["result"]
@@ -199,11 +209,9 @@ def fine_continuation(receipt):
                 or final[lane].get("states_sha256") != state_ids[-1]
                 or (lane == "initial_affine" and len(set(state_ids)) != 1)):
             raise ProbeError(f"{lane} persistent native state identity changed")
-        count_keys = ("states", "last_emission_states")
-        counts = [positive_int(row[key], f"{lane} state count")
-                  for row in observations for key in count_keys]
-        max_ratio = 1.0 if lane == "initial_affine" else 1.3
-        if max(counts) / min(counts) > max_ratio:
+        counts = {key: [positive_int(row[key], f"{lane} {key} count") for row in observations]
+                  for key in STATE_COUNTS}
+        if not _compatible_state_counts(lane, counts):
             raise ProbeError(f"{lane} state geometry drifted during native continuation")
         fixed = (observations[0]["state_cap"], observations[0]["proposal_cap"])
         if any((row["state_cap"], row["proposal_cap"]) != fixed for row in observations):
@@ -329,8 +337,8 @@ def _compatible_work(first, current):
         return False
     for lane in ("initial_affine", "adaptive"):
         a, b = first["states"][lane], current["states"][lane]
-        counts = a["counts"] + b["counts"]
-        if a["caps"] != b["caps"] or max(counts) / min(counts) > (1 if lane == "initial_affine" else 1.3):
+        counts = {key: a["counts"][key] + b["counts"][key] for key in STATE_COUNTS}
+        if a["caps"] != b["caps"] or not _compatible_state_counts(lane, counts):
             return False
     return True
 

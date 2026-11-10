@@ -1,24 +1,258 @@
 # Validation status
 
-Updated 10 November 2026. The native codec and measurement migration's local
-functional checks are complete. Current outcomes and their source identities
-are recorded below. Earlier checkpoints and historical measurements retain their
-original source/runtime; they do not qualify changed code or supply current
-native CPU/GPU calibration. None is release certification.
+Updated 10 November 2026. The bounded native throughput/precision investigation
+from `6bc9b0e3dd0ca91b3b8e3f4851301e6cf1b1371d` is complete. It supports scoped
+GPU phase improvements, three component forecasts and an accepted CPU latency
+tradeoff; complete-receiver capacity and nominal/conservative GPU-assisted CPU
+forecasts remain unresolved. The earlier migration checkpoint remains the
+baseline. Historical measurements retain their original source/runtime.
+None is release certification.
 
 The historical cleanup checkpoint was based on
 `357a50970a0c6214eeaade7c5704bbc39abd4b79` and committed as
 `419e6bae8c4fe3b0f59be23a6dfb3b69fbaed80e`. Its concise outcomes and limitations
 remain below; they are not release certification or validation of changed code.
 
+## Native throughput and precision investigation
+
+The completed investigation measured native same-stream CPU throughput,
+GPU precision/acceleration and source-matched local CPU costs with bounded
+checks. The baseline compiled source was
+`c9a797431bd9d35a0bd2c17149dbcf6211a2296c02ff8c67499c90e236099226`.
+Preserve the global `2*H` worker policy, full resource accounting, complete public
+work and physical completion while investigating serialization and repeated work.
+
+The authorized cloud envelope was at most eight hours and $20/hour aggregate.
+The selected task used one full RTX PRO 6000 under a $2.50/hour ceiling and $25
+total budget, without persistent volume. The roughly 100-minute rental ended
+with confirmed deletion by 20:47:10 UTC; no pod or cloud volume remains. The
+observed balance decrease was about $4.08, not a finalized invoice.
+Provider/account details and operational logs stay outside the checkout.
+See [the completed scope](triad-performance.md#native-throughput-and-precision-investigation--10-november-2026).
+
+Verified current evidence remains scoped to the measured source:
+
+| Check | Outcome and limit |
+| --- | --- |
+| Clean CPU baseline | Native triad group 32/32 passed, 32.67 s, before the current changes. |
+| Current functional groups | GUI 28/28 passed in 106.60 s; contract 35/35 in 30.61 s; triad 32/32 in 30.62 s. The first triad run passed 31/32 because its CLI test expected a superseded argument; the corrected expectation then passed in the full group. These are functional checks, not capacity qualification. |
+| Actual CUDA baseline | Exact `6bc9b0e3`/`c9a797…` baseline built the probe and passed the canonical tensor test within its 45-second bound on a full RTX PRO 6000 Blackwell Server GPU: 97,887 MiB, SM 120, driver 595.91.07. The pinned image supplied Torch 2.9.1/cu128 with C++11 ABI. |
+| Native CUDA work | One-unit regression and active/noise slot checks passed expected decisions and input-identity checks, with actual device work and a 16 GiB device bound, W=4/O=1 and 32 GiB host bound. These are functional checks, not a throughput, tensor-core or capacity result. |
+| Ingress completion wait | The single-completion-wait repair built and passed 3/3 focused checks in 11.93 s; the source change was independently reviewed. No measured speedup is claimed. |
+| Coalescing/Helper fixture | Coalescing and the strong-Helper arithmetic fixture passed the CPU ATen check, 1/1 in 1.63 s. Six paired CUDA cases passed coalescing parity with fewer copies and mixed timings. The later fused complex64 repair and direct-Gram measurements have the narrower outcomes recorded below. |
+| Shared receiver executor | Built and passed three focused checks in 10.09 s: stream 0.06 s, GUI 3.64 s and probe 6.39 s. Independent review found no remaining source flaw in the reviewed concurrency, lane or memory boundaries. The later concurrent-leaf exception and retained-idle-stack contrasts passed in one focused test (1/1). The matched-I/Q timings below do not support a gain. |
+| Mixed-stream regression v2 | Current and baseline binaries each passed the same one-unit stream preflight at W=4/O=2, an 8 GiB bound, 600,000-sample cap and 12-second call bound, with 377,637 identical input rows and matched work. Both first attempts at 512 MiB failed controller admission; 8 GiB is this fixture's allocation, not a portable minimum. The completed fresh-call comparison below is inconclusive overall, with its mixed stream passing the slowdown gate. |
+
+The current compiled C++ manifest is
+`3aaf0fbfeb9f311ebe66b640b9aa2ae3f3caf8b4c0164d99caad199d000c5847`.
+Its combined CUDA check passed the canonical tensor assertions and an actual
+five-slot message with two running owners. The
+[combined receipt](../local-evidence/native-throughput/combined-cuda-3aaf0fbf/combined-cuda.json)
+binds the native binaries and device/runtime; it does not certify every row.
+
+The CUDA setup first attempted a script before its upload completed, then found
+`nvcc` absent from the SSH PATH despite being installed, and Ninja unavailable.
+Those attempts reached no receiver assertions. Adding `/usr/local/cuda/bin` to
+PATH and installing Ubuntu `ninja-build`/`libssl-dev` resolved the prerequisites;
+the actual baseline CUDA checks above then ran. The baseline CUDA receipts have
+been retrieved; operational records remain outside the checkout.
+
+The first matched CPU comparisons did not improve elapsed service. Both replayed
+12-slot I/Q with SHA-256
+`0673bd95f9b4b92317dc951161859b9f8d621e0a44c714c121dce175e12f4493`.
+
+| Comparison | Measured point | Interpretation |
+| --- | --- | --- |
+| O=2 primary pair | Whole service 37.63 → 38.75 s; central four commits 12.0835 → 12.7259 s; hardware busy fraction 87.70% → 88.88%. | About 2.98% slower overall and 5.32% slower centrally. Main scoring/work matched exactly, including both messages and scored-quiet completion. |
+| Original default baseline, H=12/W=24/O=24, 8 GiB cap | Whole 37.0251 s; first slot 2.6940 s; first message 36.9523 s; CPU 391.82 s; busy 88.19%; reported RAM 1.655 GB. | Reference point, not a capacity qualification. Its sampled owner counter undercounts actual overlap. |
+| Initial shared root priority | Whole 39.0495 s; first slot 28.5360 s; busy 85.96%; 12 scorer roots/24 pool threads; reported RAM 2.016 GB. | About 5.47% slower overall with a material head-of-line latency regression. |
+| Leaf-first, narrow admitted scratch | Whole 38.2704 s; first slot 18.5478 s; busy 82.68%; ten roots/24 threads; reported RAM 1,976,414,672 bytes. | Still slower; finite drain retained only three- and two-lane scratch shapes. |
+| Full-W scratch, before oldest-slot priority | Whole 36.8415 s; first slot 20.9921 s; first message 31.6315 s; busy 86.67%; reported RAM 3,176,535,312 bytes. | Wider scratch reduced the finite commit-7→11 drain from 10.2118 to 5.2063 s. This finite tail is not sustained-throughput evidence; the point alone is not a speedup qualification. |
+| Current full-W scratch plus oldest-slot leaf priority | Whole 37.6654 s; first slot 7.5399 s; first message 21.7266 s; CPU 381.879 s; busy 84.49%; nine roots/24 threads; reported RAM 3,160,298,768 bytes. | All 12 reported scores/work and physical messages match the baseline. First message is earlier, first slot remains later, and whole service is about 1.73% slower with lower busy fraction. No throughput/utilization gain is claimed. |
+
+The current [oldest-slot receipt](../local-evidence/native-throughput/row5-default-oldest-first.json)
+and preceding [full-scratch receipt](../local-evidence/native-throughput/row5-default-full-scratch.json)
+retain the exact matched input and configuration. All current owner scratch
+shapes were W=24 under the same aggregate pool and 8 GiB memory cap. The oldest
+eligible public slot receives leaf priority; queued roots use otherwise unneeded
+lanes. The focused stream check passed 1/1 in 0.08 s for that candidate. This is
+the accepted finite-work latency tradeoff: earlier first-message delivery,
+without a throughput/utilization gain or capacity qualification.
+
+The O=2 invocations are incomplete overall: subsequent 6- and 12-worker pilots
+hit their 60-second deadline. Keep those failed additional pilots alongside the
+completed primary observations. The default central interval also remains
+unqualified: four central commits cannot exclude the seven uncommitted slots
+already present at its start (`interval_could_be_explained_by_startup_carryover`).
+The O=24 policy permits up to 47 startup-carryover slots; that theoretical bound
+is not the observed count.
+
+A final-source explicit O=2 replay retained the same input hash, all 12 reported
+scores/work and both physical messages. Its valid ready-input interval, commits
+4→8, covered 240 represented seconds with one carryover slot. Central service
+rose from 0.050348 to 0.052515 s/s (about 4.30% slower), while busy fraction rose
+87.70%→88.70%. Whole service rose 37.63→38.07 s (about 1.17% slower), and RAM
+1.361→1.475 GB, with two running roots and 24 pool threads. The
+[final O=2 receipt](../local-evidence/native-throughput/row5-backlog-final-o2.json)
+is a complete primary comparison; the original invocation's later pilot
+timeouts remain separate failures. This explicit O=2 point neither qualifies
+default O=24 nor supports a throughput gain.
+
+The old `peak_active_owners` field was sampled after commit and undercounted
+scoring overlap. In particular, its O=2 value of one does not mean the baseline
+was serial: raw slot timings show later baseline slots overlapping in waves.
+The shared pool enables earlier/sliding overlap and records roots directly,
+but these points show neither a speedup nor a capacity pass. Higher reported
+utilization alone cannot reverse the elapsed-service failure.
+
+The first real fused complex64 row-5 pair failed exact adaptive fine-work
+parity: its two-second prefix evaluated four additional candidates, increasing
+basis rows from 23,136,000 to 23,160,000. Equal retained-state and transition-edge
+counts did not satisfy that gate. An isolated pointwise fixture had no
+unrotated float-component mismatches and 975 rotated mismatches. Inspection of
+the installed C10 CUDA binary found two `FFMA` instructions in the final complex
+multiply, whereas the initial fused implementation used four `FMUL` and two
+`FADD` instructions. The narrow explicit final-FMA repair passed independent
+source review and actual RTX PRO 6000 exact pointwise, canonical full-slot and
+original failed-row checks, including exact work/state at its 2/3/4/6-second
+checkpoints. Six paired observations then preserved exact scores, work and state.
+For this one row/seed and bounded continuation, DATA and QUIET fine times fell
+36.2% and 34.1%; measured receiver-phase subtotals fell 17.1% and 15.3%. Kernel
+launches fell from 58,333 to 10,615 and device peak from 96,468,992 to 90,177,536
+bytes. These are scoped GPU phase improvements, not whole-stream throughput,
+communication reliability or local CPU forecast qualification.
+This matches the installed C10 binary's arithmetic, not a promise of bitwise
+behavior across arbitrary LibTorch/compiler/device versions. The oracle must
+reject a changed installed arithmetic path.
+
+An actual-GPU FP16 Gram-shape experiment met its arithmetic check (reported
+error `1.314e−4`) but took 184 µs, versus 119 µs for FP64 batched multiplication
+and 33 µs for the direct FP64 experiment. That low-precision candidate is stopped;
+its WMMA name supplies no instruction-level tensor-core execution proof. The
+direct-FP64 Gram path was subsequently implemented and independently accepted
+for its bounded CUDA shape of at most 128 modes. Six paired DATA/QUIET checks
+preserved exact work/state with maximum score difference `1.86e-9`. Relative to
+the repaired fused mapper, median fine-time ratios were 0.46138/0.44773 and
+receiver-phase ratios 0.83629/0.79657. Allocator peak reserved memory fell from
+90,177,536 to 69,206,016 bytes. The
+[paired receipt](../local-evidence/native-throughput/direct-gram-row5-97021/paired-summary.json)
+retains the one-row/seed limits and separate timing gates; these ratios are not
+whole-stream or CPU capacity results.
+
+The first complete GPU v2 run took 181.2 s and 91 calls, but six of nine models
+failed: a first scored slot cost about 0.319 s versus 0.110 s subsequently.
+The original report remains a failure. The revised policy executes every
+active/noise unit as a fresh `regression --units 1` process and every mixed unit
+as a fresh `message` process. It describes the first scored slot in a fresh
+process, neither a fully cold GPU device nor steady state. Earlier same-process
+v2 reports are incompatible; no extra looks were used to repair the mixture.
+The frozen driver SHA-256 is
+`73ae19dd896d4a07dbcd79786c4018a6802c3cf3a0ea682988b01a9939bf3dd7`.
+Seventy-seven focused checks passed. Its fresh-call
+[CPU baseline](../local-evidence/native-throughput/cpu-regression-v2-fresh-baseline.json)
+established all nine models in 101.675845 s/163 calls at W=4/O=2, 8 GiB,
+600,000 samples and a 300-second overall cap: nine active/noise looks and five
+stream looks. The [candidate comparison](../local-evidence/native-throughput/cpu-regression-v2-fresh-candidate.json)
+took 103.679875 s/163 calls, with all nine models supported. Mixed-stream means
+were 0.630636/0.634083 s, and the ratio interval `[0.841389, 1.201541]` passed
+the declared 1.30 slowdown gate at five looks. All eight standalone phase
+comparisons remained inconclusive at nine looks; the overall result is
+inconclusive, not a regression pass. No rerun was used to narrow those intervals.
+The fresh-call GPU run established a baseline in 272.966 s/135 calls with all
+nine models supported; active/noise/stream means were 0.32219/0.32291/0.95147 s.
+It has no GPU reference comparison. Baseline establishment is not a regression
+pass or capacity qualification.
+
+Forecast accounting was repaired to charge audio frontend cost by represented
+continuous PCM seconds rather than slot cadence, and to test independent
+adaptive-work counters separately. Retained-state count 64 and emission count
+88 must not be mixed into a drift ratio; exact affine-work equality remains
+required. Fifteen focused checks passed; stable-counter reanalysis passes and
+the genuine 25→64 drift still fails. CUDA compiler/cache guards separately
+passed 51 unit checks.
+
+The current stock row-5 CPU collection completed 33 calls with verified source
+identity. Nominal and conservative point estimates were 0.062998 and 0.269030
+s/s; logical I/Q-plus-PCM replay was 0.056741 s/s, giving point margins of
+93.70%, 73.10% and 94.33%. I/Q replay took 38.709 s for 686.473 represented
+seconds, with 86.94% hardware busy fraction, eight running owners and
+3,168,302,352 bytes reported RAM. Messages, reacquisition and codec checks
+passed. These are CPU-only points, not a full interval capacity pass.
+
+Row-5 CUDA checks passed all five paired strata and scored quiet in automatic
+precision, but its high-SNR challenge changed a losing acquisition clock
+coordinate from 0 to −0.0003 ppm. Correct bits and 4% work drift did not satisfy
+exact acquisition agreement. One explicit-FP64 check passed that challenge;
+it qualifies only that explicit arithmetic check, not the automatic class.
+The 5 dB near-decision challenge was outside the declared score band
+(14.6199 versus 21.4934, tolerance ±3.224). Independent CPU training at seed
+86021 placed both 5.5 and 6.5 dB below threshold, failing the predeclared bracket;
+that failed construction produced no qualification report. A separate bounded
+CPU-only construction reused seed 86021, with lower 6.5 and fixed upper 14.5 dB-Hz
+and at most five bisection calls. It succeeded in five calls, fixing 8.0 dB-Hz
+at log evidence 21.858229 versus threshold 21.493 ±3.224, without CUDA feedback.
+The independent CPU cost holdout at seed 97021 remained unchanged. The final
+explicit-FP64 row-5 run passed all five strata and three operational challenges
+with exact work/acquisition and zero adaptive drift. CPU and GPU near-decision
+log evidence both measured 21.85822942. This repairs that explicit precision
+route; the automatic-class failure remains a separate result.
+
+The [official all-eight forecast report](../local-evidence/native-throughput/forecast-row5/all-eight-fp64-forecast.json)
+supports three partial row-5 fine-phase estimates:
+
+| Component | Estimated s/s and interval | Independent CPU holdout s/s |
+| --- | --- | --- |
+| Cold maximum | 0.259870, `[0, 0.611954]` | 0.250479 |
+| Terminal | 0.015253, `[0, 0.126661]` | 0.014189 |
+| Erasure | 0.015019, `[0, 0.055098]` | 0.014460 |
+
+Here s/s means CPU service seconds per represented baseband second.
+
+Active and quiet cache misses/prepared-row counts differed by about 9–11%,
+outside the unchanged 5% calibrated cost-regime gate despite exact CPU/GPU
+paired work. Their estimates remain unresolved. Required matching same-stream
+calibration/backlog and complete holdout/uncertainty gates also remain open.
+Nominal and conservative GPU-assisted service and complete capacity are
+unresolved; the other seven rows have geometry-only coverage. The partial
+component forecasts cannot be reported as an all-row or complete-receiver pass.
+
+Strong-Helper +30 and +60 dB checks now pass on CPU and CUDA. The original
++60 dB fixture failed placement at 1,725 Hz IF before receiver assertions;
+the valid fixture uses 9,000 Hz sample rate, 2,450 Hz IF and noise variance 0.03.
+Its exact 544,313,305-byte workspace lease also replaces an insufficient
+512 MiB attempt. These repaired fixtures do not erase the original setup and
+admission failures.
+
+The CUDA build now requires NVCC and the CUDA SDK. The actual Blackwell build
+uses `CMAKE_CUDA_ARCHITECTURES=120` and `TORCH_CUDA_ARCH_LIST=12.0`. These identify
+the measured SM 120 device; they are not a portable architecture default. The
+optional CPU ATen build and default application without Torch remain unchanged.
+
+Retain the matched receipts, original failed checks and incomplete pilots in
+[`local-evidence/native-throughput`](../local-evidence/native-throughput/) to
+support this checkpoint's scoped claims and unresolved gates. The bounded
+campaign has ended; no additional run is implied. Tensor-core execution and
+complete capacity remain unqualified. Retire these raw receipts after applicable
+replacement evidence resolves the gates and preserves the original failures,
+source/configuration provenance and margins.
+
+The baseline/candidate comparison no longer needs copied executables or source
+archives. Retire those obsolete bundles and builds while retaining needed raw
+results and hashes; never relabel old costs as new calibration. Release artifacts
+and currently useful build profiles keep their separate retention contracts.
+
 ## Native codec and measurement migration
+
+**Completed baseline checkpoint.** The checks below precede the current
+throughput/precision changes and retain their original source and limits.
 
 The migration from `1c58507a5178c7700cd15d0fcdd05a0091c6dba9` adds bounded native
 long-message intervals, lazy emission,
 shared native CPU/tensor measurement paths and a native real-audio frontend,
 while retiring Python receiver DSP. The default application requires neither
 Python nor Torch; optional compiled ATen bulk operations retain production receiver
-control and state. CUDA execution is unavailable in the current environment.
+control and state. CUDA device execution was unavailable during this local
+checkpoint.
 Implementation, numerical comparison and capacity qualification remain separate.
 
 The long profile keeps the short codec through 16 bytes and uses fixed 1,216-slot
@@ -58,12 +292,10 @@ receipts through nine looks, noise 15 through five looks, with only the declared
 1/2/4-unit batches. This establishes a current native baseline, not a cross-revision
 regression pass, real-time capacity or communication sensitivity.
 
-The temporary [native regression baseline](../local-evidence/native-cpp-migration/regression-baseline.json)
-contains 559,086 bytes with SHA-256
+The superseded v1 `regression-baseline.json` contained 559,086 bytes with SHA-256
 `08380276aa9c15e53718d32dbb9e2d95000648031affdfa36f1079ea1f370905`.
-It supports the current bounded regression/harness claim. Retire it when its
-source or configuration becomes inapplicable and this summary or a qualified
-replacement preserves the needed evidence; no duplicate Markdown report is kept.
+This source-scoped result does not supply the current v2 comparison. Its
+applicable outcome is preserved here; it has no active baseline-retention duty.
 
 The independent clock-envelope reproduction first rejected a legal signed-arrival
 case (`−1000`, zero Helper lead) in `PublicProfile`. The repaired public window
@@ -81,8 +313,9 @@ Decoded Message content remains limited to 1 MiB; other event values retain
 A bounded native spool fixture generated 827,637 I/Q rows, stored 14,069,829 bytes
 and retained no full-capture array in RAM. Exact-input W=2/O=2 and W=1/O=1 replays
 on H=12 each committed ten valid slots, two actual `e`/quiet episodes and the
-predeclared ready interval from commit 3 through 6. Both peaked at one active
-owner, so this does not measure a multiowner speedup or manual-case capacity.
+predeclared ready interval from commit 3 through 6. Both reported
+`peak_active_owners=1`; that after-commit counter does not establish actual peak
+scoring overlap. This is not a multiowner speedup or manual-case capacity result.
 Service includes separately quantified spool reads/hash; generation and spool
 writes are excluded. Full logical PCM projection is a separate measured phase.
 Controller wall removes measured condition-variable wait and spool I/O/hash but
@@ -107,8 +340,10 @@ check exited 0 without warnings. Header provenance used the
 temporary downloads were removed. This does not test CUDA linking, device
 execution, numerical fidelity, memory or performance.
 
-The user-requested [bounded RunPod proposal](triad-performance.md#bounded-runpod-proposal--10-november-2026)
-prepares actual CUDA checks without provisioning. Its initial archive omitted
+The earlier bounded RunPod proposal prepared CUDA checks before provisioning.
+It has been superseded by the
+[current investigation](triad-performance.md#native-throughput-and-precision-investigation--10-november-2026).
+Its initial archive omitted
 `triad_probe_spool.hpp` and `triad_fixture_key.hpp`; an explicit allowlist repair
 and recursive local-header closure test corrected that packaging failure. The
 fresh extraction built the probe, exact bundled tensor parity test and Helper
@@ -120,9 +355,10 @@ its internal manifest is
 `dd17c1c270cc750d5c7dfd0a254cdf0fb15393fd1427e700013918962fa4a22a`.
 The bundled test SHA-256 is
 `4e7b734f09cf4b9270ff9b4df53ed8285f196683b5de8d82aeacdb512f13f2ee`.
-The archive is retained outside the checkout only for this current proposal,
-with cleanup after execution, cancellation or source obsolescence. No account
-metadata or provider action forms part of this preparation.
+The completed matched comparison superseded this archive's retention purpose;
+its hashes and packaging findings remain here while the obsolete source bundle
+is retired. The packaging checkpoint contained no account metadata or provider
+action.
 
 No local functional check remains pending in this checkpoint. Actual CUDA
 linking/device execution/performance, Windows runtime, physical audio devices,

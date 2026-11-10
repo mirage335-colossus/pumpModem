@@ -90,7 +90,8 @@ class CoarseSession {
 public:
     CoarseSession(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                   std::span<const Complex>, std::span<const FrequencyInterval>,
-                  unsigned workers, std::size_t scratch_limit_bytes, std::stop_token = {});
+                  unsigned workers, std::size_t scratch_limit_bytes, std::stop_token = {},
+                  ReceiverExecutor* = nullptr);
     ~CoarseSession();
     CoarseSession(CoarseSession&&) noexcept;
     CoarseSession& operator=(CoarseSession&&) noexcept;
@@ -121,6 +122,7 @@ struct CoarseFineGeometry {
 CoarseFineGeometry coarse_fine_geometry(const ReceiverConfig&, const ReceiverSlotPlan&);
 CoarseResult score_coarse(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                           std::span<const Complex>, std::span<const FrequencyInterval>,
-                          unsigned workers, std::size_t scratch_limit_bytes, std::stop_token);
+                          unsigned workers, std::size_t scratch_limit_bytes, std::stop_token,
+                          ReceiverExecutor* = nullptr);
 
 } // namespace datapump::triad::v3::receiver_detail

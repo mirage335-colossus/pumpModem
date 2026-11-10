@@ -518,15 +518,27 @@ struct Session::Impl {
                 std::uint64_t first, std::span<const Complex> samples, std::span<const std::uint8_t> validity,
                 std::uint64_t owner, std::stop_token stop) {
         while (!stop.stop_requested()) {
-            const auto before = receiver.report();
-            receiver_ok(before);
+            receiver_ok(receiver.report());
             if (receiver.push(first, samples, validity) == StreamPushResult::accepted) break;
+
+            // Observe the actual rejection cause after push(): it may have
+            // committed work before reporting backpressure. Drain queued
+            // output first, then wait for only one owner completion before
+            // retrying this unchanged chunk.
+            const auto rejected = receiver.report();
+            receiver_ok(rejected);
             deliver(receiver, display, s, owner, stop);
-            const auto after = receiver.resume(true);
-            receiver_ok(after);
-            if (!before.output_backpressured && !after.active_owners && !after.output_backpressured &&
-                after.next_public_slot == before.next_public_slot &&
-                after.uncommitted_slots == before.uncommitted_slots)
+            auto after = receiver.report();
+            if (!rejected.output_backpressured) {
+                after = receiver.wait_for_slot_completion();
+                receiver_ok(after);
+                deliver(receiver, display, s, owner, stop);
+                after = receiver.report();
+            }
+            const bool output_drained = rejected.output_backpressured && !after.output_backpressured;
+            if (!output_drained && after.state == rejected.state && !after.active_owners && !after.output_backpressured &&
+                after.next_public_slot == rejected.next_public_slot &&
+                after.uncommitted_slots == rejected.uncommitted_slots)
                 throw Error("Robust input cannot advance within the configured receiver workspace");
         }
         cancelled(stop);

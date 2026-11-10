@@ -11,21 +11,28 @@ import math
 from pathlib import Path
 import statistics
 import sys
+import time
 
 from triad_case_metrics import BATCHES, LOOKS, log_interval, t_critical
 from triad_cases import DEFAULT_CASES
 from triad_native import (BACKENDS, DEFAULT_PROBE, NativeProbe, ProbeError, allocation,
-                          environment, finite_number, is_sha256, named_phases, positive_int,
+                          digest, environment, finite_number, is_sha256, named_phases, phase_once, positive_int,
                           read_report, runtime_identity, validate_receipt, write_result)
 
 STRATA = ("active", "noise")
 PHASES = ("native_slot", "coarse", "fine", "audio_frontend")
-KERNELS = tuple(f"{stratum}_{phase}" for stratum in STRATA for phase in PHASES)
+STREAM = "native_stream"
+WORKLOADS = (*STRATA, STREAM)
+KERNELS = tuple(f"{stratum}_{phase}" for stratum in STRATA for phase in PHASES) + (STREAM,)
 ALPHA = .05
 PRECISION = .15
 MODEL_LIMIT = .30
 SLOWDOWN = 1.30
-SCHEMA = "datapump.triad.native-regression.v1"
+SCHEMA = "datapump.triad.native-regression.v2"
+STREAM_SAMPLE_LIMIT = 600_000
+STREAM_EPOCHS = (1793850000, 1793850060, 1793850120, 1793850180, 1793850240)
+STREAM_ORDINAL = 7000037
+DEFAULT_BENCHMARK_DEADLINE_MS = 300_000
 
 
 def analyze(rows, target_units, *, baseline=None):
@@ -114,9 +121,26 @@ def policy():
     return {
         "looks": list(LOOKS), "batch_units": list(BATCHES), "strata": list(STRATA),
         "phases": list(PHASES), "family_alpha": ALPHA,
+        "kernels": list(KERNELS),
         "claims_per_phase_look_pair": 3, "relative_precision": PRECISION,
         "maximum_holdout_error": MODEL_LIMIT, "material_slowdown_ratio": SLOWDOWN,
-        "model": "Additive cost of identical complete native slot and audio frontend units",
+        "model": "Additive cost of identical complete native slot, audio frontend and five-slot stream units",
+        "native_slot_unit": {
+            "command": "regression", "native_units_per_call": 1,
+            "execution": "First scored slot in a fresh process for every unit in each 1/2/4 batch",
+            "scope": "Homogeneous first-slot execution; neither a fully cold GPU device nor steady-state service",
+            "outer_budget": "All process startup, preparation and generation count toward the overall deadline",
+        },
+        "native_stream": {
+            "command": "message", "slots": 5, "maximum_generated_samples": STREAM_SAMPLE_LIMIT,
+            "expected_bits": [0, 0, 1], "expected_text": "e", "trailing_quiet_slots": 2,
+            "pattern_epochs": list(STREAM_EPOCHS), "initial_symbol_ordinal": STREAM_ORDINAL,
+            "unit": "One fresh native call; receiver_service includes receiver startup, ingress, drain, teardown and spool reads/hash",
+            "excluded_service": "Process startup, profile preparation, generation, audio projection and the separate EOF control",
+            "outer_budget": "All calls and excluded work count toward the overall benchmark deadline",
+            "preflight": "One complete message call must pass before any statistical looks",
+            "scope": "Complete fixed five-slot replay, not sustained backlog or absolute capacity",
+        },
         "warmup_and_setup": "The native receipt identifies preparation and the measured phase boundary",
         "projection_limit": "Only repetitions of measured geometry and work",
         "confidence_limit": "Conditional log-mean intervals with observed model-error allowance",
@@ -184,6 +208,147 @@ def regression_batch(receipt, stratum, count):
     return times, geometry
 
 
+def regression_batch_list(receipts, stratum, count):
+    """Sum homogeneous first-slot calls using the existing native phase validator."""
+    if not isinstance(receipts, list) or len(receipts) != count:
+        raise ProbeError("Native slot batch is missing a fresh-call unit")
+    first = receipts[0]
+    backend = first["identity"]["backend"]
+    host = _comparison_environment(backend, first)
+    observations = []
+    for receipt in receipts:
+        validate_receipt(receipt, command="regression", backend=backend, returncode=0)
+        _same_native(receipt, first, host, backend)
+        observations.append(regression_batch(receipt, stratum, 1))
+    geometry = observations[0][1]
+    if any(row[1] != geometry for row in observations):
+        raise ProbeError("Native first-slot work or observation changed between fresh calls")
+    return {phase: sum(row[0][phase] for row in observations) for phase in PHASES}, geometry
+
+
+def stream_unit(receipt):
+    """Validate the existing native message receipt without synthesizing DSP work."""
+    backend = receipt.get("identity", {}).get("backend")
+    validate_receipt(receipt, command="message", backend=backend, returncode=0)
+    result, observation, config = receipt["result"], receipt["observation"], receipt["configuration"]
+    stream = result.get("stream", {})
+    resources = allocation(receipt)
+    if (result.get("complete_receiver_service") is not True
+            or result.get("message_and_physical_quiet_verified") is not True
+            or result.get("eof_control_verified") is not True
+            or result.get("expected_message_count") != 1
+            or result.get("scope") != "configured_public_iq_stream"
+            or stream.get("work_complete") is not True
+            or stream.get("state") != "input_ended" or stream.get("input_closed") is not True
+            or stream.get("committed_slots") != 5 or stream.get("next_public_slot") != 5):
+        raise ProbeError("Native stream did not complete its five public slots and physical message")
+    rows = positive_int(observation.get("samples"), "stream observation rows")
+    if (rows > STREAM_SAMPLE_LIMIT or observation.get("first_sample") != 0
+            or observation.get("stop_sample") != rows or observation.get("generated_samples") != rows
+            or observation.get("channel_erased_rows") != 0
+            or observation.get("expected_episodes") != 1 or observation.get("wire_bits_per_episode") != 3
+            or stream.get("input_rows") != rows
+            or stream.get("verified_input_sha256") != observation["input_sha256"]):
+        raise ProbeError("Native stream observation or verified input extent is incomplete")
+    slots, messages = stream.get("slots"), stream.get("messages")
+    if not isinstance(slots, list) or len(slots) != 5 or not isinstance(messages, list) or len(messages) != 1:
+        raise ProbeError("Native stream is missing slot or message receipts")
+    ordinal = positive_int(config.get("initial_symbol_ordinal"), "initial stream ordinal", allow_zero=True)
+    epoch = positive_int(config.get("calendar_epoch"), "configured stream epoch")
+    if (epoch != STREAM_EPOCHS[0] or ordinal != STREAM_ORDINAL
+            or observation.get("public_slot") != 0 or observation.get("symbol_ordinal") != ordinal
+            or observation.get("pattern_epoch") != slots[0].get("pattern_epoch")):
+        raise ProbeError("Native stream observation address differs from its configured origin")
+    work_fields = ("coarse_workspaces", "coarse_frequency_points", "coarse_arrival_points", "fine_candidates",
+                   "affine_blocks", "adaptive_blocks", "adaptive_peak_states", "adaptive_transition_edges",
+                   "basis_rows", "quiet_modes")
+    work = []
+    previous_start = previous_stop = -1
+    for index, slot in enumerate(slots):
+        first = positive_int(slot.get("first_sample"), "slot first sample", allow_zero=True)
+        stop = positive_int(slot.get("stop_sample"), "slot stop sample")
+        address_epoch = positive_int(slot.get("pattern_epoch"), "slot pattern epoch")
+        expected_bit = (0, 0, 1)[index] if index < 3 else None
+        if (slot.get("index") != index or slot.get("symbol_ordinal") != ordinal + index
+                or address_epoch != STREAM_EPOCHS[index]
+                or first <= previous_start or stop <= previous_stop
+                or stop <= first or stop > rows or slot.get("complete") is not True
+                or slot.get("all_valid") is not True or slot.get("zero_h0_verified") is not True
+                or slot.get("decision") != ("data" if index < 3 else "quiet")
+                or (index < 3 and (type(slot.get("bit")) is not int or slot["bit"] != expected_bit))
+                or (index >= 3 and slot.get("bit") is not None)):
+            raise ProbeError("Native stream slot completion, bits or address chronology changed")
+        previous_start, previous_stop = first, stop
+        counts = {key: positive_int(slot.get(key), f"stream {key}", allow_zero=True) for key in work_fields}
+        if any(counts[key] == 0 for key in ("coarse_workspaces", "coarse_frequency_points",
+                                           "coarse_arrival_points", "fine_candidates", "affine_blocks", "basis_rows")):
+            raise ProbeError("Native stream slot lacks complete useful receiver work")
+        if index >= 3 and counts["quiet_modes"] == 0:
+            raise ProbeError("Native stream completion lacks scored quiet evidence")
+        worker_count = positive_int(slot.get("workers"), "stream slot workers")
+        if worker_count > resources["workers"]:
+            raise ProbeError("Native stream exceeded its worker allocation")
+        commit = slot.get("commit", {})
+        if positive_int(commit.get("input_stop"), "committed input stop") < stop:
+            raise ProbeError("Native stream committed an incomplete public window")
+        work.append({"index": index, "first_sample": first, "stop_sample": stop,
+                     "pattern_epoch": address_epoch, "symbol_ordinal": ordinal + index,
+                     "decision": slot["decision"], "bit": slot.get("bit"), **counts})
+    if previous_stop != rows:
+        raise ProbeError("Native stream did not score its declared final window")
+    message = messages[0]
+    expected_message = {"first_public_slot": 0, "stop_public_slot": 5, "physical_complete": True,
+                        "expected_source_matches": True, "long_form": False, "observed_bits": 3,
+                        "missing_slots": 0, "trailing_quiet_slots": 2}
+    if any(type(message.get(key)) is not type(value) or message[key] != value
+           for key, value in expected_message.items()):
+        raise ProbeError("Native stream did not decode e after exactly two scored quiet slots")
+    reserve = positive_int(stream.get("spool_residency_reserved_bytes"), "spool reservation", allow_zero=True)
+    receiver_peak = positive_int(stream.get("receiver_peak_reserved_bytes"), "receiver peak memory")
+    receiver_limit = positive_int(stream.get("receiver_memory_limit_bytes"), "receiver memory limit")
+    peak = positive_int(stream.get("peak_reserved_bytes"), "application peak memory")
+    if (reserve != observation.get("spool_residency_reserved_bytes")
+            or receiver_limit + reserve != resources["memory_limit_bytes"]
+            or stream.get("total_application_memory_limit_bytes") != resources["memory_limit_bytes"]
+            or receiver_peak > receiver_limit or peak != receiver_peak + reserve
+            or peak > resources["memory_limit_bytes"]):
+        raise ProbeError("Native stream memory receipt exceeds or changes its allocation")
+    for field, limit in (("peak_active_owners", resources["slot_owners"]),
+                         ("peak_running_owners", resources["slot_owners"]),
+                         ("peak_executor_workers", resources["workers"])):
+        # Earlier native references lack the newer pool telemetry. Never invent it.
+        if field in stream and positive_int(stream[field], field, allow_zero=True) > limit:
+            raise ProbeError("Native stream pool telemetry exceeds its allocation")
+    phase = phase_once(receipt, "receiver_service")
+    seconds = finite_number(phase.get("wall_seconds"), "receiver service", nonnegative=True)
+    measured = phase["work"]
+    if (seconds <= 0 or seconds != stream.get("wall_seconds")
+            or phase.get("unit_index") != 0
+            or phase.get("scope") != "native_iq_replay_including_bounded_spool_reads_and_verification"
+            or measured.get("committed_slots") != 5 or measured.get("input_rows") != rows
+            or measured.get("verified_input_sha256") != observation["input_sha256"]
+            or measured.get("allocation") != receipt["allocation"]):
+        raise ProbeError("Native receiver_service does not describe the validated stream")
+    eof = phase_once(receipt, "eof_control")["work"]
+    if (eof.get("work_complete") is not True or eof.get("committed_slots") != 1
+            or eof.get("messages") != [] or len(eof.get("slots", [])) != 1
+            or eof["slots"][0].get("decision") != "data"):
+        raise ProbeError("Native stream EOF control did not leave the partial message incomplete")
+    geometry = {"configuration": config, "allocation": resources, "observation": observation,
+                "work_identity_sha256": digest({"slots": work, "message": expected_message})}
+    return seconds, geometry
+
+
+def stream_batch(receipts, count):
+    if not isinstance(receipts, list) or len(receipts) != count:
+        raise ProbeError("Native stream batch is missing a fresh-call unit")
+    observations = [stream_unit(receipt) for receipt in receipts]
+    geometry = observations[0][1]
+    if any(row[1] != geometry for row in observations):
+        raise ProbeError("Native stream work or observation changed between units")
+    return {STREAM: sum(row[0] for row in observations)}, geometry
+
+
 def _baseline_kernel(baseline, name, target_units):
     row = baseline["kernels"][name]
     # Re-evaluate the raw look using the current policy before using its evidence.
@@ -199,6 +364,13 @@ def _comparison_environment(backend, description):
                                     "native_runtime": runtime_identity(description)}
 
 
+def _same_native(receipt, description, host, backend):
+    if (any(receipt["identity"].get(key) != description["identity"].get(key)
+            for key in ("source_manifest_sha256", "executable_sha256"))
+            or _comparison_environment(backend, receipt) != host):
+        raise ProbeError("Native regression runtime, executable or allocation changed between calls")
+
+
 def _validate_baseline_evidence(baseline, host, backend, target_units):
     """Bind each reference batch to the reported native executable and its unit cost."""
     if baseline.get("identity_verified_at_completion") is not True:
@@ -209,8 +381,13 @@ def _validate_baseline_evidence(baseline, host, backend, target_units):
             or _comparison_environment(backend, desc) != host):
         raise ProbeError("Baseline native executable or runtime identity is inapplicable")
     batches = baseline.get("batches")
-    if not isinstance(batches, dict) or set(batches) != set(STRATA):
+    if not isinstance(batches, dict) or set(batches) != set(WORKLOADS):
         raise ProbeError("Baseline lacks complete native batch evidence")
+    preflight = baseline.get("stream_preflight")
+    _, preflight_geometry = stream_unit(preflight)
+    _same_native(preflight, desc, host, backend)
+    if preflight_geometry != baseline["geometry"][STREAM]:
+        raise ProbeError("Baseline stream preflight differs from its measured work")
     for stratum, batch in batches.items():
         rows = {}
         for sample in batch:
@@ -219,28 +396,27 @@ def _validate_baseline_evidence(baseline, host, backend, target_units):
             sizes = rows.setdefault(index, {})
             if units not in BATCHES or units in sizes:
                 raise ProbeError("Baseline repeated or undeclared native unit batch")
-            receipt = validate_receipt(sample["receipt"], command="regression", backend=backend, returncode=0)
-            if (any(receipt["identity"].get(key) != desc["identity"][key]
-                    for key in ("source_manifest_sha256", "executable_sha256"))
-                    or _comparison_environment(backend, receipt) != host):
-                raise ProbeError("Baseline native batch identity changed")
-            timings, geometry = regression_batch(receipt, stratum, units)
+            if stratum == STREAM:
+                timings, geometry = stream_batch(sample.get("receipts"), units)
+            else:
+                timings, geometry = regression_batch_list(sample.get("receipts"), stratum, units)
+            for receipt in sample["receipts"]:
+                _same_native(receipt, desc, host, backend)
             if geometry != baseline["geometry"][stratum]:
                 raise ProbeError("Baseline native observation or work differs from its declared geometry")
             sizes[units] = timings
         if len(rows) not in LOOKS or sorted(rows) != list(range(1, len(rows) + 1)):
             raise ProbeError("Baseline lacks complete declared outer looks")
-        for phase in PHASES:
-            name = f"{stratum}_{phase}"
+        for phase in ((STREAM,) if stratum == STREAM else PHASES):
+            name = STREAM if stratum == STREAM else f"{stratum}_{phase}"
             observed = [[rows[index][units][phase] for units in BATCHES] for index in range(1, len(rows) + 1)]
             if observed != _baseline_kernel(baseline, name, target_units)["batch_seconds"]:
                 raise ProbeError("Baseline timing summaries do not match native phase observations")
 
 
-def run(*, target_units=1000, device="cpu", baseline=None, executable=DEFAULT_PROBE,
+def _run_native(probe, report, *, target_units=1000, device="cpu", baseline=None,
         workers=None, slot_owners=None, memory_limit_bytes=None, deadline_ms=30_000,
         max_samples=4_194_304, tensor_precision=None, device_index=None, device_memory_limit_bytes=None):
-    probe = NativeProbe(executable, backend=device)
     if baseline is not None and not isinstance(baseline, dict):
         raise ProbeError("Baseline report must be a JSON object")
     # Freeze the cap across both reports when the operator has left it automatic.
@@ -254,9 +430,9 @@ def run(*, target_units=1000, device="cpu", baseline=None, executable=DEFAULT_PR
                "tensor_precision": tensor_precision, "device_index": device_index,
                "device_memory_limit_bytes": device_memory_limit_bytes}
     description = probe.call("describe", **options)
-    report = {"schema": SCHEMA, "policy": policy(), "native_identity": description["identity"],
-              "description": description, "geometry": {}, "kernels": {}, "batches": {},
-              "baseline_identity": baseline.get("native_identity") if baseline else None}
+    report.update(native_identity=description["identity"], description=description,
+                  geometry={}, kernels={}, batches={},
+                  baseline_identity=baseline.get("native_identity") if baseline else None)
     if description["status"] != "complete":
         return report | {"status": description["status"], "reason": description.get("reason")}
     host = _comparison_environment(device, description)
@@ -264,26 +440,43 @@ def run(*, target_units=1000, device="cpu", baseline=None, executable=DEFAULT_PR
     options["memory_limit_bytes"] = host["allocation"]["memory_limit_bytes"]
     if baseline is not None:
         validate_baseline(baseline, baseline.get("geometry"), host)
-        if set(baseline["geometry"]) != set(STRATA):
+        if set(baseline["geometry"]) != set(WORKLOADS):
             raise ProbeError("Baseline is missing a native workload stratum")
         _validate_baseline_evidence(baseline, host, device, target_units)
-    for stratum in STRATA:
-        rows = {phase: [] for phase in PHASES}
+    stream_options = options | {"slots": 5, "max_samples": min(max_samples, STREAM_SAMPLE_LIMIT)}
+    preflight = probe.call("message", **stream_options)
+    report["stream_preflight"] = preflight
+    if preflight["status"] != "complete":
+        return report | {"status": preflight["status"], "reason": preflight.get("reason")}
+    _same_native(preflight, description, host, device)
+    _, report["geometry"][STREAM] = stream_unit(preflight)
+    if baseline is not None and baseline["geometry"][STREAM] != report["geometry"][STREAM]:
+        raise ProbeError("Baseline native stream preflight is inapplicable")
+    for stratum in WORKLOADS:
+        phases = (STREAM,) if stratum == STREAM else PHASES
+        rows = {phase: [] for phase in phases}
         receipts = report["batches"].setdefault(stratum, [])
         for look in LOOKS:
-            while len(rows["native_slot"]) < look:
-                row = {phase: [None] * len(BATCHES) for phase in PHASES}
-                offset = len(rows["native_slot"])
+            while len(rows[phases[0]]) < look:
+                row = {phase: [None] * len(BATCHES) for phase in phases}
+                offset = len(rows[phases[0]])
                 for index in ((offset + turn) % 3 for turn in range(3)):
                     units = BATCHES[index]
-                    receipt = probe.call("regression", stratum=stratum, units=units, **options)
-                    receipts.append({"look_row": offset + 1, "units": units, "receipt": receipt})
-                    if receipt["status"] != "complete":
-                        return report | {"status": receipt["status"], "reason": receipt.get("reason")}
-                    if (runtime_identity(receipt) != host["native_runtime"] or allocation(receipt) != host["allocation"]
-                            or receipt["identity"]["source_manifest_sha256"] != description["identity"]["source_manifest_sha256"]):
-                        raise ProbeError("Native regression runtime or allocation changed between batches")
-                    times, geometry = regression_batch(receipt, stratum, units)
+                    fresh = []
+                    sample = {"look_row": offset + 1, "units": units, "receipts": fresh}
+                    receipts.append(sample)
+                    command = "message" if stratum == STREAM else "regression"
+                    call_options = stream_options if stratum == STREAM else options | {"stratum": stratum, "units": 1}
+                    for _ in range(units):
+                        receipt = probe.call(command, **call_options)
+                        fresh.append(receipt)
+                        if receipt["status"] != "complete":
+                            return report | {"status": receipt["status"], "reason": receipt.get("reason")}
+                        _same_native(receipt, description, host, device)
+                    if stratum == STREAM:
+                        times, geometry = stream_batch(fresh, units)
+                    else:
+                        times, geometry = regression_batch_list(fresh, stratum, units)
                     if report["geometry"].setdefault(stratum, geometry) != geometry:
                         raise ProbeError("Native regression observation, configuration or work changed between batches")
                     if baseline is not None and baseline["geometry"][stratum] != geometry:
@@ -293,10 +486,10 @@ def run(*, target_units=1000, device="cpu", baseline=None, executable=DEFAULT_PR
                 for phase, seconds in row.items():
                     rows[phase].append(seconds)
             for phase, measured in rows.items():
-                name = f"{stratum}_{phase}"
+                name = STREAM if stratum == STREAM else f"{stratum}_{phase}"
                 reference = _baseline_kernel(baseline, name, target_units) if baseline else None
                 report["kernels"][name] = analyze(measured, target_units, baseline=reference)
-            if all(report["kernels"][f"{stratum}_{phase}"]["stop"] for phase in PHASES):
+            if all(report["kernels"][STREAM if stratum == STREAM else f"{stratum}_{phase}"]["stop"] for phase in phases):
                 break
     probe.verify_unchanged()
     final_environment = environment(device)
@@ -318,6 +511,58 @@ def run(*, target_units=1000, device="cpu", baseline=None, executable=DEFAULT_PR
     return report
 
 
+class BenchmarkExpired(ProbeError):
+    def __init__(self, reason, receipt=None):
+        super().__init__(reason)
+        self.receipt = receipt
+
+
+class BoundedProbe:
+    """Charge process overhead and all excluded work to one wall-clock budget."""
+    def __init__(self, executable, backend, deadline_ms):
+        self.deadline_ms = positive_int(deadline_ms, "benchmark deadline")
+        self.started = time.monotonic()
+        self.calls = 0
+        self.probe = NativeProbe(executable, backend=backend)
+
+    def elapsed_ms(self):
+        return (time.monotonic() - self.started) * 1000
+
+    def call(self, command, **options):
+        # NativeProbe permits 15 seconds for cooperative cancellation/exit.
+        remaining = int(self.deadline_ms - self.elapsed_ms()) - 15_000
+        if remaining <= 0:
+            raise BenchmarkExpired("Overall native regression deadline exhausted before another complete call")
+        options["deadline_ms"] = min(options.get("deadline_ms", 30_000), remaining)
+        self.calls += 1
+        receipt = self.probe.call(command, **options)
+        if self.elapsed_ms() >= self.deadline_ms:
+            raise BenchmarkExpired("Overall native regression deadline exhausted", receipt)
+        return receipt
+
+    def verify_unchanged(self):
+        self.probe.verify_unchanged()
+        if self.elapsed_ms() >= self.deadline_ms:
+            raise BenchmarkExpired("Overall native regression deadline exhausted")
+
+
+def run(*, executable=DEFAULT_PROBE, device="cpu", benchmark_deadline_ms=DEFAULT_BENCHMARK_DEADLINE_MS, **options):
+    probe = BoundedProbe(executable, device, benchmark_deadline_ms)
+    report = {"schema": SCHEMA, "policy": policy()}
+    try:
+        report = _run_native(probe, report, device=device, **options)
+    except BenchmarkExpired as error:
+        report.update(status="incomplete", reason=str(error))
+        if error.receipt is not None:
+            report["deadline_last_call"] = error.receipt
+    elapsed = probe.elapsed_ms()
+    if elapsed >= probe.deadline_ms:
+        report.update(status="incomplete", reason="Overall native regression deadline exhausted")
+    report["run_budget"] = {"deadline_ms": probe.deadline_ms, "elapsed_ms": elapsed,
+                            "native_calls": probe.calls, "includes_all_generation_and_controls": True}
+    return report
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--output", type=Path, required=True)
@@ -335,6 +580,8 @@ def main(argv=None):
     parser.add_argument("--slot-owners", type=int, help="Exact native slot owner limit.")
     parser.add_argument("--workspace-mib", type=int, help="Exact native host memory limit.")
     parser.add_argument("--deadline-ms", type=int, default=30_000, help="Deadline per bounded native call.")
+    parser.add_argument("--benchmark-deadline-ms", type=int, default=DEFAULT_BENCHMARK_DEADLINE_MS,
+                        help="Overall regression deadline, including generation, controls and process overhead.")
     parser.add_argument("--max-samples", type=int, default=4_194_304, help="Generated sample cap per native call.")
     parser.add_argument("--case-index", type=int, action="append")
     parser.add_argument("--skip-message-gate", action="store_true")
@@ -342,7 +589,7 @@ def main(argv=None):
     args = parser.parse_args(input_args)
     if args.cases is not None:
         explicit = {arg.split("=", 1)[0] for arg in input_args}
-        if explicit & {"--baseline", "--device", "--target-units", "--tensor-precision",
+        if explicit & {"--baseline", "--device", "--target-units", "--benchmark-deadline-ms", "--tensor-precision",
                        "--device-index", "--device-workspace-mib"}:
             parser.error("Relative regression options do not apply to manual capacity")
         from triad_manual_cases import main as manual_main
@@ -368,7 +615,8 @@ def main(argv=None):
         parser.error("Tensor options require --device tensor-cpu or cuda")
     try:
         options = {"target_units": args.target_units, "device": args.device,
-                   "baseline": read_report(args.baseline) if args.baseline else None}
+                   "baseline": read_report(args.baseline) if args.baseline else None,
+                   "benchmark_deadline_ms": positive_int(args.benchmark_deadline_ms, "benchmark deadline")}
         if args.probe != DEFAULT_PROBE:
             options["executable"] = args.probe
         if args.threads is not None:

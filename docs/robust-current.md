@@ -24,6 +24,7 @@ qualification follows from these connections.
 | `triad_stream.hpp` | Public profile and slot geometry, bounded DATA/Helper/noise emission, and the shared source used by GUI and exporter. |
 | `triad_receiver.hpp` | Complete slot scoring: noisy Helper proposals, full public FFT screening, persistent fine tracking, bit/null evidence and resource preflight. |
 | `triad_stream_receiver.hpp` | Bounded continuous ingress, in-process slot ownership, ordered commit, backpressure and cancellation. |
+| `src/triad_receiver_executor.hpp` | Internal shared bounded worker pool for slot roots and coarse/fine stage tasks. |
 | `triad_message_receiver.hpp` | Bounded native short/long text profiles, lazy interval emission, configured FEC and two-scored-quiet completion. |
 | `robust_profile.hpp`, `live.hpp` | Validated GUI settings, duration/profile preparation, simulation/live session and bounded presentation snapshots. |
 | `audio.hpp`, `robust_audio_frontend.hpp` | Native device ownership, routing, gain, timestamped capture and bounded real-PCM-to-I/Q filtering. |
@@ -34,18 +35,34 @@ The GUI links `datapump_robust_session`, `datapump_triad_receiver` and
 screening and fine scoring use the canonical native components. Independent
 slot owners keep mutable scorer state private while sharing immutable window
 samples. Ordered commit preserves physical chronology even when work finishes
-out of order. The automatic budget is `2*H` software workers for effective
-hardware-thread availability `H`; explicit allocations remain exact. Full DSP,
-input, stacks, application baseline and retained-result memory are charged.
-Initialized input is covered once by footprint and ownership floor; outstanding
-DSP/stacks/output bounds remain reserved because RSS cannot attribute anonymous
-memory to a scorer.
+out of order. One lazy receiver executor shares at most `W = 2*H` software workers
+across slot roots and their coarse/fine tasks for effective hardware availability
+`H`; explicit allocations remain exact. A root participates in its own stage
+batch; available lanes prioritize ready leaves for the oldest eligible public
+slot, with queued roots using otherwise unneeded lanes.
+Per-owner lane/scratch limits are fixed DSP bounds, not worker permits held
+exclusively through a slot. Admission quotes the largest ready prefix at full
+`W` scratch per owner, preferring balanced scratch only when it admits a
+strictly wider ready prefix within the full memory bound. Each admitted
+shape remains fixed through its slot; the global `W` ceiling stays unchanged.
+
+Full per-owner DSP, input, prospective and started worker stacks, application
+baseline and retained-result memory are charged. Started idle pool stacks remain
+charged until close. Initialized input is covered once by footprint and ownership
+floor; outstanding DSP/stacks/output bounds remain reserved because RSS cannot
+attribute anonymous memory to a scorer. `peak_running_owners` counts roots in
+actual scorer scope, while `peak_executor_workers` counts started pool threads;
+neither is a hardware-utilization measurement. Standalone phase probes retain
+their local executor. The current point improves first-message latency while
+remaining slower overall than the original baseline; no throughput/utilization
+gain is claimed.
 See [CPU and memory ownership](development.md#receiver-cpu-allocation).
 
 The receiver control API accepts bounded chunks with explicit sample addresses
 and optional validity masks. Backpressure rejects input without consuming it;
-the caller drains completed messages and resumes accepted work before retrying
-the same chunk. Missing samples are erasures within declared bounds, never
+the caller waits for one completion when needed, drains available messages and
+retries the same chunk without forcing a full receiver drain. EOF still drains
+all accepted work. Missing samples are erasures within declared bounds, never
 invented quiet evidence. The control API runs outside the real-time audio
 callback. Profile preparation, device work and receiver work have cancellable
 owners; GUI polling does not wait for a full receiver window.

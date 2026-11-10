@@ -1,4 +1,5 @@
 #include "triad_receiver_fine.hpp"
+#include "triad_receiver_executor.hpp"
 #include "triad_receiver_basis.hpp"
 #include "datapump/execution.hpp"
 
@@ -867,7 +868,8 @@ struct FineSession::Impl {
     std::vector<std::size_t> bulk_progress;
     std::array<std::vector<FineBulkStatistics>, 2> bulk_statistics;
     std::vector<WorkerScratch> scratch;
-    std::unique_ptr<FineWorkers> executor;
+    ReceiverExecutor* executor;
+    std::unique_ptr<FineWorkers> local_workers;
     std::array<ObservationBlock, 2> blocks;
     std::vector<StateBlockWork> state_work;
     std::vector<State> nominal, adaptive;
@@ -886,12 +888,13 @@ struct FineSession::Impl {
     Impl(const ReceiverConfig& input_config, const ReceiverSlotPlan& slot, const Crypto& key,
          FineObservation extent, std::span<const Complex> samples, std::span<const std::uint8_t> valid,
          std::span<const FineCoordinate> selected, double projected_rate, double clock_gap,
-         unsigned allocation, std::size_t scratch_limit, std::stop_token cancellation)
+         unsigned allocation, std::size_t scratch_limit, std::stop_token cancellation,
+         ReceiverExecutor* executor)
         : config(input_config), observation(extent), plan(observation_plan(config, slot, observation)),
           iq(samples), validity(valid), stop(cancellation), calendar(config, plan), grid(projected_rate, clock_gap),
           paths{{{0, 0}, {config.spread_delay_seconds, config.spread_doppler_hz}}},
           tap_count(paths[1].delay_seconds || paths[1].doppler_hz ? 2 : 1), workers(allocation),
-          stage_workers(useful_fine_workers(workers)) {
+          stage_workers(useful_fine_workers(workers)), executor(executor) {
         check_cancelled(stop);
         if (iq.size() != observation.rows || (!validity.empty() && validity.size() != iq.size()))
             throw Error("fine input lease differs from the declared observation");
@@ -948,7 +951,7 @@ struct FineSession::Impl {
         scratch.reserve(stage_workers);
         for (unsigned worker = 0; worker < stage_workers; ++worker)
             scratch.emplace_back(bulk ? 0 : max_rows, bulk ? 0 : fft_rows);
-        executor = std::make_unique<FineWorkers>(stage_workers);
+        if (!executor) local_workers = std::make_unique<FineWorkers>(stage_workers);
         for (auto& block : blocks) block.projected.reserve(max_rows);
         if (observation.record_work) state_work.resize(2 * maximum_proposals);
     }
@@ -1059,8 +1062,8 @@ struct FineSession::Impl {
             }
         });
         time(times.dispatch_seconds, [&] {
-            executor->dispatch(states, [&](unsigned worker, std::size_t index) {
-                check_cancelled(stop);
+            const auto update = [&](unsigned worker, std::size_t index, std::stop_token task_stop) {
+                check_cancelled(task_stop);
                 const bool fixed = index < nominal.size();
                 auto& state = fixed ? nominal[index] : adaptive[index - nominal.size()];
                 MappedBasisRow row;
@@ -1073,7 +1076,11 @@ struct FineSession::Impl {
                                      fixed ? first_anchor : anchor, fixed);
                 }
                 advance_state(state, row, *basis, taps, observations, prepared, config.noise_variance,
-                              scratch[worker], observation.record_work ? &state_work[index] : nullptr, stop);
+                              scratch[worker], observation.record_work ? &state_work[index] : nullptr, task_stop);
+            };
+            if (executor) executor->parallel(plan.index, states, stage_workers, stop, update);
+            else local_workers->dispatch(states, [&](unsigned worker, std::size_t index) {
+                update(worker, index, stop);
             });
         });
         add_work(basis_rows, observed_rows * 2 * tap_count * states);
@@ -1150,10 +1157,10 @@ FineSession::FineSession(const ReceiverConfig& config, const ReceiverSlotPlan& s
                          FineObservation observation, std::span<const Complex> iq,
                          std::span<const std::uint8_t> valid, std::span<const FineCoordinate> coordinates,
                          double projected_rate, double clock_gap, unsigned workers,
-                         std::size_t scratch_limit, std::stop_token stop) {
+                         std::size_t scratch_limit, std::stop_token stop, ReceiverExecutor* executor) {
     const auto began = observation.record_work ? FineClock::now() : FineClock::time_point{};
     impl_ = std::make_unique<Impl>(config, slot, key, observation, iq, valid, coordinates,
-                                   projected_rate, clock_gap, workers, scratch_limit, stop);
+                                   projected_rate, clock_gap, workers, scratch_limit, stop, executor);
     if (observation.record_work) impl_->times.preparation_seconds = seconds_since(began);
 }
 
@@ -1299,9 +1306,10 @@ void FineSession::finish(ReceiverSlotScore& score) {
 void score_fine(const ReceiverConfig& config, const ReceiverSlotPlan& plan, const Crypto& key,
                 std::span<const Complex> iq, std::span<const FineCoordinate> coordinates,
                 double projected_sample_rate_hz, double coarse_clock_gap_ppm,
-                unsigned workers, ReceiverSlotScore& score, std::size_t scratch_limit, std::stop_token stop) {
+                unsigned workers, ReceiverSlotScore& score, std::size_t scratch_limit, std::stop_token stop,
+                ReceiverExecutor* executor) {
     FineSession session(config, plan, key, whole_slot(plan), iq, {}, coordinates, projected_sample_rate_hz,
-                        coarse_clock_gap_ppm, workers, scratch_limit, stop);
+                        coarse_clock_gap_ppm, workers, scratch_limit, stop, executor);
     session.advance_to(iq.size());
     session.finish(score);
 }

@@ -13,8 +13,9 @@ requirements.
 Detect hardware availability `H` from actual OS affinity and quota limits. The
 automatic software-worker budget is **`W = 2*H`**: `H=1 → W=2`, `H=3 → W=6`,
 and `H=12 → W=24`. Explicit worker counts remain exact. Resolve this budget once
-in the receiver and pass admitted shares to its stages; nested layers must not
-multiply it. Report software permits separately from hardware utilization.
+in the receiver and share one bounded executor across slot and stage work;
+nested layers must not multiply it. Report the software ceiling separately
+from hardware utilization.
 
 The operating modem is one compiled C++ stack linked into the GUI application.
 Helper generation/acquisition, DATA generation/scoring, ordered receiver state,
@@ -26,17 +27,43 @@ statistics; receiver DSP and persistent state have one C++ implementation. See
 [current architecture](robust-current.md).
 
 `CompleteStreamReceiver` admits independent in-process slot owners lazily when
-complete public windows are ready. Each owner holds a scorer context with its
-own mutable state and an exact share of `W`; its controlling worker and any
-stage workers together consume that share. The automatic owner cap is `W`;
-explicit owner limits remain exact and cannot exceed the worker budget. Do not
-create workers for empty work. A stage may dispatch fewer tasks when useful work
-is limited, without reducing the global allocation.
+complete public windows are ready. One receiver-specific executor lazily starts
+at most `W` workers for all scoring roots and coarse/fine tasks. A slot scorer
+runs as a root on one worker and participates in its own synchronous stage
+batch; other workers may execute that batch's leaves or another admitted root.
+Ready leaf batches are prioritized by the oldest eligible public slot index;
+queued roots can use lanes that this work does not need. This is scheduling
+priority, not an additional worker allocation or a throughput guarantee.
+A root waits only for helpers already running after its batch has no unclaimed
+leaves. Do not add roots and stage task counts as separate busy workers when a
+root is itself executing a leaf.
+
+Each owner keeps private mutable state and an admitted maximum lane/scratch
+shape. This is a DSP memory bound, not an exclusive reservation of worker
+permits for the entire slot. Quote the largest ready prefix at full `W` scratch
+per owner; prefer a balanced shape only when its full memory bound admits a
+strictly wider ready prefix. Keep that admitted shape fixed until the slot ends,
+even when peers finish. This prevents uncharged expansion; the aggregate worker ceiling remains
+`W` in either case. Reject inadmissible work if no shape fits the full DSP,
+stack, input/output and ingress bounds. The shared executor bounds actual
+simultaneous work. The automatic owner cap is `W`; explicit owner limits remain
+exact and cannot exceed
+the worker budget. Do not create workers for empty work or reduce the global
+allocation merely because one stage has fewer useful tasks. Standalone phase
+probes retain their local executor and unchanged stage mathematics; they do not
+by themselves measure this shared stream scheduler.
+The current full-scratch/oldest-slot point improves first-message latency but
+remains slower overall than the original baseline. Earlier root-first and
+leaf-first failures remain in the record; see
+[the current evidence](validation.md#native-throughput-and-precision-investigation).
 
 Window samples are immutable shared native storage. Charge their assembly,
 retained input, live scorer workspaces, worker stacks, application baseline and
-bounded completed results for their complete ownership lifetimes. Initialized
-I/Q storage is covered once by the greater of observed process footprint and
+bounded completed results for their complete ownership lifetimes. Every owner
+retains its full prospective DSP reservation despite temporarily narrower
+dispatch. Stack accounting includes prospective workers and started idle pool
+threads until the pool closes; an idle thread is not released stack memory.
+Initialized I/Q storage is covered once by the greater of observed process footprint and
 an explicit baseline-plus-owned-input floor. Outstanding DSP, stacks and bounded
 outputs remain separately reserved: whole-process RSS cannot identify which
 anonymous pages belong to a scorer or prove that its remaining bound has been

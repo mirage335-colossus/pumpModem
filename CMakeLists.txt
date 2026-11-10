@@ -211,7 +211,7 @@ add_library(datapump_triad_receiver STATIC
   src/triad_receiver_coarse.cpp src/triad_receiver_helper.cpp src/triad_receiver_basis.cpp
   src/triad_gaussian_kernel.cpp src/triad_mapped_kernel.cpp
   src/triad_message_receiver.cpp src/triad_duration.cpp
-  src/triad_stream_receiver.cpp src/triad_stream_resources.cpp)
+  src/triad_stream_receiver.cpp src/triad_stream_resources.cpp src/triad_receiver_executor.cpp)
 target_include_directories(datapump_triad_receiver PUBLIC include PRIVATE src third_party/xz/src/liblzma/api)
 target_link_libraries(datapump_triad_receiver PUBLIC datapump_triad PRIVATE liblzma)
 include(cmake/TriadTensor.cmake)

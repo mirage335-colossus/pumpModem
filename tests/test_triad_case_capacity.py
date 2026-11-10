@@ -5,7 +5,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from triad_case_capacity import (INTERVAL, RATIO, _continued_component, _stream_plan, _stream_ratios,
+from triad_case_capacity import (INTERVAL, RATIO, _compatible_work, _continued_component, _stream_plan, _stream_ratios,
                                  combine_components, fine_continuation, slot_costs, worker_plan)
 from triad_native import ProbeError
 
@@ -57,6 +57,30 @@ class NativeWorkTests(unittest.TestCase):
         summary = _continued_component([row] * 3, window_seconds=8, cadence=20, family_size=1)
         self.assertAlmostEqual(summary[RATIO], (.2 + .05 + .1 * 6) / 20)
         self.assertEqual(summary["realtime_status"], "pass")
+
+    def test_retained_and_emission_state_counts_have_separate_drift_limits(self):
+        def receipt_with_counts(retained, emitted):
+            receipt = continuation_receipt()
+            for phase in receipt["phases"][-5:]:
+                phase["work"]["adaptive"].update(states=retained, last_emission_states=emitted)
+            return receipt
+
+        stable = fine_continuation(receipt_with_counts(64, 88))
+        self.assertTrue(_compatible_work(stable, fine_continuation(receipt_with_counts(64, 98))))
+        for key, retained, emitted in (("states", 48, 88), ("last_emission_states", 64, 116)):
+            with self.subTest(counter=key):
+                different_regime = fine_continuation(receipt_with_counts(retained, emitted))
+                self.assertFalse(_compatible_work(stable, different_regime))
+                drift = receipt_with_counts(64, 88)
+                drift["phases"][-3]["work"]["adaptive"][key] = (
+                    retained if key == "states" else emitted)
+                with self.assertRaisesRegex(ProbeError, "adaptive state geometry drifted"):
+                    fine_continuation(drift)
+        invalid_affine = receipt_with_counts(64, 88)
+        for phase in invalid_affine["phases"][-5:]:
+            phase["work"]["initial_affine"]["last_emission_states"] = 16
+        with self.assertRaisesRegex(ProbeError, "initial_affine state geometry drifted"):
+            fine_continuation(invalid_affine)
 
     def test_changed_state_geometry_checkpoint_or_cache_cannot_support_projection(self):
         for change in ("state", "fixed_state_identity", "finish_state_identity", "address", "cache", "input", "cadence"):

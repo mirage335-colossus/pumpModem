@@ -52,7 +52,7 @@ struct StreamCommitTiming {
 struct StreamSlotReceipt {
     ReceiverSlotScore score;
     std::uint64_t pattern_epoch = 0, symbol_ordinal = 0;
-    unsigned workers = 0;
+    unsigned workers = 0; // Maximum lane shape used for the slot's DSP lease.
     std::optional<StreamCommitTiming> commit_timing;
 };
 
@@ -63,6 +63,9 @@ struct StreamReceiverReport {
     std::uint64_t input_stop = 0, next_public_slot = 0;
     std::size_t pending_messages = 0, active_owners = 0, uncommitted_slots = 0;
     std::size_t peak_reserved_bytes = 0;
+    // Root tasks assigned to pool workers, and total threads started. Active
+    // owners above include admitted roots that are still queued.
+    unsigned peak_running_owners = 0, peak_executor_workers = 0;
     std::optional<std::uint64_t> episode_first_public_slot;
     std::size_t observed_bits = 0, erasures = 0;
     bool input_closed = false, output_backpressured = false, recovering = false;
@@ -90,6 +93,11 @@ public:
     // supplied samples are valid. A bounded coordinate gap is marked erased.
     StreamPushResult push(std::uint64_t first, std::span<const Complex>,
                           std::span<const std::uint8_t> valid = {});
+    // Collect available slot results, waiting for at most one completion
+    // before returning. Retry the unchanged chunk after input backpressure.
+    // When output is backpressured, drain messages and retry without waiting.
+    StreamReceiverReport wait_for_slot_completion();
+    // With wait=true, drain all ready work subject to output backpressure.
     StreamReceiverReport resume(bool wait = false);
     std::vector<CompletedMessage> drain_messages();
     std::vector<StreamSlotReceipt> drain_recent_slots();

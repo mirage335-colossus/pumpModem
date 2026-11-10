@@ -1,6 +1,7 @@
 #include "datapump/triad_acceleration.hpp"
 #include "datapump/triad_receiver.hpp"
 #include "triad_receiver_bulk.hpp"
+#include "triad_tensor_mapping.hpp"
 
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
@@ -8,6 +9,8 @@
 #include <torch/version.h>
 
 #if DATAPUMP_TRIAD_TENSOR_CUDA
+#include "triad_tensor_mapping.cuh"
+
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAException.h>
@@ -40,8 +43,13 @@ constexpr std::size_t maximum_pins = 32;
 constexpr std::size_t mapping_rows = 16'384;
 constexpr std::size_t maximum_states = 512;
 constexpr std::size_t maximum_batch = 8;
+constexpr std::size_t maximum_direct_gram_modes = 128;
 constexpr std::size_t maximum_upload_bytes = 16 * mib;
 constexpr auto tau = 2 * std::numbers::pi;
+
+constexpr std::size_t fine_result_values(std::size_t taps) {
+    return 2 * taps * (1 + taps) + 1; // Correlations and Gram for each bit, then the basis witness.
+}
 
 void require(bool condition, const char* message) {
     if (!condition) throw Error(message);
@@ -89,6 +97,10 @@ void add_work(BulkReceipt& to, const BulkReceipt& from) noexcept {
     TRIAD_COUNT(dc_reduction_values);
     TRIAD_COUNT(mapped_columns);
     TRIAD_COUNT(mapped_values);
+    TRIAD_COUNT(cuda_fused_mapped_launches);
+    TRIAD_COUNT(cuda_fused_mapped_values);
+    TRIAD_COUNT(cuda_direct_gram_values);
+    TRIAD_COUNT(cuda_bmm_gram_values);
     TRIAD_COUNT(uploaded_tiles);
     TRIAD_COUNT(tile_hits);
     TRIAD_COUNT(direct_columns);
@@ -409,6 +421,13 @@ public:
         (void)work;
 #endif
     }
+
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+    cudaStream_t cuda_stream() const {
+        require(stream.has_value(), "Robust fused mapping requires its CUDA stream");
+        return stream->stream();
+    }
+#endif
 
     at::Tensor fft(const at::Tensor& input, std::size_t rows, bool inverse, BulkReceipt& work,
                    CoarseBulkWork* coarse = nullptr, bool unitary = false) const {
@@ -764,6 +783,8 @@ public:
         const auto columns = 2 * block.taps;
         const auto mode_count = block.projection_indices.size();
         const auto dc = mode_count == 1 && block.projection_indices.front() == 0;
+        const auto cuda = device_.arena->device.is_cuda();
+        const auto direct_gram = cuda && !device_.precise && !dc && mode_count <= maximum_direct_gram_modes;
         require(std::is_sorted(block.projection_indices.begin(), block.projection_indices.end()) &&
                 std::adjacent_find(block.projection_indices.begin(), block.projection_indices.end()) ==
                     block.projection_indices.end() &&
@@ -772,20 +793,30 @@ public:
         const auto rows_bytes = mul(block.rows, dc ? 32 : 16 * device_.item_bytes);
         const auto projection_bytes = mul(mode_count, 96);
         const auto map_bytes = mul(std::min(mapping_rows, block.rows), 224);
-        const auto per_candidate = mul(columns, add(add(rows_bytes, projection_bytes), map_bytes));
+        const auto result_values = fine_result_values(block.taps);
+        const auto result_bytes = mul(result_values + 1, sizeof(Complex)); // Packed payload and converted witness.
+        // Charge the materialized conjugate and the tap-by-tap complex128
+        // product. This short contiguous sum needs no global partial buffer.
+        const auto direct_gram_bytes = direct_gram ? mul(mode_count, (block.taps + 1) * sizeof(Complex)) : 0;
+        const auto per_lane = add(add(rows_bytes, projection_bytes), add(map_bytes, direct_gram_bytes));
+        const auto per_candidate = add(mul(columns, per_lane), result_bytes);
         const auto upload_bound = mul(maximum_pins * tile_samples, device_.item_bytes);
         Charge shared(device_.arena, add(add(mul(mode_count, 3 * sizeof(Complex)), 2 * mib), upload_bound));
         reserve_cache(per_candidate);
-        std::vector<std::int64_t> indices;
-        indices.reserve(mode_count);
-        for (const auto index : block.projection_indices) indices.push_back(dim(index));
-        const auto bins = device_.upload(std::span<const std::int64_t>(indices), at::kLong, at::kLong, op.work);
+        at::Tensor bins;
+        if (!dc) {
+            std::vector<std::int64_t> indices;
+            indices.reserve(mode_count);
+            for (const auto index : block.projection_indices) indices.push_back(dim(index));
+            bins = device_.upload(std::span<const std::int64_t>(indices), at::kLong, at::kLong, op.work);
+        }
         const auto y = device_.upload(block.projected_y, at::kComplexDouble, at::kComplexDouble, op.work);
         for (std::size_t first = 0; first < candidate_count;) {
             cancelled(stop);
             const auto [width, batch_charge] = admit(std::min(maximum_batch, candidate_count - first), per_candidate);
             const auto lanes = mul(width, columns);
             auto raw = at::zeros({dim(lanes), dim(block.rows)}, device_.complex_options);
+            FusedMappingWork fused;
             for (std::size_t row = 0; row < block.rows;) {
                 cancelled(stop);
                 const auto rows = std::min(mapping_rows, block.rows - row);
@@ -797,7 +828,7 @@ public:
                 std::vector<bool> protected_slots;
                 std::size_t protected_count = 0;
                 auto flush = [&] {
-                    if (!pending.empty()) render(window, positions, pending, op.work);
+                    if (!pending.empty()) render(window, positions, pending, op.work, fused);
                     pending.clear();
                     std::fill(protected_slots.begin(), protected_slots.end(), false);
                     protected_count = 0;
@@ -894,15 +925,20 @@ public:
             projected = projected.reshape({dim(2 * width), dim(block.taps), dim(mode_count)});
             const auto precise = projected.to(at::kComplexDouble);
             const auto normalized_correlation = (precise.conj() * y).sum(-1) / block.variance;
-            const auto gram = at::bmm(precise.conj(), precise.transpose(1, 2));
+            const auto gram = direct_gram ? (precise.conj().resolve_conj().unsqueeze(2) * precise.unsqueeze(1)).sum(-1) :
+                at::bmm(precise.conj(), precise.transpose(1, 2));
             const auto normalized_gram = (gram + gram.transpose(1, 2).conj()) * (.5 / block.variance);
 
-            std::vector<Complex> host_corr(lanes);
-            std::vector<Complex> host_gram(mul(lanes, block.taps));
-            std::array<std::uint8_t, maximum_batch> host_nonzero{};
-            device_.download(normalized_correlation, std::span(host_corr), at::kComplexDouble, op.work);
-            device_.download(normalized_gram, std::span(host_gram), at::kComplexDouble, op.work);
-            device_.download(raw_nonzero, std::span(host_nonzero).first(width), at::kByte, op.work);
+            // Preserve all statistics and the exact 0/1 witness in one blocking result transfer.
+            const auto packed = at::cat({normalized_correlation.flatten(), normalized_gram.flatten(),
+                                         raw_nonzero.to(at::kComplexDouble)});
+            std::vector<Complex> host_values(mul(width, result_values));
+            const auto host = std::span(host_values);
+            device_.download(packed, host, at::kComplexDouble, op.work);
+            const auto gram_count = columns * block.taps;
+            const auto host_corr = host.first(lanes);
+            const auto host_gram = host.subspan(lanes, width * gram_count);
+            const auto host_nonzero = host.last(width);
             for (const auto value : host_corr)
                 require(std::isfinite(value.real()) && std::isfinite(value.imag()), "Robust tensor correlation is nonfinite");
             for (const auto value : host_gram)
@@ -910,14 +946,17 @@ public:
             for (std::size_t i = 0; i < width; ++i) {
                 auto& out = result[first + i];
                 out = {};
-                out.nonzero_basis = host_nonzero[i] != 0;
+                out.nonzero_basis = host_nonzero[i] != Complex{};
                 std::copy_n(host_corr.begin() + i * columns, columns, out.correlations.begin() + block.taps);
-                const auto gram_count = columns * block.taps;
                 std::copy_n(host_gram.begin() + i * gram_count, gram_count,
                             out.gram.begin() + block.taps * block.taps);
             }
             count(op.work.statistics_blocks, width);
             count(op.work.projected_values, mul(lanes, mode_count));
+            count(op.work.cuda_fused_mapped_launches, fused.launches);
+            count(op.work.cuda_fused_mapped_values, fused.values);
+            if (cuda) count(direct_gram ? op.work.cuda_direct_gram_values : op.work.cuda_bmm_gram_values,
+                            mul(width, gram_count));
             op.work.executed = true;
             cancelled(stop);
             first += width;
@@ -928,6 +967,10 @@ public:
     FineBulkWork completed_work() const override { return device_.fine_work(); }
 
 private:
+    struct FusedMappingWork {
+        std::uint64_t launches = 0, values = 0;
+    };
+
     struct Slot {
         std::weak_ptr<const void> owner;
         const Complex* samples = nullptr;
@@ -1019,7 +1062,8 @@ private:
         count(work.uploaded_tiles, uploads.size());
     }
 
-    void render(at::Tensor output, std::span<const double> positions, std::span<const Pending> pending, BulkReceipt& work) {
+    void render(at::Tensor output, std::span<const double> positions, std::span<const Pending> pending,
+                BulkReceipt& work, [[maybe_unused]] FusedMappingWork& fused) {
         constexpr std::size_t descriptors = maximum_batch * 4;
         constexpr std::size_t table_width = 3 + maximum_pins;
         std::array<double, descriptors * 4> coefficients{};
@@ -1041,32 +1085,25 @@ private:
         const auto indices = device_.upload(std::span<const std::int64_t>(table).first(lanes * table_width),
             at::kLong, at::kLong, work).reshape({dim(lanes), dim(table_width)});
         const auto offsets = device_.upload(positions, at::kDouble, at::kDouble, work);
-        const auto relative = maps.narrow(1, 0, 1) + maps.narrow(1, 1, 1) * offsets;
-        const auto base = relative.floor();
-        const auto index = indices.narrow(1, 0, 1) + base.to(at::kLong);
-        const auto extent = indices.narrow(1, 1, 1);
-        const auto slots = indices.narrow(1, 3, dim(maximum_pins));
-        const auto u = (relative - base).to(device_.real_type);
-        const auto less_one = u - 1;
-        const auto less_two = u - 2;
-        const auto more_one = u + 1;
-        const std::array<at::Tensor, 4> weights{
-            -u * less_one * less_two / 6, more_one * less_one * less_two / 2,
-            -more_one * u * less_two / 2, more_one * u * less_one / 6};
-        auto values = at::zeros({dim(lanes), dim(positions.size())}, device_.complex_options);
-        for (int j = 0; j < 4; ++j) {
-            const auto knot = index + (j - 1);
-            const auto keep = knot.ge(0) & knot.lt(extent);
-            const auto safe = at::where(keep, knot, 0);
-            const auto slot = at::gather(slots, 1, at::floor_divide(safe, dim(tile_samples)));
-            const auto flat = slot * dim(tile_samples) + at::remainder(safe, dim(tile_samples));
-            const auto samples = tile_storage_.view(-1).index_select(0, flat.reshape(-1)).reshape_as(values);
-            values.add_(at::where(keep, samples, 0) * weights[j]);
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        if (device_.arena->device.is_cuda() && !device_.precise) {
+            static_assert(tile_samples == cuda_mapping_tile_samples && maximum_pins == cuda_mapping_maximum_pins);
+            // Every allocation and the launch use the Operation's same guarded
+            // stream, so the CUDA allocator can retire the descriptor tensors
+            // in stream order after this scope. No cross-stream use is added.
+            C10_CUDA_CHECK(launch_cuda_mapped_c64(maps.const_data_ptr<double>(),
+                indices.const_data_ptr<std::int64_t>(), offsets.const_data_ptr<double>(),
+                tile_storage_.const_data_ptr<c10::complex<float>>(), output.mutable_data_ptr<c10::complex<float>>(),
+                {dim(positions.size()), dim(lanes), tile_storage_.size(0), output.size(0),
+                 output.stride(0), output.stride(1)}, device_.cuda_stream()));
+            count(fused.launches, 1);
+            count(fused.values, mul(lanes, positions.size()));
+        } else
+#endif
+        {
+            render_aten_mapping(output, tile_storage_, maps, indices, offsets, device_.real_type,
+                                dim(tile_samples), dim(maximum_pins));
         }
-        const auto cycles = maps.narrow(1, 2, 1) + maps.narrow(1, 3, 1) * offsets;
-        const auto angle = ((cycles - cycles.floor()) * tau).to(device_.real_type);
-        values.mul_(at::complex(angle.cos(), angle.sin()));
-        output.index_copy_(0, indices.select(1, 2), values);
         count(work.mapped_columns, lanes);
         count(work.mapped_values, mul(lanes, positions.size()));
         work.executed = true;
@@ -1095,7 +1132,8 @@ public:
     std::size_t fine_host_bytes(std::size_t block_rows, std::size_t taps) const override {
         const auto host = add(mul(block_rows, sizeof(std::int64_t) + sizeof(Complex)),
                               mul(16'384, 2 * taps * sizeof(Complex)));
-        const auto staging = 2 * maximum_pins * tile_samples * sizeof(Complex);
+        const auto result_staging = mul(maximum_batch * fine_result_values(taps), 2 * sizeof(Complex));
+        const auto staging = add(2 * maximum_pins * tile_samples * sizeof(Complex), result_staging);
         return add(add(add(host, 2 * mib), staging),
                    arena_->device.is_cpu() ? arena_->options.workspace_bytes : 0);
     }

@@ -324,7 +324,7 @@ compiler_environment() {
                 *"$quote"*)
                     requested_compiler=`printf '%s' "$remainder" | sed "s/$quote.*//"`
                     requested_arguments=`printf '%s' "$remainder" | sed "s/^[^$quote]*$quote//"` ;;
-                *) die "unclosed compiler-name quote in CC/CXX" ;;
+                *) die "unclosed compiler-name quote in CC/CXX/CUDACXX" ;;
             esac ;;
         *)
             # An existing executable path may itself contain unquoted spaces.
@@ -336,7 +336,7 @@ compiler_environment() {
             fi ;;
     esac
     case "$requested_compiler" in
-        ''|*\"*|*\'*|*\\*) die "unsupported compiler-name quoting in CC/CXX; use a plain executable path or quote the whole path" ;;
+        ''|*\"*|*\'*|*\\*) die "unsupported compiler-name quoting in CC/CXX/CUDACXX; use a plain executable path or quote the whole path" ;;
     esac
     # Keep the full CMake whitespace class; character classes in shell case
     # patterns are not available in traditional Bourne.
@@ -344,12 +344,12 @@ compiler_environment() {
         if expr "x$requested_arguments" : 'x[[:space:]]' >/dev/null; then
             :
         else
-            die "unsupported compiler-name quoting in CC/CXX; put whitespace between the executable and arguments"
+            die "unsupported compiler-name quoting in CC/CXX/CUDACXX; put whitespace between the executable and arguments"
         fi
     fi
 }
 
-# CMake otherwise silently ignores a changed CC/CXX environment in a cached tree.
+# CMake otherwise silently ignores a changed compiler environment in a cached tree.
 check_compiler() {
     requested_compiler=$1
     language=$2
@@ -361,19 +361,21 @@ check_compiler() {
     [ -n "$cached" ] || return 0
     resolved=`find_executable "$requested_compiler" || :`
     [ "$requested_compiler" = "$cached" ] || [ "$resolved" = "$cached" ] ||
-        die "${language} compiler differs from $cached; use --build-dir with a new directory when changing CC/CXX"
+        die "${language} compiler differs from $cached; use --build-dir with a new directory when changing CC/CXX/CUDACXX"
     if [ "$kind" = environment ]; then
         cached_arguments=`sed -n "s/^CMAKE_${language}_COMPILER_ARG1:[^=]*=//p" "$build_dir/CMakeCache.txt"`
         [ "$requested_arguments" = "$cached_arguments" ] ||
-            die "${language} compiler arguments differ from the configured tree; use --build-dir with a new directory when changing CC/CXX"
+            die "${language} compiler arguments differ from the configured tree; use --build-dir with a new directory when changing CC/CXX/CUDACXX"
     fi
 }
 check_compiler "${CC:-}" C environment
 check_compiler "${CXX:-}" CXX environment
+check_compiler "${CUDACXX:-}" CUDA environment
 for arg do
     case "$arg" in
         -DCMAKE_C_COMPILER=*|-DCMAKE_C_COMPILER:*=*) compiler_option=`printf '%s' "$arg" | sed 's/^[^=]*=//'`; check_compiler "$compiler_option" C path ;;
         -DCMAKE_CXX_COMPILER=*|-DCMAKE_CXX_COMPILER:*=*) compiler_option=`printf '%s' "$arg" | sed 's/^[^=]*=//'`; check_compiler "$compiler_option" CXX path ;;
+        -DCMAKE_CUDA_COMPILER=*|-DCMAKE_CUDA_COMPILER:*=*) compiler_option=`printf '%s' "$arg" | sed 's/^[^=]*=//'`; check_compiler "$compiler_option" CUDA path ;;
     esac
 done
 

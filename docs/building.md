@@ -548,9 +548,16 @@ an integrated pass. Separate `--sensitivity` trials measure native message
 reception and cannot supply CPU capacity.
 
 The ordinary [`triad_abbreviated.py`](../tools/triad_abbreviated.py) harness uses
-native slot/coarse/fine/audio receipts for relative regression, with matched
-native baselines and 1/2/4-unit, 3/5/9-look limits. Baseline establishment is not a
-relative-regression pass. See [computational checks](triad-performance.md) for
+native slot/coarse/fine/audio receipts plus a complete five-slot mixed stream
+for relative regression, with matched native baselines and 1/2/4-unit,
+3/5/9-look limits. Its `native-regression.v2` schema rejects saved v1 reports;
+the current driver measures both source binaries. Every slot and mixed-stream
+unit uses a fresh native call; active/noise timing describes the first scored
+slot in a fresh process, not a fully cold GPU or steady state. Earlier v2
+same-process policy reports are also incompatible. The overall
+`--benchmark-deadline-ms` defaults to five minutes, including subprocess,
+generation and control work. Baseline establishment is not a relative-regression
+pass. See [computational checks](triad-performance.md) for
 commands, optional compiled ATen/CUDA builds and GPU-assisted phase forecasts.
 Old Python reports are inadmissible as native timing calibration. A forecast
 pass is separate from complete real-time capacity or communication sensitivity.
@@ -564,14 +571,18 @@ itself certify a release. The native Linux and Windows manual matrices
 include the `triad` group and its `datapump-tests-triad` build target. The CPU
 `triad-abbreviated` workflow builds both candidate and same-run native reference
 probes before comparison; it does not install numerical Python packages. The
-one-time native protocol transition from `1c58507a` may establish a baseline,
-reported with `relative_regression_pass=false`. Later missing or broken
-references fail; an explicit manual diagnostic establishment remains separate.
+v2 driver uses the existing native `message` command on both binaries, so its
+mixed-stream addition needs no baseline-transition exception. Missing or broken
+references fail; explicit manual diagnostic establishment remains separate and
+does not report a relative-regression pass.
 
 The opt-in `triad-gpu` workflow requires a preprovisioned self-hosted
 `linux/x64/datapump-cuda` runner and CUDA-enabled C++11-ABI LibTorch. It builds the
 same native stack with `DATAPUMP_TRIAD_TENSOR=ON` and
-`DATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON`, executes `triad_tensor_cuda` and a probe
+`DATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON`. The CUDA implementation requires NVCC
+and the CUDA SDK; the measured SM 120 Blackwell checkpoint explicitly used
+`-DCMAKE_CUDA_ARCHITECTURES=120` and `TORCH_CUDA_ARCH_LIST=12.0`. Other devices
+need their applicable architecture. The workflow executes `triad_tensor_cuda` and a probe
 that requires actual accelerator execution, then performs a bounded matched
 CUDA regression. The workflow does not launch or purchase cloud capacity.
 Configured workflow coverage is not evidence of an actual hosted/platform run;

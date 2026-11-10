@@ -37,10 +37,19 @@ is silently selected from the observed score or transmitted truth.
 A requested CUDA backend must execute on CUDA or report unavailable; CPU fallback
 is not GPU evidence. The CMake `DATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA` option requires
 a CUDA-capable LibTorch build and registers the actual CUDA receiver check.
-The current local environment has no available CUDA execution. CPU ATen checks,
-source/build closure checks, CUDA-branch host syntax and workflow tests do not
-qualify CUDA linking, device arithmetic, device-memory behavior or speed. See
-[current validation](validation.md#native-codec-and-measurement-migration).
+The CUDA backend now requires NVCC and the CUDA SDK. The measured SM 120
+Blackwell build uses `CMAKE_CUDA_ARCHITECTURES=120` and
+`TORCH_CUDA_ARCH_LIST=12.0`; choose an explicit applicable architecture for
+another device rather than treating these as portable defaults. Optional CPU
+ATen and default builds without Torch retain their existing dependencies.
+
+The exact native baseline now has bounded CUDA parity and active/noise
+functional evidence on a full RTX PRO 6000 Blackwell Server GPU. That evidence
+does not qualify later transfer/arithmetic changes, all precision classes,
+tensor-core execution, throughput or local CPU forecasts. CPU ATen checks,
+source/build closure checks, CUDA-branch host syntax and workflow tests retain
+their narrower scope. See
+[current validation](validation.md#native-throughput-and-precision-investigation).
 
 The workload pairs exact native CPU and CUDA observations for active, noise,
 cold-maximum, terminal and erasure work. The last three are non-admitting
@@ -52,6 +61,39 @@ must cover the actual precision classes used by its target rows. Matching bits
 alone does not establish matched observations or useful arithmetic fidelity.
 Predeclare a `--near-cn0` override before the one-row challenge when needed;
 do not choose it after seeing a favorable outcome.
+
+The active fused-mapper comparison requires its declared exact work gate. The
+first real row-5 pair changed adaptive prefix candidate work despite matching
+retained-state/transition counts; an installed C10 versus fused final-multiply
+FMA difference was isolated. The explicit final-FMA repair passed exact
+pointwise, full-slot and failed-row checkpoint work/state checks on the actual
+RTX PRO 6000. That resolves the measured parity failure for the installed
+runtime; it is not a bitwise guarantee for other LibTorch/compiler/device
+combinations. The oracle must reject changed installed arithmetic. Preserve the
+original failure separately from the repaired run. Six exact paired looks show
+fine and receiver-phase improvements for one row/seed and bounded continuation;
+they do not establish whole-stream throughput or complete CPU forecasts. See
+[the current evidence](validation.md#native-throughput-and-precision-investigation).
+
+The current FP16 Gram-shape experiment met its arithmetic check but took
+184 µs versus 119 µs for FP64 batched multiplication and 33 µs for a direct
+FP64 experiment. That low-precision candidate is stopped. Its WMMA name does
+not establish instruction-level tensor-core execution. The accepted CUDA
+direct-FP64 Gram path applies to at most 128 modes in its non-DC,
+automatic-precision class; other shapes retain batched multiplication.
+Six paired DATA/QUIET observations preserved exact work/state, with maximum
+score difference `1.86e-9`, and reduced fine and measured receiver-phase time
+relative to the repaired fused mapper. This bounded row/seed result does not
+qualify other geometry or whole-stream capacity.
+
+The completed explicit-FP64 row-5 route passed five paired strata and three
+operational challenges with exact work/acquisition and zero adaptive drift.
+It supports partial cold, terminal and erasure CPU component forecasts. Active
+and quiet work falls outside the unchanged local 5% cost-regime gate, so nominal,
+conservative and complete-receiver forecasts remain unresolved. The automatic
+class's high-SNR acquisition-coordinate failure remains separate; passing
+explicit FP64 does not qualify automatic precision. Seven other manual rows
+have geometry-only coverage. See [final limits and intervals](validation.md#native-throughput-and-precision-investigation).
 
 A low-precision dtype, ATen operation or CUDA label does not prove tensor-core
 execution or a speedup. Use actual execution and elapsed measurements, including

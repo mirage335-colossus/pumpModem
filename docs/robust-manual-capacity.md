@@ -183,9 +183,17 @@ not prohibit qualified lower-precision bulk work; see the
 
 The native `CompleteStreamReceiver` shares immutable input buffers and admits
 independent in-process scorer owners for ready public windows. Resolve the total
-`2*H` worker budget once; controlling and stage workers consume shares of it.
-Automatic owner count can grow to that budget, subject to useful work and full
-memory admission. Explicit limits remain exact. There is no receiver subprocess,
+`2*H` worker budget once; slot roots and their coarse/fine tasks share a bounded
+executor. Per-owner lane/scratch caps bound DSP storage, not exclusive worker
+permits. Automatic owner count can grow to that budget, subject to useful work
+and full memory admission. Admission quotes the largest ready prefix at
+full-`W` scratch per owner, preferring balanced scratch only when its complete
+memory bound admits a strictly wider ready prefix. Each
+shape remains fixed through its slot; full DSP and started idle pool stacks
+remain charged. Ready leaves prioritize the oldest eligible public slot while
+queued roots use unneeded lanes. This does not change the aggregate `W` ceiling
+or supply a throughput guarantee. Explicit limits
+remain exact. There is no receiver subprocess,
 child bootstrap or `memfd` operating transport. Full accounting, ordered commit,
 bounded outputs and cancellation ownership follow the
 [allocation contract](development.md#receiver-cpu-allocation).
@@ -203,7 +211,9 @@ Measure productive work within one stream, including ready-input backlog and
 mostly-noise operation. Compare identical observations at serial, physical and
 logical allocations; distinguish software permits from the hardware-utilization
 denominator. Report elapsed service, busy cores, useful work, actual owners and
-memory together. Idle time after catching up is expected. Fewer useful tasks in
+memory together. `peak_running_owners` distinguishes roots in scorer scope from
+admitted owners; `peak_executor_workers` reports started pool threads, not busy
+hardware cores. Roots executing their own leaves are not extra workers. Idle time after catching up is expected. Fewer useful tasks in
 one stage must not become a global worker cap.
 
 For overlapping windows, measure the outer receive-service interval through

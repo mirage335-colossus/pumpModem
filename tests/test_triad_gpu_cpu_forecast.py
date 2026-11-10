@@ -139,6 +139,17 @@ class NativeForecastTests(unittest.TestCase):
         with self.assertRaisesRegex(forecast.ProbeError, "outside the calibrated cost regime"):
             forecast._fit_stratum(local, observation(4, .00001, demand=(107, 200)), holdout, alpha=.025)
 
+    def test_frontend_charges_continuous_pcm_and_once_per_window_validation(self):
+        cpu, _, _, _ = forecast_inputs()
+        receipt = cpu["cases"][0]["measurements"]["strata"]["active"][0]
+        # The 1 s receiver window produces 0.8 s of PCM in a 10 s cadence.
+        audio = forecast.phase_once(receipt, "audio_frontend")
+        audio["work"]["output_rows"] = 80
+        audio["wall_seconds"] = .16
+        forecast.phase_once(receipt, "input_validation")["wall_seconds"] = .02
+        measured = forecast.observation(receipt, "active")
+        self.assertAlmostEqual(measured["phases"]["frontend"]["service"], .16 / .8 + .02 / 10)
+
     def test_cancelling_holdout_errors_and_numeric_failures_are_distinct(self):
         def item(estimate, actual):
             return dict(point=estimate, interval=[estimate * .8, estimate * 1.2], holdout=actual)

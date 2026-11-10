@@ -6,7 +6,7 @@ endif()
 # scheduler, codec, and the vendored receive decoder. Keep this identity
 # independent of which optional backend is compiled.
 file(GLOB_RECURSE _triad_probe_sources CONFIGURE_DEPENDS RELATIVE "${PROJECT_SOURCE_DIR}"
-  "src/*.cpp" "src/*.c" "src/*.hpp" "src/*.h"
+  "src/*.cpp" "src/*.c" "src/*.hpp" "src/*.h" "src/*.cu" "src/*.cuh"
   "include/datapump/*.hpp" "include/datapump/*.h" "cmake/*.cmake"
   "third_party/xz/src/*.c" "third_party/xz/src/*.h" "tools/triad_probe_*.hpp")
 list(APPEND _triad_probe_sources
@@ -22,8 +22,13 @@ foreach(_triad_probe_file IN LISTS _triad_probe_sources)
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_triad_probe_absolute}")
 endforeach()
 string(SHA256 _triad_probe_source_sha "${_triad_probe_manifest}")
-string(SHA256 _triad_probe_build_sha
+set(_triad_probe_build_identity
   "${CMAKE_SYSTEM_NAME}/${CMAKE_SYSTEM_PROCESSOR}/${CMAKE_CXX_COMPILER_ID}/${CMAKE_CXX_COMPILER_VERSION}/${CMAKE_CXX_FLAGS}/${CMAKE_CXX_FLAGS_DEBUG}/${CMAKE_CXX_FLAGS_RELEASE}/${CMAKE_CXX_FLAGS_RELWITHDEBINFO}/${CMAKE_CXX_FLAGS_MINSIZEREL}/${CMAKE_BUILD_TYPE}/${DATAPUMP_SANITIZERS}/${DATAPUMP_TRIAD_TENSOR}/${DATAPUMP_PORTABLE}")
+if(CMAKE_CUDA_COMPILER_LOADED AND DATAPUMP_TRIAD_TENSOR)
+  string(APPEND _triad_probe_build_identity
+    "/${CMAKE_CUDA_COMPILER_ID}/${CMAKE_CUDA_COMPILER_VERSION}/${CMAKE_CUDA_ARCHITECTURES}/${CMAKE_CUDA_FLAGS}/${CMAKE_CUDA_FLAGS_DEBUG}/${CMAKE_CUDA_FLAGS_RELEASE}/${CMAKE_CUDA_FLAGS_RELWITHDEBINFO}/${CMAKE_CUDA_FLAGS_MINSIZEREL}")
+endif()
+string(SHA256 _triad_probe_build_sha "${_triad_probe_build_identity}")
 if(NOT DEFINED _source_commit)
   set(_source_commit "unavailable")
 endif()

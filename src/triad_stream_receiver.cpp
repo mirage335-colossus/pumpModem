@@ -1,6 +1,7 @@
 #include "datapump/triad_stream_receiver.hpp"
 
 #include "datapump/execution.hpp"
+#include "triad_receiver_executor.hpp"
 #include "triad_stream_backend.hpp"
 #include "triad_stream_resources.hpp"
 
@@ -23,6 +24,7 @@
 namespace datapump::triad::v3 {
 namespace {
 using namespace detail;
+using receiver_detail::ReceiverExecutor;
 constexpr std::size_t sample_bytes = sizeof(Complex)+sizeof(std::uint8_t);
 constexpr std::size_t input_overhead = 4096;
 constexpr std::size_t raw_block_overhead = 512;
@@ -77,40 +79,41 @@ struct SlotWake {
 
 class SlotTask {
 public:
-    SlotTask(SlotWake& wake, const ReceiverConfig& config, const Crypto& key, const StreamScorer& scorer,
+    SlotTask(ReceiverExecutor& executor, SlotWake& wake, const ReceiverConfig& config, const Crypto& key,
+             const StreamExecutorScorer& scorer,
              const ReceiverSlotPlan& plan, std::shared_ptr<const StreamWindow> input,
              unsigned workers, std::size_t workspace, std::stop_token stop)
-        : task_([this, &wake, &config, &key, &scorer, plan, input = std::move(input), workers, workspace, stop]
-                 (std::stop_token owner_stop) mutable {
-            std::stop_source combined;
-            std::stop_callback a(stop, [&] { combined.request_stop(); });
-            std::stop_callback b(owner_stop, [&] { combined.request_stop(); });
+        : result_(std::make_shared<Result>()) {
+        executor.submit([result = result_, &executor, &config, &key, &scorer, plan,
+                         input = std::move(input), workers, workspace, stop]() mutable {
             try {
-                score_ = scorer(config, plan, key, input->iq, input->valid,
-                    workers, workspace, combined.get_token());
+                result->score = scorer(config, plan, key, input->iq, input->valid,
+                    workers, workspace, stop, &executor);
             } catch (...) {
-                failure_ = std::current_exception();
+                result->failure = std::current_exception();
             }
             input.reset();
+        }, [result = result_, &wake] {
             {
                 std::lock_guard lock(wake.mutex);
-                ready_.store(true, std::memory_order_release);
+                result->ready.store(true, std::memory_order_release);
             }
             wake.changed.notify_all();
-        }) {}
-    bool ready() const noexcept { return ready_.load(std::memory_order_acquire); }
+        });
+    }
+    bool ready() const noexcept { return result_->ready.load(std::memory_order_acquire); }
     std::optional<ReceiverSlotScore> poll() {
         if (!ready()) return {};
-        task_.join();
-        if (failure_) std::rethrow_exception(failure_);
-        return std::move(score_);
+        if (result_->failure) std::rethrow_exception(result_->failure);
+        return std::move(result_->score);
     }
 private:
-    std::atomic<bool> ready_{false};
-    std::optional<ReceiverSlotScore> score_;
-    std::exception_ptr failure_;
-    // Destroy this first, joining before the worker's result storage is freed.
-    execution::Task task_;
+    struct Result {
+        std::atomic<bool> ready{false};
+        std::optional<ReceiverSlotScore> score;
+        std::exception_ptr failure;
+    };
+    std::shared_ptr<Result> result_;
 };
 
 struct RawBlock {
@@ -190,13 +193,14 @@ ReceiverSlotPlan make_receiver_slot_plan(const PublicProfile& profile, const Rec
 
 struct CompleteStreamReceiver::Impl {
     using Clock = std::chrono::steady_clock;
+    enum class Wait { none, completion, drain };
     PublicProfile profile;
     ReceiverConfig config;
     Crypto key;
     StreamReceiverOptions options;
     StreamReceiverResources resources;
     StreamWorkspace workspace;
-    StreamScorer scorer;
+    StreamExecutorScorer scorer;
     StreamFootprint footprint;
     ContinuousMessageReceiver codec;
     std::stop_source stop;
@@ -211,6 +215,7 @@ struct CompleteStreamReceiver::Impl {
     StreamReceiverState state = StreamReceiverState::receiving;
     std::string reason;
     SlotWake wake;
+    ReceiverExecutor executor;
     std::deque<Job> jobs;
     std::deque<StreamSlotReceipt> receipts;
     const Clock::time_point commit_origin = options.record_commit_timing ? Clock::now() : Clock::time_point{};
@@ -218,7 +223,7 @@ struct CompleteStreamReceiver::Impl {
 
     Impl(PublicProfile profile_value, ReceiverConfig config_value, Crypto key_value,
          StreamReceiverOptions stream, MessageDecoder decoder, MessageReceiverOptions message,
-         StreamWorkspace workspace_fn, StreamScorer score_fn, StreamFootprint footprint_fn)
+         StreamWorkspace workspace_fn, StreamExecutorScorer score_fn, StreamFootprint footprint_fn)
         : profile(std::move(profile_value)), config(std::move(config_value)), key(std::move(key_value)),
           options(stream), resources(resolve_stream_receiver_resources(options)),
           workspace(std::move(workspace_fn)), scorer(std::move(score_fn)),
@@ -226,10 +231,10 @@ struct CompleteStreamReceiver::Impl {
           codec(std::move(decoder), with_public_message_address(message, profile),
               options.first_slot, options.maximum_pending_messages),
           last_public_slot(profile.last_slot()), initial_footprint(footprint()),
-          stack_bytes(stream_worker_stack_bytes()),
+          stack_bytes(add(stream_worker_stack_bytes(), 1024)),
           fixed_reservation(receipt_reservation(options, message, resources.slot_owners)),
           maximum_buffer(options.maximum_buffer_samples.value_or(resources.memory_limit_bytes/4/sample_bytes)),
-          input_stop(options.first_input_sample.value_or(0)), dispatched_stop(0) {
+          input_stop(options.first_input_sample.value_or(0)), dispatched_stop(0), executor(resources.workers) {
         if (!workspace || !scorer || !options.maximum_input_chunk_samples || options.maximum_input_chunk_samples>maximum_chunk ||
             !maximum_buffer || window_bytes(maximum_buffer)>resources.memory_limit_bytes ||
             options.maximum_gap_samples>maximum_buffer ||
@@ -246,7 +251,10 @@ struct CompleteStreamReceiver::Impl {
             codec.invalidate_episode("capture_started_after_unknown_episode_boundary");
     }
 
-    ~Impl() { stop.request_stop(); }
+    ~Impl() {
+        stop.request_stop();
+        executor.close();
+    }
 
     ReceiverSlotPlan plan(std::uint64_t index) const {
         auto result = make_receiver_slot_plan(profile, config, index);
@@ -260,29 +268,30 @@ struct CompleteStreamReceiver::Impl {
     unsigned active() const {
         return static_cast<unsigned>(std::count_if(jobs.begin(), jobs.end(), [](const Job& job) { return bool(job.task); }));
     }
-    unsigned active_workers() const {
-        unsigned total = 0;
-        for (const auto& job : jobs) if (job.task) total += job.work.workers;
-        return total;
-    }
-
     void terminate(StreamReceiverState result, const char* why) {
         stop.request_stop();
         codec.cancel();
         state = result;
         reason = why;
-        // Job destruction joins the owner before releasing the immutable input.
+        executor.close();
         jobs.clear();
         raw.clear();
         raw_bytes = raw_initialized = 0;
     }
 
-    std::size_t reserved() const {
+    struct Reservation {
+        std::size_t nonstack;
+        unsigned lanes, started;
+    };
+
+    Reservation reservation() const {
         auto initialized = raw_initialized;
         auto prospective = add(fixed_reservation, raw_bytes-raw_initialized);
+        unsigned lanes = 0;
         for (const auto& job : jobs) if (job.task) {
             initialized = add(initialized, job.work.input);
             prospective = add(prospective, job.work.reserved-job.work.input);
+            lanes += std::min(resources.workers-lanes, job.work.workers);
         }
         // The raw and window payloads are already initialized and visible in
         // this process, with an explicit ownership floor. Whole-process growth
@@ -290,7 +299,18 @@ struct CompleteStreamReceiver::Impl {
         // bound. Keep the DSP, stacks and pending outputs reserved in addition
         // to the observed footprint, even when part is already resident.
         const auto observed = std::max(add(initial_footprint, initialized), footprint());
-        return add(observed, prospective);
+        return {add(observed, prospective), lanes, executor.started_workers()};
+    }
+
+    std::size_t reserved(const Reservation& base, unsigned additional_lanes) const {
+        const auto lanes = base.lanes + std::min(resources.workers-base.lanes, additional_lanes);
+        // Idle pool threads keep their stack leases. Prospective leaves share
+        // the global cap, while every owner's separate DSP bound stays charged.
+        return add(base.nonstack, times(stack_bytes, std::max(lanes, base.started)));
+    }
+
+    std::size_t reserved(unsigned additional_lanes = 0) const {
+        return reserved(reservation(), additional_lanes);
     }
 
     bool full_coverage(std::uint64_t first, std::uint64_t last) const {
@@ -349,13 +369,13 @@ struct CompleteStreamReceiver::Impl {
         const auto bytes = window_bytes(window_samples(plan));
         const auto dsp = workspace(config, plan, workers);
         if (dsp<bytes) throw Error("Robust slot workspace omitted the complete input lease");
-        return {plan, workers, dsp, bytes, add(dsp, add(times(stack_bytes, workers), input_overhead))};
+        return {plan, workers, dsp, bytes, add(dsp, input_overhead)};
     }
 
     std::vector<Work> choose() const {
-        const auto permits = resources.workers-active_workers();
-        const auto capacity = std::min({static_cast<std::size_t>(permits),
-            static_cast<std::size_t>(resources.slot_owners-active()),
+        const auto owners = active();
+        const auto capacity = std::min({static_cast<std::size_t>(resources.workers-owners),
+            static_cast<std::size_t>(resources.slot_owners-owners),
             stream_uncommitted_slot_limit(resources.slot_owners)-jobs.size()});
         std::vector<ReceiverSlotPlan> available;
         auto item = *next;
@@ -365,20 +385,38 @@ struct CompleteStreamReceiver::Impl {
             if (item.index==last_public_slot || n+1==capacity) break;
             item = plan(item.index+1);
         }
-        const auto base = reserved();
-        for (std::size_t width=available.size(); width; --width) {
+        const auto base = reservation();
+        // Scratch is private to a slot, while its execution lanes are shared.
+        // Keep the full shape where it fits so a trailing slot can use idle
+        // workers after earlier owners finish. The global stack bound is W.
+        std::vector<Work> full;
+        auto total = reserved(base, resources.workers);
+        for (const auto& plan : available) {
+            if (total>resources.memory_limit_bytes) break;
+            auto item = prepare(plan, resources.workers);
+            if (item.reserved>resources.memory_limit_bytes-total) break;
+            total += item.reserved;
+            full.push_back(item);
+        }
+        // Favor admitting a wider ready group when RAM only fits its
+        // balanced shapes. Existing owners keep their leased DSP bounds.
+        for (std::size_t width=available.size(); width>full.size(); --width) {
             std::vector<Work> work;
-            auto total = base;
+            std::size_t bytes = 0;
+            unsigned lanes = 0;
+            const auto groups = owners + width;
             for (std::size_t i=0; i<width; ++i) {
-                const auto share = static_cast<unsigned>(permits/width+(i>=width-permits%width));
+                const auto share = static_cast<unsigned>(resources.workers/groups +
+                    (owners+i >= groups-resources.workers%groups));
                 auto next_work = prepare(available[i], share);
-                total = add(total, next_work.reserved);
-                if (total>resources.memory_limit_bytes) break;
+                bytes = add(bytes, next_work.reserved);
+                lanes += share;
+                if (add(reserved(base, lanes), bytes)>resources.memory_limit_bytes) break;
                 work.push_back(next_work);
             }
             if (work.size()==width) return work;
         }
-        return {};
+        return full;
     }
 
     void submit(const Work& work) {
@@ -392,20 +430,20 @@ struct CompleteStreamReceiver::Impl {
         auto input = std::make_shared<const StreamWindow>(std::move(values));
         jobs.push_back({work, std::move(input), {}, {}, valid, interval_valid});
         auto& job = jobs.back();
-        job.task = std::make_unique<SlotTask>(wake, config, key, scorer, work.plan, job.input,
+        job.task = std::make_unique<SlotTask>(executor, wake, config, key, scorer, work.plan, job.input,
             work.workers, work.dsp, stop.get_token());
         advance(work.plan);
     }
 
     void dispatch() {
         if (!ready() || backpressured() || active()>=resources.slot_owners ||
-            active_workers()>=resources.workers || jobs.size()>=stream_uncommitted_slot_limit(resources.slot_owners)) return;
+            jobs.size()>=stream_uncommitted_slot_limit(resources.slot_owners)) return;
         const auto work = choose();
         if (work.empty() && !active())
             throw ReceiverWorkspaceError("Robust public window exceeds the admitted workspace");
         for (const auto& item : work) {
             if (stop.stop_requested()) break;
-            const auto admitted = add(reserved(), item.reserved);
+            const auto admitted = add(reserved(item.workers), item.reserved);
             if (admitted>resources.memory_limit_bytes) {
                 if (active()) return;
                 throw ReceiverWorkspaceError("Robust process growth exhausted the local workspace");
@@ -431,13 +469,16 @@ struct CompleteStreamReceiver::Impl {
         job.input.reset();
     }
 
-    void collect() {
+    bool collect() {
+        bool completed = false;
         for (auto& job : jobs) if (job.task) {
             auto result = job.task->poll();
             if (!result) continue;
             job.task.reset();
             accept_score(job, std::move(*result));
+            completed = true;
         }
+        return completed;
     }
 
     void commit() {
@@ -468,7 +509,7 @@ struct CompleteStreamReceiver::Impl {
         }
     }
 
-    void pump(bool wait) {
+    void pump(Wait wait) {
         if (state!=StreamReceiverState::receiving) return;
         try {
             do {
@@ -476,7 +517,7 @@ struct CompleteStreamReceiver::Impl {
                     terminate(StreamReceiverState::cancelled, "receive_cancelled_before_physical_completion");
                     return;
                 }
-                collect();
+                const bool completed = collect();
                 commit();
                 if (backpressured()) return;
                 dispatch();
@@ -484,11 +525,12 @@ struct CompleteStreamReceiver::Impl {
                     codec.finish_input();
                     state = closed ? StreamReceiverState::input_ended : StreamReceiverState::failed;
                     reason = closed ? "transport_ended" : "configured_public_calendar_exhausted";
+                    executor.close();
                     raw.clear();
                     raw_bytes = raw_initialized = 0;
                     return;
                 }
-                if (!wait || !active()) return;
+                if (wait==Wait::none || !active() || (wait==Wait::completion && completed)) return;
                 std::unique_lock lock(wake.mutex);
                 const auto wait_start = options.record_commit_timing ? Clock::now() : Clock::time_point{};
                 wake.changed.wait(lock, stop.get_token(), [&] {
@@ -518,7 +560,7 @@ struct CompleteStreamReceiver::Impl {
                 return !std::isfinite(x.real()) || !std::isfinite(x.imag());
             }) || std::any_of(valid.begin(), valid.end(), [](auto value) { return value>1; }))
             throw Error("Invalid Robust stream samples or validity mask");
-        pump(false);
+        pump(Wait::none);
         if (state!=StreamReceiverState::receiving) throw Error("Robust stream input is closed");
         if (backpressured()) return StreamPushResult::backpressured;
         const auto last = first+iq.size();
@@ -556,7 +598,7 @@ struct CompleteStreamReceiver::Impl {
             }
         }
         input_stop = last;
-        pump(false);
+        pump(Wait::none);
         return StreamPushResult::accepted;
     }
 
@@ -571,6 +613,8 @@ struct CompleteStreamReceiver::Impl {
         result.active_owners = active();
         result.uncommitted_slots = jobs.size();
         result.peak_reserved_bytes = peak_reserved;
+        result.peak_running_owners = executor.peak_running_roots();
+        result.peak_executor_workers = executor.peak_workers();
         const auto& current = codec.result();
         result.observed_bits = current.observed_bits;
         result.erasures = current.missing_slots;
@@ -587,7 +631,7 @@ struct CompleteStreamReceiver::Impl {
 CompleteStreamReceiver::CompleteStreamReceiver(PublicProfile profile, ReceiverConfig config, Crypto key,
     StreamReceiverOptions options, MessageDecoder decoder, MessageReceiverOptions message)
     : impl_(std::make_unique<Impl>(std::move(profile), std::move(config), std::move(key), options,
-        std::move(decoder), message, receiver_slot_workspace, score_receiver_slot, StreamFootprint{})) {}
+        std::move(decoder), message, receiver_slot_workspace, receiver_detail::score_slot, StreamFootprint{})) {}
 CompleteStreamReceiver::CompleteStreamReceiver(PublicProfile profile, ReceiverConfig config, Crypto key,
     StreamReceiverOptions options, NativeMessageProfile message)
     : CompleteStreamReceiver(std::move(profile), std::move(config), std::move(key), options,
@@ -598,7 +642,15 @@ CompleteStreamReceiver::~CompleteStreamReceiver() = default;
 StreamPushResult CompleteStreamReceiver::push(std::uint64_t first, std::span<const Complex> iq,
     std::span<const std::uint8_t> valid) { return impl_->push(first, iq, valid); }
 
-StreamReceiverReport CompleteStreamReceiver::resume(bool wait) { impl_->pump(wait); return report(); }
+StreamReceiverReport CompleteStreamReceiver::wait_for_slot_completion() {
+    impl_->pump(Impl::Wait::completion);
+    return report();
+}
+
+StreamReceiverReport CompleteStreamReceiver::resume(bool wait) {
+    impl_->pump(wait ? Impl::Wait::drain : Impl::Wait::none);
+    return report();
+}
 std::vector<CompletedMessage> CompleteStreamReceiver::drain_messages() { return impl_->codec.drain_messages(); }
 std::vector<StreamSlotReceipt> CompleteStreamReceiver::drain_recent_slots() {
     std::vector<StreamSlotReceipt> result;
@@ -622,6 +674,17 @@ void CompleteStreamReceiver::request_cancel() noexcept { impl_->stop.request_sto
 CompleteStreamReceiver detail::StreamReceiverFixture::make(PublicProfile profile, ReceiverConfig config, Crypto key,
     StreamReceiverOptions options, StreamWorkspace workspace, StreamScorer scorer,
     MessageDecoder decoder, MessageReceiverOptions message, StreamFootprint footprint) {
+    if (!scorer) throw Error("Invalid Robust stream fixture scorer");
+    return make_with_executor(std::move(profile), std::move(config), std::move(key), options, std::move(workspace),
+        [scorer = std::move(scorer)](const auto& config, const auto& plan, const auto& key, auto iq, auto valid,
+            unsigned workers, std::size_t bytes, std::stop_token stop, ReceiverExecutor*) {
+            return scorer(config, plan, key, iq, valid, workers, bytes, stop);
+        }, std::move(decoder), message, std::move(footprint));
+}
+
+CompleteStreamReceiver detail::StreamReceiverFixture::make_with_executor(PublicProfile profile,
+    ReceiverConfig config, Crypto key, StreamReceiverOptions options, StreamWorkspace workspace,
+    StreamExecutorScorer scorer, MessageDecoder decoder, MessageReceiverOptions message, StreamFootprint footprint) {
     return CompleteStreamReceiver(std::make_unique<CompleteStreamReceiver::Impl>(std::move(profile),
         std::move(config), std::move(key), options, std::move(decoder), message,
         std::move(workspace), std::move(scorer), std::move(footprint)));

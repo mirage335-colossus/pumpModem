@@ -3,9 +3,12 @@ from pathlib import Path
 import copy
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"tools"))
-from triad_abbreviated import analyze, log_interval, policy, validate_baseline, KERNELS, SCHEMA
+import triad_abbreviated as abbreviated
+from triad_abbreviated import (analyze, log_interval, policy, validate_baseline, stream_unit,
+                              stream_batch, regression_batch_list, KERNELS, SCHEMA)
 from triad_native import ProbeError, runtime_identity, validate_receipt
 
 
@@ -27,6 +30,95 @@ def device_receipt():
                                     "score_rows": 0}},
             "phases": [{"name": "fine_work", "work": {}, "wall_seconds": .01, "represented_seconds": 1}],
             "result": {"coordinate_scope": "declared_public_work_coordinate", "stratum": "terminal"}}
+
+
+def cpu_receipt(command):
+    result = device_receipt()
+    result.update(command=command, configuration={}, observation=None, phases=[], result={})
+    result["identity"].update(backend="cpu", configured_tensor_backend=False, backend_receipt=None,
+                              executable_sha256="4" * 64)
+    return result
+
+
+def message_receipt():
+    result = cpu_receipt("message")
+    resources = result["allocation"]
+    origin, ordinal, rows = 1793850000, 7000037, 500
+    result["configuration"] = {"calendar_epoch": origin, "initial_symbol_ordinal": ordinal,
+                               "sample_rate_hz": 1500}
+    result["observation"] = {"input_sha256": "1" * 64, "first_sample": 0, "stop_sample": rows,
+                             "samples": rows, "generated_samples": rows, "channel_erased_rows": 0,
+                             "expected_episodes": 1, "wire_bits_per_episode": 3,
+                             "public_slot": 0, "pattern_epoch": origin, "symbol_ordinal": ordinal,
+                             "spool_residency_reserved_bytes": 100}
+    slots = []
+    for index in range(5):
+        slots.append({"index": index, "first_sample": 100 * index, "stop_sample": 100 * (index + 1),
+                      "pattern_epoch": origin + 60 * index, "symbol_ordinal": ordinal + index,
+                      "complete": True, "all_valid": True, "zero_h0_verified": True,
+                      "decision": "data" if index < 3 else "quiet",
+                      "bit": (0, 0, 1)[index] if index < 3 else None, "workers": 2,
+                      "coarse_workspaces": 13, "coarse_frequency_points": 1, "coarse_arrival_points": 3,
+                      "fine_candidates": 2, "affine_blocks": 2, "adaptive_blocks": 2,
+                      "adaptive_peak_states": 2, "adaptive_transition_edges": 0,
+                      "basis_rows": 100, "quiet_modes": 5, "commit": {"input_stop": rows}})
+    stream = {"state": "input_ended", "input_closed": True, "work_complete": True,
+              "input_rows": rows, "committed_slots": 5, "next_public_slot": 5,
+              "verified_input_sha256": "1" * 64, "slots": slots,
+              "messages": [{"first_public_slot": 0, "stop_public_slot": 5, "physical_complete": True,
+                            "expected_source_matches": True, "long_form": False, "observed_bits": 3,
+                            "missing_slots": 0, "trailing_quiet_slots": 2}],
+              "spool_residency_reserved_bytes": 100, "receiver_peak_reserved_bytes": 10000,
+              "receiver_memory_limit_bytes": resources["memory_limit_bytes"] - 100,
+              "total_application_memory_limit_bytes": resources["memory_limit_bytes"],
+              "peak_reserved_bytes": 10100, "peak_active_owners": 2,
+              "peak_running_owners": 2, "peak_executor_workers": 4, "wall_seconds": .125}
+    result["result"] = {"stream": stream, "expected_message_count": 1,
+                        "complete_receiver_service": True, "message_and_physical_quiet_verified": True,
+                        "eof_control_verified": True, "scope": "configured_public_iq_stream"}
+    result["phases"] = [
+        {"name": "simulator", "wall_seconds": .75, "represented_seconds": rows / 1500, "work": {}},
+        {"name": "receiver_service", "unit_index": 0, "wall_seconds": .125,
+         "represented_seconds": rows / 1500,
+         "scope": "native_iq_replay_including_bounded_spool_reads_and_verification",
+         "work": {"committed_slots": 5, "input_rows": rows, "verified_input_sha256": "1" * 64,
+                  "allocation": copy.deepcopy(resources)}},
+        {"name": "eof_control", "wall_seconds": .025, "represented_seconds": 100 / 1500,
+         "work": {"work_complete": True, "committed_slots": 1, "messages": [], "slots": [slots[0]]}},
+    ]
+    return result
+
+
+class FixtureProbe:
+    calls = []
+
+    def __init__(self, executable, *, backend):
+        assert backend == "cpu"
+
+    def call(self, command, **options):
+        self.calls.append((command, options))
+        if command == "describe":
+            return cpu_receipt(command)
+        if command == "message":
+            assert options["slots"] == 5 and options["max_samples"] <= 600000
+            return message_receipt()
+        result = cpu_receipt(command)
+        units, stratum = options["units"], options["stratum"]
+        result["observation"] = {"input_sha256": "5" * 64, "samples": 100}
+        result["result"] = {"units": units, "stratum": stratum, "work_complete": True,
+                            "evaluator_expected_decision_observed": True}
+        for index in range(units):
+            result["phases"].extend((
+                {"name": "native_slot", "unit_index": index, "wall_seconds": .125, "represented_seconds": 1,
+                 "work": {"work_identity_sha256": "6" * 64, "complete": True,
+                          "decision": "quiet" if stratum == "noise" else "data",
+                          "coarse_seconds": .03125, "fine_seconds": .0625}},
+                {"name": "audio_frontend", "unit_index": index, "wall_seconds": .015625,
+                 "represented_seconds": 1, "work": {"input_rows": 100, "output_rows": 100}}))
+        return result
+
+    def verify_unchanged(self):
+        pass
 
 
 class AbbreviatedTests(unittest.TestCase):
@@ -134,6 +226,142 @@ class AbbreviatedTests(unittest.TestCase):
                 wrong["identity"]["backend_receipt"]["executed"] = False
             with self.subTest(change=change), self.assertRaises(ProbeError):
                 validate_receipt(wrong, command="continuation", backend="cuda", returncode=0)
+
+    def test_stream_cost_uses_only_actual_receiver_service(self):
+        receipt = message_receipt()
+        validate_receipt(receipt, command="message", backend="cpu", returncode=0)
+        seconds, geometry = stream_unit(receipt)
+        self.assertEqual(seconds, .125)
+        self.assertEqual(stream_batch([receipt] * 4, 4), ({"native_stream": .5}, geometry))
+        self.assertEqual(len(KERNELS), 9)
+        self.assertEqual(SCHEMA, "datapump.triad.native-regression.v2")
+
+    def test_stream_refuses_mutated_completion_bits_addresses_input_and_memory(self):
+        mutations = (
+            lambda x: x["result"].update(complete_receiver_service=False),
+            lambda x: x["result"]["stream"]["slots"][2].update(bit=0),
+            lambda x: x["result"]["stream"]["slots"][2].update(symbol_ordinal=7000037),
+            lambda x: x["result"]["stream"]["slots"][2].update(pattern_epoch=1),
+            lambda x: x["result"]["stream"]["slots"][1].update(pattern_epoch=1793850000),
+            lambda x: x["result"]["stream"]["slots"][2].update(pattern_epoch=1793850121),
+            lambda x: x["result"]["stream"]["slots"][3].update(complete=False),
+            lambda x: x["result"]["stream"]["slots"][3].update(basis_rows=0),
+            lambda x: x["result"]["stream"]["slots"][3].update(quiet_modes=0),
+            lambda x: x["result"]["stream"]["slots"][4].update(bit=1),
+            lambda x: x["result"]["stream"]["messages"][0].update(trailing_quiet_slots=1),
+            lambda x: x["result"]["stream"]["messages"][0].update(expected_source_matches=False),
+            lambda x: x["result"]["stream"].update(verified_input_sha256="9" * 64),
+            lambda x: x["result"]["stream"].update(receiver_peak_reserved_bytes=2**31),
+            lambda x: x["result"]["stream"].update(peak_executor_workers=5),
+            lambda x: x["phases"][1]["work"].update(input_rows=499),
+            lambda x: x["phases"][2]["work"].update(messages=[{}]),
+        )
+        for index, mutate in enumerate(mutations):
+            wrong = message_receipt()
+            mutate(wrong)
+            with self.subTest(index=index), self.assertRaises(ProbeError):
+                stream_unit(wrong)
+
+    def test_stream_work_identity_excludes_timing_worker_allocation_and_optional_pool_peaks(self):
+        original = message_receipt()
+        other = copy.deepcopy(original)
+        stream = other["result"]["stream"]
+        del stream["peak_running_owners"], stream["peak_executor_workers"]
+        stream["peak_active_owners"] = 1
+        for row in stream["slots"]:
+            row["workers"] = 1
+            row["commit"]["wall_seconds"] = .01
+        self.assertEqual(stream_unit(original), stream_unit(other))
+        other["result"]["stream"]["slots"][1]["basis_rows"] += 1
+        with self.assertRaises(ProbeError):
+            stream_batch([original, other], 2)
+        with self.assertRaises(ProbeError):
+            stream_batch([original], 2)
+
+    def test_stream_preflight_precedes_looks_and_v2_compares_all_nine_kernels(self):
+        FixtureProbe.calls = []
+        with patch.object(abbreviated, "NativeProbe", FixtureProbe):
+            baseline = abbreviated.run()
+            self.assertEqual([call[0] for call in FixtureProbe.calls[:2]], ["describe", "message"])
+            self.assertEqual(sum(command == "message" for command, _ in FixtureProbe.calls), 22)
+            slot_calls = [options for command, options in FixtureProbe.calls if command == "regression"]
+            self.assertEqual(len(slot_calls), 42)
+            self.assertTrue(all(options["units"] == 1 for options in slot_calls))
+            self.assertEqual(baseline["kernels"]["native_stream"]["batch_seconds"], [[.125, .25, .5]] * 3)
+            self.assertEqual(baseline["status"], "baseline_established")
+            compared = abbreviated.run(baseline=baseline)
+            self.assertEqual(compared["status"], "no_material_slowdown_for_measured_kernels")
+            self.assertEqual(set(compared["kernels"]), set(KERNELS))
+            old = copy.deepcopy(baseline)
+            old["schema"] = "datapump.triad.native-regression.v1"
+            with self.assertRaises(ProbeError):
+                abbreviated.run(baseline=old)
+            missing = copy.deepcopy(baseline)
+            missing["batches"]["native_stream"][1]["receipts"].pop()
+            with self.assertRaises(ProbeError):
+                abbreviated.run(baseline=missing)
+            previous_policy = copy.deepcopy(baseline)
+            del previous_policy["policy"]["native_slot_unit"]
+            with self.assertRaises(ProbeError):
+                abbreviated.run(baseline=previous_policy)
+            previous_batches = copy.deepcopy(baseline)
+            sample = previous_batches["batches"]["active"][0]
+            sample["receipt"] = sample.pop("receipts")[0]
+            with self.assertRaises(ProbeError):
+                abbreviated.run(baseline=previous_batches)
+
+    def test_slot_batches_require_one_homogeneous_native_call_per_unit(self):
+        probe = FixtureProbe("fixture", backend="cpu")
+        unit = probe.call("regression", units=1, stratum="active")
+        times, geometry = regression_batch_list([unit] * 4, "active", 4)
+        self.assertEqual(times, {"native_slot": .5, "coarse": .125, "fine": .25, "audio_frontend": .0625})
+        self.assertEqual(geometry["work_identity_sha256"], "6" * 64)
+        with self.assertRaises(ProbeError):
+            regression_batch_list([unit], "active", 2)
+        repeated = probe.call("regression", units=2, stratum="active")
+        with self.assertRaises(ProbeError):
+            regression_batch_list([unit, repeated], "active", 2)
+        for field in ("source_manifest_sha256", "executable_sha256", "build_options_sha256"):
+            changed = copy.deepcopy(unit)
+            changed["identity"][field] = "f" * 64
+            with self.subTest(field=field), self.assertRaises(ProbeError):
+                regression_batch_list([unit, changed], "active", 2)
+        changed = copy.deepcopy(unit)
+        changed["phases"][0]["work"]["work_identity_sha256"] = "e" * 64
+        with self.assertRaises(ProbeError):
+            regression_batch_list([unit, changed], "active", 2)
+
+    def test_overall_deadline_cannot_report_partial_comparison(self):
+        FixtureProbe.calls = []
+        with patch.object(abbreviated, "NativeProbe", FixtureProbe), patch.object(
+                abbreviated.time, "monotonic", side_effect=[0., 0., 31., 31.]):
+            result = abbreviated.run(benchmark_deadline_ms=30000)
+        self.assertEqual(result["status"], "incomplete")
+        self.assertNotIn("kernels", result)
+        self.assertEqual(result["run_budget"]["native_calls"], 1)
+        self.assertLessEqual(FixtureProbe.calls[0][1]["deadline_ms"], 15000)
+        self.assertEqual(result["deadline_last_call"]["command"], "describe")
+
+    def test_deadline_preserves_completed_work_and_its_native_identity(self):
+        FixtureProbe.calls = []
+        completed_checks = 0
+
+        def clock():
+            nonlocal completed_checks
+            if len(FixtureProbe.calls) >= 3:
+                completed_checks += 1
+                if completed_checks > 1:
+                    return 31.
+            return 0.
+
+        with patch.object(abbreviated, "NativeProbe", FixtureProbe), patch.object(
+                abbreviated.time, "monotonic", side_effect=clock):
+            result = abbreviated.run(benchmark_deadline_ms=30000)
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["native_identity"]["source_manifest_sha256"], "2" * 64)
+        self.assertEqual(result["stream_preflight"]["command"], "message")
+        self.assertEqual(result["batches"]["active"][0]["receipts"][0]["command"], "regression")
+        self.assertEqual(result["kernels"], {})
 
 
 if __name__ == "__main__":

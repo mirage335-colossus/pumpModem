@@ -37,7 +37,7 @@ if os.environ.get("FAIL_STEP") == ("build" if "--build" in sys.argv else "config
             tool.write_text(mock, encoding="utf-8")
             tool.chmod(0o755)
         self.env = os.environ.copy()
-        for name in ("CC", "CXX", "CMAKE_GENERATOR", "DATAPUMP_JOBS",
+        for name in ("CC", "CXX", "CUDACXX", "CMAKE_GENERATOR", "DATAPUMP_JOBS",
                      "CMAKE_BUILD_PARALLEL_LEVEL", "DATAPUMP_MAX_GLIBC", "CMAKE_TOOLCHAIN_FILE",
                      "CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "OBJC_INCLUDE_PATH",
                      "LIBRARY_PATH", "GCC_EXEC_PREFIX", "COMPILER_PATH"):
@@ -375,9 +375,34 @@ if os.environ.get("FAIL_STEP") == ("build" if "--build" in sys.argv else "config
         (output / "CMakeCache.txt").write_text("".join(lines))
 
     def test_unchanged_compiler_environment_arguments_are_accepted(self):
-        self.compiler_cache((("C", "fakecc", " -m64"), ("CXX", "fakecxx", " -m64 -pipe")))
-        _, calls = self.run_wrapper(CC="fakecc -m64", CXX="fakecxx -m64 -pipe")
+        self.compiler_cache((("C", "fakecc", " -m64"), ("CXX", "fakecxx", " -m64 -pipe"),
+                             ("CUDA", "fakecuda", " --compiler-bindir=/toolchain")))
+        _, calls = self.run_wrapper(CC="fakecc -m64", CXX="fakecxx -m64 -pipe",
+                                    CUDACXX="fakecuda --compiler-bindir=/toolchain")
         self.assertEqual(len(calls), 2)
+
+    def test_cached_cuda_compiler_changes_are_rejected_before_configuration(self):
+        self.compiler_cache((("CUDA", "fakecuda", " --compiler-bindir=/toolchain"),))
+        for requested in ("/new/cuda", "fakecuda", "fakecuda --compiler-bindir=/other"):
+            with self.subTest(environment=requested):
+                result, calls = self.run_wrapper(success=False, CUDACXX=requested)
+                self.assertIn("CUDA compiler", result.stderr)
+                self.assertIn("use --build-dir", result.stderr)
+                self.assertEqual(calls, [])
+        for option in ("-DCMAKE_CUDA_COMPILER=/new/cuda", "-DCMAKE_CUDA_COMPILER:FILEPATH=/new/cuda"):
+            with self.subTest(option=option):
+                result, calls = self.run_wrapper("--", option, success=False)
+                self.assertIn("CUDA compiler differs", result.stderr)
+                self.assertEqual(calls, [])
+
+    def test_unchanged_cuda_compiler_path_preserves_spaces_and_cached_arguments(self):
+        compiler = self.bin / "cuda compiler with spaces"
+        self.compiler_cache((("CUDA", compiler.name, " --compiler-bindir=/toolchain"),))
+        for option in (f"-DCMAKE_CUDA_COMPILER={compiler}", f"-DCMAKE_CUDA_COMPILER:FILEPATH={compiler}"):
+            with self.subTest(option=option):
+                self.log.unlink(missing_ok=True)
+                _, calls = self.run_wrapper("--", option)
+                self.assertIn(option, calls[0])
 
     def test_changed_or_removed_compiler_arguments_are_rejected(self):
         self.compiler_cache((("C", "fakecc", " -m64"),))

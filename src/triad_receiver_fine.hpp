@@ -8,6 +8,8 @@
 
 namespace datapump::triad::v3::receiver_detail {
 
+class ReceiverExecutor;
+
 struct FineCoordinate {
     std::int64_t epoch_offset_seconds = 0;
     double arrival_seconds = 0, frequency_hz = 0, clock_ppm = 0;
@@ -80,7 +82,7 @@ public:
                 std::span<const Complex> iq, std::span<const std::uint8_t> valid,
                 std::span<const FineCoordinate>, double projected_sample_rate_hz,
                 double coarse_clock_gap_ppm, unsigned workers, std::size_t scratch_limit_bytes,
-                std::stop_token = {});
+                std::stop_token = {}, ReceiverExecutor* = nullptr);
     ~FineSession();
     FineSession(const FineSession&) = delete;
     FineSession& operator=(const FineSession&) = delete;
@@ -105,7 +107,8 @@ std::size_t fine_workspace(const ReceiverConfig&, const ReceiverSlotPlan&, FineO
 void score_fine(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                 std::span<const Complex> iq, std::span<const FineCoordinate>,
                 double projected_sample_rate_hz, double coarse_clock_gap_ppm,
-                unsigned workers, ReceiverSlotScore&, std::size_t scratch_limit_bytes, std::stop_token);
+                unsigned workers, ReceiverSlotScore&, std::size_t scratch_limit_bytes, std::stop_token,
+                ReceiverExecutor* = nullptr);
 void classify_fine_slot(ReceiverSlotScore&, const AdmissionGrid&);
 double quiet_noise_threshold(std::size_t modes);
 

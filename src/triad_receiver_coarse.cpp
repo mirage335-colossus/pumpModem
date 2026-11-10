@@ -1,4 +1,5 @@
 #include "triad_receiver_coarse.hpp"
+#include "triad_receiver_executor.hpp"
 #include "triad_receiver_detail.hpp"
 #include "search_fft.hpp"
 #include "datapump/execution.hpp"
@@ -124,7 +125,14 @@ void tracked_render(PatternSource& source, long double first, long double step,
 }
 
 template<class Job>
-void parallel(std::size_t jobs, unsigned workers, std::stop_token outer_stop, Job run) {
+void parallel(std::size_t jobs, unsigned workers, std::stop_token outer_stop, ReceiverExecutor* executor,
+              std::uint64_t public_slot, Job run) {
+    if (executor) {
+        executor->parallel(public_slot, jobs, workers, outer_stop, [&](unsigned, std::size_t index, std::stop_token stop) {
+            run(index, stop);
+        });
+        return;
+    }
     const auto active = std::min<std::size_t>(workers, jobs);
     if (!active) return;
     if (active == 1) {
@@ -747,10 +755,11 @@ std::vector<Workspace> prepare_bank(const Plan& plan, const ReceiverConfig& conf
                                    const ReceiverSlotPlan& slot, const Crypto& key,
                                    const Projection& projection, const MappedProjection* mapped,
                                    const native_fft::DoublePlan* fft, bool frequency_domain,
-                                   unsigned workers, CoarseOperationCounts& work, std::stop_token stop) {
+                                   unsigned workers, CoarseOperationCounts& work, std::stop_token stop,
+                                   ReceiverExecutor* executor) {
     std::vector<Workspace> bank(plan.workspaces());
     std::array<CoarseOperationCounts, lanes> lane_work{};
-    parallel(lanes, workers, stop, [&](std::size_t lane, std::stop_token job_stop) {
+    parallel(lanes, workers, stop, executor, slot.index, [&](std::size_t lane, std::stop_token job_stop) {
         auto format = slot.format;
         format.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(format.epoch) + receiver_epoch_offsets[lane / 2]);
         PatternSource source(format, key, static_cast<std::uint8_t>(lane % 2));
@@ -942,13 +951,13 @@ std::array<std::vector<Complex>, 2> fidelity_controls(const Plan& plan, const Re
 void validate_mapped_profile(const Plan& plan, const ReceiverConfig& config, const ReceiverSlotPlan& slot,
                              const Crypto& key, const Projection& projection, const MappedProjection& mapped,
                              const native_fft::DoublePlan& fft, unsigned workers, CoarseOperationCounts& work,
-                             std::stop_token stop) {
+                             std::stop_token stop, ReceiverExecutor* executor) {
     const auto& layout = plan.fidelity_layout;
     const auto observations = fidelity_controls(plan, config, slot, key, projection, fft, work, stop);
     using Scores = std::array<std::array<double, 2>, 2>; // exact/mapped, clean/noisy
     std::vector<Scores> scores(plan.workspaces());
     std::array<CoarseOperationCounts, receiver_epoch_offsets.size()> epoch_work{};
-    parallel(receiver_epoch_offsets.size(), workers, stop, [&](std::size_t epoch, std::stop_token job_stop) {
+    parallel(receiver_epoch_offsets.size(), workers, stop, executor, slot.index, [&](std::size_t epoch, std::stop_token job_stop) {
         auto format = slot.format;
         format.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(format.epoch) + receiver_epoch_offsets[epoch]);
         std::array<PatternSource, 2> sources{PatternSource(format, key, 0), PatternSource(format, key, 1)};
@@ -1191,20 +1200,21 @@ CoarseOperationCounts score_frequency_tile(const Plan& plan, std::span<const Wor
                                             std::span<const Complex> observation, std::span<const double> grid,
                                             std::span<Peak> peaks, std::size_t first, std::size_t count,
                                             double variance, const native_fft::DoublePlan& fft,
-                                            unsigned workers, std::stop_token stop) {
+                                            unsigned workers, std::stop_token stop, ReceiverExecutor* executor,
+                                            std::uint64_t public_slot) {
     const auto& layout = plan.layout;
     const auto local_count = mul(grid.size(), retained_per_bit);
     const auto distance = std::max<std::size_t>(1, extent(std::ceil(plan.separation * plan.output_fs)));
     std::vector<std::vector<Complex>> spectra(count);
     std::vector<CoarseOperationCounts> spectrum_work(count);
-    parallel(count, workers, stop, [&](std::size_t index, std::stop_token job_stop) {
+    parallel(count, workers, stop, executor, public_slot, [&](std::size_t index, std::stop_token job_stop) {
         spectra[index] = observation_spectrum(layout, observation, grid[first + index], plan.output_fs,
                                                fft, spectrum_work[index], job_stop);
     });
     const auto jobs = mul(bank.size(), count);
     const auto active = std::min<std::size_t>(workers, jobs);
     std::vector<CoarseOperationCounts> worker_work(active);
-    parallel(active, workers, stop, [&](std::size_t task, std::stop_token job_stop) {
+    parallel(active, workers, stop, executor, public_slot, [&](std::size_t task, std::stop_token job_stop) {
         auto& work = worker_work[task];
         for (auto index = task; index < jobs; index += active) {
             const auto workspace = index / count;
@@ -1289,12 +1299,13 @@ CoarseOperationCounts score_lag_tile(const Plan& plan, std::span<const Workspace
                                      std::span<const Complex> observation, std::span<const ZoomKernel> kernels,
                                      std::size_t frequencies, std::size_t largest_fft, std::span<Peak> peaks,
                                      double variance, const native_fft::DoublePlan& fft,
-                                     unsigned workers, std::stop_token stop) {
+                                     unsigned workers, std::stop_token stop, ReceiverExecutor* executor,
+                                     std::uint64_t public_slot) {
     const auto& layout = plan.layout;
     const auto local_count = mul(frequencies, retained_per_bit);
     const auto distance = std::max<std::size_t>(1, extent(std::ceil(plan.separation * plan.output_fs)));
     std::vector<CoarseOperationCounts> worker_work(bank.size());
-    parallel(bank.size(), workers, stop, [&](std::size_t index, std::stop_token job_stop) {
+    parallel(bank.size(), workers, stop, executor, public_slot, [&](std::size_t index, std::stop_token job_stop) {
         auto& work = worker_work[index];
         std::vector<Complex> products(largest_fft);
         Columns correlations;
@@ -1330,11 +1341,11 @@ CoarseOperationCounts score_lag_tile(const Plan& plan, std::span<const Workspace
 
 void retain_proposals(CoarseResult& result, const Plan& plan, const ReceiverSlotPlan& slot,
                       const std::vector<Workspace>& bank, std::span<Peak> peaks, std::span<const double> grid,
-                      unsigned workers, std::stop_token stop) {
+                      unsigned workers, std::stop_token stop, ReceiverExecutor* executor) {
     using Retained = std::array<CoarseProposal, retained_per_bit>;
     std::vector<Retained> retained(bank.size());
     const auto local_count = mul(grid.size(), retained_per_bit);
-    parallel(bank.size(), workers, stop, [&](std::size_t workspace, std::stop_token job_stop) {
+    parallel(bank.size(), workers, stop, executor, slot.index, [&](std::size_t workspace, std::stop_token job_stop) {
         auto local = peaks.subspan(workspace * local_count, local_count);
         // Keep the original CFO-major order on equal scores. That order is
         // independent of worker completion and of the selected tile width.
@@ -1499,13 +1510,14 @@ struct CoarseSession::Impl {
     std::optional<CoarseResult> result;
     double variance = 0;
     std::size_t cursor = 0;
+    ReceiverExecutor* executor;
     std::stop_source cancellation;
     std::stop_callback<PropagateStop> external_stop;
 
     Impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
          std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
-         unsigned workers, std::size_t limit, std::stop_token outer_stop)
-        : config(config), slot(slot), external_stop(outer_stop, PropagateStop{cancellation}) {
+         unsigned workers, std::size_t limit, std::stop_token outer_stop, ReceiverExecutor* executor)
+        : config(config), slot(slot), executor(executor), external_stop(outer_stop, PropagateStop{cancellation}) {
         const auto began = PhaseClock::now();
         const auto stop = cancellation.get_token();
         check_stop(stop);
@@ -1575,7 +1587,7 @@ struct CoarseSession::Impl {
                 const Projection reference(geometry, &reference_fft, nullptr, operations, stop);
                 const MappedProjection mapped(geometry, reference, &reference_fft, operations, stop);
                 validate_mapped_profile(geometry, config, slot, key, reference, mapped, reference_fft,
-                                        workers, operations, stop);
+                                        workers, operations, stop, executor);
                 receipt.mapped_fidelity.wall_seconds = elapsed(fidelity);
             }
         }
@@ -1596,12 +1608,12 @@ struct CoarseSession::Impl {
             if (mapped && !bulk) {
                 const auto fidelity = PhaseClock::now();
                 validate_mapped_profile(geometry, config, slot, key, projection, *mapped, *fft,
-                                        workers, receipt.mapped_fidelity.operations, stop);
+                                        workers, receipt.mapped_fidelity.operations, stop, executor);
                 receipt.mapped_fidelity.wall_seconds = elapsed(fidelity);
             }
             const auto bank_started = PhaseClock::now();
             bank = prepare_bank(geometry, config, slot, key, projection, mapped ? &*mapped : nullptr,
-                                fft.get(), !bulk && !lag, workers, receipt.template_bank.operations, stop);
+                                fft.get(), !bulk && !lag, workers, receipt.template_bank.operations, stop, executor);
             receipt.template_bank.wall_seconds = elapsed(bank_started);
             mapped.reset();
             const auto input_started = PhaseClock::now();
@@ -1735,8 +1747,8 @@ struct CoarseSession::Impl {
 
 CoarseSession::CoarseSession(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
                              std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
-                             unsigned workers, std::size_t limit, std::stop_token stop)
-    : impl_(std::make_unique<Impl>(config, slot, key, iq, intervals, workers, limit, stop)) {}
+                             unsigned workers, std::size_t limit, std::stop_token stop, ReceiverExecutor* executor)
+    : impl_(std::make_unique<Impl>(config, slot, key, iq, intervals, workers, limit, stop, executor)) {}
 
 CoarseSession::~CoarseSession() = default;
 CoarseSession::CoarseSession(CoarseSession&&) noexcept = default;
@@ -1781,10 +1793,11 @@ void CoarseSession::advance(std::size_t maximum_tiles) {
                 completed = score_lag_tile(impl.geometry, std::span(impl.bank).subspan(impl.cursor, count),
                     impl.observation, impl.kernels, plan.frequency_points, plan.correlation_fft_rows,
                     std::span(impl.peaks).subspan(mul(impl.cursor, row_width), mul(count, row_width)),
-                    impl.variance, *impl.fft, plan.workers, stop);
+                    impl.variance, *impl.fft, plan.workers, stop, impl.executor, impl.slot.index);
             } else {
                 completed = score_frequency_tile(impl.geometry, impl.bank, impl.observation, impl.grid.values,
-                    impl.peaks, impl.cursor, count, impl.variance, *impl.fft, plan.workers, stop);
+                    impl.peaks, impl.cursor, count, impl.variance, *impl.fft, plan.workers, stop, impl.executor,
+                    impl.slot.index);
             }
             combine(receipt.search.operations, completed);
             impl.cursor += count;
@@ -1817,7 +1830,8 @@ std::optional<CoarseResult> CoarseSession::finish() {
         result.arrival_points = plan.arrival_points;
         result.workspaces = plan.workspaces;
         result.lag_frequency_search = plan.route == CoarseRoute::lag_groups;
-        retain_proposals(result, impl.geometry, impl.slot, impl.bank, impl.peaks, impl.grid.values, plan.workers, stop);
+        retain_proposals(result, impl.geometry, impl.slot, impl.bank, impl.peaks, impl.grid.values,
+                         plan.workers, stop, impl.executor);
         refine(result, impl.geometry, impl.config, impl.slot);
         check_stop(stop);
         impl.result.emplace(std::move(result));
@@ -1849,8 +1863,9 @@ std::optional<CoarseResult> CoarseSession::finish() {
 
 CoarseResult score_coarse(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
                           std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
-                          unsigned workers, std::size_t scratch_limit_bytes, std::stop_token stop) {
-    CoarseSession session(config, slot, key, iq, intervals, workers, scratch_limit_bytes, stop);
+                          unsigned workers, std::size_t scratch_limit_bytes, std::stop_token stop,
+                          ReceiverExecutor* executor) {
+    CoarseSession session(config, slot, key, iq, intervals, workers, scratch_limit_bytes, stop, executor);
     for (auto state = session.state(); state != CoarseState::searched; state = session.state()) {
         if (state == CoarseState::cancelled || state == CoarseState::failed)
             throw Error("coarse receiver stopped before completing its public grid");

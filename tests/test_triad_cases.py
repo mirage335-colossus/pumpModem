@@ -112,7 +112,9 @@ class TriadCasesTests(unittest.TestCase):
             output = Path(directory) / "result.json"
             code = triad_abbreviated.main(["--output", str(output)])
             self.assertEqual(code, 0)
-        regression.assert_called_once_with(target_units=1000, device="cpu", baseline=None)
+        regression.assert_called_once_with(
+            target_units=1000, device="cpu", baseline=None,
+            benchmark_deadline_ms=triad_abbreviated.DEFAULT_BENCHMARK_DEADLINE_MS)
     def test_current_manual_cases_are_consumed_without_frozen_inventory(self):
         result = load_cases()
         self.assertTrue(result["cases"])

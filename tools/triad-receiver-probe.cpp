@@ -564,6 +564,10 @@ Json bulk_json(const BulkReceipt& r) {
         {"statistics_blocks", r.statistics_blocks}, {"projected_values", r.projected_values},
         {"dc_reduction_values", r.dc_reduction_values},
         {"mapped_columns", r.mapped_columns}, {"mapped_values", r.mapped_values},
+        {"cuda_fused_mapped_launches", r.cuda_fused_mapped_launches},
+        {"cuda_fused_mapped_values", r.cuda_fused_mapped_values},
+        {"cuda_direct_gram_values", r.cuda_direct_gram_values},
+        {"cuda_bmm_gram_values", r.cuda_bmm_gram_values},
         {"uploaded_tiles", r.uploaded_tiles}, {"tile_hits", r.tile_hits},
         {"direct_columns", r.direct_columns}, {"direct_values", r.direct_values},
         {"direct_fallback_counts", std::move(fallbacks)}, {"wall_seconds", r.wall_seconds}});
@@ -1337,12 +1341,21 @@ Replay replay(const Options& o, const Profile& profile, const Capture& capture, 
                 drain();
             } else {
                 ++run.backpressure;
-                const auto before = receiver.report();
+                // push() can make progress while discovering backpressure;
+                // snapshot the rejection itself before draining anything.
+                const auto rejected = receiver.report();
                 drain();
-                const auto after = receiver.resume(true);
-                drain();
-                if (before.state == after.state && before.active_owners == 0 &&
-                    before.next_public_slot == after.next_public_slot && !before.output_backpressured)
+                auto after = receiver.report();
+                if (!rejected.output_backpressured) {
+                    after = receiver.wait_for_slot_completion();
+                    drain();
+                    after = receiver.report();
+                }
+                const bool output_drained = rejected.output_backpressured && !after.output_backpressured;
+                if (!output_drained && rejected.state == after.state && after.active_owners == 0 &&
+                    after.next_public_slot == rejected.next_public_slot &&
+                    after.uncommitted_slots == rejected.uncommitted_slots &&
+                    !after.output_backpressured)
                     throw Incomplete("Native stream cannot admit the next bounded input chunk");
             }
             const auto state = receiver.report();
@@ -1418,7 +1431,10 @@ Json replay_json(const Replay& run, const Profile& profile, std::size_t expected
         {"receiver_memory_limit_bytes", run.final.resources.memory_limit_bytes},
         {"total_application_memory_limit_bytes", run.final.resources.memory_limit_bytes + spool_reservation},
         {"peak_uncommitted_slots", run.peak_uncommitted},
-        {"peak_active_owners", run.peak_owners}, {"maximum_pending_messages", run.maximum_pending_messages},
+        {"peak_active_owners", run.peak_owners},
+        {"peak_running_owners", run.final.peak_running_owners},
+        {"peak_executor_workers", run.final.peak_executor_workers},
+        {"maximum_pending_messages", run.maximum_pending_messages},
         {"backpressure_retries", run.backpressure}, {"next_public_slot", run.final.next_public_slot},
         {"committed_slots", run.slots.size()}, {"input_closed", run.final.input_closed},
         {"wall_seconds", run.service.wall}, {"process_cpu_seconds", run.service.cpu ? Json(*run.service.cpu) : Json{}},
