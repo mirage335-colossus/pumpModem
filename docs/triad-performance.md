@@ -10,6 +10,13 @@ the manual list must start with the
 [CPU ceiling workflow](robust-manual-capacity.md#agent-workflow-for-cpu-ceiling-estimates)
 and its practical algorithm, precision and productive-parallelism requirements.
 
+**Current complete-service estimates are scoped to the configured public
+calendar. Blind discovery of ordinary independently restarted transmitters is
+unresolved, regardless of favorable numerical capacity points or forecast
+accuracy.** Keep that status in reports; these tools do not yet establish a
+general always-listening CPU ceiling. See
+[the receiver scope](validation.md#continuous-receiver-restructuring).
+
 ## Relative regression harness
 
 Run the native `triad` checks first, then the abbreviated regression harness for
@@ -55,6 +62,8 @@ supply CPU costs for acquisition, fine work, recurring banks and fixed
 orchestration. Refresh only missing local cost classes, or the affected local
 calibration when the CPU work or runtime changes. A GPU-only change requires
 new applicable GPU evidence and preserves an unchanged CPU calibration.
+This procedure forecasts the implemented configured-calendar receiver phases;
+fast GPU observations cannot fill the missing blind fresh-start discovery work.
 
 The target is complete service on the **local CPU**, with its full available
 logical-thread budget. GPU experiments accelerate workload observation; they
@@ -72,6 +81,28 @@ simulation, preparation and transfers. The pre-restructuring RTX PRO 6000 trace
 spent about 80% of its time on native CPU simulation and bank preparation;
 optimizing only small GPU kernels misses that measured bottleneck. See the
 [current evidence](validation.md#gpu-assisted-receiver-measurement).
+
+The continuous-listener and native coarse/Gaussian restructuring changed CPU
+work. Refresh its affected local phase costs and require applicable matching GPU
+work/precision evidence before publishing a new GPU-assisted forecast. The
+pre-restructuring eight-row CPU/GPU receipts remain tied to their old
+implementation.
+The new native CPU kernels do not themselves qualify a faster CUDA path or
+tensor execution. See [current restructuring validation](validation.md#continuous-receiver-restructuring).
+
+The new two-owner continuous pipeline also changes the concurrency regime.
+Its measured whole-service improvement covers the tested row-7 capture and
+geometry; all-eight-row parallel capacity remains unqualified. The
+[current all-eight explicit-serial forecasts](validation.md#complete-headless-robust-and-manual-capacity)
+reuse reviewed unchanged DSP costs with fresh wrapper costs; they do not qualify
+the parallel mode. Automatic serial fallback retains auxiliary-process memory
+and cannot inherit explicit
+`slot_processes=1` qualification. Forecast overlapping work only with
+applicable costs for its shared worker allocations and a fresh outer-service
+holdout including native preparation, IPC and ordered commit. Neither summing
+overlapping slot wall times nor timing asynchronous input submission measures
+that service. Keep the configured-calendar scope and prefer qualified
+lower-precision GPU work for the implemented phases.
 
 Package the allowlisted source with the matching native exporter and mapped
 kernel. Transfer both artifacts separately with authenticated SSH/SCP and place
@@ -214,6 +245,9 @@ Inspect each row's separate `nominal_service` and `complete_capacity` verdicts,
 intervals and point failures. The full report must cover the entire current
 ordered list, including duplicates; selected-row evidence needs an explicitly
 matched coverage assembly before any full-list conclusion.
+These verdicts remain within their configured-calendar scope. Report ordinary
+blind-listener capacity as unresolved until its additional algorithm, work and
+false-start/missed-start behavior are qualified.
 
 When a same-row timing check drifts while its input and work gates still match,
 refresh just that CPU phase. `--refresh-cpu-phase` requires the same CPU source,
@@ -227,8 +261,9 @@ independent holdout for the selected row. Use one `--case-index N`, the matching
 `--refresh-cpu-phase nominal-fine` for continued fine work or
 `--refresh-cpu-phase recurring-acquisition` for the largest recurring H0 search.
 
-The following example uses the 12-worker RTX trace and paired references from
-the current eight-row run.
+The following example shows the artifact layout of the earlier 12-worker RTX
+run. Replace these paths with applicable reports for the current source; old
+artifacts cannot bypass the identity checks.
 
 ```sh
 python3 tools/triad_gpu_cpu_forecast.py \
@@ -266,6 +301,12 @@ python3 tools/triad_manual_cases.py \
   --exporter build/dev/triad_helper_export \
   --workspace-mib 3840
 ```
+
+**This command estimates per-row service with sequential windows and the full
+worker allocation.** Its native continuous functional gate does not qualify
+the default two-owner pipeline's capacity across the manual rows. Keep that
+execution-mode distinction in every report; all-row parallel capacity is
+unqualified.
 
 The example's 3840 MiB cap remains subject to the half-visible-memory guard. Retain any
 workspace-admission failure and use a fresh matched selected-row continuation
@@ -324,18 +365,22 @@ charges a fresh one-second, two-segment 256-initial-state transition probe once
 per 0.5-second window segment to cover switching and merge work conservatively.
 The frozen native functional gate passed, including its captured-prefix EOF
 negative control. This is one bounded functional check, not capacity or
-all-case qualification. The full integrated v3 reevaluation measured all
-eight current manual cases with unresolved worst-state margins and no full
-capacity pass. The named `triad` group passed 20/20 before that run. Historical
-v2 base and continuation phases retain their own hashes and policy. Sensitivity
+all-case qualification. The earlier integrated v3 reevaluation measured its
+eight manual cases with unresolved worst-state margins and no full capacity
+pass. Its named `triad` group passed 20/20 before that run. Those receipts and
+the historical v2 phases retain their own hashes and policy; they do not qualify
+the latest native CPU changes. Sensitivity
 confirmation remains incomplete, so there is no >90% qualification. See the
 [validation record](validation.md) for per-case ratios and provenance. Use
 `--skip-message-gate` only for debugging: it bypasses the
 current source message gate and prevents an integrated suite pass.
 
-The current headless `CompleteStreamReceiver` adds bounded captured-stream
-processing with public slot plans, complete fine tracking, and two scored quiet
-slots to establish physical completion; transport EOF and received length do
-not select the endpoint. The headless path is not connected to the Robust GUI.
+The headless `CompleteStreamReceiver` defaults to continuous captured-stream
+listening on its configured public calendar, with the full visible logical CPU
+budget, bounded output/backpressure and scored-quiet recovery. Two scored quiet
+slots establish physical completion; transport EOF and received length do not
+select the endpoint. Finite gates explicitly use `continuous=False`. This does
+not yet discover a fresh transmitter's independent calendar/keyed ordinal, and
+the headless path is not connected to the Robust GUI.
 See [current architecture](robust-current.md) and
 [protocol status](protocol.md).

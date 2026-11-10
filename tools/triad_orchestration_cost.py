@@ -75,6 +75,7 @@ def _new_work_stream(prepared, plan, *, maximum_slots=418, source=None):
     manifest['sample_rate_hz'] = plan['sample_rate_hz']
     source = prepared.basis_source if source is None else source
     return CompleteStreamReceiver(manifest, source,
+        continuous=False,
         source_identity=dict(work_fixture=True),
         memory_limit_bytes=prepared.memory_limit_bytes,
         workers=1, decode_short_message=lambda _bits: {

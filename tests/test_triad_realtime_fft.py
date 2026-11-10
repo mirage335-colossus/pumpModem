@@ -901,6 +901,16 @@ class FFTScreenTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             a.score(np.zeros(a.samples, complex), [0.], frequency_intervals=[[0., 0.]])
 
+    def test_native_coarse_capability_fallback_is_explicit_and_idempotent(self):
+        s = screen()
+        with mock.patch('triad_coarse_kernel.CoarseRank2Kernel', side_effect=OSError('absent')):
+            s.enable_native_coarse('local-exporter')
+            first = s.procedure_id
+            s.enable_native_coarse('local-exporter')
+        self.assertEqual(first, s.procedure_id)
+        self.assertIsNone(s.coarse_kernel)
+        self.assertEqual(s.policy['coarse_score_kernel']['status'], 'numpy_scipy_fallback')
+
 
 if __name__ == '__main__':
     unittest.main()

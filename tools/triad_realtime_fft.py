@@ -359,6 +359,7 @@ class FFTScreen:
         self.dtype = np.complex64 if precision == 'fp32' else np.complex128
         self.real_dtype = np.float32 if precision == 'fp32' else np.float64
         self.precision = precision
+        self.coarse_kernel = None
         self.workers = _integer(workers, 'workers')
         self.batch_size = _integer(frequency_batch_size, 'frequency batch size')
         self.memory_limit_bytes = _integer(memory_limit_bytes, 'memory limit')
@@ -762,6 +763,64 @@ class FFTScreen:
                 workers=self.workers if workers is None else workers)
         return spectra
 
+    def enable_native_coarse(self, exporter):
+        """Use only the current native exporter's colocated, versioned kernel."""
+        from triad_coarse_kernel import CoarseRank2Kernel
+
+        try:
+            self.coarse_kernel = CoarseRank2Kernel(exporter)
+        except (OSError, AttributeError):
+            self.coarse_kernel = None
+            receipt = dict(status='numpy_scipy_fallback',
+                reason='native_rank2_kernel_unavailable_or_version_mismatch')
+        else:
+            receipt = dict(status='native_rank2_with_canonical_fallback',
+                arithmetic='FP64 ordered quadratic form; configured FFT precision unchanged',
+                fallback='Guarded/rank-deficient Grams, other ray counts, nonfinite or tied peak frontiers, and K>2 retain canonical arithmetic and selection.')
+        if self.policy.get('coarse_score_kernel') == receipt:
+            return
+        if not hasattr(self, '_coarse_kernel_procedure_base'):
+            self._coarse_kernel_procedure_base = self.procedure_id
+        self.policy = dict(self.policy, coarse_score_kernel=receipt)
+        self.procedure_id = _digest(dict(original=self._coarse_kernel_procedure_base,
+            coarse_score_kernel=receipt))
+
+    def _correlation_peak_rows(self, local, workspace, correlations, frequencies,
+                               *, sample_separation, top_per_bit):
+        kernel = self.coarse_kernel
+        if (kernel is None or not workspace['quadratic_explicit'] or
+                len(self.rays) != 2 or top_per_bit > 2):
+            scores = _quadratic_scores(correlations, workspace['inverse'],
+                explicit=workspace['quadratic_explicit'])/self.reference_variance
+            _append_candidate_rows(local, workspace, frequencies, scores,
+                self.arrivals, sample_separation, top_per_bit)
+            return
+        _, indices, counts = kernel(correlations, workspace['inverse'],
+            self.reference_variance, sample_separation, top_per_bit)
+        # Preserve canonical scores for global cross-CFO/workspace sorting too.
+        # Native search only needs an approximation safely outside its local
+        # comparison error envelope; publishing those values could split a tie
+        # between rows. Recompute just the at-most-two selected coordinates with
+        # the same NumPy arithmetic, including its platform SIMD contraction.
+        gather = np.where(np.arange(2)[None, :] < counts[:, None], indices, 0)
+        selected_correlations = np.take_along_axis(correlations, gather[:, None, :], axis=-1)
+        selected_scores = _quadratic_scores(selected_correlations, workspace['inverse'],
+            explicit=True)/self.reference_variance
+        for i, frequency in enumerate(frequencies):
+            if counts[i] < 0:
+                # Recompute this exceptional row in canonical arithmetic too;
+                # a numerical tie must not inherit a new rounding priority.
+                reference = _quadratic_scores(correlations[i:i+1], workspace['inverse'],
+                    explicit=True)[0]/self.reference_variance
+                selected = _candidate_peak_indices(reference, sample_separation, top_per_bit)
+                values = reference[selected]
+            else:
+                selected = indices[i, :counts[i]]
+                values = selected_scores[i, :counts[i]]
+            for lag, value in zip(selected, values, strict=True):
+                local.append(_candidate_row(workspace, frequency,
+                    self.arrivals[lag], value))
+
     def _frequency_peak_rows(self, workspace, spectra, frequencies, *,
                              sample_separation, top_per_bit, workers=None):
         """Unpruned per-CFO peaks; a tile boundary cannot change workspace NMS."""
@@ -771,16 +830,21 @@ class FFTScreen:
             products = spectra[first:stop, None, :]*workspace['transform'][None]
             correlations = fft.ifft(products, axis=-1,
                 workers=self.workers if workers is None else workers)[..., :self.lag_count]
-            scores = _quadratic_scores(correlations, workspace['inverse'],
-                explicit=workspace['quadratic_explicit'])/self.reference_variance
-            _append_candidate_rows(local, workspace, frequencies[first:stop], scores,
-                self.arrivals, sample_separation, top_per_bit)
+            self._correlation_peak_rows(local, workspace, correlations, frequencies[first:stop],
+                sample_separation=sample_separation, top_per_bit=top_per_bit)
         return local
 
     def _frequency_workspace_rows(self, spectra, frequencies, *, sample_separation, top_per_bit):
         for workspace in self.workspaces:
             yield self._frequency_peak_rows(workspace, spectra, frequencies,
                 sample_separation=sample_separation, top_per_bit=top_per_bit)
+
+    def _retained_candidates(self, rows, *, top_per_bit, separation):
+        retained = [[], []]
+        for workspace, local in zip(self.workspaces, rows, strict=True):
+            retained[workspace['bit']].extend(_select_workspace_candidates(local, top_per_bit,
+                separation, 1/(2*self.duration)))
+        return _select_bit_candidates(retained, top_per_bit)
 
     def tiled_frequency_plan(self, frequencies_hz=None, *, frequency_intervals=None,
                              top_per_bit=4, minimum_arrival_separation_seconds=None,
@@ -1210,20 +1274,15 @@ class FFTScreen:
             spectra = self._frequency_spectra(observation, frequencies)
         observation_fft_timing = _elapsed(mark)
         mark = _clock()
-        retained = [[], []]
         sample_separation = max(1, math.ceil(separation*self.output_fs))
-        frequency_separation = 1/(2*self.duration)
         if method == 'frequency':
             rows = self._frequency_workspace_rows(spectra, frequencies,
                 sample_separation=sample_separation, top_per_bit=top_per_bit)
         else:
             rows = self._lag_workspace_rows(observation, frequencies, plan['groups'],
                 sample_separation=sample_separation, top_per_bit=top_per_bit)
-        for workspace, local in zip(self.workspaces, rows, strict=True):
-            # Preserve per-workspace retention before the final per-bit merge.
-            retained[workspace['bit']].extend(_select_workspace_candidates(local, top_per_bit,
-                separation, frequency_separation))
-        retained = _select_bit_candidates(retained, top_per_bit)
+        retained = self._retained_candidates(rows, top_per_bit=top_per_bit,
+            separation=separation)
         score_timing = _elapsed(mark)
         result.update(status='proposed', reason='bounded_static_coarse_screen',
             candidates=retained[0]+retained[1], candidates_by_bit=retained,
@@ -1454,6 +1513,7 @@ class TiledFrequencySession:
                 explicit_quadratic_workspaces=sum(w['quadratic_explicit'] for w in screen.workspaces),
                 guarded_quadratic_workspaces=sum(not w['quadratic_explicit'] for w in screen.workspaces),
                 observation_ffts=plan['frequency_points'],
+                coarse_score_kernel=screen.policy.get('coarse_score_kernel'),
                 actual_fft_transform_count=plan['frequency_points']+plan['full_fft_products'],
                 estimated_peak_bytes=plan['estimated_peak_bytes'],
                 source_support_complete=True, coarse_projection_only=True,

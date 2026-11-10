@@ -94,7 +94,8 @@ class BitReceiver:
                 zero_h0_verified=True, valid_noise_statistics=True),
             quiet=dict(noise_consistent=kind == 'QUIET', projected_energy=0., threshold=1.,
                 observed_projection_modes=n, noise_upper_tail_probability=.001),
-            workspace=dict(estimated_peak_bytes=1024))
+            workspace=dict(estimated_peak_bytes=1024,
+                           memory_limit_bytes=self.arguments['memory_limit_bytes']))
 
     def close(self):
         assert not self.closed
@@ -110,9 +111,13 @@ class CompleteStreamReceiverTests(unittest.TestCase):
 
     def receiver(self, *, source=None, **arguments):
         source = PublicSource() if source is None else source
+        arguments.setdefault('continuous', False)
+        arguments.setdefault('workers', 1)
         receiver = CompleteStreamReceiver(public_manifest(), source,
-            source_identity=dict(public_key_fixture='bounded'), memory_limit_bytes=2**20,
-            maximum_slots=6, maximum_input_chunk_samples=4,
+            source_identity=dict(public_key_fixture='bounded'),
+            memory_limit_bytes=arguments.pop('memory_limit_bytes', 2**20),
+            maximum_slots=arguments.pop('maximum_slots', 6),
+            maximum_input_chunk_samples=arguments.pop('maximum_input_chunk_samples', 4),
             maximum_buffer_samples=64, maximum_gap_samples=8,
             decode_short_message=self.decode, bank_builder=bank_builder,
             receiver_factory=BitReceiver, **arguments)
@@ -182,6 +187,169 @@ class CompleteStreamReceiverTests(unittest.TestCase):
         self.assertEqual(result['status'], 'resource_limit')
         self.assertFalse(result['physical_complete'])
 
+    def test_continuous_noise_does_not_exhaust_lifetime_slots_or_diagnostics(self):
+        receiver, source = self.receiver(continuous=True, maximum_pending_messages=2,
+            recent_slot_receipts=5)
+        result = self.feed(receiver, self.record([0]*500))
+        self.assertEqual(result['status'], 'receiving')
+        self.assertEqual(result['completed_slot_count'], 500)
+        self.assertEqual(result['completed_message_count'], 0)
+        self.assertEqual(result['pending_message_count'], 0)
+        self.assertFalse(result['physical_complete'])
+        self.assertTrue(result['complete_receiver_work_covered'])
+        self.assertEqual(result['slot_classification_counts']['QUIET'], 500)
+        self.assertEqual(result['slot_receipt_count'], 5)
+        self.assertEqual([row['index'] for row in receiver.result()['slots']], list(range(495, 500)))
+        self.assertEqual(source.addresses[-1]['symbol_ordinal'], 599)
+        self.assertLessEqual(receiver._receipt_bytes, 5*16*1024)
+        self.assertLessEqual(receiver._buffer_samples, source.window+4)
+        self.decode.assert_not_called()
+
+    def test_continuous_two_messages_retain_following_buffer_and_global_address(self):
+        receiver, source = self.receiver(continuous=True, maximum_pending_messages=3,
+            recent_slot_receipts=4, maximum_input_chunk_samples=64)
+        values = self.record([1, 0, 0, 2, 0, 0])
+        result = receiver.push(0, values)
+        self.assertEqual(result['status'], 'receiving')
+        self.assertEqual(result['completed_message_count'], 2)
+        self.assertEqual(result['pending_message_count'], 2)
+        self.assertEqual(result['completed_slot_count'], 6)
+        self.assertFalse(result['physical_complete'])
+        self.assertTrue(result['complete_receiver_work_covered'])
+        self.assertEqual(result['represented_baseband_seconds'], 13.)
+        self.assertEqual(result['ingested_samples'], 28)
+        self.assertEqual(result['processed_physical_stop_sample'], 26)
+        self.assertEqual(self.decode.call_args_list, [mock.call((0,)), mock.call((1,))])
+        self.assertEqual([x['symbol_ordinal'] for x in source.addresses], list(range(100, 106)))
+        self.assertGreater(receiver._buffer_samples, 0)
+        self.assertEqual(result['messages'], [])
+        with mock.patch('triad_stream_receiver.copy.deepcopy',
+                        side_effect=AssertionError('cheap receipt must not copy stored snapshots')):
+            cheap = receiver.result(include_slots=False)
+        self.assertEqual(cheap['pending_message_count'], 2)
+        detailed = receiver.result()
+        detailed['messages'][0]['message']['received_bits'][0] = 1
+        events = receiver.drain_messages()
+        self.assertEqual([x['message']['received_bits'] for x in events], [[0], [1]])
+        self.assertEqual([(x['first_public_slot'], x['stop_public_slot']) for x in events], [(0, 3), (3, 6)])
+        self.assertEqual([x['decision_physical_stop_sample'] for x in events], [14, 26])
+        self.assertEqual(receiver.drain_messages(), [])
+
+    def test_continuous_backpressure_rejects_unconsumed_push_and_resumes_buffer(self):
+        receiver, _ = self.receiver(continuous=True, maximum_pending_messages=1,
+            recent_slot_receipts=4, maximum_input_chunk_samples=64)
+        result = receiver.push(0, self.record([1, 0, 0, 2, 0, 0]))
+        self.assertEqual(result['status'], 'message_backpressure')
+        self.assertEqual(result['completed_slot_count'], 3)
+        self.assertEqual(result['ingested_stop_sample'], 28)
+        class UnreadInput:
+            def __len__(self): raise AssertionError('backpressured input must remain untouched')
+            def __array__(self): raise AssertionError('backpressured input must remain untouched')
+        with self.assertRaisesRegex(RuntimeError, 'backpressure'):
+            receiver.push(28, UnreadInput())
+        self.assertEqual(receiver.result()['ingested_stop_sample'], 28)
+        self.assertEqual(receiver.drain_messages()[0]['message']['received_bits'], [0])
+        with self.assertRaisesRegex(RuntimeError, 'resumed'):
+            receiver.push(28, UnreadInput())
+        self.assertEqual(receiver.result()['ingested_stop_sample'], 28)
+        result = receiver.resume()
+        self.assertEqual(result['status'], 'message_backpressure')
+        self.assertEqual(result['completed_slot_count'], 6)
+        self.assertEqual(receiver.drain_messages()[0]['message']['received_bits'], [1])
+        self.assertEqual(receiver.resume()['status'], 'receiving')
+        result = receiver.push(28, np.zeros(2, complex))
+        self.assertEqual(result['ingested_stop_sample'], 30)
+        self.assertEqual(result['completed_slot_count'], 7)
+
+    def test_continuous_resync_needs_scored_quiet_and_recovers_from_old_gap(self):
+        receiver, _ = self.receiver(continuous=True, source=PublicSource(stride=10),
+            maximum_pending_messages=2, recent_slot_receipts=4, maximum_input_chunk_samples=64)
+        receiver.push(0, np.zeros(6, complex))
+        result = receiver.push(10, self.record([0, 1, 0, 0], stride=10, extra=0))
+        self.assertEqual(result['status'], 'receiving')
+        self.assertEqual(result['timestamp_gap_samples'], 4)
+        self.assertFalse(result['complete_receiver_work_covered'])
+        event = receiver.drain_messages()[0]
+        self.assertEqual(event['first_public_slot'], 2)
+        self.assertEqual(event['message']['status'], 'complete')
+        self.decode.assert_called_once_with((0,))
+
+    def test_continuous_ambiguity_is_not_discarded_until_a_quiet_boundary(self):
+        receiver, _ = self.receiver(continuous=True, maximum_pending_messages=3,
+            recent_slot_receipts=4, maximum_input_chunk_samples=64)
+        receiver.push(0, self.record([3, 1, 0, 0, 2, 0, 0]))
+        events = receiver.drain_messages()
+        self.assertEqual(events[0]['message']['status'], 'incomplete_message')
+        self.assertEqual(events[0]['message']['erasure_slot_indices'], [0])
+        self.assertEqual(events[1]['message']['status'], 'complete')
+        self.decode.assert_called_once_with((1,))
+        unresolved, _ = self.receiver(continuous=True, maximum_pending_messages=2,
+            recent_slot_receipts=4)
+        result = self.feed(unresolved, self.record([3]*6))
+        self.assertEqual(result['status'], 'receiving')
+        self.assertTrue(result['waiting_for_quiet_resynchronization'])
+        self.assertFalse(result['physical_complete'])
+        self.assertEqual(unresolved.drain_messages(), [])
+
+    def test_continuous_rejected_episode_waits_for_quiet_before_later_message(self):
+        examples = (
+            ([3]*6+[1, 0, 0, 2, 0, 0], {}, 9, 'local_slot_limit_before_physical_completion'),
+            ([1, 2, 1, 0, 1, 0, 0, 2, 0, 0], {'maximum_data_bits': 1}, 7,
+             'local_data_bit_limit_exceeded'))
+        for markers, options, fresh_slot, reason in examples:
+            with self.subTest(reason=reason):
+                self.decode.reset_mock()
+                receiver, _ = self.receiver(continuous=True, maximum_pending_messages=2,
+                    recent_slot_receipts=4, maximum_input_chunk_samples=64, **options)
+                result = receiver.push(0, self.record(markers))
+                self.assertEqual(result['status'], 'receiving')
+                self.assertFalse(result['waiting_for_quiet_resynchronization'])
+                self.assertEqual(result['rejected_episode_count'], 1)
+                result = receiver.result()
+                self.assertEqual(result['last_rejected_episode']['reason'], reason)
+                self.assertFalse(result['last_rejected_episode']['physical_complete'])
+                self.assertEqual(result['last_rejected_episode']['resynchronized_at_public_slot'], fresh_slot)
+                events = receiver.drain_messages()
+                self.assertEqual(len(events), 1)
+                self.assertEqual(events[0]['first_public_slot'], fresh_slot)
+                self.assertEqual(events[0]['message']['status'], 'complete')
+                self.decode.assert_called_once_with((1,))
+
+    def test_invalid_future_samples_do_not_poison_an_earlier_completed_message(self):
+        receiver, _ = self.receiver(continuous=True, maximum_pending_messages=2,
+            recent_slot_receipts=4, maximum_input_chunk_samples=64)
+        values = self.record([1, 0, 0, 2, 0, 0])
+        valid = np.ones(len(values), np.uint8)
+        valid[14] = 0  # First physical completion stops at14, before this sample.
+        result = receiver.push(0, values, valid)
+        self.assertEqual(result['completed_message_count'], 1)
+        self.assertEqual(receiver.drain_messages()[0]['message']['status'], 'complete')
+        self.decode.assert_called_once_with((0,))
+        self.assertFalse(result['complete_receiver_work_covered'])
+
+    def test_continuous_eof_and_cancel_do_not_complete_the_current_message(self):
+        receiver, _ = self.receiver(continuous=True, maximum_pending_messages=2,
+            recent_slot_receipts=4)
+        self.feed(receiver, self.record([1, 0]))
+        self.assertFalse(receiver.finish_input()['physical_complete'])
+        self.assertEqual(receiver.drain_messages(), [])
+        other, _ = self.receiver(continuous=True, maximum_pending_messages=2,
+            recent_slot_receipts=4)
+        self.assertFalse(other.cancel()['physical_complete'])
+        self.assertEqual(other.drain_messages(), [])
+
+    def test_continuous_default_uses_the_full_visible_worker_budget(self):
+        with mock.patch('triad_stream_receiver.resolve_cpu_budget', return_value={'threads': 12}):
+            receiver = CompleteStreamReceiver(public_manifest(), PublicSource(),
+                source_identity='public', memory_limit_bytes=4*2**20,
+                maximum_buffer_samples=64, maximum_gap_samples=8,
+                decode_short_message=self.decode, bank_builder=bank_builder,
+                receiver_factory=BitReceiver)
+        self.addCleanup(receiver.close)
+        self.assertTrue(receiver.continuous)
+        self.assertEqual(receiver.workers, 12)
+        self.assertEqual(receiver.result()['worker_allocation'], 12)
+
     def test_interior_and_leading_ambiguity_prevent_decoding_a_suffix(self):
         for markers, erased in (([1, 3, 2, 0, 0], 1), ([3, 1, 0, 0], 0)):
             with self.subTest(markers=markers):
@@ -239,6 +407,7 @@ class CompleteStreamReceiverTests(unittest.TestCase):
         def failed_builder(*args, **kwargs):
             raise MemoryError('locally bounded preparation')
         receiver = CompleteStreamReceiver(public_manifest(), PublicSource(),
+            continuous=False, workers=1,
             source_identity='public', memory_limit_bytes=2**20, maximum_slots=6,
             maximum_input_chunk_samples=4, maximum_buffer_samples=64,
             decode_short_message=self.decode, bank_builder=failed_builder,
@@ -258,6 +427,7 @@ class CompleteStreamReceiverTests(unittest.TestCase):
             row.pop('work_receipt')
             return row
         receiver = CompleteStreamReceiver(public_manifest(), PublicSource(),
+            continuous=False, workers=1,
             source_identity='public', memory_limit_bytes=2**20, maximum_slots=6,
             maximum_input_chunk_samples=4, maximum_buffer_samples=64,
             decode_short_message=self.decode, bank_builder=incomplete_builder,
@@ -267,6 +437,73 @@ class CompleteStreamReceiverTests(unittest.TestCase):
         self.assertEqual(result['status'], 'complete')
         self.assertFalse(result['complete_receiver_work_covered'])
         self.assertIsNone(result['ratio_processing_seconds_per_baseband_second'])
+
+    def test_recovery_requires_exact_integer_physical_geometry(self):
+        original = BitReceiver.receive
+        for field in ('sample_rate_hz', 'physical_first_sample', 'physical_stop_sample',
+                      'expected_samples'):
+            with self.subTest(field=field):
+                def malformed(backend, values, valid):
+                    row = original(backend, values, valid)
+                    if backend.manifest['calendar']['physical_origin_sample'] >= 8:
+                        target = row if field == 'sample_rate_hz' else row['coverage']
+                        target[field] = float(target[field])
+                    return row
+                receiver, _ = self.receiver(continuous=True, maximum_data_bits=1,
+                    maximum_pending_messages=2, recent_slot_receipts=5)
+                with mock.patch.object(BitReceiver, 'receive', malformed):
+                    result = self.feed(receiver, self.record([1, 2, 0, 0]))
+                self.assertEqual(result['status'], 'receiving')
+                self.assertTrue(result['waiting_for_quiet_resynchronization'])
+                self.assertEqual(result['recovery_quiet_slot_count'], 0)
+                self.assertFalse(result['complete_receiver_work_covered'])
+                self.assertEqual(result['slot_classification_counts']['AMBIGUOUS'], 2)
+
+    def test_recovery_workspace_receipts_cannot_silently_qualify_capacity(self):
+        original = BitReceiver.receive
+        cases = (None, {}, {'estimated_peak_bytes': -1}, {'estimated_peak_bytes': True},
+                 {'estimated_peak_bytes': '1024'}, {'estimated_peak_bytes': 1024},
+                 {'estimated_peak_bytes': 1024, 'memory_limit_bytes': False})
+        for workspace in cases:
+            with self.subTest(workspace=workspace):
+                def malformed(backend, values, valid):
+                    row = original(backend, values, valid)
+                    if backend.manifest['calendar']['physical_origin_sample'] == 8:
+                        if workspace is None:
+                            row.pop('workspace')
+                        else:
+                            row['workspace'] = workspace
+                    return row
+                receiver, _ = self.receiver(continuous=True, maximum_data_bits=1,
+                    maximum_pending_messages=2, recent_slot_receipts=5)
+                with mock.patch.object(BitReceiver, 'receive', malformed):
+                    result = self.feed(receiver, self.record([1, 2, 0, 0]))
+                self.assertEqual(result['status'], 'receiving')
+                self.assertFalse(result['waiting_for_quiet_resynchronization'])
+                self.assertFalse(result['complete_receiver_work_covered'])
+                self.assertFalse(result['workspace']['complete_preparation_receipts'])
+                self.assertIsNone(result['ratio_processing_seconds_per_baseband_second'])
+
+    def test_dsp_workspace_cannot_exceed_receiver_or_declared_budget(self):
+        original = BitReceiver.receive
+        for kind in ('peak_exceeds_receiver', 'peak_exceeds_declared', 'declared_exceeds_receiver'):
+            with self.subTest(kind=kind):
+                def over_budget(backend, values, valid):
+                    row = original(backend, values, valid)
+                    if kind == 'peak_exceeds_receiver':
+                        row['workspace']['estimated_peak_bytes'] = backend.arguments['memory_limit_bytes']+1
+                    elif kind == 'peak_exceeds_declared':
+                        row['workspace']['memory_limit_bytes'] = 1023
+                    else:
+                        row['workspace']['memory_limit_bytes'] = backend.arguments['memory_limit_bytes']+1
+                    return row
+                receiver, _ = self.receiver()
+                with mock.patch.object(BitReceiver, 'receive', over_budget):
+                    result = self.feed(receiver, self.record([1, 0, 0]))
+                self.assertEqual(result['status'], 'resource_limit')
+                self.assertFalse(result['complete_receiver_work_covered'])
+                self.assertFalse(result['physical_complete'])
+                self.assertEqual(result['diagnostic']['exception_type'], 'MemoryError')
 
     def test_recurring_build_and_decode_are_timed_but_generator_waits_are_excluded(self):
         class Clock:
@@ -285,6 +522,7 @@ class CompleteStreamReceiverTests(unittest.TestCase):
             return dict(decoded_bytes=1, filtered_text='e')
         with mock.patch('triad_stream_receiver.time.perf_counter', side_effect=clock):
             receiver = CompleteStreamReceiver(public_manifest(), PublicSource(),
+                continuous=False, workers=1,
                 source_identity='public', memory_limit_bytes=2**20, maximum_slots=6,
                 maximum_input_chunk_samples=4, maximum_buffer_samples=64,
                 decode_short_message=timed_decoder, bank_builder=timed_builder,
@@ -374,6 +612,299 @@ class NativeMessageGateHarnessTests(unittest.TestCase):
                 load.assert_called_once_with(path)
                 self.assertEqual(report['status'], 'passed' if change == 'none' else 'invalidated')
                 self.assertEqual(report['passed'], change == 'none')
+                self.assertEqual(report['mode'], 'one-message')
+
+    def test_continuous_gate_mode_is_explicit_and_boolean(self):
+        parsed = dict(source_path='/manual', source_sha256='unused', cases=[])
+        for invalid in (1, None, 'true'):
+            with self.subTest(mode=invalid), \
+                 mock.patch('triad_cases.load_cases', return_value=parsed), \
+                 self.assertRaisesRegex(ValueError, 'boolean'):
+                run_native_message_gate('/native', 2**20, continuous=invalid)
+
+
+class ControlledSlotBackend:
+    """No concurrent numerical work: exercise the real parent scheduling seam."""
+    resident_bytes = 0
+    native_workspace_bytes = 0
+
+    def __init__(self, source, **options):
+        self.source, self.total_workers = source, options['total_workers']
+        self.pending, self.allocations, self.completed = {}, [], []
+        self.release = False
+        self.reverse = True
+        self.blocking_polls = 0
+        self.closed = False
+        self.error = None
+        source.backend = self
+
+    @staticmethod
+    def input_reservation_bytes(count):
+        return 4*17*count+4*1024**2
+
+    def submit(self, index, **job):
+        assert len(self.pending) < 2
+        assert sum(value['workers'] for value in self.pending.values())+job['workers'] <= self.total_workers
+        self.pending[index] = job
+        self.allocations.append((index, job['workers']))
+
+    def poll(self, *, wait=False):
+        if not self.pending or not (wait or self.release):
+            return []
+        self.blocking_polls += int(wait)
+        from triad_slot_executor import score_public_slot
+        import time
+        index = (max if self.reverse else min)(self.pending)
+        job = self.pending.pop(index)
+        self.completed.append(index)
+        if self.error:
+            error, self.error = self.error, None
+            now = time.perf_counter()
+            return [dict(job_id=index, error_type=error, error_phase='fixture',
+                service_start_monotonic=now, service_stop_monotonic=now)]
+        result = score_public_slot(self.source, job.pop('manifest'),
+            bank_builder=bank_builder, receiver_factory=BitReceiver, **job)
+        return [dict(job_id=index, result=result,
+            service_start_monotonic=result['service_start_monotonic'],
+            service_stop_monotonic=result['service_stop_monotonic'])]
+
+    def close(self):
+        self.closed = True
+        self.pending.clear()
+
+
+class StreamPipelineTests(unittest.TestCase):
+    setUp = CompleteStreamReceiverTests.setUp
+    record = CompleteStreamReceiverTests.record
+
+    def receiver(self, **options):
+        source = PublicSource()
+        source.command = source
+        options.setdefault('maximum_pending_messages', 4)
+        receiver = CompleteStreamReceiver(public_manifest(), source,
+            source_identity={}, memory_limit_bytes=64*1024**2, workers=12,
+            decode_short_message=self.decode, bank_builder=bank_builder,
+            receiver_factory=BitReceiver, maximum_slots=8,
+            maximum_input_chunk_samples=options.pop('maximum_input_chunk_samples', 32),
+            maximum_buffer_samples=128,
+            maximum_gap_samples=8, recent_slot_receipts=8,
+            process_backend_factory=ControlledSlotBackend, **options)
+        self.addCleanup(receiver.close)
+        return receiver, source
+
+    def test_async_ingress_lone_full_budget_then_pair_and_ordered_commit(self):
+        receiver, source = self.receiver()
+        values = self.record([1, 1, 2, 0, 0])
+        first = receiver.push(0, values[:8])
+        self.assertEqual(first['completed_slot_count'], 0)
+        self.assertEqual(source.backend.allocations, [(0, 12)])
+        later = receiver.push(8, values[8:])
+        self.assertEqual(later['ingested_samples'], len(values))
+        self.assertEqual(source.backend.allocations, [(0, 12)])
+        self.assertFalse(later['complete_receiver_work_covered'])
+        result = receiver.resume(wait=True)
+        self.assertEqual(result['completed_slot_count'], 5)
+        self.assertEqual(source.backend.allocations, [(0, 12), (1, 6), (2, 6), (3, 6), (4, 6)])
+        self.assertEqual(source.backend.completed, [0, 2, 1, 4, 3])
+        self.assertEqual(result['received_samples_through_decision'], 22)
+        self.assertTrue(result['complete_receiver_work_covered'])
+        self.assertEqual(receiver.drain_messages()[0]['message']['received_bits'], [0, 0, 1])
+
+    def test_two_ready_windows_share_budget_immediately(self):
+        receiver, source = self.receiver()
+        receiver.push(0, np.zeros(10, complex))
+        self.assertEqual(source.backend.allocations, [(0, 6), (1, 6)])
+        self.assertEqual(receiver.resume(wait=False)['completed_slot_count'], 0)
+        self.assertEqual(receiver.resume()['completed_slot_count'], 2)
+
+    def test_shared_spawn_auxiliary_is_reserved_once_before_launch_and_after_fallback(self):
+        receiver, source = self.receiver()
+        before = receiver._reserved_bytes()
+        reserve = 32*1024**2
+        factory = receiver._backend_factory
+        def launch(*args, **kwargs):
+            self.assertEqual(receiver._reserved_bytes(), before+reserve)
+            return factory(*args, **kwargs)
+        receiver._backend_factory = launch
+        with mock.patch('triad_stream_receiver.spawn_auxiliary_reservation_bytes', return_value=reserve):
+            receiver._ensure_backend()
+            self.assertEqual(receiver._reserved_bytes(), before+reserve)
+            receiver._disable_pipeline('fixture_workspace_fallback')
+            self.assertTrue(source.backend.closed)
+            self.assertEqual(receiver._reserved_bytes(), before+reserve)
+            receiver.close()
+            self.assertEqual(receiver.result()['workspace']['spawn_auxiliary_reserved_bytes'], reserve)
+
+    def test_tracker_prospective_reserve_can_prevent_launch_without_reducing_serial_budget(self):
+        receiver, _ = self.receiver()
+        receiver._custom_backend = False
+        receiver._backend_factory = mock.Mock()
+        before = receiver._reserved_bytes()
+        # Two24MiB owners fit64MiB; their32MiB helper changes admission.
+        owner, auxiliary = 24*1024**2, 32*1024**2
+        self.assertLess(before+2*owner, receiver.memory_limit)
+        self.assertLessEqual(receiver.memory_limit, before+2*owner+auxiliary)
+        pages = owner // __import__('os').sysconf('SC_PAGE_SIZE')
+        with mock.patch('triad_stream_receiver.Path.read_text', return_value=f'0 {pages}'), \
+                mock.patch('triad_stream_receiver.spawn_auxiliary_reservation_bytes', return_value=32*1024**2):
+            receiver._ensure_backend()
+        receiver._backend_factory.assert_not_called()
+        self.assertEqual(receiver._spawn_auxiliary_reserve, 0)
+        self.assertEqual(receiver._reserved_bytes(), before)
+        self.assertEqual(receiver._pipeline_fallback_reason, 'two_owner_startup_memory_admission')
+
+    def test_ingress_waits_only_until_space_is_available_and_keeps_pair_running(self):
+        receiver, source = self.receiver(maximum_input_chunk_samples=4)
+        for first in range(0, 20, 4):
+            receiver.push(first, np.zeros(4, complex))
+        self.assertEqual(source.backend.allocations, [(0, 12)])
+        result = receiver.push(20, np.zeros(4, complex))
+        self.assertEqual(result['completed_slot_count'], 1)
+        self.assertEqual(source.backend.allocations, [(0, 12), (1, 6), (2, 6)])
+        self.assertEqual(set(source.backend.pending), {1, 2})
+        self.assertEqual(result['ingested_samples'], 24)
+        # Accepted subsequent input supplies the next pair while this pair is
+        # still running; explicit resume remains a complete drain.
+        receiver.push(24, np.zeros(4, complex))
+        source.backend.reverse = False
+        polls = source.backend.blocking_polls
+        result = receiver.push(28, np.zeros(4, complex))
+        self.assertEqual(source.backend.blocking_polls, polls+1)
+        self.assertEqual(result['completed_slot_count'], 2)
+        self.assertEqual(set(source.backend.pending), {2, 3})
+        self.assertEqual(result['ingested_samples'], 32)
+        result = receiver.resume()
+        self.assertEqual(result['completed_slot_count'], 7)
+        self.assertEqual(source.backend.allocations[:5], [(0, 12), (1, 6), (2, 6), (3, 6), (4, 6)])
+
+    def test_workspace_rejection_closes_children_and_retries_once_full_budget(self):
+        receiver, source = self.receiver()
+        receiver.push(0, np.zeros(10, complex))
+        source.backend.error = 'MemoryError'
+        result = receiver.resume()
+        self.assertEqual(result['status'], 'receiving')
+        self.assertTrue(source.backend.closed)
+        self.assertEqual(result['slot_pipeline']['workspace_retry_count'], 1)
+        self.assertEqual(result['slot_pipeline']['serial_fallback_reason'], 'bounded_child_workspace_rejection')
+        self.assertEqual([slot['slot_workers'] for slot in receiver.result()['slots']], [6, 12])
+        receiver.push(10, np.zeros(4, complex))
+        self.assertEqual(receiver.result()['slots'][-1]['slot_workers'], 12)
+
+    def test_worker_failure_is_terminal_without_retry(self):
+        receiver, source = self.receiver()
+        receiver.push(0, np.zeros(6, complex))
+        source.backend.error = 'RuntimeError'
+        result = receiver.resume()
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['slot_pipeline']['workspace_retry_count'], 0)
+        self.assertTrue(source.backend.closed)
+        self.assertFalse(result['physical_complete'])
+
+    def test_eof_drains_captured_jobs_without_inventing_quiet(self):
+        receiver, source = self.receiver()
+        receiver.push(0, self.record([1, 2], extra=0))
+        result = receiver.finish_input()
+        self.assertEqual(result['status'], 'input_ended')
+        self.assertEqual(result['completed_slot_count'], 2)
+        self.assertFalse(result['physical_complete'])
+        self.decode.assert_not_called()
+        with self.assertRaises(RuntimeError):
+            receiver.push(10, np.zeros(2, complex))
+
+    def test_cancel_closes_inflight_owners_without_completion(self):
+        receiver, source = self.receiver()
+        receiver.push(0, np.zeros(10, complex))
+        result = receiver.cancel()
+        self.assertTrue(source.backend.closed)
+        self.assertEqual(result['status'], 'cancelled')
+        self.assertEqual(result['completed_slot_count'], 0)
+        self.assertEqual(result['pending_message_count'], 0)
+
+    def test_output_backpressure_preserves_unread_and_rejects_new_input(self):
+        receiver, source = self.receiver(maximum_pending_messages=1)
+        values = self.record([1, 0, 0, 2, 0, 0], extra=0)
+        receiver.push(0, values)
+        result = receiver.resume()
+        self.assertEqual(result['status'], 'message_backpressure')
+        before = result['ingested_samples']
+        with self.assertRaisesRegex(RuntimeError, 'backpressure'):
+            receiver.push(len(values), np.zeros(2, complex))
+        self.assertEqual(receiver.result()['ingested_samples'], before)
+        self.assertEqual(receiver.drain_messages()[0]['message']['received_bits'], [0])
+        result = receiver.resume()
+        self.assertEqual(receiver.drain_messages()[0]['message']['received_bits'], [1])
+        receiver.resume()
+        self.assertEqual(receiver.push(len(values), np.zeros(2, complex))['ingested_samples'], before+2)
+
+    def test_future_gap_does_not_poison_prior_completed_episode(self):
+        receiver, source = self.receiver()
+        receiver.push(0, self.record([1, 0, 0], extra=0))
+        receiver.push(16, np.zeros(2, complex))  # Gap14..16 lies after the first decision.
+        result = receiver.resume()
+        self.assertEqual(receiver.drain_messages()[0]['message']['decoded_content']['filtered_text'], 'e')
+        self.assertEqual(result['timestamp_gap_samples'], 2)
+        self.assertEqual(result['received_samples_through_decision'], 16)
+        self.assertFalse(result['complete_receiver_work_covered'])
+
+    def test_shutdown_failure_is_terminal_and_retains_owner_reservation(self):
+        receiver, source = self.receiver()
+        receiver.push(0, np.zeros(6, complex))
+        close = source.backend.close
+        source.backend.close = mock.Mock(side_effect=RuntimeError('owner did not exit'))
+        result = receiver.cancel()
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['reason'], 'slot_owner_shutdown_failed')
+        self.assertIs(receiver._backend, source.backend)
+        with self.assertRaises(RuntimeError):
+            receiver.resume()
+        with self.assertRaises(RuntimeError):
+            receiver.push(6, np.zeros(2, complex))
+        source.backend.close = close
+
+    def test_interrupted_ordered_commit_cannot_resume_partial_parent_state(self):
+        receiver, source = self.receiver()
+        receiver.push(0, np.zeros(10, complex))
+        original = receiver._commit_slot
+        def interrupted(job, result):
+            original(job, result)
+            raise KeyboardInterrupt()
+        receiver._commit_slot = interrupted
+        with self.assertRaises(KeyboardInterrupt):
+            receiver.resume()
+        self.assertEqual(receiver.result()['status'], 'cancelled')
+        self.assertTrue(source.backend.closed)
+        with self.assertRaises(RuntimeError):
+            receiver.resume()
+
+    def test_eof_with_output_backpressure_drains_after_event_consumption(self):
+        receiver, source = self.receiver(maximum_pending_messages=1)
+        receiver.push(0, self.record([1, 0, 0, 2, 0, 0], extra=0))
+        self.assertEqual(receiver.finish_input()['status'], 'message_backpressure')
+        self.assertEqual(receiver.drain_messages()[0]['message']['received_bits'], [0])
+        self.assertEqual(receiver.resume()['status'], 'message_backpressure')
+        self.assertEqual(receiver.drain_messages()[0]['message']['received_bits'], [1])
+        self.assertEqual(receiver.resume()['status'], 'input_ended')
+        self.assertTrue(source.backend.closed)
+
+    def test_service_union_excludes_caller_idle_and_does_not_double_charge_wait(self):
+        receiver, _ = self.receiver()
+        from triad_stream_receiver import _ServiceUnion
+        receiver._service_clock, receiver._slot_clock = _ServiceUnion(), _ServiceUnion()
+        receiver._jobs = {0: dict(submitted=1., finished=False)}
+        with mock.patch('triad_stream_receiver.time.perf_counter', side_effect=[1., 2., 2.]):
+            began = receiver._begin_service()
+            receiver._account_parent(began)
+        with mock.patch('triad_stream_receiver.time.perf_counter', side_effect=[5., 8., 8.]):
+            began = receiver._begin_service()
+            receiver._record_worker(dict(service_start_monotonic=1.5, service_stop_monotonic=7.))
+            receiver._jobs.clear()
+            receiver._account_parent(began)
+        self.assertEqual(receiver._service, 7.)  # union[1,8], no repeated[5,7]
+        self.assertEqual(receiver._slot_service, 5.5)
+        with mock.patch('triad_stream_receiver.time.perf_counter', side_effect=[20., 21., 21.]):
+            began = receiver._begin_service()
+            receiver._account_parent(began)
+        self.assertEqual(receiver._service, 8.)
 
 
 def native_gate_main(arguments):
@@ -391,12 +922,15 @@ def native_gate_main(arguments):
                         help='current manual list; defaults to the maintained source')
     parser.add_argument('--memory-bytes', type=int)
     parser.add_argument('--workers', type=int, default=1)
+    parser.add_argument('--continuous', action='store_true',
+                        help='exercise default continuous mode through one extra native quiet slot')
     args = parser.parse_args(arguments)
     memory = args.memory_bytes
     if memory is None:
         memory = machine_resources()['memory_budget_bytes']
     report = run_native_message_gate(args.native_message_gate, memory, workers=args.workers,
-        case_list=args.case_list, progress=lambda message: print(message, flush=True))
+        case_list=args.case_list, continuous=args.continuous,
+        progress=lambda message: print(message, flush=True))
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2, allow_nan=False)+'\n')

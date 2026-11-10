@@ -108,6 +108,38 @@ void protected_tail() {
     check(s.helper_end==s.support_end,"exact protected endpoint was extended");
 }
 
+void indexed_public_calendar() {
+    // Compare direct indexing with the original recurrence across Helper
+    // punctuation, fractional halos, waits, and long-bit geometries.
+    for(bool helper:{false,true})for(unsigned wait:{0U,1U,3U})
+        for(std::uint64_t duration:{8ULL,40ULL,38ULL*86400}) {
+            auto c=config(duration,wait,helper);
+            c.leading_halo_samples=17;
+            c.support_samples=c.bit_samples+193;
+            c.helper_tail_samples=helper?37:0;
+            HelperBurstPlan p(c);
+            const HelperBurstCoordinate earliest{epoch+1,73};
+            auto current=p.first_slot(earliest);
+            for(std::uint64_t i=0;i<128;++i) {
+                check(p.slot_at(earliest,i)==current,"indexed calendar differs from successors");
+                current=p.successor(current);
+            }
+            const auto first=p.slot_at(earliest,0),next=p.slot_at(earliest,1);
+            const auto distant=p.slot_at(earliest,1000000);
+            check(distant.index==1000000 &&
+                  distant.support_begin.epoch-first.support_begin.epoch==
+                    1000000*(next.support_begin.epoch-first.support_begin.epoch),
+                  "distant indexed public slot lost its constant stride");
+            check(distant.pattern_begin.phase==first.pattern_begin.phase,
+                  "indexed public slot lost fractional pulse phase");
+        }
+    HelperBurstPlan p(config());
+    rejects([&]{p.slot_at({epoch,0},std::numeric_limits<std::uint64_t>::max());},
+            "indexed public calendar multiplication overflow accepted");
+    rejects([&]{p.slot_at({std::numeric_limits<std::uint64_t>::max()-100,0},2);},
+            "indexed public calendar addition overflow accepted");
+}
+
 void rejection_boundaries() {
     auto c=config();c.sample_rate=0;
     rejects([&]{HelperBurstPlan p(c);},"zero sample clock accepted");
@@ -137,7 +169,8 @@ void rejection_boundaries() {
 
 int main() {
     try {
-        grid_and_geometry();waits_and_quiet_intervals();protected_tail();rejection_boundaries();
+        grid_and_geometry();waits_and_quiet_intervals();protected_tail();
+        indexed_public_calendar();rejection_boundaries();
         std::cout<<"triad Helper whole-bit calendar checks passed\n";
     } catch(const std::exception& e) {
         std::cerr<<e.what()<<'\n';return 1;

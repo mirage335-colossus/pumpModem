@@ -7,17 +7,79 @@ channel, and Helper generation share native code. The retained
 [shaping findings](triad-shaping.md), and [channel model contract](channel-models.md)
 provide relevant technique summaries and measured limits.
 
-The headless `CompleteStreamReceiver` processes captured streams using native
-public slot plans, complete fine tracking and keyed fresh banks. It decides
-physical completion from two fully scored quiet slots after DATA; transport EOF
-and received length do not choose its endpoint. Its codec returns filtered
-text. The frozen native functional gate passed: it decoded `e` (`001`) after
-three DATA slots and two scored quiet slots, while the captured-prefix EOF
-negative control remained physically incomplete. This covers one bounded
-configuration and functional path only; it is not an all-case capacity,
-physical-channel or operational qualification. This headless receiver is not
+**Current capacity scope is a configured public calendar and keyed ordinal.**
+Ordinary blind listening for independently restarted transmitters remains
+unresolved. Numerical service below 1 s/s for the configured receiver does not
+establish that broader receiver's CPU ceiling or a general always-listening
+capacity pass. See the [scope and evidence](validation.md#continuous-receiver-restructuring).
+
+The headless `CompleteStreamReceiver` defaults to continuous listening on a
+configured public calendar, using native slot plans, complete fine tracking
+and keyed fresh banks. It keeps listening through noise and after completed
+messages. Two fully scored quiet slots after DATA establish physical completion;
+transport EOF and received length do not choose its endpoint. Its codec returns
+filtered text. The native functional gate checks `e` (`001`) after three DATA
+slots and two scored quiet slots, plus a captured-prefix EOF negative control
+that must remain physically incomplete. Its continuous variant also scores a
+sixth quiet slot and remains listening after draining the completed message.
+This covers one bounded configuration and functional path only; it is not an
+all-case capacity, physical-channel or operational qualification. This headless receiver is not
 connected to the ordinary Robust GUI. GUI controls remain visible, but Robust
 GUI transmission/reception is unavailable pending reconnection.
+
+Continuous listening keeps the global public slot/keyed ordinal while resetting
+bounded per-message codec state. It retains future buffered input, bounds recent
+diagnostics and unread completed messages, and rejects new input before consuming
+it when that output queue is full. Call `drain_messages()` to take completed
+messages, then `resume(wait=True)` to drain already accepted ready/in-flight
+work; repeat as needed before retrying the unchanged rejected input.
+`resume(wait=False)` polls without waiting. EOF drains accepted work but never
+invents scored quiet. An over-limit or invalid episode is rejected;
+fully scored quiet is required before rearming, rather than decoding a suffix.
+This configured-calendar listener does not discover an ordinary restarted
+transmitter's independent onset and ordinal-zero message. Finite callers retain
+explicit `continuous=False`; continued-listening checks cover the configured
+calendar only.
+
+For the canonical continuous native path, `slot_processes=None` admits up to two
+persistent process owners when the shared memory budget permits. Each owns its
+native source, bank and mutable receiver caches. They process independent public
+windows from one captured stream while the parent commits classifications,
+quiet boundaries and codec results in order. A lone job receives the full
+logical-thread budget. At a dispatch boundary, two ready jobs share it: six each
+on this twelve-thread host, never twelve plus six. `push()` accepts bounded input
+and dispatches/polls work without waiting for each slot; it may wait when the
+bounded backlog is full. Explicit `slot_processes=1`, finite mode and custom
+fixtures retain synchronous processing.
+
+Admission counts all resident owners, lookahead input and IPC buffers. A memory
+admission or full-window workspace failure closes the owners and latches the
+full-budget serial fallback; attempted work remains charged. Other failures
+stop processing rather than silently retrying another path. This pipeline's
+current qualification is in the [validation record](validation.md#continuous-receiver-restructuring).
+On the qualified row-7 five-window capture, cold complete receive time fell
+from 21.679 to 18.952 seconds (12.58%), including owner startup; average busy
+cores rose from 2.909 to 3.566. A subsequent accounting correction reserved the
+shared multiprocessing resource tracker, with a fresh three-window parity and
+resource check. This is bounded row-7 evidence, not full twelve-thread saturation
+or all-eight-row parallel capacity qualification. The
+[current all-eight serial forecasts](validation.md#complete-headless-robust-and-manual-capacity)
+reuse reviewed unchanged DSP costs with fresh controller costs; they remain a
+separate execution mode. Automatic serial fallback also
+retains auxiliary-process memory and must not inherit explicit
+`slot_processes=1` qualification.
+
+A tested fresh-onset prototype was removed after it admitted an existing active
+signal under the wrong new-message hypothesis. A DATA-versus-noise threshold
+does not distinguish a fresh transmission from an already occupied signal.
+The next design needs staged or Helper-assisted acquisition and an explicit
+occupied-signal comparison, with declared missed-start and false-start limits.
+Do not reset the keyed ordinal at every quiet boundary or repeat the entire
+long observation at every 30-second candidate start. Different native epochs
+use independent keyed waveform material, so overlapping UTC spans alone do not
+permit reuse of the old waveform prefix. Preserve these findings rather than
+restoring the failed prototype; details are in the
+[validation record](validation.md#continuous-receiver-restructuring).
 
 Receiver orchestration must preserve the **full available logical CPU worker
 budget** by default. Power or thermal limiting and temporary/minor benchmark
@@ -27,21 +89,30 @@ overrides explicit and stage dispatch sized to useful work, following the
 
 CPU fine processing fuses native render, projection and sufficient statistics
 across independent candidate tiles in that same pool. Two ready segment blocks
-share a dispatch wave; each channel model advances them chronologically before
-global pruning. Exact bit-pair geometry and recurring native source lanes are
-reused. Large CPU observations use bounded FIR tiles. Matched broad fine work
-improved 1.66–1.75×, but full receiver saturation remains unproven. Preserve the
-shared budget and sequential state semantics when removing remaining
-bottlenecks. See the [restructuring evidence](validation.md#receiver-restructuring)
-and [complete-suite results](validation.md#complete-headless-robust-and-manual-capacity).
+share a dispatch wave. Supported one-/two-tap FP64 Gaussian updates also run in
+native candidate tiles across the available budget, sharing Gram validation
+across coherence models. Each state advances chronologically; publication and
+global pruning wait for the required tile results. Generic callbacks, erasures
+and device paths retain their bounded reference processing. Exact bit-pair
+geometry and recurring native source lanes are reused, and large observations
+use bounded FIR tiles.
+
+The CPU coarse path shares immutable observation spectra across workspace
+partitions. Supported two-ray batches combine quadratic scoring and bounded
+peak selection in a native call, with ambiguity fallback and canonical retained
+scores preserving selection semantics. These changes target useful work within
+one received stream. They do not establish full receiver saturation or allow
+old timing calibration to qualify changed CPU work. See the
+[continuous receiver restructuring](validation.md#continuous-receiver-restructuring)
+and [earlier restructuring evidence](validation.md#receiver-restructuring).
 The [interactive architecture report](receiver-parallelism.html) distinguishes
 necessary state dependencies from implementation barriers. Its
-[cycle timeline](receiver-parallelism.html#cycle) shows measured controller and
-worker intervals, with separate signal-time coordinates, and explains where
-next-batch preparation could overlap current work. The pipeline and stage-speedup
-explorers are explicitly hypothetical. Its source and measurement
-identities are pinned in the report; recheck them before applying its numbers
-to changed receiver code.
+[cycle timeline](receiver-parallelism.html#cycle) preserves the pre-change
+`3b423f9` controller and worker trace, including its former three-job Gaussian
+waves. It is historical evidence, not a trace of the new native state batches.
+Separate signal-time coordinates explain where next-batch preparation could
+overlap current work. The pipeline and stage-speedup explorers are explicitly
+hypothetical; use the pinned identities before applying any measured numbers.
 
 Older single-carrier Robust and standalone triad/Helper implementations are not
 supported current paths. Protocol breaks belong in a new Git tag and a separate
@@ -99,6 +170,11 @@ python3 tools/triad_manual_cases.py \
   --exporter build/dev/triad_helper_export \
   --workspace-mib 3840
 ```
+
+This command's per-row service estimates use sequential windows at the full
+worker allocation. Its continuous native functional gate does not qualify the
+default two-owner pipeline's capacity across the manual rows. Report the
+execution mode explicitly; all-row parallel capacity remains unqualified.
 
 The suite rereads `_tests-RobustModem.md` on every invocation. Repeatable
 `--case-index N` is for a clearly marked partial debugging rerun; it does not

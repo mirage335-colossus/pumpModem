@@ -73,6 +73,18 @@ public:
         return make_slot(add_checked(current.index,1),ceil_grid(std::max(earliest,minimum)));
     }
 
+    // Every support starts on the UTC30-second grid. Translating by one
+    // recurrence therefore preserves both sample phase and Helper's modulo2
+    // punctuation phase, including fractional halos and multi-day bits.
+    // Compute a distant public slot without walking all its predecessors.
+    HelperBurstSlot slot_at(HelperBurstCoordinate earliest_support,std::uint64_t index) const {
+        const auto first=first_slot(earliest_support);
+        if(!index)return first;
+        const auto next=successor(first);
+        const auto stride=next.support_begin.epoch-first.support_begin.epoch;
+        return make_slot(index,{add_checked(first.support_begin.epoch,multiply(index,stride)),0});
+    }
+
     HelperBurstCoordinate add(HelperBurstCoordinate value,std::uint64_t samples) const {
         check_phase(value);
         const auto fraction=static_cast<std::uint64_t>(value.phase)+samples%config_.sample_rate;

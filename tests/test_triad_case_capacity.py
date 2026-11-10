@@ -19,6 +19,13 @@ def component(point, low=None, high=None):
 
 
 class CapacityTests(unittest.TestCase):
+    def test_configured_capacity_never_supplies_a_blind_discovery_estimate(self):
+        result=capacity.unqualified_blind_capacity(6750.)
+        self.assertEqual(result['status'],'unqualified')
+        self.assertIsNone(result['ratio_processing_seconds_per_baseband_second'])
+        self.assertEqual(result['naive_full_window_attempt_density_multiplier'],225.)
+        self.assertIn('not a CPU estimate',result['naive_density_scope'])
+
     def test_noise_stage_calibration_never_drains_partial_coarse_search(self):
         receiver, session = object(), Mock()
         coordinates = ((1,0.,0.,0.),)
@@ -141,6 +148,29 @@ class CapacityTests(unittest.TestCase):
         self.assertEqual(merged['model_status'],'unresolved')
         self.assertEqual(combine_components({'fine':merged},complete_work_covered=True)['realtime_status'],
                          'unresolved')
+
+    def test_lower_point_missing_interval_or_model_cannot_hide_in_a_maximum(self):
+        interval='ratio_processing_seconds_per_baseband_second_interval'
+        for field in (interval,'model_status'):
+            lower=component(.05)
+            lower.pop(field)
+            merged=_larger_component([component(.1),lower])
+            result=combine_components({'fine':merged},complete_work_covered=True)
+            self.assertEqual(result['realtime_status'],'unresolved')
+            if field==interval:self.assertIsNone(merged[interval])
+            else:self.assertEqual(merged['model_status'],'unresolved')
+        lower=component(.05);lower['model_status']='unrecognized'
+        self.assertEqual(_larger_component([component(.1),lower])['model_status'],'unresolved')
+
+    def test_maximum_keeps_lower_bound_from_an_incomplete_required_stratum(self):
+        missing=dict(model_status='unresolved',measured_complete_component_lower_bound=1.1)
+        for rows in ((component(.1),missing),(missing,)):
+            merged=_larger_component(rows)
+            self.assertEqual(merged['measured_complete_component_lower_bound'],1.1)
+            self.assertIsNone(merged.get('ratio_processing_seconds_per_baseband_second_interval'))
+            result=combine_components({'search':merged},complete_work_covered=False)
+            self.assertEqual(result['realtime_status'],'fail')
+            self.assertFalse(result['complete_work_covered'])
 
     def test_state_ceiling_requires_real_boundary_work_in_both_lanes(self):
         from copy import deepcopy

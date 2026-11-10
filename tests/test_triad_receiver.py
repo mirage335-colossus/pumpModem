@@ -116,6 +116,25 @@ class CompleteReceiverTests(unittest.TestCase):
             self.assertEqual(work_limit['slot_classification'], 'AMBIGUOUS')
             self.assertEqual(work_limit['status'], 'unresolved')
 
+    def test_frequency_partitions_share_one_observation_transform(self):
+        for workers in (1, 4):
+            receiver, m, source, _ = self.inputs(workers)
+            receiver.screen.correlation_method = 'frequency'
+            receiver.screen.workers = 12  # Bank preparation must not override this receiver's budget.
+            raw = waveform(m, source, 1, 1, .035, .2, 0.)
+            valid = np.ones(len(raw), np.uint8)
+            with receiver:
+                receiver._input(raw, valid)
+                original = receiver.screen._frequency_spectra
+                with mock.patch.object(receiver.screen, '_frequency_spectra', wraps=original) as transform:
+                    actual = receiver._coarse(raw, valid, [[-.4, .4]])
+                self.assertEqual(transform.call_count, 1)
+                self.assertEqual(transform.call_args.kwargs['workers'], workers)
+                self.assertTrue(actual['work']['shared_observation_spectra'])
+                expected = receiver.screen.score(raw, frequency_intervals=[[-.4, .4]],
+                    top_per_bit=receiver.policy['top_per_bit'])
+            self.assertEqual(actual['candidates'], expected['candidates'])
+
     def test_bounded_fine_probe_keeps_original_physical_source_clock(self):
         receiver, m, source, _ = self.inputs()
         raw = 20*waveform(m, source, 1, 1, 0., 0., 0.)

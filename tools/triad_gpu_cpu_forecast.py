@@ -8,6 +8,7 @@ last local observation is reserved for an independent timing check.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -15,7 +16,7 @@ from pathlib import Path
 from statistics import fmean
 import time
 
-from triad_case_capacity import combine_components
+from triad_case_capacity import combine_components, _larger_component, unqualified_blind_capacity
 from triad_case_suite import identity, same_measured_source, write_result
 from triad_cases import DEFAULT_CASES, ROOT, load_cases
 
@@ -65,6 +66,12 @@ def _require(condition, reason):
 
 def _select(row, keys):
     return {key: row[key] for key in keys}
+
+
+def _capacity_metadata(report):
+    return dict(capacity_scope=report.get('capacity_scope','historical-unspecified'),
+        blind_fresh_start_capacity=copy.deepcopy(report.get(
+            'blind_fresh_start_capacity',unqualified_blind_capacity())))
 
 
 def _useful(row):
@@ -428,19 +435,7 @@ def _forecast_row(cpu, gpu, *, allow_approximation=False, transfer=False, target
         complete_fine_search=rows['nominal_fine']),complete_work_covered=True)
 
     def maximum(names):
-        group = [rows[name] for name in names]
-        if any(RATIO not in row for row in group):
-            return {'model_status':'unresolved'}
-        chosen = max(group,key=lambda row:row[RATIO]).copy()
-        if all(row[INTERVAL] is not None for row in group):
-            chosen[INTERVAL] = [max(row[INTERVAL][i] for row in group) for i in (0,1)]
-        else:
-            chosen[INTERVAL] = None
-        if any(row['model_status']=='unresolved' for row in group):
-            chosen['model_status'] = 'unresolved'
-        chosen['measured_complete_component_lower_bound'] = max(
-            row.get('measured_complete_component_lower_bound',0.) for row in group)
-        return chosen
+        return _larger_component(tuple(rows[name] for name in names))
 
     ceiling = combine_components(dict(common,
         acquisition=maximum(_ACQUISITION_TIMING),complete_fine_search=maximum(_FINE_TIMING)),
@@ -449,6 +444,8 @@ def _forecast_row(cpu, gpu, *, allow_approximation=False, transfer=False, target
         ceiling.update(realtime_status='fail',reason='nominal_service_failure')
     elif ceiling['realtime_status']=='fail' and ceiling['measured_complete_component_lower_bound']<1:
         ceiling.update(realtime_status='unresolved',reason='conservative_ceiling_point_does_not_prove_nominal_failure')
+    scope = _capacity_metadata(measurement)
+    nominal['capacity_scope']=ceiling['capacity_scope']=scope['capacity_scope']
     fixed_total = sum(common[name][RATIO] for name in _FIXED)
     nominal_names = tuple(group[0] for group in _NOMINAL_TIMING)
     independent_nominal = [rows[name].get('independent_local_holdout',{}).get(RATIO) for name in nominal_names]
@@ -456,7 +453,7 @@ def _forecast_row(cpu, gpu, *, allow_approximation=False, transfer=False, target
     unadjusted = (fixed_total+sum(rows[name]['calibrated_point_before_gpu_scaling'] for name in nominal_names)
                   if held is not None else None)
     return dict(components=rows, missing_or_mismatched=missing, nominal_service=nominal,
-        complete_capacity=ceiling, local_workspace=measurement['workspace_margin'],
+        complete_capacity=ceiling, local_workspace=measurement['workspace_margin'], **scope,
         combined_independent_local_nominal_holdout_s_per_s=held,
         combined_nominal_relative_cpu_fit_error=(unadjusted/held-1 if held else None),
         combined_nominal_relative_gpu_forecast_error=(nominal[RATIO]/held-1
@@ -865,7 +862,8 @@ def estimate(cpu, gpu, parsed, source, runtime, cpu_budget, *, holdout=None, hol
         donor_index=donors.get(index,index)
         transfer=index!=donor_index
         target_noise = None
-        row=dict(case_index=index, heading=case['heading'],configuration_hash=case['configuration_hash'])
+        row=dict(case_index=index, heading=case['heading'],configuration_hash=case['configuration_hash'],
+            **_capacity_metadata(local.get(donor_index,{}).get('measurement',{})))
         if transfer:
             row['cross_case_calibration'] = dict(donor_case_index=donor_index,
                 donor_manual_list_sha256=cpu.get('input',{}).get('source_sha256'),
@@ -973,7 +971,7 @@ def estimate(cpu, gpu, parsed, source, runtime, cpu_budget, *, holdout=None, hol
               'conditional_estimates' if all(row['status']=='conditional_estimate' for row in rows) else
               'complete_point_estimates_with_unresolved_support')
     return dict(schema='triad-gpu-local-cpu-forecast-v2', cases=rows,
-        status=status,
+        status=status, **_capacity_metadata(cpu),
         nominal_point_estimates=sum(row.get('nominal_service',{}).get(RATIO) is not None for row in rows),
         ceiling_point_estimates=sum(row.get('complete_capacity',{}).get(RATIO) is not None for row in rows),
         source_revision=source['revision'], manual_list_sha256=parsed['source_sha256'],
@@ -1233,8 +1231,11 @@ def main(argv=None):
         write_result(args.output,result)
     except (OSError,ValueError,RuntimeError) as error:
         parser.error(str(error))
-    print(json.dumps(dict(status=result['status'],phase_refresh=result['phase_refresh']['status']))
-          if args.refresh_cpu_phase else result['status'])
+    summary=dict(status=result['status'],capacity_scope=result['capacity_scope'],
+                 blind_fresh_start_capacity=result['blind_fresh_start_capacity']['status'])
+    if args.refresh_cpu_phase:
+        summary['phase_refresh']=result['phase_refresh']['status']
+    print(json.dumps(summary))
     return 0 if result['status']=='conditional_estimates' else 2
 
 

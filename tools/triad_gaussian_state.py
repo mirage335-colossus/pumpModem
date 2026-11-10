@@ -46,6 +46,19 @@ class GaussianPrior:
             raise ValueError("Gaussian frequency must be finite")
         object.__setattr__(self, "stationary_power", power)
 
+    def _transition(self, dt):
+        """OU coefficients for an already validated block interval."""
+        if math.isinf(self.coherence_seconds):
+            decay, innovation_fraction = 1., 0.
+        else:
+            decay = math.exp(-dt / self.coherence_seconds)
+            innovation_fraction = -math.expm1(-2 * dt / self.coherence_seconds)
+        phase_cycles = self.frequency_hz * dt
+        if not math.isfinite(phase_cycles):
+            raise ValueError("Gaussian frequency/time product overflow")
+        rotation = cmath.rect(decay, 2 * math.pi * math.remainder(phase_cycles, 1.))
+        return decay, innovation_fraction, rotation
+
 
 class GaussianStateFilter:
     """Bounded-memory forward likelihood with unknown complex coefficients.
@@ -166,6 +179,20 @@ class GaussianStateFilter:
         self.finish()
         return self.mean.clone(), self.covariance.clone()
 
+    def _commit_native_batch(self, correlations, gram, mean, covariance, score, blocks,
+                             minimum_covariance, gram_repair):
+        """Publish an already joined and validated CPU FP64 state batch."""
+        if self.mean is None:
+            self._initialize(correlations, gram)
+        self.mean, self.covariance, self.log_likelihood_ratio = mean, covariance, score
+        self._worst_relative_covariance_eigenvalue = torch.minimum(
+            self._worst_relative_covariance_eigenvalue,
+            torch.tensor(minimum_covariance, dtype=torch.float64, device=score.device))
+        self._largest_relative_gram_repair = torch.maximum(
+            self._largest_relative_gram_repair,
+            torch.tensor(gram_repair, dtype=torch.float64, device=score.device))
+        self.blocks += blocks
+
     def update(self, correlations, gram, dt_seconds: float):
         """Consume one complete block and return its FP64 log-LR increment."""
         dt = float(dt_seconds)
@@ -198,15 +225,7 @@ class GaussianStateFilter:
         else:
             gram = (gram + gram.mH) * .5
 
-        if math.isinf(self.prior.coherence_seconds):
-            decay, innovation_fraction = 1., 0.
-        else:
-            decay = math.exp(-dt / self.prior.coherence_seconds)
-            innovation_fraction = -math.expm1(-2 * dt / self.prior.coherence_seconds)
-        phase_cycles = self.prior.frequency_hz * dt
-        if not math.isfinite(phase_cycles):
-            raise ValueError("Gaussian frequency/time product overflow")
-        rotation = cmath.rect(decay, 2 * math.pi * math.remainder(phase_cycles, 1.))
+        decay, innovation_fraction, rotation = self.prior._transition(dt)
         predicted_mean = self.mean * rotation
         predicted_covariance = self.covariance * (decay * decay) + self._power * innovation_fraction
         predicted_covariance = (predicted_covariance + predicted_covariance.mH) * .5

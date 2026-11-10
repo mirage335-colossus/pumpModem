@@ -167,6 +167,65 @@ class ForecastTests(unittest.TestCase):
         self.assertEqual(result['status'],'partial_coverage')
         self.assertEqual(result['missing'],['H0'])
 
+    def test_forecast_maximum_preserves_unselected_uncertainty_and_missing_work(self):
+        geometry=dict.fromkeys(forecast._GEOMETRY,1)
+        def measured(value):
+            return dict(component(value,value,value),calibrated_point_before_gpu_scaling=value,
+                        independent_local_holdout={forecast.RATIO:value})
+        measurement=dict(inference_allocation_mode='full_logical',workspace_margin={'status':'within_budget'},
+            recurring_window=dict(covers_longest_public_geometry=True,noise_only_acquisition=measured(.04)),
+            nominal_service={'components':{name:measured(.01) for name in forecast._FIXED}},
+            nominal_acquisition=measured(.02),noise_only_acquisition=measured(.01),recurring_banks=measured(.01),
+            fine_active=measured(.03),fine_terminal=measured(.06),noise_only_fine=measured(.05),
+            fine_public_state_ceiling=measured(.07),erasure_branch_holdout=dict(supported_by_state_ceiling=True,
+                sample={'physical_first_sample':0,forecast.RATIO:.01,'native_template_work':{'cache':{}}}))
+        strata={name:{} for name in forecast._FINE_STRATA}
+        strata['interior_erasure']={'records':[{'work':{'physical_first_sample':0}}]}
+        cpu=dict(public_geometry=geometry,calibration_inputs={},measurement=measurement)
+        gpu=dict(public_geometry=geometry,evaluator={},recurring_acquisition={},recurring_banks=[],
+            devices={'cuda':dict(strata=strata,data_acquisition={},noise_acquisition={})})
+        with mock.patch.object(forecast,'_acquisition',side_effect=lambda row,*a,**k:row), \
+             mock.patch.object(forecast,'_banks',side_effect=lambda row,*a,**k:row), \
+             mock.patch.object(forecast,'_nominal',side_effect=lambda row,*a,**k:row), \
+             mock.patch.object(forecast,'_branch',side_effect=lambda row,*a,**k:row), \
+             mock.patch.object(forecast,'_check_fine',return_value={}), \
+             mock.patch.object(forecast,'_work_envelope',return_value={'relative_cost_scale_interval':[1.,1.]}):
+            historical=forecast._forecast_row(cpu,gpu)
+            self.assertEqual(historical['complete_capacity']['realtime_status'],'pass')
+            self.assertEqual(historical['capacity_scope'],'historical-unspecified')
+            self.assertEqual(historical['blind_fresh_start_capacity']['status'],'unqualified')
+            self.assertIsNone(historical['blind_fresh_start_capacity'][forecast.RATIO])
+            measurement.update(capacity_scope='configured-public-calendar',
+                blind_fresh_start_capacity=forecast.unqualified_blind_capacity(90.))
+            scoped=forecast._forecast_row(cpu,gpu)
+            self.assertEqual(scoped['capacity_scope'],'configured-public-calendar')
+            self.assertEqual(scoped['nominal_service']['capacity_scope'],'configured-public-calendar')
+            self.assertEqual(scoped['complete_capacity']['capacity_scope'],'configured-public-calendar')
+            self.assertEqual(scoped['blind_fresh_start_capacity'],measurement['blind_fresh_start_capacity'])
+            self.assertIsNot(scoped['blind_fresh_start_capacity'],measurement['blind_fresh_start_capacity'])
+            # A smaller alternative is still required work: choosing a larger
+            # supported point must not conceal its unknown or missing model.
+            for model in ('future_unknown_status',None):
+                measurement['noise_only_acquisition']=measured(.01)
+                if model is None:
+                    del measurement['noise_only_acquisition']['model_status']
+                else:
+                    measurement['noise_only_acquisition']['model_status']=model
+                with self.subTest(model=model):
+                    result=forecast._forecast_row(cpu,gpu)['complete_capacity']
+                    self.assertFalse(result['all_component_models_supported'])
+                    self.assertEqual(result['realtime_status'],'unresolved')
+            measurement['noise_only_acquisition']=dict(measured(.01),**{forecast.INTERVAL:None})
+            uncertain=forecast._forecast_row(cpu,gpu)['complete_capacity']
+            self.assertIsNone(uncertain[forecast.INTERVAL])
+            self.assertNotEqual(uncertain['realtime_status'],'pass')
+            measurement['noise_only_acquisition']=dict(model_status='unresolved',
+                measured_complete_component_lower_bound=1.2)
+            missing=forecast._forecast_row(cpu,gpu)['complete_capacity']
+            self.assertFalse(missing['all_component_models_supported'])
+            self.assertEqual(missing['components']['acquisition']['measured_complete_component_lower_bound'],1.2)
+            self.assertEqual(missing['realtime_status'],'fail')
+
     def test_guard_preserves_point_and_withholds_pass_when_upper_reaches_realtime(self):
         service = dict(component(.7,.5,.9),realtime_status='pass')
         forecast._guarded_interval(service,.15)
@@ -332,6 +391,13 @@ class ForecastTests(unittest.TestCase):
         self.assertEqual(result['status'],'unresolved')
         self.assertEqual(result['nominal_point_estimates'],0)
         self.assertIn('no qualified mixed-precision work reference',result['cases'][0]['reason'])
+        self.assertEqual(result['capacity_scope'],'historical-unspecified')
+        self.assertEqual(result['blind_fresh_start_capacity']['status'],'unqualified')
+        cpu.update(capacity_scope='configured-public-calendar',
+                   blind_fresh_start_capacity=forecast.unqualified_blind_capacity())
+        result=forecast.estimate(cpu,gpu,{'cases':[case],'source_sha256':'list'},source,runtime,budget)
+        self.assertEqual(result['capacity_scope'],'configured-public-calendar')
+        self.assertEqual(result['blind_fresh_start_capacity'],cpu['blind_fresh_start_capacity'])
 
     def test_transfer_requires_same_native_domain_and_only_removes_encryption(self):
         old = dict(fields={'Encryption':True,'FHSS':'off'},native_args=['--case','hf','--encrypt','on'])

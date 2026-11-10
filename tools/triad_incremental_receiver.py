@@ -88,7 +88,7 @@ class IncrementalGaussianReceiver:
                  block_center_seconds=None, initial_channel_state=None,
                  first_block_elapsed_seconds=0., hypothesis_executor=None,
                  hypothesis_shards=1, basis_projection_workers=1,
-                 quiet_sample_bounds=None, bulk_statistics=None):
+                 quiet_sample_bounds=None, bulk_statistics=None, native_gaussian=None):
         started = time.perf_counter()
         self.sample_rate = float(sample_rate)
         if not math.isfinite(self.sample_rate) or self.sample_rate <= 0:
@@ -170,6 +170,9 @@ class IncrementalGaussianReceiver:
         if self.block_statistics is not None and (not callable(self.block_statistics) or
                 self.device.type != 'cpu' or self.dtype != torch.complex128 or bulk_statistics is not None):
             raise ValueError('mapped block statistics require the CPU FP64 state update')
+        self.native_gaussian = (native_gaussian if native_gaussian is not None and
+            self.block_statistics is not None and hypothesis_shards == 1 and
+            native_gaussian.supports(self.taps, self.candidates, len(self.coherences)) else None)
         # Determine the public block calendar without retaining an O(duration)
         # layout table. A short terminal remainder is merged into its previous
         # full block, matching the batch receiver's DFT noise convention.
@@ -241,6 +244,7 @@ class IncrementalGaussianReceiver:
         self.erased_rows = 0
         self.block_updates = 0
         self.hypothesis_update_tasks = 0
+        self.maximum_hypothesis_tasks_per_block = 0
         self._failed = False
         self.projection_modes = 0
         self.observed_projection_modes = 0
@@ -417,6 +421,7 @@ class IncrementalGaussianReceiver:
             if error is not None:
                 raise error
         self.hypothesis_update_tasks += len(jobs)
+        self.maximum_hypothesis_tasks_per_block = max(self.maximum_hypothesis_tasks_per_block, len(jobs))
 
     def _score_complete_pair(self, source, mask):
         if (self.block_statistics is None or self.projection_mode != "dft" or
@@ -441,7 +446,12 @@ class IncrementalGaussianReceiver:
             for (start, stop, projection, observation, _), pair in zip(requests, statistics, strict=True):
                 self._score_block(start, stop, source[start:stop], mask[start:stop],
                                   prepared=(projection, observation, pair), updates=updates)
-            self._advance_models(updates)
+            if self.native_gaussian is None:
+                self._advance_models(updates)
+            else:
+                jobs = self.native_gaussian(self.runtimes, updates)
+                self.hypothesis_update_tasks += jobs
+                self.maximum_hypothesis_tasks_per_block = max(self.maximum_hypothesis_tasks_per_block, jobs)
         except BaseException:
             # Some model state may already have advanced. Never publish or
             # retry an incomplete segment.
@@ -549,7 +559,7 @@ class IncrementalGaussianReceiver:
             quiet_projected_energy=self.quiet_projected_energy,
             quiet_sample_bounds=self.quiet_sample_bounds,
             hypothesis_shards=self.hypothesis_shards,
-            hypothesis_update_tasks_per_block=self.hypothesis_shards*len(self.runtimes),
+            hypothesis_update_tasks_per_block=self.maximum_hypothesis_tasks_per_block,
             hypothesis_update_tasks=self.hypothesis_update_tasks,
             pending_rows=len(self.pending), working_bytes_estimate=self.owned_bytes_estimate,
             push_process_cpu_seconds=self.push_cpu_seconds)

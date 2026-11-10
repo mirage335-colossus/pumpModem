@@ -20,6 +20,24 @@ from triad_realtime_fft import FFTScreen
 from triad_receiver import CompleteBitReceiver
 
 
+SUPPORTED_MODEL_STATUSES = frozenset(('abbreviated_holdout_supported',
+    'fixed_extent_measured_no_extrapolation', 'exact_geometry_measured',
+    'declared_geometry_holdout_supported'))
+
+
+def unqualified_blind_capacity(slot_seconds=None):
+    """Keep configured-calendar timings distinct from blind listening."""
+    result=dict(status='unqualified',ratio_processing_seconds_per_baseband_second=None,
+        reason='fresh_start_discovery_and_occupied_input_competition_not_qualified',
+        missing_work=['Independent transmitter fresh-start discovery',
+                      'New-start admission against an already active DATA waveform'],
+        scope='A configured-public-calendar capacity result does not qualify a blind continuously listening receiver.')
+    if slot_seconds is not None:
+        result.update(naive_full_window_attempt_density_multiplier=slot_seconds/30.,
+            naive_density_scope='Hypothetical full-window search at every 30-second public start, relative to one attempt per configured slot. This rejected strategy is not implemented, is not a CPU estimate, and does not supply a valid occupied-input admission rule.')
+    return result
+
+
 def public_calendar(source, *, slots=24):
     """Exact public intervals for the local 22-bit reference and two quiet slots.
 
@@ -544,9 +562,8 @@ def combine_components(components, *, complete_work_covered, workspace=None):
     interval = ([sum(pair[i] for pair in intervals) for i in (0,1)]
                 if points_complete and all(pair is not None for pair in intervals) else None)
     covered = points_complete and complete_work_covered
-    models = points_complete and all(row.get('model_status') in (
-        'abbreviated_holdout_supported', 'fixed_extent_measured_no_extrapolation',
-        'exact_geometry_measured','declared_geometry_holdout_supported') for row in usable)
+    models = points_complete and all(row.get('model_status') in SUPPORTED_MODEL_STATUSES
+                                    for row in usable)
     # A measured lower bound alone can reject a configuration, even when other
     # work is still unresolved. An omitted component can never make a pass.
     lower_bound = sum(row.get('measured_complete_component_lower_bound', 0.) for row in components.values())
@@ -1473,17 +1490,23 @@ def _scaled_component(summary,multiplier):
 
 
 def _larger_component(rows):
+    rows=tuple(rows)
+    lower=max((row.get('measured_complete_component_lower_bound',0.) for row in rows),default=0.)
     usable=[row for row in rows if row.get('ratio_processing_seconds_per_baseband_second') is not None]
-    if not usable:return dict(model_status='unresolved',reason='no_stage_measurements')
+    if not usable:return dict(model_status='unresolved',reason='no_stage_measurements',
+                              measured_complete_component_lower_bound=lower)
     chosen=max(usable,key=lambda row:row['ratio_processing_seconds_per_baseband_second'])
     result=copy.deepcopy(chosen)
-    bounds=[row.get('ratio_processing_seconds_per_baseband_second_interval') for row in usable]
+    bounds=[row.get('ratio_processing_seconds_per_baseband_second_interval') for row in rows]
     if all(bounds):
         result['ratio_processing_seconds_per_baseband_second_interval']=[
             max(pair[0] for pair in bounds),max(pair[1] for pair in bounds)]
+    else:
+        result['ratio_processing_seconds_per_baseband_second_interval']=None
     result['combination']='Maximum covered path-stratum service, not their sum.'
+    result['measured_complete_component_lower_bound']=lower
     result['model_status']=chosen.get('model_status','unresolved') if len(usable)==len(rows) and all(
-        row.get('model_status')!='unresolved' for row in usable) else 'unresolved'
+        row.get('model_status') in SUPPORTED_MODEL_STATUSES for row in usable) else 'unresolved'
     return result
 
 
@@ -1599,6 +1622,7 @@ def measure_complete_case(prepared, allocations, *, family_size, progress=print,
     acquisition_summaries = [nominal_acquisition, noise_acquisition, recurring_acquisition]
     ceiling=combine_components(dict(common, acquisition=_larger_component(acquisition_summaries),
         complete_fine_search=_larger_component(all_fine)),complete_work_covered=recurring_covered)
+    nominal['capacity_scope']=ceiling['capacity_scope']='configured-public-calendar'
     if not recurring_covered and ceiling['realtime_status']=='unresolved':
         ceiling['reason']='recurring_public_window_work_not_covered'
     # A deliberately overcounted256+256-state cold-cache/transition ceiling can prevent a
@@ -1671,6 +1695,8 @@ def measure_complete_case(prepared, allocations, *, family_size, progress=print,
         noise_only_acquisition=acquisition_cpu(noise_acquisition),
         recurring_reacquisition=acquisition_cpu(recurring_acquisition))
     return dict(status='measured_complete_work_estimate', measurement_scope='full_capacity',
+        capacity_scope='configured-public-calendar',
+        blind_fresh_start_capacity=unqualified_blind_capacity(prepared.slot_seconds),
         selected_workers=selected, inference_workers=workers, inference_allocation_mode=mode,
         allocation=allocation,nominal_service=nominal,
         **ceiling_work, fine_active=active,
@@ -1688,9 +1714,13 @@ def measure_complete_case(prepared, allocations, *, family_size, progress=print,
 def render_capacity_report(report):
     def number(value):
         return 'unresolved' if value is None else f'{value:.4g}'
+    scope=report.get('capacity_scope','historical-unspecified')
+    scope_description=('complete receiver work on a configured public calendar' if
+        scope=='configured-public-calendar' else scope)
     lines=['# Robust manual configuration capacity', '',
         f"Result: **{report['status']}**.", '',
         'This is the absolute capacity suite for the freshly read manual list. Relative degradation regression is a separate command.', '',
+        f'**Scope: {scope_description}. Blind discovery of independently restarted transmitters is unqualified and has no complete CPU estimate here. A scoped capacity pass does not establish ordinary blind-listening feasibility.**', '',
         f"Local CPU: {report['machine'].get('cpu_model')}; supported worker comparisons: {report['worker_allocations']}.",
         'CPU values are prepared elapsed processing seconds per received baseband second. A ratio of1 has no real-time margin;0.1 corresponds to90% margin. No core-count division or independent-stream scaling is used.', '',
         f"Current-source complete-message functional gate: **{report.get('message_gate',{}).get('status','not_run')}**. This one short high-SNR gate is not an all-configuration success certificate.", '',
@@ -1730,6 +1760,9 @@ def render_capacity_report(report):
                                  for name,timing in stages.items())
             lines.append(f"Observed CPU use in busy-core equivalents, weighted by measured elapsed time: {measured}. Native child counters are included where available.")
         lines.append(f"The conditional nominal service decision is {nominal.get('realtime_status', 'unresolved')}. The estimate charges the two-second prefix and finish once per slot and uses the observed continuation rate for the rest of the window.")
+        blind=result.get('blind_fresh_start_capacity',{})
+        if blind.get('naive_full_window_attempt_density_multiplier') is not None:
+            lines.append(f"Blind fresh-start discovery remains unqualified. Naively repeating a complete search every 30 seconds would require {number(blind['naive_full_window_attempt_density_multiplier'])}× as many window attempts as this configured slot cadence. This is a rejected work-density comparison, not a CPU forecast or a valid active-signal admission method.")
         recurring=result.get('recurring_window', {})
         if recurring.get('covers_longest_public_geometry'):
             lines.append(f"Recurring slot {recurring['slot_index']} exercised reacquisition on {recurring['sample_count']} samples and assembly across {recurring['ingress_samples']} ingress samples, including any public gap.")
@@ -1839,6 +1872,8 @@ def run_complete_cases(*,executable,output,case_list,measurement_seconds=1.,thre
     runtime=environment('cpu')
     report=dict(schema=('triad-manual-complete-capacity-v3' if calibration_stage is None
                         else 'triad-manual-stage-calibration-v1'),status='running',
+        capacity_scope='configured-public-calendar',
+        blind_fresh_start_capacity=unqualified_blind_capacity(),
         input={key:value for key,value in parsed.items() if key!='cases'},
         provenance=provenance,machine=machine,runtime=runtime,worker_allocations=allocations,
         workspace_limit_bytes=workspace_limit,
@@ -1862,9 +1897,9 @@ def run_complete_cases(*,executable,output,case_list,measurement_seconds=1.,thre
         report['message_gate']=dict(status='stage_calibration_only',passed=False)
     elif message_gate:
         from triad_message_gate import run_native_message_gate
-        print('current-source native message/quiet/EOF functional gate',flush=True)
+        print('current-source configured-calendar native message/quiet/rearm/EOF gate',flush=True)
         report['message_gate']=run_native_message_gate(executable,workspace_limit,
-            workers=min(2,machine['cpu']['available_cpus']),case_list=case_list,
+            workers=min(2,machine['cpu']['available_cpus']),case_list=case_list,continuous=True,
             progress=lambda line:print('  '+line,flush=True))
     else:
         report['message_gate']=dict(status='explicitly_skipped',passed=False)

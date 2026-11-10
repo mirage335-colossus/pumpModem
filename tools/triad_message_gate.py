@@ -70,7 +70,8 @@ def _public_manifest(source, first_slot):
         first_slot['receiver_window_samples'], 0, 72001)
 
 
-def _run_selected_case(executable, case, *, memory_limit_bytes, workers, progress):
+def _run_selected_case(executable, case, *, memory_limit_bytes, workers, progress,
+                       continuous=False):
     import json
     import subprocess
     from triad_continuous import NativeStream
@@ -89,6 +90,7 @@ def _run_selected_case(executable, case, *, memory_limit_bytes, workers, progres
         '--seconds', '.001', '--power-reference', 'bounded-tiles',
         '--data-bits', encoded['bits'], '--observation-slots', str(_OBSERVATION_SLOTS),
         '--thermal-noise', 'on']
+    processed_slots = _OBSERVATION_SLOTS if continuous else _PROCESSED_SLOTS
     source = None
     receiver = None
     result = dict(functional_passed=False, meaningful_failure=None)
@@ -109,7 +111,8 @@ def _run_selected_case(executable, case, *, memory_limit_bytes, workers, progres
             local_key_fixture_id=72001, public_case_hash=case['configuration_hash'])
         receiver = CompleteStreamReceiver(manifest, source, source_identity=source_identity,
             memory_limit_bytes=memory_limit_bytes, workers=workers,
-            native_executable=executable, maximum_slots=_PROCESSED_SLOTS)
+            native_executable=executable, maximum_slots=_PROCESSED_SLOTS,
+            **({} if continuous else dict(continuous=False)))
         first = checked = 0
         prefix = None
         generated_seconds = 0.
@@ -118,14 +121,15 @@ def _run_selected_case(executable, case, *, memory_limit_bytes, workers, progres
             values, valid = source.next(16384)
             generated_seconds += max(0., time.perf_counter()-began)
             if len(values) == 0:
-                receiver.finish_input()
-                result['meaningful_failure'] = 'transport_ended_before_physical_gate'
-                break
-            if prefix is None:
-                prefix = (values.copy(), valid.copy())
-            row = receiver.push(first, values, valid)
-            first += len(values)
-            count = row['message']['slots_consumed']
+                row = receiver.resume(wait=True) if continuous else receiver.finish_input()
+                if not continuous or row['completed_slot_count'] < processed_slots:
+                    result['meaningful_failure'] = 'transport_ended_before_physical_gate'
+            else:
+                if prefix is None:
+                    prefix = (values.copy(), valid.copy())
+                row = receiver.push(first, values, valid)
+                first += len(values)
+            count = row['completed_slot_count'] if continuous else row['message']['slots_consumed']
             if count > checked:
                 details = receiver.result()
                 for slot in details['slots'][checked:]:
@@ -138,22 +142,36 @@ def _run_selected_case(executable, case, *, memory_limit_bytes, workers, progres
                         result['meaningful_failure'] = 'first_completed_slot_mismatch'
                         break
                 checked = count
-            if result['meaningful_failure'] or row['status'] != 'receiving':
+            if (result['meaningful_failure'] or row['status'] != 'receiving' or
+                    continuous and count >= processed_slots or len(values) == 0):
                 break
         result.update(result=receiver.result(), simulator_generation_seconds=generated_seconds,
             public_first_slot=first_slot, receiver_manifest=manifest,
             evaluator_ingested_samples=first,
             evaluator_public_capture_samples=descriptor['total_samples'])
+        if continuous:
+            events = receiver.drain_messages()
+            resumed = receiver.resume() if row['status'] == 'receiving' else receiver.result()
+            result['continuous_receipt'] = dict(
+                constructor_default_exercised=True, completed_messages=events,
+                drained_message_count=len(events), status_after_drain_resume=resumed['status'],
+                pending_after_drain_resume=resumed['pending_message_count'],
+                slots_after_drain_resume=resumed['completed_slot_count'],
+                current_message_slots=resumed['message']['slots_consumed'],
+                scope='One supplied public calendar: DATA then scored quiet and continued listening. Independent-transmitter onset/rebinding is not qualified.')
         receiver.close()
         receiver = None
         final = result['result']
+        message = (result['continuous_receipt']['completed_messages'][0]['message']
+            if continuous and result['continuous_receipt']['completed_messages'] else final['message'])
         result['expected_vs_observed'] = dict(reference_bits=list(reference_bits),
-            observed_bits=final['message']['received_bits'], reference_text='e',
-            observed_content=final['message']['decoded_content'])
-        if not result['meaningful_failure'] and final['status'] == 'complete':
+            observed_bits=message['received_bits'], reference_text='e',
+            observed_content=message['decoded_content'])
+        if not result['meaningful_failure'] and message['status'] == 'complete':
             # A real captured prefix is insufficient to score even the first
             # complete public bit window. EOF must leave this control incomplete.
             with CompleteStreamReceiver(manifest, source, source_identity=source_identity,
+                    continuous=False,
                     memory_limit_bytes=memory_limit_bytes, workers=workers,
                     native_executable=executable, maximum_slots=_PROCESSED_SLOTS) as control:
                 control.push(0, *prefix)
@@ -162,12 +180,25 @@ def _run_selected_case(executable, case, *, memory_limit_bytes, workers, progres
                     'status', 'reason', 'physical_complete', 'complete_receiver_work_covered',
                     'ingested_samples', 'decision_physical_stop_sample')}
         result['source_close'] = source.close()
-        result['functional_passed'] = bool(not result['meaningful_failure'] and
-            final['status'] == 'complete' and final['message']['received_bits'] == list(reference_bits) and
-            final['message']['decoded_content']['filtered_text'] == 'e' and
-            final['message']['trailing_quiet_slots'] == [3, 4] and
-            not result['source_close']['complete'] and
+        completion_passed = bool(not result['meaningful_failure'] and
+            message['status'] == 'complete' and message['received_bits'] == list(reference_bits) and
+            message['decoded_content']['filtered_text'] == 'e' and
+            message['trailing_quiet_slots'] == [3, 4] and
             not result.get('prefix_eof_control', {}).get('physical_complete', True))
+        if continuous:
+            control = result['continuous_receipt']
+            events = control['completed_messages']
+            result['functional_passed'] = bool(completion_passed and
+                final['status'] == 'receiving' and not final['physical_complete'] and
+                final['completed_slot_count'] == processed_slots and len(events) == 1 and
+                events[0]['first_public_slot'] == 0 and events[0]['stop_public_slot'] == _PROCESSED_SLOTS and
+                control['status_after_drain_resume'] == 'receiving' and control['pending_after_drain_resume'] == 0 and
+                control['slots_after_drain_resume'] == processed_slots and control['current_message_slots'] == 1 and
+                [slot['public_address']['symbol_ordinal'] for slot in final['slots']] ==
+                    list(range(first_slot['symbol_ordinal'], first_slot['symbol_ordinal']+processed_slots)))
+        else:
+            result['functional_passed'] = bool(completion_passed and
+                final['status'] == 'complete' and not result['source_close']['complete'])
         return result
     except Exception as error:
         result.update(meaningful_failure='native_message_gate_runtime_error',
@@ -183,8 +214,12 @@ def _run_selected_case(executable, case, *, memory_limit_bytes, workers, progres
 
 
 def run_native_message_gate(executable, memory_limit_bytes, workers=1, *,
-                            case_list=None, progress=None):
+                            case_list=None, progress=None, continuous=False):
     """Run the optional current-source native three-bit quiet-slot gate once.
+
+    ``continuous=True`` additionally scores the sixth quiet observation slot
+    after the message event and drains/resumes the default continuous listener.
+    This configured-calendar proof does not establish new-transmitter discovery.
 
     Call before other receiver workers start: the controller fixes one
     numerical thread per hypothesis worker. This function returns evidence;
@@ -196,22 +231,26 @@ def run_native_message_gate(executable, memory_limit_bytes, workers=1, *,
     from triad_cpu import configure_numerical_threads, resolve_cpu_budget
 
     parsed = load_cases(DEFAULT_CASES if case_list is None else case_list)
-    if (isinstance(memory_limit_bytes, bool) or not isinstance(memory_limit_bytes, int) or
+    if (type(continuous) is not bool or
+            isinstance(memory_limit_bytes, bool) or not isinstance(memory_limit_bytes, int) or
             memory_limit_bytes < 1 or isinstance(workers, bool) or not isinstance(workers, int) or workers < 1):
-        raise ValueError('positive local memory and worker bounds are required')
+        raise ValueError('positive local memory/worker bounds and a boolean gate mode are required')
     executable = Path(executable).resolve()
     provenance = identity(executable)
     report = dict(schema='triad-native-message-gate-v1', status='running', passed=False,
+        mode='continuous-rearm' if continuous else 'one-message',
         input={key:value for key,value in parsed.items() if key != 'cases'},
         provenance=provenance, workers=workers,
         policy=dict(purpose='One fixed high-SNR complete native short-message functional gate, not throughput or sensitivity qualification.',
-            native_noise_cn0_db_hz=80., maximum_processed_slots=_PROCESSED_SLOTS,
+            native_noise_cn0_db_hz=80.,
+            maximum_processed_slots=_OBSERVATION_SLOTS if continuous else _PROCESSED_SLOTS,
             public_observation_slots=_OBSERVATION_SLOTS,
             maximum_candidate_plans=_MAXIMUM_CANDIDATE_PLANS,
             maximum_source_samples=_MAXIMUM_SOURCE_SAMPLES,
             maximum_window_samples=_MAXIMUM_WINDOW_SAMPLES,
             maximum_capture_samples=_MAXIMUM_CAPTURE_SAMPLES,
-            stopping='First completed-slot mismatch, runtime/resource failure, or physical completion. No retry or campaign extension.',
+            stopping=('First completed-slot mismatch, runtime/resource failure, or sixth scored slot after one physical completion. No retry or campaign extension.' if continuous else
+                'First completed-slot mismatch, runtime/resource failure, or physical completion. No retry or campaign extension.'),
             receiver_truth_boundary='Receiver gets public configuration, public slot plans and received samples only; expected bits/count/text/endpoint remain evaluator values.'))
     try:
         case, attempts = _choose_case(executable, parsed['cases'])
@@ -227,7 +266,8 @@ def run_native_message_gate(executable, memory_limit_bytes, workers=1, *,
                 raise ValueError('message gate workers exceed the visible local CPU allocation')
             report['numerical_threads'] = configure_numerical_threads(allocation)
             report.update(_run_selected_case(executable, case,
-                memory_limit_bytes=memory_limit_bytes, workers=workers, progress=progress))
+                memory_limit_bytes=memory_limit_bytes, workers=workers, progress=progress,
+                continuous=continuous))
             report['status'] = ('unsupported' if report.get('unsupported') else
                                 'passed' if report.get('functional_passed') else 'failed')
     except Exception as error:

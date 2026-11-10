@@ -66,7 +66,7 @@ class _TimingStream:
                  require_physical_map=False, maximum_map_step_samples=2.,
                  hypothesis_executor=None, hypothesis_shards=1,
                  basis_projection_workers=1,
-                 quiet_sample_bounds=None, bulk_statistics=None):
+                 quiet_sample_bounds=None, bulk_statistics=None, native_gaussian=None):
         began = time.perf_counter()
         self.sample_rate = float(sample_rate)
         if not math.isfinite(self.sample_rate) or self.sample_rate <= 0:
@@ -124,7 +124,7 @@ class _TimingStream:
             maximum_input_chunk_samples=self.segment_capacity,
             hypothesis_executor=hypothesis_executor, hypothesis_shards=hypothesis_shards,
             basis_projection_workers=basis_projection_workers,
-            bulk_statistics=bulk_statistics)
+            bulk_statistics=bulk_statistics, native_gaussian=native_gaussian)
         # The maintained receiver validates arithmetic, bands, prior and its
         # worst candidate workspace without synthesizing any source template.
         probe = IncrementalReceiver(samples=self.segment_capacity,

@@ -101,10 +101,13 @@ class ContinuousTests(unittest.TestCase):
                                   quiet_aperture_available=False, quiet_aperture_truncated=True))
         self.assertEqual(overlapping.slot_plan(1)['receiver_previous_signal_stop_sample'], 420000)
         overlapping.close.assert_not_called()
-        for index in (True, -1, 1024, 1.0):
+        for index in (True, -1, 1 << 64, 1.0):
             with self.subTest(index=index), self.assertRaises(ValueError):
                 current.slot_plan(index)
         self.assertEqual(current._request.call_count, 1)
+        distant = source(dict(receipt, index=4096, symbol_ordinal=4096))
+        self.assertEqual(distant.slot_plan(4096)['index'], 4096)
+        distant._request.assert_called_once_with('slot-plan 4096\n')
         for changes in ({'index': True}, {'index': 0}, {'sample_rate_hz': 5},
                         {'source_calendar_origin_sample': 481}, {'receiver_window_samples': 149999},
                         {'receiver_window_physical_origin_sample': 300001},

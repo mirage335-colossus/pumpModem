@@ -170,8 +170,8 @@ class NativeStream:
         code must preserve the returned global physical RX origin when slicing
         observations. This pipe transaction has one owner, like ``next``.
         """
-        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index <= 1023:
-            raise ValueError('public slot index must be an integer in[0,1023]')
+        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < (1 << 64):
+            raise ValueError('public slot index must be a uint64 integer')
         if not self.descriptor.get('slot_plan_supported', False):
             raise ValueError('native source lacks public slot planning; use a whole-bit calendar and rebuild')
         try:
@@ -388,6 +388,7 @@ def tracking_source_basis(source, coordinates, taps, offset, timing_forward, aud
     def render(states, anchor_seconds, first, stop, physical_origin, physical_offsets):
         return _render(states, anchor_seconds, first, stop, physical_origin, physical_offsets,
             fixed_affine=False)
+    render.native_gaussian = getattr(template_source, 'native_gaussian', None)
     render.cache_report = (template_source.report if template_backend == 'auto'
                            else lambda: dict(method='direct-native-mapped-reference', cache_limit_bytes=0))
     render.staging_workspace_bytes = (template_source.staging_workspace_bytes
@@ -418,6 +419,7 @@ def tracking_source_basis(source, coordinates, taps, offset, timing_forward, aud
         render.block_statistics = partial(block_statistics, fixed_affine=False)
         initial_affine.block_statistics = partial(block_statistics, fixed_affine=True)
     initial_affine.cache_report = render.cache_report
+    initial_affine.native_gaussian = render.native_gaussian
     render.initial_affine = initial_affine
     return render
 

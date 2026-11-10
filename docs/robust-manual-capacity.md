@@ -12,6 +12,14 @@ work degraded against a comparable baseline. A regression pass cannot establish
 real-time capacity. Both tools use the same efficient, predeclared statistical
 approach, with different decisions and explicitly recorded work coverage.
 
+**The implemented calibration covers complete configured-public-calendar
+receiver work. Ordinary blind discovery of independently restarted transmitters
+is unresolved.** Every capacity report must retain this scope, even when its
+configured-calendar nominal and conservative points are below 1 s/s. Those
+numbers cannot be promoted to a general always-listening CPU ceiling; missing
+fresh-start discovery and discrimination prevent that broader capacity pass.
+See the [current scope and findings](validation.md#continuous-receiver-restructuring).
+
 The current receiver implementation and validation are recorded in
 [current architecture](robust-current.md) and [validation](validation.md).
 Earlier coarse-only and isolated tracking measurements remain historical stage
@@ -29,6 +37,8 @@ optimized receiver cannot establish that outcome.
    current case list, preserve all selected channel effects, and predeclare
    complete-work strata, measurement/error budgets and stopping rules. Record
    source, native binaries, runtime, CPU allocation, workspace and arithmetic.
+   State that current calibration assumes a configured public calendar; keep
+   ordinary blind fresh-start discovery separately unresolved.
    Run the applicable cheap correctness checks before timing; do not keep
    changing the harness during the final measurements.
 2. **Use practical receiver algorithms and arithmetic.** Address dominant costs
@@ -61,6 +71,10 @@ optimized receiver cannot establish that outcome.
    budget despite thermal/power limits or minor local timing differences. Fewer
    useful tasks in one stage do not justify a global cap. Follow the
    [allocation contract](development.md#receiver-cpu-allocation).
+   For continuous listening, test useful work while a single captured stream
+   has ready input or backlog, including mostly-noise operation. Idle time after
+   catching up is expected. Buffering can trade latency for larger ready batches;
+   it cannot repair a sustained service rate slower than incoming samples.
 5. **Admit the forecast only after its checks.** Require applicable paired
    arithmetic/decision/work gates and independent local timing holdouts. Charge
    all [complete receiver work](#complete-receiver-work), including recurring
@@ -77,10 +91,12 @@ optimized receiver cannot establish that outcome.
    communication sensitivity. Missing work prevents a complete-capacity pass;
    a point at or above 1 s/s is a point failure. Identify the dominant remaining
    cost and next bounded discriminator if feasibility is unresolved.
+   Preserve the configured-calendar qualification and unresolved blind-listener
+   status independently of these numerical points and forecasting gates.
 
 ## Local calibration entry point
 
-To refresh the complete local calibration, use the numerical Python
+To refresh the configured-calendar local calibration, use the numerical Python
 environment used by the build.
 
 ```sh
@@ -89,9 +105,19 @@ python tools/triad_manual_cases.py --exporter build/dev/triad_helper_export \
   --output local-evidence/robust-manual-capacity-current.json
 ```
 
+**These per-row service estimates use sequential windows at the full worker
+allocation.** The native continuous functional gate is not a capacity
+qualification of the default two-owner pipeline across the manual rows.
+All-row parallel capacity remains unqualified; keep execution mode explicit.
+The [current all-eight explicit-serial forecasts](validation.md#complete-headless-robust-and-manual-capacity)
+use reviewed unchanged DSP costs with fresh wrapper costs. Their applicability
+checks and unresolved per-row bounds remain part of the result.
+
 The default compares serial, physical-core and full visible logical allocations,
 then uses the full logical allocation for fresh inference. It performs the
 current-source native message/quiet/EOF gate before measuring the current rows.
+The configured-calendar continuous gate also processes a sixth quiet slot after
+the completed message; it does not test an independently restarted transmitter.
 `--no-full-logical-inference` is an explicit diagnostic/user opt-out that selects
 the pilot winner. Do not use it, or change the default, to compensate for power
 or thermal limiting or temporary/minor timing differences; follow the
@@ -138,6 +164,17 @@ cache fills, key/ordinal changes, dispatch, synchronization and merging are
 receiver work. Only reusable preparation before reception and simulator
 generation may be excluded from sustained service; report readiness separately.
 
+The continuous listener keeps public slot/sample/keyed ordinals monotonic across
+messages; a codec reset does not reset native waveform identity. Its bounded
+output queue, backpressure and scored-quiet recovery are part of the receive
+lifecycle. Finite callers explicitly use `continuous=False`; a continuous gate
+that continues through later quiet windows still proves only the configured
+calendar. Neither supplies discovery of a transmitter with a new onset or reset
+ordinal. A broader blind-listener claim must include that discovery's recurring
+cost, unsuccessful starts and discrimination against an already occupied signal.
+Do not extrapolate per-slot cost into that claim without measuring the additional
+work. Keep these coverage limits explicit in the [current architecture](robust-current.md).
+
 Receiver inputs are the samples and public local configuration. Evaluator truth
 such as transmitted bits, actual offset, selected epoch, channel state or message
 length must not choose the receiver's hypotheses, endpoint or decision. Coarse
@@ -158,13 +195,44 @@ not prohibit qualified lower-precision bulk work; see the
 The CPU implementation prepares immutable candidate plans and fuses native
 rendering, projection and sufficient statistics in the shared worker pool.
 When both valid blocks of a segment are available, candidate tiles process
-them in one wave; each coherence model then advances the two observations in
-order before the existing timing/pruning boundary. Exact bit-pair geometry is
-shared without merging their independent signal hypotheses. Generic callbacks,
-partial erasures and unsupported staging retain their ordinary bounded paths.
+them in one wave. Supported one-/two-tap CPU FP64 state updates use native
+candidate partitions in that same pool, reuse Gram validation across models,
+and advance both observations in order before the existing timing/pruning
+boundary. Exact bit-pair geometry is shared without merging their independent
+signal hypotheses. Generic callbacks, partial erasures, device paths and
+unsupported staging retain their ordinary bounded processing.
 Recurring integer-source banks reuse each native epoch/bit lane across the
 clock/ray projections and apply a shared native cubic plan in parallel.
+Coarse workspace partitions share immutable observation spectra; supported
+two-ray batches combine quadratic scoring and bounded peak selection in native
+code, retaining canonical selected scores and fallback for ambiguous comparisons.
 These are changes to one received stream, not simultaneous simulation trials.
+
+Canonical continuous reception can keep two independent public-window jobs
+ready in persistent processes, each with private native source and cache owners.
+The parent retains one input stream and commits results in physical order.
+The jobs share one aggregate CPU and memory budget: a lone job uses all available
+workers, while two ready jobs split that allocation at a dispatch boundary.
+Memory admission or declared workspace rejection releases the owners before a
+full-budget serial fallback; failed work remains part of service. This is
+different from timing independent simulations. Production pipeline evidence
+covers the tested row-7 capture and
+geometry; it does not qualify all eight rows or demonstrate full thread
+saturation. The eight-row sequential calibration is a separate mode, not
+qualification of the pipeline. Automatic serial fallback is also distinct from
+explicit `slot_processes=1`: it retains the shared multiprocessing resource
+tracker reservation of at least 32 MiB after closing slot owners. Do not inherit
+explicit-serial workspace or capacity qualification for that fallback; consult
+[current validation](validation.md#continuous-receiver-restructuring).
+
+Robust's latency allowance permits bounded lookahead and batching when work is
+independent. Processing buffered IQ later does not add oscillator drift to
+already captured samples: receiver phase/clock hypotheses use physical sample
+coordinates. Preserve those coordinates and each state's chronology; larger
+computational batches do not authorize longer coherent integration. Reuse
+invariant preparation, and overlap next-batch preparation only when its inputs
+are ready, ownership is safe and the complete measured service improves.
+Count prepared buffers and speculative work within the shared resource budget.
 
 Record actual dispatch and cache accesses separately from logical search work.
 `row_tile_references` counts template dependencies per rendered row; physical
@@ -174,13 +242,17 @@ cache-hit counts to make a more efficient implementation look unchanged.
 Less CPU time for equivalent work is a benefit even when average busy cores
 falls. Retain the full worker budget and investigate the remaining critical
 path; neither a pool size nor an isolated parallel kernel proves whole-receiver
-saturation. See the [matched evidence](validation.md#receiver-restructuring).
+saturation. See the [current restructuring evidence](validation.md#continuous-receiver-restructuring).
 
 Report prepared elapsed processing seconds per second of received baseband for
 one complete receiver workload. A ratio at least 1 fails real-time capacity;
 0.1 represents a 90% processing-time margin. Never divide elapsed service by
 core count, sum thread CPU counters as elapsed time, or substitute throughput
 from parallel independent simulation trials. CPU counters diagnose utilization.
+For overlapping windows, measure the outer receive-service interval, including
+recurring bank work, IPC and ordered result commit. Summed slot wall times
+double-count overlap, while timing only asynchronous `push()` returns omits
+background DSP. Include input/backlog, owner/cache and IPC residency together.
 
 Detect visible affinity, quotas and physical-core topology. Compare a small
 declared set of same-stream worker allocations that includes the complete
@@ -303,6 +375,8 @@ Use the [GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual
 when the current CPU calibration covers the required work classes. The forecast
 combines GPU-observed work with local phase timings, then checks fresh bounded
 local measurements and reports nominal and conservative uncertainty separately.
+This speeds up forecasting of the implemented configured-calendar phases; it
+does not supply the unresolved blind discovery algorithm or its CPU costs.
 Keep the paired GPU reference, CPU calibration and holdout tied to their exact
 applicable artifacts. A missing cost class gets a bounded local calibration.
 In the same-geometry encrypted-to-clear transfer, the noise-only fine class can
@@ -317,9 +391,12 @@ precision/work failures and the rejected encrypted-to-clear transfer retain
 their own source and policy identities. A successful forecasting gate does
 not erase these distinctions or establish an unconditional capacity pass.
 That earlier trace is not an applicable forecast for the restructured source.
-Use the current direct CPU calibration while fresh matching GPU evidence is
-unavailable; never silently substitute an old GPU trace or a generic GPU/CPU
-speed ratio.
+Use applicable direct CPU costs while fresh matching GPU evidence is unavailable.
+The [current all-eight explicit-serial forecasts](validation.md#complete-headless-robust-and-manual-capacity)
+reuse reviewed unchanged native DSP costs and refresh changed wrapper work.
+This is conditional cost-class reuse, not new DSP timing or parallel-mode
+qualification. Earlier pre-restructuring CPU/GPU receipts retain their own
+identities. Never silently substitute old evidence or a generic GPU/CPU speed ratio.
 
 Use authenticated SSH/SCP for source and native artifacts. Reuse persistent
 storage when cache savings justify its cost, then terminate disposable

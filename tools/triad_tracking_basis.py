@@ -187,6 +187,7 @@ class CachedMappedBasis:
         self.accelerator = accelerator
         self.kernel = None
         self.paired_kernel = None
+        self.native_gaussian = None
         self.staging_workspace_bytes = 0
         d = source.descriptor
         self.sample_rate = float(d['sample_rate_hz'])
@@ -226,6 +227,8 @@ class CachedMappedBasis:
                     kernel_path = mapped_kernel_path(source.command[0])
                 self.kernel = _load_kernel(Path(kernel_path))
                 self.paired_kernel = _load_kernel(Path(kernel_path), 'triad_render_mapped_paired_v1')
+                from triad_gaussian_native import NativeGaussianBatch
+                self.native_gaussian = NativeGaussianBatch(Path(kernel_path), executor, workers)
             # Bounded pinned arrays may outlive eviction from the LRU until a
             # batch joins. Include native response and descriptor/map staging.
             self.staging_workspace_bytes = (

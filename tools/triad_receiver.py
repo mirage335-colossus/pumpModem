@@ -264,6 +264,8 @@ class FineSession:
             projection_mode='dft', memory_limit_bytes=available,
             shared_basis_workspace_bytes=getattr(self.provider, 'staging_workspace_bytes', 0),
             bulk_statistics=bulk_statistics,
+            native_gaussian=(getattr(self.provider, 'native_gaussian', None)
+                if p['precision'] == 'fp64' and owner.fine_cuda_index is None else None),
             maximum_input_chunk_samples=p['chunk_samples'], require_physical_map=True,
             hypothesis_executor=owner.executor,
             # The CPU's small state solves work best batched per coherence.
@@ -458,7 +460,7 @@ class FineReceiverContext:
             mapped_kernel_sha256=mapped_kernel_digest,
             source={name: hashlib.sha256((Path(__file__).parent/name).read_bytes()).hexdigest()
                 for name in ('triad_receiver.py','triad_tracking_receiver.py','triad_incremental_receiver.py',
-                             'triad_dynamic_joint.py','triad_gaussian_state.py','triad_continuous.py',
+                             'triad_dynamic_joint.py','triad_gaussian_state.py','triad_gaussian_native.py','triad_continuous.py',
                              'triad_tracking_basis.py')}),
             sort_keys=True).encode()).hexdigest()
         self.receiver_preparation_seconds = time.perf_counter()-began
@@ -561,6 +563,10 @@ class CompleteBitReceiver(FineReceiverContext):
         if declared != proposal:
             raise ValueError('only noise normalization and declared quiet aperture may differ between proposal and fine manifests')
         self.screen = screen
+        command = getattr(basis_source, 'command', None)
+        if (not getattr(screen, 'device_parallel', False) and
+                isinstance(command, (list, tuple)) and command):
+            screen.enable_native_coarse(command[0])
         super().__init__(manifest, basis_source, epochs=screen.epochs, clocks=screen.clocks,
             projected_sample_rate=screen.output_fs, coarse_frequency_step=screen.maximum_frequency_step,
             coarse_reserved_bytes=screen.resident_estimate, coarse_procedure_id=screen.procedure_id,
@@ -682,7 +688,24 @@ class CompleteBitReceiver(FineReceiverContext):
             projected = self.screen.prepare_observation(raw, valid)
         finally:
             self.screen.memory_limit_bytes = original_limit
+        shared_spectra = None
+        if method == 'frequency' and not device_parallel:
+            # Every workspace partition uses the same observation/CFO lattice.
+            # Prepare it once; workers own only products and correlation scratch.
+            # The existing admission reserves a spectra copy per partition and
+            # therefore conservatively covers this one shared immutable bank.
+            shared_spectra = self.screen._frequency_spectra(projected, frequencies,
+                workers=self.workers)
+            self.screen._mark_readonly(shared_spectra)
+        separation = .5/float(self.screen.manifest['format'].get('fine_chip_rate_hz', 60.))
         def score(part):
+            if shared_spectra is not None:
+                rows = part._frequency_workspace_rows(shared_spectra, frequencies,
+                    sample_separation=max(1, math.ceil(separation*part.output_fs)),
+                    top_per_bit=self.policy['top_per_bit'])
+                retained = part._retained_candidates(rows,
+                    top_per_bit=self.policy['top_per_bit'], separation=separation)
+                return dict(status='proposed', candidates=retained[0]+retained[1])
             return part.score_projected(projected, frequency_intervals=intervals,
                 projection_receipt=part.projection_receipt(), top_per_bit=self.policy['top_per_bit'])
         if self.executor is None or device_parallel:
@@ -712,6 +735,9 @@ class CompleteBitReceiver(FineReceiverContext):
             candidates=retained[0]+retained[1], candidates_by_bit=retained,
             work=dict(workspaces=len(self.screen.workspaces), workers=count,
                 frequency_points=len(frequencies), arrival_points=self.screen.lag_count,
+                shared_observation_spectra=shared_spectra is not None,
+                observation_ffts=len(frequencies) if method == 'frequency' else 0,
+                coarse_score_kernel=self.screen.policy.get('coarse_score_kernel'),
                 fft_products=total_work, estimated_peak_bytes=max(peak, input_filter_peak),
                 correlation_method=method))
 

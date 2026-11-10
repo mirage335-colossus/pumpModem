@@ -208,6 +208,7 @@ def run_stream_trial(executable, case, *, bit, cn0_db_hz, seed,
             added_amplitude_depth=descriptor['added_amplitude_depth'],
             local_key_fixture_id=72001, public_case_hash=case['configuration_hash'])
         receiver = CompleteStreamReceiver(manifest, source, source_identity=identity,
+            continuous=False,
             memory_limit_bytes=memory_limit_bytes, workers=workers,
             native_executable=executable, maximum_slots=3)
         first = checked = 0

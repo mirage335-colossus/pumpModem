@@ -184,7 +184,7 @@ class PullSourceTests(unittest.TestCase):
                              '--seed', str(seed), '--arrival-seconds', str(arrival)]) as source:
                     d = source.descriptor
                     self.assertTrue(d['slot_plan_supported'])
-                    rows = [source.command(f'slot-plan {index}') for index in (0, 1, 2, 3, 10)]
+                    rows = [source.command(f'slot-plan {index}') for index in (0, 1, 2, 3, 10, 4096)]
                     self.assertEqual(rows[0]['source_begin_samples'], d['data_offset_samples'])
                     self.assertEqual(rows[0]['pattern_epoch'], d['epoch'])
                     self.assertEqual(rows[0]['symbol_ordinal'], d['symbol_ordinal'])
@@ -210,7 +210,8 @@ class PullSourceTests(unittest.TestCase):
             self.assertEqual(plans('0', 7, 0), plans('001', 19, .01))
 
     def test_public_slot_plan_native_guards(self):
-        for command in ('slot-plan -1', 'slot-plan 1024', 'slot-plan', 'slot-plan 0 extra'):
+        for command in ('slot-plan -1', 'slot-plan 18446744073709551615',
+                        'slot-plan 100000000', 'slot-plan', 'slot-plan 0 extra'):
             with self.subTest(command=command), Source(['--data-bits', '0']) as source:
                 source.process.communicate((command + '\n').encode('ascii'), timeout=10)
                 self.assertNotEqual(source.process.returncode, 0)

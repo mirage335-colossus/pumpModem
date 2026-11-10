@@ -213,7 +213,9 @@ add_executable(triad_helper_export EXCLUDE_FROM_ALL tools/triad-helper-export.cp
 target_include_directories(triad_helper_export PRIVATE src tools)
 target_link_libraries(triad_helper_export PRIVATE datapump_triad)
 if(NOT DATAPUMP_BUILD_WASM)
-  add_library(triad_mapped_kernel SHARED EXCLUDE_FROM_ALL src/triad_mapped_kernel.cpp)
+  add_library(triad_mapped_kernel SHARED EXCLUDE_FROM_ALL
+    src/triad_mapped_kernel.cpp src/triad_gaussian_kernel.cpp
+    src/triad_coarse_kernel.cpp)
   set_target_properties(triad_mapped_kernel PROPERTIES PREFIX "" CXX_VISIBILITY_PRESET hidden)
   if(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$")
     target_compile_options(triad_mapped_kernel PRIVATE -Wall -Wextra -Wpedantic -ffp-contract=off -fno-fast-math)
@@ -562,6 +564,11 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_tracking_basis.py $<TARGET_FILE:triad_helper_export>)
     add_custom_target(test_triad_tracking_basis_native DEPENDS triad_helper_export)
     set_tests_properties(triad_tracking_basis_native PROPERTIES LABELS "triad" TIMEOUT 60)
+    add_test(NAME triad_coarse_kernel_native COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_coarse_kernel.py $<TARGET_FILE:triad_helper_export>)
+    add_custom_target(test_triad_coarse_kernel_native DEPENDS triad_helper_export)
+    set_tests_properties(triad_coarse_kernel_native PROPERTIES LABELS "triad" TIMEOUT 60
+      ENVIRONMENT "OPENBLAS_NUM_THREADS=1;OMP_NUM_THREADS=1;MKL_NUM_THREADS=1")
     if(TARGET triad_audio_stream)
       add_test(NAME triad_audio_stream COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_triad_audio_stream.py $<TARGET_FILE:triad_audio_stream>)
@@ -575,7 +582,8 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       test_triad_incremental_receiver test_triad_operational_admission
       test_triad_persistent_tracking test_triad_realtime_fft test_triad_receiver
       test_triad_regression_receiver
-      test_triad_message_receiver test_triad_stream_receiver test_triad_segmented_fft
+      test_triad_message_receiver test_triad_stream_receiver test_triad_slot_executor
+      test_triad_segmented_fft
       test_triad_stream_frontend test_triad_stream_scheduler test_triad_template_bank
       test_triad_timing_forward test_triad_tracking_budget
       test_triad_tracking_preflight test_triad_weak_helper test_triad_weak_receiver)

@@ -34,9 +34,29 @@ turn that stage's batching choice into a global thread cap. Keep one aggregate
 concurrency budget and one numerical-library thread per outer receiver worker
 to avoid nested oversubscription. Low-level constructors and bounded correctness
 fixtures may receive explicit allocations; they do not select the normal
-receiver's portable default. Normal callers of `CompleteStreamReceiver` and
-`CompleteBitReceiver` must pass the controller's budget rather than rely on
-their one-worker low-level fallback.
+receiver's portable default. `CompleteStreamReceiver` resolves the full visible
+budget when no allocation is supplied and passes each bit receiver its admitted
+share.
+Other orchestration calling `CompleteBitReceiver` must pass its budget rather
+than rely on that low-level constructor's one-worker fallback.
+
+The canonical continuous slot pipeline shares this same budget across up to two
+persistent process owners. One active job receives the full budget; two ready
+jobs divide it at a dispatch boundary, such as six plus six on this host.
+Never overlap a twelve-worker job with another six-worker job. Parent-side
+ordered commit preserves message and quiet semantics; private source/cache
+owners and all input/IPC buffers remain within aggregate memory admission.
+A memory admission or workspace failure may latch serial fallback after
+releasing the extra owners, but the fallback keeps the full logical worker budget.
+The shared multiprocessing resource tracker stays reserved at at least 32 MiB
+after owner shutdown. Automatic fallback therefore differs from explicit
+`slot_processes=1`; never inherit its workspace or capacity qualification merely
+because both execute one full-budget window at a time.
+
+The measured production pipeline improvement applies to the tested row-7
+capture and geometry. Full-thread saturation and all-eight-row parallel capacity
+remain unproven. Per-row sequential manual estimates and the native continuous
+functional gate do not establish that broader pipeline qualification.
 
 Retain explicit allocation controls for user limits and scoped diagnostics.
 The manual suite's `--no-full-logical-inference` deliberately opts into pilot
@@ -44,6 +64,17 @@ selection; agents must not enable it to react to power/thermal limits or small
 timing differences. A cloud example pinned to `--workers 12` preserves a
 particular paired comparison, not a universal cap. Report allocation, useful
 work and actual busy-core measurements separately.
+
+Preserve the receiver's declared capacity scope as well as its CPU budget.
+The [current all-eight explicit-serial forecasts](validation.md#complete-headless-robust-and-manual-capacity)
+cover a configured public calendar and keyed ordinal, reusing reviewed unchanged
+DSP costs with fresh wrapper costs. Ordinary blind discovery of independently
+restarted transmitters
+remains unresolved; favorable timing or full thread use cannot convert those
+measurements into a general always-listening CPU ceiling. Any broader claim
+must include the additional discovery and occupied-signal discrimination work.
+Follow the [current scope and findings](validation.md#continuous-receiver-restructuring)
+and [manual capacity contract](robust-manual-capacity.md).
 
 ## Material lifecycle
 

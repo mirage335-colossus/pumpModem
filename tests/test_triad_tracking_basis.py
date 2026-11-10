@@ -62,6 +62,111 @@ class AnalyticSource:
 
 @unittest.skipUnless(NATIVE, 'supply the built triad_helper_export')
 class CachedBasisTests(unittest.TestCase):
+    def test_native_gaussian_batch_matches_seeded_fp64_filters(self):
+        import torch
+        from triad_gaussian_native import NativeGaussianBatch
+        from triad_gaussian_state import GaussianPrior, GaussianStateFilter
+
+        rng = np.random.default_rng(906)
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            native = NativeGaussianBatch(mapped_kernel_path(NATIVE), executor, 4)
+            for taps in (1, 2):
+                for powers in ((.5,)*taps, (0.,)*taps):
+                    priors = [GaussianPrior(powers, coherence, .037) for coherence in (.2, 5., math.inf)]
+                    reference = [GaussianStateFilter(prior) for prior in priors]
+                    batched = [GaussianStateFilter(prior) for prior in priors]
+                    blocks = []
+                    for index in range(3):
+                        template = rng.normal(size=(3, 5, taps, 4)) + 1j*rng.normal(size=(3, 5, taps, 4))
+                        if index == 2 and taps == 2:
+                            template[..., 1, :] = 1j*template[..., 0, :]
+                        template[0] = 0.
+                        gram = template @ template.swapaxes(-1, -2).conj()
+                        correlation = template.sum(axis=-1)
+                        blocks.append((torch.from_numpy(correlation), torch.from_numpy(gram), .11*index))
+                    native(batched, blocks[:1])
+                    self.assertEqual(native(batched, blocks[1:]), 4)
+                    for actual, expected in zip(batched, reference, strict=True):
+                        for block in blocks:
+                            expected.update(*block)
+                        self.assertEqual(actual.blocks, 3)
+                        self.assertEqual(torch.count_nonzero(actual.scores()[0]), 0)
+                        for received, wanted in zip((actual.scores(), *actual.posterior()),
+                                (expected.scores(), *expected.posterior()), strict=True):
+                            torch.testing.assert_close(received, wanted, atol=1e-11, rtol=1e-11)
+
+    def test_native_gaussian_collinear_guard_and_failed_batch_does_not_publish(self):
+        import torch
+        from triad_gaussian_native import NativeGaussianBatch
+        from triad_gaussian_state import GaussianPrior, GaussianStateFilter
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            native = NativeGaussianBatch(mapped_kernel_path(NATIVE), executor, 2)
+            correlation = torch.zeros((3, 2, 2), dtype=torch.complex128)
+            for difference in (0., 1e-10, 1e-8):
+                runtime = GaussianStateFilter(GaussianPrior((.5, .5), math.inf))
+                gram = torch.zeros((3, 2, 2, 2), dtype=torch.complex128)
+                gram[1:] = 1e8*torch.tensor([[1., 1.-difference], [1.-difference, 1.]],
+                    dtype=torch.complex128)
+                native([runtime], [(correlation, gram, 0.)])
+                expected = -math.log1p(.5*1e8*(2.-difference))-math.log1p(.5*1e8*difference)
+                self.assertAlmostEqual(float(runtime.scores()[1, 0]), expected, delta=2e-8)
+                self.assertGreaterEqual(float(torch.linalg.eigvalsh(runtime.covariance).min()), 0.)
+                # Only the second candidate tile fails. Successful writes
+                # in the first tile must stay private until all tiles join.
+                before = (runtime.scores().clone(), *runtime.posterior())
+                gram[2, 1, 0, 0] = -1e8
+                with self.assertRaisesRegex(ValueError, 'positive semidefinite'):
+                    native([runtime], [(correlation, gram, .1)])
+                self.assertEqual(runtime.blocks, 1)
+                for current, previous in zip((runtime.scores(), *runtime.posterior()), before, strict=True):
+                    torch.testing.assert_close(current, previous, atol=0, rtol=0)
+
+    def test_native_gaussian_interrupted_join_drains_and_preserves_unpublished_state(self):
+        import torch
+        from triad_gaussian_native import NativeGaussianBatch
+        from triad_gaussian_state import GaussianPrior, GaussianStateFilter
+
+        class Delayed:
+            def __init__(self, operation, index):
+                self.operation, self.index = operation, index
+                self.waits = 0
+                self.completed = False
+
+            def result(self):
+                self.waits += 1
+                if self.index == 1 and self.waits == 1:
+                    raise KeyboardInterrupt
+                self.operation(self.index)
+                self.completed = True
+
+            def done(self):
+                return self.completed
+
+        class Pool:
+            def __init__(self):
+                self.jobs = []
+
+            def submit(self, operation, index):
+                self.jobs.append(Delayed(operation, index))
+                return self.jobs[-1]
+
+        pool = Pool()
+        native = NativeGaussianBatch(mapped_kernel_path(NATIVE), pool, 2)
+        r = torch.zeros((3, 2, 2), dtype=torch.complex128)
+        g = torch.zeros((3, 2, 2, 2), dtype=torch.complex128)
+        invalid = GaussianStateFilter(GaussianPrior((1.,)))
+        with self.assertRaisesRegex(ValueError, 'extent'):
+            native([invalid], [(r, g, 0.)])
+        self.assertEqual(pool.jobs, [])
+        runtime = GaussianStateFilter(GaussianPrior())
+        with self.assertRaises(KeyboardInterrupt):
+            native([runtime], [(r, g, 0.)])
+        self.assertEqual([job.waits for job in pool.jobs], [1, 2])
+        self.assertTrue(all(job.done() for job in pool.jobs))
+        self.assertIsNone(runtime.mean)
+        self.assertEqual(runtime.blocks, 0)
+
     def test_native_coarse_plan_preserves_finite_cubic_support(self):
         from triad_case_replay import _load_integer_cubic_plan
         from triad_dynamic_joint import _cubic_stencil, _sample_cubic

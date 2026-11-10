@@ -1012,12 +1012,12 @@ int run(const Options& o) {
         composite_samples = burst_plan->distance(calendar_origin, whole_slots.back().helper_end);
     }
     const auto public_slot = [&](std::uint64_t index) {
-        if (!burst_plan || index > 1023)
-            throw std::invalid_argument("slot-plan requires a whole-bit calendar and INDEX in[0,1023]");
+        if (!burst_plan)
+            throw std::invalid_argument("slot-plan requires a whole-bit calendar");
         if (f.symbol_ordinal > UINT64_MAX - index)
             throw std::invalid_argument("public slot symbol ordinal overflows");
-        auto slot = burst_plan->first_slot(burst_plan->add(calendar_origin, o.helper ? lead_samples : 0));
-        for (std::uint64_t i = 0; i < index; ++i) slot = burst_plan->successor(slot);
+        const auto slot = burst_plan->slot_at(
+            burst_plan->add(calendar_origin, o.helper ? lead_samples : 0), index);
         if (slot.pattern_begin.epoch < 6 || slot.pattern_begin.epoch > 4294967289ULL ||
             slot.helper_end.epoch >= 4294967296ULL)
             throw std::runtime_error("public slot exceeds keyed epoch or Helper metadata range");

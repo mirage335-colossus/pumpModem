@@ -15,11 +15,12 @@ canonical native waveform/channel/Helper stack and the complete headless
 receiver. See the [validation record](validation.md) for the measured native
 message gate, local CPU margins, GPU stage speed and forecast coverage.
 The [interactive receiver parallelism report](receiver-parallelism.html) maps
-current ownership and synchronization boundaries, measured stage costs and
+the pre-change ownership and synchronization boundaries, measured stage costs and
 conditional optimization opportunities. Its [cycle timeline](receiver-parallelism.html#cycle)
 shows actual controller and worker intervals, separates signal time from CPU
-elapsed time, and contrasts current execution with a hypothetical bounded
-producer/consumer pipeline. It is a dated evidence snapshot, not
+elapsed time, and contrasts that execution with a hypothetical bounded
+producer/consumer pipeline. Follow the [current restructuring record](validation.md#continuous-receiver-restructuring)
+for subsequent changes. It is a dated evidence snapshot, not
 a new capacity qualification; open it in a browser for the interactive views.
 Robust remains unavailable in the GUI pending
 reconnection. Retained

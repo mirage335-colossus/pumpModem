@@ -71,9 +71,233 @@ observations do not establish an intrinsic SMT bandwidth penalty. Keep the
 the worker-allocation decision and its telemetry limits. Remove the raw
 report when a matched scaling check supersedes that evidence.
 
+## Continuous receiver restructuring
+
+**Scope: complete processing on a configured public calendar.** The retained
+continuous listener preserves the configured keyed ordinal sequence. It does
+not discover independently restarted transmitters. Its CPU estimates therefore
+cannot establish ordinary blind continuous-listening capacity, even when the
+configured-path numerical estimate passes. The full hardware-thread default
+and the following qualified optimizations remain applicable.
+
+The current development changes preserve the full logical CPU budget and
+remove repeated work from the dominant noise search and fine state updates.
+The comparisons below use the same captured input, receiver work and allocation
+with the optimized callback enabled or disabled. They are scoped development
+comparisons; their exact source/native identities are in each receipt. They
+must not be multiplied together or treated as complete receiver capacity.
+
+The coarse CPU path shares immutable observation spectra between workspace
+partitions. A strict-FP64 native rank-two kernel combines quadratic scores and
+bounded peak selection inside the existing worker pool. Conservative arithmetic
+ambiguity guards retain canonical peak selection for near ties, and retained
+scores are recomputed with the canonical arithmetic before global selection.
+Unsupported ranks, guarded Grams and larger retained-peak counts keep the
+general path. The final twelve-worker row-4 noise comparison reduced median
+elapsed time from **0.451572 to 0.295567 seconds (1.528× throughput)**. Busy-core
+equivalents increased from **6.66 to 8.12**. A disjoint frequency holdout reduced
+0.478227 to 0.326784 seconds (1.463×). All 1,248 raw peak identities, ordering
+and published scores per look matched bitwise. The entire bounded qualifier
+took 5.124 seconds; it did not execute the full broad frequency grid.
+[Guarded coarse comparison](../local-evidence/continuous-coarse/guarded-native-discriminator.json)
+
+Complete mapped CPU FP64 one-/two-tap pairs now use native candidate-parallel
+Gaussian updates on that same pool. Gram validation is shared across coherence
+models; each candidate advances the two blocks in chronological order using
+PSD square-root factors and Cholesky solves. The controller publishes results
+only after every tile joins. Generic, erasure and device paths retain the
+general implementation. At twelve workers, row 7's continued fine time fell
+from **403.174 to 334.730 ms (1.204×)** and its model phase from 97.034 to
+19.366 ms. Fine busy cores increased from 3.174 to 3.262, with 14.65% less CPU
+time. Row 7 at six workers improved 1.331×. Row 4 at twelve improved 1.095×,
+below the declared 10% secondary gain target; that outcome is retained.
+Logical work, state order and threshold outcomes matched under the declared
+posterior tolerance. These four-second continued sessions are not successful
+message trials or whole-receiver saturation measurements.
+[Row 7 / twelve](../local-evidence/structural-fine/row-7-native-gaussian-integrated-abba.json) ·
+[Row 7 / six](../local-evidence/structural-fine/row-7-6-native-gaussian-integrated-abba.json) ·
+[Row 4 / twelve](../local-evidence/structural-fine/row-4-12-native-gaussian-integrated-abba.json)
+
+The post-native row-7 profile averaged 340.674 ms without instrumentation and
+346.774 ms with it (1.79% higher). Candidate waves occupied 160.470 ms and
+averaged 5.50 busy-core equivalents within those waves. Controller preparation
+occupied 55.141 ms, including 14.592 ms of native-cache requests/waits; adaptive
+transitions occupied 37.478 ms. Native model updates now occupy only 20.470 ms.
+These spans are nested where stated; callable overlap is not an OS scheduling
+trace. Native rendering and basis FFT dominate worker CPU time. The profile
+retained exact work, ordered states, posterior bytes, scores and endpoints.
+[Post-native profile](../local-evidence/structural-fine/row-7-post-native-residual-attribution.json)
+
+A subsequent bounded scheduling discriminator processed two adjacent quiet
+windows from **one continuous native capture** with separate persistent Python
+controllers and native source owners. Both arrangements shared the same
+twelve-thread budget. Two concurrent six-worker jobs reduced whole-slot bank,
+DSP, IPC and ordered quiet-state service from **8.913410 to 6.481362 seconds
+(27.29% less elapsed; 1.375× throughput)** compared with sequential twelve-worker
+jobs. Busy-core equivalents increased from **2.94 to 4.45**. All logical work,
+coverage and ordered decisions matched; the largest numerical difference was
+4.44e-16. This experiment excludes production ingress and pruning, so it does
+not yet qualify the integrated listener or other manual rows.
+[Two-controller discriminator](../local-evidence/continuous-process/process-discriminator.json)
+
+One predeclared width extension compared four three-worker jobs with two waves
+of two six-worker jobs on four adjacent windows. Four owners reduced elapsed
+time by **14.39%**, below the fixed **15% incremental adoption gate**, while
+raising busy cores from 4.43 to 5.99. It also increased aggregate CPU work and
+peak sampled RSS to 2.354 GB. All sixteen evaluated slots preserved logical
+work and ordered decisions; maximum numerical difference was 1.33e-15. No
+threshold was changed or favorable retry taken. Two owners remain the qualified
+design choice; this does not reduce the aggregate hardware-thread budget.
+The combined scheduling investigation took 107.53 seconds, including an initial
+memory-admission rejection before DSP and the explicitly revised two-owner
+partition. The global 3840 MiB budget was unchanged.
+[Width extension](../local-evidence/continuous-process-width/process-discriminator.json)
+
+The production continuous receiver now has the bounded two-owner scheduler.
+Ordinary `push` can accept input while DSP runs; `resume(wait=True)` drains
+accepted work. A lone job keeps the full visible logical-thread allocation;
+two ready jobs share it. Private native owners isolate the mutable keyed basis
+address, and the parent commits results in public-slot order. Runtime, input,
+IPC and result ownership share the local memory reservation. Memory admission
+can select a latched full-budget serial fallback. Transport failures and
+interruption fail closed, and child teardown is bounded. Service accounting
+unions actual background execution with controller API intervals, excludes
+application polling delays and records one-time owner startup separately.
+
+Independent source review accepted the integration; 80 focused parent/lifecycle
+checks and 14 backend checks passed. The final required triad group passed
+**22/22 in 32.84 seconds**, including the refill and auxiliary-memory corrections
+below. The native functional gate passed in 24.15 seconds:
+`001` decoded to `e`, quiet slots 3 and 4 completed the message, and quiet slot
+5 was scored while listening continued. Four of six slots used the split
+worker budget; there was no memory fallback. A truncated-input control remained
+physically incomplete. An initial stdin-based launcher failed before DSP because
+spawn could not reopen `<stdin>`; the identical call then used a guarded script.
+No production code changed to repair that launcher. A subsequent narrow
+ingress correction makes buffer backpressure wait only until space is available,
+so the producer can refill while paired jobs continue; explicit drain/EOF still
+wait for all accepted work. Its discriminating regression is included in the
+80 checks. The native functional receipt predates that refill correction and
+does not measure the integrated scheduler's throughput or qualify all cases.
+[Final triad log](../local-evidence/continuous-pipeline/triad-final.log) ·
+[Native pipeline gate](../local-evidence/continuous-pipeline/functional-gate.json)
+
+The production row-7 backlog comparison then passed its predeclared integration
+gates in **83.43 seconds**, including setup and cleanup. ABBA used ordinary
+16,384-sample `push` calls and `resume(wait=True)` on the same five captured
+windows: DATA bit 0 followed by four quiet windows. Both automatic looks used
+allocations **12, 6, 6, 6, 6**, with no fallback or retries. All 1,649,627 supplied
+samples were covered once (274.9378 seconds of physical input). Independent
+audit checked 1,856 exact fields and 392 numerical fields across twenty slot
+results; every exposed numerical value matched exactly. Deeper candidate/cache
+parity remains scoped to the earlier two-owner discriminator.
+
+| Production metric | Serial 12 | Automatic two owners |
+| --- | ---: | ---: |
+| Median complete receive service | 21.6792 s | 18.9520 s |
+| Controller/worker service union | 21.6779 s | 18.9514 s |
+| Average busy-core equivalents | 2.909 | 3.566 |
+| Listed-process sampled CPU time | 63.055 s | 67.585 s |
+
+This is **12.58% less elapsed service (1.144× throughput)** with **22.62% more
+productive CPU occupancy**, at 7.18% more listed-process CPU time. These CPU and
+busy-core figures cover the sampled evaluator/controller/native processes;
+they exclude the shared resource tracker identified below. Elapsed service
+includes its startup. The comparison includes
+one-time spawned-owner startup (1.255 and 1.292 seconds). Subtracting only that
+measured startup gives an 18.45% reduction over the five-window service; this
+descriptive calculation is not a separate sustained-throughput measurement.
+Full twelve-thread saturation and other rows' parallel capacity remain unproven.
+All 66 measured sources and both capture hashes stayed unchanged.
+[Production comparison](../local-evidence/continuous-pipeline/production-qualifier.json)
+
+The sampler observed 1.318 GB across its listed evaluator/controller/native
+processes. A subsequent audit found that it omitted Python's shared spawn
+resource tracker (12.76 MB in an isolated matching-runtime check). That omission
+does not exhaust the observed margin to the 3840 MiB limit, but it exceeds the
+old conservative reservation's 7.64 MB headroom. The corrected implementation
+reserves at least 32 MiB for that shared helper before spawning and retains the
+reservation after closing owners or falling back to serial execution. It does
+not create or kill the process-wide tracker itself. Explicit serial execution
+from the outset creates no tracker and has a different memory allowance from
+automatic fallback.
+
+A **14.71-second current-source continuation check passed** on the exact
+929,627-sample prefix of the production capture. The three DATA/quiet/quiet
+results, work and numerical fields matched the earlier comparison exactly;
+allocation was 12, 6, 6, without fallback. Sampled aggregate RSS including the
+tracker was 1.277 GB. The 12.70 MB tracker was covered by the 33.55 MB reservation,
+and modeled peak ownership was 4,015,521,077 bytes within the 4,026,531,840-byte
+limit. Source/binary identities and post-exit cleanup checks passed. This
+qualifies the corrected admission and work paths; the original ABBA remains
+the timing evidence for its recorded source, not a rerun of the corrected
+budget path.
+[Tracker-budget continuation](../local-evidence/continuous-pipeline/tracker-budget-gate.json)
+
+Private pipeline drivers and raw captures were removed after independent
+audit (about 44 MB). Keep the compact comparison, functional/admission receipts
+and original setup failures while they support the current scheduler claims;
+remove them once superseded by an equally scoped validation. An unqualified
+general parallel-forecast prototype was also deleted rather than maintained
+alongside the canonical sampler. It produced no qualified capacity result.
+
+One guarded FP64 phasor-recurrence experiment reused each direct phase anchor
+for 32 samples without changing interpolation coordinates. The frozen paired
+comparison preserved numerical/work gates but saved only 7.53% and 6.91% of
+continued fine time on rows 7 and 4, below its declared 10% adoption gate.
+The variant was removed. An earlier attempt was invalidated by a concurrent
+source edit; that failure remains recorded separately. No source or binary
+changed during the single authorized replacement comparison.
+[Rejected recurrence](../local-evidence/structural-fine/phase-recurrence-discriminator.json)
+
+Two-tile preparation overlap failed the declared 10% useful-gain gate before
+and after native scoring. Wider workspace FFT batches and Python-only bounded
+peak selection were slower. Those variants and their private drivers were
+removed. The installed SciPy 1.18.1 FFT backend uses DUCC, releases the GIL for
+the transform and already caches plans. The repository's power-of-two-only
+native FFT would increase a representative 19,600-point transform to 32,768;
+there is no established benefit from replacing this backend.
+[SciPy wrapper](https://raw.githubusercontent.com/scipy/scipy/v1.18.1/scipy/fft/_duccfft/pyduccfft.cxx) ·
+[DUCC plan cache](https://raw.githubusercontent.com/scipy/scipy/v1.18.1/subprojects/duccfft/ducc0/fft/fftnd_impl.h)
+
+A bounded fresh-start supervisor prototype was rejected and removed. It tried
+ordinal-zero starts on the public 30-second grid while continuing one acquired
+message. In a native test with independent receiver configuration, leading
+noise and a legitimate restart behaved correctly, but the eighth attempt
+mistook an active message's ordinal-one DATA for a new ordinal-zero message.
+Its DATA-versus-noise score was about 59.5 million against a 21.49 threshold.
+The test stopped at that first mismatch after 36.175 seconds, with unchanged
+source, input and binary identities. A noise-only admission bound does not
+decide competition between two signal explanations. Subtracting existing
+different-window scores or selected likelihood lower bounds would not repair
+that model error.
+[Failed native gate](../local-evidence/continuous-fresh-native-gate.json)
+
+The same prototype has an unsuitable search-cost structure for the long-bit
+cases: complete windows every 30 seconds would give 225 starts per 6,750-second
+row-1 slot, before any competing-message work. This is a hypothetical work
+density, not a measured CPU forecast. Native DATA keys incorporate start epoch,
+symbol ordinal and local tile even without payload encryption, so one
+UTC-shifted correlation prefix cannot represent all those starts. Retain this
+failed receipt and its predeclaration/log while they support the unresolved
+blind-acquisition design question; the unused supervisor, emitter fixture and
+associated tests have been deleted. A replacement needs efficient staged or
+Helper-assisted acquisition with declared missed-detection/false-start rules
+and an occupied-signal model. The configured-calendar estimates must keep this
+missing work explicit rather than labeling ordinary blind listening feasible.
+
+Keep these compact receipts while they support the current implementation,
+its numerical qualification and rejected alternatives. Private prototype
+implementations have no continuing purpose. Replace raw receipts when a
+matched current qualification supersedes their claim, preserving the concise
+findings here. The earlier interactive report below remains a labeled baseline.
+
 ## Receiver restructuring
 
-The receiver now stages immutable candidate plans, fuses mapped rendering,
+This section records the preceding source-pinned restructuring and the baseline
+used by the interactive report. Later changes are recorded above.
+
+That receiver stages immutable candidate plans, fuses mapped rendering,
 DFT projection and sufficient statistics, and advances the two ready blocks
 of a segment in one model job. Exact bit-pair geometry is evaluated once for
 both independent DATA hypotheses. Global timing transitions and pruning retain
@@ -100,7 +324,7 @@ comparison. The six-worker wall-time improvement was smaller and noisy; the
 DC control established CPU-time savings but no reliable separate elapsed gain.
 The full logical-thread default remains in force.
 
-The final-source row-7 residual profile preserved work, states, scores and
+The preceding source's row-7 residual profile preserved work, states, scores and
 endpoints in all five observations. Unmarked four-second continuations averaged
 0.423 s and 3.16 busy cores. Instrumentation added about 2% on average. In the
 marked path, mapping/statistics consumed 50% of elapsed time, model barriers
@@ -112,7 +336,7 @@ overlapped candidate lanes is a more substantial future restructuring, requiring
 new numerical and transition-boundary qualification.
 [Final residual profile](../local-evidence/structural-fine/row-7-final-residual-attribution.json)
 
-A separate bounded chronological trace at source `3b423f9` now supports the
+A separate bounded chronological trace at source `3b423f9` supports the baseline
 [interactive cycle chart](receiver-parallelism.html#cycle). One warm look and
 four plain/traced ABBA looks took 4.34 s including fixture setup; no production
 instrumentation was retained. The traced four-second continuation contains 16
@@ -194,78 +418,113 @@ the claims, retaining the concise algorithm and negative-result findings.
 
 ## Complete headless Robust and manual capacity
 
-The current direct calibration covers all eight rows on the Ryzen 5 PRO 5650U
-with a fixed **3840 MiB workspace and all 12 logical workers**. It compares
-1/6/12 allocations within one stream and includes the separate continued
-six-versus-twelve-worker check. The single uninterrupted full-list invocation
-took **17 minutes 58.36 seconds**, including the native message gate, fixture
-preparation and bounded measurements. All 61 measured source files, the case
-list and native artifacts remained unchanged through completion. This is an
-uncommitted restructuring of baseline `247b720`; exact identities are in the
-report, not a release certificate.
-[Current report](../local-evidence/current-restructure/calibration-all8.md) ·
-[Current JSON](../local-evidence/current-restructure/calibration-all8.json)
+The current conditional forecasts cover all eight manual rows on the Ryzen 5 PRO
+5650U in **explicit serial mode with all 12 logical workers and a 3840 MiB
+workspace**. They include complete work on the configured public calendar.
+**Default parallel capacity across all rows and blind fresh-transmitter capacity
+remain unqualified.** These estimates do not inherit the row-7 pipeline speedup
+or qualify automatic fallback with a retained shared tracker.
 
-Every row covers the required receiver work. All eight nominal service
-intervals are below 1 s/s, with point margins of **78.76%–92.66%**. The
-conservative work and model gates support conditional capacity only on row 1.
-Rows 2–8 remain unresolved even where their numerical intervals are below
-1 s/s: a required terminal or noise-only fine model did not establish its
-holdout gate. Row 4 also fails the conservative numerical point criterion.
-No omitted work, unsupported extrapolation or negative margin is relabeled as
-a pass. These estimates do not qualify communication-success probabilities
-or establish maximum whole-machine capacity.
+The bounded refresh took **3 minutes 42.93 seconds**, including two retained
+setup/fixture corrections. It reuses reviewed unchanged DSP costs and measures
+changed controller, input assembly, planning, codec and continuous-message
+bookkeeping. All 66 current source hashes, both native binaries and runtime
+identity were stable. Independent audit confirmed work/cache/memory checks,
+unchanged DSP receipts and exact recomposition of costs and intervals. This is
+conditional cost-class reuse with fresh wrapper costs, not new DSP timing
+qualification or release certification.
+[Current all-eight serial refresh](../local-evidence/continuous-receiver/current-serial12-refresh-h0.json) ·
+[Applicability audit](../local-evidence/continuous-receiver/serial12-refresh-audit.json)
+
+The underlying frozen sequential baseline took **14 minutes 24.21 seconds**,
+including the configured continuous native gate, fixture preparation and bounded
+measurements. Its 65 measured source files, native artifacts and case list stayed
+unchanged. Exact source hashes on uncommitted `0751d4dd` are retained in the
+reports. It predates the two-owner scheduler and supplies unchanged local phase
+costs, rather than evidence of that scheduler's concurrency or IPC costs.
+[Sequential baseline report](../local-evidence/continuous-receiver/calibration-all8.md) ·
+[Sequential baseline JSON](../local-evidence/continuous-receiver/calibration-all8.json)
+
+Every row includes the required configured-calendar receiver work. All eight
+nominal numerical intervals are below 1 s/s, with point margins of
+**82.92%–94.12%**. Seven nominal model decisions pass; row 4 remains unsupported
+because its recurring-bank timing comparison narrowly exceeded its declared
+30% gate (ratio 1.3043). No threshold was relaxed and no favorable retry was run.
+The conservative work/model/interval gates support conditional capacity on
+**rows 2, 5 and 7**. Rows 1, 3, 6 and 8 retain unsupported fine extrapolations.
+Row 4 also fails the conservative numerical point criterion. These are scoped
+CPU-capacity results, not communication-success probabilities or proof that
+the hardware ceiling has been reached.
 
 | Manual row | Nominal (s/s) | Nominal interval | Conservative point (s/s) | Conservative interval | Conservative decision | Continued fine busy cores |
 | --- | ---: | --- | ---: | --- | --- | ---: |
-| 1 Sub-9kHz | 0.105797 | 0.065142–0.160895 | 0.403813 | 0.317824–0.505933 | Conditional pass | 2.509 |
-| 2 Groundwave GPSDO | 0.107313 | 0.057771–0.179719 | 0.431828 | 0.332123–0.557078 | Unresolved | 2.604 |
-| 3 Groundwave Helper | 0.151933 | 0.109730–0.233736 | 0.426845 | 0.285671–0.646181 | Unresolved | 3.116 |
-| 4 HF Helper | 0.209542 | 0.106432–0.399960 | **10.503598** | 0.132542–1.706e+23 | Unresolved | 3.497 |
-| 5 HF encrypted GPSDO | 0.082533 | 0.046506–0.135198 | 0.348601 | 0.224880–0.525080 | Unresolved | 2.932 |
-| 6 FHSS | 0.212438 | 0.125459–0.397052 | 0.634457 | 0.466646–0.920861 | Unresolved | 2.597 |
-| 7 HF unencrypted GPSDO | 0.073359 | 0.054175–0.102080 | 0.324074 | 0.266107–0.399616 | Unresolved | 3.122 |
-| 8 EME | 0.170287 | 0.101504–0.905893 | 0.648012 | 0.458800–1.535051 | Unresolved | 2.803 |
+| 1 Sub-9kHz | 0.074380 | 0.061820–0.089259 | 0.345250 | 0.204783–0.525967 | Unresolved | 2.656 |
+| 2 Groundwave GPSDO | 0.076962 | 0.062438–0.095403 | 0.346030 | 0.286664–0.418095 | Conditional pass | 2.761 |
+| 3 Groundwave Helper | 0.112558 | 0.084375–0.146508 | 0.329590 | 0.255563–0.450456 | Unresolved | 3.613 |
+| 4 HF Helper | 0.165353 | 0.110595–0.235060 | 4.129237 | 0.372204–2101.40 | Unresolved; point fails | 3.833 |
+| 5 HF encrypted GPSDO | 0.061270 | 0.045831–0.083959 | 0.278895 | 0.130658–0.505194 | Conditional pass | 3.268 |
+| 6 FHSS | 0.170817 | 0.117349–0.240995 | 0.533668 | 0.436313–0.692413 | Unresolved | 2.774 |
+| 7 HF unencrypted GPSDO | 0.058782 | 0.037936–0.089245 | 0.266651 | 0.222546–0.323282 | Conditional pass | 3.399 |
+| 8 EME | 0.127802 | 0.075502–0.209365 | 0.521022 | 0.282059–0.879363 | Unresolved | 2.866 |
 
-Row 4's broad noise-only fallback covers 8,596 frequency points and 1,340,976
-FFT products. Ordinary abbreviated kernel forecasts were approximately
-4.8–6.3 s/s. One recurring two-unit timing took 2.189 s wall / 3.358 s CPU,
-versus 0.413–0.498 s wall / about 3.03 s CPU for its peers. Its cause is not
-established. Three outer observations and the declared family-wise log
-interval amplify that stall into the enormous upper bound above; it is not
-a credible precise maximum. Removing that anomaly would not establish
-real-time broad fallback. Preserve the failed gate rather than repeat until
-a favorable timing appears or relax the uncertainty rule.
+Row 4 still requires the broad 8,596-frequency fallback. Its conservative point
+is **4.129 s/s**, while the declared uncertainty procedure gives 0.372–2101.40
+s/s and leaves the acquisition model unsupported. That upper endpoint is an
+uncertainty warning, not a credible precise maximum. Its bank observations were
+0.683 and 0.524 seconds; the failed comparison is preserved. The matched kernel
+speedups above are the evidence for the optimization, rather than a ratio
+between unrelated complete-suite point estimates.
 
-Elapsed-weighted continued fine utilization ranges from **2.51 to 3.50 busy
-cores**; maximum-state fine reaches 4.80 and FHSS noise-only acquisition 8.32.
-Thus the restructuring saves substantial work but does not demonstrate
-saturation of all twelve threads. Sequential tracking transitions, controller
-planning and small model batches remain limits. The full logical worker
-budget applies regardless of the six-worker timing comparison or this
-laptop's power limits. [CPU allocation contract](development.md#receiver-cpu-allocation)
+The reused fine measurements range from **2.66 to 3.83 busy-core equivalents**.
+Maximum-state fine reaches 5.18, and FHSS nominal acquisition reaches 8.81.
+**Whole-receiver saturation of all twelve threads remains unproven.** The
+portable full-thread default is unchanged; pilot winners and this laptop's
+power limits do not authorize reducing it. That baseline compares 1/6/12
+workers within one stream and uses fresh twelve-worker inference. It does not
+repeat the optional separate sustained allocation campaign.
+[CPU allocation contract](development.md#receiver-cpu-allocation)
 
-In the separate matched six-versus-twelve-worker continuations, twelve workers
-used more busy cores in every row. Point throughput was 0.763–0.995× the
-six-worker result on rows 1–7 and 1.030× on row 8; the intervals do not establish
-a worker optimum. Preserve these unfavorable observations alongside the gains
-from the restructuring. They do not authorize reducing the portable default.
+The baseline's named `./build.sh test triad` passed **22/22** in 34.91 seconds.
+Its native gate decoded canonical `e` (`001`), completed it after two scored quiet
+slots, then processed a sixth quiet slot while remaining in continuous receive
+state. Draining/resuming preserves the public ordinal; the captured-prefix EOF
+negative control remains incomplete. This is one configured-calendar
+functional case, not blind transmitter discovery or an all-case success bound.
+[Named test log](../local-evidence/continuous-receiver/triad.log)
 
-The named `./build.sh test triad` passed **21/21** in 30.02 seconds on the final
-CPU sources. Focused checks cover matched mapped plans, bit-pair arithmetic,
-partial erasures, generic nonzero-null callbacks, drained worker failures,
-aligned native buffers, finite FIR tails and large-input memory admission.
-The full calibration repeats the current native message/quiet/EOF gate.
-[Named test log](../local-evidence/current-restructure/triad.log)
+Keep this frozen calibration while it supplies applicable unchanged local phase
+costs and unresolved bounds under an explicit source review. The earlier
+calibration remains only as the
+embedded architecture report's explicitly historical baseline. Remove raw
+receipts when their documented purpose is superseded.
 
-Earlier singleton-DC normalized sums and basis-DFT dispatch remain in the
-canonical path; the new fused pipeline supersedes their separate attribution
-as a description of current utilization. A scratch 128→1024-row mapped batch
-was 2–5% slower despite fewer calls and remains rejected. Keep the current
-calibration and scoped restructuring receipts while they support these claims.
-The older CPU calibration constituents remain only where required to interpret
-the earlier source-matched GPU forecasting qualification below. Retire raw
-receipts when matched replacements supersede their stated purpose.
+The first invocation stopped all eight rows at geometry provenance because a
+relative exporter path hashed differently from the canonical absolute path.
+That 64.40-second setup failure was retained. Correcting the executable spelling
+accepted row 1 but left rows 2–8 at the work/cache/memory guard; their discarded
+subreceipts prevent assigning an exact per-row cause. Source review found the
+private fixture compared H0 input with DATA maximum-state references, although
+adaptive work depends on input. It also omitted the input reservation normally
+initialized by acquisition. Row 1's corrected workspace arithmetic remains
+within its limit: 1,425,142,394 bytes against 3,327,035,141 bytes.
+
+The single final continuation preserved accepted row 1 and reproduced each
+remaining row's own H0 reference: seed 96341, variance, extent, coordinates,
+physical origin, ordinary state mode and canonical input reservation. All
+individual work/cache/memory checks passed; full-input workspace equals the
+baseline in every new row. This recovers conditional applicability without
+changing DSP, fitting new DSP timings, relaxing thresholds or upgrading old
+unsupported models. The 74.49-second continuation brought total external time
+to 222.93 seconds within the original 300-second budget. Earlier failed attempts
+remain distinct from this accepted check.
+
+Keep the compact reports, original failures and applicability audit while they
+support these current estimates. The private proof driver, bytecode and duplicate
+per-row outputs were removed after audit (16 files, 5.13 MB); they have no
+continuing implementation role.
+[First corrected partial refresh](../local-evidence/continuous-receiver/current-serial12-refresh-corrected.json) ·
+[Original setup failure](../local-evidence/continuous-receiver/current-serial12-refresh.json) ·
+[Applicability audit](../local-evidence/continuous-receiver/serial12-refresh-audit.json)
 
 Development checks exposed and corrected three reception defects before the
 current measurement: FP32 innovation arithmetic failed at very high SNR,

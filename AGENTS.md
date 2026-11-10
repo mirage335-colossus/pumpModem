@@ -30,6 +30,20 @@ through the [GPU-assisted procedure](docs/triad-performance.md#runpod-gpu-assist
 GPU speed or a hypothetical optimization is not a CPU capacity result. Report
 complete nominal and conservative service, uncertainty, margin and unresolved
 work for every current row; a forecasting gate is distinct from a capacity pass.
+Preserve the receiver scope: current complete-work calibration assumes a
+configured public calendar and keyed ordinal sequence. It does not qualify
+blind discovery of independently restarted transmitters. Report ordinary
+blind continuous-listening capacity as unresolved until that acquisition and
+occupied-signal competition are implemented and measured; a favorable scoped
+estimate cannot remove this missing work. See the
+[current findings](docs/validation.md#continuous-receiver-restructuring).
+The continuous native CPU receiver overlaps adjacent ready windows with two
+independent process owners, sharing one full hardware-thread budget and
+committing results in public-slot order. A lone job uses the full budget.
+Keep measured same-stream throughput separate from conditional concurrent
+cost-class forecasts; the old sequential calibration does not by itself
+qualify the process scheduler. Follow the
+[current capacity workflow](docs/robust-manual-capacity.md).
 
 ## Prevent accumulation
 
