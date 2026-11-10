@@ -1,10 +1,11 @@
 # Oscillator references and timing assumptions
 
-The retained Baseband Osc and Shift Osc controls describe reference assumptions;
-they do not connect GPS hardware, discipline clocks or tune a radio. Robust
-operation is [unavailable in the GUI](robust-current.md) pending reconnection.
-These settings are inputs to that future connection, not current receiver search
-or sensitivity guarantees.
+Baseband Osc and Shift Osc configure reference assumptions in the native Robust
+GUI session: sampled-channel impairments, duration planning and public receiver
+search bounds. They do not connect GPS hardware, discipline clocks or tune a
+radio. A selected model is not measured device accuracy, sensitivity or complete
+receiver coverage. Live reception remains scoped to the configured public
+calendar; see [current architecture and limits](robust-current.md).
 
 ## Independent physical quantities
 

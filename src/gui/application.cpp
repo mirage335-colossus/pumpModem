@@ -125,7 +125,9 @@ void Application::start() {
     impl_->started_session=true;
     impl_->next=impl_->next_presentation=impl_->started=Clock::now();
     if(launch.smoke)impl_->smoke=std::make_unique<Smoke>();
-    impl_->controller.start();impl_->bitmaps.update(impl_->controller);
+    impl_->controller.start(impl_->regular_selected());
+    impl_->audio_suspended=!impl_->regular_selected();
+    impl_->bitmaps.update(impl_->controller);
     if(impl_->fast_selected()&&!launch.simulation&&!launch.smoke)impl_->fast_controller.set_selected(true);
 }
 bool Application::tick() {
@@ -147,7 +149,7 @@ bool Application::tick() {
             impl_->smoke->step(impl_->controller, &impl_->bitmaps);
             if(!impl_->passed&&impl_->smoke->done()) {
                 impl_->passed=true;impl_->completed=now;select_page(launch.page);
-                std::cout<<"Shared GUI smoke passed: editor controls, dropdowns, declarations and explicit Robust unavailable state.\n";
+                std::cout<<"Shared GUI smoke passed: editor controls, dropdowns, declarations and native Robust session.\n";
             }
             if(!impl_->passed) {
                 const auto& definitions=ui::pages();
@@ -188,7 +190,11 @@ void Application::select(ui::Field field,std::string id) {
     if(field==ui::Field::fast_mode) {
         if((id!="robust"&&id!="fast"&&id!="legacy")||impl_->fast_mode.selected==id)return;
         dismiss_overlay();++impl_->mode_generation;
-        if(impl_->regular_selected())impl_->regular_page=impl_->page;
+        if(impl_->regular_selected()) {
+            impl_->regular_page=impl_->page;
+            impl_->audio_suspended=true;
+            (void)impl_->controller.try_suspend_capture();
+        }
         if(impl_->legacy_selected())impl_->legacy_controller.selected(false);
         if(impl_->fast_selected())impl_->fast_controller.set_selected(false);
         impl_->page=ui::Page::console;
@@ -616,10 +622,12 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
             if(arg=="--help") {
                 std::cout<<"Data Pump console\n"<<frontend_label<<backend<<" (selected at build time)\nUsage: "<<program_name
                     <<" [--color|--monochrome] [--self-check] [--smoke-test]\n"
-                    <<"Fast and Legacy audio remain available. Robust controls are retained while\n"
-                    <<"the canonical triad backend is connected; Robust audio is unavailable.\n"
+                    <<"Robust uses the native three-carrier modem with a configured public calendar.\n"
+                    <<"Live peers must share a waveform profile, calendar and initial ordinal.\n"
                     <<"Saved settings: --keyfile PATH | --keyset amateur|none, --key-name NAME,\n"
                     <<"--rate HZ --carrier HZ --shift HZ --target-snr DB-Hz --helper-power WATTS.\n"
+                    <<"Robust receive setup: --calendar-epoch UTC --calendar-ordinal N\n"
+                    <<"--live-noise-dbfs-hz DBFS/Hz; configure the local audio noise model explicitly.\n"
                     <<"Developer trace: --verbose [--verbose-file NEW-PATH]\n"
                     <<"Physical audio instrument: --audio-timing-test 5..300 [--audio-test-device DEVICE]\n"
                     <<"Smoke controls: --smoke-hold SECONDS --smoke-view NAME --smoke-scroll 0..1\n";

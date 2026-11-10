@@ -1,4 +1,4 @@
-.TH DATAPUMP-GUI 1 "October 2026" "Data Pump 001_00" "User Commands"
+.TH DATAPUMP-GUI 1 "November 2026" "Data Pump 001_00" "User Commands"
 .nh
 .ad l
 .nr HY 0
@@ -16,10 +16,15 @@ and live signal plots.
 .PP
 An ordinary launch opens Fast Modem and listens on the selected audio device.
 The Modem menu also offers Robust Modem and Legacy Modem.
-Robust uses binary patterns for weak signals; Legacy supports BPSK31,
-BPSK125 and Olivia-4/2k text.
+Robust links one native C++ three-carrier DATA/Helper/complete-receiver stack
+into the application; Python is not part of its operating path. Legacy supports
+BPSK31, BPSK125 and Olivia-4/2k text.
 The modes have separate settings.
 Peers must select matching waveform, source, coding and key settings.
+Live Robust also requires a shared public calendar and initial waveform ordinal,
+plus a declared local input-noise model in Robust setup. Unknown-start
+acquisition, native real-time capacity and physical-device qualification remain
+unqualified. Robust audio CLI commands remain retired.
 .PP
 Robust keeps Baseband Osc, Shift Osc and Margin beside its main Carrier and
 Shift frequency controls. Shift 0 disables Shift Osc as N/A and excludes all
@@ -49,7 +54,8 @@ The last color or monochrome option wins.
 .TP
 .B \-\-simulation
 Open Robust Modem with a continuous simulated noisy channel instead of live
-audio. Transmissions run at computation speed, then replay in the plots.
+audio. Emitted samples pass through the selected continuous sampled channel
+and complete native receiver; plots show actual observations and score records.
 .TP
 .BI \-\-hardware-channel-test " yes|no"
 Deprecated compatibility spelling; accepted but ignored and no longer exported.
@@ -89,8 +95,39 @@ they do not set a radio's RF output power.
 Select the built-in public amateur keyset or unload all keys. Cannot be combined
 with \-\-keyfile; \-\-keyset none also cannot be combined with \-\-key-name or
 \-\-tx-key named. With the amateur keyset, \-\-tx-key none disables transmission
-with that key while retaining it for reception. Omitting the option preserves
-the current key bank.
+encryption and selects plaintext reception while retaining loaded keys for
+later selection. Omitting the option preserves the current key bank.
+.TP
+.BI \-\-calendar\-epoch " UTC|none"
+Shared public calendar anchor in whole UTC seconds, 6 through 4294967289.
+Default none leaves live operation unconfigured; simulation uses its own
+agreed local calendar. Both peers must use the same anchor.
+.TP
+.BI \-\-calendar\-ordinal " N"
+Shared unsigned initial waveform ordinal; default 0. It advances through DATA
+and quiet slots and does not reset at message boundaries.
+.TP
+.BI \-\-live\-noise\-dbfs\-hz " DENSITY|unspecified"
+Declared one-sided local input-noise density in normalized PCM squared per Hz,
+from \-250 to 0 dBFS/Hz. Default unspecified leaves live reception unconfigured.
+This is separate from simulated link noise in dBm/Hz and does not calibrate a device.
+.TP
+.BI \-\-fec " off|rs20|rs60"
+Configured native short-text error correction; default off. Both peers must agree.
+RS modes add bounded Reed-Solomon parity and CRC error detection after short
+coding; decoding still requires two fully scored quiet slots. CRC is not sender
+authentication. Exact raw-bit transmission bypasses FEC.
+.TP
+.BI \-\-helper\-power " POWER"
+Requested Helper transmit power, separate from DATA power. Zero disables Helper.
+Accepts power units such as W or mW; it does not set physical radio power.
+.TP
+.BI \-\-helper\-ratio\-limit " DB"
+Maximum Helper-to-DATA power ratio: 10, 20, 40, 60, 80 or 90 dB.
+The native allocation limits Helper power to the selected ratio.
+.TP
+.BI \-\-helper\-callsign " TEXT"
+Up to 16 printable ASCII characters in keyed Helper metadata.
 .TP
 .BI \-\-tx\-dbm " DBM"
 Transmit power for the link budget, from \-200 to 100 dBm.
@@ -125,7 +162,8 @@ active shared model into Baseband Osc and selects Shift Osc's Baseband clock
 option. Independent UTC accuracy, region and offset controls do not change that topology.
 .TP
 .BI \-\-clock\-sync " SPEC"
-Default retains the existing epoch search. An explicit example is
+Default retains the broad arrival-time search around the configured public
+calendar. An explicit example is
 GPS_1ms-400ms_region-2564ms_offset: per-station PC accuracy, total propagation
 region width centered on the fixed offset. Editable ns/us/ms/s values are accepted.
 These are assumptions, not measured audio-device accuracy. Unsupported timing
@@ -138,13 +176,9 @@ Audio error is total nonnegative lag, zero through the entered value (Default: +
 It is not a plus/minus allowance; GPS accuracy keeps its existing plus/minus interpretation.
 Numeric Audio error edits are independent of GPS accuracy,
 propagation and oscillator models. Accepts nonnegative ns/us/ms/s durations up to 60s,
-subject to the Live search-window limit. This does not change buffering or
-establish measured hardware accuracy. It does not change the ordinary search
-when clock sync is Default and hopping is disabled. FHSS assumes a shared
-GPS calendar at Default, with plus/minus10ms at each station
-and the selected causal audio lag. Saved parameter lists retain explicit values.
-An unsupported allowance visibly falls back to ordinary playback before private
-output; it is not silently enlarged.
+within native profile limits. This does not measure hardware latency or alter
+the audio device clock. Live capture requires actual provider timestamps and
+uncertainty compatible with the declared calendar and arrival bounds.
 .TP
 .BI \-\-live\-duplex " yes|no"
 Keep hardware capture running during local transmission for physical loopback;
@@ -152,32 +186,34 @@ default no. Clear received resets queued input and receiver backlog without
 cancelling transmission or clearing its private-key reuse lock.
 .TP
 .BI \-\-symbol\-burst " off|1|2|3|5|10"
-Save a whole-symbol waiting preference for future Robust triad integration.
-Default is off. The GUI selectors are immediately right of FHSS. Robust
-operation is unavailable in the GUI pending reconnection; this preference
-does not enable transmission or reception.
+Minimum whole-bit waits between native public DATA slots; default off.
+Mandatory pulse support, Helper lead/tail and calendar alignment remain.
+Scheduled waits are not scored quiet slots and cannot finish a message.
 .TP
 .BI \-\-symbol\-burst\-random " 0|1|2|3"
-Save a random extra whole-symbol waiting preference for future triad
-integration. Default is 0. This preference does not enable Robust operation.
+Additional shared-calendar whole-bit waits from zero through this limit;
+default 0. Both peers need matching calendar, key/profile and wait settings.
+The native keyed permutation has equal counts in each 252-slot cycle.
 .TP
 .BI \-\-dsss\-factor " 1|10|100|1000"
-Additional private outer spreading; 1 is off. Requires a selected key for factors
-above one and retains the existing inner private patterns. Experimental receiver
-sensitivity and structured-interference qualification are incomplete. Selecting
-a factor in the GUI sets Rate 360/36/3.6 Hz for 10x/100x/1000x and stream Carrier
-1500 Hz. Explicit command values retain their supplied Rate and Carrier.
+Added-symbol factor for the native three-carrier waveform; 1 disables added
+symbols. Selecting a larger factor in the GUI enables Interleave and adjusts
+Rate to preserve the initial occupied bandwidth. Explicit command values retain
+their supplied Rate and Carrier. No encryption key is required for this control;
+without one, waveform material is publicly reproducible.
+.TP
+.BI \-\-dsss\-mode " off|interleave"
+Select one native symbol lane or interleaved added-symbol lanes. Peers must
+share the mode and factor. This does not qualify sensitivity or interference rejection.
 .TP
 .BI \-\-fhss " off|fake-fcc|fake-eu|fake-list"
-Select a persistent preference for illustrative Carrier/Shift hopping.
-DSSS and FHSS require an active transmit encryption key. Without one, saved
-preferences remain inactive and the GUI selectors are disabled. A receive-only
-keyfile does not enable spreading.
+Select the canonical FHSS envelope and an illustrative Carrier/Shift schedule.
+It does not retune external radio hardware or enable simultaneous reception.
 Below 800 MHz both use narrow experimental spacing derived from the waveform;
 800 MHz is a product convention, not a regulatory boundary. Higher frequencies
 use band-specific profiles or report no applicable profile. The legacy
-fake-0.4s-200 identifier maps to fake-fcc. This does not retune hardware or
-change transmitted audio. Profile details and unimplemented access assumptions
+fake-0.4s-200 identifier maps to fake-fcc. The envelope affects transmitted audio
+while the audio IF and hardware tuning remain fixed. Profile details and unimplemented access assumptions
 appear under Model limits and references; the illustration is not certification.
 .TP
 .BI \-\-fhss-list " FREQUENCIES"
@@ -185,8 +221,8 @@ For fake-list, give 2–200 distinct Shift frequencies, comma/semicolon separate
 or one per line, in Hz/kHz/MHz/GHz/THz (bare values are Hz). Maximum 8192 bytes.
 Developer mode exposes Fake: List and the FHSS multiline editor with Apply list.
 Zero Shift is allowed. Carrier follows by the same delta, preserving its
-difference from Shift. The list illustrates 0.4-second residence, with fixed physical
-transmitted audio and radio tuning. It has no regulatory profile.
+difference from Shift. The list illustrates 0.4-second residence, with fixed
+audio IF and radio tuning. It has no regulatory profile.
 .TP
 .BI \-\-fhss-list-file " PATH"
 Load a regular text file using the same frequency syntax; # starts an end-of-line
@@ -200,10 +236,12 @@ Multiply declared frequency and clock accuracy bounds; default 3, minimum 1.
 .BI \-\-target\-snr " DB-HZ"
 Set the single Robust target carrier-to-noise-density ratio, from \-200 to
 200 dB-Hz. Default: 32. Console and Link Planner edit the same value for all
-messages and attachments. This is a planning target, not measured in-band SNR.
+short-message planning. It drives a provisional native duration model, not a
+sensitivity guarantee, measured in-band SNR or native CPU-capacity forecast.
 .TP
 .BI \-\-rate " FREQUENCY"
-Set the nominal rate/bandwidth, from 0.001 Hz to 30 MHz.
+Set the native inner rate, parsed from 0.001 Hz to 30 MHz.
+The selected waveform and fixed Helper placement must fit the actual audio rate.
 Default: 3.6 kHz.
 This is not the payload bit rate.
 .B \-\-bw
@@ -229,10 +267,11 @@ is an alias; choose one shift spelling.
 USB is fixed; \-\-sideband upper is a compatibility no-op and lower is rejected.
 These settings do not retune hardware or add a complex I/Q interface.
 .TP
-.BI \-\-dsp\-workspace " PERCENT"
-Limit the Robust DSP workspace to 25%, 50% or 75% of available RAM.
-Default: 75%.
-The percent sign may be omitted.
+.BI \-\-dsp\-workspace " auto|PERCENT"
+Automatic uses available RAM with bounded host headroom and is the default.
+Explicit 25%, 50% or 75% values set a receiver memory limit; the percent sign
+may be omitted. Software workers still default to twice effective logical CPU
+capacity, with shared in-process ownership and full resource admission.
 .PP
 Frequencies accept Hz, kHz, MHz, GHz or THz case-insensitively, with optional
 spaces, scientific notation or k/m/g/t shorthand; bare numbers mean Hz.
@@ -278,12 +317,13 @@ text draft. Live audio reception pauses during transmission and resumes afterwar
 In Fast Modem, Ctrl+Enter transmits; Enter inserts a newline.
 In Robust Modem, Enter transmits by default; the send preference can require
 Ctrl+Enter instead.
-Cancel stops the current transmission or simulation replay.
+Cancel stops the current transmission or simulation.
 .PP
-Robust text of 1\(en16 source bytes uses the fixed short dictionary.
-Explicit raw-bit input sends precisely its bits, preserving leading zeros and
-partial bytes. Neither short path adds a header, padding, FEC or MAC.
-Longer text and all attachments use fixed coding intervals.
+Robust text of 1\(en16 source bytes uses the native short dictionary. Off sends
+its exact short bits; RS20 and RS60 use the configured bounded text-FEC profile.
+Explicit raw-bit input accepts 1\(en208 bits and sends them exactly, preserving
+leading zeros and partial bytes without FEC. Longer text and attachments are
+not supported by Robust; use a modem with an applicable file/text profile.
 .PP
 The Robust controller starts with the built-in public keyset
 .BR WARNING\-Amateur .
@@ -298,11 +338,10 @@ to remove the transmit and receive keys. The normal live transmit guard remains
 in effect, but it cannot coordinate independent stations or sessions using the
 same key, epoch and stream positions.
 .PP
-Pending Robust receptions expose each newly accepted bit in the same row,
-retaining the first 4096 diagnostic bits.
-Reception completes only when consecutive fully scored absent symbols cover
-at least six seconds. A long symbol must finish before it can count as absent;
-cancellation or a decodable prefix does not complete a message.
+Pending Robust receptions expose bounded bit and native score diagnostics.
+Reception completes only after two fully scored quiet public DATA slots.
+Interior missing slots remain erasures if DATA resumes; transport EOF,
+cancellation, received length and a decodable prefix do not complete a message.
 Pending content cannot be copied or saved as a completed message.
 .PP
 Completed text can be copied or pasted into the message draft.
@@ -313,6 +352,11 @@ Received files are never opened or executed automatically.
 .PP
 Developer mode reveals advanced controls and inspection pages.
 The Robust Link planner shares the single Target SNR with Console.
+Receive-probability and CPU forecasts remain unqualified. Detailed transmission
+inspection is deferred separately from the connected live Pattern evidence and
+Pattern steps views. Transmit noise uses fresh independent DATA keys; Helper-only
+transmission emits no DATA. Force next transmission is a one-shot address-reuse
+lock override that retains history and all draft/key/device/resource checks.
 Robust uses automatic waveform defaults and the fixed Helper arrangement of
 high/low pilot tones and a separate auxiliary tone; these are not selectable.
 Its Launch command includes a file-backed keyring's path and named transmit key

@@ -7,7 +7,7 @@
 #include "datapump/triad_modem_v3.hpp"
 #include "datapump/triad_shaping.hpp"
 #include "datapump/triad_helper_burst.hpp"
-#include "datapump/triad_transmission_keys.hpp"
+#include "datapump/triad_stream.hpp"
 #include "datapump/tuning.hpp"
 #include "diagnostic_iq_noise_options.hpp"
 
@@ -43,10 +43,8 @@ namespace {
 using namespace datapump;
 using namespace datapump::triad::v3;
 constexpr std::uint32_t default_sample_rate = 18000;
-constexpr double data_start_seconds = 38;
+constexpr double data_start_seconds = helper_lead_seconds;
 constexpr double thermal_n0_dbm_hz = -164;
-constexpr double spectral_skirt_allowance_hz = 200;
-constexpr double tau = 2 * std::numbers::pi;
 constexpr std::size_t stream_chunk_samples = 4096;
 constexpr std::size_t maximum_sequence_bits = 256;
 constexpr std::size_t maximum_short_source_bytes = 16;
@@ -816,10 +814,6 @@ void print_infeasible_plan(const Options& o, std::string_view stage, std::string
     std::cout << "}\n";
 }
 
-Complex rotation(double frequency, long double seconds) {
-    return std::polar(1., tau * static_cast<double>(std::remainder(frequency * seconds, 1.L)));
-}
-
 void write_complex(std::ostream& out, std::span<const Complex> samples) {
     // Explicit interleaved little-endian binary64, independent of the C++
     // std::complex object representation. Bound memory by one output chunk.
@@ -843,64 +837,13 @@ void json_string(std::ostream& out, std::string_view text) {
 
 const char* boolean(bool value) { return value ? "true" : "false"; }
 
-struct DataPowerReference {
-    double active_seconds = 0, mean_norm = 0;
-    unsigned nodes = 0;
-    const char* method = "bounded-keyed-tile-quadrature-v1";
-    unsigned sampled_tiles = 0;
-    double tile_relative_standard_error = 0;
-};
-
-DataPowerReference bounded_tile_power(PatternSource& source, const Format& f, const Geometry& g) {
-    // Sample at most sixteen independently keyed active tiles. No duration-sized
-    // pass or per-chunk gain is used. This is a statistical power reference, not
-    // a certificate of a particular complete waveform's energy.
-    constexpr unsigned maximum_tiles = 16, nodes_per_tile = 2048;
-    const auto tiles = static_cast<unsigned>(std::min<std::uint64_t>(maximum_tiles, g.tile_count));
-    const long double active_dwell = f.dwell_seconds - 2 * f.quiet_seconds;
-    const long double active_tile = g.tile_seconds * (f.fhss ? active_dwell / f.dwell_seconds : 1.L);
-    DataPowerReference result;
-    result.active_seconds = static_cast<double>(active_tile * g.tile_count);
-    result.sampled_tiles = tiles;
-    result.nodes = tiles * nodes_per_tile;
-    long double sum = 0, squares = 0;
-    for (unsigned j = 0; j < tiles; ++j) {
-        const auto begin = static_cast<std::uint64_t>(static_cast<long double>(g.tile_count) * j / tiles);
-        const auto end = static_cast<std::uint64_t>(static_cast<long double>(g.tile_count) * (j + 1) / tiles);
-        const auto tile = begin + mix64(f.epoch ^ (0x54494c45504f57ULL + j)) % (end - begin);
-        long double energy = 0;
-        for (unsigned i = 0; i < nodes_per_tile; ++i) {
-            const auto random = mix64(f.epoch ^ tile ^ (0x4e4f4445504f57ULL + i));
-            const auto fraction = static_cast<long double>(random >> 11) / 9007199254740992.L;
-            const auto coordinate = active_tile * (i + fraction) / nodes_per_tile;
-            long double within = coordinate;
-            if (f.fhss) {
-                const auto dwell = std::floor(coordinate / active_dwell);
-                within = dwell * f.dwell_seconds + f.quiet_seconds + coordinate - dwell * active_dwell;
-            }
-            const auto seconds = tile * (static_cast<long double>(f.burst_wait_tiles) + 1) * g.tile_seconds + within;
-            energy += std::norm(source.sample_at(g.calendar_origin_sample + seconds * f.sample_rate));
-        }
-        const auto mean = energy / nodes_per_tile;
-        sum += mean; squares += mean * mean;
-    }
-    result.mean_norm = static_cast<double>(sum / tiles);
-    if (!(result.mean_norm > 0) || !std::isfinite(result.mean_norm))
-        throw std::runtime_error("invalid bounded tile power reference");
-    if (tiles > 1) {
-        const auto variance = std::max(0.L, (squares - sum * sum / tiles) / (tiles - 1));
-        result.tile_relative_standard_error = static_cast<double>(std::sqrt(variance / tiles) / result.mean_norm);
-    }
-    return result;
-}
-
 void data_power_json(std::ostream& out, const Options& o, const DataPowerReference& power,
                      double calibration_gain, double data_gain) {
     out << "\"data_power_reference_policy\":"; json_string(out, o.power_reference);
     out << ",\"pattern_revision\":\"" << pattern_revision_name()
         << "\",\"added_amplitude_depth\":" << o.added_amplitude_depth
         << ",\"data_power_reference_version\":2,\"data_reference_bit\":0"
-        << ",\"data_reference_integration_method\":"; json_string(out, power.method);
+        << ",\"data_reference_integration_method\":"; json_string(out, "bounded-keyed-tile-quadrature-v1");
     out << ",\"data_reference_complete_sampled_source\":false"
         << ",\"data_reference_active_seconds\":" << power.active_seconds
         << ",\"data_reference_mean_norm\":" << power.mean_norm
@@ -960,141 +903,70 @@ int run(const Options& o) {
     auto f = selected_shaping.format;
     const auto g = selected_shaping.geometry;
     const auto sample_rate = f.sample_rate;
-    // Exactly 400 ms for the accepted integer multiple-of-five sample clocks.
-    const std::uint64_t dwell_samples = 2ULL * sample_rate / 5;
-    // Keep the complete finite-envelope source bound until sampled validation
-    // has justified reducing it. The certificate affects only Helper placement.
-    const auto legacy_source_bandwidth = g.occupied_bandwidth_hz + 2 / f.ramp_seconds;
+    const auto helper_options = helper_options_for(physical);
     if (o.plan_only) {
-        print_plan_json(o, data_if_hz, selected_shaping, helper_options_for(physical), physical, physics);
+        print_plan_json(o, data_if_hz, selected_shaping, helper_options, physical, physics);
         return 0;
     }
-    const auto selected = selected_key(o);
-    const auto keys = datapump::triad::resolve_transmission_keys(
-        selected, f.encrypt, datapump::triad::TransmissionMode::Message);
-    f.encrypt = keys.encrypt_data;
-    const auto& key = keys.data;
-    const auto& helper_key = keys.helper;
-    PatternSource reference_source(f, key, 0);
-    PatternSource data_source(f, key, static_cast<std::uint8_t>(o.bit));
-    const auto lead_seconds = o.helper ? data_start_seconds : 0.;
-    const auto lead_samples = static_cast<std::uint64_t>(std::llround(lead_seconds * sample_rate));
-    if (!o.whole_bit_calendar && o.helper && g.calendar_origin_sample > lead_samples)
-        throw std::runtime_error("DATA pulse padding exceeds the fixed Helper lead");
-    // Power planning retains its public historical preview coordinate. The
-    // opt-in emitted calendar below instead places the entire DATA support
-    // after a fresh38-second Helper lead.
-    const auto preview_data_offset = static_cast<long double>(data_start_seconds) * sample_rate - g.calendar_origin_sample;
-    auto data_offset = o.whole_bit_calendar || !o.helper ? std::uint64_t{0} : lead_samples - g.calendar_origin_sample;
-    if (g.source_samples > UINT64_MAX - data_offset - dwell_samples)
-        throw std::runtime_error("composite source extent overflow");
-    const auto data_end = data_offset + g.source_samples;
-    auto composite_samples = ((data_end + dwell_samples - 1) / dwell_samples) * dwell_samples;
-    std::vector<HelperBurstSlot> whole_slots;
-    std::optional<HelperBurstPlan> burst_plan;
-    const HelperBurstCoordinate calendar_origin{f.epoch, 0};
-    if (o.whole_bit_calendar) {
-        const auto bit_samples_real = static_cast<long double>(g.bit_seconds) * sample_rate;
-        if (bit_samples_real < 1 || bit_samples_real > UINT64_MAX)
-            throw std::runtime_error("whole-bit logical calendar extent overflow");
-        burst_plan.emplace(HelperBurstConfig{sample_rate, static_cast<std::uint64_t>(std::llround(bit_samples_real)),
-            g.source_samples, g.calendar_origin_sample, o.whole_bit_wait_count, o.helper});
-        auto slot = burst_plan->first_slot(burst_plan->add(calendar_origin, o.helper ? lead_samples : 0));
-        whole_slots.reserve(o.whole_bit_count);
-        for (unsigned i = 0; i < o.whole_bit_count; ++i) {
-            if (slot.pattern_begin.epoch < 6 || slot.pattern_begin.epoch > 4294967289ULL ||
-                slot.helper_end.epoch >= 4294967296ULL)
-                throw std::runtime_error("whole-bit calendar exceeds keyed epoch or Helper metadata range");
-            whole_slots.push_back(slot);
-            if (i + 1 < o.whole_bit_count) slot = burst_plan->successor(slot);
-        }
-        data_offset = burst_plan->distance(calendar_origin, whole_slots.front().support_begin);
-        composite_samples = burst_plan->distance(calendar_origin, whole_slots.back().helper_end);
-    }
-    const auto public_slot = [&](std::uint64_t index) {
-        if (!burst_plan)
-            throw std::invalid_argument("slot-plan requires a whole-bit calendar");
-        if (f.symbol_ordinal > UINT64_MAX - index)
-            throw std::invalid_argument("public slot symbol ordinal overflows");
-        const auto slot = burst_plan->slot_at(
-            burst_plan->add(calendar_origin, o.helper ? lead_samples : 0), index);
-        if (slot.pattern_begin.epoch < 6 || slot.pattern_begin.epoch > 4294967289ULL ||
-            slot.helper_end.epoch >= 4294967296ULL)
-            throw std::runtime_error("public slot exceeds keyed epoch or Helper metadata range");
-        return slot;
-    };
-    const long double helper_end = static_cast<long double>(composite_samples) / sample_rate;
-    long double observation_end = helper_end;
-    if (o.observation_slots) {
-        // This caller-selected observation budget is independent of DATA
-        // contents/count. The finite source still stops at its actual support;
-        // one channel continues through the remaining quiet scheduled slots.
-        const auto final_observation_slot = public_slot(*o.observation_slots - 1);
-        observation_end = burst_plan->relative_seconds(calendar_origin, final_observation_slot.helper_end);
-    }
-    if (o.helper && static_cast<long double>(f.epoch) + std::ceil(helper_end) >= 4294967296.L)
-        throw std::runtime_error("source endpoint exceeds Helper32-bit epoch calendar");
+    const auto key = selected_key(o);
+    PublicProfileConfig profile_config;
+    profile_config.format = f;
+    profile_config.data_if_hz = data_if_hz;
+    profile_config.gate_bandwidth_hz = std::max(0.,
+        selected_shaping.spectrum.placement_bandwidth_hz - g.occupied_bandwidth_hz);
+    profile_config.helper = helper_options;
+    profile_config.helper_enabled = o.helper;
+    profile_config.wait_bits = o.whole_bit_wait_count;
+    profile_config.capture_lead_seconds = physical.capture_lead;
+    profile_config.capture_trail_seconds = physical.capture_trail;
+    profile_config.arrival_low_seconds = physical.arrival_low;
+    profile_config.arrival_high_seconds = physical.arrival_high;
+    profile_config.audio_pair_ppm = base_oscillator.clock_error_ppm;
+    profile_config.spread_delay_ms = physics.selected_delay_ms;
+    profile_config.spread_doppler_hz = physics.selected_doppler_hz;
+    profile_config.signal_delay_ms = physics.delay_ms;
+    profile_config.delay_excursion_seconds = physics.delay_excursion_seconds;
+    profile_config.selective_signal_tail = physics.modulation_rate_hz > 0 &&
+        (physics.slow_depth > 0 || physics.fast_depth > 0);
+    profile_config.receiver_tail_samples = static_cast<std::uint64_t>(std::ceil(sample_rate * o.receiver_tail_seconds));
+    const PublicProfile profile(std::move(profile_config));
+    const auto calendar_origin = profile.origin();
+    const auto& calendar = profile.calendar();
 
-    auto helper_options = helper_options_for(physical);
-    helper::PowerReference reference;
-    reference.epoch = f.epoch;
-    reference.begin_seconds = 39;
-    reference.end_seconds = 41;
-    reference.time_key = helper_key;
-    reference.helper_start_seconds = 0;
-    reference.helper_end_seconds = o.whole_bit_calendar ? std::max(helper_end, 42.L) : helper_end;
-    reference.active = [f](long double seconds) {
-        if (!f.fhss) return true;
-        auto within = std::fmod(seconds - data_start_seconds, static_cast<long double>(f.dwell_seconds));
-        if (within < 0) within += f.dwell_seconds;
-        return std::min(within, static_cast<long double>(f.dwell_seconds) - within) > f.quiet_seconds;
-    };
-    long double reference_norm = 0;
-    unsigned reference_nodes = 0;
-    for (unsigned i = 0; i < helper::power_reference_nodes; ++i) {
-        const auto seconds = helper::power_reference_node(reference, i);
-        if (!reference.active(seconds)) continue;
-        const auto value = reference_source.sample_at(seconds * sample_rate - preview_data_offset);
-        reference_norm += std::norm(value);
-        ++reference_nodes;
-    }
-    if (!reference_nodes || reference_norm <= 0) throw std::runtime_error("empty DATA power reference");
-    const auto reference_mean_norm = static_cast<double>(reference_norm / reference_nodes);
-    reference.data_mean_power = reference_mean_norm / 2;
-    // The finite pulse/gate spectral certificate selects Helper placement.
-    // Sample bounds below retain the full 2/ramp envelope and all tails.
-    const auto gate_bandwidth = std::max(0., selected_shaping.spectrum.placement_bandwidth_hz -
-                                             g.occupied_bandwidth_hz);
-    const auto complete_data_bandwidth = legacy_source_bandwidth;
-    const helper::PlacementBand placement{data_if_hz, g.occupied_bandwidth_hz, gate_bandwidth, f.fhss};
-    helper::Plan plan{};
-    if (o.helper) {
-        try { plan = helper::plan(helper_options, placement, sample_rate, 0, 1, &reference); }
-        catch (const std::exception& error) {
-            throw std::runtime_error("production Helper plan rejected DATA IF " + std::to_string(data_if_hz) +
-                                     " Hz: " + error.what());
+    Bytes bits;
+    EmissionOptions emission_options;
+    if (o.whole_bit_calendar) {
+        emission_options.slot_count = o.whole_bit_count;
+        if (o.data) {
+            bits.reserve(o.whole_bit_count);
+            for (unsigned i = 0; i < o.whole_bit_count; ++i)
+                bits.push_back(static_cast<std::uint8_t>(o.data_bits ? (*o.data_bits)[i] - '0' : o.bit ^ (i & 1)));
+            emission_options.bits = bits;
+        } else {
+            emission_options.mode = o.helper ? EmissionMode::HelperOnly : EmissionMode::Quiet;
         }
     }
-    // Preserve the production Helper preview and composite gain exactly. The
-    // former two-second DATA window can sit inside a long low-rate birth ramp,
-    // so it is not a general-rate nominal-power reference. A separate DATA-only
-    // correction enforces configured active transmit power without changing a
-    // Helper sample, duty cycle, waveform, or propagation effect.
-    const auto data_reference = bounded_tile_power(reference_source, f, g);
-    const auto data_calibration_gain = std::sqrt(reference_mean_norm / data_reference.mean_norm);
-    const auto composite_gain = o.helper ? 1 / (plan.data_gain * std::sqrt(reference_mean_norm)) : 1.;
-    const auto data_gain = o.helper ? plan.data_gain * composite_gain * data_calibration_gain
-                                    : 1 / std::sqrt(data_reference.mean_norm);
-    std::unique_ptr<helper::Generator> generator;
-    if (o.helper) generator = std::make_unique<helper::Generator>(helper_options, plan, f.epoch, true, helper_key);
-    long double measured_helper_norm = 0;
-    for (unsigned i = 0; o.helper && i < helper::power_reference_nodes; ++i) {
-        const auto seconds = helper::power_reference_node(reference, i);
-        if (reference.active(seconds))
-            measured_helper_norm += std::norm(generator->mix_analytic({}, seconds, sample_rate,
-                reference.helper_end_seconds, 0) * composite_gain);
+    auto emission = o.whole_bit_calendar ? Emission(profile, key, emission_options) :
+        Emission::isolated_fixture(profile, key, static_cast<std::uint8_t>(o.bit), o.data);
+    const auto emitted = emission.source();
+    const auto& report = emission.report();
+    const auto composite_samples = emitted.geometry.source_samples;
+    const auto data_offset = report.first_data_sample;
+    const auto& plan = report.helper_plan;
+    const auto& data_reference = report.data_reference;
+    const auto reference_mean_norm = report.reference_data_mean_norm;
+    const auto reference_helper_ratio = report.reference_helper_ratio;
+    const auto data_calibration_gain = report.data_calibration_gain;
+    const auto composite_gain = report.composite_gain;
+    const auto data_gain = report.data_gain;
+
+    long double observation_end = static_cast<long double>(composite_samples) / sample_rate;
+    if (o.observation_slots) {
+        // The evaluator selects a fixed observation budget independently of the
+        // DATA payload. The same channel drains through all scheduled slots.
+        const auto final_slot = profile.transmit_slot(*o.observation_slots - 1);
+        observation_end = calendar.relative_seconds(calendar_origin, final_slot.helper_end);
     }
-    const auto reference_helper_ratio = o.helper ? static_cast<double>(measured_helper_norm / reference_nodes) : 0.;
 
     if (o.power_plan_only) {
         std::cout << std::setprecision(17)
@@ -1166,7 +1038,6 @@ int run(const Options& o) {
     effects.rx.phase_noise_rad_per_sqrt_second = relative_phase / std::sqrt(2.);
     const auto arrival_draw = std::uniform_real_distribution<double>(physical.arrival_low, physical.arrival_high)(arrival_rng);
     effects.timing_offset_seconds = o.arrival.value_or(arrival_draw);
-    const auto selected_delay_ms = physics.selected_delay_ms;
     effects.spread_delay_ms = physics.delay_ms;
     effects.spread_doppler_hz = physics.doppler_hz;
     effects.perturbation_slow_depth = physics.slow_depth;
@@ -1184,128 +1055,7 @@ int run(const Options& o) {
     config.signal_gain = 1;
     config.complex_noise_variance = sample_rate / std::pow(10., cn0 / 10);
     config.maximum_chunk_samples = stream_chunk_samples;
-    // A fixed, public complete observation calendar prevents the random
-    // arrival/clock realization from choosing the exported file length.
-    const auto tx_min = 1 - base_half_ppm * 1e-6;
-    const auto rx_max = 1 + base_half_ppm * 1e-6;
-    const auto tx_max = 1 + base_half_ppm * 1e-6;
-    const auto rx_min = 1 - base_half_ppm * 1e-6;
-    const auto tail_bound_seconds = selected_delay_ms * .001 + physics.delay_excursion_seconds +
-        2 / (3 * g.carrier_spacing_hz) + 32. / sample_rate;
-    const auto receiver_tail_samples = static_cast<std::uint64_t>(std::ceil(sample_rate * o.receiver_tail_seconds));
-    const auto public_capture_stop = [&](long double source_end_seconds) {
-        const auto samples = std::ceil(sample_rate * rx_max *
-            (physical.capture_lead + static_cast<double>(source_end_seconds) / tx_min + physical.arrival_high +
-             physical.capture_trail + tail_bound_seconds));
-        if (!std::isfinite(samples) || samples < 0 ||
-            static_cast<long double>(samples) > static_cast<long double>(UINT64_MAX - receiver_tail_samples))
-            throw std::runtime_error("public receive window overflows sample coordinates");
-        return static_cast<std::uint64_t>(samples) + receiver_tail_samples;
-    };
-    const auto public_capture_first = [&](long double source_begin_seconds) {
-        // Keep one public capture-lead interval of preroll before the earliest
-        // possible Helper/DATA support. Global physical RX coordinates remain
-        // authoritative when this bounded per-slot observation is sliced.
-        const auto samples = std::floor(sample_rate * rx_min *
-            (static_cast<double>(source_begin_seconds) / tx_max + physical.arrival_low));
-        if (!std::isfinite(samples) || static_cast<long double>(samples) > UINT64_MAX)
-            throw std::runtime_error("public receive window overflows sample coordinates");
-        return samples > 0 ? static_cast<std::uint64_t>(samples) : std::uint64_t{0};
-    };
-    const bool selective_signal_tail = physics.modulation_rate_hz > 0 &&
-        (physics.slow_depth > 0 || physics.fast_depth > 0);
-    const auto signal_tail_seconds = physics.delay_ms * .001 + physics.delay_excursion_seconds +
-        (selective_signal_tail ? 2 / (3 * g.carrier_spacing_hz) : 0.) + 32. / sample_rate;
-    const auto public_signal_first = [&](long double source_begin_seconds) {
-        // The finite source interpolation can reach slightly before the
-        // nominal edge. Keep the same32-sample engineering guard as the
-        // public channel envelope, including the slowest TX clock.
-        const auto samples = std::floor(sample_rate * rx_min *
-            (physical.capture_lead + static_cast<double>(source_begin_seconds) / tx_max +
-             physical.arrival_low - 32. / (sample_rate * tx_min)));
-        if (!std::isfinite(samples) || static_cast<long double>(samples) > UINT64_MAX)
-            throw std::runtime_error("public signal envelope overflows sample coordinates");
-        return samples > 0 ? static_cast<std::uint64_t>(samples) : std::uint64_t{0};
-    };
-    const auto public_signal_stop = [&](long double source_end_seconds) {
-        // Signal support excludes observation-only capture trail/padding.
-        // The selective drain exists only when that public filter is enabled.
-        const auto samples = std::ceil(sample_rate * rx_max *
-            (physical.capture_lead + static_cast<double>(source_end_seconds) / tx_min +
-             physical.arrival_high + signal_tail_seconds));
-        if (!std::isfinite(samples) || samples < 0 || static_cast<long double>(samples) > UINT64_MAX)
-            throw std::runtime_error("public signal envelope overflows sample coordinates");
-        return static_cast<std::uint64_t>(samples);
-    };
-    config.minimum_capture_samples = public_capture_stop(observation_end);
-    // Only the current slot owns a DATA pattern cache. The complete transmitter
-    // callback and StreamingChannel remain alive across DATA, Helper and quiet
-    // intervals, so changing the source bit never resets propagation state.
-    std::unique_ptr<PatternSource> whole_source;
-    std::size_t whole_source_index = std::numeric_limits<std::size_t>::max();
-
-    long double source_data_energy = 0, source_helper_energy = 0;
-    std::uint64_t source_rows = 0;
-    EmittedSource emitted;
-    emitted.format = f;
-    emitted.geometry = g;
-    emitted.geometry.source_samples = composite_samples;
-    emitted.geometry.calendar_origin_sample = 0;
-    emitted.minimum_frequency_hz = o.helper ? std::min(-complete_data_bandwidth / 2,
-        helper::low_pilot_frequency_hz - data_if_hz) - spectral_skirt_allowance_hz :
-        -complete_data_bandwidth / 2 - spectral_skirt_allowance_hz;
-    emitted.maximum_frequency_hz = std::max(complete_data_bandwidth / 2,
-        o.helper ? plan.frequency_hz - data_if_hz : 0.) + spectral_skirt_allowance_hz;
-    emitted.working_bytes = data_source.working_bytes() + (generator ? sizeof(helper::Generator) : 0) +
-        whole_slots.capacity() * sizeof(HelperBurstSlot) + (o.data_bits ? o.data_bits->capacity() : 0) +
-        (o.whole_bit_calendar ? g.source_workspace_bytes : 0);
-    std::size_t whole_slot_index = 0;
-    emitted.sample_at = [&](std::uint64_t n) {
-        const auto seconds = static_cast<long double>(n) / sample_rate;
-        Complex raw_data;
-        long double active_helper_begin = 0, active_helper_end = helper_end;
-        bool helper_active = o.helper;
-        if (o.whole_bit_calendar) {
-            while (whole_slot_index + 1 < whole_slots.size() &&
-                   n >= burst_plan->distance(calendar_origin, whole_slots[whole_slot_index].helper_end))
-                ++whole_slot_index;
-            const auto& slot = whole_slots[whole_slot_index];
-            const auto offset = burst_plan->distance(calendar_origin, slot.support_begin);
-            if (o.data && n >= offset && n - offset < g.source_samples) {
-                if (whole_source_index != whole_slot_index) {
-                    auto source_format = f;
-                    source_format.epoch = slot.pattern_begin.epoch;
-                    source_format.symbol_ordinal = f.symbol_ordinal + slot.index;
-                    const auto bit = o.data_bits ? (*o.data_bits)[whole_slot_index] - '0' :
-                        static_cast<int>(o.bit ^ (slot.index & 1));
-                    // Free the previous private cache before allocating its
-                    // replacement, preserving the one-active-source bound.
-                    whole_source.reset();
-                    whole_source = std::make_unique<PatternSource>(source_format, key,
-                        static_cast<std::uint8_t>(bit));
-                    whole_source_index = whole_slot_index;
-                }
-                raw_data = whole_source->sample_at(static_cast<long double>(n - offset));
-            }
-            active_helper_begin = burst_plan->relative_seconds(calendar_origin, slot.helper_begin);
-            active_helper_end = burst_plan->relative_seconds(calendar_origin, slot.helper_end);
-            helper_active = o.helper && seconds >= active_helper_begin && seconds < active_helper_end;
-        } else if (o.data) {
-            if (n >= data_offset && n - data_offset < g.source_samples)
-                raw_data = data_source.sample_at(static_cast<long double>(n - data_offset));
-        }
-        const auto up = rotation(data_if_hz, seconds);
-        const auto data = raw_data * data_gain;
-        const auto helper_input = raw_data * data_calibration_gain;
-        auto audio = helper_active ?
-            generator->mix_analytic(helper_input * up, seconds, sample_rate, active_helper_end, active_helper_begin) * composite_gain : data * up;
-        auto helper_component = helper_active ? audio - data * up : Complex{};
-        const auto value = audio * std::conj(up);
-        source_data_energy += std::norm(data);
-        source_helper_energy += std::norm(helper_component);
-        ++source_rows;
-        return value;
-    };
+    config.minimum_capture_samples = profile.capture_stop(observation_end);
     std::unique_ptr<StreamingChannel> channel;
     if (o.stream_kind == "channel")
         channel = std::make_unique<StreamingChannel>(emitted, config);
@@ -1323,7 +1073,7 @@ int run(const Options& o) {
         constexpr std::size_t maximum_rows = 16384, maximum_columns = 128, public_bank_lanes = 26;
         const auto total = o.stream_kind == "channel" ? channel->total_samples() : composite_samples;
         auto candidate_format = f;
-        if (o.whole_bit_calendar) candidate_format.epoch = whole_slots.front().pattern_begin.epoch;
+        if (o.whole_bit_calendar) candidate_format.epoch = profile.transmit_slot(0).pattern_begin.epoch;
         std::map<std::pair<int, unsigned>, std::unique_ptr<PatternSource>> templates;
         std::size_t template_bytes = 0;
         std::size_t template_cache_evictions = 0;
@@ -1332,7 +1082,7 @@ int run(const Options& o) {
         std::vector<Complex> samples(maximum_rows);
         std::vector<std::uint8_t> valid(maximum_rows, 1);
         const auto fixed_bytes = emitted.working_bytes + (channel ? channel->report().working_bytes : 0) +
-            reference_source.working_bytes() + samples.size() * sizeof(Complex) * 2 + valid.size();
+            samples.size() * sizeof(Complex) * 2 + valid.size();
         if (fixed_bytes > stream_budget) throw std::runtime_error("stream source exceeds64MiB workspace budget");
         const auto map_budget = maximum_rows * sizeof(double) + PatternSource::render_bank_scratch_bytes;
         const auto lane_budget = g.source_workspace_bytes + 2 * maximum_rows * sizeof(Complex) +
@@ -1406,9 +1156,9 @@ int run(const Options& o) {
                 no_extra(command);
                 std::cout << "{\"stopped\":true,\"complete\":" << boolean(cursor == total)
                     << ",\"consumed_samples\":" << cursor << ",\"total_samples\":" << total
-                    << ",\"source_generated_samples\":" << source_rows
-                    << ",\"source_data_energy\":" << static_cast<double>(source_data_energy)
-                    << ",\"source_helper_energy\":" << static_cast<double>(source_helper_energy)
+                    << ",\"source_generated_samples\":" << report.generated_samples
+                    << ",\"source_data_energy\":" << static_cast<double>(report.data_energy)
+                    << ",\"source_helper_energy\":" << static_cast<double>(report.helper_energy)
                     << ",\"workspace_bytes\":" << fixed_bytes + template_bytes
                     << ",\"template_cache_evictions\":" << template_cache_evictions << "}\n" << std::flush;
                 return 0;
@@ -1418,29 +1168,25 @@ int run(const Options& o) {
                 if (!(command >> index_text)) throw std::invalid_argument("slot-plan requires INDEX");
                 no_extra(command);
                 const auto index = integer(index_text, "public slot index");
-                const auto slot = public_slot(index);
-                const auto next = burst_plan->successor(slot);
-                const auto source_begin = burst_plan->distance(calendar_origin, slot.support_begin);
-                const auto next_source_begin = burst_plan->distance(calendar_origin, next.support_begin);
-                const auto helper_begin = burst_plan->distance(calendar_origin, slot.helper_begin);
-                const auto helper_stop = burst_plan->distance(calendar_origin, slot.helper_end);
-                const auto pattern_begin = burst_plan->distance(calendar_origin, slot.pattern_begin);
-                const auto pattern_stop = burst_plan->distance(calendar_origin, slot.pattern_end);
-                const auto source_stop = burst_plan->distance(calendar_origin, slot.support_end);
-                const auto first = public_capture_first(burst_plan->relative_seconds(calendar_origin, slot.helper_begin));
-                const auto stop = public_capture_stop(burst_plan->relative_seconds(calendar_origin, slot.helper_end));
-                const auto data_first = public_signal_first(burst_plan->relative_seconds(calendar_origin, slot.support_begin));
-                const auto data_stop = public_signal_stop(burst_plan->relative_seconds(calendar_origin, slot.support_end));
-                const auto previous_stop = index ? public_signal_stop(burst_plan->relative_seconds(
-                    calendar_origin, public_slot(index - 1).helper_end)) : std::uint64_t{0};
-                const auto next_first = public_signal_first(burst_plan->relative_seconds(calendar_origin, next.helper_begin));
-                if (stop <= first) throw std::runtime_error("public receive window is empty");
-                const auto quiet_first = std::min(stop, std::max({first, data_first, previous_stop}));
-                const auto quiet_stop = std::max(quiet_first, std::min({stop, data_stop, next_first}));
+                if (!o.whole_bit_calendar)
+                    throw std::invalid_argument("slot-plan requires a whole-bit calendar");
+                const auto planned = profile.slot(index);
+                const auto& slot = planned.tx;
+                const auto next = calendar.successor(slot);
+                const auto source_begin = calendar.distance(calendar_origin, slot.support_begin);
+                const auto next_source_begin = calendar.distance(calendar_origin, next.support_begin);
+                const auto helper_begin = calendar.distance(calendar_origin, slot.helper_begin);
+                const auto helper_stop = calendar.distance(calendar_origin, slot.helper_end);
+                const auto pattern_begin = calendar.distance(calendar_origin, slot.pattern_begin);
+                const auto pattern_stop = calendar.distance(calendar_origin, slot.pattern_end);
+                const auto source_stop = calendar.distance(calendar_origin, slot.support_end);
+                const auto [first, stop] = planned.observation;
+                const auto [data_first, data_stop] = planned.data_support;
+                const auto [quiet_first, quiet_stop] = planned.quiet_aperture;
                 std::cout << "{\"schema\":\"triad-public-slot-plan-v1\",\"index\":" << index
                     << ",\"sample_rate_hz\":" << sample_rate
-                    << ",\"pattern_epoch\":" << slot.pattern_begin.epoch
-                    << ",\"symbol_ordinal\":" << f.symbol_ordinal + index
+                    << ",\"pattern_epoch\":" << planned.pattern_epoch
+                    << ",\"symbol_ordinal\":" << planned.symbol_ordinal
                     << ",\"source_begin_samples\":" << source_begin
                     << ",\"next_source_begin_samples\":" << next_source_begin
                     << ",\"source_samples\":" << g.source_samples
@@ -1457,8 +1203,8 @@ int run(const Options& o) {
                     << ",\"receiver_window_samples\":" << stop - first
                     << ",\"receiver_data_first_sample\":" << data_first
                     << ",\"receiver_data_stop_sample\":" << data_stop
-                    << ",\"receiver_previous_signal_stop_sample\":" << previous_stop
-                    << ",\"receiver_next_signal_first_sample\":" << next_first
+                    << ",\"receiver_previous_signal_stop_sample\":" << planned.previous_signal_stop
+                    << ",\"receiver_next_signal_first_sample\":" << planned.next_signal_first
                     << ",\"quiet_aperture_first_sample\":" << quiet_first
                     << ",\"quiet_aperture_stop_sample\":" << quiet_stop
                     << ",\"quiet_aperture_available\":" << boolean(quiet_first < quiet_stop)
@@ -1494,7 +1240,8 @@ int run(const Options& o) {
                 const auto first = cursor;
                 const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(requested, total - cursor));
                 if (o.stream_kind == "emitted") {
-                    for (std::size_t i = 0; i < count; ++i) samples[i] = emitted.sample_at(cursor + i);
+                    if (emission.read(std::span(samples).first(count)) != count)
+                        throw std::runtime_error("source ended before declared stream endpoint");
                     std::fill_n(valid.begin(), count, std::uint8_t{1});
                 } else {
                     std::size_t received = 0;

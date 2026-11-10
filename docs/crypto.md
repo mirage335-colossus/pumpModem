@@ -38,9 +38,11 @@ purpose keys. The independent Serpent root does not feed that AES derivation.
 
 The waveform's keyed child sources use `Crypto::mac` on their canonical
 context to derive a child waveform seed. The dual-lane message APIs are kept
-separate from this AES-only waveform path. Python acquisition/tracking tools
-are not an integrated receiver, and the Robust backend is not connected to the
-GUI.
+separate from this AES-only waveform path. The native C++ complete receiver
+and GUI session share these canonical components. Python tools test and compare
+the implementation; they are not an operating receiver. GUI connection does
+not add sender authentication or replay protection to waveform evidence, and
+text FEC/CRC is error correction/detection rather than authentication.
 
 ## Dual-lane confidentiality and authentication
 

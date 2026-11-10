@@ -1,10 +1,15 @@
 # Current weak acquisition and streaming research
 
-The canonical `WeakReceiver` and weak Helper estimator are acquisition stages
-exposed by `tools/triad_backend.py`. `PracticalTrackingReceiver` continues a
-declared post-acquisition bank. These stages are not an integrated message
-receiver or GUI backend; [current architecture](robust-current.md) states the
-available boundary.
+Native Helper estimation, full public coarse FFT proposals and persistent fine
+tracking now implement these stages inside the C++ complete receiver linked to
+the GUI. Reception uses a configured public calendar and keyed ordinal; it does
+not acquire arbitrary waveform addresses. See [current architecture](robust-current.md).
+
+The Python `WeakReceiver`, weak Helper estimator and
+`PracticalTrackingReceiver` remain numerical references for matched-input
+migration parity and interpretation of the historical studies below. They are
+not a supported operating receiver. Preserve concise findings and remove
+superseded modules/captures once those comparison questions are resolved.
 
 ## Acquisition without discarding complex evidence
 

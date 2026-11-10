@@ -3,7 +3,12 @@
 Data Pump's desktop application and CLI are C++ executables. Python, Tk, virtual
 environments, and package downloads are absent from the application installation.
 A working installation can be copied as one directory to another compatible
-computer and run immediately.
+computer and run immediately. Robust Helper, DATA, complete receiver processing
+and audio session code are compiled into the GUI through static C++ libraries.
+No Python receiver, receiver worker executable or receiver IPC is required.
+Python tools may test and benchmark the native implementation during development.
+This does not change the separate existing audio-entropy helper or platform
+library packaging. See [current Robust scope](robust-current.md).
 
 The complete FLTK 1.4.5 source is pinned in `third_party/fltk`; the QR encoder and
 the XZ 5.8.4 liblzma source subset are also vendored. liblzma is compiled into

@@ -4,9 +4,11 @@ The current Robust channel is the native streaming channel used with the
 canonical `IndependentApskV2` waveform. Its public configuration and report are
 in [`triad_modem_v3.hpp`](../include/datapump/triad_modem_v3.hpp); its streaming
 implementation is [`triad_simulation_stream.cpp`](../src/triad_simulation_stream.cpp).
-Python acquisition and tracking remain sequential receiver stages. These
-simulation controls do not connect Robust reception to the GUI, establish an
-end-to-end operating result, or qualify physical hardware.
+The GUI session uses this same native channel between emitted DATA/Helper and
+the complete native receiver. Python may test or compare the implementation but
+is not in that operating path. A channel connection or component parity result
+does not qualify physical hardware or all receiver configurations; see
+[current validation](validation.md#native-gui-integration).
 
 ## Baseline and channel stages
 

@@ -2,9 +2,12 @@
 
 PC UTC, audio sample rate and RF oscillator phase are independent quantities.
 Selecting a GPS profile neither synchronizes the PC nor certifies an ADC/DAC.
-The shared timing contracts remain relevant to Fast, Legacy and future Robust
-integration. The old Robust arrival-search, playback-repair campaigns and
-manual-candidate recipes are retired; [Robust is not connected to the GUI](robust-current.md).
+The shared timing contracts apply to Fast, Legacy and the native Robust GUI
+session. Robust uses an explicitly configured public calendar and declared
+arrival bounds, together with actual audio-provider timing evidence. This does
+not acquire unknown waveform epochs or certify device clocks. The old Robust
+arrival-search/playback-repair campaigns and manual-candidate recipes remain
+retired; see [current Robust scope](robust-current.md).
 
 ## Independent controls
 

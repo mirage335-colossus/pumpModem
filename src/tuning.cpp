@@ -117,7 +117,7 @@ double shannon_capacity_bps(double bandwidth_hz,double target_snr_db_hz) {
     return (bandwidth_hz/std::numbers::ln2)*capacity_per_hz;
 }
 // Preserve validation/round trips for the visible saved preference. These
-// values cannot select a receiver or waveform while Robust is unavailable.
+// values do not select the native Robust waveform or receiver implementation.
 modem::OuterDsssVersion parse_outer_dsss_version(std::string_view name) {
     if(name=="legacy")return modem::OuterDsssVersion::legacy_v1;
     if(name=="interleave"||name=="interleaved-v2")return modem::OuterDsssVersion::interleaved_v2;

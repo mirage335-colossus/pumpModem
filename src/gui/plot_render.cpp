@@ -14,6 +14,7 @@ struct Waterfall { std::shared_ptr<const SpectrumHistory> history; bool overview
 struct SpectrumDetail { std::shared_ptr<const SpectrumHistory> history; std::optional<std::pair<double,double>> band; std::string label; };
 struct Qr { std::optional<QrCode> code; QrBrightness brightness; };
 struct Codeword { std::size_t data, parity; };
+struct PatternEvidence { std::vector<PatternEvidencePoint> points; };
 using Rgb = theme::Rgb;
 Rgb gray(unsigned char value) { return {value, value, value}; }
 Rgb phase_color(double degrees) {
@@ -74,7 +75,7 @@ double constellation_scale(const Constellation& data) {
 
 }
 struct PlotSnapshot::Data {
-    std::variant<std::monostate, Waveform, Constellation, Waterfall, SpectrumDetail, Qr, Codeword> value;
+    std::variant<std::monostate, Waveform, Constellation, Waterfall, SpectrumDetail, Qr, Codeword, PatternEvidence> value;
     template<class Value> explicit Data(Value value_) : value(std::move(value_)) {}
 };
 PlotSnapshot::PlotSnapshot() : data_(std::make_shared<Data>(std::monostate{})) {}
@@ -122,6 +123,24 @@ PlotSnapshot PlotSnapshot::qr(std::optional<QrCode> code, QrBrightness brightnes
 }
 PlotSnapshot PlotSnapshot::codeword(std::size_t data, std::size_t parity) {
     return PlotSnapshot(std::make_shared<Data>(Codeword{data, parity}));
+}
+PlotSnapshot PlotSnapshot::pattern_evidence(std::vector<PatternEvidencePoint> points) {
+    if(points.size()>pattern_evidence_capacity)
+        points.erase(points.begin(),points.end()-static_cast<std::ptrdiff_t>(pattern_evidence_capacity));
+    for(std::size_t i=0;i<points.size();++i) {
+        auto& point=points[i];
+        if(i && point.slot<=points[i-1].slot)throw Error("pattern evidence slots must increase");
+        if(!point.bit_log_e || !std::isfinite((*point.bit_log_e)[0]) || !std::isfinite((*point.bit_log_e)[1]) ||
+           !point.operational_log_e || !std::isfinite(*point.operational_log_e) ||
+           !point.operational_threshold || !std::isfinite(*point.operational_threshold)) {
+            point.bit_log_e.reset();point.operational_log_e.reset();point.operational_threshold.reset();
+        }
+        if(!point.quiet_energy || !std::isfinite(*point.quiet_energy) || *point.quiet_energy<0 ||
+           !point.quiet_threshold || !std::isfinite(*point.quiet_threshold) || *point.quiet_threshold<=0) {
+            point.quiet_energy.reset();point.quiet_threshold.reset();
+        }
+    }
+    return PlotSnapshot(std::make_shared<Data>(PatternEvidence{std::move(points)}));
 }
 
 void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, bool color_enabled) const {
@@ -349,6 +368,101 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
                 }
                 return background;
             });
+        } else if constexpr (std::is_same_v<Type, PatternEvidence>) {
+            if(data.points.empty()) {
+                rows(request,sink,false,[](unsigned,unsigned){return gray(0);});return;
+            }
+            // Five bounded column envelopes preserve every retained observation
+            // when a narrow view pools several slots into one display column.
+            // Separate series avoid mixing DATA evidence with quiet energy.
+            using Span=std::pair<int,int>;
+            std::array<std::vector<Span>,5> traces;
+            for(auto& trace:traces)trace.assign(request.width,{height,-1});
+            long double lower=0,upper=0;
+            bool have_evidence=false,have_quiet=false;
+            for(const auto& point:data.points) {
+                if(point.bit_log_e) {
+                    for(const auto value:{(*point.bit_log_e)[0],(*point.bit_log_e)[1],
+                                          *point.operational_log_e,*point.operational_threshold}) {
+                        lower=std::min(lower,static_cast<long double>(value));
+                        upper=std::max(upper,static_cast<long double>(value));
+                    }
+                    have_evidence=true;
+                }
+                have_quiet|=point.quiet_energy.has_value();
+            }
+            if(!(upper>lower)) {lower=-1;upper=1;}
+            // Scaling first avoids overflow even where long double has the
+            // same range as double (notably the Windows native build).
+            const auto evidence_scale=std::max(std::abs(lower),std::abs(upper));
+            const auto scaled_lower=lower/evidence_scale,scaled_upper=upper/evidence_scale;
+            const auto top_stop=std::max(0,height*3/4-2);
+            const auto quiet_top=std::min(height-1,top_stop+3);
+            const auto quiet_stop=height-1;
+            const auto evidence_y=[&](double value) {
+                const auto fraction=std::clamp((static_cast<long double>(value)/evidence_scale-scaled_lower)/
+                                               (scaled_upper-scaled_lower),0.L,1.L);
+                return static_cast<int>(std::llround((1-fraction)*top_stop));
+            };
+            const auto quiet_y=[&](long double ratio) {
+                const auto fraction=std::clamp(ratio/2,0.L,1.L);
+                return quiet_top+static_cast<int>(std::llround((1-fraction)*(quiet_stop-quiet_top)));
+            };
+            const auto span=data.points.back().slot-data.points.front().slot;
+            const auto position=[&](const PatternEvidencePoint& point) {
+                return span?static_cast<int>((static_cast<long double>(point.slot-data.points.front().slot)*(width-1))/span):width-1;
+            };
+            const auto add=[&](std::size_t series,int x,int y) {
+                if(x<0 || x>=width || y<0 || y>=height)return;
+                auto& column=traces[series][static_cast<std::size_t>(x)];
+                column.first=std::min(column.first,y);column.second=std::max(column.second,y);
+            };
+            const auto line=[&](std::size_t series,int x0,int y0,int x1,int y1) {
+                const int dx=std::abs(x1-x0),sx=x0<x1?1:-1,dy=-std::abs(y1-y0),sy=y0<y1?1:-1;
+                int error=dx+dy;
+                for(;;) {
+                    add(series,x0,y0);if(x0==x1 && y0==y1)break;
+                    const auto twice=2*error;
+                    if(twice>=dy) {error+=dy;x0+=sx;}
+                    if(twice<=dx) {error+=dx;y0+=sy;}
+                }
+            };
+            std::array<std::optional<std::pair<int,int>>,5> previous;
+            std::uint64_t previous_slot=0;
+            for(std::size_t i=0;i<data.points.size();++i) {
+                const auto& point=data.points[i];const auto x=position(point);
+                if(i && (previous_slot==std::numeric_limits<std::uint64_t>::max() || point.slot!=previous_slot+1))
+                    previous={};
+                std::array<std::optional<int>,5> ys;
+                if(point.bit_log_e) {
+                    ys[0]=evidence_y((*point.bit_log_e)[0]);ys[1]=evidence_y((*point.bit_log_e)[1]);
+                    ys[2]=evidence_y(*point.operational_log_e);ys[3]=evidence_y(*point.operational_threshold);
+                }
+                if(point.quiet_energy)ys[4]=quiet_y(static_cast<long double>(*point.quiet_energy)/ *point.quiet_threshold);
+                for(std::size_t series=0;series<ys.size();++series) {
+                    if(!ys[series]) {previous[series].reset();continue;}
+                    if(previous[series])line(series,previous[series]->first,previous[series]->second,x,*ys[series]);
+                    else add(series,x,*ys[series]);
+                    // Measured slots remain visible on an expanded graph.
+                    add(series,x-1,*ys[series]);add(series,x,*ys[series]-1);
+                    previous[series]=std::pair{x,*ys[series]};
+                }
+                previous_slot=point.slot;
+            }
+            const auto hits=[&](std::size_t series,unsigned x,unsigned y) {
+                const auto column=traces[series][x];
+                return static_cast<int>(y)>=column.first && static_cast<int>(y)<=column.second;
+            };
+            rows(request,sink,color,[&](unsigned x,unsigned y) {
+                if(hits(2,x,y))return theme::text_rgb(color,theme::accent);
+                if(hits(0,x,y))return theme::data_rgb(color,theme::accent);
+                if(hits(1,x,y))return theme::comparison_rgb(color);
+                if(hits(3,x,y) && x%6<3)return color?theme::caution_tint:gray(theme::muted);
+                if(hits(4,x,y))return color?theme::positive_tint:gray(theme::accent);
+                if((have_evidence && static_cast<int>(y)==evidence_y(0)) ||
+                   (have_quiet && static_cast<int>(y)==quiet_y(1)))return reference(x,y);
+                return gray(0);
+            });
         } else if constexpr (std::is_same_v<Type, Codeword>) {
             const auto total = static_cast<long double>(data.data) + data.parity;
             const auto split = total ? static_cast<unsigned>(request.width * (static_cast<long double>(data.data) / total)) : request.width;
@@ -405,6 +519,17 @@ std::string PlotSnapshot::caption(unsigned width) const {
         } else if constexpr (std::is_same_v<Type, Qr>) {
             if (data.brightness == QrBrightness::off) return "QR preview off";
             return data.code ? "QR preview" : "No QR message";
+        } else if constexpr (std::is_same_v<Type, PatternEvidence>) {
+            if(data.points.empty())return "No scored public slots yet";
+            const auto& latest=data.points.back();
+            out << "Slots " << data.points.front().slot << ".." << latest.slot << ": ";
+            if(latest.operational_log_e)out << std::setprecision(5) << "log E " << *latest.operational_log_e
+                << " / threshold " << *latest.operational_threshold;
+            else out << "latest evidence incomplete";
+            out << "\nFixed-affine 0 (data), 1 (comparison), aggregate (white); dashed threshold applies only to aggregate.";
+            out << "\n";
+            if(latest.quiet_energy)out << "Quiet energy " << *latest.quiet_energy << " / " << *latest.quiet_threshold << "; ";
+            out << "bottom ratio 0..2 (clipped). Conditional model; adaptive lanes are diagnostic only.";
         } else if constexpr (std::is_same_v<Type, Codeword>) out << data.data << " data / " << data.parity << " parity bytes";
         return out.str();
     }, data_->value);

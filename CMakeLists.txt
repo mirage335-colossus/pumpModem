@@ -60,7 +60,7 @@ add_library(datapump
   src/crypto.cpp src/serpent.cpp src/stream_codec.cpp
   src/attachment.cpp src/compression_short.cpp src/compression_lzma.cpp
   src/modem.cpp src/runtime.cpp src/resampler.cpp src/qr.cpp src/transfer.cpp
-  src/tuning.cpp src/tuning_presets.cpp src/live.cpp third_party/qrcodegen/qrcodegen.cpp)
+  src/tuning.cpp src/tuning_presets.cpp third_party/qrcodegen/qrcodegen.cpp)
 # Preserve the existing numerical policy of the surviving shared/Fast/Legacy code.
 if(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$")
   if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
@@ -202,12 +202,27 @@ endif()
 # One canonical Robust waveform/Helper implementation, available without tests.
 add_library(datapump_triad STATIC
   src/triad_modem_v3.cpp src/triad_shaping.cpp
-  src/triad_simulation_stream.cpp src/triad_basis.cpp
+  src/triad_simulation_stream.cpp src/triad_basis.cpp src/triad_stream.cpp
   src/helper_carrier.cpp src/helper_metadata.cpp src/search_fft.cpp)
 target_include_directories(datapump_triad PUBLIC include PRIVATE src)
 target_link_libraries(datapump_triad PUBLIC datapump)
+add_library(datapump_triad_receiver STATIC
+  src/triad_receiver.cpp src/triad_receiver_detail.cpp src/triad_receiver_fine.cpp
+  src/triad_receiver_coarse.cpp src/triad_receiver_helper.cpp src/triad_receiver_basis.cpp
+  src/triad_gaussian_kernel.cpp src/triad_mapped_kernel.cpp
+  src/triad_message_receiver.cpp src/triad_duration.cpp
+  src/triad_stream_receiver.cpp src/triad_stream_resources.cpp)
+target_include_directories(datapump_triad_receiver PUBLIC include PRIVATE src third_party/xz/src/liblzma/api)
+target_link_libraries(datapump_triad_receiver PUBLIC datapump_triad PRIVATE liblzma)
+add_library(datapump_robust_session STATIC src/live.cpp src/robust_profile.cpp)
+target_include_directories(datapump_robust_session PUBLIC include PRIVATE src)
+target_link_libraries(datapump_robust_session PUBLIC datapump_triad_receiver)
 if(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$")
   target_compile_options(datapump_triad PRIVATE -Wall -Wextra -Wpedantic -ffp-contract=off -fno-fast-math)
+  target_compile_options(datapump_triad_receiver PRIVATE -Wall -Wextra -Wpedantic -ffp-contract=off -fno-fast-math)
+elseif(MSVC)
+  target_compile_options(datapump_triad PRIVATE /fp:strict)
+  target_compile_options(datapump_triad_receiver PRIVATE /fp:strict)
 endif()
 add_executable(triad_helper_export EXCLUDE_FROM_ALL tools/triad-helper-export.cpp)
 target_include_directories(triad_helper_export PRIVATE src tools)
@@ -309,9 +324,14 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_test(NAME gui_fast_keygen COMMAND test_gui_fast_live --keygen-staging)
   set_tests_properties(gui_fast_live PROPERTIES LABELS "gui")
   set_tests_properties(gui_fast_keygen PROPERTIES LABELS "gui;fast" TIMEOUT 90)
+  add_executable(test_gui_robust_live tests/test_gui_robust_live.cpp)
+  target_link_libraries(test_gui_robust_live PRIVATE datapump_robust_session datapump)
+  target_compile_definitions(test_gui_robust_live PRIVATE DATAPUMP_TEST_UTC_CAPTURE_PROVIDER=1)
+  add_test(NAME gui_robust_live COMMAND test_gui_robust_live)
+  set_tests_properties(gui_robust_live PROPERTIES LABELS "gui;triad" TIMEOUT 120)
   add_test(NAME vendored_lzma_source COMMAND ${CMAKE_COMMAND}
     -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/vendored_lzma.cmake)
-  foreach(component robust_unavailable crypto keyring stream_codec attachment compression_short
+  foreach(component crypto keyring stream_codec attachment compression_short
       compression_lzma runtime qr resampler clock_sync audio_provider_timing search_fft)
     add_executable(test_${component} tests/test_${component}.cpp)
     target_include_directories(test_${component} PRIVATE src tests)
@@ -321,6 +341,14 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
     endif()
     add_test(NAME ${component} COMMAND test_${component})
     set_tests_properties(${component} PROPERTIES LABELS "contract;regular")
+  endforeach()
+  foreach(component triad_message_native triad_native_helper triad_duration_native triad_receiver_basis
+      triad_native_receiver triad_coarse_native triad_stream_native)
+    add_executable(test_${component} EXCLUDE_FROM_ALL tests/test_${component}.cpp)
+    target_include_directories(test_${component} PRIVATE src tests)
+    target_link_libraries(test_${component} PRIVATE datapump_triad_receiver)
+    add_test(NAME ${component} COMMAND test_${component})
+    set_tests_properties(${component} PROPERTIES LABELS "triad;contract" TIMEOUT 60)
   endforeach()
   foreach(component triad_v3_source triad_mapped_basis triad_shaping triad_transmission_keys
       triad_v3_channel continuous_clock triad_helper_burst helper_carrier helper_metadata)
@@ -671,7 +699,7 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
 endif()
 if(NOT DATAPUMP_BUILD_WASM)
   set(_datapump_mock_audio_tests test_legacy_session test_fast_session test_fast_telemetry
-    test_gui_legacy_live test_gui_fast_live)
+    test_gui_legacy_live test_gui_fast_live test_gui_robust_live)
   set(_datapump_direct_audio_tests test_alsa_audio test_windows_audio)
   get_property(_datapump_native_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
   foreach(_target IN LISTS _datapump_native_targets)

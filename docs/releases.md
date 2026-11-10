@@ -727,11 +727,15 @@ repository. Use the schema-5 channels above for automatic repository updates.
 
 ## GUI support limits
 
-Robust controls remain in the GUI, but the Robust transmitter and receiver are
-unavailable pending reconnection to the canonical native path. Do not describe
-package or frontend checks as Robust operation or reception qualification. Fast
-and Legacy GUI behavior, Rev's OpenGL requirement, and host audio-device limits
-remain separate release boundaries. See [current Robust status](robust-current.md).
+Robust GUI operation uses the canonical native C++ stack with configured-calendar
+reception. Its [functional checks](validation.md#native-gui-integration), native
+CPU-capacity qualification, physical-device testing and exact-binary release
+certification are separate claims. Package or frontend checks alone do not
+establish the latter three. Detailed transmission inspection and Link Planner
+receive/CPU forecasts retain their stated limits; live pattern plots consume
+native receiver evidence. Fast and Legacy behavior, Rev's OpenGL requirement,
+and host audio-device limits remain separate release boundaries. See
+[current Robust status](robust-current.md).
 
 ## Diagnose a branch before full validation
 

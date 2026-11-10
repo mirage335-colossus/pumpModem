@@ -1,4 +1,5 @@
 #include "application.hpp"
+#include "controller.hpp"
 #include "fast/controller.hpp"
 #include "fast/presentation.hpp"
 #include "fast/plots.hpp"
@@ -567,15 +568,19 @@ void live_plot_presentation() {
 void service_generations() {
     using F=ui::Field;using C=ui::Command;
     Application app({.simulation=true});
-    app.activate(C::attach_file);auto regular=app.take_services();
-    check(regular.size()==1,"Regular file service unavailable");
+    const auto regular_key=app.field(F::key).selected;
+    app.activate(C::open_keyfile);auto regular=app.take_services();
+    check(regular.size()==1,"Robust keyfile service unavailable");
     app.select(F::fast_mode,"fast");app.select(F::fast_source,"file");app.activate(C::fast_choose_file);auto fast=app.take_services();
     check(fast.size()==1&&fast.front().id!=regular.front().id,"Mode services reused a callback identity");
-    app.complete_service({regular.front().id,false,"/tmp/stale-regular.bin",{}});
+    app.complete_service({regular.front().id,false,"/tmp/stale-regular.key",{}});
     app.complete_service({fast.front().id,false,"/tmp/fast-current.bin",{}});
     check(app.field(F::fast_file).text=="/tmp/fast-current.bin","Fast file service routed to the wrong controller");
     app.activate(C::fast_choose_file);auto old=app.take_services();check(old.size()==1,"Second fast service unavailable");
-    app.select(F::fast_mode,"robust");app.select(F::fast_mode,"fast");
+    app.select(F::fast_mode,"robust");
+    check(app.field(F::key).selected==regular_key&&app.control(action(C::open_keyfile)).enabled,
+          "Stale Robust service changed keys or started keyfile loading after a mode change");
+    app.select(F::fast_mode,"fast");
     app.complete_service({old.front().id,false,"/tmp/stale-fast.bin",{}});
     check(app.field(F::fast_file).text=="/tmp/fast-current.bin","Stale service survived a mode generation change");
     app.close();
@@ -706,17 +711,15 @@ void robust_public_key_warning() {
 }
 void robust_boundary_keeps_polling() {
     using F=ui::Field;using C=ui::Command;
-    // The retained Robust editor must stay usable across a mode switch while
-    // its retired audio backend remains explicitly unavailable.
+    // Configuring a real Robust session must not fabricate reception or lose
+    // the independent draft when the shared host switches modems.
     Application app({.simulation=true});
     app.edit(F::short_bits,"001");app.edit(F::bandwidth,"1.2 kHz");app.start();app.tick();
     const auto bits=app.field(F::short_bits).text;
     const auto rate=app.field(F::bandwidth).text;
     const auto key=app.field(F::key).selected;
-    check(bits=="001"&&!app.enabled(C::transmit)&&!app.enabled(C::transmit_noise),
-          "Removed Robust backend accepted transmission or lost the raw draft");
-    check(app.field(F::mode).text.find("unavailable")!=std::string::npos,
-          "Robust boundary did not explain its unavailable backend");
+    check(bits=="001"&&app.field(F::signals).records.empty(),
+          "Configuring Robust lost its raw draft or fabricated reception");
     app.select(F::fast_mode,"fast");app.edit(F::fast_text,"Keep this Fast draft");
     const auto before=app.poll_count();
     const auto end=std::chrono::steady_clock::now()+std::chrono::seconds(1);
@@ -728,15 +731,49 @@ void robust_boundary_keeps_polling() {
     check(app.field(F::short_bits).text==bits&&app.field(F::bandwidth).text==rate&&
           app.field(F::key).selected==key&&app.field(F::message).enabled,
           "Fast mode replaced the retained Robust draft or settings");
-    check(!app.enabled(C::transmit)&&app.field(F::signals).records.empty(),
-          "Mode switch fabricated Robust reception or enabled the retired transmitter");
+    check(app.field(F::signals).records.empty(),"Mode switch fabricated Robust reception");
     app.select(F::fast_mode,"fast");
     check(app.field(F::fast_text).text=="Keep this Fast draft"&&app.field(F::fast_text).enabled,
           "Returning to Fast lost its independent draft or editor");
     app.close();
 }
+void robust_native_settings() {
+    using F=ui::Field;
+    Controller controller({.simulation=true});
+    check(controller.settings().transfer.fec==FecMode::off&&!controller.settings().receiver_memory_limit,
+          "Robust must default to short uncoded text and automatic receiver headroom");
+    controller.edit(F::link_power,"1 W");controller.edit(F::link_loss,"90 dB");
+    controller.edit(F::link_noise,"-164 dBm/Hz");controller.edit(F::snr,"20");
+    controller.select(F::dsss_factor,"10");controller.edit(F::bandwidth,"36 Hz");
+    controller.select(F::symbol_burst,"2");controller.select(F::symbol_burst_random,"3");
+    controller.select(F::fhss,"fake-fcc");controller.select(F::fec,"rs20");
+    controller.edit(F::helper_power,"100 mW");controller.select(F::helper_ratio_limit,"20");
+    controller.edit(F::helper_callsign,"K1ABC");
+    controller.edit(F::calendar_epoch,"1793850000");controller.edit(F::calendar_ordinal,"12");
+    controller.edit(F::live_noise_dbfs_hz,"-92.25");
+    const auto& s=controller.settings();
+    check(s.tx_dbm==30&&s.path_loss_db==90&&s.noise_dbm_hz==-164&&s.target_cn0_db_hz==20,
+          "Robust link/target edits did not reach the session");
+    check(s.added_interleave&&s.added_symbols==10&&s.transfer.modem.bandwidth_hz==36&&
+          s.symbol_burst_wait==2&&s.symbol_burst_random==3&&s.fhss_profile=="fake-fcc",
+          "Robust waveform controls remained saved-only preferences");
+    check(s.helper.power_w==.1&&s.helper.ratio_limit_db==20&&s.helper.callsign=="K1ABC"&&
+          s.transfer.fec==FecMode::rs20&&s.calendar&&s.calendar->epoch==1793850000&&
+          s.calendar->initial_ordinal==12&&s.live_noise_dbfs_hz==-92.25,
+          "Robust Helper/codec/calendar settings did not reach the session");
+    const auto exported=launch_command::parse(controller.field(F::planner_command).text);
+    check(exported.calendar_epoch==1793850000ULL&&exported.calendar_ordinal==12&&
+          exported.live_noise_dbfs_hz==-92.25&&exported.fec=="rs20"&&exported.workspace_percent==0,
+          "Native receiver settings were lost from saved launch parameters");
+    controller.edit(F::short_bits,"001");
+    check(controller.field(F::fec).selected=="rs20"&&controller.field(F::fec).display_text=="Off (exact raw bits)",
+          "Raw transmission must retain the FEC preference while reporting its effective bypass");
+    controller.edit(F::calendar_epoch,"none");controller.edit(F::live_noise_dbfs_hz,"unspecified");
+    check(!controller.settings().calendar&&!controller.settings().live_noise_dbfs_hz,
+          "Explicitly clearing live configuration retained a stale calendar/noise model");
+}
 }
 int main() {
-    try {audio_settings();rate_and_spectrum_presentation();damaged_reception_presentation();snr_and_symbol_rate_controls();message_submit_shortcut();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();robust_keyfile_menu_label();robust_public_key_warning();robust_boundary_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
+    try {audio_settings();rate_and_spectrum_presentation();damaged_reception_presentation();snr_and_symbol_rate_controls();message_submit_shortcut();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();robust_keyfile_menu_label();robust_public_key_warning();robust_boundary_keeps_polling();robust_native_settings();std::cout<<"Fast GUI isolation tests passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

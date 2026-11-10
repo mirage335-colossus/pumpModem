@@ -3,10 +3,17 @@
 #include "datapump/transfer.hpp"
 #include "datapump/helper_carrier.hpp"
 #include "datapump/transmit_trace.hpp"
+#include <array>
 #include <memory>
+#include <utility>
 
 namespace datapump::live {
-// Preserved GUI settings. A single selected key is held in transfer.key.
+// Both ends configure the same calendar independently. Its ordinal advances
+// through quiet slots as well as DATA. A later capture can join this calendar.
+struct Calendar {
+    std::uint64_t epoch = 0, initial_ordinal = 0;
+};
+
 struct Settings {
     transfer::Options transfer;
     std::string device="default";
@@ -14,6 +21,18 @@ struct Settings {
     audio::ChannelMode channel_mode=audio::ChannelMode::left_mono;
     double transmit_gain=1;
     helper::Options helper;
+    std::optional<Calendar> calendar;
+    // One-sided audio input density, in squared normalized PCM per Hz.
+    // The live scorer requires a separately declared input noise model.
+    std::optional<double> live_noise_dbfs_hz;
+    std::optional<std::size_t> receiver_memory_limit;
+    double tx_dbm=20, path_loss_db=120, noise_dbm_hz=-174, target_cn0_db_hz=32;
+    double doppler_shift_hz=0;
+    std::string spread_preset="none", selective_perturbation="off";
+    unsigned added_symbols=1, symbol_burst_wait=0, symbol_burst_random=0;
+    bool added_interleave=false;
+    std::string fhss_profile="off";
+    std::vector<double> fhss_frequencies_hz;
 };
 void validate_settings(const Settings&);
 struct SignalUpdate {
@@ -35,8 +54,20 @@ struct SignalUpdate {
     bool helper_carrier=false;
 };
 enum class ConstellationSource {input,transmitted,received};
-// Shared presentation boundary for a future canonical backend. No acquisition,
-// receiver banks, calibration counters or retired receiver ownership remain.
+enum class PatternDecision { ambiguous, data, quiet };
+// Bounded diagnostic rows from actual receive processing in public-slot order.
+struct PatternStep {
+    std::uint64_t index=0, epoch=0, ordinal=0;
+    PatternDecision decision=PatternDecision::ambiguous;
+    std::optional<std::uint8_t> bit;
+    std::array<double,2> bit_evidence{}, adaptive_bit_evidence{}, combined_bit_evidence{};
+    double quiet_energy=0, quiet_threshold=0, operational_log_e=0, operational_threshold=0;
+    double helper_seconds=0, coarse_seconds=0, fine_seconds=0;
+    std::size_t quiet_modes=0, fine_candidates=0;
+    unsigned workers=0;
+    bool evidence_complete=false;
+    std::string helper_status, reason;
+};
 struct Snapshot {
     std::vector<float> waveform;
     std::uint32_t waveform_sample_rate=0;
@@ -53,18 +84,24 @@ struct Snapshot {
     std::vector<SignalUpdate> signals;
     std::vector<transfer::Received> received;
     modem::TransmitTrace transmit_trace;
+    std::vector<PatternStep> pattern_steps;
+    std::optional<double> bit_seconds, slot_stride_seconds;
+    std::optional<std::pair<double,double>> search_band_hz, helper_band_hz;
+    std::optional<std::string> transmit_unavailable;
+    std::optional<std::string> noise_transmit_unavailable;
     std::string status,error,receiver_error;
     bool running=false,transmitting=false,simulation=false,simulation_replay=false;
+    bool force_transmit_available=false;
 };
-// This explicit unavailable boundary owns no device, worker, waveform or DSP.
-// The GUI keeps its controls until the canonical triad backend is connected.
+// The application thread submits settings and commands. Device and DSP work
+// stay in the session. Poll snapshot() to consume one-shot receive events.
 class Session {
 public:
     Session();
     ~Session();
     Session(const Session&)=delete;
     Session& operator=(const Session&)=delete;
-    void start(const Settings&);
+    void start(const Settings&,bool active=true);
     void configure(const Settings&);
     void set_mono(bool);
     void set_channel_mode(audio::ChannelMode);
@@ -73,8 +110,8 @@ public:
     bool try_suspend_capture();
     void resume_capture();
     void clear_received();
-    void transmit(const Message&);
-    void transmit_bits(std::span<const std::uint8_t>);
+    void transmit(const Message&,bool force=false);
+    void transmit_bits(std::span<const std::uint8_t>,bool force=false);
     void transmit_noise();
     void transmit_helper();
     void cancel_transmit();
@@ -82,6 +119,7 @@ public:
     void cancel_recovery(std::uint64_t);
     Snapshot snapshot();
     void stop();
+    bool ready_to_close() const;
 private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

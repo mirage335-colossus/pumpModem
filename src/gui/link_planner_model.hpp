@@ -7,8 +7,8 @@
 #include <string>
 
 namespace datapump::gui::planner {
-// Saved planning inputs belong to the UI. Receiver estimates are unavailable
-// until the canonical triad backend is connected to the application.
+// Saved planning inputs belong to the UI. Receiver probability and CPU
+// forecasts require qualification against the native receiver.
 struct Inputs {
     transfer::Options options;
     double target_db_hz=32;

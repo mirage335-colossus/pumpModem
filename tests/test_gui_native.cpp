@@ -78,26 +78,54 @@ void shared_robust_target() {
     try {gui::Application bad(std::move(invalid));} catch(const Error&) {rejected=true;}
     check(rejected);
 }
-void repeatable_length_boundary() {
+void short_draft_boundaries() {
+    using F=gui::ui::Field;using C=gui::ui::Command;
     gui::Application app({.simulation=true});
-    app.select(gui::ui::Field::fast_mode,"robust");
-    app.edit(gui::ui::Field::message,std::string(236,'x'));
-    check(app.field(gui::ui::Field::repeatable).enabled);
-    app.toggle(gui::ui::Field::repeatable,true);
-    check(app.field(gui::ui::Field::repeatable).checked&&app.field(gui::ui::Field::message).text.size()==256);
-    const auto draft=app.field(gui::ui::Field::message).text;
-    app.activate(gui::ui::Command::attach_file);
-    const auto requests=app.take_services();check(requests.size()==1);
-    app.complete_service({requests.front().id,false,"/nonexistent/repeatable-test",{}});
-    check(!app.field(gui::ui::Field::repeatable).enabled&&app.field(gui::ui::Field::repeatable).checked);
-    app.activate(gui::ui::Command::use_text);
-    check(app.field(gui::ui::Field::repeatable).enabled&&app.field(gui::ui::Field::repeatable).checked);
-    check(app.field(gui::ui::Field::message).text==draft);
-    app.edit(gui::ui::Field::message,app.field(gui::ui::Field::message).text+"x");
-    check(!app.field(gui::ui::Field::repeatable).enabled&&!app.field(gui::ui::Field::repeatable).checked);
-    check(app.field(gui::ui::Field::message).text==std::string(237,'x'));
-    app.edit(gui::ui::Field::message,std::string(236,'x'));
-    check(app.field(gui::ui::Field::repeatable).enabled&&!app.field(gui::ui::Field::repeatable).checked);
+    app.select(F::fast_mode,"robust");
+    // The retained developer draft tool cannot make an oversized native
+    // short message eligible, and unsupported attachments cannot replace it.
+    app.edit(F::message,std::string(236,'x'));
+    check(app.field(F::repeatable).enabled);
+    app.toggle(F::repeatable,true);
+    check(app.field(F::repeatable).checked&&app.field(F::message).text.size()==256);
+    const auto draft=app.field(F::message).text;
+    check(app.field(F::short_bits).text.empty()&&app.field(F::airtime).text.find("limited to 16 bytes")!=std::string::npos);
+    check(!app.enabled(C::attach_file));
+    app.activate(C::attach_file);
+    check(app.take_services().empty()&&app.field(F::message).text==draft);
+    check(app.field(F::repeatable).enabled&&app.field(F::repeatable).checked);
+    app.edit(F::message,draft+"x");
+    check(!app.field(F::repeatable).enabled&&!app.field(F::repeatable).checked);
+    check(app.field(F::message).text==std::string(237,'x'));
+    app.edit(F::message,std::string(236,'x'));
+    check(app.field(F::repeatable).enabled&&!app.field(F::repeatable).checked);
+
+    app.edit(F::message,std::string(16,'x'));
+    check(!app.field(F::short_bits).text.empty()&&app.field(F::airtime).text.find(" DATA + 2 scored quiet slots")!=std::string::npos);
+    app.edit(F::message,std::string(17,'x'));
+    check(app.field(F::message).text.size()==17&&app.field(F::short_bits).text.empty());
+    check(app.field(F::airtime).text.find("limited to 16 bytes")!=std::string::npos);
+
+    app.select(F::fec,"rs60");
+    const auto raw=std::string(207,'0')+"1";
+    app.edit(F::short_bits,raw);
+    check(app.field(F::short_bits).text==raw&&app.field(F::binary_label).text=="Raw bits / 208 bits");
+    check(app.field(F::short_bits_detail).text.starts_with("208 payload bits.")&&
+          app.field(F::airtime).text.starts_with("208 DATA + 2 scored quiet slots"));
+    check(app.field(F::fec).selected=="rs60"&&
+          app.field(F::fec).display_text=="Off (exact raw bits)");
+    const auto committed_binary=app.field(F::binary).text;
+    app.edit(F::short_bits,raw+"0");
+    check(app.field(F::short_bits_detail).text=="Enter 1-208 exact bits."&&
+          app.field(F::binary).text==committed_binary);
+    app.edit(F::short_bits,"00x1");
+    check(app.field(F::binary).text==committed_binary&&
+          app.field(F::airtime).text.find(" DATA + ")==std::string::npos);
+    app.edit(F::short_bits,"001");
+    check(app.field(F::short_bits).text=="001"&&app.field(F::binary_label).text=="Raw bits / 3 bits"&&
+          app.field(F::airtime).text.starts_with("3 DATA + 2 scored quiet slots"));
+    app.edit(F::message,"text");
+    check(app.field(F::fec).enabled&&app.field(F::fec).selected=="rs60"&&app.field(F::fec).display_text.empty());
 }
 void retained_raw_bits() {
     gui::Signals signals;
@@ -219,7 +247,7 @@ int main() {
     try {
         planner_quick_references();
         shared_robust_target();
-        repeatable_length_boundary();
+        short_draft_boundaries();
         retained_raw_bits();
         received_text_boundary();
         check(gui::parse_binary_bits("0")==Bytes({0}));

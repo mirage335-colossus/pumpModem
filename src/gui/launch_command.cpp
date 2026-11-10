@@ -92,11 +92,19 @@ void helper_callsign(std::string_view text) {
         invalid("Helper carrier callsign must contain at most 16 printable ASCII characters.");
 }
 unsigned workspace(std::string_view text) {
+    if(text=="auto")return 0;
     if(!text.empty()&&text.back()=='%')text.remove_suffix(1);
     if(text=="25")return 25;
     if(text=="50")return 50;
     if(text=="75")return 75;
-    invalid("--dsp-workspace must be 25%, 50%, or 75%.");
+    invalid("--dsp-workspace must be auto, 25%, 50%, or 75%.");
+}
+std::uint64_t unsigned_integer(std::string_view text,std::string_view flag) {
+    std::uint64_t value=0;
+    const auto parsed=std::from_chars(text.data(),text.data()+text.size(),value);
+    if(text.empty()||parsed.ec!=std::errc{}||parsed.ptr!=text.data()+text.size())
+        invalid(std::string(flag)+" requires an unsigned integer.");
+    return value;
 }
 double frequency(std::string_view text,std::string_view flag,double low,bool allow_zero=false,
                  double high=30000000) {
@@ -159,7 +167,8 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--dsss-mode"||flag=="--search-arithmetic"||flag=="--receiver-strategy"||flag=="--receiver-cpu-budget"||flag=="--doppler"||flag=="--fhss"||flag=="--fhss-list"||flag=="--fhss-list-file"||flag=="--live-duplex"||flag=="--hardware-channel-test"||
             flag=="--keyfile"||flag=="--keyset"||flag=="--key-name"||flag=="--tx-key"||
             flag=="--symbol-burst"||flag=="--symbol-burst-random"||
-            flag=="--helper-power"||flag=="--helper-ratio-limit"||flag=="--helper-callsign";
+            flag=="--helper-power"||flag=="--helper-ratio-limit"||flag=="--helper-callsign"||
+            flag=="--calendar-epoch"||flag=="--calendar-ordinal"||flag=="--live-noise-dbfs-hz"||flag=="--fec";
         if(!known)invalid("Unknown launch option: "+std::string(flag));
         std::string_view value;
         if(equal!=std::string_view::npos)value=argument.substr(equal+1);
@@ -179,6 +188,21 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         else if(flag=="--rate"||flag=="--bw")result.rate_hz=frequency(value,flag,tuning::minimum_bandwidth_hz);
         else if(flag=="--carrier")result.carrier_hz=frequency(value,flag,0,false,std::numeric_limits<double>::max());
         else if(flag=="--dsp-workspace")result.workspace_percent=workspace(value);
+        else if(flag=="--calendar-epoch") {
+            result.calendar_epoch=value=="none"?0:unsigned_integer(value,flag);
+            if(*result.calendar_epoch&&(*result.calendar_epoch<6||*result.calendar_epoch>4294967289ULL))
+                invalid("Calendar epoch must be none or UTC seconds from 6 through 4294967289.");
+        }
+        else if(flag=="--calendar-ordinal")result.calendar_ordinal=unsigned_integer(value,flag);
+        else if(flag=="--live-noise-dbfs-hz") {
+            result.clear_live_noise=value=="unspecified";
+            result.live_noise_dbfs_hz.reset();
+            if(!result.clear_live_noise)result.live_noise_dbfs_hz=number(value,flag,-250,0);
+        }
+        else if(flag=="--fec") {
+            if(value!="off"&&value!="rs20"&&value!="rs60")invalid("--fec must be off, rs20 or rs60.");
+            result.fec=value;
+        }
         else if(flag=="--clock-sync")result.clock_sync=clock_sync::format(clock_sync::parse(value));
         else if(flag=="--keyfile")result.keyfile=value;
         else if(flag=="--keyset") {
@@ -320,7 +344,13 @@ std::string format(const Patch& settings) {
     if(settings.rate_hz)add("--rate",numeric(*settings.rate_hz));
     if(settings.carrier_hz)add("--carrier",numeric(*settings.carrier_hz));
     if(settings.doppler)add("--doppler",tuning::parse_doppler(*settings.doppler).canonical);
-    if(settings.workspace_percent)add("--dsp-workspace",std::to_string(*settings.workspace_percent)+"%");
+    if(settings.workspace_percent)add("--dsp-workspace",*settings.workspace_percent?std::to_string(*settings.workspace_percent)+"%":"auto");
+    if(settings.calendar_epoch)add("--calendar-epoch",*settings.calendar_epoch?std::to_string(*settings.calendar_epoch):"none");
+    if(settings.calendar_ordinal)add("--calendar-ordinal",std::to_string(*settings.calendar_ordinal));
+    if(settings.clear_live_noise&&settings.live_noise_dbfs_hz)invalid("Cannot export both a live noise density and an unspecified density.");
+    if(settings.clear_live_noise)add("--live-noise-dbfs-hz","unspecified");
+    else if(settings.live_noise_dbfs_hz)add("--live-noise-dbfs-hz",numeric(*settings.live_noise_dbfs_hz));
+    if(settings.fec)add("--fec",*settings.fec);
     if(settings.clock_sync)add("--clock-sync",clock_sync::format(clock_sync::parse(*settings.clock_sync)));
     if(settings.audio_timing_error_seconds)add("--audio-error",clock_sync::duration_text(*settings.audio_timing_error_seconds));
     if(settings.dsss_mode)add("--dsss-mode",*settings.dsss_mode);

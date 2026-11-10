@@ -274,25 +274,26 @@ def _quadratic_scores(correlations, inverse, *, explicit=True, xp=np):
 
 
 def _candidate_peak_indices(score, sample_separation, maximum):
-    """Canonical SciPy interior peaks plus independently eligible endpoints."""
+    """Retain peaks with an explicit equal-score priority shared with native."""
     if len(score) == 1:
         return np.array([0], dtype=np.intp)
-    peaks = signal.find_peaks(score, distance=sample_separation)[0]
-    leading, trailing = score[0] >= score[1], score[-1] >= score[-2]
-    if leading or trailing:
-        # find_peaks returns sorted distinct INTERIOR indices. Endpoints can
-        # be inserted in order without concatenation, sorting, or deduplication.
-        offset = int(leading)
-        selected = np.empty(len(peaks)+offset+int(trailing), dtype=np.intp)
-        selected[offset:offset+len(peaks)] = peaks
-        if leading:
-            selected[0] = 0
-        if trailing:
-            selected[-1] = len(score)-1
-        peaks = selected
-    if len(peaks) > maximum:
-        peaks = peaks[np.argpartition(score[peaks], -maximum)[-maximum:]]
-    return peaks
+    peaks = signal.find_peaks(score)[0]
+    # SciPy supplies the floor-midpoint of each interior plateau. Give
+    # higher lag priority among exact ties, including during suppression.
+    eligible = []
+    for lag in peaks[np.lexsort((peaks, score[peaks]))[::-1]]:
+        if all(abs(lag-old) >= sample_separation for old in eligible):
+            eligible.append(lag)
+            if len(eligible) > maximum:
+                break
+    if score[0] >= score[1]:
+        eligible.append(0)
+    if score[-1] >= score[-2]:
+        eligible.append(len(score)-1)
+    if len(eligible) <= maximum:
+        return np.asarray(sorted(eligible), dtype=np.intp)
+    frontier = np.asarray(eligible, dtype=np.intp)
+    return frontier[np.lexsort((frontier, score[frontier]))[-maximum:]]
 
 
 def _append_candidate_rows(local, workspace, frequencies, scores, arrivals,
@@ -1135,11 +1136,13 @@ class FFTScreen:
         group_count = min(interval_count, self.maximum_fft_products//(2*workspaces*rays*self.lag_count))
         if group_count and self.correlation_method != 'frequency':
             count = min(bounded_count, self.maximum_frequency_points)
-            # The padded length of a group is no greater than the next power
-            # of two. Sum the convolution support bounds over all groups.
-            transformed = 2*(min(group_count, count//2)*(self.kernel_rows-1)+count)
-            peaks['coarse_lag'] = ordinary('lag', count, lag_count=count,
-                lag_transformed=transformed, lag_largest=fft.next_fast_len(self.kernel_rows+count-1))
+            # Touching intervals share endpoints but still need independent
+            # convolutions. The sum of their within-group steps is at most
+            # count-1, and every nonsingleton group contributes a step.
+            steps = count-1
+            transformed = 2*(min(group_count, steps)*self.kernel_rows+steps)
+            peaks['coarse_lag'] = ordinary('lag', count, lag_count=count+group_count-1,
+                lag_transformed=transformed, lag_largest=fft.next_fast_len(self.kernel_rows+steps) if steps else 0)
         return peaks
 
     def _uses_streamed_observation(self):

@@ -19,7 +19,7 @@
 #endif
 using namespace datapump;
 namespace {
-constexpr const char* unavailable="Robust audio commands are unavailable until the canonical triad backend is connected. The retired single-carrier modem has been removed.";
+constexpr const char* unavailable="Robust audio commands are not exposed by this CLI. Use the native application for configured-calendar Robust operation.";
 constexpr const char* usage=R"HELP(Data Pump — audio text and file modem
 Usage: pump COMMAND [OPTIONS]
   keygen       Create an owner-only symmetric keyfile (--output PATH)
@@ -34,7 +34,7 @@ Usage: pump COMMAND [OPTIONS]
 Key options: --key-names A,B --device ID --pad PATH
 QR options: --format svg|pbm --output PATH (otherwise stdout)
 General: --help --version
-Robust audio commands await connection to the canonical triad backend.
+Configured-calendar Robust operation is available in the native application.
 )HELP";
 class Args {
     std::map<std::string,std::string> values_;
@@ -73,7 +73,7 @@ int main(int argc,char** argv) {
         _setmode(_fileno(stdin),_O_BINARY);_setmode(_fileno(stdout),_O_BINARY);
 #endif
         if(argc>1&&std::string_view(argv[1]).starts_with("fast-"))return fast::cli_main(argc,argv);
-        // Reject the removed backend before parsing options or opening files/devices.
+        // Reject retired CLI commands before parsing options or opening files/devices.
         if(argc>1) {
             const std::set<std::string_view> retired={"tx","rx","listen","simulate","estimate","analyze-link","status-tx","status-rx","--tx","--rx"};
             if(retired.contains(argv[1]))throw Error(unavailable);

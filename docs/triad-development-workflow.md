@@ -1,10 +1,13 @@
 # Developing the canonical three-carrier Robust modem
 
 Start with [current architecture](robust-current.md), [independent patterns](triad-patterns.md),
-and the [channel model contract](channel-models.md). There is one native waveform,
-shaping, streaming-channel and Helper path. `tools/triad_backend.py` exposes the
-current Python acquisition and tracking stages; it is not a finished GUI modem.
-The former single-carrier receiver and standalone alternatives are retired.
+and the [channel model contract](channel-models.md). There is one compiled C++
+waveform, channel, Helper and complete receiver stack, linked into the GUI
+through a native session. Python can test and benchmark the stack but is not
+part of its operating path. Retained numerical references serve bounded
+migration parity and interpretation of old measurements only; remove them when
+those concrete questions are resolved. The former single-carrier receiver and
+standalone alternatives remain retired.
 
 ## Choose the smallest discriminating check
 
@@ -28,12 +31,15 @@ this same method. Do not restore an old campaign executable to obtain evidence.
 
 - Native `PatternSource`, shaping and `StreamingChannel` own waveform and sample
   geometry. The bounded source/basis bridge consumes those same components.
-- `WeakReceiver` uses weak Helper evidence, complex FFT proposals and sparse
-  dynamic likelihood refinement. Preserve both bit alternatives and the public
-  epoch/arrival prior; do not select them using transmitter truth.
-- `PracticalTrackingReceiver` is scheduled post-acquisition tracking. Its nominal
-  and adaptive persistent lanes are internal mixture components, not competing
-  complete modem implementations.
+- Native Helper and coarse receiver modules use noisy Helper evidence and full
+  public complex FFT proposals. Preserve both bit alternatives and public
+  epoch/arrival priors; do not select them using transmitter truth.
+- Native fine tracking advances persistent fixed-affine, adaptive and combined
+  lanes. Only the fixed-affine lane supplies operational admission; the other
+  lanes remain diagnostics. All required work is charged.
+- `CompleteStreamReceiver` owns one aggregate worker budget, shared immutable
+  windows, ordered commit and bounded queues. The message receiver handles
+  codec state only after two scored quiet slots; EOF never invents completion.
 - Frontend, template, timing and Gaussian-state modules are reusable kernels.
   Preparation/cache ownership and actual numeric thread limits are part of cost.
 
@@ -54,9 +60,10 @@ a specific question, next action and cleanup condition.
 ## Scope the checks to the change
 
 Use `./build.sh test triad` for the retained bounded native and Python checks in
-a configured scientific Python environment. Use applicable shared security,
-audio, Fast, Legacy or frontend groups when those components change. GUI Robust
-operation is explicitly unavailable; preserved controls must not fabricate
-receive results. Test counts and results belong in [validation](validation.md).
+a configured scientific Python environment. Native operation itself must build
+and run without Python. Use applicable shared security, audio, Fast, Legacy and
+frontend groups when those components change. GUI controls must preserve actual
+receiver diagnostics and expose unconfigured/unsupported action reasons.
+Test counts and results belong in [validation](validation.md).
 Protocol breaks evolve this implementation; older binaries belong to Git tags
 and separate releases, never parallel source trees.

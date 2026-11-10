@@ -1,8 +1,13 @@
 # Robust modem
 
 See [current Robust architecture and status](../robust-current.md) for the
-canonical native waveform/channel/Helper path, sequential Python receiver
-stages, and GUI limitation. Concise historical technique findings remain in
+compiled C++ source/Helper/complete-receiver/audio stack linked into the GUI,
+configured-calendar operating scope and remaining validation limits. Python
+serves tests and benchmarks, not the operating path. Native CPU capacity remains
+unqualified; historical performance results retain their original runtime.
+The retired Robust audio CLI commands remain unavailable.
+
+Concise historical technique findings remain in
 [pattern research](../triad-patterns.md), [stochastic channel analysis](../triad-stochastic.md),
 [rate-aware shaping](../triad-shaping.md), and the [shared channel contract](../channel-models.md).
 The [matched pattern](../validation-data/triad-v3/2026-11-06-independent-patterns/README.md),

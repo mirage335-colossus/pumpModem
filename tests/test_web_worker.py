@@ -89,7 +89,8 @@ finally:
         process.wait()
 
 # Host file paths cross only the separate inherited capability pipe. Import
-# opaque source data while Robust transmission remains explicitly unavailable.
+# opaque source data through Fast; the native Robust short-message profile
+# deliberately does not accept attachments.
 def string(value):
     data = value.encode("utf-8")
     return struct.pack("<I", len(data)) + data
@@ -130,14 +131,21 @@ with tempfile.TemporaryDirectory(prefix="datapump-file-contract-") as directory:
                 process.stdin.write(packet)
             wait_for(lambda: int(snapshot["ack"]) >= sequence)
         wait_for(lambda: snapshot is not None)
+        wait_for(lambda: any(item.get("text") == "Robust simulation ready"
+                             for item in snapshot["controls"]))
+        assert not control("Attach file")["enabled"], "Robust short-message profile accepted attachments"
+        assert not control("Transmit")["enabled"], "empty Robust draft enabled transmission"
+        assert any(tab["label"] == "Robust setup" for tab in snapshot["tabs"]), "configured-calendar setup missing"
+        modem = next(item for item in snapshot["controls"]
+                     if any(option["label"] == "Fast Modem" for option in item.get("options", [])))
+        fast = next(option for option in modem["options"] if option["label"] == "Fast Modem")
+        event(2, modem["id"], fast["id"])
         event(4, control("Attach file")["id"])
         wait_for(lambda: snapshot.get("service", {}).get("kind") == "open_file" if snapshot.get("service") else False)
         event(13, snapshot["service"]["id"], str(source), trusted=True)
-        wait_for(lambda: any(item.get("text") == "Attached: a.bin" for item in snapshot["controls"]))
-        assert control("Transmit") and not control("Transmit")["enabled"], "retired Robust transmitter enabled"
+        wait_for(lambda: control("Source file") is not None and control("Source file")["text"].endswith("a.bin"))
+        assert not control("Cancel")["enabled"], "file import started a transmission"
         assert not control("Files in memory")["records"], "file import manufactured received content"
-        assert any(item.get("text") == "Robust is unavailable until the canonical triad backend is connected."
-                   for item in snapshot["controls"]), "missing unavailable status"
         event(4, control("Use text")["id"])
         process.stdin.close()
         os.close(file_write)

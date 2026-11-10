@@ -40,11 +40,12 @@ Switching Text/File retains both drafts. Loading a key does not enable
 encryption; switching encryption off retains the key for later use.
 
 Fast settings, key selection, text/file drafts and history remain independent
-of other application settings and drafts. Robust is currently unavailable in
-the GUI; switching views does not connect or start a Robust reception. Starting Fast
-hardware waits for the regular audio device to close and refuses to interrupt
-an admitted pending reception or transmission. A regular simulation can continue
-while its interface is hidden.
+of other modem settings and drafts. Robust uses its own native session and
+configured-calendar controls. Shared mode handoff coordinates audio ownership:
+starting Fast hardware waits for the Robust device to close and refuses to
+interrupt an active Robust transmission. Switching away requests suspension
+of Robust reception; an active transmission can continue while its interface
+is hidden.
 
 An active Fast transmission continues when switching back; Fast listening stops.
 Regular controls remain disabled until Fast releases the audio device; idle

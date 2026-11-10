@@ -210,6 +210,78 @@ void environmental_oscilloscope() {
           "partial oscilloscope envelope was labeled as reconstruction");
 
 }
+void pattern_evidence() {
+    live::PatternStep step;
+    step.index=10;step.evidence_complete=true;
+    step.bit_evidence={std::log(2.),std::log(6.)};
+    step.operational_log_e=std::log(2.);step.operational_threshold=3.;
+    step.quiet_modes=5;step.quiet_energy=4.;step.quiet_threshold=8.;
+    const auto points=pattern_evidence_points(std::span(&step,1));
+    check(points.size()==1 && points[0].bit_log_e &&
+          std::abs((*points[0].bit_log_e)[0])<1e-12 &&
+          std::abs((*points[0].bit_log_e)[1]-std::log(3.))<1e-12,
+          "pattern alternatives lost the original-grid correction or counted bit mixture twice");
+    const auto complete=PlotSnapshot::pattern_evidence(points);
+    check(complete.caption().find("threshold applies only to aggregate")!=std::string::npos &&
+          complete.caption().find("adaptive lanes are diagnostic only")!=std::string::npos,
+          "pattern caption implies a per-bit admission or adaptive decision");
+    step.evidence_complete=false;
+    const auto incomplete=pattern_evidence_points(std::span(&step,1));
+    check(!incomplete[0].bit_log_e && !incomplete[0].quiet_energy,
+          "unscored slot fabricated zero evidence or quiet energy");
+    const auto blank=render(PlotSnapshot::pattern_evidence(incomplete),full_bitmap_request(71,53));
+    check(std::all_of(blank.pixels().begin(),blank.pixels().end(),[](auto value){return value==0;}),
+          "incomplete pattern slot painted scored evidence");
+    check(PlotSnapshot::pattern_evidence({}).caption()=="No scored public slots yet" &&
+          PlotSnapshot::pattern_evidence(incomplete).caption().find("incomplete")!=std::string::npos,
+          "empty/incomplete evidence has no honest status");
+
+    step.evidence_complete=true;
+    step.bit_evidence[0]=std::numeric_limits<double>::quiet_NaN();
+    step.quiet_energy=std::numeric_limits<double>::infinity();
+    const auto invalid=pattern_evidence_points(std::span(&step,1));
+    check(invalid==pattern_evidence_points(std::span(&step,1)) &&
+          !invalid[0].bit_log_e && !invalid[0].quiet_energy,
+          "nonfinite receiver diagnostics leaked into the plot or churn its snapshot identity");
+    auto unsafe=points;
+    unsafe[0].bit_log_e=std::array{std::numeric_limits<double>::infinity(),0.};
+    unsafe[0].quiet_threshold=-1.;
+    check(render(PlotSnapshot::pattern_evidence(unsafe),full_bitmap_request(71,53)).pixels()==blank.pixels(),
+          "plot factory accepted invalid independent caller evidence");
+
+    auto gap=points;gap.push_back(points.front());gap.back().slot=12;
+    const auto gap_source=PlotSnapshot::pattern_evidence(gap);
+    const auto gap_image=render(gap_source,full_bitmap_request(71,53),false);
+    for(unsigned y=0;y<53;++y)
+        check(red(gap_image,35,y)<=theme::grid,"pattern plot connected evidence across a missing public slot");
+    gap.clear();
+    check(render(gap_source,full_bitmap_request(71,53),false).pixels()==gap_image.pixels(),
+          "pattern producer retained mutable input storage");
+    for(unsigned width:{1U,7U,71U})for(unsigned height:{1U,3U,53U})for(bool color:{false,true}) {
+        auto request=full_bitmap_request(width,height,false,color);
+        const auto full=render(gap_source,request,color);
+        BitmapImage tiled(width,height);
+        for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;) {
+            const auto count=std::min(3U,width-x);request.damage={x,y,count,1};
+            gap_source.paint(request,[&](unsigned px,unsigned py,PixelBlock block){tiled.blit(px,py,block);},color);
+            x+=count;
+        }
+        check(full.pixels()==tiled.pixels(),"pattern evidence changed with disjoint repaint or small viewport");
+    }
+    auto huge=points;huge[0].bit_log_e=std::array{-std::numeric_limits<double>::max(),std::numeric_limits<double>::max()};
+    huge[0].quiet_energy=std::numeric_limits<double>::max();huge[0].quiet_threshold=std::numeric_limits<double>::denorm_min();
+    (void)render(PlotSnapshot::pattern_evidence(huge),full_bitmap_request(71,53));
+    std::vector<live::PatternStep> history(80);
+    for(std::size_t i=0;i<history.size();++i)history[i].index=i;
+    const auto bounded=pattern_evidence_points(history);
+    check(bounded.size()==plots::pattern_evidence_capacity && bounded.front().slot==16 && bounded.back().slot==79,
+          "pattern evidence lost bounded retention or original public slot indices");
+    const auto cleared=pattern_evidence_points(history,77);
+    check(cleared.size()==2 && cleared.front().slot==78 && cleared.back().slot==79 &&
+          pattern_evidence_points(history,79).empty(),"clear evidence did not hide exactly the retained past slots");
+    rejected([&]{auto reversed=points;reversed.push_back(points.front());
+        (void)PlotSnapshot::pattern_evidence(reversed);},"duplicate pattern indices were presented as chronological evidence");
+}
 void fitted_history() {
     plots::SpectrumHistory history;
     for(unsigned row=0;row<160;++row) {
@@ -449,7 +521,7 @@ int main(int argc,char** argv) {
             waterfall_resize();detailed_waterfall_phase();
             std::cout<<"Focused waterfall display contracts passed\n";return 0;
         }
-        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); environmental_oscilloscope(); waterfall_resize(); detailed_waterfall_phase(); fitted_history(); qr_rendering();
+        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); environmental_oscilloscope(); pattern_evidence(); waterfall_resize(); detailed_waterfall_phase(); fitted_history(); qr_rendering();
         std::cout << "GUI bitmap contract and shared producer tests passed\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

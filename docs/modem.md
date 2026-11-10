@@ -1,11 +1,17 @@
 # Modem architecture and shared boundaries
 
-[Robust](robust-current.md) has one canonical native three-carrier source and
-channel/Helper implementation. Python acquisition and tracking are successive
-receiver stages, not an integrated GUI message backend. Robust controls remain
-visible, but Robust operation is unavailable pending reconnection. The retired
-single-carrier protocol, planner, decoder, cover engine and command recipes are
-not compatibility requirements for the replacement.
+[Robust](robust-current.md) has one compiled C++ three-carrier stack for source,
+Helper, channel simulation, complete receiver processing and audio. The shared
+GUI session links that implementation and uses in-process owners and shared
+buffers. Python is a testing/benchmarking tool and temporary numerical reference,
+not an operating receiver. Live operation uses the configured public calendar,
+keyed ordinal and declared local noise model. Unknown-start acquisition and
+native real-time capacity remain unqualified; see
+[current validation](validation.md#native-gui-integration).
+
+Robust GUI operation and CLI availability are separate: the former Robust audio
+CLI commands remain retired. Old single-carrier protocol, planner and command
+recipes are not compatibility requirements for the native stack.
 
 [Fast](indexes/fast.md) and [Legacy](legacy-modem.md) are independent maintained
 modems with their own formats, operating paths and validation. Do not apply an

@@ -48,7 +48,7 @@ struct InspectionRequest {
     bool simulation=false;
     std::string device;
 };
-// UI boundary for the replacement triad backend. No waveform or receiver
-// estimate is produced while that backend is disconnected.
+// Optional detailed presentation boundary. The native session supplies live
+// diagnostics separately; this view does not produce waveform or receiver estimates.
 Inspection inspect(const InspectionRequest& request,std::stop_token stop = {});
 }

@@ -17,6 +17,22 @@ template<class Function> void rejects(Function function,const std::string& messa
     throw std::runtime_error(message);
 }
 void parsing_and_formatting() {
+    const auto calendar=launch_command::parse("--calendar-epoch 1793850000 --calendar-ordinal 18446744073709551615 --live-noise-dbfs-hz -92.25 --dsp-workspace auto --fec rs20");
+    check(calendar.calendar_epoch==1793850000ULL&&calendar.calendar_ordinal==std::numeric_limits<std::uint64_t>::max()&&
+          calendar.live_noise_dbfs_hz==-92.25&&calendar.workspace_percent==0&&calendar.fec=="rs20"&&
+          launch_command::parse(launch_command::format(calendar))==calendar,
+          "Configured calendar, full ordinal, live noise and automatic allocation must round trip exactly");
+    const auto unconfigured=launch_command::parse("--calendar-epoch none --live-noise-dbfs-hz unspecified --fec off");
+    check(unconfigured.calendar_epoch==0&&unconfigured.clear_live_noise&&!unconfigured.live_noise_dbfs_hz&&
+          launch_command::parse(launch_command::format(unconfigured))==unconfigured,
+          "Explicit calendar/noise clearing must survive launch round trip");
+    check(!launch_command::parse("--rate 1200").calendar_epoch&&
+          !launch_command::parse("--rate 1200").clear_live_noise,
+          "Older partial commands must preserve configured calendar/noise");
+    for(const auto* bad:{"--calendar-epoch 5","--calendar-epoch 4294967290","--calendar-epoch -1",
+        "--calendar-epoch 1.5","--calendar-ordinal -1","--calendar-ordinal 18446744073709551616",
+        "--live-noise-dbfs-hz nan","--live-noise-dbfs-hz -251","--live-noise-dbfs-hz 1","--fec rs40"})
+        rejects([&]{launch_command::parse(bad);},"Invalid native receiver profile accepted");
     for(const auto* wait:{"off","1","2","3","5","10"})for(const auto* random:{"0","1","2","3"}) {
         const auto patch=launch_command::parse(std::string("--symbol-burst ")+wait+" --symbol-burst-random "+random);
         check(patch.symbol_burst==(std::string_view(wait)=="off"?0U:static_cast<unsigned>(std::stoul(wait)))&&

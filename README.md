@@ -17,12 +17,19 @@ PCM or analog audio interfaces. Saves are explicit.
 
 ## Robust modem status
 
-The canonical Robust implementation is the native three-adjacent-carrier
-`IndependentApskV2` waveform, shaping, streaming channel, and Helper Generator
-stack. Python `WeakReceiver` acquisition and `PracticalTrackingReceiver`
-tracking are sequential stages, not an integrated end-to-end receiver. Robust
-is not connected to the GUI and remains unavailable there; existing GUI controls
-are retained pending reconnection. See [current architecture and status](docs/robust-current.md).
+Robust uses one compiled C++ three-adjacent-carrier `IndependentApskV2` stack
+linked into the GUI: DATA and Helper generation, continuous channel simulation,
+complete receiver processing and native audio. In-process worker owners share
+buffers and one aggregate CPU budget. Python is a testing/benchmarking tool,
+not an application runtime.
+
+Live operation requires peers to share a configured calendar, keyed ordinal,
+waveform/FEC settings and key, plus a declared local input-noise model. Text is
+bounded to 16 bytes; exact raw bits and configured Off/RS20/RS60 text FEC use the
+same native session. Unknown-start acquisition, physical-device qualification
+and native real-time capacity remain unqualified. The former Robust audio CLI
+commands remain retired. See [current architecture](docs/robust-current.md),
+[GUI controls](docs/gui-contract.md) and [validation](docs/validation.md#native-gui-integration).
 
 To edit the informal [Robust test list](_tests-RobustModem.md), open the
 [standalone editor](tools-endUser/robust-test-list-editor.html) in a browser, select the
@@ -66,8 +73,8 @@ test groups, package profiles, and offline installation.
 The shared GUI supports Console, transmission drafts, audio selection, and
 modem-specific views. See the [GUI contract](docs/gui-contract.md),
 [architecture](docs/gui-architecture.md), and [frontend interfaces](docs/frontend-interfaces.md).
-Robust's existing controls do not imply that its receive/transmit backend is
-currently available.
+Robust live pattern plots show native receiver evidence. Detailed transmission
+inspection and Link Planner receive/CPU forecasts retain their stated limits.
 
 ## Documentation
 

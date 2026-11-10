@@ -1,5 +1,15 @@
 # Robust computational checks
 
+**Runtime applicability:** Robust operation now uses one native C++ stack linked
+into the GUI. Python remains a test/benchmark driver and, while migration parity
+questions remain, a numerical reference. The retained harness commands,
+process-scheduler measurements and GPU/CPU applicability receipts below keep
+their original source/runtime scope. They do not qualify the current native GUI
+receiver or its in-process scheduler. Changed native CPU work and orchestration
+need matched local phase costs and fresh bounded holdouts through that native
+implementation before a new capacity forecast. Preserve all historical numeric
+failures, uncertainty and margins. See [current validation](validation.md#native-gui-integration).
+
 The Robust tools answer two different questions. The ordinary
 [`tools/triad_abbreviated.py`](../tools/triad_abbreviated.py) harness compares
 bounded computational work against a matched baseline to detect relative
@@ -10,7 +20,7 @@ the manual list must start with the
 [CPU ceiling workflow](robust-manual-capacity.md#agent-workflow-for-cpu-ceiling-estimates)
 and its practical algorithm, precision and productive-parallelism requirements.
 
-**Current complete-service estimates are scoped to the configured public
+**The retained complete-service estimates are scoped to the configured public
 calendar. Acquisition of unconfigured waveform epochs, ordinals and timing is
 unresolved, regardless of favorable numerical capacity points or forecast
 accuracy.** Keep that coverage limit in reports. The continuous bit/null model
@@ -90,6 +100,11 @@ pre-restructuring eight-row CPU/GPU receipts remain tied to their old
 implementation.
 The new native CPU kernels do not themselves qualify a faster CUDA path or
 tensor execution. See [current restructuring validation](validation.md#continuous-receiver-restructuring).
+
+The following ownership details describe the historical measured reference
+runtime, including its process transport. The current native stack shares
+immutable buffers in-process under the same aggregate `2*H` budget; see the
+[allocation contract](development.md#receiver-cpu-allocation).
 
 Every automatic Robust receiver mode uses `S = 2*H` software permits, including
 serial, finite and custom paths; explicit worker count `W` stays exact.
@@ -542,12 +557,13 @@ confirmation remains incomplete, so there is no >90% qualification. See the
 `--skip-message-gate` only for debugging: it bypasses the
 current source message gate and prevents an integrated suite pass.
 
-The headless `CompleteStreamReceiver` defaults to continuous captured-stream
+The historical reference `CompleteStreamReceiver` defaults to continuous captured-stream
 listening on its configured public calendar, with the full visible logical CPU
 budget, bounded output/backpressure and scored-quiet recovery. Two scored quiet
 slots establish physical completion; transport EOF and received length do not
 select the endpoint. Finite gates explicitly use `continuous=False`. This does
-not yet qualify unconfigured waveform epoch/ordinal/timing acquisition, and
-the headless path is not connected to the Robust GUI.
+not qualify unconfigured waveform epoch/ordinal/timing acquisition. The GUI now
+uses the native C++ complete receiver; these reference-harness results are not
+its functional or capacity qualification.
 See [current architecture](robust-current.md) and
 [protocol status](protocol.md).

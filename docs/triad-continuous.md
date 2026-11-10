@@ -1,10 +1,12 @@
 # Bounded source and continuous inference components
 
-The canonical Python integration API is `tools/triad_backend.py`. It exposes
-the native source/basis service, weak acquisition, persistent tracking and
-shared frontend/timing/planning kernels. These are building blocks, not a
-standalone modem CLI or a GUI-connected message receiver. See
-[current architecture](robust-current.md).
+The operating interfaces are native C++: `triad_stream.hpp` supplies bounded
+source and public slot geometry; `triad_receiver.hpp` scores complete slots;
+`triad_stream_receiver.hpp` owns continuous ingress and ordered completion.
+The GUI links these components through `live::Session`, sharing immutable input
+between in-process scorer owners. Python numerical modules are retained only
+for bounded migration comparisons and historical measurement interpretation,
+not as an application runtime. See [current architecture](robust-current.md).
 
 ## What streams
 
@@ -14,7 +16,7 @@ observation; do not send simulated receiver noise as the intended DAC waveform.
 Current shaping/channel state and all delayed tails remain shared and continuous.
 Whole-source exports and full-duration normalization/calibration are retired.
 
-`IncrementalReceiver` retains bounded input and Gaussian likelihood state for
+The numerical-reference `IncrementalReceiver` retains bounded input and Gaussian likelihood state for
 a declared candidate bank. Its accumulated score alone does not admit a bit.
 Observation endpoint, priors and permitted attempts remain explicit; incomplete
 input cannot be padded with fictitious observed zeros. Persistent timing lanes
@@ -33,7 +35,11 @@ The native full-audio bridge retains byte/format/limit/EOF checks and
 whiten interpolation noise or identify arbitrary remote motion. Adaptive
 tracking remains distinct from physical-noise qualification.
 
-The [continuous record](validation-data/triad-v3/2026-11-06-continuous/README.md)
+The native complete receiver separately maintains bounded ingress, independent
+slot ownership, ordered commit, quiet completion and continued listening. Its
+current scope and checks are in [validation](validation.md#native-gui-integration).
+
+The historical [continuous record](validation-data/triad-v3/2026-11-06-continuous/README.md)
 and [CPU follow-up](validation-data/triad-v3/2026-11-06-cpu-default/README.md)
 retain dated outcomes. They do not mandate full/sustained runs; use
 [abbreviated testing](triad-performance.md) for new intensive work.

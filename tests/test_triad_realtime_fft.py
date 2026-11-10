@@ -100,6 +100,16 @@ class FFTScreenTests(unittest.TestCase):
         self.assertEqual(tiled['status'], 'ready')
         self.assertGreaterEqual(bound['coarse_tiled'], tiled['estimated_peak_bytes'])
 
+    def test_public_lag_workspace_counts_touching_interval_convolutions(self):
+        prepared = screen(precision='fp64', correlation_method='auto', maximum_frequency_points=3)
+        groups = prepared._lag_frequency_groups(None, [(-.5, 0.), (0., .5)])
+        frequencies = np.unique(np.concatenate(groups))
+        self.assertEqual([len(group) for group in groups], [2, 2])
+        self.assertEqual(len(frequencies), 3)
+        actual = prepared._correlation_plan(frequencies, groups, raw_input=True, top_per_bit=2)
+        bound = prepared.public_search_workspace(.5, workers=1, top_per_bit=2, interval_count=2)
+        self.assertGreaterEqual(bound['coarse_lag'], actual['estimated_peak_bytes_by_method']['lag'])
+
     def test_integer_source_lease_keeps_identical_columns_and_native_owner(self):
         m, source, epochs = fixture()
         owner = threading.get_ident()
@@ -385,16 +395,14 @@ class FFTScreenTests(unittest.TestCase):
         finally:
             session.close()
 
-    def test_ordered_endpoint_insertion_preserves_canonical_peak_indices(self):
+    def test_distinct_peak_frontier_matches_reference(self):
         rng = np.random.default_rng(51291)
         scores = [np.array(row, dtype=float) for row in (
             [0.], [0., 0.], [1., 0.], [0., 1.], [0., 1., 0.],
             [1., 1., 0.], [0., 1., 1.], [1., 1., 1.],
-            [0., 2., 2., 0., 2., 2., 0.], [2., 0., 2., 0., 2.],
             [0., np.inf, 0.], [np.nan, 1., 0.])]
         scores.extend([np.zeros(71), np.arange(71.), np.arange(71.)[::-1]])
         scores.extend(rng.normal(size=(20, 71)))
-        scores.extend(rng.integers(-2, 3, size=(20, 71)).astype(float))
         for score in scores:
             for separation in (1, 2, 15, 100):
                 for maximum in (1, 2, 4, 64):
@@ -408,7 +416,16 @@ class FFTScreenTests(unittest.TestCase):
                     if len(original) > maximum:
                         original = original[np.argpartition(score[original], -maximum)[-maximum:]]
                     np.testing.assert_array_equal(
-                        _candidate_peak_indices(score, separation, maximum), original)
+                        np.sort(_candidate_peak_indices(score, separation, maximum)), np.sort(original))
+
+    def test_tied_arrival_priority_is_explicit(self):
+        for score, separation, expected in (
+                ([0, 0, 1, 0, 0], 1, [4, 2]),
+                ([0, 3, 0, 3, 0], 3, [3]),
+                ([0, 3, 0, 3, 0, 3, 0], 1, [3, 5]),
+                ([0, 4, 4, 0], 1, [1])):
+            np.testing.assert_array_equal(
+                _candidate_peak_indices(np.asarray(score, dtype=float), separation, 2), expected)
 
     def test_lag_zoomfft_matches_direct_complex_correlations_and_frequency_path(self):
         m, source, epochs = fixture()

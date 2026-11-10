@@ -1,18 +1,144 @@
 # Validation status
 
-Updated 9 November 2026. The historical cleanup checkpoint below was then
-uncommitted and based on `357a50970a0c6214eeaade7c5704bbc39abd4b79`, now
-committed as `419e6bae8c4fe3b0f59be23a6dfb3b69fbaed80e`. It is not release
-certification. The [source and binary inventory](../local-evidence/robust-cleanup/source-binaries.json)
-records 2,904 surviving implementation, test and build files and selected binary
-hashes. This compact manifest substantiates this cleanup checkpoint; retire it
-when the checkpoint is superseded. Its source-inventory SHA-256 is
-`2405f259c050b68d7bbabad9628eb97ff750e53c6d9f51012f47530719f7c74b`.
-This is a post-validation inventory, excluding documentation/evidence, not a
-before/after timing comparison. Raw run logs are temporary; remove them after
-this checkpoint is accepted unless a specific active validation or release
-requirement still needs them. The concise outcomes and limitations below are
-the maintained record.
+Updated 10 November 2026. The native migration below is an uncommitted
+integration checkpoint, not release certification. Historical measurements
+retain their original source/runtime and do not qualify native GUI performance.
+
+The historical cleanup checkpoint was based on
+`357a50970a0c6214eeaade7c5704bbc39abd4b79` and committed as
+`419e6bae8c4fe3b0f59be23a6dfb3b69fbaed80e`. Its concise outcomes and limitations
+remain below; they are not release certification or validation of changed code.
+
+## Native GUI integration
+
+The operating architecture is now a single C++ stack linked into the GUI:
+canonical source/Helper, complete slot scoring, bounded message/FEC processing,
+in-process continuous scheduling and the native audio session. Python is absent
+from this operating path. The old Python process scheduler and sealed-input IPC
+are reference/historical machinery, not an application deployment requirement.
+Live reception is scoped to an explicitly configured public calendar and keyed
+ordinal, with a declared local live-noise model. Unknown-start acquisition,
+external radio retuning, all-configuration sensitivity, native CPU capacity and
+physical-device qualification remain outside the current evidence. These Linux
+functional checks do not qualify Windows, browser/Wasm operation or a release;
+release certification requires exact published source and binary identities.
+
+The current functional checks have these outcomes. Combined coverage below
+reuses unchanged passing cases after scoped corrections; it is not a claim
+that every full group was rerun.
+
+| Check | Outcome |
+| --- | --- |
+| `./build.sh test triad --jobs 1 --build-jobs 4` | 30/30 passed, 63.36 s; `CCACHE_DIR=/tmp/pumpmodem-native-ccache`. Includes native source/Helper/scorer/message/stream, `gui_robust_live` (3.24 s), Python references and GPU diagnostic unit checks. |
+| `contract` | 32/32 passed, 28.04 s. |
+| `gui` | Initial 27/28 passed in about 107 s; corrected `gui_native_policy` then passed in 0.05 s. All 28 cases have passing coverage across those runs. |
+| `frontends` | Initial 7/8 passed in 21.36 s; corrected `framebuffer` then passed in 0.28 s. All eight cases have passing coverage across those runs. |
+| `web` | Initial 11/13 passed in 147.59 s, including `web_live` in 137.59 s; both localhost preview setup failures passed in the permitted rerun, 3.56 s. All 13 cases have passing coverage across those runs. |
+| Rev application build | Passed with Clang 19; runtime native-window checks remain separate. |
+| FLTK native-window group | Final rebuilt group 3/3 passed, 93.82 s: workflow 0.14 s, adapter 93.55 s and document 0.11 s. Earlier failures and repairs are recorded below. |
+| Rev native-window group | 5/5 passed, 335.29 s: workflow, adapter, platform and both coordinate-scale checks. The rebuilt final-copy layout/lifecycle probe also passed with nine painted frames and zero failures. |
+
+Native-window checks used an isolated Xvfb display with software OpenGL. The
+full Rev group and final rebuilt FLTK group used:
+
+```sh
+DISPLAY=:93 LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2 CCACHE_DIR=/tmp/pumpmodem-native-ccache ./build.sh test native --backend rev --jobs 1 --build-jobs 4
+DISPLAY=:93 LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2 ctest --test-dir build/dev --output-on-failure -L '^native_gui$' -j 1
+```
+
+This validates the exercised native frontend paths, not physical audio devices
+or a hardware GPU/driver combination. The rebuilt Rev
+`timeout 90 build/rev/test_rev_adapter --layout-lifecycle` probe used the same
+display/software-rendering environment and passed after the final shared
+airtime-label change. No native runtime check remains pending in this checkpoint.
+
+The GUI failure was an obsolete attachment-service fixture for Robust's short
+profile; the framebuffer failure expected the retired `Short` label instead
+of `Target SNR`. Scoped fixture/help corrections preserve received-content and
+state checks and add 16/17-byte text and 208/209-bit boundaries. Rebuilt
+`ctest --test-dir build/dev --output-on-failure -R '^(gui_native_policy|framebuffer)$' -j 2`
+passed both affected cases. An earlier stale Fast service fixture was corrected;
+`gui_fast` passed in 4.54 s and the full GUI run's Fast live case in 106.99 s.
+Web preview failures were sandbox localhost setup restrictions, resolved by
+rerunning those checks with permission, without a source fix. Initial failed
+invocations remain failures.
+
+The initial FLTK native group passed 2/3 cases. Adapter diagnosis separated
+fixture assumptions from a product defect.
+Tab press/release checks now tolerate unrelated asynchronous revisions while
+preserving their actual input/state contract. A compression-label fixture's
+80 ms wait preceded the 100 ms native presentation interval; waiting boundedly
+for the actual visible text exposed genuine glyph clipping. The product fix
+shortened only the airtime label to, for example,
+`3 DATA + 2 scored quiet slots (~300 s)`. The focused `--compression-labels`
+check passed in 0.44 s, covering maximum 208-bit input and actual Compression
+and narrow Console glyph bounds. Updated `gui_native_policy` copy assertions
+passed in 0.05 s. FLTK, Rev and native-worker applications were rebuilt; the
+final full FLTK group and focused Rev check above then passed. Those measured
+outcomes, rather than the fixture corrections alone, close the runtime checks.
+
+These results are functional coverage, not a new GPU workload forecast, native
+CPU calibration or capacity qualification. No all-configuration operating pass
+or final release-source identity is claimed. An initial aggregate compile
+stopped on a missing `pcm_scale` declaration and was repaired before runtime
+validation; that failed invocation executed no runtime assertions.
+
+`ctest --test-dir build/dev --output-on-failure -R '^gui_robust_live$'`
+passed in **3.41 seconds**. Its bounded simulation decoded `e` from actual native
+`001` DATA scoring and two fully scored quiet slots, with validated content and
+ordered pattern records. This one configured-calendar stratum used 1500 Hz
+sampling, 500 Hz IF, positive noise at modeled 80 dB-Hz, exact oscillators and
+Helper/FEC/spread/selective/FHSS Off. Its declared bounds were five scored
+windows, 600,000 samples and 90 seconds wall time. The first fixture used
+6000 Hz with a minimum 60-second public cadence and failed its sample-budget
+preflight; the corrected legal 1500 Hz/500 Hz fixture retained the same cap.
+The earlier failed setup is not counted as a completed reception trial.
+
+A separate dated real-PCM fixture passed Hilbert conversion and complete native
+DATA-1 scoring, then rejected transport EOF as message completion. It retained
+actual receiver I/Q and waveform observations without publishing a complete
+message. The same test covers audio routing/options, AMATEUR, one-shot force,
+cancellation and session lifecycle through mock device providers. These mocks
+are not physical-device qualification. The actual simulation and PCM receive
+paths keep native DSP, score evidence and codec processing real.
+
+An independent memory discriminator originally measured **183,910,400 bytes**
+RSS against a **167,772,160-byte** cap: a real overrun, not an accepted timing
+variation. Admission had credited aggregate resident growth against pending
+scorer work that had not yet allocated its full DSP. The repair retains
+outstanding DSP/stack/output reservations separately from process footprint;
+initialized I/Q is covered once by the greater of footprint and the
+baseline-plus-owned-input floor. The corrected deferred-DSP check withholds
+the third slot rather than spending the same resident-memory credit twice.
+Explicit-worker resolution also preserved
+`H=12, W=27, C=27` when only `W` was supplied. Windows automatic-cap source now
+uses the minimum of physical, commit and virtual availability; that source
+inspection is not a Windows execution result. These bounded resource checks
+supply neither an OS-enforced hard memory limit nor native CPU capacity.
+
+Bounded migration comparisons reported the following matched-input evidence:
+
+| Component | Observed coverage and limit |
+| --- | --- |
+| Helper | Nine reference cases matched status/reason, endpoints within `1e-10` and levels within `3e-6`; these do not establish all Helper-on DATA joins. |
+| Native basis | Cached dense one-lane parity was exact; three-lane maximum difference was `4.78e-15`. Separate interpolation gates cover their declared geometry. |
+| Source/exporter | 1,050,000 I/Q and validity samples plus ten public slot receipts matched exactly across DATA/Helper and selected channel cases. Shared storage changes workspace accounting, not sample semantics. |
+| Duration planner | Twenty-three reference rows matched candidate durations within `3e-12`; the model remains provisional and does not guarantee sensitivity. |
+| Full slot scoring | Four bounded clear/encrypted DATA and noise-quiet cases passed alongside invalid-input/resource/cancellation checks. A 71,154-row encrypted two-ray fine comparison matched affine/adaptive/combined scores within `1.183e-7` and the quiet threshold exactly. Different traversal counters are not matched CPU work. |
+| Message/FEC | Configured Off/RS20/RS60, exact raw bypass, bounded erasures, quiet completion and rearming received focused checks and independent review. A leading ambiguous/quiet/DATA chronology bug was found and repaired with a distinct RS20 regression. |
+
+This is numerical/functional coverage, not a throughput comparison or a success
+probability estimate. Independent Message/FEC, Session/profile, source and
+scheduler reviews found no remaining blocking issue in their reviewed scope.
+The scoped complete-receiver mathematical review resolved coarse tie ordering,
+lag and shared-endpoint workspace defects; their targeted regressions are
+included in the passing triad group. The reviewed source, documentation and
+lifecycle scope has passing functional coverage, including the final native runtime checks above. This checkpoint is
+not physical-device, sensitivity, native-capacity, Windows/Wasm or release
+certification. Temporary parity captures and command logs serve those checks; remove redundant
+captures when the comparison and review are resolved, retaining concise
+findings and evidence required for unresolved failures. No heavy CPU-capacity
+rerun is part of this integration checkpoint.
 
 ## Sustained CPU hardware scaling
 
@@ -72,6 +198,16 @@ the worker-allocation decision and its telemetry limits. Remove the raw
 report when a matched scaling check supersedes that evidence.
 
 ## Continuous receiver restructuring
+
+**Historical runtime scope.** This section records the former Python-orchestrated
+receiver with native DSP kernels and independent process owners. References to
+“current” or “final” below identify that measured revision, not the new native
+C++ GUI runtime. Process startup, resource trackers, copied transport and `memfd`
+were part of that implementation and are superseded operationally. Retain its
+failed gates, timing/memory limits and source identities; none transfers native
+scheduler qualification. The [current ownership contract](development.md#receiver-cpu-allocation)
+preserves `2*H`, full memory accounting and ordered physical completion.
+
 
 **Final shared-input sustained observation.** One bounded 49-window run on the
 final receiver used its automatic allocation: 24 software permits on 12 visible
@@ -736,6 +872,12 @@ the claims, retaining the concise algorithm and negative-result findings.
 
 ## Complete headless Robust and manual capacity
 
+These estimates measure the historical Python-orchestrated complete receiver
+with native kernels. They are retained with their original margins, failures
+and applicability receipts, not as native GUI runtime calibration. New native
+CPU work requires matched affected timings and complete same-stream accounting.
+
+
 The retained complete-work measurements cover all eight manual rows on the Ryzen
 5 PRO 5650U with **one 24-worker pool, 12 hardware threads and a 9072 MiB
 workspace**. Every row includes complete work on the configured public calendar.
@@ -1126,6 +1268,9 @@ by equivalent current evidence.
 
 ## Transmit key policy checks
 
+This is the historical 7 November checkpoint; the native GUI migration is
+recorded separately above.
+
 The uncommitted policy change based on `64f7feb6f298ba844f45ecbf1c57f02219158d16`
 passed `./build.sh test contract` (26/26), `./build.sh test triad` (19/19), and
 `./build.sh test gui` (27/27) on 7 November 2026. These runs used the existing
@@ -1142,6 +1287,8 @@ at the native policy/generator API; no GUI reconnection, operational noise
 endpoint, physical transmission, or release certification is claimed.
 
 ## Cleanup validation
+
+This is the historical cleanup checkpoint before native GUI reconnection.
 
 The CLI, FLTK GUI and pipe-worker applications rebuilt successfully. The FLTK
 adapter and document test executables also compile and link; their native-window
@@ -1190,8 +1337,8 @@ restriction. No omitted check is counted as passed.
 
 RunPod instances supported the replay transport and the separately recorded
 GPU parity investigation. The current manual capacity checks used simulated
-baseband and local headless receiver work. The GUI remains disconnected.
-Physical-device and release qualification are separate. The
+baseband and local headless receiver work. Those measurements do not qualify the new native GUI runtime. Physical-device
+and release qualification remain separate. The
 [abbreviated regression harness](triad-performance.md) measures relative changes
 in declared work and cannot establish absolute receiver capacity. Its historical
 smoke measurement withheld an unresolved Gaussian projection and made no

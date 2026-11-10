@@ -8,7 +8,7 @@
 #include <vector>
 
 namespace datapump::gui::ui {
-enum class Page { console, compression, flow, transmission, planner, fast_modem, fhss, count };
+enum class Page { console, compression, flow, transmission, planner, fast_modem, fhss, robust_setup, count };
 enum class Field {
     callsign, grid, repeatable, helper_power, helper_ratio_limit, helper_callsign, simulation, link_power, link_loss, link_noise,
     simulation_oscillator, simulation_oscillator_detail, rf_oscillator, rf_shift, spread_preset, selective_perturbation, search_margin, oscillator_reference, oscillator_sideband,
@@ -25,7 +25,7 @@ enum class Field {
     fast_progress, fast_rate, fast_tracking, fast_correction, fast_auth, fast_detail, fast_history, fast_airtime, fast_diagnostics, fast_snr, fast_qr_brightness, fast_files,
     legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_status, legacy_device, legacy_volume, legacy_exclusive, legacy_mono,
     search_arithmetic, doppler, fhss_list, fhss_list_status, receiver_strategy, receiver_cpu_budget,
-    symbol_burst, symbol_burst_random, count
+    symbol_burst, symbol_burst_random, calendar_epoch, calendar_ordinal, live_noise_dbfs_hz, count
 };
 enum class Command {
     none, transmit, force_transmit, transmit_noise, transmit_helper, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,

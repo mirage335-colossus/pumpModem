@@ -1,10 +1,18 @@
 # Conditional duration-planning research
 
-The reusable `triad_duration_model` is exposed through `tools/triad_backend.py`.
-The former standalone planner/export driver is removed. A duration forecast is
-a model calculation, not receiver sensitivity, reliability or physical-link
-qualification. Native source geometry still owns exact tile, sample, pulse,
-clock-address and burst calendars.
+Native `triad_duration.hpp` supplies the provisional duration model used by
+`robust_profile` and the GUI. Target C/N0, oscillator/channel assumptions and
+public waveform geometry determine the modeled bit duration. Planning uses a
+fixed public one-bit assumption rather than transmitted draft length. The
+Python `triad_duration_model` remains a numerical comparison reference while
+migration parity and historical forecasts require it; it is not in the operating
+path. Remove superseded reference code and captures when those questions close.
+
+A duration forecast is a model calculation, not receiver sensitivity,
+reliability, real-time capacity or physical-link qualification. Native source
+geometry owns exact tile, sample, pulse, clock-address and burst calendars.
+[Current integration checks](validation.md#native-gui-integration) are separate
+from the dated research below.
 
 The [duration-planner evidence](validation-data/triad-v3/2026-11-06-duration-planner/README.md)
 and [long-coordinate forecast checks](validation-data/triad-v3/2026-11-06-long-forecast/README.md)

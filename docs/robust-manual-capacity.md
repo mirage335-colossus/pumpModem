@@ -1,18 +1,29 @@
 # Robust manual-case receiver capacity
 
+**Runtime applicability:** the operating receiver is now the native C++ stack
+linked into the GUI, with shared buffers and in-process worker ownership.
+The retained Python calibration commands and measured values below describe
+their original reference/runtime revisions. Their process-owner, bootstrap and
+`memfd` details are historical, not the native application's operating contract.
+They do not qualify native GUI CPU capacity. New capacity claims require a
+measurement route through the current complete native receiver, matched affected
+local phase costs and the same full-work/uncertainty gates below. Functional
+GUI validation is separate; see [current results](validation.md#native-gui-integration)
+and [native ownership](development.md#receiver-cpu-allocation).
+
 The manually edited `_tests-RobustModem.md` asks **what this computer's CPU can
 sustain for the complete receiver in real time**, using practical efficient
 algorithms and all available hardware threads. These are absolute capacity
 checks. When applicable local calibration exists, start with the
 [GPU-assisted forecast](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast).
-Use `tools/triad_manual_cases.py` for fresh CPU calibration. The former
+The retained reference calibration tool is `tools/triad_manual_cases.py`. The former
 `triad_abbreviated.py --cases` invocation forwards to the same implementation.
 The ordinary `triad_abbreviated.py` performance regression asks whether measured
 work degraded against a comparable baseline. A regression pass cannot establish
 real-time capacity. Both tools use the same efficient, predeclared statistical
 approach, with different decisions and explicitly recorded work coverage.
 
-**The implemented calibration covers complete configured-public-calendar
+**The retained calibration covers complete configured-public-calendar
 receiver work. Acquisition of unconfigured waveform epochs, ordinals and timing
 is unresolved.** Every capacity report must retain this scope, even when its
 configured-calendar nominal and conservative points are below 1 s/s. Those
@@ -98,8 +109,10 @@ optimized receiver cannot establish that outcome.
 
 ## Local calibration entry point
 
-To refresh the configured-calendar local calibration, use the numerical Python
-environment used by the build.
+The following entry point refreshes the retained configured-calendar reference
+calibration in the numerical Python environment used by the build. It does not
+measure the new native GUI runtime; bind a native measurement route before
+claiming application capacity.
 
 ```sh
 ./build.sh test triad
@@ -215,6 +228,12 @@ not prohibit qualified lower-precision bulk work; see the
 [current stage distinctions](gpu-precision-controls.md#current-implementation).
 
 ## Local parallel capacity
+
+The measured algorithms and scheduler observations in this subsection belong
+to the historical Python-orchestrated runtime. Their numerical results and
+failed gates remain unchanged. Current native scheduling follows the shared
+in-process [allocation contract](development.md#receiver-cpu-allocation) and
+requires its own bounded same-stream measurements.
 
 The CPU implementation prepares immutable candidate plans and fuses native
 rendering, projection and sufficient statistics in the shared worker pool.

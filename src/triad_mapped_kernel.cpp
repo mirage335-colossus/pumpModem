@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <limits>
 #include <numbers>
+#include "triad_mapped_kernel.hpp"
 
 #ifdef _WIN32
 #define TRIAD_EXPORT __declspec(dllexport)
@@ -14,13 +15,7 @@
 #endif
 
 namespace {
-struct MappedRow {
-    double fraction, scale, phase, phase_step;
-    std::int64_t origin;
-    std::size_t tile_count;
-    const double* const* tiles;
-    double* output;
-};
+using MappedRow = TriadMappedRow;
 
 constexpr double zero[2]{};
 

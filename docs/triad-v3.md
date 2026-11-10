@@ -33,11 +33,14 @@ and sample-clock effects in the [channel contract](channel-models.md).
 
 ## Current receiver and search
 
-The headless `CompleteStreamReceiver` joins public Helper/`FFTScreen`
-acquisition, persistent fine tracking, bit/null decisions and scored quiet-slot
-completion to the canonical short dictionary decoder. Native shaped-basis
-construction is shared by its stages. The backend is not connected to the GUI;
-Robust controls remain visible but operation is unavailable pending reconnection.
+The native C++ `CompleteStreamReceiver` joins noisy Helper acquisition, full
+public FFT proposals, persistent fine tracking, bit/null decisions and scored
+quiet-slot completion to the bounded short-message/FEC decoder. Native shaped
+bases and shared immutable input support its stages. The GUI session links this
+same stack; no Python receiver or receiver IPC is in the operating path.
+Reception uses a configured public calendar and keyed ordinal. Current
+functional checks do not qualify unknown-start acquisition, native CPU capacity
+or physical hardware; see [validation](validation.md#native-gui-integration).
 The earlier native QR receiver and isolated v3 alternatives are retired.
 
 Research supports sharing complex FFT proposals across keyed time addresses,

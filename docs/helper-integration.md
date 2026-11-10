@@ -1,10 +1,17 @@
 # Helper integration in the canonical triad path
 
-The native Helper Generator and single-key metadata codec are retained with the
-canonical triad waveform and channel. The current weak Helper/acquisition stage
-is exposed through `tools/triad_backend.py`. The older ordinary receiver and
-standalone Helper tracking/conditioning implementations are removed. The GUI
-Robust controls are not yet connected to this backend.
+The native Helper generator, single-key metadata codec and weak Helper
+acquisition share the canonical C++ triad stack linked into the GUI. Helper
+power, ratio limit and callsign configure that native source; the complete
+receiver supplies noisy Helper proposals to DATA refinement. Helper-only and
+noise transmissions use the same source interface. Python references are used
+for bounded migration parity, not operating acquisition. Retire superseded
+reference code and captures when those numerical questions close.
+
+The older ordinary receiver and standalone Helper tracking/conditioning
+implementations remain removed. Current component checks do not qualify every
+Helper/DATA configuration or physical channel; see
+[native integration validation](validation.md#native-gui-integration).
 
 ## Transmitter facts and assumptions
 

@@ -31,9 +31,8 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     default:break;
     }
     control.persistent=persistent_slot(slot);
-    control.developer_only=slot==Slot::fec||slot==Slot::dsp_workspace||
-        slot==Slot::profile_reference||slot==Slot::callsign||
-        slot==Slot::grid||slot==Slot::repeatable||slot==Slot::transmit_helper;
+    control.developer_only=slot==Slot::dsp_workspace||slot==Slot::callsign||
+        slot==Slot::grid||slot==Slot::repeatable;
     control.open_upward=slot>=Slot::device;
     if(slot==Slot::symbol_burst||slot==Slot::symbol_burst_random||slot==Slot::helper_power||slot==Slot::helper_ratio_limit||slot==Slot::helper_callsign)control.open_upward=false;
     control.font_size=control.multiline?16:13;
@@ -41,54 +40,54 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(menu==Menu::keyfile)control.menu_label="Keyfile";
     if(menu==Menu::recovery) {
         control.menu_label="Recovery";control.font_size=11;
-        control.help="Robust recovery is unavailable until the canonical triad backend is connected.";
+        control.help="Retained-message rescoring is unavailable; continuous reception keeps listening on its configured calendar.";
     }
     if(slot==Slot::header) {control.font_size=22;control.scope=ScreenScope::shared;}
     if(slot==Slot::fast_mode) {control.scope=ScreenScope::shared;control.help="Choose Fast Modem, Robust Modem or Legacy Modem. Each mode keeps its own settings.";}
     if(slot==Slot::developer_mode||slot==Slot::shellcode_mode)control.scope=ScreenScope::shared;
     if(slot==Slot::shellcode_mode) {control.developer_only=true;control.help="Allow printable English ASCII in received text. Newlines are allowed in both modes; other controls and non-ASCII bytes remain underscores. Turning Developer mode off resets this exception.";}
     if(slot==Slot::developer_mode)control.help="Show advanced controls and inspection tabs. Hiding them keeps their current settings, including command-line overrides.";
-    if(slot==Slot::helper_power)control.help="Saved Helper power preference in watts. Zero disables Helper. Robust audio is unavailable until the canonical triad backend is connected.";
-    if(slot==Slot::helper_ratio_limit)control.help="Saved maximum Helper/data power ratio in dB. This control does not adjust physical radio power.";
-    if(slot==Slot::helper_callsign)control.help="Up to 16 printable ASCII characters saved for Helper metadata. Editing this field does not change the message.";
+    if(slot==Slot::helper_power)control.help="Requested Helper transmit power in watts, separate from DATA power. Zero disables Helper. The configured ratio limit can reduce its effective power; this setting does not adjust radio hardware.";
+    if(slot==Slot::helper_ratio_limit)control.help="Maximum Helper/DATA power ratio in dB. The emitted Helper is limited to this ratio; this control does not adjust physical radio power.";
+    if(slot==Slot::helper_callsign)control.help="Up to 16 printable ASCII characters in keyed Helper metadata. Editing this field does not change the message.";
     if(slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
     if(slot==Slot::callsign)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. A valid value of at most 16 printable ASCII characters also copies to Helper Carrier Callsign. Helper-only edits never change this value or the message.";
-    if(slot==Slot::repeatable)control.help="Prepends REPEATABLE-XXXXXXXX and a space before the CQ greeting. Each message edit generates 8 random consonants or digits. Automatically turns off for attachments or messages over 256 bytes, including the prefix.";
+    if(slot==Slot::repeatable)control.help="Developer draft tool: prepends REPEATABLE-XXXXXXXX and a space, with 8 new random consonants or digits per edit. The 20-byte prefix exceeds the native Robust 16-byte text limit; turn it off before transmitting. Automatically turns off above 256 draft bytes, including the prefix.";
     if(slot==Slot::simulation)
-        control.help="Saved simulation preference. Robust simulation and physical audio are unavailable until the canonical triad backend is connected.";
+        control.help="Yes feeds the canonical emitted waveform through the selected sampled channel and native receiver. No uses the selected audio device and configured public calendar.";
     if(slot==Slot::live_duplex) {
         control.font_size=12;
-        control.help="Saved duplex preference for future triad audio integration. This control does not activate Robust audio.";
+        control.help="Keep live reception active during transmission. The selected device must support simultaneous capture and playback.";
     }
     if(slot==Slot::link_power)
         control.help="Average transmit power for the shared link budget. Choose a preset or enter power in W, mW, uW, µW or dBm. This is a planning assumption; adjust the radio's output power separately.";
     if(slot==Slot::link_loss)
         control.help="Total loss between transmitter and receiver, in dB, including antenna gains and feed-line losses. Choose a preset or enter a nonnegative value. Received power equals transmit power minus this loss.";
     if(slot==Slot::link_noise)
-        control.help="Receiver noise power in one hertz, in dBm/Hz. Choose a preset or enter a value. Received power minus this noise density gives the signal level used by Link planner.";
+        control.help="Simulated receiver noise power in one hertz, in dBm/Hz. Received power minus this density gives simulated C/N0. Live input uses the separate declared audio noise density in Robust setup.";
     if(slot==Slot::simulation_oscillator)
-        control.help="Saved illustrative ADC/DAC oscillator model. It does not discipline or control physical hardware.";
-    if(control.field==Field::rf_oscillator)control.help="Saved oscillator model for the radio shift. Baseband clock records a shared reference; selecting it does not control hardware.";
+        control.help="Illustrative ADC/DAC oscillator model for sampled channel effects and public receiver bounds. It does not discipline or control physical hardware.";
+    if(control.field==Field::rf_oscillator)control.help="Oscillator model for the radio shift and its public receiver bounds. Baseband clock uses a shared reference; selecting it does not control hardware.";
     if(control.field==Field::rf_shift)control.help="Absolute frequency translation or radio LO in Hz, kHz, MHz, GHz or THz; default 0 Hz. Fixed USB delivers a real ADC/DAC stream at Carrier minus Shift, which must stay positive. Set Carrier above Shift to keep the desired stream tone. This setting does not retune physical hardware.";
-    if(control.field==Field::spread_preset)control.help="Saved propagation Doppler and delay-spread preference. Robust simulation is currently unavailable.";
-    if(control.field==Field::selective_perturbation)control.help="Saved frequency-selective amplitude-modulation preference. Off is the explicit baseline.";
-    if(control.field==Field::search_margin)control.help="Saved conservative oscillator and channel margin; at least 1x. This is an assumption, not measured receiver coverage.";
+    if(control.field==Field::spread_preset)control.help="Selected propagation Doppler and delay-spread model for the sampled channel and public receiver bounds. None is the explicit baseline.";
+    if(control.field==Field::selective_perturbation)control.help="Additional frequency-selective amplitude modulation in the sampled channel. Off is the explicit baseline.";
+    if(control.field==Field::search_margin)control.help="Conservative multiplier of oscillator and channel search bounds; at least 1x. This is an assumption, not measured receiver coverage.";
 
-    if(slot==Slot::clock_accuracy)control.help="Saved station clock-error bound. Editable ns/us/ms/s; Default restores timing controls.";
+    if(slot==Slot::clock_accuracy)control.help="Station clock-error bound used by the public arrival search. Editable ns/us/ms/s; Default restores timing controls.";
     if(slot==Slot::clock_region)control.help="Total remaining propagation-delay search width centered on Offset. For example 400 ms means +/-200 ms. Both GPS error bounds are added outside this region. Editable ns/us/ms/s; Default resets all four timing controls.";
     if(slot==Slot::clock_offset)control.help="Approximate fixed one-way path delay, or total Earth-Moon-Earth path delay (2564 ms example). Region extends nearer and farther around it. This does not set the PC clock. Default resets all four timing controls.";
-    if(slot==Slot::audio_error)control.help="Saved audio-lag bound from zero through 60 seconds. Default is 70 ms. This assumption does not measure device latency.";
-    if(slot==Slot::dsss_factor)control.help="Saved spreading preference for future triad integration. No retired waveform generator is retained.";
-    if(slot==Slot::dsss_version)control.help="Saved spreading mode. Off and Interleave controls remain available for future triad integration.";
-    if(slot==Slot::fhss)control.help="Saved sequential hopping preference and optional frequency list. This does not retune physical hardware or enable simultaneous reception.";
-    if(slot==Slot::symbol_burst)control.help="Saved whole-symbol waiting preference for future triad integration.";
-    if(slot==Slot::symbol_burst_random)control.help="Saved random whole-symbol waiting preference for future triad integration.";
+    if(slot==Slot::audio_error)control.help="Declared audio-lag bound from zero through 60 seconds. Default is 70 ms. Provider timing must support the selected live calendar; this assumption does not measure device latency.";
+    if(slot==Slot::dsss_factor)control.help="Added-symbol spreading factor for the canonical three-carrier waveform. Selecting a factor enables Interleave and adjusts Rate to preserve the initial occupied bandwidth.";
+    if(slot==Slot::dsss_version)control.help="Off uses one symbol coefficient; Interleave uses the selected Added Symbols spreading factor in the canonical waveform.";
+    if(slot==Slot::fhss)control.help="Canonical FHSS envelope and synthetic sequential hopping profile. This does not retune physical hardware or enable simultaneous reception.";
+    if(slot==Slot::symbol_burst)control.help="Minimum whole-bit waiting periods between scheduled DATA slots. Scheduled waiting is not a scored quiet slot and cannot finish a message.";
+    if(slot==Slot::symbol_burst_random)control.help="Additional shared-calendar waiting periods from zero through this limit. Both peers need the same calendar and key/profile; waits never count as missing DATA or quiet completion.";
 
-    if(slot==Slot::mode)control.help="Robust is unavailable until the canonical triad backend is connected. Fast and Legacy remain separate available modes.";
+    if(slot==Slot::mode)control.help="Native three-carrier Robust session state. Live reception needs the shared public calendar and a declared local input-noise model; set these in Robust setup.";
     if(slot==Slot::paste_previous) {control.font_size=11;control.help="Paste the previous transmitted message back into Message for editing or retransmission.";}
     if(slot==Slot::force_transmit) {
         control.font_size=11;
-        control.help="Robust transmission is unavailable until the canonical triad backend is connected.";
+        control.help="One-shot override of a reported same-key address-reuse lock. It retains the usage history and still requires a valid draft, profile, key and device.";
     }
     if(slot==Slot::transmit||slot==Slot::short_transmit||slot==Slot::airtime||slot==Slot::short_airtime)
         control.font_size=11;
@@ -109,11 +108,11 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Enter up to 208 exact 0/1 bits; leading zeros are preserved and whitespace is optional. Short Message text fills these dictionary bits automatically. Editing this field selects exact raw transmission. Enter transmits; Shift+Enter inserts a newline.";
     }
     if(slot==Slot::compression_codes)control.font_size=12;
-    if(slot==Slot::short_bits_detail)control.help="Raw patterns preserve the exact entered bits. Stream completion requires six seconds without symbols.";
+    if(slot==Slot::short_bits_detail)control.help="Raw patterns preserve the exact entered bits. Physical completion requires two fully scored quiet public slots.";
     if(slot==Slot::transmit_noise||slot==Slot::short_transmit_noise)
-        control.help="Unavailable until the canonical Robust backend is connected. Intended policy: noise DATA uses fresh temporary CSPRNG keys and encryption; enabled Helper callsign uses the public Amateur key. Does not change your message or selected-key settings.";
+        control.help="Noise DATA uses fresh temporary CSPRNG keys and encryption; enabled Helper callsign uses the public Amateur key. Runs until Cancel TX. Does not change your message or selected-key settings.";
     if(slot==Slot::transmit_helper)
-        control.help="Helper-only transmission is unavailable until the canonical triad backend is connected.";
+        control.help="Transmit the configured Helper signal and callsign without DATA. Helper power must be nonzero; Cancel TX stops it.";
     if(slot==Slot::copy_raw_signal)control.help="Copy the selected completed reception's exact transport bits, including leading zeros and compression bits.";
     if(slot==Slot::paste_raw_signal)control.help="Load the selected reception's exact bits (up to 208) into the raw editor for retransmission.";
     if(slot==Slot::signals) {
@@ -130,13 +129,13 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::files) {control.activate_record=Command::save_file;control.empty_text="No received files";}
     if(slot==Slot::transmit_scope) {
         control.list_row_height=17;
-        control.help="Transmission diagnostics will be supplied by the canonical triad backend after integration.";
+        control.help="Bounded diagnostics from the accepted native transmission. Noise private key material is never captured.";
     }
     if(slot==Slot::transmit_scope_caption)control.font_size=11;
     if(slot==Slot::profile_reference) {
         control.font_size=10;control.list_row_height=17;
         control.empty_text="Set a valid modem profile";
-        control.help="Profile reference is unavailable until the canonical triad backend is connected.";
+        control.help="Actual completed receiver slots, their public addresses, fixed-affine evidence, scored quiet test, stage timing and worker allocation. Adaptive and combined scores remain diagnostic.";
     }
     if(slot==Slot::transmit_scope_format) {
         control.font_size=11;
@@ -149,24 +148,38 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::mono)control.help="Choose Left mono (default), Right mono, or Stereo. Mono devices use their sole channel.";
     if(slot==Slot::volume)control.help=transmit_volume_help;
     if(slot==Slot::exclusive)control.help=exclusive_audio_help;
-    if(slot==Slot::bandwidth)control.help="Saved nominal rate in Hz, from 0.001 Hz through 30 MHz. This control does not currently start a Robust waveform.";
-    if(slot==Slot::carrier)control.help="Saved carrier frequency in Hz, kHz, MHz, GHz or THz. Carrier minus Shift is the audio coordinate. This does not retune hardware.";
-    if(slot==Slot::snr)control.help="Saved receiver target C/N0 in dB-Hz. No receiver sensitivity or duration estimate is currently provided.";
+    if(slot==Slot::bandwidth)control.help="Canonical inner pattern rate in Hz, from 0.001 Hz through 30 MHz. Added Symbols and shaping determine occupied bandwidth; unsupported audio profiles report a validation error.";
+    if(slot==Slot::carrier)control.help="Physical carrier frequency in Hz, kHz, MHz, GHz or THz. Carrier minus Shift is the audio coordinate. This does not retune hardware.";
+    if(slot==Slot::snr)control.help="Locally agreed target C/N0 in dB-Hz used by provisional native duration planning. Both peers must use the same target; it does not change simulated actual signal/noise power or qualify sensitivity.";
     if(control.field==Field::planner_command) {
         control.document_only=true;control.tab_navigation=true;control.font_size=11;control.submit=Command::none;control.submit_mode=Field::count;
         control.help="Copy to launch with this plan. Paste settings, then Load. The target is shared with Robust Console. Enter inserts a new line.";
     }
-    if(control.field==Field::planner_target) {control.document_only=true;control.help="Saved Robust target shared with Console. Receiver-fit calculations are unavailable until canonical triad integration.";}
+    if(control.field==Field::planner_target) {control.document_only=true;control.help="Robust target shared with Console and native modeled-duration planning. Full receiver sensitivity and CPU forecasts remain unqualified.";}
     if(control.field==Field::search_arithmetic) {
         control.document_only=true;control.developer_only=true;control.purpose=ControlPurpose::setup;
-        control.help="Saved arithmetic preference: Default, FP32 minimum or FP64 force. The canonical backend must report effective precision and fallbacks when connected.";
+        control.help="Receiver arithmetic preference: Default, FP32 minimum or FP64 force. Native fine processing currently uses FP64; FP32 minimum permits that higher precision. The actual arithmetic appears in diagnostics.";
     }
     if(control.field==Field::receiver_strategy||control.field==Field::receiver_cpu_budget) {
         control.document_only=true;control.developer_only=true;control.purpose=ControlPurpose::setup;
-        control.help="Saved receiver preference for future canonical triad integration. No legacy algorithm or performance forecast remains.";
+        control.help=control.field==Field::receiver_strategy?
+            "Automatic uses the native complete receiver. Other saved strategy preferences are unsupported and prevent profile preparation; they do not select an alternative receiver.":
+            "Saved planning preference in CPU seconds per received second. It does not throttle the native receiver's worker allocation or establish a qualified CPU forecast.";
     }
-    if(slot==Slot::dsp_workspace)control.help="Saved DSP-memory preference as a percentage of available RAM. The unavailable Robust boundary allocates no receiver workspace.";
-    if(slot==Slot::diagnostics)control.help="Robust throughput and receiver estimates are unavailable until canonical triad integration.";
+    if(slot==Slot::dsp_workspace)control.help="Automatic uses cgroup-aware available RAM with bounded host headroom. Percentage choices are explicit receiver limits. Receiver software workers still default to twice effective logical CPU capacity.";
+    if(control.field==Field::calendar_epoch) {
+        control.purpose=ControlPurpose::setup;
+        control.help="Shared public calendar anchor as whole UTC seconds, 6 through 4294967289. Both peers must configure the same anchor and ordinal. None leaves live transmission/reception unconfigured; simulation uses its own agreed local calendar.";
+    }
+    if(control.field==Field::calendar_ordinal) {
+        control.purpose=ControlPurpose::setup;
+        control.help="Shared unsigned initial waveform ordinal. It advances through DATA and quiet slots and does not reset at message boundaries.";
+    }
+    if(control.field==Field::live_noise_dbfs_hz) {
+        control.purpose=ControlPurpose::setup;
+        control.help="Declared one-sided audio input noise density in dBFS/Hz, using normalized PCM squared per hertz. A finite conservative model is required for live likelihoods; this setting is not an automatic calibration or physical-noise qualification. Unspecified keeps live reception unconfigured.";
+    }
+    if(slot==Slot::diagnostics)control.help="Actual session diagnostics. Functional reception and modeled duration do not establish physical sensitivity or sustained CPU capacity.";
     if(slot==Slot::waterfall) {control.footer_height=24;control.click=Command::toggle_waterfall_expanded;control.right_click=Command::toggle_helper_waterfall_expanded;control.help="With Helper Carrier enabled, right-click to zoom in on the low pilot, auxiliary and high pilot tones. Click for the fullscreen configured search band and a little surrounding spectrum with adjacent amplitude/phase columns. Phase brightness follows amplitude; quiet noise stays dim. Escape or another click restores this environmental view. Clear waterfall clears history separately. Simulation uses a fixed 40 dB range; hardware spans the captured sample rate, including surrounding interference.";}
     if(slot==Slot::waveform) {
         control.footer_height=24;control.wheel_up=Command::zoom_in;control.wheel_down=Command::zoom_out;
@@ -174,7 +187,8 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     }
     if(slot==Slot::pattern_scores) {
         control.click=Command::clear_pattern_scores;
-        control.help="Robust receiver evidence is unavailable until the canonical triad backend is connected.";
+        control.footer_height=64;
+        control.help="Actual fixed-affine DATA evidence retains the original public-grid prior mass; it is not a probability. Only aggregate evidence uses the operational threshold. Adaptive and combined lanes are diagnostic. The lower strip shows quiet energy/threshold, clipped to 0–2. Click clears the displayed evidence history.";
     }
     if(slot==Slot::copy_signal||slot==Slot::clear_waterfall||slot==Slot::zoom_in||slot==Slot::zoom_out||slot==Slot::reset_zoom)control.font_size=11;
     return control;
@@ -185,6 +199,7 @@ const std::vector<PageDefinition>& pages() {
     static const std::vector<PageDefinition> definitions{
         {Page::console,"console","Console",false,86},
         {Page::planner,"planner","Link planner",true,128},
+        {Page::robust_setup,"robust-setup","Robust setup",false,130},
         {Page::fhss,"fhss","FHSS",false,86,true},
         {Page::compression,"compression","Compression / raw bits",false,200,true},
         {Page::flow,"flow","Modem flow",true,114,true},
@@ -227,6 +242,12 @@ const std::vector<Control>& console_screen() {
         placed({Kind::choice,Field::search_arithmetic,Command::none,Bitmap::none,Page::planner,4,"Search arithmetic"}, Slot::none),
         placed({Kind::choice,Field::receiver_strategy,Command::none,Bitmap::none,Page::planner,4,"Receiver strategy"}, Slot::none),
         placed({Kind::text,Field::receiver_cpu_budget,Command::none,Bitmap::none,Page::planner,4,"CPU budget (s / 1 s)",1,false,64}, Slot::none),
+        placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,0,"Both peers must share the calendar, ordinal, key and waveform settings."}, Slot::none),
+        placed({Kind::text,Field::calendar_epoch,Command::none,Bitmap::none,Page::robust_setup,1,"Calendar anchor (UTC seconds)",2,false,32}, Slot::none),
+        placed({Kind::text,Field::calendar_ordinal,Command::none,Bitmap::none,Page::robust_setup,1,"Initial waveform ordinal",2,false,32}, Slot::none),
+        placed({Kind::text,Field::live_noise_dbfs_hz,Command::none,Bitmap::none,Page::robust_setup,2,"Live input noise (dBFS/Hz)",2,false,64}, Slot::none),
+        placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,3,"Live reception uses a declared local noise model. Simulation uses the sampled channel noise."}, Slot::none),
+        placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,4,"Unknown transmission starts are not acquired. Message completion requires two scored quiet slots."}, Slot::none),
         placed({Kind::action,Field::count,Command::open_keyfile,Bitmap::none,Page::console,2,"Open keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::generate_keyfile,Bitmap::none,Page::console,2,"Generate keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::load_amateur,Bitmap::none,Page::console,2,"WARNING - Load Amateur"}, Slot::key_actions, Menu::keyfile),
@@ -274,7 +295,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::action,Field::count,Command::save_file,Bitmap::none,Page::console,11,"Save selected..."}, Slot::save_file),
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::waterfall,Page::console,12,"Spectrum"}, Slot::waterfall),
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::waveform,Page::console,12,"Waveform"}, Slot::waveform),
-        placed({Kind::bitmap,Field::count,Command::none,Bitmap::constellation,Page::console,12,"Constellation"}, Slot::constellation),
+        placed({Kind::bitmap,Field::count,Command::none,Bitmap::constellation,Page::console,12,"Receiver input I/Q"}, Slot::constellation),
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::pattern_scores,Page::console,12,"Pattern evidence"}, Slot::pattern_scores),
         placed({Kind::list,Field::profile_reference,Command::none,Bitmap::none,Page::console,12,"Pattern steps"}, Slot::profile_reference),
         placed({Kind::action,Field::count,Command::clear_waterfall,Bitmap::none,Page::console,13,"Clear waterfall"}, Slot::clear_waterfall),
@@ -288,9 +309,9 @@ const std::vector<Control>& console_screen() {
         placed({Kind::label,Field::diagnostics,Command::none,Bitmap::none,Page::console,14,""}, Slot::diagnostics),
         placed({Kind::label,Field::status,Command::none,Bitmap::none,Page::console,15,""}, Slot::status),
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::compression,0,
-            "Text of 1-16 bytes uses only dictionary bits: quick brown = 70 bits. No markers, parity or padding.\n"
+            "With Error correction Off, 1-16 text bytes use only dictionary bits: quick brown = 70 bits.\n"
             "Edit up to 208 exact bits below; complete codes show the expected text. Raw 010 stays exactly 010.\n"
-            "Longer text and attachments use fixed 128-byte coding intervals."}, Slot::compression_explanation),
+            "Text is limited to 16 bytes. Optional Reed-Solomon protects the short frame; raw bits always bypass FEC."}, Slot::compression_explanation),
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::compression,1,"Dictionary / exact raw bits (1-208)"}, Slot::short_bits_label),
         placed({Kind::text,Field::short_bits,Command::none,Bitmap::none,Page::compression,1,"",1,true,416}, Slot::short_bits),
         placed({Kind::label,Field::short_bits_detail,Command::none,Bitmap::none,Page::compression,2,""}, Slot::short_bits_detail),

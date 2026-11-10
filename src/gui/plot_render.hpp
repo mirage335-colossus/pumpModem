@@ -25,6 +25,9 @@ public:
         std::optional<std::pair<double,double>> searched_band_hz = {}, std::string band_label = "Search");
     static PlotSnapshot qr(std::optional<QrCode> code, QrBrightness brightness = QrBrightness::dark);
     static PlotSnapshot codeword(std::size_t data, std::size_t parity);
+    // Top: fixed-affine bit alternatives and operational aggregate/threshold.
+    // Bottom: separately scored quiet energy relative to its noise threshold.
+    static PlotSnapshot pattern_evidence(std::vector<PatternEvidencePoint> points);
     // color_enabled is user preference, independently gated by target support.
     void paint(const BitmapRequest& request, const BitmapSink& sink, bool color_enabled = true) const;
     // Erase application-specific factories and data at the backend boundary.

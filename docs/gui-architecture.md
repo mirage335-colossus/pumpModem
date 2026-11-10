@@ -17,6 +17,32 @@ features still changes shared declarations/models only. The boundary test checks
 both dependency directions and prevents either frontend from acquiring the
 other's implementation. See [frontend interfaces](frontend-interfaces.md).
 
+## Native Robust session
+
+The shared controller owns `live::Session`, linked through
+`datapump_robust_session` to the canonical C++ transmitter, Helper, complete
+receiver and audio interfaces. `robust_profile` translates validated controls
+into one public profile and receiver configuration. The receiver's in-process
+slot owners share immutable native input buffers and divide one aggregate
+worker budget. There is no Python receiver or receiver subprocess in the GUI's
+operating path. See [native interfaces](robust-current.md#native-interfaces-and-ownership).
+
+Preparation and device operations run outside the GUI thread. Receiver ingress,
+ordered commit, codec state and bounded snapshots belong to the session, never
+the audio callback or toolkit adapter. Cancellation requests invalidate the
+owning generation; completion retains resource ownership until workers stop.
+The application polls readiness to close rather than blocking the interface on
+receiver joins. Fast is the default active modem; inactive Robust sessions do
+not reserve capture devices. Active-mode changes and asynchronous key loads
+must preserve the requested state without temporary use of another key.
+
+Robust setup exposes the configured public calendar and local live-noise model.
+The shared declaration controls their validation and availability on every
+frontend. Plots receive actual bounded waveform, spectrum, receiver I/Q and
+native score/step snapshots. A view cannot fabricate receive evidence from
+simulation settings or transmitter truth. Current integration and validation
+limits are in [the validation record](validation.md#native-gui-integration).
+
 ## Ownership
 
 | Shared module | Responsibility |
@@ -40,7 +66,7 @@ other's implementation. See [frontend interfaces](frontend-interfaces.md).
 | `theme.hpp`, `presentation_palette.hpp` | Shared widget states (border, hover, focus, selection, disabled and dialog colors), semantic text/document tones and fills. |
 | `screen_console.cpp` | Window/page titles, controls, bindings, menus, help, submit/activation/gesture policies. |
 | `desktop_layout.hpp`, `control_layout.hpp`, `cell_layout.hpp` | Desktop geometry, label/editor/preset/caption placement, and record cell/content extents in logical units. |
-| `controller.cpp` | Authoritative drafts, validation, settings, workers, commands, key/file state, reception and eligibility. |
+| `controller.cpp` | Authoritative drafts, validation, settings, native Robust session, commands, key/file state, reception and eligibility. |
 | `record_presentations.hpp` | Signal/file records, including frequency, status, reception quality, text, tone and activation eligibility. |
 | `inspection_page.hpp` | Inspection section order, cards, tables, pagination and native text around plot snapshots. |
 | `link_planner_model.*`, `link_planner_page.*` | Bounded link previews, native planner controls and labels, logarithmic plot snapshots and model details. |

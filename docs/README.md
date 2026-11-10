@@ -10,30 +10,29 @@ obsolete code, experiments and generated outputs when that purpose ends.
 
 ## Current Robust modem
 
-The [current architecture and status](robust-current.md) identifies the
-canonical native waveform/channel/Helper stack and the complete headless
-receiver. See the [validation record](validation.md) for the measured native
-message gate, local CPU margins, GPU stage speed and forecast coverage.
-The [interactive receiver parallelism report](receiver-parallelism.html) shows
-the latest measured [CPU and execution timeline](receiver-parallelism.html#cycle)
-for the shared-input receiver: sustained backlog utilization, owner startup,
-overlapping windows and ordered controller work. The original exact tracking-task
-comparison gate failed; the report separates its post-hoc allocation-normalized
-comparison from that outcome. Its [two-owner baseline](receiver-parallelism.html#two-owner-baseline)
-and [earlier fine-cycle comparison](receiver-parallelism.html#historical-cycle)
-preserve detailed stage/worker traces. Processing wall time and physical sample
-time are separate; recorded job spans do not establish simultaneous OS execution.
-The CPU series uses actual process counters, with monitor overhead and
-measurement limits reported separately.
-Historical stage costs and hypothetical optimization explorers retain their
-original scope. See the [current restructuring record](validation.md#continuous-receiver-restructuring)
-for qualified speed and capacity results; a timing trace is not a new capacity
-qualification. Open the report in a browser for the interactive views.
-Robust remains unavailable in the GUI pending
-reconnection. Retained
-[pattern research](triad-patterns.md), [stochastic channel findings](triad-stochastic.md),
-[rate-aware shaping](triad-shaping.md), and [channel model contract](channel-models.md)
-provide bounded technique summaries and evidence limits.
+The [current architecture and status](robust-current.md) describes the native
+C++ Helper/DATA/complete-receiver stack linked into the GUI, with shared buffers
+and coordinated in-process workers. Python is a testing/benchmarking tool, not
+the operating receiver. The [GUI contract](gui-contract.md) maps the controls
+and requires a shared public calendar and keyed ordinal for live operation;
+unknown-start acquisition remains outside scope.
+
+See [native integration validation](validation.md#native-gui-integration) for
+native functional checks and qualification limits. Historical local
+CPU margins, GPU comparisons and process-scheduler measurements retain their
+original source and execution mode in the [validation record](validation.md).
+They do not qualify native GUI capacity. The
+[interactive parallelism report](receiver-parallelism.html) shows that historical
+runtime, including its failed exact tracking-task gate and separate post-hoc
+comparison. Its measured process-counter timelines are neither the current
+in-process scheduler nor proof of full CPU saturation.
+
+Retained [pattern research](triad-patterns.md),
+[stochastic channel findings](triad-stochastic.md),
+[rate-aware shaping](triad-shaping.md), and
+[channel model contract](channel-models.md) provide bounded technique summaries
+and evidence limits. New native CPU work needs applicable local phase timing;
+source-matched numerical parity alone is not performance calibration.
 
 Computationally intensive Robust checks must follow the hierarchical,
 computationally minimal statistical method in [the current testing policy](robust-current.md#testing-computationally-intensive-robust-changes).
@@ -65,7 +64,7 @@ the [GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual-cap
 | --- | --- |
 | Product and operation | [Project overview](../README.md), [requirements and limits](requirements.md), [protocol](protocol.md), [manuals](#command-and-interface-manuals) |
 | Development and delivery | [Development contract](development.md), [build and test guide](building.md), [release procedures](releases.md), [offline installation](offline-installation.md) |
-| Helper Carrier | The current native generator is part of the [Robust architecture](robust-current.md); historical measurements are evidence only and do not imply a supported receiver |
+| Helper Carrier | Native generation and acquisition share the [Robust stack](robust-current.md); historical measurements retain their original scope |
 | Simulation channels | [Doppler, delay spread, selective amplitude and FHSS tails](channel-models.md) |
 | GPU precision | [GPU precision guidance](gpu-precision-controls.md); bounded RTX PRO 6000 stage measurements are not a qualified full receiver |
 | Fast Modem | [Fast topic index](indexes/fast.md) |

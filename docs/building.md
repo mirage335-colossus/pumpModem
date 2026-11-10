@@ -21,7 +21,9 @@ development files are required. The normal FLTK GUI also needs X11/Xft and font
 development packages on Linux. FLTK, XZ/liblzma, QR and LDPC sources are vendored.
 Python is optional for CLI/build-tool tests, and required only by the opt-in Rev
 resource builder or optional dependency preparation helper. Python is not part
-of the installed application. The browser profile additionally uses Python to
+of the installed application. The Robust Helper, DATA, receiver and session
+static libraries link into the GUI binary; no receiver subprocess or Python
+runtime is installed. The browser profile additionally uses Python to
 assemble its self-contained static page; it is not a browser runtime dependency.
 
 For Debian/Ubuntu, see the package list in the [README](../README.md#build-and-run).
@@ -439,22 +441,23 @@ tests but do not compile them. For individual work, build the corresponding
 
 ### Robust modem
 
-The [current Robust architecture](robust-current.md) distinguishes the
-canonical native waveform/channel/Helper path, a headless complete-stream
-receiver, and the still unavailable GUI path. Run the affected cheap
-deterministic checks first. Prefer the
-[GPU-assisted manual forecast](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast)
-when applicable local phase costs exist. When local calibration needs a full
-refresh, run the native triad group and the manual-case suite.
+The [current Robust architecture](robust-current.md) is one compiled C++
+waveform/Helper/receiver stack linked into the GUI session. Run affected cheap
+deterministic native checks first, then the shared GUI/audio groups. Python
+numerical references remain test tools for bounded migration comparisons; they
+are not the application receiver. Old process-runtime costs do not calibrate
+the in-process native scheduler. See the
+[native integration results](validation.md#native-gui-integration).
 
 ```sh
 ./build.sh test triad
-python3 tools/triad_manual_cases.py \
-  --output local-evidence/robust-cases.json \
-  --exporter build/dev/triad_helper_export
+./build.sh test gui
 ```
 
-The `triad_abbreviated.py --cases` form remains a compatibility forwarder.
+The retained `tools/triad_manual_cases.py` and its `triad_abbreviated.py --cases`
+forwarder have source-bound reference coverage. They require a matched native
+measurement route and applicable complete-work costs before qualifying the
+current GUI receiver.
 Ordinary `triad_abbreviated.py` runs measure relative computational regression
 against a matched baseline; they are not absolute capacity results. See the
 [manual capacity contract](robust-manual-capacity.md) for complete work,
@@ -518,8 +521,12 @@ or a release.
 
 ### Robust computational checks
 
-The retained `triad` group covers concise native waveform, shaping, stream, and
-Helper Generator checks. Run it before refreshing local CPU calibration.
+The `triad` group covers bounded native source, Helper, complete receiver,
+message/FEC and stream checks, plus available Python reference tests. Run it
+before refreshing local CPU calibration. The manual harness below measures its
+reference runtime; its historical costs are not native GUI calibration. Bind a
+native benchmark route to the current complete receiver before making a new
+application capacity claim.
 
 ```sh
 ./build.sh test triad
@@ -533,8 +540,8 @@ runner validates the entire current list and marks the output partial, which
 does not qualify omitted rows.
 
 The manual suite reads and validates `_tests-RobustModem.md` by default and
-supports current-index partial reruns. It defaults to fresh full-visible
-logical CPU inference after the allocation pilot. Its exact coverage,
+supports current-index partial reruns. Its default inference allocation is twice effective logical hardware capacity
+after the allocation pilot; explicit allocations remain exact. Its exact coverage,
 workspace and cost gates, and interpretation limits are in the
 [manual capacity contract](robust-manual-capacity.md). A partial rerun cannot
 qualify omitted rows, and staged/coarse sensitivity does not qualify an
@@ -631,8 +638,9 @@ own assets, so deleting `base` does not block it. Older schemas retain the base
 fallback. The current `tools/release-dependencies.py fetch` helper retrieves a
 full verified archive pair by default; use `--binary-only` when sources are not
 needed. Package verification checks the selected binaries, notices, checksums and
-relocation. Robust reception is unavailable in the GUI and physical-device
-qualification remains a separate scope.
+relocation. Native Robust integration, complete-receiver capacity and
+physical-device qualification remain separate scopes; package verification
+alone establishes none of those operating results.
 
 The [signed Debian repository](releases.md#debian-installation-from-github-releases)
 is generated entirely as GitHub Release assets. `datapump-fltk` and

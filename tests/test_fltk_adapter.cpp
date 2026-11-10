@@ -806,6 +806,15 @@ void tab_clicks() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
     app.application.toggle(ui::Field::developer_mode,true);
     auto* window=application_window();require(window,"Tab fixture has no native window");
+    struct CallbackProbe {
+        Fl_Widget& widget;Fl_Callback* original;void* context;unsigned calls=0;
+        explicit CallbackProbe(Fl_Widget& value):widget(value),original(value.callback()),context(value.user_data()) {
+            widget.callback([](Fl_Widget* sender,void* data) {
+                auto& probe=*static_cast<CallbackProbe*>(data);++probe.calls;probe.original(sender,probe.context);
+            },this);
+        }
+        ~CallbackProbe(){widget.callback(original,context);}
+    };
     const auto key=Fl::e_keysym,x=Fl::e_x,y=Fl::e_y,state=Fl::e_state;
     const auto refresh=[] {
         const auto until=Clock::now()+std::chrono::milliseconds(130);
@@ -828,16 +837,20 @@ void tab_clicks() {
             if(initial.id==ui::Page::fast_modem||target.id==ui::Page::fast_modem)continue;
             app.application.select_page(initial.id);refresh();selected(initial.id);
             auto* button=find_button(*window,target.title);
+            CallbackProbe probe(*button);
             const int px=button->x()+button->w()/2,py=button->y()+button->h()/2;
-            const auto revision=app.application.revision();
             pointer(FL_PUSH,px,py);
             require(Fl::pushed()==button,"Tab click missed its native target");
             // A stationary press spanning presentation ticks must still commit
             // on release, including when clicking the already selected tab.
+            // Receiver updates can advance the aggregate application revision;
+            // count this tab's callbacks to observe the gesture itself.
             refresh();
-            require(app.application.page()==initial.id&&app.application.revision()==revision,
+            require(app.application.page()==initial.id&&probe.calls==0,
                 "Native tab changed pages before mouse release");
+            require(Fl::pushed()==button,"Presentation ticks lost the held native tab");
             pointer(FL_RELEASE,px,py);selected(target.id);refresh();selected(target.id);
+            require(probe.calls==1,"Native tab release did not dispatch exactly once");
         }
     }
     for(const auto& target:ui::pages()) {
@@ -845,12 +858,16 @@ void tab_clicks() {
         auto* button=find_button(*window,target.title);
         const int px=button->x()+button->w()/2,py=button->y()+button->h()/2;
         for(bool return_inside:{false,true}) {
+            CallbackProbe probe(*button);
             const auto before=app.application.page();
             pointer(FL_PUSH,px,py);refresh();
             pointer(FL_DRAG,px,button->y()+button->h()+10);refresh();
             if(return_inside) {pointer(FL_DRAG,px,py);refresh();}
+            require(app.application.page()==before&&probe.calls==0,
+                "Native tab drag committed before mouse release");
             pointer(FL_RELEASE,px,return_inside?py:button->y()+button->h()+10);
             selected(return_inside?target.id:before);refresh();selected(return_inside?target.id:before);
+            require(probe.calls==(return_inside?1U:0U),"Native tab drag dispatched an incorrect callback count");
         }
     }
     Fl::e_keysym=key;Fl::e_x=x;Fl::e_y=y;Fl::e_state=state;
@@ -1600,26 +1617,60 @@ void compression_page_labels() {
     app.application.toggle(ui::Field::developer_mode,true);app.application.select_page(ui::Page::compression);
     auto* window=application_window();require(window,"Compression fixture has no native window");
     window->resize(window->x(),window->y(),ui::min_width,ui::min_height);
-    for(const auto* draft:{"","010","0010","01010"}) {
-        if(*draft)app.application.edit(ui::Field::short_bits,draft);
-        const auto until=Clock::now()+std::chrono::milliseconds(80);while(Clock::now()<until)Fl::wait(.005);
-        for(const auto& c:ui::console_screen())if(c.page==ui::Page::compression&&c.kind==ui::Kind::label) {
-            const auto value=app.application.control(c).label;
-            const auto expected=app.application.control_layout(c,window->w(),window->h()).label;
-            // The same status can appear in both tabs; measure this declared
-            // native label, including its page-specific geometry.
-            const std::function<Fl_Widget*(Fl_Group&)> locate=[&](Fl_Group& group)->Fl_Widget* {
-                for(int i=0;i<group.children();++i) {
-                    auto* child=group.child(i);
-                    if(child->label()&&value==child->label()&&ui::Rect{child->x(),child->y(),child->w(),child->h()}==expected)return child;
-                    if(auto* nested=dynamic_cast<Fl_Group*>(child))if(auto* found=locate(*nested))return found;
+    const auto& controls=ui::console_screen();
+    const auto console_airtime=std::find_if(controls.begin(),controls.end(),[](const auto& c) {
+        return c.page==ui::Page::console&&c.field==ui::Field::airtime;
+    });
+    require(console_airtime!=controls.end(),"Console airtime declaration is missing");
+    for(const auto& draft:std::array<std::string,5>{"","010","0010","01010",std::string(207,'0')+"1"}) {
+        if(!draft.empty())app.application.edit(ui::Field::short_bits,draft);
+        const auto check=[&]() -> std::optional<std::string> {
+            for(const auto& c:controls)if(c.page==ui::Page::compression&&c.kind==ui::Kind::label) {
+                const auto value=app.application.control(c).label;
+                const auto expected=app.application.control_layout(c,window->w(),window->h()).label;
+                // The same status can appear in both tabs; measure this
+                // visible native label at its page-specific geometry.
+                Fl_Widget* at_expected=nullptr;
+                const std::function<Fl_Widget*(Fl_Group&)> locate=[&](Fl_Group& group)->Fl_Widget* {
+                    for(int i=0;i<group.children();++i) {
+                        auto* child=group.child(i);
+                        if(child->visible_r()&&dynamic_cast<NativeLiteralText*>(child)&&
+                            ui::Rect{child->x(),child->y(),child->w(),child->h()}==expected) {
+                            at_expected=child;
+                            if(child->label()&&value==child->label())return child;
+                        }
+                        if(auto* nested=dynamic_cast<Fl_Group*>(child))if(auto* found=locate(*nested))return found;
+                    }
+                    return nullptr;
+                };
+                auto* label=locate(*window);
+                if(!label)return "Compression label for "+std::to_string(draft.size())+"-bit draft expected ["+value+
+                    "] at "+std::to_string(expected.x)+","+std::to_string(expected.y)+" "+
+                    std::to_string(expected.w)+"x"+std::to_string(expected.h)+" but found ["+
+                    (at_expected&&at_expected->label()?at_expected->label():"no visible label at bounds")+"]";
+                fl_font(label->labelfont(),label->labelsize());int width=0,height=0;fl_measure(value.c_str(),width,height,0);
+                if(width>label->w()||height>label->h())
+                    throw std::runtime_error("Compression label clips at the minimum window size: "+value+
+                        " (needs "+std::to_string(width)+"x"+std::to_string(height)+", has "+
+                        std::to_string(label->w())+"x"+std::to_string(label->h())+")");
+                if(c.field==ui::Field::airtime) {
+                    const auto bounds=app.application.control_layout(*console_airtime,window->w(),window->h()).label;
+                    fl_font(label->labelfont(),console_airtime->font_size);width=height=0;
+                    fl_measure(value.c_str(),width,height,0);
+                    if(width>bounds.w||height>bounds.h)
+                        throw std::runtime_error("Airtime label clips in Console at the minimum window size: "+value);
                 }
-                return nullptr;
-            };
-            auto* label=locate(*window);require(label,"Compression text was not presented as a native label");
-            fl_font(label->labelfont(),label->labelsize());int width=0,height=0;fl_measure(value.c_str(),width,height,0);
-            if(width>label->w()||height>label->h())
-                throw std::runtime_error("Compression label clips at the minimum window size: "+value);
+            }
+            if(!draft.empty()&&!app.application.enabled(ui::Command::transmit_short_bits))
+                return "Compression simulation did not prepare its profile for the raw draft";
+            return {};
+        };
+        // The modeled airtime changes after asynchronous profile preparation.
+        // Wait for the real presentation rather than sampling between frames.
+        const auto deadline=Clock::now()+std::chrono::seconds(3);
+        while(const auto pending=check()) {
+            if(Clock::now()>=deadline)throw std::runtime_error(*pending);
+            Fl::wait(.005);
         }
     }
     app.application.close();while(!app.application.finished())Fl::wait(.005);

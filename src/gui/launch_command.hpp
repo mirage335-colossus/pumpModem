@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
@@ -27,9 +28,15 @@ struct Patch {
     // never serialize key material. Omitted keyset preserves the current bank.
     std::optional<std::string> keyfile,keyset,key_name,tx_key;
     std::optional<double> audio_timing_error_seconds;
+    // Zero epoch clears the configured calendar. Ordinal is independent of
+    // message boundaries; both peers must use the same initial address.
+    std::optional<std::uint64_t> calendar_epoch,calendar_ordinal;
+    std::optional<double> live_noise_dbfs_hz;
+    bool clear_live_noise=false;
+    std::optional<std::string> fec;
     std::optional<bool> full_duplex;
     std::optional<unsigned> dsss_factor;
-    std::optional<unsigned> workspace_percent;
+    std::optional<unsigned> workspace_percent; // 0 selects automatic headroom.
     bool operator==(const Patch&) const=default;
 };
 // Only argument text is read: no process, shell expansion, or file is invoked.

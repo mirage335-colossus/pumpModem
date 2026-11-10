@@ -6,6 +6,7 @@ namespace {
 void require(bool condition,const char* message){if(!condition)throw Error(message);}
 void check_controls(Controller& controller) {
     using F=ui::Field;using C=ui::Command;
+    const auto selected_fec=controller.field(F::fec).selected;
     require(controller.field(F::qr_brightness).selected=="dark","QR brightness must start Dark");
     require(controller.field(F::message).enabled&&controller.field(F::binary).enabled,"Composer controls unavailable");
     controller.edit(F::message,"Preserve this message");
@@ -20,8 +21,11 @@ void check_controls(Controller& controller) {
     require(controller.field(F::message).text==before,"Invalid UTF-8 was accepted");
     controller.edit(F::short_bits,"001");
     require(controller.field(F::short_bits).text=="001","Raw bit editor lost leading zeros");
-    require(!controller.enabled(C::transmit)&&!controller.enabled(C::transmit_noise)&&!controller.enabled(C::transmit_helper),"Removed Robust backend was enabled");
-    require(controller.field(F::mode).text.find("unavailable")!=std::string::npos,"Missing Robust backend status");
+    require(controller.snapshot().signals.empty()&&controller.snapshot().received.empty()&&controller.signals().lines().empty(),
+        "Editing a Robust draft fabricated receive evidence");
+    require(!controller.enabled(C::transmit_helper),"Disabled Helper power enabled Helper-only transmission");
+    require(controller.field(F::fec).selected==selected_fec&&controller.field(F::fec).display_text=="Off (exact raw bits)",
+        "Exact raw transmission did not report effective FEC Off");
     std::set<std::tuple<ui::Page,int,int,unsigned>> identities;
     for(const auto& control:ui::console_screen()) {
         const auto kind=control.kind==ui::Kind::action?1:control.kind==ui::Kind::bitmap?2:0;
@@ -31,9 +35,15 @@ void check_controls(Controller& controller) {
     }
     controller.edit(F::search_margin,"7");controller.edit(F::audio_error,"100ms");
     controller.select(F::rf_oscillator,"baseband-clock");
+    controller.edit(F::calendar_epoch,"1793850000");controller.edit(F::calendar_ordinal,"7");
+    controller.edit(F::live_noise_dbfs_hz,"-92");
     const auto saved=launch_command::parse(controller.field(F::planner_command).text);
-    require(saved.search_margin==7&&saved.audio_timing_error_seconds==.1&&saved.reference=="shared-radio",
-        "Saved controls lost search margin, audio error or reference");
+    require(saved.search_margin==7&&saved.audio_timing_error_seconds==.1&&saved.reference=="shared-radio"&&
+        saved.calendar_epoch==1793850000ULL&&saved.calendar_ordinal==7&&saved.live_noise_dbfs_hz==-92&&saved.workspace_percent==0,
+        "Saved controls lost timing, calendar, input noise or automatic allocation");
+    require(controller.settings().calendar&&controller.settings().calendar->initial_ordinal==7&&
+        controller.settings().live_noise_dbfs_hz==-92&&!controller.settings().receiver_memory_limit,
+        "Configured receiver values did not reach the session");
     controller.activate(C::unload_keys);
     require(controller.field(F::key).selected=="none"&&!controller.settings().transfer.key,"Unloading the selected key failed");
 }

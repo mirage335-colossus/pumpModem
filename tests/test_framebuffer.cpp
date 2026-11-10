@@ -344,7 +344,7 @@ void mfd_tuning_and_pages() {
     mfd_choose(session,"TUNE","Rate");require(app.field(ui::Field::bandwidth).text=="3.6 kHz","Robust initial rate");
     bezel(session,4);require(app.field(ui::Field::bandwidth).text=="2.4 kHz","MFD lower rate");
     bezel(session,5);require(app.field(ui::Field::bandwidth).text=="3.6 kHz","MFD higher rate");
-    mfd_choose(session,"TUNE","Short");const auto before=std::stod(app.field(ui::Field::snr).text);
+    mfd_choose(session,"TUNE","Target SNR");const auto before=std::stod(app.field(ui::Field::snr).text);
     bezel(session,5);const auto higher=std::stod(app.field(ui::Field::snr).text);
     require(higher>before,"MFD numeric presets followed descending declaration order");
     bezel(session,4);require(std::stod(app.field(ui::Field::snr).text)<higher,"MFD normalized preset did not step back");
@@ -470,7 +470,7 @@ void mfd_operating_subset() {
     app.select(ui::Field::fast_mode,"robust");session.tick();mfd_choose(session,"TUNE","Rate");
     app.select(ui::Field::fast_mode,"fast");bezel(session,5);
     require(app.field(ui::Field::fast_mode).selected=="fast","stale adjustment activated replacement modem control");
-    app.select(ui::Field::fast_mode,"robust");session.tick();mfd_choose(session,"TUNE","Short");
+    app.select(ui::Field::fast_mode,"robust");session.tick();mfd_choose(session,"TUNE","Target SNR");
     app.edit(ui::Field::snr,"-17");bezel(session,5);
     require(std::stod(app.field(ui::Field::snr).text)==-17,"stale adjustment applied a changed target");
     app.select(ui::Field::fast_mode,"fast");app.select(ui::Field::fast_device,"");app.edit(ui::Field::fast_text,"guard");session.tick();

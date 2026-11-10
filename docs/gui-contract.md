@@ -10,18 +10,57 @@ See [GUI architecture](gui-architecture.md) for shared-code structure.
 ## Modems and current availability
 
 The Modem dropdown retains **Fast Modem**, **Robust Modem**, and **Legacy Modem**;
-ordinary launches default to Fast. Fast and Legacy have active controllers and
-keep their own settings and behavior. Robust controls, tabs, and saved settings
-remain visible for future reconnection, but its transmitter and receiver are
-unavailable in the GUI. Selecting Robust does not start a modem, simulation, or
-receive session. See [current Robust architecture and status](robust-current.md).
+ordinary launches default to Fast. Each modem retains its own controller and
+settings. Robust connects the shared controls to the native C++ session linked
+into the application. Starting Fast does not start a Robust receiver or acquire
+its audio device. Mode changes and pending key loads preserve active intent
+without starting a session with a different key.
 
-Robust keeps one Target SNR, shared by Console, Link Planner and the saved
-`--target-snr` option, with a default of 32 dB-Hz. There are no separate short,
-long or receive-list targets. Waveform selection uses the canonical automatic
-defaults; Helper placement uses the fixed high/low pilots and separate auxiliary
-tone. Pattern/tone and Helper frequency controls and their launch overrides are
-removed. This does not change the receiver software-worker allocation.
+Robust live operation requires both peers to configure the same public calendar
+anchor, initial waveform ordinal, key and waveform/FEC settings. **Robust setup**
+exposes the calendar and a declared local live input-noise density in dBFS/Hz.
+An unconfigured calendar or noise model keeps the affected live action unavailable
+with an explanation. Simulation uses its own agreed local calendar. These
+settings do not implement unknown-start acquisition or measure the audio device.
+See [current architecture](robust-current.md) and
+[current validation](validation.md#native-gui-integration).
+
+| Shared control | Native meaning |
+| --- | --- |
+| Encryption | Off preserves unencrypted DATA; keyfile and AMATEUR select the effective key. AMATEUR is public key material, not confidentiality. |
+| Helper power, ratio limit, callsign | Requested Helper watts, native power allocation/ratio clamp and Helper metadata. Zero power disables Helper; these settings do not control radio hardware. |
+| Transmit power, path loss | DATA power and simulated link attenuation, separate from playback volume. |
+| Clock sync, region, offset, audio error | Public arrival bounds and sampled timing model; live capture also needs actual provider timestamps and uncertainty. |
+| Base/Shift oscillator, Margin | Declared oscillator errors/phase noise and public search-bound multiplier. |
+| Doppler/delay spread, selective amplitude | Selected canonical sampled-channel effects and corresponding declared receiver assumptions. Off remains explicit. |
+| Rate, Shift | Rate is native inner rate; audio IF is Carrier minus Shift. Shift also contributes to the oscillator error model. |
+| Additional Symbols, Spreading | Off uses one lane; Interleave with `N×` selects `N` native added-symbol lanes. Nominal occupied DATA bandwidth is `0.625 × Rate × N`. |
+| Symbol burst, Random extra | Shared whole-bit calendar waits; see [burst scheduling](symbol-burst.md). |
+| FHSS | Canonical envelope and illustrative frequency schedule; no external radio retuning. |
+| Target SNR dB/1Hz | One shared C/N0 target, default 32 dB-Hz, for provisional duration planning; separate from actual simulated C/N0. |
+| Error correction | Configured Off, RS20 or RS60 native short-message profile. Raw bits bypass FEC exactly. |
+| Simulation | Native emitted waveform through the selected continuous sampled channel and complete native receiver. |
+| Audio device, channel routing, Live/duplex, TX volume, Exclusive | Existing native device service, selected channel layout, capture/playback policy and output gain. |
+| Waterfall, Waveform, Receiver input I/Q | Bounded actual session observations; receiver I/Q is not a substitute TX trace. |
+| Pattern evidence, Pattern steps | Native public-slot classifications, scores, completeness, resource and stage diagnostics. |
+
+Robust keeps one Target SNR shared by Console, Link Planner and saved
+`--target-snr`. Waveform selection uses canonical automatic defaults. Helper
+placement uses the fixed high/low pilots and separate auxiliary tone; an invalid
+selected IF/rate fails configuration explicitly. Pattern/tone and Helper
+frequency controls and their launch overrides remain removed.
+
+Transmit, Cancel TX, Transmit noise and Helper-only transmission dispatch to the
+same native session. Noise uses fresh independent DATA keys and encryption;
+Helper metadata uses the public Amateur key in that mode. **Force next
+transmission** appears only for the same-key waveform-address reuse lock. It is
+a one-shot override of that lock and separation wait, preserves reuse history,
+and retains draft, key, device and resource checks. Cancellation does not reset
+the public calendar or erase reuse history.
+
+Detailed transmission inspection remains deferred. This is separate from the
+connected live Pattern evidence and Pattern steps views, which show native
+receiver observations and score records.
 
 The **Link Planner** retains its controls, presets, command editor, general
 link-budget arithmetic, and generic plots. Robust receive-probability, CPU-pace,
@@ -65,6 +104,5 @@ produced by shared code; native adapters do not compute modem or receive state.
 
 Features using existing controls should change shared declarations and
 application mapping only. Preserve selection and draft state when changing tabs
-or switching active modems. A retained Robust control is not a promise of
-backend support; keep its unavailable state explicit until the canonical path is
-connected.
+or switching active modems. Keep unsupported or unconfigured actions explicitly unavailable with their
+reason; implementation coverage and validation limits must remain visible.

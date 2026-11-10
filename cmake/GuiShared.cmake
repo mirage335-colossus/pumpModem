@@ -16,7 +16,7 @@ if(NOT TARGET datapump_gui_application)
   target_include_directories(datapump_gui_application PUBLIC src/gui)
   # Static-library link dependencies still reach the executable, but modem
   # headers and other domain compile requirements stop at this implementation.
-  target_link_libraries(datapump_gui_application PRIVATE datapump datapump_fast datapump_legacy)
+  target_link_libraries(datapump_gui_application PRIVATE datapump datapump_fast datapump_legacy datapump_robust_session)
   if(DATAPUMP_SANITIZERS AND NOT MSVC)
     # Keep native adapters instrumented without exporting domain include paths.
     target_compile_options(datapump_gui_application INTERFACE

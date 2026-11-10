@@ -64,21 +64,24 @@ follow new arrivals only when already at the tail. Native clipboard and
 asynchronous prompt services stay inside the adapter.
 Pending Save requests retain their payload across inbox eviction.
 
-The adapters retain shared presentation and service boundaries, but the Robust
-modem and its receive-inspection behavior are not connected to the current GUI.
-Robust controls do not run a receive session or expose decoder-derived
-measurements. See the [GUI contract](gui-contract.md) and
-[current Robust status](robust-current.md); active shared content-safety rules
-are in [security](security.md).
+Both adapters use the same native Robust C++ session and expose bounded live
+waveform, waterfall, receiver I/Q, Pattern evidence and Pattern steps from
+actual observations and complete score records. Detailed transmission
+inspection remains deferred; it is distinct from these live plots. Native-window
+conformance and physical-device qualification remain separate from shared
+functional checks. See the [GUI contract](gui-contract.md),
+[current Robust status](robust-current.md) and [validation](validation.md#native-gui-integration);
+shared content-safety rules remain in [security](security.md).
 
 `inspection_page.hpp` builds the inspection document from the shared `Inspection`
 model. `document_layout.hpp` computes its document rectangles from native glyph
 measurements; `backend_rev_document.hpp` applies those rectangles and renders headings, numbered step/section
-cards, notes, navigation and parameter rows with native Rev elements. Modem flow
-follows the FLTK section order: processing lanes, chosen alphabets, full pattern
-inspection, then preamble and integration notes. Transmission separates on-air
-and logical source sections, shows proportional fixed-interval data/parity bars and
-coding notes, and places the parameter table last. Card columns respond to the
+cards, notes, navigation and parameter rows with native Rev elements. This
+shared renderer supports the same section order as FLTK: processing lanes, chosen alphabets, full pattern
+inspection, then preamble and integration notes. Its transmission layout
+supports on-air/logical-source sections, coding bars and a final parameter table.
+These renderer capabilities do not imply an active detailed Robust inspection
+model; that view currently reports its unavailable state. Card columns respond to the
 page width; native text measurement supplies their heights. The pages scroll
 inside the same tab viewport as FLTK. Their section structure is shared policy;
 glyph metrics and wrapping remain toolkit-specific.

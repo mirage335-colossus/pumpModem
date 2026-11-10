@@ -57,8 +57,8 @@ ui::DocumentNode build(const planner::Model& model,float width,bool show_details
     paragraph(root,"Link planner",22,Tone::text,true);
     if(error.empty())error=model.error;
     if(!error.empty())paragraph(root,std::move(error),12,Tone::negative,true);
-    paragraph(root,model.receiver_status.empty()?"Robust planning is unavailable until the triad backend is connected.":model.receiver_status,13,Tone::text,true);
-    paragraph(root,"Saved controls remain available. Timing, receiver probability and processing estimates are unavailable.");
+    paragraph(root,model.receiver_status.empty()?"Robust Link Planner forecasts are not yet qualified for the native receiver.":model.receiver_status,13,Tone::text,true);
+    paragraph(root,"The native session uses provisional duration planning. This page has no qualified receiver probability or processing forecasts.");
     if(model.error.empty())
         paragraph(root,"Received power: "+number(model.received_dbm)+" dBm · C/N0: "+number(model.actual_cn0_db_hz)+" dB-Hz. These are link-budget arithmetic only.");
     control(root,ui::Field::planner_target);
@@ -75,7 +75,7 @@ ui::DocumentNode build(const planner::Model& model,float width,bool show_details
         {"Clock / RAM limit",Command::planner_clock,false}});
     buttons(root,{{show_details?"Hide details":"Model limits and references",Command::planner_toggle_details}});
     if(show_details) {
-        paragraph(root,"The retired single-carrier receiver and its calibration models have been removed. The canonical triad receiver does not yet supply application planning estimates. No reception, hardware capability or performance claim follows from the saved values.");
+        paragraph(root,"Native Robust duration planning is a provisional waveform model. Receiver probability and processing forecasts need source-matched validation and local measurements. Saved inputs do not establish reception reliability or hardware capacity.");
         paragraph(root,"Quick references",15,Tone::text,true);
         paragraph(root,"Rough comparison examples, not propagation predictions or automatic presets. Antennas, propagation and noise change the result; operating modes do not determine path loss. Power (dBm) and path loss (dB) are separate quantities.");
         paragraph(root,"Sub-9 kHz · 200 ft antenna · 10 kW: 0 dBm power reference; 200 dB path loss.");

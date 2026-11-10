@@ -1,16 +1,28 @@
 # Burst scheduling controls and research
 
-The GUI keeps minimum-wait choices Off, 1, 2, 3, 5 and 10 symbols, and random
-extra-wait choices 0 through 3. They remain saved settings for future backend
-connection. [Robust GUI operation is unavailable](robust-current.md); the old
-single-carrier UTC calendar, keyed random waits, capture exclusion and
-silence-based completion implementation have been removed.
+The GUI minimum-wait choices Off, 1, 2, 3, 5 and 10 symbols map to
+`HelperBurstConfig::wait_bits`; Random extra 0 through 3 maps to
+`random_extra_bits`. These are complete logical DATA-bit waits in the native
+`HelperBurstPlan`, not individual chips or FFT tiles. The native
+`Format::burst_wait_tiles` remains a separate within-bit calendar.
 
-The current native `triad::v3::Format` has `burst_wait_tiles`. Native geometry
-owns its tile lattice, pulse margins and source extent. This is not evidence
-that the old GUI's whole-symbol settings or random-wait semantics already map
-to that field. Reconnection must make the mapping explicit and validate it in
-the single canonical implementation.
+Both peers share the same public anchor, initial ordinal, key and wait settings.
+Each support starts on the UTC 30-second grid. Helper-enabled slots preserve a
+fresh 38-second lead, complete DATA pulse support and protected Helper tail.
+Off removes the requested additional wait; it does not remove these mandatory
+supports, guards and grid alignment.
+
+Random extra selects 0 through the configured limit from a keyed permutation
+with equal counts in each 252-slot cycle. Anchor, initial ordinal and cycle
+separate the permutation domain; a fixed cycle total allows bounded direct
+lookup at distant ordinals. Without encryption the public Amateur key supplies
+a reproducible calendar, not secrecy. Message completion does not restart the
+calendar. Waits do not become missing DATA slots or quiet-completion evidence.
+
+The GUI, exporter and receiver use the same public slot geometry. Source and
+channel state remain continuous across selected waits, including pulse and
+delayed channel tails. The implementation and bounded checks are distinct from
+long-duration or physical-device qualification.
 
 ## Retained scheduling lessons
 
@@ -26,7 +38,7 @@ retained observation requirements establish that they are unnecessary. Missing
 timestamps or unexplained discontinuities cannot be replaced by invented silence.
 
 Scheduled waiting is not failed-symbol evidence or a message terminator.
-The replacement protocol must define completion independently of the retired
-receiver. A long coordinate or simulated gap is not a long-running device test.
+The current protocol requires two fully scored quiet public DATA slots for
+physical completion. A long coordinate or simulated gap is not a long-running device test.
 Study scheduling with [minimal abbreviated checks](triad-performance.md) and
 preserve the [audio timing contract](clock-sync.md).

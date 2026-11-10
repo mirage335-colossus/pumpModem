@@ -22,10 +22,11 @@ public:
     ~Controller();
     Controller(const Controller&) = delete;
     Controller& operator=(const Controller&) = delete;
-    void start();
+    void start(bool active=true);
     void poll();
     void close();
-    // Idle-only audio handoff for the mode host; pending reception is retained.
+    // TX-idle audio handoff cancels partial DSP capture and retains incomplete
+    // rows. Capture restarts on the configured calendar with quiet-slot rearming.
     bool try_suspend_capture();
     void resume_capture();
     bool closing() const;

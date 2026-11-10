@@ -7,7 +7,7 @@ namespace datapump::gui::planner {
 Model build(const Inputs& inputs,std::stop_token) {
     Model result;
     result.inputs=inputs;
-    result.receiver_status="Robust planning is unavailable until the triad backend is connected.";
+    result.receiver_status="Robust Link Planner forecasts are not yet qualified for the native receiver.";
     if(std::isfinite(inputs.tx_dbm)&&std::isfinite(inputs.path_loss_db)&&
        std::isfinite(inputs.noise_density_dbm_hz)) {
         result.received_dbm=inputs.tx_dbm-inputs.path_loss_db;

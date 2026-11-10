@@ -4,6 +4,39 @@
 #include <map>
 
 namespace datapump::gui {
+inline std::vector<plots::PatternEvidencePoint> pattern_evidence_points(std::span<const live::PatternStep> steps,
+        std::optional<std::uint64_t> cleared_through={}) {
+    if(steps.size()>plots::pattern_evidence_capacity)steps=steps.last(plots::pattern_evidence_capacity);
+    std::vector<plots::PatternEvidencePoint> points;points.reserve(steps.size());
+    for(const auto& step:steps) {
+        if(cleared_through && step.index<=*cleared_through)continue;
+        plots::PatternEvidencePoint point;point.slot=step.index;
+        if(step.evidence_complete && std::isfinite(step.bit_evidence[0]) && std::isfinite(step.bit_evidence[1]) &&
+           std::isfinite(step.operational_log_e) && std::isfinite(step.operational_threshold)) {
+            // The scorer's aggregate is the equally weighted bit mixture plus
+            // one common original-grid prior/null correction. Recover that
+            // correction stably, without redoing or changing a DSP decision.
+            const auto a=static_cast<long double>(step.bit_evidence[0]);
+            const auto b=static_cast<long double>(step.bit_evidence[1]);
+            const auto maximum=std::max(a,b);
+            const auto normalization=std::log1p(std::exp(std::min(a,b)-maximum))-std::log(2.L);
+            const std::array<double,2> alternatives{
+                static_cast<double>(step.operational_log_e+(a-maximum)-normalization),
+                static_cast<double>(step.operational_log_e+(b-maximum)-normalization)};
+            if(std::isfinite(alternatives[0]) && std::isfinite(alternatives[1])) {
+                point.bit_log_e=alternatives;point.operational_log_e=step.operational_log_e;
+                point.operational_threshold=step.operational_threshold;
+            }
+        }
+        if(step.evidence_complete && step.quiet_modes && std::isfinite(step.quiet_energy) && step.quiet_energy>=0 &&
+           std::isfinite(step.quiet_threshold) && step.quiet_threshold>0) {
+            point.quiet_energy=step.quiet_energy;point.quiet_threshold=step.quiet_threshold;
+        }
+        points.push_back(std::move(point));
+    }
+    return points;
+}
+
 // Application mapping for named bitmap declarations. Toolkit adapters observe
 // changed IDs and transfer their opaque snapshots; they do not interpret modem
 // measurements, QR brightness, replay policy or inspection diagram contents.
@@ -38,7 +71,23 @@ public:
             constellation_source_ = snapshot.constellation_source;
             constellation_dropped_ = snapshot.constellation_dropped;
         }
-        if(!frames_.contains(ui::Bitmap::pattern_scores))put(ui::Bitmap::pattern_scores, {});
+        if(snapshot.pattern_steps.empty()) {
+            pattern_cleared_through_.reset();pattern_latest_address_.reset();
+        } else {
+            const auto& latest=snapshot.pattern_steps.back();
+            const std::array<std::uint64_t,3> address{latest.index,latest.epoch,latest.ordinal};
+            if(pattern_latest_address_ && (address[0]<(*pattern_latest_address_)[0] ||
+                (address[0]==(*pattern_latest_address_)[0] && address!=*pattern_latest_address_)))
+                pattern_cleared_through_.reset();
+            pattern_latest_address_=address;
+            if(update.clear_pattern_scores_through)pattern_cleared_through_=update.clear_pattern_scores_through;
+        }
+        auto evidence=pattern_evidence_points(snapshot.pattern_steps,pattern_cleared_through_);
+        if(!frames_.contains(ui::Bitmap::pattern_scores) || evidence!=pattern_evidence_) {
+            pattern_evidence_=std::move(evidence);
+            const auto frame=plots::PlotSnapshot::pattern_evidence(pattern_evidence_);
+            put(ui::Bitmap::pattern_scores,frame);put(ui::Bitmap::pattern_evidence,frame);
+        }
         const auto band=controller.spectrum_search_band();
         if (update.clear_waterfall || append) {
             frozen_history_=std::make_shared<const plots::SpectrumHistory>(history_);
@@ -68,7 +117,7 @@ public:
         const auto model = controller.inspection();
         if (inspected_ != model) {
             inspected_ = model;
-            put(ui::Bitmap::pattern, {}); put(ui::Bitmap::pattern_distances, {}); put(ui::Bitmap::pattern_evidence, {});
+            put(ui::Bitmap::pattern, {}); put(ui::Bitmap::pattern_distances, {});
             for (auto id : {ui::Bitmap::payload_alphabet, ui::Bitmap::reference_alphabet}) {
                 const std::size_t index = id == ui::Bitmap::payload_alphabet ? 0 : 1;
                 put(id, model && index < model->constellations.size() ?
@@ -84,7 +133,6 @@ public:
     std::uint64_t version(ui::Bitmap id) const { const auto it=versions_.find(id);return it==versions_.end()?0:it->second; }
     std::string caption(ui::Bitmap id, unsigned width = 640) const {
         if (id == ui::Bitmap::qr && !qr_error_.empty()) return qr_error_;
-        if (id == ui::Bitmap::pattern_scores) return "Triad backend unavailable";
         auto result = get(id).caption(width);
         if(id==ui::Bitmap::waveform || id==ui::Bitmap::waterfall || id==ui::Bitmap::waterfall_detail || id==ui::Bitmap::waterfall_helper_detail)
             result+=environment_monitor_?" / input monitor":simulation_?" / simulated stream":" / modem stream";
@@ -102,7 +150,7 @@ public:
         case ui::Bitmap::constellation:
             return constellation_source_ == live::ConstellationSource::received ? "Received constellation" :
                 constellation_source_ == live::ConstellationSource::transmitted ? "Transmitted constellation" : "Receiver input I/Q";
-        case ui::Bitmap::pattern_scores: return "Pattern evidence";
+        case ui::Bitmap::pattern_scores: case ui::Bitmap::pattern_evidence: return "Pattern evidence";
         default: return ""; // Other sources retain their ordinary declaration label.
         }
     }
@@ -115,6 +163,9 @@ private:
     std::optional<std::pair<double,double>> searched_band_;
     std::optional<std::pair<double,double>> helper_band_;
     std::optional<std::uint64_t> spectrum_revision_;
+    std::vector<plots::PatternEvidencePoint> pattern_evidence_;
+    std::optional<std::uint64_t> pattern_cleared_through_;
+    std::optional<std::array<std::uint64_t,3>> pattern_latest_address_;
     std::string qr_text_, brightness_, qr_error_;
     std::shared_ptr<const Inspection> inspected_;
     std::uint64_t constellation_dropped_ = 0;

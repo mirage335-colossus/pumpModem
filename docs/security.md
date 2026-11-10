@@ -5,7 +5,8 @@ network endpoint, or command. Saving original received bytes requires an
 explicit local path. Current format, authentication, and completion guarantees
 are specific to each maintained service; see [Fast](fast-mode.md),
 [Legacy](legacy-modem.md), and [cryptography](crypto.md). Robust transmission
-and reception are not connected to the GUI.
+and configured-calendar reception use the native C++ GUI session and retain
+these shared presentation and input bounds. See [current scope](robust-current.md).
 
 ## Received-content presentation
 
@@ -41,9 +42,11 @@ The native Robust waveform uses purpose-separated keyed streams, and its data
 confidentiality uses independent Serpent and AES lanes. Reusing the same key
 and canonical stream address reproduces bytes; key/address reuse is unsafe.
 Purpose separation and waveform evidence do not authenticate a sender or
-provide replay protection. The current Robust implementation is not an
-integrated receiver or GUI service, so no end-to-end reception or physical-link
-security claim is made.
+provide replay protection. The native Robust session integrates transmission
+and reception, but that connection does not establish a physical-link security
+guarantee. Configured text FEC uses a public CRC for error detection, not sender
+authentication. Public AMATEUR key material and unencrypted operation provide
+no confidentiality; applicable tests and limits remain in [validation](validation.md#native-gui-integration).
 
 Keyfiles use the current `DPMKEY04` format; older versions are rejected. Audio
 collected during key generation is supplementary input, not a source of

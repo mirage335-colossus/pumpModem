@@ -13,7 +13,7 @@ selected mitigations do not establish universal security or link performance.
 | [Cryptography](../crypto.md) | Primitives, keyfiles, stream derivation, independent private bit templates and mode-specific boundaries. |
 | [Security](../security.md) | Current receive/presentation, storage, execution and cryptographic boundaries. |
 | [Receive-processing hardening](../receive-processing-hardening.md) | Implemented receive-processing and selected speculative-execution mitigations, audit scope and remaining limits. |
-| [Current Robust status](../robust-current.md) | Retired receiver measurements are historical; compute estimates are unavailable pending integration. |
+| [Current Robust status](../robust-current.md) | Native GUI stack and configured-calendar scope; historical measurements do not qualify current CPU capacity. |
 | [LPI estimates](../lpi-estimates.md) | Uncalibrated observation models and assumptions; not capability assurance. |
 | [Earlier security review](../security-review.md) | Historical packet/APSK findings, superseded by current security/protocol references; retains prior reasoning and limitations. |
 | [Requirements matrix](../requirements.md) | Version 001_00 feature coverage and implementation/qualification boundaries. |

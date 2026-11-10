@@ -192,6 +192,12 @@ class NativeTests(unittest.TestCase):
     def control(self,label):
         return next(c for c in self.snapshot['controls'] if c['label']==label)
 
+    def select_fast(self):
+        modem=next(item for item in self.snapshot['controls']
+                   if any(option['label']=='Fast Modem' for option in item.get('options',[])))
+        fast=next(option for option in modem['options'] if option['label']=='Fast Modem')
+        self.event(2,modem['id'],fast['id'])
+
     def event(self,kind,target,value='',flags=0):
         sequence=int(self.snapshot['ack'])+1
         payload=struct.pack('<IQQQIII',1,int(self.snapshot['generation']),sequence,int(target),kind,flags,0)+preview.string(value)+preview.string('')
@@ -228,6 +234,11 @@ class NativeTests(unittest.TestCase):
         self.assertIsNone(self.server.worker)
 
     def test_native_file_import_and_cancel(self):
+        self.wait(lambda:any(item.get('text')=='Robust simulation ready' for item in self.snapshot['controls']))
+        self.assertFalse(self.control('Attach file')['enabled'])
+        self.assertFalse(self.control('Transmit')['enabled'])
+        self.assertTrue(any(tab['label']=='Robust setup' for tab in self.snapshot['tabs']))
+        self.select_fast()
         fixture=bytes([0,1,2,3,255,192,128,68,97,116,97,80,117,109,112,10])
         (self.root/'input.bin').write_bytes(fixture)
         self.event(4,self.control('Attach file')['id']);self.wait(lambda:bool(self.snapshot.get('service')))
@@ -235,11 +246,10 @@ class NativeTests(unittest.TestCase):
         self.assertFalse(self.snapshot.get('service'))
         self.event(4,self.control('Attach file')['id']);self.wait(lambda:bool(self.snapshot.get('service')))
         self.service('input.bin')
-        self.wait(lambda:any(item.get('text')=='Attached: input.bin' for item in self.snapshot['controls']))
-        self.assertFalse(self.control('Transmit')['enabled'])
+        self.wait(lambda:any(item['label']=='Source file' and item.get('text','').endswith('input.bin')
+                             for item in self.snapshot['controls']))
+        self.assertFalse(self.control('Cancel')['enabled'])
         self.assertFalse(self.control('Files in memory').get('records'))
-        self.assertTrue(any(item.get('text')=='Robust is unavailable until the canonical triad backend is connected.'
-                            for item in self.snapshot['controls']))
         self.event(4,self.control('Use text')['id'])
         worker=self.server.worker;self.assertEqual(self.request('/stop',b'')[0],200)
         self.assertEqual(self.process.poll(),0);self.assertFalse(worker.reader.is_alive())
@@ -252,6 +262,7 @@ class NativeTests(unittest.TestCase):
         self.assertFalse(worker.reader.is_alive())
 
     def test_failed_import_can_be_retried(self):
+        self.select_fast()
         (self.root/'input.bin').write_bytes(b'abc')
         self.event(4,self.control('Attach file')['id']);self.wait(lambda:bool(self.snapshot.get('service')))
         service=self.snapshot['service'];sequence=int(self.snapshot['ack'])+1
@@ -267,8 +278,9 @@ class NativeTests(unittest.TestCase):
         self.assertFalse(self.snapshot.get('service'))
         self.event(4,self.control('Attach file')['id']);self.wait(lambda:bool(self.snapshot.get('service')))
         self.service('input.bin')
-        self.wait(lambda:any(item.get('text')=='Attached: input.bin' for item in self.snapshot['controls']))
-        self.assertFalse(self.control('Transmit')['enabled'])
+        self.wait(lambda:any(item['label']=='Source file' and item.get('text','').endswith('input.bin')
+                             for item in self.snapshot['controls']))
+        self.assertFalse(self.control('Cancel')['enabled'])
 
 
 if __name__=='__main__':

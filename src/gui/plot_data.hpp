@@ -11,6 +11,18 @@
 #include <vector>
 
 namespace datapump::gui::plots {
+// One completed public-slot observation. Missing/invalid evidence stays absent;
+// it is never drawn as a zero score. Bit values include the same original-grid
+// prior correction as the aggregate operational log evidence.
+struct PatternEvidencePoint {
+    std::uint64_t slot=0;
+    std::optional<std::array<double,2>> bit_log_e;
+    std::optional<double> operational_log_e, operational_threshold;
+    std::optional<double> quiet_energy, quiet_threshold;
+    bool operator==(const PatternEvidencePoint&) const = default;
+};
+inline constexpr std::size_t pattern_evidence_capacity=64;
+
 inline constexpr std::size_t waveform_kernel_radius = 32;
 // The live oscilloscope follows an environmental timebase, independent of the
 // expected carrier. Low-rate inputs default to half a second; ordinary audio
