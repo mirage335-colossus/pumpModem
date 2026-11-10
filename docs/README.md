@@ -15,9 +15,11 @@ canonical native waveform/channel/Helper stack and the complete headless
 receiver. See the [validation record](validation.md) for the measured native
 message gate, local CPU margins, GPU stage speed and forecast coverage.
 The [interactive receiver parallelism report](receiver-parallelism.html) shows
-the latest measured [CPU and execution timeline](receiver-parallelism.html#cycle),
-from the revision before shared-input transport: sustained backlog utilization, owner startup, overlapping windows and
-ordered controller work. Its [two-owner baseline](receiver-parallelism.html#two-owner-baseline)
+the latest measured [CPU and execution timeline](receiver-parallelism.html#cycle)
+for the shared-input receiver: sustained backlog utilization, owner startup,
+overlapping windows and ordered controller work. The original exact tracking-task
+comparison gate failed; the report separates its post-hoc allocation-normalized
+comparison from that outcome. Its [two-owner baseline](receiver-parallelism.html#two-owner-baseline)
 and [earlier fine-cycle comparison](receiver-parallelism.html#historical-cycle)
 preserve detailed stage/worker traces. Processing wall time and physical sample
 time are separate; recorded job spans do not establish simultaneous OS execution.

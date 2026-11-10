@@ -94,6 +94,21 @@ full-window workspace failure closes the owners and latches the
 full-budget serial fallback; attempted work remains charged. Other failures
 stop processing rather than silently retrying another path. This pipeline's
 current qualification is in the [validation record](validation.md#continuous-receiver-restructuring).
+A final-source 49-window same-stream run with sealed input and automatic
+allocation averaged **8.325 busy threads of 12 (69.37%)** over 51.898 seconds
+of predeclared ready-backlog intervals. Its longest uninterrupted eligible
+interval was 32.899 seconds at 7.921 busy threads; 21.238 seconds of owner
+startup were reported separately. The capture contained one DATA bit and 48
+quiet windows; its one-bit codec frame was invalid. All windows completed without
+fallback or retry. The original exact cross-allocation parity gate **failed** because 17
+slots had different dispatched tracking-task counts. After independently
+excluding that allocation-dependent count, all other compared work, scores and
+decisions matched. The full input digest matched before ingress; the
+predeclared post-run input hash was not performed. This is a scoped utilization
+observation, not an all-row pipeline capacity result. The automatic RAM cap was 8.748 GB versus the earlier
+fixed 9.513 GB; the observations do not isolate a transport speedup.
+[Final-source receipt](../local-evidence/final-backlog-cpu/result.json).
+
 Before the `memfd` transport change, the enlarged automatic owner cap passed the
 independently audited 49-window continuous-capture check, preserving exact exposed
 DSP work on the first previously checked twenty-five windows and covering all
@@ -103,7 +118,7 @@ busy-core equivalents against twelve hardware threads (81.09%). It reached
 thirteen active services and fourteen resident owners within the twenty-four-permit
 and memory limits. This establishes useful
 same-stream parallelism for that capture, not full saturation, a paired speedup,
-current shared-transport utilization or all-row pipeline capacity. Earlier
+a result for the later shared transport or all-row pipeline capacity. Earlier
 hardware-count-capped results keep their original scope.
 On the earlier qualified
 two-owner row-7 five-window capture, cold complete receive time fell
@@ -184,10 +199,11 @@ old timing calibration to qualify changed CPU work. See the
 and [earlier restructuring evidence](validation.md#receiver-restructuring).
 The [interactive architecture report](receiver-parallelism.html) distinguishes
 necessary state dependencies from implementation barriers. Its measured
-[CPU timeline](receiver-parallelism.html#cycle) records the pre-`memfd` 49-window
-resource-admitted scheduler and its predeclared backlog occupancy, separately
-from startup, fill and drain. It establishes neither current shared-transport
-utilization, full saturation nor all-row pipeline capacity. The [earlier two-owner timeline](receiver-parallelism.html#two-owner-baseline)
+[CPU timeline](receiver-parallelism.html#cycle) records the final-source
+49-window scheduler and its predeclared backlog occupancy, separately from
+startup, fill and drain. Its original exact tracking-task gate failed, with a
+separate post-hoc allocation-normalized comparison. It establishes neither
+full saturation nor all-row pipeline capacity. The [earlier two-owner timeline](receiver-parallelism.html#two-owner-baseline)
 retains its selected fine cycle, controller waits, nested stages and worker jobs.
 The [historical trace](receiver-parallelism.html#historical-cycle)
 preserves the pre-change `3b423f9` execution, including its former three-job

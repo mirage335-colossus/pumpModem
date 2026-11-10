@@ -92,6 +92,22 @@ at eight workers each and preserved checked outputs, two-quiet completion,
 continued listening, EOF rejection and descriptor/process cleanup. It does not
 establish an elapsed gain or an all-row shared-transport admission envelope.
 
+A final-source 49-window same-stream observation used the sealed-input pipeline
+with automatic allocation. Over 51.898 seconds of predeclared ready-backlog
+intervals it averaged **8.325 busy hardware-thread equivalents of 12 (69.37%)**;
+the longest uninterrupted eligible interval was 32.899 seconds and averaged
+7.921. Owner startup totaled 21.238 seconds separately and is excluded from the
+steady selector. All 49 windows completed, with no fallback or retry. The
+predeclared exact comparison with the earlier capture **failed**: 17 slots had
+different dispatched tracking-task counts under different worker partitions.
+An independent post-hoc comparison excluded that allocation-dependent count;
+the other compared work, scores and decisions matched. These are scoped CPU
+observations, not an all-row pipeline capacity qualification. Its automatic
+RAM cap was 8.748 GB; the earlier fixed cap was 9.513 GB, so the observations
+do not isolate a transport speedup. See the
+[final-source receipt](../local-evidence/final-backlog-cpu/result.json) and
+[current validation](validation.md#continuous-receiver-restructuring).
+
 Before the `memfd` transport change, the enlarged automatic owner cap passed an
 independently audited 49-window continuous-capture check. Its predeclared
 sustained-backlog interval averaged
@@ -99,7 +115,7 @@ sustained-backlog interval averaged
 reached thirteen active services and fourteen resident owners while sharing
 twenty-four software permits.
 This is bounded evidence for that capture, not full saturation, a paired speedup
-comparison, current shared-transport utilization or all-row pipeline capacity.
+comparison, a result for the later shared transport or all-row pipeline capacity.
 Earlier hardware-count-capped and fixed-width measurements retain their original
 scope; see
 [current validation](validation.md#continuous-receiver-restructuring).

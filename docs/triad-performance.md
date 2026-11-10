@@ -117,10 +117,22 @@ used three owners at eight workers each, with exact checked outcomes and correct
 quiet/EOF/lifetime behavior. Neither result establishes an elapsed gain or an
 all-row shared-transport admission envelope.
 
+A final-source 49-window same-stream observation with sealed input and automatic
+allocation averaged **8.325 busy threads of 12 (69.37%)** over 51.898 seconds
+of predeclared ready-backlog intervals. The longest uninterrupted interval was
+32.899 seconds at 7.921 busy threads; owner startup totaled 21.238 seconds
+separately. All 49 windows completed without fallback or retry. The original
+exact comparison gate **failed** because dispatched tracking-task counts
+changed in 17 slots. A separate post-hoc comparison excluded that
+allocation-dependent count; the other compared work, scores and decisions
+matched. This observation is not an all-row pipeline capacity result. Its
+automatic RAM cap was 8.748 GB versus the earlier fixed 9.513 GB; the observations
+do not isolate a transport speedup. [Final-source receipt](../local-evidence/final-backlog-cpu/result.json).
+
 Before the `memfd` change, the enlarged automatic owner cap passed an independently
 audited 49-window continuous-capture check; its predeclared sustained-backlog
-interval averaged 81.09% of twelve hardware threads. That is pre-transport evidence,
-not current shared-transport utilization. It does not establish full saturation,
+interval averaged 81.09% of twelve hardware threads. That is pre-transport evidence.
+It does not establish full saturation,
 a paired speedup or all-eight-row pipeline capacity. The pre-`memfd` admission bootstrap's
 owner widths are conditional on its transport, declared ring ranges, geometry
 and RAM. They are not current shared-transport or universal concurrency factors.

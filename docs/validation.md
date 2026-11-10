@@ -73,6 +73,51 @@ report when a matched scaling check supersedes that evidence.
 
 ## Continuous receiver restructuring
 
+**Final shared-input sustained observation.** One bounded 49-window run on the
+final receiver used its automatic allocation: 24 software permits on 12 visible
+hardware threads, with an 8,748,048,384-byte operating memory cap. Across all
+417 predeclared eligible backlog intervals, it averaged **8.325 monitor-adjusted
+busy hardware threads out of 12 (69.37%) for 51.898 seconds**. The longest
+uninterrupted eligible stretch was **32.899 seconds at 7.921 busy threads**.
+Eligibility followed input and backlog readiness, excluded owner startup and
+ended at the start of the final window's assembly; it did not select CPU peaks
+or a particular owner count. Thirteen services overlapped at most, and all 24
+permits were allocated for 50.382 seconds of eligible coverage. The raw mean,
+including monitor overhead, was 8.390 busy threads.
+
+Owner startup occupied 21.238 seconds externally (21.183 seconds in the
+receiver). The complete receiver lifecycle was 161.091 seconds, including
+86.128 seconds through the final input push and 16.437 seconds from final
+assembly to drain. Startup overlaps those lifecycle phases and must not be
+added to them. Fixture generation took another 11.688 seconds; the supervisor
+finished in 178.304 seconds under its 210-second bound. Peak sampled RSS was
+5.167 GB and peak prospective admission was 8.744 GB under the 8.748 GB cap.
+All 49 windows completed in order using sealed shared input, with two scored
+quiet slots and continued listening; there were no retries, fallbacks or
+remaining children. The full input digest matched before ingress, and source,
+native artifacts and case identities matched after execution.
+The declaration also required a full input digest after processing, but the
+driver did not recompute it; that check is **unverified**. Source inspection
+shows that ingress copies the input chunks and window assembly creates fresh
+arrays, but this is not a substitute for the missing post-run digest. The input
+is one DATA bit `0` followed by 48 quiet slots; its one-bit codec frame is
+physically complete but invalid, not a decoded message demonstration.
+
+The original predeclared exact historical-parity gate **failed** in 17 slots.
+Independent examination found each difference was the number of dispatched
+tracking update tasks, which changes with the worker partition. A separate
+post-hoc comparison excluding only that allocation-dependent counter found all
+other compared work, scores, coverage, addresses and decisions identical. This
+does not change the original failed gate. The earlier 81.09% observation below
+used the pre-memfd receiver and a larger 9.513 GB cap; the two runs do not
+establish a causal speedup or slowdown. The current observation demonstrates
+productive same-stream parallelism, not full saturation or all-case pipeline
+capacity. Keep the raw result, failed gate and independent audit while they
+support the current timing chart; replace them when an equally scoped current
+measurement supersedes this claim.
+[Final shared-input measurement](../local-evidence/final-backlog-cpu/result.json) ·
+[Independent audit](../local-evidence/final-backlog-cpu/independent-audit.json)
+
 **Scope: complete processing on a configured public calendar.** The retained
 continuous listener preserves the configured keyed ordinal sequence. It detects
 bits or nulls, confirms completion with two scored quiet slots and resets codec

@@ -272,10 +272,24 @@ The three-owner comparison missed its original 15% elapsed-gain threshold. The
 user then chose the modest gain and increased productive utilization as useful
 for this and less power-limited CPUs. Preserve the failed old gate and the new
 adoption rationale separately. Three-by-six is historical evidence, not a fixed
-controller endpoint. Before the `memfd` transport change, the enlarged automatic
+controller endpoint. The final-source 49-window same-stream run with automatic
+allocation and sealed input averaged **8.325 busy threads of 12 (69.37%)** over
+51.898 seconds of predeclared backlog intervals. Its longest uninterrupted
+interval was 32.899 seconds at 7.921 busy threads; owner startup totaled 21.238
+seconds separately. The capture contained one DATA bit and 48 quiet windows;
+its one-bit codec frame was invalid. The original exact comparison gate **failed**
+on dispatched tracking-task counts in 17 slots; a separate post-hoc comparison excluding that
+allocation-dependent count matched the remaining compared work, scores and
+decisions. All 49 windows completed without fallback or retry. The full input
+digest matched before ingress, but the predeclared post-run input hash was not
+performed. This is a scoped utilization observation, not an all-row pipeline
+capacity pass. The automatic
+RAM cap was 8.748 GB versus the earlier fixed 9.513 GB; the observations do
+not isolate a transport speedup. [Final-source receipt](../local-evidence/final-backlog-cpu/result.json). Before the `memfd`
+transport change, the enlarged automatic
 owner cap passed an independently audited 49-window continuous-capture check,
 averaging 81.09% of twelve hardware threads over its predeclared sustained-backlog
-interval. This does not measure current shared-transport utilization. Earlier
+interval. This is historical pre-transport evidence. Earlier
 hardware-count-capped measurements retain their scope. This result is neither
 full saturation nor a paired speedup or all-row pipeline capacity result. The
 pre-`memfd` admission bootstrap supplies conditional owner widths for its declared
