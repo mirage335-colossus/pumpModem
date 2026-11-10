@@ -404,10 +404,43 @@ causal transport-speed comparison. Its original exact gate failed on dispatch
 counts in 17 slots; the separate post-hoc comparison and missing post-run input
 hash remain explicit. Those results are not native scheduler capacity.
 
-Earlier GPU work found that preparation and simulation dominated a receiver
-trace, and that faster isolated tensor transforms did not improve the complete
-receiver. Earlier accepted forecast timing gates still had unresolved
+The [verified GPU history inventory](triad-gpu-optimization.md#verified-git-history-inventory)
+records successful NVFP4 correlation, split-BF16/TF32x3 phase contractions,
+CUDA graph/fusion, caching and other earlier implementations. Some lag-transform
+experiments improved an isolated operation without improving their complete
+trace; that result must not be generalized to all Tensor Core work. Earlier
+accepted forecast timing gates still had unresolved
 conservative capacity, including numeric point failures. Preserve those lessons
 and [precision failures](gpu-precision-controls.md#retained-lessons), not obsolete
 executable campaigns. No full, sustained, multi-day, exhaustive or heavy run is
 a routine fallback when bounded current evidence is inconclusive.
+
+### Earlier CPU implementations worth reconsidering
+
+The 10 November history audit also found the following CPU lineages. Ratios
+compare each historical implementation with its own contemporaneous baseline;
+they are not comparisons with the current complete `IndependentApskV2` receiver.
+Several wins were native kernels inside the Python-controlled receiver and
+survived its migration. Deleting a Python caller does not imply deleting its
+algorithm. These concise findings and Git references replace any need to restore
+obsolete source trees or benchmark campaigns.
+
+| Implementation and historical reference | Measured advantage | Current disposition and limits |
+| --- | --- | --- |
+| **Singleton-DC sum, direct output and shared pointer tables**, [`345e8d70`](https://github.com/mirage335-colossus/pumpModem/blob/345e8d70/docs/validation.md#L100) | DC sum instead of full FFT: nominal fine **1.32–1.35×**, capped-state **1.31× / 1.47×**; score delta ≤3.98e-13. Separate output/pointer-table change reduced fine time **9.2% / 4.7%** at six/twelve workers. | Native normalized DC sum, caller-owned scratch and shared pinned tiles remain. Historical percentages do not automatically apply to current orchestration. |
+| **Fused mapped rendering/projection/statistics and paired chronological blocks**, stored in `3b423f93`; [findings](validation.md#receiver-restructuring) | Rows 7/4 fine throughput **1.750× / 1.664×**; CPU time down **37.0% / 31.4%**. Gaussian jobs 144→72 and worker submissions 1776→288 with logical references preserved. | Paired native mapped kernel and block updates substantially survive. Measured on dirty `247b7202`; three critical source hashes match `3b423f93`, not an assertion that its whole tree was the measured build. |
+| **Shared observation spectra, native rank-two scoring and bounded peak selection**, `c54e2469`; [findings](https://github.com/mirage335-colossus/pumpModem/blob/89945e83/docs/validation.md#L744) | Row-4 noise **451.572→295.567 ms, 1.528×**; independent-frequency holdout **1.463×**. All 1,248 peak identities, order and published scores per look matched bitwise. | Old bridge removed; shared spectra, quadratic scores and bounded selection survive in native coarse processing. Critical measured source hashes match `c54e2469`. |
+| **Candidate-parallel native Gaussian updates and shared Gram validation**, `c54e2469`; [findings](https://github.com/mirage335-colossus/pumpModem/blob/89945e83/docs/validation.md#L760) | Row-7 twelve-worker fine **403.174→334.730 ms, 1.204×**; model phase **97.034→19.366 ms, 5.010×**. Six-worker fine **1.331×**; row 4 only **1.095×**. | Native kernel retained and called directly by current fine receiver. The model-phase gain is not a fivefold complete-receiver gain. |
+| **Cross-block validated mapping geometry reuse**, recorded in `58d7d8ea`; [findings](https://github.com/mirage335-colossus/pumpModem/blob/89945e83/docs/validation.md#L789) | Row-7 continuation **329.192→301.838 ms, 8.31%** lower; row-4 cold branch **4.14%** lower. Exact scores, state order, fills and logical references. | Exact cross-block descriptor-plan reuse is not established in the current per-render/tap preparation. Worth checking in native code; removal of Python overhead can change its benefit. |
+| **Overlapping ready receiver windows**, recorded in `c54e2469`; [findings](https://github.com/mirage335-colossus/pumpModem/blob/89945e83/docs/validation.md#L983) | Two-controller discriminator **1.375×**; production five-window ABBA **21.6792→18.9520 s, 1.144×**, busy-core equivalents **2.909→3.566**. | Ready-window overlap survives in-process. Measured scheduler was dirty `0751d4dd`; the recording commit includes later accounting fixes. Do not restore processes or claim this establishes current capacity. Later three-controller gains still missed the original 15% gate. |
+| **Earlier native per-slot workers versus shared pool**, `6bc9b0e3` versus `8706d228`; [matched point](validation.md#native-throughput-and-precision-investigation) | Earlier version: total **37.0251 versus 37.6654 s**, first slot **2.6940 versus 7.5399 s**, reported RAM **1.655 versus 3.160 GB**. Current pool completes first message earlier, **21.7266 versus 36.9523 s**. | A real older-native advantage on selected metrics, balanced by current message latency/ownership. One point is not a portable capacity ranking or reason to reduce the global worker default. |
+| **Native FP32 FFT acquisition and close-clock template reuse**, [`c56d0e1a`](https://github.com/mirage335-colossus/pumpModem/blob/c56d0e1a/docs/validation.md#L107) | Complete one-bit-plus-absence captures: **1.429× / 2.074× / 1.984×** under three arrival priors. Five-lane template construction **142.3→53.2 ms, 2.676×**. Conditional 6,544-pair numerical/sensitivity screen had no decision/completion disagreement. | Retired single-carrier receiver, not current triple-waveform qualification; full-bank sensitivity remained unresolved. Generic SIMD FFT code remains, but the old receiver/cache contract was removed in `419e6bae`. |
+| **Shared finite-pulse moments and affine interval coefficient cache**, `5a37b781` / [`12010d87`](https://github.com/mirage335-colossus/pumpModem/blob/12010d87/docs/pulse-moment-validation.md#L142) | Moment prefix **42.4–45.6×**; complete low-carrier captures about **2.6–2.7×**. Later coefficient-cache complete `001` fixture **1.430×**, inclusive pair **34.60574→24.73944 CPU s, 1.399×** ([cache results](https://github.com/mirage335-colossus/pumpModem/blob/12010d87/docs/pulse-moment-validation.md#L680)). | Largest ratio is only 20 s of a 6,400 s symbol; initial-bank coverage was unfinished. Old pulse mathematics must match the new waveform before reuse. Transfer factorization/cache principles, not the retired receiver. |
+| **Scheduled physical moments, shared source curves and candidate-family SIMD**, [`fe3e2c28`](https://github.com/mirage335-colossus/pumpModem/blob/fe3e2c28/docs/scheduled-hops.md#L638), [`7af295c1`](https://github.com/mirage335-colossus/pumpModem/blob/7af295c1/docs/scheduled-hops.md#L889), [`42221b0a`](https://github.com/mirage335-colossus/pumpModem/blob/42221b0a/docs/scheduled-hops.md#L1595) | Identical complete 348 s PCM: **923.545→457.735 CPU s (2.018×)**, **118.884→65.709 wall s (1.809×)**. Subsequent hot/cold source reuse **1.259× CPU / 1.215× wall**. P3 frequency moments/SIMD reduced prefix CPU/wall by **27.6% / 22.6%**. | Retired scheduled/single-carrier architecture; full complex evidence preserved in the complete comparison. P3 prefix had no accepted bit/END and demanding full captures still failed. Duty reduction is not an equal-detector speedup. |
+
+The earlier single-carrier implementations were removed in `419e6bae` for
+canonical-stack consolidation; their deletion did not disprove the recorded
+gains. Algorithmic factorization, reuse over natural signal intervals and grouping
+exactly shared preparation remain useful research directions. Current native
+CPU comparisons need matched waveform, public work, resource ownership and
+complete service measurements before selecting an older technique.

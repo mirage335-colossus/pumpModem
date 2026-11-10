@@ -14,6 +14,12 @@ accelerator.** Do not let a familiar A100/A5000 or one slow small-matrix experim
 silently determine the development target. Qualify the actual precision and
 complete-work speedup on the selected hardware.
 
+Historical Tensor Core work includes successful NVFP4 DSP correlation and
+split-BF16/TF32x3 phase contractions. See the [verified Git inventory](triad-gpu-optimization.md#verified-git-history-inventory)
+for measured wins, instruction evidence and integration limits. A failed small
+FP16 Gram or lag-search replacement is not evidence that Tensor Cores never
+helped this project; qualification of the current backend is a separate question.
+
 Use efficient search, batched correlations, reusable device-resident templates
 and buffers, and suitable matrix shapes where measurements support them.
 Reduced input precision with higher-precision accumulation or small sensitive
