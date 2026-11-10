@@ -945,7 +945,7 @@ private:
         if(b.toggle) {
             // value() also resets FLTK's press baseline. Preserve its
             // pending toggle until release, including drag cancellation.
-            if(Fl::pushed()!=b.toggle)b.toggle->value(state.checked);
+            if(Fl::pushed()!=b.toggle||!view.enabled)b.toggle->value(state.checked);
             label(b.toggle,view.control.label);
         }
         if(b.records){b.records->configure(c);b.records->apply(state);}

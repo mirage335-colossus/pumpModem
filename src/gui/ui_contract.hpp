@@ -10,13 +10,12 @@
 namespace datapump::gui::ui {
 enum class Page { console, compression, flow, transmission, planner, fast_modem, fhss, count };
 enum class Field {
-    callsign, grid, repeatable, helper_power, helper_ratio_limit, helper_frequency, helper_callsign, simulation, link_power, link_loss, link_noise,
-    simulation_confidence, simulation_cpu_time, simulation_gpu_time,
+    callsign, grid, repeatable, helper_power, helper_ratio_limit, helper_callsign, simulation, link_power, link_loss, link_noise,
     simulation_oscillator, simulation_oscillator_detail, rf_oscillator, rf_shift, spread_preset, selective_perturbation, search_margin, oscillator_reference, oscillator_sideband,
     clock_accuracy, clock_region, clock_offset, audio_error, dsss_factor, dsss_version, fhss,
     oscillator_search_detail, lpi_estimate, planner_target, planner_command,
     key, message, binary,
-    qr_brightness, send_key, device, mono, live_duplex, volume, exclusive, bandwidth, carrier, snr, long_snr, receive_snr, pattern, fec, dsp_workspace,
+    qr_brightness, send_key, device, mono, live_duplex, volume, exclusive, bandwidth, carrier, snr, fec, dsp_workspace,
     files, signals, mode, status, airtime, force_transmit, key_path, message_label, binary_label,
     diagnostics, inspection, flow_detail, transmission_detail, payload_alphabet,
     reference_alphabet, waveform_zoom, short_bits, short_bits_detail, received_raw_bits,
@@ -25,7 +24,7 @@ enum class Field {
     fast_device, fast_mono, fast_volume, fast_exclusive, fast_encryption, fast_key, fast_key_path, fast_source, fast_text, fast_file, fast_status,
     fast_progress, fast_rate, fast_tracking, fast_correction, fast_auth, fast_detail, fast_history, fast_airtime, fast_diagnostics, fast_snr, fast_qr_brightness, fast_files,
     legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_status, legacy_device, legacy_volume, legacy_exclusive, legacy_mono,
-    search_arithmetic, doppler, fhss_list, fhss_list_status, receiver_strategy, receiver_cpu_budget, sched_hop, sched_frequency_search, sched_hop_dilution,
+    search_arithmetic, doppler, fhss_list, fhss_list_status, receiver_strategy, receiver_cpu_budget,
     symbol_burst, symbol_burst_random, count
 };
 enum class Command {
@@ -37,7 +36,7 @@ enum class Command {
     resume_recovery, cancel_recovery,
     planner_target, planner_load_command, planner_stronger, planner_weaker, planner_example_short, planner_example_lpi,
     planner_fast, planner_day, planner_clock, planner_toggle_details, planner_toggle_draft,
-    planner_power, planner_loss, planner_noise, planner_apply_short, planner_apply_long,
+    planner_power, planner_loss, planner_noise,
     planner_power_100w, planner_power_4w, planner_power_1w, planner_power_100mw,
     planner_power_2mw, planner_power_1mw, planner_power_30uw, planner_power_1uw,
     fast_open_key, fast_generate_key, fast_choose_file, fast_transmit, fast_listen, fast_cancel, fast_save, fast_use_text, fast_clear_received, fast_copy_signal, fast_paste_signal, fast_toggle_qr_expanded,

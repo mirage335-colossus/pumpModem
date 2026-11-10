@@ -16,6 +16,13 @@ remain visible for future reconnection, but its transmitter and receiver are
 unavailable in the GUI. Selecting Robust does not start a modem, simulation, or
 receive session. See [current Robust architecture and status](robust-current.md).
 
+Robust keeps one Target SNR, shared by Console, Link Planner and the saved
+`--target-snr` option, with a default of 32 dB-Hz. There are no separate short,
+long or receive-list targets. Waveform selection uses the canonical automatic
+defaults; Helper placement uses the fixed high/low pilots and separate auxiliary
+tone. Pattern/tone and Helper frequency controls and their launch overrides are
+removed. This does not change the receiver software-worker allocation.
+
 The **Link Planner** retains its controls, presets, command editor, general
 link-budget arithmetic, and generic plots. Robust receive-probability, CPU-pace,
 clock-search, and workspace forecasts are unavailable; see the concise

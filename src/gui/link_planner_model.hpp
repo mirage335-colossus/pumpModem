@@ -1,6 +1,5 @@
 #pragma once
 #include "datapump/transfer.hpp"
-#include "datapump/tuning.hpp"
 #include <functional>
 #include <memory>
 #include <optional>
@@ -12,8 +11,7 @@ namespace datapump::gui::planner {
 // until the canonical triad backend is connected to the application.
 struct Inputs {
     transfer::Options options;
-    tuning::PatternMode mode=tuning::PatternMode::auto_pattern;
-    double target_db_hz=-8;
+    double target_db_hz=32;
     double tx_dbm=3;
     double path_loss_db=120;
     double noise_density_dbm_hz=-164;

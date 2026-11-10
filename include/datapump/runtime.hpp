@@ -11,7 +11,7 @@ namespace runtime {
 // Available physical RAM (and process/container headroom where exposed).
 // DSP signal history is independent of the received-content cache limit.
 std::size_t available_memory_bytes();
-std::size_t dsp_workspace_budget(unsigned percent = 50);
+std::size_t dsp_workspace_budget(unsigned percent = 75);
 // Capture the default once, so ordinary Options/Settings copies keep a stable
 // budget. A user-selected percentage can be resolved again on configuration.
 std::size_t default_dsp_workspace_bytes();

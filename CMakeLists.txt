@@ -683,6 +683,7 @@ if(NOT DATAPUMP_BUILD_WASM)
       target_sources(${_target} PRIVATE src/audio_policy.cpp)
     elseif(_type STREQUAL "EXECUTABLE" AND
         ("datapump_gui_application" IN_LIST _links OR
+         "datapump_terminal_ui" IN_LIST _links OR "datapump_framebuffer" IN_LIST _links OR
          _target MATCHES "^(pump|datapump-gui|datapump-tui|datapump-fb|test_gui_|test_fast_|test_legacy_|fast_|acoustic_)" OR
          _target MATCHES "^test_(binary_editor|inspection_page|gui_bitmaps)$"))
       target_link_libraries(${_target} PRIVATE datapump_audio_native)

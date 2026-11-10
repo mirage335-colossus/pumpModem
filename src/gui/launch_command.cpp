@@ -3,7 +3,6 @@
 #include "fhss_profile.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/clock_sync.hpp"
-#include "datapump/sched_hop.hpp"
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -92,12 +91,6 @@ void helper_callsign(std::string_view text) {
     if(text.size()>16||std::any_of(text.begin(),text.end(),[](unsigned char ch){return ch<32||ch>126;}))
         invalid("Helper carrier callsign must contain at most 16 printable ASCII characters.");
 }
-double sched_frequency_search(std::string_view text) {
-    const auto value=number(text,"--sched-frequency-search",1,32);
-    if(value!=1&&value!=2&&value!=4&&value!=8&&value!=16&&value!=32)
-        invalid("--sched-frequency-search must be 1, 2, 4, 8, 16, or 32.");
-    return value;
-}
 unsigned workspace(std::string_view text) {
     if(!text.empty()&&text.back()=='%')text.remove_suffix(1);
     if(text=="25")return 25;
@@ -158,19 +151,15 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         const std::string_view argument=arguments[i];
         const auto equal=argument.find('=');
         const auto flag=argument.substr(0,equal);
-        if(flag=="--auto-pattern") {
-            if(equal!=std::string_view::npos)invalid("--auto-pattern does not take a value.");
-            result.pattern="auto-pattern";continue;
-        }
         const bool known=flag=="--tx-dbm"||flag=="--path-loss-db"||flag=="--noise-dbm-hz"||
-            flag=="--oscillator"||flag=="--target-snr"||flag=="--short-target-snr"||flag=="--long-target-snr"||
-            flag=="--rate"||flag=="--bw"||flag=="--carrier"||flag=="--dsp-workspace"||flag=="--pattern"||
+            flag=="--oscillator"||flag=="--target-snr"||
+            flag=="--rate"||flag=="--bw"||flag=="--carrier"||flag=="--dsp-workspace"||
             flag=="--spread-preset"||flag=="--selective-perturbation"||flag=="--rf-oscillator"||flag=="--shift"||flag=="--rf-shift"||flag=="--rf-carrier"||flag=="--search-margin"||
             flag=="--reference"||flag=="--sideband"||flag=="--lf-reference"||
-            flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--dsss-mode"||flag=="--search-arithmetic"||flag=="--receiver-strategy"||flag=="--receiver-cpu-budget"||flag=="--doppler"||flag=="--fhss"||flag=="--sched-hop"||flag=="--sched-hop-dilution"||flag=="--sched-frequency-search"||flag=="--fhss-list"||flag=="--fhss-list-file"||flag=="--live-duplex"||flag=="--hardware-channel-test"||
+            flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--dsss-mode"||flag=="--search-arithmetic"||flag=="--receiver-strategy"||flag=="--receiver-cpu-budget"||flag=="--doppler"||flag=="--fhss"||flag=="--fhss-list"||flag=="--fhss-list-file"||flag=="--live-duplex"||flag=="--hardware-channel-test"||
             flag=="--keyfile"||flag=="--keyset"||flag=="--key-name"||flag=="--tx-key"||
             flag=="--symbol-burst"||flag=="--symbol-burst-random"||
-            flag=="--helper-power"||flag=="--helper-ratio-limit"||flag=="--helper-frequency"||flag=="--helper-callsign";
+            flag=="--helper-power"||flag=="--helper-ratio-limit"||flag=="--helper-callsign";
         if(!known)invalid("Unknown launch option: "+std::string(flag));
         std::string_view value;
         if(equal!=std::string_view::npos)value=argument.substr(equal+1);
@@ -183,16 +172,10 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         if(flag=="--tx-dbm")result.tx_dbm=number(value,flag,-200,100);
         else if(flag=="--helper-power")result.helper_power_w=helper_power(value);
         else if(flag=="--helper-ratio-limit")result.helper_ratio_limit_db=helper_ratio(value);
-        else if(flag=="--helper-frequency") {
-            if(value!="high")invalid("--helper-frequency supports only high; low and 0 Hz are no longer supported.");
-            result.helper_frequency=value;
-        }
         else if(flag=="--helper-callsign")result.helper_callsign=value;
         else if(flag=="--path-loss-db")result.path_loss_db=number(value,flag,0,500);
         else if(flag=="--noise-dbm-hz")result.noise_dbm_hz=number(value,flag,-250,0);
         else if(flag=="--target-snr")result.target_db_hz=number(value,flag,-200,200);
-        else if(flag=="--short-target-snr")result.short_target_db_hz=number(value,flag,-200,200);
-        else if(flag=="--long-target-snr")result.long_target_db_hz=number(value,flag,-200,200);
         else if(flag=="--rate"||flag=="--bw")result.rate_hz=frequency(value,flag,tuning::minimum_bandwidth_hz);
         else if(flag=="--carrier")result.carrier_hz=frequency(value,flag,0,false,std::numeric_limits<double>::max());
         else if(flag=="--dsp-workspace")result.workspace_percent=workspace(value);
@@ -231,11 +214,6 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         }
         else if(flag=="--symbol-burst")result.symbol_burst=modem::parse_symbol_burst_wait(value);
         else if(flag=="--symbol-burst-random")result.symbol_burst_random=modem::parse_symbol_burst_random(value);
-        else if(flag=="--sched-hop")result.sched_hop=modem::sched_hop_multiplier(value);
-        else if(flag=="--sched-frequency-search")result.sched_frequency_search=sched_frequency_search(value);
-        else if(flag=="--sched-hop-dilution") {
-            result.sched_hop_dilution=modem::sched_hop_active_hops(value);
-        }
         else if(flag=="--live-duplex") {
             if(value!="yes"&&value!="no")invalid("--live-duplex must be yes or no.");
             result.full_duplex=value=="yes";
@@ -282,15 +260,12 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         else if(flag=="--sideband") {
             if(value!="upper")invalid("Only upper sideband is supported; Carrier minus Shift is the real stream frequency.");
         }
-        else if(flag=="--pattern")result.pattern=std::string(tuning::pattern_mode_name(tuning::parse_pattern_mode(value)));
     }
     if(carrier_alias) {
         if(result.carrier_hz&&*result.carrier_hz!=*carrier_alias)
             invalid("--carrier and --rf-carrier must specify the same absolute frequency.");
         result.carrier_hz=carrier_alias;
     }
-    if(result.sched_hop&&*result.sched_hop>1&&result.sched_hop_dilution&&*result.sched_hop_dilution>*result.sched_hop)
-        invalid("Sched_Hop dilution cannot exceed its enabled multiplier.");
     if(result.fhss_list&&result.fhss_list_file)invalid("Use only one of --fhss-list and --fhss-list-file.");
     // Omitted Doppler preserves the destination value. Validate a complete
     // triplet here; the controller validates every partial patch against the
@@ -328,14 +303,9 @@ std::string format(const Patch& settings) {
     const auto add=[&](std::string flag,std::string value) {
         arguments.push_back(std::move(flag));arguments.push_back(std::move(value));
     };
-    if(settings.pattern) {
-        if(*settings.pattern=="auto-pattern")arguments.emplace_back("--auto-pattern");
-        else add("--pattern",*settings.pattern);
-    }
     if(settings.tx_dbm)add("--tx-dbm",numeric(*settings.tx_dbm));
     if(settings.helper_power_w)add("--helper-power",numeric(*settings.helper_power_w));
     if(settings.helper_ratio_limit_db)add("--helper-ratio-limit",numeric(*settings.helper_ratio_limit_db));
-    if(settings.helper_frequency)add("--helper-frequency",*settings.helper_frequency);
     if(settings.helper_callsign)arguments.push_back("--helper-callsign="+*settings.helper_callsign);
     if(settings.path_loss_db)add("--path-loss-db",numeric(*settings.path_loss_db));
     if(settings.noise_dbm_hz)add("--noise-dbm-hz",numeric(*settings.noise_dbm_hz));
@@ -347,8 +317,6 @@ std::string format(const Patch& settings) {
     if(settings.search_margin)add("--search-margin",numeric(*settings.search_margin));
     if(settings.reference)add("--reference",*settings.reference);
     if(settings.target_db_hz)add("--target-snr",numeric(*settings.target_db_hz));
-    if(settings.short_target_db_hz)add("--short-target-snr",numeric(*settings.short_target_db_hz));
-    if(settings.long_target_db_hz)add("--long-target-snr",numeric(*settings.long_target_db_hz));
     if(settings.rate_hz)add("--rate",numeric(*settings.rate_hz));
     if(settings.carrier_hz)add("--carrier",numeric(*settings.carrier_hz));
     if(settings.doppler)add("--doppler",tuning::parse_doppler(*settings.doppler).canonical);
@@ -365,9 +333,6 @@ std::string format(const Patch& settings) {
         add("--receiver-cpu-budget",numeric(*settings.receiver_cpu_budget));
     }
     if(settings.full_duplex)add("--live-duplex",*settings.full_duplex?"yes":"no");
-    if(settings.sched_hop_dilution)add("--sched-hop-dilution",std::string(modem::sched_hop_dilution_id(*settings.sched_hop_dilution)));
-    if(settings.sched_hop)add("--sched-hop",std::string(modem::sched_hop_id(*settings.sched_hop)));
-    if(settings.sched_frequency_search)add("--sched-frequency-search",numeric(sched_frequency_search(numeric(*settings.sched_frequency_search))));
     if(settings.fhss)add("--fhss",std::string(fhss::id(fhss::parse(*settings.fhss))));
     if(settings.symbol_burst)add("--symbol-burst",*settings.symbol_burst?std::to_string(*settings.symbol_burst):"off");
     if(settings.symbol_burst_random)add("--symbol-burst-random",std::to_string(*settings.symbol_burst_random));

@@ -501,26 +501,28 @@
         presets->params.value=option->value;re::Event picked;presets->onChange(picked);settle();
         if(editor->content.get()==before||!application.field(ui::Field::planner_target).display_text.empty())
             throw std::runtime_error("Rev inline preset did not edit and commit through its normal binding");
-        const auto planner_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(30);
-        while((!application.enabled(ui::Command::planner_stronger)||
-               !application.enabled(ui::Command::planner_weaker))&&std::chrono::steady_clock::now()<planner_deadline) {
-            application.tick();apply();native_frame();
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }
-        if(!application.enabled(ui::Command::planner_stronger)||!application.enabled(ui::Command::planner_weaker))
-            throw std::runtime_error("Rev planner worker did not prepare native navigation");
-        settle();
         focus_control(editor);re::Event tab;tab.keyboard.tab.id=1;keyDown(tab);
         if(!presets->dropdown->targetFlags.focus)throw std::runtime_error("Rev inline editor Tab order skipped its preset control");
         const auto& order=document->tab_elements();
         const auto position=std::find(order.begin(),order.end(),host->element());
         if(position==order.end()||std::distance(position,order.end())<3)
             throw std::runtime_error("Rev inline document lacks the adjacent target actions");
-        const auto target_index=static_cast<std::size_t>(std::distance(order.begin(),position));
+        const auto action=[&](std::string_view label) -> re::Element* {
+            const auto found=std::find_if(order.begin(),order.end(),[&](auto* element) {
+                const auto* button=dynamic_cast<theme::RevButton*>(element);
+                return button&&button->labelText->content.get()==label;
+            });
+            return found==order.end()?nullptr:*found;
+        };
+        auto* stronger=action("Stronger");auto* weaker=action("Weaker");
+        auto* next=action("Spread-Spectrum DSSS FHSS Example");auto* after=action("Weak-Signal Example");
+        if(!stronger||!weaker||allows_input(stronger)||allows_input(weaker)||!next||!after||
+           !allows_input(next)||!allows_input(after))
+            throw std::runtime_error("Rev planner action availability differs from the current model");
         tab.propagate=true;keyDown(tab);
-        if(!document->tab_elements()[target_index+1]->targetFlags.focus)throw std::runtime_error("Rev inline preset Tab order skipped the next document action");
+        if(!next->targetFlags.focus)throw std::runtime_error("Rev inline preset Tab order skipped the next available document action");
         tab.propagate=true;keyDown(tab);
-        if(!document->tab_elements()[target_index+2]->targetFlags.focus)throw std::runtime_error("Rev document actions did not retain their visual Tab order");
+        if(!after->targetFlags.focus)throw std::runtime_error("Rev document actions did not retain their visual Tab order");
         tab.keyboard.shift.id=1;tab.propagate=true;keyDown(tab);tab.propagate=true;keyDown(tab);
         if(!presets->dropdown->targetFlags.focus)throw std::runtime_error("Rev reverse Tab order skipped the inline preset control");
         focus_control(editor);application.dispatch(ui::Command::planner_toggle_details);settle();

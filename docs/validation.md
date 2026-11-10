@@ -1203,6 +1203,18 @@ qualification for changed code, configurations or physical devices.
 
 ## Historical provenance
 
+A local unreleased GUI review compared `52ace0a` with
+`2a0f3dd142c97909f206145cd4f4eecb1cc72dcf`. Both failed native text replay
+with `receiver search limited | Simulation replay 0%`: an existing 16-entry
+presentation limit discarded newly accepted output, while decoder arbitration
+could retire a pending identity without a separate presentation notification.
+The old receiver is retired; this finding does not establish the behavior of the
+current receiver. Age-based eviction and treating retirement as physical
+completion would violate the historical pending/physical-completion contract.
+The same review reported an independently inherited ALSA clipping failure.
+Its other host and SDK checks and exact historical scope are in Git history;
+they do not qualify current sources or releases.
+
 Useful [pattern](validation-data/triad-v3/2026-11-06-independent-patterns/README.md),
 [spacing](validation-data/triad-v3/2026-11-06-spacing/README.md), and
 [stochastic-channel](validation-data/triad-v3/2026-11-05-stochastic/README.md)

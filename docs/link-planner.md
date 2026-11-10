@@ -3,7 +3,8 @@
 The desktop **Link Planner** tab remains available beside Console. It retains
 its settings controls and presets, launch-command editing, generic link-budget
 arithmetic, and plots. These are interface conveniences; choosing or loading a
-setting does not start transmission.
+setting does not start transmission. Console and Link Planner edit the same
+single Target SNR, initially 32 dB-Hz, saved as `--target-snr`.
 
 The former Robust receive-probability, CPU-pace, clock-coverage, RAM-search,
 and observer/receiver-time forecasts are unavailable. The tab does not run a

@@ -30,7 +30,7 @@ struct Policy {
     double half_window_seconds() const { return 2 * accuracy_seconds + region_seconds / 2; }
 };
 // Default is an acquisition-policy choice, not an unsynchronized hop clock.
-// A keyed FHSS/Sched_Hop calendar assumes GPS alignment at both stations even
+// A keyed FHSS calendar assumes GPS alignment at both stations even
 // when the user leaves that choice at Default. Keep the optional UI/CLI value
 // intact; non-hopping Default retains its broad arrival search.
 inline std::optional<Policy> effective_policy(const std::optional<Policy>& selected,bool hopping) {

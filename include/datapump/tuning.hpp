@@ -4,30 +4,8 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace datapump::tuning {
-enum class PatternMode {
-    auto_keystream, auto_pattern, auto_tone,
-    pattern_3, pattern_4, pattern_6, pattern_8, pattern_12, pattern_16,
-    tone_1, tone_2, tone_3, tone_4, tone_8, tone_32, tone_128,
-    tone_1024, tone_4096, tone_16384
-};
-PatternMode parse_pattern_mode(std::string_view name);
-std::string_view pattern_mode_name(PatternMode mode);
-std::span<const PatternMode> pattern_modes();
-bool tone_mode(PatternMode mode);
-inline constexpr double default_receive_target_db_hz = 32;
-inline constexpr std::size_t maximum_receive_targets = 16;
-inline constexpr std::size_t maximum_receive_target_text = 512;
-struct ReceiveTargets {
-    std::vector<double> values{default_receive_target_db_hz};
-    std::string canonical = "32";
-    bool reset = false;
-};
-// One invalid token resets the complete list. Accept at most 16 finite
-// decimal targets in -200..200 dB-Hz and preserve first-occurrence order.
-ReceiveTargets parse_receive_targets(std::string_view text);
 // target_snr_db_hz is C/N0: signal power / noise power in a 1 Hz bandwidth.
 // Results are integration estimates, not empirical sensitivity guarantees.
 inline constexpr double minimum_bandwidth_hz = modem::minimum_bandwidth_hz;

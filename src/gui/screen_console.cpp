@@ -7,7 +7,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     control.slot=slot; control.menu=menu;
     switch(slot) {
     case Slot::fast_mode:case Slot::bandwidth:case Slot::carrier:case Slot::rf_shift:case Slot::doppler:case Slot::snr:
-    case Slot::long_snr:case Slot::volume:
+    case Slot::volume:
         control.purpose=ControlPurpose::operating_parameter;break;
     case Slot::clear:case Slot::transmit:case Slot::transmit_noise:case Slot::transmit_helper:case Slot::cancel:
         control.purpose=ControlPurpose::operation;break;
@@ -16,10 +16,10 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     case Slot::search_margin: case Slot::clock_accuracy: case Slot::clock_region: case Slot::clock_offset: case Slot::audio_error:
         control.purpose=ControlPurpose::planning;break;
     case Slot::device:case Slot::mono:case Slot::live_duplex:case Slot::exclusive:case Slot::key:case Slot::key_actions:
-    case Slot::dsss_factor:case Slot::dsss_version:case Slot::fhss:case Slot::sched_hop:case Slot::sched_hop_dilution:case Slot::sched_frequency_search:
+    case Slot::dsss_factor:case Slot::dsss_version:case Slot::fhss:
     case Slot::symbol_burst:case Slot::symbol_burst_random:
-    case Slot::helper_power:case Slot::helper_ratio_limit:case Slot::helper_frequency:case Slot::helper_callsign:
-    case Slot::pattern:case Slot::fec:case Slot::dsp_workspace:case Slot::receive_snr:
+    case Slot::helper_power:case Slot::helper_ratio_limit:case Slot::helper_callsign:
+    case Slot::fec:case Slot::dsp_workspace:
     case Slot::developer_mode:case Slot::shellcode_mode:case Slot::send_key:
         control.purpose=ControlPurpose::setup;break;
     case Slot::message:case Slot::binary:case Slot::paste_previous:case Slot::attach_file:
@@ -31,11 +31,11 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     default:break;
     }
     control.persistent=persistent_slot(slot);
-    control.developer_only=slot==Slot::pattern||slot==Slot::fec||slot==Slot::dsp_workspace||
-        slot==Slot::receive_snr||slot==Slot::profile_reference||slot==Slot::callsign||
+    control.developer_only=slot==Slot::fec||slot==Slot::dsp_workspace||
+        slot==Slot::profile_reference||slot==Slot::callsign||
         slot==Slot::grid||slot==Slot::repeatable||slot==Slot::transmit_helper;
     control.open_upward=slot>=Slot::device;
-    if(slot==Slot::symbol_burst||slot==Slot::symbol_burst_random||slot==Slot::helper_power||slot==Slot::helper_ratio_limit||slot==Slot::helper_frequency||slot==Slot::helper_callsign)control.open_upward=false;
+    if(slot==Slot::symbol_burst||slot==Slot::symbol_burst_random||slot==Slot::helper_power||slot==Slot::helper_ratio_limit||slot==Slot::helper_callsign)control.open_upward=false;
     control.font_size=control.multiline?16:13;
     if(control.kind==Kind::bitmap)control.font_size=11;
     if(menu==Menu::keyfile)control.menu_label="Keyfile";
@@ -50,12 +50,10 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::developer_mode)control.help="Show advanced controls and inspection tabs. Hiding them keeps their current settings, including command-line overrides.";
     if(slot==Slot::helper_power)control.help="Saved Helper power preference in watts. Zero disables Helper. Robust audio is unavailable until the canonical triad backend is connected.";
     if(slot==Slot::helper_ratio_limit)control.help="Saved maximum Helper/data power ratio in dB. This control does not adjust physical radio power.";
-    if(slot==Slot::helper_frequency)control.help="Saved Helper placement preference. The canonical triad backend must provide the placement and audio route.";
     if(slot==Slot::helper_callsign)control.help="Up to 16 printable ASCII characters saved for Helper metadata. Editing this field does not change the message.";
     if(slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
     if(slot==Slot::callsign)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. A valid value of at most 16 printable ASCII characters also copies to Helper Carrier Callsign. Helper-only edits never change this value or the message.";
     if(slot==Slot::repeatable)control.help="Prepends REPEATABLE-XXXXXXXX and a space before the CQ greeting. Each message edit generates 8 random consonants or digits. Automatically turns off for attachments or messages over 256 bytes, including the prefix.";
-    if(slot==Slot::simulation_confidence||slot==Slot::simulation_cpu_time||slot==Slot::simulation_gpu_time)control.font_size=12;
     if(slot==Slot::simulation)
         control.help="Saved simulation preference. Robust simulation and physical audio are unavailable until the canonical triad backend is connected.";
     if(slot==Slot::live_duplex) {
@@ -63,17 +61,11 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Saved duplex preference for future triad audio integration. This control does not activate Robust audio.";
     }
     if(slot==Slot::link_power)
-        control.help="Average transmit power for the shared link budget and RX estimate. Choose a preset or enter power in W, mW, uW, µW or dBm. This is a planning assumption; adjust the radio's output power separately.";
+        control.help="Average transmit power for the shared link budget. Choose a preset or enter power in W, mW, uW, µW or dBm. This is a planning assumption; adjust the radio's output power separately.";
     if(slot==Slot::link_loss)
         control.help="Total loss between transmitter and receiver, in dB, including antenna gains and feed-line losses. Choose a preset or enter a nonnegative value. Received power equals transmit power minus this loss.";
     if(slot==Slot::link_noise)
-        control.help="Receiver noise power in one hertz, in dBm/Hz. Choose a preset or enter a value. Received power minus this noise density gives the signal level used by Link planner and the RX estimate.";
-    if(slot==Slot::simulation_confidence)
-        control.help="Receiver confidence is unavailable until the canonical triad backend is connected and measured.";
-    if(slot==Slot::simulation_cpu_time)
-        control.help="CPU estimates are unavailable. Future Robust performance testing must use minimal hierarchical abbreviated statistical experiments.";
-    if(slot==Slot::simulation_gpu_time)
-        control.help="GPU estimates are unavailable. Future Robust performance testing must use minimal hierarchical abbreviated statistical experiments.";
+        control.help="Receiver noise power in one hertz, in dBm/Hz. Choose a preset or enter a value. Received power minus this noise density gives the signal level used by Link planner.";
     if(slot==Slot::simulation_oscillator)
         control.help="Saved illustrative ADC/DAC oscillator model. It does not discipline or control physical hardware.";
     if(control.field==Field::rf_oscillator)control.help="Saved oscillator model for the radio shift. Baseband clock records a shared reference; selecting it does not control hardware.";
@@ -91,12 +83,6 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::fhss)control.help="Saved sequential hopping preference and optional frequency list. This does not retune physical hardware or enable simultaneous reception.";
     if(slot==Slot::symbol_burst)control.help="Saved whole-symbol waiting preference for future triad integration.";
     if(slot==Slot::symbol_burst_random)control.help="Saved random whole-symbol waiting preference for future triad integration.";
-
-    if(control.field==Field::sched_hop) {
-        control.developer_only=true;
-        control.help="Saved scheduling preference for future triad integration. The retired scheduled receiver is removed.";
-    }
-    if(control.field==Field::sched_frequency_search)control.help="Saved frequency-search preference. No current receiver-bank or coverage claim is made.";
 
     if(slot==Slot::mode)control.help="Robust is unavailable until the canonical triad backend is connected. Fast and Legacy remain separate available modes.";
     if(slot==Slot::paste_previous) {control.font_size=11;control.help="Paste the previous transmitted message back into Message for editing or retransmission.";}
@@ -165,21 +151,12 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::exclusive)control.help=exclusive_audio_help;
     if(slot==Slot::bandwidth)control.help="Saved nominal rate in Hz, from 0.001 Hz through 30 MHz. This control does not currently start a Robust waveform.";
     if(slot==Slot::carrier)control.help="Saved carrier frequency in Hz, kHz, MHz, GHz or THz. Carrier minus Shift is the audio coordinate. This does not retune hardware.";
-    if(slot==Slot::snr)control.help="Saved short-message design C/N0 in dB-Hz. No receiver sensitivity or duration estimate is currently provided.";
-    if(slot==Slot::long_snr)control.help="Saved short-message design C/N0 in dB-Hz. No receiver sensitivity or duration estimate is currently provided.";
-    if(slot==Slot::receive_snr)control.help="Saved receive-target text for future triad integration. No parallel receiver bank is retained.";
+    if(slot==Slot::snr)control.help="Saved receiver target C/N0 in dB-Hz. No receiver sensitivity or duration estimate is currently provided.";
     if(control.field==Field::planner_command) {
         control.document_only=true;control.tab_navigation=true;control.font_size=11;control.submit=Command::none;control.submit_mode=Field::count;
-        control.help="Copy to launch with this plan. Paste settings, then Load. Uses this target for short and long messages. Enter inserts a new line.";
+        control.help="Copy to launch with this plan. Paste settings, then Load. The target is shared with Robust Console. Enter inserts a new line.";
     }
-    if(control.field==Field::planner_target) {control.document_only=true;control.help="Saved planning target only. Receiver-fit calculations are unavailable until canonical triad integration.";}
-    if(control.field==Field::sched_hop || control.field==Field::sched_hop_dilution || control.field==Field::sched_frequency_search) {
-        control.document_only=true;control.developer_only=true;control.purpose=ControlPurpose::setup;
-    }
-    if(control.field==Field::sched_hop_dilution) {
-        control.developer_only=true;control.purpose=ControlPurpose::setup;
-        control.help="Saved active-hop scheduling preference for future triad integration.";
-    }
+    if(control.field==Field::planner_target) {control.document_only=true;control.help="Saved Robust target shared with Console. Receiver-fit calculations are unavailable until canonical triad integration.";}
     if(control.field==Field::search_arithmetic) {
         control.document_only=true;control.developer_only=true;control.purpose=ControlPurpose::setup;
         control.help="Saved arithmetic preference: Default, FP32 minimum or FP64 force. The canonical backend must report effective precision and fallbacks when connected.";
@@ -232,9 +209,6 @@ const std::vector<Control>& console_screen() {
         placed({Kind::text,Field::link_power,Command::none,Bitmap::none,Page::console,2,"Transmit power",1,false,64}, Slot::link_power),
         placed({Kind::text,Field::link_loss,Command::none,Bitmap::none,Page::console,2,"Path loss",1,false,64}, Slot::link_loss),
         placed({Kind::text,Field::link_noise,Command::none,Bitmap::none,Page::console,2,"Noise (dBm/Hz)",1,false,64}, Slot::link_noise),
-        placed({Kind::label,Field::simulation_confidence,Command::none,Bitmap::none,Page::console,2,"RX estimate"}, Slot::simulation_confidence),
-        placed({Kind::label,Field::simulation_cpu_time,Command::none,Bitmap::none,Page::console,2,"CPU / Ryzen 5 PRO 5650U"}, Slot::simulation_cpu_time),
-        placed({Kind::label,Field::simulation_gpu_time,Command::none,Bitmap::none,Page::console,2,"GPU / RTX 4090 Laptop (projected)"}, Slot::simulation_gpu_time),
         placed({Kind::text,Field::clock_accuracy,Command::none,Bitmap::none,Page::console,3,"Clock sync",1,false,128}, Slot::clock_accuracy),
         placed({Kind::text,Field::clock_region,Command::none,Bitmap::none,Page::console,3,"Region",1,false,128}, Slot::clock_region),
         placed({Kind::text,Field::clock_offset,Command::none,Bitmap::none,Page::console,3,"Offset",1,false,128}, Slot::clock_offset),
@@ -246,7 +220,6 @@ const std::vector<Control>& console_screen() {
         placed({Kind::text,Field::search_margin,Command::none,Bitmap::none,Page::console,3,"Margin",1,false,64}, Slot::search_margin),
         placed({Kind::text,Field::helper_power,Command::none,Bitmap::none,Page::console,4,"Helper Carrier Power",1,false,64}, Slot::helper_power),
         placed({Kind::choice,Field::helper_ratio_limit,Command::none,Bitmap::none,Page::console,4,"Helper Carrier Ratio Limit"}, Slot::helper_ratio_limit),
-        placed({Kind::choice,Field::helper_frequency,Command::none,Bitmap::none,Page::console,4,"Helper Carrier Frequency"}, Slot::helper_frequency),
         placed({Kind::text,Field::helper_callsign,Command::none,Bitmap::none,Page::console,4,"Helper Carrier Callsign",1,false,16}, Slot::helper_callsign),
         placed({Kind::action,Field::count,Command::transmit_helper,Bitmap::none,Page::console,4,"Helper"}, Slot::transmit_helper),
         placed({Kind::text,Field::planner_target,Command::none,Bitmap::none,Page::planner,3,"Target SNR (dB-Hz)",1,false,64}, Slot::none),
@@ -261,26 +234,19 @@ const std::vector<Control>& console_screen() {
         placed({Kind::action,Field::count,Command::show_key_folder,Bitmap::none,Page::console,2,"Show key folder"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::acknowledge_key_failure,Bitmap::none,Page::console,2,"Keep current keys"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::choice,Field::dsss_factor,Command::none,Bitmap::none,Page::console,3,"Spreading"}, Slot::dsss_factor),
-        placed({Kind::choice,Field::dsss_version,Command::none,Bitmap::none,Page::console,3,"DSSS"}, Slot::dsss_version),
+        placed({Kind::choice,Field::dsss_version,Command::none,Bitmap::none,Page::console,3,"Added Symbols"}, Slot::dsss_version),
         placed({Kind::choice,Field::fhss,Command::none,Bitmap::none,Page::console,3,"FHSS"}, Slot::fhss),
         placed({Kind::choice,Field::symbol_burst,Command::none,Bitmap::none,Page::console,3,"Symbol_Burst"}, Slot::symbol_burst),
         placed({Kind::choice,Field::symbol_burst_random,Command::none,Bitmap::none,Page::console,3,"Random extra"}, Slot::symbol_burst_random),
-        placed({Kind::choice,Field::sched_hop,Command::none,Bitmap::none,Page::planner,5,"Sched_Hop"}, Slot::none),
-        placed({Kind::choice,Field::sched_hop_dilution,Command::none,Bitmap::none,Page::planner,5,"Dilution"}, Slot::none),
-        placed({Kind::choice,Field::sched_frequency_search,Command::none,Bitmap::none,Page::planner,5,"Freq search"}, Slot::none),
         placed({Kind::choice,Field::key,Command::none,Bitmap::none,Page::console,3,"Encryption key entry"}, Slot::key),
-        placed({Kind::label,Field::key_path,Command::none,Bitmap::none,Page::console,3,""}, Slot::key_path),
         placed({Kind::text,Field::device,Command::none,Bitmap::none,Page::console,4,"Audio device"}, Slot::device),
         placed({Kind::text,Field::bandwidth,Command::none,Bitmap::none,Page::console,4,"Rate"}, Slot::bandwidth),
         placed({Kind::text,Field::carrier,Command::none,Bitmap::none,Page::console,4,"Carrier"}, Slot::carrier),
         placed({Kind::text,Field::rf_shift,Command::none,Bitmap::none,Page::console,4,"Shift",1,false,64}, Slot::rf_shift),
         placed({Kind::text,Field::doppler,Command::none,Bitmap::none,Page::console,4,"Doppler",1,false,64}, Slot::doppler),
-        placed({Kind::choice,Field::pattern,Command::none,Bitmap::none,Page::console,5,"Pattern / tone"}, Slot::pattern),
         placed({Kind::choice,Field::fec,Command::none,Bitmap::none,Page::console,5,"Error correction"}, Slot::fec),
         placed({Kind::choice,Field::dsp_workspace,Command::none,Bitmap::none,Page::console,5,"DSP workspace"}, Slot::dsp_workspace),
-        placed({Kind::text,Field::snr,Command::none,Bitmap::none,Page::console,5,"Short ≤16 B target SNR (dB-Hz)"}, Slot::snr),
-        placed({Kind::text,Field::long_snr,Command::none,Bitmap::none,Page::console,5,"Long / file target SNR (dB-Hz)"}, Slot::long_snr),
-        placed({Kind::text,Field::receive_snr,Command::none,Bitmap::none,Page::console,5,"RX targets (dB-Hz)",1,false,512}, Slot::receive_snr),
+        placed({Kind::text,Field::snr,Command::none,Bitmap::none,Page::console,5,"Target SNR (dB-Hz)"}, Slot::snr),
         placed({Kind::label,Field::message_label,Command::none,Bitmap::none,Page::console,6,"Message"}, Slot::message_label),
         placed({Kind::action,Field::count,Command::paste_previous,Bitmap::none,Page::console,6,"Previous message - click to paste"}, Slot::paste_previous),
         placed({Kind::action,Field::force_transmit,Command::force_transmit,Bitmap::none,Page::console,6,"Force next transmission"}, Slot::force_transmit),

@@ -1333,12 +1333,6 @@ void inline_document_editor() {
         while(Clock::now()<until)Fl::wait(.005);
     };
     app.application.select_page(ui::Page::planner);refresh();
-    const auto planner_deadline=Clock::now()+std::chrono::seconds(30);
-    while((!app.application.enabled(ui::Command::planner_stronger)||
-           !app.application.enabled(ui::Command::planner_weaker))&&Clock::now()<planner_deadline)Fl::wait(.005);
-    require(app.application.enabled(ui::Command::planner_stronger)&&
-            app.application.enabled(ui::Command::planner_weaker),"Planner worker did not prepare native navigation");
-    refresh();
     const auto help_for=[](ui::Field field) {
         const auto& controls=ui::console_screen();
         const auto found=std::find_if(controls.begin(),controls.end(),[&](const auto& control){return control.field==field;});
@@ -1375,8 +1369,8 @@ void inline_document_editor() {
         Fl::e_keysym=FL_Tab;Fl::e_state=reverse?FL_SHIFT:0;Fl::e_text=tab_text;Fl::e_length=1;Fl::handle(FL_KEYDOWN,window);
     };
     tab(false);require(Fl::focus()==presets,"Inline Tab did not move from editor to presets");
-    tab(false);require(Fl::focus()==find_button(*document,"Stronger"),"Inline Tab skipped the adjacent Stronger action");
-    tab(false);require(Fl::focus()==find_button(*document,"Weaker"),"Inline Tab skipped the adjacent Weaker action");
+    tab(false);require(Fl::focus()==find_button(*document,"Spread-Spectrum DSSS FHSS Example"),"Inline Tab did not skip unavailable planner actions");
+    tab(false);require(Fl::focus()==find_button(*document,"Weak-Signal Example"),"Inline Tab skipped the next available action");
     tab(true);tab(true);tab(true);require(Fl::focus()==editor,"Inline reverse Tab did not restore document visual order");
     Fl::e_keysym=key;Fl::e_state=state;Fl::e_text=event_text;Fl::e_length=length;
     const auto* original=editor;editor->value("-");editor->do_callback();refresh();
@@ -1746,6 +1740,9 @@ int main(int argc,char** argv) {
         }
         if(argc==2&&std::string_view(argv[1])=="--expanded-hover") {
             theme::apply_palette();expanded_bitmap_hover_repaint();return 0;
+        }
+        if(argc==2&&std::string_view(argv[1])=="--compression-labels") {
+            theme::apply_palette();compression_page_labels();return 0;
         }
         if(argc!=1)throw std::runtime_error("Unknown FLTK adapter probe");
         theme::apply_palette();

@@ -35,30 +35,8 @@ void parsing_and_formatting() {
     rejects([&]{launch_command::format(bad_burst);},"Invalid programmatic Symbol_Burst export accepted");
     bad_burst.symbol_burst=1;bad_burst.symbol_burst_random=4;
     rejects([&]{launch_command::format(bad_burst);},"Invalid programmatic random wait export accepted");
-    for(const auto* multiplier:{"0","3","5"}) for(const auto* dilution:{"0","3"}) {
-        const auto patch=launch_command::parse(std::string("--sched-hop ")+multiplier+
-            " --sched-frequency-search 8 --sched-hop-dilution "+dilution);
-        check(patch.sched_hop.has_value()&&patch.sched_frequency_search==8&&
-            patch.sched_hop_dilution==(std::string_view(dilution)=="0"?1U:3U)&&
-            launch_command::parse(launch_command::format(patch))==patch,
-            "Moderate schedule/dilution lost exact parameter-list semantics");
-    }
-    for(const auto* disabled:{"disabled","off","1"})
-        check(launch_command::parse(std::string("--sched-hop ")+disabled).sched_hop==1,
-              "Legacy disable alias changed meaning");
-    const auto ordinary=launch_command::parse("--sched-hop 5 --sched-hop-dilution 1");
-    check(ordinary.sched_hop_dilution==1&&launch_command::format(ordinary).find("--sched-hop-dilution 0")!=std::string::npos,
-          "Legacy ordinary dilution did not export canonical zero");
-    check(!launch_command::parse("--rate 1200").sched_hop&&
-        !launch_command::parse("--rate 1200").sched_frequency_search&&
-        !launch_command::parse("--rate 1200").sched_hop_dilution,
-        "Older partial commands must leave scheduled burst settings omitted");
-    for(const auto* bad:{"--sched-hop 2","--sched-hop 10","--sched-hop 100","--sched-hop 1k","--sched-hop 1000",
-        "--sched-hop 10k","--sched-hop 10000","--sched-hop nan","--sched-frequency-search 3",
-        "--sched-frequency-search 0","--sched-frequency-search 64","--sched-frequency-search nan",
-        "--sched-hop-dilution 2","--sched-hop-dilution 37","--sched-hop-dilution 10001",
-        "--sched-hop-dilution 1.5","--sched-hop-dilution nan"})
-        rejects([&]{launch_command::parse(bad);},"Unsupported/retired scheduled setting accepted");
+    for(const auto* retired:{"--sched-hop 3","--sched-hop-dilution 3","--sched-frequency-search 8"})
+        rejects([&]{launch_command::parse(retired);},"Retired scheduled option accepted");
     for(const auto* strategy:{"auto","existing","complex","amplitude"}) {
         const auto patch=launch_command::parse(std::string("--receiver-strategy ")+strategy+" --receiver-cpu-budget 0.37");
         check(patch.receiver_strategy==strategy&&patch.receiver_cpu_budget==.37&&
@@ -198,11 +176,11 @@ void parsing_and_formatting() {
     for(const auto* command:{"--tx-key all","--keyfile=","--key-name=","--tx-key none --key-name none"})
         rejects([&]{launch_command::parse(command);},"invalid key reference or conflicting selection accepted");
     const auto settings=launch_command::parse(
-        "./datapump-gui --auto-pattern --tx-dbm 3 --path-loss-db=170 --noise-dbm-hz -164 "
+        "./datapump-gui --tx-dbm 3 --path-loss-db=170 --noise-dbm-hz -164 "
         "--oscillator gpsdo-ocxo --target-snr -8 --rate 3600 --carrier 1500 --dsp-workspace 50%");
     check(settings.tx_dbm==3&&settings.path_loss_db==170&&settings.noise_dbm_hz==-164&&
           settings.target_db_hz==-8&&settings.rate_hz==3600&&settings.carrier_hz==1500&&
-          settings.workspace_percent==50&&settings.oscillator=="gpsdo-ocxo"&&settings.pattern=="auto-pattern",
+          settings.workspace_percent==50&&settings.oscillator=="gpsdo-ocxo",
           "complete command did not parse its concrete settings");
     const auto command=launch_command::format(settings);
     check(launch_command::parse(command)==settings,"canonical command must round-trip every setting exactly");
@@ -211,7 +189,9 @@ void parsing_and_formatting() {
         check(launch_command::parse(launch_command::format(changed))==changed,
               "new Rate presets must round-trip exact numeric launch settings");
     }
-    check(command.find("--auto-pattern")!=std::string::npos&&command.find("--target-snr -8")!=std::string::npos&&
+    check(command.find("--auto-pattern")==std::string::npos&&command.find("--pattern")==std::string::npos&&command.find("--helper-frequency")==std::string::npos&&
+          command.find("--short-target-snr")==std::string::npos&&command.find("--long-target-snr")==std::string::npos&&
+          command.find("--target-snr -8")!=std::string::npos&&
           command.find("--rate 3600")!=std::string::npos,"canonical command must use concise readable flags and numbers");
     const auto radio=launch_command::parse("--oscillator crystal --rf-oscillator gpsdo-ocxo --carrier 10.0015MHz --shift 10MHz --search-margin 3x --reference shared-radio --sideband upper");
     check(radio.rf_shift_hz==10000000&&radio.search_margin==3&&radio.reference=="shared-radio"&&radio.rf_oscillator=="gpsdo-ocxo"&&radio.carrier_hz==10001500,
@@ -253,13 +233,8 @@ void parsing_and_formatting() {
     check(launch_command::parse(launch_command::format(precise_frequency))==precise_frequency,
         "Frequency export discarded a fractional Hz above GHz");
     auto precise=settings;precise.target_db_hz=std::nextafter(-47.,-48.);
-    precise.short_target_db_hz=-20.1234567890123;precise.long_target_db_hz=23;
     check(launch_command::parse(launch_command::format(precise))==precise,
-          "formatting must not change sample-sensitive target precision or individual overrides");
-    for(const auto mode:datapump::tuning::pattern_modes()) {
-        auto pattern=settings;pattern.pattern=datapump::tuning::pattern_mode_name(mode);
-        check(launch_command::parse(launch_command::format(pattern))==pattern,"every actual pattern mode must retain its identity");
-    }
+          "formatting must not change the single target's precision");
     for(const auto& oscillator:datapump::tuning::oscillator_presets()) {
         auto model=settings;
         if(!oscillator.baseband_supported)model.rf_oscillator=oscillator.id;else model.oscillator=oscillator.id;
@@ -283,42 +258,31 @@ void parsing_and_formatting() {
     const auto portable=launch_command::parse(R"('.\datapump-gui.exe' --bw 1MHz --carrier 3e6 --tx-dbm -15)");
     check(portable.rate_hz==1000000&&portable.carrier_hz==3000000&&portable.tx_dbm==-15,
           "Windows separators and Hz unit aliases must survive tokenization");
-    const auto duplicate=launch_command::parse("--rate 1200 --bw 3600 --tx-dbm 1 --tx-dbm=3 --short-target-snr -9 --target-snr -8");
-    check(duplicate.rate_hz==3600&&duplicate.tx_dbm==3&&duplicate.short_target_db_hz==-9&&duplicate.target_db_hz==-8,
-          "last duplicate wins while explicit short/long overrides remain independent of common-target order");
+    const auto duplicate=launch_command::parse("--rate 1200 --bw 3600 --tx-dbm 1 --tx-dbm=3 --target-snr -8 --target-snr -9");
+    check(duplicate.rate_hz==3600&&duplicate.tx_dbm==3&&duplicate.target_db_hz==-9,
+          "last duplicate wins for the single target and other settings");
     const std::vector<std::string> tokens{"--oscillator","GPSDO: OCXO","--rate","3.6 kHz"};
     const auto exact=launch_command::parse_arguments(tokens);
     check(exact.oscillator=="gpsdo-ocxo"&&exact.rate_hz==3600,"startup tokens must be used without another shell parse");
 }
 void helper_settings() {
     for(const auto& value:std::vector<std::pair<std::string,double>>{{"1.5kW",1500},{"100 W",100},{"40W",40},{"2mW",.002},{"30uW",.00003},{"1 µW",.000001},{"1500",1500},{"0",0}}) {
-        auto patch=launch_command::parse("--helper-power '"+value.first+"' --helper-ratio-limit 90dB --helper-frequency high --helper-callsign 'N0CALL/P'");
+        auto patch=launch_command::parse("--helper-power '"+value.first+"' --helper-ratio-limit 90dB --helper-callsign 'N0CALL/P'");
         check(patch.helper_power_w&&std::abs(*patch.helper_power_w-value.second)<1e-12&&patch.helper_ratio_limit_db==90&&
-              patch.helper_frequency=="high"&&patch.helper_callsign=="N0CALL/P","Helper options lost units or values");
+              patch.helper_callsign=="N0CALL/P","Helper options lost units or values");
         check(launch_command::parse(launch_command::format(patch))==patch,"Helper settings do not round trip");
     }
     {
-        const auto patch=launch_command::parse("--helper-frequency high --helper-callsign=''");
+        const auto patch=launch_command::parse("--helper-callsign=''");
         check(patch.helper_callsign==""&&launch_command::parse(launch_command::format(patch))==patch,
-              "Helper empty callsign or frequency selection was discarded");
+              "Helper empty callsign was discarded");
     }
     {
         const auto patch=launch_command::parse("--tx-key none --helper-callsign 1234567890123456");
         check(patch.helper_callsign=="1234567890123456","A 16-character helper callsign was rejected");
     }
-    for(const auto* frequency:{"low","0"}) {
-        try {
-            (void)launch_command::parse(std::string("--helper-frequency ")+frequency);
-            check(false,"Retired Helper placement accepted by launch parser");
-        } catch(const std::invalid_argument& error) {
-            check(std::string_view(error.what()).find("only high")!=std::string_view::npos,
-                  "Retired Helper placement error omitted the supported choice");
-        }
-        launch_command::Patch retired;retired.helper_frequency=frequency;
-        rejects([&]{launch_command::format(retired);},"Retired Helper placement accepted by command export");
-    }
     for(const auto* value:{"--helper-power -1","--helper-power nan","--helper-power 1e308kW",
-        "--helper-ratio-limit 30","--helper-ratio-limit 91","--helper-frequency middle",
+        "--helper-ratio-limit 30","--helper-ratio-limit 91",
         "--tx-key none --helper-callsign 12345678901234567","--helper-callsign 'N0CÄLL' --tx-key none"})
         rejects([&]{launch_command::parse(value);},"Invalid helper setting accepted");
     for(const auto* callsign:{"12345678901234567","N0CÄLL"}) {
@@ -334,7 +298,9 @@ void helper_settings() {
 
 void invalid_commands() {
     for(const auto* command:{"", "  \n\t", "./datapump-gui", "\"\" --tx-dbm 3", "--unknown 1", "--tx-dbm", "--tx-dbm=",
-            "--tx-dbm --path-loss-db 170", "--rate 3600 trailing", "--rate '3600", "--auto-pattern=yes",
+            "--tx-dbm --path-loss-db 170", "--rate 3600 trailing", "--rate '3600",
+            "--auto-pattern", "--pattern auto-pattern", "--helper-frequency high",
+            "--short-target-snr 32", "--long-target-snr 55",
             "--target-snr nan", "--target-snr inf", "--target-snr +-1", "--target-snr 201",
             "--tx-dbm -201", "--tx-dbm 101", "--path-loss-db -1", "--path-loss-db 501",
             "--noise-dbm-hz -251", "--noise-dbm-hz 1", "--rate 0", "--rate .0009", "--rate 31MHz",
@@ -342,7 +308,7 @@ void invalid_commands() {
             "--rf-shift -1", "--rf-shift NaN", "--rf-shift 1e308MHz", "--shift 1e308GHz", "--carrier 1e308THz", "--rate 1GHz", "--carrier '1 2 MHz'", "--carrier '1 GHz extra'", "--carrier '+-1GHz'", "--rf-carrier 0", "--rf-shift 1 --rf-carrier 1 --doppler 0c",
             "--search-margin .99", "--search-margin inf", "--reference imaginary", "--sideband imaginary", "--sideband lower", "--carrier 1500 --shift 1MHz --doppler 0c", "--carrier 1MHz --shift 1MHz --doppler 0c", "--carrier 1500 --rf-carrier 10001500", "--lf-reference 1500",
             "--reference independent --lf-reference 0", "--lf-reference 0 --reference independent", "--rf-oscillator imaginary",
-            "--oscillator imaginary", "--pattern imaginary", "--rate $(touch /tmp/never)",
+            "--oscillator imaginary", "--rate $(touch /tmp/never)",
             "--rate 3600;echo", "--tx-dbm `whoami`"})
         rejects([&]{(void)launch_command::parse(command);},std::string("invalid command was accepted: ")+command);
     rejects([]{(void)launch_command::parse(std::string(8193,'x'));},"oversized command was accepted");
@@ -358,7 +324,7 @@ void startup() {
     // Actual manual launcher settings, reaching the backend callback. --help
     // used to bypass parsing and therefore missed --audio-error default.
     bool manual_started=false;
-    check(invoke({"--pattern","auto-keystream","--tx-dbm","36.020599913279625",
+    check(invoke({"--tx-dbm","36.020599913279625",
         "--path-loss-db","60","--noise-dbm-hz","-164","--oscillator","crystal",
         "--rf-oscillator","gpsdo-xo","--shift","3e7","--search-margin","3",
         "--reference","independent","--target-snr","40","--rate","360",
@@ -374,7 +340,7 @@ void startup() {
                 "manual launcher did not resolve its actual options");return 73;
         })==73&&manual_started,"manual launcher failed before GUI startup");
     unsigned called=0;
-    check(invoke({"--monochrome","--simulation","--auto-pattern","--target-snr=-8","--rate","3.6kHz",
+    check(invoke({"--monochrome","--simulation","--target-snr=-8","--rate","3.6kHz",
                   "--carrier","1500","--dsp-workspace","75%","--keyfile","private keys/key's file",
                   "--key-name","none","--tx-key","named"},[&](Launch launch) {
         ++called;check(!launch.color&&launch.simulation&&launch.settings&&launch.settings->target_db_hz==-8&&
@@ -388,6 +354,8 @@ void startup() {
     {
         struct Restore {std::streambuf* previous;~Restore(){std::cerr.rdbuf(previous);}} restore{std::cerr.rdbuf(errors.rdbuf())};
         for(const auto& arguments:std::vector<std::vector<std::string>>{{"--unknown"},{"--tx-dbm"},{"--self-check","--audio-error","50"},
+                {"--auto-pattern"},{"--pattern","tone-1"},{"--helper-frequency","high"},
+                {"--short-target-snr","32"},{"--long-target-snr","55"},
                 {"--rate","nan"},{"--target-snr","201"},{"stray"},{"--rate","--simulation"},
                 {"--smoke-timeout","9"},{"--smoke-timeout","1200.000001"},{"--smoke-timeout","1201"},
                 {"--smoke-timeout","nan"},{"--smoke-timeout","inf"}})

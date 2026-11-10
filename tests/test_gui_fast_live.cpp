@@ -496,7 +496,7 @@ void generated_key_preserves_capture() {
         }
     };
     wait([&]{return controller.field(F::fast_key).options.size()==1&&
-        controller.field(F::fast_key).options.front().label=="Previous";},"Fast prior key not loaded");
+        controller.field(F::fast_key).options.front().label=="Previous - "+path_text(old_key);},"Fast prior key not loaded");
     controller.set_selected(true);
     wait([&]{return fixture::capture_active==1&&fixture::capture_registered==1;},"Fast keygen fixture did not start listening");
     const auto opens=fixture::capture_opens.load();
@@ -509,21 +509,21 @@ void generated_key_preserves_capture() {
              "Fast key generation did not finish with pending selection");
         check(fixture::capture_active==1&&fixture::capture_opens==opens&&!fixture::capture_overlap,
             "Fast key generation interrupted or duplicated active capture");
-        check(controller.field(F::fast_key).options.front().label=="Previous",
+        check(controller.field(F::fast_key).options.front().label=="Previous - "+path_text(old_key),
             "Fast key generation replaced active receive key");
     };
     generate(fresh_key);
-    check(controller.field(F::fast_key_path).text.find("WARNING")==std::string::npos,
+    check(controller.field(F::fast_status).text.find("WARNING")==std::string::npos,
           "Valid mock audio spuriously reported OS-only generation");
     fixture::keygen_samples=2;
     generate(fallback_key);
     check(controller.field(F::fast_key_path).text.find("WARNING: OS-only entropy")!=std::string::npos,
-          "Fast audio fallback warning was not persistent in key presentation");
+          "Fast pending fallback warning was not retained for shared status presentation");
     controller.set_selected(false);deadline=std::chrono::steady_clock::now()+10s;
     wait([&]{return controller.field(F::fast_key).options.size()==1&&
-        controller.field(F::fast_key).options.front().label=="Fast";},"Pending Fast key was not applied after reception ended");
-    check(controller.field(F::fast_key_path).text.find("WARNING: OS-only entropy")!=std::string::npos,
-          "Fast fallback warning disappeared after pending selection");
+        controller.field(F::fast_key).options.front().label=="Fast - "+path_text(fallback_key)+" (WARNING: OS-only entropy)";},"Pending Fast key was not applied after reception ended");
+    check(controller.field(F::fast_key).options.front().label.find("WARNING: OS-only entropy")!=std::string::npos,
+          "Fast fallback warning disappeared from the loaded key choice");
     controller.close();
     wait([&]{return controller.ready_to_close();},"Fast keygen fixture did not close");
 }

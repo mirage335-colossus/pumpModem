@@ -211,7 +211,8 @@ void pixel_interaction() {
     app.close();
 }
 void pixel_presets() {
-    Application app({});app.select(ui::Field::fast_mode,"robust");auto edit=declaration(ui::Field::carrier);edit.label="Pixel preset";edit.placement={20,40,0,0,300,30};
+    Application app({});app.select(ui::Field::fast_mode,"robust");auto edit=declaration(ui::Field::bandwidth);edit.label="Pixel preset";edit.placement={20,40,0,0,300,30};
+    require(!app.field(edit.field).options.empty(),"pixel preset fixture has no options");
     ui::OverlayDefinition overlay;overlay.controls={edit};app.show_overlay(std::move(overlay));
     framebuffer::Session session(app,false);session.resize({1200,1048,{6,18}});session.tick();click(session,24,44);select_all(session);input(session,"1234");
     key(session,surface::Key::down,true);key(session,surface::Key::down);key(session,surface::Key::escape);

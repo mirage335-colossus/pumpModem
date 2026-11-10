@@ -35,20 +35,14 @@ static_assert(!HasDomainFactory<BitmapSource>);
 static_assert(std::same_as<decltype(ui::DocumentNode{}.plot), BitmapSource>);
 static_assert(std::same_as<decltype(BitmapPresentation{}.source), BitmapSource>);
 static_assert(std::is_copy_constructible_v<BitmapSource>);
-// Both native backends bind these shared fields and slots. Model estimates
-// use shared visibility rules without introducing toolkit-specific controls.
+// Both native backends bind the shared link inputs and model controls.
 static_assert(ui::persistent_slot(ui::Slot::link_power));
 static_assert(ui::persistent_slot(ui::Slot::link_loss));
 static_assert(ui::persistent_slot(ui::Slot::link_noise));
-static_assert(ui::persistent_slot(ui::Slot::simulation_confidence));
-static_assert(ui::persistent_slot(ui::Slot::simulation_cpu_time));
-static_assert(ui::persistent_slot(ui::Slot::simulation_gpu_time));
 static_assert(ui::persistent_slot(ui::Slot::simulation_oscillator));
 static_assert(ui::persistent_slot(ui::Slot::rf_oscillator));
 static_assert(ui::persistent_slot(ui::Slot::search_margin));
 static_assert(ui::persistent_slot(ui::Slot::rf_shift));
-static_assert(ui::Field::simulation_confidence!=ui::Field::simulation_cpu_time&&
-              ui::Field::simulation_cpu_time!=ui::Field::simulation_gpu_time);
 
 // Semantic tones must keep identical meaning for document labels, list cells
 // and bitmap captions, including the full-white monochrome data accent.

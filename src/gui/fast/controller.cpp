@@ -441,7 +441,7 @@ struct Controller::Impl {
     void apply_loaded_key(Loaded result) {
         keys=std::move(result.keys);key_path=std::move(result.path);
         auto& key=f(F::fast_key);key.options.clear();key.selected.clear();
-        for(std::size_t i=0;i<keys.size();++i)key.options.push_back({std::to_string(i),keys[i].name});
+        for(std::size_t i=0;i<keys.size();++i)key.options.push_back({std::to_string(i),keys[i].name+" - "+path_text(key_path)+(result.warning.empty()?"":" (WARNING: OS-only entropy)")});
         settings.key.reset();
         if(!keys.empty()) {key.selected="0";settings.key=keys.front().key;}
         settings_changed();show_key_path(key_path,result.warning);

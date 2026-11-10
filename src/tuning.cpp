@@ -13,14 +13,6 @@
 
 namespace datapump::tuning {
 namespace {
-constexpr std::array modes{
-    PatternMode::auto_keystream,PatternMode::auto_pattern,PatternMode::auto_tone,
-    PatternMode::pattern_3,PatternMode::pattern_4,PatternMode::pattern_6,PatternMode::pattern_8,PatternMode::pattern_12,PatternMode::pattern_16,
-    PatternMode::tone_1,PatternMode::tone_2,PatternMode::tone_3,PatternMode::tone_4,PatternMode::tone_8,PatternMode::tone_32,
-    PatternMode::tone_128,PatternMode::tone_1024,PatternMode::tone_4096,PatternMode::tone_16384};
-constexpr std::array<std::string_view,19> names{
-    "auto-keystream","auto-pattern","auto-tone","pattern-3","pattern-4","pattern-6","pattern-8","pattern-12","pattern-16",
-    "tone-1","tone-2","tone-3","tone-4","tone-8","tone-32","tone-128","tone-1024","tone-4096","tone-16384"};
 constexpr std::array presets{
     SimulationPreset{"no",false,0,0},SimulationPreset{"3dBm -6dB",true,3,-6},
     SimulationPreset{"3dBm -60dB",true,3,-60},SimulationPreset{"3dBm -90dB",true,3,-90},
@@ -28,11 +20,6 @@ constexpr std::array presets{
     SimulationPreset{"3dBm -200dB",true,3,-200},SimulationPreset{"3dBm -230dB",true,3,-230},
     SimulationPreset{"50dBm -200dB",true,50,-200},SimulationPreset{"50dBm -270dB",true,50,-270},
     SimulationPreset{"70dBm -250dB",true,70,-250}};
-std::size_t index_of(PatternMode mode) {
-    const auto found=std::find(modes.begin(),modes.end(),mode);
-    if(found==modes.end()) throw Error("unknown pattern mode");
-    return static_cast<std::size_t>(found-modes.begin());
-}
 std::string normalized(std::string_view name) {
     std::string result;
     for(auto character:name) {
@@ -43,51 +30,8 @@ std::string normalized(std::string_view name) {
     return result;
 }
 }
-std::span<const PatternMode> pattern_modes(){return modes;}
 modem::OscillatorModel oscillator_model(const OscillatorPreset& preset) {
     return {preset.clock_error_ppm,preset.phase_noise_degrees_per_sqrt_second};
-}
-std::string_view pattern_mode_name(PatternMode mode){return names[index_of(mode)];}
-bool tone_mode(PatternMode mode){return mode==PatternMode::auto_tone || index_of(mode)>=9;}
-PatternMode parse_pattern_mode(std::string_view name) {
-    const auto found=std::find(names.begin(),names.end(),name);
-    if(found==names.end()) throw Error("unknown pattern mode: "+std::string(name));
-    return modes[static_cast<std::size_t>(found-names.begin())];
-}
-ReceiveTargets parse_receive_targets(std::string_view text) {
-    const auto invalid=[] {ReceiveTargets result;result.reset=true;return result;};
-    if(text.empty() || text.size()>maximum_receive_target_text)return invalid();
-    ReceiveTargets result;result.values.clear();result.canonical.clear();
-    std::size_t entries=0;
-    while(true) {
-        if(++entries>maximum_receive_targets)return invalid();
-        const auto comma=text.find(',');
-        auto token=text.substr(0,comma);
-        while(!token.empty() && std::isspace(static_cast<unsigned char>(token.front())))token.remove_prefix(1);
-        while(!token.empty() && std::isspace(static_cast<unsigned char>(token.back())))token.remove_suffix(1);
-        // Floating from_chars accepts a leading minus but no leading plus.
-        if(!token.empty() && token.front()=='+') {
-            token.remove_prefix(1);
-            if(!token.empty() && (token.front()=='+' || token.front()=='-'))return invalid();
-        }
-        if(token.empty())return invalid();
-        double value=0;
-        const auto parsed=std::from_chars(token.data(),token.data()+token.size(),value);
-        if(parsed.ec!=std::errc{} || parsed.ptr!=token.data()+token.size() ||
-           !std::isfinite(value) || value < -200 || value > 200)return invalid();
-        if(value==0)value=0; // Canonicalize negative zero.
-        if(std::find(result.values.begin(),result.values.end(),value)==result.values.end())result.values.push_back(value);
-        if(comma==std::string_view::npos)break;
-        text.remove_prefix(comma+1);
-    }
-    for(const auto value:result.values) {
-        std::array<char,64> buffer{};
-        const auto formatted=std::to_chars(buffer.data(),buffer.data()+buffer.size(),value);
-        if(formatted.ec!=std::errc{})return invalid();
-        if(!result.canonical.empty())result.canonical+=", ";
-        result.canonical.append(buffer.data(),formatted.ptr);
-    }
-    return result;
 }
 Doppler parse_doppler(std::string_view text) {
     const auto invalid=[] {throw Error("doppler must be a finite velocity in c, knots, mph or kph, or a frequency shift in %; velocity must be below light speed");};

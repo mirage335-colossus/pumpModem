@@ -152,7 +152,7 @@ void editing_and_security() {
 }
 void editable_presets() {
     Application app({});app.select(ui::Field::fast_mode,"robust");
-    auto c=declaration(ui::Field::carrier);c.label="Editable preset";c.row=0;
+    auto c=declaration(ui::Field::bandwidth);c.label="Editable preset";c.row=0;
     check(!app.field(c.field).options.empty(),"preset fixture has no options");
     ui::OverlayDefinition overlay;overlay.controls={c};show_overlay(app,std::move(overlay));
     terminal::Session session(app);session.resize({80,24,{1,1}});editor_focus(session,"Editable preset");
@@ -314,12 +314,13 @@ void overlay_focus_policy() {
 }
 void popup_binding_identity() {
     Application app({});app.select(ui::Field::fast_mode,"robust");terminal::Session session(app);session.resize({80,500,{1,1}});
-    editor_focus(session,"Carrier");select_all(session);session.input(input("1234"));
-    const auto expected=app.field(ui::Field::carrier).options.front().id;
+    editor_focus(session,"Rate");select_all(session);session.input(input("1234"));
+    check(!app.field(ui::Field::bandwidth).options.empty(),"popup fixture has no options");
+    const auto expected=app.field(ui::Field::bandwidth).options.front().id;
     session.input(key(terminal::Key::down,false,false,true));
     app.toggle(ui::Field::developer_mode,true); // Inserts controls before the open popup's owner.
     session.input(key(terminal::Key::enter));
-    check(app.field(ui::Field::carrier).text==expected,"visibility changes retargeted an open editable dropdown");app.close();
+    check(app.field(ui::Field::bandwidth).text==expected,"visibility changes retargeted an open editable dropdown");app.close();
 }
 void empty_record_placeholder() {
     Application app({});auto list=declaration(ui::Field::fast_files);list.row=0;

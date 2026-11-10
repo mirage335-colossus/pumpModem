@@ -67,17 +67,24 @@ ui::DocumentNode build(const planner::Model& model,float width,bool show_details
         {"Weak-Signal Example",Command::planner_example_weak},{"Sub-9kHz Example",Command::planner_example_sub9},
         {"Earth-Moon-Earth Example",Command::planner_example_eme}});
     buttons(root,{{use_draft?"Plan 1 bit":"Use current draft",Command::planner_toggle_draft}});
-    buttons(root,{{"Use target for short messages",Command::planner_apply_short},
-        {"Use target for long messages",Command::planner_apply_long}});
     control(root,ui::Field::planner_command,ui::label_height+56);
     buttons(root,{{"Load",Command::planner_load_command}});
     for(const auto field:std::array{ui::Field::search_arithmetic,ui::Field::receiver_strategy,
-            ui::Field::receiver_cpu_budget,ui::Field::sched_hop,ui::Field::sched_hop_dilution,
-            ui::Field::sched_frequency_search})control(root,field);
+            ui::Field::receiver_cpu_budget})control(root,field);
     buttons(root,{{"1 bit / sec",Command::planner_fast,false},{"1 day / bit",Command::planner_day,false},
         {"Clock / RAM limit",Command::planner_clock,false}});
     buttons(root,{{show_details?"Hide details":"Model limits and references",Command::planner_toggle_details}});
-    if(show_details)paragraph(root,"The retired single-carrier receiver and its calibration models have been removed. The canonical triad receiver does not yet supply application planning estimates. No reception, hardware capability or performance claim follows from the saved values.");
+    if(show_details) {
+        paragraph(root,"The retired single-carrier receiver and its calibration models have been removed. The canonical triad receiver does not yet supply application planning estimates. No reception, hardware capability or performance claim follows from the saved values.");
+        paragraph(root,"Quick references",15,Tone::text,true);
+        paragraph(root,"Rough comparison examples, not propagation predictions or automatic presets. Antennas, propagation and noise change the result; operating modes do not determine path loss. Power (dBm) and path loss (dB) are separate quantities.");
+        paragraph(root,"Sub-9 kHz · 200 ft antenna · 10 kW: 0 dBm power reference; 200 dB path loss.");
+        paragraph(root,"Groundwave · 1 MHz · 150 miles: 180 dB path loss.");
+        paragraph(root,"Groundwave · 30 MHz · 150 miles: 210 dB path loss.");
+        paragraph(root,"Skywave · 1–30 MHz: SSB voice, 130 dB path loss; FT8, 160 dB path loss.");
+        paragraph(root,"Meteor burst: 150 dB path loss.");
+        paragraph(root,"Earth–Moon–Earth · 5.8 GHz: −30 dBm transmit power; 220 dB path loss.");
+    }
     return root;
 }
 }

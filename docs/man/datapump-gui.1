@@ -140,8 +140,8 @@ Numeric Audio error edits are independent of GPS accuracy,
 propagation and oscillator models. Accepts nonnegative ns/us/ms/s durations up to 60s,
 subject to the Live search-window limit. This does not change buffering or
 establish measured hardware accuracy. It does not change the ordinary search
-when clock sync is Default and hopping is disabled. FHSS and Sched_Hop
-assume a shared GPS calendar at Default, with plus/minus10ms at each station
+when clock sync is Default and hopping is disabled. FHSS assumes a shared
+GPS calendar at Default, with plus/minus10ms at each station
 and the selected causal audio lag. Saved parameter lists retain explicit values.
 An unsupported allowance visibly falls back to ordinary playback before private
 output; it is not silently enlarged.
@@ -152,19 +152,14 @@ default no. Clear received resets queued input and receiver backlog without
 cancelling transmission or clearing its private-key reuse lock.
 .TP
 .BI \-\-symbol\-burst " off|1|2|3|5|10"
-Space complete Robust symbols with the selected minimum number of symbol waits.
-The next complete support starts on a UTC 30-second boundary, at least 60 seconds
-after the previous start. Default is off. Both peers select matching settings.
-The GUI selectors are immediately right of FHSS. Complete symbols, pulse padding,
-20-second guards and full timing uncertainty remain captured; proven silence
-is available for receiver backlog processing. This adds no bits, dwell or ramp.
-FHSS remains independent; simultaneous enabled Sched_Hop is rejected.
+Save a whole-symbol waiting preference for future Robust triad integration.
+Default is off. The GUI selectors are immediately right of FHSS. Robust
+operation is unavailable in the GUI pending reconnection; this preference
+does not enable transmission or reception.
 .TP
 .BI \-\-symbol\-burst\-random " 0|1|2|3"
-Limit the additional cryptographically selected whole-symbol wait to 0 through
-this value, inclusive. Default is 0; effective extra wait is zero without a key.
-Planned silence does not end reception. A complete expected symbol must be
-scored absent under the ordinary physical-completion rule.
+Save a random extra whole-symbol waiting preference for future triad
+integration. Default is 0. This preference does not enable Robust operation.
 .TP
 .BI \-\-dsss\-factor " 1|10|100|1000"
 Additional private outer spreading; 1 is off. Requires a selected key for factors
@@ -199,44 +194,13 @@ comment. Cannot be combined with --fhss-list. Files are validated before setting
 change. Launch and parameter-list exports save the applied frequencies inline,
 independent of the source file. Hiding Developer mode retains the active list.
 .TP
-.BI \-\-sched-hop " 0|3|5"
-Keyed active/null scheduling; default 0 disables it. Requires a selected
-communication key. Frames contain three or five 0.4-second hops with normally
-one active hop. Long symbols split while source time pauses; physical carrier
-time continues. Nulls provide processing time and never observed absence.
-Disabled aliases off/disabled/1 preserve their meanings. Retired enabled
-multipliers require an explicit new choice and are not silently converted.
-.TP
-.BI \-\-sched-hop-dilution " 0|3"
-Developer-only consecutive active hops: 0 means one; 3 means three in the
-unchanged frame. 5/3 gives effective 5/3 airtime. 3/3 uses continuous reception,
-retaining applicable FHSS ramps. Legacy dilution 1 maps exactly to 0; other
-retired values fail import. Inactive preferences remain saved.
-.TP
-.BI \-\-sched-frequency-search " 1|2|4|8|16|32"
-Widen oscillator frequency uncertainty by this factor while Sched_Hop is enabled;
-default 1. The GUI Freq search dropdown is disabled otherwise. This does not
-widen the oscillator clock-rate bound or increase RAM/captured bandwidth.
-Required hypotheses must fit coverage and workspace limits. Unsupported
-scheduled decoder geometry remains explicit; RX probability is uncalibrated.
-All three scheduled preferences round-trip through launch commands and parameter
-lists. Older settings use disabled, dilution 1 and frequency multiplier 1.
-.TP
 .BI \-\-search\-margin " N"
 Multiply declared frequency and clock accuracy bounds; default 3, minimum 1.
 .TP
 .BI \-\-target\-snr " DB-HZ"
-Set the planner, short-message and long-message target carrier-to-noise-density
-ratios, from \-200 to 200 dB-Hz.
-This is a planning target, not measured in-band SNR.
-.TP
-.BI \-\-short\-target\-snr " DB-HZ"
-Override the short-message target without changing the planner target.
-Default: 32.
-.TP
-.BI \-\-long\-target\-snr " DB-HZ"
-Override the long-message and attachment target without changing the planner
-target. Default: 55.
+Set the single Robust target carrier-to-noise-density ratio, from \-200 to
+200 dB-Hz. Default: 32. Console and Link Planner edit the same value for all
+messages and attachments. This is a planning target, not measured in-band SNR.
 .TP
 .BI \-\-rate " FREQUENCY"
 Set the nominal rate/bandwidth, from 0.001 Hz to 30 MHz.
@@ -267,22 +231,8 @@ These settings do not retune hardware or add a complex I/Q interface.
 .TP
 .BI \-\-dsp\-workspace " PERCENT"
 Limit the Robust DSP workspace to 25%, 50% or 75% of available RAM.
-Default: 50%.
+Default: 75%.
 The percent sign may be omitted.
-.TP
-.B \-\-auto\-pattern
-Select automatic pattern planning, the default.
-.TP
-.BI \-\-pattern " MODE"
-Select
-.BR auto-pattern ,
-.BR auto-keystream ,
-.BR auto-tone ,
-.BI pattern- N
-with N equal to 3, 4, 6, 8, 12 or 16, or
-.BI tone- N
-with N equal to 1, 2, 3, 4, 8, 32, 128, 1024, 4096 or 16384.
-Tone modes disable private spreading and encryption.
 .PP
 Frequencies accept Hz, kHz, MHz, GHz or THz case-insensitively, with optional
 spaces, scientific notation or k/m/g/t shorthand; bare numbers mean Hz.
@@ -362,7 +312,9 @@ Exact completed attachment bytes remain available for an explicit save.
 Received files are never opened or executed automatically.
 .PP
 Developer mode reveals advanced controls and inspection pages.
-The Robust Link planner previews a link independently of the live targets.
+The Robust Link planner shares the single Target SNR with Console.
+Robust uses automatic waveform defaults and the fixed Helper arrangement of
+high/low pilot tones and a separate auxiliary tone; these are not selectable.
 Its Launch command includes a file-backed keyring's path and named transmit key
 via \-\-keyfile, \-\-tx-key named and \-\-key-name (or \-\-tx-key none).
 It uses \-\-keyset amateur for the built-in public key and \-\-keyset none for
@@ -372,6 +324,10 @@ when None is selected. Other loaded ring entries remain available for selection.
 Missing files or key names leave the previous settings unchanged.
 Its Launch command can be copied for reuse; Load applies validated settings
 without executing a shell command or starting a transmission.
+.PP
+Older copied commands must omit \-\-auto-pattern, \-\-pattern,
+\-\-helper-frequency, \-\-short-target-snr and \-\-long-target-snr.
+Use \-\-target-snr for the single desired target; the retired options are rejected.
 .PP
 Click the Robust Console waterfall for a full-window view cropped to the
 configured receive search bands. Adjacent columns show amplitude on the left

@@ -108,7 +108,7 @@ Add `datapump_fast` and a fast regression executable. Do not add fast branches t
 regular `modem::Config`, `transfer::Options`, short dictionary, marker collector,
 receiver, tuning or probability model. Existing CLI commands remain regular;
 new explicit fast commands dispatch to a separate implementation. Do not
-reinterpret existing `--rate`, `--target-snr`, `--pattern` or `--simulation` flags.
+reinterpret existing `--rate`, `--target-snr` or `--simulation` flags.
 
 Reuse unchanged audio callbacks and narrowly reviewed utilities. The generic RS
 arithmetic is useful, but currently shares a translation unit with regular

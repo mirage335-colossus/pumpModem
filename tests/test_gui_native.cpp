@@ -1,9 +1,12 @@
 #include "../src/gui/state.hpp"
 #include "../src/gui/record_presentations.hpp"
+#include "../src/gui/application.hpp"
 #include "datapump/live.hpp"
+#include <algorithm>
 #include <iostream>
 #include <limits>
 #include <source_location>
+#include <vector>
 
 using namespace datapump;
 void check(bool value, std::source_location location=std::source_location::current()) {
@@ -14,6 +17,87 @@ StreamContent content(std::uint8_t id, std::size_t size) {
     result.message.local_id[0]=id;
     result.message.data.resize(size,id);
     return result;
+}
+bool document_contains(const gui::ui::DocumentNode& node, std::string_view text) {
+    if (node.text.find(text)!=std::string::npos) return true;
+    for (const auto& child:node.children) if (document_contains(child,text)) return true;
+    return false;
+}
+void planner_quick_references() {
+    gui::Application app({.simulation=true});
+    app.navigate(gui::ui::Page::planner);
+    const auto collapsed=app.document(gui::ui::Page::planner,900);
+    check(collapsed && document_contains(*collapsed,"Model limits and references"));
+    check(!document_contains(*collapsed,"Quick references"));
+    app.dispatch(gui::ui::Command::planner_toggle_details);
+    const auto expanded=app.document(gui::ui::Page::planner,900);
+    check(expanded && document_contains(*expanded,"Hide details"));
+    for (const auto* reference:{"Sub-9 kHz", "Groundwave", "Skywave", "Meteor burst", "Earth–Moon–Earth"})
+        check(document_contains(*expanded,reference));
+    check(document_contains(*expanded,"not propagation predictions"));
+    app.dispatch(gui::ui::Command::planner_toggle_details);
+    const auto hidden=app.document(gui::ui::Page::planner,900);
+    check(hidden && !document_contains(*hidden,"Quick references"));
+}
+void shared_robust_target() {
+    gui::Application app({.simulation=true});
+    app.select(gui::ui::Field::fast_mode,"robust");
+    const auto& declarations=gui::ui::console_screen();
+    for(const auto& control:declarations) {
+        const std::string_view label=control.label;
+        check(label!="Pattern / tone"&&label!="Helper Carrier Frequency"&&
+              label!="Long / file target SNR (dB-Hz)"&&label!="RX targets (dB-Hz)");
+    }
+    const auto target=std::find_if(declarations.begin(),declarations.end(),[](const auto& control) {
+        return control.field==gui::ui::Field::snr;
+    });
+    check(target!=declarations.end());
+    check(app.field(gui::ui::Field::snr).text=="32"&&app.field(gui::ui::Field::planner_target).text=="32");
+    check(std::string_view(target->label)=="Target SNR (dB-Hz)");
+    app.edit(gui::ui::Field::snr,"40");
+    const auto first_command=app.field(gui::ui::Field::planner_command).text;
+    check(app.field(gui::ui::Field::planner_target).text=="40"&&first_command.find("--target-snr 40")!=std::string::npos);
+    app.edit(gui::ui::Field::snr,"40x");
+    check(app.field(gui::ui::Field::snr).text=="40x"&&app.field(gui::ui::Field::planner_target).text=="40"&&
+          app.field(gui::ui::Field::planner_command).text==first_command);
+    app.edit(gui::ui::Field::snr,"40.0000");
+    check(app.field(gui::ui::Field::planner_target).text=="40.0000");
+    check(app.submit(*target,false,false));
+    check(app.field(gui::ui::Field::snr).text=="40"&&app.field(gui::ui::Field::planner_target).text=="40");
+    app.navigate(gui::ui::Page::planner);
+    app.edit(gui::ui::Field::planner_target,"55");
+    check(app.field(gui::ui::Field::snr).text=="55"&&
+          app.field(gui::ui::Field::planner_command).text.find("--target-snr 55")!=std::string::npos);
+
+    std::vector<std::string> args{"--target-snr","-3"};
+    gui::Launch loaded;loaded.settings=gui::launch_command::parse_arguments(args);
+    gui::Application from_command(std::move(loaded));
+    check(from_command.field(gui::ui::Field::snr).text=="-3"&&from_command.field(gui::ui::Field::planner_target).text=="-3");
+    auto invalid=gui::Launch{};invalid.settings=gui::launch_command::Patch{};invalid.settings->target_db_hz=201;
+    bool rejected=false;
+    try {gui::Application bad(std::move(invalid));} catch(const Error&) {rejected=true;}
+    check(rejected);
+}
+void repeatable_length_boundary() {
+    gui::Application app({.simulation=true});
+    app.select(gui::ui::Field::fast_mode,"robust");
+    app.edit(gui::ui::Field::message,std::string(236,'x'));
+    check(app.field(gui::ui::Field::repeatable).enabled);
+    app.toggle(gui::ui::Field::repeatable,true);
+    check(app.field(gui::ui::Field::repeatable).checked&&app.field(gui::ui::Field::message).text.size()==256);
+    const auto draft=app.field(gui::ui::Field::message).text;
+    app.activate(gui::ui::Command::attach_file);
+    const auto requests=app.take_services();check(requests.size()==1);
+    app.complete_service({requests.front().id,false,"/nonexistent/repeatable-test",{}});
+    check(!app.field(gui::ui::Field::repeatable).enabled&&app.field(gui::ui::Field::repeatable).checked);
+    app.activate(gui::ui::Command::use_text);
+    check(app.field(gui::ui::Field::repeatable).enabled&&app.field(gui::ui::Field::repeatable).checked);
+    check(app.field(gui::ui::Field::message).text==draft);
+    app.edit(gui::ui::Field::message,app.field(gui::ui::Field::message).text+"x");
+    check(!app.field(gui::ui::Field::repeatable).enabled&&!app.field(gui::ui::Field::repeatable).checked);
+    check(app.field(gui::ui::Field::message).text==std::string(237,'x'));
+    app.edit(gui::ui::Field::message,std::string(236,'x'));
+    check(app.field(gui::ui::Field::repeatable).enabled&&!app.field(gui::ui::Field::repeatable).checked);
 }
 void retained_raw_bits() {
     gui::Signals signals;
@@ -133,6 +217,9 @@ void received_text_boundary() {
 }
 int main() {
     try {
+        planner_quick_references();
+        shared_robust_target();
+        repeatable_length_boundary();
         retained_raw_bits();
         received_text_boundary();
         check(gui::parse_binary_bits("0")==Bytes({0}));

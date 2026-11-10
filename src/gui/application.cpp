@@ -100,7 +100,7 @@ struct Application::Impl {
         std::shared_ptr<const planner::Model> previous;
         std::shared_ptr<const ui::DocumentNode> root;
         int width=0;
-        bool details=false,draft=false,closing=false,can_apply=false,can_load=false;
+        bool details=false,draft=false,closing=false,can_load=false;
     } planner_document;
 };
 Application::Application(Launch options):launch(std::move(options)),impl_(std::make_unique<Impl>(launch)) {
@@ -312,19 +312,18 @@ void Application::navigate(ui::Page page) {if(accepts_surface(0))select_page(pag
 ui::ControlLayout Application::control_layout(const ui::Control& declaration,int width,int height,
         std::span<const ui::Control> declarations) const {
     return ui::control_layout(declaration,control(declaration).state,width,height,declarations,
-                              field(ui::Field::transmit_scope).visible,field(ui::Field::simulation_cpu_time).visible,
-                              field(ui::Field::force_transmit).visible);
+                              field(ui::Field::transmit_scope).visible,field(ui::Field::force_transmit).visible);
 }
 ui::Rect Application::page_bounds(int width,int height) const {
     if(impl_->fast_selected())return {ui::margin,86,width-2*ui::margin,height-190};
-    return ui::page_rect(width,height,field(ui::Field::simulation_cpu_time).visible);
+    return ui::page_rect(width,height);
 }
 ui::Rect Application::tabs_bounds(int width,int height) const {
     if(impl_->fast_selected())return {ui::margin,58,width-2*ui::margin,28};
-    return ui::tabs_rect(width,height,field(ui::Field::simulation_cpu_time).visible);
+    return ui::tabs_rect(width,height);
 }
 std::vector<ui::TabLayout> Application::tab_layout(int width,int height) const {
-    auto result=ui::tab_layout(width,height,ui::pages(),field(ui::Field::simulation_cpu_time).visible);
+    auto result=ui::tab_layout(width,height,ui::pages());
     int x=tabs_bounds(width,height).x;
     for(auto& tab:result) {
         tab.visible=page_visible(tab.page);
@@ -355,22 +354,28 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
     if(!declaration.surface&&!declaration.persistent&&!page_visible(declaration.page))view.visible=false;
     if(!declaration.surface&&(declaration.field==ui::Field::planner_target||declaration.field==ui::Field::planner_command||
                              declaration.field==ui::Field::search_arithmetic||declaration.field==ui::Field::receiver_strategy||
-                             declaration.field==ui::Field::receiver_cpu_budget||declaration.field==ui::Field::sched_hop||
-                             declaration.field==ui::Field::sched_hop_dilution||declaration.field==ui::Field::sched_frequency_search))
+                             declaration.field==ui::Field::receiver_cpu_budget))
         view.visible=view.visible&&page()==ui::Page::planner;
     if(declaration.surface) {
         view.visible=view.visible&&impl_->overlay&&impl_->overlay->generation==declaration.surface;
     }
     view.enabled=view.enabled&&accepts_surface(declaration.surface);
-    if(declaration.kind==ui::Kind::label&&declaration.field!=ui::Field::count)view.label=state.text;
+    if(declaration.kind==ui::Kind::label&&declaration.field!=ui::Field::count) {
+        view.label=state.text;
+        if(declaration.field==ui::Field::fast_status || declaration.field==ui::Field::status) {
+            const auto& key_notice=field(declaration.field==ui::Field::fast_status?ui::Field::fast_key_path:ui::Field::key_path).text;
+            if(key_notice.starts_with("WARNING: OS-only entropy") && !view.label.starts_with("WARNING: OS-only entropy"))
+                view.label="WARNING: OS-only entropy · "+view.label;
+            else if(key_notice.starts_with("WARNING - Amateur") && view.label.find("Public amateur key")==std::string::npos)
+                view.label="WARNING: Amateur key is public · "+view.label;
+        }
+    }
     if(declaration.kind==ui::Kind::text&&!state.display_text.empty()) {
         const auto effective=(state.display_text.size()>6?"":"using ")+state.display_text+" dB-Hz";
         if(declaration.field==ui::Field::doppler)view.label="Doppler · "+state.display_text;
         else if(declaration.field==ui::Field::helper_power)view.label="Helper Carrier Power · "+state.display_text;
-        else if(declaration.field==ui::Field::snr)view.label="Short ≤16 B · "+effective;
-        else if(declaration.field==ui::Field::long_snr)view.label="Long / file · "+effective;
+        else if(declaration.field==ui::Field::snr)view.label="Target · "+effective;
         else if(declaration.field==ui::Field::planner_target)view.label="Target · "+effective;
-        else if(declaration.field==ui::Field::receive_snr)view.label="RX targets · adjusted; Enter to show";
     }
     if(declaration.kind==ui::Kind::action) {
         const auto current=command_label(declaration.command);
@@ -490,8 +495,7 @@ ui::Page Application::page() const { return impl_->page; }
 bool Application::smoke_passed() const { return impl_->passed; }
 bool Application::submit_gesture(const ui::Control& control,bool ctrl,bool shift) const {
     if(control.read_only)return false;
-    if(control.kind==ui::Kind::text&&(control.field==ui::Field::snr||control.field==ui::Field::long_snr||
-        control.field==ui::Field::receive_snr||control.field==ui::Field::planner_target)&&!ctrl&&!shift)return true;
+    if(control.kind==ui::Kind::text&&(control.field==ui::Field::snr||control.field==ui::Field::planner_target)&&!ctrl&&!shift)return true;
     if(control.submit==ui::Command::none||shift)return false;
     if(control.field==ui::Field::legacy_text&&control.submit==ui::Command::legacy_transmit)return ctrl;
     const bool wants_ctrl=(control.field==ui::Field::fast_text&&control.submit==ui::Command::fast_transmit)||
@@ -500,8 +504,7 @@ bool Application::submit_gesture(const ui::Control& control,bool ctrl,bool shift
 }
 bool Application::submit(const ui::Control& control,bool ctrl,bool shift) {
     if(!submit_gesture(control,ctrl,shift))return false;
-    if(control.kind==ui::Kind::text&&(control.field==ui::Field::snr||control.field==ui::Field::long_snr||
-        control.field==ui::Field::receive_snr||control.field==ui::Field::planner_target)&&!ctrl&&!shift) {
+    if(control.kind==ui::Kind::text&&(control.field==ui::Field::snr||control.field==ui::Field::planner_target)&&!ctrl&&!shift) {
         if(accepts_input(control))impl_->controller.commit_target(control.field);
         return true;
     }
@@ -556,10 +559,10 @@ std::shared_ptr<const ui::DocumentNode> Application::document(ui::Page page,int 
         const bool updating=model->calculating&&cached.previous;
         auto displayed=updating?cached.previous:model;
         const bool details=impl_->controller.planner_details(),draft=impl_->controller.planner_uses_draft();
-        const bool closing=impl_->controller.closing(),can_apply=impl_->controller.enabled(ui::Command::planner_apply_short);
+        const bool closing=impl_->controller.closing();
         const bool can_load=impl_->controller.enabled(ui::Command::planner_load_command);
         if(!cached.root||cached.model!=model||cached.width!=width||cached.details!=details||
-            cached.draft!=draft||cached.closing!=closing||cached.can_apply!=can_apply||cached.can_load!=can_load) {
+            cached.draft!=draft||cached.closing!=closing||cached.can_load!=can_load) {
             if(updating) {
                 // Numerical results and plots remain explicitly previous,
                 // while navigation always belongs to the current inputs.
@@ -576,7 +579,7 @@ std::shared_ptr<const ui::DocumentNode> Application::document(ui::Page page,int 
                 for(auto& child:node.children)enable(child);
             };
             enable(root);
-            cached={model,cached.previous,std::make_shared<const ui::DocumentNode>(std::move(root)),width,details,draft,closing,can_apply,can_load};
+            cached={model,cached.previous,std::make_shared<const ui::DocumentNode>(std::move(root)),width,details,draft,closing,can_load};
         }
         return cached.root;
     }
@@ -652,7 +655,7 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
             } else {
                 if(!arg.starts_with("--"))throw Error("Unknown or incomplete option: "+arg);
                 settings_arguments.push_back(arg);
-                if(arg!="--auto-pattern"&&arg.find('=')==std::string::npos&&i+1<argc)
+                if(arg.find('=')==std::string::npos&&i+1<argc)
                     settings_arguments.emplace_back(argv[++i]);
             }
         }

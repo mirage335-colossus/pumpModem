@@ -636,11 +636,12 @@ void retained_key_and_result_presentation() {
     const auto end=std::chrono::steady_clock::now()+std::chrono::seconds(5);
     while(!controller.enabled(C::fast_listen)&&std::chrono::steady_clock::now()<end) {controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));}
     check(controller.enabled(C::fast_listen),"Fast key did not load");
-    const auto key=controller.field(F::fast_key).selected,key_path=controller.field(F::fast_key_path).text;
+    const auto key=controller.field(F::fast_key).selected,key_label=controller.field(F::fast_key).options.front().label;
+    check(key_label=="GUI retained key - "+path.string(),"Fast key option must show its full keyfile path");
     controller.toggle(F::fast_encryption,false);
     check(controller.enabled(C::fast_listen)&&!controller.field(F::fast_key).enabled&&!controller.enabled(C::fast_generate_key),"Plain mode did not disable retained key controls");
     controller.toggle(F::fast_encryption,true);
-    check(controller.enabled(C::fast_listen)&&controller.field(F::fast_key).selected==key&&controller.field(F::fast_key_path).text==key_path,"Encryption toggle discarded the loaded key");
+    check(controller.enabled(C::fast_listen)&&controller.field(F::fast_key).selected==key&&controller.field(F::fast_key).options.front().label==key_label,"Encryption toggle discarded the loaded key");
     const auto profile=fast::profile(fast::Channel::wire);
     Bytes source(4200,'x');source[0]='h';source[1]='i';source[2]='\n';source[3]=0;source[4]=255;
     fast::StreamEncoder encoder(profile,std::nullopt,fast::byte_source(source));
@@ -665,6 +666,43 @@ void retained_key_and_result_presentation() {
     check(fast_ui::transfer_stage(snapshot)=="RECEIVED · authenticated"&&fast_ui::integrity_label(snapshot).find("2 authenticated groups")!=std::string::npos,
           "Encrypted completion lost its captured authentication result");
     controller.close();
+}
+void robust_keyfile_menu_label() {
+    using F=ui::Field;using C=ui::Command;
+    const auto path=std::filesystem::temp_directory_path()/(
+        "datapump-robust-gui-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".key");
+    struct Cleanup {std::filesystem::path path;~Cleanup(){std::error_code e;std::filesystem::remove(path,e);}} cleanup{path};
+    check(create_keyring(path,{"GUI key"},std::nullopt,fixture_keyfile::generation()).audio_used,
+          "Robust GUI fixture did not use synthetic audio");
+    launch_command::Patch patch;patch.keyfile=path.string();
+    Application app({.simulation=true,.settings=patch});app.select(F::fast_mode,"robust");app.start();
+    const auto& item=action(C::acknowledge_key_failure);
+    const auto expected="Keep current keys - "+path.filename().string();
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+    while(app.control(item).label!=expected&&std::chrono::steady_clock::now()<deadline) {
+        app.tick();std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    check(app.control(item).label==expected&&!app.control(item).enabled,
+          "Robust key menu did not show loaded filename on disabled current-keys item");
+    app.activate(C::unload_keys);
+    check(app.control(item).label=="Keep current keys"&&!app.control(item).enabled,
+          "Robust key menu retained a filename after unloading keys");
+    app.close();
+}
+void robust_public_key_warning() {
+    using F=ui::Field;using C=ui::Command;
+    Application app({.simulation=true});app.select(F::fast_mode,"robust");
+    const auto& status=control(F::status);
+    check(app.control(status).label.starts_with("WARNING: Amateur key is public"),
+          "Public Robust key warning was not visible in the shared status presentation");
+    app.activate(C::unload_keys);
+    check(!app.control(status).label.starts_with("WARNING: Amateur key is public"),
+          "Public key warning remained after the key was unloaded");
+    app.activate(C::load_amateur);
+    check(app.control(status).label.find("Public amateur key")!=std::string::npos&&
+          !app.control(status).label.starts_with("WARNING: Amateur key is public"),
+          "Public key load notice was duplicated or suppressed");
+    app.close();
 }
 void robust_boundary_keeps_polling() {
     using F=ui::Field;using C=ui::Command;
@@ -699,6 +737,6 @@ void robust_boundary_keeps_polling() {
 }
 }
 int main() {
-    try {audio_settings();rate_and_spectrum_presentation();damaged_reception_presentation();snr_and_symbol_rate_controls();message_submit_shortcut();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();robust_boundary_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
+    try {audio_settings();rate_and_spectrum_presentation();damaged_reception_presentation();snr_and_symbol_rate_controls();message_submit_shortcut();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();robust_keyfile_menu_label();robust_public_key_warning();robust_boundary_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }
