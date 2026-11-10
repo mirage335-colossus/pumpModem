@@ -106,13 +106,15 @@ old timing calibration to qualify changed CPU work. See the
 [continuous receiver restructuring](validation.md#continuous-receiver-restructuring)
 and [earlier restructuring evidence](validation.md#receiver-restructuring).
 The [interactive architecture report](receiver-parallelism.html) distinguishes
-necessary state dependencies from implementation barriers. Its
-[cycle timeline](receiver-parallelism.html#cycle) preserves the pre-change
-`3b423f9` controller and worker trace, including its former three-job Gaussian
-waves. It is historical evidence, not a trace of the new native state batches.
-Separate signal-time coordinates explain where next-batch preparation could
-overlap current work. The pipeline and stage-speedup explorers are explicitly
-hypothetical; use the pinned identities before applying any measured numbers.
+necessary state dependencies from implementation barriers. Its current
+[execution timeline](receiver-parallelism.html#cycle) records the two-owner
+pipeline and a selected fine cycle, with controller waits, nested stages and
+worker jobs distinguished. The [historical trace](receiver-parallelism.html#historical-cycle)
+preserves the pre-change `3b423f9` execution, including its former three-job
+Gaussian waves. Signal-time coordinates are separate from processing wall time;
+recorded job spans do not measure OS scheduling or establish full CPU saturation.
+The pipeline and stage-speedup explorers remain explicitly hypothetical; use
+each view's pinned identity before applying its measured numbers.
 
 Older single-carrier Robust and standalone triad/Helper implementations are not
 supported current paths. Protocol breaks belong in a new Git tag and a separate

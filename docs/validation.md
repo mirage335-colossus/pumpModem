@@ -234,6 +234,43 @@ the timing evidence for its recorded source, not a rerun of the corrected
 budget path.
 [Tracker-budget continuation](../local-evidence/continuous-pipeline/tracker-budget-gate.json)
 
+The [current execution timing chart](receiver-parallelism.html#cycle) records
+**206 actual events** from a fresh five-window run on `c54e2469`, using the same
+1,649,627-sample capture (274.9378 seconds of physical input). It shows parent
+ingress/startup/assembly/commit, both owners' nested preparation/search/fine
+stages and a preselected early fine cycle in quiet window 3. This replaces the
+historical trace as the report's primary view; the old `3b423f9` trace remains
+inside an explicitly historical comparison.
+
+The plain control took **18.8923 seconds** and the traced run **18.8647 seconds**.
+Their observed difference is −0.146%; this single ordered pair is neither a
+speedup estimate nor a causal estimate of tracing overhead. Work, scores,
+decisions and message state matched exactly. Both used allocations
+**12, 6, 6, 6, 6**, with stable source, binary, capture and adapter hashes. The
+whole bounded capture/check took **40.64 seconds**. No receiver code changed.
+
+The timestamps show actual refill overlap: window 3 starts at 11.645 seconds
+while window 2 runs until 13.377; window 4 starts at 13.386 while window 3 runs
+until 17.455. The selected affine/adaptive cycles took 27.490/39.859 ms, each
+with six basis jobs and six native Gaussian candidate jobs. They are fixed
+early cycles, not a warmed average. Recorded call intervals include waits and
+nested work; their overlap does not establish simultaneous OS execution or
+full CPU saturation. Wall time uses the shared monotonic clock; thread CPU
+values are independently sampled same-thread deltas, with small clock-sampling
+differences possible. The chart does not qualify additional configurations or
+blind reception.
+
+Independent audit checked all event identities, nesting, dispatch/collection
+order, physical coverage, source hashes and the twelve-worker permit ceiling.
+Retain the compact trace while it supports this audited chart. The temporary
+adapter, regenerated captures and redundant owner sidecars were removed after
+acceptance (28.09 MB). Browser checks covered window navigation, interval
+inspection, both fine-cycle views, historical disclosure and a 390-pixel layout;
+no horizontal overflow or console warnings/errors were observed. Unique element IDs,
+local links and JavaScript syntax also passed checks.
+[Current timing receipt](../local-evidence/current-timing/timing-trace.json) ·
+[Clock semantics](https://docs.python.org/3.13/library/time.html#time.perf_counter)
+
 Private pipeline drivers and raw captures were removed after independent
 audit (about 44 MB). Keep the compact comparison, functional/admission receipts
 and original setup failures while they support the current scheduler claims;

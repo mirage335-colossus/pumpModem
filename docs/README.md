@@ -14,14 +14,16 @@ The [current architecture and status](robust-current.md) identifies the
 canonical native waveform/channel/Helper stack and the complete headless
 receiver. See the [validation record](validation.md) for the measured native
 message gate, local CPU margins, GPU stage speed and forecast coverage.
-The [interactive receiver parallelism report](receiver-parallelism.html) maps
-the pre-change ownership and synchronization boundaries, measured stage costs and
-conditional optimization opportunities. Its [cycle timeline](receiver-parallelism.html#cycle)
-shows actual controller and worker intervals, separates signal time from CPU
-elapsed time, and contrasts that execution with a hypothetical bounded
-producer/consumer pipeline. Follow the [current restructuring record](validation.md#continuous-receiver-restructuring)
-for subsequent changes. It is a dated evidence snapshot, not
-a new capacity qualification; open it in a browser for the interactive views.
+The [interactive receiver parallelism report](receiver-parallelism.html) shows
+the current two-owner [execution timeline](receiver-parallelism.html#cycle),
+including overlapping windows, controller waits and one detailed fine cycle.
+Its [historical comparison](receiver-parallelism.html#historical-cycle) preserves
+the earlier controller/worker trace. Processing wall time and physical sample
+time are separate; recorded job spans do not establish simultaneous OS execution.
+Historical stage costs and hypothetical optimization explorers retain their
+original scope. See the [current restructuring record](validation.md#continuous-receiver-restructuring)
+for qualified speed and capacity results; a timing trace is not a new capacity
+qualification. Open the report in a browser for the interactive views.
 Robust remains unavailable in the GUI pending
 reconnection. Retained
 [pattern research](triad-patterns.md), [stochastic channel findings](triad-stochastic.md),
