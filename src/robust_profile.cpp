@@ -136,6 +136,8 @@ bool gpu_receiver_available() noexcept {
 void validate_settings(const Settings& s) {
     check(!s.gpu || gpu_receiver_available(), "GPU reception is unavailable in this build (Vulkan support required)");
     modem::validate(s.transfer.modem);
+    check(!s.gpu || s.transfer.modem.search_arithmetic != modem::SearchArithmetic::fp64,
+          "FP64 force cannot be combined with the Vulkan GPU receiver; disable GPU or select automatic/FP32 minimum");
     const auto fs = s.transfer.modem.sample_rate;
     check(fs <= 192000 && fs % 5 == 0, "Robust audio rate must be a multiple of five up to 192 kHz");
     check(s.transfer.modem.carrier_hz > 0 && s.transfer.modem.carrier_hz < fs / 2.,
@@ -229,6 +231,8 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     const auto shift_diffusion = osc.rf.phase_noise_degrees_per_sqrt_second * std::numbers::pi / 180;
 
     ReceiverConfig rx;
+    rx.native_coarse_precision = modem.search_arithmetic == modem::SearchArithmetic::fp64
+        ? NativeCoarsePrecision::fp64 : NativeCoarsePrecision::automatic;
     rx.sample_rate_hz = fs;
     rx.data_if_hz = modem.carrier_hz;
     rx.clock_bound_ppm = osc.lf.accuracy_ppm / denominator * osc.margin;

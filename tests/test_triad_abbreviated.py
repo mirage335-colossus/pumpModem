@@ -28,6 +28,7 @@ def device_receipt():
                 "build_config": "Release", "configured_tensor_backend": True,
                 "configured_vulkan_backend": False, "require_accelerator": True,
                 "receiver_arithmetic": "native_fp64_state_and_admission", "requested_tensor_precision": "automatic",
+                "requested_native_coarse_precision": "automatic",
                 "requested_tensor_coarse_math": "fft",
                 "backend_receipt": {"device": "cuda:0", "device_name": "Fixture GPU",
                                     "library_version": "2.15", "cuda_runtime_version": 13000,
@@ -226,6 +227,7 @@ class AbbreviatedTests(unittest.TestCase):
         receipt = device_receipt()
         receipt.update(command="describe", phases=[], observation=None)
         receipt["identity"]["requested_tensor_coarse_math"] = "int8"
+        receipt["identity"]["requested_native_coarse_precision"] = "automatic"
         receipt["identity"]["backend_receipt"]["requested_coarse_math"] = "int8"
         with tempfile.TemporaryDirectory() as directory:
             binary = Path(directory) / "probe"
@@ -238,10 +240,24 @@ class AbbreviatedTests(unittest.TestCase):
                 self.assertEqual(arguments[arguments.index("--tensor-coarse-math") + 1], "int8")
                 with self.assertRaisesRegex(ProbeError, "altered the requested coarse"):
                     probe.call("describe", tensor_coarse_math="fp16")
+                wrong_policy = copy.deepcopy(receipt)
+                wrong_policy["identity"]["requested_tensor_coarse_math"] = "fft"
+                wrong_policy["identity"]["backend_receipt"]["requested_coarse_math"] = "fft"
+                wrong_policy["identity"]["requested_native_coarse_precision"] = "fp64"
+                execute.return_value = subprocess.CompletedProcess([], 0, json.dumps(wrong_policy).encode(), b"")
+                with self.assertRaisesRegex(ProbeError, "altered the requested native coarse precision"):
+                    probe.call("describe", native_coarse_precision="automatic")
         missing = copy.deepcopy(receipt)
         del missing["identity"]["requested_tensor_coarse_math"]
         with self.assertRaisesRegex(ProbeError, "arithmetic identity"):
             validate_receipt(missing, command="describe", backend="cuda", returncode=0)
+        missing = copy.deepcopy(receipt)
+        del missing["identity"]["requested_native_coarse_precision"]
+        with self.assertRaisesRegex(ProbeError, "requested native precision policy"):
+            validate_receipt(missing, command="describe", backend="cuda", returncode=0)
+        forced = copy.deepcopy(receipt)
+        forced["identity"]["requested_native_coarse_precision"] = "fp64"
+        self.assertNotEqual(runtime_identity(forced), runtime_identity(receipt))
         receipt["identity"]["backend_receipt"]["requested_coarse_math"] = "fft"
         with self.assertRaisesRegex(ProbeError, "differs from the requested"):
             validate_receipt(receipt, command="describe", backend="cuda", returncode=0)

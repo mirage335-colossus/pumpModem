@@ -1,7 +1,8 @@
-# Native GPU precision and CPU forecasting
+# Native receiver precision and CPU forecasting
 
 **Prefer practical lower-precision and tensor-compatible bulk arithmetic when
-it speeds up qualified manual-suite forecasting.** The intended receiver
+it improves qualified operating receiver throughput and test speed.** The intended
+receiver
 normally operates on quiet or mostly quiet spectrum, including FHSS; extreme
 in-band dynamic range is not a general usage requirement. Do not impose FP64
 on all work because one numerical stage needs it. Check the relevant error and
@@ -13,6 +14,9 @@ prefer a full RTX PRO 6000 Blackwell or a demonstrably more suitable modern
 accelerator.** Do not let a familiar A100/A5000 or one slow small-matrix experiment
 silently determine the development target. Qualify the actual precision and
 complete-work speedup on the selected hardware.
+Prefer INT8 when an available native implementation passes the unchanged
+numerical/work gates and gives the best complete cost for the challenging
+geometry. A type selector or theoretical instruction rate is insufficient.
 
 **Choose the default for the computational ceiling of challenging reception,
 including wide frequency searches and accumulated input.** Efficiency on an easy
@@ -46,7 +50,7 @@ path. Qualify the numerical stage and the processing hardware separately.
 | --- | --- |
 | Composite audio/I/Q and channel isolation | Preserve the current FIR/projection arithmetic and explicit strong-Helper checks. Quiet spectrum after filtering does not bound the dynamic range of this composite input. Include filtering and transfer costs. |
 | Helper-specific filtered baseband | Lower-precision tone/correlation processing is a candidate because strong isolated Helper signals can have modest in-band dynamic range. It is not implemented as a low-precision GPU backend. Qualify frequency error and uncertainty before using them to narrow DATA work; phase/timing transfer needs its own evidence. |
-| DATA-specific filtered baseband | Current FP16/INT8 lag matrices operate here. Test normalization, clipping/nonfinite counts, accumulator bounds, full scores and candidate/decision stability, including noise-only and near-decision observations. |
+| DATA-specific filtered baseband | Qualified native CPU FP32 FFTs, Vulkan FP32 FFTs and optional CUDA FP16/INT8 lag matrices operate here. Test scaling, clipping/nonfinite counts, accumulator bounds, full scores and candidate/decision stability, including noise-only and near-decision observations. |
 | Broad frequency/arrival search | Measure full public coverage and complete search/selection cost. Current FFT and optional dense lag matrices are different algorithms; an arithmetic selector does not change an FFT into an INT8 transform. |
 | Fine statistics, coordinates and persistent evidence | Retain precision where long accumulation, small frequency/phase/timing changes or conditioning affects state and decisions. A bulk-matrix pass does not qualify reduced-precision state updates. |
 | Receiver scheduling and completion | Exercise native worker ownership, preparation overlap, bounded workspace and scored quiet-slot finish independently of arithmetic. Component utilization or a small transform win is not complete receiver capacity. |
@@ -70,8 +74,18 @@ ceiling. Keep full FFT as the current default while qualifying alternatives.
 
 ## Current implementation
 
-The default compiled receiver uses its native CPU arithmetic and has no Torch
-runtime dependency. The optional `DATAPUMP_TRIAD_TENSOR` build links a C++ ATen
+The default compiled receiver uses automatic native CPU arithmetic and has no
+Torch runtime dependency. On the qualified AVX2 frequency route, post-filter
+FFTs use FP32 after every double-precision template Gram passes the `1/16`
+minimum eigenvalue-ratio guard. Lag groups, compact tight-clock geometry,
+ill-conditioned banks and unqualified CPU kernels retain explicit FP64 routes.
+Coordinates, phase, Gram/quadratic scoring and fine state retain double precision.
+Rare extreme post-filter exponents use exact power-of-two block scaling and
+double-precision correlation restoration. See the [operating arithmetic policy](search-arithmetic.md)
+for shared GUI/launch controls and the CPU reference override. This policy keeps
+the full worker allocation and conservative memory admission.
+
+The optional `DATAPUMP_TRIAD_TENSOR` build links a C++ ATen
 bulk backend into that same receiver. Public coarse search, fine state, work
 accounting, decisions and completion remain in the production C++ control path;
 Python does not duplicate those algorithms.
@@ -99,6 +113,10 @@ path with explicit stage routing. A numerical or resource failure must not
 silently fall back. See the [native Vulkan scope](triad-performance.md#local-radeon-vulkan-processing)
 and [current qualification](validation.md#local-radeon-vulkan-backend).
 
+The GUI's FP64-force preference is incompatible with this FP32 Vulkan backend
+and is rejected explicitly. CPU automatic versus forced-FP64 diagnostics remain
+separate from GPU device/work evidence.
+
 On the 5650U, exposed shader FP16/INT8 types and the integer-dot extension do not
 by themselves prove packed throughput or accelerated dot products. The observed
 RADV device reports FP16 support but no accelerated 8-bit integer-dot variants.
@@ -108,6 +126,12 @@ packed arithmetic. VkFFT's FP16-storage mode still computes in FP32, so neither
 its storage size nor a half-typed buffer establishes a 2× arithmetic gain.
 Keep the [hardware peak model](triad-performance.md#radeon-arithmetic-ceilings)
 separate from measured affected-phase and complete-receiver speedups.
+
+Current Helper FFT work occurs before channel isolation and retains double
+precision; lowering it based only on the later quiet passband is not justified.
+Fine Gaussian cancellation/conditioning likewise remains a separate precision
+requirement. A small quadratic-scoring fraction alone does not justify changing
+its precision while FFT/product work dominates the accelerated phase.
 
 ### Portable FP32 mapping arithmetic
 

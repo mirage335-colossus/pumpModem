@@ -159,7 +159,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(control.field==Field::planner_target) {control.document_only=true;control.help="Robust target shared with Console and native modeled-duration planning. Full receiver sensitivity and CPU forecasts remain unqualified.";}
     if(control.field==Field::search_arithmetic) {
         control.document_only=true;control.developer_only=true;control.purpose=ControlPurpose::setup;
-        control.help="Receiver arithmetic preference: Default, FP32 minimum or FP64 force. Native fine processing currently uses FP64; FP32 minimum permits that higher precision. The actual arithmetic appears in diagnostics.";
+        control.help="CPU search precision: Default and FP32 minimum use qualified FP32 after channel isolation, with FP64 for conditioning and fine processing. FP64 force is a CPU reference and cannot be combined with GPU. GPU uses its separately qualified precision policy.";
     }
     if(control.field==Field::receiver_strategy||control.field==Field::receiver_cpu_budget) {
         control.document_only=true;control.developer_only=true;control.purpose=ControlPurpose::setup;

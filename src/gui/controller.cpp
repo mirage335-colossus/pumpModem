@@ -1135,7 +1135,9 @@ struct Controller::Impl {
                 if(snapshot.bit_seconds)
                     f(UiField::diagnostics).text+=" · modeled DATA duration "+planner_number(*snapshot.bit_seconds)+" s · configured calendar";
             } else if(snapshot.bit_seconds)
-                f(UiField::diagnostics).text="Native FP64 · modeled DATA duration "+planner_number(*snapshot.bit_seconds)+" s · configured calendar";
+                f(UiField::diagnostics).text=settings.transfer.modem.search_arithmetic==modem::SearchArithmetic::fp64
+                    ?"Native FP64 force · modeled DATA duration "+planner_number(*snapshot.bit_seconds)+" s · configured calendar"
+                    :"Native automatic precision · modeled DATA duration "+planner_number(*snapshot.bit_seconds)+" s · configured calendar";
         }
         const auto& trace=snapshot.transmit_trace;
         std::string active_fhss;

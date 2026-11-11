@@ -111,7 +111,8 @@ def runtime_identity(receipt):
     identity = receipt["identity"]
     runtime = {name: identity.get(name) for name in (
         "backend", "compiler", "build_config", "build_options_sha256", "configured_tensor_backend",
-        "receiver_arithmetic", "requested_tensor_precision", "requested_tensor_coarse_math",
+        "receiver_arithmetic", "requested_native_coarse_precision",
+        "requested_tensor_precision", "requested_tensor_coarse_math",
     )}
     runtime["configured_vulkan_backend"] = identity.get("configured_vulkan_backend", False)
     bulk = identity.get("backend_receipt")
@@ -175,6 +176,9 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
     if observation is not None and not isinstance(observation, dict):
         raise ProbeError("Invalid native observation receipt")
     identity = receipt["identity"]
+    native_precision = identity.get("requested_native_coarse_precision")
+    if native_precision not in ("automatic", "fp64"):
+        raise ProbeError("Complete native receipt lacks a valid requested native precision policy")
     if identity.get("backend") != backend:
         raise ProbeError("Native receipt backend disagrees with requested backend")
     if identity.get("implementation") != "native-production-receiver":
@@ -198,7 +202,7 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
             raise ProbeError("Complete native receipt lacks build and source identity")
         if not all(isinstance(identity.get(key), str) and identity[key] for key in (
                 "compiler", "build_config", "receiver_arithmetic", "requested_tensor_precision",
-                "requested_tensor_coarse_math")):
+                "requested_tensor_coarse_math", "requested_native_coarse_precision")):
             raise ProbeError("Complete native receipt lacks compiler or arithmetic identity")
         coarse_math = identity["requested_tensor_coarse_math"]
         if coarse_math not in ("fft", "fp16", "int8") or (backend == "cpu" and coarse_math != "fft"):
@@ -404,6 +408,9 @@ class NativeProbe:
         if receipt["status"] == "complete":
             if receipt["identity"]["requested_tensor_coarse_math"] != (options.get("tensor_coarse_math") or "fft"):
                 raise ProbeError("Native probe altered the requested coarse arithmetic policy")
+            if (receipt["identity"]["requested_native_coarse_precision"] !=
+                    (options.get("native_coarse_precision") or "automatic")):
+                raise ProbeError("Native probe altered the requested native coarse precision policy")
             actual = allocation(receipt)
             for key, value in limits.items():
                 if value is not None and actual[key] != value:

@@ -32,7 +32,15 @@ def main(executable):
     assert description["allocation"]["slot_owners"] == 1
     assert description["result"] == {"available": True, "actual_device_work": False}
     assert not description["phases"]
+    assert description["identity"]["requested_native_coarse_precision"] == "automatic"
     assert description["identity"]["requested_tensor_coarse_math"] == "fft"
+    forced = run("describe", "--native-coarse-precision", "fp64")
+    assert forced["identity"]["requested_native_coarse_precision"] == "fp64"
+    assert forced["identity"]["receiver_arithmetic"] == "native_fp64_coarse_fft_state_and_admission"
+    run("describe", "--native-coarse-precision", "fp32", code=1,
+        parse_error="--native-coarse-precision expects automatic or fp64")
+    run("describe", "--backend", "vulkan", "--native-coarse-precision", "fp64", code=1,
+        parse_error="FP64 native coarse precision override requires --backend cpu")
     tensor_on_cpu = run("describe", "--tensor-coarse-math", "int8", code=2)
     assert tensor_on_cpu["status"] == "unavailable" and not tensor_on_cpu["phases"]
     assert tensor_on_cpu["identity"]["requested_tensor_coarse_math"] == "int8"

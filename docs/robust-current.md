@@ -63,6 +63,15 @@ remaining slower overall than the original baseline; no throughput/utilization
 gain is claimed.
 See [CPU and memory ownership](development.md#receiver-cpu-allocation).
 
+The operating CPU receiver defaults to qualified FP32 frequency-search FFTs
+after native DATA channel isolation on AVX2, guarded by the complete bank's
+double-precision Gram conditioning. Lag/tight-clock and ill-conditioned or
+unqualified CPU routes retain FP64 with explicit reasons; coordinates, scoring
+and fine state remain double precision. The [shared arithmetic policy](search-arithmetic.md)
+defines the automatic and forced-FP64 controls, scaling and receipt identity.
+Neither arithmetic choice reduces public coverage, `W=2*H` or the conservative
+memory admission bound.
+
 The optional [Vulkan backend](triad-performance.md#local-radeon-vulkan-processing)
 starts after native DATA channel isolation and accelerates the complete
 frequency-search grid and exact arrival frontiers. Helper, native FIR, template

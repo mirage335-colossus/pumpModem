@@ -57,6 +57,10 @@ struct CoarseWorkPlan {
     double maximum_frequency_step_hz = 0, clock_gap_ppm = 0;
     double arrival_lower_seconds = 0, arrival_upper_seconds = 0;
     bool mapped_fidelity_native_fp64 = false;
+    std::string fft_precision = "fp64", precision_reason;
+    double minimum_eigenvalue_ratio = 1;
+    int observation_scale_exponent = 0;
+    std::size_t scaled_template_workspaces = 0;
 };
 
 struct CoarseProgress {

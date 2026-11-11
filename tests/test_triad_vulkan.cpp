@@ -86,8 +86,8 @@ private:
     std::jthread timer_;
 };
 
-void direct_frequency_grid(const std::shared_ptr<r::ReceiverBulkBackend>& backend) {
-    constexpr std::size_t kernel = 7, arrivals = 5, fft_rows = 16;
+void direct_frequency_grid(const std::shared_ptr<r::ReceiverBulkBackend>& backend, std::size_t fft_rows) {
+    constexpr std::size_t kernel = 7, arrivals = 5;
     constexpr double fs = 80, variance = .7;
     const std::array<double, 5> frequencies{-1., -.5, 0., .5, 1.};
     std::array<Complex, kernel + arrivals - 1> observation{};
@@ -227,6 +227,7 @@ Capture coarse_capture(const datapump::Crypto& key, bool mapped = false) {
     auto& s = f.slot;
     c.sample_rate_hz = mapped ? 6000 : 600;
     c.noise_variance = .05;
+    c.native_coarse_precision = v::NativeCoarsePrecision::fp64;
     c.frequency_bound_hz = mapped ? .005 : .2;
     c.clock_bound_ppm = mapped ? 0 : 400;
     c.spread_delay_seconds = mapped ? 0 : .0145;
@@ -288,7 +289,11 @@ j::Json plan_json(const r::CoarseWorkPlan& p) {
         {"arrivals", p.arrival_points}, {"workspaces", p.workspaces}, {"rays", p.rays},
         {"fft_rows", p.correlation_fft_rows}, {"tile_width", p.tile_width}, {"tiles", p.total_tiles},
         {"projected_rate_hz", p.projected_sample_rate_hz}, {"workspace_limit_bytes", p.workspace_limit_bytes},
-        {"workspace_reserved_bytes", p.workspace_reserved_bytes}, {"bulk_host_workspace_bytes", p.bulk_host_workspace_bytes}});
+        {"workspace_reserved_bytes", p.workspace_reserved_bytes}, {"bulk_host_workspace_bytes", p.bulk_host_workspace_bytes},
+        {"fft_precision", p.fft_precision}, {"precision_reason", p.precision_reason},
+        {"minimum_eigenvalue_ratio", p.minimum_eigenvalue_ratio},
+        {"observation_scale_exponent", p.observation_scale_exponent},
+        {"scaled_template_workspaces", p.scaled_template_workspaces}});
 }
 
 bool same_work(const r::CoarseOperationCounts& a, const r::CoarseOperationCounts& b) {
@@ -321,19 +326,19 @@ void same_result(const r::CoarseResult& a, const r::CoarseResult& b) {
     check(a.coordinates == b.coordinates && a.proposal_count == b.proposal_count &&
           a.frequency_points == b.frequency_points && a.arrival_points == b.arrival_points &&
           a.workspaces == b.workspaces && a.lag_frequency_search == b.lag_frequency_search,
-          "native/Vulkan coarse receiver changed public geometry or selected coordinates");
+          "paired coarse receivers changed public geometry or selected coordinates");
     for (std::size_t i = 0; i < a.proposal_count; ++i) {
         check(a.proposals[i].coordinate == b.proposals[i].coordinate &&
               a.proposals[i].bit == b.proposals[i].bit && a.proposals[i].rank == b.proposals[i].rank,
-              "native/Vulkan coarse receiver changed proposal identity or rank");
-        near(b.proposals[i].score, a.proposals[i].score, 3e-6, "native/Vulkan coarse proposal score differs");
+              "paired coarse receivers changed proposal identity or rank");
+        near(b.proposals[i].score, a.proposals[i].score, 3e-6, "paired coarse receiver proposal score differs");
     }
     // Template FFT work moves from native bank construction into bulk prepare;
     // compare complete logical work, not its implementation-specific phase.
     check(same_work(total_work(a.work), total_work(b.work)) &&
           same_work(a.work.search.operations, b.work.search.operations) &&
           same_work(a.work.selection.operations, b.work.selection.operations),
-          "native/Vulkan coarse receiver changed completed logical work");
+          "paired coarse receivers changed completed logical work");
 }
 
 struct Measured {
@@ -513,6 +518,7 @@ void full_slots(const std::shared_ptr<r::ReceiverBulkBackend>& backend, std::sto
     config.sample_rate_hz = fs;
     config.data_if_hz = 1725;
     config.noise_variance = .25;
+    config.native_coarse_precision = v::NativeCoarsePrecision::fp64;
     v::ReceiverSlotPlan slot;
     slot.index = 37;
     slot.first_sample = 20'000;
@@ -631,6 +637,7 @@ void benchmark(const std::shared_ptr<r::ReceiverBulkBackend>& backend, std::stop
     auto f = coarse_capture(key);
     if (wide) f.config.frequency_bound_hz = 2;
     const auto hash = input_hash(f.iq);
+    const bool cpu_precision = !backend;
     // First-use pair is reported separately, not discarded or pooled into the
     // fixed three paired observations. Every owner prepares and releases its
     // private plans and buffers; compiled programs can survive in the bounded
@@ -640,17 +647,39 @@ void benchmark(const std::shared_ptr<r::ReceiverBulkBackend>& backend, std::stop
         std::array<Measured, 2> pair;
         const auto first = look % 2;
         for (const auto index : {first, 1U - first}) {
-            check(!stop.stop_requested(), "Vulkan comparison exceeded its fixed 120-second budget");
+            check(!stop.stop_requested(), "coarse comparison exceeded its fixed 120-second budget");
+            f.config.native_coarse_precision = cpu_precision && index
+                ? v::NativeCoarsePrecision::automatic : v::NativeCoarsePrecision::fp64;
             pair[index] = measure(f, key, resources.workers, index ? backend : nullptr, stop);
             if (reference) same_result(*reference, pair[index].result);
         }
         same_result(pair[0].result, pair[1].result);
-        if (look) {
+        if (look && backend) {
             check(pair[1].after->vulkan_fft_cache_hits > pair[1].before->vulkan_fft_cache_hits &&
                   pair[1].after->vulkan_fft_cache_misses == pair[1].before->vulkan_fft_cache_misses,
                   "warm Vulkan comparison recompiled an already covered FFT geometry");
         }
         if (!reference) reference = pair[0].result;
+        if (cpu_precision) {
+            const auto& control = pair[0].result.work.plan;
+            const auto& automatic = pair[1].result.work.plan;
+            check(control.fft_precision == "fp64" && control.precision_reason == "explicit-fp64" &&
+                  !automatic.precision_reason.empty() && control.minimum_eigenvalue_ratio == automatic.minimum_eigenvalue_ratio,
+                  "CPU precision comparison changed the bank or missed its explicit FP64 control");
+            for (unsigned index = 0; index < pair.size(); ++index) {
+                auto row = measurement_json(pair[index], false, look, look == 0, hash);
+                row["schema"] = "datapump.triad.cpu-precision-comparison.v1";
+                row["requested_precision"] = index ? "automatic" : "fp64";
+                row["hardware_threads"] = resources.hardware_threads;
+                row["source_manifest_sha256"] = DATAPUMP_TRIAD_PROBE_SOURCE_SHA;
+                row["build_options_sha256"] = DATAPUMP_TRIAD_PROBE_BUILD_SHA;
+                row["fixture_source_sha256"] = DATAPUMP_TRIAD_COMPONENT_SOURCE_SHA;
+                row["compiler"] = DATAPUMP_TRIAD_PROBE_COMPILER;
+                row["build_config"] = DATAPUMP_TRIAD_PROBE_CONFIG;
+                output(row);
+            }
+            continue;
+        }
         output(measurement_json(pair[0], false, look, look == 0, hash));
         output(measurement_json(pair[1], true, look, look == 0, hash));
     }
@@ -682,11 +711,18 @@ int main(int argc, char** argv) {
     try {
         std::cout << std::setprecision(17);
         const auto mode = argc == 1 ? std::string_view{} : std::string_view(argv[1]);
+        const bool cpu_precision = mode == "--benchmark-cpu-precision" || mode == "--benchmark-cpu-precision-wide";
         check(argc <= 2 && (mode.empty() || mode == "--plan" || mode == "--benchmark" ||
-                           mode == "--plan-wide" || mode == "--benchmark-wide"),
-              "expected test_triad_vulkan [--plan|--benchmark|--plan-wide|--benchmark-wide]");
+                           mode == "--plan-wide" || mode == "--benchmark-wide" || cpu_precision),
+              "expected test_triad_vulkan [--plan|--benchmark|--benchmark-cpu-precision], "
+              "with optional -wide suffix");
         const Deadline deadline;
-        const bool wide = mode == "--plan-wide" || mode == "--benchmark-wide";
+        const bool wide = mode.ends_with("-wide");
+        if (cpu_precision) {
+            benchmark(nullptr, deadline.token(), wide);
+            check(!deadline.token().stop_requested(), "CPU precision comparison exceeded the fixed invocation deadline");
+            return 0;
+        }
         if (mode == "--plan" || mode == "--plan-wide") {
             const auto key = datapump::Crypto::amateur();
             auto f = coarse_capture(key);
@@ -717,7 +753,8 @@ int main(int argc, char** argv) {
             workspace_boundary(backend);
             simultaneous_owner_accounting(backend);
             idle_stream_cache_admission(backend);
-            direct_frequency_grid(backend);
+            direct_frequency_grid(backend, 16);
+            direct_frequency_grid(backend, 256);
             check_workspace_receipt(backend->receipt(), true);
             exact_frontier_rows();
             full_slots(backend, deadline.token());

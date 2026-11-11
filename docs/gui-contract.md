@@ -39,6 +39,7 @@ See [current architecture](robust-current.md) and
 | FHSS | Canonical envelope and illustrative frequency schedule; no external radio retuning. |
 | Target SNR dB/1Hz | One shared C/N0 target, default 32 dB-Hz, for provisional duration planning; separate from actual simulated C/N0. |
 | Error correction | Configured Off, RS20 or RS60 native short/long text profiles. Raw bits bypass text coding and FEC exactly. |
+| Search arithmetic | Default and FP32 minimum select qualified automatic native CPU arithmetic; FP64 force selects its explicit reference policy. Sensitive stages retain higher precision. |
 | GPU | Optional native Vulkan DATA coarse processing, shared by live reception and simulation; CPU remains the default. |
 | Simulation | Native emitted waveform through the selected continuous sampled channel and complete native receiver. |
 | Audio device, channel routing, Live/duplex, TX volume, Exclusive | Existing native device service, selected channel layout, capture/playback policy and output gain. |
@@ -52,6 +53,12 @@ has no Vulkan receiver backend. Enabling it initializes an actual GPU on the
 native session manager, away from the UI thread. A requested device failure
 is reported and prevents that session from starting; it never silently selects
 CPU processing. Turning GPU off explicitly returns to the native CPU path.
+
+The [Search arithmetic preference](search-arithmetic.md) persists as
+`--search-arithmetic default|fp32-min|fp64-force`. Its help explains that automatic
+processing uses qualified post-filter FP32 coarse FFTs with FP64 exclusions and
+sensitive state. Diagnostics distinguish native automatic precision from forced
+FP64. GPU plus FP64 force is rejected because the Vulkan backend uses FP32 FFTs.
 
 GPU readiness identifies the device; positive GPU scored-row evidence identifies
 executed work. Helper, FIR, template generation, native lag/tight-clock routes

@@ -12,6 +12,10 @@ namespace datapump::triad::v3 {
 
 namespace receiver_detail { class ReceiverBulkBackend; }
 
+// Receiver-local FFT preference. This does not change any public waveform or
+// key state; automatic may select a qualified CPU precision for a stage.
+enum class NativeCoarsePrecision { automatic, fp64 };
+
 inline constexpr std::array<std::int64_t, 13> receiver_epoch_offsets{
     -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6};
 inline constexpr std::size_t receiver_coherence_count = 3;
@@ -39,6 +43,7 @@ struct ReceiverConfig {
     // Public noise normalization and absolute basis gain. Neither is inferred
     // from a decoded bit, a private sample realization, or the episode length.
     double noise_variance = 0, data_basis_gain = 1;
+    NativeCoarsePrecision native_coarse_precision = NativeCoarsePrecision::automatic;
     helper::Plan helper;
     bool helper_enabled = false, physical_rf_retuning = false;
     // Optional compiled bulk arithmetic. The shared receiver still owns all
@@ -82,6 +87,7 @@ struct ReceiverSlotScore {
     double selected_prior_mass = 0;
     std::size_t quiet_modes = 0, workspace_peak_bytes = 0, fine_candidates = 0;
     std::size_t coarse_workspaces = 0, coarse_frequency_points = 0, coarse_arrival_points = 0;
+    std::string coarse_fft_precision, coarse_precision_reason;
     std::size_t affine_blocks = 0, adaptive_blocks = 0, adaptive_peak_states = 0;
     std::uint64_t adaptive_transition_edges = 0, basis_rows = 0;
     double helper_seconds = 0, coarse_seconds = 0, fine_seconds = 0;

@@ -226,6 +226,8 @@ ReceiverSlotScore receiver_detail::score_slot(const ReceiverConfig& config, cons
     score.coarse_workspaces = coarse.workspaces;
     score.coarse_frequency_points = coarse.frequency_points;
     score.coarse_arrival_points = coarse.arrival_points;
+    score.coarse_fft_precision = coarse.work.plan.fft_precision;
+    score.coarse_precision_reason = coarse.work.plan.precision_reason;
     if (coarse.coordinates.empty()) {
         score.reason = std::move(coarse.reason);
         return score;

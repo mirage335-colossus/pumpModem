@@ -1,9 +1,12 @@
 # Validation status
 
-The local Radeon Vulkan backend passes actual-device correctness checks. Its
-bounded warm comparison achieves **1.269× complete coarse-phase speedup** on the
-wider search; the original narrow search remains **39.6% slower** than the
-full-worker native CPU path. Cold compilation remains a separate cost below.
+Qualified native AVX2 FP32 search is now the automatic CPU policy. The bounded
+comparison below improves a challenging five-slot receiver workload by
+**1.196×**; easier complete-service cases remain essentially unchanged. The
+local Radeon Vulkan backend also passes actual-device correctness checks. Its
+earlier **1.269× complete coarse-phase speedup** and narrow-case **39.6% slowdown**
+compare against the historical FP64 CPU path, not the new automatic CPU policy.
+Cold compilation remains a separate cost below.
 Earlier Ryzen CPU and RTX 4090 CUDA results retain their original source and
 hardware scope. No complete receiver-capacity or Tensor Core utilization claim
 follows.
@@ -24,6 +27,97 @@ The historical cleanup checkpoint was based on
 `357a50970a0c6214eeaade7c5704bbc39abd4b79` and committed as
 `419e6bae8c4fe3b0f59be23a6dfb3b69fbaed80e`. Its concise outcomes and limitations
 remain below; they are not release certification or validation of changed code.
+
+## Native arithmetic selection
+
+The working change from `eaa0b805beaf788973da252dce03bb565e9f85be` selects
+post-filter FP32 frequency FFTs on AVX2, including live/simulated GUI reception.
+Every template Gram must have minimum/maximum eigenvalue ratio at least `1/16`.
+This is an empirical qualification envelope, not a universal roundoff theorem.
+Exact power-of-two block scaling preserves tiny inputs and noise-normalized
+scores. Full-band filtering, coordinates, Gram/quadratic scoring and fine state
+retain double precision. Unqualified CPU kernels, lag groups, compact tight-clock
+geometry and ill-conditioned banks retain FP64. The original full hypotheses,
+`W=2*H`, conservative memory admission and physical completion remain intact.
+See [the operating policy](search-arithmetic.md).
+
+On the Ryzen 5 PRO 5650U, Release/GCC 14.2, `H=12`, `W=24`, the frozen narrow/wide
+coarse comparison used one separate first-use pair and three alternating pairs,
+under a 120-second cap per geometry. Both policies use identical input fingerprint
+`10788907945148184106`, complete search work, exact proposal coordinates/order
+and the unchanged `3e-6` score gate. FP64 retains its original combined bank
+preparation; FP32 includes scaling, conversion and its extra preparation dispatch.
+
+| Complete coarse phase | FP64 median | Automatic FP32 median | Speedup | Paired ratio range |
+| --- | ---: | ---: | ---: | ---: |
+| 78 workspaces, 22 frequencies, FFT 2048 | 86.948 ms | 86.714 ms | 1.003× | 1.003–1.099× |
+| 78 workspaces, 211 frequencies, FFT 4096 | 517.336 ms | 440.245 ms | 1.175× | 1.117–1.224× |
+
+First-use FP64/FP32 times were 65.720/68.132 ms and 407.556/433.202 ms respectively;
+they are not pooled with the three recurring looks. Narrow service is effectively
+unchanged, and this is not a universal latency win. An earlier 1.45× wide pilot
+also split FP64 preparation and could not establish the original-path gain;
+the corrected comparison above supersedes that pilot.
+
+Complete native `message` checks used the same three DATA plus two scored quiet
+slots, seed 74021, 600,000-sample cap, 10-second invocation deadline, 4 GiB
+allocation and 24 workers. Each geometry had one first-use pair plus three
+alternating pairs. `--seconds .1 --rate 120` gives 10.4-second public bits; the
+capture has 377,637 rows. The unchanged input, work, decisions, EOF negative
+control and `5e-6` evidence gates passed. Timings include receiver preparation,
+search, fine work, ordered completion and bounded verified spool reads; simulator
+generation and one-time profile/audio preparation are reported separately.
+
+| Complete five-slot service | FP64 median | FP32 median | Speedup | Paired ratio range |
+| --- | ---: | ---: | ---: | ---: |
+| Exact shift oscillator, 1 frequency | 367.740 ms | 361.300 ms | 1.018× | 0.985–1.031× |
+| Crystal shift, RF 20 kHz, 181 frequencies | 535.864 ms | 542.943 ms | 0.987× | 0.948–1.032× |
+| Crystal shift, RF 200 kHz, 1,794 frequencies | 2,002.082 ms | 1,673.750 ms | 1.196× | 1.184–1.244× |
+
+After the first two neutral results (20.61 seconds total), one additional
+search-dominant stratum was declared with the same gates and 120-second cap.
+It finished in 23.91 seconds and all five automatic slots actually used FP32
+frequency search. Its first-use pair was 1,951.291/1,604.695 ms. No further strata
+were sampled. Three pairs are descriptive evidence, not a sensitivity probability,
+sustained backlog test, manual-case capacity pass or refreshed CPU forecast.
+
+Numerical checks cover independent FFT/DFT agreement, scalar/AVX2 agreement,
+65,536-point round trips, unchanged full search/proposals, `2^-100` input scaling,
+near-decision DATA on both sides, strong Helper and failed-Helper quiet. A fixed
+1.5 ms two-ray delay with 0.024 Hz Doppler has minimum Gram ratio 0.0826204 and
+passes FP32/FP64 work, exact proposal and score gates; 0.020 Hz gives 0.061346 and
+selects FP64 just below the cutoff. The final expanded coarse check passes.
+The native group passed **33/33** (52.13 seconds), GUI **29/29** (146.31 seconds),
+then the added shared profile-policy check passed. Native FFT checks also pass.
+The rebuilt actual Radeon passes its direct-grid, exact-frontier, near-decision
+and quiet tests. Optional CUDA algorithms are unchanged; their native comparison
+fixtures explicitly retain the FP64 oracle. No new CUDA-device run is claimed.
+
+Radeon profiling bounded quadratic FP64 scoring to at most **0.37%** of complete
+coarse time, below the predeclared 1% screen. A structured product dispatch passed
+accuracy but slowed the wide warm mean from 439.63 to 502.59 ms; it and the
+temporary instrumentation were removed. CPU controls also varied, so those
+descriptive timings do not isolate a shader-only causal gain. The retained GPU
+bulk path is FP32. This device has no accelerated INT8 dot path. Packed FP16 or
+FP16 storage remain distinct unqualified alternatives: VkFFT half storage still
+computes in FP32, but could independently affect memory traffic.
+
+The original aggregate-initializer compilation failure was repaired by preserving
+the `Workspace` field order. An initial ill-conditioning test retained Doppler
+that kept its two templates independent; correcting the fixture exposed the
+intended FP64 guard without relaxing a gate.
+
+Final production source manifest:
+`ca22d0ce467751510fd123304e4fae7bfe2c62942109f1db14833b82e356604a`.
+Build-options hash:
+`63a1a31d84dfb81f992610f16c646d5f49b6f69bf7f0a0efa97ccd9180f14d41`.
+Native probe binary:
+`e337eb61a5243ba3f4d22682132582248fe10ee0f22b4c56ec40299b9f8fdd39`.
+The final paired receipts in ignored `local-evidence/native-arithmetic/` support
+this source-bound claim; remove them when it is superseded. Superseded pilots,
+the experimental baseline executable, profiling captures and temporary diagnostics
+have been removed. Existing build caches remain useful. The local GUI binary has
+been rebuilt with the new automatic policy and optional Vulkan support.
 
 ## Shared GUI GPU selection
 

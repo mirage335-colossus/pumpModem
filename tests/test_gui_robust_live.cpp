@@ -13,6 +13,7 @@
 #include <mutex>
 #include <numbers>
 #include <random>
+#include <string_view>
 #include <thread>
 
 using namespace datapump;
@@ -165,6 +166,31 @@ live::Settings settings(bool simulation) {
         std::chrono::system_clock::now().time_since_epoch()).count();
     s.calendar = live::Calendar{static_cast<std::uint64_t>(now), 7000037};
     return s;
+}
+
+void native_precision_profile_policy() {
+    auto s = settings(true);
+    const auto automatic = live::detail::prepare_profile(s, *s.calendar, {});
+    s.transfer.modem.search_arithmetic = modem::SearchArithmetic::fp32;
+    const auto fp32_min = live::detail::prepare_profile(s, *s.calendar, {});
+    s.transfer.modem.search_arithmetic = modem::SearchArithmetic::fp64;
+    const auto fp64_force = live::detail::prepare_profile(s, *s.calendar, {});
+    check(automatic.receiver.native_coarse_precision == triad::v3::NativeCoarsePrecision::automatic &&
+          fp32_min.receiver.native_coarse_precision == triad::v3::NativeCoarsePrecision::automatic &&
+          fp64_force.receiver.native_coarse_precision == triad::v3::NativeCoarsePrecision::fp64,
+          "GUI search arithmetic did not map to the native receiver precision policy");
+
+    s.gpu = true;
+    bool rejected = false;
+    try {
+        live::validate_settings(s);
+    } catch (const Error& error) {
+        const std::string_view message(error.what());
+        rejected = live::gpu_receiver_available()
+            ? message.find("FP64 force cannot be combined with the Vulkan GPU receiver") != std::string_view::npos
+            : message.find("GPU reception is unavailable in this build (Vulkan support required)") != std::string_view::npos;
+    }
+    check(rejected, "GPU plus FP64 force did not report the applicable explicit validation error");
 }
 
 live::Snapshot ready(live::Session& session) {
@@ -666,6 +692,7 @@ int main(int argc, char** argv) {
             return 0;
         }
         check(argc == 1, "Unexpected Robust session test argument");
+        native_precision_profile_policy();
         if (!live::gpu_receiver_available()) unavailable_gpu();
         inactive_and_audio_ownership();
         live_transmit_and_cancel(false);

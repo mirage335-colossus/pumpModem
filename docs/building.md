@@ -671,6 +671,11 @@ Select Robust Modem and use the **GPU** checkbox immediately left of Developer.
 It defaults off and persists as `--gpu yes|no`; CPU-only builds keep the control
 disabled with an explanation. Requested GPU initialization failures are reported
 without silently starting a CPU session. See the [shared GUI contract](gui-contract.md).
+The Search arithmetic preference selects automatic CPU processing or the
+explicit FP64 CPU reference; GPU plus FP64 force is rejected. The compiled
+`test_triad_vulkan` also supports a [CPU-only precision comparison](triad-performance.md#native-cpu-arithmetic-comparison)
+that does not create a Vulkan device, although building this target still needs
+the optional Vulkan development dependencies.
 
 Vulkan builds also register `gui_robust_gpu_unavailable`, which uses an invalid
 ICD path to check the missing-device failure and return to CPU. With

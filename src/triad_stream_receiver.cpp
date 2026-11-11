@@ -31,7 +31,8 @@ constexpr std::size_t input_overhead = 4096;
 constexpr std::size_t raw_block_overhead = 512;
 constexpr std::size_t slot_receipt_bytes = 4096;
 constexpr std::size_t maximum_chunk = 16384;
-static_assert(sizeof(StreamSlotReceipt) + 2 * 256 < slot_receipt_bytes);
+// Four bounded local diagnostic strings, including the executed coarse policy.
+static_assert(sizeof(StreamSlotReceipt) + 4 * 256 < slot_receipt_bytes);
 
 std::size_t add(std::size_t a, std::size_t b) {
     if (b>std::numeric_limits<std::size_t>::max()-a) throw ReceiverWorkspaceError("Robust workspace overflow");

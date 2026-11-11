@@ -1,17 +1,23 @@
 #include "datapump/triad_receiver.hpp"
 #include "datapump/triad_stream.hpp"
+#include "../src/search_fft.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <limits>
 #include <numbers>
 #include <stdexcept>
+#include <string_view>
+#include <utility>
 
 namespace {
 using namespace datapump;
 using namespace datapump::triad::v3;
 constexpr unsigned sample_rate = 497;
 constexpr std::size_t workspace_limit = 256 * 1024 * 1024;
+const bool cpu_fft_fp32_qualified =
+    std::string_view(modem::detail::search_fft::kernel_name()) == "avx2";
 
 void check(bool condition, const char* reason) {
     if (!condition) throw std::runtime_error(reason);
@@ -221,11 +227,17 @@ void helper_composite_observation() {
     config.helper_enabled = true;
     config.helper = profile.helper_plan();
 
+    struct Capture {
+        ReceiverSlotPlan plan;
+        std::vector<Complex> iq;
+        std::vector<std::uint8_t> valid;
+    };
     const auto observe = [&](const PublicSlot& slot) {
         const auto seconds = [&](HelperBurstCoordinate coordinate) {
             return profile.calendar().relative_seconds(profile.origin(), coordinate);
         };
-        ReceiverSlotPlan plan;
+        Capture captured;
+        auto& plan = captured.plan;
         plan.index = slot.index;
         plan.first_sample = slot.observation.first;
         plan.stop_sample = slot.observation.stop;
@@ -245,29 +257,157 @@ void helper_composite_observation() {
             const auto take = std::min<std::uint64_t>(discard.size(), plan.first_sample - channel.position());
             check(channel.read(std::span(discard).first(take)) == take, "truncated Helper capture before window");
         }
-        std::vector<Complex> iq(slot.observation.size());
-        std::vector<std::uint8_t> valid(iq.size());
-        for (std::size_t i = 0; i < iq.size();) {
-            const auto take = std::min(discard.size(), iq.size() - i);
-            check(channel.read(std::span(iq).subspan(i, take), std::span(valid).subspan(i, take)) == take,
+        captured.iq.resize(slot.observation.size());
+        captured.valid.resize(captured.iq.size());
+        for (std::size_t i = 0; i < captured.iq.size();) {
+            const auto take = std::min(discard.size(), captured.iq.size() - i);
+            check(channel.read(std::span(captured.iq).subspan(i, take), std::span(captured.valid).subspan(i, take)) == take,
                   "truncated Helper capture in window");
             i += take;
         }
-        return score_receiver_slot(config, plan, key, iq, valid, 2, helper_workspace_limit);
+        return captured;
     };
-    const auto active = observe(data);
+    const auto score_mode = [&](const Capture& captured, NativeCoarsePrecision precision) {
+        auto selected = config;
+        selected.native_coarse_precision = precision;
+        return score_receiver_slot(selected, captured.plan, key, captured.iq, captured.valid, 2,
+                                   helper_workspace_limit);
+    };
+    const auto active_capture = observe(data);
+    const auto active = score_mode(active_capture, NativeCoarsePrecision::automatic);
+    const auto active_fp64 = score_mode(active_capture, NativeCoarsePrecision::fp64);
     check(emission.report().helper_energy > 0 && emission.report().data_energy > 0,
           "composite capture must contain actual DATA and Helper energy");
     check(active.complete && active.decision == SlotDecision::data && active.bit == 1,
           "Helper-assisted encrypted DATA must complete with the correct bit");
     check(active.helper_status == "pilot_aware_onset_relative_frequency_proposal",
           "real Helper lead must produce a narrowed frequency proposal");
-    const auto absent = observe(quiet);
+    check(active.coarse_fft_precision == (cpu_fft_fp32_qualified ? "fp32" : "fp64") &&
+          active.coarse_precision_reason == (cpu_fft_fp32_qualified ? "qualified-post-filter-fft" : "cpu-kernel-unqualified") &&
+          active_fp64.coarse_fft_precision == "fp64" &&
+          active_fp64.coarse_precision_reason == "explicit-fp64",
+          "complete Helper/DATA receiver did not execute the selected FP32 and FP64 coarse paths");
+    check(active.coarse_workspaces == active_fp64.coarse_workspaces &&
+          active.coarse_frequency_points == active_fp64.coarse_frequency_points &&
+          active.fine_candidates == active_fp64.fine_candidates && active.bit == active_fp64.bit &&
+          active.decision == active_fp64.decision && active.helper_status == active_fp64.helper_status &&
+          active.adaptive_transition_edges == active_fp64.adaptive_transition_edges &&
+          active.adaptive_peak_states == active_fp64.adaptive_peak_states &&
+          active.affine_blocks == active_fp64.affine_blocks && active.adaptive_blocks == active_fp64.adaptive_blocks,
+          "automatic post-filter FP32 changed complete Helper/DATA work or admission");
+    const auto score_close = [](double a, double b) {
+        return std::abs(a - b) <= 5e-6 * std::max(1., std::abs(b));
+    };
+    for (std::size_t i = 0; i < active.bit_evidence.size(); ++i)
+        check(score_close(active.bit_evidence[i], active_fp64.bit_evidence[i]) &&
+              score_close(active.adaptive_bit_evidence[i], active_fp64.adaptive_bit_evidence[i]) &&
+              score_close(active.combined_bit_evidence[i], active_fp64.combined_bit_evidence[i]),
+              "automatic post-filter FP32 changed complete DATA evidence beyond tolerance");
+    check(score_close(active.operational_log_e, active_fp64.operational_log_e) &&
+          score_close(active.operational_threshold, active_fp64.operational_threshold),
+          "automatic post-filter FP32 changed the DATA decision threshold beyond tolerance");
+    const auto quiet_capture = observe(quiet);
+    const auto absent = score_mode(quiet_capture, NativeCoarsePrecision::automatic);
+    const auto absent_fp64 = score_mode(quiet_capture, NativeCoarsePrecision::fp64);
     check(absent.complete && absent.decision == SlotDecision::quiet && absent.noise_statistics_valid,
           "Helper-enabled receiver must score actual quiet after emission stops");
     check(absent.helper_status != "pilot_aware_onset_relative_frequency_proposal" &&
           active.coarse_frequency_points < absent.coarse_frequency_points,
           "coarse search must use the selected Helper region or full noise-only fallback");
+    check(absent.decision == absent_fp64.decision && absent.bit == absent_fp64.bit &&
+          absent.helper_status == absent_fp64.helper_status &&
+          absent.coarse_workspaces == absent_fp64.coarse_workspaces &&
+          absent.coarse_frequency_points == absent_fp64.coarse_frequency_points &&
+          absent.fine_candidates == absent_fp64.fine_candidates &&
+          score_close(absent.quiet_energy, absent_fp64.quiet_energy) &&
+          score_close(absent.quiet_threshold, absent_fp64.quiet_threshold) &&
+          score_close(absent.operational_log_e, absent_fp64.operational_log_e),
+          "automatic post-filter FP32 changed failed-Helper quiet/null evidence");
+    check(absent.coarse_fft_precision == (cpu_fft_fp32_qualified ? "fp32" : "fp64") &&
+          absent.coarse_precision_reason == (cpu_fft_fp32_qualified ? "qualified-post-filter-fft" : "cpu-kernel-unqualified") &&
+          absent_fp64.coarse_fft_precision == "fp64" &&
+          absent_fp64.coarse_precision_reason == "explicit-fp64",
+          "failed-Helper quiet receiver did not report the selected CPU precision paths");
+}
+
+void native_precision_near_decision_sides() {
+    // Reuse the frozen native/Vulkan receiver oracle's public slot geometry
+    // and DATA attenuation bracket, but exercise this source-only CPU fixture
+    // with no GPU dependency or duplicate receiver implementation.
+    constexpr unsigned fs = 497;
+    ReceiverConfig base;
+    base.sample_rate_hz = fs;
+    base.data_if_hz = 1725;
+    base.noise_variance = .25;
+    ReceiverSlotPlan slot;
+    slot.index = 37;
+    slot.first_sample = 20'000;
+    slot.window_capture_lead_seconds = -17.7;
+    slot.source_start_seconds = 18.1;
+    slot.format.sample_rate = fs;
+    slot.format.inner_rate_hz = 120;
+    slot.format.added_symbols = 1;
+    slot.format.bit_seconds = .001;
+    slot.format.pulse_shape = PulseShape::TaperedRrc;
+    slot.format.epoch = 1793850000;
+    slot.format.symbol_ordinal = 7000037;
+    slot.format.encrypt = true;
+    const auto key = Crypto::amateur();
+    PatternSource source(slot.format, key, 1);
+    const auto count = source.geometry().source_samples + 403;
+    check(count < 6'000, "native precision near-decision fixture exceeded its fixed sample cap");
+    slot.stop_sample = slot.first_sample + count;
+    slot.quiet_first_sample = slot.first_sample + 230;
+    slot.quiet_stop_sample = slot.first_sample + count - 223;
+    std::vector<Complex> transmitted(count);
+    for (std::size_t i = 0; i < count; ++i)
+        transmitted[i] = .7 * source.sample_at((static_cast<long double>(i) / fs -
+            slot.window_capture_lead_seconds - slot.source_start_seconds) * fs);
+
+    const auto score_both = [&](std::span<const Complex> input) {
+        auto automatic = base;
+        automatic.native_coarse_precision = NativeCoarsePrecision::automatic;
+        const auto low = score_receiver_slot(automatic, slot, key, input, {}, 1,
+            receiver_slot_workspace(automatic, slot, 1));
+        auto reference = base;
+        reference.native_coarse_precision = NativeCoarsePrecision::fp64;
+        const auto full = score_receiver_slot(reference, slot, key, input, {}, 1,
+            receiver_slot_workspace(reference, slot, 1));
+        check(low.coarse_fft_precision == (cpu_fft_fp32_qualified ? "fp32" : "fp64") && full.coarse_fft_precision == "fp64" &&
+              low.coarse_precision_reason == (cpu_fft_fp32_qualified ? "qualified-post-filter-fft" : "cpu-kernel-unqualified") &&
+              full.coarse_precision_reason == "explicit-fp64",
+              "near-decision receiver did not execute both selected CPU arithmetic paths");
+        check(low.complete && full.complete && low.bit == full.bit && low.decision == full.decision &&
+              low.coarse_frequency_points == full.coarse_frequency_points &&
+              low.coarse_workspaces == full.coarse_workspaces && low.fine_candidates == full.fine_candidates &&
+              low.adaptive_transition_edges == full.adaptive_transition_edges &&
+              low.adaptive_peak_states == full.adaptive_peak_states && low.affine_blocks == full.affine_blocks &&
+              low.adaptive_blocks == full.adaptive_blocks,
+              "near-decision FP32 receiver changed its winner or complete work coverage");
+        const auto close = [](double a, double b) {
+            return std::abs(a - b) <= 5e-6 * std::max(1., std::abs(b));
+        };
+        for (std::size_t i = 0; i < low.bit_evidence.size(); ++i)
+            check(close(low.bit_evidence[i], full.bit_evidence[i]) &&
+                  close(low.combined_bit_evidence[i], full.combined_bit_evidence[i]),
+                  "near-decision FP32 changed the complete DATA evidence beyond tolerance");
+        check(close(low.operational_log_e, full.operational_log_e) &&
+              close(low.operational_threshold, full.operational_threshold),
+              "near-decision FP32 changed the full receiver threshold evidence");
+        return std::pair{low, full};
+    };
+
+    for (const auto attenuation : {.0615, .0621}) {
+        auto input = transmitted;
+        for (auto& sample : input) sample *= attenuation;
+        const auto [low, full] = score_both(input);
+        const auto expected_pass = attenuation > .062;
+        check(std::abs(full.operational_log_e - full.operational_threshold) < .7 &&
+              full.operational_passes_conditional_bound == expected_pass &&
+              std::abs(low.operational_log_e - low.operational_threshold) < .7 &&
+              low.operational_passes_conditional_bound == expected_pass,
+              "FP32 changed either original near-decision DATA side of the frozen .7 threshold bracket");
+    }
 }
 }
 
@@ -276,6 +416,7 @@ int main() {
         complete_data();
         physical_quiet_and_limits();
         helper_composite_observation();
+        native_precision_near_decision_sides();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

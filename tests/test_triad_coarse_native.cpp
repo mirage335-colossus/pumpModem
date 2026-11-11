@@ -1,4 +1,5 @@
 #include "../src/triad_receiver_coarse.hpp"
+#include "../src/search_fft.hpp"
 #include "triad_crypto_fixture.hpp"
 
 #include <algorithm>
@@ -7,11 +8,16 @@
 #include <limits>
 #include <numbers>
 #include <stdexcept>
+#include <string_view>
+#include <tuple>
 
 namespace v = datapump::triad::v3;
 namespace r = v::receiver_detail;
 
 namespace {
+const bool cpu_fft_fp32_qualified =
+    std::string_view(datapump::modem::detail::search_fft::kernel_name()) == "avx2";
+
 void check(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
@@ -42,7 +48,8 @@ v::Complex rotation(long double cycles) {
     return std::polar(1., static_cast<double>(2 * std::numbers::pi_v<long double> * std::remainder(cycles, 1.L)));
 }
 
-Fixture capture(const datapump::Crypto& crypto, bool mapped) {
+Fixture capture(const datapump::Crypto& crypto, bool mapped,
+                double spread_delay = .0145, double spread_doppler = 1.25) {
     Fixture f;
     auto& c = f.config;
     auto& s = f.slot;
@@ -50,8 +57,8 @@ Fixture capture(const datapump::Crypto& crypto, bool mapped) {
     c.noise_variance = .05;
     c.frequency_bound_hz = mapped ? .005 : .2;
     c.clock_bound_ppm = mapped ? 0 : 400;
-    c.spread_delay_seconds = mapped ? 0 : .0145;
-    c.spread_doppler_hz = mapped ? 0 : 1.25;
+    c.spread_delay_seconds = mapped ? 0 : spread_delay;
+    c.spread_doppler_hz = mapped ? 0 : spread_doppler;
     c.helper_enabled = !mapped;
     s.first_sample = 80'000;
     s.window_capture_lead_seconds = mapped ? -22.L : -29.4L;
@@ -116,7 +123,8 @@ void check_winner(const Fixture& fixture, const r::CoarseResult& result) {
 }
 
 void exact_two_ray(const datapump::Crypto& crypto) {
-    const auto f = capture(crypto, false);
+    auto f = capture(crypto, false);
+    f.config.native_coarse_precision = v::NativeCoarsePrecision::fp64;
     const std::array<r::FrequencyInterval, 2> intervals{{{-.2, -.13}, {.03125, .045}}};
     constexpr unsigned workers = 3;
     const auto limit = r::coarse_workspace(f.config, f.slot, workers);
@@ -154,6 +162,98 @@ void exact_two_ray(const datapump::Crypto& crypto) {
             "partial public support admitted a complete coarse bank");
 }
 
+void automatic_precision_qualification(const datapump::Crypto& crypto) {
+    constexpr unsigned workers = 3;
+    const std::array<r::FrequencyInterval, 1> intervals{{{-.2, .2}}};
+    const auto run = [&](const Fixture& fixture, v::NativeCoarsePrecision precision) {
+        auto config = fixture.config;
+        config.native_coarse_precision = precision;
+        const auto limit = r::coarse_workspace(config, fixture.slot, workers);
+        return r::score_coarse(config, fixture.slot, crypto, fixture.iq, intervals, workers, limit, {});
+    };
+    const auto search_work = [](const r::CoarseProgress& progress) {
+        const auto& plan = progress.plan;
+        const auto& work = progress.search.operations;
+        return std::tie(plan.route, plan.frequency_points, plan.arrival_points, plan.workspaces,
+                        plan.rays, plan.correlation_fft_rows, plan.total_tiles, progress.completed_tiles,
+                        work.forward_ffts, work.inverse_ffts, work.fft_rows, work.fft_row_stages,
+                        work.workspace_frequency_pairs, work.score_rows, work.retained_peaks,
+                        progress.selection.operations.selection_peak_rows);
+    };
+    const auto check_pair = [&](const r::CoarseResult& low, const r::CoarseResult& ref) {
+        const auto& plan = low.work.plan;
+        check(plan.route == r::CoarseRoute::frequency_tiles && plan.rays == 2 &&
+              plan.fft_precision == (cpu_fft_fp32_qualified ? "fp32" : "fp64") &&
+              plan.precision_reason == (cpu_fft_fp32_qualified ? "qualified-post-filter-fft" : "cpu-kernel-unqualified") &&
+              plan.minimum_eigenvalue_ratio >= 1. / 16,
+              "automatic two-ray search did not select its qualified precision");
+        check(ref.work.plan.fft_precision == "fp64" && ref.work.plan.precision_reason == "explicit-fp64",
+              "forced FP64 control did not report its executed arithmetic");
+        check(search_work(low.work) == search_work(ref.work) &&
+              low.proposal_count == ref.proposal_count && low.coordinates == ref.coordinates,
+              "automatic precision changed public coverage, ordered coordinates or proposal count");
+        for (std::size_t i = 0; i < ref.proposal_count; ++i) {
+            const auto& selected = low.proposals[i];
+            const auto& expected = ref.proposals[i];
+            check(selected.coordinate == expected.coordinate && selected.rank == expected.rank &&
+                  selected.bit == expected.bit && selected.rank == 2 &&
+                  std::abs(selected.score - expected.score) <= 3e-6 * std::max(1., std::abs(expected.score)),
+                  "automatic precision changed an ordered two-ray proposal beyond its score tolerance");
+        }
+    };
+
+    // A demanding, wide public search with a conditioned full-rank two-ray
+    // basis exercises both rays and the FP32 FFT path. The FP64 version is the
+    // oracle; require stable proposal identity/order as well as score accuracy.
+    const auto wide = capture(crypto, false);
+    const auto float_result = run(wide, v::NativeCoarsePrecision::automatic);
+    check_pair(float_result, run(wide, v::NativeCoarsePrecision::fp64));
+
+    // The two rays use the same measured geometry in the synthesized input
+    // and the template bank. This ratio is close enough to 1/16 to exercise
+    // the bottom of the FP32 envelope, unlike the well-separated rays above.
+    const auto boundary = capture(crypto, false, .0015, .024);
+    const auto boundary_result = run(boundary, v::NativeCoarsePrecision::automatic);
+    const auto ratio = boundary_result.work.plan.minimum_eigenvalue_ratio;
+    check(ratio >= .065 && ratio <= .10, "boundary fixture left its near-cutoff conditioning range");
+    check_winner(boundary, boundary_result);
+    check_pair(boundary_result, run(boundary, v::NativeCoarsePrecision::fp64));
+
+    // An input power change also changes the declared noise variance. Exact
+    // exponent scaling must preserve the normalized score without making the
+    // low-amplitude FFT underflow.
+    auto low_level = wide;
+    for (auto& sample : low_level.iq) sample *= std::ldexp(1., -100);
+    low_level.config.noise_variance *= std::ldexp(1., -200);
+    const auto scaled_float = run(low_level, v::NativeCoarsePrecision::automatic);
+    check(scaled_float.work.plan.fft_precision == (cpu_fft_fp32_qualified ? "fp32" : "fp64") &&
+          (cpu_fft_fp32_qualified ? scaled_float.work.plan.observation_scale_exponent != 0 :
+                                    scaled_float.work.plan.observation_scale_exponent == 0) &&
+          scaled_float.proposal_count == float_result.proposal_count &&
+          scaled_float.coordinates == float_result.coordinates,
+          "power-scaled wide input did not retain FP32 scores and proposals");
+    const auto scaled_double = run(low_level, v::NativeCoarsePrecision::fp64);
+    for (std::size_t i = 0; i < float_result.proposal_count; ++i)
+        check(std::abs(scaled_float.proposals[i].score - float_result.proposals[i].score) <=
+                  3e-6 * std::max(1., std::abs(float_result.proposals[i].score)) &&
+              std::abs(scaled_float.proposals[i].score - scaled_double.proposals[i].score) <=
+                  3e-6 * std::max(1., std::abs(scaled_double.proposals[i].score)),
+              "power-scaled FP32 score changed from normalized FP32 or FP64 reference");
+
+    // A small reduction in Doppler puts the matched two-ray bank just below
+    // the cutoff. Preparation alone must select the full FP64 bank.
+    const auto below = capture(crypto, false, .0015, .020);
+    const auto limit = r::coarse_workspace(below.config, below.slot, workers);
+    r::CoarseSession guarded(below.config, below.slot, crypto, below.iq,
+                             intervals, workers, limit);
+    const auto guard = guarded.progress().plan;
+    check(guard.route == r::CoarseRoute::frequency_tiles && guard.minimum_eigenvalue_ratio >= .055 &&
+          guard.minimum_eigenvalue_ratio < 1. / 16 &&
+          guard.fft_precision == "fp64" &&
+          guard.precision_reason == (cpu_fft_fp32_qualified ? "ill-conditioned-template" : "cpu-kernel-unqualified"),
+          "ill-conditioned two-ray bank did not retain explicit FP64 processing");
+}
+
 void slow_mapped(const datapump::Crypto& crypto) {
     const auto f = capture(crypto, true);
     const std::array<r::FrequencyInterval, 1> intervals{{{-.005, .005}}};
@@ -162,8 +262,9 @@ void slow_mapped(const datapump::Crypto& crypto) {
     r::CoarseSession session(f.config, f.slot, crypto, f.iq, intervals, workers, limit);
     const auto initial = session.progress();
     check(initial.plan.route == r::CoarseRoute::lag_groups && initial.plan.total_tiles > 1 &&
+          initial.plan.fft_precision == "fp64" && initial.plan.precision_reason == "lag-groups" &&
           initial.mapped_fidelity.operations.projected_columns > 0 && initial.lag_setup.operations.forward_ffts == 1,
-          "lag-domain session missed its prepared reusable work");
+          "lag-domain session changed precision or missed its prepared reusable work");
     session.advance(1);
     const auto prefix = session.progress();
     const auto pairs = initial.plan.tile_width * initial.plan.frequency_points;
@@ -441,6 +542,7 @@ int main() try {
     const auto crypto = key();
     tied_arrival_frontier();
     exact_two_ray(crypto);
+    automatic_precision_qualification(crypto);
     frequency_continuation(crypto);
     incomplete_bulk_cannot_publish(crypto);
     exact_bulk_frontiers(crypto);

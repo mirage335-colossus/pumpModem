@@ -14,7 +14,9 @@
 #include <numbers>
 #include <numeric>
 #include <random>
+#include <string_view>
 #include <tuple>
+#include <type_traits>
 
 namespace datapump::triad::v3::receiver_detail {
 namespace {
@@ -107,6 +109,16 @@ void combine(CoarseOperationCounts& total, const CoarseBulkWork& part) {
 }
 
 void tracked_fft(std::span<Complex> values, bool inverse, const native_fft::DoublePlan& plan,
+                 CoarseOperationCounts& work, std::stop_token stop) {
+    native_fft::fft(values, inverse, plan, stop);
+    note(inverse ? work.inverse_ffts : work.forward_ffts, 1);
+    note(work.fft_rows, values.size());
+    const auto levels = static_cast<std::uint64_t>(std::countr_zero(values.size()));
+    require_coarse(!levels || values.size() <= UINT64_MAX / levels, "coarse transform work count overflow");
+    note(work.fft_row_stages, levels * values.size());
+}
+
+void tracked_fft(std::span<std::complex<float>> values, bool inverse, const native_fft::FloatPlan& plan,
                  CoarseOperationCounts& work, std::stop_token stop) {
     native_fft::fft(values, inverse, plan, stop);
     note(inverse ? work.inverse_ffts : work.forward_ffts, 1);
@@ -738,7 +750,52 @@ Columns make_columns(const Plan& plan, const Layout& layout, const ReceiverConfi
 struct Workspace {
     Columns columns;
     Inverse inverse;
+    std::array<std::vector<std::complex<float>>, 2> float_columns;
+    double eigenvalue_ratio = 1;
+    int scale_exponent = 0;
 };
+
+// Block scaling changes only representation, after native channel isolation.
+// Ordinary normalized audio needs no extra multiplication. Rare exponent
+// extremes are scaled by an exact power of two and restored in FP64 scoring.
+int float_scale_exponent(double maximum) {
+    require_coarse(std::isfinite(maximum) && maximum >= 0, "nonfinite post-filter FFT scale");
+    if (!maximum) return 0;
+    const auto exponent = std::ilogb(maximum);
+    return exponent < -16 || exponent > 16 ? exponent : 0;
+}
+
+Complex scaled(Complex value, int exponent) {
+    if (!exponent) return value;
+    return {std::scalbn(value.real(), exponent), std::scalbn(value.imag(), exponent)};
+}
+
+double maximum_component(std::span<const Complex> values) {
+    double maximum = 0;
+    for (const auto value : values)
+        maximum = std::max({maximum, std::abs(value.real()), std::abs(value.imag())});
+    return maximum;
+}
+
+void to_float_spectrum(Workspace& workspace, const Layout& layout, const native_fft::FloatPlan& fft,
+                       CoarseOperationCounts& work, std::stop_token stop) {
+    const auto maximum = std::max(maximum_component(workspace.columns[0]), maximum_component(workspace.columns[1]));
+    workspace.scale_exponent = float_scale_exponent(maximum);
+    for (std::size_t ray = 0; ray < workspace.columns.size(); ++ray) if (!workspace.columns[ray].empty()) {
+        auto& input = workspace.columns[ray];
+        auto& spectrum = workspace.float_columns[ray];
+        spectrum.resize(layout.nfft);
+        for (std::size_t i = 0; i < input.size(); ++i) {
+            if ((i & 4095U) == 0) check_stop(stop);
+            spectrum[i] = static_cast<std::complex<float>>(scaled(input[i], -workspace.scale_exponent));
+        }
+        // No complete double and float spectral banks coexist. The existing
+        // native quote covers each raw column and its transient destination.
+        std::vector<Complex>().swap(input);
+        tracked_fft(spectrum, false, fft, work, stop);
+        for (auto& value : spectrum) value = std::conj(value);
+    }
+}
 
 void to_spectrum(Columns& columns, const Layout& layout, const native_fft::DoublePlan& fft,
                  CoarseOperationCounts& work, std::stop_token stop) {
@@ -770,7 +827,12 @@ std::vector<Workspace> prepare_bank(const Plan& plan, const ReceiverConfig& conf
             auto columns = make_columns(plan, plan.layout, config, projection, mapped, source, 0, integer,
                                         plan.clocks[clock], counts, job_stop);
             auto& destination = bank[plan.workspace_index(lane, clock)];
-            destination.inverse = invert(gram(columns, plan.ray_count), plan.ray_count);
+            const auto g = gram(columns, plan.ray_count);
+            destination.inverse = invert(g, plan.ray_count);
+            if (plan.ray_count == 2) {
+                const auto smallest = std::max(0., (g.a * g.d - std::norm(g.b)) / destination.inverse.largest);
+                destination.eigenvalue_ratio = smallest / destination.inverse.largest;
+            }
             if (frequency_domain) to_spectrum(columns, plan.layout, *fft, counts, job_stop);
             destination.columns = std::move(columns);
         }
@@ -795,22 +857,32 @@ std::array<Peak, retained_per_bit> arrival_peaks(std::span<const double> values,
     return result;
 }
 
+template<class Fft>
+using FftComplex = std::conditional_t<std::is_same_v<Fft, native_fft::FloatPlan>, std::complex<float>, Complex>;
+
+template<class Fft>
 std::vector<double> correlation_scores(const Plan& plan, const Layout& layout, const Workspace& workspace,
-                                       std::span<const Complex> observation, double variance,
-                                       const native_fft::DoublePlan& fft, CoarseOperationCounts& work,
-                                       std::stop_token stop) {
-    Columns products;
+                                       std::span<const FftComplex<Fft>> observation, double variance,
+                                       const Fft& fft, CoarseOperationCounts& work,
+                                       std::stop_token stop, int observation_exponent = 0) {
+    std::array<std::vector<FftComplex<Fft>>, 2> products;
+    const auto& columns = [&]() -> const auto& {
+        if constexpr (std::is_same_v<Fft, native_fft::FloatPlan>) return workspace.float_columns;
+        else return workspace.columns;
+    }();
     for (std::size_t ray = 0; ray < plan.ray_count; ++ray) {
         auto& product = products[ray];
         product.resize(layout.nfft);
         for (std::size_t i = 0; i < product.size(); ++i)
-            product[i] = observation[i] * workspace.columns[ray][i];
+            product[i] = observation[i] * columns[ray][i];
         tracked_fft(product, true, fft, work, stop);
     }
     std::vector<double> scores(layout.lag_count);
     for (std::size_t lag = 0; lag < scores.size(); ++lag) {
-        const auto second = plan.ray_count == 2 ? products[1][lag] : Complex{};
-        scores[lag] = quadratic(workspace.inverse.matrix, products[0][lag], second) / variance;
+        const auto exponent = observation_exponent + workspace.scale_exponent;
+        const auto first = scaled(static_cast<Complex>(products[0][lag]), exponent);
+        const auto second = plan.ray_count == 2 ? scaled(static_cast<Complex>(products[1][lag]), exponent) : Complex{};
+        scores[lag] = quadratic(workspace.inverse.matrix, first, second) / variance;
         require_coarse(std::isfinite(scores[lag]), "nonfinite coarse correlation score");
     }
     note(work.workspace_frequency_pairs, 1);
@@ -818,20 +890,22 @@ std::vector<double> correlation_scores(const Plan& plan, const Layout& layout, c
     return scores;
 }
 
-std::vector<Complex> observation_spectrum(const Layout& layout, std::span<const Complex> observation,
+template<class Fft>
+std::vector<FftComplex<Fft>> observation_spectrum(const Layout& layout, std::span<const Complex> observation,
                                           double frequency, std::size_t output_fs,
-                                          const native_fft::DoublePlan& fft, CoarseOperationCounts& work,
-                                          std::stop_token stop) {
-    std::vector<Complex> spectrum(layout.nfft);
+                                          const Fft& fft, CoarseOperationCounts& work,
+                                          std::stop_token stop, int scale_exponent = 0) {
+    std::vector<FftComplex<Fft>> spectrum(layout.nfft);
     if (!frequency) {
-        std::copy(observation.begin(), observation.end(), spectrum.begin());
+        for (std::size_t i = 0; i < observation.size(); ++i)
+            spectrum[i] = static_cast<FftComplex<Fft>>(scaled(observation[i], -scale_exponent));
     } else {
         const auto step = static_cast<long double>(frequency) / output_fs;
         const auto increment = rotation(-step);
         Complex phase{1};
         for (std::size_t i = 0; i < observation.size(); ++i) {
             if ((i & 255U) == 0) phase = rotation(-static_cast<long double>(i) * step);
-            spectrum[i] = observation[i] * phase;
+            spectrum[i] = static_cast<FftComplex<Fft>>(scaled(observation[i], -scale_exponent) * phase);
             phase *= increment;
         }
     }
@@ -1203,20 +1277,21 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
     return {add(add(add(base, high), task_overhead), bulk_host), bulk_host};
 }
 
+template<class Fft>
 CoarseOperationCounts score_frequency_tile(const Plan& plan, std::span<const Workspace> bank,
                                             std::span<const Complex> observation, std::span<const double> grid,
                                             std::span<Peak> peaks, std::size_t first, std::size_t count,
-                                            double variance, const native_fft::DoublePlan& fft,
+                                            double variance, const Fft& fft,
                                             unsigned workers, std::stop_token stop, ReceiverExecutor* executor,
-                                            std::uint64_t public_slot) {
+                                            std::uint64_t public_slot, int observation_exponent = 0) {
     const auto& layout = plan.layout;
     const auto local_count = mul(grid.size(), retained_per_bit);
     const auto distance = std::max<std::size_t>(1, extent(std::ceil(plan.separation * plan.output_fs)));
-    std::vector<std::vector<Complex>> spectra(count);
+    std::vector<std::vector<FftComplex<Fft>>> spectra(count);
     std::vector<CoarseOperationCounts> spectrum_work(count);
     parallel(count, workers, stop, executor, public_slot, [&](std::size_t index, std::stop_token job_stop) {
         spectra[index] = observation_spectrum(layout, observation, grid[first + index], plan.output_fs,
-                                               fft, spectrum_work[index], job_stop);
+                                               fft, spectrum_work[index], job_stop, observation_exponent);
     });
     const auto jobs = mul(bank.size(), count);
     const auto active = std::min<std::size_t>(workers, jobs);
@@ -1227,8 +1302,8 @@ CoarseOperationCounts score_frequency_tile(const Plan& plan, std::span<const Wor
             const auto workspace = index / count;
             const auto local_frequency = index % count;
             const auto frequency = first + local_frequency;
-            const auto scores = correlation_scores(plan, layout, bank[workspace], spectra[local_frequency],
-                                                    variance, fft, work, job_stop);
+            const auto scores = correlation_scores<Fft>(plan, layout, bank[workspace], spectra[local_frequency],
+                                                    variance, fft, work, job_stop, observation_exponent);
             const auto selected = arrival_peaks(scores, distance, frequency);
             std::copy(selected.begin(), selected.end(), peaks.begin() + workspace * local_count + frequency * retained_per_bit);
             for (const auto& peak : selected) if (std::isfinite(peak.score)) note(work.retained_peaks, 1);
@@ -1508,6 +1583,7 @@ struct CoarseSession::Impl {
     FrequencyGrid grid;
     CoarseProgress receipt;
     std::unique_ptr<native_fft::DoublePlan> fft;
+    std::unique_ptr<native_fft::FloatPlan> float_fft;
     std::unique_ptr<CoarseBulk> bulk;
     CoarseBulkCompletedWork bulk_completed;
     std::vector<Workspace> bank;
@@ -1528,6 +1604,9 @@ struct CoarseSession::Impl {
         const auto began = PhaseClock::now();
         const auto stop = cancellation.get_token();
         check_stop(stop);
+        require_coarse(config.native_coarse_precision == NativeCoarsePrecision::automatic ||
+                       config.native_coarse_precision == NativeCoarsePrecision::fp64,
+                       "invalid native coarse arithmetic policy");
         geometry = make_plan(config, slot);
         const auto& layout = geometry.layout;
         require_coarse(iq.size() == capture_samples(slot), "coarse receiver input does not match its public window");
@@ -1604,6 +1683,11 @@ struct CoarseSession::Impl {
                 receipt.mapped_fidelity.wall_seconds = elapsed(fidelity);
             }
         }
+        const bool compact_precision = work.projected_sample_rate_hz <= 10 && config.clock_bound_ppm > 0 &&
+                                       2 * config.clock_bound_ppm <= .001;
+        const bool qualified_cpu = std::string_view(native_fft::kernel_name()) == "avx2";
+        const bool split_bank = !bulk && !lag && config.native_coarse_precision == NativeCoarsePrecision::automatic &&
+                                !compact_precision && qualified_cpu;
         {
             const auto setup = PhaseClock::now();
             if (!bulk || !bulk->supports_fir()) {
@@ -1627,7 +1711,8 @@ struct CoarseSession::Impl {
             }
             const auto bank_started = PhaseClock::now();
             bank = prepare_bank(geometry, config, slot, key, projection, mapped ? &*mapped : nullptr,
-                                fft.get(), !bulk && !lag, workers, receipt.template_bank.operations, stop, executor);
+                                fft.get(), !bulk && !lag && !split_bank, workers,
+                                receipt.template_bank.operations, stop, executor);
             receipt.template_bank.wall_seconds = elapsed(bank_started);
             mapped.reset();
             const auto input_started = PhaseClock::now();
@@ -1636,6 +1721,52 @@ struct CoarseSession::Impl {
                     std::copy_n(iq.begin() + first, values.size(), values.begin());
                 }, receipt.observation.operations, stop);
             receipt.observation.wall_seconds = elapsed(input_started);
+        }
+        work.minimum_eigenvalue_ratio = 1;
+        for (const auto& workspace : bank)
+            work.minimum_eigenvalue_ratio = std::min(work.minimum_eigenvalue_ratio, workspace.eigenvalue_ratio);
+        if (bulk) {
+            work.fft_precision = "bulk";
+            work.precision_reason = "compiled-backend";
+        } else if (lag) {
+            work.precision_reason = "lag-groups";
+        } else {
+            // Selection uses public geometry and template conditioning, never
+            // a decoded bit or observed score. Keep the original FP64 scorer.
+            if (config.native_coarse_precision == NativeCoarsePrecision::fp64)
+                work.precision_reason = "explicit-fp64";
+            else if (compact_precision)
+                work.precision_reason = "compact-tight-clock";
+            else if (!qualified_cpu)
+                work.precision_reason = "cpu-kernel-unqualified";
+            else if (work.minimum_eigenvalue_ratio < 1. / 16)
+                work.precision_reason = "ill-conditioned-template";
+            else {
+                work.fft_precision = "fp32";
+                work.precision_reason = "qualified-post-filter-fft";
+                work.observation_scale_exponent = float_scale_exponent(maximum_component(observation));
+            }
+            if (split_bank) {
+                const auto transform_started = PhaseClock::now();
+                if (work.fft_precision == "fp32") {
+                    // FIR and independent mapped-fidelity work are finished. Do
+                    // not keep an unused double twiddle table alongside the float
+                    // table: the original larger native quote covers either one.
+                    fft.reset();
+                    float_fft = std::make_unique<native_fft::FloatPlan>(layout.nfft, stop);
+                }
+                std::array<CoarseOperationCounts, lanes> transform_work{};
+                parallel(lanes, workers, stop, executor, slot.index, [&](std::size_t lane, std::stop_token job_stop) {
+                    for (std::size_t clock = 0; clock < geometry.clock_count; ++clock) {
+                        auto& workspace = bank[geometry.workspace_index(lane, clock)];
+                        if (float_fft) to_float_spectrum(workspace, layout, *float_fft, transform_work[lane], job_stop);
+                        else to_spectrum(workspace.columns, layout, *fft, transform_work[lane], job_stop);
+                    }
+                });
+                for (const auto& operations : transform_work) combine(receipt.template_bank.operations, operations);
+                for (const auto& workspace : bank) work.scaled_template_workspaces += workspace.scale_exponent != 0;
+                receipt.template_bank.wall_seconds += elapsed(transform_started);
+            }
         }
         if (lag) {
             const auto lag_started = PhaseClock::now();
@@ -1773,11 +1904,15 @@ struct CoarseSession::Impl {
 
     void refresh_retained_bytes() {
         auto bytes = add(sizeof(*this), fft ? fft->working_bytes() : 0);
+        bytes = add(bytes, float_fft ? float_fft->working_bytes() : 0);
         bytes = add(bytes, mul(grid.values.capacity(), sizeof(double)));
         bytes = add(bytes, mul(grid.groups.capacity(), sizeof(FrequencyGroup)));
         bytes = add(bytes, mul(bank.capacity(), sizeof(Workspace)));
         for (const auto& workspace : bank)
             for (const auto& column : workspace.columns) bytes = add(bytes, storage(column.capacity()));
+        for (const auto& workspace : bank)
+            for (const auto& column : workspace.float_columns)
+                bytes = add(bytes, mul(column.capacity(), sizeof(std::complex<float>)));
         bytes = add(bytes, storage(observation.capacity()));
         bytes = add(bytes, mul(kernels.capacity(), sizeof(ZoomKernel)));
         for (const auto& kernel : kernels) {
@@ -1844,6 +1979,10 @@ void CoarseSession::advance(std::size_t maximum_tiles) {
                     impl.observation, impl.kernels, plan.frequency_points, plan.correlation_fft_rows,
                     std::span(impl.peaks).subspan(mul(impl.cursor, row_width), mul(count, row_width)),
                     impl.variance, *impl.fft, plan.workers, stop, impl.executor, impl.slot.index);
+            } else if (impl.float_fft) {
+                completed = score_frequency_tile(impl.geometry, impl.bank, impl.observation, impl.grid.values,
+                    impl.peaks, impl.cursor, count, impl.variance, *impl.float_fft, plan.workers, stop, impl.executor,
+                    impl.slot.index, plan.observation_scale_exponent);
             } else {
                 completed = score_frequency_tile(impl.geometry, impl.bank, impl.observation, impl.grid.values,
                     impl.peaks, impl.cursor, count, impl.variance, *impl.fft, plan.workers, stop, impl.executor,

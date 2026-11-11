@@ -78,6 +78,7 @@ void require(bool condition, const char* message) {
 struct Options {
     std::string command, scenario, backend = "cpu", stratum = "active", tensor_precision = "automatic";
     std::string tensor_coarse_math = "fft";
+    std::string native_coarse_precision = "automatic";
     std::string base = "exact-fixture", shift = "exact-fixture";
     std::string spread = "none", selective = "off", timing = "fixture";
     std::optional<unsigned> workers, owners;
@@ -167,6 +168,7 @@ Options parse(int argc, char** argv) {
     assign("--backend", o.backend);
     assign("--tensor-precision", o.tensor_precision);
     assign("--tensor-coarse-math", o.tensor_coarse_math);
+    assign("--native-coarse-precision", o.native_coarse_precision);
     assign("--require-accelerator", o.require_accelerator);
     assign("--device-index", o.device_index);
     assign("--device-memory-limit-bytes", o.device_memory_limit);
@@ -239,6 +241,8 @@ Options parse(int argc, char** argv) {
     require(one_of(o.backend, {"cpu", "tensor-cpu", "cuda", "vulkan"}), "Unknown native probe backend");
     require(one_of(o.tensor_precision, {"automatic", "fp64"}), "Unknown tensor precision");
     require(one_of(o.tensor_coarse_math, {"fft", "fp16", "int8"}), "Unknown tensor coarse arithmetic");
+    require(one_of(o.native_coarse_precision, {"automatic", "fp64"}),
+            "--native-coarse-precision expects automatic or fp64");
     require(one_of(o.stratum, {"active", "noise", "cold-maximum", "terminal", "erasure"}),
             "Unknown native probe stratum");
     require(one_of(o.timing, {"broad", "fixture"}), "Unknown native probe timing policy");
@@ -259,6 +263,8 @@ Options parse(int argc, char** argv) {
             "Vulkan coarse search uses its native FP32 path; tensor precision selection is unsupported");
     require(o.backend != "vulkan" || o.tensor_coarse_math == "fft",
             "Vulkan coarse search uses the full FFT; tensor matrix arithmetic is unsupported");
+    require(o.native_coarse_precision == "automatic" || o.backend == "cpu",
+            "FP64 native coarse precision override requires --backend cpu");
     return o;
 }
 
@@ -277,6 +283,8 @@ live::Settings settings_for(const Options& o, std::size_t memory_limit) {
     live::Settings s;
     s.simulation = true;
     s.receiver_memory_limit = memory_limit;
+    s.transfer.modem.search_arithmetic = o.native_coarse_precision == "fp64"
+        ? modem::SearchArithmetic::fp64 : modem::SearchArithmetic::default_mode;
     s.transfer.modem.sample_rate = o.sample_rate;
     s.transfer.modem.carrier_hz = o.data_if_hz;
     s.transfer.modem.bandwidth_hz = o.rate_hz;
@@ -885,7 +893,9 @@ Json score_json(const ReceiverSlotScore& score) {
         {"fine_candidates", score.fine_candidates}, {"adaptive_peak_states", score.adaptive_peak_states},
         {"adaptive_transition_edges", score.adaptive_transition_edges}, {"basis_rows", score.basis_rows},
         {"coarse_workspaces", score.coarse_workspaces}, {"coarse_frequency_points", score.coarse_frequency_points},
-        {"coarse_arrival_points", score.coarse_arrival_points}, {"affine_blocks", score.affine_blocks},
+        {"coarse_arrival_points", score.coarse_arrival_points},
+        {"coarse_fft_precision", score.coarse_fft_precision}, {"coarse_precision_reason", score.coarse_precision_reason},
+        {"affine_blocks", score.affine_blocks},
         {"adaptive_blocks", score.adaptive_blocks}, {"helper_status", score.helper_status},
         {"helper_seconds", score.helper_seconds}, {"coarse_seconds", score.coarse_seconds},
         {"fine_seconds", score.fine_seconds}, {"workspace_peak_bytes", score.workspace_peak_bytes}});
@@ -907,6 +917,10 @@ Json coarse_json(const CoarseProgress& p) {
     return object({{"completed_tiles", p.completed_tiles}, {"planned_tiles", g.total_tiles},
         {"remaining_tiles", g.total_tiles - p.completed_tiles},
         {"tile_width", g.tile_width}, {"route", g.route == CoarseRoute::lag_groups ? "lag_groups" : "frequency_tiles"},
+        {"fft_precision", g.fft_precision}, {"precision_reason", g.precision_reason},
+        {"minimum_eigenvalue_ratio", g.minimum_eigenvalue_ratio},
+        {"observation_scale_exponent", g.observation_scale_exponent},
+        {"scaled_template_workspaces", g.scaled_template_workspaces},
         {"workers", g.workers}, {"first_sample", g.first_sample}, {"stop_sample", g.stop_sample},
         {"public_slot", g.public_slot}, {"pattern_epoch", g.pattern_epoch}, {"symbol_ordinal", g.symbol_ordinal},
         {"rays", g.rays}, {"clocks", g.clocks}, {"workspaces", g.workspaces}, {"frequency_points", g.frequency_points},
@@ -1752,6 +1766,7 @@ void codec_run(Json& report, const Options& o, const Profile& profile, std::stop
 void help() {
     std::cout << "triad_receiver_probe describe|plan|slot|continuation|message|backlog|regression|codec [--flag value ...]\n"
         "  --backend cpu|tensor-cpu|cuda|vulkan --require-accelerator on|off --tensor-precision automatic|fp64\n"
+        "  --native-coarse-precision automatic|fp64 (CPU reference FFT arithmetic)\n"
         "  --tensor-coarse-math fft|fp16|int8 (post-channelization search; fallback is reported)\n"
         "  --device-index N --device-memory-limit-bytes N\n"
         "  --case hf|eme and the normalized manual-case options from triad_cases.py\n"
@@ -1789,10 +1804,15 @@ Json identity() {
 
 void run(Json& report, const Options& o, std::stop_token stop) {
     report["identity"]["backend"] = o.backend;
-    report["identity"]["receiver_arithmetic"] = "native_fp64_state_and_admission";
+    report["identity"]["receiver_arithmetic"] = o.backend == "vulkan"
+        ? "native_vulkan_fp32_fft_with_fp64_coordinates_scores_and_state"
+        : o.backend != "cpu" ? "compiled_tensor_bulk_with_native_fp64_coordinates_and_state"
+        : o.native_coarse_precision == "fp64" ? "native_fp64_coarse_fft_state_and_admission"
+        : "native_automatic_fp32_coarse_fft_with_fp64_guard_scoring_state_and_admission";
     report["identity"]["require_accelerator"] = o.require_accelerator;
     report["identity"]["requested_tensor_precision"] = o.tensor_precision;
     report["identity"]["requested_tensor_coarse_math"] = o.tensor_coarse_math;
+    report["identity"]["requested_native_coarse_precision"] = o.native_coarse_precision;
     const auto backend = selected_backend(o);
     const auto describe_backend = [&] {
         report["identity"]["backend_receipt"] = backend ? bulk_json(backend->receipt()) : Json{};

@@ -19,6 +19,7 @@ The tools answer different questions:
 | `triad_abbreviated.py` | Relative computational regression against a matched native baseline. |
 | `triad_abbreviated.py --components` | Bounded same-binary native matrix/FFT and exact-peak comparisons, with device and arithmetic evidence. |
 | `test_triad_vulkan --benchmark` | Matched native CPU/Vulkan coarse-search comparison on one fixed public geometry; not complete receiver capacity. |
+| `test_triad_vulkan --benchmark-cpu-precision` | Matched explicit-FP64/automatic native CPU coarse comparison, without Vulkan device creation. |
 | `triad_manual_cases.py` | Absolute local CPU capacity for the current ordered manual cases. |
 | `triad_gpu_workload.py` and `triad_gpu_cpu_forecast.py` | GPU-observed native work combined with local native phase costs and independent CPU holdouts. |
 
@@ -208,6 +209,8 @@ slower original case.
 
 One first-use pair is reported separately, followed by exactly three alternating
 CPU/Vulkan pairs under a 120-second comparison deadline per selected geometry.
+The CPU control explicitly uses FP64; comparison against automatic CPU arithmetic
+is a separate declared question below.
 Context creation is separate; session preparation, search, selection and complete
 owner lifetime including teardown are timed. Each new session still creates its
 private plans and buffers, loading retained serialized programs when applicable.
@@ -223,9 +226,39 @@ Do not expand sampling or alter public geometry after seeing a timing result.
 The [source-bound 5650U result](validation.md#local-radeon-vulkan-backend) is
 1.269× warm complete coarse-phase speedup on the nine-tile wide case
 (524.061 → 412.809 ms), while the one-tile narrow case remains 39.6% slower
-(77.117 → 107.629 ms). Both include remaining CPU preparation and teardown at
+(77.117 → 107.629 ms). This historical comparison uses the earlier FP64 CPU
+reference; it does not qualify a speedup over the new automatic CPU policy.
+Both include remaining CPU preparation and teardown at
 `H=12/W=24`; neither is whole-receiver or sustained-backlog qualification.
 Retain the separate first-use compilation costs and measured memory charges.
+
+### Native CPU arithmetic comparison
+
+The operating [automatic CPU policy](search-arithmetic.md) can use qualified
+post-filter FP32 frequency FFTs while retaining double-precision conditioning,
+coordinates, scores and fine state. The probe's
+`--native-coarse-precision automatic|fp64` records the requested policy in runtime
+identity and the actual selection/reason/scales in work receipts. Keep policies
+matched for ordinary regression baselines; a precision comparison explicitly
+declares that difference. Explicit FP64 is available only for the CPU reference.
+
+After relevant numerical checks, the optional compiled test target provides two
+fixed CPU-only comparisons without creating a Vulkan device:
+
+```sh
+./build/dev-vulkan/test_triad_vulkan --benchmark-cpu-precision > local-evidence/cpu-precision.jsonl
+./build/dev-vulkan/test_triad_vulkan --benchmark-cpu-precision-wide > local-evidence/cpu-precision-wide.jsonl
+```
+
+Each uses the same declared narrow or wide geometry above, full `W=2*H`, one
+separate first-use pair and three alternating explicit-FP64/automatic pairs
+under a 120-second cap. Input, template-bank conditioning, public work and exact
+candidate coordinates must agree, with the unchanged `3e-6` score gate. Report
+actual arithmetic and any FP64 exclusion; an automatic request on an unqualified
+CPU is not an FP32 measurement. Timings include preparation through owner
+teardown. Compare against the unchanged combined FP64 preparation schedule;
+additional control-only dispatches would bias the result. These are complete
+coarse-phase comparisons, not whole-receiver capacity or backlog tests.
 
 ### Radeon arithmetic ceilings
 
@@ -268,7 +301,7 @@ operation count divided by arithmetic peak and unavoidable bytes divided by
 available bandwidth, plus necessary synchronization/setup. Use the measured
 phase boundaries and operation mix; do not infer a receiver speedup from FLOPS.
 
-For the current three-look CPU measurements, making only the recorded `search`
+For the earlier FP64 CPU three-look measurements, making only the recorded `search`
 stage free would bound complete coarse-phase speedup at **1.356× narrow** and
 **7.990× wide**. This leaves measured preparation, selection and teardown
 unchanged and assumes no new overlap. It is a deliberately limited stage bound,

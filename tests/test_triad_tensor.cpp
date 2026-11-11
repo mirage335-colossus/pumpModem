@@ -1802,6 +1802,7 @@ void dc_gram_oracle(r::ReceiverBulkBackend& backend) {
 void full_slot(const std::shared_ptr<r::ReceiverBulkBackend>& backend) {
     constexpr unsigned fs = 497;
     v::ReceiverConfig config;
+    config.native_coarse_precision = v::NativeCoarsePrecision::fp64;
     config.sample_rate_hz = fs;
     config.data_if_hz = 1725;
     config.noise_variance = .25;
@@ -1944,6 +1945,7 @@ void helper_composite_slot(const std::shared_ptr<r::ReceiverBulkBackend>& backen
     v::StreamingChannel channel(emission.source(), channel_config);
 
     auto config = v::ReceiverConfig{};
+    config.native_coarse_precision = v::NativeCoarsePrecision::fp64;
     config.sample_rate_hz = fs;
     config.data_if_hz = settings.data_if_hz;
     config.frequency_bound_hz = settings.cfo_bound_hz;
