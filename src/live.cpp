@@ -4,8 +4,10 @@
 #include "datapump/received_text.hpp"
 #include "datapump/robust_audio_frontend.hpp"
 #include "datapump/robust_profile.hpp"
+#include "datapump/triad_acceleration.hpp"
 #include "datapump/triad_stream_receiver.hpp"
 #include "search_fft.hpp"
+#include "triad_receiver_bulk.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1078,9 +1080,15 @@ struct Session::Impl {
                 current.running = true;
                 current.status = preparing;
                 current.transmit_unavailable = preparing;
+                current.gpu_device.clear();
+                current.gpu_score_rows = 0;
             }
             std::stop_callback shutdown(manager_stop, [source = generation_stop]() mutable { source.request_stop(); });
             std::shared_ptr<const Profile> active;
+            // One cache owner per settings generation, retained across every
+            // window and successive simulation transmissions. Reconfiguration
+            // releases it only after capture and all receiver owners drain.
+            std::shared_ptr<receiver_detail::ReceiverBulkBackend> gpu_backend;
             execution::Task capture;
             auto start_capture = [&] {
                 if (s.simulation || !s.live_noise_dbfs_hz) return;
@@ -1106,15 +1114,26 @@ struct Session::Impl {
 
             try {
                 if (const auto reason = basic_transmit_reason(s)) throw Error(*reason);
+                if (s.gpu) {
+#if defined(DATAPUMP_HAVE_TRIAD_VULKAN)
+                    gpu_backend = make_vulkan_receiver_backend({0, 256U * 1024 * 1024});
+#else
+                    throw Error("GPU reception is unavailable in this build (Vulkan support required)");
+#endif
+                }
+                const auto gpu_device = gpu_backend ? gpu_backend->receipt().device_name : std::string{};
                 const auto prepare = [&] {
                     const auto anchor = s.simulation ? simulation_calendar(s) : *s.calendar;
-                    active = std::make_shared<const Profile>(detail::prepare_profile(s, anchor, stop));
+                    auto prepared = detail::prepare_profile(s, anchor, stop);
+                    prepared.receiver.bulk_backend = gpu_backend;
+                    active = std::make_shared<const Profile>(std::move(prepared));
                     const auto& calendar = active->waveform;
                     const auto initial = calendar.transmit_slot(0);
                     const auto following = calendar.transmit_slot(1);
                     std::lock_guard lock(mutex);
                     if (owner != generation || stop.stop_requested()) return;
                     profile = active;
+                    current.gpu_device = gpu_device;
                     current.bit_seconds = calendar.geometry().bit_seconds;
                     current.slot_stride_seconds = static_cast<double>(calendar.calendar().distance(
                         initial.helper_begin, following.helper_begin)) / calendar.effective_sample_rate();
@@ -1201,8 +1220,15 @@ struct Session::Impl {
             close_capture();
             {
                 std::lock_guard lock(mutex);
-                resources_owned = false;
                 profile.reset();
+            }
+            // Device destruction must stay off the GUI mutex, and suspension
+            // must not announce released resources before this teardown.
+            active.reset();
+            gpu_backend.reset();
+            {
+                std::lock_guard lock(mutex);
+                resources_owned = false;
             }
             changed.notify_all();
         }
@@ -1431,6 +1457,11 @@ Snapshot Session::snapshot() {
     Snapshot result;
     {
         std::lock_guard lock(p.mutex);
+        // The receipt lock only copies counters; it never calls the device or
+        // takes this mutex. Do not lend the GUI a backend shared_ptr: it could
+        // become the last owner and perform device teardown on this thread.
+        if (p.profile && p.profile->receiver.bulk_backend)
+            p.current.gpu_score_rows = p.profile->receiver.bulk_backend->receipt().score_rows;
         result = p.current;
         result.signals.swap(p.signal_events);
         result.received.swap(p.received_events);

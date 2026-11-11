@@ -164,7 +164,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             flag=="--rate"||flag=="--bw"||flag=="--carrier"||flag=="--dsp-workspace"||
             flag=="--spread-preset"||flag=="--selective-perturbation"||flag=="--rf-oscillator"||flag=="--shift"||flag=="--rf-shift"||flag=="--rf-carrier"||flag=="--search-margin"||
             flag=="--reference"||flag=="--sideband"||flag=="--lf-reference"||
-            flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--dsss-mode"||flag=="--search-arithmetic"||flag=="--receiver-strategy"||flag=="--receiver-cpu-budget"||flag=="--doppler"||flag=="--fhss"||flag=="--fhss-list"||flag=="--fhss-list-file"||flag=="--live-duplex"||flag=="--hardware-channel-test"||
+            flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--dsss-mode"||flag=="--search-arithmetic"||flag=="--receiver-strategy"||flag=="--receiver-cpu-budget"||flag=="--doppler"||flag=="--fhss"||flag=="--fhss-list"||flag=="--fhss-list-file"||flag=="--live-duplex"||flag=="--gpu"||flag=="--hardware-channel-test"||
             flag=="--keyfile"||flag=="--keyset"||flag=="--key-name"||flag=="--tx-key"||
             flag=="--symbol-burst"||flag=="--symbol-burst-random"||
             flag=="--helper-power"||flag=="--helper-ratio-limit"||flag=="--helper-callsign"||
@@ -241,6 +241,10 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         else if(flag=="--live-duplex") {
             if(value!="yes"&&value!="no")invalid("--live-duplex must be yes or no.");
             result.full_duplex=value=="yes";
+        }
+        else if(flag=="--gpu") {
+            if(value!="yes"&&value!="no")invalid("--gpu must be yes or no.");
+            result.gpu=value=="yes";
         }
         else if(flag=="--hardware-channel-test") {
             if(value!="yes"&&value!="no")invalid("--hardware-channel-test must be yes or no.");
@@ -363,6 +367,7 @@ std::string format(const Patch& settings) {
         add("--receiver-cpu-budget",numeric(*settings.receiver_cpu_budget));
     }
     if(settings.full_duplex)add("--live-duplex",*settings.full_duplex?"yes":"no");
+    if(settings.gpu)add("--gpu",*settings.gpu?"yes":"no");
     if(settings.fhss)add("--fhss",std::string(fhss::id(fhss::parse(*settings.fhss))));
     if(settings.symbol_burst)add("--symbol-burst",*settings.symbol_burst?std::to_string(*settings.symbol_burst):"off");
     if(settings.symbol_burst_random)add("--symbol-burst-random",std::to_string(*settings.symbol_burst_random));

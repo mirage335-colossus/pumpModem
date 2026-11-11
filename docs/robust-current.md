@@ -73,8 +73,13 @@ shared host RAM, so the full per-session ceiling and separate staging remain
 charged through completion and cancellation. The backend's bounded serialized
 VkFFT program cache has a separate persistent host-memory charge, including idle
 lifetime; session device plans and buffers remain private. Default CPU operation
-and public route selection are unchanged. Selection is currently through the
-native factory/headless probe; the GUI has no accelerator selector.
+and public route selection are unchanged. The shared GUI's **GPU** checkbox
+selects this backend for live reception and simulation, with the same native
+factory available to headless probes. Device initialization runs on the session
+manager rather than the UI thread. The backend/cache persists across
+transmissions within a settings generation, and requested device failures remain
+explicit. The GUI charges a fixed 256 MiB per-owner device ceiling and preserves
+the full worker budget. See the [shared control contract](gui-contract.md).
 Implementation scope is distinct from the [current device evidence](validation.md#local-radeon-vulkan-backend).
 
 The receiver control API accepts bounded chunks with explicit sample addresses

@@ -543,6 +543,7 @@ struct Controller::Impl {
             if(load->live_noise_dbfs_hz)f(UiField::live_noise_dbfs_hz).text=planner_number(*load->live_noise_dbfs_hz);
             if(load->fec)f(UiField::fec).selected=*load->fec;
             if(load->full_duplex)f(UiField::live_duplex).checked=*load->full_duplex;
+            if(load->gpu)f(UiField::gpu).checked=*load->gpu;
             if(load->workspace_percent) {dsp_workspace_percent=*load->workspace_percent;f(UiField::dsp_workspace).selected=*load->workspace_percent?"ram-"+std::to_string(*load->workspace_percent):"auto";}
             if(load->fhss_list){fhss_list=fhss::parse_list(*load->fhss_list);f(UiField::fhss_list).text=fhss::list_text(fhss_list,'\n');}
             if(load->tx_key=="none")f(UiField::key).selected="none";
@@ -552,6 +553,7 @@ struct Controller::Impl {
         }
         settings.device=f(UiField::device).text;settings.simulation=f(UiField::simulation).selected=="yes";
         settings.full_duplex=f(UiField::live_duplex).checked;settings.exclusive=f(UiField::exclusive).checked;
+        settings.gpu=f(UiField::gpu).checked;
         settings.tx_dbm=planner_inputs.tx_dbm;settings.path_loss_db=planner_inputs.path_loss_db;
         settings.noise_dbm_hz=planner_inputs.noise_density_dbm_hz;settings.target_cn0_db_hz=planner_inputs.target_db_hz;
         settings.transfer.modem.bandwidth_hz=frequency(f(UiField::bandwidth).text,"Rate");
@@ -664,6 +666,7 @@ struct Controller::Impl {
         values.receiver_strategy=tuning::receiver_strategy_id(settings.transfer.modem.receiver_strategy);
         values.receiver_cpu_budget=settings.transfer.modem.receiver_cpu_budget;
         values.full_duplex=settings.full_duplex;
+        values.gpu=settings.gpu;
         values.fhss=f(UiField::fhss).selected;
         values.symbol_burst=modem::parse_symbol_burst_wait(f(UiField::symbol_burst).selected);
         values.symbol_burst_random=modem::parse_symbol_burst_random(f(UiField::symbol_burst_random).selected);
@@ -977,6 +980,7 @@ struct Controller::Impl {
             UiField::fec,UiField::dsp_workspace,UiField::snr,UiField::planner_target,
             UiField::search_arithmetic,UiField::receiver_strategy,UiField::receiver_cpu_budget})
             f(id).enabled=!closing&&!busy;
+        f(UiField::gpu).enabled=!closing&&!busy&&live::gpu_receiver_available();
         for(const auto id:{UiField::callsign,UiField::grid})f(id).enabled=!closing;
         f(UiField::oscillator_reference).visible=false;f(UiField::oscillator_reference).enabled=false;
         f(UiField::message).enabled=f(UiField::binary).enabled=f(UiField::short_bits).enabled=!attachment&&!closing;
@@ -1111,6 +1115,7 @@ struct Controller::Impl {
         const bool state_changed=value.status!=snapshot.status||value.error!=snapshot.error||
             value.receiver_error!=snapshot.receiver_error||value.transmitting!=snapshot.transmitting||
             value.running!=snapshot.running||value.bit_seconds!=snapshot.bit_seconds||
+            value.gpu_device!=snapshot.gpu_device||value.gpu_score_rows!=snapshot.gpu_score_rows||
             value.transmit_trace.revision!=snapshot.transmit_trace.revision;
         snapshot=std::move(value);
         apply_receptions(inbox,signals,snapshot);
@@ -1121,8 +1126,17 @@ struct Controller::Impl {
             snapshot.running?"Robust receiving":"Robust idle";
         f(UiField::mode).text_tone=snapshot.receiver_error.empty()?ui::TextTone::normal:ui::TextTone::negative;
         f(UiField::diagnostics).text=snapshot.receiver_error;
-        if(f(UiField::diagnostics).text.empty()&&snapshot.bit_seconds)
-            f(UiField::diagnostics).text="Native FP64 · modeled DATA duration "+planner_number(*snapshot.bit_seconds)+" s · configured calendar";
+        if(f(UiField::diagnostics).text.empty()) {
+            if(settings.gpu&&!snapshot.gpu_device.empty()) {
+                if(snapshot.gpu_score_rows)
+                    f(UiField::diagnostics).text="GPU search + native tracking · "+std::to_string(snapshot.gpu_score_rows)+
+                        " rows · "+snapshot.gpu_device;
+                else f(UiField::diagnostics).text="GPU ready + native tracking · "+snapshot.gpu_device;
+                if(snapshot.bit_seconds)
+                    f(UiField::diagnostics).text+=" · modeled DATA duration "+planner_number(*snapshot.bit_seconds)+" s · configured calendar";
+            } else if(snapshot.bit_seconds)
+                f(UiField::diagnostics).text="Native FP64 · modeled DATA duration "+planner_number(*snapshot.bit_seconds)+" s · configured calendar";
+        }
         const auto& trace=snapshot.transmit_trace;
         std::string active_fhss;
         if(snapshot.transmitting&&trace.fhss_available&&trace.fhss_channels&&trace.fhss_channel<trace.fhss_channels) {
@@ -1623,6 +1637,12 @@ void Controller::toggle(UiField field,bool value) {
     if(p.f(field).enabled&&p.f(field).checked!=value) {
         if(field==UiField::exclusive||field==UiField::live_duplex) {
             p.f(field).checked=value;p.configure();
+        }
+        else if(field==UiField::gpu) {
+            const bool previous=p.settings.gpu;
+            p.f(field).checked=value;
+            try {p.configure();}
+            catch(const std::exception& error) {p.f(field).checked=previous;p.notice(error.what(),10);}
         }
         else if(field==UiField::repeatable)p.set_repeatable(value);
         else if(field==UiField::mono) {

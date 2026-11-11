@@ -43,6 +43,7 @@ static_assert(ui::persistent_slot(ui::Slot::simulation_oscillator));
 static_assert(ui::persistent_slot(ui::Slot::rf_oscillator));
 static_assert(ui::persistent_slot(ui::Slot::search_margin));
 static_assert(ui::persistent_slot(ui::Slot::rf_shift));
+static_assert(ui::persistent_slot(ui::Slot::gpu));
 
 // Semantic tones must keep identical meaning for document labels, list cells
 // and bitmap captions, including the full-white monochrome data accent.

@@ -152,8 +152,13 @@ tight-clock FP64 class and fine tracking. The public route chooser is unchanged;
 `native-lag-groups` and `compact-tight-clock-fp64` are explicit native routes.
 A GPU device or allocation failure is not permission to substitute CPU work.
 `--require-accelerator on` requires actual Vulkan search work, so an otherwise
-valid CPU-only route cannot become a GPU result. Selection is currently exposed
-through the native factory and headless probe; the GUI has no accelerator selector.
+valid CPU-only route cannot become a GPU result. The native factory, headless
+probe and shared GUI's **GPU** checkbox expose this optional backend. The GUI
+defaults to CPU, saves `--gpu yes|no`, and uses the same backend for live reception
+and simulation. It initializes the device off the UI thread and retains one
+backend/cache per settings generation across transmissions. Requested device
+failure remains explicit; device readiness alone is not proof of accelerated
+search work. See the [shared control contract](gui-contract.md).
 
 Use the [Vulkan build and test recipe](building.md#vulkan-compute-on-integrated-radeon)
 and record the physical device, driver, features, source/build identity, full
@@ -179,6 +184,8 @@ Use `vulkan_peak_owner_bytes` for a per-owner bound and
 multi-owner aggregate directly to one owner's limit. Preserve the full native
 `W=2*H` worker budget for remaining work and compare against that budget, not a
 single-thread CPU reference.
+The GUI uses a fixed 256 MiB per-owner device ceiling, fully charged by native
+admission alongside staging and the persistent program cache.
 
 After the device correctness checks, run the compiled comparison directly:
 

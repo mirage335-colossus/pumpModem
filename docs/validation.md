@@ -25,6 +25,41 @@ The historical cleanup checkpoint was based on
 `419e6bae8c4fe3b0f59be23a6dfb3b69fbaed80e`. Its concise outcomes and limitations
 remain below; they are not release certification or validation of changed code.
 
+## Shared GUI GPU selection
+
+The working change from `81372e34a220f67d44b5d1b67ae03ae3bf1456e8` adds the
+shared **GPU** checkbox immediately left of Developer, visible independently
+of Developer mode. CPU remains the default. The saved `--gpu yes|no` preference
+selects the existing native Vulkan backend for live reception and simulation;
+requested device failures remain visible. The default/minimum desktop widths
+grow by 64 pixels to retain the existing header's readable mode/status width.
+
+The backend/cache belongs to one session settings generation. Device creation
+and teardown stay on the manager, after capture/receiver owners drain; polling
+copies only a bounded work receipt. Suspension/resumption clears old-generation
+work counters. The full worker budget and DSP memory admission are unchanged.
+
+CPU-only GUI checks passed 27/28 initially; the sole failure was the old exact
+message-editor width assertion after widening the header. Updated geometry,
+launch round-trip and native GUI policy checks then passed 3/3. The rebuilt
+Vulkan-enabled GUI passed 10/10 affected shared checks, including CPU reception,
+Fast/Legacy preservation and explicit missing-device failure/recovery. The
+alternate-frontend group passed 8/8, including framebuffer and terminal views.
+FLTK adapter and document conformance passed in a private Xvfb display. The
+restricted invocation could not connect to its display; the host invocation
+passed without changing the user's desktop. Visual inspection of the rebuilt
+window confirmed a checked GPU control directly left of unchecked Developer
+mode, with the actual Radeon device reported as ready.
+
+On the actual `AMD Radeon Graphics (RADV RENOIR)` device,
+`build/dev/test_gui_robust_live --gpu` decoded `e`/`001` through the GUI's native
+Session path, with all three DATA and two physical quiet decisions and **130
+actual GPU score rows**. GPU off/on and suspension/resumption passed. This
+bounded functional fixture covers at most five scoring windows and 600,000
+samples, with a 90-second receive limit. It is not a new speedup, capacity,
+all-audio-device or release claim. The local `build/dev/datapump-gui` includes
+Vulkan support; the portable build option still defaults off.
+
 ## Local Radeon Vulkan backend
 
 Work starts from clean `9606771b10b813d6c7d64ecd6dae4d43329e5466`. The local
@@ -115,8 +150,9 @@ The wide result is a measured benefit for this complete coarse geometry, with
 remaining CPU preparation included. It does not establish whole-receiver
 speedup, sustained backlog capacity, GPU utilization, packed-FP16 arithmetic or
 a CPU forecast. The narrow result and cold costs remain material limitations.
-The default native CPU path and full worker budget remain unchanged; the GUI
-has no accelerator selector. The [arithmetic model](triad-performance.md#radeon-arithmetic-ceilings)
+The default native CPU path and full worker budget remain unchanged; the shared
+GUI now exposes the optional backend through its GPU checkbox. The
+[arithmetic model](triad-performance.md#radeon-arithmetic-ceilings)
 separates ideal peaks from the current measured stage bounds.
 
 Temporary `local-evidence/amd-igpu/` receipts serve the current exact-device

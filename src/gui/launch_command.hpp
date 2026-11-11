@@ -35,6 +35,7 @@ struct Patch {
     bool clear_live_noise=false;
     std::optional<std::string> fec;
     std::optional<bool> full_duplex;
+    std::optional<bool> gpu;
     std::optional<unsigned> dsss_factor;
     std::optional<unsigned> workspace_percent; // 0 selects automatic headroom.
     bool operator==(const Patch&) const=default;

@@ -17,6 +17,14 @@ template<class Function> void rejects(Function function,const std::string& messa
     throw std::runtime_error(message);
 }
 void parsing_and_formatting() {
+    check(!launch_command::parse("--rate 1200").gpu,
+          "Older partial commands must leave GPU selection unspecified");
+    const auto gpu_on=launch_command::parse("--gpu yes");
+    const auto gpu_off=launch_command::parse("--gpu no");
+    check(gpu_on.gpu==true&&gpu_off.gpu==false&&
+          launch_command::parse(launch_command::format(gpu_on))==gpu_on&&
+          launch_command::parse(launch_command::format(gpu_off))==gpu_off,
+          "GPU selection must round trip both enabled and disabled values");
     const auto calendar=launch_command::parse("--calendar-epoch 1793850000 --calendar-ordinal 18446744073709551615 --live-noise-dbfs-hz -92.25 --dsp-workspace auto --fec rs20");
     check(calendar.calendar_epoch==1793850000ULL&&calendar.calendar_ordinal==std::numeric_limits<std::uint64_t>::max()&&
           calendar.live_noise_dbfs_hz==-92.25&&calendar.workspace_percent==0&&calendar.fec=="rs20"&&
@@ -185,7 +193,7 @@ void parsing_and_formatting() {
     check(!datapump::clock_sync::parse("Default"),"Default clock policy must remain absent");
     for(const auto* command:{"--fhss-list '1MHz'","--fhss-list '1MHz,1MHz'","--fhss-list '1MHz,2MHz' --fhss-list-file file","--fhss genuine","--fhss ic-7100","--dsss-factor 2","--clock-sync GPS_nanms-1ms_region-0ms_offset",
         "--clock-sync GPS_1ms--1ms_region-0ms_offset","--audio-error -1ms",
-        "--audio-error NaNms","--audio-error 61s","--audio-error 30","--live-duplex maybe","--live-duplex 1",
+        "--audio-error NaNms","--audio-error 61s","--audio-error 30","--live-duplex maybe","--live-duplex 1","--gpu maybe","--gpu 1",
         "--hardware-channel-test maybe","--hardware-channel-test 1"})rejects([&]{launch_command::parse(command);},"invalid clock/spreading setting accepted");
     check(launch_command::parse("--audio-error 0ms").audio_timing_error_seconds==0,
         "zero additional audio allowance must remain an explicit supported assumption");

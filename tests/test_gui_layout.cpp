@@ -15,29 +15,29 @@ bool contains(Rect outer, Rect inner) {
 }
 void established_default() {
     const DesktopLayout layout;
-    check(DesktopLayout::default_width == 1180 && DesktopLayout::default_height == 1168 &&
-          DesktopLayout::min_width == 1130 && DesktopLayout::min_height == 1088,
+    check(DesktopLayout::default_width == 1244 && DesktopLayout::default_height == 1168 &&
+          DesktopLayout::min_width == 1194 && DesktopLayout::min_height == 1088,
           "desktop default or minimum size changed");
-    check(layout[Slot::tabs] == Rect{16, 281, 1148, 728}, "header must preserve the compact link and model controls");
-    check(layout[Slot::page] == Rect{16, 313, 1148, 696}, "page viewport must start below every persistent header control");
-    check(layout[Slot::message] == Rect{16, 339, 785, 78}, "compact message composition size changed");
-    check(layout[Slot::paste_previous] == Rect{561, 317, 240, 20}, "previous-message button moved");
-    check(layout[Slot::binary] == Rect{815, 339, 220, 78}, "binary editor moved");
-    check(layout[Slot::qr] == Rect{1049, 339, 115, 115}, "QR preview must span the editor and action rows");
-    check(layout[Slot::transmit_scope] == Rect{16, 476, 1148, 206}, "generation scope size changed");
-    check(layout[Slot::profile_reference] == Rect{884, 838, 280, 163}, "profile reference must share the plot row at the right edge");
-    check(layout[Slot::signals] == Rect{16, 705, 882, 110}, "received signals size changed");
-    check(layout[Slot::files] == Rect{912, 705, 252, 74}, "received files size changed");
-    check(layout[Slot::waterfall] == Rect{16, 838, 205, 163}, "header must preserve usable plot height");
-    check(layout[Slot::device] == Rect{16, 1033, 200, 27}, "persistent modem controls moved");
-    check(layout[Slot::bandwidth] == Rect{226, 1033, 127, 27} &&
-          layout[Slot::carrier] == Rect{363, 1033, 150, 27} &&
-          layout[Slot::rf_shift] == Rect{523, 1033, 135, 27}, "Rate, Carrier and Shift editors lost their reserved widths");
+    check(layout[Slot::tabs] == Rect{16, 281, 1212, 728}, "header must preserve the compact link and model controls");
+    check(layout[Slot::page] == Rect{16, 313, 1212, 696}, "page viewport must start below every persistent header control");
+    check(layout[Slot::message] == Rect{16, 339, 849, 78}, "compact message composition size changed");
+    check(layout[Slot::paste_previous] == Rect{625, 317, 240, 20}, "previous-message button moved");
+    check(layout[Slot::binary] == Rect{879, 339, 220, 78}, "binary editor moved");
+    check(layout[Slot::qr] == Rect{1113, 339, 115, 115}, "QR preview must span the editor and action rows");
+    check(layout[Slot::transmit_scope] == Rect{16, 476, 1212, 206}, "generation scope size changed");
+    check(layout[Slot::profile_reference] == Rect{948, 838, 280, 163}, "profile reference must share the plot row at the right edge");
+    check(layout[Slot::signals] == Rect{16, 705, 946, 110}, "received signals size changed");
+    check(layout[Slot::files] == Rect{976, 705, 252, 74}, "received files size changed");
+    check(layout[Slot::waterfall] == Rect{16, 838, 220, 163}, "header must preserve usable plot height");
+    check(layout[Slot::device] == Rect{16, 1033, 212, 27}, "persistent modem controls moved");
+    check(layout[Slot::bandwidth] == Rect{238, 1033, 133, 27} &&
+          layout[Slot::carrier] == Rect{381, 1033, 156, 27} &&
+          layout[Slot::rf_shift] == Rect{547, 1033, 141, 27}, "Rate, Carrier and Shift editors lost their reserved widths");
     check(layout[Slot::snr] == Rect{16, 1076, 260, 27} &&
-          layout[Slot::fec] == Rect{286, 1076, 878, 27}, "single target and error correction lost their persistent row");
-    check(layout[Slot::doppler]==Rect{668,1033,220,27}&&layout[Slot::dsp_workspace]==Rect{898,1033,266,27},
+          layout[Slot::fec] == Rect{286, 1076, 942, 27}, "single target and error correction lost their persistent row");
+    check(layout[Slot::doppler]==Rect{698,1033,220,27}&&layout[Slot::dsp_workspace]==Rect{928,1033,300,27},
         "Doppler or advanced controls lost their separate usable row widths");
-    check(layout[Slot::status] == Rect{16, 1137, 876, 24}, "persistent status must reserve the volume controls");
+    check(layout[Slot::status] == Rect{16, 1137, 940, 24}, "persistent status must reserve the volume controls");
 }
 void below_minimum_1080_geometry() {
     // The native window minimum is 1088; this checks geometry only and does
@@ -155,7 +155,7 @@ void supported_sizes() {
         // Every top-bar control may be visible together during simulation.
         // Include native labels above inputs so a new row cannot obscure them.
         std::vector<Rect> occupied_header;
-        for(const auto slot:{Slot::simulation,Slot::link_power,Slot::link_loss,Slot::link_noise,
+        for(const auto slot:{Slot::gpu,Slot::simulation,Slot::link_power,Slot::link_loss,Slot::link_noise,
                              Slot::clock_accuracy,Slot::clock_region,Slot::clock_offset,Slot::audio_error,
                              Slot::simulation_oscillator,Slot::rf_oscillator,Slot::spread_preset,Slot::selective_perturbation,Slot::search_margin,
                              Slot::helper_power,Slot::helper_ratio_limit,Slot::helper_callsign}) {
@@ -182,12 +182,14 @@ void supported_sizes() {
               persistent_slot(Slot::symbol_burst)&&persistent_slot(Slot::symbol_burst_random)&&
               key_action.y==key.y&&key.y+key.h<=simulation.y-label_height,
               "Persistent Burst dropdowns must follow FHSS and fit before the key without obscuring the link row");
-        const auto repeatable=layout[Slot::repeatable],mode=layout[Slot::mode];
+        const auto repeatable=layout[Slot::repeatable],mode=layout[Slot::mode],gpu=layout[Slot::gpu];
         check(layout[Slot::fast_mode].x+layout[Slot::fast_mode].w+8==repeatable.x&&
-              repeatable.x+repeatable.w+8==mode.x&&mode.x+mode.w+10==layout[Slot::developer_mode].x&&
+              repeatable.x+repeatable.w+8==mode.x&&mode.x+mode.w+10==gpu.x&&
+              gpu.w==64&&gpu.x+gpu.w==layout[Slot::developer_mode].x&&
+              layout[Slot::fast_airtime].x+layout[Slot::fast_airtime].w+10==gpu.x&&
               repeatable.y==layout[Slot::fast_mode].y&&mode.w>=178&&
               repeatable.y+repeatable.h<burst.y-label_height,
-              "Repeatable and mode must fit the top header without changing the body or covering setup labels");
+              "GPU and existing mode controls must fit the top header without covering setup labels");
         const auto message = layout[Slot::message], binary = layout[Slot::binary], qr = layout[Slot::qr];
         check(message.y == binary.y && binary.y == qr.y &&
               message.h == binary.h && qr.h >= 87 && qr.w == qr.h &&

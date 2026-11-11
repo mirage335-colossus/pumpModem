@@ -125,7 +125,16 @@ std::vector<double> illustrated_hops(const Settings& settings, double bandwidth)
 }
 }
 
+bool gpu_receiver_available() noexcept {
+#if defined(DATAPUMP_HAVE_TRIAD_VULKAN)
+    return true;
+#else
+    return false;
+#endif
+}
+
 void validate_settings(const Settings& s) {
+    check(!s.gpu || gpu_receiver_available(), "GPU reception is unavailable in this build (Vulkan support required)");
     modem::validate(s.transfer.modem);
     const auto fs = s.transfer.modem.sample_rate;
     check(fs <= 192000 && fs % 5 == 0, "Robust audio rate must be a multiple of five up to 192 kHz");

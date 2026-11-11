@@ -20,7 +20,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     case Slot::symbol_burst:case Slot::symbol_burst_random:
     case Slot::helper_power:case Slot::helper_ratio_limit:case Slot::helper_callsign:
     case Slot::fec:case Slot::dsp_workspace:
-    case Slot::developer_mode:case Slot::shellcode_mode:case Slot::send_key:
+    case Slot::gpu:case Slot::developer_mode:case Slot::shellcode_mode:case Slot::send_key:
         control.purpose=ControlPurpose::setup;break;
     case Slot::message:case Slot::binary:case Slot::paste_previous:case Slot::attach_file:
     case Slot::use_text:case Slot::copy_signal:case Slot::paste_signal:case Slot::save_file:
@@ -44,7 +44,8 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     }
     if(slot==Slot::header) {control.font_size=22;control.scope=ScreenScope::shared;}
     if(slot==Slot::fast_mode) {control.scope=ScreenScope::shared;control.help="Choose Fast Modem, Robust Modem or Legacy Modem. Each mode keeps its own settings.";}
-    if(slot==Slot::developer_mode||slot==Slot::shellcode_mode)control.scope=ScreenScope::shared;
+    if(slot==Slot::gpu||slot==Slot::developer_mode||slot==Slot::shellcode_mode)control.scope=ScreenScope::shared;
+    if(slot==Slot::gpu)control.help="Accelerate Robust reception and simulation on the GPU. Requires a build with GPU support. Device errors appear in receiver status.";
     if(slot==Slot::shellcode_mode) {control.developer_only=true;control.help="Allow printable English ASCII in received text. Newlines are allowed in both modes; other controls and non-ASCII bytes remain underscores. Turning Developer mode off resets this exception.";}
     if(slot==Slot::developer_mode)control.help="Show advanced controls and inspection tabs. Hiding them keeps their current settings, including command-line overrides.";
     if(slot==Slot::helper_power)control.help="Requested Helper transmit power in watts, separate from DATA power. Zero disables Helper. The configured ratio limit can reduce its effective power; this setting does not adjust radio hardware.";
@@ -214,6 +215,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::console,0,"DATA PUMP"}, Slot::header),
         placed({Kind::choice,Field::fast_mode,Command::none,Bitmap::none,Page::console,0,""}, Slot::fast_mode),
         placed({Kind::label,Field::mode,Command::none,Bitmap::none,Page::console,0,""}, Slot::mode),
+        placed({Kind::toggle,Field::gpu,Command::none,Bitmap::none,Page::console,0,"GPU"}, Slot::gpu),
         placed({Kind::toggle,Field::developer_mode,Command::none,Bitmap::none,Page::console,0,"Developer mode"}, Slot::developer_mode),
         placed({Kind::toggle,Field::shellcode_mode,Command::none,Bitmap::none,Page::console,0,"Shellcode mode"}, Slot::shellcode_mode),
         placed({Kind::action,Field::count,Command::clear_received,Bitmap::none,Page::console,0,"Clear received"}, Slot::clear),

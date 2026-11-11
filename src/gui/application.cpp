@@ -366,6 +366,8 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
         view.visible=view.visible&&impl_->overlay&&impl_->overlay->generation==declaration.surface;
     }
     view.enabled=view.enabled&&accepts_surface(declaration.surface);
+    if(declaration.field==ui::Field::gpu&&(!impl_->regular_selected()||impl_->auxiliary_active()))
+        view.enabled=false;
     if(declaration.kind==ui::Kind::label&&declaration.field!=ui::Field::count) {
         view.label=state.text;
         if(declaration.field==ui::Field::fast_status || declaration.field==ui::Field::status) {
@@ -627,7 +629,7 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
                     <<"Saved settings: --keyfile PATH | --keyset amateur|none, --key-name NAME,\n"
                     <<"--rate HZ --carrier HZ --shift HZ --target-snr DB-Hz --helper-power WATTS.\n"
                     <<"Robust receive setup: --calendar-epoch UTC --calendar-ordinal N\n"
-                    <<"--live-noise-dbfs-hz DBFS/Hz; configure the local audio noise model explicitly.\n"
+                    <<"--live-noise-dbfs-hz DBFS/Hz; configure the local audio noise model explicitly. --gpu yes|no selects GPU acceleration (default no).\n"
                     <<"Developer trace: --verbose [--verbose-file NEW-PATH]\n"
                     <<"Physical audio instrument: --audio-timing-test 5..300 [--audio-test-device DEVICE]\n"
                     <<"Smoke controls: --smoke-hold SECONDS --smoke-view NAME --smoke-scroll 0..1\n";

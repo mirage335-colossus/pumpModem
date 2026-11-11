@@ -18,6 +18,8 @@ struct Settings {
     transfer::Options transfer;
     std::string device="default";
     bool mono=true,simulation=false,full_duplex=false,exclusive=false;
+    // Local processing choice; it does not change the on-air profile.
+    bool gpu=false;
     audio::ChannelMode channel_mode=audio::ChannelMode::left_mono;
     double transmit_gain=1;
     helper::Options helper;
@@ -35,6 +37,9 @@ struct Settings {
     std::vector<double> fhss_frequencies_hz;
 };
 void validate_settings(const Settings&);
+// Compile-time capability only. Device initialization stays on the session
+// manager, so GUI availability checks never open a GPU or block on a driver.
+bool gpu_receiver_available() noexcept;
 struct SignalUpdate {
     std::uint64_t id=0;
     double frequency_hz=0;
@@ -90,6 +95,8 @@ struct Snapshot {
     std::optional<std::string> transmit_unavailable;
     std::optional<std::string> noise_transmit_unavailable;
     std::string status,error,receiver_error;
+    std::string gpu_device;
+    std::uint64_t gpu_score_rows=0;
     bool running=false,transmitting=false,simulation=false,simulation_replay=false;
     bool force_transmit_available=false;
 };

@@ -79,6 +79,39 @@ void shared_robust_target() {
     try {gui::Application bad(std::move(invalid));} catch(const Error&) {rejected=true;}
     check(rejected);
 }
+void shared_gpu_toggle() {
+    using F=gui::ui::Field;using S=gui::ui::Slot;
+    const auto& declarations=gui::ui::console_screen();
+    const auto gpu=std::find_if(declarations.begin(),declarations.end(),[](const auto& control){return control.field==F::gpu;});
+    const auto developer=std::find_if(declarations.begin(),declarations.end(),[](const auto& control){return control.field==F::developer_mode;});
+    check(gpu!=declarations.end()&&developer!=declarations.end()&&gpu<developer);
+    check(gpu->slot==S::gpu&&gpu->persistent&&gpu->scope==gui::ui::ScreenScope::shared);
+    gui::Application app({.simulation=true});
+    check(!app.field(F::developer_mode).checked&&app.control(*gpu).visible);
+    check(!app.field(F::gpu).checked&&app.control(*gpu).enabled==live::gpu_receiver_available());
+    app.select(F::fast_mode,"fast");
+    check(app.control(*gpu).visible&&!app.control(*gpu).enabled);
+    app.select(F::fast_mode,"robust");
+    check(app.control(*gpu).enabled==live::gpu_receiver_available());
+    if(live::gpu_receiver_available()) {
+        app.toggle(F::gpu,true);
+        check(app.field(F::gpu).checked&&app.field(F::planner_command).text.find("--gpu yes")!=std::string::npos);
+        app.toggle(F::gpu,false);
+        check(!app.field(F::gpu).checked&&app.field(F::planner_command).text.find("--gpu no")!=std::string::npos);
+    }
+    gui::Launch configured{.simulation=true};
+    configured.settings=gui::launch_command::Patch{};
+    configured.settings->gpu=true;
+    if(live::gpu_receiver_available()) {
+        gui::Application from_command(std::move(configured));
+        check(from_command.field(F::gpu).checked);
+    } else {
+        bool unsupported=false;
+        try {gui::Application from_command(std::move(configured));}
+        catch(const Error&) {unsupported=true;}
+        check(unsupported);
+    }
+}
 void text_and_raw_draft_boundaries() {
     using F=gui::ui::Field;using C=gui::ui::Command;
     gui::Application app({.simulation=true});
@@ -281,6 +314,7 @@ int main() {
     try {
         planner_quick_references();
         shared_robust_target();
+        shared_gpu_toggle();
         text_and_raw_draft_boundaries();
         pending_transmit_trace();
         retained_raw_bits();

@@ -545,13 +545,15 @@ void dated_live_data_then_eof() {
     }
 }
 
-void complete_native_simulation() {
+void complete_native_simulation(bool gpu = false) {
     // One predeclared functional stratum, not a sensitivity/capacity claim:
     // public calendar, clear e=001, FEC/Helper/spread/selective/FHSS Off, exact
     // oscillators, target and actual 80 dB-Hz with positive physical noise.
     // At most five complete scored windows, 600,000 samples and 90s wall time.
     const auto captures = fixture::capture_opens.load(), playbacks = fixture::playback_opens.load();
     auto simulated = settings(true);
+    simulated.gpu = gpu;
+    if (gpu) simulated.receiver_memory_limit = 1024U * 1024 * 1024;
     // The public slot cadence is at least a minute. A supported lower logical
     // sample rate keeps the full physical calendar inside the sample budget.
     simulated.transfer.modem.sample_rate = 1500;
@@ -559,6 +561,8 @@ void complete_native_simulation() {
     live::Session session;
     session.start(simulated);
     const auto prepared = ready(session);
+    check(prepared.gpu_device.empty() == !gpu && prepared.gpu_score_rows == 0,
+          "Robust GPU readiness does not match the selected backend");
     check(prepared.bit_seconds && prepared.slot_stride_seconds && *prepared.slot_stride_seconds * 6 * 1500 < 600000,
           "Robust simulation exceeds its predeclared sample budget");
     session.transmit(Message{.data = {'e'}});
@@ -596,13 +600,73 @@ void complete_native_simulation() {
           "Native plot output contains nonfinite samples");
     check(fixture::capture_opens == captures && fixture::playback_opens == playbacks,
           "Simulation acquired a physical audio device");
+    if (gpu) {
+        check(!completed.gpu_device.empty() && completed.gpu_score_rows > 0,
+              "GPU simulation decoded without actual accelerated scoring");
+        const auto rows = completed.gpu_score_rows;
+        // Repeated profile preparation after TX must keep the same backend
+        // and its cumulative work receipt for this settings generation.
+        check(ready(session).gpu_score_rows >= rows, "Simulation preparation reset GPU work evidence");
+        std::cout << "GPU Session decoded e/001 on " << completed.gpu_device
+                  << "; actual GPU score rows=" << rows << '\n';
+        (void)session.try_suspend_capture();
+        wait(session, [&](const auto&) { return session.try_suspend_capture(); },
+             "GPU suspension did not release its receiver resources");
+        session.resume_capture();
+        const auto resumed = ready(session);
+        check(!resumed.gpu_device.empty() && resumed.gpu_score_rows == 0,
+              "Resumed GPU generation retained stale completed-work evidence");
+        simulated.gpu = false;
+        session.configure(simulated);
+        const auto cpu = ready(session);
+        check(cpu.gpu_device.empty() && cpu.gpu_score_rows == 0,
+              "Switching GPU off retained the old generation's backend or work evidence");
+        simulated.gpu = true;
+        session.configure(simulated);
+        check(!ready(session).gpu_device.empty(), "Re-enabling GPU did not prepare a new backend");
+    }
     close(session);
     check(session.snapshot().received.empty(), "Stopped simulation emitted a late duplicate message");
 }
+
+void unavailable_gpu() {
+    auto requested = settings(true);
+    requested.gpu = true;
+    if (!live::gpu_receiver_available()) {
+        bool rejected = false;
+        try { live::validate_settings(requested); }
+        catch (const Error& error) { rejected = std::string(error.what()).find("Vulkan support required") != std::string::npos; }
+        check(rejected, "CPU-only build accepted requested GPU processing");
+        return;
+    }
+    // This mode is run with an intentionally unavailable Vulkan ICD. Failure
+    // is asynchronous and visible; it must not report ready on a CPU backend.
+    live::Session session;
+    session.start(requested);
+    const auto failed = wait(session, [](const auto& out) { return !out.receiver_error.empty(); },
+                             "Missing GPU did not report its initialization failure");
+    check(!failed.running && failed.transmit_unavailable && failed.gpu_device.empty() && !failed.gpu_score_rows,
+          "Unavailable GPU silently fell back or reported successful work");
+    requested.gpu = false;
+    session.configure(requested);
+    check(ready(session).receiver_error.empty(), "GPU initialization failure prevented returning to CPU");
+    close(session);
+}
 }
 
-int main() {
+int main(int argc, char** argv) {
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "--gpu") {
+            check(live::gpu_receiver_available(), "Actual GPU session test requires Vulkan support");
+            complete_native_simulation(true);
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--gpu-unavailable") {
+            unavailable_gpu();
+            return 0;
+        }
+        check(argc == 1, "Unexpected Robust session test argument");
+        if (!live::gpu_receiver_available()) unavailable_gpu();
         inactive_and_audio_ownership();
         live_transmit_and_cancel(false);
         live_transmit_and_cancel(true);

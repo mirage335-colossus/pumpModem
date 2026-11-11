@@ -39,10 +39,29 @@ See [current architecture](robust-current.md) and
 | FHSS | Canonical envelope and illustrative frequency schedule; no external radio retuning. |
 | Target SNR dB/1Hz | One shared C/N0 target, default 32 dB-Hz, for provisional duration planning; separate from actual simulated C/N0. |
 | Error correction | Configured Off, RS20 or RS60 native short/long text profiles. Raw bits bypass text coding and FEC exactly. |
+| GPU | Optional native Vulkan DATA coarse processing, shared by live reception and simulation; CPU remains the default. |
 | Simulation | Native emitted waveform through the selected continuous sampled channel and complete native receiver. |
 | Audio device, channel routing, Live/duplex, TX volume, Exclusive | Existing native device service, selected channel layout, capture/playback policy and output gain. |
 | Waterfall, Waveform, Receiver input I/Q | Bounded actual session observations; receiver I/Q is not a substitute TX trace. |
 | Pattern evidence, Pattern steps | Native public-slot classifications, scores, completeness, resource and stage diagnostics. |
+
+The shared **GPU** checkbox sits immediately left of **Developer**. It defaults
+off, persists with the launch settings as `--gpu yes|no`, and is disabled with
+an explanation outside Robust mode, while busy or closing, or when the build
+has no Vulkan receiver backend. Enabling it initializes an actual GPU on the
+native session manager, away from the UI thread. A requested device failure
+is reported and prevents that session from starting; it never silently selects
+CPU processing. Turning GPU off explicitly returns to the native CPU path.
+
+GPU readiness identifies the device; positive GPU scored-row evidence identifies
+executed work. Helper, FIR, template generation, native lag/tight-clock routes
+and fine tracking retain their documented CPU processing. One backend and its
+bounded program cache survive repeated transmissions within a settings
+generation; reconfiguration or close releases that generation. The fixed
+256 MiB per-owner GPU ceiling and persistent cache are charged to native
+admission, including shared RAM on an APU. The default `W=2*H` worker budget
+remains intact. This control does not promise a speedup for every geometry; see
+[measured scope and limits](triad-performance.md#local-radeon-vulkan-processing).
 
 Robust keeps one Target SNR shared by Console, Link Planner and saved
 `--target-snr`. Waveform selection uses canonical automatic defaults. Helper

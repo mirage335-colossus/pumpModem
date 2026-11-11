@@ -657,6 +657,30 @@ Only request that option on a runner with suitable render-device access.
 `--device-index` selects the enumerated physical device; probe receipts identify
 its actual vendor/device, driver and executed work.
 
+For the desktop application, omit `--cli` and build the GUI in a compatible
+development profile, with the same dependency configuration:
+
+```sh
+./build.sh configure --build-dir build/dev --jobs 2 -- \
+  -DDATAPUMP_TRIAD_VULKAN=ON -DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=OFF
+cmake --build build/dev --target datapump-gui --parallel 2
+./build/dev/datapump-gui
+```
+
+Select Robust Modem and use the **GPU** checkbox immediately left of Developer.
+It defaults off and persists as `--gpu yes|no`; CPU-only builds keep the control
+disabled with an explanation. Requested GPU initialization failures are reported
+without silently starting a CPU session. See the [shared GUI contract](gui-contract.md).
+
+Vulkan builds also register `gui_robust_gpu_unavailable`, which uses an invalid
+ICD path to check the missing-device failure and return to CPU. With
+`DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON`, `gui_robust_gpu` invokes
+`test_gui_robust_live --gpu`. Its one declared simulation covers five public
+windows, at most 600,000 samples and a 90-second receive deadline, checks decoded
+`e`/`001` plus actual GPU work, and switches GPU off/on. The strict device check
+runs serially under a 120-second CTest timeout. These registered checks are not
+evidence of a passed run or sustained receiver capacity.
+
 The local dependency preparation uses verified Debian archives extracted
 without system installation into
 `third_party/build-support/cache/vulkan-native/usr-prefix/usr`. When reusing that
@@ -671,8 +695,7 @@ Preserve the default native worker allocation and matched public search. Actual
 GPU access on the development host requires execution outside the restricted
 sandbox that hides `/dev/dri`; no driver or device-permission change was made.
 An unavailable access route must remain an unavailable result. This build does
-not expose a GUI accelerator selector or qualify a release; use the native
-factory/headless probe for backend selection.
+not by itself qualify a release or all physical audio configurations.
 
 ## Compile-time policy
 
