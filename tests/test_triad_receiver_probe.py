@@ -54,6 +54,8 @@ def main(executable):
         parse_error="Vulkan coarse search uses the full FFT")
     run("describe", "--backend", "vulkan", "--tensor-precision", "fp64", code=1,
         parse_error="Vulkan coarse search uses its native FP32 path")
+    run("describe", "--backend", "gpu", "--device-index", "1", code=1,
+        parse_error="Automatic GPU selection does not accept pinned device")
     automatic = run("describe", default_allocation=True)["allocation"]
     assert automatic["hardware_threads"] > 0
     assert automatic["workers"] == 2 * automatic["hardware_threads"]
@@ -69,6 +71,7 @@ def main(executable):
     assert [row["name"] for row in plan["phases"]] == ["profile_preparation"]
     assert plan["configuration"]["coarse_full_prior"]["route"] == "lag_groups"
     assert plan["configuration"]["coarse_full_prior"]["correlation_fft_rows"] == 0
+    assert plan["configuration"]["coarse_full_prior"]["bulk_frequency_admission"] is None
     large_options = ("--seconds", "670", "--max-samples", "1200000")
     large_auto = run("plan", *large_options)["configuration"]
     large_fp32 = run("plan", *large_options, "--native-coarse-precision", "fp32")["configuration"]
@@ -99,6 +102,8 @@ def main(executable):
     mapped_prepare = next(row["work"] for row in mapped["phases"] if row["name"] == "coarse_prepare")
     mapped_tile = next(row["work"] for row in mapped["phases"] if row["name"] == "coarse_tiles")
     assert mapped_prepare["route"] == "lag_groups"
+    assert mapped_prepare["bulk_frequency_admission"] is None
+    assert mapped_prepare["native_fallback_reason"] == ""
     assert mapped_prepare["mapped_fidelity"]["projected_columns"] > 0
     assert mapped_tile["search"]["score_rows"] == lag_plan["frequency_points"] * lag_plan["arrival_points"]
     assert mapped["result"]["acquisition"]["completed_tiles"] == 1

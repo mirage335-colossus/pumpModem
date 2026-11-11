@@ -29,6 +29,150 @@ The historical cleanup checkpoint was based on
 `419e6bae8c4fe3b0f59be23a6dfb3b69fbaed80e`. Its concise outcomes and limitations
 remain below; they are not release certification or validation of changed code.
 
+## NVIDIA and Intel GPU-toggle integration
+
+The shared C++ automatic selector tries compatible CUDA first, then a compatible
+physical Vulkan device; it never reports CPU-only work as GPU execution. The
+bounded hardware comparison used a full RTX PRO 6000 Blackwell Server Edition
+(96 GB), on a cloud AMD EPYC 9554 host with 16 explicitly allocated logical
+threads (`H=16`, `W=32`), three slot owners and an 8 GiB application-memory bound.
+This is cloud-hardware evidence, not a Ryzen CPU forecast. Both public geometries
+used one ray, no Helper and 26 workspaces: broad search, 1,794 frequencies ×
+2,111 arrivals with FFT 4,096; and long transform, 70 frequencies × one arrival
+with FFT 65,536. The configured-calendar stream included a complete five-slot
+message, two scored quiet slots and reacquisition. CPU/GPU input digests matched
+within every pair.
+
+The bounded method was predeclared: capability/phase/memory checks, existing
+native component checks, automatic and FP32-minimum GUI Session checks, then a
+five-slot pair and one 25-slot same-stream pair per geometry. Each had a
+180-second bound; invalid work or unbounded reservation stopped a stratum.
+Candidate seeds were 74021/74022; fresh five-slot holdouts used 74023/74024.
+The ready-input backlog interval is separately measured from the commit of
+public slot 8 through slot 16 (eight commits), after all interval input is ready;
+its two initial uncommitted slots are below eight, so startup carryover is
+excluded. Full-stream service includes startup fill/drain and bounded spool
+read/verification, whose counters are also reported separately. These are
+paired descriptive measurements, not capacity passes or confidence intervals.
+
+| Geometry | 25-slot complete stream, CPU → GPU | Ready-input interval, CPU → GPU | Fresh five-slot holdout, CPU → GPU |
+| --- | ---: | ---: | ---: |
+| Broad | 8.2028 → 1.3200 s (**6.21× faster**) | 2.6703 → 0.36386 s (**7.34× faster**) | 1.6653 → 0.4391 s (**3.79× faster**) |
+| Long | 16.3110 → 16.4030 s (**0.56% slower**) | 5.1647 → 5.2332 s (**1.33% slower**) | 3.4278 → 3.5058 s (**2.27% slower**) |
+
+The first all-CUDA candidate exposed many small fine dispatches. It completed
+the broad backlog in 8.0367 s CPU / 2.5076 s GPU, but the long backlog took
+16.5915 s CPU / 25.2777 s GPU. The qualified follow-up uses native fine work
+only for automatic CUDA when public maximum block rows ≤512, projected modes
+≤40, one tap, AVX2 and admitted worker share ≥32; larger blocks, multiple taps
+and smaller worker shares retain CUDA fine. This bounded stage-routing candidate
+improves the broad measurements while the long case remains slightly slower.
+The result therefore supports the scoped automatic route, not a claim that GPU
+selection accelerates every geometry.
+
+The timing candidate checks bind probe hash
+`b19a5e4ddb29b3d064a2bdedf2d5932c9cb3c8ed4aa1d608af8e4194231755d` and source
+manifest `e6c46ae3e600ae330ae023d49f1ae04109a2ca34840f40664f572eca89548508`.
+The final CMake-only CUDA architecture-override correction changed no DSP code;
+the fresh-seed holdouts bind final probe hash
+`cfb636c0d665622892e8ff923a07028a726455b8cc7e9abe53b139021667a0ba` and source
+manifest `95eb309f65200223774215e17bbb4ba92433cdd472c2197d7c274dbea34550d7`.
+The final CUDA bundle contains six cubins for SM 8.9 and SM 12.0. CMake had
+initially selected only SM 12.0 despite an `89;120` cache request; explicit
+architecture overrides disabled and per-target `CUDAFLAGS` passed for both
+architectures. Preserve this build failure and its correction separately from
+the DSP result. Subsequent native changes add Vulkan shared-workspace admission
+and reporting after the CUDA source manifest above. The later shared coarse
+release-before-parallel-retain change leaves CUDA implementation unchanged; its
+interaction was reviewed, but not revalidated on actual CUDA hardware. The PRO
+6000 results do not cover later source revisions.
+
+Resource receipts show the tradeoff. The CUDA device workspace limit was
+99,243,065,344 bytes; peak device allocator reservation was 1,782,579,200 bytes
+on the broad backlog and 681,574,400 bytes on the long backlog. GPU receiver
+host peaks were 2,346,828,227 and 3,282,152,345 bytes, versus CPU peaks of
+2,029,184,451 and 2,788,859,865 bytes under the same 8 GiB cap. Spool residency
+was the same in each pair: 37,380,096 bytes broad and 229,109,760 bytes long.
+CUDA uploaded 107,512,372 bytes / downloaded 56,516,000 bytes on broad work;
+the long case transferred 2,992,899,308 / 186,502,000 bytes and synchronized
+29,850 times. These transfer, workspace and host-memory costs accompany the
+slightly slower long result; they are not hidden by arithmetic peak claims.
+
+Preserved integration failures and repairs: the first CPU probe run segfaulted
+because the probe dereferenced an absent CPU bulk backend while collecting a
+receipt; a null-safe receipt fix passed both affected probe tests. A 1 GiB GUI
+test limit failed bounded captured-input admission (peak RSS 937,516 KiB); the
+shared GUI Session checks passed after using a 2 GiB test limit. The default
+CMake cache initially built only SM 12.0 and was repaired as described above.
+After these fixes, the native triad group passed 33/33, affected GUI/CI/package
+checks 6/6, and Python orchestration passed 71 tests. Local Radeon tests with
+CUDA disabled passed native Vulkan and shared GUI Session automatic/FP32-minimum
+paths. The full run's `local-evidence/gpu-toggle-validation/` files retain the
+original failures and source-bound measurements until the open hardware checks
+are resolved; remove these temporary results after distilling those outcomes.
+
+These measurements do not establish sustained receiver capacity, Ryzen CPU
+throughput, sensitivity populations, universal GPU benefit, or Intel UHD 630
+compatibility. FP16 cuFFT remains unresolved and is distinct from measured
+FP16/INT8 matrix contractions. No Intel test host was available. SecureCloud
+and regional deployment attempts for RTX 4090 and RTX 5090 did not
+produce an instance: the 4090 capacity had expired, and deploy requests for the
+other available consumer card returned no instance. There is no new consumer
+GPU measurement. The tested PRO 6000 pod was terminated; no pod or persistent
+volume remains. No cloud identifiers or account details are part of this
+record.
+
+## Local Radeon Vulkan shared-workspace follow-up
+
+The automatic Vulkan workspace path was exercised on the local Ryzen 5 PRO
+5650U's Radeon Graphics (`RADV RENOIR`) with `H=12`, `W=24`, one numerical
+thread per receiver worker and a 6 GiB application limit. The bounded
+`automatic-workspace` checks planned `F=35`, then narrowed execution to `F=1`
+while retaining all 156 score rows; this held the full 3.410 GB prior lease and
+observed a 328 MB device peak. A 1 MiB shared FIFO exercised
+cancellation, a small successor, wakeup and explicit native fallback.
+
+The corrected full-public-slot pair used 710 Hz input, 120 Hz data IF, a fixed
+240-second active interval, two rays, 78 workspaces, 26 frequency points,
+two arrivals and an 88,979-row template with a 131,072-point FFT. CPU and GPU
+active and noise inputs matched within each pair. Both GPU calls completed all
+4,056 public scores (`26 × 78 × 2`) and exact fine work. The active stratum
+detected bit 0; the noise stratum completed as quiet. The Vulkan receipt records
+nine FFT calls, 20 dispatches, and 3,410,726,688 bytes actual peak/lease against
+a 4.2 GB shared-workspace cap. Summed phase wall time, excluding simulator and
+profile preparation, was 8.651 s CPU / 8.533 s GPU for active and 8.783 s CPU /
+7.495 s GPU for noise. This is one descriptive pair per stratum, not a sustained
+capacity or statistical claim.
+
+An earlier `Fs=480` candidate was rejected by the transmit-bandwidth/sample-clock
+guard before DSP. The `Fs=960` Hz request with a 335-second active interval
+stopped at the plan's template-work bound; neither is a DSP failure. The
+corrected 240-second full-public-slot pair and workspace checks completed. At
+the pre-label-fix candidate, the triad group passed 33/33, actual Vulkan GUI
+checks passed 6/6, and 72 focused Python tests passed. The final GUI group passed 29/29; the full
+GUI binary built and both CI/package checks passed (2/2). An initial
+strict-validator update passed 41/41 Python tests against a fixture that gave
+pinned Vulkan a positive shared cap; review then found pinned receipts may
+correctly report zero. The corrected fixtures and validators pass 41/41 focused
+and 72/72 combined Python checks. Rebuilt automatic and pinned GPU slot probes
+each completed all 146,432 scores and detected the expected DATA bit: automatic
+reports `backend_shared` with an 8,996,048-byte owner allocation/lease, while
+pinned reports `per_coarse_session` with zero shared counters. The final physical
+Vulkan, portable host-scoring and FIFO admission checks pass 3/3. CPU-only
+LibTorch parity and GPU-unavailable checks also pass; an initial unavailable
+check used the wrong command-line flag and was corrected without a source change.
+
+The final probe source manifest is
+`50a53856782b7f8176828dfa94500f195ff7f426ad282723dd12ef2494f3c455`, and its binary
+SHA-256 is `b3eadc0ded2dd6c2b8e10a1c4a45777dbf8774593b3cdbf00367e04f1a76e1dd`.
+The recorded full-slot timings predate the receipt-label/validator correction;
+it changes reporting only, so no performance rerun was needed. The original
+wrong-fixture pass remains a failed qualification step, not evidence for the
+final pinned/automatic distinction. Superseded cloud upload bundles and a
+duplicate result copy were removed; the source-bound observations and original
+failures remain temporarily in `local-evidence/gpu-toggle-validation/` for the
+current integration claims and unresolved hardware checks.
+
 ## Lower-precision and workspace investigation
 
 The current investigation starts from `eddd12719b475e36b6d503b4965e0805f6ab7736`.

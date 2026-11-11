@@ -1,6 +1,7 @@
 #include "triad_receiver_fine.hpp"
 #include "triad_receiver_executor.hpp"
 #include "triad_receiver_basis.hpp"
+#include "search_fft.hpp"
 #include "datapump/execution.hpp"
 
 #include <algorithm>
@@ -783,21 +784,26 @@ ReceiverSlotPlan observation_plan(const ReceiverConfig& config, const ReceiverSl
     return plan;
 }
 
-std::size_t workspace_for_plan(const ReceiverConfig& config, const ReceiverSlotPlan& plan,
-                               const BlockCalendar& calendar, unsigned workers, bool record_work,
-                               std::stop_token stop = {}) {
+struct FineWorkspaceQuote {
+    std::size_t bytes;
+    std::string_view native_fallback_reason;
+};
+
+FineWorkspaceQuote workspace_for_plan(const ReceiverConfig& config, const ReceiverSlotPlan& plan,
+                                      const BlockCalendar& calendar, unsigned workers, bool record_work,
+                                      std::stop_token stop = {}) {
     if (!workers) throw Error("fine observation requires a positive worker share");
     // Reject unsupported public support before leasing a slot.
     const ProjectionBands validated(config, plan);
     const auto lengths = calendar.lengths();
     const auto max_rows = *std::max_element(lengths.begin(), lengths.end());
-    std::size_t bytes = 64 * 1024, fft_rows = 0;
+    std::size_t bytes = 64 * 1024, fft_rows = 0, max_modes = 0;
     const auto add = [&](std::size_t count, std::size_t element) {
         bytes = checked_add(bytes, checked_multiply(count, element));
     };
     for (const auto rows : lengths) {
         if (!rows) continue;
-        visit_projection_modes(rows, validated, stop, [](std::size_t) {});
+        max_modes = std::max(max_modes, visit_projection_modes(rows, validated, stop, [](std::size_t) {}));
         bytes = checked_add(bytes, DftPlan::workspace_bytes(rows));
         add(rows, sizeof(std::size_t));
         fft_rows = std::max(fft_rows, DftPlan::scratch_samples(rows));
@@ -810,8 +816,11 @@ std::size_t workspace_for_plan(const ReceiverConfig& config, const ReceiverSlotP
     if (record_work) add(2 * maximum_proposals, sizeof(StateBlockWork));
     const auto active = useful_fine_workers(workers);
     const auto mapped_rows = std::min(max_rows, maximum_basis_rows);
-    if (config.bulk_backend && config.bulk_backend->supports_fine()) {
-        const auto taps = config.spread_delay_seconds || config.spread_doppler_hz ? 2U : 1U;
+    const auto taps = config.spread_delay_seconds || config.spread_doppler_hz ? 2U : 1U;
+    const auto fallback = config.bulk_backend ? config.bulk_backend->fine_fallback_reason(
+        {max_rows, max_modes, taps, workers, std::string_view(modem::detail::search_fft::kernel_name()) == "avx2"})
+        : std::string_view{};
+    if (config.bulk_backend && fallback.empty()) {
         bytes = checked_add(bytes, config.bulk_backend->fine_host_bytes(max_rows, taps));
         add(4 * maximum_proposals, sizeof(FineBulkStatistics));
         add(2 * maximum_proposals, sizeof(MappedBasisRow));
@@ -824,7 +833,7 @@ std::size_t workspace_for_plan(const ReceiverConfig& config, const ReceiverSlotP
             checked_multiply(mapped_rows, sizeof(double))));
     }
     bytes = checked_add(bytes, config.bulk_backend ? config.bulk_backend->persistent_host_workspace() : 0);
-    return checked_add(bytes, MappedBasis::workspace_bytes(config, plan, mapped_rows, active));
+    return {checked_add(bytes, MappedBasis::workspace_bytes(config, plan, mapped_rows, active)), fallback};
 }
 
 void add_work(std::uint64_t& counter, std::uint64_t amount) {
@@ -860,7 +869,7 @@ std::size_t fine_workspace(const ReceiverConfig& config, const ReceiverSlotPlan&
                            FineObservation observation, unsigned workers) {
     const auto plan = observation_plan(config, slot, observation);
     const BlockCalendar calendar(config, plan);
-    return workspace_for_plan(config, plan, calendar, workers, observation.record_work);
+    return workspace_for_plan(config, plan, calendar, workers, observation.record_work).bytes;
 }
 
 std::size_t fine_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers) {
@@ -937,7 +946,8 @@ struct FineSession::Impl {
         if (cold && observation.rows != 2 * calendar.segment_rows)
             throw Error("cold maximum-state work requires exactly two complete fine segments");
 
-        workspace = workspace_for_plan(config, plan, calendar, workers, observation.record_work, stop);
+        const auto quote = workspace_for_plan(config, plan, calendar, workers, observation.record_work, stop);
+        workspace = quote.bytes;
         if (workspace > scratch_limit)
             throw ReceiverWorkspaceError("complete fine receiver exceeds its admitted workspace");
         coordinates.assign(selected.begin(), selected.end());
@@ -961,7 +971,7 @@ struct FineSession::Impl {
         observation_scratch.resize(fft_rows);
         const auto mapped_rows = std::min(max_rows, maximum_basis_rows);
         basis = std::make_unique<MappedBasis>(config, plan, key, mapped_rows, stage_workers);
-        if (config.bulk_backend && config.bulk_backend->supports_fine()) {
+        if (config.bulk_backend && quote.native_fallback_reason.empty()) {
             bulk = config.bulk_backend->make_fine(projected_rate, 2 * config.clock_bound_ppm);
             if (!bulk) throw Error("requested Robust bulk backend did not construct a fine session");
             bulk_work = bulk->completed_work();
@@ -971,7 +981,7 @@ struct FineSession::Impl {
             std::iota(bulk_offsets.begin(), bulk_offsets.end(), 0.);
             for (auto& item : bulk_statistics) item.reserve(2 * maximum_proposals);
         } else if (config.bulk_backend) {
-            config.bulk_backend->record_native_fine();
+            config.bulk_backend->record_native_fine(quote.native_fallback_reason);
         }
         scratch.reserve(stage_workers);
         for (unsigned worker = 0; worker < stage_workers; ++worker)

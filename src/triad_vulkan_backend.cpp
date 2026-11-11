@@ -14,8 +14,10 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 #include <map>
 #include <mutex>
@@ -74,16 +76,45 @@ void credit_search_work(CoarseBulkWork& into, const CoarseBulkWork& completed) {
 
 struct FloatComplex { float real, imag; };
 static_assert(sizeof(FloatComplex) == 8);
+struct PhaseStep { std::uint32_t low, high; };
+static_assert(sizeof(PhaseStep) == sizeof(double));
+PhaseStep phase_step(double frequency, double rate) {
+    // Reduce in FP64 before conversion, including frequencies outside the
+    // fundamental interval. The centered step has magnitude at most 1/2.
+    // A uint32 row amplifies rounding of a Q64 step by less than 2^-33 turns.
+    const auto turns = -std::remainder(frequency, rate) / rate;
+    const auto magnitude = static_cast<std::uint64_t>(std::round(std::ldexp(std::abs(turns), 64)));
+    const auto word = turns < 0 ? std::uint64_t{0} - magnitude : magnitude;
+    return {static_cast<std::uint32_t>(word), static_cast<std::uint32_t>(word >> 32)};
+}
+
+VkDeviceSize device_local_bytes(const VkPhysicalDeviceMemoryProperties& memory) {
+    VkDeviceSize bytes = 0;
+    for (std::uint32_t i = 0; i < memory.memoryHeapCount; ++i)
+        if (memory.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+            bytes += std::min(memory.memoryHeaps[i].size, UINT64_MAX - bytes);
+    return bytes;
+}
+
 using FftKey = std::tuple<std::size_t, std::size_t, bool, bool>;
 constexpr auto fp32_arithmetic = "fp32_fft_fp64_coordinates_and_scores_native_fir_and_fine";
 constexpr auto half_storage_arithmetic = "fp16_fft_storage_fp32_fft_and_products";
 constexpr auto fp32_direct_arithmetic = "fp32_direct_dot_fp64_scoring";
 constexpr auto half_storage_direct_arithmetic = "fp16_storage_fp32_direct_dot_fp64_scoring";
 constexpr auto packed_direct_arithmetic = "packed_fp16_direct_dot_fp32_reduction_fp64_scoring";
+constexpr auto host_score_suffix = "_fixed_phase_host_fp64_scoring";
 
 bool direct_request(VulkanCoarsePrecision precision) {
     return precision == VulkanCoarsePrecision::direct_fp32 ||
            precision == VulkanCoarsePrecision::direct_fp16_storage || precision == VulkanCoarsePrecision::direct_fp16;
+}
+
+VkBufferCreateInfo storage_buffer(std::size_t bytes) {
+    VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    info.size = bytes;
+    info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    return info;
 }
 
 struct SerializedFft {
@@ -101,7 +132,9 @@ struct CachedFft {
 
 struct Shared {
     VulkanReceiverOptions options;
+    const bool automatic_workspace;
     bool automatic_half_device = false, automatic_direct_device = false;
+    bool host_scoring = false;
     VkInstance instance = VK_NULL_HANDLE;
     VkPhysicalDevice physical = VK_NULL_HANDLE;
     VkDevice device = VK_NULL_HANDLE;
@@ -109,7 +142,13 @@ struct Shared {
     std::uint32_t family = 0, timestamp_bits = 0;
     VkPhysicalDeviceProperties properties{};
     VkPhysicalDeviceMemoryProperties memory{};
+    VkDeviceSize maximum_allocation_size = 0;
+    std::array<bool, VK_MAX_MEMORY_HEAPS> allowed_heaps{};
     mutable std::mutex receipt_mutex;
+    std::condition_variable_any memory_ready;
+    struct PendingLease { PendingLease* previous = nullptr; PendingLease* next = nullptr; };
+    PendingLease* first_waiter = nullptr;
+    PendingLease* last_waiter = nullptr;
     std::mutex queue_mutex;
     std::mutex fft_cache_mutex, fft_compile_mutex;
     std::map<FftKey, CachedFft> fft_cache;
@@ -117,14 +156,16 @@ struct Shared {
     std::uint64_t fft_cache_age = 0;
     BulkReceipt total;
 
-    explicit Shared(const VulkanReceiverOptions& requested) : options(requested) {
-        require(options.workspace_bytes >= mib, "Robust Vulkan requires an explicit workspace of at least 1 MiB");
+    explicit Shared(const VulkanReceiverOptions& requested, bool automatic_device = false)
+        : options(requested), automatic_workspace(automatic_device) {
+        require(options.workspace_bytes >= mib || (automatic_workspace && !options.workspace_bytes),
+                "Robust Vulkan requires an explicit workspace of at least 1 MiB");
         require(options.coarse_precision == VulkanCoarsePrecision::automatic ||
                 options.coarse_precision == VulkanCoarsePrecision::fp32 ||
                 options.coarse_precision == VulkanCoarsePrecision::fp16_storage ||
                 direct_request(options.coarse_precision),
                 "invalid Robust Vulkan storage precision policy");
-        try { initialize(); } catch (...) { release(); throw; }
+        try { initialize(automatic_device); } catch (...) { release(); throw; }
     }
     ~Shared() { release(); }
     Shared(const Shared&) = delete;
@@ -133,7 +174,7 @@ struct Shared {
         if (instance) vkDestroyInstance(instance, nullptr);
         device = VK_NULL_HANDLE; instance = VK_NULL_HANDLE;
     }
-    void initialize() {
+    void initialize(bool automatic_device) {
         static std::once_flag compiler;
         std::call_once(compiler, [] {
             require(glslang_initialize_process() != 0, "Robust Vulkan GLSL compiler initialization failed");
@@ -147,18 +188,62 @@ struct Shared {
         if (status != VK_SUCCESS) throw VulkanBackendUnavailable("Vulkan 1.2 runtime is unavailable");
         std::uint32_t devices = 0;
         check(vkEnumeratePhysicalDevices(instance, &devices, nullptr), "device enumeration");
-        if (options.device_index >= devices) throw VulkanBackendUnavailable("requested Vulkan physical device is unavailable");
         std::vector<VkPhysicalDevice> available(devices);
-        check(vkEnumeratePhysicalDevices(instance, &devices, available.data()), "device enumeration");
-        physical = available[options.device_index];
+        if (devices)
+            check(vkEnumeratePhysicalDevices(instance, &devices, available.data()), "device enumeration");
+        if (!automatic_device) {
+            if (options.device_index >= devices)
+                throw VulkanBackendUnavailable("requested Vulkan physical device is unavailable");
+            initialize_device(available[options.device_index]);
+            return;
+        }
+        struct Candidate {
+            std::uint32_t index;
+            bool discrete;
+            VkDeviceSize local_bytes;
+        };
+        std::vector<Candidate> candidates;
+        for (std::uint32_t i = 0; i < devices; ++i) {
+            VkPhysicalDeviceProperties device_properties{};
+            vkGetPhysicalDeviceProperties(available[i], &device_properties);
+            const bool discrete = device_properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+            if (discrete || device_properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
+                VkPhysicalDeviceMemoryProperties device_memory{};
+                vkGetPhysicalDeviceMemoryProperties(available[i], &device_memory);
+                candidates.push_back({i, discrete, device_local_bytes(device_memory)});
+            }
+        }
+        // Prefer a discrete GPU for backlog throughput. Within a device class
+        // prefer more local memory for broader resident template banks.
+        std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+            return std::tie(a.discrete, a.local_bytes) > std::tie(b.discrete, b.local_bytes);
+        });
+        std::string failures;
+        for (const auto& candidate : candidates) {
+            options.device_index = candidate.index;
+            try {
+                initialize_device(available[candidate.index]);
+                if (!failures.empty()) total.selection_reason = "Higher-ranked Vulkan candidates unavailable" + failures;
+                return;
+            } catch (const VulkanBackendUnavailable& unavailable) {
+                failures += "; " + std::string(properties.deviceName) + ": " + unavailable.what();
+            }
+        }
+        throw VulkanBackendUnavailable("No compatible physical Vulkan GPU" + failures);
+    }
+    void initialize_device(VkPhysicalDevice selected) {
+        physical = selected;
         VkPhysicalDeviceSubgroupProperties subgroup{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
         VkPhysicalDeviceDriverProperties driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+        VkPhysicalDeviceMaintenance3Properties allocation{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES};
         subgroup.pNext = &driver;
+        driver.pNext = &allocation;
         VkPhysicalDeviceShaderIntegerDotProductProperties dot{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_PROPERTIES};
         VkPhysicalDeviceProperties2 props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
         props.pNext = &subgroup;
         vkGetPhysicalDeviceProperties2(physical, &props);
         properties = props.properties;
+        maximum_allocation_size = allocation.maxMemoryAllocationSize;
         if (properties.deviceType != VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU &&
             properties.deviceType != VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
             throw VulkanBackendUnavailable("requested Vulkan device is not a physical integrated or discrete GPU");
@@ -176,9 +261,18 @@ struct Shared {
         VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
         features.pNext = &eleven;
         vkGetPhysicalDeviceFeatures2(physical, &features);
-        if (!features.features.shaderFloat64 || !features.features.shaderInt64)
-            throw VulkanBackendUnavailable("Robust Vulkan requires FP64 scoring and 64-bit frontier indices");
+        host_scoring = options.force_host_scoring || !features.features.shaderFloat64 || !features.features.shaderInt64;
         vkGetPhysicalDeviceMemoryProperties(physical, &memory);
+        const auto local_bytes = device_local_bytes(memory);
+        if ((!automatic_workspace && options.workspace_bytes > local_bytes) || local_bytes > SIZE_MAX)
+            throw VulkanBackendUnavailable("Robust Vulkan workspace exceeds the physical device heap or host address range");
+        constexpr auto coherent = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        const auto types = std::span(memory.memoryTypes).first(memory.memoryTypeCount);
+        if (!std::ranges::any_of(types, [=](const VkMemoryType& type) {
+                return (type.propertyFlags & coherent) == coherent;
+            }))
+            throw VulkanBackendUnavailable("Robust Vulkan requires host-visible coherent compute memory");
+        if (automatic_workspace) initialize_workspace();
         std::uint32_t families = 0;
         vkGetPhysicalDeviceQueueFamilyProperties(physical, &families, nullptr);
         std::vector<VkQueueFamilyProperties> queues(families);
@@ -196,7 +290,7 @@ struct Shared {
         VkDeviceQueueCreateInfo queue_info{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
         queue_info.queueFamilyIndex = family; queue_info.queueCount = 1; queue_info.pQueuePriorities = &priority;
         VkPhysicalDeviceFeatures enabled{};
-        enabled.shaderFloat64 = VK_TRUE; enabled.shaderInt64 = VK_TRUE;
+        enabled.shaderFloat64 = enabled.shaderInt64 = host_scoring ? VK_FALSE : VK_TRUE;
         VkDeviceCreateInfo info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
         info.queueCreateInfoCount = 1; info.pQueueCreateInfos = &queue_info; info.pEnabledFeatures = &enabled;
         VkPhysicalDeviceVulkan11Features enable_eleven{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
@@ -230,7 +324,13 @@ struct Shared {
             enable_eleven.storageBuffer16BitAccess = VK_TRUE;
             info.pNext = &enable_eleven;
         }
-        check(vkCreateDevice(physical, &info, nullptr, &device), "device creation");
+        VkDevice created = VK_NULL_HANDLE;
+        const auto status = vkCreateDevice(physical, &info, nullptr, &created);
+        if (status == VK_ERROR_DEVICE_LOST || status == VK_ERROR_EXTENSION_NOT_PRESENT ||
+            status == VK_ERROR_FEATURE_NOT_PRESENT || status == VK_ERROR_INITIALIZATION_FAILED)
+            throw VulkanBackendUnavailable("Robust Vulkan device initialization unavailable (" + std::to_string(status) + ")");
+        check(status, "device creation");
+        device = created;
         vkGetDeviceQueue(device, family, 0, &queue);
         total.device = "vulkan:" + std::to_string(options.device_index);
         total.device_name = properties.deviceName;
@@ -254,17 +354,120 @@ struct Shared {
             dot.integerDotProduct8BitSignedAccelerated || dot.integerDotProduct4x8BitPackedUnsignedAccelerated ||
             dot.integerDotProduct4x8BitPackedSignedAccelerated;
         total.unified_memory = properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
-        total.workspace_limit_bytes = options.workspace_bytes;
-        total.workspace_scope = "per_coarse_session";
+        total.workspace_limit_bytes = automatic_workspace ? total.vulkan_shared_workspace_limit_bytes : options.workspace_bytes;
+        total.workspace_scope = automatic_workspace ? "backend_shared" : "per_coarse_session";
         total.host_cache_limit_bytes = serialized_cache_limit;
         total.fft_plan_cache_limit = plan_cache_limit;
         // Physical heap capacity is descriptive, not permission to consume it.
         // Host DSP admission separately charges the complete session ceiling.
-        for (std::uint32_t i = 0; i < memory.memoryHeapCount; ++i)
-            if (memory.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
-                total.total_device_bytes = add(total.total_device_bytes, memory.memoryHeaps[i].size);
-        require(total.total_device_bytes && options.workspace_bytes <= total.total_device_bytes,
-                "Robust Vulkan workspace exceeds the physical device heap");
+        total.total_device_bytes = static_cast<std::size_t>(local_bytes);
+    }
+    std::uint32_t memory_type(std::uint32_t compatible, bool host_reads, bool restrict_heaps = true) const {
+        constexpr auto required = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        auto selected = memory.memoryTypeCount;
+        int best_rank = -1;
+        for (std::uint32_t i = 0; i < memory.memoryTypeCount; ++i) {
+            const auto& type = memory.memoryTypes[i];
+            const auto flags = type.propertyFlags;
+            if (!(compatible & (1u << i)) || (flags & required) != required ||
+                (automatic_workspace && restrict_heaps && !allowed_heaps[type.heapIndex])) continue;
+            const auto rank = ((host_reads && (flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) ? 2 : 0) +
+                ((flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) ? 1 : 0);
+            if (rank > best_rank || (!host_reads && rank == 0 && best_rank == 0)) {
+                selected = i; best_rank = rank;
+            }
+        }
+        return selected;
+    }
+    void initialize_workspace() {
+        // Preserve the regular device-local and host-read cached preferences.
+        // An aggregate lease bounded by the smallest reachable heap protects
+        // each such heap even if actual buffer requirements restrict its type.
+        allowed_heaps.fill(false);
+        allowed_heaps[memory.memoryTypes[memory_type(UINT32_MAX, false, false)].heapIndex] = true;
+        if (host_scoring)
+            allowed_heaps[memory.memoryTypes[memory_type(UINT32_MAX, true, false)].heapIndex] = true;
+        std::uint32_t count = 0;
+        check(vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, nullptr), "memory extension enumeration");
+        std::vector<VkExtensionProperties> extensions(count);
+        if (count)
+            check(vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, extensions.data()),
+                  "memory extension enumeration");
+        const bool reports_budget = std::ranges::any_of(std::span(extensions).first(count), [](const auto& entry) {
+            return std::string_view(entry.extensionName) == VK_EXT_MEMORY_BUDGET_EXTENSION_NAME;
+        });
+        VkPhysicalDeviceMemoryBudgetPropertiesEXT budget{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
+        if (reports_budget) {
+            VkPhysicalDeviceMemoryProperties2 details{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
+            details.pNext = &budget;
+            vkGetPhysicalDeviceMemoryProperties2(physical, &details);
+        }
+        auto usable = VkDeviceSize{SIZE_MAX};
+        auto accessible_min = VkDeviceSize{SIZE_MAX};
+        for (std::uint32_t heap = 0; heap < memory.memoryHeapCount; ++heap) {
+            if (!allowed_heaps[heap]) continue;
+            const auto size = memory.memoryHeaps[heap].size;
+            const auto reported = reports_budget ? std::min(size, budget.heapBudget[heap]) : size;
+            const auto accessible = reported - std::min(reported, budget.heapUsage[heap]);
+            const auto headroom = std::min(accessible / 8,
+                std::clamp(size / 20, VkDeviceSize{64 * mib}, VkDeviceSize{1024 * mib}));
+            usable = std::min(usable, accessible - headroom);
+            accessible_min = std::min(accessible_min, accessible);
+        }
+        total.initial_free_device_bytes = static_cast<std::size_t>(accessible_min);
+        total.runtime_headroom_bytes = static_cast<std::size_t>(accessible_min - usable);
+        total.vulkan_shared_workspace_limit_bytes = static_cast<std::size_t>(
+            options.workspace_bytes ? std::min<VkDeviceSize>(usable, options.workspace_bytes) : usable);
+    }
+    std::optional<std::size_t> quote_buffer(std::size_t bytes, bool host_reads) const {
+        if (!bytes) return 0;
+        if (bytes > properties.limits.maxStorageBufferRange || bytes > maximum_allocation_size) return {};
+        const auto info = storage_buffer(bytes);
+        VkBuffer handle = VK_NULL_HANDLE;
+        check(vkCreateBuffer(device, &info, nullptr, &handle), "workspace buffer requirements");
+        VkMemoryRequirements requirements{};
+        vkGetBufferMemoryRequirements(device, handle, &requirements);
+        vkDestroyBuffer(device, handle, nullptr);
+        if (requirements.size > maximum_allocation_size || requirements.size > SIZE_MAX ||
+            memory_type(requirements.memoryTypeBits, host_reads) == memory.memoryTypeCount) return {};
+        return static_cast<std::size_t>(requirements.size);
+    }
+    void acquire(std::size_t bytes, std::stop_token stop) {
+        const auto limit = total.vulkan_shared_workspace_limit_bytes;
+        if (!bytes || bytes > limit) throw ReceiverWorkspaceError("Robust Vulkan geometry exceeds its shared device workspace");
+        std::unique_lock lock(receipt_mutex);
+        const auto fits = [&] { return bytes <= limit - total.vulkan_leased_bytes; };
+        if (first_waiter || !fits()) {
+            // Queue only blocked owners, using each waiting thread's stack.
+            // A later small lease cannot continually delay a larger request.
+            PendingLease pending{last_waiter};
+            if (last_waiter) last_waiter->next = &pending;
+            else first_waiter = &pending;
+            last_waiter = &pending;
+            ++total.vulkan_waiting_sessions;
+            const auto remove = [&] {
+                if (pending.previous) pending.previous->next = pending.next;
+                else first_waiter = pending.next;
+                if (pending.next) pending.next->previous = pending.previous;
+                else last_waiter = pending.previous;
+                --total.vulkan_waiting_sessions;
+                memory_ready.notify_all();
+            };
+            try { memory_ready.wait(lock, stop, [&] { return first_waiter == &pending && fits(); }); }
+            catch (...) { remove(); throw; }
+            remove();
+        }
+        cancelled(stop);
+        total.vulkan_leased_bytes += bytes;
+        total.vulkan_peak_leased_bytes = std::max(total.vulkan_peak_leased_bytes, total.vulkan_leased_bytes);
+        total.vulkan_peak_owner_lease_bytes = std::max(total.vulkan_peak_owner_lease_bytes, bytes);
+    }
+    void release_lease(std::size_t bytes) noexcept {
+        {
+            std::lock_guard lock(receipt_mutex);
+            total.vulkan_leased_bytes -= bytes;
+        }
+        memory_ready.notify_all();
     }
     BulkReceipt receipt() const {
         std::lock_guard lock(receipt_mutex);
@@ -279,6 +482,7 @@ struct Shared {
                     ? (result.vulkan_fp32_score_rows ? "mixed_fp16_fp32_fft_storage_fp32_compute" : half_storage_arithmetic)
                     : fp32_arithmetic;
         }
+        if (host_scoring) result.precision += host_score_suffix;
         return result;
     }
     std::shared_ptr<const SerializedFft> cached_fft(const FftKey& key) {
@@ -338,6 +542,7 @@ struct Shared {
         ADD_FIELD(upload_bytes); ADD_FIELD(download_bytes); ADD_FIELD(synchronizations);
         ADD_FIELD(fft_calls); ADD_FIELD(fft_rows); ADD_FIELD(score_rows);
         ADD_FIELD(vulkan_dispatches); ADD_FIELD(vulkan_arrival_peak_rows); ADD_FIELD(vulkan_arrival_peak_values);
+        ADD_FIELD(vulkan_host_scored_rows);
         ADD_FIELD(vulkan_fp32_score_rows); ADD_FIELD(vulkan_fp16_storage_score_rows);
         ADD_FIELD(vulkan_direct_dot_terms); ADD_FIELD(vulkan_direct_fp32_score_rows); ADD_FIELD(vulkan_direct_fp16_score_rows);
         ADD_FIELD(vulkan_direct_fp16_storage_score_rows);
@@ -351,6 +556,97 @@ struct Shared {
     }
 };
 
+bool direct_geometry(const Shared& shared, const CoarseBulkGeometry& geometry) {
+    const auto request = shared.options.coarse_precision;
+    return geometry.taps == 1 && geometry.lag_count == 1 &&
+        (direct_request(request) || (request == VulkanCoarsePrecision::automatic && shared.automatic_direct_device));
+}
+
+struct TileBufferLayout {
+    std::size_t frequency, spectra, products, temporary, scores, frontier;
+    std::size_t product_rows, score_rows;
+};
+
+TileBufferLayout tile_buffers(const CoarseBulkGeometry& geometry, bool direct, bool host_scoring,
+                              std::size_t element_bytes, std::size_t frequencies, std::size_t batch, bool frontier) {
+    const auto rows = direct ? geometry.kernel_rows : geometry.correlation_fft_rows;
+    const auto pairs = mul(batch, frequencies);
+    const auto product_rows = mul(mul(pairs, geometry.taps), direct ? 1 : rows);
+    const auto score_rows = mul(pairs, geometry.lag_count);
+    return {mul(frequencies, sizeof(double)), mul(mul(frequencies, rows), element_bytes),
+        mul(product_rows, direct ? sizeof(FloatComplex) : element_bytes),
+        direct ? 0 : mul(std::max(mul(frequencies, rows), product_rows), sizeof(FloatComplex)),
+        host_scoring ? 0 : mul(score_rows, sizeof(double)),
+        frontier && !host_scoring ? mul(pairs, sizeof(CoarseBulkPeaks)) : 0, product_rows, score_rows};
+}
+
+CoarseFrequencyPlan automatic_frequency_plan(const Shared& shared, const CoarseBulkGeometry& geometry,
+                                               std::size_t workspaces, std::size_t maximum_fft_rows) {
+    constexpr CoarseFrequencyPlan unsupported{.native_fallback_reason = "native-vulkan-workspace"};
+    const auto limit = shared.total.vulkan_shared_workspace_limit_bytes;
+    if (!limit) return unsupported;
+    const bool direct = direct_geometry(shared, geometry);
+    const auto rows = direct ? geometry.kernel_rows : geometry.correlation_fft_rows;
+    const auto bank_elements = mul(mul(workspaces, geometry.taps), rows);
+    if (bank_elements > UINT32_MAX) return unsupported;
+    const auto requested = shared.options.coarse_precision;
+    const bool half_candidate = requested == VulkanCoarsePrecision::fp16_storage ||
+        requested == VulkanCoarsePrecision::direct_fp16_storage || requested == VulkanCoarsePrecision::direct_fp16 ||
+        (requested == VulkanCoarsePrecision::automatic && shared.automatic_half_device);
+    const auto charge = [&](std::initializer_list<std::pair<std::size_t, bool>> buffers) -> std::optional<std::size_t> {
+        std::size_t bytes = 0;
+        for (const auto& [payload, host_reads] : buffers) {
+            if (payload > limit - bytes) return {};
+            const auto extent = shared.quote_buffer(payload, host_reads);
+            if (!extent || *extent > limit - bytes) return {};
+            bytes += *extent;
+        }
+        return bytes;
+    };
+    const auto observation = mul(add(geometry.kernel_rows, geometry.lag_count - 1), sizeof(FloatComplex));
+    const auto inverse = mul(workspaces, 4 * sizeof(double));
+    const std::array element_sizes{sizeof(FloatComplex), sizeof(std::uint32_t)};
+    std::array<std::size_t, 2> resident{}, preparation{};
+    const unsigned modes = half_candidate ? 2 : 1;
+    for (unsigned mode = 0; mode < modes; ++mode) {
+        const auto bank = charge({{mul(bank_elements, element_sizes[mode]), false}, {observation, false},
+                                  {inverse, shared.host_scoring}});
+        const auto temporary = direct ? std::optional<std::size_t>{0}
+                                      : charge({{mul(bank_elements, sizeof(FloatComplex)), false}});
+        if (!bank || !temporary || *temporary > limit - *bank) return unsupported;
+        resident[mode] = *bank;
+        preparation[mode] = *bank + *temporary;
+    }
+    // Prefer the full admitted public frequency tile, then the largest useful
+    // workspace batch that fits. The public grid is independent of both.
+    for (auto width = geometry.frequency_tile_width; width; --width) {
+        for (auto batch = std::min(maximum_batch, workspaces); batch; batch /= 2) {
+            std::size_t peak = 0;
+            bool fits = true;
+            for (unsigned mode = 0; mode < modes && fits; ++mode) {
+                const auto tile = tile_buffers(geometry, direct, shared.host_scoring, element_sizes[mode],
+                                               width, batch, true);
+                if (tile.product_rows > UINT32_MAX || tile.score_rows > UINT32_MAX) {
+                    fits = false;
+                    break;
+                }
+                const auto bytes = charge({{tile.frequency, false}, {tile.spectra, false},
+                    {tile.products, shared.host_scoring}, {tile.temporary, false},
+                    {tile.scores, false}, {tile.frontier, false}});
+                fits = bytes && *bytes <= limit - resident[mode];
+                if (fits) peak = std::max({peak, preparation[mode], resident[mode] + *bytes});
+            }
+            if (fits) {
+                const auto host_scores = mul(mul(mul(batch, width), geometry.lag_count), sizeof(double));
+                const auto host = add(peak, add(compiler_host_bound,
+                    add(mul(maximum_fft_rows, sizeof(Complex)), host_scores)));
+                return {width, batch, peak, host, {}};
+            }
+        }
+    }
+    return unsupported;
+}
+
 struct Context;
 struct Buffer {
     Context* owner = nullptr;
@@ -359,7 +655,7 @@ struct Buffer {
     void* mapped = nullptr;
     // Usable capacity; each dispatch/readback supplies its active extent.
     std::size_t bytes = 0, charged = 0;
-    Buffer(Context&, std::size_t);
+    Buffer(Context&, std::size_t, bool host_reads = false);
     ~Buffer();
     Buffer(const Buffer&) = delete;
 };
@@ -397,6 +693,7 @@ struct Context {
     VkDescriptorPool descriptors = VK_NULL_HANDLE;
     VkQueryPool direct_timestamps = VK_NULL_HANDLE;
     std::size_t allocated = 0, peak_allocated = 0;
+    std::size_t allocation_limit, lease = 0;
     bool active = false, half_storage = false, direct_dot = false, packed_direct = false, timed_direct = false;
     std::uint64_t age = 0;
     BulkReceipt local;
@@ -404,7 +701,8 @@ struct Context {
     std::unique_ptr<Pipeline> rotate, products, quadratic, peaks;
     std::size_t fft_element_bytes() const { return half_storage ? sizeof(std::uint32_t) : sizeof(FloatComplex); }
 
-    explicit Context(std::shared_ptr<Shared> owner) : shared(std::move(owner)) {
+    explicit Context(std::shared_ptr<Shared> owner)
+        : shared(std::move(owner)), allocation_limit(shared->options.workspace_bytes) {
         try {
             VkCommandPoolCreateInfo p{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
             p.queueFamilyIndex = shared->family; p.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -438,12 +736,21 @@ struct Context {
             --shared->total.vulkan_active_sessions;
             active = false;
         }
+        if (lease) {
+            shared->release_lease(lease);
+            lease = 0;
+        }
+    }
+    void admit(std::size_t bytes, std::stop_token stop) {
+        shared->acquire(bytes, stop);
+        allocation_limit = lease = bytes;
     }
     void account(BulkReceipt delta) {
 #define ADD_FIELD(name) count(local.name, delta.name)
         ADD_FIELD(upload_bytes); ADD_FIELD(download_bytes); ADD_FIELD(synchronizations);
         ADD_FIELD(fft_calls); ADD_FIELD(fft_rows); ADD_FIELD(score_rows);
         ADD_FIELD(vulkan_dispatches); ADD_FIELD(vulkan_arrival_peak_rows); ADD_FIELD(vulkan_arrival_peak_values);
+        ADD_FIELD(vulkan_host_scored_rows);
         ADD_FIELD(vulkan_fp32_score_rows); ADD_FIELD(vulkan_fp16_storage_score_rows);
         ADD_FIELD(vulkan_direct_dot_terms); ADD_FIELD(vulkan_direct_fp32_score_rows); ADD_FIELD(vulkan_direct_fp16_score_rows);
         ADD_FIELD(vulkan_direct_fp16_storage_score_rows);
@@ -461,6 +768,7 @@ struct Context {
         COPY_FIELD(upload_bytes); COPY_FIELD(download_bytes); COPY_FIELD(synchronizations);
         COPY_FIELD(fft_calls); COPY_FIELD(fft_rows); COPY_FIELD(score_rows);
         COPY_FIELD(vulkan_dispatches); COPY_FIELD(vulkan_arrival_peak_rows); COPY_FIELD(vulkan_arrival_peak_values);
+        COPY_FIELD(vulkan_host_scored_rows);
         COPY_FIELD(vulkan_fp32_score_rows); COPY_FIELD(vulkan_fp16_storage_score_rows);
         COPY_FIELD(vulkan_direct_dot_terms); COPY_FIELD(vulkan_direct_fp32_score_rows); COPY_FIELD(vulkan_direct_fp16_score_rows);
         COPY_FIELD(vulkan_direct_fp16_storage_score_rows);
@@ -471,10 +779,13 @@ struct Context {
 #undef COPY_FIELD
         // Generic allocation fields retain the shared backend's aggregate.
         result.vulkan_peak_owner_bytes = peak_allocated;
+        result.workspace_limit_bytes = allocation_limit;
+        result.workspace_scope = "per_coarse_session";
         result.fft_plan_cache_count = plans.size();
         result.precision = direct_dot ? (packed_direct ? packed_direct_arithmetic :
             half_storage ? half_storage_direct_arithmetic : fp32_direct_arithmetic) :
             (half_storage ? half_storage_arithmetic : fp32_arithmetic);
+        if (shared->host_scoring) result.precision += host_score_suffix;
         return result;
     }
     void barrier(VkPipelineStageFlags source_stage, VkAccessFlags source,
@@ -566,17 +877,23 @@ struct Context {
         cancelled(stop);
     }
     Pipeline& pipeline(std::unique_ptr<Pipeline>& slot, std::string_view source,
-                       std::uint32_t bindings, std::uint32_t push_bytes, bool storage_shader = true) {
+                       std::uint32_t bindings, std::uint32_t push_bytes, bool storage_shader = true,
+                       bool fixed_phase = false) {
         if (!slot) {
             const auto began = Clock::now();
-            std::string code;
+            std::string defines;
             if (half_storage && storage_shader) {
+                defines = "#define HALF_STORAGE\n";
+                if (packed_direct) defines += "#define PACKED_DIRECT\n";
+            }
+            if (fixed_phase) defines += "#define FIXED_PHASE\n";
+            std::string code;
+            if (!defines.empty()) {
                 constexpr std::string_view version = "#version 450\n";
                 const auto start = source.find(version);
                 require(start != std::string_view::npos, "invalid Vulkan precision shader prelude");
                 code.assign(source);
-                code.insert(start + version.size(), packed_direct
-                    ? "#define HALF_STORAGE\n#define PACKED_DIRECT\n" : "#define HALF_STORAGE\n");
+                code.insert(start + version.size(), defines);
                 source = code;
             }
             slot = std::make_unique<Pipeline>(*this, source, bindings, push_bytes);
@@ -721,29 +1038,20 @@ struct Context {
     }
 };
 
-Buffer::Buffer(Context& context, std::size_t size) : owner(&context), bytes(size) {
+Buffer::Buffer(Context& context, std::size_t size, bool host_reads) : owner(&context), bytes(size) {
     require(size, "Robust Vulkan buffer must be nonempty");
     if (size > context.shared->properties.limits.maxStorageBufferRange)
         throw ReceiverWorkspaceError("Robust Vulkan buffer exceeds maxStorageBufferRange");
     auto& shared = *context.shared;
     try {
-        VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-        info.size = size; info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                                    VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        const auto info = storage_buffer(size);
         check(vkCreateBuffer(shared.device, &info, nullptr, &handle), "buffer creation");
         VkMemoryRequirements requirements{};
         vkGetBufferMemoryRequirements(shared.device, handle, &requirements);
-        if (requirements.size > shared.options.workspace_bytes - std::min(context.allocated, shared.options.workspace_bytes))
+        if (requirements.size > shared.maximum_allocation_size ||
+            requirements.size > context.allocation_limit - std::min(context.allocated, context.allocation_limit))
             throw ReceiverWorkspaceError("Robust Vulkan operation exceeds its session allocation ceiling");
-        std::uint32_t type = shared.memory.memoryTypeCount;
-        const auto required = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-        for (std::uint32_t i = 0; i < shared.memory.memoryTypeCount; ++i)
-            if ((requirements.memoryTypeBits & (1u << i)) &&
-                (shared.memory.memoryTypes[i].propertyFlags & required) == required) {
-                type = i;
-                if (shared.memory.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) break;
-            }
+        const auto type = shared.memory_type(requirements.memoryTypeBits, host_reads);
         if (type == shared.memory.memoryTypeCount)
             throw VulkanBackendUnavailable("Robust Vulkan requires bounded host-visible coherent compute memory");
         // Reserve the actual Vulkan allocation extent before allocating it.
@@ -856,6 +1164,18 @@ std::uint32_t half_bits(float x) {
     return sign | ((mantissa + (1u << (shift - 1)) - 1u + ((mantissa >> shift) & 1u)) >> shift);
 }
 
+float unpack_half(std::uint32_t bits) {
+    const auto sign = (bits & 0x8000u) << 16;
+    const auto exponent = (bits >> 10) & 31u;
+    const auto significand = bits & 1023u;
+    if (!exponent) {
+        const auto value = std::ldexp(static_cast<float>(significand), -24);
+        return std::bit_cast<float>(std::bit_cast<std::uint32_t>(value) | sign);
+    }
+    const auto biased_exponent = exponent == 31u ? 255u : exponent + 112u;
+    return std::bit_cast<float>(sign | (biased_exponent << 23) | (significand << 13));
+}
+
 void pack(Buffer& destination, std::span<const Complex> input, std::size_t first = 0,
           double scale = 1, bool half = false) {
     require(mul(add(first, input.size()), half ? sizeof(std::uint32_t) : sizeof(FloatComplex)) <= destination.bytes,
@@ -907,11 +1227,13 @@ void validate_peaks(std::span<const CoarseBulkPeaks> rows, std::size_t arrivals)
     }
 }
 
-struct RotatePush { std::uint32_t rows, nfft, frequencies, unused = 0; double rate; };
+struct RotatePush { std::uint32_t rows, nfft, frequencies, unused = 0; };
+struct RotateFp64Push { RotatePush geometry; double rate; };
 struct ProductPush { std::uint32_t nfft, taps, frequencies, width, first; };
 struct ScorePush { std::uint32_t nfft, taps, frequencies, width, arrivals, first; double variance; };
 struct PeakPush { std::uint32_t arrivals, separation; };
-static_assert(sizeof(RotatePush) == 24 && sizeof(ProductPush) == 20 && sizeof(ScorePush) == 32 && sizeof(PeakPush) == 8);
+static_assert(sizeof(RotatePush) == 16 && sizeof(RotateFp64Push) == 24 &&
+              sizeof(ProductPush) == 20 && sizeof(ScorePush) == 32 && sizeof(PeakPush) == 8);
 
 class VulkanCoarse final : public CoarseBulk {
 public:
@@ -951,7 +1273,7 @@ public:
         const bool qualified_fft_geometry = single_arrival_rank_one && nfft == 2048 &&
             count_ == 26 && geometry.frequency_count >= 181 &&
             geometry.frequency_count <= 1794;
-        context_.direct_dot = automatic_direct || (requested_direct && single_arrival_rank_one);
+        context_.direct_dot = direct_geometry(*context_.shared, geometry);
         const auto bank_rows = context_.direct_dot ? geometry.kernel_rows : nfft;
         narrow(mul(columns, bank_rows));
         if (requested_direct && !context_.direct_dot)
@@ -1005,9 +1327,25 @@ public:
                 }
             }
         }
+        if (context_.shared->automatic_workspace) {
+            // The receiver supplies the full-prior shape. Standalone leaves
+            // can also plan their own public geometry before allocating.
+            if (!geometry_.device_workspace_bytes) {
+                if (!geometry_.frequency_tile_width)
+                    geometry_.frequency_tile_width = std::min<std::size_t>(32, geometry_.frequency_count);
+                const auto plan = automatic_frequency_plan(*context_.shared, geometry_, count_, nfft);
+                geometry_.device_workspace_bytes = plan.device_workspace_bytes;
+                geometry_.workspace_batch = plan.workspace_batch;
+                geometry_.frequency_tile_width = plan.tile_width;
+            }
+            if (!geometry_.workspace_batch || !geometry_.frequency_tile_width ||
+                geometry_.workspace_batch > std::min(maximum_batch, count_))
+                throw ReceiverWorkspaceError("Robust Vulkan could not admit the automatic frequency geometry");
+            context_.admit(geometry_.device_workspace_bytes, stop);
+        }
         bank_ = std::make_unique<Buffer>(context_, mul(mul(columns, bank_rows), context_.fft_element_bytes()));
         observation_ = std::make_unique<Buffer>(context_, mul(observation.size(), sizeof(FloatComplex)));
-        coefficients_ = std::make_unique<Buffer>(context_, mul(count_, 4 * sizeof(double)));
+        coefficients_ = std::make_unique<Buffer>(context_, mul(count_, 4 * sizeof(double)), context_.shared->host_scoring);
         std::memset(bank_->mapped, 0, bank_->bytes);
         pack(*observation_, observation, 0, obs_scale);
         auto* inverse = static_cast<double*>(coefficients_->mapped);
@@ -1025,7 +1363,8 @@ public:
             }
         }
         BulkReceipt copies;
-        copies.upload_bytes = add(add(bank_->bytes, observation_->bytes), coefficients_->bytes);
+        copies.upload_bytes = add(bank_->bytes, observation_->bytes);
+        if (!context_.shared->host_scoring) copies.upload_bytes = add(copies.upload_bytes, coefficients_->bytes);
         context_.account(copies);
         if (!context_.direct_dot) {
             auto& temporary = retain(temporary_, mul(mul(columns, nfft), sizeof(FloatComplex)));
@@ -1034,6 +1373,8 @@ public:
                 context_.fft(nfft, columns, *bank_, temporary, false, completed_work, delta, stop);
             });
             credit_search_work(work, completed_work);
+            // Automatic leases quote separate preparation and search peaks.
+            if (context_.shared->automatic_workspace) temporary_.reset();
         }
         prepared_ = true;
     }
@@ -1045,6 +1386,7 @@ public:
     bool frequency_peaks(std::span<const double> frequencies, std::size_t separation,
                          const CoarsePeakSink& sink, CoarseBulkWork& work, std::stop_token stop) override {
         require(separation && static_cast<bool>(sink), "invalid Robust Vulkan peak geometry");
+        if (context_.shared->host_scoring) return false;
         scores(frequencies, separation, {}, sink, work, stop);
         return true;
     }
@@ -1053,46 +1395,50 @@ public:
     }
     BulkReceipt receipt() const override { return context_.receipt(); }
 private:
-    Buffer& retain(std::unique_ptr<Buffer>& slot, std::size_t bytes) {
+    Buffer& retain(std::unique_ptr<Buffer>& slot, std::size_t bytes, bool host_reads = false) {
         if (!slot || slot->bytes < bytes) {
             // Every previous submission has completed before this point. Drop
             // the old reservation before growing, never charge both capacities.
             slot.reset();
-            slot = std::make_unique<Buffer>(context_, bytes);
+            slot = std::make_unique<Buffer>(context_, bytes, host_reads);
         }
         return *slot;
     }
     void release_work_buffers() {
         frontier_.reset(); values_.reset(); temporary_.reset(); product_.reset();
         spectra_.reset(); frequency_.reset();
+        host_values_.reset(); host_values_capacity_ = 0;
         work_frequencies_ = work_width_ = 0; work_frontier_ = false;
     }
     std::size_t prepare_work_buffers(std::size_t frequencies, std::size_t separation, std::stop_token stop) {
         const bool frontier = separation != 0;
+        const auto preferred_batch = context_.shared->automatic_workspace ? geometry_.workspace_batch :
+            std::min(maximum_batch, count_);
         auto width = work_width_ && work_frequencies_ == frequencies && work_frontier_ == frontier
-            ? work_width_ : std::min(maximum_batch, count_);
+            ? work_width_ : preferred_batch;
         bool exact_retry = false;
         for (;;) {
             cancelled(stop);
             try {
-                const auto element_bytes = context_.fft_element_bytes();
-                const auto spectrum_rows = context_.direct_dot ? geometry_.kernel_rows : geometry_.correlation_fft_rows;
-                const auto spectra_bytes = mul(mul(frequencies, spectrum_rows), element_bytes);
-                const auto product_rows = mul(mul(mul(width, frequencies), geometry_.taps),
-                                              context_.direct_dot ? 1 : geometry_.correlation_fft_rows);
-                const auto score_rows = mul(mul(width, frequencies), geometry_.lag_count);
-                narrow(product_rows); narrow(score_rows);
-                const auto product_bytes = mul(product_rows, context_.direct_dot ? sizeof(FloatComplex) : element_bytes);
-                retain(frequency_, mul(frequencies, sizeof(double)));
-                retain(spectra_, spectra_bytes);
-                retain(product_, product_bytes);
+                const auto tile = tile_buffers(geometry_, context_.direct_dot, context_.shared->host_scoring,
+                                               context_.fft_element_bytes(), frequencies, width, frontier);
+                narrow(tile.product_rows); narrow(tile.score_rows);
+                retain(frequency_, tile.frequency);
+                retain(spectra_, tile.spectra);
+                retain(product_, tile.products, context_.shared->host_scoring);
                 // Forward spectra and inverse products are serial submissions,
                 // so one charged temporary allocation serves both FFT stages.
-                if (!context_.direct_dot)
-                    retain(temporary_, mul(std::max(mul(frequencies, geometry_.correlation_fft_rows), product_rows),
-                                           sizeof(FloatComplex)));
-                retain(values_, mul(score_rows, sizeof(double)));
-                if (separation) retain(frontier_, mul(mul(width, frequencies), sizeof(CoarseBulkPeaks)));
+                if (tile.temporary) retain(temporary_, tile.temporary);
+                if (context_.shared->host_scoring) {
+                    // Charged separately from the mapped device allocations
+                    // in coarse_host_bytes. Drop the old capacity before growth.
+                    if (tile.score_rows > host_values_capacity_) {
+                        host_values_.reset(); host_values_capacity_ = 0;
+                        host_values_ = std::make_unique_for_overwrite<double[]>(tile.score_rows);
+                        host_values_capacity_ = tile.score_rows;
+                    }
+                } else retain(values_, tile.scores);
+                if (tile.frontier) retain(frontier_, tile.frontier);
                 work_frequencies_ = frequencies; work_frontier_ = frontier; work_width_ = width;
                 return width;
             } catch (const ReceiverWorkspaceError&) {
@@ -1106,12 +1452,46 @@ private:
             }
         }
     }
+    template<bool Half>
+    void host_scores(std::size_t first, std::size_t pairs, std::size_t frequencies, std::stop_token stop) {
+        const auto correlations = product_->mapped;
+        const auto load = [&](std::size_t index) -> Complex {
+            if constexpr (Half) {
+                const auto packed = static_cast<const std::uint32_t*>(correlations)[index];
+                return {unpack_half(packed), unpack_half(packed >> 16)};
+            } else {
+                const auto value = static_cast<const FloatComplex*>(correlations)[index];
+                return {value.real, value.imag};
+            }
+        };
+        const auto nfft = context_.direct_dot ? 1 : geometry_.correlation_fft_rows;
+        const auto arrivals = geometry_.lag_count;
+        const auto* coefficients = static_cast<const double*>(coefficients_->mapped);
+        for (std::size_t pair = 0; pair < pairs; ++pair) {
+            cancelled(stop);
+            const auto* inverse = coefficients + (first + pair / frequencies) * 4;
+            const auto start = pair * geometry_.taps * nfft;
+            for (std::size_t lag = 0; lag < arrivals; ++lag) {
+                if ((lag & 4095u) == 0) cancelled(stop);
+                const auto a = load(start + lag);
+                auto score = inverse[0] * std::norm(a);
+                if (geometry_.taps == 2) {
+                    const auto b = load(start + nfft + lag);
+                    score += inverse[1] * std::norm(b);
+                    score += 2 * std::real(std::conj(a) * Complex{inverse[2], inverse[3]} * b);
+                }
+                host_values_[pair * arrivals + lag] = score / geometry_.variance;
+            }
+        }
+    }
     void scores(std::span<const double> frequencies, std::size_t separation,
                 const CoarseScoreSink& score_sink, const CoarsePeakSink& peak_sink,
                 CoarseBulkWork& work, std::stop_token stop) {
         cancelled(stop);
         require(prepared_ && !frequencies.empty() && frequencies.size() <= geometry_.frequency_count,
                 "invalid Robust Vulkan frequency tile");
+        require(!context_.shared->automatic_workspace || frequencies.size() <= geometry_.frequency_tile_width,
+                "Robust Vulkan tile exceeds its planned frequency width");
         for (double frequency : frequencies) require(std::isfinite(frequency), "Robust Vulkan frequency is nonfinite");
         const auto nfft = geometry_.correlation_fft_rows, nf = frequencies.size();
         const auto spectrum_rows = context_.direct_dot ? geometry_.kernel_rows : nfft;
@@ -1120,25 +1500,37 @@ private:
         const auto batch_width = prepare_work_buffers(nf, separation, stop);
         auto& frequency = *frequency_;
         auto& spectra = *spectra_;
-        std::memcpy(frequency.mapped, frequencies.data(), frequencies.size_bytes());
-        auto& rotate = context_.pipeline(context_.rotate, vulkan_rotate_shader, 3, sizeof(RotatePush));
+        const bool host_scoring = context_.shared->host_scoring;
+        if (host_scoring) {
+            auto* phases = static_cast<PhaseStep*>(frequency.mapped);
+            for (std::size_t f = 0; f < nf; ++f)
+                phases[f] = phase_step(frequencies[f], geometry_.projected_sample_rate_hz);
+        } else std::memcpy(frequency.mapped, frequencies.data(), frequencies.size_bytes());
+        auto& rotate = context_.pipeline(context_.rotate, vulkan_rotate_shader, 3,
+                                        host_scoring ? sizeof(RotatePush) : sizeof(RotateFp64Push), true, host_scoring);
         const std::array<Buffer*, 3> rotate_buffers{observation_.get(), &frequency, &spectra};
         context_.bind(rotate, rotate_buffers);
         const RotatePush rotate_push{narrow(observation_->bytes / sizeof(FloatComplex)), narrow(spectrum_rows),
-                                     narrow(nf), 0, geometry_.projected_sample_rate_hz};
+                                     narrow(nf)};
+        const auto dispatch_rotation = [&](BulkReceipt& delta) {
+            delta.upload_bytes = frequencies.size_bytes();
+            const auto groups = (spectra_count + 255) / 256;
+            if (host_scoring) context_.dispatch(rotate, rotate_push, groups, delta);
+            else context_.dispatch(rotate, RotateFp64Push{rotate_push, geometry_.projected_sample_rate_hz}, groups, delta);
+        };
         if (!context_.direct_dot) {
             CoarseBulkWork completed_work;
             context_.run(stop, [&](BulkReceipt& delta) {
-                delta.upload_bytes = frequencies.size_bytes();
-                context_.dispatch(rotate, rotate_push, (spectra_count + 255) / 256, delta);
+                dispatch_rotation(delta);
                 context_.fft(nfft, nf, spectra, *temporary_, false, completed_work, delta, stop);
             });
             credit_search_work(work, completed_work);
         }
         auto& product_pipeline = context_.pipeline(context_.products,
             context_.direct_dot ? vulkan_direct_dot_shader : vulkan_products_shader, 3, sizeof(ProductPush));
-        auto& quadratic = context_.pipeline(context_.quadratic, vulkan_quadratic_shader, 3, sizeof(ScorePush),
-                                            !context_.direct_dot);
+        Pipeline* quadratic = nullptr;
+        if (!host_scoring) quadratic = &context_.pipeline(context_.quadratic, vulkan_quadratic_shader, 3,
+                                                          sizeof(ScorePush), !context_.direct_dot);
         Pipeline* peak_pipeline = nullptr;
         if (separation) peak_pipeline = &context_.pipeline(context_.peaks, vulkan_coarse_peaks_shader, 2, sizeof(PeakPush));
         for (std::size_t first = 0; first < count_;) {
@@ -1147,8 +1539,11 @@ private:
             const auto pairs = mul(width, nf), samples = mul(pairs, geometry_.lag_count);
             const auto product_rows = mul(mul(pairs, geometry_.taps), context_.direct_dot ? 1 : nfft);
             const std::array<Buffer*, 3> product_buffers{bank_.get(), &spectra, product_.get()};
-            const std::array<Buffer*, 3> score_buffers{product_.get(), coefficients_.get(), values_.get()};
-            context_.bind(product_pipeline, product_buffers); context_.bind(quadratic, score_buffers);
+            context_.bind(product_pipeline, product_buffers);
+            if (quadratic) {
+                const std::array<Buffer*, 3> score_buffers{product_.get(), coefficients_.get(), values_.get()};
+                context_.bind(*quadratic, score_buffers);
+            }
             if (separation) {
                 const std::array<Buffer*, 2> peak_buffers{values_.get(), frontier_.get()};
                 context_.bind(*peak_pipeline, peak_buffers);
@@ -1160,10 +1555,7 @@ private:
             CoarseBulkWork completed_work;
             context_.run(stop, [&](BulkReceipt& delta) {
                 if (context_.direct_dot) {
-                    if (!first) {
-                        delta.upload_bytes = frequencies.size_bytes();
-                        context_.dispatch(rotate, rotate_push, (spectra_count + 255) / 256, delta);
-                    }
+                    if (!first) dispatch_rotation(delta);
                     context_.begin_dot_timing();
                     context_.dispatch(product_pipeline, product_push, pairs, delta);
                     context_.end_dot_timing();
@@ -1172,7 +1564,7 @@ private:
                     context_.dispatch(product_pipeline, product_push, (product_rows + 255) / 256, delta);
                     context_.fft(nfft, mul(pairs, geometry_.taps), *product_, *temporary_, true, completed_work, delta, stop);
                 }
-                context_.dispatch(quadratic, score_push, (samples + 255) / 256, delta);
+                if (quadratic) context_.dispatch(*quadratic, score_push, (samples + 255) / 256, delta);
                 if (separation) context_.dispatch(*peak_pipeline, peak_push, pairs, delta);
             });
             credit_search_work(work, completed_work);
@@ -1195,10 +1587,22 @@ private:
                 count(work.score_rows, samples); count(work.workspace_frequency_pairs, pairs);
                 peak_sink(first, width, output);
             } else {
-                const auto output = std::span(static_cast<const double*>(values_->mapped), samples);
+                const double* scored = nullptr;
+                if (host_scoring) {
+                    const bool half = context_.half_storage && !context_.direct_dot;
+                    if (half) host_scores<true>(first, pairs, nf, stop);
+                    else host_scores<false>(first, pairs, nf, stop);
+                    scored = host_values_.get();
+                    completed.vulkan_host_scored_rows = samples;
+                    completed.download_bytes = mul(mul(samples, geometry_.taps),
+                                                   half ? sizeof(std::uint32_t) : sizeof(FloatComplex));
+                } else {
+                    scored = static_cast<const double*>(values_->mapped);
+                    completed.download_bytes = mul(samples, sizeof(double));
+                }
+                const auto output = std::span(scored, samples);
                 require(std::all_of(output.begin(), output.end(), [](double value) { return std::isfinite(value); }),
                         "Robust Vulkan coarse score is nonfinite");
-                completed.download_bytes = mul(samples, sizeof(double));
                 context_.account(completed);
                 count(work.score_rows, samples); count(work.workspace_frequency_pairs, pairs);
                 score_sink(first, width, output);
@@ -1209,6 +1613,8 @@ private:
     Context context_;
     std::unique_ptr<Buffer> bank_, observation_, coefficients_;
     std::unique_ptr<Buffer> frequency_, spectra_, temporary_, product_, values_, frontier_;
+    std::unique_ptr<double[]> host_values_;
+    std::size_t host_values_capacity_ = 0;
     CoarseBulkGeometry geometry_;
     std::string_view precision_reason_;
     std::size_t count_ = 0;
@@ -1219,12 +1625,61 @@ private:
 
 class VulkanBackend final : public ReceiverBulkBackend {
 public:
-    explicit VulkanBackend(const VulkanReceiverOptions& options) : shared_(std::make_shared<Shared>(options)) {}
+    explicit VulkanBackend(const VulkanReceiverOptions& options, bool automatic_device = false)
+        : shared_(std::make_shared<Shared>(options, automatic_device)) {}
     bool supports_fine() const noexcept override { return false; }
     bool permits_native_exact_chirp_z() const noexcept override {
         return shared_->options.prefer_native_exact_chirp_z &&
                shared_->options.coarse_precision == VulkanCoarsePrecision::automatic &&
                shared_->automatic_direct_device;
+    }
+    std::optional<CoarseFrequencyPlan> frequency_plan(const CoarseBulkGeometry& geometry,
+             std::size_t workspaces, std::size_t maximum_fft_rows) const override {
+        if (!shared_->automatic_workspace) return {};
+        return automatic_frequency_plan(*shared_, geometry, workspaces, maximum_fft_rows);
+    }
+    std::size_t maximum_frequency_tile_width(const CoarseBulkGeometry& geometry, std::size_t workspaces,
+                                             std::size_t requested_width, double) const override {
+        if (requested_width <= 1) return requested_width;
+        const bool direct = direct_geometry(*shared_, geometry);
+        const auto rows = direct ? geometry.kernel_rows : geometry.correlation_fft_rows;
+        // A lower-precision normalization may fall back to FP32 before
+        // allocation. Quote the wider representation and one workspace at a
+        // time here. The live allocator can admit additional workspaces.
+        const auto spectrum = mul(rows, sizeof(FloatComplex));
+        const auto bank = mul(mul(workspaces, geometry.taps), spectrum);
+        const auto observation = mul(add(geometry.kernel_rows, geometry.lag_count - 1), sizeof(FloatComplex));
+        const auto inverse = mul(workspaces, 4 * sizeof(double));
+        const auto& limits = shared_->properties.limits;
+        const auto storage = static_cast<std::size_t>(limits.maxStorageBufferRange);
+        const auto allocation_limit = shared_->options.workspace_bytes;
+        // Leave room for per-buffer padding before the allocation-time checks
+        // use the driver's exact VkMemoryRequirements. Each FFT stage retains
+        // one reusable temporary buffer, and the bank transform is a separate
+        // phase. An unsupported bank or single-frequency geometry still gets
+        // the explicit allocation error if a receiver executes that route.
+        const auto padding = static_cast<std::size_t>(std::max({VkDeviceSize{1}, limits.bufferImageGranularity,
+                                                               limits.minStorageBufferOffsetAlignment})) - 1;
+        const auto charged = [padding](std::size_t bytes) { return bytes ? add(bytes, padding) : 0; };
+        const auto resident = add(add(charged(bank), charged(observation)), charged(inverse));
+        if (std::max({bank, observation, inverse}) > storage ||
+            add(resident, direct ? 0 : charged(bank)) >= allocation_limit) return 1;
+        const auto product = direct ? sizeof(FloatComplex) : mul(geometry.taps, spectrum);
+        const std::array per_frequency{
+            sizeof(double), spectrum, product, direct ? std::size_t{0} : std::max(spectrum, product),
+            shared_->host_scoring ? std::size_t{0} : mul(geometry.lag_count, sizeof(double)),
+            shared_->host_scoring ? std::size_t{0} : sizeof(CoarseBulkPeaks)};
+        auto width = requested_width;
+        auto fixed = resident;
+        std::size_t bytes_per_frequency = 0;
+        for (const auto bytes : per_frequency) {
+            if (!bytes) continue;
+            width = std::min(width, storage / bytes);
+            fixed = add(fixed, padding);
+            bytes_per_frequency = add(bytes_per_frequency, bytes);
+        }
+        const auto budget = allocation_limit - std::min(allocation_limit, fixed);
+        return std::max<std::size_t>(1, std::min(width, budget / bytes_per_frequency));
     }
     std::string_view coarse_fallback_reason(double rate, double clock, CoarseRoute route) const noexcept override {
         if (rate <= 10 && clock > 0 && clock <= .001) return "compact-tight-clock-fp64";
@@ -1235,9 +1690,10 @@ public:
         std::lock_guard lock(shared_->receipt_mutex);
         if (reason == "native-lag-groups") count(shared_->total.native_coarse_lag_sessions, 1);
         else if (reason == "compact-tight-clock-fp64") count(shared_->total.native_coarse_precision_sessions, 1);
+        else if (reason == "native-vulkan-workspace") count(shared_->total.native_coarse_workspace_sessions, 1);
         else throw Error("unknown Robust Vulkan native coarse fallback");
     }
-    void record_native_fine() override {
+    void record_native_fine(std::string_view) override {
         std::lock_guard lock(shared_->receipt_mutex);
         count(shared_->total.native_fine_sessions, 1);
     }
@@ -1279,6 +1735,8 @@ std::vector<CoarseBulkPeaks> vulkan_select_peak_rows(const VulkanReceiverOptions
     narrow(scores.size());
     const auto rows = scores.size() / arrivals;
     auto shared = std::make_shared<Shared>(options);
+    if (shared->host_scoring)
+        throw VulkanBackendUnavailable("Vulkan device frontier diagnostic requires FP64 and 64-bit index shaders");
     Context context(shared);
     Buffer input(context, scores.size_bytes()), output(context, mul(rows, sizeof(CoarseBulkPeaks)));
     std::memcpy(input.mapped, scores.data(), scores.size_bytes());
@@ -1295,5 +1753,10 @@ std::vector<CoarseBulkPeaks> vulkan_select_peak_rows(const VulkanReceiverOptions
 
 std::shared_ptr<receiver_detail::ReceiverBulkBackend> make_vulkan_receiver_backend(const VulkanReceiverOptions& options) {
     return std::make_shared<receiver_detail::VulkanBackend>(options);
+}
+
+std::shared_ptr<receiver_detail::ReceiverBulkBackend>
+make_automatic_vulkan_receiver_backend(const VulkanReceiverOptions& options) {
+    return std::make_shared<receiver_detail::VulkanBackend>(options, true);
 }
 } // namespace datapump::triad::v3

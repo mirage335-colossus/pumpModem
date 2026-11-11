@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <exception>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -59,11 +60,17 @@ void output(const j::Json& value) {
 }
 
 void check_workspace_receipt(const r::BulkReceipt& receipt, bool idle) {
-    check(receipt.workspace_scope == "per_coarse_session" &&
+    const bool shared = receipt.vulkan_shared_workspace_limit_bytes != 0;
+    check(receipt.workspace_scope == (shared ? "backend_shared" : "per_coarse_session") &&
           receipt.vulkan_peak_owner_bytes <= receipt.workspace_limit_bytes &&
           receipt.peak_reserved_bytes >= receipt.vulkan_peak_owner_bytes &&
           receipt.allocator_peak_reserved_bytes >= receipt.vulkan_peak_owner_bytes,
           "Vulkan receipt confused the per-owner limit with aggregate allocation");
+    if (shared)
+        check(receipt.workspace_limit_bytes == receipt.vulkan_shared_workspace_limit_bytes &&
+              receipt.vulkan_leased_bytes <= receipt.vulkan_peak_leased_bytes &&
+              receipt.vulkan_peak_leased_bytes <= receipt.workspace_limit_bytes,
+              "automatic Vulkan receipt exceeded its shared workspace limit");
     if (idle)
         check(receipt.reserved_bytes == 0 && receipt.allocator_live_bytes == 0 &&
               receipt.allocator_reserved_bytes == 0 && receipt.vulkan_active_sessions == 0,
@@ -88,13 +95,16 @@ private:
 };
 
 void direct_frequency_grid(const std::shared_ptr<r::ReceiverBulkBackend>& backend, std::size_t fft_rows,
-                           bool diagnostic = false, int input_exponent = 0, bool direct = false) {
+                           bool diagnostic = false, int input_exponent = 0, bool direct = false,
+                           bool wrapped_phase = false) {
     const std::size_t kernel = fft_rows >= 65536 ? 32768 : 7;
     const std::size_t arrivals = direct ? 1 : 5;
     const std::size_t taps = direct ? 1 : 2;
     constexpr double fs = 80;
     const double variance = std::ldexp(.7, 2 * input_exponent);
-    const std::array<double, 5> frequencies{-1., -.5, 0., .5, 1.};
+    const auto frequencies = wrapped_phase
+        ? std::array{-3199.93, -39.999985, 0., 39.999985, 3200.07}
+        : std::array{-1., -.5, 0., .5, 1.};
     std::vector<Complex> observation(kernel + arrivals - 1);
     std::array<std::vector<Complex>, 4> columns;
     for (auto& column : columns) column.resize(kernel);
@@ -115,7 +125,8 @@ void direct_frequency_grid(const std::shared_ptr<r::ReceiverBulkBackend>& backen
                 for (std::size_t tap = 0; tap < taps; ++tap)
                     for (std::size_t i = 0; i < kernel; ++i)
                         correlation[tap] += observation[arrival + i] *
-                            std::conj(workspace.columns[tap][i]) * rotation(-frequency * (arrival + i) / fs);
+                            std::conj(workspace.columns[tap][i]) * rotation(-static_cast<long double>(frequency) *
+                                                                           (arrival + i) / fs);
                 expected.push_back((workspace.inverse_a * std::norm(correlation[0]) +
                     workspace.inverse_d * std::norm(correlation[1]) +
                     2 * std::real(std::conj(correlation[0]) * workspace.inverse_b * correlation[1])) / variance);
@@ -150,11 +161,20 @@ void direct_frequency_grid(const std::shared_ptr<r::ReceiverBulkBackend>& backen
           (direct ? !work.inverse_ffts && work.singleton_dot_terms == work.score_rows * kernel : work.inverse_ffts > 0) &&
           device->completed_work().executed && device->completed_work().score_rows == work.score_rows,
           "Vulkan frequency grid did not credit complete actual work");
+    const auto completed = device->receipt();
+    const bool host_scored = completed.vulkan_host_scored_rows != 0;
+    if (host_scored)
+        check(completed.vulkan_host_scored_rows == work.score_rows && !completed.vulkan_arrival_peak_rows,
+              "Vulkan host scoring did not account for its entire grid separately from device frontiers");
+    if (wrapped_phase)
+        check(host_scored && completed.fft_calls && completed.fft_rows && maximum_normalized_error < 1e-3,
+              "Long fixed-point phase rotation differs from the independent direct correlation");
     if (diagnostic) {
         const auto receipt = backend->receipt();
         output(j::object({{"schema", "datapump.vulkan-precision-diagnostic.v1"},
             {"fft_rows", fft_rows}, {"kernel_rows", kernel}, {"input_exponent", input_exponent},
             {"score_rows", work.score_rows}, {"maximum_normalized_score_error", maximum_normalized_error},
+            {"wrapped_phase", wrapped_phase}, {"host_scored_rows", completed.vulkan_host_scored_rows},
             {"direct_dot_terms", receipt.vulkan_direct_dot_terms}, {"direct_dot_seconds", receipt.vulkan_direct_dot_seconds},
             {"peak_device_owner_bytes", receipt.vulkan_peak_owner_bytes}, {"executed", receipt.executed}}));
     }
@@ -162,7 +182,7 @@ void direct_frequency_grid(const std::shared_ptr<r::ReceiverBulkBackend>& backen
         r::CoarseBulkWork peak_work;
         const auto before = device->completed_work();
         next = 0;
-        check(device->frequency_peaks(frequencies, separation,
+        const bool compact = device->frequency_peaks(frequencies, separation,
             [&](std::size_t first, std::size_t count, std::span<const r::CoarseBulkPeaks> peaks) {
                 check(first == next && count && peaks.size() == count * frequencies.size(),
                       "Vulkan frontier publication omitted or reordered public rows");
@@ -177,7 +197,15 @@ void direct_frequency_grid(const std::shared_ptr<r::ReceiverBulkBackend>& backen
                               "Vulkan frontier changed canonical order or exact score bits");
                 }
                 next += count;
-            }, peak_work, {}), "Vulkan exact frequency frontier unexpectedly requested a fallback");
+            }, peak_work, {});
+        check(compact != host_scored, "Vulkan frontier dispatch did not respect its score capability");
+        if (!compact) {
+            const auto after = device->completed_work();
+            check(next == 0 && peak_work == r::CoarseBulkWork{} && after.score_rows == before.score_rows &&
+                  after.executed == before.executed,
+                  "Vulkan host frontier selection changed work before requesting the native score sink");
+            continue;
+        }
         check(next == bank.size() && peak_work == work &&
               device->completed_work().score_rows - before.score_rows == work.score_rows,
               "Vulkan compact frontier changed the completed score work");
@@ -502,7 +530,9 @@ Measured measure(const Capture& f, const datapump::Crypto& key, unsigned workers
         check_workspace_receipt(receipt, true);
         check(receipt.vulkan && receipt.executed && receipt.score_rows > measured.before->score_rows &&
               receipt.vulkan_dispatches > measured.before->vulkan_dispatches &&
-              receipt.vulkan_arrival_peak_rows > measured.before->vulkan_arrival_peak_rows && receipt.reserved_bytes == 0,
+              (receipt.vulkan_arrival_peak_rows > measured.before->vulkan_arrival_peak_rows ||
+               receipt.vulkan_host_scored_rows - measured.before->vulkan_host_scored_rows ==
+                   receipt.score_rows - measured.before->score_rows) && receipt.reserved_bytes == 0,
               "canonical coarse fixture did not execute and release Vulkan work");
     }
     return measured;
@@ -666,6 +696,234 @@ void workspace_boundary(const std::shared_ptr<r::ReceiverBulkBackend>& backend) 
     const auto after = backend->receipt();
     check(work == r::CoarseBulkWork{} && after.score_rows == before.score_rows,
           "rejected Vulkan allocation received completed numerical work");
+}
+
+void bounded_frequency_tiles(bool force_host_scoring, std::stop_token stop) {
+    constexpr std::size_t rows = 8192, arrivals = 3, kernel = rows - arrivals + 1;
+    constexpr double fs = 80;
+    const std::array<double, 5> frequencies{-1., -.5, 0., .5, 1.};
+    std::vector<Complex> observation(rows), a(kernel), b(kernel);
+    a[0] = 1;
+    b[0] = Complex{0, 2};
+    for (std::size_t lag = 0; lag < arrivals; ++lag) observation[lag] = static_cast<double>(lag + 1);
+    const std::array<r::CoarseBulkWorkspace, 2> bank{{
+        {{a, b}, 1, .25, {}},
+        {{b, a}, .25, 1, {}}
+    }};
+    const r::CoarseBulkGeometry geometry{2, kernel, rows, arrivals, frequencies.size(), fs, 1};
+    const auto backend = v::make_vulkan_receiver_backend(
+        {0, mib, v::VulkanCoarsePrecision::fp32, false, force_host_scoring});
+    const auto width = backend->maximum_frequency_tile_width(geometry, bank.size(), frequencies.size(), .25);
+    check(width && width < frequencies.size(), "Vulkan did not bound the tile before device allocation");
+    {
+        auto owner = backend->make_coarse(fs, .25);
+        r::CoarseBulkWork preparation, work;
+        owner->prepare(geometry, observation, bank, {}, preparation, stop);
+        rejects<v::ReceiverWorkspaceError>([&] {
+            owner->frequency_tile(frequencies, [](auto, auto, auto) {
+                throw std::runtime_error("unbounded Vulkan frequency tile published work");
+            }, work, stop);
+        }, "Vulkan accepted the original tile beyond its device ceiling");
+        check(work == r::CoarseBulkWork{} && owner->completed_work().score_rows == 0,
+              "an unadmitted Vulkan tile received search work credit");
+        for (std::size_t f = 0; f < frequencies.size(); f += width) {
+            const auto tile = std::span(frequencies).subspan(f, std::min(width, frequencies.size() - f));
+            std::size_t next = 0;
+            owner->frequency_tile(tile, [&](std::size_t first, std::size_t count, std::span<const double> values) {
+                check(first == next && values.size() == count * tile.size() * arrivals,
+                      "Vulkan bounded frequency tiles omitted or reordered workspace/arrival rows");
+                for (std::size_t i = 0; i < values.size(); ++i) {
+                    const auto amplitude = static_cast<double>(i % arrivals + 1);
+                    near(values[i], 2 * amplitude * amplitude, 3e-6,
+                         "Vulkan bounded frequency tiles changed the correlation scores");
+                }
+                next += count;
+            }, work, stop);
+            check(next == bank.size(), "Vulkan bounded frequency tiles omitted workspaces");
+        }
+        const auto pairs = bank.size() * frequencies.size();
+        check(work.workspace_frequency_pairs == pairs && work.score_rows == pairs * arrivals &&
+              work.forward_ffts == frequencies.size() && work.inverse_ffts == pairs * geometry.taps,
+              "Vulkan tile bound changed the completed public search geometry");
+    }
+    const auto receipt = backend->receipt();
+    check_workspace_receipt(receipt, true);
+    output(j::object({{"schema", "datapump.triad.vulkan-tile-check.v1"}, {"original_width", frequencies.size()},
+        {"bounded_width", width}, {"score_rows", receipt.score_rows},
+        {"host_scored_rows", receipt.vulkan_host_scored_rows}, {"fft_calls", receipt.fft_calls},
+        {"peak_device_owner_bytes", receipt.vulkan_peak_owner_bytes}}));
+}
+
+void automatic_workspace_capacity(std::stop_token stop) {
+    using Precision = v::VulkanCoarsePrecision;
+    const auto backend = v::make_automatic_vulkan_receiver_backend({0, 0, Precision::fp32});
+    constexpr std::size_t kernel = 82645, rows = 131072, workspaces = 78, arrivals = 2;
+    constexpr double fs = 240;
+    const r::CoarseBulkGeometry full{2, kernel, rows, arrivals, 35, fs, 1, 24};
+    const auto plan = backend->frequency_plan(full, workspaces, rows);
+    check(plan && plan->native_fallback_reason.empty() && plan->tile_width &&
+          plan->device_workspace_bytes > 256 * mib && plan->host_workspace_bytes > plan->device_workspace_bytes,
+          "automatic Vulkan did not admit the broad geometry above the previous device ceiling");
+    const auto unsupported = backend->frequency_plan({1, 1, std::size_t{1} << 30, 1, 1, fs, 1, 1}, 1, rows);
+    check(unsupported && unsupported->native_fallback_reason == "native-vulkan-workspace" &&
+          !unsupported->device_workspace_bytes && !unsupported->host_workspace_bytes && !backend->receipt().executed,
+          "an impossible Vulkan buffer did not produce a native preflight route");
+
+    // Same two-ray bank and long transform as the full public prior. A single
+    // declared frequency exercises the bank capacity without timing a replay.
+    std::vector<Complex> observation(kernel + arrivals - 1), a(kernel), b(kernel);
+    a[0] = 1; b[0] = Complex{0, 2};
+    observation[0] = 1; observation[1] = 2;
+    const r::CoarseBulkWorkspace columns{{a, b}, 1, .25, {}};
+    const std::vector<r::CoarseBulkWorkspace> bank(workspaces, columns);
+    const std::array<double, 1> frequency{.01};
+    const r::CoarseBulkGeometry one{2, kernel, rows, arrivals, 1, fs, 1,
+        plan->tile_width, plan->workspace_batch, plan->device_workspace_bytes};
+    {
+        auto owner = backend->make_coarse(fs, .25);
+        r::CoarseBulkWork prepared, work;
+        owner->prepare(one, observation, bank, {}, prepared, stop);
+        check(backend->receipt().vulkan_leased_bytes == plan->device_workspace_bytes,
+              "narrower execution did not retain the full-prior geometry lease");
+        std::size_t next = 0;
+        owner->frequency_tile(frequency, [&](std::size_t first, std::size_t count, std::span<const double> scores) {
+            check(first == next && scores.size() == count * arrivals, "long Vulkan bank omitted public rows");
+            for (std::size_t i = 0; i < scores.size(); ++i)
+                near(scores[i], i % arrivals ? 8. : 2., 3e-6, "long Vulkan bank changed an impulse correlation score");
+            next += count;
+        }, work, stop);
+        check(next == workspaces && prepared.forward_ffts == 2 * workspaces &&
+              work.inverse_ffts == 2 * workspaces && work.score_rows == workspaces * arrivals &&
+              owner->receipt().vulkan_peak_owner_bytes > 256 * mib &&
+              owner->receipt().vulkan_peak_owner_bytes <= plan->device_workspace_bytes,
+              "long Vulkan bank did not execute within its exact geometry lease");
+        const auto local = owner->receipt();
+        check(local.workspace_scope == "per_coarse_session" && local.workspace_limit_bytes == plan->device_workspace_bytes,
+              "the automatic Vulkan owner lost its own lease scope in its receipt");
+    }
+    const auto long_receipt = backend->receipt();
+    check_workspace_receipt(long_receipt, true);
+    check(!long_receipt.vulkan_leased_bytes && long_receipt.vulkan_peak_leased_bytes == plan->device_workspace_bytes &&
+          long_receipt.vulkan_peak_leased_bytes <= long_receipt.vulkan_shared_workspace_limit_bytes,
+          "the long Vulkan bank retained a shared lease after release");
+    output(j::object({{"schema", "datapump.triad.vulkan-automatic-workspace.v1"},
+        {"device", long_receipt.device_name}, {"workspace_scope", long_receipt.workspace_scope},
+        {"shared_limit_bytes", long_receipt.vulkan_shared_workspace_limit_bytes},
+        {"full_prior_frequencies", full.frequency_count}, {"full_prior_tile_width", plan->tile_width},
+        {"full_prior_batch", plan->workspace_batch}, {"full_prior_lease_bytes", plan->device_workspace_bytes},
+        {"fixture_peak_bytes", long_receipt.vulkan_peak_owner_bytes}, {"fixture_score_rows", long_receipt.score_rows}}));
+}
+
+void automatic_workspace_admission(std::stop_token stop) {
+    // The exact same small geometry needs more than half of this deliberately
+    // constrained shared budget. A second owner must park without allocations.
+    const auto limited = v::make_automatic_vulkan_receiver_backend({0, mib, v::VulkanCoarsePrecision::fp32});
+    constexpr std::size_t small_rows = 8192, small_kernel = small_rows - 1, arrivals = 2;
+    constexpr double fs = 240;
+    const r::CoarseBulkGeometry small{2, small_kernel, small_rows, arrivals, 1, fs, 1, 1};
+    std::vector<Complex> small_input(small_rows), a(small_kernel), b(small_kernel);
+    a[0] = 1; b[0] = Complex{0, 2};
+    small_input[0] = 1; small_input[1] = 2;
+    const std::array<double, 1> frequency{.01};
+    const std::array<r::CoarseBulkWorkspace, 2> small_bank{{
+        {{a, b}, 1, .25, {}}, {{a, b}, 1, .25, {}}
+    }};
+    const auto small_plan = limited->frequency_plan(small, small_bank.size(), small_rows);
+    check(small_plan && small_plan->device_workspace_bytes > mib / 2 && small_plan->device_workspace_bytes <= mib,
+          "automatic Vulkan waiting fixture did not create shared pressure");
+    auto holder = limited->make_coarse(fs, .25);
+    r::CoarseBulkWork prepared;
+    holder->prepare(small, small_input, small_bank, {}, prepared, stop);
+    const auto wait_for_owners = [&](std::uint64_t count) {
+        const auto deadline = Clock::now() + std::chrono::seconds(5);
+        while (limited->receipt().vulkan_waiting_sessions != count) {
+            check(!stop.stop_requested() && Clock::now() < deadline, "Vulkan owner did not park at the shared lease");
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        check(limited->receipt().vulkan_leased_bytes == small_plan->device_workspace_bytes,
+              "parked Vulkan owner obtained a partial lease");
+    };
+    bool cancelled_wait = false;
+    r::CoarseBulkWork cancelled_work;
+    std::jthread cancelled_owner([&](std::stop_token token) {
+        try {
+            auto owner = limited->make_coarse(fs, .25);
+            owner->prepare(small, small_input, small_bank, {}, cancelled_work, token);
+        } catch (const datapump::Error& error) {
+            cancelled_wait = token.stop_requested() && std::string_view(error.what()).find("cancelled") != std::string_view::npos;
+        }
+    });
+    wait_for_owners(1);
+    // This later owner has room alongside the holder, but the older request
+    // remains first in line until cancelled. Cancellation wakes its successor.
+    const r::CoarseBulkGeometry tiny{1, 1, 16, arrivals, 1, fs, 1, 1};
+    const std::array<r::CoarseBulkWorkspace, 1> tiny_bank{{{{std::span(a).first(1), {}}, 1, 0, {}}}};
+    const auto tiny_plan = limited->frequency_plan(tiny, tiny_bank.size(), 16);
+    check(tiny_plan && tiny_plan->device_workspace_bytes &&
+          tiny_plan->device_workspace_bytes <= mib - small_plan->device_workspace_bytes,
+          "later Vulkan lease did not fit the holder's unused capacity");
+    const auto sink = [](std::size_t, std::size_t, std::span<const double>) {};
+    std::exception_ptr tiny_error;
+    r::CoarseBulkWork tiny_work;
+    std::jthread tiny_owner([&](std::stop_token token) {
+        try {
+            auto owner = limited->make_coarse(fs, .25);
+            r::CoarseBulkWork work;
+            owner->prepare(tiny, std::span(small_input).first(arrivals), tiny_bank, {}, work, token);
+            owner->frequency_tile(frequency, sink, tiny_work, token);
+        } catch (...) { tiny_error = std::current_exception(); }
+    });
+    wait_for_owners(2);
+    cancelled_owner.request_stop();
+    cancelled_owner.join();
+    tiny_owner.join();
+    if (tiny_error) std::rethrow_exception(tiny_error);
+    check(cancelled_wait && cancelled_work == r::CoarseBulkWork{} && !limited->receipt().vulkan_waiting_sessions &&
+          tiny_work.score_rows == arrivals && limited->receipt().vulkan_leased_bytes == small_plan->device_workspace_bytes,
+          "cancelled Vulkan waiter reported work or failed to wake its FIFO successor");
+
+    std::exception_ptr waiter_error;
+    r::CoarseBulkWork holder_work, waiter_work;
+    std::jthread waiting_owner([&](std::stop_token token) {
+        try {
+            auto owner = limited->make_coarse(fs, .25);
+            r::CoarseBulkWork work;
+            owner->prepare(small, small_input, small_bank, {}, work, token);
+            owner->frequency_tile(frequency, sink, waiter_work, token);
+        } catch (...) { waiter_error = std::current_exception(); }
+    });
+    wait_for_owners(1);
+    holder->frequency_tile(frequency, sink, holder_work, stop);
+    holder.reset();
+    waiting_owner.join();
+    if (waiter_error) std::rethrow_exception(waiter_error);
+    const auto after_wait = limited->receipt();
+    check_workspace_receipt(after_wait, true);
+    check(holder_work.score_rows == 4 && waiter_work.score_rows == 4 && after_wait.score_rows == 8 + arrivals &&
+          !after_wait.vulkan_waiting_sessions && !after_wait.vulkan_leased_bytes &&
+          after_wait.vulkan_peak_leased_bytes == small_plan->device_workspace_bytes + tiny_plan->device_workspace_bytes,
+          "Vulkan holder and resumed owner did not complete under the shared budget");
+
+    const auto key = datapump::Crypto::amateur();
+    const auto capture = coarse_capture(key);
+    auto config = capture.config;
+    const std::array<r::FrequencyInterval, 1> prior{{{-config.frequency_bound_hz, config.frequency_bound_hz}}};
+    const auto native = r::score_coarse(config, capture.slot, key, capture.iq, prior, 1,
+                                      r::coarse_workspace(config, capture.slot, 1), stop, nullptr);
+    config.bulk_backend = limited;
+    const auto fallback = r::score_coarse(config, capture.slot, key, capture.iq, prior, 1,
+                                        r::coarse_workspace(config, capture.slot, 1), stop, nullptr);
+    same_result(native, fallback);
+    const auto after_fallback = limited->receipt();
+    check(fallback.work.native_fallback_reason == "native-vulkan-workspace" && !fallback.work.bulk &&
+          after_fallback.native_coarse_workspace_sessions == 1 && after_fallback.fft_calls == after_wait.fft_calls &&
+          after_fallback.score_rows == after_wait.score_rows,
+          "automatic Vulkan workspace fallback did not preserve native work and explicit evidence");
+    output(j::object({{"schema", "datapump.triad.vulkan-workspace-admission.v1"},
+        {"device", after_wait.device_name}, {"shared_limit_bytes", after_wait.vulkan_shared_workspace_limit_bytes},
+        {"peak_leased_bytes", after_wait.vulkan_peak_leased_bytes}, {"cancelled_wait", cancelled_wait},
+        {"fifo_successor_score_rows", tiny_work.score_rows},
+        {"resumed_score_rows", waiter_work.score_rows}, {"native_fallback", fallback.work.native_fallback_reason}}));
 }
 
 void simultaneous_owner_accounting(const std::shared_ptr<r::ReceiverBulkBackend>& backend) {
@@ -953,12 +1211,21 @@ int main(int argc, char** argv) {
         const bool direct = mode == "--precision-direct-fp32" || mode == "--precision-direct-fp16" ||
             mode == "--precision-direct-fp16-storage";
         const bool precision_diagnostic = mode == "--precision-fp32" || mode == "--precision-fp16-storage" || direct;
-        check(argc <= 2 && (mode.empty() || mode == "--plan" || mode == "--benchmark" ||
+        const bool host_scoring = mode == "--host-scoring";
+        const bool auto_workspace = mode == "--automatic-workspace";
+        const bool workspace_admission = mode == "--workspace-admission";
+        check(argc <= 2 && (mode.empty() || mode == "--plan" || mode == "--benchmark" || host_scoring ||
                            mode == "--plan-wide" || mode == "--benchmark-wide" || cpu_precision ||
-                           precision_diagnostic),
-              "expected test_triad_vulkan [--plan|--benchmark|--benchmark-cpu-precision], "
+                           precision_diagnostic || auto_workspace || workspace_admission),
+              "expected test_triad_vulkan [--plan|--benchmark|--benchmark-cpu-precision|--host-scoring|--workspace-admission|--automatic-workspace], "
               "with optional -wide suffix");
         const Deadline deadline;
+        if (auto_workspace || workspace_admission) {
+            if (auto_workspace) automatic_workspace_capacity(deadline.token());
+            automatic_workspace_admission(deadline.token());
+            check(!deadline.token().stop_requested(), "automatic Vulkan workspace test exceeded its deadline");
+            return 0;
+        }
         const bool wide = mode.ends_with("-wide");
         if (cpu_precision) {
             benchmark(nullptr, deadline.token(), wide);
@@ -991,8 +1258,8 @@ int main(int argc, char** argv) {
             mode == "--precision-direct-fp32" ? v::VulkanCoarsePrecision::direct_fp32 :
             mode == "--precision-direct-fp16-storage" ? v::VulkanCoarsePrecision::direct_fp16_storage :
             mode == "--precision-direct-fp16" ? v::VulkanCoarsePrecision::direct_fp16 :
-            mode == "--precision-fp32" ? v::VulkanCoarsePrecision::fp32 : v::VulkanCoarsePrecision::automatic;
-        const auto backend = v::make_vulkan_receiver_backend({0, device_workspace, precision});
+            mode == "--precision-fp32" || host_scoring ? v::VulkanCoarsePrecision::fp32 : v::VulkanCoarsePrecision::automatic;
+        const auto backend = v::make_vulkan_receiver_backend({0, device_workspace, precision, false, host_scoring});
         describe(backend->receipt(), std::chrono::duration<double>(Clock::now() - began).count());
         if (precision_diagnostic) {
             direct_frequency_grid(backend, 16, true, 0, direct);
@@ -1000,17 +1267,32 @@ int main(int argc, char** argv) {
             direct_frequency_grid(backend, 65536, true, -80, direct);
             direct_frequency_grid(backend, 65536, true, 40, direct);
             check_workspace_receipt(backend->receipt(), true);
+        } else if (host_scoring) {
+            direct_frequency_grid(backend, 16);
+            direct_frequency_grid(backend, 65'536, true, 0, false, true);
+            bounded_frequency_tiles(true, deadline.token());
+            full_slots(backend, deadline.token());
+            const auto receipt = backend->receipt();
+            check_workspace_receipt(receipt, true);
+            check(receipt.vulkan_host_scored_rows == receipt.score_rows && receipt.score_rows &&
+                  !receipt.vulkan_arrival_peak_rows && receipt.fft_calls && receipt.native_fine_sessions == 4,
+                  "portable Vulkan route did not retain native scoring and fine work around actual GPU FFTs");
+            output(j::object({{"schema", "datapump.triad.vulkan-checks.v1"}, {"status", "checks_passed"},
+                {"actual_gpu_work", true}, {"scope", "fixed_phase_native_scoring_and_fine_receiver"},
+                {"score_rows", receipt.score_rows}, {"host_scored_rows", receipt.vulkan_host_scored_rows},
+                {"fft_calls", receipt.fft_calls}, {"precision", receipt.precision}}));
         } else if (mode == "--benchmark" || mode == "--benchmark-wide") benchmark(backend, deadline.token(), wide);
         else {
             fallback_boundaries(backend, deadline.token());
             native_chirp_z_preference(deadline.token());
             workspace_boundary(backend);
+            bounded_frequency_tiles(false, deadline.token());
             simultaneous_owner_accounting(backend);
             idle_stream_cache_admission(backend);
             direct_frequency_grid(backend, 16);
             direct_frequency_grid(backend, 256);
             check_workspace_receipt(backend->receipt(), true);
-            exact_frontier_rows();
+            if (!backend->receipt().vulkan_host_scored_rows) exact_frontier_rows();
             full_slots(backend, deadline.token());
             fft_storage_policy(device_workspace);
             automatic_direct_policy();

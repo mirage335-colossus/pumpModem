@@ -52,6 +52,7 @@ struct CoarseWorkPlan {
     // One tile advances either adjacent CFOs for all workspaces or adjacent
     // workspaces for all CFOs. The final tile may be smaller.
     std::size_t tile_width = 0, total_tiles = 0;
+    std::optional<CoarseFrequencyPlan> bulk_frequency_admission;
     std::size_t workspace_reserved_bytes = 0, workspace_limit_bytes = 0, bulk_host_workspace_bytes = 0;
     double input_sample_rate_hz = 0, projected_sample_rate_hz = 0;
     double maximum_frequency_step_hz = 0, clock_gap_ppm = 0;

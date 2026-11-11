@@ -139,10 +139,41 @@ std::string exact_frequency_text(double hz) {
 
 }
 std::string gpu_search_diagnostics(const live::Snapshot& snapshot) {
-    auto text = snapshot.gpu_score_rows
-        ? "GPU search + native tracking · " + std::to_string(snapshot.gpu_score_rows) + " rows"
-        : std::string("GPU ready + native tracking");
+    const bool cuda = snapshot.gpu_backend.starts_with("cuda:");
+    std::string text;
+    if (cuda) {
+        if (snapshot.gpu_score_rows)
+            text = "GPU search · " + std::to_string(snapshot.gpu_score_rows) + " rows";
+        else text = "GPU ready";
+        if (snapshot.gpu_statistics_blocks)
+            text += " · GPU fine statistics " + std::to_string(snapshot.gpu_statistics_blocks);
+        if (snapshot.gpu_cuda_native_fine_sessions) {
+            text += " · native fine fallback " + std::to_string(snapshot.gpu_cuda_native_fine_sessions) + " sessions";
+            if (!snapshot.gpu_cuda_native_fine_fallback_reason.empty())
+                text += " (" + snapshot.gpu_cuda_native_fine_fallback_reason + ")";
+        }
+    } else {
+        text = snapshot.gpu_score_rows
+            ? "GPU search + native tracking · " + std::to_string(snapshot.gpu_score_rows) + " rows"
+            : std::string("GPU ready + native tracking");
+        if (snapshot.gpu_host_scored_rows)
+            text += " · native precision scoring " + std::to_string(snapshot.gpu_host_scored_rows) + " rows";
+        if (snapshot.gpu_vulkan_shared_workspace_limit_bytes) {
+            constexpr std::size_t mib = 1024U * 1024U;
+            const auto mibs = [=](std::size_t bytes) { return bytes / mib + (bytes % mib != 0); };
+            text += " · workspace " + std::to_string(mibs(snapshot.gpu_vulkan_leased_bytes)) + "/" +
+                std::to_string(mibs(snapshot.gpu_vulkan_shared_workspace_limit_bytes)) + " MiB";
+            text += " (peak " + std::to_string(mibs(snapshot.gpu_vulkan_peak_leased_bytes)) +
+                ", owner " + std::to_string(mibs(snapshot.gpu_vulkan_peak_owner_lease_bytes)) +
+                ", waiting " + std::to_string(snapshot.gpu_vulkan_waiting_sessions) + ")";
+        }
+        if (snapshot.gpu_native_coarse_workspace_sessions)
+            text += " · native coarse workspace fallback " +
+                std::to_string(snapshot.gpu_native_coarse_workspace_sessions) +
+                " (native-vulkan-workspace)";
+    }
     if(snapshot.gpu_native_coarse_lag_sessions) text += " · native lag search selected";
+    if(!snapshot.gpu_selection_reason.empty()) text += " · " + snapshot.gpu_selection_reason;
     return text + " · " + snapshot.gpu_device;
 }
 
@@ -1124,6 +1155,18 @@ struct Controller::Impl {
             value.receiver_error!=snapshot.receiver_error||value.transmitting!=snapshot.transmitting||
             value.running!=snapshot.running||value.bit_seconds!=snapshot.bit_seconds||
             value.gpu_device!=snapshot.gpu_device||value.gpu_score_rows!=snapshot.gpu_score_rows||
+            value.gpu_backend!=snapshot.gpu_backend||value.gpu_precision!=snapshot.gpu_precision||
+            value.gpu_statistics_blocks!=snapshot.gpu_statistics_blocks||
+            value.gpu_cuda_native_fine_sessions!=snapshot.gpu_cuda_native_fine_sessions||
+            value.gpu_cuda_native_fine_fallback_reason!=snapshot.gpu_cuda_native_fine_fallback_reason||
+            value.gpu_vulkan_shared_workspace_limit_bytes!=snapshot.gpu_vulkan_shared_workspace_limit_bytes||
+            value.gpu_vulkan_leased_bytes!=snapshot.gpu_vulkan_leased_bytes||
+            value.gpu_vulkan_peak_leased_bytes!=snapshot.gpu_vulkan_peak_leased_bytes||
+            value.gpu_vulkan_peak_owner_lease_bytes!=snapshot.gpu_vulkan_peak_owner_lease_bytes||
+            value.gpu_vulkan_waiting_sessions!=snapshot.gpu_vulkan_waiting_sessions||
+            value.gpu_native_coarse_workspace_sessions!=snapshot.gpu_native_coarse_workspace_sessions||
+            value.gpu_host_scored_rows!=snapshot.gpu_host_scored_rows||
+            value.gpu_selection_reason!=snapshot.gpu_selection_reason||
             value.gpu_native_coarse_lag_sessions!=snapshot.gpu_native_coarse_lag_sessions||
             value.transmit_trace.revision!=snapshot.transmit_trace.revision;
         snapshot=std::move(value);

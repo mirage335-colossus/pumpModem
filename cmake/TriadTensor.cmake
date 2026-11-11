@@ -11,6 +11,17 @@ if(DATAPUMP_BUILD_WASM)
   message(FATAL_ERROR "The ATen receiver backend requires a native build")
 endif()
 
+# Torch can enable CUDA while it is being discovered and populate CMake's
+# architecture cache from the build host. Remember explicit user allocation
+# before discovery so a cloud build does not silently become Blackwell-only.
+set(_triad_explicit_cuda_architectures FALSE)
+if(DEFINED CMAKE_CUDA_ARCHITECTURES)
+  set(_triad_explicit_cuda_architectures TRUE)
+  set(_triad_requested_cuda_architectures "${CMAKE_CUDA_ARCHITECTURES}")
+elseif(DEFINED ENV{CUDAARCHS} AND NOT "$ENV{CUDAARCHS}" STREQUAL "")
+  set(_triad_explicit_cuda_architectures TRUE)
+  set(_triad_requested_cuda_architectures "$ENV{CUDAARCHS}")
+endif()
 find_package(Torch CONFIG REQUIRED)
 separate_arguments(_triad_torch_flags NATIVE_COMMAND "${TORCH_CXX_FLAGS}")
 if(TORCH_CXX_FLAGS MATCHES "_GLIBCXX_USE_CXX11_ABI=0")
@@ -27,9 +38,45 @@ target_compile_definitions(datapump_triad_receiver PUBLIC DATAPUMP_HAVE_TRIAD_TE
 
 if(CAFFE2_USE_CUDA AND NOT CAFFE2_USE_ROCM)
   find_package(CUDAToolkit REQUIRED)
+  # Build usable code for the supported NVIDIA receiver families even when
+  # configuration runs without a GPU. Explicit architecture allocations win.
+  if(_triad_explicit_cuda_architectures)
+    set(CMAKE_CUDA_ARCHITECTURES "${_triad_requested_cuda_architectures}")
+  else()
+    if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 12.8)
+      set(CMAKE_CUDA_ARCHITECTURES "89-real;120")
+    elseif(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 11.8)
+      set(CMAKE_CUDA_ARCHITECTURES "89")
+    else()
+      # Older toolkits retain CMake's detected architecture from the cache,
+      # rather than Torch's normal-scope OFF override.
+      set(CMAKE_CUDA_ARCHITECTURES "$CACHE{CMAKE_CUDA_ARCHITECTURES}")
+    endif()
+    set(CMAKE_CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}" CACHE STRING
+      "Native Robust CUDA architectures" FORCE)
+  endif()
+  # LibTorch sets a normal-scope OFF value and appends its own host-detected
+  # -gencode flags. Restore CMake's target selection and remove only those
+  # appended architecture flags so explicit allocations also remain exact.
+  if(NVCC_FLAGS_EXTRA)
+    list(JOIN NVCC_FLAGS_EXTRA " " _triad_torch_arch_flags)
+    # Remove exactly the last (Torch-appended) occurrence. Earlier identical
+    # flags may be explicit user input, including CUDAFLAGS on first configure.
+    set(_triad_torch_arch_flags " ${_triad_torch_arch_flags}")
+    string(FIND "${CMAKE_CUDA_FLAGS}" "${_triad_torch_arch_flags}" _triad_arch_position REVERSE)
+    if(_triad_arch_position LESS 0)
+      message(FATAL_ERROR "Cannot isolate LibTorch CUDA architecture flags; cannot preserve architecture allocation")
+    endif()
+    string(SUBSTRING "${CMAKE_CUDA_FLAGS}" 0 ${_triad_arch_position} _triad_flag_prefix)
+    string(LENGTH "${_triad_torch_arch_flags}" _triad_arch_length)
+    math(EXPR _triad_arch_end "${_triad_arch_position} + ${_triad_arch_length}")
+    string(SUBSTRING "${CMAKE_CUDA_FLAGS}" ${_triad_arch_end} -1 _triad_flag_suffix)
+    set(CMAKE_CUDA_FLAGS "${_triad_flag_prefix}${_triad_flag_suffix}")
+  endif()
   enable_language(CUDA)
   target_sources(datapump_triad_tensor PRIVATE src/triad_tensor_mapping.cu src/triad_tensor_matrix.cu src/triad_tensor_peaks.cu)
-  set_target_properties(datapump_triad_tensor PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+  set_target_properties(datapump_triad_tensor PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON
+    CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
   if(CMAKE_CUDA_COMPILER_ID STREQUAL "NVIDIA")
     foreach(_cuda_flags CMAKE_CUDA_FLAGS CMAKE_CUDA_FLAGS_DEBUG CMAKE_CUDA_FLAGS_RELEASE
                          CMAKE_CUDA_FLAGS_RELWITHDEBINFO CMAKE_CUDA_FLAGS_MINSIZEREL)
@@ -46,6 +93,7 @@ if(CAFFE2_USE_CUDA AND NOT CAFFE2_USE_ROCM)
     message(FATAL_ERROR "The fused Robust mapping kernel requires NVIDIA or Clang CUDA compilation")
   endif()
   target_compile_definitions(datapump_triad_tensor PRIVATE DATAPUMP_TRIAD_TENSOR_CUDA=1)
+  target_compile_definitions(datapump_triad_receiver PUBLIC DATAPUMP_HAVE_TRIAD_CUDA=1)
   target_link_libraries(datapump_triad_tensor PRIVATE CUDA::cudart CUDA::cublas)
 elseif(DATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA)
   message(FATAL_ERROR "A CUDA-enabled LibTorch build is required for the Robust CUDA check")
@@ -74,7 +122,10 @@ if(BUILD_TESTING OR DATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA)
     add_custom_target(test_triad_tensor_cuda DEPENDS test_triad_tensor)
     if(BUILD_TESTING)
       add_test(NAME triad_tensor_cuda COMMAND test_triad_tensor --cuda)
+      add_test(NAME triad_tensor_cuda_automatic COMMAND test_triad_tensor --cuda --cuda-automatic)
+      add_custom_target(test_triad_tensor_cuda_automatic DEPENDS test_triad_tensor)
       set_tests_properties(triad_tensor_cuda PROPERTIES LABELS "triad;triad_gpu" TIMEOUT 30 RUN_SERIAL TRUE)
+      set_tests_properties(triad_tensor_cuda_automatic PROPERTIES LABELS "triad_gpu" TIMEOUT 60 RUN_SERIAL TRUE)
     endif()
   endif()
 endif()

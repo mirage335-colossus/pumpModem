@@ -178,6 +178,69 @@ report the actual coarse and fine arithmetic, device/runtime and memory use.
 Fine Gaussian state retains the native higher-precision policy. No arithmetic
 is silently selected from the observed score or transmitted truth.
 
+### GUI automatic GPU selection
+
+The GUI GPU control and headless `--backend gpu` share the compiled C++ factory.
+It tries automatic CUDA on a compatible initialized discrete device, then
+automatic physical Vulkan if CUDA is not compiled, unavailable or fails to
+initialize. The factory does not fall back to CPU. If no compatible physical
+accelerator is ready, the session reports GPU unavailability. Receipts preserve
+the user-requested `gpu` selection separately from the actual CUDA/Vulkan
+backend and selection reason; accelerator qualification additionally requires
+completed backend-specific work. Explicit CUDA and Vulkan probe modes remain
+pinned to their named backend.
+
+Automatic CUDA uses FP32 FFTs for scalable frequency search and retains exact
+device chirp-Z only for the supported, cost-qualified single-arrival geometry.
+The CUDA FP16/INT8 matrix path is still an explicit bounded option. Its earlier
+measured shapes and limitations do not qualify automatic matrix selection from
+Tensor Core peak rates, and a matrix contraction is not a low-precision FFT.
+The GPU selector must retain the full frequency/arrival hypothesis set under
+tile and device-memory limits; allocation or execution failure is explicit.
+Complete affected-stage cost, workspace, sensitivity and false-alarm tradeoffs
+govern any future automatic arithmetic change.
+
+FP32 is the currently qualified CUDA FFT route, **not a demonstrated precision
+or throughput ceiling**. Native half-precision cuFFT is a distinct unresolved
+candidate; the FP16/INT8 matrix checks do not evaluate it. NVIDIA's
+[cuFFT 12.8 guide](https://docs.nvidia.com/cuda/archive/12.8.1/cufft/index.html#half-precision-cufft-transforms)
+supports half transforms for power-of-two sizes and identifies intermediate
+range/overflow limits. A native candidate should test normalization and
+power-of-two scaling, full preparation/transfer/synchronization costs, workspace
+and reception tradeoffs. Those limits do not establish a universal FP16
+rejection. The current integration also leaves coarse FIR preparation/transfer
+overlap as a measured structural improvement opportunity.
+
+For portable Vulkan devices lacking shader FP64 or shader INT64, the receiver
+can keep bulk FFT/product arithmetic in FP32, represent frequency phase steps
+as Q64 constants, reduce each row phase in 32-bit shader arithmetic, and perform
+fixed-phase score evaluation on the host in FP64. Receipts mark every host-scored
+row and append `_fixed_phase_host_fp64_scoring` to the executed precision. This
+is an actual Vulkan transform/product plus CPU score path, not GPU FP64 or a
+device-score claim. Tile memory bounds may reduce batch width but never public
+search coverage. The implementation is intended to permit Intel UHD 630 Vulkan
+use without optional GPU FP64/INT64 features. That hardware is unavailable here;
+the forced host-scoring path was exercised on a different physical Vulkan GPU,
+which establishes route behavior only, not Intel driver compatibility or speed.
+
+For hardware evidence, the bounded automatic-GUI comparison was measured on a
+full RTX PRO 6000 Blackwell. Its qualified CUDA policy uses native fine processing
+for a scoped small-block regime (public maximum block rows ≤512, projected modes
+≤40, one tap, AVX2 and admitted worker share ≥32) while retaining CUDA coarse
+work; outside that regime, CUDA fine remains selected. The broad 25-slot stream
+improved from 8.2028 s to 1.3200 s (6.21×), and its eight-commit ready-input
+interval from 2.6703 s to 0.36386 s (7.34×). The long-transform stream remained
+slightly slower: 0.56% for the full stream, 1.33% for the ready interval and
+2.27% on the fresh holdout. This is a bounded service result, not sustained
+capacity or a precision change; see [validation](validation.md#nvidia-and-intel-gpu-toggle-integration).
+
+Automatic-GUI validation on RTX 4090 and RTX 5090 remains unavailable after
+deployment attempts produced no instance. Historical RTX 4090 matrix-component
+results remain valid only for their recorded explicit-CUDA build and fixtures;
+they do not qualify this GUI receiver path. Intel UHD 630 remains unmeasured
+because no test host is available. Preserve these device-specific gaps and the
+long-case regression alongside the broad-case gain.
+
 ### Vulkan on Vega integrated graphics
 
 The optional `DATAPUMP_TRIAD_VULKAN` backend uses in-process Vulkan/VkFFT for
@@ -192,6 +255,13 @@ the compact tight-clock FP64 class and fine processing stay on the canonical CPU
 path with explicit stage routing. A numerical or resource failure must not
 silently fall back. See the [native Vulkan scope](triad-performance.md#local-radeon-vulkan-processing)
 and [current qualification](validation.md#local-radeon-vulkan-backend).
+
+The automatic GUI's shared Vulkan admission was also checked on the physical
+Radeon: a >256 MiB component and one matched full-public-slot active/noise pair
+completed with matching CPU bit/null decisions and fine work, peaking at
+3.4107 GB under a 4.2 GB shared workspace. This is a bounded workspace and
+correctness qualification, not complete-message capacity or a throughput claim;
+see the [current GUI integration results](validation.md#nvidia-and-intel-gpu-toggle-integration).
 
 The GUI's FP64-force preference is incompatible with this FP32 Vulkan backend
 and is rejected explicitly. CPU automatic versus forced-FP64 diagnostics remain

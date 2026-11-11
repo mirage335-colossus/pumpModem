@@ -14,6 +14,7 @@ from triad_cases import ROOT
 SCHEMA = "datapump.triad.native-probe.v1"
 DEFAULT_PROBE = ROOT / "build/dev/triad_receiver_probe"
 BACKENDS = ("cpu", "tensor-cpu", "cuda", "vulkan")
+NATIVE_BACKENDS = (*BACKENDS, "gpu")
 COMMANDS = frozenset(("describe", "plan", "slot", "continuation", "message", "backlog",
                       "regression", "codec"))
 STATUS_CODES = {"complete": 0, "incomplete": 2, "unavailable": 2, "error": 1}
@@ -118,13 +119,16 @@ def runtime_identity(receipt):
     bulk = identity.get("backend_receipt")
     if bulk is None:
         runtime["bulk"] = None
-    elif identity.get("backend") == "vulkan":
+    elif identity.get("backend") in ("vulkan", "gpu") and bulk.get("vulkan") is True:
         runtime["bulk"] = {name: bulk.get(name) for name in (
             "device", "device_name", "library_version", "vulkan", "vulkan_api_version",
             "vulkan_driver_version", "vulkan_vendor_id", "vulkan_device_id", "vulkan_subgroup_size",
             "vulkan_float16", "vulkan_int8", "vulkan_integer_dot8_accelerated", "unified_memory",
             "numerical_threads", "precision", "workspace_scope", "workspace_limit_bytes", "total_device_bytes",
         )}
+        runtime["bulk"]["selection_reason"] = bulk.get("selection_reason")
+        if identity.get("backend") == "gpu":
+            runtime["selected_accelerator_backend"] = "vulkan"
         # The selected storage can differ by session and is known only after
         # work executes. Bind current reports to their requested policy instead.
         if "requested_vulkan_precision" in identity:
@@ -135,8 +139,10 @@ def runtime_identity(receipt):
             "device", "device_name", "library_version", "cuda_runtime_version", "cuda_driver_version",
             "cuda_blas_version", "cuda_compute_major", "cuda_compute_minor",
             "cuda", "numerical_threads", "precision", "requested_coarse_math", "workspace_limit_bytes", "total_device_bytes",
-            "fft_plan_cache_limit",
+            "fft_plan_cache_limit", "selection_reason",
         )}
+        if identity.get("backend") == "gpu":
+            runtime["selected_accelerator_backend"] = "cuda" if bulk.get("cuda") is True else "unknown"
     return runtime
 
 
@@ -164,6 +170,21 @@ def phase_once(receipt, name, *, scope=None):
     return phases[0]
 
 
+def _validate_frequency_admission(value, where):
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise ProbeError(f"Invalid Vulkan bulk-frequency admission in {where}")
+    for key in ("tile_width", "workspace_batch", "device_workspace_bytes", "host_workspace_bytes"):
+        if type(value.get(key)) is not int or value[key] < 0:
+            raise ProbeError(f"Invalid Vulkan admission {key} in {where}")
+    reason = value.get("native_fallback_reason")
+    if reason not in ("", "native-vulkan-workspace"):
+        raise ProbeError(f"Unrecognized Vulkan admission fallback in {where}")
+    if not reason and not all(value[key] > 0 for key in ("tile_width", "workspace_batch", "device_workspace_bytes")):
+        raise ProbeError(f"Admitted Vulkan bulk work lacks a positive device allocation in {where}")
+
+
 def validate_receipt(receipt, *, command, backend, returncode, expected_require_accelerator=None):
     if not isinstance(receipt, dict) or receipt.get("schema") != SCHEMA:
         raise ProbeError("Expected a current native Robust probe receipt")
@@ -189,9 +210,9 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
         raise ProbeError("Native receipt backend disagrees with requested backend")
     if identity.get("implementation") != "native-production-receiver":
         raise ProbeError("Measurement did not identify the canonical native receiver")
-    if (backend == "vulkan" and expected_require_accelerator is not None
+    if (backend in ("vulkan", "gpu") and expected_require_accelerator is not None
             and identity.get("require_accelerator") is not expected_require_accelerator):
-        raise ProbeError("Native probe did not honor the requested Vulkan accelerator requirement")
+        raise ProbeError("Native probe did not honor the requested accelerator requirement")
     if not isinstance(receipt.get("phases"), list):
         raise ProbeError("Missing native phase receipts")
     for phase in receipt["phases"]:
@@ -202,6 +223,17 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
         finite_number(phase.get("represented_seconds"), "represented baseband duration", nonnegative=True)
         if phase.get("process_cpu_seconds") is not None:
             finite_number(phase["process_cpu_seconds"], "phase process CPU time", nonnegative=True)
+        work = phase.get("work", {})
+        if "bulk_frequency_admission" in work:
+            _validate_frequency_admission(work["bulk_frequency_admission"], phase["name"])
+        if ("native_fallback_reason" in work and
+                work["native_fallback_reason"] not in ("", "native-vulkan-workspace",
+                    "native-lag-groups", "compact-tight-clock-fp64")):
+            raise ProbeError("Native coarse phase has an unknown fallback reason")
+    configuration = receipt.get("configuration") or {}
+    full_prior = configuration.get("coarse_full_prior") if isinstance(configuration, dict) else None
+    if isinstance(full_prior, dict) and "bulk_frequency_admission" in full_prior:
+        _validate_frequency_admission(full_prior["bulk_frequency_admission"], "full-prior plan")
     if status == "complete":
         allocation(receipt)
         if not all(is_sha256(identity.get(key)) for key in ("source_manifest_sha256", "build_options_sha256")):
@@ -220,16 +252,29 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
             raise ProbeError("Complete native receipt has an invalid Vulkan build configuration")
         if backend == "vulkan" and identity.get("configured_vulkan_backend") is not True:
             raise ProbeError("Complete native receipt lacks the Vulkan build configuration")
-        if backend in ("tensor-cpu", "cuda"):
+        actual_backend = backend
+        if backend == "gpu":
             bulk = identity.get("backend_receipt")
-            if (not isinstance(bulk, dict) or bulk.get("cuda") is not (backend == "cuda") or bulk.get("vulkan") is True
+            if not isinstance(bulk, dict) or bulk.get("cuda") is bulk.get("vulkan"):
+                raise ProbeError("Automatic GPU selection lacks exactly one actual accelerator identity")
+            actual_backend = "cuda" if bulk.get("cuda") is True else "vulkan"
+            if identity.get("selected_accelerator_backend") != actual_backend:
+                raise ProbeError("Automatic GPU selected-backend identity disagrees with executed device")
+            if not isinstance(bulk.get("selection_reason"), str) or not bulk["selection_reason"]:
+                raise ProbeError("Automatic GPU receipt lacks its selection/fallback reason")
+        if actual_backend in ("tensor-cpu", "cuda"):
+            bulk = identity.get("backend_receipt")
+            if (not isinstance(bulk, dict) or bulk.get("cuda") is not (actual_backend == "cuda") or bulk.get("vulkan") is True
                     or bulk.get("numerical_threads") != 1
                     or not all(isinstance(bulk.get(key), str) and bulk[key] for key in (
                         "device", "device_name", "library_version", "precision"))):
                 raise ProbeError("Complete tensor receipt lacks the requested device and library identity")
             if bulk.get("requested_coarse_math") != coarse_math:
                 raise ProbeError("Tensor backend coarse arithmetic differs from the requested policy")
-        if backend == "vulkan":
+            waiters = bulk.get("device_admission_waiters")
+            if waiters is not None and (type(waiters) is not int or waiters < 0):
+                raise ProbeError("Tensor receipt has an invalid device-admission waiter count")
+        if actual_backend == "vulkan":
             bulk = identity.get("backend_receipt")
             if (identity["configured_vulkan_backend"] is not True or not isinstance(bulk, dict)
                     or bulk.get("vulkan") is not True or bulk.get("cuda") is True
@@ -249,6 +294,10 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                                      "direct-fp32", "direct-fp16-storage", "direct-fp16"):
                     raise ProbeError("Invalid Vulkan storage precision request")
                 total = positive_int(bulk.get("score_rows"), "Vulkan scored rows", allow_zero=True)
+                host_scored = positive_int(bulk.get("vulkan_host_scored_rows", 0),
+                                           "Vulkan host-scored rows", allow_zero=True)
+                if host_scored not in (0, total):
+                    raise ProbeError("Vulkan host-scored rows must cover the complete selected route")
                 single = positive_int(bulk.get("vulkan_fp32_score_rows"), "Vulkan FP32 scored rows", allow_zero=True)
                 half = positive_int(bulk.get("vulkan_fp16_storage_score_rows"),
                                     "Vulkan FP16-storage scored rows", allow_zero=True)
@@ -276,18 +325,31 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                           "mixed_fp16_fp32_fft_storage_fp32_compute" if single and half else
                           "fp16_fft_storage_fp32_fft_and_products" if half else
                           "fp32_fft_fp64_coordinates_and_scores_native_fir_and_fine")
-                if total and bulk["precision"] != actual:
+                if total and bulk["precision"] != actual and not (
+                        host_scored == total and
+                        bulk["precision"] == actual + "_fixed_phase_host_fp64_scoring"):
                     raise ProbeError("Vulkan reported storage precision disagrees with scored rows")
         if command not in ("describe", "plan") and not receipt["phases"]:
             raise ProbeError("Complete native workload contains no measured phases")
         if command not in ("describe", "plan", "codec") and (
                 observation is None or not is_sha256(observation.get("input_sha256"))):
             raise ProbeError("Complete native workload lacks the exact observed input identity")
-        if backend == "cuda" and command not in ("describe", "plan"):
+        if actual_backend == "cuda" and command not in ("describe", "plan"):
             accelerator = identity.get("backend_receipt") or {}
             diagnostic = receipt["result"].get("coordinate_scope") == "declared_public_work_coordinate"
             mapped = accelerator.get("mapped_values")
-            if diagnostic:
+            if backend == "gpu":
+                native_fine_sessions = accelerator.get("native_fine_sessions", 0)
+                native_fine_reason = accelerator.get("native_fine_fallback_reason", "")
+                terminal_gpu_fine = (receipt["result"].get("stratum") == "terminal"
+                                     and type(mapped) is int and mapped == 0)
+                actual_gpu_fine = (type(accelerator.get("statistics_blocks")) is int
+                                   and accelerator["statistics_blocks"] > 0
+                                   and (type(mapped) is int and mapped > 0 or terminal_gpu_fine))
+                recognized_native_fine = (type(native_fine_sessions) is int and native_fine_sessions > 0
+                                          and native_fine_reason == "small-chronological-blocks")
+                operations = ("fft_calls", "score_rows")
+            elif diagnostic:
                 terminal_zero = (receipt["result"].get("stratum") == "terminal"
                                  and type(mapped) is int and mapped == 0)
                 operations = ("statistics_blocks",) if terminal_zero else ("mapped_values", "statistics_blocks")
@@ -295,14 +357,16 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                 operations = ("fft_calls", "score_rows", "mapped_values", "statistics_blocks")
             projected = any(type(accelerator.get(key)) is int and accelerator[key] > 0
                             for key in ("fft_calls", "dc_reduction_values"))
+            valid_operations = all(type(accelerator.get(key)) is int and accelerator[key] > 0
+                                   for key in operations)
             if (accelerator.get("cuda") is not True or accelerator.get("executed") is not True
-                    or not projected or not all(type(accelerator.get(key)) is int and accelerator[key] > 0
-                                                for key in operations)):
-                raise ProbeError("Complete CUDA receipt does not prove actual accelerator work")
+                    or not projected or not valid_operations
+                    or (backend == "gpu" and not (actual_gpu_fine or recognized_native_fine))):
+                raise ProbeError("Complete CUDA receipt does not prove the required coarse and fine accelerator work")
         require_accelerator = expected_require_accelerator
         if require_accelerator is None:
             require_accelerator = identity.get("require_accelerator") is True
-        if backend == "vulkan" and command not in ("describe", "plan") and require_accelerator:
+        if actual_backend == "vulkan" and command not in ("describe", "plan") and require_accelerator:
             accelerator = identity.get("backend_receipt") or {}
             workspace_limit = accelerator.get("workspace_limit_bytes")
             if type(workspace_limit) is not int or workspace_limit <= 0:
@@ -310,10 +374,13 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
             owner_peak = accelerator.get("vulkan_peak_owner_bytes")
             active_sessions = accelerator.get("vulkan_active_sessions")
             aggregate_peak = accelerator.get("allocator_peak_reserved_bytes")
+            positive_int(accelerator.get("native_coarse_workspace_sessions", 0),
+                         "native coarse workspace fallback sessions", allow_zero=True)
             cache_limit = accelerator.get("host_cache_limit_bytes")
             cache_bytes = accelerator.get("host_cache_bytes")
             cache_entries = accelerator.get("host_cache_entries")
-            if (accelerator.get("workspace_scope") != "per_coarse_session"
+            expected_scope = "backend_shared" if backend == "gpu" else "per_coarse_session"
+            if (accelerator.get("workspace_scope") != expected_scope
                     or type(owner_peak) is not int or not 0 < owner_peak <= workspace_limit
                     or type(active_sessions) is not int or active_sessions < 0
                     or type(aggregate_peak) is not int or aggregate_peak < owner_peak
@@ -321,6 +388,22 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                     or type(cache_bytes) is not int or not 0 <= cache_bytes <= cache_limit
                     or type(cache_entries) is not int or not 0 <= cache_entries <= 8):
                 raise ProbeError("Vulkan receipt does not prove bounded device and serialized FFT cache allocation")
+            if backend == "gpu":
+                shared_limit = positive_int(accelerator.get("vulkan_shared_workspace_limit_bytes"),
+                                            "Vulkan shared workspace limit")
+                leased_bytes = positive_int(accelerator.get("vulkan_leased_bytes"),
+                                            "Vulkan currently leased bytes", allow_zero=True)
+                peak_leased = positive_int(accelerator.get("vulkan_peak_leased_bytes"), "Vulkan peak leased bytes")
+                peak_owner_lease = positive_int(accelerator.get("vulkan_peak_owner_lease_bytes"),
+                                                "Vulkan peak owner lease")
+                reserved_bytes = positive_int(accelerator.get("reserved_bytes"),
+                                              "Vulkan currently reserved bytes", allow_zero=True)
+                positive_int(accelerator.get("vulkan_waiting_sessions"), "Vulkan waiting sessions", allow_zero=True)
+                if (workspace_limit != shared_limit
+                        or not owner_peak <= peak_owner_lease <= peak_leased <= shared_limit
+                        or not reserved_bytes <= leased_bytes <= peak_leased
+                        or aggregate_peak > peak_leased):
+                    raise ProbeError("Automatic Vulkan receipt exceeds its shared workspace or owner leases")
             frequency_route = any(isinstance(phase.get("work"), dict)
                                   and phase["work"].get("native_fallback_reason", "") == ""
                                   and phase["work"].get("route") == "frequency_tiles"
@@ -364,11 +447,24 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                 route_proof = regression_route
             else:
                 route_proof = frequency_route
-            work_counts = ("fft_calls", "vulkan_direct_dot_terms") if "requested_vulkan_precision" in identity else (
-                "fft_calls",)
+            host_scored = positive_int(accelerator.get("vulkan_host_scored_rows", 0),
+                                       "Vulkan host scored rows", allow_zero=True)
+            score_rows = positive_int(accelerator.get("score_rows"), "Vulkan score rows", allow_zero=True)
+            frontier_rows = positive_int(accelerator.get("vulkan_arrival_peak_rows"),
+                                         "Vulkan arrival peak rows", allow_zero=True)
+            frontier_values = positive_int(accelerator.get("vulkan_arrival_peak_values"),
+                                           "Vulkan arrival peak values", allow_zero=True)
+            if (host_scored == score_rows and host_scored > 0
+                    and (frontier_rows or frontier_values)):
+                raise ProbeError("Host-scored Vulkan rows cannot claim a GPU arrival frontier")
+            if host_scored not in (0, score_rows):
+                raise ProbeError("Vulkan host-scored rows must cover the complete selected route")
+            frontier_proof = (host_scored == score_rows and host_scored > 0
+                              or host_scored == 0 and frontier_rows > 0 and frontier_values > 0)
+            work_counts = ("fft_calls", "vulkan_direct_dot_terms")
             if (accelerator.get("vulkan") is not True or accelerator.get("executed") is not True
                     or not all(type(accelerator.get(key)) is int and accelerator[key] > 0
-                               for key in ("vulkan_dispatches", "vulkan_arrival_peak_rows", "score_rows"))
+                               for key in ("vulkan_dispatches", "score_rows")) or not frontier_proof
                     or not any(type(accelerator.get(key)) is int and accelerator[key] > 0
                                for key in work_counts)
                     or not route_proof):
@@ -380,7 +476,7 @@ class NativeProbe:
     """One identified native executable. Each measurement has explicit limits."""
 
     def __init__(self, executable=DEFAULT_PROBE, *, backend="cpu"):
-        if backend not in BACKENDS:
+        if backend not in NATIVE_BACKENDS:
             raise ProbeError("Unsupported native backend")
         self.path = probe_path(executable)
         self.backend = backend
@@ -417,7 +513,7 @@ class NativeProbe:
         if deadline_ms > 3_600_000:
             raise ProbeError("Native probe deadline exceeds one hour")
         argv = [str(self.path), command, "--backend", self.backend,
-                "--require-accelerator", "on" if self.backend in ("cuda", "vulkan") else "off",
+                "--require-accelerator", "on" if self.backend in ("cuda", "vulkan", "gpu") else "off",
                 "--deadline-ms", str(deadline_ms), "--max-samples", str(max_samples),
                 *native_args]
         limits = {"workers": workers, "slot_owners": slot_owners,
@@ -449,7 +545,7 @@ class NativeProbe:
             raise ProbeError(f"Native {command} returned no receipt (exit {finished.returncode})"
                              + (f": {detail}" if detail else "")) from error
         receipt = validate_receipt(raw, command=command, backend=self.backend, returncode=finished.returncode,
-                                   expected_require_accelerator=self.backend == "vulkan")
+                                   expected_require_accelerator=self.backend in ("vulkan", "gpu"))
         if receipt["status"] == "complete":
             if receipt["identity"]["requested_tensor_coarse_math"] != (options.get("tensor_coarse_math") or "fft"):
                 raise ProbeError("Native probe altered the requested coarse arithmetic policy")

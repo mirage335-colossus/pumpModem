@@ -5,6 +5,7 @@
 #include "triad_receiver_coarse.hpp"
 #include "triad_receiver_helper.hpp"
 #include "triad_probe_json.hpp"
+#include "search_fft.hpp"
 
 #if DATAPUMP_TRIAD_TENSOR_CUDA
 #include "triad_tensor_mapping.cuh"
@@ -29,6 +30,7 @@
 #include <optional>
 #include <random>
 #include <sstream>
+#include <thread>
 
 namespace {
 namespace v = datapump::triad::v3;
@@ -1799,7 +1801,8 @@ void dc_gram_oracle(r::ReceiverBulkBackend& backend) {
     }
 }
 
-void full_slot(const std::shared_ptr<r::ReceiverBulkBackend>& backend) {
+void full_slot(const std::shared_ptr<r::ReceiverBulkBackend>& backend,
+               unsigned workers = 1, bool native_fine = false) {
     constexpr unsigned fs = 497;
     v::ReceiverConfig config;
     config.native_coarse_precision = v::NativeCoarsePrecision::fp64;
@@ -1831,13 +1834,13 @@ void full_slot(const std::shared_ptr<r::ReceiverBulkBackend>& backend) {
         iq[i] = .7 * source.sample_at((static_cast<long double>(i) / fs -
             slot.window_capture_lead_seconds - slot.source_start_seconds) * fs);
     const auto paired = [&](std::span<const Complex> samples) {
-        const auto native = v::score_receiver_slot(config, slot, key, samples, {}, 1,
-                                                   v::receiver_slot_workspace(config, slot, 1));
+        const auto native = v::score_receiver_slot(config, slot, key, samples, {}, workers,
+                                                   v::receiver_slot_workspace(config, slot, workers));
         auto tensor_config = config;
         tensor_config.bulk_backend = backend;
         const auto before = backend->receipt();
-        const auto tensor = v::score_receiver_slot(tensor_config, slot, key, samples, {}, 1,
-                                                   v::receiver_slot_workspace(tensor_config, slot, 1));
+        const auto tensor = v::score_receiver_slot(tensor_config, slot, key, samples, {}, workers,
+                                                   v::receiver_slot_workspace(tensor_config, slot, workers));
         const auto after = backend->receipt();
         check(native.complete && tensor.complete && tensor.bit == native.bit &&
               native.decision == tensor.decision && native.fine_candidates == tensor.fine_candidates &&
@@ -1849,15 +1852,26 @@ void full_slot(const std::shared_ptr<r::ReceiverBulkBackend>& backend) {
         near(tensor.operational_log_e, native.operational_log_e, 5e-6,
              "production native and tensor slot scores differ");
         check(after.fft_calls > before.fft_calls && after.fir_input_rows > before.fir_input_rows &&
-              after.score_rows > before.score_rows && after.mapped_values > before.mapped_values &&
-              after.statistics_blocks > before.statistics_blocks && after.reserved_bytes == 0,
-              "production slot did not actually execute and release both tensor stages");
-        if (after.cuda) {
+              after.score_rows > before.score_rows && after.reserved_bytes == 0,
+              "production slot did not actually execute and release its tensor coarse stage");
+        if (native_fine) {
+            check(after.native_fine_sessions == before.native_fine_sessions + 1 &&
+                  after.native_fine_fallback_reason == "small-chronological-blocks" &&
+                  after.mapped_values == before.mapped_values && after.statistics_blocks == before.statistics_blocks &&
+                  after.cuda_fused_mapped_launches == before.cuda_fused_mapped_launches &&
+                  after.cuda_fused_mapped_values == before.cuda_fused_mapped_values,
+                  "small public blocks did not use and report native fine work");
+        } else {
+            check(after.native_fine_sessions == before.native_fine_sessions &&
+                  after.mapped_values > before.mapped_values && after.statistics_blocks > before.statistics_blocks,
+                  "production slot did not execute its requested tensor fine stage");
+        }
+        if (after.cuda && !native_fine) {
             check(after.cuda_fused_mapped_launches > before.cuda_fused_mapped_launches &&
                   after.cuda_fused_mapped_values - before.cuda_fused_mapped_values ==
                       after.mapped_values - before.mapped_values,
                   "ordinary CUDA slot did not complete its fused mapped work");
-        } else {
+        } else if (!after.cuda) {
             check(!after.cuda_fused_mapped_launches && !after.cuda_fused_mapped_values,
                   "CPU tensor scoring credited CUDA fused work");
         }
@@ -2058,18 +2072,100 @@ void helper_composite_slot(const std::shared_ptr<r::ReceiverBulkBackend>& backen
               << 10 * std::log10(emitted.reference_helper_ratio) << " dB; Helper span " << span
               << " Hz; tensor " << after.device << (after.cuda ? " CUDA" : " CPU") << '\n';
 }
+void automatic_cuda_backend() {
+    const auto backend = v::make_automatic_cuda_receiver_backend();
+    const auto before = backend->status_receipt();
+    check(before.cuda && !before.executed && !before.score_rows && !before.statistics_blocks &&
+          before.workspace_limit_bytes >= 128 * mib && !before.allocator_reserved_bytes,
+          "automatic CUDA initialization did not produce a fresh device and workspace receipt");
+
+    // Quote, but do not allocate, two FIR phases that cannot fit together.
+    // One owner has a complete lease while the second is cancelled.
+    const auto output = before.workspace_limit_bytes / (2 * 3 * sizeof(std::complex<float>)) + 1;
+    auto resident = backend->make_coarse(100, 0);
+    resident->begin_fir_projection(64, 1, output, {});
+    const auto held = backend->status_receipt().reserved_bytes;
+    check(held > before.workspace_limit_bytes / 2 && held <= before.workspace_limit_bytes,
+          "automatic CUDA did not reserve the complete phase");
+    const auto peer = v::make_automatic_cuda_receiver_backend();
+    check(peer->status_receipt().reserved_bytes == held, "automatic CUDA duplicated a process/device workspace");
+
+    const auto wait_for_queued = [&] {
+        using namespace std::chrono_literals;
+        const auto deadline = std::chrono::steady_clock::now() + 3s;
+        while (!peer->status_receipt().device_admission_waiters) {
+            check(std::chrono::steady_clock::now() < deadline, "CUDA owner did not wait for its phase lease");
+            std::this_thread::sleep_for(1ms);
+        }
+    };
+    std::exception_ptr cancelled;
+    std::jthread waiting([&](std::stop_token stop) {
+        try {
+            auto second = peer->make_coarse(100, 0);
+            second->begin_fir_projection(64, 1, output, stop);
+        } catch (...) {
+            cancelled = std::current_exception();
+        }
+    });
+    wait_for_queued();
+    waiting.request_stop();
+    waiting.join();
+    check(static_cast<bool>(cancelled), "cancelled CUDA admission unexpectedly obtained a lease");
+    try {
+        std::rethrow_exception(cancelled);
+    } catch (const datapump::Error& error) {
+        check(std::string_view(error.what()).find("cancelled") != std::string_view::npos,
+              "CUDA admission did not report cancellation");
+    }
+    const auto after_cancel = peer->status_receipt();
+    check(after_cancel.reserved_bytes == held && !after_cancel.device_admission_waiters,
+          "cancelled CUDA admission leaked a waiter or changed another owner's lease");
+
+    std::exception_ptr wake_failure;
+    std::jthread waking([&](std::stop_token stop) {
+        try {
+            auto second = peer->make_coarse(100, 0);
+            second->begin_fir_projection(64, 1, output, stop);
+            check(peer->status_receipt().reserved_bytes == held, "queued CUDA owner did not receive its complete lease");
+        } catch (...) {
+            wake_failure = std::current_exception();
+        }
+    });
+    wait_for_queued();
+    resident.reset();
+    waking.join();
+    if (wake_failure) std::rethrow_exception(wake_failure);
+    check(backend->status_receipt().reserved_bytes == before.reserved_bytes, "CUDA phase lease was not released");
+
+    coarse(*backend);
+    full_slot(backend);
+    if (std::string_view(datapump::modem::detail::search_fft::kernel_name()) == "avx2")
+        full_slot(backend, 32, true);
+    const auto after = backend->receipt();
+    const auto status = backend->status_receipt();
+    const auto fresh = peer->status_receipt();
+    check(after.cuda && after.executed && after.score_rows && after.statistics_blocks &&
+          after.reserved_bytes == before.reserved_bytes &&
+          after.peak_reserved_bytes <= after.workspace_limit_bytes &&
+          after.allocator_peak_reserved_bytes && after.allocator_peak_reserved_bytes <= after.workspace_limit_bytes &&
+          status.score_rows == after.score_rows && status.statistics_blocks == after.statistics_blocks &&
+          !status.allocator_reserved_bytes && !fresh.executed && !fresh.score_rows && !fresh.statistics_blocks,
+          "CUDA status mixed another backend's work or lost its device workspace bound");
+    std::cout << "Automatic CUDA phase admission and complete slot checks passed on " << after.device_name << '\n';
+}
 } // namespace
 
 int main(int argc, char** argv) {
     try {
         bool cuda = false, matrix_only = false, matrix_benchmark = false;
-        bool peaks_only = false, peak_benchmark = false, component_describe = false;
+        bool peaks_only = false, peak_benchmark = false, component_describe = false, automatic_cuda = false;
         std::optional<v::TensorCoarseMath> matrix_math;
         std::optional<unsigned> matrix_benchmark_case;
         std::optional<std::size_t> matrix_benchmark_workspace_mib;
         for (int i = 1; i < argc; ++i) {
             const std::string_view option(argv[i]);
             if (option == "--cuda") cuda = true;
+            else if (option == "--cuda-automatic") automatic_cuda = true;
             else if (option == "--component-describe") component_describe = true;
             else if (option == "--matrix-only") matrix_only = true;
             else if (option == "--matrix-benchmark") matrix_benchmark = true;
@@ -2098,15 +2194,21 @@ int main(int argc, char** argv) {
                 else if (name == "int8") matrix_math = v::TensorCoarseMath::int8;
                 else check(false, "--matrix-math requires fp16|int8");
             }
-            else check(false, "usage: test_triad_tensor [--cuda] [--component-describe|--matrix-only|--matrix-benchmark|--peaks-only|--peak-benchmark] [--matrix-math fp16|int8] [--matrix-benchmark-case 0|1] [--matrix-benchmark-workspace-mib N]");
+            else check(false, "usage: test_triad_tensor [--cuda] [--cuda-automatic|--component-describe|--matrix-only|--matrix-benchmark|--peaks-only|--peak-benchmark] [--matrix-math fp16|int8] [--matrix-benchmark-case 0|1] [--matrix-benchmark-workspace-mib N]");
         }
-        check(cuda || (!matrix_only && !matrix_benchmark && !peaks_only && !peak_benchmark), "CUDA-specific checks require --cuda");
-        check(static_cast<unsigned>(matrix_only) + matrix_benchmark + peaks_only + peak_benchmark + component_describe <= 1,
+        check(cuda || (!matrix_only && !matrix_benchmark && !peaks_only && !peak_benchmark && !automatic_cuda),
+              "CUDA-specific checks require --cuda");
+        check(static_cast<unsigned>(matrix_only) + matrix_benchmark + peaks_only + peak_benchmark + component_describe +
+                  automatic_cuda <= 1,
               "select at most one focused check or benchmark");
         check(!(matrix_only && matrix_benchmark), "select either --matrix-only or --matrix-benchmark");
         check(!matrix_math || matrix_only || matrix_benchmark, "--matrix-math requires --matrix-only or --matrix-benchmark");
         check(matrix_benchmark || (!matrix_benchmark_case && !matrix_benchmark_workspace_mib),
               "benchmark case/workspace selectors require --matrix-benchmark");
+        if (automatic_cuda) {
+            automatic_cuda_backend();
+            return 0;
+        }
         if (component_describe) {
             // CUDA_VISIBLE_DEVICES selects which physical GPU is visible as
             // device zero. A description initializes its native context but

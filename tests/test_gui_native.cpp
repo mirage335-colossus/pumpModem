@@ -127,6 +127,31 @@ void gpu_route_diagnostics() {
     snapshot.gpu_native_coarse_lag_sessions=0;
     check(gui::gpu_search_diagnostics(snapshot)==
           "GPU search + native tracking · 42 rows · fixture GPU");
+
+    snapshot.gpu_backend="cuda:0";
+    snapshot.gpu_statistics_blocks=7;
+    snapshot.gpu_selection_reason="automatic CUDA";
+    check(gui::gpu_search_diagnostics(snapshot)==
+          "GPU search · 42 rows · GPU fine statistics 7 · automatic CUDA · fixture GPU");
+    snapshot.gpu_statistics_blocks=0;
+    snapshot.gpu_cuda_native_fine_sessions=3;
+    snapshot.gpu_cuda_native_fine_fallback_reason="small-chronological-blocks";
+    check(gui::gpu_search_diagnostics(snapshot)==
+          "GPU search · 42 rows · native fine fallback 3 sessions (small-chronological-blocks) · automatic CUDA · fixture GPU");
+
+    snapshot.gpu_backend="vulkan:0";
+    snapshot.gpu_cuda_native_fine_sessions=0;
+    snapshot.gpu_cuda_native_fine_fallback_reason.clear();
+    snapshot.gpu_vulkan_shared_workspace_limit_bytes=1024U*1024U*1024U;
+    snapshot.gpu_vulkan_leased_bytes=64U*1024U*1024U;
+    snapshot.gpu_vulkan_peak_leased_bytes=512U*1024U*1024U;
+    snapshot.gpu_vulkan_peak_owner_lease_bytes=384U*1024U*1024U;
+    snapshot.gpu_vulkan_waiting_sessions=2;
+    snapshot.gpu_native_coarse_workspace_sessions=3;
+    snapshot.gpu_selection_reason="automatic Vulkan";
+    check(gui::gpu_search_diagnostics(snapshot)==
+          "GPU search + native tracking · 42 rows · workspace 64/1024 MiB (peak 512, owner 384, waiting 2) · "
+          "native coarse workspace fallback 3 (native-vulkan-workspace) · automatic Vulkan · fixture GPU");
 }
 void text_and_raw_draft_boundaries() {
     using F=gui::ui::Field;using C=gui::ui::Command;

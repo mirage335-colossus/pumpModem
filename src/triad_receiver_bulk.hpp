@@ -6,6 +6,7 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <stop_token>
 #include <string_view>
 
@@ -25,6 +26,8 @@ inline constexpr std::array<std::string_view, 6> bulk_matrix_fallback_reasons{
 
 struct BulkReceipt {
     std::string device, device_name, library_version, precision, requested_coarse_math;
+    std::string selection_reason;
+    std::string native_fine_fallback_reason;
     std::string workspace_scope = "backend_shared";
     int cuda_runtime_version = 0, cuda_driver_version = 0;
     int cuda_blas_version = 0, cuda_compute_major = 0, cuda_compute_minor = 0;
@@ -38,6 +41,7 @@ struct BulkReceipt {
     std::size_t allocator_peak_live_bytes = 0, allocator_peak_reserved_bytes = 0;
     std::size_t total_device_bytes = 0, initial_free_device_bytes = 0;
     std::size_t runtime_headroom_bytes = 0;
+    std::size_t device_admission_waiters = 0;
     std::size_t host_cache_limit_bytes = 0, host_cache_bytes = 0, host_cache_entries = 0;
     std::size_t fft_plan_cache_count = 0, fft_plan_cache_limit = 0;
     std::uint64_t upload_bytes = 0, download_bytes = 0, synchronizations = 0;
@@ -46,12 +50,16 @@ struct BulkReceipt {
     // Exact CUDA arrival selection, credited after validated frontier readback.
     std::uint64_t cuda_arrival_peak_rows = 0, cuda_arrival_peak_values = 0;
     std::uint64_t vulkan_dispatches = 0, vulkan_arrival_peak_rows = 0, vulkan_arrival_peak_values = 0;
+    std::uint64_t vulkan_host_scored_rows = 0;
     std::uint64_t vulkan_fp32_score_rows = 0, vulkan_fp16_storage_score_rows = 0;
     std::uint64_t vulkan_direct_dot_terms = 0;
     std::uint64_t vulkan_direct_fp32_score_rows = 0, vulkan_direct_fp16_score_rows = 0;
     std::uint64_t vulkan_direct_fp16_storage_score_rows = 0;
     double vulkan_direct_dot_seconds = 0;
     std::uint64_t vulkan_peak_owner_bytes = 0, vulkan_active_sessions = 0;
+    std::size_t vulkan_shared_workspace_limit_bytes = 0, vulkan_leased_bytes = 0;
+    std::size_t vulkan_peak_leased_bytes = 0, vulkan_peak_owner_lease_bytes = 0;
+    std::uint64_t vulkan_waiting_sessions = 0, native_coarse_workspace_sessions = 0;
     std::uint64_t vulkan_fft_cache_hits = 0, vulkan_fft_cache_misses = 0;
     double vulkan_fft_plan_seconds = 0, vulkan_shader_compile_seconds = 0;
     std::uint64_t native_coarse_lag_sessions = 0, native_coarse_precision_sessions = 0, native_fine_sessions = 0;
@@ -108,6 +116,12 @@ struct FineBulkBlock {
     std::span<const std::size_t> projection_indices;
     std::span<const Complex> projected_y;
     double variance = 0;
+};
+
+struct FineBulkGeometry {
+    std::size_t maximum_block_rows = 0, maximum_projection_modes = 0, taps = 0;
+    unsigned workers = 0;
+    bool native_avx2 = false;
 };
 
 struct FineBulkStatistics {
@@ -176,6 +190,14 @@ struct CoarseZoomGroup {
 struct CoarseBulkGeometry {
     std::size_t taps = 0, kernel_rows = 0, correlation_fft_rows = 0, lag_count = 0, frequency_count = 0;
     double projected_sample_rate_hz = 0, variance = 0;
+    std::size_t frequency_tile_width = 0;
+    // Optional backend-specific allocation shape chosen for the full prior.
+    std::size_t workspace_batch = 0, device_workspace_bytes = 0;
+};
+
+struct CoarseFrequencyPlan {
+    std::size_t tile_width = 0, workspace_batch = 0, device_workspace_bytes = 0, host_workspace_bytes = 0;
+    std::string_view native_fallback_reason;
 };
 
 // A score view contains [workspace][frequency][arrival] in canonical order.
@@ -196,6 +218,9 @@ public:
     // False keeps the canonical native FIR/channelizer before device upload.
     // It does not permit a fallback after any device operation has started.
     virtual bool supports_fir() const noexcept { return true; }
+    // Automatic backends can admit an entire FIR phase before it retains any
+    // device buffers, avoiding waits while holding another phase's memory.
+    virtual void begin_fir_projection(std::size_t, std::size_t, std::size_t, std::stop_token) {}
     virtual std::shared_ptr<const CoarseBulkFilter> prepare_filter(
         std::span<const double> taps, std::size_t fft_rows, CoarseBulkWork&, std::stop_token) = 0;
     virtual std::vector<Complex> project_fir(const CoarseBulkFilter&, const CoarseFirCrop&,
@@ -226,12 +251,26 @@ class ReceiverBulkBackend {
 public:
     virtual ~ReceiverBulkBackend() = default;
     virtual bool supports_fine() const noexcept { return true; }
+    // Uses the full public block calendar, independent of observed scores.
+    // Empty means the backend must provide the requested fine stage.
+    virtual std::string_view fine_fallback_reason(const FineBulkGeometry&) const noexcept {
+        return supports_fine() ? std::string_view{} : "native-fine-backend";
+    }
     virtual bool permits_native_exact_chirp_z() const noexcept { return false; }
+    virtual bool supports_exact_device_chirp_z() const noexcept { return false; }
+    // Bound a computational tile before preflight/construction; every public
+    // frequency is still scored. Explicit/default CPU geometry is unchanged.
+    virtual std::size_t maximum_frequency_tile_width(const CoarseBulkGeometry&,
+        std::size_t, std::size_t requested_width, double) const { return requested_width; }
+    // Geometry-specific automatic admission, from the complete public prior.
+    // An absent result retains the existing backend's workspace contract.
+    virtual std::optional<CoarseFrequencyPlan> frequency_plan(const CoarseBulkGeometry&,
+        std::size_t, std::size_t) const { return std::nullopt; }
     // Pure public-geometry selection, shared by preflight and construction.
     // Empty means the backend must construct the requested coarse session.
     virtual std::string_view coarse_fallback_reason(double, double, CoarseRoute) const noexcept { return {}; }
     virtual void record_native_coarse(std::string_view) {}
-    virtual void record_native_fine() {}
+    virtual void record_native_fine(std::string_view) {}
     virtual std::unique_ptr<FineBulk> make_fine(double projected_rate_hz, double clock_span_ppm) = 0;
     virtual std::unique_ptr<CoarseBulk> make_coarse(double projected_rate_hz, double clock_span_ppm) = 0;
     // Additional host reservation to include in public DSP preflight.
@@ -240,6 +279,8 @@ public:
     virtual std::size_t coarse_host_bytes(std::size_t maximum_fft_rows,
         std::size_t maximum_tile_frequencies, std::size_t arrivals) const = 0;
     virtual BulkReceipt receipt() const = 0;
+    // GUI polling must not query a driver or synchronize outstanding device work.
+    virtual BulkReceipt status_receipt() const { return receipt(); }
 };
 
 } // namespace datapump::triad::v3::receiver_detail

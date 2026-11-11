@@ -187,8 +187,8 @@ void native_precision_profile_policy() {
     } catch (const Error& error) {
         const std::string_view message(error.what());
         rejected = live::gpu_receiver_available()
-            ? message.find("FP64 force cannot be combined with the Vulkan GPU receiver") != std::string_view::npos
-            : message.find("GPU reception is unavailable in this build (Vulkan support required)") != std::string_view::npos;
+            ? message.find("FP64 force cannot be combined with the GPU receiver") != std::string_view::npos
+            : message.find("GPU reception is unavailable in this build (CUDA or Vulkan support required)") != std::string_view::npos;
     }
     check(rejected, "GPU plus FP64 force did not report the applicable explicit validation error");
 }
@@ -580,7 +580,16 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false) {
     auto simulated = settings(true);
     simulated.gpu = gpu;
     if (gpu_fp32) simulated.transfer.modem.search_arithmetic = modem::SearchArithmetic::fp32;
-    if (gpu) simulated.receiver_memory_limit = 1024U * 1024 * 1024;
+    if (gpu) {
+#if defined(DATAPUMP_HAVE_TRIAD_CUDA)
+        // The CUDA-linked fixture reached 937,516 KiB resident on the
+        // RTX PRO 6000 before adding the receiver's idle worker stack
+        // reservations. Leave room for both under a fixed application cap.
+        simulated.receiver_memory_limit = 2U * 1024 * 1024 * 1024;
+#else
+        simulated.receiver_memory_limit = 1024U * 1024 * 1024;
+#endif
+    }
     // The public slot cadence is at least a minute. A supported lower logical
     // sample rate keeps the full physical calendar inside the sample budget.
     simulated.transfer.modem.sample_rate = 1500;
@@ -588,11 +597,22 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false) {
     live::Session session;
     session.start(simulated);
     const auto prepared = ready(session);
-    check(prepared.gpu_device.empty() == !gpu && prepared.gpu_score_rows == 0 &&
+    check(prepared.gpu_device.empty() == !gpu && prepared.gpu_backend.empty() == !gpu &&
+          prepared.gpu_score_rows == 0 && prepared.gpu_statistics_blocks == 0 &&
+          prepared.gpu_cuda_native_fine_sessions == 0 && prepared.gpu_cuda_native_fine_fallback_reason.empty() &&
+          prepared.gpu_vulkan_leased_bytes == 0 && prepared.gpu_vulkan_peak_leased_bytes == 0 &&
+          prepared.gpu_native_coarse_workspace_sessions == 0 &&
+          prepared.gpu_cuda_fp16_calls == 0 && prepared.gpu_cuda_int8_calls == 0 &&
           prepared.gpu_fp32_score_rows == 0 && prepared.gpu_fp16_storage_score_rows == 0 &&
           prepared.gpu_packed_fp16_score_rows == 0 && prepared.gpu_native_coarse_lag_sessions == 0 &&
           (!gpu_fp32 || !prepared.gpu_native_lag_preference_supported),
           "Robust GPU readiness does not match the selected backend");
+    if (prepared.gpu_backend.starts_with("vulkan:"))
+        check(prepared.gpu_vulkan_shared_workspace_limit_bytes > 0,
+              "Automatic Vulkan session omitted its discovered shared workspace budget");
+    else
+        check(prepared.gpu_vulkan_shared_workspace_limit_bytes == 0 && prepared.gpu_vulkan_leased_bytes == 0,
+              "Non-Vulkan session reported Vulkan workspace admission");
     check(prepared.bit_seconds && prepared.slot_stride_seconds && *prepared.slot_stride_seconds * 6 * 1500 < 600000,
           "Robust simulation exceeds its predeclared sample budget");
     session.transmit(Message{.data = {'e'}});
@@ -631,15 +651,31 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false) {
     check(fixture::capture_opens == captures && fixture::playback_opens == playbacks,
           "Simulation acquired a physical audio device");
     if (gpu) {
-        check(!completed.gpu_device.empty() && completed.gpu_score_rows > 0,
-              "GPU simulation decoded without actual accelerated scoring");
-        check(completed.gpu_fp32_score_rows + completed.gpu_fp16_storage_score_rows == completed.gpu_score_rows &&
-              completed.gpu_packed_fp16_score_rows <= completed.gpu_fp16_storage_score_rows,
-              "GPU session precision receipts do not account for actual scored work");
-        if (gpu_fp32)
-            check(completed.gpu_fp32_score_rows == completed.gpu_score_rows &&
-                  completed.gpu_fp16_storage_score_rows == 0 && completed.gpu_packed_fp16_score_rows == 0,
-                  "GPU FP32 minimum did not execute solely FP32 scoring");
+        check(!completed.gpu_device.empty() && !completed.gpu_backend.empty() &&
+              (completed.gpu_score_rows > 0 || completed.gpu_statistics_blocks > 0),
+              "GPU simulation decoded without actual accelerated receiver work");
+        if (completed.gpu_backend.starts_with("cuda:")) {
+            check(completed.gpu_vulkan_shared_workspace_limit_bytes == 0 &&
+                  completed.gpu_vulkan_leased_bytes == 0 && completed.gpu_native_coarse_workspace_sessions == 0,
+                  "CUDA session reported Vulkan workspace execution receipts");
+            check(completed.gpu_fp32_score_rows == 0 && completed.gpu_fp16_storage_score_rows == 0 &&
+                  completed.gpu_packed_fp16_score_rows == 0,
+                  "CUDA work was misreported in Vulkan precision counters");
+            if (gpu_fp32)
+                check(completed.gpu_cuda_fp16_calls == 0 && completed.gpu_cuda_int8_calls == 0,
+                      "CUDA FP32 minimum executed reduced-precision matrix contractions");
+        } else {
+            check(completed.gpu_vulkan_shared_workspace_limit_bytes > 0 &&
+                  completed.gpu_vulkan_peak_leased_bytes > 0,
+                  "Vulkan session omitted automatic shared workspace admission/execution evidence");
+            check(completed.gpu_fp32_score_rows + completed.gpu_fp16_storage_score_rows == completed.gpu_score_rows &&
+                  completed.gpu_packed_fp16_score_rows <= completed.gpu_fp16_storage_score_rows,
+                  "Vulkan session precision receipts do not account for actual scored work");
+            if (gpu_fp32)
+                check(completed.gpu_fp32_score_rows == completed.gpu_score_rows &&
+                      completed.gpu_fp16_storage_score_rows == 0 && completed.gpu_packed_fp16_score_rows == 0,
+                      "Vulkan FP32 minimum did not execute solely FP32 scoring");
+        }
         const auto rows = completed.gpu_score_rows;
         // Repeated profile preparation after TX must keep the same backend
         // and its cumulative work receipt for this settings generation.
@@ -651,15 +687,32 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false) {
              "GPU suspension did not release its receiver resources");
         session.resume_capture();
         const auto resumed = ready(session);
-        check(!resumed.gpu_device.empty() && resumed.gpu_score_rows == 0,
+        check(!resumed.gpu_device.empty() && !resumed.gpu_backend.empty() && resumed.gpu_score_rows == 0 &&
+              resumed.gpu_statistics_blocks == 0 && resumed.gpu_cuda_native_fine_sessions == 0 &&
+              resumed.gpu_cuda_native_fine_fallback_reason.empty() &&
+              resumed.gpu_vulkan_leased_bytes == 0 && resumed.gpu_vulkan_peak_leased_bytes == 0 &&
+              resumed.gpu_native_coarse_workspace_sessions == 0 &&
+              resumed.gpu_cuda_fp16_calls == 0 && resumed.gpu_cuda_int8_calls == 0,
               "Resumed GPU generation retained stale completed-work evidence");
+        if (resumed.gpu_backend.starts_with("vulkan:"))
+            check(resumed.gpu_vulkan_shared_workspace_limit_bytes > 0 && resumed.gpu_vulkan_peak_leased_bytes == 0,
+                  "Resumed Vulkan generation did not reset and reinitialize workspace receipts");
+        else
+            check(resumed.gpu_vulkan_shared_workspace_limit_bytes == 0 && resumed.gpu_vulkan_leased_bytes == 0 &&
+                  resumed.gpu_native_coarse_workspace_sessions == 0,
+                  "Resumed non-Vulkan generation retained stale Vulkan workspace receipts");
         check(resumed.gpu_fp32_score_rows == 0 && resumed.gpu_fp16_storage_score_rows == 0 &&
               resumed.gpu_packed_fp16_score_rows == 0 && resumed.gpu_native_coarse_lag_sessions == 0,
               "Resumed GPU generation retained stale precision evidence");
         simulated.gpu = false;
         session.configure(simulated);
         const auto cpu = ready(session);
-        check(cpu.gpu_device.empty() && cpu.gpu_score_rows == 0 && cpu.gpu_precision.empty() &&
+        check(cpu.gpu_device.empty() && cpu.gpu_backend.empty() && cpu.gpu_selection_reason.empty() &&
+              cpu.gpu_score_rows == 0 && cpu.gpu_precision.empty() && cpu.gpu_statistics_blocks == 0 &&
+              cpu.gpu_cuda_native_fine_sessions == 0 && cpu.gpu_cuda_native_fine_fallback_reason.empty() &&
+              cpu.gpu_vulkan_shared_workspace_limit_bytes == 0 && cpu.gpu_vulkan_leased_bytes == 0 &&
+              cpu.gpu_vulkan_peak_leased_bytes == 0 && cpu.gpu_native_coarse_workspace_sessions == 0 &&
+              cpu.gpu_host_scored_rows == 0 && cpu.gpu_cuda_fp16_calls == 0 && cpu.gpu_cuda_int8_calls == 0 &&
               cpu.gpu_fp32_score_rows == 0 && cpu.gpu_fp16_storage_score_rows == 0 &&
               cpu.gpu_packed_fp16_score_rows == 0 && cpu.gpu_native_coarse_lag_sessions == 0 &&
               !cpu.gpu_native_lag_preference_supported,
@@ -727,17 +780,21 @@ void unavailable_gpu() {
     if (!live::gpu_receiver_available()) {
         bool rejected = false;
         try { live::validate_settings(requested); }
-        catch (const Error& error) { rejected = std::string(error.what()).find("Vulkan support required") != std::string::npos; }
+        catch (const Error& error) { rejected = std::string(error.what()).find("CUDA or Vulkan support required") != std::string::npos; }
         check(rejected, "CPU-only build accepted requested GPU processing");
         return;
     }
-    // This mode is run with an intentionally unavailable Vulkan ICD. Failure
-    // is asynchronous and visible; it must not report ready on a CPU backend.
+    // Device discovery is deliberately masked by the build's GPU-unavailable
+    // test mode. Failure is asynchronous and visible; it must not claim CPU as GPU.
     live::Session session;
     session.start(requested);
     const auto failed = wait(session, [](const auto& out) { return !out.receiver_error.empty(); },
                              "Missing GPU did not report its initialization failure");
-    check(!failed.running && failed.transmit_unavailable && failed.gpu_device.empty() && !failed.gpu_score_rows,
+    check(!failed.running && failed.transmit_unavailable && failed.gpu_device.empty() && failed.gpu_backend.empty() &&
+          failed.gpu_selection_reason.empty() && !failed.gpu_score_rows && !failed.gpu_statistics_blocks &&
+          !failed.gpu_cuda_native_fine_sessions && failed.gpu_cuda_native_fine_fallback_reason.empty() &&
+          !failed.gpu_vulkan_shared_workspace_limit_bytes && !failed.gpu_vulkan_leased_bytes &&
+          !failed.gpu_vulkan_peak_leased_bytes && !failed.gpu_native_coarse_workspace_sessions,
           "Unavailable GPU silently fell back or reported successful work");
     requested.gpu = false;
     session.configure(requested);
@@ -749,17 +806,17 @@ void unavailable_gpu() {
 int main(int argc, char** argv) {
     try {
         if (argc == 2 && std::string_view(argv[1]) == "--gpu") {
-            check(live::gpu_receiver_available(), "Actual GPU session test requires Vulkan support");
+            check(live::gpu_receiver_available(), "Actual GPU session test requires a compiled GPU backend");
             complete_native_simulation(true);
             return 0;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--gpu-fp32") {
-            check(live::gpu_receiver_available(), "Actual GPU session test requires Vulkan support");
+            check(live::gpu_receiver_available(), "Actual GPU session test requires a compiled GPU backend");
             complete_native_simulation(true, true);
             return 0;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--gpu-native-lag") {
-            check(live::gpu_receiver_available(), "Actual GPU session test requires Vulkan support");
+            check(live::gpu_receiver_available(), "Actual GPU session test requires a compiled GPU backend");
             if (!native_lag_simulation()) {
                 std::cout << "Native lag Session geometry unavailable on this GPU or CPU allocation\n";
                 return 77;

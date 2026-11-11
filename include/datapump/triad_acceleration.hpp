@@ -35,6 +35,11 @@ struct TensorReceiverOptions {
 std::shared_ptr<receiver_detail::ReceiverBulkBackend>
 make_tensor_receiver_backend(const TensorReceiverOptions&);
 
+// Native application selection: choose an available CUDA GPU and a shared
+// workspace from its usable memory. Explicit probe options remain exact.
+std::shared_ptr<receiver_detail::ReceiverBulkBackend>
+make_automatic_cuda_receiver_backend(TensorPrecision precision = TensorPrecision::automatic);
+
 class VulkanBackendUnavailable : public Error {
 public:
     using Error::Error;
@@ -52,6 +57,9 @@ struct VulkanReceiverOptions {
     // Applications can permit a qualified native chirp-Z route before
     // device scoring. Explicit device probes retain the default.
     bool prefer_native_exact_chirp_z = false;
+    // Exercise the portable phase/scoring route even on a device with shader
+    // FP64. Otherwise selected automatically when FP64/INT64 is unavailable.
+    bool force_host_scoring = false;
 };
 
 // Optional native Vulkan broad-frequency search. Channelization, fine state,
@@ -59,5 +67,25 @@ struct VulkanReceiverOptions {
 // A requested device must be a physical GPU; software Vulkan is rejected.
 std::shared_ptr<receiver_detail::ReceiverBulkBackend>
 make_vulkan_receiver_backend(const VulkanReceiverOptions&);
+
+// Select a compatible physical GPU, rather than assuming enumeration index 0.
+std::shared_ptr<receiver_detail::ReceiverBulkBackend>
+make_automatic_vulkan_receiver_backend(const VulkanReceiverOptions&);
+
+class GpuBackendUnavailable : public Error {
+public:
+    using Error::Error;
+};
+
+struct GpuReceiverOptions {
+    bool fp32_minimum = false;
+};
+
+// Shared GUI and probe entry point. Prefer native CUDA where compiled and
+// available, otherwise a compatible physical Vulkan GPU. Never selects CPU
+// emulation; individual stages retain their explicit native routing contracts.
+bool gpu_receiver_backend_available() noexcept;
+std::shared_ptr<receiver_detail::ReceiverBulkBackend>
+make_gpu_receiver_backend(const GpuReceiverOptions& = {});
 
 } // namespace datapump::triad::v3

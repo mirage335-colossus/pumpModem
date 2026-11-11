@@ -10,7 +10,10 @@ else()
     # The target computer supplies its GL loader, vendor selection and drivers.
     # Copying a build host's GLX/NVIDIA/Mesa chain can break another machine.
     "^lib(GL|GLX|OpenGL|GLdispatch|EGL|GLESv1_CM|GLESv2)(_[^.]+)?\\.so(\\..*)?$"
-    "^lib(nvidia|cuda|drm|gbm)[^.]*\\.so(\\..*)?$"
+    "^lib(nvidia|drm|gbm)[^.]*\\.so(\\..*)?$"
+    # libcuda belongs to the installed driver. libcudart and other toolkit
+    # runtimes are application dependencies and must remain in the package.
+    "^libcuda\\.so(\\..*)?$"
     "^ld-linux.*" "^ld64.*"
     "^lib(c|m|mvec|dl|pthread|rt|util|resolv|anl|thread_db|BrokenLocale|nss_[^.]+)\\.so(\\..*)?$")
 endif()

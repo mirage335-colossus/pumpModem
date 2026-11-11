@@ -20,12 +20,16 @@ See [current architecture](robust-current.md) and
 | FP32 minimum / `--search-arithmetic fp32-min` | FP32 spectral products, with higher precision where required. |
 | FP64 force / `--search-arithmetic fp64-force` | Force the native CPU coarse FFT to FP64. |
 
-The GUI reports the requested native policy. With **GPU** enabled, Default can
-use the qualified Vulkan automatic policy or the calibrated native chirp-Z
-route described below; FP32 minimum selects the FP32-storage/FP32-arithmetic
-Vulkan FFT. Combining GPU with FP64 force is an explicit configuration error.
-A precision preference is not a promise that every receiver stage uses that
-type, nor does it select an INT8 FFT.
+The GUI reports the requested native policy. With **GPU** enabled, Default uses
+the shared automatic native selector: compatible CUDA first, then a physical
+Vulkan GPU if CUDA is unavailable or cannot initialize. It may select the
+qualified exact CUDA chirp-Z path or a supported native chirp-Z route when its
+geometry and cost guards apply; otherwise it uses the backend's full-search
+bulk route. FP32 minimum selects FP32 arithmetic for the GPU frequency search,
+including the FP32-storage/FP32-arithmetic Vulkan FFT. Combining GPU with FP64
+force is an explicit configuration error. A precision preference is not a
+promise that every receiver stage uses that type, nor does it select an INT8
+FFT. See the [automatic GPU integration contract](triad-performance.md#automatic-gpu-backend-used-by-the-gui).
 
 ## Native CPU selection
 
@@ -89,7 +93,13 @@ their requested GPU execution semantics. Actual routing is reported, rather than
 assuming that a checked GPU control means every score ran on the device.
 The separately qualified CUDA FP16/INT8 matrix alternatives remain available on
 their applicable devices and geometries. They do not establish local Radeon
-capabilities or convert the CUDA FFT default into INT8.
+capabilities or convert the CUDA FFT default into INT8. They remain explicit
+bounded choices, not the automatic policy selected from nominal Tensor Core
+rates: each must beat the scalable FFT on complete affected cost while retaining
+all frequency hypotheses and meeting the receiver's proportional sensitivity,
+false-alarm and workspace requirements. The automatic selector reports the
+actual CUDA/Vulkan route and any native stage fallback; a CPU-only receipt can
+never satisfy an accelerated GPU request.
 
 Helper's current expensive FFTs precede isolation and retain double precision.
 Fine Gaussian cancellation and conditioning also need precision even when the

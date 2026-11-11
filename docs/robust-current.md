@@ -7,7 +7,12 @@ receiver, receiver subprocess or receiver IPC. Python tools orchestrate native
 tests/benchmarks and analyze their returned statistics; receiver DSP and state
 belong to the compiled implementation. The default application requires neither
 Python nor Torch. Optional compiled ATen and Vulkan backends can supply bulk
-operations inside the same receiver control path.
+operations inside the same receiver control path. The shared GUI GPU selector
+prefers a usable compiled CUDA receiver and then a compatible physical Vulkan
+receiver; it never reports native CPU execution as GPU work. CUDA covers coarse
+and eligible fine bulk stages, while Vulkan accelerates GPU search and retains
+native fine processing. Neither optional path places Python in the operating
+DSP chain.
 
 New modem and intensive numerical work must follow the
 [native processing and integration contract](development.md#native-processing-and-integration).
@@ -89,30 +94,45 @@ the slot lease when coarse is dominant; it does not imply a reduction where
 Helper or fine work dominates.
 
 The optional [Vulkan backend](triad-performance.md#local-radeon-vulkan-processing)
-starts after native DATA channel isolation and accelerates the complete
-frequency-search grid and exact arrival frontiers. On the qualified local Radeon
-device/geometry, a scaled packed-FP16 direct correlation uses FP32 accumulation
-and FP64 scoring. Other cases can use FP32 direct arithmetic, qualified FP16 FFT
-storage with FP32 arithmetic, an FP32 FFT or explicit native fallback. Actual precision and
-fallback reason are reported. Helper, native FIR, template
-generation, lag groups, the compact tight-clock FP64 class and fine tracking
-remain in native CPU code. Stage capability/routing is explicit; workspace
-quotation and construction use the same decision. An APU's GPU allocations use
-shared host RAM, so the full per-session ceiling and separate staging remain
-charged through completion and cancellation. The backend's bounded serialized
-VkFFT program cache has a separate persistent host-memory charge, including idle
-lifetime; session device plans and buffers remain private. The shared GUI's
-**GPU** checkbox selects this backend for live reception and simulation. Its
-Default setting may choose native chirp-Z for the calibrated compatible
-Radeon/public-geometry/worker crossover, while preserving the full fallback
-reservation. Explicit GPU choices and strict headless accelerator probes retain
-requested device execution. The same native factory is available to headless
-probes. Device initialization runs on the session manager rather than the UI
-thread. The backend/cache persists across
-transmissions within a settings generation, and requested device failures remain
-explicit. The GUI charges a fixed 256 MiB per-owner device ceiling and preserves
-the full worker budget. See the [shared control contract](gui-contract.md).
-Implementation scope is distinct from the [current device evidence](validation.md#local-radeon-vulkan-backend).
+starts after native DATA channel isolation and accelerates GPU frequency-search
+work; fine processing remains native CPU work. On the specifically qualified
+local Radeon device/geometry, a scaled packed-FP16 direct correlation uses FP32
+accumulation and FP64 scoring. Other cases can use FP32 direct arithmetic,
+qualified FP16 FFT storage with FP32 arithmetic, an FP32 FFT or explicit native
+fallback. Actual precision and fallback reason are reported. Helper, native
+FIR, template generation, lag groups and the compact tight-clock FP64 class also
+remain native. Stage capability/routing is explicit. An APU's GPU allocations
+use shared host RAM; the bounded device workspace, staging and persistent
+VkFFT program cache are charged through their ownership lifetimes.
+
+The shared GUI's **GPU** checkbox selects the generic native receiver factory
+for live reception and simulation. If compiled and usable, CUDA is preferred
+and executes GPU coarse/fine bulk work; otherwise the selector tries a
+compatible physical Vulkan backend, which executes GPU search and native fine
+processing. The CUDA automatic policy routes qualified small public fine blocks
+to native fine processing while coarse work remains on CUDA; the GUI reports the
+count and fallback reason separately from precision. Its scoped geometry and
+[bounded measurements](validation.md#nvidia-and-intel-gpu-toggle-integration)
+preserve the slower long-case results. CUDA uses a process/device-shared bounded workspace
+admitted against available memory with runtime headroom; waiting for memory is
+cancellable. Automatic Vulkan GUI admission discovers a shared workspace budget
+from available physical memory after runtime headroom and leases a whole coarse
+session. The GUI reports current/peak aggregate leases, peak single-owner lease,
+waiters and native workspace fallbacks. A geometry that cannot fit the smallest
+admissible Vulkan shape uses the complete native coarse path and is reported as
+`native-vulkan-workspace`; it is not counted as GPU work. Explicit pinned Vulkan
+probes retain their configured per-owner limit. Default may choose the scoped
+native chirp-Z crossover on qualified Vulkan geometry;
+FP32 minimum disables it. CUDA's current automatic FFT work is FP32, so its
+FP32-minimum route keeps the same FP32 bulk arithmetic and higher-precision
+sensitive stages. FP64 force cannot be combined with GPU. Readiness, backend
+identity, actual work, selection reason and fallback are reported; a CPU route
+is never counted as GPU work. Device initialization stays on the session
+manager thread, and bounded backend state is released on reconfiguration/close.
+The full `W=2*H` software worker budget is preserved. See the [shared control
+contract](gui-contract.md). These implementation details do not establish
+physical-device performance or qualification; see the [current device
+evidence](validation.md#local-radeon-vulkan-backend).
 
 The receiver control API accepts bounded chunks with explicit sample addresses
 and optional validity masks. Backpressure rejects input without consuming it;

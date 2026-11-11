@@ -1081,12 +1081,26 @@ struct Session::Impl {
                 current.status = preparing;
                 current.transmit_unavailable = preparing;
                 current.gpu_device.clear();
+                current.gpu_backend.clear();
+                current.gpu_selection_reason.clear();
                 current.gpu_score_rows = 0;
                 current.gpu_precision.clear();
                 current.gpu_fp32_score_rows = 0;
                 current.gpu_fp16_storage_score_rows = 0;
                 current.gpu_packed_fp16_score_rows = 0;
                 current.gpu_native_coarse_lag_sessions = 0;
+                current.gpu_cuda_native_fine_sessions = 0;
+                current.gpu_cuda_native_fine_fallback_reason.clear();
+                current.gpu_vulkan_shared_workspace_limit_bytes = 0;
+                current.gpu_vulkan_leased_bytes = 0;
+                current.gpu_vulkan_peak_leased_bytes = 0;
+                current.gpu_vulkan_peak_owner_lease_bytes = 0;
+                current.gpu_vulkan_waiting_sessions = 0;
+                current.gpu_native_coarse_workspace_sessions = 0;
+                current.gpu_host_scored_rows = 0;
+                current.gpu_statistics_blocks = 0;
+                current.gpu_cuda_fp16_calls = 0;
+                current.gpu_cuda_int8_calls = 0;
                 current.gpu_native_lag_preference_supported = false;
             }
             std::stop_callback shutdown(manager_stop, [source = generation_stop]() mutable { source.request_stop(); });
@@ -1121,16 +1135,13 @@ struct Session::Impl {
             try {
                 if (const auto reason = basic_transmit_reason(s)) throw Error(*reason);
                 if (s.gpu) {
-#if defined(DATAPUMP_HAVE_TRIAD_VULKAN)
-                    const auto precision = s.transfer.modem.search_arithmetic == modem::SearchArithmetic::fp32
-                        ? VulkanCoarsePrecision::fp32 : VulkanCoarsePrecision::automatic;
-                    const bool prefer_native = s.transfer.modem.search_arithmetic == modem::SearchArithmetic::default_mode;
-                    gpu_backend = make_vulkan_receiver_backend({0, 256U * 1024 * 1024, precision, prefer_native});
-#else
-                    throw Error("GPU reception is unavailable in this build (Vulkan support required)");
-#endif
+                    const bool fp32_minimum = s.transfer.modem.search_arithmetic == modem::SearchArithmetic::fp32;
+                    gpu_backend = make_gpu_receiver_backend(GpuReceiverOptions{fp32_minimum});
                 }
-                const auto gpu_device = gpu_backend ? gpu_backend->receipt().device_name : std::string{};
+                const auto gpu_initial_receipt = gpu_backend ? gpu_backend->status_receipt() : receiver_detail::BulkReceipt{};
+                const auto gpu_device = gpu_backend ? gpu_initial_receipt.device_name : std::string{};
+                const auto gpu_backend_name = gpu_backend ? gpu_initial_receipt.device : std::string{};
+                const auto gpu_selection_reason = gpu_backend ? gpu_initial_receipt.selection_reason : std::string{};
                 const bool native_lag_preference = gpu_backend && gpu_backend->permits_native_exact_chirp_z();
                 const auto prepare = [&] {
                     const auto anchor = s.simulation ? simulation_calendar(s) : *s.calendar;
@@ -1144,6 +1155,8 @@ struct Session::Impl {
                     if (owner != generation || stop.stop_requested()) return;
                     profile = active;
                     current.gpu_device = gpu_device;
+                    current.gpu_backend = gpu_backend_name;
+                    current.gpu_selection_reason = gpu_selection_reason;
                     current.gpu_native_lag_preference_supported = native_lag_preference;
                     current.bit_seconds = calendar.geometry().bit_seconds;
                     current.slot_stride_seconds = static_cast<double>(calendar.calendar().distance(
@@ -1472,13 +1485,28 @@ Snapshot Session::snapshot() {
         // takes this mutex. Do not lend the GUI a backend shared_ptr: it could
         // become the last owner and perform device teardown on this thread.
         if (p.profile && p.profile->receiver.bulk_backend) {
-            const auto receipt = p.profile->receiver.bulk_backend->receipt();
+            const auto receipt = p.profile->receiver.bulk_backend->status_receipt();
             p.current.gpu_score_rows = receipt.score_rows;
             p.current.gpu_precision = receipt.precision;
             p.current.gpu_fp32_score_rows = receipt.vulkan_fp32_score_rows;
             p.current.gpu_fp16_storage_score_rows = receipt.vulkan_fp16_storage_score_rows;
             p.current.gpu_packed_fp16_score_rows = receipt.vulkan_direct_fp16_score_rows;
             p.current.gpu_native_coarse_lag_sessions = receipt.native_coarse_lag_sessions;
+            if (p.current.gpu_backend.starts_with("cuda:")) {
+                p.current.gpu_cuda_native_fine_sessions = receipt.native_fine_sessions;
+                p.current.gpu_cuda_native_fine_fallback_reason = receipt.native_fine_fallback_reason;
+            } else if (p.current.gpu_backend.starts_with("vulkan:")) {
+                p.current.gpu_vulkan_shared_workspace_limit_bytes = receipt.vulkan_shared_workspace_limit_bytes;
+                p.current.gpu_vulkan_leased_bytes = receipt.vulkan_leased_bytes;
+                p.current.gpu_vulkan_peak_leased_bytes = receipt.vulkan_peak_leased_bytes;
+                p.current.gpu_vulkan_peak_owner_lease_bytes = receipt.vulkan_peak_owner_lease_bytes;
+                p.current.gpu_vulkan_waiting_sessions = receipt.vulkan_waiting_sessions;
+                p.current.gpu_native_coarse_workspace_sessions = receipt.native_coarse_workspace_sessions;
+            }
+            p.current.gpu_host_scored_rows = receipt.vulkan_host_scored_rows;
+            p.current.gpu_statistics_blocks = receipt.statistics_blocks;
+            p.current.gpu_cuda_fp16_calls = receipt.cuda_matrix_fp16_calls;
+            p.current.gpu_cuda_int8_calls = receipt.cuda_matrix_int8_calls;
         }
         result = p.current;
         result.signals.swap(p.signal_events);

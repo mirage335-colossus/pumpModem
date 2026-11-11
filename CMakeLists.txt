@@ -209,7 +209,7 @@ target_link_libraries(datapump_triad PUBLIC datapump)
 add_library(datapump_triad_receiver STATIC
   src/triad_receiver.cpp src/triad_receiver_detail.cpp src/triad_receiver_fine.cpp
   src/triad_receiver_coarse.cpp src/triad_receiver_helper.cpp src/triad_receiver_basis.cpp
-  src/triad_gaussian_kernel.cpp src/triad_mapped_kernel.cpp
+  src/triad_gaussian_kernel.cpp src/triad_mapped_kernel.cpp src/triad_gpu_backend.cpp
   src/triad_message_receiver.cpp src/triad_duration.cpp
   src/triad_stream_receiver.cpp src/triad_stream_resources.cpp src/triad_receiver_executor.cpp)
 target_include_directories(datapump_triad_receiver PUBLIC include PRIVATE src third_party/xz/src/liblzma/api)
@@ -220,6 +220,17 @@ add_library(datapump_robust_session STATIC src/live.cpp src/robust_profile.cpp
   src/robust_audio_frontend.cpp)
 target_include_directories(datapump_robust_session PUBLIC include PRIVATE src)
 target_link_libraries(datapump_robust_session PUBLIC datapump_triad_receiver)
+if(BUILD_TESTING)
+  add_executable(test_gui_robust_live tests/test_gui_robust_live.cpp)
+elseif(DATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA OR DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE)
+  # The bounded GPU source bundle exercises the same Session as the GUI without
+  # configuring every unrelated test or requiring a display server.
+  add_executable(test_gui_robust_live EXCLUDE_FROM_ALL tests/test_gui_robust_live.cpp)
+endif()
+if(TARGET test_gui_robust_live)
+  target_link_libraries(test_gui_robust_live PRIVATE datapump_robust_session datapump)
+  target_compile_definitions(test_gui_robust_live PRIVATE DATAPUMP_TEST_UTC_CAPTURE_PROVIDER=1)
+endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$")
   target_compile_options(datapump_triad PRIVATE -Wall -Wextra -Wpedantic -ffp-contract=off -fno-fast-math)
   target_compile_options(datapump_triad_receiver PRIVATE -Wall -Wextra -Wpedantic -ffp-contract=off -fno-fast-math)
@@ -315,17 +326,14 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_test(NAME gui_fast_keygen COMMAND test_gui_fast_live --keygen-staging)
   set_tests_properties(gui_fast_live PROPERTIES LABELS "gui")
   set_tests_properties(gui_fast_keygen PROPERTIES LABELS "gui;fast" TIMEOUT 90)
-  add_executable(test_gui_robust_live tests/test_gui_robust_live.cpp)
-  target_link_libraries(test_gui_robust_live PRIVATE datapump_robust_session datapump)
-  target_compile_definitions(test_gui_robust_live PRIVATE DATAPUMP_TEST_UTC_CAPTURE_PROVIDER=1)
   add_test(NAME gui_robust_live COMMAND test_gui_robust_live)
   set_tests_properties(gui_robust_live PROPERTIES LABELS "gui;triad" TIMEOUT 120)
-  if(DATAPUMP_TRIAD_VULKAN)
+  if(DATAPUMP_TRIAD_VULKAN OR (DATAPUMP_TRIAD_TENSOR AND CAFFE2_USE_CUDA AND NOT CAFFE2_USE_ROCM))
     add_test(NAME gui_robust_gpu_unavailable COMMAND test_gui_robust_live --gpu-unavailable)
     set_tests_properties(gui_robust_gpu_unavailable PROPERTIES LABELS "gui" TIMEOUT 30
-      ENVIRONMENT "VK_DRIVER_FILES=${CMAKE_CURRENT_BINARY_DIR}/no-such-vulkan-icd.json;VK_ICD_FILENAMES=${CMAKE_CURRENT_BINARY_DIR}/no-such-vulkan-icd.json")
+      ENVIRONMENT "CUDA_VISIBLE_DEVICES=-1;VK_DRIVER_FILES=${CMAKE_CURRENT_BINARY_DIR}/no-such-vulkan-icd.json;VK_ICD_FILENAMES=${CMAKE_CURRENT_BINARY_DIR}/no-such-vulkan-icd.json")
     add_custom_target(test_gui_robust_gpu_unavailable DEPENDS test_gui_robust_live)
-    if(DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE)
+    if(DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE OR DATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA)
       add_test(NAME gui_robust_gpu COMMAND test_gui_robust_live --gpu)
       add_test(NAME gui_robust_gpu_fp32 COMMAND test_gui_robust_live --gpu-fp32)
       add_test(NAME gui_robust_gpu_native_lag COMMAND test_gui_robust_live --gpu-native-lag)

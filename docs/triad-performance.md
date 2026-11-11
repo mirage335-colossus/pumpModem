@@ -95,6 +95,9 @@ Keep target requirements, actual device receipts and validation outcomes separat
 | GeForce RTX 4090 desktop | Ada CUDA target, compute capability 8.9, 24 GB GDDR6X. Record the actual device and usable memory. [NVIDIA specifications](https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4090/) |
 | GeForce RTX 4090 Laptop GPU | Separate Ada product with 16 GB GDDR6. NVIDIA lists an 80–150 W GPU subsystem range; record the laptop/OEM power configuration rather than applying desktop results. [NVIDIA laptop comparison](https://www.nvidia.com/en-eu/geforce/laptops/compare/) |
 | GeForce RTX 4060 Ti 16 GB | Ada CUDA target with an explicitly required 16 GB variant. The 8 GB variant is a different memory target even when the device name is similar. [NVIDIA specifications](https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4060-4060ti/) |
+| GeForce RTX 5090 | Blackwell CUDA compatibility and performance target. Record exact SKU, driver/runtime, full-device allocation and actual arithmetic; no automatic-GUI result is implied by the target name. |
+| NVIDIA RTX PRO 6000 Blackwell | Preferred development accelerator. A bounded automatic-GUI integration comparison is now measured; see [NVIDIA/Intel GPU-toggle integration](validation.md#nvidia-and-intel-gpu-toggle-integration). It qualifies a scoped broad-search gain, not a general GPU speedup or sustained capacity. |
+| Intel UHD Graphics 630 (Core i9-9900K) | Portable Vulkan compatibility target. The shader-feature fallback is designed not to require device FP64/INT64 for FP32 frequency-search work; no Intel host is available, so this is not physical UHD 630 qualification. |
 | AMD Ryzen 5 PRO 5650U with Radeon Graphics | Zen 3 CPU, six cores/twelve threads and integrated Radeon graphics with seven graphics cores. Record CPU execution separately from integrated-GPU execution and actual host/shared memory. [AMD specifications](https://www.amd.com/en/support/downloads/drivers.html/processors/ryzen-pro/ryzen-pro-5000-series/amd-ryzen-5-pro-5650u.html), [Zen 3 introduction](https://www.amd.com/en/newsroom/press-releases/2021-3-16-amd-brings-power-of-zen-3-to-world-s-best-mobile.html) |
 | AMD Ryzen 7 8840U with Radeon Graphics | Zen 4 CPU, eight cores/sixteen threads and Radeon 780M graphics with twelve graphics cores. Its separate NPU is not a substitute for a qualified graphics or CPU backend. Record actual host/shared memory and CPU features. [AMD specifications](https://www.amd.com/en/products/processors/laptop/ryzen/8000-series/amd-ryzen-7-8840u.html) |
 
@@ -131,6 +134,80 @@ an FFT fallback cannot count as an FP16/INT8 matrix result. Check actual matrix
 call/work counters and fallback reasons. Kernel dispatch evidence and elapsed
 cost are separate from instruction-level utilization and sustained capacity.
 
+### Automatic GPU backend used by the GUI
+
+The GUI GPU toggle and native probe `--backend gpu` use the same C++ automatic
+factory. It tries the compatible automatic CUDA receiver first when CUDA is
+compiled and a usable discrete CUDA device can be initialized. If CUDA is
+unavailable or initialization fails, it tries a compatible physical Vulkan GPU.
+Vulkan automatic selection prefers a discrete GPU, then the candidate with more
+device-local memory. It accepts only physical integrated or discrete GPUs that
+meet runtime, queue, workgroup, coherent-memory and workspace requirements.
+There is no CPU fallback: if neither device path initializes, GPU reception is
+unavailable and the session/probe reports that failure. A selected device is
+not proof that GPU work completed. Receipts distinguish the requested `gpu`
+selector, actual `cuda`/`vulkan` device, selection reason, stage routing,
+arithmetic and completed device-work counters.
+
+Automatic CUDA bulk work keeps the scalable FP32 FFT search. It can select the
+exact device chirp-Z path only in its supported, profitable single-arrival
+geometry; that route still evaluates the complete public frequency set. CUDA's
+optional FP16 and INT8 matrix contractions remain explicit, shape-bounded
+alternatives. Historical isolated or matrix measurements do not make the
+automatic selector choose them from peak arithmetic rates, and neither type is
+an INT8 FFT. The deployed automatic GUI keeps coarse work on CUDA and routes fine
+processing to native CPU for public blocks of at most 512 rows, at most 40
+projected modes, one tap, AVX2, and an admitted worker share of at least 32.
+Other shapes retain CUDA fine processing. This scoped stage-routing choice does
+not change arithmetic precision and is not a claim that every CUDA geometry
+benefits. Vulkan fallback keeps its own precision and stage receipts. On
+devices without shader FP64 or shader INT64, Vulkan can run FP32 FFT/product
+work with Q64 phase-step constants and 32-bit shader phase reduction, then use
+host FP64 scoring. This compatibility route performs real Vulkan transform or
+direct-product work; host scoring is separately recorded and must not be
+presented as GPU score arithmetic. The Intel UHD 630 implementation target is
+this feature-compatible route. Its phase/scoring path was exercised on another
+physical Vulkan GPU, not an Intel device, so UHD 630 runtime, driver, memory and
+throughput qualification remain open.
+
+Explicit `--backend cuda` and `--backend vulkan` probes remain pinned to the
+requested backend and report unavailable when it cannot execute. `--backend gpu`
+measures the same backend choice as the GUI; automatic selection may use either
+actual backend and the receipt must name it. Strict accelerator checks require
+completed CUDA or Vulkan work, including the valid Vulkan host-scored partition;
+device enumeration, readiness, or CPU-only fallback cannot pass. CUDA device
+memory admission, Vulkan tile sizing and workspace limits may bound batch width,
+but must preserve every public frequency and arrival hypothesis. Automatic GUI
+Vulkan discovers a shared device budget after runtime headroom and grants shared
+leases per coarse-session owner; explicit pinned Vulkan probes retain their
+configured per-owner limit. Receipts distinguish current/peak shared leases and
+peak owner lease. If the minimum admissible geometry does not fit, its coarse
+stage routes to native and increments the `native-vulkan-workspace` fallback
+count; it is never represented as GPU-scored work. The bounded Radeon
+qualification now covers a >256 MiB component and one matched full-public-slot
+active/noise pair (3.4107 GB peak against a 4.2 GB shared workspace) with
+matching CPU bit/null decisions and fine work. This single pair does not qualify
+complete-message capacity; see the [current GUI integration results](validation.md#nvidia-and-intel-gpu-toggle-integration).
+Insufficient workspace, device allocation failure or execution failure is an
+explicit error, not permission to drop hypotheses or claim CPU service as GPU
+execution. Comparisons retain the full `W=2*H` software-worker budget for other
+receiver stages and preserve the computational-ceiling and proportional
+sensitivity/cost contract above.
+
+The latest bounded automatic-GUI integration ran on a full RTX PRO 6000
+Blackwell. The scoped native-fine route improved the broad 25-slot stream from
+8.2028 s to 1.3200 s (6.21×) and the eight-commit ready-input interval from
+2.6703 s to 0.36386 s (7.34×). On the long-transform stratum it was 0.56% slower
+for the full stream, 1.33% slower in the ready interval and 2.27% slower on the
+fresh five-slot holdout. These are bounded paired service comparisons, not a
+sustained capacity qualification; details and resource costs are in the
+[validation record](validation.md#nvidia-and-intel-gpu-toggle-integration).
+Automatic GUI validation on RTX 4090 and RTX 5090 remains unavailable after
+deployment attempts yielded no instance. Historical RTX 4090 matrix-component
+qualification remains scoped to those components. Intel UHD 630 still has no
+available test host. The scoped CUDA native-fine policy is not evidence for
+those devices.
+
 Default-selection experiments follow the
 [automatic-mode computational-ceiling contract](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling).
 Prioritize challenging-case complete service and workspace capacity; a neutral
@@ -160,13 +237,14 @@ tight-clock FP64 class and fine tracking. The public route chooser is unchanged;
 `native-lag-groups` and `compact-tight-clock-fp64` are explicit native routes.
 A GPU device or allocation failure is not permission to substitute CPU work.
 `--require-accelerator on` requires actual Vulkan search work, so an otherwise
-valid CPU-only route cannot become a GPU result. The native factory, headless
-probe and shared GUI's **GPU** checkbox expose this optional backend. The GUI
-defaults to CPU, saves `--gpu yes|no`, and uses the same backend for live reception
-and simulation. It initializes the device off the UI thread and retains one
-backend/cache per settings generation across transmissions. Requested device
-failure remains explicit; device readiness alone is not proof of accelerated
-search work. See the [shared control contract](gui-contract.md).
+valid CPU-only route cannot become a GPU result. The shared native automatic
+factory, headless probe and GUI's **GPU** checkbox expose the same selection for
+live reception and simulation: CUDA is tried first when compiled and usable,
+then a compatible physical Vulkan device. The GUI defaults to CPU, saves
+`--gpu yes|no`, initializes the selected device off the UI thread and retains
+one backend/cache per settings generation across transmissions. Requested
+device failure remains explicit; device readiness alone is not proof of
+accelerated search work. See the [shared control contract](gui-contract.md).
 
 Use the [Vulkan build and test recipe](building.md#vulkan-compute-on-integrated-radeon)
 and record the physical device, driver, features, source/build identity, full
@@ -175,25 +253,27 @@ Mesa as `AMD Radeon Graphics (RADV RENOIR)`; reject `llvmpipe` and other CPU
 Vulkan devices for GPU qualification. Runtime enumeration, numerical correctness
 and elapsed speedup are separate gates. See [current evidence](validation.md#local-radeon-vulkan-backend).
 
-An APU's host-visible/device-local allocations use shared system RAM. Charge the
-full per-session device allocation ceiling, FFT scratch/plans and separate host
-staging/metadata to admission. Keep their ownership and charge until submitted
-work completes, including cancellation. Coherent mappings still require correct
+An APU's host-visible/device-local allocations use shared system RAM. Automatic
+GUI admission discovers a bounded shared device budget from available physical
+memory after runtime headroom, then grants shared leases per coarse-session
+owner. Charge that shared budget to host admission along with FFT scratch/plans
+and separate host staging/metadata. Keep each lease until submitted work
+completes, including cancellation. Coherent mappings still require correct
 GPU-to-host synchronization; they do not establish free transfers or zero-copy
 performance. Device plans and work buffers remain private to each coarse session.
 A backend-owned cache may retain at most eight serialized VkFFT programs and
 8 MiB of payload, with a separate 64 KiB metadata reservation. It has its own
 persistent host-memory charge, including periods with no live coarse owner;
-it is not uncharged GPU storage. `workspace_scope=per_coarse_session` makes the
-configured device limit an owner limit; generic live/peak allocation counters
-aggregate all owners.
-Use `vulkan_peak_owner_bytes` for a per-owner bound and
-`vulkan_active_sessions` alongside the aggregate charge. Do not compare a valid
-multi-owner aggregate directly to one owner's limit. Preserve the full native
+it is not uncharged GPU storage. Automatic GUI admission reports
+`workspace_scope=backend_shared`: one device budget is shared across concurrent
+coarse-session owners through explicit leases. Pinned/individual Vulkan backends
+report `workspace_scope=per_coarse_session`, where the configured limit applies
+to each owner. Use `vulkan_leased_bytes` and `vulkan_peak_leased_bytes` for
+aggregate lease accounting, `vulkan_peak_owner_lease_bytes` for the largest
+single owner lease, and `vulkan_active_sessions` for live owners. Do not compare
+a valid multi-owner aggregate directly to one owner's lease. Preserve the full native
 `W=2*H` worker budget for remaining work and compare against that budget, not a
 single-thread CPU reference.
-The GUI uses a fixed 256 MiB per-owner device ceiling, fully charged by native
-admission alongside staging and the persistent program cache.
 
 After the device correctness checks, run the compiled comparison directly:
 

@@ -96,12 +96,24 @@ struct Snapshot {
     std::optional<std::string> noise_transmit_unavailable;
     std::string status,error,receiver_error;
     std::string gpu_device,gpu_precision;
+    std::string gpu_backend,gpu_selection_reason;
     std::uint64_t gpu_score_rows=0;
     // Bounded cumulative executed-work diagnostics for this settings generation.
     std::uint64_t gpu_fp32_score_rows=0,gpu_fp16_storage_score_rows=0,gpu_packed_fp16_score_rows=0;
     // Native lag selection is recorded before DSP completion; it is not a
     // count of completed scores or evidence of GPU execution.
     std::uint64_t gpu_native_coarse_lag_sessions=0;
+    // CUDA can retain native fine processing for a scoped fallback route.
+    // This is stage-routing evidence, not arithmetic precision or GPU work.
+    std::uint64_t gpu_cuda_native_fine_sessions=0;
+    std::string gpu_cuda_native_fine_fallback_reason;
+    // Shared Vulkan admission and execution-time fallback evidence. These are
+    // zero on CUDA and native CPU generations.
+    std::size_t gpu_vulkan_shared_workspace_limit_bytes=0,gpu_vulkan_leased_bytes=0;
+    std::size_t gpu_vulkan_peak_leased_bytes=0,gpu_vulkan_peak_owner_lease_bytes=0;
+    std::uint64_t gpu_vulkan_waiting_sessions=0,gpu_native_coarse_workspace_sessions=0;
+    std::uint64_t gpu_host_scored_rows=0,gpu_statistics_blocks=0;
+    std::uint64_t gpu_cuda_fp16_calls=0,gpu_cuda_int8_calls=0;
     bool gpu_native_lag_preference_supported=false;
     bool running=false,transmitting=false,simulation=false,simulation_replay=false;
     bool force_transmit_available=false;

@@ -99,10 +99,10 @@ jobs:
         esac
         test -d "$LIBTORCH_PREFIX"
         ./build.sh configure --cli --build-dir build/triad-cuda --jobs 2 -- -DCMAKE_PREFIX_PATH="$LIBTORCH_PREFIX" -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCHITECTURES" -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON
-        cmake --build build/triad-cuda --target triad_receiver_probe test_triad_tensor_cuda --parallel 2
-    - name: Require actual CUDA execution and precision checks
+        cmake --build build/triad-cuda --target triad_receiver_probe test_triad_tensor_cuda test_triad_tensor_cuda_automatic test_gui_robust_live --parallel 2
+    - name: Require actual CUDA execution, automatic arithmetic and GUI session checks
       run: |
-        ctest --test-dir build/triad-cuda --output-on-failure -R '^triad_tensor_cuda$' --no-tests=error
+        ctest --test-dir build/triad-cuda --output-on-failure -R '^(triad_tensor_cuda|triad_tensor_cuda_automatic|gui_robust_gpu|gui_robust_gpu_fp32|gui_robust_gpu_unavailable)$' --no-tests=error
         build/triad-cuda/triad_receiver_probe describe --backend cuda --require-accelerator on > build/triad-cuda-device.json
     - name: Measure bounded native CUDA components
       if: inputs.components != 'off'

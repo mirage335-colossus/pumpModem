@@ -1235,6 +1235,8 @@ bool exact_chirp_z_profile(const Plan& plan, const ReceiverConfig& config) {
         return false;
     if (!config.bulk_backend) return true;
     const auto rate = static_cast<double>(plan.output_fs), clock = 2 * config.clock_bound_ppm;
+    if (config.bulk_backend->supports_exact_device_chirp_z())
+        return config.bulk_backend->coarse_fallback_reason(rate, clock, CoarseRoute::lag_groups).empty();
     return config.bulk_backend->permits_native_exact_chirp_z() && native_float_kernel() &&
            config.bulk_backend->coarse_fallback_reason(rate, clock, CoarseRoute::frequency_tiles).empty() &&
            !config.bulk_backend->coarse_fallback_reason(rate, clock, CoarseRoute::lag_groups).empty();
@@ -1293,9 +1295,15 @@ double frequency_fft_work(const Plan& plan, std::size_t points) {
         std::log2(plan.layout.nfft);
 }
 
-bool prefer_native_singleton(const Plan& plan, const ReceiverConfig& config) {
-    return !config.bulk_backend &&
+bool prefer_exact_singleton(const Plan& plan, const ReceiverConfig& config) {
+    return (!config.bulk_backend || config.bulk_backend->supports_exact_device_chirp_z()) &&
         4. * plan.workspaces() * plan.layout.kernel_rows <= frequency_fft_work(plan, 1);
+}
+
+bool exact_chirp_device_cost(const Plan& plan, const ReceiverConfig& config,
+                             std::size_t frequencies, double stages, unsigned workers) {
+    return !config.bulk_backend || config.bulk_backend->supports_exact_device_chirp_z() ||
+           enough_device_direct_work(plan, frequencies, stages, workers);
 }
 
 bool choose_lag(const Plan& plan, const FrequencyGrid& grid, const ReceiverConfig& config, unsigned workers) {
@@ -1317,13 +1325,12 @@ bool choose_lag(const Plan& plan, const FrequencyGrid& grid, const ReceiverConfi
     const auto forward = grid.values.size(), inverse = forward * plan.workspaces() * plan.ray_count;
     const double frequency_work = frequency_fft_work(plan, forward);
     if (exact_chirp) {
-        if (forward == 1) return prefer_native_singleton(plan, config);
+        if (forward == 1) return prefer_exact_singleton(plan, config);
         // The chirp-Z convolution uses two FP64 transforms per workspace
         // instead of one inverse transform for each frequency and workspace.
         // Require clear transform-work savings before changing from the
         // existing packed or floating frequency route.
-        return 4 * work <= frequency_work &&
-            (!config.bulk_backend || enough_device_direct_work(plan, forward, work, workers));
+        return 4 * work <= frequency_work && exact_chirp_device_cost(plan, config, forward, work, workers);
     }
     return inverse > max_fft_products || work < frequency_work;
 }
@@ -1358,6 +1365,18 @@ std::size_t scoring_worker_workspace(const Layout& layout, const Plan& plan,
 
 struct WorkspaceQuote { std::size_t total = 0, bulk_host = 0; };
 
+std::optional<CoarseFrequencyPlan> frequency_admission(const Plan& plan, const ReceiverConfig& config,
+                                                       std::size_t frequency_count, unsigned workers) {
+    if (!config.bulk_backend) return {};
+    const auto rate = static_cast<double>(plan.output_fs), clock = 2 * config.clock_bound_ppm;
+    if (!config.bulk_backend->coarse_fallback_reason(rate, clock, CoarseRoute::frequency_tiles).empty()) return {};
+    const auto& layout = plan.layout;
+    const auto width = tile_points(plan, frequency_count, workers);
+    return config.bulk_backend->frequency_plan(
+        {plan.ray_count, layout.kernel_rows, layout.nfft, layout.lag_count, frequency_count, rate, 0, width},
+        plan.workspaces(), std::max({layout.nfft, plan.filter_fft, plan.fidelity_layout.nfft}));
+}
+
 WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
                                  std::size_t frequency_count, unsigned workers) {
     require_coarse(workers > 0, "coarse receiver requires an explicit positive worker share");
@@ -1371,8 +1390,8 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
         // maximum possible grid size when quoting either valid route.
         const auto minimum_chirp = chirp_fft_work(plan.workspaces(), layout.nfft);
         const auto exact_group_possible = 4 * minimum_chirp <= frequency_fft_work(plan, lag_points) &&
-            (!config.bulk_backend || enough_device_direct_work(plan, lag_points, minimum_chirp, workers));
-        if (!exact_group_possible) lag_points = prefer_native_singleton(plan, config) ? 1 : 0;
+            exact_chirp_device_cost(plan, config, lag_points, minimum_chirp, workers);
+        if (!exact_group_possible) lag_points = prefer_exact_singleton(plan, config) ? 1 : 0;
     }
     const auto lag_groups = !lag_points ? 0 :
         std::min(lag_group_limit(plan, config), config.helper_enabled ? max_intervals : 1);
@@ -1476,9 +1495,11 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
         config.bulk_backend->coarse_fallback_reason(rate, clock, CoarseRoute::lag_groups).empty();
     // Shared compiled programs can remain live even for a native fallback.
     const auto persistent = config.bulk_backend ? config.bulk_backend->persistent_host_workspace() : 0;
-    const auto bulk_host = add(persistent, bulk_frequency || bulk_lag ? config.bulk_backend->coarse_host_bytes(
+    const auto frequency = frequency_admission(plan, config, frequency_count, workers);
+    const auto legacy = bulk_lag || (bulk_frequency && !frequency) ? config.bulk_backend->coarse_host_bytes(
         bulk_lag ? nfft : std::max({layout.nfft, plan.filter_fft, plan.fidelity_layout.nfft}),
-        std::max(bulk_frequency ? tile : 0, bulk_lag ? lag_points : 0), layout.lag_count) : 0);
+        std::max(bulk_frequency && !frequency ? tile : 0, bulk_lag ? lag_points : 0), layout.lag_count) : 0;
+    const auto bulk_host = add(persistent, std::max(legacy, frequency ? frequency->host_workspace_bytes : 0));
     return {add(add(add(base, high), task_overhead), bulk_host), bulk_host};
 }
 
@@ -1514,6 +1535,26 @@ CoarseWorkPlan make_work_plan(const Plan& geometry, const FrequencyGrid& grid,
     work.clocks = geometry.clock_count;
     work.tile_width = lag ? std::min<std::size_t>(workers, work.workspaces) :
                             tile_points(geometry, work.frequency_points, workers);
+    if (!lag && config.bulk_backend && config.bulk_backend->coarse_fallback_reason(
+            static_cast<double>(geometry.output_fs), 2 * config.clock_bound_ppm, work.route).empty()) {
+        // The Helper can narrow the executed grid, but the retained shape and
+        // host/device charge must come from the same full public prior.
+        work.bulk_frequency_admission = frequency_admission(geometry, config, frequency_bound(geometry, config), workers);
+        if (const auto& admission = work.bulk_frequency_admission) {
+            if (admission->native_fallback_reason.empty()) {
+                require_coarse(admission->tile_width && admission->workspace_batch && admission->device_workspace_bytes,
+                               "coarse backend returned an invalid automatic frequency admission");
+                work.tile_width = std::min(work.tile_width, admission->tile_width);
+            }
+        } else {
+            const auto width = config.bulk_backend->maximum_frequency_tile_width(
+                {work.rays, layout.kernel_rows, layout.nfft, layout.lag_count, work.frequency_points,
+                 static_cast<double>(geometry.output_fs), 0, work.tile_width},
+                work.workspaces, work.tile_width, 2 * config.clock_bound_ppm);
+            require_coarse(width && width <= work.tile_width, "coarse backend returned an invalid frequency tile width");
+            work.tile_width = width;
+        }
+    }
     work.total_tiles = ceil_div(lag ? work.workspaces : work.frequency_points, work.tile_width);
     work.workspace_reserved_bytes = workspace.total;
     work.workspace_limit_bytes = limit;
@@ -1911,6 +1952,8 @@ struct CoarseSession::Impl {
         if (config.bulk_backend) {
             receipt.native_fallback_reason = config.bulk_backend->coarse_fallback_reason(
                 work.projected_sample_rate_hz, 2 * config.clock_bound_ppm, work.route);
+            if (receipt.native_fallback_reason.empty() && work.bulk_frequency_admission)
+                receipt.native_fallback_reason = work.bulk_frequency_admission->native_fallback_reason;
             if (!receipt.native_fallback_reason.empty())
                 config.bulk_backend->record_native_coarse(receipt.native_fallback_reason);
         }
@@ -1945,6 +1988,10 @@ struct CoarseSession::Impl {
                 const auto fft_rows = fused_float ? geometry.filter_fft :
                     std::max({layout.nfft, geometry.filter_fft, geometry.fidelity_layout.nfft, work.correlation_fft_rows});
                 fft = std::make_unique<native_fft::DoublePlan>(fft_rows, stop);
+            }
+            if (bulk && bulk->supports_fir()) {
+                const auto mapped_filters = geometry.source_step > 1 ? MappedProjection::phase_count(geometry) : 0;
+                bulk->begin_fir_projection(geometry.filter_fft, 1 + mapped_filters, layout.crop_rows, stop);
             }
             const Projection projection(geometry, fft.get(), bulk && bulk->supports_fir() ? bulk.get() : nullptr,
                                         receipt.filter_setup.operations, stop);
@@ -2052,8 +2099,11 @@ struct CoarseSession::Impl {
         for (const auto& kernel : kernels)
             zoom.push_back({kernel.group.first, kernel.group.count, kernel.input_phase, kernel.convolution});
         CoarseBulkWork operations;
+        const auto& admission = plan.bulk_frequency_admission;
         bulk->prepare({plan.rays, plan.projected_template_rows, plan.correlation_fft_rows,
-                       plan.arrival_points, plan.frequency_points, plan.projected_sample_rate_hz, variance},
+                       plan.arrival_points, plan.frequency_points, plan.projected_sample_rate_hz, variance,
+                       admission ? admission->tile_width : plan.tile_width,
+                       admission ? admission->workspace_batch : 0, admission ? admission->device_workspace_bytes : 0},
                       observation, columns, zoom, operations, stop);
         if (const auto reason = bulk->precision_reason(); !reason.empty())
             receipt.plan.precision_reason = reason;
@@ -2275,6 +2325,14 @@ std::optional<CoarseResult> CoarseSession::finish() {
     const auto began = PhaseClock::now();
     try {
         const auto& plan = receipt.plan;
+        if (impl.bulk) {
+            receipt.bulk = impl.bulk->receipt();
+            require_coarse(receipt.bulk->executed && receipt.bulk->score_rows == impl.bulk_completed.score_rows,
+                           "coarse bulk completed without a matching backend execution receipt");
+            // All device leaves have completed. Release their lease before
+            // proposal selection, which may require other executor lanes.
+            impl.bulk.reset();
+        }
         CoarseResult result;
         result.projected_sample_rate_hz = plan.projected_sample_rate_hz;
         result.maximum_frequency_step_hz = plan.maximum_frequency_step_hz;
@@ -2290,11 +2348,6 @@ std::optional<CoarseResult> CoarseSession::finish() {
         check_stop(stop);
         impl.result.emplace(std::move(result));
         impl.refresh_retained_bytes();
-        if (impl.bulk) {
-            receipt.bulk = impl.bulk->receipt();
-            require_coarse(receipt.bulk->executed && receipt.bulk->score_rows == impl.bulk_completed.score_rows,
-                           "coarse bulk completed without a matching backend execution receipt");
-        }
         check_stop(stop);
         receipt.selection.operations.selection_peak_rows = impl.peaks.size();
         receipt.proposals = impl.result->proposal_count;

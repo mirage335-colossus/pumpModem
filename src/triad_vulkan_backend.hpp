@@ -16,10 +16,16 @@ std::vector<CoarseBulkPeaks> vulkan_select_peak_rows(const VulkanReceiverOptions
 
 inline constexpr std::string_view vulkan_rotate_shader = R"glsl(
 #version 450
+#ifndef FIXED_PHASE
 #extension GL_ARB_gpu_shader_fp64 : require
+#endif
 layout(local_size_x=256) in;
 layout(std430,set=0,binding=0) readonly buffer Observation { vec2 observation[]; };
+#ifdef FIXED_PHASE
+layout(std430,set=0,binding=1) readonly buffer Frequencies { uvec2 phase_step[]; };
+#else
 layout(std430,set=0,binding=1) readonly buffer Frequencies { double frequency[]; };
+#endif
 #ifdef HALF_STORAGE
 layout(std430,set=0,binding=2) writeonly buffer Output { uint output_values[]; };
 #define STORE(value) packHalf2x16(value)
@@ -27,14 +33,28 @@ layout(std430,set=0,binding=2) writeonly buffer Output { uint output_values[]; }
 layout(std430,set=0,binding=2) writeonly buffer Output { vec2 output_values[]; };
 #define STORE(value) value
 #endif
-layout(push_constant) uniform Parameters { uint rows; uint nfft; uint frequencies; uint unused; double rate; } p;
+layout(push_constant) uniform Parameters {
+    uint rows; uint nfft; uint frequencies; uint unused;
+#ifndef FIXED_PHASE
+    double rate;
+#endif
+} p;
 void main() {
     uint i=gl_GlobalInvocationID.x+gl_GlobalInvocationID.y*gl_NumWorkGroups.x*256u;
     if (i >= p.nfft*p.frequencies) return;
     uint row=i%p.nfft, f=i/p.nfft;
     if (row>=p.rows) { output_values[i]=STORE(vec2(0)); return; }
+#ifdef FIXED_PHASE
+    // Multiply the Q64 step by the sample index modulo one turn. Only the
+    // high word is needed for FP32 trig. No 64-bit shader feature is used.
+    uint upper, lower;
+    umulExtended(phase_step[f].x,row,upper,lower);
+    uint phase=upper+phase_step[f].y*row;
+    float angle=float(int(phase))*1.4629180792671597e-9;
+#else
     precise double cycles=-frequency[f]*(double(row)/p.rate);
     float angle=float((cycles-floor(cycles))*6.283185307179586476925286766559);
+#endif
     vec2 rotation=vec2(cos(angle),sin(angle));
     vec2 value=observation[row];
     precise float real_value=value.x*rotation.x-value.y*rotation.y;

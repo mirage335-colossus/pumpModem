@@ -172,6 +172,8 @@ Options parse(int argc, char** argv) {
     assign("--vulkan-precision", o.vulkan_precision);
     assign("--native-coarse-precision", o.native_coarse_precision);
     assign("--require-accelerator", o.require_accelerator);
+    const bool device_index_supplied = values.contains("--device-index");
+    const bool device_memory_limit_supplied = values.contains("--device-memory-limit-bytes");
     assign("--device-index", o.device_index);
     assign("--device-memory-limit-bytes", o.device_memory_limit);
     assign("--workers", o.workers);
@@ -240,12 +242,12 @@ Options parse(int argc, char** argv) {
         else require(*fec == "off", "--fec expects off, rs20 or rs60");
     }
     if (!values.empty()) throw Error("Unknown native probe option " + std::string(values.begin()->first));
-    require(one_of(o.backend, {"cpu", "tensor-cpu", "cuda", "vulkan"}), "Unknown native probe backend");
+    require(one_of(o.backend, {"cpu", "tensor-cpu", "cuda", "vulkan", "gpu"}), "Unknown native probe backend");
     require(one_of(o.tensor_precision, {"automatic", "fp64"}), "Unknown tensor precision");
     require(one_of(o.tensor_coarse_math, {"fft", "fp16", "int8"}), "Unknown tensor coarse arithmetic");
     require(one_of(o.vulkan_precision, {"automatic", "fp32", "fp16-storage", "direct-fp32",
                                        "direct-fp16-storage", "direct-fp16"}) &&
-            (o.backend == "vulkan" || o.vulkan_precision == "automatic"),
+            (o.backend == "vulkan" || o.backend == "gpu" || o.vulkan_precision == "automatic"),
             "Invalid Vulkan precision policy or backend");
     require(one_of(o.native_coarse_precision, {"automatic", "fp32", "fp64", "q15"}),
             "--native-coarse-precision expects automatic, fp32, fp64 or q15");
@@ -269,6 +271,10 @@ Options parse(int argc, char** argv) {
             "Vulkan coarse search uses its native FP32 path; tensor precision selection is unsupported");
     require(o.backend != "vulkan" || o.tensor_coarse_math == "fft",
             "Vulkan coarse search uses the full FFT; tensor matrix arithmetic is unsupported");
+    require(o.backend != "gpu" || (!device_index_supplied && !device_memory_limit_supplied &&
+            o.tensor_precision == "automatic" && o.tensor_coarse_math == "fft" &&
+            o.vulkan_precision == "automatic"),
+            "Automatic GPU selection does not accept pinned device, workspace or backend arithmetic overrides");
     require(o.native_coarse_precision == "automatic" || o.backend == "cpu",
             "Native coarse precision overrides require --backend cpu");
     return o;
@@ -583,6 +589,13 @@ Json bulk_json(const BulkReceipt& r) {
         {"allocator_reserved_bytes", r.allocator_reserved_bytes}, {"allocator_peak_live_bytes", r.allocator_peak_live_bytes},
         {"allocator_peak_reserved_bytes", r.allocator_peak_reserved_bytes}, {"total_device_bytes", r.total_device_bytes},
         {"initial_free_device_bytes", r.initial_free_device_bytes}, {"runtime_headroom_bytes", r.runtime_headroom_bytes},
+        {"vulkan_shared_workspace_limit_bytes", r.vulkan_shared_workspace_limit_bytes},
+        {"vulkan_leased_bytes", r.vulkan_leased_bytes},
+        {"vulkan_peak_leased_bytes", r.vulkan_peak_leased_bytes},
+        {"vulkan_peak_owner_lease_bytes", r.vulkan_peak_owner_lease_bytes},
+        {"vulkan_waiting_sessions", r.vulkan_waiting_sessions},
+        {"native_coarse_workspace_sessions", r.native_coarse_workspace_sessions},
+        {"device_admission_waiters", r.device_admission_waiters},
         {"fft_plan_cache_count", r.fft_plan_cache_count}, {"fft_plan_cache_limit", r.fft_plan_cache_limit},
         {"upload_bytes", r.upload_bytes},
         {"download_bytes", r.download_bytes}, {"synchronizations", r.synchronizations},
@@ -607,6 +620,7 @@ Json bulk_json(const BulkReceipt& r) {
         {"vulkan_dispatches", r.vulkan_dispatches},
         {"vulkan_arrival_peak_rows", r.vulkan_arrival_peak_rows},
         {"vulkan_arrival_peak_values", r.vulkan_arrival_peak_values},
+        {"vulkan_host_scored_rows", r.vulkan_host_scored_rows},
         {"vulkan_fp32_score_rows", r.vulkan_fp32_score_rows},
         {"vulkan_fp16_storage_score_rows", r.vulkan_fp16_storage_score_rows},
         {"vulkan_direct_dot_terms", r.vulkan_direct_dot_terms},
@@ -617,6 +631,7 @@ Json bulk_json(const BulkReceipt& r) {
         {"native_coarse_lag_sessions", r.native_coarse_lag_sessions},
         {"native_coarse_precision_sessions", r.native_coarse_precision_sessions},
         {"native_fine_sessions", r.native_fine_sessions},
+        {"native_fine_fallback_reason", r.native_fine_fallback_reason},
         {"statistics_blocks", r.statistics_blocks}, {"projected_values", r.projected_values},
         {"dc_reduction_values", r.dc_reduction_values},
         {"mapped_columns", r.mapped_columns}, {"mapped_values", r.mapped_values},
@@ -644,7 +659,8 @@ Json bulk_json(const BulkReceipt& r) {
         {"matrix_fft_fallback_counts", std::move(matrix_fallbacks)},
         {"uploaded_tiles", r.uploaded_tiles}, {"tile_hits", r.tile_hits},
         {"direct_columns", r.direct_columns}, {"direct_values", r.direct_values},
-        {"direct_fallback_counts", std::move(fallbacks)}, {"wall_seconds", r.wall_seconds}});
+        {"direct_fallback_counts", std::move(fallbacks)}, {"wall_seconds", r.wall_seconds},
+        {"selection_reason", r.selection_reason}});
 }
 
 std::shared_ptr<ReceiverBulkBackend> selected_backend(const Options& o) {
@@ -672,6 +688,19 @@ std::shared_ptr<ReceiverBulkBackend> selected_backend(const Options& o) {
 #else
         throw Unavailable("This native probe build does not include the optional Vulkan backend");
 #endif
+    }
+    if (o.backend == "gpu") {
+        if (o.require_accelerator && (o.command == "codec" || o.work_only))
+            throw Unavailable("GPU accelerator qualification requires a complete coarse-search workload");
+        try {
+            return make_gpu_receiver_backend({o.vulkan_precision == "fp32"});
+        } catch (const GpuBackendUnavailable& error) {
+            throw Unavailable(error.what());
+        } catch (const TensorBackendUnavailable& error) {
+            throw Unavailable(error.what());
+        } catch (const VulkanBackendUnavailable& error) {
+            throw Unavailable(error.what());
+        }
     }
     if (o.require_accelerator && o.backend != "cuda")
         throw Unavailable("An accelerated probe requires --backend cuda or vulkan");
@@ -951,6 +980,12 @@ Json coarse_json(const CoarseProgress& p) {
         {"arrival_lower_seconds", g.arrival_lower_seconds}, {"arrival_upper_seconds", g.arrival_upper_seconds},
         {"workspace_reserved_bytes", g.workspace_reserved_bytes}, {"retained_bytes", p.retained_bytes},
         {"proposals", p.proposals}, {"refined_coordinates", p.refined_coordinates},
+        {"bulk_frequency_admission", g.bulk_frequency_admission ? object({
+            {"tile_width", g.bulk_frequency_admission->tile_width},
+            {"workspace_batch", g.bulk_frequency_admission->workspace_batch},
+            {"device_workspace_bytes", g.bulk_frequency_admission->device_workspace_bytes},
+            {"host_workspace_bytes", g.bulk_frequency_admission->host_workspace_bytes},
+            {"native_fallback_reason", g.bulk_frequency_admission->native_fallback_reason}}) : Json{}},
         {"native_fallback_reason", p.native_fallback_reason},
         {"filter_setup", coarse_counts(p.filter_setup)}, {"mapped_fidelity", coarse_counts(p.mapped_fidelity)},
         {"template_bank", coarse_counts(p.template_bank)}, {"observation", coarse_counts(p.observation)},
@@ -1783,7 +1818,7 @@ void codec_run(Json& report, const Options& o, const Profile& profile, std::stop
 
 void help() {
     std::cout << "triad_receiver_probe describe|plan|slot|continuation|message|backlog|regression|codec [--flag value ...]\n"
-        "  --backend cpu|tensor-cpu|cuda|vulkan --require-accelerator on|off --tensor-precision automatic|fp64\n"
+        "  --backend cpu|tensor-cpu|cuda|vulkan|gpu --require-accelerator on|off --tensor-precision automatic|fp64\n"
         "  --native-coarse-precision automatic|fp32|fp64|q15 (Q15 spectral products require native AVX2)\n"
         "  --tensor-coarse-math fft|fp16|int8 (post-channelization search; fallback is reported)\n"
         "  --vulkan-precision automatic|fp32|fp16-storage|direct-fp32|direct-fp16-storage|direct-fp16\n"
@@ -1825,6 +1860,7 @@ void run(Json& report, const Options& o, std::stop_token stop) {
     report["identity"]["backend"] = o.backend;
     report["identity"]["receiver_arithmetic"] = o.backend == "vulkan"
         ? "native_vulkan_selected_frequency_search_with_fp64_coordinates_scores_and_state"
+        : o.backend == "gpu" ? "automatic_cuda_or_vulkan_bulk_with_fp64_sensitive_stages"
         : o.backend != "cpu" ? "compiled_tensor_bulk_with_native_fp64_coordinates_and_state"
         : o.native_coarse_precision == "fp64" ? "native_fp64_coarse_fft_state_and_admission"
         : o.native_coarse_precision == "q15" ? "native_q15_spectral_products_fp32_fft_fp64_score_and_state"
@@ -1837,7 +1873,11 @@ void run(Json& report, const Options& o, std::stop_token stop) {
     report["identity"]["requested_native_coarse_precision"] = o.native_coarse_precision;
     const auto backend = selected_backend(o);
     const auto describe_backend = [&] {
-        report["identity"]["backend_receipt"] = backend ? bulk_json(backend->receipt()) : Json{};
+        const auto receipt = backend ? backend->receipt() : BulkReceipt{};
+        report["identity"]["backend_receipt"] = backend ? bulk_json(receipt) : Json{};
+        if (backend && o.backend == "gpu")
+            report["identity"]["selected_accelerator_backend"] = receipt.cuda ? "cuda" :
+                receipt.vulkan ? "vulkan" : "unknown";
     };
     describe_backend();
     StreamReceiverOptions allocation_options;
@@ -1890,7 +1930,13 @@ void run(Json& report, const Options& o, std::stop_token stop) {
                     {"arrival_points", plan.arrival_points}, {"workspaces", plan.workspaces},
                     {"rays", plan.rays}, {"correlation_fft_rows", plan.correlation_fft_rows},
                     {"tile_width", plan.tile_width}, {"planned_tiles", plan.total_tiles},
-                    {"workspace_reserved_bytes", plan.workspace_reserved_bytes}});
+                    {"workspace_reserved_bytes", plan.workspace_reserved_bytes},
+                    {"bulk_frequency_admission", plan.bulk_frequency_admission ? object({
+                        {"tile_width", plan.bulk_frequency_admission->tile_width},
+                        {"workspace_batch", plan.bulk_frequency_admission->workspace_batch},
+                        {"device_workspace_bytes", plan.bulk_frequency_admission->device_workspace_bytes},
+                        {"host_workspace_bytes", plan.bulk_frequency_admission->host_workspace_bytes},
+                        {"native_fallback_reason", plan.bulk_frequency_admission->native_fallback_reason}}) : Json{}}});
             } catch (const Error& error) {
                 configuration["coarse_full_prior"] = Json{};
                 configuration["coarse_full_prior_reason"] = error.what();
@@ -1906,8 +1952,9 @@ void run(Json& report, const Options& o, std::stop_token stop) {
         else if (o.work_only) diagnostic_fine(report, o, profile, slot, resources, samples_left, stop);
         else slot_run(report, o, profile, slot, resources, samples_left, stop);
         describe_backend();
+        const auto actual_backend = backend ? backend->receipt() : BulkReceipt{};
         if (o.backend == "cuda" && o.command != "codec") {
-            const auto actual = backend->receipt();
+            const auto& actual = actual_backend;
             if (!actual.cuda || !actual.executed || (!o.work_only && (!actual.fft_calls || !actual.score_rows)) ||
                 (!actual.fft_calls && !actual.dc_reduction_values) || !actual.statistics_blocks ||
                 (!actual.mapped_values && o.stratum != "terminal"))
@@ -1916,11 +1963,43 @@ void run(Json& report, const Options& o, std::stop_token stop) {
                 actual.allocator_peak_reserved_bytes > actual.workspace_limit_bytes)
                 throw Incomplete("CUDA allocator peak did not satisfy the declared device workspace");
         }
-        if (o.backend == "vulkan" && o.require_accelerator && o.command != "codec") {
-            const auto actual = backend->receipt();
+        if (o.backend == "gpu" && actual_backend.cuda && o.command != "codec") {
+            const auto& actual = actual_backend;
+            const bool coarse_gpu_work = actual.cuda && actual.executed && actual.fft_calls &&
+                actual.score_rows;
+            const bool terminal_gpu_fine = actual.mapped_values == 0 && o.stratum == "terminal";
+            const bool gpu_fine_work = actual.statistics_blocks > 0 &&
+                (actual.mapped_values > 0 || terminal_gpu_fine);
+            const bool qualified_native_fine = actual.native_fine_sessions > 0 &&
+                actual.native_fine_fallback_reason == "small-chronological-blocks";
+            if (!coarse_gpu_work || !(gpu_fine_work || qualified_native_fine))
+                throw Incomplete("Automatic CUDA receiver did not complete GPU coarse work and a recognized GPU/native fine route");
+            if (!actual.allocator_peak_reserved_bytes ||
+                actual.allocator_peak_reserved_bytes > actual.workspace_limit_bytes)
+                throw Incomplete("Automatic CUDA allocator peak did not satisfy the declared device workspace");
+        }
+        if ((o.backend == "vulkan" || (o.backend == "gpu" && actual_backend.vulkan)) &&
+            o.require_accelerator && o.command != "codec") {
+            const auto& actual = actual_backend;
+            const auto host_scored = actual.vulkan_host_scored_rows == actual.score_rows &&
+                actual.vulkan_host_scored_rows > 0 && actual.vulkan_arrival_peak_rows == 0 &&
+                actual.vulkan_arrival_peak_values == 0;
+            const auto device_frontier = actual.vulkan_host_scored_rows == 0 &&
+                actual.vulkan_arrival_peak_rows > 0;
+            const bool automatic = o.backend == "gpu";
+            const bool shared_workspace_bounded = !automatic ||
+                (actual.vulkan_shared_workspace_limit_bytes > 0 &&
+                 actual.workspace_limit_bytes == actual.vulkan_shared_workspace_limit_bytes &&
+                 actual.vulkan_peak_owner_bytes <= actual.vulkan_peak_owner_lease_bytes &&
+                 actual.vulkan_peak_owner_lease_bytes <= actual.vulkan_peak_leased_bytes &&
+                 actual.vulkan_peak_leased_bytes <= actual.vulkan_shared_workspace_limit_bytes &&
+                 actual.vulkan_leased_bytes <= actual.vulkan_peak_leased_bytes &&
+                 actual.reserved_bytes <= actual.vulkan_leased_bytes &&
+                 actual.allocator_peak_reserved_bytes <= actual.vulkan_peak_leased_bytes);
             if (!actual.vulkan || !actual.executed || (!actual.fft_calls && !actual.vulkan_direct_dot_terms) ||
                 !actual.score_rows ||
-                !actual.vulkan_dispatches || !actual.vulkan_arrival_peak_rows ||
+                !actual.vulkan_dispatches || !(host_scored || device_frontier) ||
+                (actual.vulkan_host_scored_rows != 0 && !host_scored) ||
                 actual.vulkan_fp32_score_rows > actual.score_rows ||
                 actual.vulkan_fp16_storage_score_rows != actual.score_rows - actual.vulkan_fp32_score_rows ||
                 actual.vulkan_direct_fp32_score_rows > actual.vulkan_fp32_score_rows ||
@@ -1929,7 +2008,9 @@ void run(Json& report, const Options& o, std::stop_token stop) {
                     actual.vulkan_fp16_storage_score_rows - actual.vulkan_direct_fp16_score_rows ||
                 actual.vulkan_direct_dot_terms < actual.vulkan_direct_fp32_score_rows +
                     actual.vulkan_direct_fp16_score_rows + actual.vulkan_direct_fp16_storage_score_rows ||
-                actual.workspace_scope != "per_coarse_session" || !actual.vulkan_peak_owner_bytes ||
+                actual.workspace_scope != (automatic ? "backend_shared" : "per_coarse_session") ||
+                !shared_workspace_bounded ||
+                !actual.vulkan_peak_owner_bytes ||
                 actual.vulkan_peak_owner_bytes > actual.workspace_limit_bytes ||
                 actual.allocator_peak_reserved_bytes < actual.vulkan_peak_owner_bytes)
                 throw Incomplete("Vulkan receiver work did not execute bounded full-frequency scoring");

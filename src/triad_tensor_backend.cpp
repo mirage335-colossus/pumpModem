@@ -25,7 +25,9 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstring>
+#include <deque>
 #include <exception>
 #include <limits>
 #include <map>
@@ -33,6 +35,7 @@
 #include <numbers>
 #include <numeric>
 #include <type_traits>
+#include <utility>
 
 namespace datapump::triad::v3 {
 namespace receiver_detail {
@@ -53,6 +56,7 @@ constexpr std::size_t maximum_matrix_bytes = 32 * mib;
 constexpr std::size_t maximum_matrix_workspaces = 32;
 constexpr std::size_t maximum_matrix_arrivals = 64;
 constexpr auto tau = 2 * std::numbers::pi;
+constexpr std::string_view small_fine_fallback = "small-chronological-blocks";
 
 constexpr std::size_t fine_result_values(std::size_t taps) {
     return 2 * taps * (1 + taps) + 1; // Correlations and Gram for each bit, then the basis witness.
@@ -111,6 +115,7 @@ void add_work(BulkReceipt& to, const BulkReceipt& from) noexcept {
     TRIAD_COUNT(cuda_arrival_peak_rows);
     TRIAD_COUNT(cuda_arrival_peak_values);
     TRIAD_COUNT(statistics_blocks);
+    TRIAD_COUNT(native_fine_sessions);
     TRIAD_COUNT(projected_values);
     TRIAD_COUNT(dc_reduction_values);
     TRIAD_COUNT(mapped_columns);
@@ -154,9 +159,13 @@ struct Arena {
     at::Device device{at::kCPU};
     BulkReceipt total;
     mutable std::mutex mutex;
+    std::condition_variable_any available;
+    std::deque<const std::size_t*> pending;
+    std::size_t existing_allocations = 0;
 
-    explicit Arena(const TensorReceiverOptions& requested) : options(requested) {
-        if (options.workspace_bytes < mib || options.workspace_bytes > static_cast<std::uint64_t>(INT64_MAX))
+    explicit Arena(const TensorReceiverOptions& requested, bool automatic) : options(requested) {
+        if (!automatic && (options.workspace_bytes < mib ||
+                           options.workspace_bytes > static_cast<std::uint64_t>(INT64_MAX)))
             throw ReceiverWorkspaceError("Robust tensor backend requires an explicit workspace of at least 1 MiB");
         static std::once_flag threading;
         std::call_once(threading, [] {
@@ -182,21 +191,34 @@ struct Arena {
         cudaDeviceProp properties{};
         C10_CUDA_CHECK(cudaGetDeviceProperties(&properties, device.index()));
         C10_CUDA_CHECK(cudaMemGetInfo(&total.initial_free_device_bytes, &total.total_device_bytes));
-        // Reserve separate driver/library headroom outside the shared tensor
-        // allocation budget. The allocator cap includes its retained blocks.
-        const auto headroom = std::min<std::size_t>(256 * mib, total.total_device_bytes / 20);
-        total.runtime_headroom_bytes = headroom;
-        if (total.initial_free_device_bytes <= headroom ||
-            options.workspace_bytes > total.initial_free_device_bytes - headroom)
-            throw ReceiverWorkspaceError("Robust CUDA workspace exceeds free device memory with runtime headroom");
         c10::cuda::CUDACachingAllocator::init(devices);
         // Select the native caching allocator, whose fraction and reserved
         // block statistics correspond to the admission receipt below.
         require(c10::cuda::CUDACachingAllocator::get()->name() == "native",
                 "Robust CUDA requires ATen's native caching allocator");
         const auto prior = c10::cuda::CUDACachingAllocator::getDeviceStats(device.index());
+        // Automatic mode leaves separate driver/library and display headroom.
+        // Reconfiguration can reuse the process allocator's retained blocks.
+        // Existing active bytes still consume the new arena's capacity.
+        const auto headroom = automatic
+            ? std::clamp(total.total_device_bytes / 20, 256 * mib, 2048 * mib)
+            : std::min<std::size_t>(256 * mib, total.total_device_bytes / 20);
+        total.runtime_headroom_bytes = headroom;
+        auto accessible = total.initial_free_device_bytes;
+        if (automatic) {
+            accessible = std::min(total.total_device_bytes, add(accessible,
+                static_cast<std::size_t>(prior.reserved_bytes[0].current)));
+            existing_allocations = static_cast<std::size_t>(prior.active_bytes[0].current);
+            if (accessible <= headroom || accessible - headroom < add(existing_allocations, mib))
+                throw ReceiverWorkspaceError("Robust CUDA has insufficient device memory with runtime headroom");
+            options.workspace_bytes = accessible - headroom;
+            total.reserved_bytes = total.peak_reserved_bytes = existing_allocations;
+        }
+        if (accessible <= headroom || options.workspace_bytes > accessible - headroom)
+            throw ReceiverWorkspaceError("Robust CUDA workspace exceeds free device memory with runtime headroom");
         if (prior.reserved_bytes[0].current > static_cast<std::int64_t>(options.workspace_bytes))
             throw ReceiverWorkspaceError("existing CUDA allocator reservations exceed the Robust workspace");
+        total.workspace_limit_bytes = options.workspace_bytes;
         const auto fraction = static_cast<double>(options.workspace_bytes) / total.total_device_bytes;
         c10::cuda::CUDACachingAllocator::setMemoryFraction(std::nextafter(fraction, 0.), device.index());
         // ATen allocates the FFT work area through its caching allocator.
@@ -226,6 +248,34 @@ struct Arena {
         return true;
     }
 
+    std::size_t admit(std::size_t minimum, std::size_t preferred, std::stop_token stop) {
+        require(minimum && preferred >= minimum, "invalid Robust CUDA device lease");
+        if (minimum > options.workspace_bytes - existing_allocations)
+            throw ReceiverWorkspaceError("Robust CUDA cannot fit one complete device phase");
+        std::unique_lock lock(mutex);
+        // A waiting phase holds no device memory. Ready phases can always
+        // complete within their lease, even if other owners have used VRAM.
+        pending.push_back(&minimum);
+        const auto remove = [&] {
+            pending.erase(std::find(pending.begin(), pending.end(), &minimum));
+            available.notify_all();
+        };
+        try {
+            available.wait(lock, stop, [&] {
+                return pending.front() == &minimum && minimum <= options.workspace_bytes - total.reserved_bytes;
+            });
+        } catch (...) {
+            remove();
+            throw;
+        }
+        remove();
+        cancelled(stop);
+        const auto bytes = std::min(preferred, options.workspace_bytes - total.reserved_bytes);
+        total.reserved_bytes += bytes;
+        total.peak_reserved_bytes = std::max(total.peak_reserved_bytes, total.reserved_bytes);
+        return bytes;
+    }
+
     void release(std::size_t bytes) noexcept {
 #if DATAPUMP_TRIAD_TENSOR_CUDA
         if (bytes && device.is_cuda() && std::uncaught_exceptions()) {
@@ -239,15 +289,23 @@ struct Arena {
             }
         }
 #endif
-        std::lock_guard lock(mutex);
-        total.reserved_bytes -= bytes;
+        {
+            std::lock_guard lock(mutex);
+            total.reserved_bytes -= bytes;
+        }
+        available.notify_all();
     }
 
-    BulkReceipt receipt() const {
-        std::lock_guard lock(mutex);
-        auto out = total;
+    BulkReceipt receipt(bool query_runtime = true, const BulkReceipt* work = nullptr) const {
+        BulkReceipt out;
+        {
+            std::lock_guard lock(mutex);
+            out = total;
+            out.device_admission_waiters = pending.size();
+            if (work) add_work(out, *work);
+        }
 #if DATAPUMP_TRIAD_TENSOR_CUDA
-        if (device.is_cuda()) {
+        if (query_runtime && device.is_cuda()) {
             const auto stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device.index());
             out.allocator_live_bytes = stats.allocated_bytes[0].current;
             out.allocator_reserved_bytes = stats.reserved_bytes[0].current;
@@ -255,13 +313,15 @@ struct Arena {
             out.allocator_peak_reserved_bytes = stats.reserved_bytes[0].peak;
             out.fft_plan_cache_count = at::detail::getCUDAHooks().cuFFTGetPlanCacheSize(device.index());
         }
+#else
+        (void)query_runtime;
 #endif
         return out;
     }
 };
 
-std::shared_ptr<Arena> arena_for(const TensorReceiverOptions& options) {
-    if (options.device == TensorDevice::cpu) return std::make_shared<Arena>(options);
+std::shared_ptr<Arena> arena_for(const TensorReceiverOptions& options, bool automatic) {
+    if (options.device == TensorDevice::cpu) return std::make_shared<Arena>(options, false);
     // CUDA's allocator limit is process/device scoped. Every receiver using
     // this device shares one charge instead of multiplying the configured cap.
     static std::mutex mutex;
@@ -269,43 +329,88 @@ std::shared_ptr<Arena> arena_for(const TensorReceiverOptions& options) {
     std::lock_guard lock(mutex);
     auto& existing = devices[options.device_index];
     if (auto arena = existing.lock()) {
-        require(arena->options.workspace_bytes == options.workspace_bytes,
+        require(automatic || arena->options.workspace_bytes == options.workspace_bytes,
                 "active Robust CUDA receivers must agree on the device workspace");
         return arena;
     }
-    auto arena = std::make_shared<Arena>(options);
+    auto arena = std::make_shared<Arena>(options, automatic);
     existing = arena;
     return arena;
 }
 
-class Charge {
+class TensorWorkspace {
 public:
-    Charge() = default;
-    Charge(std::shared_ptr<Arena> arena, std::size_t bytes) : arena_(std::move(arena)), bytes_(bytes) {
-        if (!arena_->reserve(bytes_))
-            throw ReceiverWorkspaceError("Robust tensor operation exceeds the shared workspace");
+    TensorWorkspace(std::shared_ptr<Arena> arena, bool leased) : arena_(std::move(arena)), leased_(leased) {}
+    ~TensorWorkspace() { if (limit_) arena_->release(limit_); }
+
+    bool leased() const noexcept { return leased_; }
+    bool fits(std::size_t bytes) const {
+        std::lock_guard lock(mutex_);
+        return bytes <= limit_ - used_;
     }
-    Charge(Charge&& other) noexcept : arena_(std::move(other.arena_)), bytes_(other.bytes_) {}
-    Charge& operator=(Charge&& other) noexcept {
-        if (arena_) arena_->release(bytes_);
-        arena_ = std::move(other.arena_);
-        bytes_ = other.bytes_;
-        return *this;
+
+    void begin(std::size_t minimum, std::size_t preferred, std::stop_token stop) {
+        if (!leased_) return;
+        std::lock_guard lock(mutex_);
+        require(!used_, "Robust CUDA cannot replace a lease with resident device buffers");
+        if (limit_) arena_->release(std::exchange(limit_, 0));
+        limit_ = arena_->admit(minimum, preferred, stop);
     }
-    ~Charge() { if (arena_) arena_->release(bytes_); }
+
+    bool reserve(std::size_t bytes) {
+        if (!leased_) return arena_->reserve(bytes);
+        std::lock_guard lock(mutex_);
+        if (bytes > limit_ - used_) return false;
+        used_ += bytes;
+        return true;
+    }
+
+    void release(std::size_t bytes) noexcept {
+        if (leased_) {
+            std::lock_guard lock(mutex_);
+            used_ -= bytes;
+        } else arena_->release(bytes);
+    }
 
 private:
     std::shared_ptr<Arena> arena_;
+    const bool leased_;
+    mutable std::mutex mutex_;
+    std::size_t limit_ = 0, used_ = 0;
+};
+
+class Charge {
+public:
+    Charge() = default;
+    Charge(std::shared_ptr<TensorWorkspace> workspace, std::size_t bytes)
+        : workspace_(std::move(workspace)), bytes_(bytes) {
+        if (!workspace_->reserve(bytes_))
+            throw ReceiverWorkspaceError("Robust tensor operation exceeds the shared workspace");
+    }
+    Charge(Charge&& other) noexcept : workspace_(std::move(other.workspace_)), bytes_(other.bytes_) {}
+    Charge& operator=(Charge&& other) noexcept {
+        if (workspace_) workspace_->release(bytes_);
+        workspace_ = std::move(other.workspace_);
+        bytes_ = other.bytes_;
+        return *this;
+    }
+    ~Charge() { if (workspace_) workspace_->release(bytes_); }
+
+private:
+    std::shared_ptr<TensorWorkspace> workspace_;
     std::size_t bytes_ = 0;
 };
 
 class TensorContext {
 public:
-    TensorContext(std::shared_ptr<Arena> arena, bool precise)
-        : arena(std::move(arena)), precise(precise), type(precise ? at::kComplexDouble : at::kComplexFloat),
+    TensorContext(std::shared_ptr<Arena> arena, std::shared_ptr<BulkReceipt> backend_work,
+                  bool precise, bool leased)
+        : arena(std::move(arena)), workspace(std::make_shared<TensorWorkspace>(this->arena, leased)),
+          precise(precise), type(precise ? at::kComplexDouble : at::kComplexFloat),
           real_type(precise ? at::kDouble : at::kFloat), item_bytes(precise ? 16 : 8),
           options(at::TensorOptions().device(this->arena->device)),
-          complex_options(options.dtype(type)), double_options(options.dtype(at::kDouble))
+          complex_options(options.dtype(type)), double_options(options.dtype(at::kDouble)),
+          backend_work(std::move(backend_work))
 #if DATAPUMP_TRIAD_TENSOR_CUDA
           , stream(this->arena->device.is_cuda()
               ? std::optional(c10::cuda::getStreamFromPool(false, this->arena->device.index()))
@@ -339,7 +444,7 @@ public:
             work.wall_seconds += std::chrono::duration<double>(Clock::now() - began_).count();
             add_work(context_.local, work);
             std::lock_guard lock(context_.arena->mutex);
-            add_work(context_.arena->total, work);
+            add_work(*context_.backend_work, work);
         }
         BulkReceipt work;
     private:
@@ -492,12 +597,14 @@ public:
     }
 
     std::shared_ptr<Arena> arena;
+    std::shared_ptr<TensorWorkspace> workspace;
     bool precise;
     at::ScalarType type, real_type;
     std::size_t item_bytes;
     at::TensorOptions options, complex_options, double_options;
 
 private:
+    std::shared_ptr<BulkReceipt> backend_work;
     mutable std::mutex mutex;
     BulkReceipt local;
 #if DATAPUMP_TRIAD_TENSOR_CUDA
@@ -512,13 +619,43 @@ struct Filter final : CoarseBulkFilter {
     at::Tensor spectrum;
 
     Filter(const TensorContext& context, std::size_t count, std::size_t rows)
-        : owner(&context), taps(count), rows(rows), resident(context.arena, mul(rows, context.item_bytes)) {}
+        : owner(&context), taps(count), rows(rows), resident(context.workspace, mul(rows, context.item_bytes)) {}
 };
 
 class TensorCoarse final : public CoarseBulk {
 public:
-    TensorCoarse(std::shared_ptr<Arena> arena, bool precise, TensorCoarseMath math)
-        : device_(std::move(arena), precise), math_(math) {}
+    TensorCoarse(std::shared_ptr<Arena> arena, std::shared_ptr<BulkReceipt> backend_work,
+                 bool precise, TensorCoarseMath math, bool leased)
+        : device_(std::move(arena), std::move(backend_work), precise, leased), math_(math) {}
+
+    std::string_view precision_reason() const noexcept override {
+        if (device_.workspace->leased() && lag_ && geometry_.lag_count == 1 && groups_.size() == 1)
+            return geometry_.frequency_count == 1 ? "cuda-one-arrival-singleton-dot" : "cuda-one-arrival-chirp-z";
+        return {};
+    }
+
+    void begin_fir_projection(std::size_t maximum_fft_rows, std::size_t maximum_filters,
+                              std::size_t maximum_output_rows, std::stop_token stop) override {
+        if (!device_.workspace->leased()) return;
+        const auto spectrum = mul(maximum_fft_rows, device_.item_bytes);
+        const auto resident = mul(maximum_filters, spectrum);
+        const auto output = mul(maximum_output_rows, 3 * device_.item_bytes);
+        const auto batch = mul(16, spectrum);
+        device_.workspace->begin(add(add(resident, output), batch),
+                                 add(add(resident, output), mul(4, batch)), stop);
+    }
+
+    static std::size_t maximum_frequency_tile_width(const CoarseBulkGeometry& geometry, std::size_t workspaces,
+        std::size_t requested, std::size_t item_bytes, std::size_t capacity) {
+        if (requested <= 1) return requested;
+        const auto bank = mul(mul(workspaces, geometry.taps), geometry.correlation_fft_rows);
+        const auto observation = add(geometry.kernel_rows, geometry.lag_count - 1);
+        const auto resident = resident_bytes(add(add(bank, observation), mul(workspaces, 4)), workspaces, item_bytes);
+        if (resident >= capacity) return 1;
+        const auto one = add(observation_bytes(geometry, 1),
+            frequency_batch_bytes(geometry, 1, frontier_overhead(geometry, 1), item_bytes));
+        return std::clamp((capacity - resident) / one, std::size_t{1}, requested);
+    }
 
     std::shared_ptr<const CoarseBulkFilter> prepare_filter(
         std::span<const double> taps, std::size_t fft_rows, CoarseBulkWork& work, std::stop_token stop) override {
@@ -526,7 +663,7 @@ public:
         TensorContext::Operation op(device_);
         cancelled(stop);
         auto filter = std::make_shared<Filter>(device_, taps.size(), fft_rows);
-        Charge scratch(device_.arena, mul(fft_rows, 12 * device_.item_bytes));
+        Charge scratch(device_.workspace, mul(fft_rows, 12 * device_.item_bytes));
         const auto impulse = device_.upload(taps, at::kDouble, device_.real_type, op.work).to(device_.type);
         filter->spectrum = device_.fft(impulse, fft_rows, false, op.work, &work);
         device_.synchronize(op.work);
@@ -546,7 +683,7 @@ public:
         const auto output_stop = add(crop.first_output, crop.output_rows);
         (void)add(crop.output_origin, mul(output_stop - 1, crop.output_stride));
         const auto output_bytes = mul(crop.output_rows, device_.item_bytes);
-        Charge output_charge(device_.arena, mul(output_bytes, 3));
+        Charge output_charge(device_.workspace, mul(output_bytes, 3));
         auto output = at::zeros({dim(crop.output_rows)}, device_.complex_options);
         struct Job {
             std::size_t first, rows, out_first, out_stop;
@@ -637,9 +774,31 @@ public:
             matrix_bytes = add(matrix_bytes, mul(mul(geometry.kernel_rows, group.frequencies), sizeof(Complex) / 2));
         }
         require(!lag_ || covered == geometry.frequency_count, "Robust tensor lag groups do not cover the full grid");
-        const auto bytes = add(mul(resident, device_.item_bytes), mul(bank.size(), 48));
-        resident_ = Charge(device_.arena, bytes);
-        Charge scratch(device_.arena, add(mul(largest_fft, 12 * device_.item_bytes), 2 * maximum_upload_bytes));
+        const auto bytes = resident_bytes(resident, bank.size(), device_.item_bytes);
+        const auto preparation = add(mul(largest_fft, 12 * device_.item_bytes), 2 * maximum_upload_bytes);
+        if (device_.workspace->leased()) {
+            // The FIR owner has released its spectra. Quote the resident bank
+            // together with scratch for a complete scoring batch before any
+            // new upload, so no owner can wait while pinning its bank.
+            std::size_t shared, batch, preferred_width;
+            if (lag_) {
+                shared = mul(mul(geometry.frequency_count, geometry.lag_count), 3 * sizeof(double));
+                batch = lag_batch_bytes(geometry, largest_fft);
+                preferred_width = std::min<std::size_t>(32, geometry.lag_count);
+            } else {
+                const auto width = geometry.frequency_tile_width ? geometry.frequency_tile_width
+                                                                 : geometry.frequency_count;
+                require(width <= geometry.frequency_count, "invalid Robust CUDA frequency tile width");
+                shared = observation_bytes(geometry, width);
+                batch = frequency_batch_bytes(geometry, width, frontier_overhead(geometry, width), device_.item_bytes);
+                preferred_width = std::min(maximum_batch, bank.size());
+            }
+            const auto minimum = add(bytes, std::max(preparation, add(shared, batch)));
+            const auto preferred = add(bytes, std::max(preparation, add(shared, mul(batch, preferred_width))));
+            device_.workspace->begin(minimum, preferred, stop);
+        }
+        resident_ = Charge(device_.workspace, bytes);
+        Charge scratch(device_.workspace, preparation);
         geometry_ = geometry;
         count_ = bank.size();
         matrix_fallback_ = matrix_policy_reason(geometry, matrix_bytes);
@@ -679,8 +838,8 @@ public:
                     } else {
                         const auto values = mul(geometry.kernel_rows, group.frequencies);
                         try {
-                            prepared.matrix_charge = Charge(device_.arena, mul(values, device_.item_bytes));
-                            Charge temporary(device_.arena, add(mul(values, sizeof(std::int64_t) + device_.item_bytes),
+                            prepared.matrix_charge = Charge(device_.workspace, mul(values, device_.item_bytes));
+                            Charge temporary(device_.workspace, add(mul(values, sizeof(std::int64_t) + device_.item_bytes),
                                 mul(geometry.kernel_rows + group.frequencies, sizeof(std::int64_t))));
                             const auto indices = at::remainder(
                                 at::arange(dim(group.frequencies), device_.options.dtype(at::kLong)).unsqueeze(0) -
@@ -728,7 +887,7 @@ public:
         require(separation && static_cast<bool>(sink), "invalid Robust tensor frequency peak geometry");
         // Include a possible contiguous score copy plus the fixed packed
         // output. Both remain charged through the blocking frontier readback.
-        const auto extra = mul(frequencies.size(), add(mul(geometry_.lag_count, sizeof(double)), sizeof(CoarseBulkPeaks)));
+        const auto extra = frontier_overhead(geometry_, frequencies.size());
         frequency_scores(frequencies, extra, work, op.work, stop,
             [&](const at::Tensor& scores, std::size_t first, std::size_t width) {
                 publish_peaks(scores, first, width, frequencies.size(), separation, sink, work, op.work, stop);
@@ -754,8 +913,7 @@ public:
         std::size_t largest_fft = window_rows;
         for (const auto& group : groups_) if (group.convolution.defined())
             largest_fft = std::max(largest_fft, static_cast<std::size_t>(group.convolution.numel()));
-        const auto per_lag = add(mul(mul(largest_fft, geometry_.taps), 14 * device_.item_bytes),
-                                 mul(geometry_.frequency_count, 112));
+        const auto per_lag = lag_batch_bytes(geometry_, largest_fft);
         if (has_matrix_) {
             const auto completed = matrix_lag_tile(first_workspace, workspace_count, windows, per_lag,
                                                    sink, work, op.work, stop);
@@ -764,7 +922,7 @@ public:
             if (!workspace_count) return;
         }
         const auto n = mul(geometry_.frequency_count, geometry_.lag_count);
-        Charge output_charge(device_.arena, mul(n, 3 * sizeof(double)));
+        Charge output_charge(device_.workspace, mul(n, 3 * sizeof(double)));
         auto scores = at::empty({1, dim(geometry_.frequency_count), dim(geometry_.lag_count)}, device_.double_options);
         for (std::size_t w = first_workspace; w < first_workspace + workspace_count; ++w) {
             const auto column = bank_.select(0, dim(w)).conj();
@@ -803,6 +961,29 @@ private:
         std::size_t fallback = no_matrix_fallback;
     };
 
+    std::size_t lag_batch_bytes(const CoarseBulkGeometry& geometry, std::size_t fft_rows) const {
+        return add(mul(mul(fft_rows, geometry.taps), 14 * device_.item_bytes), mul(geometry.frequency_count, 112));
+    }
+
+    static std::size_t resident_bytes(std::size_t values, std::size_t workspaces, std::size_t item_bytes) {
+        return add(mul(values, item_bytes), mul(workspaces, 48));
+    }
+
+    static std::size_t observation_bytes(const CoarseBulkGeometry& geometry, std::size_t frequencies) {
+        return mul(mul(frequencies, geometry.correlation_fft_rows), 16 * sizeof(Complex));
+    }
+
+    static std::size_t frontier_overhead(const CoarseBulkGeometry& geometry, std::size_t frequencies) {
+        return mul(frequencies, add(mul(geometry.lag_count, sizeof(double)), sizeof(CoarseBulkPeaks)));
+    }
+
+    static std::size_t frequency_batch_bytes(const CoarseBulkGeometry& geometry, std::size_t frequencies,
+                                             std::size_t extra, std::size_t item_bytes) {
+        const auto spectrum_rows = mul(frequencies, geometry.correlation_fft_rows);
+        return add(add(mul(mul(spectrum_rows, geometry.taps), 12 * item_bytes),
+                       mul(mul(frequencies, geometry.lag_count), 96)), extra);
+    }
+
     template<class Publish>
     void frequency_scores(std::span<const double> frequencies, std::size_t extra_per_workspace,
                           CoarseBulkWork& work, BulkReceipt& receipt, std::stop_token stop, const Publish& publish_scores) {
@@ -811,16 +992,15 @@ private:
         if (math_ != TensorCoarseMath::fft) count(receipt.matrix_fft_fallback_counts[2], 1);
         cancelled(stop);
         const auto fft_rows = geometry_.correlation_fft_rows;
-        const auto spectrum_rows = mul(frequencies.size(), fft_rows);
-        Charge observation_charge(device_.arena, mul(spectrum_rows, 16 * sizeof(Complex)));
+        Charge observation_charge(device_.workspace, observation_bytes(geometry_, frequencies.size()));
         const auto position = at::arange(observation_.size(0), device_.double_options) / geometry_.projected_sample_rate_hz;
         const auto frequency = device_.upload(frequencies, at::kDouble, at::kDouble, receipt);
         auto cycles = -frequency.unsqueeze(1) * position;
         const auto angle = ((cycles - cycles.floor()) * tau).to(device_.real_type);
         const auto rotated = at::complex(angle.cos(), angle.sin()) * observation_;
         const auto spectra = device_.fft(rotated, fft_rows, false, receipt, &work);
-        const auto per_workspace = add(add(mul(mul(spectrum_rows, geometry_.taps), 12 * device_.item_bytes),
-                                           mul(mul(frequencies.size(), geometry_.lag_count), 96)), extra_per_workspace);
+        const auto per_workspace = frequency_batch_bytes(geometry_, frequencies.size(), extra_per_workspace,
+                                                          device_.item_bytes);
         for (std::size_t first = 0; first < count_;) {
             cancelled(stop);
             const auto [width, charge] = admit(std::min(maximum_batch, count_ - first),
@@ -953,7 +1133,7 @@ private:
                 const auto bytes = add(mul(workspaces, score_bytes),
                                        add(mul(rows, per_lag), matrix_scratch_bytes(rows)));
                 try {
-                    return {workspaces, arrivals, Charge(device_.arena, bytes)};
+                    return {workspaces, arrivals, Charge(device_.workspace, bytes)};
                 } catch (const ReceiverWorkspaceError&) {
                     // Reduce arrival width first; if even one cannot fit,
                     // retry a smaller independent-workspace batch.
@@ -1082,7 +1262,7 @@ private:
     std::pair<std::size_t, Charge> admit(std::size_t maximum, const Size& size) const {
         for (auto width = maximum; width; width /= 2) {
             try {
-                return {width, Charge(device_.arena, size(width))};
+                return {width, Charge(device_.workspace, size(width))};
             } catch (const ReceiverWorkspaceError&) {
                 if (width == 1) throw;
             }
@@ -1135,8 +1315,9 @@ private:
 
 class TensorFine final : public FineBulk {
 public:
-    TensorFine(std::shared_ptr<Arena> arena, bool precise, TensorCoarseMath coarse_math)
-        : device_(std::move(arena), precise), coarse_math_(coarse_math) {}
+    TensorFine(std::shared_ptr<Arena> arena, std::shared_ptr<BulkReceipt> backend_work,
+               bool precise, TensorCoarseMath coarse_math, bool leased)
+        : device_(std::move(arena), std::move(backend_work), precise, leased), coarse_math_(coarse_math) {}
 
     void statistics(const FineBulkBlock& block, std::size_t candidate_count, const FineMappingSource& source,
                     std::span<FineBulkStatistics> result, std::stop_token stop) override {
@@ -1173,14 +1354,38 @@ public:
         const auto per_lane = add(add(rows_bytes, projection_bytes), add(map_bytes, add(direct_gram_bytes, owned_gram_bytes)));
         const auto per_candidate = add(mul(columns, per_lane), result_bytes);
         const auto upload_bound = mul(maximum_pins * tile_samples, device_.item_bytes);
-        Charge shared(device_.arena, add(add(mul(mode_count, 3 * sizeof(Complex)), 2 * mib), upload_bound));
+        const auto shared_bytes = add(add(mul(mode_count, 3 * sizeof(Complex)), 2 * mib), upload_bound);
+        std::size_t gram_bytes = 0;
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        if (cuda && !direct_gram) gram_bytes = CudaComplexMatrix::gram_workspace_bytes();
+#endif
+        if (device_.workspace->leased()) {
+            const auto shared_minimum = add(add(shared_bytes, gram_bytes), per_candidate);
+            if (!device_.workspace->fits(add(shared_minimum, cache_slots_ ? 0 : upload_bound))) {
+                // No previous block's kernels outlive its result download.
+                // Drop optional residents before waiting for a larger lease.
+                bins_.reset();
+                for (auto& offsets : offsets_) offsets.reset();
+                tile_storage_ = at::Tensor{};
+                slots_.clear();
+                cache_charge_ = {};
+                cache_slots_ = 0;
+                const auto desired_candidates = mul(std::min(maximum_batch, candidate_count), per_candidate);
+                const auto descriptor_bytes = add(mul(mode_count, 2 * sizeof(std::int64_t)),
+                                                   mul(std::min(mapping_rows, block.rows), 3 * sizeof(double)));
+                const auto preferred = add(add(shared_bytes, gram_bytes),
+                    add(add(desired_candidates, mul(preferred_cache_slots(), tile_samples * device_.item_bytes)),
+                        descriptor_bytes));
+                device_.workspace->begin(add(shared_minimum, upload_bound), preferred, stop);
+            }
+        }
+        Charge shared(device_.workspace, shared_bytes);
         Charge gram_charge;
         at::Tensor gram_workspace;
 #if DATAPUMP_TRIAD_TENSOR_CUDA
-        if (cuda && !direct_gram) {
-            const auto bytes = CudaComplexMatrix::gram_workspace_bytes();
-            gram_charge = Charge(device_.arena, bytes);
-            gram_workspace = at::empty({dim(bytes)}, device_.options.dtype(at::kByte));
+        if (gram_bytes) {
+            gram_charge = Charge(device_.workspace, gram_bytes);
+            gram_workspace = at::empty({dim(gram_bytes)}, device_.options.dtype(at::kByte));
             if (!gram_) gram_ = std::make_unique<CudaComplexMatrix>();
         }
 #endif
@@ -1414,7 +1619,7 @@ private:
         for (const auto index : block.projection_indices) indices.push_back(dim(index));
         auto next = std::make_unique<DescriptorCache<std::size_t>>();
         try {
-            next->charge = Charge(device_.arena, mul(block.projection_indices.size(), sizeof(std::int64_t)));
+            next->charge = Charge(device_.workspace, mul(block.projection_indices.size(), sizeof(std::int64_t)));
         } catch (const ReceiverWorkspaceError&) {
             // The operation's shared projection bound already covers one
             // transient index tensor. Caching must not become an admission
@@ -1445,7 +1650,7 @@ private:
         }
         auto next = std::make_unique<DescriptorCache<double>>();
         try {
-            next->charge = Charge(device_.arena, positions.size_bytes());
+            next->charge = Charge(device_.workspace, positions.size_bytes());
         } catch (const ReceiverWorkspaceError&) {
             // The admitted mapped batch already prices this transient tensor.
             count(work.mapping_offset_cache_uploads, 1);
@@ -1462,7 +1667,7 @@ private:
     std::pair<std::size_t, Charge> admit(std::size_t maximum, std::size_t per_candidate) {
         for (auto width = maximum; width; width /= 2) {
             try {
-                return {width, Charge(device_.arena, mul(width, per_candidate))};
+                return {width, Charge(device_.workspace, mul(width, per_candidate))};
             } catch (const ReceiverWorkspaceError&) {
                 if (width == 1) {
                     if (!bins_ && !offsets_[0] && !offsets_[1]) throw;
@@ -1471,23 +1676,28 @@ private:
                     // by the shared transient projection reservation.
                     bins_.reset();
                     for (auto& offsets : offsets_) offsets.reset();
-                    return {1, Charge(device_.arena, per_candidate)};
+                    return {1, Charge(device_.workspace, per_candidate)};
                 }
             }
         }
         throw ReceiverWorkspaceError("Robust tensor fine operation cannot admit one candidate");
     }
 
+    std::size_t preferred_cache_slots() const {
+        return std::clamp(device_.arena->options.workspace_bytes / 8 / (tile_samples * device_.item_bytes),
+                          maximum_pins, std::size_t{256});
+    }
+
     void reserve_cache(std::size_t one_candidate) {
         if (cache_slots_) return;
         // Price one actual candidate before choosing the resident cache.
         // Hold the resulting cache lease across every later batch admission.
-        Charge minimum_batch(device_.arena, one_candidate);
+        Charge minimum_batch(device_.workspace, one_candidate);
         const auto tile_bytes = tile_samples * device_.item_bytes;
-        auto slots = std::clamp(device_.arena->options.workspace_bytes / 8 / tile_bytes, maximum_pins, std::size_t{256});
+        auto slots = preferred_cache_slots();
         for (;;) {
             try {
-                cache_charge_ = Charge(device_.arena, mul(slots, tile_bytes));
+                cache_charge_ = Charge(device_.workspace, mul(slots, tile_bytes));
                 break;
             } catch (const ReceiverWorkspaceError&) {
                 if (slots == maximum_pins) throw;
@@ -1604,17 +1814,46 @@ private:
 
 class TensorBackend final : public ReceiverBulkBackend {
 public:
-    explicit TensorBackend(const TensorReceiverOptions& options)
-        : arena_(arena_for(options)), precision_(options.precision), coarse_math_(options.coarse_math) {
+    explicit TensorBackend(const TensorReceiverOptions& options, bool automatic = false)
+        : arena_(arena_for(options, automatic)), precision_(options.precision),
+          coarse_math_(options.coarse_math), automatic_(automatic) {
         (void)coarse_math_name(coarse_math_);
     }
 
+    bool supports_exact_device_chirp_z() const noexcept override { return automatic_; }
+
+    std::string_view fine_fallback_reason(const FineBulkGeometry& geometry) const noexcept override {
+        // Small independent transforms and sparse projections lose their
+        // advantage to the synchronous per-block CUDA preparation/readback.
+        // Keep the native route within the measured AVX2 worker/shape class.
+        if (automatic_ && precision_ == TensorPrecision::automatic && geometry.native_avx2 &&
+            geometry.workers >= 32 && geometry.taps == 1 &&
+            geometry.maximum_block_rows && geometry.maximum_block_rows <= 512 &&
+            geometry.maximum_projection_modes && geometry.maximum_projection_modes <= 40)
+            return small_fine_fallback;
+        return {};
+    }
+
+    void record_native_fine(std::string_view reason) override {
+        require(reason == small_fine_fallback, "invalid native fine routing reason for Robust CUDA");
+        std::lock_guard lock(arena_->mutex);
+        count(work_->native_fine_sessions, 1);
+    }
+
     std::unique_ptr<FineBulk> make_fine(double rate, double clock_span) override {
-        return std::make_unique<TensorFine>(arena_, precise(rate, clock_span), coarse_math_);
+        return std::make_unique<TensorFine>(arena_, work_, precise(rate, clock_span), coarse_math_, automatic_);
     }
 
     std::unique_ptr<CoarseBulk> make_coarse(double rate, double clock_span) override {
-        return std::make_unique<TensorCoarse>(arena_, precise(rate, clock_span), coarse_math_);
+        return std::make_unique<TensorCoarse>(arena_, work_, precise(rate, clock_span), coarse_math_, automatic_);
+    }
+
+    std::size_t maximum_frequency_tile_width(const CoarseBulkGeometry& geometry, std::size_t workspaces,
+        std::size_t requested_width, double clock_span) const override {
+        if (!automatic_) return requested_width;
+        const auto item_bytes = precise(geometry.projected_sample_rate_hz, clock_span) ? 16 : 8;
+        return TensorCoarse::maximum_frequency_tile_width(geometry, workspaces, requested_width, item_bytes,
+            arena_->options.workspace_bytes - arena_->existing_allocations);
     }
 
     std::size_t fine_host_bytes(std::size_t block_rows, std::size_t taps) const override {
@@ -1645,14 +1884,19 @@ public:
         return add(add(add(scores, staging), matrix_metadata), arena_->device.is_cpu() ? arena_->options.workspace_bytes : 0);
     }
 
-    BulkReceipt receipt() const override {
-        auto report = arena_->receipt();
+    BulkReceipt receipt() const override { return report(true); }
+    BulkReceipt status_receipt() const override { return report(false); }
+
+private:
+    BulkReceipt report(bool query_runtime) const {
+        auto report = arena_->receipt(query_runtime, work_.get());
         report.precision = precision_ == TensorPrecision::fp64 ? "fp64" : "automatic";
         report.requested_coarse_math = coarse_math_name(coarse_math_);
+        if (automatic_) report.selection_reason = "cuda-discrete-gpu";
+        if (report.native_fine_sessions) report.native_fine_fallback_reason = small_fine_fallback;
         return report;
     }
 
-private:
     bool precise(double rate, double clock_span) const {
         require(std::isfinite(rate) && rate > 0 && std::isfinite(clock_span) && clock_span >= 0,
                 "invalid Robust tensor public precision geometry");
@@ -1662,6 +1906,8 @@ private:
     std::shared_ptr<Arena> arena_;
     TensorPrecision precision_;
     TensorCoarseMath coarse_math_;
+    bool automatic_;
+    std::shared_ptr<BulkReceipt> work_ = std::make_shared<BulkReceipt>();
 };
 
 } // namespace
@@ -1678,6 +1924,57 @@ std::shared_ptr<receiver_detail::ReceiverBulkBackend> make_tensor_receiver_backe
                 std::string(error.what_without_backtrace()).substr(0, 512));
         throw;
     }
+}
+
+std::shared_ptr<receiver_detail::ReceiverBulkBackend> make_automatic_cuda_receiver_backend(TensorPrecision precision) {
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+    int count = 0;
+    if (const auto status = cudaGetDeviceCount(&count); status != cudaSuccess)
+        throw TensorBackendUnavailable("Robust CUDA device discovery failed: " + std::string(cudaGetErrorString(status)));
+
+    struct Candidate {
+        unsigned index;
+        std::uint64_t parallel_clock;
+        std::size_t memory;
+    };
+    std::vector<Candidate> candidates;
+    for (int index = 0; index < count && index <= std::numeric_limits<c10::DeviceIndex>::max(); ++index) {
+        cudaDeviceProp properties{};
+        if (cudaGetDeviceProperties(&properties, index) != cudaSuccess || properties.integrated ||
+            properties.computeMode == cudaComputeModeProhibited) continue;
+        // Rank visible, usable devices with a simple throughput proxy and
+        // then memory capacity. Receiver qualification uses elapsed service.
+        candidates.push_back({static_cast<unsigned>(index),
+            static_cast<std::uint64_t>(properties.multiProcessorCount) * properties.clockRate,
+            properties.totalGlobalMem});
+    }
+    std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+        if (a.parallel_clock != b.parallel_clock) return a.parallel_clock > b.parallel_clock;
+        return a.memory > b.memory;
+    });
+    std::string reason;
+    std::exception_ptr workspace_failure;
+    for (const auto& candidate : candidates) {
+        try {
+            return std::make_shared<receiver_detail::TensorBackend>(
+                TensorReceiverOptions{TensorDevice::cuda, candidate.index, 0, precision, TensorCoarseMath::fft}, true);
+        } catch (const c10::OutOfMemoryError&) {
+            workspace_failure = std::make_exception_ptr(ReceiverWorkspaceError("allocation failed during Robust CUDA initialization"));
+        } catch (const ReceiverWorkspaceError&) {
+            workspace_failure = std::current_exception();
+        } catch (const c10::Error& error) {
+            reason = std::string(error.what_without_backtrace()).substr(0, 512);
+        } catch (const TensorBackendUnavailable& error) {
+            reason = error.what();
+        }
+    }
+    if (workspace_failure) std::rethrow_exception(workspace_failure);
+    if (!reason.empty()) throw TensorBackendUnavailable("Robust CUDA initialization failed: " + reason);
+    throw TensorBackendUnavailable("No compatible discrete CUDA device is available");
+#else
+    (void)precision;
+    throw TensorBackendUnavailable("Robust CUDA requested with a CPU-only LibTorch backend");
+#endif
 }
 
 } // namespace datapump::triad::v3

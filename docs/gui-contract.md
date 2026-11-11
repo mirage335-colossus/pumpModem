@@ -40,7 +40,7 @@ See [current architecture](robust-current.md) and
 | Target SNR dB/1Hz | One shared C/N0 target, default 32 dB-Hz, for provisional duration planning; separate from actual simulated C/N0. |
 | Error correction | Configured Off, RS20 or RS60 native short/long text profiles. Raw bits bypass text coding and FEC exactly. |
 | Search arithmetic | Default selects qualified automatic routing; FP32 minimum selects FP32 products/FFT with higher-precision guards; FP64 force selects its native CPU reference policy. Sensitive stages retain higher precision. |
-| GPU | Optional native Vulkan DATA coarse processing, shared by live reception and simulation, with a scoped native chirp-Z crossover in Default mode; GPU remains off by default. |
+| GPU | Optional native CUDA or Vulkan DATA processing, shared by live reception and simulation; the compiled selector prefers usable CUDA, then a compatible physical Vulkan device. GPU remains off by default. |
 | Simulation | Native emitted waveform through the selected continuous sampled channel and complete native receiver. |
 | Audio device, channel routing, Live/duplex, TX volume, Exclusive | Existing native device service, selected channel layout, capture/playback policy and output gain. |
 | Waterfall, Waveform, Receiver input I/Q | Bounded actual session observations; receiver I/Q is not a substitute TX trace. |
@@ -49,28 +49,52 @@ See [current architecture](robust-current.md) and
 The shared **GPU** checkbox sits immediately left of **Developer**. It defaults
 off, persists with the launch settings as `--gpu yes|no`, and is disabled with
 an explanation outside Robust mode, while busy or closing, or when the build
-has no Vulkan receiver backend. Enabling it initializes an actual GPU on the
-native session manager, away from the UI thread. A requested device failure
-is reported and prevents that session from starting. Once initialized, Default
-may choose the documented native chirp-Z route on the calibrated geometry; its
-actual routing is reported. Turning GPU off explicitly returns to the native CPU path.
+has no native CUDA or Vulkan receiver backend. Enabling it initializes the
+selected physical GPU on the native session manager, away from the UI thread.
+The selector tries usable CUDA first when compiled, then a compatible physical
+Vulkan device. A requested-device failure is reported and prevents that session
+from starting; there is no CPU-as-GPU fallback. The selected device and bounded
+selection/fallback reason are exposed in diagnostics. Turning GPU off explicitly
+returns to the native CPU path.
 
 The [Search arithmetic preference](search-arithmetic.md) persists as
 `--search-arithmetic default|fp32-min|fp64-force`. Automatic native CPU processing
 can use Q15 spectral products with FP32 FFTs, FP32 products or a qualified FP64
-chirp-Z route; sensitive stages retain FP64. FP32 minimum keeps native spectral
-products at FP32 and selects the FP32 Vulkan FFT when GPU is enabled. Combining
-GPU with FP64 force is rejected. The displayed policy is distinct from actual
-per-slot routing and precision in receiver diagnostics/receipts.
+chirp-Z route; sensitive stages retain FP64. With GPU enabled, FP32 minimum
+selects FP32 CUDA bulk work (the current CUDA automatic FFT path already uses
+FP32), with higher precision retained for sensitive stages. Vulkan FP32 minimum
+selects its FP32 search path and disables the Default-only native chirp-Z
+crossover. Combining GPU with FP64 force is explicitly unavailable and rejected.
+The displayed policy is distinct from actual per-slot routing and precision in
+receiver diagnostics/receipts.
 
 GPU readiness identifies the device; positive GPU scored-row evidence identifies
-executed work. Helper, FIR, template generation, native lag/tight-clock routes
-and fine tracking retain their documented CPU processing. One backend and its
-bounded program cache survive repeated transmissions within a settings
-generation; reconfiguration or close releases that generation. The fixed
-256 MiB per-owner GPU ceiling and persistent cache are charged to native
-admission, including shared RAM on an APU. The default `W=2*H` worker budget
-remains intact. This control does not promise a speedup for every geometry; see
+executed work. CUDA performs GPU coarse and bulk fine work when selected by its
+automatic route. Vulkan performs GPU
+frequency-grid search while Helper processing, FIR/template preparation,
+native lag/tight-clock routes, fine tracking and sensitive host scoring retain
+native CPU processing. The CUDA automatic policy also routes qualified small public
+fine blocks through canonical native fine processing while retaining CUDA
+coarse work; its native-fine session count and fallback reason are shown
+separately from arithmetic precision. The supported geometry and bounded
+[complete-stream measurements](validation.md#nvidia-and-intel-gpu-toggle-integration)
+define its qualification; routing alone does not prove acceleration. Receipts and
+diagnostics distinguish backend, executed stage work and fallback/selection
+reason. CUDA workspace admission is shared
+across sessions, bounded by available device memory with runtime headroom, and
+cancellable; status polling uses a cheap receipt query. Automatic Vulkan
+admission discovers a backend-wide workspace budget from available physical
+device memory after runtime headroom, and leases each whole coarse session from
+that shared pool. Diagnostics show current and peak leases, the largest owner
+lease, waiting sessions and any native coarse fallback count. If a geometry
+cannot fit even the smallest admissible Vulkan shape, its coarse work falls
+back to the native CPU path and is reported as `native-vulkan-workspace`, never
+as GPU work. Explicit pinned Vulkan probes may still use their configured
+per-owner limit. Vulkan's bounded persistent program cache remains separately
+charged; on an APU, device allocations count against shared host RAM. Both
+routes preserve the default `W=2*H` worker budget. This control does not promise
+a speedup for every geometry. Actual device and performance qualification is
+recorded separately in [validation](validation.md#native-gui-integration) and
 [measured scope and limits](triad-performance.md#local-radeon-vulkan-processing).
 
 Robust keeps one Target SNR shared by Console, Link Planner and saved

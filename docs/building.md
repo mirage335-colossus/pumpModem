@@ -580,7 +580,9 @@ The opt-in `triad-gpu` workflow requires a preprovisioned self-hosted
 `linux/x64/datapump-cuda` runner and CUDA-enabled C++11-ABI LibTorch. It builds the
 same native stack with `DATAPUMP_TRIAD_TENSOR=ON` and
 `DATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON`. The CUDA implementation requires NVCC
-and the CUDA SDK. The workflow's `cuda_architectures` input applies to both
+and the CUDA SDK. This optional ATen/CUDA backend also enables the GUI's native
+GPU selector; no Python modem or Python runtime is part of the operating path.
+The workflow's `cuda_architectures` input applies to both
 candidate and reference: `native` (default, requires CMake 3.24 or newer),
 `89` for the representative Ada targets, or `120` for Blackwell. Explicit
 choices set `TORCH_CUDA_ARCH_LIST` to `8.9` or `12.0`; `native` clears an inherited
@@ -609,7 +611,13 @@ Its separate receipt and CI summary cannot supply a relative-commit regression
 or capacity pass. CUDA device zero is the visible device; configure
 `CUDA_VISIBLE_DEVICES` on the runner when selection is necessary. This workflow
 does not provision a runner, launch or purchase cloud capacity, or implement a
-Vulkan backend. Use the separate Vulkan recipe below for the local Radeon;
+Vulkan backend. In a CUDA-enabled GUI build, the checkbox uses CUDA first and
+then falls back to a compatible physical Vulkan backend if available. CUDA
+builds require the native LibTorch package plus CUDA toolkit development
+dependencies at configure/build time. Package dependency handling includes CUDA
+toolkit runtime libraries such as `libcudart`; the machine running the app must
+provide a compatible NVIDIA driver (`libcuda` is not bundled). See the optional
+GUI recipe below. Use the separate Vulkan recipe for the local Radeon;
 retain CPU checks separately on the representative Ryzen systems.
 Configured workflow coverage is not evidence of an actual hosted/platform run;
 see [recorded outcomes](validation.md#native-codec-and-measurement-migration).
@@ -657,23 +665,37 @@ Only request that option on a runner with suitable render-device access.
 `--device-index` selects the enumerated physical device; probe receipts identify
 its actual vendor/device, driver and executed work.
 
-For the desktop application, omit `--cli` and build the GUI in a compatible
-development profile, with the same dependency configuration:
+For the desktop application with CUDA acceleration, omit `--cli` and build the
+GUI in a compatible development profile, with the same optional native CUDA
+dependencies and compile coverage (CUDA 12.8 defaults to `89-real;120` unless
+the user explicitly selects architectures):
 
 ```sh
 ./build.sh configure --build-dir build/dev --jobs 2 -- \
+  -DCMAKE_PREFIX_PATH="$LIBTORCH_PREFIX" \
+  -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON \
   -DDATAPUMP_TRIAD_VULKAN=ON -DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=OFF
 cmake --build build/dev --target datapump-gui --parallel 2
 ./build/dev/datapump-gui
 ```
 
+The GUI then probes CUDA on its native session-manager thread and selects it
+before Vulkan when a usable compiled device is present. CUDA performs coarse and
+fine bulk work. It shares bounded, cancellable GPU workspace across sessions
+and reports the selected backend and fallback reason. GPU enablement does not
+make a CPU fallback appear as GPU execution. The host system supplies the
+compatible NVIDIA driver; the packaged application carries toolkit runtime
+dependencies required by the build. CUDA is optional and the default build
+does not require Torch or Python.
+
 Select Robust Modem and use the **GPU** checkbox immediately left of Developer.
-It defaults off and persists as `--gpu yes|no`; CPU-only builds keep the control
-disabled with an explanation. Requested GPU initialization failures are reported
-without silently starting a CPU session. See the [shared GUI contract](gui-contract.md).
+It defaults off and persists as `--gpu yes|no`; builds with neither CUDA nor
+Vulkan keep the control disabled with an explanation. Requested GPU
+initialization failures are reported without silently starting a CPU session.
+The generic selector tries usable CUDA first, then compatible physical Vulkan.
 Search arithmetic Default selects qualified automatic CPU/GPU routing, including
-the scoped GUI native chirp-Z crossover; FP32 minimum selects native FP32
-products or the FP32 Vulkan FFT, and GPU plus FP64 force is rejected. The compiled
+the scoped Vulkan GUI native chirp-Z crossover; FP32 minimum selects FP32 CUDA
+bulk work or the FP32 Vulkan search route, and GPU plus FP64 force is rejected. The compiled
 `test_triad_vulkan` also supports a [CPU-only precision comparison](triad-performance.md#native-cpu-arithmetic-comparison)
 that does not create a Vulkan device, although building this target still needs
 the optional Vulkan development dependencies.

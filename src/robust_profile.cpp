@@ -1,5 +1,6 @@
 #include "datapump/robust_profile.hpp"
 
+#include "datapump/triad_acceleration.hpp"
 #include "datapump/tuning.hpp"
 
 #include <algorithm>
@@ -126,18 +127,14 @@ std::vector<double> illustrated_hops(const Settings& settings, double bandwidth)
 }
 
 bool gpu_receiver_available() noexcept {
-#if defined(DATAPUMP_HAVE_TRIAD_VULKAN)
-    return true;
-#else
-    return false;
-#endif
+    return triad::v3::gpu_receiver_backend_available();
 }
 
 void validate_settings(const Settings& s) {
-    check(!s.gpu || gpu_receiver_available(), "GPU reception is unavailable in this build (Vulkan support required)");
+    check(!s.gpu || gpu_receiver_available(), "GPU reception is unavailable in this build (CUDA or Vulkan support required)");
     modem::validate(s.transfer.modem);
     check(!s.gpu || s.transfer.modem.search_arithmetic != modem::SearchArithmetic::fp64,
-          "FP64 force cannot be combined with the Vulkan GPU receiver; disable GPU or select automatic/FP32 minimum");
+          "FP64 force cannot be combined with the GPU receiver; disable GPU or select automatic/FP32 minimum");
     const auto fs = s.transfer.modem.sample_rate;
     check(fs <= 192000 && fs % 5 == 0, "Robust audio rate must be a multiple of five up to 192 kHz");
     check(s.transfer.modem.carrier_hz > 0 && s.transfer.modem.carrier_hz < fs / 2.,

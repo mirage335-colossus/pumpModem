@@ -63,7 +63,10 @@ testing; this preference is not a universal speed claim or permission to spend.
 
 Performance tests must support the [representative receiver targets](docs/triad-performance.md#representative-receiver-hardware):
 RTX 4090 desktop, RTX 4090 Laptop, RTX 4060 Ti **16 GB**, and Ryzen 5 PRO
-5650U / Ryzen 7 8840U CPU and integrated-graphics systems. These operating
+5650U / Ryzen 7 8840U CPU and integrated-graphics systems. The native GUI GPU
+selector also targets RTX 5090, RTX PRO 6000 Blackwell and Intel i9-9900K/UHD 630.
+Keep actual-device qualification distinct from compatible builds and forced
+feature-path checks; no Intel test host is currently available. These operating
 targets do not replace the development-GPU preference. Record the actual
 processor, memory, runtime and executed arithmetic; a target label, compatible
 build or CPU fallback is not a GPU measurement. Keep unavailable AMD GPU paths

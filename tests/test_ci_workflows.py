@@ -85,8 +85,8 @@ class Workflows(unittest.TestCase):
         self.assertIn('runs-on: [self-hosted, linux, x64, datapump-cuda]', source)
         self.assertIn('-DDATAPUMP_TRIAD_TENSOR=ON', source)
         self.assertIn('-DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON', source)
-        self.assertIn('--target triad_receiver_probe test_triad_tensor_cuda', source)
-        self.assertIn("-R '^triad_tensor_cuda$' --no-tests=error", source)
+        self.assertIn('--target triad_receiver_probe test_triad_tensor_cuda test_triad_tensor_cuda_automatic test_gui_robust_live', source)
+        self.assertIn("-R '^(triad_tensor_cuda|triad_tensor_cuda_automatic|gui_robust_gpu|gui_robust_gpu_fp32|gui_robust_gpu_unavailable)$' --no-tests=error", source)
         self.assertIn('--backend cuda --require-accelerator on', source)
         self.assertIn('--device cuda', source)
         self.assertNotRegex(source, r'pip install|continue-on-error|--device cpu|runpodctl')
@@ -102,6 +102,7 @@ class Workflows(unittest.TestCase):
         commands.mkdir()
         reference_dir = directory / 'triad-cuda-reference'
         reference_dir.mkdir()
+        (directory / 'build/triad-cuda').mkdir(parents=True)
         libtorch = directory / 'libtorch'
         libtorch.mkdir()
         recorder = f'#!{os.sys.executable}\n' + '''import json, os, sys
@@ -112,8 +113,9 @@ with open(os.environ['COMMAND_LOG'], 'a') as output:
 if Path(sys.argv[0]).name == 'cmake' and sys.argv[1:] == ['--version']:
     print('cmake version ' + os.environ.get('CMAKE_TEST_VERSION', '3.31.6'))
 '''
-        for path in (commands / 'cmake', commands / 'git', commands / 'python',
-                     directory / 'build.sh', reference_dir / 'build.sh'):
+        for path in (commands / 'cmake', commands / 'ctest', commands / 'git', commands / 'python',
+                     directory / 'build.sh', reference_dir / 'build.sh',
+                     directory / 'build/triad-cuda/triad_receiver_probe'):
             path.write_text(recorder)
             path.chmod(0o700)
         log = directory / 'commands.jsonl'
@@ -124,6 +126,32 @@ if Path(sys.argv[0]).name == 'cmake' and sys.argv[1:] == ['--version']:
                             'MATRIX_CASE': '0', 'DEVICE_WORKSPACE_MIB': '2048',
                             'TORCH_CUDA_ARCH_LIST': 'stale-inherited-value'}
         return env, log
+
+    @unittest.skipIf(os.name == 'nt', 'The CUDA workflow shell is Bash')
+    def test_gpu_workflow_builds_and_runs_automatic_and_gui_session_checks(self):
+        source = (WORKFLOWS / 'triad-gpu.yml').read_text()
+        build = workflow_run(source, 'Build native CUDA receiver and correctness checks')
+        actual = workflow_run(source, 'Require actual CUDA execution, automatic arithmetic and GUI session checks')
+        self.assertIn('test_triad_tensor_cuda_automatic', build)
+        self.assertIn('test_gui_robust_live', build)
+        self.assertIn('--cuda-automatic', (ROOT / 'cmake/TriadTensor.cmake').read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            env, log = self.gpu_fixture(directory)
+            for script in (build, actual):
+                result = subprocess.run(['bash', '-e', '-c', script], cwd=directory, env=env,
+                                        capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+            rows = [json.loads(line) for line in log.read_text().splitlines()]
+            cmake_builds = [row['argv'] for row in rows if row['name'] == 'cmake' and row['argv'][:2] ==
+                            ['--build', 'build/triad-cuda']]
+            self.assertEqual(len(cmake_builds), 1)
+            for target in ('triad_receiver_probe', 'test_triad_tensor_cuda',
+                           'test_triad_tensor_cuda_automatic', 'test_gui_robust_live'):
+                self.assertIn(target, cmake_builds[0])
+            checks = [row['argv'] for row in rows if row['name'] == 'ctest']
+            self.assertEqual(checks, [['--test-dir', 'build/triad-cuda', '--output-on-failure',
+                                      '-R', '^(triad_tensor_cuda|triad_tensor_cuda_automatic|gui_robust_gpu|gui_robust_gpu_fp32|gui_robust_gpu_unavailable)$',
+                                      '--no-tests=error']])
 
     @unittest.skipIf(os.name == 'nt', 'The Linux workflow shell is Bash')
     def test_gpu_candidate_and_reference_use_the_same_validated_architecture(self):
@@ -262,7 +290,7 @@ if Path(sys.argv[0]).name == 'cmake' and sys.argv[1:] == ['--version']:
         self.assertIn('-DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=OFF', source)
         self.assertIn('-DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON', source)
         self.assertIn("-R '^triad_vulkan_plan$' --no-tests=error", source)
-        self.assertIn("-R '^triad_vulkan$' --no-tests=error", source)
+        self.assertIn("-R '^(triad_vulkan|triad_vulkan_host_scoring|triad_vulkan_workspace_admission|gui_robust_gpu|gui_robust_gpu_fp32|gui_robust_gpu_unavailable)$' --no-tests=error", source)
         self.assertIn('test_triad_vulkan --plan', source)
         self.assertIn('test_triad_vulkan --plan-wide', source)
         self.assertIn('test_triad_vulkan --benchmark', source)
@@ -284,8 +312,8 @@ if Path(sys.argv[0]).name == 'cmake' and sys.argv[1:] == ['--version']:
             ('build-and-plan', 'Build Vulkan backend and CPU plan check'),
             ('build-and-plan', 'Check bounded native search geometry without device execution'),
             ('actual-gpu', 'Configure Vulkan with required actual GPU execution'),
-            ('actual-gpu', 'Build native Vulkan receiver tests'),
-            ('actual-gpu', 'Require numerical correctness on the actual Vulkan GPU'),
+            ('actual-gpu', 'Build native Vulkan and GUI receiver tests'),
+            ('actual-gpu', 'Require Vulkan, GUI-session and host-scoring checks on the actual GPU'),
             ('actual-gpu', 'Measure bounded native full frequency search'),
             ('actual-gpu', 'Measure bounded native wide frequency search'),
         )
@@ -342,18 +370,22 @@ elif name == 'triad_receiver_probe':
             self.assertEqual(len(vulkan_configures), 2)
             self.assertIn('-DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=OFF', vulkan_configures[0]['argv'])
             self.assertIn('-DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON', vulkan_configures[1]['argv'])
+            builds = [row for row in rows if row['name'] == 'cmake' and row['argv'][:2] == ['--build', 'build/triad-vulkan']]
+            self.assertEqual(len(builds), 2)
+            self.assertIn('test_gui_robust_live', builds[1]['argv'])
+            self.assertIn('test_triad_vulkan', builds[1]['argv'])
             checks = [row for row in rows if row['name'] == 'ctest']
             self.assertEqual(len(checks), 2)
             self.assertEqual(checks[0]['argv'], ['--test-dir', 'build/triad-vulkan', '--output-on-failure',
                                                 '-R', '^triad_vulkan_plan$', '--no-tests=error'])
             self.assertEqual(checks[1]['argv'], ['--test-dir', 'build/triad-vulkan', '--output-on-failure',
-                                                '-R', '^triad_vulkan$', '--no-tests=error'])
+                                                '-R', '^(triad_vulkan|triad_vulkan_host_scoring|triad_vulkan_workspace_admission|gui_robust_gpu|gui_robust_gpu_fp32|gui_robust_gpu_unavailable)$', '--no-tests=error'])
             plans = [row for row in rows if row['name'] == 'test_triad_vulkan']
             self.assertEqual([row['argv'] for row in plans],
                              [['--plan'], ['--plan-wide'], ['--benchmark'], ['--benchmark-wide']])
             preflight = workflow_job_run(source, 'actual-gpu', 'Confirm preinstalled Vulkan toolchain')
             self.assertIn('glslangValidator --version', preflight)
-            self.assertIn('/dev/dri/renderD128', preflight)
+            self.assertIn("compgen -G '/dev/dri/renderD*'", preflight)
             self.assertIn('timeout --signal=TERM --kill-after=5s 125s',
                           workflow_job_run(source, 'actual-gpu', 'Measure bounded native full frequency search'))
             wide_benchmark = workflow_job_run(source, 'actual-gpu', 'Measure bounded native wide frequency search')

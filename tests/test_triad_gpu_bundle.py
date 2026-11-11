@@ -42,6 +42,7 @@ class TriadGpuBundleTests(unittest.TestCase):
             "tools/diagnostic_iq_noise_options.hpp": "#pragma once\n",
             "tests/test_triad_tensor.cpp": "int main() {}\n",
             "tests/test_triad_vulkan.cpp": "int main() {}\n",
+            "tests/test_gui_robust_live.cpp": "#include \"datapump/live.hpp\"\nint main() {}\n",
             "tests/test_triad_gpu_workload.py": "VALUE = 4\n",
             "tools/triad_gpu_bank.py": "# retired Python DSP\n",
             "tools/triad_receiver.py": "# retired Python receiver\n",
@@ -159,6 +160,7 @@ class TriadGpuBundleTests(unittest.TestCase):
         self.assertIn("tools/triad_fixture_key.hpp", names)
         self.assertIn("tests/test_triad_tensor.cpp", names)
         self.assertIn("tests/test_triad_vulkan.cpp", names)
+        self.assertIn("tests/test_gui_robust_live.cpp", names)
         self.assertIn("cmake/TriadTensor.cmake", names)
         self.assertIn("cmake/TriadVulkan.cmake", names)
         self.assertIn("third_party/vkfft/UPSTREAM.sha256", names)
@@ -182,7 +184,8 @@ class TriadGpuBundleTests(unittest.TestCase):
         out = self.base / "project.tar.gz"
         bundle.create_bundle(MODULE.parents[1], out)
         pending = ["tools/triad-receiver-probe.cpp", "tools/triad-helper-export.cpp",
-                   "tools/triad-audio-stream.cpp", "tests/test_triad_tensor.cpp", "tests/test_triad_vulkan.cpp"]
+                   "tools/triad-audio-stream.cpp", "tests/test_triad_tensor.cpp",
+                   "tests/test_triad_vulkan.cpp", "tests/test_gui_robust_live.cpp"]
         seen = set()
         with tarfile.open(out, "r:gz") as tar:
             names = set(tar.getnames())

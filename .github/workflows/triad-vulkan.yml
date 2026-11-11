@@ -67,16 +67,16 @@ jobs:
       run: |
         cmake --version
         glslangValidator --version
-        test -e /dev/dri/renderD128
+        compgen -G '/dev/dri/renderD*' > /dev/null
     - name: Configure Vulkan with required actual GPU execution
       run: |
         ./build.sh configure --cli --build-dir build/triad-vulkan --jobs 2 -- -DDATAPUMP_TRIAD_VULKAN=ON -DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON
-    - name: Build native Vulkan receiver tests
+    - name: Build native Vulkan and GUI receiver tests
       run: |
-        cmake --build build/triad-vulkan --target triad_receiver_probe test_triad_vulkan --parallel 2
-    - name: Require numerical correctness on the actual Vulkan GPU
+        cmake --build build/triad-vulkan --target triad_receiver_probe test_triad_vulkan test_gui_robust_live --parallel 2
+    - name: Require Vulkan, GUI-session and host-scoring checks on the actual GPU
       run: |
-        ctest --test-dir build/triad-vulkan --output-on-failure -R '^triad_vulkan$' --no-tests=error
+        ctest --test-dir build/triad-vulkan --output-on-failure -R '^(triad_vulkan|triad_vulkan_host_scoring|triad_vulkan_workspace_admission|gui_robust_gpu|gui_robust_gpu_fp32|gui_robust_gpu_unavailable)$' --no-tests=error
         build/triad-vulkan/triad_receiver_probe describe --backend vulkan --require-accelerator on > build/triad-vulkan-device.json
     - name: Measure bounded native full frequency search
       run: |

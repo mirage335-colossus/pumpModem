@@ -37,7 +37,8 @@ def device_receipt():
                                     "cuda": True, "numerical_threads": 1,
                                     "precision": "automatic", "requested_coarse_math": "fft", "executed": True, "mapped_values": 0,
                                     "statistics_blocks": 4, "fft_calls": 0, "dc_reduction_values": 12,
-                                    "score_rows": 0}},
+                                    "score_rows": 0, "device_admission_waiters": 0,
+                                    "native_fine_sessions": 0, "native_fine_fallback_reason": ""}},
             "phases": [{"name": "fine_work", "work": {}, "wall_seconds": .01, "represented_seconds": 1}],
             "result": {"coordinate_scope": "declared_public_work_coordinate", "stratum": "terminal"}}
 
@@ -51,7 +52,7 @@ def cpu_receipt(command):
     return result
 
 
-def vulkan_bulk_receipt():
+def vulkan_bulk_receipt(*, automatic=False):
     return {"device": "vulkan:0", "device_name": "AMD Radeon Graphics",
             "library_version": "Vulkan 1.4 / Mesa", "precision": "fp32",
             "vulkan": True, "cuda": False, "numerical_threads": 1,
@@ -59,15 +60,50 @@ def vulkan_bulk_receipt():
             "vulkan_vendor_id": 4098, "vulkan_device_id": 5688,
             "vulkan_subgroup_size": 64, "vulkan_float16": True,
             "vulkan_int8": True, "vulkan_integer_dot8_accelerated": False,
-            "unified_memory": True, "workspace_scope": "per_coarse_session",
-            "workspace_limit_bytes": 1 << 29, "vulkan_peak_owner_bytes": 1 << 28,
-            "vulkan_active_sessions": 2, "reserved_bytes": 1 << 30,
-            "allocator_peak_reserved_bytes": 1 << 30,
+            "unified_memory": True, "workspace_scope": "backend_shared" if automatic else "per_coarse_session",
+            "workspace_limit_bytes": (4 << 30) if automatic else (1 << 29),
+            "vulkan_peak_owner_bytes": 3 << 27,
+            "vulkan_shared_workspace_limit_bytes": (4 << 30) if automatic else 0, "vulkan_leased_bytes": 0,
+            "vulkan_peak_leased_bytes": (1 << 30) if automatic else 0,
+            "vulkan_peak_owner_lease_bytes": (1 << 29) if automatic else 0,
+            "vulkan_waiting_sessions": 0, "native_coarse_workspace_sessions": 0,
+            "vulkan_active_sessions": 0, "reserved_bytes": 0,
+            "allocator_peak_reserved_bytes": 3 << 28,
             "host_cache_limit_bytes": 8 << 20, "host_cache_bytes": 2 << 20,
             "host_cache_entries": 2, "vulkan_fft_cache_hits": 1, "vulkan_fft_cache_misses": 1,
             "total_device_bytes": 6 << 30, "executed": True,
             "vulkan_dispatches": 12, "vulkan_arrival_peak_rows": 4,
+            "vulkan_arrival_peak_values": 32, "vulkan_fp32_score_rows": 8,
+            "vulkan_fp16_storage_score_rows": 0,
             "fft_calls": 4, "score_rows": 8}
+
+
+def automatic_gpu_receipt(selected):
+    if selected == "cuda":
+        receipt = device_receipt()
+        bulk = receipt["identity"]["backend_receipt"]
+        bulk["selection_reason"] = "automatic CUDA selection"
+        bulk.update(fft_calls=4, score_rows=32, statistics_blocks=0, mapped_values=0,
+                    native_fine_sessions=1, native_fine_fallback_reason="small-chronological-blocks")
+        receipt["phases"][0].update(name="native_slot", work={"coarse_fft_calls": 4})
+        receipt["result"].update(coordinate_scope="complete_public_selection", stratum="active")
+    else:
+        receipt = device_receipt()
+        receipt["phases"][0].update(name="coarse_tiles",
+                                    work={"route": "frequency_tiles", "native_fallback_reason": "",
+                                          "bulk_frequency_admission": {
+                                              "tile_width": 8, "workspace_batch": 4,
+                                              "device_workspace_bytes": 1 << 29,
+                                              "host_workspace_bytes": 5 << 27,
+                                              "native_fallback_reason": ""}})
+        bulk = vulkan_bulk_receipt(automatic=True)
+        bulk["selection_reason"] = "automatic Vulkan fallback after CUDA unavailable"
+        bulk["precision"] = "fp32_fft_fp64_coordinates_and_scores_native_fir_and_fine"
+        receipt["identity"].update(configured_vulkan_backend=True, backend_receipt=bulk,
+                                   requested_vulkan_precision="automatic")
+    receipt["identity"].update(backend="gpu", selected_accelerator_backend=selected,
+                              require_accelerator=True)
+    return receipt
 
 
 def message_receipt():
@@ -316,6 +352,8 @@ class AbbreviatedTests(unittest.TestCase):
                                   backend_receipt=vulkan_bulk_receipt())
         receipt["phases"][0]["name"] = "coarse_tiles"
         receipt["phases"][0]["work"] = {"route": "frequency_tiles", "native_fallback_reason": ""}
+        # Two pinned owners can exceed a single owner's cap in aggregate.
+        # Their receipt has no automatic shared workspace or lease.
         validate_receipt(receipt, command="continuation", backend="vulkan", returncode=0,
                          expected_require_accelerator=True)
         mutations = (lambda x: x["identity"]["backend_receipt"].update(vulkan=False),
@@ -323,7 +361,10 @@ class AbbreviatedTests(unittest.TestCase):
                      lambda x: x["identity"]["backend_receipt"].update(vulkan_arrival_peak_rows=0),
                      lambda x: x["identity"]["backend_receipt"].update(fft_calls=0),
                      lambda x: x["identity"]["backend_receipt"].update(score_rows=0),
-                     lambda x: x["identity"]["backend_receipt"].update(vulkan_peak_owner_bytes=1 << 30),
+                     lambda x: x["identity"]["backend_receipt"].update(workspace_scope="backend_shared"),
+                     lambda x: x["identity"]["backend_receipt"].update(vulkan_peak_owner_bytes=(1 << 29) + 1),
+                     lambda x: x["identity"]["backend_receipt"].update(allocator_peak_reserved_bytes=1 << 28),
+                     lambda x: x["identity"]["backend_receipt"].update(native_coarse_workspace_sessions=-1),
                      lambda x: x["identity"]["backend_receipt"].update(host_cache_bytes=9 << 20),
                      lambda x: x["identity"]["backend_receipt"].update(host_cache_entries=9),
                      lambda x: x["identity"].update(require_accelerator=False),
@@ -335,6 +376,116 @@ class AbbreviatedTests(unittest.TestCase):
             with self.subTest(mutation=mutate), self.assertRaises(ProbeError):
                 validate_receipt(wrong, command="continuation", backend="vulkan", returncode=0,
                                  expected_require_accelerator=True)
+
+    def test_vulkan_fixed_phase_host_scoring_still_proves_completed_gpu_work(self):
+        receipt = device_receipt()
+        bulk = vulkan_bulk_receipt()
+        bulk.update(vulkan_arrival_peak_rows=0, vulkan_arrival_peak_values=0,
+                    vulkan_host_scored_rows=8,
+                    precision="fp32_fft_fp64_coordinates_and_scores_native_fir_and_fine_fixed_phase_host_fp64_scoring")
+        receipt["identity"].update(backend="vulkan", configured_vulkan_backend=True,
+                                   backend_receipt=bulk, requested_vulkan_precision="automatic")
+        receipt["phases"][0].update(name="coarse_tiles",
+                                    work={"route": "frequency_tiles", "native_fallback_reason": ""})
+        validate_receipt(receipt, command="continuation", backend="vulkan", returncode=0,
+                         expected_require_accelerator=True)
+        for patch in ({"vulkan_host_scored_rows": 7},
+                      {"vulkan_arrival_peak_rows": 1},
+                      {"fft_calls": 0, "vulkan_direct_dot_terms": 0},
+                      {"precision": "unexpected_host_score_path"}):
+            wrong = copy.deepcopy(receipt)
+            wrong["identity"]["backend_receipt"].update(patch)
+            with self.subTest(patch=patch), self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="continuation", backend="vulkan", returncode=0,
+                                 expected_require_accelerator=True)
+
+    def test_automatic_gpu_receipts_identify_actual_accelerator_and_fallback(self):
+        cuda = automatic_gpu_receipt("cuda")
+        validate_receipt(cuda, command="continuation", backend="gpu", returncode=0,
+                         expected_require_accelerator=True)
+        cuda_fine = copy.deepcopy(cuda)
+        cuda_fine_bulk = cuda_fine["identity"]["backend_receipt"]
+        cuda_fine_bulk.update(statistics_blocks=4, mapped_values=24, native_fine_sessions=0,
+                              native_fine_fallback_reason="")
+        validate_receipt(cuda_fine, command="continuation", backend="gpu", returncode=0,
+                         expected_require_accelerator=True)
+        vulkan = automatic_gpu_receipt("vulkan")
+        validate_receipt(vulkan, command="continuation", backend="gpu", returncode=0,
+                         expected_require_accelerator=True)
+        for patch in ({"workspace_scope": "per_coarse_session"},
+                      {"workspace_limit_bytes": (1 << 29)},
+                      {"vulkan_shared_workspace_limit_bytes": 0},
+                      {"vulkan_peak_owner_lease_bytes": (1 << 27)},
+                      {"vulkan_peak_leased_bytes": (5 << 30)},
+                      {"allocator_peak_reserved_bytes": (1 << 30) + 1},
+                      {"vulkan_leased_bytes": (1 << 30) + 1},
+                      {"reserved_bytes": 1}):
+            wrong = copy.deepcopy(vulkan)
+            wrong["identity"]["backend_receipt"].update(patch)
+            with self.subTest(automatic_vulkan_workspace=patch), self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="continuation", backend="gpu", returncode=0,
+                                 expected_require_accelerator=True)
+        self.assertNotEqual(runtime_identity(cuda)["selected_accelerator_backend"],
+                            runtime_identity(vulkan)["selected_accelerator_backend"])
+        for patch in ({"selection_reason": ""}, {"executed": False}):
+            wrong = copy.deepcopy(vulkan)
+            wrong["identity"]["backend_receipt"].update(patch)
+            with self.subTest(patch=patch), self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="continuation", backend="gpu", returncode=0,
+                                 expected_require_accelerator=True)
+        wrong = copy.deepcopy(cuda)
+        wrong["identity"]["backend_receipt"]["vulkan"] = True
+        with self.assertRaises(ProbeError):
+            validate_receipt(wrong, command="continuation", backend="gpu", returncode=0,
+                             expected_require_accelerator=True)
+        for patch in (
+                {"mapped_values": 0, "native_fine_sessions": 1,
+                 "native_fine_fallback_reason": "unrecognized-reason"},
+                {"mapped_values": 0, "native_fine_sessions": 0,
+                 "native_fine_fallback_reason": "small-chronological-blocks"},
+                {"fft_calls": 0, "mapped_values": 0, "native_fine_sessions": 1,
+                 "native_fine_fallback_reason": "small-chronological-blocks"},
+                {"device_admission_waiters": -1}):
+            wrong = copy.deepcopy(cuda)
+            wrong["identity"]["backend_receipt"].update(patch)
+            with self.subTest(patch=patch), self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="continuation", backend="gpu", returncode=0,
+                                 expected_require_accelerator=True)
+        explicit_cuda = copy.deepcopy(cuda)
+        explicit_cuda["identity"].update(backend="cuda")
+        explicit_cuda["identity"].pop("selected_accelerator_backend", None)
+        with self.assertRaises(ProbeError):
+            validate_receipt(explicit_cuda, command="continuation", backend="cuda", returncode=0,
+                             expected_require_accelerator=True)
+
+    def test_automatic_vulkan_workspace_fallback_is_reported_but_not_gpu_work(self):
+        mixed = message_receipt()
+        bulk = vulkan_bulk_receipt(automatic=True)
+        bulk.update(selection_reason="automatic Vulkan fallback after CUDA unavailable",
+                    native_coarse_workspace_sessions=1,
+                    precision="fp32_fft_fp64_coordinates_and_scores_native_fir_and_fine")
+        mixed["identity"].update(backend="gpu", selected_accelerator_backend="vulkan",
+                                 configured_vulkan_backend=True, require_accelerator=True,
+                                 requested_vulkan_precision="automatic", backend_receipt=bulk)
+        mixed["phases"].append({"name": "coarse_prepare", "wall_seconds": 0.01,
+                                "represented_seconds": 1,
+                                "work": {"native_fallback_reason": "native-vulkan-workspace",
+                                         "bulk_frequency_admission": {
+                                             "tile_width": 0, "workspace_batch": 0,
+                                             "device_workspace_bytes": 0, "host_workspace_bytes": 0,
+                                             "native_fallback_reason": "native-vulkan-workspace"}}})
+        validate_receipt(mixed, command="message", backend="gpu", returncode=0,
+                         expected_require_accelerator=True)
+
+        native_only = copy.deepcopy(mixed)
+        native = native_only["identity"]["backend_receipt"]
+        native.update(vulkan_dispatches=0, fft_calls=0, score_rows=0,
+                      vulkan_arrival_peak_rows=0, vulkan_arrival_peak_values=0,
+                      vulkan_fp32_score_rows=0, vulkan_fp16_storage_score_rows=0,
+                      vulkan_host_scored_rows=0, vulkan_direct_dot_terms=0)
+        with self.assertRaises(ProbeError):
+            validate_receipt(native_only, command="message", backend="gpu", returncode=0,
+                             expected_require_accelerator=True)
 
     def test_vulkan_stream_receipt_uses_production_receiver_work_shape(self):
         receipt = message_receipt()
