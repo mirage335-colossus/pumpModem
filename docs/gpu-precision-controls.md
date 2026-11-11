@@ -1,22 +1,83 @@
 # Native receiver precision and CPU forecasting
 
-**Prefer practical lower-precision and tensor-compatible bulk arithmetic when
-it improves qualified operating receiver throughput and test speed.** The intended
-receiver
-normally operates on quiet or mostly quiet spectrum, including FHSS; extreme
-in-band dynamic range is not a general usage requirement. Do not impose FP64
-on all work because one numerical stage needs it. Check the relevant error and
-decision sensitivity with the bounded method in the
-[CPU ceiling workflow](robust-manual-capacity.md#agent-workflow-for-cpu-ceiling-estimates).
+## Automatic mode prioritizes computational ceiling
+
+**Automatic algorithm and arithmetic selection must prioritize the highest
+practical complete-receiver computational ceiling and DSP workspace capacity on
+challenging cases, so reception does not fail through accumulating input
+backlog.** This is the governing CPU/GPU default-selection objective. Optimizing
+an easy case already well below that ceiling, conserving energy, or preserving
+unneeded numerical precision must not take priority over challenging reception.
+This is a design requirement, not a claim that current defaults sustain every
+configuration; current measured limits remain in [validation](validation.md).
+
+The [Default GUI/launch option](search-arithmetic.md) is the user's means of
+obtaining the best supported computational throughput without having to select
+the right arithmetic and computational structure for the available processor.
+FP32-minimum and FP64-force overrides serve exceptional precision needs; their
+availability makes conservative precision an inappropriate automatic-mode goal.
+The intended quiet-spectrum use should rarely need those overrides, but that
+expectation is not a proof about FFT intermediate range, accumulation or
+conditioning. Do not impose FP64 on bulk work because one sensitive stage needs it.
+
+Apply these rules to automatic selection and new optimization work:
+
+- Prefer algorithms and structures with the strongest supported challenging-case
+  capacity, including broad searches, long transforms, unsuccessful candidates
+  and noise-only/failed-Helper work. Consider scaling, workspace admission,
+  parallel batches, preparation overlap and shared-buffer ownership together.
+  Keep every public hypothesis; doing less required reception work is not a
+  throughput improvement.
+- Prefer suitable throughput-oriented arithmetic, including FP32, packed FP16,
+  Q15 or INT8, for that algorithm and hardware. Higher precision needs a
+  worthwhile demonstrated reception, range, conditioning or complete-service
+  benefit, or a documented absence of plausible computational benefit from
+  reducing it. An FP64 algorithm doing much less work can correctly beat a
+  lower-precision algorithm: current scoped chirp-Z selection is such a case.
+  Fewer bits alone do not determine the winner.
+- A neutral or slower easy-case timing must not exclude a lower-precision default
+  whose supported scaling or workspace benefit protects more demanding cases.
+  Do not restrict eligibility to the exact small fixtures measured without a
+  technical reason. Use public geometry, hardware capability and applicable
+  bounds to generalize, stating extrapolation and uncertainty. A plausible
+  unmeasured benefit calls for bounded investigation, not a fabricated speedup
+  or an indefinite higher-precision default justified only by missing tests.
+  Once the evidence supports a better challenging-case tradeoff, select that
+  route automatically throughout its supported range; do not require users to
+  discover an obscure manual kernel or arithmetic choice to obtain it.
+- If documented hardware throughput or credible measurements suggest an advantage
+  that the implementation does not realize, investigate native libraries/driver
+  features, actual dispatch and generated/executed instructions, packing,
+  conversions, layout, batching, occupancy, transfers and synchronization.
+  Correct implementation bottlenecks before declaring the arithmetic or hardware
+  ceiling reached. Half-width storage with FP32 computation is a memory
+  optimization, not evidence of packed FP16 arithmetic; an INT8 contraction is
+  not an INT8 FFT.
+- Compare complete affected-stage and receiver costs, including recurring
+  preparation and downstream work; report workspace savings separately.
+  Proportional sensitivity and false-detection tradeoffs, with uncertainty,
+  govern suitability. A universal FP64 score tolerance or arbitrary sensitivity
+  loss cutoff must not substitute for that assessment. Higher precision retained
+  because a stage is unqualified is a reported investigation gap, not evidence
+  that it is numerically necessary.
+
+Preserve configured-calendar behavior, scored physical quiet-slot completion,
+the full `W=2*H` software-worker budget and exact explicit resource limits.
+Use bounded hierarchical experiments and the
+[CPU ceiling workflow](robust-manual-capacity.md#agent-workflow-for-cpu-ceiling-estimates);
+do not expand testing into exhaustive campaigns. Distinguish justified defaults,
+conditional forecasts and measured sustained capacity. Report requested and actual
+arithmetic and every fallback; theoretical peaks and isolated kernels do not
+establish whole-receiver throughput or CPU capacity.
 
 **Hardware selection follows the [GPU selection contract](triad-performance.md#gpu-selection-for-accelerated-development):
 prefer a full RTX PRO 6000 Blackwell or a demonstrably more suitable modern
 accelerator.** Do not let a familiar A100/A5000 or one slow small-matrix experiment
 silently determine the development target. Qualify the actual precision and
 complete-work speedup on the selected hardware.
-Prefer INT8 when an available native implementation passes the unchanged
-receiver/work gates and gives the best complete cost for the challenging
-geometry. A type selector or theoretical instruction rate is insufficient.
+Prefer INT8 when an available native implementation meets the applicable
+receiver contract and offers the best supported complete cost/capacity tradeoff
+for challenging geometry. A type selector or theoretical instruction rate is insufficient.
 Judge sensitivity loss proportionally against the complete computational
 benefit, including whether it enables reception several dB further into the
 noise floor. The user's examples are that under 1 dB may be worthwhile, around
@@ -28,12 +89,6 @@ sensitivity-loss threshold. Compare with high-precision reception on predeclared
 signal, noise and conditioning strata, report uncertainty and false-alarm effects,
 and preserve full public work and physical completion. The sensitivity method
 and applicable bounds remain under investigation.
-
-**Choose the default for the computational ceiling of challenging reception,
-including wide frequency searches and accumulated input.** Efficiency on an easy
-case well below that ceiling does not justify a default that falls behind on
-harder public geometry. Preserve complete search coverage, productive batches,
-and the shared native worker/memory contracts; energy efficiency is not the goal.
 
 Historical Tensor Core work includes successful NVFP4 DSP correlation and
 split-BF16/TF32x3 phase contractions. See the [verified Git inventory](triad-gpu-optimization.md#verified-git-history-inventory)
@@ -243,7 +298,10 @@ error against a 1% limit. Four-product high/residual reconstruction and a later
 bulk timings did not resolve that failure or demonstrate an advantage over
 qualified INT8. There is no current FP4 selector. This scoped result does not
 invalidate the successful historical NVFP4 implementation or rule out a future
-native design; it must meet the unchanged numerical and full-cost gates.
+native design. Preserve that experiment's failed gates and lack of demonstrated
+complete-cost benefit; a new candidate must be evaluated under the
+[proportional sensitivity/capacity policy](#automatic-mode-prioritizes-computational-ceiling),
+not rejected solely by that historical score or peak-agreement cutoff.
 
 The implementation reuses per-stage native library handles and prepared
 lag-group coefficient matrices. It combines up to 32 independent workspaces,
@@ -397,8 +455,14 @@ testing. Pair each used coarse/fine precision class with the CPU reference and
 check candidate order, acquisition coordinates, scores, fixed-affine decisions,
 state/work counts and native-cache behavior. Include noise-only, near-decision
 and relevant high-SNR or ill-conditioned states; quiet spectrum alone does not
-guarantee numerical conditioning. Keep higher precision in the small stages
-where the paired checks need it. Record requested and effective arithmetic,
+guarantee numerical conditioning. Separate numerical regression diagnostics from
+reception, false-detection and service-cost outcomes. Existing exact arithmetic,
+protocol and work-accounting checks keep their specific contracts; a new
+precision candidate need not reproduce every FP64 score or candidate ranking
+to demonstrate a worthwhile receiver tradeoff. Keep higher precision where the
+evidence justifies it under the automatic-mode contract, and label conservative
+implementation choices separately from demonstrated precision requirements.
+Record requested and effective arithmetic,
 actual backend execution and any fallback; do not silently label CPU or FP64
 fallback work as low-precision GPU acceleration.
 

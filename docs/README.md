@@ -10,6 +10,13 @@ obsolete code, experiments and generated outputs when that purpose ends.
 
 ## Current Robust modem
 
+**Automatic CPU/GPU choices must prioritize challenging-case receiver capacity
+and prevent input backlog.** Start with the
+[automatic-mode contract](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling)
+before choosing algorithms, arithmetic or scheduling defaults. Easy-case
+efficiency and unnecessary precision must not lower that computational ceiling;
+explicit precision overrides serve exceptional needs.
+
 For new modem, DSP or intensive numerical work, follow the
 [native processing contract](development.md#native-processing-and-integration):
 prefer the integrated C++ implementation and compatible native backends; Python

@@ -5,6 +5,30 @@ Use the [documentation index](docs/README.md) for maintained guidance. Check
 and [current Robust architecture](docs/robust-current.md) before changing those areas.
 Search `src/`, `include/`, `tests/` and `cmake/` first when locating implementation.
 
+## Prioritize receiver computational ceiling in automatic mode
+
+**Automatic mode must prioritize complete-receiver throughput and DSP workspace
+capacity on challenging cases, to prevent reception failure from accumulating
+input backlog.** Treat computational ceiling as the primary design objective;
+easy-case efficiency, energy savings and unnecessary numerical precision must
+not lower it. This applies to CPU and GPU algorithms, arithmetic, layouts,
+batching, preparation overlap and worker ownership, not just numeric types.
+
+The automatic option is the user's way to obtain the best supported throughput
+without selecting hardware-specific kernels. Higher-precision GUI overrides do
+not excuse conservative automatic defaults. Prefer suitable lower precision;
+retain higher precision where evidence shows a worthwhile reception, range,
+conditioning or complete-service benefit, or no plausible computational benefit
+from reducing it. FP64 agreement at a universal tolerance, an arbitrary dB loss
+cutoff, or no gain on one easy fixture must not veto a candidate with a credible
+challenging-case advantage. Investigate unrealized hardware benefits and fix
+implementation/dispatch bottlenecks before declaring a hardware ceiling.
+
+Follow the authoritative [automatic-mode contract](docs/gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling)
+for proportional sensitivity/cost tradeoffs, bounded evidence and fallback
+reporting. Preserve all public hypotheses, configured-calendar behavior, physical
+quiet-slot completion, explicit resource limits and the full `W=2*H` budget.
+
 ## Keep intensive processing in the native application
 
 **Prefer C++ and compatible in-process native libraries/backends for modem,

@@ -131,6 +131,13 @@ an FFT fallback cannot count as an FP16/INT8 matrix result. Check actual matrix
 call/work counters and fallback reasons. Kernel dispatch evidence and elapsed
 cost are separate from instruction-level utilization and sustained capacity.
 
+Default-selection experiments follow the
+[automatic-mode computational-ceiling contract](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling).
+Prioritize challenging-case complete service and workspace capacity; a neutral
+easy-case result or a fixture's FP64 score tolerance does not settle adoption.
+Keep existing fixture-specific regression/forecast gates distinct from that
+receiver sensitivity/cost decision and preserve their original outcomes.
+
 Use the existing native component and receiver tests hierarchically: cheap
 capability/numerical checks first, then a fixed small set of matched component
 shapes, then affected complete receiver strata. Vary frequency/arrival extent,

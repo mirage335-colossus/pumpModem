@@ -14,6 +14,12 @@ New modem and intensive numerical work must follow the
 Extend these in-process interfaces and compiled CPU/GPU backends; keep Python
 outside the operating DSP chain and persistent receiver state.
 
+Automatic CPU/GPU algorithm and arithmetic selection follows the
+[computational-ceiling contract](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling):
+prioritize challenging-case complete-receiver capacity and prevention of input
+backlog over easy-case efficiency or unnecessary precision. Current routes and
+their qualification limits below remain distinct from that design objective.
+
 The shared GUI controller connects this stack to simulation, live audio and
 presentation. Fast remains the launch default and retains its independent
 controller. Implementation availability is distinct from validation: see

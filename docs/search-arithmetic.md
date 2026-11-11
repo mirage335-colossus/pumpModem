@@ -3,8 +3,14 @@
 Robust uses qualified lower precision in the operating C++ receiver, including
 live reception and simulation. The policy preserves complete public frequency
 searches, the default `W=2*H` workers and conservative DSP admission. Arithmetic
-selection must improve the useful processing ceiling while preserving public
-search and physical completion; quantify any reception-sensitivity tradeoff.
+selection must prioritize the complete receiver's challenging-case computational
+ceiling and resistance to input backlog, preserving public search and physical
+completion. Default is the user's throughput-oriented option; the availability
+of higher-precision overrides does not justify unnecessary precision in automatic
+mode. Follow the [automatic-mode contract](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling),
+including proportional sensitivity/cost tradeoffs and investigation of unrealized
+hardware acceleration. The routes below describe current implementation and
+qualification, not a ceiling on further algorithm or arithmetic improvements.
 See [current architecture](robust-current.md) and
 [precision boundaries](gpu-precision-controls.md).
 

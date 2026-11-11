@@ -7,6 +7,20 @@ truth for shared stream and presentation behavior. Do not treat retired
 single-carrier or standalone triad/Helper implementations as compatibility
 requirements.
 
+## Automatic receiver capacity
+
+**Prioritize complete-receiver computational ceiling and DSP workspace capacity
+on challenging cases; defaults must minimize the risk of falling behind incoming
+samples.** Automatic mode is the user's throughput-oriented choice across CPU
+and GPU hardware. Higher-precision overrides do not justify a conservative
+automatic default, and easy-case efficiency must not lower the challenging-case
+ceiling. Apply the authoritative
+[automatic-mode contract](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling)
+to algorithm structure, arithmetic, batching, overlap and memory ownership. It
+requires proportional reception/cost evidence rather than universal FP64 parity
+or dB cutoffs, with explicit fallback and qualification limits. Preserve complete
+public work, physical completion and the [full worker budget](#receiver-cpu-allocation).
+
 ## Native processing and integration
 
 **For modem, DSP and other computationally intensive numerical work inside a
