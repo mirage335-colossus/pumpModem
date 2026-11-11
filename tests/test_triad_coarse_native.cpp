@@ -246,7 +246,12 @@ void frequency_continuation(const datapump::Crypto& crypto) {
     rejects([&] { cancelled.advance(1); }, "cancelled coarse work resumed");
 }
 
-enum class BulkFault { missing_workspace, missing_execution, stale_execution };
+enum class BulkFault {
+    missing_workspace, missing_execution, stale_execution, valid_scores,
+    valid_frontiers, frontier_missing_workspace, frontier_count, frontier_lag,
+    frontier_duplicate, frontier_nonfinite, frontier_missing_execution, frontier_stale_execution,
+    frontier_false_callback, frontier_false_work, frontier_false_execution
+};
 
 class IncompleteCoarseTile final : public r::CoarseBulk {
 public:
@@ -270,16 +275,62 @@ public:
     }
     void frequency_tile(std::span<const double> frequencies, const r::CoarseScoreSink& emit,
                         r::CoarseBulkWork& work, std::stop_token) override {
+        check(fault_ < BulkFault::valid_frontiers, "compressed frontier unexpectedly used full-score fallback");
         const auto published = fault_ == BulkFault::missing_workspace ? workspaces_ - 1 : workspaces_;
-        const std::vector<double> scores(published * frequencies.size() * arrivals_);
+        const auto scores = synthetic_scores(published, frequencies.size());
         emit(0, published, scores);
         work.workspace_frequency_pairs = workspaces_ * frequencies.size();
         work.score_rows = work.workspace_frequency_pairs * arrivals_;
-        if (fault_ == BulkFault::stale_execution && calls_ == 0) {
+        if (fault_ == BulkFault::valid_scores || (fault_ == BulkFault::stale_execution && calls_ == 0)) {
             receipt_.executed = true;
-            receipt_.score_rows = work.score_rows;
+            receipt_.score_rows += work.score_rows;
         }
         ++calls_;
+    }
+    bool frequency_peaks(std::span<const double> frequencies, std::size_t separation, const r::CoarsePeakSink& emit,
+                         r::CoarseBulkWork& work, std::stop_token) override {
+        if (fault_ < BulkFault::valid_frontiers) return false;
+        if (fault_ == BulkFault::frontier_false_work) {
+            ++work.forward_ffts;
+            return false;
+        }
+        if (fault_ == BulkFault::frontier_false_execution) {
+            receipt_.executed = true;
+            ++receipt_.score_rows;
+            return false;
+        }
+        const auto published = fault_ == BulkFault::frontier_missing_workspace ? workspaces_ - 1 : workspaces_;
+        const auto scores = synthetic_scores(published, frequencies.size());
+        std::vector<r::CoarseBulkPeaks> frontiers(published * frequencies.size());
+        for (std::size_t row = 0; row < frontiers.size(); ++row) {
+            const auto values = std::span(scores).subspan(row * arrivals_, arrivals_);
+            const auto selected = r::select_coarse_arrivals(values, separation);
+            auto& output = frontiers[row];
+            output.count = selected.count;
+            for (std::size_t i = 0; i < selected.count; ++i) {
+                output.lags[i] = selected.indices[i];
+                output.scores[i] = values[selected.indices[i]];
+            }
+        }
+        if (fault_ == BulkFault::frontier_count) frontiers.front().count = 3;
+        if (fault_ == BulkFault::frontier_lag) frontiers.front().lags[0] = arrivals_;
+        if (fault_ == BulkFault::frontier_nonfinite) frontiers.front().scores[0] = std::numeric_limits<double>::quiet_NaN();
+        if (fault_ == BulkFault::frontier_duplicate) {
+            frontiers.front().count = 2;
+            frontiers.front().lags[1] = frontiers.front().lags[0];
+            frontiers.front().scores[1] = frontiers.front().scores[0];
+        }
+        emit(0, published, frontiers);
+        if (fault_ == BulkFault::frontier_false_callback) return false;
+        work.workspace_frequency_pairs = workspaces_ * frequencies.size();
+        work.score_rows = work.workspace_frequency_pairs * arrivals_;
+        if (fault_ != BulkFault::frontier_missing_execution &&
+            (fault_ != BulkFault::frontier_stale_execution || calls_ == 0)) {
+            receipt_.executed = true;
+            receipt_.score_rows += work.score_rows;
+        }
+        ++calls_;
+        return true;
     }
     void lag_tile(std::size_t, std::size_t, const r::CoarseScoreSink&,
                   r::CoarseBulkWork&, std::stop_token) override {
@@ -288,6 +339,17 @@ public:
     r::BulkReceipt receipt() const override { return receipt_; }
 
 private:
+    std::vector<double> synthetic_scores(std::size_t workspaces, std::size_t frequencies) const {
+        std::vector<double> scores(workspaces * frequencies * arrivals_);
+        for (std::size_t w = 0; w < workspaces; ++w)
+            for (std::size_t f = 0; f < frequencies; ++f)
+                for (std::size_t lag = 0; lag < arrivals_; ++lag)
+                    // Finite negative scores remain valid under the existing
+                    // full-score contract; tied peaks exercise exact ordering.
+                    scores[(w * frequencies + f) * arrivals_ + lag] = -1. - (lag + w) % 7;
+        return scores;
+    }
+
     BulkFault fault_;
     r::BulkReceipt receipt_;
     std::size_t workspaces_ = 0, arrivals_ = 0, calls_ = 0;
@@ -315,14 +377,19 @@ void incomplete_bulk_cannot_publish(const datapump::Crypto& crypto) {
     auto f = capture(crypto, false);
     const std::array<r::FrequencyInterval, 1> intervals{{{-.2, .2}}};
     constexpr unsigned workers = 3;
-    for (auto fault : {BulkFault::missing_workspace, BulkFault::missing_execution, BulkFault::stale_execution}) {
+    for (auto fault : {BulkFault::missing_workspace, BulkFault::missing_execution, BulkFault::stale_execution,
+                      BulkFault::frontier_missing_workspace, BulkFault::frontier_count, BulkFault::frontier_lag,
+                      BulkFault::frontier_duplicate, BulkFault::frontier_nonfinite, BulkFault::frontier_missing_execution,
+                      BulkFault::frontier_stale_execution, BulkFault::frontier_false_callback,
+                      BulkFault::frontier_false_work, BulkFault::frontier_false_execution}) {
         f.config.bulk_backend = std::make_shared<IncompleteCoarseBackend>(fault);
         const auto limit = r::coarse_workspace(f.config, f.slot, workers);
         r::CoarseSession session(f.config, f.slot, crypto, f.iq, intervals, workers, limit);
         check(session.progress().plan.bulk_host_workspace_bytes > 0, "coarse bulk host staging was not reserved");
-        if (fault == BulkFault::stale_execution) session.advance(1);
+        const auto stale = fault == BulkFault::stale_execution || fault == BulkFault::frontier_stale_execution;
+        if (stale) session.advance(1);
         const auto before = session.progress();
-        if (fault == BulkFault::stale_execution)
+        if (stale)
             check(before.completed_tiles == 1 && before.bulk && before.bulk->executed && before.bulk->score_rows > 0,
                   "stale execution fixture did not first commit a complete witnessed tile");
         rejects([&] { session.advance(1); }, "coarse bulk accepted a missing or unwitnessed score tile");
@@ -331,6 +398,28 @@ void incomplete_bulk_cannot_publish(const datapump::Crypto& crypto) {
               failed.search.operations.score_rows == before.search.operations.score_rows && !session.finish(),
               "incomplete coarse bulk work was credited or published");
     }
+}
+
+void exact_bulk_frontiers(const datapump::Crypto& crypto) {
+    auto f = capture(crypto, false);
+    const std::array<r::FrequencyInterval, 1> intervals{{{-.2, .2}}};
+    constexpr unsigned workers = 3;
+    const auto result = [&](BulkFault mode) {
+        f.config.bulk_backend = std::make_shared<IncompleteCoarseBackend>(mode);
+        const auto limit = r::coarse_workspace(f.config, f.slot, workers);
+        return r::score_coarse(f.config, f.slot, crypto, f.iq, intervals, workers, limit, {});
+    };
+    const auto full = result(BulkFault::valid_scores), compressed = result(BulkFault::valid_frontiers);
+    check(full.coordinates == compressed.coordinates && full.proposal_count == compressed.proposal_count &&
+          full.work.search.operations.score_rows == compressed.work.search.operations.score_rows &&
+          full.work.search.operations.workspace_frequency_pairs == compressed.work.search.operations.workspace_frequency_pairs &&
+          full.work.search.operations.retained_peaks == compressed.work.search.operations.retained_peaks,
+          "compressed coarse frontiers changed canonical coverage or retained candidates");
+    for (std::size_t i = 0; i < full.proposal_count; ++i)
+        check(full.proposals[i].score == compressed.proposals[i].score &&
+              full.proposals[i].coordinate == compressed.proposals[i].coordinate &&
+              full.proposals[i].bit == compressed.proposals[i].bit && full.proposals[i].rank == compressed.proposals[i].rank,
+              "compressed coarse frontiers changed ordered proposal values");
 }
 
 void tied_arrival_frontier() {
@@ -354,6 +443,7 @@ int main() try {
     exact_two_ray(crypto);
     frequency_continuation(crypto);
     incomplete_bulk_cannot_publish(crypto);
+    exact_bulk_frontiers(crypto);
     slow_mapped(crypto);
     return 0;
 } catch (const std::exception& error) {

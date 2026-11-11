@@ -76,6 +76,7 @@ void require(bool condition, const char* message) {
 
 struct Options {
     std::string command, scenario, backend = "cpu", stratum = "active", tensor_precision = "automatic";
+    std::string tensor_coarse_math = "fft";
     std::string base = "exact-fixture", shift = "exact-fixture";
     std::string spread = "none", selective = "off", timing = "fixture";
     std::optional<unsigned> workers, owners;
@@ -164,6 +165,7 @@ Options parse(int argc, char** argv) {
     }
     assign("--backend", o.backend);
     assign("--tensor-precision", o.tensor_precision);
+    assign("--tensor-coarse-math", o.tensor_coarse_math);
     assign("--require-accelerator", o.require_accelerator);
     assign("--device-index", o.device_index);
     assign("--device-memory-limit-bytes", o.device_memory_limit);
@@ -235,6 +237,7 @@ Options parse(int argc, char** argv) {
     if (!values.empty()) throw Error("Unknown native probe option " + std::string(values.begin()->first));
     require(one_of(o.backend, {"cpu", "tensor-cpu", "cuda"}), "Unknown native probe backend");
     require(one_of(o.tensor_precision, {"automatic", "fp64"}), "Unknown tensor precision");
+    require(one_of(o.tensor_coarse_math, {"fft", "fp16", "int8"}), "Unknown tensor coarse arithmetic");
     require(one_of(o.stratum, {"active", "noise", "cold-maximum", "terminal", "erasure"}),
             "Unknown native probe stratum");
     require(one_of(o.timing, {"broad", "fixture"}), "Unknown native probe timing policy");
@@ -546,11 +549,16 @@ Json bulk_json(const BulkReceipt& r) {
     Json::Object fallbacks;
     for (std::size_t i = 0; i < r.direct_fallback_counts.size(); ++i)
         fallbacks.emplace(std::string(bulk_direct_fallback_reasons[i]), r.direct_fallback_counts[i]);
+    Json::Object matrix_fallbacks;
+    for (std::size_t i = 0; i < r.matrix_fft_fallback_counts.size(); ++i)
+        matrix_fallbacks.emplace(std::string(bulk_matrix_fallback_reasons[i]), r.matrix_fft_fallback_counts[i]);
     return object({
         {"device", r.device}, {"device_name", r.device_name}, {"library_version", r.library_version},
         {"cuda_runtime_version", r.cuda_runtime_version}, {"cuda_driver_version", r.cuda_driver_version},
+        {"cuda_blas_version", r.cuda_blas_version},
+        {"cuda_compute_major", r.cuda_compute_major}, {"cuda_compute_minor", r.cuda_compute_minor},
         {"numerical_threads", r.numerical_threads},
-        {"precision", r.precision}, {"cuda", r.cuda}, {"executed", r.executed},
+        {"precision", r.precision}, {"requested_coarse_math", r.requested_coarse_math}, {"cuda", r.cuda}, {"executed", r.executed},
         {"workspace_limit_bytes", r.workspace_limit_bytes}, {"reserved_bytes", r.reserved_bytes},
         {"peak_reserved_bytes", r.peak_reserved_bytes}, {"allocator_live_bytes", r.allocator_live_bytes},
         {"allocator_reserved_bytes", r.allocator_reserved_bytes}, {"allocator_peak_live_bytes", r.allocator_peak_live_bytes},
@@ -561,6 +569,8 @@ Json bulk_json(const BulkReceipt& r) {
         {"download_bytes", r.download_bytes}, {"synchronizations", r.synchronizations},
         {"fft_calls", r.fft_calls}, {"fft_rows", r.fft_rows}, {"fir_input_rows", r.fir_input_rows},
         {"fir_output_contributions", r.fir_output_contributions}, {"score_rows", r.score_rows},
+        {"cuda_arrival_peak_rows", r.cuda_arrival_peak_rows},
+        {"cuda_arrival_peak_values", r.cuda_arrival_peak_values},
         {"statistics_blocks", r.statistics_blocks}, {"projected_values", r.projected_values},
         {"dc_reduction_values", r.dc_reduction_values},
         {"mapped_columns", r.mapped_columns}, {"mapped_values", r.mapped_values},
@@ -568,6 +578,24 @@ Json bulk_json(const BulkReceipt& r) {
         {"cuda_fused_mapped_values", r.cuda_fused_mapped_values},
         {"cuda_direct_gram_values", r.cuda_direct_gram_values},
         {"cuda_bmm_gram_values", r.cuda_bmm_gram_values},
+        {"cuda_matrix_fp16_calls", r.cuda_matrix_fp16_calls},
+        {"cuda_matrix_int8_calls", r.cuda_matrix_int8_calls},
+        {"cuda_matrix_inner_chunks", r.cuda_matrix_inner_chunks},
+        {"cuda_matrix_padded_real_macs", r.cuda_matrix_padded_real_macs},
+        {"cuda_matrix_packed_values", r.cuda_matrix_packed_values},
+        {"cuda_matrix_output_values", r.cuda_matrix_output_values},
+        {"cuda_matrix_maximum_rows", r.cuda_matrix_maximum_rows},
+        {"cuda_matrix_maximum_columns", r.cuda_matrix_maximum_columns},
+        {"cuda_matrix_maximum_inner", r.cuda_matrix_maximum_inner},
+        {"cuda_matrix_nonfinite_values", r.cuda_matrix_nonfinite_values},
+        {"cuda_matrix_saturated_values", r.cuda_matrix_saturated_values},
+        {"cuda_matrix_maximum_a_scale", r.cuda_matrix_maximum_a_scale},
+        {"cuda_matrix_maximum_b_scale", r.cuda_matrix_maximum_b_scale},
+        {"projection_index_cache_hits", r.projection_index_cache_hits},
+        {"projection_index_cache_uploads", r.projection_index_cache_uploads},
+        {"mapping_offset_cache_hits", r.mapping_offset_cache_hits},
+        {"mapping_offset_cache_uploads", r.mapping_offset_cache_uploads},
+        {"matrix_fft_fallback_counts", std::move(matrix_fallbacks)},
         {"uploaded_tiles", r.uploaded_tiles}, {"tile_hits", r.tile_hits},
         {"direct_columns", r.direct_columns}, {"direct_values", r.direct_values},
         {"direct_fallback_counts", std::move(fallbacks)}, {"wall_seconds", r.wall_seconds}});
@@ -575,6 +603,8 @@ Json bulk_json(const BulkReceipt& r) {
 
 std::shared_ptr<ReceiverBulkBackend> selected_backend(const Options& o) {
     if (o.backend == "cpu") {
+        if (o.tensor_coarse_math != "fft")
+            throw Unavailable("Tensor coarse arithmetic requires --backend tensor-cpu or cuda");
         if (o.require_accelerator) throw Unavailable("An accelerated probe requires --backend cuda");
         return {};
     }
@@ -584,7 +614,9 @@ std::shared_ptr<ReceiverBulkBackend> selected_backend(const Options& o) {
     try {
         return make_tensor_receiver_backend({o.backend == "cuda" ? TensorDevice::cuda : TensorDevice::cpu,
             o.device_index, o.device_memory_limit.value_or(256 * 1024 * 1024),
-            o.tensor_precision == "fp64" ? TensorPrecision::fp64 : TensorPrecision::automatic});
+            o.tensor_precision == "fp64" ? TensorPrecision::fp64 : TensorPrecision::automatic,
+            o.tensor_coarse_math == "fp16" ? TensorCoarseMath::fp16 :
+                o.tensor_coarse_math == "int8" ? TensorCoarseMath::int8 : TensorCoarseMath::fft});
     } catch (const TensorBackendUnavailable& error) {
         throw Unavailable(error.what());
     }
@@ -1680,6 +1712,7 @@ void codec_run(Json& report, const Options& o, const Profile& profile, std::stop
 void help() {
     std::cout << "triad_receiver_probe describe|plan|slot|continuation|message|backlog|regression|codec [--flag value ...]\n"
         "  --backend cpu|tensor-cpu|cuda --require-accelerator on|off --tensor-precision automatic|fp64\n"
+        "  --tensor-coarse-math fft|fp16|int8 (post-channelization search; fallback is reported)\n"
         "  --device-index N --device-memory-limit-bytes N\n"
         "  --case hf|eme and the normalized manual-case options from triad_cases.py\n"
         "  --workers N --slot-owners N --memory-limit-bytes N --max-samples N --deadline-ms N\n"
@@ -1711,6 +1744,7 @@ void run(Json& report, const Options& o, std::stop_token stop) {
     report["identity"]["backend"] = o.backend;
     report["identity"]["receiver_arithmetic"] = "native_fp64_state_and_admission";
     report["identity"]["requested_tensor_precision"] = o.tensor_precision;
+    report["identity"]["requested_tensor_coarse_math"] = o.tensor_coarse_math;
     const auto backend = selected_backend(o);
     const auto describe_backend = [&] {
         report["identity"]["backend_receipt"] = backend ? bulk_json(backend->receipt()) : Json{};

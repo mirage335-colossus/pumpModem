@@ -57,6 +57,8 @@ struct FineProgress {
     FineObservation observation;
     std::uint64_t public_slot = 0, pattern_epoch = 0, symbol_ordinal = 0;
     std::size_t available_rows = 0, processed_rows = 0, segments = 0, blocks = 0;
+    // Nominal geometry; the public terminal segment/block can be enlarged
+    // to absorb a short remainder. last_block_rows is the actual last block.
     std::size_t block_rows = 0, segment_rows = 0, last_block_rows = 0;
     std::size_t requested_invalid_rows = 0, additional_discarded_rows = 0, erased_blocks = 0;
     std::size_t observed_projection_modes = 0, quiet_modes = 0, workspace_bytes = 0;
@@ -100,6 +102,7 @@ private:
 
 std::size_t fine_workspace(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers);
 struct FineBlockGeometry {
+    // Nominal geometry before the complete public observation fixes its tail.
     std::size_t block_rows = 0, segment_rows = 0;
 };
 FineBlockGeometry fine_block_geometry(double sample_rate_hz);

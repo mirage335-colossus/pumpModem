@@ -1,6 +1,9 @@
 """Cheap inference and refusal checks; no performance campaign is executed."""
 from pathlib import Path
 import copy
+import json
+import subprocess
+import tempfile
 import sys
 import unittest
 from unittest.mock import patch
@@ -9,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"tools"))
 import triad_abbreviated as abbreviated
 from triad_abbreviated import (analyze, log_interval, policy, validate_baseline, stream_unit,
                               stream_batch, regression_batch_list, KERNELS, SCHEMA)
-from triad_native import ProbeError, runtime_identity, validate_receipt
+from triad_native import NativeProbe, ProbeError, runtime_identity, validate_receipt
 
 
 def device_receipt():
@@ -22,10 +25,13 @@ def device_receipt():
                 "source_manifest_sha256": "2" * 64, "build_options_sha256": "3" * 64, "compiler": "GNU-14",
                 "build_config": "Release", "configured_tensor_backend": True,
                 "receiver_arithmetic": "native_fp64_state_and_admission", "requested_tensor_precision": "automatic",
+                "requested_tensor_coarse_math": "fft",
                 "backend_receipt": {"device": "cuda:0", "device_name": "Fixture GPU",
                                     "library_version": "2.15", "cuda_runtime_version": 13000,
-                                    "cuda_driver_version": 13000, "cuda": True, "numerical_threads": 1,
-                                    "precision": "automatic", "executed": True, "mapped_values": 0,
+                                    "cuda_driver_version": 13000, "cuda_blas_version": 12804,
+                                    "cuda_compute_major": 12, "cuda_compute_minor": 0,
+                                    "cuda": True, "numerical_threads": 1,
+                                    "precision": "automatic", "requested_coarse_math": "fft", "executed": True, "mapped_values": 0,
                                     "statistics_blocks": 4, "fft_calls": 0, "dc_reduction_values": 12,
                                     "score_rows": 0}},
             "phases": [{"name": "fine_work", "work": {}, "wall_seconds": .01, "represented_seconds": 1}],
@@ -193,22 +199,60 @@ class AbbreviatedTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_baseline(baseline, baseline["geometry"], baseline["environment"])
 
+    def test_native_invocation_binds_requested_coarse_arithmetic(self):
+        receipt = device_receipt()
+        receipt.update(command="describe", phases=[], observation=None)
+        receipt["identity"]["requested_tensor_coarse_math"] = "int8"
+        receipt["identity"]["backend_receipt"]["requested_coarse_math"] = "int8"
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "probe"
+            binary.write_bytes(b"\x7fELFfixture")
+            probe = NativeProbe(binary, backend="cuda")
+            with patch("triad_native.subprocess.run") as execute:
+                execute.return_value = subprocess.CompletedProcess([], 0, json.dumps(receipt).encode(), b"")
+                probe.call("describe", tensor_coarse_math="int8")
+                arguments = execute.call_args.args[0]
+                self.assertEqual(arguments[arguments.index("--tensor-coarse-math") + 1], "int8")
+                with self.assertRaisesRegex(ProbeError, "altered the requested coarse"):
+                    probe.call("describe", tensor_coarse_math="fp16")
+        missing = copy.deepcopy(receipt)
+        del missing["identity"]["requested_tensor_coarse_math"]
+        with self.assertRaisesRegex(ProbeError, "arithmetic identity"):
+            validate_receipt(missing, command="describe", backend="cuda", returncode=0)
+        receipt["identity"]["backend_receipt"]["requested_coarse_math"] = "fft"
+        with self.assertRaisesRegex(ProbeError, "differs from the requested"):
+            validate_receipt(receipt, command="describe", backend="cuda", returncode=0)
+
+    def test_regression_cli_propagates_coarse_policy_and_rejects_cpu_use(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(abbreviated, "run") as run:
+            run.return_value = {"status": "baseline_established"}
+            output = str(Path(directory) / "result.json")
+            self.assertEqual(abbreviated.main(["--output", output, "--device", "cuda",
+                                              "--tensor-coarse-math", "fp16"]), 0)
+            self.assertEqual(run.call_args.kwargs["tensor_coarse_math"], "fp16")
+            with self.assertRaises(SystemExit):
+                abbreviated.main(["--output", output, "--tensor-coarse-math", "int8"])
+
     def test_native_runtime_comparison_binds_build_and_nested_device_fields(self):
         original = device_receipt()
         expected = runtime_identity(original)
         for field, value in (("build_config", "Debug"), ("build_options_sha256", "f" * 64),
-                             ("requested_tensor_precision", "fp64")):
+                             ("requested_tensor_precision", "fp64"), ("requested_tensor_coarse_math", "int8")):
             changed = copy.deepcopy(original)
             changed["identity"][field] = value
             self.assertNotEqual(runtime_identity(changed), expected)
         for field, value in (("library_version", "2.14"), ("device_name", "Other GPU"),
-                             ("cuda_driver_version", 12800), ("precision", "fp64")):
+                             ("cuda_driver_version", 12800), ("cuda_blas_version", 12805),
+                             ("cuda_compute_major", 10), ("cuda_compute_minor", 1), ("precision", "fp64"), ("requested_coarse_math", "fp16")):
             changed = copy.deepcopy(original)
             changed["identity"]["backend_receipt"][field] = value
             self.assertNotEqual(runtime_identity(changed), expected)
         changed = copy.deepcopy(original)
         changed["identity"]["source_manifest_sha256"] = "f" * 64
         changed["identity"]["backend_receipt"]["dc_reduction_values"] += 8
+        changed["identity"]["backend_receipt"]["cuda_matrix_maximum_rows"] = 4096
+        changed["identity"]["backend_receipt"]["cuda_matrix_maximum_columns"] = 256
+        changed["identity"]["backend_receipt"]["cuda_matrix_maximum_inner"] = 512
         self.assertEqual(runtime_identity(changed), expected)
 
     def test_terminal_zero_mapping_requires_actual_accelerated_reductions(self):

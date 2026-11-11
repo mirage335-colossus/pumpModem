@@ -111,12 +111,13 @@ def runtime_identity(receipt):
     identity = receipt["identity"]
     runtime = {name: identity.get(name) for name in (
         "compiler", "build_config", "build_options_sha256", "configured_tensor_backend",
-        "receiver_arithmetic", "requested_tensor_precision",
+        "receiver_arithmetic", "requested_tensor_precision", "requested_tensor_coarse_math",
     )}
     bulk = identity.get("backend_receipt")
     runtime["bulk"] = None if bulk is None else {name: bulk.get(name) for name in (
         "device", "device_name", "library_version", "cuda_runtime_version", "cuda_driver_version",
-        "cuda", "numerical_threads", "precision", "workspace_limit_bytes", "total_device_bytes",
+        "cuda_blas_version", "cuda_compute_major", "cuda_compute_minor",
+        "cuda", "numerical_threads", "precision", "requested_coarse_math", "workspace_limit_bytes", "total_device_bytes",
         "fft_plan_cache_limit",
     )}
     return runtime
@@ -182,8 +183,12 @@ def validate_receipt(receipt, *, command, backend, returncode):
         if not all(is_sha256(identity.get(key)) for key in ("source_manifest_sha256", "build_options_sha256")):
             raise ProbeError("Complete native receipt lacks build and source identity")
         if not all(isinstance(identity.get(key), str) and identity[key] for key in (
-                "compiler", "build_config", "receiver_arithmetic", "requested_tensor_precision")):
+                "compiler", "build_config", "receiver_arithmetic", "requested_tensor_precision",
+                "requested_tensor_coarse_math")):
             raise ProbeError("Complete native receipt lacks compiler or arithmetic identity")
+        coarse_math = identity["requested_tensor_coarse_math"]
+        if coarse_math not in ("fft", "fp16", "int8") or (backend == "cpu" and coarse_math != "fft"):
+            raise ProbeError("Complete native receipt has unsupported coarse arithmetic")
         if type(identity.get("configured_tensor_backend")) is not bool:
             raise ProbeError("Complete native receipt lacks the build backend configuration")
         if backend != "cpu":
@@ -193,6 +198,8 @@ def validate_receipt(receipt, *, command, backend, returncode):
                     or not all(isinstance(bulk.get(key), str) and bulk[key] for key in (
                         "device", "device_name", "library_version", "precision"))):
                 raise ProbeError("Complete tensor receipt lacks the requested device and library identity")
+            if bulk.get("requested_coarse_math") != coarse_math:
+                raise ProbeError("Tensor backend coarse arithmetic differs from the requested policy")
         if command not in ("describe", "plan") and not receipt["phases"]:
             raise ProbeError("Complete native workload contains no measured phases")
         if command not in ("describe", "plan", "codec") and (
@@ -291,6 +298,8 @@ class NativeProbe:
                              + (f": {detail}" if detail else "")) from error
         receipt = validate_receipt(raw, command=command, backend=self.backend, returncode=finished.returncode)
         if receipt["status"] == "complete":
+            if receipt["identity"]["requested_tensor_coarse_math"] != (options.get("tensor_coarse_math") or "fft"):
+                raise ProbeError("Native probe altered the requested coarse arithmetic policy")
             actual = allocation(receipt)
             for key, value in limits.items():
                 if value is not None and actual[key] != value:

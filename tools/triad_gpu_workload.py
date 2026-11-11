@@ -21,8 +21,9 @@ CHALLENGES = ("near-decision", "high-snr", "scored-quiet")
 SCORE_ATOL, SCORE_RTOL = 2e-3, 2e-4
 ADAPTIVE_COST_RTOL = .05
 CUDA_RUNTIME_FIELDS = ("device", "device_name", "library_version", "cuda_runtime_version",
-                       "cuda_driver_version", "numerical_threads", "workspace_limit_bytes",
-                       "total_device_bytes")
+                       "cuda_driver_version", "cuda_blas_version", "cuda_compute_major", "cuda_compute_minor",
+                       "numerical_threads", "workspace_limit_bytes",
+                       "total_device_bytes", "requested_coarse_math")
 PRECISION = ("fp64", "fp32_bulk_fp64_coordinates_and_reductions")
 COARSE_GEOMETRY = (
     "route", "rays", "clocks", "workspaces", "frequency_points", "frequency_groups",
@@ -84,6 +85,9 @@ def cuda_runtime(bulk):
                 for key in ("device_name", "library_version")), "Missing CUDA device or library identity")
     for key in ("cuda_driver_version", "cuda_runtime_version", "workspace_limit_bytes", "total_device_bytes"):
         positive_int(bulk.get(key), key)
+    positive_int(bulk.get("cuda_blas_version"), "CUDA BLAS version", allow_zero=True)
+    positive_int(bulk.get("cuda_compute_major"), "CUDA compute capability major")
+    positive_int(bulk.get("cuda_compute_minor"), "CUDA compute capability minor", allow_zero=True)
     plan_count = positive_int(bulk.get("fft_plan_cache_count"), "CUDA FFT plan cache count", allow_zero=True)
     plan_limit = positive_int(bulk.get("fft_plan_cache_limit"), "CUDA FFT plan cache limit", allow_zero=True)
     require(plan_count <= plan_limit, "CUDA FFT plan cache exceeds its bound")
@@ -92,6 +96,8 @@ def cuda_runtime(bulk):
     require(bulk["workspace_limit_bytes"] + headroom <= free <= bulk["total_device_bytes"],
             "CUDA device memory admission was not preserved")
     require(bulk.get("numerical_threads") == 1, "Unexpected ATen host numerical thread count")
+    require(bulk.get("requested_coarse_math") in ("fft", "fp16", "int8"),
+            "Missing CUDA coarse arithmetic policy")
     return {key: bulk[key] for key in CUDA_RUNTIME_FIELDS}
 
 
@@ -114,6 +120,22 @@ def accelerator_stage(work, stage, *, terminal=False):
     for key in (("score_rows", "fir_output_contributions") if stage == "coarse" else
                 ("statistics_blocks", "projected_values")):
         positive_int(bulk.get(key), f"CUDA {stage} {key}")
+    peak_rows = positive_int(bulk.get("cuda_arrival_peak_rows"), "CUDA arrival peak rows", allow_zero=True)
+    peak_values = positive_int(bulk.get("cuda_arrival_peak_values"), "CUDA arrival peak values", allow_zero=True)
+    require(bool(peak_rows) == bool(peak_values), "CUDA arrival peak work has incomplete counters")
+    if peak_rows:
+        require(stage == "coarse" and work.get("route") == "frequency_tiles",
+                "CUDA arrival peak work requires the coarse frequency-tile route")
+        lags = positive_int(work.get("arrival_points"), "coarse arrival points")
+        workspaces = positive_int(work.get("workspaces"), "coarse workspaces")
+        frequencies = positive_int(work.get("frequency_points"), "coarse frequency points")
+        search = work.get("search")
+        require(isinstance(search, dict), "CUDA arrival peak work lacks logical search counts")
+        pairs = positive_int(search.get("workspace_frequency_pairs"), "coarse workspace-frequency pairs")
+        values = positive_int(search.get("score_rows"), "coarse logical score rows")
+        require(peak_rows == pairs == workspaces * frequencies and
+                peak_values == values == bulk["score_rows"] == peak_rows * lags,
+                "CUDA arrival peak work does not cover the complete logical score grid")
     # Direct native rendering is a public exceptional route. It cannot establish
     # a normal mapped acceleration cost class, even when its FFT ran on device.
     if stage == "fine":
@@ -186,6 +208,8 @@ def validate_work(receipt, backend, stratum, *, command="continuation", declared
                 "Native interior erasure was not measured")
     if backend == "cuda":
         fine_runtime, fine_precision = accelerator_stage(fine, "fine", terminal=declared and stratum == "terminal")
+        require(fine_runtime["requested_coarse_math"] == receipt["identity"].get("requested_tensor_coarse_math"),
+                "Fine CUDA receipt differs from the requested coarse arithmetic policy")
         coarse_precision = None
         if coarse is not None:
             coarse_runtime, coarse_precision = accelerator_stage(coarse, "coarse")
@@ -226,6 +250,23 @@ def _cost_drift(left, right, fields):
     return max(errors, default=0.)
 
 
+def _same_count_fields(left, right, fields):
+    return all(type(left.get(key)) is int and left[key] >= 0
+               and type(right.get(key)) is int and right[key] == left[key] for key in fields)
+
+
+def _same_coarse_cpu_demand(left, right):
+    # Keep this contract aligned with triad_gpu_cpu_forecast.observation:
+    # CPU search and selection costs are projected from these logical counts,
+    # never from GPU elapsed time, transferred bytes or peak-kernel launches.
+    return (same_fields(left, right, COARSE_GEOMETRY)
+            and _same_count_fields(left.get("search", {}), right.get("search", {}),
+                                   ("workspace_frequency_pairs", "score_rows"))
+            and _same_count_fields(left.get("selection", {}), right.get("selection", {}),
+                                   ("retained_peaks", "selection_peak_rows"))
+            and _same_count_fields(left, right, ("proposals", "refined_coordinates")))
+
+
 def compare_work(cpu, cuda, stratum, *, command="continuation", declared=False):
     """Same-input paired parity. Excludes backend dispatch, transfer and timing."""
     precision, runtime = validate_work(cuda, "cuda", stratum, command=command, declared=declared)
@@ -235,11 +276,16 @@ def compare_work(cpu, cuda, stratum, *, command="continuation", declared=False):
                   same_fields(cpu["observation"], cuda["observation"],
                               ("input_sha256", "seed", "public_slot", "pattern_epoch", "symbol_ordinal")))
     acquisition_match = None
+    logical_coarse_cpu_work_match = None
+    exact_arrival_mapping = None
     if not declared:
         coarse_a = _phase_work(cpu, "coarse_selection")
         coarse_b = _phase_work(cuda, "coarse_selection")
+        logical_coarse_cpu_work_match = _same_coarse_cpu_demand(coarse_a, coarse_b)
         acquisition_match = (
             same_fields(coarse_a, coarse_b, COARSE_GEOMETRY) and
+            same_fields(coarse_a.get("search", {}), coarse_b.get("search", {}),
+                        ("workspace_frequency_pairs", "score_rows")) and
             same_fields(_phase_work(cpu, "coarse_prepare"), _phase_work(cuda, "coarse_prepare"),
                         ("frequency_grid_sha256",)) and
             coarse_a["refined_coordinates_detail"] == coarse_b["refined_coordinates_detail"] and
@@ -266,9 +312,39 @@ def compare_work(cpu, cuda, stratum, *, command="continuation", declared=False):
                     for lane in ("initial_affine", "adaptive"))
         )
         adaptive_cost_drift = max(adaptive_cost_drift, _cost_drift(a["adaptive"], b["adaptive"], LANE_COUNTS))
-    accepted = (same_input and acquisition_match is not False and decision_match and fixed_match
-                and adaptive_cost_drift <= ADAPTIVE_COST_RTOL)
-    return dict(accepted=accepted, same_input=same_input, acquisition_match=acquisition_match,
+    # Matrix replacements still lack a qualified CPU-demand mapping. Exact
+    # arrival reduction is different: it preserves FFT scoring and the complete
+    # native search/selection demand consumed by observation(). Its GPU timing
+    # and transfer savings must not enter a CPU forecast.
+    unqualified_cost_leaves = {field
+        for phase in cuda["phases"]
+        for field in ("cuda_matrix_fp16_calls", "cuda_matrix_int8_calls")
+        if (phase["work"].get("bulk") or {}).get(field, 0) != 0}
+    same_native_source = (is_sha256(cpu["identity"].get("source_manifest_sha256"))
+                          and cpu["identity"]["source_manifest_sha256"] ==
+                              cuda["identity"].get("source_manifest_sha256"))
+    if not declared and coarse_b["bulk"]["cuda_arrival_peak_rows"]:
+        # validate_work already proved all W*F rows and W*F*L scores were
+        # reduced, with a complete frequency-tile grid. Qualify only the FFT
+        # policy and exact CPU logical demand, from a paired native source.
+        exact_arrival_mapping = bool(
+            coarse_b["route"] == "frequency_tiles"
+            and cuda["identity"].get("requested_tensor_coarse_math") == "fft"
+            and coarse_b["bulk"]["requested_coarse_math"] == "fft"
+            and not unqualified_cost_leaves and same_native_source
+            and logical_coarse_cpu_work_match and acquisition_match and same_input)
+        if not exact_arrival_mapping:
+            unqualified_cost_leaves.add("cuda_arrival_peak_rows")
+    unqualified_cost_leaves = sorted(unqualified_cost_leaves)
+    cpu_cost_work_match = not unqualified_cost_leaves and logical_coarse_cpu_work_match is not False
+    numerical_match = (same_input and acquisition_match is not False and decision_match and fixed_match
+                       and adaptive_cost_drift <= ADAPTIVE_COST_RTOL)
+    accepted = numerical_match and cpu_cost_work_match
+    return dict(accepted=accepted, numerical_parity_accepted=numerical_match,
+                cpu_cost_work_match=cpu_cost_work_match, cpu_cost_unqualified_leaves=unqualified_cost_leaves,
+                logical_coarse_cpu_work_match=logical_coarse_cpu_work_match,
+                exact_arrival_cpu_demand_mapping=exact_arrival_mapping, same_native_source=same_native_source,
+                same_input=same_input, acquisition_match=acquisition_match,
                 decisions_and_scores_match=decision_match, fixed_work_match=fixed_match,
                 maximum_relative_adaptive_cost_drift=adaptive_cost_drift,
                 precision=list(precision), cuda_runtime=runtime)
@@ -298,7 +374,7 @@ def _case_receipts(probe, case, options, seed, *, cpu_reference=None, near_cn0=N
                    row_deadline_ms):
     cutoff = time.monotonic() + row_deadline_ms / 1000
     cpu_options = {name: value for name, value in options.items()
-                   if name not in ("device_index", "device_memory_limit_bytes", "tensor_precision")}
+                   if name not in ("device_index", "device_memory_limit_bytes", "tensor_precision", "tensor_coarse_math")}
 
     def call(command, *, receiver=probe, **kwargs):
         remaining = int(1000 * (cutoff - time.monotonic()))
@@ -373,7 +449,8 @@ def run_probe(*, case_list=DEFAULT_CASES, case_indices=None, executable=DEFAULT_
               device="cuda", output, paired_reference=False, workspace_mib=None, reference_cases=None,
               slot_owners=None, device_memory_mib=None, seed=74021, max_samples=4_194_304,
               deadline_ms=30_000, coarse_tiles=4096, device_index=0, near_cn0=None,
-              backlog_slots=0, tensor_precision="automatic", fixed_active_seconds=None, row_deadline_ms=180_000):
+              backlog_slots=0, tensor_precision="automatic", tensor_coarse_math="fft",
+              fixed_active_seconds=None, row_deadline_ms=180_000):
     parsed = load_cases(case_list)
     selected = select_cases(parsed, case_indices)
     references = tuple(reference_cases or ())
@@ -384,6 +461,9 @@ def run_probe(*, case_list=DEFAULT_CASES, case_indices=None, executable=DEFAULT_
             "Declare at most three distinct paired reference rows within the selection")
     require(device in ("cpu", "cuda") and (device == "cuda" or not references),
             "Paired references require a CUDA workload")
+    require(tensor_coarse_math in ("fft", "fp16", "int8") and
+            (device == "cuda" or tensor_coarse_math == "fft"),
+            "Tensor coarse arithmetic requires CUDA")
     require(near_cn0 is None or (math.isfinite(near_cn0) and len(references) == 1),
             "An explicit near-decision C/N0 requires one paired reference row")
     positive_int(seed, "seed", allow_zero=True)
@@ -403,7 +483,7 @@ def run_probe(*, case_list=DEFAULT_CASES, case_indices=None, executable=DEFAULT_
     limits = dict(workers=workers, slot_owners=slot_owners, seconds=fixed_active_seconds,
                   memory_limit_bytes=None if workspace_mib is None else workspace_mib << 20,
                   max_samples=max_samples, deadline_ms=deadline_ms, coarse_tiles=coarse_tiles)
-    options = limits | (dict(device_index=device_index, tensor_precision=tensor_precision,
+    options = limits | (dict(device_index=device_index, tensor_precision=tensor_precision, tensor_coarse_math=tensor_coarse_math,
                              device_memory_limit_bytes=None if device_memory_mib is None else device_memory_mib << 20)
                         if device == "cuda" else {})
     began = time.perf_counter()
@@ -466,6 +546,7 @@ def main(argv=None):
     parser.add_argument("--device-index", type=int, default=0)
     parser.add_argument("--device-memory-mib", type=int)
     parser.add_argument("--tensor-precision", choices=("automatic", "fp64"), default="automatic")
+    parser.add_argument("--tensor-coarse-math", choices=("fft", "fp16", "int8"), default="fft")
     parser.add_argument("--workspace-mib", type=int)
     parser.add_argument("--seed", type=int, default=74021)
     parser.add_argument("--max-samples", type=int, default=4_194_304)
@@ -488,6 +569,7 @@ def main(argv=None):
                            max_samples=args.max_samples, deadline_ms=args.deadline_ms,
                            coarse_tiles=args.coarse_tiles, device_index=args.device_index, near_cn0=args.near_cn0,
                            backlog_slots=args.backlog_slots, tensor_precision=args.tensor_precision,
+                           tensor_coarse_math=args.tensor_coarse_math,
                            fixed_active_seconds=args.fixed_active_seconds, row_deadline_ms=args.row_deadline_ms)
     except (OSError, ValueError, KeyError) as error:
         parser.error(str(error))

@@ -32,7 +32,8 @@ def forecast_inputs():
         return dict(implementation="native-production-receiver", source_manifest_sha256="1" * 64,
                     compiler="fixture", build_config="Release", build_options_sha256="2" * 64,
                     executable_sha256=("3" if backend == "cuda" or paired else "4") * 64,
-                    backend=backend, backend_receipt=bulk() if backend == "cuda" else None)
+                    backend=backend, requested_tensor_coarse_math="fft",
+                    backend_receipt=bulk() if backend == "cuda" else None)
 
     def envelope(command, backend="cpu", *, seed=0, phases=(), result=None):
         return dict(schema="datapump.triad.native-probe.v1", command=command, status="complete",
@@ -63,7 +64,7 @@ def forecast_inputs():
                 template_bank=dict(source_render_rows=100, projected_columns=4), observation=dict(fir_input_rows=100))
             forecast.phase_once(receipt, "coarse_selection")["work"].update(
                 selection=dict(retained_peaks=2, selection_peak_rows=2), proposals=1, refined_coordinates=1,
-                search=dict(workspace_frequency_pairs=4, score_rows=100))
+                search=dict(workspace_frequency_pairs=15, score_rows=60))
         return receipt
 
     def backlog(seed):
@@ -138,6 +139,61 @@ class NativeForecastTests(unittest.TestCase):
             forecast._fit_stratum(local, gpu, observation(4, .01), alpha=.025)
         with self.assertRaisesRegex(forecast.ProbeError, "outside the calibrated cost regime"):
             forecast._fit_stratum(local, observation(4, .00001, demand=(107, 200)), holdout, alpha=.025)
+
+    def test_exact_arrival_reducer_references_reach_existing_forecast_gates(self):
+        cpu, gpu, parsed, held = forecast_inputs()
+        original = deepcopy(gpu)
+        row = gpu["cases"][0]
+        receipts = list(row["strata"].values()) + [row["references"][name]["cuda"]
+                                                  for name in workload.CHALLENGES]
+        for receipt in receipts:
+            coarse_phases = [phase for phase in receipt["phases"] if phase["name"] == "coarse_selection"]
+            if coarse_phases:
+                coarse = coarse_phases[0]["work"]
+                coarse["bulk"].update(cuda_arrival_peak_rows=coarse["search"]["workspace_frequency_pairs"],
+                                      cuda_arrival_peak_values=coarse["search"]["score_rows"])
+        classes = forecast.reference_classes(gpu, {1: row}, [1])
+        self.assertEqual(classes, forecast.reference_classes(original, {1: original["cases"][0]}, [1]))
+        before = forecast.estimate(cpu, original, parsed, cpu["description"], holdout=held,
+                                   case_indices=[1], holdout_indices=[1])
+        after = forecast.estimate(cpu, gpu, parsed, cpu["description"], holdout=held,
+                                  case_indices=[1], holdout_indices=[1])
+        self.assertEqual(before["cases"], after["cases"])
+        demand_before = forecast.observation(row["strata"]["active"], "active", measure_timing=False)
+        slower = deepcopy(gpu)
+        for receipt in list(slower["cases"][0]["strata"].values()) + [
+                slower["cases"][0]["references"][name]["cuda"] for name in workload.CHALLENGES]:
+            for phase in receipt["phases"]:
+                phase["wall_seconds"] *= 100000
+        demand_after = forecast.observation(slower["cases"][0]["strata"]["active"], "active", measure_timing=False)
+        self.assertEqual(demand_before, demand_after)
+        slower_result = forecast.estimate(cpu, slower, parsed, cpu["description"], holdout=held,
+                                          case_indices=[1], holdout_indices=[1])
+        self.assertEqual(after["cases"], slower_result["cases"])
+
+        for change in ("bad_reducer_count", "selection_peak_rows", "retained_peaks", "matrix", "source", "coverage"):
+            changed = deepcopy(gpu)
+            changed_row = changed["cases"][0]
+            receipt = changed_row["strata"]["active"]
+            coarse = forecast.phase_once(receipt, "coarse_selection")["work"]
+            if change == "bad_reducer_count":
+                coarse["bulk"]["cuda_arrival_peak_values"] -= 1
+            elif change in ("selection_peak_rows", "retained_peaks"):
+                coarse["selection"][change] += 1
+            elif change == "matrix":
+                coarse["bulk"]["cuda_matrix_int8_calls"] = 1
+            elif change == "source":
+                receipt["identity"]["source_manifest_sha256"] = "f" * 64
+            else:
+                del changed_row["references"]["high-snr"]
+            with self.subTest(change=change), self.assertRaises(forecast.ProbeError):
+                forecast.reference_classes(changed, {1: changed_row}, [1])
+        reused = deepcopy(held)
+        reused["cases"][0]["strata"]["active"]["observation"]["seed"] = 4
+        rejected = forecast.estimate(cpu, gpu, parsed, cpu["description"], holdout=reused,
+                                     case_indices=[1], holdout_indices=[1])
+        self.assertIsNone(rejected["cases"][0]["nominal_service"])
+        self.assertIn("independent seed", " ".join(rejected["cases"][0]["unresolved_work"]))
 
     def test_frontend_charges_continuous_pcm_and_once_per_window_validation(self):
         cpu, _, _, _ = forecast_inputs()

@@ -11,6 +11,9 @@ namespace receiver_detail { class ReceiverBulkBackend; }
 
 enum class TensorDevice { cpu, cuda };
 enum class TensorPrecision { automatic, fp64 };
+// Optional post-channelization coarse contractions. The full FFT search is
+// retained for every unsupported shape and remains the scalable default.
+enum class TensorCoarseMath { fft, fp16, int8 };
 
 class TensorBackendUnavailable : public Error {
 public:
@@ -24,6 +27,7 @@ struct TensorReceiverOptions {
     // The native receiver separately reserves host transfer staging.
     std::size_t workspace_bytes = 0;
     TensorPrecision precision = TensorPrecision::automatic;
+    TensorCoarseMath coarse_math = TensorCoarseMath::fft;
 };
 
 // Defined by the optional compiled backend target. A request for CUDA

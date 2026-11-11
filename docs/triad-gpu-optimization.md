@@ -5,8 +5,10 @@ Follow [precision controls](gpu-precision-controls.md) and the
 optimization ladder, sensitivity sweeps and calibration campaigns are retired.
 There is one canonical receiver implementation; alternative arithmetic belongs
 inside the canonical implementation. The historical precision controls and
-GPU receiver APIs discussed in these reports have been removed; this page is
-research context, not a current precision-control contract.
+standalone GPU receiver APIs discussed in these reports have been removed.
+This page records their evidence and [native disposition](#native-disposition-of-the-historical-techniques);
+the current options and qualification rules are in the
+[native precision guide](gpu-precision-controls.md).
 
 **Successful Tensor Core DSP implementations exist in Git history.** NVFP4
 accelerated an actual large correlation batch on RTX PRO 6000; split-BF16 and
@@ -14,6 +16,17 @@ TF32x3 accelerated a phase-state workload on RTX 5090. The recent small FP16
 Gram failure does not negate those results. Their arithmetic, layout and reuse
 techniques deserve consideration inside the current native backend, with new
 qualification for its waveform, shapes and complete work.
+
+**Preserve the hardest-search computational ceiling when selecting defaults.**
+The canonical native backend now contains optional FP16 and INT8
+post-channelization lag-DFT paths with reusable coefficients and bounded
+workspace/arrival batching. Bounded GPU fixtures and two large bulk shapes pass;
+complete-receiver qualification remains separate. The new FP4 candidate was
+removed after failing the frozen noise-peak gate, preserving its findings. Full
+frequency-tile and chirp/zoom FFT coverage remains the default: a dense matrix's
+sample-by-frequency arithmetic growth does not disappear when its storage is
+tiled. Promote a different default only with applicable complete-work and
+backlog evidence; an easy-case efficiency result is insufficient.
 
 ## What to measure separately
 
@@ -88,14 +101,60 @@ uses the archived `08c3446f…` source snapshot, with later dtype/accounting gua
 in the committed file. Source, raw receipts and selected assembly were inspected
 directly from Git objects without restoring campaigns.
 
-Current native source retains mixed precision, mapped-basis/device caches, fused
-mapping and small direct Gram reductions. It does **not** contain the historical
-NVFP4, split-BF16/TF32x3 contraction or CUDA graph implementations. Their finite
-phase-state models and earlier cyclic-amplitude/QPSK waveform differ from the
-current receiver. Transfer useful arithmetic, batching, packing, reusable
-workspace and graph techniques into native interfaces; do not restore the old
-receiver. See the separate [CPU history inventory](triad-performance.md#earlier-cpu-implementations-worth-reconsidering)
-for preserved native kernels and potentially missing reuse.
+## Native disposition of the historical techniques
+
+All eleven GPU groups above have a current disposition below. Together with
+the [ten CPU groups](triad-performance.md#earlier-cpu-implementations-worth-reconsidering),
+the audit accounts for 21 historical technique groups. “Implemented”
+describes code in the canonical native stack, not qualification by the old
+measurement. Current scoped results and unresolved gates are in
+[validation](validation.md#native-matrix-and-preparation-follow-through). The old finite phase-state model
+and cyclic-amplitude/QPSK waveform differ from the current receiver, so retain
+the transferable technique rather than restoring another receiver.
+
+| Historical group | Current native disposition |
+| --- | --- |
+| NVFP4 correlation and fused reconstruction | The historical Triton result remains a proven scoped win. A new native cuBLASLt analogue was removed: single-product FP4 failed the 1% score gate (5.03% error), and four-product/residual-scale repairs changed a unique noise peak. Active bulk costs improved against FFT but did not establish an advantage over qualified INT8. This does not reject other FP4 designs or transfer the historical result to current C++. |
+| Split-BF16 / TF32x3 phase contractions | These arithmetic modes remain absent. The old phase-state contraction does not map directly onto current Gaussian tracking. The high/residual principle was tested in the removed FP4 analogue, using actual decoded residuals, HH/HL/LH/LL products and FP64 reconstruction. Its noise-peak failure leaves the historical split-BF16/TF32x3 findings intact. |
+| Fused FP16 packing and tiled products | Native scaled packing and FP32-accumulating products implemented; include all packing, setup and reconstruction when qualifying the path. The historical complete-receiver loss remains relevant. |
+| K32 partials and explicit outer accumulation | Bounded-partial principle implemented with complex chunks of at most 512 samples, INT32 sums for INT8 and FP64 outer reconstruction. This is different arithmetic from the historical FP8 K32 result and needs its own numerical gate. |
+| Scaled FP16 lag-domain DFT | Shape-qualified native coarse lag-group analogue implemented after DATA channelization, with shared coefficients and full FFT fallback. Historical transform wins did not establish an integrated win. |
+| Fused phase stencil, graphs and register reducer | Current fused mapping, direct small Gram reduction and coalesced readback preserve fusion/reduction principles. Exact CUDA arrival-peak frontiers pass device fixtures and the full 8,596-frequency active/noise public-slot checks; a bounded bulk test measures the transfer/selection improvement. Sustained backlog and CPU forecasting remain separate. The old stencil belongs to a different model; CUDA graph replay is still absent. |
+| Persistent whole-scan graph workspace | Exact descriptor and source-tile caches preserve part of the residency lesson; they are not graph replay. Bounded post-render projection/statistics capture remains an unimplemented candidate. |
+| Mixed precision and FP64 reduction organization | FP32 bulk with FP64 coordinates, statistics and posterior evidence is retained. The historical two-level reducer is not established as the same current implementation, so its ratio does not transfer. |
+| Prepared Gaussian design and simulator caches | Persistent native mapped bases, projection plans and device tiles are retained. Exact projection/offset descriptor reuse and shared block-pair transition preparation extend this lesson. Simulator truth remains outside receiver input. |
+| Cached direct-GEMM acquisition bank | Prepared native lag-group matrices and batching across workspaces/arrivals provide a shape-specific analogue. They preserve every public score and do not replace broad FFT acquisition with an unbounded dense bank. |
+| Independent two-GPU trial sharding | Still applicable to independent compiled qualification jobs when needed. It is test orchestration, not one-stream receiver parallelism; it does not justify a second modem implementation. |
+
+Current matrix batches can combine up to 32 workspaces, 64 arrivals and two taps
+into 4,096 complex rows, subject to ready work and full memory admission. This
+addresses a material historical distinction: useful large contraction shapes
+must not be judged solely from the current fine stage's 1×1 or 2×2 Gram matrices.
+Receipts expose actual dimensions and execution/fallback counts; potential
+maximum shape alone is not evidence that a test dispatched it.
+
+An optional split-BF16/TF32x3 variant would fit the prepared coarse matrix
+boundary, subject to supported library/device shapes, explicit complex packing,
+all split-product costs and scratch admission, and the same frozen score/work
+gates. It cannot replace the current Gaussian posterior or FP64 state by analogy
+with the old phase lattice. The removed split-FP4 experiment informs that
+residual technique without establishing those absent arithmetic modes.
+
+The next graph boundary would be fixed-shape projection/statistics after native
+rendering. It needs stable buffers, exact geometry/precision/bin signatures,
+fresh observation and witness reset, warmed FFT plans, coordinated capture
+across owners, and full graph-pool lifetime accounting. Callback-driven source
+generation, changing keyed tiles and blocking readback cannot simply be captured
+as though their host control flow replayed. Descriptor caching is a prerequisite
+for some of this work, not proof that the historical graph gains are retained.
+
+See the separate [CPU history inventory](triad-performance.md#earlier-cpu-implementations-worth-reconsidering)
+for preserved native kernels, old waveform-specific methods and remaining reuse
+opportunities. The current native precision guide keeps
+[arithmetic and CPU forecasting limits](gpu-precision-controls.md#qualifying-a-faster-path)
+separate from this historical inventory.
+
+## Historical numerical limits and lifecycle
 
 Plain BF16, TF32 and scaled FP16 phase-state contractions failed the original
 likelihood-error/bias screen despite unchanged decisions in a small sample.

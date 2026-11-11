@@ -1,6 +1,10 @@
 # Validation status
 
-Updated 10 November 2026. The bounded native throughput/precision investigation
+Updated 10 November 2026. The native history, matrix/preparation and wide-search
+follow-through is complete with the scoped checks below, including the fine-tail
+repair. Complete-receiver capacity and refreshed CPU forecasts remain unresolved.
+The earlier
+bounded native throughput/precision investigation
 from `6bc9b0e3dd0ca91b3b8e3f4851301e6cf1b1371d` is complete. It supports scoped
 GPU phase improvements, three component forecasts and an accepted CPU latency
 tradeoff; complete-receiver capacity and nominal/conservative GPU-assisted CPU
@@ -12,6 +16,222 @@ The historical cleanup checkpoint was based on
 `357a50970a0c6214eeaade7c5704bbc39abd4b79` and committed as
 `419e6bae8c4fe3b0f59be23a6dfb3b69fbaed80e`. Its concise outcomes and limitations
 remain below; they are not release certification or validation of changed code.
+
+## Native matrix and preparation follow-through
+
+The historical audit records dispositions for 21 technique groups:
+[eleven GPU groups](triad-gpu-optimization.md#native-disposition-of-the-historical-techniques)
+and [ten CPU groups](triad-performance.md#earlier-cpu-implementations-worth-reconsidering).
+The canonical C++/CUDA implementation adds optional post-channelization FP16
+and INT8 lag matrices, bounded workspace/arrival batching, exact
+descriptor reuse, shared Gaussian transition preparation and an exact CUDA
+arrival-peak frontier. The full FFT
+search remains the default. Implementation does not transfer historical
+performance or qualify complete-receiver capacity; see the
+[precision contract](gpu-precision-controls.md#stage-boundaries-and-optional-matrix-processing).
+
+The ordinary baseline triad group passed 32/32. The pre-tail-repair checkpoint passes:
+triad 32/32 in 31.52 s, optional ATen CPU 1/1 in 13.75 s, and wrappers 41/41.
+Its actual GPU compiled source manifest is
+`bbcf0d9e0063fe71213034041d3883e292e4d9d2c9ee83f8ef4e6372fbc891b6`.
+It passes both exact-frontier fixtures and the full CUDA suite, including
+composite Helper/DATA at +30/+60 dB, the unchanged 128 MiB bound, and repeated
+fresh fine-owner allocation stress. Independent source review passed. These
+functional checks do not establish complete-receiver capacity.
+
+The bounded CPU preparation comparison used the native production receiver,
+GNU 14.2 Release, H=12/W=24/O=24, one numerical thread per worker and an 8 GiB
+bound. It used seed 74021, three alternating baseline/candidate pairs per
+active, quiet/noise and erasure stratum, with a 30-second per-call and
+180-second aggregate cap. Exactly 18 calls completed in about 5.12 s. The
+compiled source manifests were `3aaf0fbfeb9f311ebe66b640b9aa2ae3f3caf8b4c0164d99caad199d000c5847`
+and `8e48e4da565ef37c0f66124b6194af25c390993d0367a076a4a23c7abe8ad668`.
+This is a phase comparison, not a sustained backlog or capacity test.
+
+| Fine service stratum | Candidate/baseline geometric mean | Paired log-ratio 95% t interval |
+| --- | --- | --- |
+| Active | 0.912935 | 0.641551–1.299118 |
+| Quiet/noise | 1.014148 | 0.792482–1.297817 |
+| Erasure | 0.883256 | 0.630811–1.236727 |
+
+All intervals cross one; **no CPU speedup is demonstrated**. The first active
+and noise pairs stopped on an exact receipt mismatch: coarse retained-memory
+metadata increased by 464 bytes. Inspection classified only that fixed metadata
+delta, retaining the original failure. Reusing the ten original calls and
+executing only the eight remaining calls preserved the sample budget. DSP
+inputs, state, scores and work then matched exactly; erasure needed no metadata
+exception. Three-pair intervals are descriptive and do not establish a portable
+CPU cost or complete-receiver forecast.
+
+On a full RTX PRO 6000 Blackwell Server Edition (SM120, CUDA runtime 12.8,
+cuBLAS 12.8.4), FP16 and INT8 each passed the bounded matrix fixtures with 35
+actual GEMMs and no capability fallback. The post-channelization `CoarseBulk`
+benchmark then measured three alternating pairs for each arithmetic and shape.
+Each batch reached 4,096 matrix rows, made 19 deterministic direct-DFT checks, and
+retained every public score. These are initialized-device fresh-owner costs:
+owner creation, preparation and first lag calculation are included; process/CUDA
+startup and owner teardown are excluded. Resident timings reuse immutable input
+and do not measure fresh live reception. The table uses only the final three
+pairs per arithmetic/shape bound to the `bbcf0d9e…` checkpoint and recorded
+test/probe binary hashes; earlier pre-removal timings remain separate provenance.
+DFT check coordinates may repeat;
+their count is not a number of independent statistical trials.
+
+| Shape (samples / frequencies / arrivals / workspaces; two taps) | Arithmetic | Fresh-owner geometric mean, FFT → candidate |
+| --- | --- | --- |
+| 769 / 129 / 65 / 33 | FP16 | 11.885 → 3.824 ms |
+| 769 / 129 / 65 / 33 | INT8 | 11.858 → 3.681 ms |
+| 2,048 / 65 / 64 / 32 | FP16 | 8.687 → 3.445 ms |
+| 2,048 / 65 / 64 / 32 | INT8 | 9.068 → 3.283 ms |
+
+The second shape initially failed 4,096-row batch admission at 1 GiB. Its scoped
+2 GiB rerun completed all three pairs; this does not revise the portable memory
+default or erase the original failure. Maximum normalized active-score errors
+were `4.80022e-6` for FP16 and `2.44530e-4` for INT8 across these two shapes.
+The traces record `cutlass_80_tensorop_i16832gemm_s8` INT8 and
+`cutlass_80_wmma_tensorop_s161616gemm_f16` FP16 kernel launches.
+The hardware-counter request failed with `ERR_NVGPUCTRPERM`; instruction counts,
+occupancy and high utilization are not established by these receipts. Bulk cost
+improvements do not establish complete-receiver speed or CPU capacity.
+
+The new FP4 implementation was removed after failing its unchanged numerical
+gates. Single-product E2M1/block-16 arithmetic failed the 1% normalized score
+error gate with `0.050318` (about 5.03%). A high/residual repair using actual
+decoded residuals and all HH/HL/LH/LL products improved that error but changed
+the unique noise peak at K=769/F=129; a later 16× residual-scale repair still
+selected 1803 instead of oracle 4536. The oracle's relative runner-up gap was
+0.004041, while normalized maximum error was 0.003461: passing the aggregate
+1% error screen did not preserve the required peak. Four FP32-accumulating
+products with FP64 reconstruction and doubled packing were fully charged.
+Three-pair active fresh-owner means were 4.482 ms versus FFT 12.183 ms for the
+769-sample shape, and 3.534 ms versus 8.480 ms for the 2,048-sample shape. Those
+favorable active costs do not fix the noise failure or demonstrate an advantage
+over qualified INT8. There is no current FP4 option. The successful historical
+NVFP4 results remain applicable to their original implementation and workload.
+
+An intervening FP4 retry is invalid
+as patched-source evidence: a timestamp-preserving bundle overlay left changed
+sources older than existing Ninja objects, so a refreshed source manifest did
+not prove that the changed translation units rebuilt. The
+[bundle extraction guidance](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast)
+now requires timestamp-safe extraction or a fresh source/build and verified
+recompilation. Preserve both the numerical failure and stale-object retry.
+
+The first public-slot check was unresolved. Row 5 CPU active/noise
+checks passed, while CUDA produced matching expected decisions but its receipt
+failed with `Missing CUDA coarse arithmetic policy`. After the receipt repair,
+both active and noise CPU/CUDA pairs pass numerical and physical-decision
+checks, with identical input, public acquisition and fixed work. The original
+forecast gate rejected the new `cuda_arrival_peak_rows` telemetry. Review found
+that this was overly conservative: CPU work remains projected from unchanged
+workspace/frequency pairs, scores and retained peaks/proposals. Source-bound
+offline reanalysis now passes both row-5 and both wide pairs, including strict
+work comparison and exact coarse-search/selection CPU demand equality. It adds
+no DSP calls or calibration and preserves the original failed summaries.
+Row 4 CPU active/noise failed with
+`Robust likelihood block cannot resolve DATA and Helper bands`, preventing the
+paired CUDA checks; a separate original-baseline active replay reproduces the
+same error, establishing that it predates these changes. An explicitly modified
+wide-unassisted row 4 used the full
+8,596-frequency `frequency_tiles` search: GPU-host CPU active/noise calls took
+27.437/27.651 s, while each CUDA call reached its 30-second native deadline.
+No same-input public lag-group pair admitted the optional matrix candidates.
+These failures cannot be replaced by the favorable component batch results;
+neither a complete-receiver pass nor sustained input-backlog capacity is shown.
+
+The wide-search diagnosis found a concrete transfer/host-selection bottleneck:
+F=8,596, L=10,553, 78 DSP workspaces and NFFT=32,768 require 7,075,659,864
+logical scores, or 56,605,278,912 bytes of full FP64 score readback. The deadline-limited CUDA
+call completed 132/269 tiles and downloaded about 27.815 GB while native
+non-maximum suppression remained serial on the host. The new device frontier
+retains the same full score calculation and peak semantics but returns at most
+two peaks in 40 bytes per workspace/frequency: 26,819,520 bytes for the full
+geometry. It preserves plateau midpoints, tie priority, independent endpoint
+eligibility, separation and ordered publication; nonfinite values in any input
+score still fail. Added core checks passed 1/1 in 4.28 s, and source reviews and
+actual CUDA exact-frontier fixtures pass.
+
+The bounded frontier benchmark used this arrival/workspace/FFT geometry with
+32 frequencies, a 2 GiB bound, two warm-up scorings and three alternating timed
+pairs (eight scorings total). All 26,340,288 scores, exact frontier entries and
+16 fixed direct-DFT checks pass; each side performs the same 32 forward and
+4,992 inverse FFTs. Fresh-owner geometric mean falls from 240.668 to 17.617 ms
+(13.661×), including owner creation, preparation and search but excluding
+process/CUDA startup and teardown. The descriptive paired-log-ratio 95% t
+interval is 0.041642–0.128675 for candidate/baseline. Downloaded bytes fall from
+210,722,304 to 99,840. This is measured component improvement; the separate
+full-width check below establishes its own narrower result.
+
+The subsequent four-call 8,596-frequency public-slot experiment passes both
+active and noise CPU/CUDA pairs. Every call retains the original input/grid,
+L=10,553 with 78 DSP workspaces, all 269 tiles and all 7,075,659,864 logical
+scores; CUDA frontier counters confirm complete coverage. Total call elapsed times are 28.171 s CPU
+versus 5.070 s CUDA for active and 26.111 s versus 4.781 s for noise. These are
+one pair per stratum, not timing confidence intervals or sustained-stream
+throughput. The earlier CUDA run was censored at its 30-second deadline, so it
+does not provide an exact old/new GPU speedup ratio. Numerical/physical and
+fixed-work gates pass. The initial forecast rejection on the new frontier
+telemetry is retained; the corrected logical-work projection passes all four
+recorded row-5/wide pairs. No complete forecast is calculated: the remaining
+strata and operational challenges, source-matched current local CPU calibration,
+independent holdouts and same-stream backlog checks are still required.
+Quiet-slot message completion and local CPU capacity remain outside this check.
+
+The cleaned full CUDA check also failed a 128 MiB bound during coarse-bank
+preparation after the DC-policy fixtures, despite about 94 GiB of physical
+device memory being free. The ATen 2.9.1 source investigation identified a
+process-lifetime cuBLAS workspace cache of 8,519,680 bytes per handle/stream.
+The repair retains direct small Grams, computes singleton DC in C128 even in
+precise stages, and routes every remaining CUDA fine Gram through an owned C128
+ZGEMM with a charged 4 MiB caller workspace. CPU `at::bmm` is unchanged. The original
+failure remains; the repaired full CUDA suite passes the unchanged 128 MiB
+fixture and repeated fresh fine-owner allocation stress. Independent review
+passed. This resolves the tested Gram lifetime paths, not all possible backend
+memory behavior or every configuration.
+
+A separate public fine-only case subsequently reproduced a constructor failure
+at a 13-sample tail. The initial shared public-extent merge repair passed its
+targeted check 1/1 in 1.59 s. The repaired calendar merges a short public tail
+into its preceding segment before samples are exposed, without dropping or
+padding input. Workspace preflight validates the exact projection bins without
+allocating them. Review of both changes passed. The new compiled source
+`0b8165730edee9f6248f5c7fba1038a914ad454b10fea4d6e57a5ba52f280ab0`
+passes ordinary triad 32/32 in 30.71 s and the full CUDA suite after a
+timestamp-safe rebuild, including the unchanged 128 MiB, strong-Helper and
+owner-lifetime checks. Optional ATen CPU also passes 1/1 in 13.75 s. The four-call
+row-4 check passes both active/noise CPU/CUDA pairs with the original input/grid,
+all 429,013 rows processed in 286 blocks/143 segments, a 1,513-row final block
+and no discarded or invalid rows. Active call elapsed time
+is 3.137 s CPU versus 5.088 s CUDA; noise is 27.934 s versus 6.729 s. Each pair
+passes numerical, physical-decision and logical-work gates at H=27/W=54 with
+8 GiB host/2 GiB device bounds. Active Helper acquisition narrows the search to
+44 frequencies/two tiles. Noise finds no coarse pilot and retains all 8,596
+frequencies/269 tiles and 7,075,659,864 scores; its coarse-tile phase takes
+25.581 s CPU versus 2.251 s CUDA. These one-pair observations are not a portable
+speed ranking.
+
+One affected local row-4 active call also completes in 11.607 s at H=12/W=24,
+O=24 and an 8 GiB bound (11.557 s named phases; 7.122 s fine work). It is a
+timing observation, not calibration of all
+strata, a fresh holdout or a capacity pass. Old fine-tail calibration is invalid
+for the changed source; new complete forecasts still need applicable calibration
+and holdouts. The `bbcf0d9e…` wide-slot and bulk measurements above retain their
+pre-repair source binding. Unchanged component costs are not silently relabeled
+as validation of the changed fine path.
+
+Temporary receipts in `local-evidence/native-tensor-current/` bind this current
+investigation's source, binaries, inputs and failed/continued checks. The findings
+and remaining limits are distilled here. Cleanup removed 53 redundant temporary
+files, including five retired orchestration scripts, empty captures, duplicate
+command/hash copies and superseded successful timing/profile logs. Eleven private
+source/binary/archive copies were removed; useful builds, caches and the ATen
+installation remain. The temporary cloud instance and volumes were confirmed
+absent; operational receipts remain outside the checkout. Hash-referenced
+originals, failed gates and source-bound raw receipts supporting current claims
+remain until the claim is superseded or its remaining question is resolved.
+Changed matrix work is not mapped
+onto the existing CPU FFT forecast; no current matrix or preparation result
+qualifies complete-receiver nominal/conservative service or real-time capacity.
 
 ## Native throughput and precision investigation
 

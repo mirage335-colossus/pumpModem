@@ -28,7 +28,7 @@ target_compile_definitions(datapump_triad_receiver PUBLIC DATAPUMP_HAVE_TRIAD_TE
 if(CAFFE2_USE_CUDA AND NOT CAFFE2_USE_ROCM)
   find_package(CUDAToolkit REQUIRED)
   enable_language(CUDA)
-  target_sources(datapump_triad_tensor PRIVATE src/triad_tensor_mapping.cu)
+  target_sources(datapump_triad_tensor PRIVATE src/triad_tensor_mapping.cu src/triad_tensor_matrix.cu src/triad_tensor_peaks.cu)
   set_target_properties(datapump_triad_tensor PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
   if(CMAKE_CUDA_COMPILER_ID STREQUAL "NVIDIA")
     foreach(_cuda_flags CMAKE_CUDA_FLAGS CMAKE_CUDA_FLAGS_DEBUG CMAKE_CUDA_FLAGS_RELEASE
@@ -37,16 +37,16 @@ if(CAFFE2_USE_CUDA AND NOT CAFFE2_USE_ROCM)
         message(FATAL_ERROR "Robust fused mapping requires CUDA math without --use_fast_math")
       endif()
     endforeach()
-    set_source_files_properties(src/triad_tensor_mapping.cu PROPERTIES
+    set_source_files_properties(src/triad_tensor_mapping.cu src/triad_tensor_matrix.cu src/triad_tensor_peaks.cu PROPERTIES
       COMPILE_OPTIONS "--fmad=false;--ftz=false;--prec-div=true;--prec-sqrt=true")
   elseif(CMAKE_CUDA_COMPILER_ID STREQUAL "Clang")
-    set_source_files_properties(src/triad_tensor_mapping.cu PROPERTIES
+    set_source_files_properties(src/triad_tensor_mapping.cu src/triad_tensor_matrix.cu src/triad_tensor_peaks.cu PROPERTIES
       COMPILE_OPTIONS "-fno-fast-math;-ffp-contract=off")
   else()
     message(FATAL_ERROR "The fused Robust mapping kernel requires NVIDIA or Clang CUDA compilation")
   endif()
   target_compile_definitions(datapump_triad_tensor PRIVATE DATAPUMP_TRIAD_TENSOR_CUDA=1)
-  target_link_libraries(datapump_triad_tensor PRIVATE CUDA::cudart)
+  target_link_libraries(datapump_triad_tensor PRIVATE CUDA::cudart CUDA::cublas)
 elseif(DATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA)
   message(FATAL_ERROR "A CUDA-enabled LibTorch build is required for the Robust CUDA check")
 else()

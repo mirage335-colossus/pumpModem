@@ -4,6 +4,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <numbers>
 #include <stdexcept>
 
 namespace {
@@ -20,6 +21,17 @@ void rejects(Operation operation, const char* reason) {
     try {
         operation();
     } catch (const Exception&) {
+        return;
+    }
+    throw std::runtime_error(reason);
+}
+
+template<class Operation>
+void rejects_with(Operation operation, const char* expected, const char* reason) {
+    try {
+        operation();
+    } catch (const Error& error) {
+        check(std::string(error.what()).find(expected) != std::string::npos, reason);
         return;
     }
     throw std::runtime_error(reason);
@@ -64,6 +76,206 @@ struct Fixture {
     }
 };
 
+void helper_terminal_geometry() {
+    // Public row-4 geometry: a 13-sample remainder used to create a DFT
+    // whose 461.5-Hz bins could not separate otherwise disjoint DATA/Helper
+    // bands. Construction alone reproduces the failure; no capture is needed.
+    ReceiverConfig config;
+    config.sample_rate_hz = 6000;
+    config.data_if_hz = 1725;
+    config.frequency_bound_hz = 90.522026101305059;
+    config.clock_bound_ppm = 300.01500075003753;
+    config.spread_doppler_hz = 90;
+    config.spread_delay_seconds = .021;
+    config.noise_variance = .05;
+    config.helper_enabled = true;
+    config.helper.low_frequency_hz = 550;
+    config.helper.auxiliary_frequency_hz = 950;
+    config.helper.frequency_hz = 2400;
+    ReceiverSlotPlan slot;
+    slot.first_sample = 89966;
+    slot.stop_sample = 518979;
+    slot.quiet_first_sample = 361431;
+    slot.quiet_stop_sample = 517384;
+    slot.format.sample_rate = 6000;
+    slot.format.inner_rate_hz = 36;
+    slot.format.added_symbols = 10;
+    slot.format.bit_seconds = 11.6;
+    slot.format.pulse_shape = PulseShape::TaperedRrc;
+    slot.format.epoch = 1793850000;
+    slot.format.symbol_ordinal = 7000037;
+    const std::vector<Complex> zero(slot.stop_sample - slot.first_sample);
+    const std::array<FineCoordinate, 1> coordinates{{{0, 0, 0, 0}}};
+    const FineObservation extent{slot.first_sample, zero.size(), FineRunKind::operational, true};
+    const auto workspace = fine_workspace(config, slot, extent, 1);
+    FineSession session(config, slot, Crypto::amateur(), extent, zero, {}, coordinates,
+                        100, 12, 1, workspace);
+    check(session.progress().processed_rows == 0,
+          "public Helper tail geometry must construct without processing input");
+
+    auto short_slot = slot;
+    short_slot.stop_sample = short_slot.first_sample + 13;
+    short_slot.quiet_first_sample = short_slot.first_sample;
+    short_slot.quiet_stop_sample = short_slot.stop_sample;
+    const FineObservation short_extent{short_slot.first_sample, 13, FineRunKind::operational, true};
+    rejects_with([&] { (void)fine_workspace(config, short_slot, short_extent, 1); },
+                 "cannot resolve DATA and Helper bands",
+                 "workspace admission must reject an unresolvable real DFT before constructing a receiver");
+    rejects_with([&] {
+        FineSession unresolved(config, short_slot, Crypto::amateur(), short_extent,
+                               std::span(zero).first(13), {}, coordinates, 100, 12, 1, workspace);
+    }, "cannot resolve DATA and Helper bands",
+       "a whole observation too short to resolve Helper exclusions must still fail");
+}
+
+struct ProjectionWitness {
+    std::span<const Complex> input;
+    std::size_t cursor = 0, quiet_stop = 0, quiet_modes = 0;
+    double variance = 0, quiet_energy = 0;
+    std::vector<std::size_t> lengths;
+};
+
+// This fixture observes the production observation projection, independently
+// checking every output with a direct unitary DFT. It does not supply a modem
+// oracle or claim valid receiver admission from its zero template statistics.
+class ProjectionWitnessBulk final : public FineBulk {
+public:
+    explicit ProjectionWitnessBulk(std::shared_ptr<ProjectionWitness> witness) : witness_(std::move(witness)) {}
+
+    void statistics(const FineBulkBlock& block, std::size_t candidates, const FineMappingSource& source,
+                    std::span<FineBulkStatistics> output, std::stop_token) override {
+        auto& witness = *witness_;
+        check(block.rows <= witness.input.size() - witness.cursor, "projection must stay inside the real input");
+        check(block.projected_y.size() == block.projection_indices.size(), "projected mode dimensions must agree");
+        long double expected_energy = 0;
+        for (std::size_t mode = 0; mode < block.projection_indices.size(); ++mode) {
+            const auto index = block.projection_indices[mode];
+            std::complex<long double> expected{};
+            for (std::size_t sample = 0; sample < block.rows; ++sample) {
+                const auto angle = -2 * std::numbers::pi_v<long double> * index * sample / block.rows;
+                const auto value = witness.input[witness.cursor + sample];
+                expected += std::complex<long double>(value.real(), value.imag()) *
+                            std::complex<long double>(std::cos(angle), std::sin(angle));
+            }
+            expected /= std::sqrt(static_cast<long double>(block.rows));
+            check(std::abs(std::complex<long double>(block.projected_y[mode].real(), block.projected_y[mode].imag()) -
+                           expected) <= 1e-9L * std::max(1.L, std::abs(expected)),
+                  "every real terminal sample must participate in the actual-length unitary DFT");
+            expected_energy += std::norm(expected);
+        }
+        if (witness.cursor + block.rows <= witness.quiet_stop) {
+            witness.quiet_modes += block.projection_indices.size();
+            witness.quiet_energy += static_cast<double>(expected_energy) / witness.variance;
+        }
+        witness.cursor += block.rows;
+        witness.lengths.push_back(block.rows);
+        for (std::size_t candidate = 0; candidate < candidates; ++candidate) {
+            source(candidate, 0, block.rows, [](auto, auto, auto) {});
+            output[candidate] = {};
+        }
+        work_.executed = true;
+        work_.statistics_blocks += candidates;
+        work_.projected_values += 2 * block.taps * candidates * block.projection_indices.size();
+    }
+
+    BulkReceipt receipt() const override { return work_; }
+
+private:
+    std::shared_ptr<ProjectionWitness> witness_;
+    BulkReceipt work_;
+};
+
+class ProjectionWitnessBackend final : public ReceiverBulkBackend {
+public:
+    explicit ProjectionWitnessBackend(std::shared_ptr<ProjectionWitness> witness) : witness_(std::move(witness)) {}
+    std::unique_ptr<FineBulk> make_fine(double, double) override {
+        return std::make_unique<ProjectionWitnessBulk>(witness_);
+    }
+    std::unique_ptr<CoarseBulk> make_coarse(double, double) override { return {}; }
+    std::size_t fine_host_bytes(std::size_t, std::size_t) const override { return 0; }
+    std::size_t coarse_host_bytes(std::size_t, std::size_t, std::size_t) const override { return 0; }
+    BulkReceipt receipt() const override { return {}; }
+
+private:
+    std::shared_ptr<ProjectionWitness> witness_;
+};
+
+void terminal_projection_boundaries() {
+    struct Case {
+        unsigned fs;
+        std::size_t rows, deferred, segments;
+        std::vector<std::size_t> lengths;
+    };
+    const std::array cases{
+        Case{6000, 6000, 3000, 2, {1500, 1500, 1500, 1500}},
+        Case{6000, 6001, 3000, 2, {1500, 1500, 1500, 1501}},
+        Case{6000, 7499, 3000, 2, {1500, 1500, 1500, 2999}},
+        Case{6000, 7500, 6000, 3, {1500, 1500, 1500, 1500, 1500}},
+        Case{6000, 8999, 6000, 3, {1500, 1500, 1500, 1500, 2999}},
+        Case{6002, 7501, 3001, 2, {1500, 1501, 1500, 1500, 1500}},
+        Case{6000, 1499, 0, 1, {1499}},
+        Case{6000, 13, 0, 1, {13}},
+    };
+    for (const auto& test : cases) {
+        ReceiverConfig config;
+        config.sample_rate_hz = test.fs;
+        config.noise_variance = .125;
+        ReceiverSlotPlan slot;
+        slot.first_sample = 1000;
+        slot.stop_sample = slot.first_sample + test.rows;
+        slot.quiet_first_sample = slot.first_sample;
+        // An aperture ending one sample early must exclude the complete last
+        // projection block, even when most of that block lies in quiet time.
+        slot.quiet_stop_sample = slot.stop_sample - 1;
+        slot.format.sample_rate = test.fs;
+        slot.format.inner_rate_hz = 120;
+        slot.format.added_symbols = 1;
+        slot.format.bit_seconds = .001;
+        slot.format.pulse_shape = PulseShape::TaperedRrc;
+        slot.format.epoch = 1793850000;
+        slot.format.symbol_ordinal = 3117;
+        std::vector<Complex> input(test.rows);
+        for (std::size_t i = 0; i < input.size(); ++i)
+            input[i] = {.3 * std::sin(.731 * i) + .17 * std::cos(.193 * i), .2 * std::sin(.557 * i)};
+        input.back() += Complex{2, -3};
+        const std::array<FineCoordinate, 1> coordinates{{{0, 0, 0, 0}}};
+        auto witness = std::make_shared<ProjectionWitness>();
+        witness->input = input;
+        witness->quiet_stop = test.rows - 1;
+        witness->variance = config.noise_variance;
+        config.bulk_backend = std::make_shared<ProjectionWitnessBackend>(witness);
+        const FineObservation extent{slot.first_sample, test.rows, FineRunKind::probe, true};
+        const auto workspace = fine_workspace(config, slot, extent, 1);
+        rejects<ReceiverWorkspaceError>([&] {
+            FineSession undersized(config, slot, Crypto::amateur(), extent, input, {}, coordinates,
+                                   100, 0, 1, workspace - 1);
+        }, "terminal geometry must enforce its exact workspace quote");
+        FineSession session(config, slot, Crypto::amateur(), extent, input, {}, coordinates,
+                            100, 0, 1, workspace);
+        session.advance_to(test.rows - 1);
+        check(session.progress().processed_rows == test.deferred && witness->cursor == test.deferred,
+              "checkpoint exposure must not split the immutable terminal segment");
+        session.advance_to(test.rows);
+        const auto progress = session.progress();
+        check(progress.observation_complete && progress.processed_rows == test.rows &&
+              progress.segments == test.segments && progress.blocks == test.lengths.size() &&
+              witness->cursor == test.rows && witness->lengths == test.lengths,
+              "terminal calendar must project all real samples exactly once");
+        check(progress.quiet_modes == witness->quiet_modes &&
+              std::abs(progress.quiet_energy - witness->quiet_energy) <= 1e-9 * std::max(1., witness->quiet_energy),
+              "actual-length unitary projections must preserve noise variance and whole-block quiet eligibility");
+    }
+
+    ReceiverConfig oversized;
+    oversized.sample_rate_hz = 2'097'152;
+    oversized.noise_variance = 1;
+    ReceiverSlotPlan slot;
+    slot.stop_sample = 1'048'577;
+    slot.quiet_stop_sample = slot.stop_sample;
+    rejects_with([&] { (void)fine_workspace(oversized, slot, 1); }, "segment exceeds 1048576 samples",
+                 "the actual merged segment must obey the public maximum before allocation");
+}
+
 void production_equivalence() {
     const Fixture f;
     const auto bound = fine_workspace(f.config, f.slot, 1);
@@ -89,14 +301,14 @@ void production_equivalence() {
     check(split.progress().processed_rows == 3 * f.fs, "checkpoint must defer the incomplete segment");
     split.advance_to(f.iq.size() - 1);
     const auto near_end = split.progress();
-    check(near_end.processed_rows == 19 * f.fs && !near_end.observation_complete,
-          "the short terminal block must wait for its full declared extent");
+    check(near_end.processed_rows == 19 * f.fs - f.fs / 2 && !near_end.observation_complete,
+          "the merged terminal segment must wait for its full declared extent");
     split.advance_to(f.iq.size());
     ReceiverSlotScore incremental;
     split.finish(incremental);
     const auto finished = split.progress();
-    check(finished.observation_complete && finished.last_block_rows == 17 &&
-          finished.finished && incremental.complete, "the true terminal block must be scored once");
+    check(finished.observation_complete && finished.last_block_rows == f.fs / 4 + 17 &&
+          finished.finished && incremental.complete, "the enlarged terminal block must be scored once");
     check(direct.bit_evidence == incremental.bit_evidence &&
           direct.adaptive_bit_evidence == incremental.adaptive_bit_evidence &&
           direct.combined_bit_evidence == incremental.combined_bit_evidence &&
@@ -306,6 +518,8 @@ void incomplete_bulk_cannot_publish_quiet() {
 
 int main() {
     try {
+        helper_terminal_geometry();
+        terminal_projection_boundaries();
         production_equivalence();
         uninterrupted_interior_probe();
         erasure_and_failure();

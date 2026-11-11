@@ -416,7 +416,8 @@ def _validate_baseline_evidence(baseline, host, backend, target_units):
 
 def _run_native(probe, report, *, target_units=1000, device="cpu", baseline=None,
         workers=None, slot_owners=None, memory_limit_bytes=None, deadline_ms=30_000,
-        max_samples=4_194_304, tensor_precision=None, device_index=None, device_memory_limit_bytes=None):
+        max_samples=4_194_304, tensor_precision=None, tensor_coarse_math=None,
+        device_index=None, device_memory_limit_bytes=None):
     if baseline is not None and not isinstance(baseline, dict):
         raise ProbeError("Baseline report must be a JSON object")
     # Freeze the cap across both reports when the operator has left it automatic.
@@ -427,7 +428,7 @@ def _run_native(probe, report, *, target_units=1000, device="cpu", baseline=None
         memory_limit_bytes = baseline_environment["allocation"].get("memory_limit_bytes")
     options = {"workers": workers, "slot_owners": slot_owners, "memory_limit_bytes": memory_limit_bytes,
                "deadline_ms": deadline_ms, "max_samples": max_samples,
-               "tensor_precision": tensor_precision, "device_index": device_index,
+               "tensor_precision": tensor_precision, "tensor_coarse_math": tensor_coarse_math, "device_index": device_index,
                "device_memory_limit_bytes": device_memory_limit_bytes}
     description = probe.call("describe", **options)
     report.update(native_identity=description["identity"], description=description,
@@ -569,6 +570,7 @@ def main(argv=None):
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--device", choices=BACKENDS, default="cpu")
     parser.add_argument("--tensor-precision", choices=("automatic", "fp64"))
+    parser.add_argument("--tensor-coarse-math", choices=("fft", "fp16", "int8"))
     parser.add_argument("--device-index", type=int)
     parser.add_argument("--device-workspace-mib", type=int)
     parser.add_argument("--target-units", type=int, default=1000, help="Projection only. Executes bounded 1/2/4 batches.")
@@ -589,7 +591,7 @@ def main(argv=None):
     args = parser.parse_args(input_args)
     if args.cases is not None:
         explicit = {arg.split("=", 1)[0] for arg in input_args}
-        if explicit & {"--baseline", "--device", "--target-units", "--benchmark-deadline-ms", "--tensor-precision",
+        if explicit & {"--baseline", "--device", "--target-units", "--benchmark-deadline-ms", "--tensor-precision", "--tensor-coarse-math",
                        "--device-index", "--device-workspace-mib"}:
             parser.error("Relative regression options do not apply to manual capacity")
         from triad_manual_cases import main as manual_main
@@ -611,7 +613,7 @@ def main(argv=None):
     if not 4 <= args.target_units <= 10**9:
         parser.error("--target-units must be in [4,1000000000]")
     if args.device == "cpu" and any(value is not None for value in (
-            args.tensor_precision, args.device_index, args.device_workspace_mib)):
+            args.tensor_precision, args.tensor_coarse_math, args.device_index, args.device_workspace_mib)):
         parser.error("Tensor options require --device tensor-cpu or cuda")
     try:
         options = {"target_units": args.target_units, "device": args.device,
@@ -631,6 +633,8 @@ def main(argv=None):
             options["max_samples"] = positive_int(args.max_samples, "sample limit")
         if args.tensor_precision is not None:
             options["tensor_precision"] = args.tensor_precision
+        if args.tensor_coarse_math is not None:
+            options["tensor_coarse_math"] = args.tensor_coarse_math
         if args.device_index is not None:
             options["device_index"] = positive_int(args.device_index, "device index", allow_zero=True)
         if args.device_workspace_mib is not None:

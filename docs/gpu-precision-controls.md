@@ -1,4 +1,4 @@
-# Precision for GPU-assisted CPU forecasting
+# Native GPU precision and CPU forecasting
 
 **Prefer practical lower-precision and tensor-compatible bulk arithmetic when
 it speeds up qualified manual-suite forecasting.** The intended receiver
@@ -13,6 +13,12 @@ prefer a full RTX PRO 6000 Blackwell or a demonstrably more suitable modern
 accelerator.** Do not let a familiar A100/A5000 or one slow small-matrix experiment
 silently determine the development target. Qualify the actual precision and
 complete-work speedup on the selected hardware.
+
+**Choose the default for the computational ceiling of challenging reception,
+including wide frequency searches and accumulated input.** Efficiency on an easy
+case well below that ceiling does not justify a default that falls behind on
+harder public geometry. Preserve complete search coverage, productive batches,
+and the shared native worker/memory contracts; energy efficiency is not the goal.
 
 Historical Tensor Core work includes successful NVFP4 DSP correlation and
 split-BF16/TF32x3 phase contractions. See the [verified Git inventory](triad-gpu-optimization.md#verified-git-history-inventory)
@@ -38,13 +44,114 @@ accounting, decisions and completion remain in the production C++ control path;
 Python does not duplicate those algorithms.
 
 `TensorReceiverOptions` selects CPU or an exact CUDA device, a bounded shared
-workspace and `automatic` or `fp64` precision. The native workload CLI exposes
-`--tensor-precision automatic|fp64`. Automatic bulk work normally uses FP32 with
+workspace, `automatic` or `fp64` precision, and a separate coarse arithmetic
+policy. The native workload CLI exposes `--tensor-precision automatic|fp64` and
+`--tensor-coarse-math fft|fp16|int8`; `fft` remains the default. Automatic bulk
+work normally uses FP32 with
 FP64 coordinates and reductions. The compact tight-clock class (sample rate at
 most 10 Hz and positive clock span at most 0.001 ppm) selects FP64. Receipts
 report the actual coarse and fine arithmetic, device/runtime and memory use.
 Fine Gaussian state retains the native higher-precision policy. No arithmetic
 is silently selected from the observed score or transmitted truth.
+
+### Stage boundaries and optional matrix processing
+
+The optional FP16/INT8 matrix path is implemented in the canonical C++/CUDA
+backend using cuBLAS. Bounded actual-GPU fixtures and two large post-channelization
+shapes show numerical passes and lower bulk cost on the RTX PRO 6000. These are
+scoped component results, not complete-receiver or backlog qualification. See
+the [current results and failures](validation.md#native-matrix-and-preparation-follow-through)
+before selecting an arithmetic mode.
+
+Quantization belongs after channel isolation. The current coarse matrix entry
+receives filtered DATA observations and templates. Raw composite I/Q, which may
+contain much stronger Helper tones, keeps the existing FP32 FIR path or its
+FP64 precision class; do not replace that input with INT8 or FP4. Fine DATA
+observations are separately projected in native FP64 before the bulk interface.
+Helper filtering remains native and supplies frequency intervals to DATA search.
+Helper phase/timing transfer and a low-precision Helper backend are separate,
+unqualified extensions. Quiet spectrum makes lower-precision bulk arithmetic
+worth testing; it does not establish accumulation accuracy or conditioning.
+
+| Coarse matrix request | Implemented arithmetic |
+| --- | --- |
+| `fp16` | Per-chunk row/column normalization, FP16 products with FP32 accumulation, and FP64 complex reconstruction and outer accumulation. |
+| `int8` | Symmetric `[-127,127]` operands, independently initialized INT32 partials, and FP64 rescaling/reconstruction. At most 512 complex samples become 1,024 real products per partial: `1024*127² = 16,516,096 < 2²⁴`, so the integer sum cannot overflow. This bound does not remove input quantization error. |
+
+The new FP4 candidate was removed after failing its frozen numerical gates.
+Single-product E2M1/block-16 arithmetic produced `0.050318` normalized score
+error against a 1% limit. Four-product high/residual reconstruction and a later
+16× residual-scale repair still changed the unique noise peak. Favorable active
+bulk timings did not resolve that failure or demonstrate an advantage over
+qualified INT8. There is no current FP4 selector. This scoped result does not
+invalidate the successful historical NVFP4 implementation or rule out a future
+native design; it must meet the unchanged numerical and full-cost gates.
+
+The implementation reuses per-stage native library handles and prepared
+lag-group coefficient matrices. It combines up to 32 independent workspaces,
+64 arrivals and two taps into a matrix with up to 4,096 complex rows, reducing
+the risk that tiny products hide useful Tensor Core parallelism. Admission
+reduces those batch dimensions when needed; it does not reduce the receiver's
+global worker budget or search coverage. Coefficients, packing/library scratch,
+results and host staging remain charged through their full lifetimes. Results
+are published as complete ordered workspace grids in slices of at most eight.
+
+Current matrix eligibility is 16–8,192 input samples, at least 16 arrivals,
+and 8–256 frequencies per lag group, with total coefficient storage bounded by
+`min(32 MiB, shared device workspace/8)`. Frequency-tiled searches, precise FP64
+stages, unsupported devices/shapes and insufficient workspace retain the full
+FFT calculation. Receipts distinguish `cpu-device`, `fp64-stage`,
+`frequency-tile-route`, `unfavorable-shape`, `workspace-limit` and
+`device-capability` fallbacks. A requested CUDA backend still must execute on
+CUDA; this arithmetic fallback does not turn CPU work into GPU evidence.
+
+The scalable frequency-tile and chirp/zoom FFT searches remain the default.
+For a uniform grid, direct matrix correlation grows with samples times searched
+frequencies; tiling bounds its storage but does not remove that arithmetic growth.
+FFT search scales differently and must remain available for broad geometry.
+Select a matrix default only from qualified, complete-cost measurements covering
+the hardest applicable shapes. A narrow GEMM win or an unfavorable tiny Gram
+measurement cannot decide the broad-search default. Tensor Core FFT factorization
+would be a distinct algorithm to implement and qualify, not an INT8 cuFFT switch.
+
+The CUDA frequency-tile route now implements exact arrival-peak selection on
+the device, returning a fixed 40-byte frontier per workspace/frequency instead
+of the complete FP64 arrival row. It still computes and validates every score;
+logical score/work counts remain unchanged. Its contract matches native
+plateau midpoints, ties, endpoints, separation and the two-peak ordering.
+Contiguous score copies, packed device output and host publication buffers
+remain charged until readback completes. Native and actual-CUDA fixtures pass,
+and a bounded 32-frequency comparison improves fresh-owner bulk cost while
+preserving every score and the exact frontier. The full 8,596-frequency
+active/noise public-slot checks also pass with lower measured elapsed time
+than the same-host CPU checks. Sustained backlog and CPU-forecast qualification
+remain separate; see the current validation record.
+
+Fine sessions also retain exact-value projection-bin and mapping-offset
+descriptors, alongside the existing ownership-aware source-tile cache. Changed
+bins, rows or offsets invalidate the relevant descriptor; fresh observations,
+mapping coefficients and keyed source identities remain independent. Optional
+caching can fall back to charged transient uploads under memory pressure.
+Common Gaussian transition coefficients are now prepared once per chronological
+block pair in native dispatch, including missing blocks. These are transfers of
+the historical preparation/reuse lessons, not measured speedup claims.
+
+The singleton DC fine Gram uses a direct C128 product even in precise stages;
+the existing small direct Grams remain. Other CUDA fine Grams use an owned C128
+ZGEMM with a charged 4 MiB caller workspace, avoiding ATen's process-lifetime
+cuBLAS workspace cache. CPU BMM is
+unchanged. The repaired actual-CUDA suite passes the unchanged 128 MiB fixture
+and repeated fresh fine-owner allocation stress. These checks qualify the
+tested ownership paths, not every device/configuration or all library memory.
+
+Matrix receipts record requested arithmetic, loaded cuBLAS/SM identity,
+successful product/chunk counts, actual peak dimensions, padded arithmetic,
+packing counts, nonfinite/saturation diagnostics and scale maxima. Descriptor
+hit/upload counters expose reuse. These counters do not establish hardware
+occupancy or instruction execution; retain actual-device profiling and complete
+elapsed costs as separate evidence.
+
+### Existing qualification and remaining limits
 
 A requested CUDA backend must execute on CUDA or report unavailable; CPU fallback
 is not GPU evidence. The CMake `DATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA` option requires
@@ -132,6 +239,18 @@ local holdouts determine the forecast. Do not multiply GPU elapsed time by a
 generic FLOPS ratio. Follow the
 [GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast).
 
+The workload gate reports numerical parity separately from CPU cost-work
+compatibility. Executed FP16 or INT8 matrix work cannot qualify the existing
+FFT-based CPU forecast model until an applicable CPU work mapping is measured.
+Exact CUDA frontier reduction preserves the CPU logical-work projection through
+`workspace_frequency_pairs`, `score_rows` and retained peaks/proposals. Its
+`cuda_arrival_peak_rows` telemetry is not a replacement CPU work feature or a
+GPU-time-to-CPU conversion. Full-grid/frontier parity and all existing source,
+runtime, local calibration and holdout gates still apply.
+Requested arithmetic is also part of relative-regression runtime identity.
+Changed common transition preparation needs fresh affected CPU timings; neither
+the old CPU costs nor a GPU product count alone supplies that calibration.
+
 The [validation record](validation.md#gpu-assisted-receiver-measurement)
 distinguishes the earlier accepted eight-row timing forecasts from unresolved
 conservative CPU capacity and the restructuring's new source identity. Earlier
@@ -153,8 +272,9 @@ qualification of the current native ATen implementation:
   bounded row-3 checks on RTX PRO 6000 but did not improve the integrated receiver.
   Scaled FP16 sped up isolated packing-inclusive transforms by 1.33–1.88× while
   acquisition stages took longer and common stages were effectively unchanged.
-  Those implementations were removed. Do not restore that replacement without a
-  changed workload or a concrete removal of surrounding costs.
+  Those implementations were removed. The current native candidate adds shared
+  workspace/arrival batching and bounded resident coefficients; measure those
+  changed surrounding costs before treating it as a successful replacement.
 - A prior GPU filter-staging/memory-lifetime edit lacked fresh CUDA execution
   after replacement capacity became unavailable. Earlier device qualification
   did not cover the changed source.

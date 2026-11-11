@@ -26,6 +26,10 @@ def main(executable):
     assert description["allocation"]["slot_owners"] == 1
     assert description["result"] == {"available": True, "actual_device_work": False}
     assert not description["phases"]
+    assert description["identity"]["requested_tensor_coarse_math"] == "fft"
+    tensor_on_cpu = run("describe", "--tensor-coarse-math", "int8", code=2)
+    assert tensor_on_cpu["status"] == "unavailable" and not tensor_on_cpu["phases"]
+    assert tensor_on_cpu["identity"]["requested_tensor_coarse_math"] == "int8"
     automatic = run("describe", default_allocation=True)["allocation"]
     assert automatic["hardware_threads"] > 0
     assert automatic["workers"] == 2 * automatic["hardware_threads"]

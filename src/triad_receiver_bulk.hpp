@@ -1,6 +1,7 @@
 #pragma once
 
 #include "datapump/triad_modem_v3.hpp"
+#include "triad_bulk_peaks.hpp"
 
 #include <array>
 #include <functional>
@@ -15,9 +16,15 @@ inline constexpr std::array<std::string_view, 8> bulk_direct_fallback_reasons{
     "nonfinite-relative-map", "large-phase", "pinned-tile-limit", "relative-map-range", "other"
 };
 
+inline constexpr std::array<std::string_view, 6> bulk_matrix_fallback_reasons{
+    "cpu-device", "fp64-stage", "frequency-tile-route", "unfavorable-shape",
+    "workspace-limit", "device-capability"
+};
+
 struct BulkReceipt {
-    std::string device, device_name, library_version, precision;
+    std::string device, device_name, library_version, precision, requested_coarse_math;
     int cuda_runtime_version = 0, cuda_driver_version = 0;
+    int cuda_blas_version = 0, cuda_compute_major = 0, cuda_compute_minor = 0;
     unsigned numerical_threads = 1;
     std::size_t workspace_limit_bytes = 0, reserved_bytes = 0, peak_reserved_bytes = 0;
     std::size_t allocator_live_bytes = 0, allocator_reserved_bytes = 0;
@@ -28,11 +35,23 @@ struct BulkReceipt {
     std::uint64_t upload_bytes = 0, download_bytes = 0, synchronizations = 0;
     std::uint64_t fft_calls = 0, fft_rows = 0, fir_input_rows = 0, fir_output_contributions = 0;
     std::uint64_t score_rows = 0, statistics_blocks = 0, projected_values = 0, dc_reduction_values = 0;
+    // Exact CUDA arrival selection, credited after validated frontier readback.
+    std::uint64_t cuda_arrival_peak_rows = 0, cuda_arrival_peak_values = 0;
     std::uint64_t mapped_columns = 0, mapped_values = 0, uploaded_tiles = 0, tile_hits = 0;
     // CUDA mapped work credited after the batch's blocking statistics readback.
     std::uint64_t cuda_fused_mapped_launches = 0, cuda_fused_mapped_values = 0;
     // CUDA Gram elements credited after the same readback.
     std::uint64_t cuda_direct_gram_values = 0, cuda_bmm_gram_values = 0;
+    // Post-channelization matrix work, credited only after synchronization.
+    std::uint64_t cuda_matrix_fp16_calls = 0, cuda_matrix_int8_calls = 0;
+    std::uint64_t cuda_matrix_inner_chunks = 0, cuda_matrix_padded_real_macs = 0;
+    std::uint64_t cuda_matrix_packed_values = 0, cuda_matrix_output_values = 0;
+    std::uint64_t cuda_matrix_maximum_rows = 0, cuda_matrix_maximum_columns = 0, cuda_matrix_maximum_inner = 0;
+    std::uint64_t cuda_matrix_nonfinite_values = 0, cuda_matrix_saturated_values = 0;
+    double cuda_matrix_maximum_a_scale = 0, cuda_matrix_maximum_b_scale = 0;
+    std::array<std::uint64_t, bulk_matrix_fallback_reasons.size()> matrix_fft_fallback_counts{};
+    std::uint64_t projection_index_cache_hits = 0, projection_index_cache_uploads = 0;
+    std::uint64_t mapping_offset_cache_hits = 0, mapping_offset_cache_uploads = 0;
     std::uint64_t direct_columns = 0, direct_values = 0;
     std::array<std::uint64_t, bulk_direct_fallback_reasons.size()> direct_fallback_counts{};
     double wall_seconds = 0;
@@ -101,6 +120,7 @@ struct CoarseBulkWork {
     std::uint64_t forward_ffts = 0, inverse_ffts = 0, fft_rows = 0, fft_row_stages = 0;
     std::uint64_t fir_input_rows = 0, fir_output_contributions = 0, score_rows = 0;
     std::uint64_t workspace_frequency_pairs = 0, singleton_dot_terms = 0;
+    bool operator==(const CoarseBulkWork&) const = default;
 };
 
 struct CoarseBulkCompletedWork {
@@ -145,6 +165,12 @@ struct CoarseBulkGeometry {
 using CoarseScoreSink = std::function<void(std::size_t first_workspace, std::size_t workspace_count,
     std::span<const double>)>;
 
+// Exact frontiers contain [workspace][frequency] in canonical order. All
+// arrival scores still undergo the backend's finite-value validation and count
+// toward completed work. The callback consumes this view before staging reuse.
+using CoarsePeakSink = std::function<void(std::size_t first_workspace, std::size_t workspace_count,
+    std::span<const CoarseBulkPeaks>)>;
+
 class CoarseBulk {
 public:
     virtual ~CoarseBulk() = default;
@@ -159,6 +185,12 @@ public:
         CoarseBulkWork&, std::stop_token) = 0;
     virtual void frequency_tile(std::span<const double> frequencies, const CoarseScoreSink&,
         CoarseBulkWork&, std::stop_token) = 0;
+    // Optional exact on-device arrival selection. False means unsupported and
+    // must not change work, completion receipts or invoke the sink. A backend
+    // that starts work must finish with true or throw, never request fallback
+    // after partial execution/publication. True retains full score-row counts.
+    virtual bool frequency_peaks(std::span<const double>, std::size_t,
+        const CoarsePeakSink&, CoarseBulkWork&, std::stop_token) { return false; }
     virtual void lag_tile(std::size_t first_workspace, std::size_t workspace_count,
         const CoarseScoreSink&, CoarseBulkWork&, std::stop_token) = 0;
     virtual BulkReceipt receipt() const = 0;

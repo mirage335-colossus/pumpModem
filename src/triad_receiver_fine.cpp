@@ -62,12 +62,31 @@ std::size_t round_rows(double seconds, double sample_rate) {
 
 struct BlockCalendar {
     std::size_t rows, block_rows, segment_rows;
+    std::size_t final_first, final_rows;
     BlockCalendar(const ReceiverConfig& config, const ReceiverSlotPlan& plan)
         : rows(static_cast<std::size_t>(plan.stop_sample - plan.first_sample)),
           block_rows(round_rows(.25, config.sample_rate_hz)),
           segment_rows(round_rows(.5, config.sample_rate_hz)) {
-        if (!rows || std::min(rows, segment_rows) > maximum_segment_rows)
+        if (!rows) throw Error("Robust receiver observation has no samples");
+        final_rows = rows % segment_rows;
+        if (!final_rows) final_rows = std::min(rows, segment_rows);
+        else if (rows >= segment_rows && final_rows < block_rows) {
+            // The complete public extent determines this merge, before any
+            // samples are exposed. A tiny remainder cannot independently
+            // resolve otherwise disjoint DATA and Helper bands. Absorb it
+            // into the preceding segment without dropping or padding input.
+            final_rows = checked_add(segment_rows, final_rows);
+        }
+        final_first = rows - final_rows;
+        const auto largest = final_first ? std::max(segment_rows, final_rows) : final_rows;
+        if (largest > maximum_segment_rows)
             throw Error("Robust receiver segment exceeds 1048576 samples");
+    }
+
+    std::size_t segment_length(std::size_t first) const {
+        if (first > final_first || first % segment_rows)
+            throw Error("Robust receiver segment is outside its public calendar");
+        return first == final_first ? final_rows : segment_rows;
     }
 
     std::size_t block_count(std::size_t segment_length) const {
@@ -90,8 +109,8 @@ struct BlockCalendar {
                     values.at(used++) = length;
             }
         };
-        if (rows >= segment_rows) add(segment_rows);
-        add(rows % segment_rows);
+        if (final_first) add(segment_rows);
+        add(final_rows);
         return values;
     }
 };
@@ -139,29 +158,41 @@ struct ProjectionBands {
     }
 };
 
+// Use the identical discrete-bin predicate for admission and construction.
+// A continuous gap between public bands is not enough when a short DFT bin
+// intersects both. The admission visitor stores nothing and allocates nothing.
+template<class Store>
+std::size_t visit_projection_modes(std::size_t rows, const ProjectionBands& bands,
+                                  std::stop_token stop, Store store) {
+    const double spacing = bands.sample_rate / static_cast<double>(rows);
+    const double half_bin = spacing / 2;
+    std::size_t modes = 0;
+    for (std::size_t index = 0; index < rows; ++index) {
+        if (!(index % 4096)) check_cancelled(stop);
+        const auto bin = index < (rows + 1) / 2 ? static_cast<std::int64_t>(index) :
+            static_cast<std::int64_t>(index) - static_cast<std::int64_t>(rows);
+        const auto hz = static_cast<double>(bin) * spacing;
+        if (hz < bands.required.lower_hz - half_bin || hz > bands.required.upper_hz + half_bin)
+            continue;
+        if (bands.use_exclusions) {
+            for (const auto& band : bands.excluded) {
+                if (hz >= band.lower_hz - half_bin && hz <= band.upper_hz + half_bin)
+                    throw Error("Robust likelihood block cannot resolve DATA and Helper bands");
+            }
+        }
+        store(index);
+        ++modes;
+    }
+    if (!modes) throw Error("Robust likelihood block has no observed DATA modes");
+    return modes;
+}
+
 class Projection {
 public:
     Projection(std::size_t rows, const ProjectionBands& bands, std::stop_token stop)
         : rows_(rows), normalization_(1 / std::sqrt(static_cast<double>(rows))) {
-        const double spacing = bands.sample_rate / static_cast<double>(rows);
-        const double half_bin = spacing / 2;
         indices_.reserve(rows);
-        for (std::size_t index = 0; index < rows; ++index) {
-            if (!(index % 4096)) check_cancelled(stop);
-            const auto bin = index < (rows + 1) / 2 ? static_cast<std::int64_t>(index) :
-                static_cast<std::int64_t>(index) - static_cast<std::int64_t>(rows);
-            const auto hz = static_cast<double>(bin) * spacing;
-            if (hz < bands.required.lower_hz - half_bin || hz > bands.required.upper_hz + half_bin)
-                continue;
-            if (bands.use_exclusions) {
-                for (const auto& band : bands.excluded) {
-                    if (hz >= band.lower_hz - half_bin && hz <= band.upper_hz + half_bin)
-                        throw Error("Robust likelihood block cannot resolve DATA and Helper bands");
-                }
-            }
-            indices_.push_back(index);
-        }
-        if (indices_.empty()) throw Error("Robust likelihood block has no observed DATA modes");
+        visit_projection_modes(rows, bands, stop, [&](std::size_t index) { indices_.push_back(index); });
         if (indices_.size() != 1 || indices_.front() != 0) plan_.emplace(rows, stop);
     }
 
@@ -592,11 +623,11 @@ struct StateBlockWork {
 void advance_state(State& state, const MappedBasisRow& row, MappedBasis& basis,
                    std::span<const Tap> taps, std::span<const ObservationBlock> blocks,
                    const std::array<const FineBulkStatistics*, 2>& prepared,
+                   const std::array<double, 4 * 2 * models>& transitions,
                    double variance, WorkerScratch& scratch, StateBlockWork* work, std::stop_token stop) {
     const auto tap_count = taps.size(), tap_square = tap_count * tap_count;
     std::array<Complex, 2 * 3 * 2> correlations{};
     std::array<Complex, 2 * 3 * 4> grams{};
-    std::array<double, 4 * 2 * models> transitions{};
     std::array<double, 2> powers{1. / tap_count, 1. / tap_count};
     if (work) *work = {};
     const auto basis_began = work ? FineClock::now() : FineClock::time_point{};
@@ -620,16 +651,6 @@ void advance_state(State& state, const MappedBasisRow& row, MappedBasis& basis,
                 work->template_energy += energy;
                 work->positive_basis_blocks += energy > 0;
             }
-        }
-        // Missing blocks have no sufficient statistics. The real elapsed
-        // block interval still evolves every channel posterior.
-        for (std::size_t model = 0; model < models; ++model) {
-            const auto offset = 4 * (i * models + model);
-            const auto exponent = -blocks[i].elapsed / coherence_seconds[model];
-            const auto decay = std::exp(exponent);
-            transitions[offset] = decay * decay;
-            transitions[offset + 1] = -std::expm1(2 * exponent);
-            transitions[offset + 2] = decay;
         }
     }
     if (work) scratch.basis_statistics_seconds += seconds_since(basis_began);
@@ -763,11 +784,11 @@ ReceiverSlotPlan observation_plan(const ReceiverConfig& config, const ReceiverSl
 }
 
 std::size_t workspace_for_plan(const ReceiverConfig& config, const ReceiverSlotPlan& plan,
-                               const BlockCalendar& calendar, unsigned workers, bool record_work) {
+                               const BlockCalendar& calendar, unsigned workers, bool record_work,
+                               std::stop_token stop = {}) {
     if (!workers) throw Error("fine observation requires a positive worker share");
     // Reject unsupported public support before leasing a slot.
     const ProjectionBands validated(config, plan);
-    (void)validated;
     const auto lengths = calendar.lengths();
     const auto max_rows = *std::max_element(lengths.begin(), lengths.end());
     std::size_t bytes = 64 * 1024, fft_rows = 0;
@@ -776,6 +797,7 @@ std::size_t workspace_for_plan(const ReceiverConfig& config, const ReceiverSlotP
     };
     for (const auto rows : lengths) {
         if (!rows) continue;
+        visit_projection_modes(rows, validated, stop, [](std::size_t) {});
         bytes = checked_add(bytes, DftPlan::workspace_bytes(rows));
         add(rows, sizeof(std::size_t));
         fft_rows = std::max(fft_rows, DftPlan::scratch_samples(rows));
@@ -914,7 +936,7 @@ struct FineSession::Impl {
         if (cold && observation.rows != 2 * calendar.segment_rows)
             throw Error("cold maximum-state work requires exactly two complete fine segments");
 
-        workspace = workspace_for_plan(config, plan, calendar, workers, observation.record_work);
+        workspace = workspace_for_plan(config, plan, calendar, workers, observation.record_work, stop);
         if (workspace > scratch_limit)
             throw ReceiverWorkspaceError("complete fine receiver exceeds its admitted workspace");
         coordinates.assign(selected.begin(), selected.end());
@@ -1062,6 +1084,22 @@ struct FineSession::Impl {
             }
         });
         time(times.dispatch_seconds, [&] {
+            check_cancelled(stop);
+            // Elapsed intervals and channel models are common to all states.
+            // Prepare them once per chronological block pair, including
+            // missing blocks whose elapsed time still evolves the posterior.
+            // Keep this recurring work inside the dispatch timing receipt.
+            std::array<double, 4 * 2 * models> transitions{};
+            for (std::size_t i = 0; i < observations.size(); ++i) {
+                for (std::size_t model = 0; model < models; ++model) {
+                    const auto offset = 4 * (i * models + model);
+                    const auto exponent = -observations[i].elapsed / coherence_seconds[model];
+                    const auto decay = std::exp(exponent);
+                    transitions[offset] = decay * decay;
+                    transitions[offset + 1] = -std::expm1(2 * exponent);
+                    transitions[offset + 2] = decay;
+                }
+            }
             const auto update = [&](unsigned worker, std::size_t index, std::stop_token task_stop) {
                 check_cancelled(task_stop);
                 const bool fixed = index < nominal.size();
@@ -1075,7 +1113,7 @@ struct FineSession::Impl {
                     row = mapped_row(config, plan, grid, coordinates[state.key.group], state.key,
                                      fixed ? first_anchor : anchor, fixed);
                 }
-                advance_state(state, row, *basis, taps, observations, prepared, config.noise_variance,
+                advance_state(state, row, *basis, taps, observations, prepared, transitions, config.noise_variance,
                               scratch[worker], observation.record_work ? &state_work[index] : nullptr, task_stop);
             };
             if (executor) executor->parallel(plan.index, states, stage_workers, stop, update);
@@ -1189,7 +1227,7 @@ void FineSession::advance_to(std::size_t available_rows) {
         }
         p.available = available_rows;
         while (!p.observation_complete()) {
-            const auto rows = std::min(p.calendar.segment_rows, p.observation.rows - p.processed);
+            const auto rows = p.calendar.segment_length(p.processed);
             if (rows > p.available - p.processed) break;
             check_cancelled(p.stop);
             p.segment(rows);

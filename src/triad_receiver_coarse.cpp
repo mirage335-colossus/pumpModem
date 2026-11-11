@@ -1695,9 +1695,45 @@ struct CoarseSession::Impl {
             }
             next_workspace += rows;
         };
+        const auto peak_sink = [&](std::size_t workspace, std::size_t rows,
+                                   std::span<const CoarseBulkPeaks> frontiers) {
+            check_stop(stop);
+            require_coarse(workspace == next_workspace && rows > 0 && rows <= stop_workspace - next_workspace &&
+                           frontiers.size() == mul(rows, frequencies),
+                           "coarse bulk returned frontiers outside the requested canonical grid");
+            for (std::size_t row = 0; row < rows; ++row) {
+                for (std::size_t f = 0; f < frequencies; ++f) {
+                    const auto& frontier = frontiers[row * frequencies + f];
+                    require_coarse(frontier.count > 0 && frontier.count <= retained_per_bit,
+                                   "invalid coarse bulk frontier count");
+                    const auto frequency = first_frequency + f;
+                    std::array<Peak, retained_per_bit> selected{};
+                    for (std::size_t i = 0; i < frontier.count; ++i) {
+                        require_coarse(frontier.lags[i] < plan.arrival_points && std::isfinite(frontier.scores[i]) &&
+                                       (!i || frontier.lags[0] != frontier.lags[i]),
+                                       "invalid coarse bulk frontier arrival or score");
+                        selected[i] = {frontier.scores[i], frequency, static_cast<std::size_t>(frontier.lags[i])};
+                    }
+                    std::copy(selected.begin(), selected.end(), peaks.begin() +
+                              (workspace + row) * row_width + frequency * retained_per_bit);
+                    note(completed.retained_peaks, frontier.count);
+                }
+            }
+            next_workspace += rows;
+        };
         CoarseBulkWork operations;
         if (lag) bulk->lag_tile(first, count, sink, operations, stop);
-        else bulk->frequency_tile(std::span(grid.values).subspan(first, count), sink, operations, stop);
+        else {
+            const auto values = std::span(grid.values).subspan(first, count);
+            if (!bulk->frequency_peaks(values, distance, peak_sink, operations, stop)) {
+                const auto untouched = bulk->completed_work();
+                require_coarse(next_workspace == first_workspace && operations == CoarseBulkWork{} &&
+                               untouched.score_rows == bulk_completed.score_rows &&
+                               untouched.executed == bulk_completed.executed,
+                               "unsupported coarse frontier path changed work before fallback");
+                bulk->frequency_tile(values, sink, operations, stop);
+            }
+        }
         const auto expected_pairs = mul(stop_workspace - first_workspace, frequencies);
         const auto expected_scores = mul(expected_pairs, plan.arrival_points);
         require_coarse(next_workspace == stop_workspace && operations.workspace_frequency_pairs == expected_pairs &&

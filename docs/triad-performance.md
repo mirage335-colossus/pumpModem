@@ -162,6 +162,22 @@ Python DSP or a prebuilt exporter/kernel pair:
 python3 tools/triad_gpu_bundle.py --output /tmp/robust-gpu-source.tar.gz
 ```
 
+Bundle entries deliberately have epoch modification times. When updating an
+existing extracted source tree, extract without restoring those timestamps:
+
+```sh
+tar -xmzf /tmp/robust-gpu-source.tar.gz -C /path/to/native-source
+```
+
+Alternatively, use a fresh source/build directory. An ordinary timestamp-preserving
+tar overlay can leave changed sources older than existing Ninja objects, reusing
+stale DSP code even when reconfiguration updates the compiled source manifest.
+After extraction, reconfigure and verify that changed translation units rebuild
+and the probe relinks before accepting measurements. A new manifest alone is
+insufficient evidence. Reuse compatible build profiles and `ccache` to keep this
+fast; do not purge useful caches. Use a fresh source tree when the bundle removes
+files, so an overlay cannot retain obsolete inputs.
+
 Build the probe from that closure with a CUDA-enabled C++11-ABI LibTorch install:
 
 ```sh
@@ -205,6 +221,27 @@ is an explicit diagnostic override, not a default qualification shortcut.
 Pairing requires winner/order and fixed-work agreement, score tolerance
 `atol=2e-3, rtol=2e-4`, and at most 5% adaptive work-demand drift. Equal final bits
 alone do not establish matched inputs or adequate precision.
+
+The current coarse arithmetic selector is `--tensor-coarse-math fft|fp16|int8`,
+with `fft` the full-search default. The bounded native FP16/INT8 bulk wins and
+removed FP4 candidate's failures are recorded in
+[current validation](validation.md#native-matrix-and-preparation-follow-through).
+Numerical parity for matrix work is separate from CPU cost-work compatibility:
+the FFT CPU forecast rejects executed matrix work until an applicable local
+mapping is measured. A component GPU speedup is not that mapping.
+Exact CUDA frontier reduction preserves the CPU logical-work projection through
+full `workspace_frequency_pairs`, `score_rows` and retained peaks/proposals;
+its GPU telemetry does not require a different CPU cost feature. Full-grid and
+frontier parity do not waive source/runtime, local calibration or holdout gates.
+
+For wide FFT work, measure full logical scores, device-to-host bytes and host
+peak-selection time separately. The new exact CUDA arrival frontier compresses
+readback while preserving every computed score and native peak semantics. Its
+device fixtures, bounded 32-frequency bulk comparison and full 8,596-frequency
+active/noise public-slot checks pass. Sustained backlog qualification remains
+separate. Compressed output is not reduced search
+coverage, and its byte count must not replace the full score/work count in a
+forecast.
 
 `--row-deadline-ms` bounds the whole row. An explicit
 `--fixed-active-seconds` must match a separately declared native CPU duration
