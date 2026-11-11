@@ -13,7 +13,7 @@ from triad_cases import ROOT
 
 SCHEMA = "datapump.triad.native-probe.v1"
 DEFAULT_PROBE = ROOT / "build/dev/triad_receiver_probe"
-BACKENDS = ("cpu", "tensor-cpu", "cuda")
+BACKENDS = ("cpu", "tensor-cpu", "cuda", "vulkan")
 COMMANDS = frozenset(("describe", "plan", "slot", "continuation", "message", "backlog",
                       "regression", "codec"))
 STATUS_CODES = {"complete": 0, "incomplete": 2, "unavailable": 2, "error": 1}
@@ -110,16 +110,27 @@ def runtime_identity(receipt):
     """Build and device attributes that must match a relative comparison."""
     identity = receipt["identity"]
     runtime = {name: identity.get(name) for name in (
-        "compiler", "build_config", "build_options_sha256", "configured_tensor_backend",
+        "backend", "compiler", "build_config", "build_options_sha256", "configured_tensor_backend",
         "receiver_arithmetic", "requested_tensor_precision", "requested_tensor_coarse_math",
     )}
+    runtime["configured_vulkan_backend"] = identity.get("configured_vulkan_backend", False)
     bulk = identity.get("backend_receipt")
-    runtime["bulk"] = None if bulk is None else {name: bulk.get(name) for name in (
-        "device", "device_name", "library_version", "cuda_runtime_version", "cuda_driver_version",
-        "cuda_blas_version", "cuda_compute_major", "cuda_compute_minor",
-        "cuda", "numerical_threads", "precision", "requested_coarse_math", "workspace_limit_bytes", "total_device_bytes",
-        "fft_plan_cache_limit",
-    )}
+    if bulk is None:
+        runtime["bulk"] = None
+    elif identity.get("backend") == "vulkan":
+        runtime["bulk"] = {name: bulk.get(name) for name in (
+            "device", "device_name", "library_version", "vulkan", "vulkan_api_version",
+            "vulkan_driver_version", "vulkan_vendor_id", "vulkan_device_id", "vulkan_subgroup_size",
+            "vulkan_float16", "vulkan_int8", "vulkan_integer_dot8_accelerated", "unified_memory",
+            "numerical_threads", "precision", "workspace_scope", "workspace_limit_bytes", "total_device_bytes",
+        )}
+    else:
+        runtime["bulk"] = {name: bulk.get(name) for name in (
+            "device", "device_name", "library_version", "cuda_runtime_version", "cuda_driver_version",
+            "cuda_blas_version", "cuda_compute_major", "cuda_compute_minor",
+            "cuda", "numerical_threads", "precision", "requested_coarse_math", "workspace_limit_bytes", "total_device_bytes",
+            "fft_plan_cache_limit",
+        )}
     return runtime
 
 
@@ -147,7 +158,7 @@ def phase_once(receipt, name, *, scope=None):
     return phases[0]
 
 
-def validate_receipt(receipt, *, command, backend, returncode):
+def validate_receipt(receipt, *, command, backend, returncode, expected_require_accelerator=None):
     if not isinstance(receipt, dict) or receipt.get("schema") != SCHEMA:
         raise ProbeError("Expected a current native Robust probe receipt")
     if (receipt.get("command") is None and receipt.get("status") == "error" and returncode == 1):
@@ -168,6 +179,9 @@ def validate_receipt(receipt, *, command, backend, returncode):
         raise ProbeError("Native receipt backend disagrees with requested backend")
     if identity.get("implementation") != "native-production-receiver":
         raise ProbeError("Measurement did not identify the canonical native receiver")
+    if (backend == "vulkan" and expected_require_accelerator is not None
+            and identity.get("require_accelerator") is not expected_require_accelerator):
+        raise ProbeError("Native probe did not honor the requested Vulkan accelerator requirement")
     if not isinstance(receipt.get("phases"), list):
         raise ProbeError("Missing native phase receipts")
     for phase in receipt["phases"]:
@@ -191,15 +205,34 @@ def validate_receipt(receipt, *, command, backend, returncode):
             raise ProbeError("Complete native receipt has unsupported coarse arithmetic")
         if type(identity.get("configured_tensor_backend")) is not bool:
             raise ProbeError("Complete native receipt lacks the build backend configuration")
-        if backend != "cpu":
+        if (backend != "vulkan" and "configured_vulkan_backend" in identity
+                and type(identity["configured_vulkan_backend"]) is not bool):
+            raise ProbeError("Complete native receipt has an invalid Vulkan build configuration")
+        if backend == "vulkan" and identity.get("configured_vulkan_backend") is not True:
+            raise ProbeError("Complete native receipt lacks the Vulkan build configuration")
+        if backend in ("tensor-cpu", "cuda"):
             bulk = identity.get("backend_receipt")
-            if (not isinstance(bulk, dict) or bulk.get("cuda") is not (backend == "cuda")
+            if (not isinstance(bulk, dict) or bulk.get("cuda") is not (backend == "cuda") or bulk.get("vulkan") is True
                     or bulk.get("numerical_threads") != 1
                     or not all(isinstance(bulk.get(key), str) and bulk[key] for key in (
                         "device", "device_name", "library_version", "precision"))):
                 raise ProbeError("Complete tensor receipt lacks the requested device and library identity")
             if bulk.get("requested_coarse_math") != coarse_math:
                 raise ProbeError("Tensor backend coarse arithmetic differs from the requested policy")
+        if backend == "vulkan":
+            bulk = identity.get("backend_receipt")
+            if (identity["configured_vulkan_backend"] is not True or not isinstance(bulk, dict)
+                    or bulk.get("vulkan") is not True or bulk.get("cuda") is True
+                    or bulk.get("numerical_threads") != 1
+                    or not all(isinstance(bulk.get(key), str) and bulk[key] for key in (
+                        "device", "device_name", "library_version", "precision"))
+                    or type(bulk.get("unified_memory")) is not bool):
+                raise ProbeError("Vulkan receipt lacks the requested physical-device/runtime identity")
+            for key in ("vulkan_api_version", "vulkan_driver_version", "vulkan_vendor_id", "vulkan_device_id"):
+                positive_int(bulk.get(key), "Vulkan " + key, allow_zero=key in ("vulkan_vendor_id", "vulkan_device_id"))
+            for key in ("vulkan_float16", "vulkan_int8", "vulkan_integer_dot8_accelerated"):
+                if type(bulk.get(key)) is not bool:
+                    raise ProbeError("Vulkan receipt lacks queried arithmetic features")
         if command not in ("describe", "plan") and not receipt["phases"]:
             raise ProbeError("Complete native workload contains no measured phases")
         if command not in ("describe", "plan", "codec") and (
@@ -221,6 +254,76 @@ def validate_receipt(receipt, *, command, backend, returncode):
                     or not projected or not all(type(accelerator.get(key)) is int and accelerator[key] > 0
                                                 for key in operations)):
                 raise ProbeError("Complete CUDA receipt does not prove actual accelerator work")
+        require_accelerator = expected_require_accelerator
+        if require_accelerator is None:
+            require_accelerator = identity.get("require_accelerator") is True
+        if backend == "vulkan" and command not in ("describe", "plan") and require_accelerator:
+            accelerator = identity.get("backend_receipt") or {}
+            workspace_limit = accelerator.get("workspace_limit_bytes")
+            if type(workspace_limit) is not int or workspace_limit <= 0:
+                raise ProbeError("Vulkan receipt lacks a positive workspace limit")
+            owner_peak = accelerator.get("vulkan_peak_owner_bytes")
+            active_sessions = accelerator.get("vulkan_active_sessions")
+            aggregate_peak = accelerator.get("allocator_peak_reserved_bytes")
+            cache_limit = accelerator.get("host_cache_limit_bytes")
+            cache_bytes = accelerator.get("host_cache_bytes")
+            cache_entries = accelerator.get("host_cache_entries")
+            if (accelerator.get("workspace_scope") != "per_coarse_session"
+                    or type(owner_peak) is not int or not 0 < owner_peak <= workspace_limit
+                    or type(active_sessions) is not int or active_sessions < 0
+                    or type(aggregate_peak) is not int or aggregate_peak < owner_peak
+                    or type(cache_limit) is not int or cache_limit <= 0
+                    or type(cache_bytes) is not int or not 0 <= cache_bytes <= cache_limit
+                    or type(cache_entries) is not int or not 0 <= cache_entries <= 8):
+                raise ProbeError("Vulkan receipt does not prove bounded device and serialized FFT cache allocation")
+            frequency_route = any(isinstance(phase.get("work"), dict)
+                                  and phase["work"].get("native_fallback_reason", "") == ""
+                                  and phase["work"].get("route") == "frequency_tiles"
+                                  for phase in receipt["phases"])
+            stream = receipt.get("result", {}).get("stream")
+            stream_phase = next((phase for phase in receipt["phases"]
+                                 if phase.get("name") == "receiver_service"
+                                 and isinstance(phase.get("work"), dict)), None)
+            stream_work = stream_phase.get("work", {}) if stream_phase else {}
+            stream_route = (command in ("message", "backlog")
+                            and receipt["result"].get("complete_receiver_service") is True
+                            and isinstance(stream, dict) and stream.get("state") == "input_ended"
+                            and stream.get("input_closed") is True and stream.get("work_complete") is True
+                            and type(stream.get("committed_slots")) is int and stream["committed_slots"] > 0
+                            and type(stream.get("input_rows")) is int and stream["input_rows"] > 0
+                            and is_sha256(stream.get("verified_input_sha256"))
+                            and stream_work.get("committed_slots") == stream["committed_slots"]
+                            and stream_work.get("input_rows") == stream["input_rows"]
+                            and stream_work.get("verified_input_sha256") == stream["verified_input_sha256"])
+            regression_units = receipt["result"].get("units")
+            regression_phases = [phase for phase in receipt["phases"] if phase.get("name") == "native_slot"]
+            regression_route = (command == "regression"
+                                and receipt["result"].get("work_complete") is True
+                                and receipt["result"].get("evaluator_expected_decision_observed") is True
+                                and type(regression_units) is int and regression_units > 0
+                                and len(regression_phases) == regression_units
+                                and all(phase["work"].get("complete") is True
+                                        and phase["work"].get("all_valid") is True
+                                        and phase["work"].get("decision") in ("data", "quiet")
+                                        and type(phase["work"].get("coarse_workspaces")) is int
+                                        and phase["work"]["coarse_workspaces"] > 0
+                                        and type(phase["work"].get("coarse_frequency_points")) is int
+                                        and phase["work"]["coarse_frequency_points"] > 0
+                                        and type(phase["work"].get("coarse_arrival_points")) is int
+                                        and phase["work"]["coarse_arrival_points"] > 0
+                                        and is_sha256(phase["work"].get("work_identity_sha256"))
+                                        for phase in regression_phases))
+            if command in ("message", "backlog"):
+                route_proof = stream_route
+            elif command == "regression":
+                route_proof = regression_route
+            else:
+                route_proof = frequency_route
+            if (accelerator.get("vulkan") is not True or accelerator.get("executed") is not True
+                    or not all(type(accelerator.get(key)) is int and accelerator[key] > 0
+                               for key in ("vulkan_dispatches", "vulkan_arrival_peak_rows", "fft_calls", "score_rows"))
+                    or not route_proof):
+                raise ProbeError("Complete Vulkan receipt does not prove GPU full-frequency FFT and score work")
     return receipt
 
 
@@ -265,7 +368,7 @@ class NativeProbe:
         if deadline_ms > 3_600_000:
             raise ProbeError("Native probe deadline exceeds one hour")
         argv = [str(self.path), command, "--backend", self.backend,
-                "--require-accelerator", "on" if self.backend == "cuda" else "off",
+                "--require-accelerator", "on" if self.backend in ("cuda", "vulkan") else "off",
                 "--deadline-ms", str(deadline_ms), "--max-samples", str(max_samples),
                 *native_args]
         limits = {"workers": workers, "slot_owners": slot_owners,
@@ -296,7 +399,8 @@ class NativeProbe:
             detail = finished.stderr[-1024:].decode("utf-8", errors="replace").strip()
             raise ProbeError(f"Native {command} returned no receipt (exit {finished.returncode})"
                              + (f": {detail}" if detail else "")) from error
-        receipt = validate_receipt(raw, command=command, backend=self.backend, returncode=finished.returncode)
+        receipt = validate_receipt(raw, command=command, backend=self.backend, returncode=finished.returncode,
+                                   expected_require_accelerator=self.backend == "vulkan")
         if receipt["status"] == "complete":
             if receipt["identity"]["requested_tensor_coarse_math"] != (options.get("tensor_coarse_math") or "fft"):
                 raise ProbeError("Native probe altered the requested coarse arithmetic policy")

@@ -8,9 +8,10 @@ endif()
 file(GLOB_RECURSE _triad_probe_sources CONFIGURE_DEPENDS RELATIVE "${PROJECT_SOURCE_DIR}"
   "src/*.cpp" "src/*.c" "src/*.hpp" "src/*.h" "src/*.cu" "src/*.cuh"
   "include/datapump/*.hpp" "include/datapump/*.h" "cmake/*.cmake"
-  "third_party/xz/src/*.c" "third_party/xz/src/*.h" "tools/triad_probe_*.hpp")
+  "third_party/xz/src/*.c" "third_party/xz/src/*.h" "tools/triad_probe_*.hpp"
+  "third_party/vkfft/vkFFT/*.h")
 list(APPEND _triad_probe_sources
-  CMakeLists.txt third_party/xz/UPSTREAM.sha256
+  CMakeLists.txt third_party/xz/UPSTREAM.sha256 third_party/vkfft/UPSTREAM.sha256
   tools/triad-receiver-probe.cpp)
 list(REMOVE_DUPLICATES _triad_probe_sources)
 list(SORT _triad_probe_sources)
@@ -24,6 +25,10 @@ endforeach()
 string(SHA256 _triad_probe_source_sha "${_triad_probe_manifest}")
 set(_triad_probe_build_identity
   "${CMAKE_SYSTEM_NAME}/${CMAKE_SYSTEM_PROCESSOR}/${CMAKE_CXX_COMPILER_ID}/${CMAKE_CXX_COMPILER_VERSION}/${CMAKE_CXX_FLAGS}/${CMAKE_CXX_FLAGS_DEBUG}/${CMAKE_CXX_FLAGS_RELEASE}/${CMAKE_CXX_FLAGS_RELWITHDEBINFO}/${CMAKE_CXX_FLAGS_MINSIZEREL}/${CMAKE_BUILD_TYPE}/${DATAPUMP_SANITIZERS}/${DATAPUMP_TRIAD_TENSOR}/${DATAPUMP_PORTABLE}")
+if(DATAPUMP_TRIAD_VULKAN)
+  string(APPEND _triad_probe_build_identity
+    "/Vulkan-${Vulkan_VERSION}/glslang-${glslang_VERSION}/${DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE}")
+endif()
 if(CMAKE_CUDA_COMPILER_LOADED AND DATAPUMP_TRIAD_TENSOR)
   string(APPEND _triad_probe_build_identity
     "/${CMAKE_CUDA_COMPILER_ID}/${CMAKE_CUDA_COMPILER_VERSION}/${CMAKE_CUDA_ARCHITECTURES}/${CMAKE_CUDA_FLAGS}/${CMAKE_CUDA_FLAGS_DEBUG}/${CMAKE_CUDA_FLAGS_RELEASE}/${CMAKE_CUDA_FLAGS_RELWITHDEBINFO}/${CMAKE_CUDA_FLAGS_MINSIZEREL}")
@@ -53,6 +58,14 @@ if(TARGET test_triad_tensor)
   target_include_directories(test_triad_tensor PRIVATE tools)
   target_compile_definitions(test_triad_tensor PRIVATE ${_triad_probe_identity_definitions}
     DATAPUMP_TRIAD_COMPONENT_SOURCE_SHA="${_triad_component_source_sha}")
+endif()
+
+if(TARGET test_triad_vulkan)
+  set(_triad_vulkan_component_source "${PROJECT_SOURCE_DIR}/tests/test_triad_vulkan.cpp")
+  file(SHA256 "${_triad_vulkan_component_source}" _triad_vulkan_component_source_sha)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_triad_vulkan_component_source}")
+  target_compile_definitions(test_triad_vulkan PRIVATE ${_triad_probe_identity_definitions}
+    DATAPUMP_TRIAD_COMPONENT_SOURCE_SHA="${_triad_vulkan_component_source_sha}")
 endif()
 
 if(BUILD_TESTING AND Python3_Interpreter_FOUND)

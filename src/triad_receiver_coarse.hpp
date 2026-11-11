@@ -23,7 +23,6 @@ struct CoarseArrivalPeaks {
 CoarseArrivalPeaks select_coarse_arrivals(std::span<const double> scores, std::size_t separation);
 
 enum class CoarseState { prepared, searching, searched, finished, cancelled, failed };
-enum class CoarseRoute { frequency_tiles, lag_groups };
 
 struct CoarseOperationCounts {
     // Logical complex transforms, with row-stages equal to sum(N*log2(N)).
@@ -68,6 +67,7 @@ struct CoarseProgress {
     // publish work credit or candidates. Wall time includes interrupted work.
     CoarsePhaseWork filter_setup, mapped_fidelity, template_bank, observation, lag_setup, bulk_prepare, search, selection;
     std::optional<BulkReceipt> bulk;
+    std::string native_fallback_reason;
     double preparation_seconds = 0;
     std::size_t proposals = 0, refined_coordinates = 0;
 };

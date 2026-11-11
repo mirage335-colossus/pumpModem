@@ -1,9 +1,12 @@
 # Validation status
 
-Representative receiver-hardware test support now has bounded local Ryzen CPU
-and actual RTX 4090 CUDA evidence. The entry below separates those measured
-devices, component results and remaining unmeasured targets; no complete
-receiver-capacity or Tensor Core utilization claim follows.
+The local Radeon Vulkan backend passes actual-device correctness checks. Its
+bounded warm comparison achieves **1.269× complete coarse-phase speedup** on the
+wider search; the original narrow search remains **39.6% slower** than the
+full-worker native CPU path. Cold compilation remains a separate cost below.
+Earlier Ryzen CPU and RTX 4090 CUDA results retain their original source and
+hardware scope. No complete receiver-capacity or Tensor Core utilization claim
+follows.
 
 Updated 10 November 2026. The native history, matrix/preparation and wide-search
 follow-through is complete with the scoped checks below, including the fine-tail
@@ -22,6 +25,106 @@ The historical cleanup checkpoint was based on
 `419e6bae8c4fe3b0f59be23a6dfb3b69fbaed80e`. Its concise outcomes and limitations
 remain below; they are not release certification or validation of changed code.
 
+## Local Radeon Vulkan backend
+
+Work starts from clean `9606771b10b813d6c7d64ecd6dae4d43329e5466`. The local
+Ryzen 5 PRO 5650U exposes its Cezanne GPU, PCI `1002:1638`, through amdgpu and
+Mesa `25.0.7-2+deb13u1` as `AMD Radeon Graphics (RADV RENOIR)`, Vulkan device API
+1.4.305. The normal restricted sandbox hides the render node; authorized host
+execution enumerates the actual integrated GPU without driver or permission
+changes. A separate `llvmpipe` software device is excluded from GPU qualification.
+The installed OpenCL loader exposes zero platforms.
+
+The device reports FP16 and FP64 shader arithmetic, 8/16-bit buffer storage,
+64-lane subgroups and four compute-only queues. Its integer-dot extension reports
+no accelerated 8-bit or packed-4×8 variants. Host-visible/coherent/device-local
+memory is shared physical RAM, not additional dedicated VRAM or demonstrated
+zero-copy throughput. The kernel advertises a maximum 1,800 MHz graphics clock.
+These are capability observations, not measured arithmetic rates.
+
+The optional native Vulkan implementation targets filtered DATA frequency FFTs,
+scoring and exact peak frontiers while retaining native FIR, Helper, template
+generation, lag/tight-clock routes and fine processing. The public route chooser,
+full worker budget, search coverage and scored completion contract remain in
+force. See [scope and tests](triad-performance.md#local-radeon-vulkan-processing),
+[precision boundaries](gpu-precision-controls.md#vulkan-on-vega-integrated-graphics)
+and [the conditional hardware model](triad-performance.md#radeon-arithmetic-ceilings).
+The final cached-program revision passes the independent frequency-grid oracle
+(`3e-6`), exact arrival-frontier cases and native-fine receiver comparisons
+(`5e-6`), including near-decision and quiet observations. Memory checks cover
+simultaneous owner charges, retained cache admission with no active owner,
+one-byte-short rejection and cache reuse. Correctness and both timing cases bind
+native source `902288108c1d89298cfddfbc94d8bec07d1f9e05df9923b16c7a981fef2737ba`,
+build options `1402552abf5b6fbff4e950c89404fc95182ca1e59e25f11137439237b7078f55`
+and fixture `cda15a9bc5449d605cefbe47aba0ea93337f194ab4b3bff2f083ea8413bad7fa`.
+The runtime is GNU 14.2 Release, VkFFT 1.3.4 and glslang 15.2.0, with native
+`H=12/W=24`. The resulting `test_triad_vulkan` binary SHA-256 is
+`1c464d5a12c56556b4bb24de58818914ab30a62da1121cdf5ca2c6970be4bda7` and
+`triad_receiver_probe` is
+`221477e33705adc2f87a5dc1e34b27e932e6bdd6a91d54a2acbb58485df9e289`.
+The required native CPU group passes 32/32 in 28.28 seconds. The actual Python
+`NativeProbe` wrapper also completes a Vulkan regression (four dispatches,
+26 score rows) and a configured-calendar message (24 dispatches, 156 score
+rows), both at `W=24` with actual GPU work and cache bounds checked. These
+integration checks do not extend the timing result to complete receiver capacity.
+
+Earlier test-only failures are preserved:
+the full `H=12/W=24` plan has one complete tile rather than the fixture's assumed
+multiple tiles; native lag preflight conservatively retains a device quote; a
+fine-memory check used a coarse-only observation window; and a simultaneous-owner
+check confused shared aggregate receipt counters with per-owner allocation.
+Those corrections did not change GPU arithmetic or numerical tolerances.
+
+The initial uncached small case at source `b1b000b6868a4ea92f1996c5be5768ca68f4e2f662eead862e0d49e75dc8a27c`
+was about 2.5× slower on Vulkan. Increasing batch
+width to 64, reusing work buffers and using direction-specific plans reduced
+wide-case submissions from 100 to 28 but did not by itself improve the complete
+phase. Its actual peak grew from 31.1 to 207.7 MB. Caching serialized FFT programs
+then removed repeated compilation while keeping device plans and buffers private
+to each owner. The cache admits at most eight entries/8 MiB of payload plus a
+64 KiB metadata reservation, charged for the backend's entire lifetime.
+
+Both final cases retain the identical 8,565-sample input, fingerprint
+`10788907945148184106`, all 78 workspaces and every public hypothesis. The wider
+interval was declared separately after retaining the original result. Each case
+uses one separate first-use pair followed by three alternating CPU/Vulkan pairs,
+with a 120-second cap. Means below include preparation, search, selection and
+owner teardown, but exclude separately measured backend creation.
+
+| Public frequency interval | Frequencies / arrivals / FFT rows / tiles | CPU mean | Vulkan mean | CPU/Vulkan speedup; paired range |
+| --- | --- | --- | --- | --- |
+| `[-0.2,0.2]` Hz | 22 / 25 / 2,048 / 1 | 77.117 ms | 107.629 ms | **0.717×**; 0.701–0.737× |
+| `[-2,2]` Hz | 211 / 31 / 4,096 / 9 | 524.061 ms | 412.809 ms | **1.269×**; 1.213–1.331× |
+
+These are descriptive measurements, not confidence bounds. The first-use pairs
+were CPU/Vulkan 72.320/213.012 ms for the narrow case and 405.327/610.745 ms for
+the wide case; backend creation added 28–32 ms separately. Every measured warm
+Vulkan look has zero program-cache misses: four hits and 327,312 payload bytes
+for narrow, seven hits and 607,996 bytes for wide. Wide FFT plan initialization
+averages 7.149 ms, shader compilation 11.907 ms and submitted-work wall time
+269.081 ms, with 28 synchronizations and 63 shader dispatches. These nested
+diagnostic timings must not be added again to complete coarse time.
+
+Actual per-owner device peaks are 95,544,976 bytes (91.1 MiB) narrow and
+207,686,448 bytes (198.1 MiB) wide. Admission conservatively charges the full
+configured 256 MiB device ceiling plus host staging/metadata and the persistent
+cache; the APU consumes shared host RAM. Generic allocation counters aggregate
+owners, while `vulkan_peak_owner_bytes` reports the per-owner peak.
+
+The wide result is a measured benefit for this complete coarse geometry, with
+remaining CPU preparation included. It does not establish whole-receiver
+speedup, sustained backlog capacity, GPU utilization, packed-FP16 arithmetic or
+a CPU forecast. The narrow result and cold costs remain material limitations.
+The default native CPU path and full worker budget remain unchanged; the GUI
+has no accelerator selector. The [arithmetic model](triad-performance.md#radeon-arithmetic-ceilings)
+separates ideal peaks from the current measured stage bounds.
+
+Temporary `local-evidence/amd-igpu/` receipts serve the current exact-device
+qualification and source-bound speedup claim. Keep only the capability,
+original failure and final measurement evidence needed for those claims; remove
+transient shader copies, diagnostic builds and redundant logs when their purpose
+ends. The reusable verified dependency cache serves the current optional build.
+
 ## Representative receiver hardware checks
 
 The [target contract](triad-performance.md#representative-receiver-hardware)
@@ -29,9 +132,9 @@ covers RTX 4090 desktop, RTX 4090 Laptop, RTX 4060 Ti 16 GB, Ryzen 5 PRO 5650U
 and Ryzen 7 8840U CPU/integrated-graphics systems. The PRO 6000 remains the
 development preference. Hardware-specific checks must bind actual device,
 memory, runtime and executed arithmetic; a target profile or compatible build
-does not establish performance on that device. The current project has no AMD
-GPU backend. Ryzen CPU execution is valid CPU evidence, not integrated-GPU
-qualification.
+does not establish performance on that device. At this earlier checkpoint the
+project had no AMD GPU backend. Its Ryzen CPU execution is CPU evidence, not
+integrated-GPU qualification; the later Vulkan work has a separate entry above.
 
 The native component mode and opt-in CUDA workflow now bind compiled
 production/build/fixture identity, actual device/runtime, fixed inputs, complete

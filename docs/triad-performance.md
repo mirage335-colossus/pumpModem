@@ -3,8 +3,8 @@
 The operating modem and measured receiver are the same compiled C++ stack.
 Python's standard library orchestrates native probes and analyzes receipts; it
 contains no second receiver DSP implementation. The default application requires
-neither Python nor Torch. The optional compiled ATen backend uses the same native
-receiver control, persistent state, work accounting and completion rules.
+neither Python nor Torch. Optional compiled ATen and Vulkan backends use the same
+native receiver control, persistent state, work accounting and completion rules.
 
 The [native processing contract](development.md#native-processing-and-integration)
 also governs new experiments and cloud testing: extend the compiled probe and
@@ -18,6 +18,7 @@ The tools answer different questions:
 | --- | --- |
 | `triad_abbreviated.py` | Relative computational regression against a matched native baseline. |
 | `triad_abbreviated.py --components` | Bounded same-binary native matrix/FFT and exact-peak comparisons, with device and arithmetic evidence. |
+| `test_triad_vulkan --benchmark` | Matched native CPU/Vulkan coarse-search comparison on one fixed public geometry; not complete receiver capacity. |
 | `triad_manual_cases.py` | Absolute local CPU capacity for the current ordered manual cases. |
 | `triad_gpu_workload.py` and `triad_gpu_cpu_forecast.py` | GPU-observed native work combined with local native phase costs and independent CPU holdouts. |
 
@@ -103,16 +104,17 @@ the actual architecture and retain execution evidence alongside the arithmetic
 counters. See the [Ada architecture](https://images.nvidia.com/aem-dam/Solutions/geforce/ada/nvidia-ada-gpu-architecture.pdf)
 and [CUDA Ada tuning guide](https://docs.nvidia.com/cuda/ada-tuning-guide/index.html).
 
-The present modem backend supports native CPU and optional CPU ATen/CUDA;
-there is no AMD GPU receiver backend. A successful Ryzen CPU test must therefore
-remain a CPU result. AMD's RDNA 3 matrix instructions support low-precision
-arithmetic, but that architecture capability does not establish support for an
-exact APU, OS, driver and library combination. Recheck the current
-[ROCm compatibility matrix](https://rocm.docs.amd.com/en/latest/compatibility/compatibility-matrix.html)
-and [rocWMMA targets](https://rocm.docs.amd.com/projects/rocWMMA/en/latest/api-reference/api-reference-guide.html)
-before a future native AMD implementation; do not turn the current project gap
-into a permanent claim about all AMD hardware. See
-[RDNA 3 matrix instructions](https://gpuopen.com/learn/wmma_on_rdna3/).
+The optional [native Vulkan path](#local-radeon-vulkan-processing) targets the
+5650U's accessible Radeon through Mesa RADV. CPU, ATen/CUDA and Vulkan execution
+remain distinct results. A Ryzen CPU measurement does not qualify its graphics,
+and a Vulkan device label does not prove that a receiver stage used the GPU.
+The 8840U has different RDNA 3 hardware; its matrix instructions and runtime
+support must be qualified separately. Recheck the current
+[ROCm compatibility matrix](https://rocm.docs.amd.com/en/latest/compatibility/compatibility-matrix.html),
+[rocWMMA targets](https://rocm.docs.amd.com/projects/rocWMMA/en/latest/api-reference/api-reference-guide.html)
+and [RDNA 3 matrix instructions](https://gpuopen.com/learn/wmma_on_rdna3/)
+before choosing an implementation for that APU. Neither unsupported ROCm nor a
+missing OpenCL platform rules out an available native Vulkan route.
 
 Runtime capabilities govern the test, not a processor-name preset. Preserve
 affinity/quota-aware `W=2*H`, explicit allocations, actual SIMD dispatch and
@@ -140,6 +142,139 @@ changing a default; keep fresh-owner and resident timings distinct. The
 [stage-specific precision contract](gpu-precision-controls.md#precision-opportunities-by-stage)
 distinguishes current matrix operations from prospective Tensor Core FFT work.
 
+### Local Radeon Vulkan processing
+
+`DATAPUMP_TRIAD_VULKAN` adds an optional in-process C++ backend using pinned
+VkFFT and glslang. It accelerates the complete filtered DATA frequency-search
+grid and exact arrival-peak selection. Native C++ retains FIR channel isolation,
+Helper acquisition, template generation, lag-group search, the compact
+tight-clock FP64 class and fine tracking. The public route chooser is unchanged;
+`native-lag-groups` and `compact-tight-clock-fp64` are explicit native routes.
+A GPU device or allocation failure is not permission to substitute CPU work.
+`--require-accelerator on` requires actual Vulkan search work, so an otherwise
+valid CPU-only route cannot become a GPU result. Selection is currently exposed
+through the native factory and headless probe; the GUI has no accelerator selector.
+
+Use the [Vulkan build and test recipe](building.md#vulkan-compute-on-integrated-radeon)
+and record the physical device, driver, features, source/build identity, full
+work and per-stage routing. The local device is Cezanne `1002:1638`, reported by
+Mesa as `AMD Radeon Graphics (RADV RENOIR)`; reject `llvmpipe` and other CPU
+Vulkan devices for GPU qualification. Runtime enumeration, numerical correctness
+and elapsed speedup are separate gates. See [current evidence](validation.md#local-radeon-vulkan-backend).
+
+An APU's host-visible/device-local allocations use shared system RAM. Charge the
+full per-session device allocation ceiling, FFT scratch/plans and separate host
+staging/metadata to admission. Keep their ownership and charge until submitted
+work completes, including cancellation. Coherent mappings still require correct
+GPU-to-host synchronization; they do not establish free transfers or zero-copy
+performance. Device plans and work buffers remain private to each coarse session.
+A backend-owned cache may retain at most eight serialized VkFFT programs and
+8 MiB of payload, with a separate 64 KiB metadata reservation. It has its own
+persistent host-memory charge, including periods with no live coarse owner;
+it is not uncharged GPU storage. `workspace_scope=per_coarse_session` makes the
+configured device limit an owner limit; generic live/peak allocation counters
+aggregate all owners.
+Use `vulkan_peak_owner_bytes` for a per-owner bound and
+`vulkan_active_sessions` alongside the aggregate charge. Do not compare a valid
+multi-owner aggregate directly to one owner's limit. Preserve the full native
+`W=2*H` worker budget for remaining work and compare against that budget, not a
+single-thread CPU reference.
+
+After the device correctness checks, run the compiled comparison directly:
+
+```sh
+./build/dev-vulkan/test_triad_vulkan --plan
+./build/dev-vulkan/test_triad_vulkan --benchmark > local-evidence/amd-igpu-comparison.jsonl
+./build/dev-vulkan/test_triad_vulkan --plan-wide
+./build/dev-vulkan/test_triad_vulkan --benchmark-wide > local-evidence/amd-igpu-wide-comparison.jsonl
+```
+
+The plan must confirm the unchanged frequency route at the full detected worker
+budget. Its fixed public geometry uses 600 Hz samples, inner rate 36, four added
+symbols, 0.1-second bits, ±400 ppm clock span, two rays with 0.0145-second delay
+and 1.25 Hz Doppler, arrival interval `[-0.1,0.1]` seconds and frequency interval
+`[-0.2,0.2]` Hz. It retains 78 workspaces and every planned frequency tile.
+The separate, predeclared `--plan-wide` / `--benchmark-wide` case changes the
+public frequency interval to `[-2,2]` Hz while retaining the same input. Keep its
+derived projection/search geometry and results distinct; it does not replace a
+slower original case.
+
+One first-use pair is reported separately, followed by exactly three alternating
+CPU/Vulkan pairs under a 120-second comparison deadline per selected geometry.
+Context creation is separate; session preparation, search, selection and complete
+owner lifetime including teardown are timed. Each new session still creates its
+private plans and buffers, loading retained serialized programs when applicable.
+Measured warm looks require positive program-cache hits and zero misses; first
+compilation cannot be silently removed from the first-use result. Report planning,
+shader compilation and submitted-work wall time separately; these diagnostics
+overlap the complete phase and are not extra additive costs. The comparison
+binds source/build/fixture identity and identical input/geometry hashes,
+requires exact coordinates and work, and retains the `3e-6` score gate. This is
+a small descriptive comparison, not a sustained backlog or whole-receiver pass.
+Do not expand sampling or alter public geometry after seeing a timing result.
+
+The [source-bound 5650U result](validation.md#local-radeon-vulkan-backend) is
+1.269× warm complete coarse-phase speedup on the nine-tile wide case
+(524.061 → 412.809 ms), while the one-tile narrow case remains 39.6% slower
+(77.117 → 107.629 ms). Both include remaining CPU preparation and teardown at
+`H=12/W=24`; neither is whole-receiver or sustained-backlog qualification.
+Retain the separate first-use compilation costs and measured memory charges.
+
+### Radeon arithmetic ceilings
+
+The 5650U has useful vector arithmetic without the matrix hardware of newer
+AMD architectures. AMD lists seven graphics compute units at up to 1.8 GHz;
+GCN supplies 64 shader lanes per compute unit. Counting one FMA as two operations
+gives these conditional peaks:
+
+| Arithmetic | Derived peak at 1.8 GHz | Meaning |
+| --- | --- | --- |
+| FP32 vector FMA | `7 × 64 × 2 × 1.8 = 1.6128 TFLOPS` | Ideal compute throughput; not sustained modem service. |
+| Packed FP16 | `2 × 1.6128 = 3.2256 TFLOPS` | Requires actual packed half arithmetic and numerical qualification. |
+| INT8 dot/matrix | No additional peak claimed | LLVM's `gfx90c` lacks the accelerated dot/matrix feature sets; an integer shader type or emulated dot extension is insufficient. |
+
+See [AMD's processor specifications](https://www.amd.com/en/support/downloads/drivers.html/processors/ryzen-pro/ryzen-pro-5000-series/amd-ryzen-5-pro-5650u.html),
+[GCN/Vega arithmetic organization](https://ir.amd.com/news-events/press-releases/detail/744/vega-amds-new-graphics-architecture-for-virtually-unlimited-workloads),
+[packed FP16 guidance](https://gpuopen.com/learn/first-steps-implementing-fp16/)
+and [LLVM's GFX9/gfx90c feature definitions](https://github.com/llvm/llvm-project/blob/release/19.x/llvm/lib/Target/AMDGPU/AMDGPU.td#L1245).
+Do not apply CDNA matrix or RDNA 3 WMMA rates to this Vega-class APU. No numeric
+FP64 peak is claimed without an applicable exact-device source.
+
+For six Zen 3 physical CPU cores at a common assumed clock `f` GHz, two 256-bit
+FMA pipelines give ideal CPU peaks of `192*f` GFLOPS FP32 and `96*f` GFLOPS FP64.
+SMT does not double the physical FMA units. Against ideal CPU FP32, the GPU
+arithmetic ratios are `8.4/f` for FP32 and `16.8/f` for packed FP16: at an
+illustrative, unmeasured 3 GHz, **2.8× and 5.6×**. Comparing to CPU FP64 doubles
+those ratios but changes numerical precision. See the
+[Zen 3 scheduling model](https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/X86/X86ScheduleZnver3.td#L164).
+These are instruction/clock bounds, not predicted application speedups.
+
+Shared-memory bandwidth and unaffected receiver work impose further limits.
+If the machine has two 64-bit DDR4-3200 channels, their ideal 51.2 GB/s would
+require about 31.5 FLOP per transferred byte to feed the FP32 peak, before
+CPU/display contention. That is a conditional memory example, not a measurement
+of this machine's channels or bandwidth. For a measured CPU total `T`, let `U`
+be the work outside the accelerated phase. Even a zero-time accelerated phase
+cannot exceed `T/U` speedup without changing or overlapping that remaining work.
+A more useful optimistic GPU time bound adds to `U` the larger of eligible
+operation count divided by arithmetic peak and unavoidable bytes divided by
+available bandwidth, plus necessary synchronization/setup. Use the measured
+phase boundaries and operation mix; do not infer a receiver speedup from FLOPS.
+
+For the current three-look CPU measurements, making only the recorded `search`
+stage free would bound complete coarse-phase speedup at **1.356× narrow** and
+**7.990× wide**. This leaves measured preparation, selection and teardown
+unchanged and assumes no new overlap. It is a deliberately limited stage bound,
+not a feasible GPU forecast or a whole-modem ceiling. The measured wide result
+is 1.269×; packed FP16 arithmetic is not executed by this implementation.
+
+VkFFT's half option stores FP16 data but computes in FP32. It therefore does
+not qualify the packed-FP16 arithmetic peak. A separate contraction using actual
+`v_pk_*_f16` instructions would need numerical and complete-cost checks; mixed
+FP16 inputs with FP32 operations also do not imply twice-rate arithmetic. See
+the [precision boundary](gpu-precision-controls.md#vulkan-on-vega-integrated-graphics)
+and [VkFFT implementation description](https://github.com/DTolm/VkFFT/tree/v1.3.4).
+
 ### Bounded native component comparisons
 
 After the [native CUDA build and correctness checks](building.md#ci-sanitizers-and-release-validation),
@@ -159,7 +294,7 @@ executable is `test_triad_tensor` beside the supplied receiver probe. Components
 use visible CUDA device zero; set `CUDA_VISIBLE_DEVICES` before launch to select
 another physical device. CPU execution is rejected for this mode. On a Ryzen
 system without the CUDA backend, use the ordinary CPU regression/capacity entry
-points and retain the integrated-GPU result as unavailable or unmeasured.
+points or the separate Vulkan recipe. CUDA matrix mode is not a Vulkan test.
 
 The two matrix cases fix `(samples, frequencies, arrivals, workspaces)` at
 `(769,129,65,33)` or `(2048,65,64,32)`, each with two taps. They are geometry

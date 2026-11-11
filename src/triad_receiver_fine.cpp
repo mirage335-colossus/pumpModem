@@ -810,7 +810,7 @@ std::size_t workspace_for_plan(const ReceiverConfig& config, const ReceiverSlotP
     if (record_work) add(2 * maximum_proposals, sizeof(StateBlockWork));
     const auto active = useful_fine_workers(workers);
     const auto mapped_rows = std::min(max_rows, maximum_basis_rows);
-    if (config.bulk_backend) {
+    if (config.bulk_backend && config.bulk_backend->supports_fine()) {
         const auto taps = config.spread_delay_seconds || config.spread_doppler_hz ? 2U : 1U;
         bytes = checked_add(bytes, config.bulk_backend->fine_host_bytes(max_rows, taps));
         add(4 * maximum_proposals, sizeof(FineBulkStatistics));
@@ -823,6 +823,7 @@ std::size_t workspace_for_plan(const ReceiverConfig& config, const ReceiverSlotP
             (max_rows > mapped_rows ? 4 * mapped_rows : 0), sizeof(Complex)),
             checked_multiply(mapped_rows, sizeof(double))));
     }
+    bytes = checked_add(bytes, config.bulk_backend ? config.bulk_backend->persistent_host_workspace() : 0);
     return checked_add(bytes, MappedBasis::workspace_bytes(config, plan, mapped_rows, active));
 }
 
@@ -960,7 +961,7 @@ struct FineSession::Impl {
         observation_scratch.resize(fft_rows);
         const auto mapped_rows = std::min(max_rows, maximum_basis_rows);
         basis = std::make_unique<MappedBasis>(config, plan, key, mapped_rows, stage_workers);
-        if (config.bulk_backend) {
+        if (config.bulk_backend && config.bulk_backend->supports_fine()) {
             bulk = config.bulk_backend->make_fine(projected_rate, 2 * config.clock_bound_ppm);
             if (!bulk) throw Error("requested Robust bulk backend did not construct a fine session");
             bulk_work = bulk->completed_work();
@@ -969,6 +970,8 @@ struct FineSession::Impl {
             bulk_offsets.resize(mapped_rows);
             std::iota(bulk_offsets.begin(), bulk_offsets.end(), 0.);
             for (auto& item : bulk_statistics) item.reserve(2 * maximum_proposals);
+        } else if (config.bulk_backend) {
+            config.bulk_backend->record_native_fine();
         }
         scratch.reserve(stage_workers);
         for (unsigned worker = 0; worker < stage_workers; ++worker)

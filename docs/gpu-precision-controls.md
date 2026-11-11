@@ -87,6 +87,28 @@ report the actual coarse and fine arithmetic, device/runtime and memory use.
 Fine Gaussian state retains the native higher-precision policy. No arithmetic
 is silently selected from the observed score or transmitted truth.
 
+### Vulkan on Vega integrated graphics
+
+The optional `DATAPUMP_TRIAD_VULKAN` backend uses in-process Vulkan/VkFFT for
+filtered DATA frequency-search FFTs, scoring and exact arrival frontiers.
+Current transforms use FP32 bulk arithmetic; coordinates and quadratic scoring
+retain higher precision. Native FIR keeps strong Helper energy out of this
+reduced-precision search. Helper acquisition, template generation, lag groups,
+the compact tight-clock FP64 class and fine processing stay on the canonical CPU
+path with explicit stage routing. A numerical or resource failure must not
+silently fall back. See the [native Vulkan scope](triad-performance.md#local-radeon-vulkan-processing)
+and [current qualification](validation.md#local-radeon-vulkan-backend).
+
+On the 5650U, exposed shader FP16/INT8 types and the integer-dot extension do not
+by themselves prove packed throughput or accelerated dot products. The observed
+RADV device reports FP16 support but no accelerated 8-bit integer-dot variants.
+Vega can execute packed FP16 vector arithmetic; it has no qualified matrix/Tensor
+Core path here. The current FP32 FFT implementation does not use that optional
+packed arithmetic. VkFFT's FP16-storage mode still computes in FP32, so neither
+its storage size nor a half-typed buffer establishes a 2× arithmetic gain.
+Keep the [hardware peak model](triad-performance.md#radeon-arithmetic-ceilings)
+separate from measured affected-phase and complete-receiver speedups.
+
 ### Portable FP32 mapping arithmetic
 
 FP32 mapped-basis rotation now declares `fp32-rn4-v1`: compute all four real

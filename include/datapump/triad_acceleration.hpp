@@ -35,4 +35,22 @@ struct TensorReceiverOptions {
 std::shared_ptr<receiver_detail::ReceiverBulkBackend>
 make_tensor_receiver_backend(const TensorReceiverOptions&);
 
+class VulkanBackendUnavailable : public Error {
+public:
+    using Error::Error;
+};
+
+struct VulkanReceiverOptions {
+    unsigned device_index = 0;
+    // Per-coarse-owner allocation ceiling. On integrated GPUs this storage
+    // consumes host RAM and is included in the native DSP preflight.
+    std::size_t workspace_bytes = 0;
+};
+
+// Optional native Vulkan broad-frequency search. Channelization, fine state,
+// lag-group search and the compact tight-clock FP64 class remain native CPU.
+// A requested device must be a physical GPU; software Vulkan is rejected.
+std::shared_ptr<receiver_detail::ReceiverBulkBackend>
+make_vulkan_receiver_backend(const VulkanReceiverOptions&);
+
 } // namespace datapump::triad::v3

@@ -1191,8 +1191,15 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
     // Task metadata and the bounded active native call stack are charged
     // separately from shared immutable tables and algorithm buffers.
     const auto task_overhead = mul(std::min<std::size_t>(workers, tile * plan.workspaces()), 128 * 1024);
-    const auto bulk_host = config.bulk_backend ? config.bulk_backend->coarse_host_bytes(
-        nfft, std::max(tile, lag_groups ? lag_points : 0), layout.lag_count) : 0;
+    const auto can_accelerate = config.bulk_backend &&
+        (config.bulk_backend->coarse_fallback_reason(static_cast<double>(plan.output_fs),
+            2 * config.clock_bound_ppm, CoarseRoute::frequency_tiles).empty() ||
+         (lag_groups && config.bulk_backend->coarse_fallback_reason(static_cast<double>(plan.output_fs),
+            2 * config.clock_bound_ppm, CoarseRoute::lag_groups).empty()));
+    // Shared compiled programs can remain live even for a native fallback.
+    const auto persistent = config.bulk_backend ? config.bulk_backend->persistent_host_workspace() : 0;
+    const auto bulk_host = add(persistent, can_accelerate ? config.bulk_backend->coarse_host_bytes(
+        nfft, std::max(tile, lag_groups ? lag_points : 0), layout.lag_count) : 0);
     return {add(add(add(base, high), task_overhead), bulk_host), bulk_host};
 }
 
@@ -1573,6 +1580,12 @@ struct CoarseSession::Impl {
             require_coarse(std::isfinite(iq[i].real()) && std::isfinite(iq[i].imag()), "coarse receiver requires finite input");
         }
         if (config.bulk_backend) {
+            receipt.native_fallback_reason = config.bulk_backend->coarse_fallback_reason(
+                work.projected_sample_rate_hz, 2 * config.clock_bound_ppm, work.route);
+            if (!receipt.native_fallback_reason.empty())
+                config.bulk_backend->record_native_coarse(receipt.native_fallback_reason);
+        }
+        if (config.bulk_backend && receipt.native_fallback_reason.empty()) {
             const auto setup = PhaseClock::now();
             bulk = config.bulk_backend->make_coarse(work.projected_sample_rate_hz, 2 * config.clock_bound_ppm);
             require_coarse(static_cast<bool>(bulk), "requested coarse bulk backend did not create an execution session");
@@ -1593,12 +1606,13 @@ struct CoarseSession::Impl {
         }
         {
             const auto setup = PhaseClock::now();
-            if (!bulk) {
+            if (!bulk || !bulk->supports_fir()) {
                 const auto fft_rows = std::max({layout.nfft, geometry.filter_fft, geometry.fidelity_layout.nfft,
                                                 work.correlation_fft_rows});
                 fft = std::make_unique<native_fft::DoublePlan>(fft_rows, stop);
             }
-            const Projection projection(geometry, fft.get(), bulk.get(), receipt.filter_setup.operations, stop);
+            const Projection projection(geometry, fft.get(), bulk && bulk->supports_fir() ? bulk.get() : nullptr,
+                                        receipt.filter_setup.operations, stop);
             variance = projection.variance(config.noise_variance);
             require_coarse(std::isfinite(variance) && variance > 0, "coarse projected noise variance is invalid");
             std::optional<MappedProjection> mapped;

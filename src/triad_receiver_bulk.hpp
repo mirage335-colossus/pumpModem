@@ -11,6 +11,8 @@
 
 namespace datapump::triad::v3::receiver_detail {
 
+enum class CoarseRoute { frequency_tiles, lag_groups };
+
 inline constexpr std::array<std::string_view, 8> bulk_direct_fallback_reasons{
     "unsupported-or-abrupt-pulse", "insufficient-cache-oversampling", "native-origin-precision",
     "nonfinite-relative-map", "large-phase", "pinned-tile-limit", "relative-map-range", "other"
@@ -23,20 +25,31 @@ inline constexpr std::array<std::string_view, 6> bulk_matrix_fallback_reasons{
 
 struct BulkReceipt {
     std::string device, device_name, library_version, precision, requested_coarse_math;
+    std::string workspace_scope = "backend_shared";
     int cuda_runtime_version = 0, cuda_driver_version = 0;
     int cuda_blas_version = 0, cuda_compute_major = 0, cuda_compute_minor = 0;
+    std::uint32_t vulkan_api_version = 0, vulkan_driver_version = 0;
+    std::uint32_t vulkan_vendor_id = 0, vulkan_device_id = 0, vulkan_subgroup_size = 0;
+    bool vulkan = false, unified_memory = false, vulkan_float16 = false, vulkan_int8 = false;
+    bool vulkan_integer_dot8_accelerated = false;
     unsigned numerical_threads = 1;
     std::size_t workspace_limit_bytes = 0, reserved_bytes = 0, peak_reserved_bytes = 0;
     std::size_t allocator_live_bytes = 0, allocator_reserved_bytes = 0;
     std::size_t allocator_peak_live_bytes = 0, allocator_peak_reserved_bytes = 0;
     std::size_t total_device_bytes = 0, initial_free_device_bytes = 0;
     std::size_t runtime_headroom_bytes = 0;
+    std::size_t host_cache_limit_bytes = 0, host_cache_bytes = 0, host_cache_entries = 0;
     std::size_t fft_plan_cache_count = 0, fft_plan_cache_limit = 0;
     std::uint64_t upload_bytes = 0, download_bytes = 0, synchronizations = 0;
     std::uint64_t fft_calls = 0, fft_rows = 0, fir_input_rows = 0, fir_output_contributions = 0;
     std::uint64_t score_rows = 0, statistics_blocks = 0, projected_values = 0, dc_reduction_values = 0;
     // Exact CUDA arrival selection, credited after validated frontier readback.
     std::uint64_t cuda_arrival_peak_rows = 0, cuda_arrival_peak_values = 0;
+    std::uint64_t vulkan_dispatches = 0, vulkan_arrival_peak_rows = 0, vulkan_arrival_peak_values = 0;
+    std::uint64_t vulkan_peak_owner_bytes = 0, vulkan_active_sessions = 0;
+    std::uint64_t vulkan_fft_cache_hits = 0, vulkan_fft_cache_misses = 0;
+    double vulkan_fft_plan_seconds = 0, vulkan_shader_compile_seconds = 0;
+    std::uint64_t native_coarse_lag_sessions = 0, native_coarse_precision_sessions = 0, native_fine_sessions = 0;
     std::uint64_t mapped_columns = 0, mapped_values = 0, uploaded_tiles = 0, tile_hits = 0;
     // CUDA mapped work credited after the batch's blocking statistics readback.
     std::uint64_t cuda_fused_mapped_launches = 0, cuda_fused_mapped_values = 0;
@@ -174,6 +187,9 @@ using CoarsePeakSink = std::function<void(std::size_t first_workspace, std::size
 class CoarseBulk {
 public:
     virtual ~CoarseBulk() = default;
+    // False keeps the canonical native FIR/channelizer before device upload.
+    // It does not permit a fallback after any device operation has started.
+    virtual bool supports_fir() const noexcept { return true; }
     virtual std::shared_ptr<const CoarseBulkFilter> prepare_filter(
         std::span<const double> taps, std::size_t fft_rows, CoarseBulkWork&, std::stop_token) = 0;
     virtual std::vector<Complex> project_fir(const CoarseBulkFilter&, const CoarseFirCrop&,
@@ -203,9 +219,16 @@ public:
 class ReceiverBulkBackend {
 public:
     virtual ~ReceiverBulkBackend() = default;
+    virtual bool supports_fine() const noexcept { return true; }
+    // Pure public-geometry selection, shared by preflight and construction.
+    // Empty means the backend must construct the requested coarse session.
+    virtual std::string_view coarse_fallback_reason(double, double, CoarseRoute) const noexcept { return {}; }
+    virtual void record_native_coarse(std::string_view) {}
+    virtual void record_native_fine() {}
     virtual std::unique_ptr<FineBulk> make_fine(double projected_rate_hz, double clock_span_ppm) = 0;
     virtual std::unique_ptr<CoarseBulk> make_coarse(double projected_rate_hz, double clock_span_ppm) = 0;
     // Additional host reservation to include in public DSP preflight.
+    virtual std::size_t persistent_host_workspace() const noexcept { return 0; }
     virtual std::size_t fine_host_bytes(std::size_t block_rows, std::size_t taps) const = 0;
     virtual std::size_t coarse_host_bytes(std::size_t maximum_fft_rows,
         std::size_t maximum_tile_frequencies, std::size_t arrivals) const = 0;

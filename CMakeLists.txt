@@ -215,6 +215,7 @@ add_library(datapump_triad_receiver STATIC
 target_include_directories(datapump_triad_receiver PUBLIC include PRIVATE src third_party/xz/src/liblzma/api)
 target_link_libraries(datapump_triad_receiver PUBLIC datapump_triad PRIVATE liblzma)
 include(cmake/TriadTensor.cmake)
+include(cmake/TriadVulkan.cmake)
 add_library(datapump_robust_session STATIC src/live.cpp src/robust_profile.cpp
   src/robust_audio_frontend.cpp)
 target_include_directories(datapump_robust_session PUBLIC include PRIVATE src)
@@ -716,7 +717,7 @@ else()
   install(DIRECTORY docs/ DESTINATION share/doc/datapump/docs PATTERN validation-data EXCLUDE)
 endif()
 install(FILES third_party/README.md third_party/FLTK-SOURCE.md DESTINATION share/doc/datapump/third_party)
-foreach(dependency qrcodegen xz ldpc rev build-support)
+foreach(dependency qrcodegen xz ldpc rev build-support vkfft)
   file(GLOB _dependency_notices "third_party/${dependency}/*.md"
     "third_party/${dependency}/*LICENSE*" "third_party/${dependency}/COPYING*"
     "third_party/${dependency}/UPSTREAM.json" "third_party/${dependency}/*.sha256"

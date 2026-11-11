@@ -10,7 +10,7 @@
 #include "triad_receiver_driver.hpp"
 #include "triad_receiver_helper.hpp"
 #include "triad_stream_resources.hpp"
-#ifdef DATAPUMP_HAVE_TRIAD_TENSOR
+#if defined(DATAPUMP_HAVE_TRIAD_TENSOR) || defined(DATAPUMP_HAVE_TRIAD_VULKAN)
 #include "datapump/triad_acceleration.hpp"
 #endif
 
@@ -236,7 +236,7 @@ Options parse(int argc, char** argv) {
         else require(*fec == "off", "--fec expects off, rs20 or rs60");
     }
     if (!values.empty()) throw Error("Unknown native probe option " + std::string(values.begin()->first));
-    require(one_of(o.backend, {"cpu", "tensor-cpu", "cuda"}), "Unknown native probe backend");
+    require(one_of(o.backend, {"cpu", "tensor-cpu", "cuda", "vulkan"}), "Unknown native probe backend");
     require(one_of(o.tensor_precision, {"automatic", "fp64"}), "Unknown tensor precision");
     require(one_of(o.tensor_coarse_math, {"fft", "fp16", "int8"}), "Unknown tensor coarse arithmetic");
     require(one_of(o.stratum, {"active", "noise", "cold-maximum", "terminal", "erasure"}),
@@ -255,6 +255,10 @@ Options parse(int argc, char** argv) {
             "Work-only diagnostics require continuation and a nonnominal stratum");
     require(o.pilot_workers.empty() || o.command == "backlog", "Worker pilots require backlog replay");
     require(o.pilot_workers.empty() || o.backend == "cpu", "Worker allocation pilots require the native CPU backend");
+    require(o.backend != "vulkan" || o.tensor_precision == "automatic",
+            "Vulkan coarse search uses its native FP32 path; tensor precision selection is unsupported");
+    require(o.backend != "vulkan" || o.tensor_coarse_math == "fft",
+            "Vulkan coarse search uses the full FFT; tensor matrix arithmetic is unsupported");
     return o;
 }
 
@@ -572,6 +576,26 @@ Json bulk_json(const BulkReceipt& r) {
         {"fir_output_contributions", r.fir_output_contributions}, {"score_rows", r.score_rows},
         {"cuda_arrival_peak_rows", r.cuda_arrival_peak_rows},
         {"cuda_arrival_peak_values", r.cuda_arrival_peak_values},
+        {"vulkan", r.vulkan}, {"vulkan_api_version", r.vulkan_api_version},
+        {"vulkan_driver_version", r.vulkan_driver_version}, {"vulkan_vendor_id", r.vulkan_vendor_id},
+        {"vulkan_device_id", r.vulkan_device_id}, {"vulkan_subgroup_size", r.vulkan_subgroup_size},
+        {"vulkan_float16", r.vulkan_float16}, {"vulkan_int8", r.vulkan_int8},
+        {"vulkan_integer_dot8_accelerated", r.vulkan_integer_dot8_accelerated},
+        {"unified_memory", r.unified_memory}, {"workspace_scope", r.workspace_scope},
+        {"vulkan_peak_owner_bytes", r.vulkan_peak_owner_bytes},
+        {"vulkan_active_sessions", r.vulkan_active_sessions},
+        {"vulkan_fft_plan_seconds", r.vulkan_fft_plan_seconds},
+        {"vulkan_shader_compile_seconds", r.vulkan_shader_compile_seconds},
+        {"host_cache_limit_bytes", r.host_cache_limit_bytes}, {"host_cache_bytes", r.host_cache_bytes},
+        {"host_cache_entries", r.host_cache_entries},
+        {"vulkan_fft_cache_hits", r.vulkan_fft_cache_hits},
+        {"vulkan_fft_cache_misses", r.vulkan_fft_cache_misses},
+        {"vulkan_dispatches", r.vulkan_dispatches},
+        {"vulkan_arrival_peak_rows", r.vulkan_arrival_peak_rows},
+        {"vulkan_arrival_peak_values", r.vulkan_arrival_peak_values},
+        {"native_coarse_lag_sessions", r.native_coarse_lag_sessions},
+        {"native_coarse_precision_sessions", r.native_coarse_precision_sessions},
+        {"native_fine_sessions", r.native_fine_sessions},
         {"statistics_blocks", r.statistics_blocks}, {"projected_values", r.projected_values},
         {"dc_reduction_values", r.dc_reduction_values},
         {"mapped_columns", r.mapped_columns}, {"mapped_values", r.mapped_values},
@@ -606,11 +630,25 @@ std::shared_ptr<ReceiverBulkBackend> selected_backend(const Options& o) {
     if (o.backend == "cpu") {
         if (o.tensor_coarse_math != "fft")
             throw Unavailable("Tensor coarse arithmetic requires --backend tensor-cpu or cuda");
-        if (o.require_accelerator) throw Unavailable("An accelerated probe requires --backend cuda");
+        if (o.require_accelerator) throw Unavailable("An accelerated probe requires --backend cuda or vulkan");
         return {};
     }
+    if (o.backend == "vulkan") {
+        if (o.require_accelerator && (o.command == "codec" || o.work_only))
+            throw Unavailable("Vulkan accelerator qualification requires a complete coarse-search workload");
+#ifdef DATAPUMP_HAVE_TRIAD_VULKAN
+        try {
+            return make_vulkan_receiver_backend({o.device_index,
+                o.device_memory_limit.value_or(256 * 1024 * 1024)});
+        } catch (const VulkanBackendUnavailable& error) {
+            throw Unavailable(error.what());
+        }
+#else
+        throw Unavailable("This native probe build does not include the optional Vulkan backend");
+#endif
+    }
     if (o.require_accelerator && o.backend != "cuda")
-        throw Unavailable("An accelerated probe requires --backend cuda");
+        throw Unavailable("An accelerated probe requires --backend cuda or vulkan");
 #ifdef DATAPUMP_HAVE_TRIAD_TENSOR
     try {
         return make_tensor_receiver_backend({o.backend == "cuda" ? TensorDevice::cuda : TensorDevice::cpu,
@@ -881,6 +919,7 @@ Json coarse_json(const CoarseProgress& p) {
         {"arrival_lower_seconds", g.arrival_lower_seconds}, {"arrival_upper_seconds", g.arrival_upper_seconds},
         {"workspace_reserved_bytes", g.workspace_reserved_bytes}, {"retained_bytes", p.retained_bytes},
         {"proposals", p.proposals}, {"refined_coordinates", p.refined_coordinates},
+        {"native_fallback_reason", p.native_fallback_reason},
         {"filter_setup", coarse_counts(p.filter_setup)}, {"mapped_fidelity", coarse_counts(p.mapped_fidelity)},
         {"template_bank", coarse_counts(p.template_bank)}, {"observation", coarse_counts(p.observation)},
         {"lag_setup", coarse_counts(p.lag_setup)}, {"bulk_prepare", coarse_counts(p.bulk_prepare)},
@@ -1712,7 +1751,7 @@ void codec_run(Json& report, const Options& o, const Profile& profile, std::stop
 
 void help() {
     std::cout << "triad_receiver_probe describe|plan|slot|continuation|message|backlog|regression|codec [--flag value ...]\n"
-        "  --backend cpu|tensor-cpu|cuda --require-accelerator on|off --tensor-precision automatic|fp64\n"
+        "  --backend cpu|tensor-cpu|cuda|vulkan --require-accelerator on|off --tensor-precision automatic|fp64\n"
         "  --tensor-coarse-math fft|fp16|int8 (post-channelization search; fallback is reported)\n"
         "  --device-index N --device-memory-limit-bytes N\n"
         "  --case hf|eme and the normalized manual-case options from triad_cases.py\n"
@@ -1739,12 +1778,19 @@ Json identity() {
 #else
             false
 #endif
+        }, {"configured_vulkan_backend",
+#ifdef DATAPUMP_HAVE_TRIAD_VULKAN
+            true
+#else
+            false
+#endif
         }});
 }
 
 void run(Json& report, const Options& o, std::stop_token stop) {
     report["identity"]["backend"] = o.backend;
     report["identity"]["receiver_arithmetic"] = "native_fp64_state_and_admission";
+    report["identity"]["require_accelerator"] = o.require_accelerator;
     report["identity"]["requested_tensor_precision"] = o.tensor_precision;
     report["identity"]["requested_tensor_coarse_math"] = o.tensor_coarse_math;
     const auto backend = selected_backend(o);
@@ -1806,6 +1852,15 @@ void run(Json& report, const Options& o, std::stop_token stop) {
             if (!actual.allocator_peak_reserved_bytes ||
                 actual.allocator_peak_reserved_bytes > actual.workspace_limit_bytes)
                 throw Incomplete("CUDA allocator peak did not satisfy the declared device workspace");
+        }
+        if (o.backend == "vulkan" && o.require_accelerator && o.command != "codec") {
+            const auto actual = backend->receipt();
+            if (!actual.vulkan || !actual.executed || !actual.fft_calls || !actual.score_rows ||
+                !actual.vulkan_dispatches || !actual.vulkan_arrival_peak_rows ||
+                actual.workspace_scope != "per_coarse_session" || !actual.vulkan_peak_owner_bytes ||
+                actual.vulkan_peak_owner_bytes > actual.workspace_limit_bytes ||
+                actual.allocator_peak_reserved_bytes < actual.vulkan_peak_owner_bytes)
+                throw Incomplete("Vulkan receiver work did not execute a bounded full-frequency FFT and score batch");
         }
         if (o.require_accelerator && o.command == "codec")
             throw Incomplete("Isolated codec work does not execute accelerator stages");

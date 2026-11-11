@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def main(executable):
-    def run(command, *args, code=0, default_allocation=False):
+    def run(command, *args, code=0, default_allocation=False, parse_error=None):
         allocation = [] if default_allocation else ["--workers", "1", "--slot-owners", "1"]
         completed = subprocess.run(
             [str(executable), command, *allocation, "--deadline-ms", "12000", *args],
@@ -16,6 +16,11 @@ def main(executable):
         receipt = json.loads(completed.stdout)
         assert completed.returncode == code, (command, receipt["reason"], completed.stderr)
         assert receipt["schema"] == "datapump.triad.native-probe.v1"
+        if parse_error is not None:
+            assert receipt["command"] is None
+            assert receipt["status"] == "error"
+            assert parse_error in receipt["reason"]
+            return receipt
         assert receipt["command"] == command
         assert receipt["identity"]["implementation"] == "native-production-receiver"
         assert receipt["identity"]["cpu_fft_kernel"] in ("avx2", "scalar")
@@ -31,6 +36,10 @@ def main(executable):
     tensor_on_cpu = run("describe", "--tensor-coarse-math", "int8", code=2)
     assert tensor_on_cpu["status"] == "unavailable" and not tensor_on_cpu["phases"]
     assert tensor_on_cpu["identity"]["requested_tensor_coarse_math"] == "int8"
+    run("describe", "--backend", "vulkan", "--tensor-coarse-math", "int8", code=1,
+        parse_error="Vulkan coarse search uses the full FFT")
+    run("describe", "--backend", "vulkan", "--tensor-precision", "fp64", code=1,
+        parse_error="Vulkan coarse search uses its native FP32 path")
     automatic = run("describe", default_allocation=True)["allocation"]
     assert automatic["hardware_threads"] > 0
     assert automatic["workers"] == 2 * automatic["hardware_threads"]

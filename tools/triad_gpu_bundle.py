@@ -3,7 +3,7 @@
 
 The input set is intentionally allowlisted: native project sources and headers,
 the CMake build description, the native probe and its orchestration scripts,
-and the pinned XZ and qrcodegen sources. LibTorch, CUDA and system build
+and the pinned XZ, VkFFT and qrcodegen sources. LibTorch, CUDA and system build
 dependencies come from the remote build environment.
 """
 from __future__ import annotations
@@ -26,6 +26,7 @@ _TOP_FILES = ("CMakeLists.txt", "CMakePresets.json", "LICENSE", "build.sh", "_te
 _NATIVE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx",
                     ".inc", ".inl", ".s", ".cu", ".cuh"}
 _XZ_INVENTORY = "third_party/xz/UPSTREAM.sha256"
+_VKFFT_INVENTORY = "third_party/vkfft/UPSTREAM.sha256"
 _XZ_BUILD_METADATA = {
     "AUTHORS", "CMakeLists.txt", "COPYING", "COPYING.0BSD", "COPYING.LGPLv2.1", "INSTALL", "README",
     "src/common/common_w32res.rc", "src/common/w32_application.manifest",
@@ -42,7 +43,9 @@ _PROBE_TOOLS = (
 _EXACT_FILES = (*_TOP_FILES, "src/pump.manifest", "tools/build_capacity.py",
                 *("tools/" + name for name in _PROBE_TOOLS),
                 "tools/diagnostic_iq_noise_options.hpp", "tests/test_triad_tensor.cpp",
+                "tests/test_triad_vulkan.cpp",
                 "third_party/xz/README.datapump.md",
+                "third_party/vkfft/README.datapump.md",
                 "third_party/qrcodegen/LICENSE", "third_party/qrcodegen/qrcodegen.cpp",
                 "third_party/qrcodegen/qrcodegen.hpp")
 _SECRET_NAME = re.compile(r"(?:secret|credential|password|token|private.?key|id_(?:rsa|ed25519))", re.I)
@@ -168,8 +171,23 @@ def _collect(root_fd: int) -> list[tuple[str, os.stat_result, str | None]]:
             raise BundleError(f"invalid or disallowed XZ inventory entry: {path!r}")
         selected[rel] = (_inventory_file(root_fd, rel), digest)
 
+    # VkFFT is an optional backend, but its pinned source participates in the
+    # conservative production identity even when a bundle builds CUDA only.
+    inventory_info = _inventory_file(root_fd, _VKFFT_INVENTORY)
+    selected[_VKFFT_INVENTORY] = (inventory_info, None)
+    for line in _read_source(root_fd, _VKFFT_INVENTORY, inventory_info).decode("ascii").splitlines():
+        digest, separator, path = line.partition("  ")
+        path = _safe_rel(path)
+        rel = f"third_party/vkfft/{path}"
+        if (not separator or not re.fullmatch(r"[0-9a-f]{64}", digest) or rel in selected
+                or not _eligible(rel) or not all(_source_directory(part) for part in path.split("/")[:-1])
+                or not (path == "LICENSE" or (path.startswith("vkFFT/") and PurePosixPath(path).suffix == ".h"))):
+            raise BundleError(f"invalid or disallowed VkFFT inventory entry: {path!r}")
+        selected[rel] = (_inventory_file(root_fd, rel), digest)
+
     required = {"cmake/VendoredLzma.cmake", "cmake/XzReceiveHardening.cmake",
-                "cmake/TriadTensor.cmake", "third_party/xz/CMakeLists.txt",
+                "cmake/TriadTensor.cmake", "cmake/TriadVulkan.cmake", "third_party/xz/CMakeLists.txt",
+                "third_party/vkfft/vkFFT/vkFFT.h", "third_party/vkfft/LICENSE",
                 "src/triad_tensor_backend.cpp", "include/datapump/triad_acceleration.hpp"}
     absent = sorted(required - selected.keys())
     if absent:
@@ -199,7 +217,7 @@ def create_bundle(root: Path | str, destination: Path | str) -> dict[str, object
             data = _read_source(root_fd, rel, info)
             digest = hashlib.sha256(data).hexdigest()
             if expected is not None and digest != expected:
-                raise BundleError(f"modified pinned XZ source: {rel}")
+                raise BundleError(f"modified pinned third-party source: {rel}")
             records.append({"path": rel, "size": len(data), "sha256": digest})
             payloads.append((rel, data))
     manifest = {"format": "datapump.triad.native-gpu-source.v1", "files": records}

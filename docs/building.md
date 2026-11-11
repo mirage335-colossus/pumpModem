@@ -608,8 +608,9 @@ and a 300-second aggregate deadline. `peaks`/`all` require exactly 2048 MiB.
 Its separate receipt and CI summary cannot supply a relative-commit regression
 or capacity pass. CUDA device zero is the visible device; configure
 `CUDA_VISIBLE_DEVICES` on the runner when selection is necessary. This workflow
-does not provision a runner, launch or purchase cloud capacity, or implement an
-AMD GPU backend. Use CPU checks separately on the representative Ryzen systems.
+does not provision a runner, launch or purchase cloud capacity, or implement a
+Vulkan backend. Use the separate Vulkan recipe below for the local Radeon;
+retain CPU checks separately on the representative Ryzen systems.
 Configured workflow coverage is not evidence of an actual hosted/platform run;
 see [recorded outcomes](validation.md#native-codec-and-measurement-migration).
 
@@ -626,6 +627,52 @@ modem benchmarks. Keep maintained outcomes concise in
 [validation.md](validation.md). Keep research only when a concise finding informs
 current work or a specific raw record is required to interpret it; record its
 provenance, limitations and cleanup reason. Do not accumulate historical runs.
+
+### Vulkan compute on integrated Radeon
+
+The optional `DATAPUMP_TRIAD_VULKAN` build links the native Vulkan/VkFFT coarse
+backend without Torch or a Python runtime. VkFFT 1.3.4 is pinned in
+[`third_party/vkfft`](../third_party/vkfft/README.datapump.md); Vulkan and glslang
+are native development dependencies. On Debian, the relevant packages are
+`libvulkan-dev`, `glslang-dev`, `glslang-tools` and `spirv-tools`. Normal configure
+and build commands never install packages, replace drivers or download sources.
+
+With those dependencies already available:
+
+```sh
+./build.sh configure --cli --build-dir build/dev-vulkan --jobs 2 -- \
+  -DDATAPUMP_TRIAD_VULKAN=ON -DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON
+cmake --build build/dev-vulkan --target triad_receiver_probe test_triad_vulkan --parallel 2
+ctest --test-dir build/dev-vulkan --output-on-failure \
+  -R '^triad_vulkan(_plan)?$' --no-tests=error
+./build/dev-vulkan/triad_receiver_probe describe --backend vulkan
+```
+
+Both options default to `OFF`. `test_triad_vulkan --plan` is a CPU-only geometry
+preflight registered as `triad_vulkan_plan` when the backend is built. Setting
+`DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON` also registers `triad_vulkan`, which
+requires an actual GPU, runs serially and has a 120-second timeout. A software
+Vulkan device does not satisfy it; missing device access is not a skipped pass.
+Only request that option on a runner with suitable render-device access.
+`--device-index` selects the enumerated physical device; probe receipts identify
+its actual vendor/device, driver and executed work.
+
+The local dependency preparation uses verified Debian archives extracted
+without system installation into
+`third_party/build-support/cache/vulkan-native/usr-prefix/usr`. When reusing that
+current cache, pass its absolute path as `CMAKE_PREFIX_PATH`; its linker setup
+also uses `-DVulkan_LIBRARY=/usr/lib/x86_64-linux-gnu/libvulkan.so.1` for the
+already-installed host loader. This is a local development recipe, not a portable
+binary or driver bundle. Keep the cache while the Vulkan build uses it.
+
+Run numerical/device checks before the
+[bounded CPU/Vulkan comparison](triad-performance.md#local-radeon-vulkan-processing).
+Preserve the default native worker allocation and matched public search. Actual
+GPU access on the development host requires execution outside the restricted
+sandbox that hides `/dev/dri`; no driver or device-permission change was made.
+An unavailable access route must remain an unavailable result. This build does
+not expose a GUI accelerator selector or qualify a release; use the native
+factory/headless probe for backend selection.
 
 ## Compile-time policy
 

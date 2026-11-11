@@ -1,0 +1,105 @@
+name: Native Robust Vulkan validation
+'on':
+  workflow_dispatch:
+    inputs:
+      run_gpu:
+        description: Also run the strict GPU checks and bounded native comparison on a provisioned Vulkan GPU runner
+        type: boolean
+        default: false
+jobs:
+  build-and-plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Install native Vulkan build prerequisites
+      run: |
+        sudo apt-get update
+        sudo apt-get install --no-install-recommends -y cmake ninja-build g++ libssl-dev libvulkan-dev glslang-dev glslang-tools spirv-tools python3
+    - name: Configure without requiring a GPU
+      run: |
+        ./build.sh configure --cli --build-dir build/triad-vulkan --jobs 2 -- -DDATAPUMP_TRIAD_VULKAN=ON -DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=OFF
+    - name: Build Vulkan backend and CPU plan check
+      run: |
+        cmake --build build/triad-vulkan --target triad_receiver_probe test_triad_vulkan --parallel 2
+    - name: Check bounded native search geometry without device execution
+      run: |
+        ctest --test-dir build/triad-vulkan --output-on-failure -R '^triad_vulkan_plan$' --no-tests=error
+        build/triad-vulkan/test_triad_vulkan --plan > build/triad-vulkan-plan.json
+        build/triad-vulkan/test_triad_vulkan --plan-wide > build/triad-vulkan-plan-wide.json
+    - name: Retain Vulkan build and plan receipts
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: triad-native-vulkan-plan-${{ github.run_attempt }}
+        path: |
+          build/triad-vulkan-plan.json
+          build/triad-vulkan-plan-wide.json
+          build/triad-vulkan/CMakeCache.txt
+          build/triad-vulkan/Testing/Temporary/
+        if-no-files-found: warn
+        retention-days: 7
+
+  actual-gpu:
+    if: inputs.run_gpu
+    needs: build-and-plan
+    # Never install or provision graphics drivers in CI. The owner registers a
+    # self-hosted runner only after preparing its Vulkan driver and SDK.
+    runs-on: [self-hosted, linux, x64, triad-vulkan]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Confirm preinstalled Vulkan toolchain
+      run: |
+        cmake --version
+        glslangValidator --version
+        test -e /dev/dri/renderD128
+    - name: Configure Vulkan with required actual GPU execution
+      run: |
+        ./build.sh configure --cli --build-dir build/triad-vulkan --jobs 2 -- -DDATAPUMP_TRIAD_VULKAN=ON -DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON
+    - name: Build native Vulkan receiver tests
+      run: |
+        cmake --build build/triad-vulkan --target triad_receiver_probe test_triad_vulkan --parallel 2
+    - name: Require numerical correctness on the actual Vulkan GPU
+      run: |
+        ctest --test-dir build/triad-vulkan --output-on-failure -R '^triad_vulkan$' --no-tests=error
+        build/triad-vulkan/triad_receiver_probe describe --backend vulkan --require-accelerator on > build/triad-vulkan-device.json
+    - name: Measure bounded native full frequency search
+      run: |
+        timeout --signal=TERM --kill-after=5s 125s build/triad-vulkan/test_triad_vulkan --benchmark > build/triad-vulkan-benchmark.jsonl
+    - name: Measure bounded native wide frequency search
+      run: |
+        timeout --signal=TERM --kill-after=5s 125s build/triad-vulkan/test_triad_vulkan --benchmark-wide > build/triad-vulkan-benchmark-wide.jsonl
+    - name: Retain actual Vulkan device and measurement receipts
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: triad-native-vulkan-gpu-${{ github.run_attempt }}
+        path: |
+          build/triad-vulkan-device.json
+          build/triad-vulkan-benchmark.jsonl
+          build/triad-vulkan/Testing/Temporary/
+        if-no-files-found: warn
+        retention-days: 7
+    - name: Retain wide Vulkan benchmark separately
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: triad-native-vulkan-gpu-wide-${{ github.run_attempt }}
+        path: build/triad-vulkan-benchmark-wide.jsonl
+        if-no-files-found: warn
+        retention-days: 7

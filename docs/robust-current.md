@@ -6,8 +6,8 @@ through internal interfaces and shared buffers. There is no operating Python
 receiver, receiver subprocess or receiver IPC. Python tools orchestrate native
 tests/benchmarks and analyze their returned statistics; receiver DSP and state
 belong to the compiled implementation. The default application requires neither
-Python nor Torch. An optional compiled ATen backend can supply bulk operations
-inside the same receiver control path.
+Python nor Torch. Optional compiled ATen and Vulkan backends can supply bulk
+operations inside the same receiver control path.
 
 New modem and intensive numerical work must follow the
 [native processing and integration contract](development.md#native-processing-and-integration).
@@ -33,7 +33,7 @@ qualification follows from these connections.
 | `triad_message_receiver.hpp` | Bounded native short/long text profiles, lazy interval emission, configured FEC and two-scored-quiet completion. |
 | `robust_profile.hpp`, `live.hpp` | Validated GUI settings, duration/profile preparation, simulation/live session and bounded presentation snapshots. |
 | `audio.hpp`, `robust_audio_frontend.hpp` | Native device ownership, routing, gain, timestamped capture and bounded real-PCM-to-I/Q filtering. |
-| `triad_acceleration.hpp` | Optional compiled tensor leaves under the production receiver's control, state and resource contracts. |
+| `triad_acceleration.hpp` | Optional compiled ATen/Vulkan leaves under the production receiver's control, state and resource contracts. |
 
 The GUI links `datapump_robust_session`, `datapump_triad_receiver` and
 `datapump_triad` statically. Source generation, Helper acquisition, coarse
@@ -62,6 +62,20 @@ their local executor. The current point improves first-message latency while
 remaining slower overall than the original baseline; no throughput/utilization
 gain is claimed.
 See [CPU and memory ownership](development.md#receiver-cpu-allocation).
+
+The optional [Vulkan backend](triad-performance.md#local-radeon-vulkan-processing)
+starts after native DATA channel isolation and accelerates the complete
+frequency-search grid and exact arrival frontiers. Helper, native FIR, template
+generation, lag groups, the compact tight-clock FP64 class and fine tracking
+remain in native CPU code. Stage capability/routing is explicit; workspace
+quotation and construction use the same decision. An APU's GPU allocations use
+shared host RAM, so the full per-session ceiling and separate staging remain
+charged through completion and cancellation. The backend's bounded serialized
+VkFFT program cache has a separate persistent host-memory charge, including idle
+lifetime; session device plans and buffers remain private. Default CPU operation
+and public route selection are unchanged. Selection is currently through the
+native factory/headless probe; the GUI has no accelerator selector.
+Implementation scope is distinct from the [current device evidence](validation.md#local-radeon-vulkan-backend).
 
 The receiver control API accepts bounded chunks with explicit sample addresses
 and optional validity masks. Backpressure rejects input without consuming it;

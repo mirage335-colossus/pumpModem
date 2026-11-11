@@ -24,6 +24,13 @@ def workflow_run(source, name):
     return '\n'.join(line[8:] for line in block.splitlines() if line.strip()) + '\n'
 
 
+def workflow_job_run(source, job, name):
+    """Read a literal run block from one job without parsing all of YAML."""
+    start = source.split(f'  {job}:\n', 1)[1]
+    body = re.split(r'\n  [A-Za-z][\w-]*:\n', start, maxsplit=1)[0]
+    return workflow_run(body, name)
+
+
 class Workflows(unittest.TestCase):
     def test_reusable_workflows_exist(self):
         for path in WORKFLOWS.glob('*.yml'):
@@ -238,6 +245,124 @@ if Path(sys.argv[0]).name == 'cmake' and sys.argv[1:] == ['--version']:
                 self.assertIn(f'Relative regression pass: **{expected}**', output)
                 self.assertIn('Native component status: **component_checks_passed**', output)
                 self.assertIn('not a relative-commit regression pass', output)
+
+    def test_vulkan_workflow_separates_hosted_plan_and_opt_in_actual_gpu(self):
+        path = WORKFLOWS / 'triad-vulkan.yml'
+        self.assertTrue(path.is_file())
+        source = path.read_text()
+        self.assertIn("  workflow_dispatch:\n", source)
+        self.assertRegex(source, r'run_gpu:\n[\s\S]*?type: boolean\n\s+default: false')
+        self.assertIn('build-and-plan:', source)
+        self.assertIn('runs-on: ubuntu-24.04', source)
+        self.assertIn('actual-gpu:', source)
+        self.assertIn('if: inputs.run_gpu', source)
+        self.assertIn('needs: build-and-plan', source)
+        self.assertIn('runs-on: [self-hosted, linux, x64, triad-vulkan]', source)
+        self.assertIn('-DDATAPUMP_TRIAD_VULKAN=ON', source)
+        self.assertIn('-DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=OFF', source)
+        self.assertIn('-DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON', source)
+        self.assertIn("-R '^triad_vulkan_plan$' --no-tests=error", source)
+        self.assertIn("-R '^triad_vulkan$' --no-tests=error", source)
+        self.assertIn('test_triad_vulkan --plan', source)
+        self.assertIn('test_triad_vulkan --plan-wide', source)
+        self.assertIn('test_triad_vulkan --benchmark', source)
+        self.assertIn('test_triad_vulkan --benchmark-wide', source)
+        self.assertIn('125s build/triad-vulkan/test_triad_vulkan --benchmark-wide', source)
+        self.assertIn('--backend vulkan --require-accelerator on', source)
+        self.assertIn('glslangValidator --version', source)
+        self.assertNotRegex(source, r'runpodctl|apt-get.*(mesa|vulkan-driver)|continue-on-error|workflow_call:')
+        self.assertIn('build/triad-vulkan-device.json', source)
+        self.assertIn('build/triad-vulkan-benchmark.jsonl', source)
+        self.assertIn('build/triad-vulkan-benchmark-wide.jsonl', source)
+        self.assertIn('name: triad-native-vulkan-gpu-wide-${{ github.run_attempt }}', source)
+
+    @unittest.skipIf(os.name == 'nt', 'The Vulkan CI runner shell is Bash')
+    def test_vulkan_workflow_commands_build_plan_and_require_gpu_on_self_hosted_job(self):
+        source = (WORKFLOWS / 'triad-vulkan.yml').read_text()
+        plan_steps = (
+            ('build-and-plan', 'Configure without requiring a GPU'),
+            ('build-and-plan', 'Build Vulkan backend and CPU plan check'),
+            ('build-and-plan', 'Check bounded native search geometry without device execution'),
+            ('actual-gpu', 'Configure Vulkan with required actual GPU execution'),
+            ('actual-gpu', 'Build native Vulkan receiver tests'),
+            ('actual-gpu', 'Require numerical correctness on the actual Vulkan GPU'),
+            ('actual-gpu', 'Measure bounded native full frequency search'),
+            ('actual-gpu', 'Measure bounded native wide frequency search'),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            command_bin = directory / 'bin'
+            command_bin.mkdir()
+            for relative in ('build/triad-vulkan',):
+                (directory / relative).mkdir(parents=True)
+            recorder = f'#!{os.sys.executable}\n' + '''import json, os, sys
+from pathlib import Path
+name = Path(sys.argv[0]).name
+argv = sys.argv[1:]
+with open(os.environ['COMMAND_LOG'], 'a') as output:
+    output.write(json.dumps({'name': name, 'argv': argv}) + '\\n')
+if name == 'cmake' and argv == ['--version']:
+    print('cmake version 3.31.6')
+elif name == 'glslangValidator' and argv == ['--version']:
+    print('Glslang Version: 15.2.0')
+elif name == 'test_triad_vulkan':
+    if argv == ['--plan']:
+        print(json.dumps({'actual_gpu_work': False, 'workers': 24}))
+    elif argv == ['--plan-wide']:
+        print(json.dumps({'actual_gpu_work': False, 'workers': 24, 'wide': True}))
+    elif argv == ['--benchmark']:
+        print(json.dumps({'schema': 'datapump.triad.vulkan-benchmark.v1', 'actual_gpu_work': True}))
+    elif argv == ['--benchmark-wide']:
+        print(json.dumps({'schema': 'datapump.triad.vulkan-benchmark.v1', 'actual_gpu_work': True, 'wide': True}))
+elif name == 'triad_receiver_probe':
+    print(json.dumps({'status': 'complete', 'command': 'describe',
+                      'identity': {'backend': 'vulkan', 'backend_receipt': {
+                          'vulkan': True, 'executed': False, 'device_name': 'fixture AMD Vulkan device'}}}))
+'''
+            for name in ('cmake', 'ctest', 'glslangValidator'):
+                target = command_bin / name
+                target.write_text(recorder)
+                target.chmod(0o700)
+            for name in ('build.sh', 'build/triad-vulkan/test_triad_vulkan',
+                         'build/triad-vulkan/triad_receiver_probe'):
+                target = directory / name
+                target.write_text(recorder)
+                target.chmod(0o700)
+            log = directory / 'commands.jsonl'
+            environment = os.environ | {'PATH': f'{command_bin}:{os.environ["PATH"]}',
+                                        'COMMAND_LOG': str(log)}
+            for job, step in plan_steps:
+                with self.subTest(job=job, step=step):
+                    script = workflow_job_run(source, job, step)
+                    result = subprocess.run(['bash', '-e', '-c', script], cwd=directory,
+                                            env=environment, capture_output=True, text=True, check=False)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+            rows = [json.loads(line) for line in log.read_text().splitlines()]
+            vulkan_configures = [row for row in rows if row['name'] == 'build.sh']
+            self.assertEqual(len(vulkan_configures), 2)
+            self.assertIn('-DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=OFF', vulkan_configures[0]['argv'])
+            self.assertIn('-DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON', vulkan_configures[1]['argv'])
+            checks = [row for row in rows if row['name'] == 'ctest']
+            self.assertEqual(len(checks), 2)
+            self.assertEqual(checks[0]['argv'], ['--test-dir', 'build/triad-vulkan', '--output-on-failure',
+                                                '-R', '^triad_vulkan_plan$', '--no-tests=error'])
+            self.assertEqual(checks[1]['argv'], ['--test-dir', 'build/triad-vulkan', '--output-on-failure',
+                                                '-R', '^triad_vulkan$', '--no-tests=error'])
+            plans = [row for row in rows if row['name'] == 'test_triad_vulkan']
+            self.assertEqual([row['argv'] for row in plans],
+                             [['--plan'], ['--plan-wide'], ['--benchmark'], ['--benchmark-wide']])
+            preflight = workflow_job_run(source, 'actual-gpu', 'Confirm preinstalled Vulkan toolchain')
+            self.assertIn('glslangValidator --version', preflight)
+            self.assertIn('/dev/dri/renderD128', preflight)
+            self.assertIn('timeout --signal=TERM --kill-after=5s 125s',
+                          workflow_job_run(source, 'actual-gpu', 'Measure bounded native full frequency search'))
+            wide_benchmark = workflow_job_run(source, 'actual-gpu', 'Measure bounded native wide frequency search')
+            self.assertIn('timeout --signal=TERM --kill-after=5s 125s', wide_benchmark)
+            self.assertIn('test_triad_vulkan --benchmark-wide > build/triad-vulkan-benchmark-wide.jsonl',
+                          wide_benchmark)
+            plan = workflow_job_run(source, 'build-and-plan',
+                                    'Check bounded native search geometry without device execution')
+            self.assertIn('test_triad_vulkan --plan-wide > build/triad-vulkan-plan-wide.json', plan)
 
     @unittest.skipIf(os.name == 'nt', 'The Linux workflow shell is Bash')
     def test_failed_reference_build_is_not_replaced_with_establishment(self):

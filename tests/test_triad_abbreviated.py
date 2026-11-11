@@ -26,6 +26,7 @@ def device_receipt():
                 "backend": "cuda", "implementation": "native-production-receiver",
                 "source_manifest_sha256": "2" * 64, "build_options_sha256": "3" * 64, "compiler": "GNU-14",
                 "build_config": "Release", "configured_tensor_backend": True,
+                "configured_vulkan_backend": False, "require_accelerator": True,
                 "receiver_arithmetic": "native_fp64_state_and_admission", "requested_tensor_precision": "automatic",
                 "requested_tensor_coarse_math": "fft",
                 "backend_receipt": {"device": "cuda:0", "device_name": "Fixture GPU",
@@ -43,9 +44,29 @@ def device_receipt():
 def cpu_receipt(command):
     result = device_receipt()
     result.update(command=command, configuration={}, observation=None, phases=[], result={})
-    result["identity"].update(backend="cpu", configured_tensor_backend=False, backend_receipt=None,
+    result["identity"].update(backend="cpu", configured_tensor_backend=False,
+                              configured_vulkan_backend=False, require_accelerator=False, backend_receipt=None,
                               executable_sha256="4" * 64)
     return result
+
+
+def vulkan_bulk_receipt():
+    return {"device": "vulkan:0", "device_name": "AMD Radeon Graphics",
+            "library_version": "Vulkan 1.4 / Mesa", "precision": "fp32",
+            "vulkan": True, "cuda": False, "numerical_threads": 1,
+            "vulkan_api_version": 1, "vulkan_driver_version": 1,
+            "vulkan_vendor_id": 4098, "vulkan_device_id": 5688,
+            "vulkan_subgroup_size": 64, "vulkan_float16": True,
+            "vulkan_int8": True, "vulkan_integer_dot8_accelerated": False,
+            "unified_memory": True, "workspace_scope": "per_coarse_session",
+            "workspace_limit_bytes": 1 << 29, "vulkan_peak_owner_bytes": 1 << 28,
+            "vulkan_active_sessions": 2, "reserved_bytes": 1 << 30,
+            "allocator_peak_reserved_bytes": 1 << 30,
+            "host_cache_limit_bytes": 8 << 20, "host_cache_bytes": 2 << 20,
+            "host_cache_entries": 2, "vulkan_fft_cache_hits": 1, "vulkan_fft_cache_misses": 1,
+            "total_device_bytes": 6 << 30, "executed": True,
+            "vulkan_dispatches": 12, "vulkan_arrival_peak_rows": 4,
+            "fft_calls": 4, "score_rows": 8}
 
 
 def message_receipt():
@@ -272,6 +293,76 @@ class AbbreviatedTests(unittest.TestCase):
                 wrong["identity"]["backend_receipt"]["executed"] = False
             with self.subTest(change=change), self.assertRaises(ProbeError):
                 validate_receipt(wrong, command="continuation", backend="cuda", returncode=0)
+
+    def test_vulkan_required_work_is_a_physical_full_frequency_dispatch(self):
+        receipt = device_receipt()
+        receipt["identity"].update(backend="vulkan", configured_vulkan_backend=True,
+                                  backend_receipt=vulkan_bulk_receipt())
+        receipt["phases"][0]["name"] = "coarse_tiles"
+        receipt["phases"][0]["work"] = {"route": "frequency_tiles", "native_fallback_reason": ""}
+        validate_receipt(receipt, command="continuation", backend="vulkan", returncode=0,
+                         expected_require_accelerator=True)
+        mutations = (lambda x: x["identity"]["backend_receipt"].update(vulkan=False),
+                     lambda x: x["identity"]["backend_receipt"].update(vulkan_dispatches=0),
+                     lambda x: x["identity"]["backend_receipt"].update(vulkan_arrival_peak_rows=0),
+                     lambda x: x["identity"]["backend_receipt"].update(fft_calls=0),
+                     lambda x: x["identity"]["backend_receipt"].update(score_rows=0),
+                     lambda x: x["identity"]["backend_receipt"].update(vulkan_peak_owner_bytes=1 << 30),
+                     lambda x: x["identity"]["backend_receipt"].update(host_cache_bytes=9 << 20),
+                     lambda x: x["identity"]["backend_receipt"].update(host_cache_entries=9),
+                     lambda x: x["identity"].update(require_accelerator=False),
+                     lambda x: x["identity"].pop("require_accelerator"),
+                     lambda x: x["phases"][0]["work"].update(native_fallback_reason="native-lag-groups"))
+        for mutate in mutations:
+            wrong = copy.deepcopy(receipt)
+            mutate(wrong)
+            with self.subTest(mutation=mutate), self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="continuation", backend="vulkan", returncode=0,
+                                 expected_require_accelerator=True)
+
+    def test_vulkan_stream_receipt_uses_production_receiver_work_shape(self):
+        receipt = message_receipt()
+        receipt["identity"].update(backend="vulkan", configured_vulkan_backend=True,
+                                  require_accelerator=True, backend_receipt=vulkan_bulk_receipt())
+        validate_receipt(receipt, command="message", backend="vulkan", returncode=0,
+                         expected_require_accelerator=True)
+        wrong = copy.deepcopy(receipt)
+        wrong["result"]["complete_receiver_service"] = False
+        with self.assertRaises(ProbeError):
+            validate_receipt(wrong, command="message", backend="vulkan", returncode=0,
+                             expected_require_accelerator=True)
+
+    def test_vulkan_regression_receipt_uses_native_slot_work_shape(self):
+        receipt = device_receipt()
+        receipt["command"] = "regression"
+        receipt["identity"].update(backend="vulkan", configured_vulkan_backend=True,
+                                  backend_receipt=vulkan_bulk_receipt())
+        receipt["result"] = {"units": 1, "stratum": "active", "work_complete": True,
+                              "evaluator_expected_decision_observed": True,
+                              "complete_receiver_service": False}
+        receipt["phases"] = [{"name": "native_slot", "unit_index": 0,
+                              "wall_seconds": .1, "represented_seconds": 1,
+                              "work": {"complete": True, "all_valid": True, "decision": "data",
+                                       "coarse_workspaces": 4, "coarse_frequency_points": 16,
+                                       "coarse_arrival_points": 8,
+                                       "work_identity_sha256": "5" * 64}}]
+        validate_receipt(receipt, command="regression", backend="vulkan", returncode=0,
+                         expected_require_accelerator=True)
+        wrong = copy.deepcopy(receipt)
+        wrong["phases"][0]["work"]["coarse_frequency_points"] = 0
+        with self.assertRaises(ProbeError):
+            validate_receipt(wrong, command="regression", backend="vulkan", returncode=0,
+                             expected_require_accelerator=True)
+
+    def test_legacy_non_vulkan_receipts_normalize_missing_vulkan_configuration(self):
+        for backend, receipt in (("cpu", cpu_receipt("describe")), ("cuda", device_receipt())):
+            with self.subTest(backend=backend):
+                receipt["command"] = "describe"
+                receipt["identity"].pop("configured_vulkan_backend", None)
+                receipt["identity"].pop("require_accelerator", None)
+                validate_receipt(receipt, command="describe", backend=backend, returncode=0)
+                self.assertFalse(runtime_identity(receipt)["configured_vulkan_backend"])
+                self.assertNotIn("require_accelerator", runtime_identity(receipt))
 
     def test_stream_cost_uses_only_actual_receiver_service(self):
         receipt = message_receipt()

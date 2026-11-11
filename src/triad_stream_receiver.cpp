@@ -2,6 +2,7 @@
 
 #include "datapump/execution.hpp"
 #include "triad_receiver_executor.hpp"
+#include "triad_receiver_bulk.hpp"
 #include "triad_stream_backend.hpp"
 #include "triad_stream_resources.hpp"
 
@@ -232,7 +233,8 @@ struct CompleteStreamReceiver::Impl {
               options.first_slot, options.maximum_pending_messages),
           last_public_slot(profile.last_slot()), initial_footprint(footprint()),
           stack_bytes(add(stream_worker_stack_bytes(), 1024)),
-          fixed_reservation(receipt_reservation(options, message, resources.slot_owners)),
+          fixed_reservation(add(receipt_reservation(options, message, resources.slot_owners),
+              config.bulk_backend ? config.bulk_backend->persistent_host_workspace() : 0)),
           maximum_buffer(options.maximum_buffer_samples.value_or(resources.memory_limit_bytes/4/sample_bytes)),
           input_stop(options.first_input_sample.value_or(0)), dispatched_stop(0), executor(resources.workers) {
         if (!workspace || !scorer || !options.maximum_input_chunk_samples || options.maximum_input_chunk_samples>maximum_chunk ||

@@ -26,6 +26,7 @@ class TriadGpuBundleTests(unittest.TestCase):
         self.root = self.base / "repo"
         self.root.mkdir()
         xz_sources = {"CMakeLists.txt": "project(xz)\n", "src/lzma.c": "/* vendored */\n"}
+        vkfft_sources = {"LICENSE": "Fixture MIT license\n", "vkFFT/vkFFT.h": "/* VkFFT fixture */\n"}
         for rel, content in {
             "CMakeLists.txt": "project(x)\n",
             "CMakePresets.json": "{}\n",
@@ -35,10 +36,12 @@ class TriadGpuBundleTests(unittest.TestCase):
             "cmake/VendoredLzma.cmake": "# xz\n",
             "cmake/XzReceiveHardening.cmake": "# overlay\n",
             "cmake/TriadTensor.cmake": "# native accelerator\n",
+            "cmake/TriadVulkan.cmake": "# native Vulkan accelerator\n",
             **{"tools/" + name: "" for name in bundle._PROBE_TOOLS},
             "tools/build_capacity.py": "def usable_cpus(): return 1\n",
             "tools/diagnostic_iq_noise_options.hpp": "#pragma once\n",
             "tests/test_triad_tensor.cpp": "int main() {}\n",
+            "tests/test_triad_vulkan.cpp": "int main() {}\n",
             "tests/test_triad_gpu_workload.py": "VALUE = 4\n",
             "tools/triad_gpu_bank.py": "# retired Python DSP\n",
             "tools/triad_receiver.py": "# retired Python receiver\n",
@@ -52,6 +55,11 @@ class TriadGpuBundleTests(unittest.TestCase):
                 f"{hashlib.sha256(content.encode()).hexdigest()}  {name}\n"
                 for name, content in xz_sources.items()),
             **{f"third_party/xz/{name}": content for name, content in xz_sources.items()},
+            "third_party/vkfft/README.datapump.md": "# Pinned VkFFT source\n",
+            "third_party/vkfft/UPSTREAM.sha256": "".join(
+                f"{hashlib.sha256(content.encode()).hexdigest()}  {name}\n"
+                for name, content in vkfft_sources.items()),
+            **{f"third_party/vkfft/{name}": content for name, content in vkfft_sources.items()},
             "third_party/qrcodegen/LICENSE": "Fixture license\n",
             "third_party/qrcodegen/qrcodegen.cpp": "// vendored\n",
             "third_party/qrcodegen/qrcodegen.hpp": "#pragma once\n",
@@ -85,6 +93,7 @@ class TriadGpuBundleTests(unittest.TestCase):
         (self.root / "src" / "ordinary.cpp").write_text("safe")
         (self.root / "src" / "records.csv").write_text("arbitrary records")
         (self.root / "third_party" / "xz" / "unpinned.c").write_text("unrelated code")
+        (self.root / "third_party" / "vkfft" / "unpinned.h").write_text("unrelated code")
         (self.root / "build").mkdir()
         (self.root / "build" / "secret.txt").write_text("do not ship")
         for rel in ("src/build/cache.cpp", "include/env/leak.hpp", "cmake/customer-secret/config.cmake"):
@@ -98,6 +107,7 @@ class TriadGpuBundleTests(unittest.TestCase):
         self.assertIn("src/ordinary.cpp", names)
         self.assertNotIn("src/records.csv", names)
         self.assertNotIn("third_party/xz/unpinned.c", names)
+        self.assertNotIn("third_party/vkfft/unpinned.h", names)
         self.assertFalse(any(".env" in n or "private_key" in n or n.startswith("build/")
                              or "/build/" in n or "/env/" in n or "customer-secret" in n
                              for n in names))
@@ -148,16 +158,31 @@ class TriadGpuBundleTests(unittest.TestCase):
         self.assertIn("tools/triad_probe_spool.hpp", names)
         self.assertIn("tools/triad_fixture_key.hpp", names)
         self.assertIn("tests/test_triad_tensor.cpp", names)
+        self.assertIn("tests/test_triad_vulkan.cpp", names)
         self.assertIn("cmake/TriadTensor.cmake", names)
+        self.assertIn("cmake/TriadVulkan.cmake", names)
+        self.assertIn("third_party/vkfft/UPSTREAM.sha256", names)
+        self.assertIn("third_party/vkfft/vkFFT/vkFFT.h", names)
+        self.assertIn("third_party/vkfft/LICENSE", names)
         self.assertIn("src/triad_tensor_backend.cpp", names)
         self.assertNotIn("tools/triad_gpu_bank.py", names)
         self.assertNotIn("tools/triad_receiver.py", names)
+
+    def test_rejects_modified_or_disallowed_vkfft_inventory(self):
+        header = self.root / "third_party/vkfft/vkFFT/vkFFT.h"
+        header.write_text("modified pinned source")
+        with self.assertRaisesRegex(bundle.BundleError, "modified pinned third-party source"):
+            bundle.create_bundle(self.root, self.base / "modified-vkfft.tgz")
+        inventory = self.root / "third_party/vkfft/UPSTREAM.sha256"
+        inventory.write_text(f"{'0' * 64}  benchmark.py\n")
+        with self.assertRaisesRegex(bundle.BundleError, "disallowed VkFFT inventory"):
+            bundle.create_bundle(self.root, self.base / "disallowed-vkfft.tgz")
 
     def test_native_entrypoints_have_their_quoted_header_closure(self):
         out = self.base / "project.tar.gz"
         bundle.create_bundle(MODULE.parents[1], out)
         pending = ["tools/triad-receiver-probe.cpp", "tools/triad-helper-export.cpp",
-                   "tools/triad-audio-stream.cpp", "tests/test_triad_tensor.cpp"]
+                   "tools/triad-audio-stream.cpp", "tests/test_triad_tensor.cpp", "tests/test_triad_vulkan.cpp"]
         seen = set()
         with tarfile.open(out, "r:gz") as tar:
             names = set(tar.getnames())

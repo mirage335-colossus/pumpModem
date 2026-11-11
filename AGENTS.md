@@ -49,6 +49,14 @@ FFT. Choose defaults by complete service on challenging broad searches, includin
 unsuccessful Helper acquisition, while preserving every public hypothesis and
 the full `2*H` worker budget. A narrow or easy-case win cannot lower that ceiling.
 
+For the 5650U's Vega-class Radeon, use the optional
+[native Vulkan route](docs/triad-performance.md#local-radeon-vulkan-processing)
+when qualifying its actual GPU. Do not infer unavailability solely from ROCm or
+OpenCL support, or count `llvmpipe` as GPU execution. Preserve explicit native
+stage routing and shared-RAM admission. Packed FP16 vector arithmetic is distinct
+from FP16 storage and from newer AMD matrix hardware; report measured speedup
+separately from the [conditional arithmetic ceiling](docs/triad-performance.md#radeon-arithmetic-ceilings).
+
 ## Preserve the full receiver CPU budget
 
 Default Robust receiver orchestration and capacity testing to **twice the
@@ -157,8 +165,10 @@ operation. Source generation, DSP, persistent receiver state and real-audio
 projection are C++. Python tools only orchestrate native probes and analyze
 statistics; the former Python numerical receiver implementations are retired.
 The default application needs neither Python nor Torch. Optional compiled ATen
-bulk operations share the production receiver control and bounded ownership;
-requested CUDA must execute on CUDA or report unavailable.
+and Vulkan bulk operations share the production receiver control and bounded
+ownership. Requested CUDA must execute on CUDA or report unavailable; a required
+Vulkan accelerator result must identify actual GPU search work, with native
+stage routing reported explicitly.
 Implementation and component parity do not qualify all configurations,
 communication success probabilities, real-time capacity or physical hardware.
 Keep current checks and remaining gates accurate in

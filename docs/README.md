@@ -19,8 +19,8 @@ The [current architecture and status](robust-current.md) describes the native
 C++ Helper/DATA/complete-receiver stack linked into the GUI, with shared buffers
 and coordinated in-process workers. Python orchestrates native tests/benchmarks
 and analyzes statistics; it does not implement receiver DSP. The default
-application needs neither Python nor Torch; an optional compiled ATen backend
-shares production receiver control. The [GUI contract](gui-contract.md) maps the controls
+application needs neither Python nor Torch; optional compiled ATen and Vulkan
+backends share production receiver control. The [GUI contract](gui-contract.md) maps the controls
 and requires a shared public calendar and keyed ordinal for live operation;
 unknown-start acquisition remains outside scope.
 
@@ -57,6 +57,9 @@ arithmetic from tensor-compatible improvements requiring qualification.
 The [representative receiver hardware](triad-performance.md#representative-receiver-hardware)
 contract separates Ada desktop/laptop and Ryzen CPU/integrated-graphics targets
 from the preferred development GPU and from actual measured devices.
+The [local Radeon Vulkan path](triad-performance.md#local-radeon-vulkan-processing)
+and [arithmetic ceiling model](triad-performance.md#radeon-arithmetic-ceilings)
+keep native GPU results separate from processor peaks and CPU-only evidence.
 The manual suite and regression harness share efficient
 sampling methods; their pass decisions are different. Run `./build.sh test triad`
 before manual capacity measurements. Earlier partial-stage results do not
