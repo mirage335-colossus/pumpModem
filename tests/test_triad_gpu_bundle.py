@@ -144,6 +144,7 @@ class TriadGpuBundleTests(unittest.TestCase):
         self.assertIn("tools/build_capacity.py", names)
         self.assertIn("tools/diagnostic_iq_noise_options.hpp", names)
         self.assertIn("tools/triad-receiver-probe.cpp", names)
+        self.assertIn("tools/triad_abbreviated.py", names)
         self.assertIn("tools/triad_probe_spool.hpp", names)
         self.assertIn("tools/triad_fixture_key.hpp", names)
         self.assertIn("tests/test_triad_tensor.cpp", names)

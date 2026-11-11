@@ -83,6 +83,161 @@ class Workflows(unittest.TestCase):
         self.assertIn('--backend cuda --require-accelerator on', source)
         self.assertIn('--device cuda', source)
         self.assertNotRegex(source, r'pip install|continue-on-error|--device cpu|runpodctl')
+        self.assertIn("options: [native, '89', '120']", source)
+        self.assertIn("options: ['off', fp16, int8, peaks, all]", source)
+        self.assertIn("if: inputs.components != 'off'", source)
+        self.assertIn('same-binary algorithm comparisons, not a relative-commit regression pass', source)
+
+    def gpu_fixture(self, directory):
+        """Record actual workflow argv/env without compiling or invoking a GPU."""
+        directory = Path(directory)
+        commands = directory / 'bin'
+        commands.mkdir()
+        reference_dir = directory / 'triad-cuda-reference'
+        reference_dir.mkdir()
+        libtorch = directory / 'libtorch'
+        libtorch.mkdir()
+        recorder = f'#!{os.sys.executable}\n' + '''import json, os, sys
+from pathlib import Path
+with open(os.environ['COMMAND_LOG'], 'a') as output:
+    output.write(json.dumps({'name': Path(sys.argv[0]).name, 'argv': sys.argv[1:],
+                             'torch_arch': os.environ.get('TORCH_CUDA_ARCH_LIST')}) + '\\n')
+if Path(sys.argv[0]).name == 'cmake' and sys.argv[1:] == ['--version']:
+    print('cmake version ' + os.environ.get('CMAKE_TEST_VERSION', '3.31.6'))
+'''
+        for path in (commands / 'cmake', commands / 'git', commands / 'python',
+                     directory / 'build.sh', reference_dir / 'build.sh'):
+            path.write_text(recorder)
+            path.chmod(0o700)
+        log = directory / 'commands.jsonl'
+        env = os.environ | {'PATH': f'{commands}:{os.environ["PATH"]}',
+                            'COMMAND_LOG': str(log), 'RUNNER_TEMP': str(directory),
+                            'REFERENCE_SHA': 'fixture', 'LIBTORCH_PREFIX': str(libtorch),
+                            'CUDA_ARCHITECTURES': 'native', 'COMPONENTS': 'off',
+                            'MATRIX_CASE': '0', 'DEVICE_WORKSPACE_MIB': '2048',
+                            'TORCH_CUDA_ARCH_LIST': 'stale-inherited-value'}
+        return env, log
+
+    @unittest.skipIf(os.name == 'nt', 'The Linux workflow shell is Bash')
+    def test_gpu_candidate_and_reference_use_the_same_validated_architecture(self):
+        source = (WORKFLOWS / 'triad-gpu.yml').read_text()
+        names = ('Validate CUDA test selection', 'Build native CUDA receiver and correctness checks',
+                 'Build same-run native CUDA reference')
+        scripts = [workflow_run(source, name) for name in names]
+        for architecture, torch_arch in (('native', None), ('89', '8.9'), ('120', '12.0')):
+            with self.subTest(architecture=architecture), tempfile.TemporaryDirectory() as directory:
+                env, log = self.gpu_fixture(directory)
+                env['CUDA_ARCHITECTURES'] = architecture
+                for script in scripts:
+                    result = subprocess.run(['bash', '-e', '-c', script], cwd=directory, env=env,
+                                            capture_output=True, text=True, check=False)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                rows = [json.loads(line) for line in log.read_text().splitlines()]
+                configurations = [row for row in rows if row['name'] == 'build.sh']
+                self.assertEqual(len(configurations), 2)
+                for row in configurations:
+                    self.assertIn(f'-DCMAKE_CUDA_ARCHITECTURES={architecture}', row['argv'])
+                    self.assertEqual(row['torch_arch'], torch_arch)
+                    self.assertIn('-DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON', row['argv'])
+
+    @unittest.skipIf(os.name == 'nt', 'The Linux workflow shell is Bash')
+    def test_gpu_invalid_selection_stops_before_build_or_measurement(self):
+        source = (WORKFLOWS / 'triad-gpu.yml').read_text()
+        validation = workflow_run(source, 'Validate CUDA test selection')
+        candidate = workflow_run(source, 'Build native CUDA receiver and correctness checks')
+        invalid = ({'CUDA_ARCHITECTURES': '86'}, {'CUDA_ARCHITECTURES': '89; echo bad'},
+                   {'COMPONENTS': 'cuda'}, {'MATRIX_CASE': '2'},
+                   *({'DEVICE_WORKSPACE_MIB': value} for value in ('0', '-1', '1.5', '65537', '1e3', '$(echo bad)')),
+                   {'COMPONENTS': 'peaks', 'DEVICE_WORKSPACE_MIB': '4096'},
+                   {'COMPONENTS': 'all', 'DEVICE_WORKSPACE_MIB': '1024'})
+        for changes in invalid:
+            with self.subTest(changes=changes), tempfile.TemporaryDirectory() as directory:
+                env, log = self.gpu_fixture(directory)
+                result = subprocess.run(['bash', '-e', '-c', validation + candidate], cwd=directory,
+                                        env=env | changes, capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 2)
+                self.assertFalse(log.exists())
+        # Each configure step also rejects unsupported architecture values when
+        # extracted independently; the reference must not even create a checkout.
+        for name in ('Build native CUDA receiver and correctness checks', 'Build same-run native CUDA reference'):
+            with self.subTest(step=name), tempfile.TemporaryDirectory() as directory:
+                env, log = self.gpu_fixture(directory)
+                result = subprocess.run(['bash', '-e', '-c', workflow_run(source, name)], cwd=directory,
+                                        env=env | {'CUDA_ARCHITECTURES': 'invalid'}, capture_output=True, check=False)
+                self.assertEqual(result.returncode, 2)
+                self.assertFalse(log.exists())
+
+    @unittest.skipIf(os.name == 'nt', 'The Linux workflow shell is Bash')
+    def test_gpu_native_architecture_requires_supported_cmake_before_build(self):
+        source = (WORKFLOWS / 'triad-gpu.yml').read_text()
+        script = (workflow_run(source, 'Validate CUDA test selection') +
+                  workflow_run(source, 'Build native CUDA receiver and correctness checks'))
+        for version in ('3.21.7', '3.23.5', 'invalid'):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as directory:
+                env, log = self.gpu_fixture(directory)
+                result = subprocess.run(['bash', '-e', '-c', script], cwd=directory,
+                                        env=env | {'CMAKE_TEST_VERSION': version}, capture_output=True,
+                                        text=True, check=False)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn('requires CMake 3.24 or newer', result.stderr)
+                rows = [json.loads(line) for line in log.read_text().splitlines()]
+                self.assertEqual([(row['name'], row['argv']) for row in rows], [('cmake', ['--version'])])
+
+    @unittest.skipIf(os.name == 'nt', 'The Linux workflow shell is Bash')
+    def test_gpu_components_use_one_bounded_native_path_and_separate_report(self):
+        source = (WORKFLOWS / 'triad-gpu.yml').read_text()
+        validation = workflow_run(source, 'Validate CUDA test selection')
+        script = workflow_run(source, 'Measure bounded native CUDA components')
+        for component, matrix_case, workspace in (('fp16', '0', '1'), ('int8', '1', '65536'),
+                                                  ('peaks', '0', '2048'), ('all', '1', '2048')):
+            with self.subTest(component=component), tempfile.TemporaryDirectory() as directory:
+                env, log = self.gpu_fixture(directory)
+                result = subprocess.run(['bash', '-e', '-c', validation + script], cwd=directory,
+                                        env=env | {'COMPONENTS': component, 'MATRIX_CASE': matrix_case,
+                                                   'DEVICE_WORKSPACE_MIB': workspace},
+                                        capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                rows = [json.loads(line) for line in log.read_text().splitlines()]
+                self.assertEqual([(row['name'], row['argv']) for row in rows[:-1]], [('cmake', ['--version'])])
+                self.assertEqual(rows[-1]['name'], 'python')
+                argv = rows[-1]['argv']
+                self.assertEqual(argv[0], 'tools/triad_abbreviated.py')
+                options = dict(zip(argv[1::2], argv[2::2]))
+                self.assertEqual(options['--output'], 'build/triad-cuda-components.json')
+                self.assertEqual(options['--probe'], 'build/triad-cuda/triad_receiver_probe')
+                self.assertEqual(options['--component-probe'], 'build/triad-cuda/test_triad_tensor')
+                self.assertEqual(options['--device'], 'cuda')
+                self.assertEqual(options['--components'], component)
+                self.assertEqual(options['--device-workspace-mib'], workspace)
+                self.assertEqual(options['--benchmark-deadline-ms'], '300000')
+                self.assertNotIn('--baseline', options)
+                self.assertEqual(options.get('--matrix-case'), None if component == 'peaks' else matrix_case)
+
+    @unittest.skipIf(os.name == 'nt', 'The Linux workflow shell is Bash')
+    def test_gpu_component_success_cannot_supply_a_relative_regression_pass(self):
+        source = (WORKFLOWS / 'triad-gpu.yml').read_text()
+        script = workflow_run(source, 'Record CUDA qualification limits')
+        for status, expected in (('baseline_established', 'false'),
+                                 ('no_material_slowdown_for_measured_kernels', 'true')):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
+                directory = Path(directory)
+                build = directory / 'build'
+                build.mkdir()
+                (build / 'triad-cuda-candidate.json').write_text(json.dumps({'status': status}))
+                (build / 'triad-cuda-components.json').write_text(json.dumps({'status': 'component_checks_passed'}))
+                summary = directory / 'summary.md'
+                # Execute the literal workflow's Python body without assuming a
+                # separate "python" command exists on a developer's machine.
+                body = script.split("python - <<'PY'\n", 1)[1].rsplit('\nPY', 1)[0]
+                result = subprocess.run([os.sys.executable, '-c', body], cwd=directory,
+                                        env=os.environ | {'REFERENCE_MODE': 'compare', 'COMPONENTS': 'all',
+                                                          'GITHUB_STEP_SUMMARY': str(summary)},
+                                        capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                output = summary.read_text()
+                self.assertIn(f'Relative regression pass: **{expected}**', output)
+                self.assertIn('Native component status: **component_checks_passed**', output)
+                self.assertIn('not a relative-commit regression pass', output)
 
     @unittest.skipIf(os.name == 'nt', 'The Linux workflow shell is Bash')
     def test_failed_reference_build_is_not_replaced_with_establishment(self):

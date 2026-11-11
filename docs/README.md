@@ -54,6 +54,9 @@ assess practical complete-receiver feasibility on this CPU using efficient
 algorithms, qualified reduced precision and all available hardware threads.**
 The [precision guide](gpu-precision-controls.md) distinguishes current fast
 arithmetic from tensor-compatible improvements requiring qualification.
+The [representative receiver hardware](triad-performance.md#representative-receiver-hardware)
+contract separates Ada desktop/laptop and Ryzen CPU/integrated-graphics targets
+from the preferred development GPU and from actual measured devices.
 The manual suite and regression harness share efficient
 sampling methods; their pass decisions are different. Run `./build.sh test triad`
 before manual capacity measurements. Earlier partial-stage results do not
@@ -74,7 +77,7 @@ the [GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual-cap
 | Development and delivery | [Development contract](development.md), [build and test guide](building.md), [release procedures](releases.md), [offline installation](offline-installation.md) |
 | Helper Carrier | Native generation and acquisition share the [Robust stack](robust-current.md); historical measurements retain their original scope |
 | Simulation channels | [Doppler, delay spread, selective amplitude and FHSS tails](channel-models.md) |
-| GPU hardware and precision | [GPU selection contract](triad-performance.md#gpu-selection-for-accelerated-development): prefer a full RTX PRO 6000 Blackwell or a demonstrably more suitable modern accelerator; [precision guidance](gpu-precision-controls.md) defines qualification |
+| GPU hardware and precision | [GPU selection contract](triad-performance.md#gpu-selection-for-accelerated-development): prefer a full RTX PRO 6000 Blackwell or a demonstrably more suitable modern accelerator; [representative receiver targets](triad-performance.md#representative-receiver-hardware) and [precision guidance](gpu-precision-controls.md) define qualification |
 | Fast Modem | [Fast topic index](indexes/fast.md) |
 | Legacy Modem | [Legacy reference](legacy-modem.md) and retained interoperability fixtures |
 | GUI and frontends | [Interfaces index](indexes/interfaces.md), [GUI contract](gui-contract.md), [frontend interfaces](frontend-interfaces.md) |

@@ -4,6 +4,7 @@
 #include "triad_receiver_bulk.hpp"
 #include "triad_receiver_coarse.hpp"
 #include "triad_receiver_helper.hpp"
+#include "triad_probe_json.hpp"
 
 #if DATAPUMP_TRIAD_TENSOR_CUDA
 #include "triad_tensor_mapping.cuh"
@@ -38,6 +39,34 @@ constexpr double tau = 2 * std::numbers::pi;
 
 void check(bool condition, const char* reason) {
     if (!condition) throw datapump::Error(reason);
+}
+
+void emit_component_identity(const r::BulkReceipt& receipt) {
+    using datapump::triad::probe::object;
+    using datapump::triad::probe::write_json;
+    check(!receipt.executed, "component identity must precede numerical device work");
+    write_json(std::cout, object({
+        {"schema", "datapump.triad.native-component-identity.v1"},
+        {"source_manifest_sha256", DATAPUMP_TRIAD_PROBE_SOURCE_SHA},
+        {"build_options_sha256", DATAPUMP_TRIAD_PROBE_BUILD_SHA},
+        {"fixture_source_sha256", DATAPUMP_TRIAD_COMPONENT_SOURCE_SHA},
+        {"compiler", DATAPUMP_TRIAD_PROBE_COMPILER},
+        {"build_config", DATAPUMP_TRIAD_PROBE_CONFIG},
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        {"mapping_fp32_arithmetic_contract", r::mapping_c64_arithmetic_contract},
+#endif
+        {"device", receipt.device}, {"device_name", receipt.device_name},
+        {"cuda", receipt.cuda}, {"library_version", receipt.library_version},
+        {"cuda_compute_major", receipt.cuda_compute_major},
+        {"cuda_compute_minor", receipt.cuda_compute_minor},
+        {"cuda_runtime_version", receipt.cuda_runtime_version},
+        {"cuda_driver_version", receipt.cuda_driver_version},
+        {"cuda_blas_version", receipt.cuda_blas_version},
+        {"total_device_bytes", receipt.total_device_bytes},
+        {"initial_free_device_bytes", receipt.initial_free_device_bytes},
+        {"workspace_limit_bytes", receipt.workspace_limit_bytes},
+        {"actual_device_work", false}}));
+    std::cout << '\n' << std::flush;
 }
 
 void near(Complex a, Complex b, double tolerance, const char* reason) {
@@ -124,6 +153,81 @@ void cuda_arrival_peak_oracle() {
     run(nonfinite, 4);
     check(r::cuda_select_coarse_peaks(nullptr, nullptr, 0, 1, 1, stream.stream()) == cudaErrorInvalidValue,
           "CUDA arrival selector accepted invalid zero-row/null geometry");
+}
+
+void cuda_mapping_rounding_holdouts() {
+    const auto stream = c10::cuda::getStreamFromPool(false, 0);
+    const c10::cuda::CUDAStreamGuard guard(stream);
+    const auto host = at::TensorOptions().device(at::kCPU);
+    const auto gpu = at::TensorOptions().device(at::kCUDA, 0);
+    // Independent IEEE binary32 goldens, not values obtained from either
+    // mapper. In the first case both real products round to 1 + 2^-22;
+    // their subtraction is +0, while the imaginary sum is 2 + 2^-21.
+    // The second case has exact a*c = 1 + 2^-24 - 2^-47, which rounds to 1;
+    // fusing the subtraction would instead leave a nonzero residual.
+    constexpr std::array<std::array<std::uint32_t, 6>, 6> cases{{
+        {0x3f800001, 0x3f800000, 0x3f800001, 0x3f800002, 0x00000000, 0x40000002},
+        {0x3f800001, 0x3f800000, 0x3f7fffff, 0x3f800000, 0x00000000, 0x40000000},
+        {0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000, 0x00000000, 0x40000000},
+        {0x00000000, 0x00000000, 0xbf800000, 0x00000000, 0x80000000, 0x00000000},
+        {0x80000000, 0x80000000, 0x3f800000, 0x3f800000, 0x00000000, 0x80000000},
+        {0x3f800000, 0x3f800000, 0x3f800000, 0xbf800000, 0x40000000, 0x00000000}}};
+    std::array<c10::complex<float>, cases.size()> values{};
+    std::array<float, cases.size()> cosine{}, sine{};
+    for (std::size_t i = 0; i < cases.size(); ++i) {
+        values[i] = {std::bit_cast<float>(cases[i][0]), std::bit_cast<float>(cases[i][1])};
+        cosine[i] = std::bit_cast<float>(cases[i][2]);
+        sine[i] = std::bit_cast<float>(cases[i][3]);
+    }
+    for (const auto target : {host, gpu}) {
+        auto input = at::from_blob(values.data(), {static_cast<std::int64_t>(cases.size())},
+            host.dtype(at::kComplexFloat)).to(target.dtype(at::kComplexFloat)).clone();
+        const auto c = at::from_blob(cosine.data(), {static_cast<std::int64_t>(cases.size())},
+            host.dtype(at::kFloat)).to(target.dtype(at::kFloat));
+        const auto s = at::from_blob(sine.data(), {static_cast<std::int64_t>(cases.size())},
+            host.dtype(at::kFloat)).to(target.dtype(at::kFloat));
+        r::rotate_mapping_c64(input, c, s);
+        const auto actual = at::view_as_real(input).contiguous().cpu();
+        const auto* components = actual.const_data_ptr<float>();
+        for (std::size_t i = 0; i < cases.size(); ++i)
+            for (std::size_t part = 0; part < 2; ++part)
+                check(std::bit_cast<std::uint32_t>(components[2 * i + part]) == cases[i][4 + part],
+                      "FP32 mapping rotation violated independent rounding/cancellation/signed-zero golden");
+    }
+
+    // Exact identity rotation exercises the actual fused kernel independently
+    // of the ATen renderer. Offsets produce cycles 0, -1 and -2, all wrapping
+    // to angle +0: cos(+0)=1 and sin(+0)=+0 preserve both components. Do not
+    // assume correctly rounded transcendental results at nonzero angles.
+    constexpr std::int64_t rows = 3;
+    const float c = std::bit_cast<float>(std::uint32_t{0x3f3504f3});
+    const auto component = at::full({1, r::cuda_mapping_tile_samples}, c, gpu.dtype(at::kFloat));
+    const auto tiles = at::complex(component, component);
+    std::array<double, 4> coefficients{0., 1., 0., -1.};
+    std::array<double, rows> positions{0., 1., 2.};
+    std::array<std::int64_t, 3 + r::cuda_mapping_maximum_pins> descriptors{};
+    descriptors[0] = 2;
+    descriptors[1] = 8;
+    const auto maps = at::from_blob(coefficients.data(), {1, 4}, host.dtype(at::kDouble)).to(gpu.dtype(at::kDouble));
+    const auto offsets = at::from_blob(positions.data(), {rows}, host.dtype(at::kDouble)).to(gpu.dtype(at::kDouble));
+    const auto table = at::from_blob(descriptors.data(), {1, static_cast<std::int64_t>(descriptors.size())},
+        host.dtype(at::kLong)).to(gpu.dtype(at::kLong));
+    for (bool fused : {false, true}) {
+        auto result = at::empty({1, rows}, gpu.dtype(at::kComplexFloat));
+        if (fused)
+            C10_CUDA_CHECK(r::launch_cuda_mapped_c64(maps.const_data_ptr<double>(), table.const_data_ptr<std::int64_t>(),
+                offsets.const_data_ptr<double>(), tiles.const_data_ptr<c10::complex<float>>(),
+                result.mutable_data_ptr<c10::complex<float>>(), {rows, 1, 1, 1, rows, 1}, stream.stream()));
+        else
+            r::render_aten_mapping(result, tiles, maps, table, offsets, at::kFloat,
+                r::cuda_mapping_tile_samples, r::cuda_mapping_maximum_pins);
+        const auto actual = at::view_as_real(result).contiguous().cpu();
+        const auto* components = actual.const_data_ptr<float>();
+        for (std::size_t i = 0; i < rows; ++i)
+            check(std::bit_cast<std::uint32_t>(components[2 * i]) == 0x3f3504f3 &&
+                  std::bit_cast<std::uint32_t>(components[2 * i + 1]) == 0x3f3504f3,
+                  "FP32 mapping violated independent unit-rotation/negative-phase golden");
+    }
 }
 
 void cuda_mapping_pointwise() {
@@ -918,12 +1022,58 @@ MatrixBenchmarkMeasurement matrix_benchmark_measure(r::ReceiverBulkBackend& back
     return result;
 }
 
+std::uint64_t peak_benchmark_input_hash(const MatrixCoarseFixture& fixture);
+
+std::uint64_t matrix_benchmark_input_hash(const MatrixCoarseFixture& fixture) {
+    // Extend the existing observation/template fingerprint with every actual
+    // lag-plan input. Encode words little-endian instead of hashing padding,
+    // pointers or platform-native object representations. This is a stable
+    // comparison fingerprint, not a cryptographic digest.
+    auto hash = peak_benchmark_input_hash(fixture);
+    const auto word = [&](std::uint64_t value) {
+        for (unsigned byte = 0; byte < 8; ++byte) {
+            hash ^= (value >> (8 * byte)) & 255;
+            hash *= UINT64_C(1099511628211);
+        }
+    };
+    const auto real = [&](double value) { word(std::bit_cast<std::uint64_t>(value)); };
+    const auto samples = [&](std::span<const Complex> values) {
+        word(values.size());
+        for (const auto value : values) {
+            real(value.real());
+            real(value.imag());
+        }
+    };
+    word(1); // Fingerprint encoding version.
+    for (const auto value : {fixture.geometry.taps, fixture.geometry.kernel_rows,
+                            fixture.geometry.correlation_fft_rows, fixture.geometry.lag_count,
+                            fixture.geometry.frequency_count}) word(value);
+    real(fixture.geometry.projected_sample_rate_hz);
+    real(fixture.geometry.variance);
+    word(fixture.group.first_frequency);
+    word(fixture.group.frequencies);
+    samples(fixture.group.input_phase);
+    samples(fixture.group.convolution);
+    samples(fixture.active);
+    word(fixture.workspaces.size());
+    for (const auto& workspace : fixture.workspaces) {
+        for (const auto column : workspace.columns) samples(column);
+        real(workspace.inverse_a);
+        real(workspace.inverse_d);
+        real(workspace.inverse_b.real());
+        real(workspace.inverse_b.imag());
+    }
+    return hash;
+}
+
 void emit_matrix_benchmark(const MatrixBenchmarkMeasurement& result, const MatrixCoarseFixture& fixture,
+                           std::uint64_t input_hash,
                            v::TensorCoarseMath math, v::TensorCoarseMath comparison_math, unsigned look,
                            bool candidate_first, unsigned benchmark_case) {
     const auto& receipt = result.receipt;
     // Machine-readable evidence for this production CoarseBulk API only.
-    // Source/binary identity is supplied by the invoking validation harness.
+    // The preceding identity record binds compiled source/runtime. The
+    // invoking harness separately binds the executable bytes and total cost.
     std::cout << std::setprecision(17)
         << "{\"schema\":\"native_coarse_bulk_benchmark_v1\",\"scope\":\"post_channelization_CoarseBulk\""
         << ",\"initialized_device\":true,\"fresh_owner_excludes_teardown\":true"
@@ -931,8 +1081,11 @@ void emit_matrix_benchmark(const MatrixBenchmarkMeasurement& result, const Matri
         << "\",\"comparison_math\":\"" << matrix_math_name(comparison_math)
         << "\",\"candidate_first\":" << (candidate_first ? "true" : "false")
         << ",\"look\":" << look << ",\"benchmark_case\":" << benchmark_case << ",\"kernel\":" << fixture.kernel
+        << ",\"input_fnv1a64\":\"" << input_hash << "\""
+        << ",\"input_hash_encoding\":\"fnv1a64_le_geometry_observation_templates_and_lag_plan_v1\""
         << ",\"frequencies\":" << fixture.frequencies << ",\"arrivals\":" << fixture.arrivals
         << ",\"workspaces\":" << fixture.workspaces.size() << ",\"taps\":" << fixture.taps
+        << ",\"correlation_fft_rows\":" << fixture.geometry.correlation_fft_rows
         << ",\"owner_seconds\":" << result.owner_seconds << ",\"prepare_seconds\":" << result.prepare_seconds
         << ",\"first_lag_seconds\":" << result.first_lag_seconds
         << ",\"fresh_owner_seconds\":" << result.fresh_owner_seconds
@@ -945,6 +1098,11 @@ void emit_matrix_benchmark(const MatrixBenchmarkMeasurement& result, const Matri
         << ",\"upload_bytes\":" << receipt.upload_bytes << ",\"download_bytes\":" << receipt.download_bytes
         << ",\"score_rows\":" << receipt.score_rows << ",\"fft_calls\":" << receipt.fft_calls
         << ",\"matrix_calls\":" << matrix_calls(receipt, math)
+        << ",\"matrix_fp16_calls\":" << receipt.cuda_matrix_fp16_calls
+        << ",\"matrix_int8_calls\":" << receipt.cuda_matrix_int8_calls
+        << ",\"matrix_nonfinite_values\":" << receipt.cuda_matrix_nonfinite_values
+        << ",\"matrix_saturated_values\":" << receipt.cuda_matrix_saturated_values
+        << ",\"matrix_output_values\":" << receipt.cuda_matrix_output_values
         << ",\"matrix_inner_chunks\":" << receipt.cuda_matrix_inner_chunks
         << ",\"matrix_padded_real_macs\":" << receipt.cuda_matrix_padded_real_macs
         << ",\"matrix_packed_values\":" << receipt.cuda_matrix_packed_values
@@ -955,7 +1113,11 @@ void emit_matrix_benchmark(const MatrixBenchmarkMeasurement& result, const Matri
         << ",\"cuda_driver_version\":" << receipt.cuda_driver_version
         << ",\"cuda_blas_version\":" << receipt.cuda_blas_version
         << ",\"cuda_compute_major\":" << receipt.cuda_compute_major
-        << ",\"cuda_compute_minor\":" << receipt.cuda_compute_minor << "}\n";
+        << ",\"cuda_compute_minor\":" << receipt.cuda_compute_minor
+        << ",\"matrix_fft_fallback_counts\":[";
+    for (std::size_t i = 0; i < receipt.matrix_fft_fallback_counts.size(); ++i)
+        std::cout << (i ? "," : "") << receipt.matrix_fft_fallback_counts[i];
+    std::cout << "]}\n";
 }
 
 void cuda_matrix_benchmark(std::optional<v::TensorCoarseMath> selected,
@@ -972,11 +1134,17 @@ void cuda_matrix_benchmark(std::optional<v::TensorCoarseMath> selected,
     // a predeclared selection rule. All scores are paired with the FFT reference.
     constexpr std::array shapes{std::array<std::size_t, 4>{769, 129, 65, 33},
                                std::array<std::size_t, 4>{2048, 65, 64, 32}};
+    bool emitted_identity = false;
     for (unsigned benchmark_case = 0; benchmark_case < shapes.size(); ++benchmark_case) {
         if (selected_case && benchmark_case != *selected_case) continue;
         const auto& shape = shapes[benchmark_case];
         const MatrixCoarseFixture fixture(shape[0], shape[1], shape[2], 2, shape[3], false);
+        const auto input_hash = matrix_benchmark_input_hash(fixture);
         auto fft = backend(v::TensorCoarseMath::fft);
+        if (!emitted_identity) {
+            emit_component_identity(fft->receipt());
+            emitted_identity = true;
+        }
         auto reference_owner = fft->make_coarse(MatrixCoarseFixture::fs, .25);
         r::CoarseBulkWork preparation, reference_work;
         reference_owner->prepare(fixture.geometry, fixture.active, fixture.workspaces,
@@ -1022,8 +1190,8 @@ void cuda_matrix_benchmark(std::optional<v::TensorCoarseMath> selected,
                     candidate_result = matrix_benchmark_measure(*candidate, fixture, reference, math);
                     baseline_result = matrix_benchmark_measure(*fft, fixture, reference, v::TensorCoarseMath::fft);
                 }
-                emit_matrix_benchmark(baseline_result, fixture, v::TensorCoarseMath::fft, math, look, !(look % 2), benchmark_case);
-                emit_matrix_benchmark(candidate_result, fixture, math, math, look, !(look % 2), benchmark_case);
+                emit_matrix_benchmark(baseline_result, fixture, input_hash, v::TensorCoarseMath::fft, math, look, !(look % 2), benchmark_case);
+                emit_matrix_benchmark(candidate_result, fixture, input_hash, math, math, look, !(look % 2), benchmark_case);
             }
         }
     }
@@ -1200,6 +1368,7 @@ void cuda_peak_benchmark() {
     const auto input_hash = peak_benchmark_input_hash(fixture);
     auto backend = v::make_tensor_receiver_backend({v::TensorDevice::cuda, 0, workspace,
                                                    v::TensorPrecision::automatic, v::TensorCoarseMath::fft});
+    emit_component_identity(backend->receipt());
     // Eight scorings total: two preflights, then three AB/BA/AB pairs.
     // This synthetic post-channelization tile matches a public work shape;
     // it is not an actual waveform, complete receiver or backlog-capacity test.
@@ -1892,13 +2061,14 @@ void helper_composite_slot(const std::shared_ptr<r::ReceiverBulkBackend>& backen
 int main(int argc, char** argv) {
     try {
         bool cuda = false, matrix_only = false, matrix_benchmark = false;
-        bool peaks_only = false, peak_benchmark = false;
+        bool peaks_only = false, peak_benchmark = false, component_describe = false;
         std::optional<v::TensorCoarseMath> matrix_math;
         std::optional<unsigned> matrix_benchmark_case;
         std::optional<std::size_t> matrix_benchmark_workspace_mib;
         for (int i = 1; i < argc; ++i) {
             const std::string_view option(argv[i]);
             if (option == "--cuda") cuda = true;
+            else if (option == "--component-describe") component_describe = true;
             else if (option == "--matrix-only") matrix_only = true;
             else if (option == "--matrix-benchmark") matrix_benchmark = true;
             else if (option == "--peaks-only") peaks_only = true;
@@ -1926,15 +2096,25 @@ int main(int argc, char** argv) {
                 else if (name == "int8") matrix_math = v::TensorCoarseMath::int8;
                 else check(false, "--matrix-math requires fp16|int8");
             }
-            else check(false, "usage: test_triad_tensor [--cuda] [--matrix-only|--matrix-benchmark|--peaks-only|--peak-benchmark] [--matrix-math fp16|int8] [--matrix-benchmark-case 0|1] [--matrix-benchmark-workspace-mib N]");
+            else check(false, "usage: test_triad_tensor [--cuda] [--component-describe|--matrix-only|--matrix-benchmark|--peaks-only|--peak-benchmark] [--matrix-math fp16|int8] [--matrix-benchmark-case 0|1] [--matrix-benchmark-workspace-mib N]");
         }
         check(cuda || (!matrix_only && !matrix_benchmark && !peaks_only && !peak_benchmark), "CUDA-specific checks require --cuda");
-        check(static_cast<unsigned>(matrix_only) + matrix_benchmark + peaks_only + peak_benchmark <= 1,
+        check(static_cast<unsigned>(matrix_only) + matrix_benchmark + peaks_only + peak_benchmark + component_describe <= 1,
               "select at most one focused check or benchmark");
         check(!(matrix_only && matrix_benchmark), "select either --matrix-only or --matrix-benchmark");
         check(!matrix_math || matrix_only || matrix_benchmark, "--matrix-math requires --matrix-only or --matrix-benchmark");
         check(matrix_benchmark || (!matrix_benchmark_case && !matrix_benchmark_workspace_mib),
               "benchmark case/workspace selectors require --matrix-benchmark");
+        if (component_describe) {
+            // CUDA_VISIBLE_DEVICES selects which physical GPU is visible as
+            // device zero. A description initializes its native context but
+            // never invokes numerical fixtures or claims executed DSP work.
+            const auto described = v::make_tensor_receiver_backend({
+                cuda ? v::TensorDevice::cuda : v::TensorDevice::cpu, 0, 128 * mib,
+                v::TensorPrecision::automatic});
+            emit_component_identity(described->receipt());
+            return 0;
+        }
 #if DATAPUMP_TRIAD_TENSOR_CUDA
         if (peak_benchmark) {
             cuda_peak_benchmark();
@@ -1958,6 +2138,7 @@ int main(int argc, char** argv) {
             }
             if (!matrix_only) {
                 cuda_arrival_peak_oracle();
+                cuda_mapping_rounding_holdouts();
                 cuda_mapping_pointwise();
             }
             cuda_matrix_coarse(matrix_math);

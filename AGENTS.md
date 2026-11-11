@@ -35,6 +35,20 @@ full GPU. Follow the [GPU selection contract](docs/triad-performance.md#gpu-sele
 before choosing or renting hardware. Preserve spending authorization and bounded
 testing; this preference is not a universal speed claim or permission to spend.
 
+## Cover representative receiver hardware
+
+Performance tests must support the [representative receiver targets](docs/triad-performance.md#representative-receiver-hardware):
+RTX 4090 desktop, RTX 4090 Laptop, RTX 4060 Ti **16 GB**, and Ryzen 5 PRO
+5650U / Ryzen 7 8840U CPU and integrated-graphics systems. These operating
+targets do not replace the development-GPU preference. Record the actual
+processor, memory, runtime and executed arithmetic; a target label, compatible
+build or CPU fallback is not a GPU measurement. Keep unavailable AMD GPU paths
+explicit. Qualify low precision after Helper/DATA channel isolation separately
+from raw input and sensitive state. An INT8 matrix contraction is not an INT8
+FFT. Choose defaults by complete service on challenging broad searches, including
+unsuccessful Helper acquisition, while preserving every public hypothesis and
+the full `2*H` worker budget. A narrow or easy-case win cannot lower that ceiling.
+
 ## Preserve the full receiver CPU budget
 
 Default Robust receiver orchestration and capacity testing to **twice the

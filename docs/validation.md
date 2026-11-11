@@ -1,5 +1,10 @@
 # Validation status
 
+Representative receiver-hardware test support now has bounded local Ryzen CPU
+and actual RTX 4090 CUDA evidence. The entry below separates those measured
+devices, component results and remaining unmeasured targets; no complete
+receiver-capacity or Tensor Core utilization claim follows.
+
 Updated 10 November 2026. The native history, matrix/preparation and wide-search
 follow-through is complete with the scoped checks below, including the fine-tail
 repair. Complete-receiver capacity and refreshed CPU forecasts remain unresolved.
@@ -16,6 +21,108 @@ The historical cleanup checkpoint was based on
 `357a50970a0c6214eeaade7c5704bbc39abd4b79` and committed as
 `419e6bae8c4fe3b0f59be23a6dfb3b69fbaed80e`. Its concise outcomes and limitations
 remain below; they are not release certification or validation of changed code.
+
+## Representative receiver hardware checks
+
+The [target contract](triad-performance.md#representative-receiver-hardware)
+covers RTX 4090 desktop, RTX 4090 Laptop, RTX 4060 Ti 16 GB, Ryzen 5 PRO 5650U
+and Ryzen 7 8840U CPU/integrated-graphics systems. The PRO 6000 remains the
+development preference. Hardware-specific checks must bind actual device,
+memory, runtime and executed arithmetic; a target profile or compatible build
+does not establish performance on that device. The current project has no AMD
+GPU backend. Ryzen CPU execution is valid CPU evidence, not integrated-GPU
+qualification.
+
+The native component mode and opt-in CUDA workflow now bind compiled
+production/build/fixture identity, actual device/runtime, fixed inputs, complete
+work and executed arithmetic. They distinguish matrix comparisons from full FFT
+peak reduction and from relative receiver regression. The local Ryzen 5 PRO
+5650U uses the reported native `avx2` FFT path with H=12/W=24. At compiled source
+`99d21d1b61225bf8d988039029bd13d9a809a07e683ab9a072df130c74f0a3a6`,
+the ordinary native group passes 32/32 in 30.71 s, the focused probe check passes
+1/1 in 5.46 s, and optional CPU ATen passes 1/1 in 11.67 s. The wrapper's 32,
+workflow's 18 and source-bundle's nine unit tests pass. A CPU-only component
+request reports unavailable after one describe call and zero component
+measurements. These checks do not qualify integrated graphics or receiver
+capacity.
+
+Initial Ada validation on an RTX 4090 (SM 8.9, CUDA 12.8, LibTorch 2.9.1) failed
+the unchanged full-CUDA mapping oracle before component timings. It reported
+zero differing unrotated and 645 differing rotated float components against
+the installed ATen expression. The compiled source is `99d21d1b…` and fixture
+source is `d916f8548659cf1fa0c5c09be4ed363d5d880cf3a8bc3fcd4f364fe37e8fe0f9`.
+One bounded discriminator isolated final complex-product FMA association:
+unrotated values, cycles, angle, sine/cosine and reconstructed reference were
+bit-exact, while the installed expression associated the imaginary sum
+differently from the fused mapper. The largest absolute mismatch was
+`5.960464477539e-8`. This reproduces the old arithmetic-contract failure; it is
+not a claim that a tolerance was met or that the installed oracle passed.
+
+The separately reviewed repair declares
+[`fp32-rn4-v1`](gpu-precision-controls.md#portable-fp32-mapping-arithmetic), with
+four individually rounded products followed by rounded subtraction/addition,
+for both the fused mapper and its native reference. FP64 is unchanged. At
+source `ed59216a5d53cb6db6c7f05e2861e230dbdb7efbc74bf1ed9e25eb808725b22b`,
+the ordinary native group passes 32/32 in 30.24 s and CPU ATen passes 1/1 in
+13.24 s. The actual CUDA suite then failed the newly added composite
+unit-rotation/negative-phase golden before performance measurements. A bounded
+discriminator found the fixture had assumed equal rounded sine/cosine: actual
+cosine was `0x3f3504f3` and sine `0x3f3504f4`; both mappers agreed on the result
+`-2^-25 + i`. The corrected composite fixture uses exact zero-angle and
+negative-integer wrap. Six independent multiplication goldens and the 139×17
+exact mapper comparison remain unchanged. Review passed; the corrected fixture
+source is `7d12a9d779d08189f909129e521d75afade872897752f4beedccfd3186c247bd`,
+with production source `ed59216a…` unchanged. The corrected full CUDA suite
+passes in 17.114 s, including exact mapping/arithmetic goldens, native receiver
+comparisons, near-decision/quiet checks and +30/+60 dB Helper composites. Its
+matrix fixtures execute 35 FP16 and 35 INT8 GEMMs with zero capability
+fallbacks. The original mapper comparison and receiver tolerances remain
+unchanged; the reference now follows the explicit arithmetic revision. A
+separate launch attempt could not find `/usr/bin/time` and executed no test
+assertions; the successful run used the shell timing facility.
+
+The maintained component command then passes all three selected comparisons
+in five native calls and 6.439 s total, including process/control overhead,
+within its original 300-second budget. It uses matrix case zero and the fixed
+peak shape with an exact 2,048 MiB workspace. The runtime is GNU 13.3 Release,
+CUDA 12.8, cuBLAS 12.8.4 and LibTorch 2.9.1 on the actual RTX 4090, SM 8.9.
+Build identity is
+`05ae3890dd37ccd47a679f023b76b84d4c1502997fda2b9be44ec8a6fbd9390d`;
+the source/fixture above and `fp32-rn4-v1` bind both binaries and all calls.
+
+| Native component | Reference → candidate fresh-owner geometric mean | Candidate/reference ratio, descriptive 95% interval |
+| --- | --- | --- |
+| FP16 lag matrix versus FFT; K=769, F=129, A=65, W=33, two taps | 24.201 → 6.875 ms (3.52×) | 0.2841 [0.2152, 0.3751] |
+| INT8 lag matrix versus FFT; same geometry and input | 24.259 → 6.939 ms (3.50×) | 0.2860 [0.2126, 0.3849] |
+| Exact CUDA frontier versus full-score readback/host peak selection; K=8989, F=32, A=10553, W=78, FFT=32768 | 346.219 → 40.172 ms (8.62×) | 0.1160 [0.0336, 0.4011] |
+
+Each comparison uses exactly three alternating pairs. Fresh-owner timing
+includes preparation and first search on an initialized device, excluding
+teardown. Resident lag ratios are 0.1193 for both matrix modes; peak search-only
+ratio is 0.0818. Matrix batches reach 4,096 rows, retain the full score grid,
+and report zero fallback, nonfinite or saturated values. Maximum normalized
+score error is `4.8082e-6` for FP16 and `2.4454e-4` for INT8, within the unchanged
+gates. The frontier comparison computes all 26,340,288 scores and preserves exact peak
+semantics. These are same-binary component observations, not a relative-commit
+regression result, a full 8,596-frequency receiver replay or sustained service.
+The test records executed FP16/INT8 cuBLAS products; it did not collect
+instruction-level Tensor Core evidence or utilization. It does not select a new
+default, supply a CPU forecast or qualify real-time receiver capacity.
+
+Existing PRO 6000 measurements below retain their original source and hardware
+scope; they do not override either Ada failure or qualify the revised automatic
+fine arithmetic. RTX 4090 Laptop, RTX 4060 Ti 16 GB
+and Ryzen 7 8840U remain unmeasured, and no Tensor Core utilization or complete
+capacity pass is claimed.
+
+Temporary receipts in `local-evidence/representative-hardware/` retain both
+original failures, the setup failure, source/binary/fixture identities and raw
+checks supporting these current claims. Remove redundant build logs, transient
+diagnostic copies and superseded outputs after cleanup; retain necessary claim
+and failure evidence until it is superseded. The temporary cloud instance was
+stopped and terminated; the refreshed provider view confirms no remaining
+compute, storage or endpoint resources and no ongoing hourly charge. No
+persistent volume was created. Provider/account records stay outside the checkout.
 
 ## Native matrix and preparation follow-through
 

@@ -17,6 +17,7 @@ The tools answer different questions:
 | Entry point | Decision |
 | --- | --- |
 | `triad_abbreviated.py` | Relative computational regression against a matched native baseline. |
+| `triad_abbreviated.py --components` | Bounded same-binary native matrix/FFT and exact-peak comparisons, with device and arithmetic evidence. |
 | `triad_manual_cases.py` | Absolute local CPU capacity for the current ordered manual cases. |
 | `triad_gpu_workload.py` and `triad_gpu_cpu_forecast.py` | GPU-observed native work combined with local native phase costs and independent CPU holdouts. |
 
@@ -78,6 +79,122 @@ measured outcome, not a claim conferred by this hardware preference. Follow the
 source-matched local CPU costs and independent holdouts for CPU forecasting.
 Stay within the current spending authorization and cleanup contract; historical
 prices and the completed rental's budget are not new spending authority.
+
+## Representative receiver hardware
+
+The following are representative future receiver targets, distinct from the
+preferred development accelerator and from devices actually measured. An Ada
+compatibility check on an RTX 4090 is a concrete reason to use that device;
+it does not qualify its laptop counterpart or change the development default.
+Keep target requirements, actual device receipts and validation outcomes separate.
+
+| Target | Distinctions the test must retain |
+| --- | --- |
+| GeForce RTX 4090 desktop | Ada CUDA target, compute capability 8.9, 24 GB GDDR6X. Record the actual device and usable memory. [NVIDIA specifications](https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4090/) |
+| GeForce RTX 4090 Laptop GPU | Separate Ada product with 16 GB GDDR6. NVIDIA lists an 80–150 W GPU subsystem range; record the laptop/OEM power configuration rather than applying desktop results. [NVIDIA laptop comparison](https://www.nvidia.com/en-eu/geforce/laptops/compare/) |
+| GeForce RTX 4060 Ti 16 GB | Ada CUDA target with an explicitly required 16 GB variant. The 8 GB variant is a different memory target even when the device name is similar. [NVIDIA specifications](https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4060-4060ti/) |
+| AMD Ryzen 5 PRO 5650U with Radeon Graphics | Zen 3 CPU, six cores/twelve threads and integrated Radeon graphics with seven graphics cores. Record CPU execution separately from integrated-GPU execution and actual host/shared memory. [AMD specifications](https://www.amd.com/en/support/downloads/drivers.html/processors/ryzen-pro/ryzen-pro-5000-series/amd-ryzen-5-pro-5650u.html), [Zen 3 introduction](https://www.amd.com/en/newsroom/press-releases/2021-3-16-amd-brings-power-of-zen-3-to-world-s-best-mobile.html) |
+| AMD Ryzen 7 8840U with Radeon Graphics | Zen 4 CPU, eight cores/sixteen threads and Radeon 780M graphics with twelve graphics cores. Its separate NPU is not a substitute for a qualified graphics or CPU backend. Record actual host/shared memory and CPU features. [AMD specifications](https://www.amd.com/en/products/processors/laptop/ryzen/8000-series/amd-ryzen-7-8840u.html) |
+
+All three GeForce targets use Ada's fourth-generation Tensor Cores and compute
+capability 8.9. Ada supports FP16 and INT8 Tensor Core arithmetic; hardware
+support does not prove that a particular library operation used it. Build for
+the actual architecture and retain execution evidence alongside the arithmetic
+counters. See the [Ada architecture](https://images.nvidia.com/aem-dam/Solutions/geforce/ada/nvidia-ada-gpu-architecture.pdf)
+and [CUDA Ada tuning guide](https://docs.nvidia.com/cuda/ada-tuning-guide/index.html).
+
+The present modem backend supports native CPU and optional CPU ATen/CUDA;
+there is no AMD GPU receiver backend. A successful Ryzen CPU test must therefore
+remain a CPU result. AMD's RDNA 3 matrix instructions support low-precision
+arithmetic, but that architecture capability does not establish support for an
+exact APU, OS, driver and library combination. Recheck the current
+[ROCm compatibility matrix](https://rocm.docs.amd.com/en/latest/compatibility/compatibility-matrix.html)
+and [rocWMMA targets](https://rocm.docs.amd.com/projects/rocWMMA/en/latest/api-reference/api-reference-guide.html)
+before a future native AMD implementation; do not turn the current project gap
+into a permanent claim about all AMD hardware. See
+[RDNA 3 matrix instructions](https://gpuopen.com/learn/wmma_on_rdna3/).
+
+Runtime capabilities govern the test, not a processor-name preset. Preserve
+affinity/quota-aware `W=2*H`, explicit allocations, actual SIMD dispatch and
+bounded memory admission. Charge APU shared storage once by ownership while
+accounting for concurrent CPU/GPU access and memory-bandwidth contention.
+Independent CPU and integrated-GPU phase timings do not establish their combined
+service. Record compiler, native libraries, device architecture, precision,
+workspace, physical/shared memory and relevant power configuration.
+
+Report each accelerated result as executed, an explicit arithmetic fallback,
+unavailable, or unmeasured. A CUDA request cannot succeed through CPU execution;
+an FFT fallback cannot count as an FP16/INT8 matrix result. Check actual matrix
+call/work counters and fallback reasons. Kernel dispatch evidence and elapsed
+cost are separate from instruction-level utilization and sustained capacity.
+
+Use the existing native component and receiver tests hierarchically: cheap
+capability/numerical checks first, then a fixed small set of matched component
+shapes, then affected complete receiver strata. Vary frequency/arrival extent,
+observation length, ready batch size and workspace in predeclared comparisons.
+Include Helper acquisition that narrows DATA search and unsuccessful/absent
+Helper cases that retain the broad search. Smaller memory budgets may change
+tiling, never public geometry or hypothesis coverage. Compare preparation,
+packing, transfer, synchronization, peak selection, fine work and finish before
+changing a default; keep fresh-owner and resident timings distinct. The
+[stage-specific precision contract](gpu-precision-controls.md#precision-opportunities-by-stage)
+distinguishes current matrix operations from prospective Tensor Core FFT work.
+
+### Bounded native component comparisons
+
+After the [native CUDA build and correctness checks](building.md#ci-sanitizers-and-release-validation),
+use the existing abbreviated entry point for a predeclared component comparison:
+
+```sh
+python3 tools/triad_abbreviated.py \
+  --probe build/triad-cuda/triad_receiver_probe \
+  --component-probe build/triad-cuda/test_triad_tensor \
+  --device cuda --components all --matrix-case 0 \
+  --device-workspace-mib 2048 --benchmark-deadline-ms 300000 \
+  --output local-evidence/triad-cuda-components.json
+```
+
+Select `fp16`, `int8`, `peaks`, or `all` before measurement. The default component
+executable is `test_triad_tensor` beside the supplied receiver probe. Components
+use visible CUDA device zero; set `CUDA_VISIBLE_DEVICES` before launch to select
+another physical device. CPU execution is rejected for this mode. On a Ryzen
+system without the CUDA backend, use the ordinary CPU regression/capacity entry
+points and retain the integrated-GPU result as unavailable or unmeasured.
+
+The two matrix cases fix `(samples, frequencies, arrivals, workspaces)` at
+`(769,129,65,33)` or `(2048,65,64,32)`, each with two taps. They are geometry
+choices, not hardware presets. `--matrix-case` defaults to zero and cannot be
+used with `--components peaks`. The peak fixture keeps its complete
+`(8989,32,10553,78)` geometry and a 32,768-row FFT. Explicit component workspace
+is exact, from 1–65,536 MiB; `peaks` and `all` require 2,048 MiB for that fixed
+fixture. A shape which cannot fit fails rather than silently reducing its
+search. Use a separate, predeclared matrix-only comparison to study another
+workspace bound.
+
+`datapump.triad.native-components.v1` is separate from receiver regression and
+CPU capacity schemas. It binds receiver and component executable hashes,
+compiled production/build identity, exact fixture source, runtime/device and
+input fingerprints. A cheap `test_triad_tensor --component-describe` (add
+`--cuda` for CUDA) emits identity without numerical DSP work; it is not a
+performance result. The receiver's `describe` also reports the actual
+`cpu_fft_kernel` dispatch, so a CPU model name alone cannot imply SIMD execution.
+
+Each selected component uses three alternating paired looks with frozen
+numerical/work checks. One matrix comparison performs 14 scoring operations,
+including its checks and fresh/resident observations; the peak comparison
+performs eight. `all` permits at most three benchmark calls plus two identity
+calls under one wall deadline, including process/control overhead, with no
+retry or timing-driven expansion. The wrapper rejects changed inputs, runtime,
+geometry, missing work, unsupported matrix fallback and invalid packed values.
+The peak comparison preserves full FFT/score work and exact frontier semantics.
+
+Fresh-owner timings include preparation and first search on an initialized
+device, exclude teardown, and remain separate from resident timings. The report
+provides descriptive paired ratios and intervals; `component_checks_passed`
+does not mean a speedup, relative-commit regression pass, Tensor Core instruction
+utilization, complete receiver capacity or CPU forecast. Full receiver tests
+still cover Helper acquisition, broad fallback, fine processing and physical
+completion. Regression/manual selectors cannot be mixed into component mode.
 
 ## Relative regression harness
 

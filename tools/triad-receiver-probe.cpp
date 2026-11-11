@@ -2,6 +2,7 @@
 #include "datapump/robust_profile.hpp"
 #include "datapump/triad_stream_receiver.hpp"
 #include "datapump/tuning.hpp"
+#include "search_fft.hpp"
 #include "triad_probe_json.hpp"
 #include "triad_probe_spool.hpp"
 #include "triad_receiver_coarse.hpp"
@@ -1726,6 +1727,7 @@ void help() {
 
 Json identity() {
     return object({{"implementation", "native-production-receiver"},
+        {"cpu_fft_kernel", datapump::modem::detail::search_fft::kernel_name()},
         {"source_manifest_sha256", DATAPUMP_TRIAD_PROBE_SOURCE_SHA},
         {"source_commit_at_configure", DATAPUMP_TRIAD_PROBE_SOURCE_COMMIT},
         {"compiler", DATAPUMP_TRIAD_PROBE_COMPILER}, {"build_config", DATAPUMP_TRIAD_PROBE_CONFIG},

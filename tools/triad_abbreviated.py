@@ -10,6 +10,7 @@ import argparse
 import math
 from pathlib import Path
 import statistics
+import subprocess
 import sys
 import time
 
@@ -17,7 +18,7 @@ from triad_case_metrics import BATCHES, LOOKS, log_interval, t_critical
 from triad_cases import DEFAULT_CASES
 from triad_native import (BACKENDS, DEFAULT_PROBE, NativeProbe, ProbeError, allocation,
                           digest, environment, finite_number, is_sha256, named_phases, phase_once, positive_int,
-                          read_report, runtime_identity, validate_receipt, write_result)
+                          read_report, runtime_identity, validate_receipt, write_result, json_loads, RECEIPT_LIMIT)
 
 STRATA = ("active", "noise")
 PHASES = ("native_slot", "coarse", "fine", "audio_frontend")
@@ -33,6 +34,13 @@ STREAM_SAMPLE_LIMIT = 600_000
 STREAM_EPOCHS = (1793850000, 1793850060, 1793850120, 1793850180, 1793850240)
 STREAM_ORDINAL = 7000037
 DEFAULT_BENCHMARK_DEADLINE_MS = 300_000
+COMPONENT_SCHEMA = "datapump.triad.native-components.v1"
+COMPONENT_IDENTITY_SCHEMA = "datapump.triad.native-component-identity.v1"
+COMPONENT_RUNTIME = ("device", "device_name", "cuda", "cuda_compute_major", "cuda_compute_minor",
+                     "cuda_runtime_version", "cuda_driver_version", "cuda_blas_version",
+                     "library_version", "total_device_bytes")
+COMPONENT_BUILD = ("source_manifest_sha256", "build_options_sha256", "compiler", "build_config")
+MATRIX_SHAPES = ((769, 129, 65, 33, 2, 1024), (2048, 65, 64, 32, 2, 4096))
 
 
 def analyze(rows, target_units, *, baseline=None):
@@ -564,6 +572,264 @@ def run(*, executable=DEFAULT_PROBE, device="cpu", benchmark_deadline_ms=DEFAULT
     return report
 
 
+def component_identity(record, description, previous=None):
+    """Bind the native fixture to the production probe, without calling it DSP work."""
+    if not isinstance(record, dict) or record.get("schema") != COMPONENT_IDENTITY_SCHEMA:
+        raise ProbeError("Missing native component identity")
+    native = description["identity"]
+    bulk = native.get("backend_receipt")
+    if not isinstance(bulk, dict) or bulk.get("cuda") is not True or record.get("cuda") is not True:
+        raise ProbeError("Components require an actual CUDA backend")
+    if record.get("actual_device_work") is not False:
+        raise ProbeError("Component identity must not claim DSP execution")
+    for name in (*COMPONENT_BUILD, *COMPONENT_RUNTIME):
+        expected = native.get(name) if name in COMPONENT_BUILD else bulk.get(name)
+        if expected is None or record.get(name) != expected:
+            raise ProbeError(f"Component/probe identity mismatch: {name}")
+    for name in ("source_manifest_sha256", "build_options_sha256", "fixture_source_sha256"):
+        if not is_sha256(record.get(name)):
+            raise ProbeError(f"Invalid component {name}")
+    for name in ("total_device_bytes", "initial_free_device_bytes", "workspace_limit_bytes"):
+        positive_int(record.get(name), name)
+    if previous is not None and any(record.get(name) != previous.get(name)
+                                    for name in (*COMPONENT_BUILD, *COMPONENT_RUNTIME, "fixture_source_sha256")):
+        raise ProbeError("Component source/build/runtime changed between calls")
+    return record
+
+
+def _component_integer(row, name, *, zero=True):
+    return positive_int(row.get(name), name, allow_zero=zero)
+
+
+def _component_time(row, name, *, positive=False):
+    value = finite_number(row.get(name), name, nonnegative=True)
+    if positive and value <= 0:
+        raise ProbeError(f"Component {name} must be positive")
+    return value
+
+
+def validate_component_rows(rows, component, matrix_case, workspace_bytes, identity):
+    """Check a fixed three-pair native component look; never extrapolate to reception."""
+    if len(rows) != 6 or any(not isinstance(row, dict) for row in rows):
+        raise ProbeError("Component benchmark requires exactly three complete paired looks")
+    matrix = component != "peaks"
+    shape = MATRIX_SHAPES[matrix_case] if matrix else (8989, 32, 10553, 78, 2, 32768)
+    geometry_names = ("kernel", "frequencies", "arrivals", "workspaces", "taps", "correlation_fft_rows")
+    expected_schema = "native_coarse_bulk_benchmark_v1" if matrix else "native_arrival_peak_benchmark_v1"
+    expected_scope = "post_channelization_CoarseBulk" if matrix else "synthetic_native_bulk_geometry"
+    modes = ("fft", component) if matrix else ("full_scores_host_nms", "cuda_frontier")
+    scores = shape[1] * shape[2] * shape[3]
+    pairs = shape[1] * shape[3]
+    fingerprint = None
+    for index, row in enumerate(rows):
+        look, mode = index // 2 + 1, modes[index % 2]
+        order_name = "candidate_first" if matrix else "compressed_first"
+        if (row.get("schema") != expected_schema or row.get("scope") != expected_scope
+                or type(row.get("look")) is not int or row["look"] != look
+                or row.get("math" if matrix else "mode") != mode
+                or row.get(order_name) is not (look % 2 == 0)):
+            raise ProbeError("Component schema, look, order or arithmetic changed")
+        if tuple(_component_integer(row, name, zero=False) for name in geometry_names) != shape:
+            raise ProbeError("Component public geometry changed")
+        value = row.get("input_fnv1a64")
+        if not isinstance(value, str) or not value.isascii() or not value.isdecimal() or not 0 <= int(value) < 2**64:
+            raise ProbeError("Component lacks its native input fingerprint")
+        if fingerprint is None:
+            fingerprint = value
+        if value != fingerprint:
+            raise ProbeError("Component input changed between paired looks")
+        if row.get("initialized_device") is not True or row.get("fresh_owner_excludes_teardown") is not True:
+            raise ProbeError("Component timing boundary changed")
+        parts = ("owner_seconds", "prepare_seconds", "first_lag_seconds" if matrix else "search_seconds")
+        part_sum = sum(_component_time(row, name) for name in parts)
+        fresh = _component_time(row, "fresh_owner_seconds", positive=True)
+        if not math.isclose(fresh, part_sum, rel_tol=1e-10, abs_tol=1e-12):
+            raise ProbeError("Component fresh-owner time does not include preparation and search")
+        if _component_integer(row, "workspace_limit_bytes", zero=False) != workspace_bytes:
+            raise ProbeError("Component changed the exact workspace bound")
+        for name in ("peak_reserved_bytes", "allocator_peak_reserved_bytes"):
+            if _component_integer(row, name, zero=False) > workspace_bytes:
+                raise ProbeError("Component exceeded its workspace bound")
+        for name in ("upload_bytes", "download_bytes", "synchronizations"):
+            _component_integer(row, name, zero=False)
+        if _component_integer(row, "score_rows", zero=False) != scores * (2 if matrix else 1):
+            raise ProbeError("Component did not process the complete score grid")
+        if matrix:
+            if (type(row.get("benchmark_case")) is not int or row["benchmark_case"] != matrix_case
+                    or row.get("comparison_math") != component
+                    or row.get("input_hash_encoding") != "fnv1a64_le_geometry_observation_templates_and_lag_plan_v1"
+                    or row.get("resident_reuses_immutable_input") is not True
+                    or _component_integer(row, "independent_dft_checks", zero=False) != 19):
+                raise ProbeError("Matrix comparison or numerical oracle contract changed")
+            _component_time(row, "resident_lag_seconds", positive=True)
+            error = _component_time(row, "normalized_score_error")
+            if error > (3e-5 if mode == "fft" else .002 if mode == "fp16" else .01):
+                raise ProbeError("Matrix score error exceeded its frozen numerical gate")
+            for name in ("cuda_runtime_version", "cuda_driver_version", "cuda_blas_version",
+                         "cuda_compute_major", "cuda_compute_minor"):
+                if row.get(name) != identity[name]:
+                    raise ProbeError(f"Matrix runtime changed: {name}")
+            counts = [_component_integer(row, f"matrix_{name}_calls") for name in ("fp16", "int8")]
+            calls = _component_integer(row, "matrix_calls")
+            fallback = row.get("matrix_fft_fallback_counts")
+            if (not isinstance(fallback, list) or len(fallback) != 6
+                    or any(type(count) is not int or count != 0 for count in fallback)
+                    or _component_integer(row, "matrix_nonfinite_values")
+                    or _component_integer(row, "matrix_saturated_values")):
+                raise ProbeError("Matrix benchmark fell back or produced invalid packed values")
+            if mode == "fft":
+                if calls or any(counts) or _component_integer(row, "fft_calls", zero=False) <= 0:
+                    raise ProbeError("FFT reference executed another arithmetic path")
+            else:
+                if not calls or sum(counts) != calls or counts[0 if mode == "fp16" else 1] != calls:
+                    raise ProbeError("Requested matrix arithmetic did not execute exclusively")
+                if (_component_integer(row, "matrix_inner_chunks", zero=False) != calls
+                        or _component_integer(row, "matrix_output_values", zero=False) != 2 * shape[4] * scores
+                        or tuple(_component_integer(row, name, zero=False) for name in (
+                            "matrix_maximum_rows", "matrix_maximum_columns", "matrix_maximum_inner"))
+                        != (4096, shape[1], shape[0])):
+                    raise ProbeError("Matrix benchmark changed the admitted work or batch")
+                for name in ("matrix_padded_real_macs", "matrix_packed_values"):
+                    _component_integer(row, name, zero=False)
+        else:
+            if row.get("separation") != 17 or row.get("independent_dft_points") != 16:
+                raise ProbeError("Peak numerical oracle or selection geometry changed")
+            forward, inverse = shape[1], pairs * shape[4]
+            expected_stages = (forward + inverse) * shape[5] * (shape[5].bit_length() - 1)
+            if (_component_integer(row, "forward_ffts", zero=False) != forward
+                    or _component_integer(row, "inverse_ffts", zero=False) != inverse
+                    or _component_integer(row, "fft_row_stages", zero=False) != expected_stages):
+                raise ProbeError("Peak optimization changed full FFT work")
+            compressed = mode == "cuda_frontier"
+            if (_component_integer(row, "cuda_arrival_peak_rows") != (pairs if compressed else 0)
+                    or _component_integer(row, "cuda_arrival_peak_values") != (scores if compressed else 0)
+                    or row["download_bytes"] != (pairs * 40 if compressed else scores * 8)):
+                raise ProbeError("Peak frontier did not preserve full search/readback accounting")
+    phases = ("fresh_owner_seconds", "resident_lag_seconds") if matrix else ("fresh_owner_seconds", "search_seconds")
+    comparisons = {}
+    for phase in phases:
+        ratios = [rows[index + 1][phase] / rows[index][phase] for index in (0, 2, 4)]
+        point, interval = log_interval(ratios, alpha=.05)
+        comparisons[phase] = {"paired_candidate_over_reference": ratios,
+                              "geometric_mean_ratio": point, "descriptive_95_percent_interval": interval,
+                              "scope": "Three fixed paired component observations, not a capacity or regression verdict"}
+    return {"component": component, "status": "component_checks_passed", "input_fnv1a64": fingerprint,
+            "actual_algorithm": "scaled_lag_matrix" if matrix else "full_fft_with_exact_cuda_frontier",
+            "tensor_core_instruction_evidence": "not_collected_by_this_timing_test",
+            "rows": rows, "comparisons": comparisons}
+
+
+def run_components(*, executable=DEFAULT_PROBE, component_executable=None, components="all", matrix_case=0,
+                   workspace_mib=2048, benchmark_deadline_ms=DEFAULT_BENCHMARK_DEADLINE_MS):
+    """Run only the declared native component comparisons, under one wall budget."""
+    started = time.monotonic()
+    deadline = positive_int(benchmark_deadline_ms, "benchmark deadline")
+    positive_int(workspace_mib, "device workspace MiB")
+    if workspace_mib > 65536 or components not in ("fp16", "int8", "peaks", "all"):
+        raise ProbeError("Invalid component or workspace selection")
+    if type(matrix_case) is not int or matrix_case not in (0, 1):
+        raise ProbeError("Component matrix case must be 0 or 1")
+    selected = ("fp16", "int8", "peaks") if components == "all" else (components,)
+    if "peaks" in selected and workspace_mib != 2048:
+        raise ProbeError("The fixed peak comparison requires exactly 2048 MiB")
+    report = {"schema": COMPONENT_SCHEMA, "status": "incomplete", "environment": environment("cuda"),
+              "policy": {"components": list(selected), "matrix_case": matrix_case,
+                         "device_workspace_bytes": workspace_mib * 2**20, "paired_looks": 3,
+                         "maximum_benchmark_calls": len(selected), "maximum_native_calls": len(selected) + 2,
+                         "matrix_scorings_per_comparison": 14, "peak_scorings": 8,
+                         "receipt_acceptance_limit_bytes": RECEIPT_LIMIT,
+                         "selection": "Fixed before measurements; no retries or timing-based expansion",
+                         "device_selection": "Visible CUDA device 0; use CUDA_VISIBLE_DEVICES before launch"},
+              "complete_receiver_capacity_qualified": False, "cpu_forecast_qualified": False,
+              "relative_commit_regression_pass": False, "calls": [], "components": []}
+    receiver = component = None
+
+    def elapsed_ms():
+        return (time.monotonic() - started) * 1000
+
+    def verify():
+        receiver.verify_unchanged()
+        component.verify_unchanged()
+        if environment("cuda") != report["environment"]:
+            raise ProbeError("Host environment changed during component measurements")
+        if elapsed_ms() >= deadline:
+            raise BenchmarkExpired("Overall component deadline exhausted")
+
+    def invoke(options, maximum_rows):
+        verify()
+        record = {"argv": [str(component.path), "--cuda", *options]}
+        report["calls"].append(record)
+        begin = time.monotonic()
+        try:
+            finished = subprocess.run(record["argv"], capture_output=True, check=False,
+                                      timeout=max(.001, (deadline - elapsed_ms()) / 1000))
+            stdout, stderr = finished.stdout, finished.stderr
+            record["returncode"] = finished.returncode
+        except subprocess.TimeoutExpired as error:
+            stdout, stderr = error.stdout or b"", error.stderr or b""
+            record["timed_out"] = True
+        record.update(elapsed_seconds=time.monotonic() - begin,
+                      stdout=stdout[:RECEIPT_LIMIT].decode("utf-8", errors="replace"),
+                      stderr=stderr[-4096:].decode("utf-8", errors="replace"))
+        verify()
+        if record.get("timed_out"):
+            raise BenchmarkExpired("Native component exceeded its bounded process deadline")
+        if len(stdout) > RECEIPT_LIMIT or len(stderr) > RECEIPT_LIMIT:
+            raise ProbeError("Native component output exceeds its size limit")
+        if record["returncode"] != 0:
+            raise ProbeError(f"Native component check failed (exit {record['returncode']}): {record['stderr'].strip()}")
+        lines = stdout.splitlines()
+        if len(lines) != maximum_rows:
+            raise ProbeError("Native component returned incomplete or additional JSONL records")
+        return [json_loads(line) for line in lines]
+
+    try:
+        receiver = NativeProbe(executable, backend="cuda")
+        component = NativeProbe(component_executable or receiver.path.with_name(
+            "test_triad_tensor" + receiver.path.suffix), backend="cuda")
+        report["binaries"] = {"receiver": {"path": str(receiver.path), "sha256": receiver.executable_sha256},
+                              "components": {"path": str(component.path), "sha256": component.executable_sha256}}
+        verify()
+        remaining = int(deadline - elapsed_ms()) - 15000
+        if remaining <= 0:
+            raise BenchmarkExpired("Overall component deadline cannot admit receiver description")
+        description_call = {"command": "receiver_describe"}
+        report["calls"].append(description_call)
+        begin = time.monotonic()
+        description = receiver.call("describe", deadline_ms=min(30000, remaining),
+                                    device_memory_limit_bytes=workspace_mib * 2**20)
+        description_call.update(elapsed_seconds=time.monotonic() - begin, receipt=description)
+        verify()
+        if description["status"] != "complete":
+            report.update(status=description["status"], reason=description.get("reason"))
+            return report
+        identity = component_identity(invoke(["--component-describe"], 1)[0], description)
+        report["native_identity"] = identity
+        for choice in selected:
+            options = (["--peak-benchmark"] if choice == "peaks" else ["--matrix-benchmark", "--matrix-math", choice,
+                       "--matrix-benchmark-case", str(matrix_case), "--matrix-benchmark-workspace-mib", str(workspace_mib)])
+            records = invoke(options, 7)
+            current_identity = component_identity(records[0], description, identity)
+            if current_identity["workspace_limit_bytes"] != workspace_mib * 2**20:
+                raise ProbeError("Component identity changed the exact benchmark workspace")
+            checked = validate_component_rows(records[1:], choice, matrix_case,
+                                              workspace_mib * 2**20, current_identity)
+            if choice != "peaks" and any(prior["component"] != "peaks" and
+                    prior["input_fnv1a64"] != checked["input_fnv1a64"] for prior in report["components"]):
+                raise ProbeError("Matrix arithmetic comparisons changed the fixed input")
+            report["components"].append(checked)
+        verify()
+        report.update(status="component_checks_passed", identity_verified_at_completion=True)
+    except BenchmarkExpired as error:
+        report.update(status="incomplete", reason=str(error))
+    except (ValueError, OSError, KeyError, TypeError, UnicodeError) as error:
+        report.update(status="error", reason=str(error))
+    finally:
+        report["run_budget"] = {"deadline_ms": deadline, "elapsed_ms": elapsed_ms(),
+                                "native_calls": len(report["calls"]), "includes_process_and_control_overhead": True}
+    return report
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--output", type=Path, required=True)
@@ -573,6 +839,11 @@ def main(argv=None):
     parser.add_argument("--tensor-coarse-math", choices=("fft", "fp16", "int8"))
     parser.add_argument("--device-index", type=int)
     parser.add_argument("--device-workspace-mib", type=int)
+    parser.add_argument("--components", choices=("fp16", "int8", "peaks", "all"),
+                        help="Bounded native component comparisons, separate from receiver regression/capacity.")
+    parser.add_argument("--component-probe", type=Path, help="Compiled test_triad_tensor; defaults beside --probe.")
+    parser.add_argument("--matrix-case", type=int, choices=(0, 1),
+                        help="One predeclared native matrix geometry (default 0).")
     parser.add_argument("--target-units", type=int, default=1000, help="Projection only. Executes bounded 1/2/4 batches.")
     parser.add_argument("--cases", nargs="?", const=str(DEFAULT_CASES), help="Use the manual capacity entry point.")
     parser.add_argument("--probe", "--exporter", type=Path, dest="probe", default=DEFAULT_PROBE,
@@ -589,8 +860,31 @@ def main(argv=None):
     parser.add_argument("--skip-message-gate", action="store_true")
     input_args = list(sys.argv[1:] if argv is None else argv)
     args = parser.parse_args(input_args)
+    explicit = {arg.split("=", 1)[0] for arg in input_args if arg.startswith("--")}
+    if args.components is not None:
+        allowed = {"--output", "--device", "--probe", "--components", "--component-probe", "--matrix-case",
+                   "--device-workspace-mib", "--benchmark-deadline-ms"}
+        if explicit - allowed:
+            parser.error("Receiver regression/manual options do not apply to component comparisons")
+        if args.device != "cuda":
+            parser.error("Component timing requires --device cuda; CPU execution does not qualify a GPU")
+        if args.components == "peaks" and args.matrix_case is not None:
+            parser.error("--matrix-case does not apply to the fixed peak comparison")
+        try:
+            result = run_components(executable=args.probe, component_executable=args.component_probe,
+                                    components=args.components, matrix_case=args.matrix_case or 0,
+                                    workspace_mib=args.device_workspace_mib if args.device_workspace_mib is not None else 2048,
+                                    benchmark_deadline_ms=args.benchmark_deadline_ms)
+        except (ValueError, OSError, KeyError, TypeError) as error:
+            result = {"schema": COMPONENT_SCHEMA, "status": "error", "reason": str(error)}
+        write_result(args.output, result)
+        print(f"{result['status']}: {args.output}")
+        if result.get("reason"):
+            print(result["reason"], file=sys.stderr)
+        return 0 if result["status"] == "component_checks_passed" else 2 if result["status"] in ("incomplete", "unavailable") else 1
+    if args.component_probe is not None or args.matrix_case is not None:
+        parser.error("--component-probe and --matrix-case require --components")
     if args.cases is not None:
-        explicit = {arg.split("=", 1)[0] for arg in input_args}
         if explicit & {"--baseline", "--device", "--target-units", "--benchmark-deadline-ms", "--tensor-precision", "--tensor-coarse-math",
                        "--device-index", "--device-workspace-mib"}:
             parser.error("Relative regression options do not apply to manual capacity")

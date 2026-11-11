@@ -58,10 +58,11 @@ __global__ void mapped_c64(const double* maps, const std::int64_t* table, const 
     const float angle = static_cast<float>((cycles - ::floor(cycles)) * tau);
     const float cosine = ::cosf(angle);
     const float sine = ::sinf(angle);
-    // Match the CUDA ATen complex multiply's final rotation rounding.
-    // Explicit fusion here leaves coordinate and interpolation contraction off.
-    const float rotated_real = __fmaf_rn(real, cosine, -__fmul_rn(imag, sine));
-    const float rotated_imag = __fmaf_rn(imag, cosine, __fmul_rn(real, sine));
+    // fp32-rn4-v1: round all four products separately, then round the
+    // subtraction/addition. Do not inherit a library/compiler-selected FMA
+    // grouping: that grouping differs between supported CUDA architectures.
+    const float rotated_real = __fsub_rn(__fmul_rn(real, cosine), __fmul_rn(imag, sine));
+    const float rotated_imag = __fadd_rn(__fmul_rn(real, sine), __fmul_rn(imag, cosine));
     output[destination * view.output_column_stride + sample * view.output_sample_stride] =
         c10::complex<float>{rotated_real, rotated_imag};
 }

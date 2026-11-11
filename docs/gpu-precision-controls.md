@@ -35,6 +35,39 @@ judging the speedup. A faster isolated GEMM does not establish a faster test.
 Preserve the case's selected effects, public search coverage and receiver
 decisions rather than reducing required work to obtain a favorable timing.
 
+## Precision opportunities by stage
+
+Use the [representative hardware contract](triad-performance.md#representative-receiver-hardware)
+for Ada desktop/laptop GPUs and Ryzen CPU/integrated-graphics targets. A device's
+low-precision capability is useful only through an implemented, measured native
+path. Qualify the numerical stage and the processing hardware separately.
+
+| Stage | Precision and performance-test boundary |
+| --- | --- |
+| Composite audio/I/Q and channel isolation | Preserve the current FIR/projection arithmetic and explicit strong-Helper checks. Quiet spectrum after filtering does not bound the dynamic range of this composite input. Include filtering and transfer costs. |
+| Helper-specific filtered baseband | Lower-precision tone/correlation processing is a candidate because strong isolated Helper signals can have modest in-band dynamic range. It is not implemented as a low-precision GPU backend. Qualify frequency error and uncertainty before using them to narrow DATA work; phase/timing transfer needs its own evidence. |
+| DATA-specific filtered baseband | Current FP16/INT8 lag matrices operate here. Test normalization, clipping/nonfinite counts, accumulator bounds, full scores and candidate/decision stability, including noise-only and near-decision observations. |
+| Broad frequency/arrival search | Measure full public coverage and complete search/selection cost. Current FFT and optional dense lag matrices are different algorithms; an arithmetic selector does not change an FFT into an INT8 transform. |
+| Fine statistics, coordinates and persistent evidence | Retain precision where long accumulation, small frequency/phase/timing changes or conditioning affects state and decisions. A bulk-matrix pass does not qualify reduced-precision state updates. |
+| Receiver scheduling and completion | Exercise native worker ownership, preparation overlap, bounded workspace and scored quiet-slot finish independently of arithmetic. Component utilization or a small transform win is not complete receiver capacity. |
+
+Tensor Core FFT/filter-bank factorizations, batched small transforms and other
+structured contractions are useful candidates for broad low-SNR searches after
+channel isolation. They require their own native implementation, work mapping,
+accuracy and complete-cost comparison. A dense DFT's quadratic work cannot be
+made equivalent to an FFT's `N log N` scaling merely by tiling or selecting INT8.
+The current `int8` option selects a bounded matrix contraction; unsupported or
+frequency-tiled work explicitly stays on FFT. cuFFT's documented transform
+precisions are distinct from low-precision matrix multiplication. See
+[cuFFT's transform and precision documentation](https://docs.nvidia.com/cuda/cufft/).
+
+Prefer the algorithm with the qualified ceiling on the most challenging
+applicable geometry. A replacement default must cover unsuccessful Helper
+acquisition and broad search, include recurring preparation and downstream work,
+and preserve all hypotheses under the target memory bound. An easy-case speedup
+well below real-time capacity is not a reason to choose a lower worst-case
+ceiling. Keep full FFT as the current default while qualifying alternatives.
+
 ## Current implementation
 
 The default compiled receiver uses its native CPU arithmetic and has no Torch
@@ -53,6 +86,30 @@ most 10 Hz and positive clock span at most 0.001 ppm) selects FP64. Receipts
 report the actual coarse and fine arithmetic, device/runtime and memory use.
 Fine Gaussian state retains the native higher-precision policy. No arithmetic
 is silently selected from the observed score or transmitted truth.
+
+### Portable FP32 mapping arithmetic
+
+FP32 mapped-basis rotation now declares `fp32-rn4-v1`: compute all four real
+products with separate round-to-nearest rounding, then round the real subtraction
+and imaginary addition separately. The fused CUDA mapper and native ATen
+reference implement the same contract; their exact comparison and independent
+arithmetic goldens remain required. The component identity reports
+`mapping_fp32_arithmetic_contract`. FP64 mapping is unchanged.
+
+This is an explicit arithmetic revision, not a device-specific tolerance or an
+assumption that installed C10 complex multiplication chooses the same FMA
+association on every CUDA architecture. The first Ada check reproduced an
+association difference after exact interpolation/phase/trigonometric agreement.
+The new contract passes the bounded actual RTX 4090 CUDA suite. An initial composite
+unit-rotation golden incorrectly assumed identical rounded sine/cosine values;
+its correction uses exact zero-angle and negative-integer phase wrap while
+preserving the independent multiplication goldens and exact mapper comparison.
+The corrected suite also retains the native receiver, near-decision, quiet and
+strong-Helper checks. This is scoped Ada evidence, not a cross-device guarantee.
+See [current outcomes](validation.md#representative-receiver-hardware-checks)
+and keep both original failures. Earlier automatic-FP32 fine results bind their old source
+and arithmetic; they cannot qualify this revision. Preserve the complete
+receiver's native comparison, near-decision, quiet and strong-Helper gates.
 
 ### Stage boundaries and optional matrix processing
 
@@ -151,6 +208,18 @@ hit/upload counters expose reuse. These counters do not establish hardware
 occupancy or instruction execution; retain actual-device profiling and complete
 elapsed costs as separate evidence.
 
+The maintained [native component mode](triad-performance.md#bounded-native-component-comparisons)
+checks the requested FP16/INT8 contractions and exact GPU peak reduction as
+separate production operations. It rejects matrix fallbacks as matrix
+qualification, binds fixture/input/device identities, and includes packing,
+preparation and search in its fresh-owner costs. Its three-pair ratios remain
+component evidence. The full FFT default and complete receiver qualification
+gates are unchanged.
+Its first actual RTX 4090 run passes both matrix modes and exact peak reduction
+within 6.439 s aggregate. The [source-bound results](validation.md#representative-receiver-hardware-checks)
+record the preceding failures and arithmetic revision; they do not qualify the
+laptop/4060 Ti/APU targets or instruction-level Tensor Core utilization.
+
 ### Existing qualification and remaining limits
 
 A requested CUDA backend must execute on CUDA or report unavailable; CPU fallback
@@ -181,15 +250,16 @@ alone does not establish matched observations or useful arithmetic fidelity.
 Predeclare a `--near-cn0` override before the one-row challenge when needed;
 do not choose it after seeing a favorable outcome.
 
-The active fused-mapper comparison requires its declared exact work gate. The
-first real row-5 pair changed adaptive prefix candidate work despite matching
+The historical active fused-mapper comparison required its declared exact work
+gate. The first real row-5 pair changed adaptive prefix candidate work despite matching
 retained-state/transition counts; an installed C10 versus fused final-multiply
 FMA difference was isolated. The explicit final-FMA repair passed exact
 pointwise, full-slot and failed-row checkpoint work/state checks on the actual
 RTX PRO 6000. That resolves the measured parity failure for the installed
-runtime; it is not a bitwise guarantee for other LibTorch/compiler/device
-combinations. The oracle must reject changed installed arithmetic. Preserve the
-original failure separately from the repaired run. Six exact paired looks show
+runtime; it was not a bitwise guarantee for other LibTorch/compiler/device
+combinations. The original failure and repaired run remain source-bound evidence;
+the [new explicit FP32 contract](#portable-fp32-mapping-arithmetic) replaces that
+installed-library association and needs its own qualification. Six exact paired looks show
 fine and receiver-phase improvements for one row/seed and bounded continuation;
 they do not establish whole-stream throughput or complete CPU forecasts. See
 [the current evidence](validation.md#native-throughput-and-precision-investigation).

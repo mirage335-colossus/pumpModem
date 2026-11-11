@@ -14,6 +14,25 @@ name: Native Robust CUDA validation
         description: Diagnostic GPU baseline establishment without a relative regression comparison
         type: boolean
         default: false
+      cuda_architectures:
+        description: Compile for the actual runner, Ada SM89, or Blackwell SM120
+        type: choice
+        options: [native, '89', '120']
+        default: native
+      components:
+        description: Optional bounded same-binary algorithm comparisons, separate from receiver regression
+        type: choice
+        options: ['off', fp16, int8, peaks, all]
+        default: 'off'
+      matrix_case:
+        description: One fixed native matrix geometry; does not select a hardware model
+        type: choice
+        options: ['0', '1']
+        default: '0'
+      device_workspace_mib:
+        description: Exact component workspace in MiB; peaks/all require 2048
+        type: number
+        default: 2048
 permissions:
   contents: read
 jobs:
@@ -28,6 +47,10 @@ jobs:
       LIBTORCH_PREFIX: ${{ inputs.libtorch_prefix }}
       REFERENCE_REF: ${{ inputs.reference_ref }}
       ESTABLISH_BASELINE: ${{ inputs.establish_baseline }}
+      CUDA_ARCHITECTURES: ${{ inputs.cuda_architectures }}
+      COMPONENTS: ${{ inputs.components }}
+      MATRIX_CASE: ${{ inputs.matrix_case }}
+      DEVICE_WORKSPACE_MIB: ${{ inputs.device_workspace_mib }}
       OMP_NUM_THREADS: '1'
       OPENBLAS_NUM_THREADS: '1'
       MKL_NUM_THREADS: '1'
@@ -39,6 +62,27 @@ jobs:
     - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
       with:
         python-version: '3.12'
+    - name: Validate CUDA test selection
+      run: |
+        case "$CUDA_ARCHITECTURES" in native|89|120) ;; *) echo 'Invalid CUDA architecture selection' >&2; exit 2 ;; esac
+        case "$COMPONENTS" in off|fp16|int8|peaks|all) ;; *) echo 'Invalid component selection' >&2; exit 2 ;; esac
+        case "$MATRIX_CASE" in 0|1) ;; *) echo 'Invalid matrix case selection' >&2; exit 2 ;; esac
+        if [[ ! "$DEVICE_WORKSPACE_MIB" =~ ^[1-9][0-9]{0,4}$ ]] || (( DEVICE_WORKSPACE_MIB > 65536 )); then
+          echo 'Component workspace must be an integer in [1,65536] MiB' >&2
+          exit 2
+        fi
+        if [[ "$COMPONENTS" = peaks || "$COMPONENTS" = all ]] && [[ "$DEVICE_WORKSPACE_MIB" != 2048 ]]; then
+          echo 'The fixed peak fixture requires exactly 2048 MiB' >&2
+          exit 2
+        fi
+        if [ "$CUDA_ARCHITECTURES" = native ]; then
+          cmake_version=$(cmake --version)
+          if [[ ! "$cmake_version" =~ ^cmake[[:space:]]version[[:space:]]([0-9]+)\.([0-9]+)\. ]] ||
+             (( BASH_REMATCH[1] < 3 || (BASH_REMATCH[1] == 3 && BASH_REMATCH[2] < 24) )); then
+            echo 'The native CUDA architecture selection requires CMake 3.24 or newer' >&2
+            exit 2
+          fi
+        fi
     - name: Select native reference
       id: reference
       run: |
@@ -47,22 +91,40 @@ jobs:
         python tools/triad-ci-reference.py --reference-ref "$REFERENCE_REF" "${options[@]}" --output build/triad-cuda-reference-selection.json --github-output "$GITHUB_OUTPUT"
     - name: Build native CUDA receiver and correctness checks
       run: |
+        case "$CUDA_ARCHITECTURES" in
+          native) unset TORCH_CUDA_ARCH_LIST ;;
+          89) export TORCH_CUDA_ARCH_LIST=8.9 ;;
+          120) export TORCH_CUDA_ARCH_LIST=12.0 ;;
+          *) echo 'Invalid CUDA architecture selection' >&2; exit 2 ;;
+        esac
         test -d "$LIBTORCH_PREFIX"
-        ./build.sh configure --cli --build-dir build/triad-cuda --jobs 2 -- -DCMAKE_PREFIX_PATH="$LIBTORCH_PREFIX" -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON
+        ./build.sh configure --cli --build-dir build/triad-cuda --jobs 2 -- -DCMAKE_PREFIX_PATH="$LIBTORCH_PREFIX" -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCHITECTURES" -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON
         cmake --build build/triad-cuda --target triad_receiver_probe test_triad_tensor_cuda --parallel 2
     - name: Require actual CUDA execution and precision checks
       run: |
         ctest --test-dir build/triad-cuda --output-on-failure -R '^triad_tensor_cuda$' --no-tests=error
         build/triad-cuda/triad_receiver_probe describe --backend cuda --require-accelerator on > build/triad-cuda-device.json
+    - name: Measure bounded native CUDA components
+      if: inputs.components != 'off'
+      run: |
+        options=()
+        if [ "$COMPONENTS" != peaks ]; then options+=(--matrix-case "$MATRIX_CASE"); fi
+        python tools/triad_abbreviated.py --output build/triad-cuda-components.json --probe build/triad-cuda/triad_receiver_probe --component-probe build/triad-cuda/test_triad_tensor --device cuda --components "$COMPONENTS" --device-workspace-mib "$DEVICE_WORKSPACE_MIB" --benchmark-deadline-ms 300000 "${options[@]}"
     - name: Build same-run native CUDA reference
       if: steps.reference.outputs.mode == 'compare'
       env:
         REFERENCE_SHA: ${{ steps.reference.outputs.reference_sha }}
       run: |
+        case "$CUDA_ARCHITECTURES" in
+          native) unset TORCH_CUDA_ARCH_LIST ;;
+          89) export TORCH_CUDA_ARCH_LIST=8.9 ;;
+          120) export TORCH_CUDA_ARCH_LIST=12.0 ;;
+          *) echo 'Invalid CUDA architecture selection' >&2; exit 2 ;;
+        esac
         git worktree add --detach "$RUNNER_TEMP/triad-cuda-reference" "$REFERENCE_SHA"
         (
           cd "$RUNNER_TEMP/triad-cuda-reference"
-          ./build.sh configure --cli --build-dir "$RUNNER_TEMP/triad-cuda-reference-build" --jobs 2 -- -DCMAKE_PREFIX_PATH="$LIBTORCH_PREFIX" -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON
+          ./build.sh configure --cli --build-dir "$RUNNER_TEMP/triad-cuda-reference-build" --jobs 2 -- -DCMAKE_PREFIX_PATH="$LIBTORCH_PREFIX" -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCHITECTURES" -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON
           cmake --build "$RUNNER_TEMP/triad-cuda-reference-build" --target triad_receiver_probe --parallel 2
         )
     - name: Measure bounded native CUDA reference
@@ -87,12 +149,18 @@ jobs:
         path = Path('build/triad-cuda-candidate.json')
         result = json.loads(path.read_text()) if path.is_file() else {}
         status = result.get('status', 'not_measured')
+        component_path = Path('build/triad-cuda-components.json')
+        components = json.loads(component_path.read_text()) if component_path.is_file() else {}
+        component_status = components.get('status', 'not_requested' if os.environ['COMPONENTS'] == 'off' else 'not_measured')
         relative_pass = os.environ['REFERENCE_MODE'] == 'compare' and status == 'no_material_slowdown_for_measured_kernels'
         with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
             stream.write(f'Native CUDA performance status: **{status}**.\n\n')
             stream.write(f'Relative regression pass: **{str(relative_pass).lower()}**. '
                          'This bounded check does not establish complete CPU capacity or a GPU-to-CPU forecast. '
                          'Forecasts require current local native phase calibration and independent holdouts.\n')
+            stream.write(f'\nNative component status: **{component_status}**. '
+                         'These are bounded same-binary algorithm comparisons, not a relative-commit regression pass, '
+                         'sustained receiver capacity, or Tensor Core utilization measurement.\n')
         PY
     - name: Retain native CUDA receipts
       if: always()

@@ -36,12 +36,24 @@ endif()
 add_executable(triad_receiver_probe EXCLUDE_FROM_ALL tools/triad-receiver-probe.cpp)
 target_include_directories(triad_receiver_probe PRIVATE src tools)
 target_link_libraries(triad_receiver_probe PRIVATE datapump_robust_session)
-target_compile_definitions(triad_receiver_probe PRIVATE
+set(_triad_probe_identity_definitions
   DATAPUMP_TRIAD_PROBE_SOURCE_SHA="${_triad_probe_source_sha}"
   DATAPUMP_TRIAD_PROBE_SOURCE_COMMIT="${_source_commit}"
   DATAPUMP_TRIAD_PROBE_COMPILER="${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}"
   DATAPUMP_TRIAD_PROBE_CONFIG="$<CONFIG>"
   DATAPUMP_TRIAD_PROBE_BUILD_SHA="${_triad_probe_build_sha}")
+target_compile_definitions(triad_receiver_probe PRIVATE ${_triad_probe_identity_definitions})
+
+# Component measurements exercise the same production libraries, but also
+# bind the separate numerical fixture and timing boundary to its exact source.
+if(TARGET test_triad_tensor)
+  set(_triad_component_source "${PROJECT_SOURCE_DIR}/tests/test_triad_tensor.cpp")
+  file(SHA256 "${_triad_component_source}" _triad_component_source_sha)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_triad_component_source}")
+  target_include_directories(test_triad_tensor PRIVATE tools)
+  target_compile_definitions(test_triad_tensor PRIVATE ${_triad_probe_identity_definitions}
+    DATAPUMP_TRIAD_COMPONENT_SOURCE_SHA="${_triad_component_source_sha}")
+endif()
 
 if(BUILD_TESTING AND Python3_Interpreter_FOUND)
   add_test(NAME triad_receiver_probe COMMAND "${Python3_EXECUTABLE}"

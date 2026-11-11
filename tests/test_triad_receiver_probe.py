@@ -18,6 +18,7 @@ def main(executable):
         assert receipt["schema"] == "datapump.triad.native-probe.v1"
         assert receipt["command"] == command
         assert receipt["identity"]["implementation"] == "native-production-receiver"
+        assert receipt["identity"]["cpu_fft_kernel"] in ("avx2", "scalar")
         assert re.fullmatch("[0-9a-f]{64}", receipt["identity"]["source_manifest_sha256"])
         return receipt
 

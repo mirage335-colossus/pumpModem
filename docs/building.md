@@ -580,11 +580,36 @@ The opt-in `triad-gpu` workflow requires a preprovisioned self-hosted
 `linux/x64/datapump-cuda` runner and CUDA-enabled C++11-ABI LibTorch. It builds the
 same native stack with `DATAPUMP_TRIAD_TENSOR=ON` and
 `DATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON`. The CUDA implementation requires NVCC
-and the CUDA SDK; the measured SM 120 Blackwell checkpoint explicitly used
-`-DCMAKE_CUDA_ARCHITECTURES=120` and `TORCH_CUDA_ARCH_LIST=12.0`. Other devices
-need their applicable architecture. The workflow executes `triad_tensor_cuda` and a probe
+and the CUDA SDK. The workflow's `cuda_architectures` input applies to both
+candidate and reference: `native` (default, requires CMake 3.24 or newer),
+`89` for the representative Ada targets, or `120` for Blackwell. Explicit
+choices set `TORCH_CUDA_ARCH_LIST` to `8.9` or `12.0`; `native` clears an inherited
+value so stale environment selection cannot override the actual runner. This
+selection is compilation coverage, not a measurement on the named GPU.
+
+For a local Ada build with preinstalled CUDA-enabled C++11-ABI LibTorch,
+set `LIBTORCH_PREFIX` to its absolute CMake prefix:
+
+```sh
+TORCH_CUDA_ARCH_LIST=8.9 ./build.sh configure --cli --build-dir build/triad-cuda --jobs 2 -- \
+  -DCMAKE_PREFIX_PATH="$LIBTORCH_PREFIX" -DCMAKE_CUDA_ARCHITECTURES=89 \
+  -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON
+cmake --build build/triad-cuda --target triad_receiver_probe test_triad_tensor_cuda --parallel 2
+ctest --test-dir build/triad-cuda --output-on-failure -R '^triad_tensor_cuda$' --no-tests=error
+```
+
+Use the actual device's architecture for other GPUs. The workflow executes
+`triad_tensor_cuda` and a probe
 that requires actual accelerator execution, then performs a bounded matched
-CUDA regression. The workflow does not launch or purchase cloud capacity.
+CUDA regression. Optional `components=fp16|int8|peaks|all` (default `off`) also
+runs the [bounded native component mode](triad-performance.md#bounded-native-component-comparisons)
+with one selected `matrix_case=0|1`, exact `device_workspace_mib` (default 2048)
+and a 300-second aggregate deadline. `peaks`/`all` require exactly 2048 MiB.
+Its separate receipt and CI summary cannot supply a relative-commit regression
+or capacity pass. CUDA device zero is the visible device; configure
+`CUDA_VISIBLE_DEVICES` on the runner when selection is necessary. This workflow
+does not provision a runner, launch or purchase cloud capacity, or implement an
+AMD GPU backend. Use CPU checks separately on the representative Ryzen systems.
 Configured workflow coverage is not evidence of an actual hosted/platform run;
 see [recorded outcomes](validation.md#native-codec-and-measurement-migration).
 

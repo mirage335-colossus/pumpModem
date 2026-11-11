@@ -1,6 +1,8 @@
 """Cheap inference and refusal checks; no performance campaign is executed."""
 from pathlib import Path
 import copy
+import contextlib
+import io
 import json
 import subprocess
 import tempfile
@@ -406,6 +408,266 @@ class AbbreviatedTests(unittest.TestCase):
         self.assertEqual(result["stream_preflight"]["command"], "message")
         self.assertEqual(result["batches"]["active"][0]["receipts"][0]["command"], "regression")
         self.assertEqual(result["kernels"], {})
+
+
+def component_description():
+    result = device_receipt()
+    result.update(command="describe", phases=[], observation=None)
+    result["identity"]["backend_receipt"].update(total_device_bytes=16 * 2**30,
+        initial_free_device_bytes=15 * 2**30, workspace_limit_bytes=2 * 2**30)
+    return result
+
+
+def component_identity():
+    description = component_description()["identity"]
+    return {"schema": abbreviated.COMPONENT_IDENTITY_SCHEMA,
+            **{name: description[name] for name in abbreviated.COMPONENT_BUILD},
+            **{name: description["backend_receipt"][name] for name in abbreviated.COMPONENT_RUNTIME},
+            "fixture_source_sha256": "9" * 64, "initial_free_device_bytes": 15 * 2**30,
+            "workspace_limit_bytes": 2 * 2**30, "actual_device_work": False}
+
+
+def component_rows(component="fp16", case=0):
+    matrix = component != "peaks"
+    k, f, a, w, taps, nfft = abbreviated.MATRIX_SHAPES[case] if matrix else (8989, 32, 10553, 78, 2, 32768)
+    modes = ("fft", component) if matrix else ("full_scores_host_nms", "cuda_frontier")
+    rows = []
+    for look in (1, 2, 3):
+        for index, mode in enumerate(modes):
+            row = {"schema": "native_coarse_bulk_benchmark_v1" if matrix else "native_arrival_peak_benchmark_v1",
+                   "scope": "post_channelization_CoarseBulk" if matrix else "synthetic_native_bulk_geometry",
+                   "kernel": k, "frequencies": f, "arrivals": a, "workspaces": w, "taps": taps,
+                   "correlation_fft_rows": nfft, "look": look, "input_fnv1a64": "1234",
+                   "initialized_device": True, "fresh_owner_excludes_teardown": True,
+                   "owner_seconds": .001, "prepare_seconds": .002,
+                   "first_lag_seconds" if matrix else "search_seconds": .003 if index else .009,
+                   "fresh_owner_seconds": .006 if index else .012,
+                   "workspace_limit_bytes": 2 * 2**30, "peak_reserved_bytes": 1000,
+                   "allocator_peak_reserved_bytes": 2000, "upload_bytes": 3000, "download_bytes": 4000,
+                   "synchronizations": 5, "score_rows": w * f * a * (2 if matrix else 1)}
+            if matrix:
+                row.update(math=mode, comparison_math=component, candidate_first=look % 2 == 0,
+                    benchmark_case=case, resident_reuses_immutable_input=True, independent_dft_checks=19,
+                    input_hash_encoding="fnv1a64_le_geometry_observation_templates_and_lag_plan_v1",
+                    resident_lag_seconds=.002 if index else .008, normalized_score_error=0.,
+                    matrix_calls=4 if index else 0, matrix_inner_chunks=4 if index else 0,
+                    matrix_fp16_calls=4 if mode == "fp16" else 0, matrix_int8_calls=4 if mode == "int8" else 0,
+                    matrix_fft_fallback_counts=[0] * 6, matrix_saturated_values=0, matrix_nonfinite_values=0,
+                    matrix_output_values=2 * taps * w * f * a if index else 0,
+                    matrix_maximum_rows=4096 if index else 0, matrix_maximum_columns=f if index else 0,
+                    matrix_maximum_inner=k if index else 0, matrix_padded_real_macs=100 if index else 0,
+                    matrix_packed_values=100 if index else 0, fft_calls=1 if index else 10)
+                identity = component_identity()
+                row.update({name: identity[name] for name in ("cuda_runtime_version", "cuda_driver_version",
+                    "cuda_blas_version", "cuda_compute_major", "cuda_compute_minor")})
+            else:
+                row.update(mode=mode, compressed_first=look % 2 == 0, separation=17, independent_dft_points=16,
+                    forward_ffts=f, inverse_ffts=w * f * taps,
+                    fft_row_stages=(f + w * f * taps) * nfft * (nfft.bit_length() - 1),
+                    cuda_arrival_peak_rows=w * f if index else 0,
+                    cuda_arrival_peak_values=w * f * a if index else 0,
+                    download_bytes=w * f * 40 if index else w * f * a * 8)
+            rows.append(row)
+    return rows
+
+
+class ComponentFixtureProbe:
+    changed = False
+
+    def __init__(self, executable, *, backend):
+        self.path = Path(executable)
+        self.executable_sha256 = "8" * 64 if "test_triad_tensor" in str(executable) else "7" * 64
+
+    def call(self, command, **options):
+        assert command == "describe"
+        return component_description()
+
+    def verify_unchanged(self):
+        if self.changed:
+            raise ProbeError("Native executable changed during measurement")
+
+
+def component_process(argv, **kwargs):
+    identity = component_identity()
+    if "--component-describe" in argv:
+        identity["workspace_limit_bytes"] = 128 * 2**20
+        rows = [identity]
+    else:
+        choice = "peaks" if "--peak-benchmark" in argv else argv[argv.index("--matrix-math") + 1]
+        case = int(argv[argv.index("--matrix-benchmark-case") + 1]) if choice != "peaks" else 0
+        rows = [identity, *component_rows(choice, case)]
+    return subprocess.CompletedProcess(argv, 0, b"\n".join(json.dumps(row).encode() for row in rows) + b"\n", b"")
+
+
+class ComponentTests(unittest.TestCase):
+    def validate(self, rows, component="fp16", case=0):
+        return abbreviated.validate_component_rows(rows, component, case, 2 * 2**30, component_identity())
+
+    def test_fixed_matrix_and_peak_pairs_keep_separate_claim_scope(self):
+        for choice in ("fp16", "int8", "peaks"):
+            for case in (0, 1) if choice != "peaks" else (0,):
+                result = self.validate(component_rows(choice, case), choice, case)
+                self.assertEqual(result["status"], "component_checks_passed")
+                self.assertEqual(len(result["rows"]), 6)
+                self.assertAlmostEqual(result["comparisons"]["fresh_owner_seconds"]["geometric_mean_ratio"], .5)
+                self.assertEqual(result["tensor_core_instruction_evidence"], "not_collected_by_this_timing_test")
+
+    def test_missing_duplicate_look_input_geometry_and_runtime_drift_rejected(self):
+        for key, value in (("look", 1), ("input_fnv1a64", "777"), ("frequencies", 128),
+                           ("cuda_compute_major", 8), ("candidate_first", False), ("benchmark_case", True)):
+            rows = component_rows()
+            rows[3][key] = value
+            with self.subTest(key=key), self.assertRaises(ProbeError):
+                self.validate(rows)
+        for rows in (component_rows()[:-1], component_rows() + [component_rows()[0]]):
+            with self.assertRaises(ProbeError):
+                self.validate(rows)
+
+    def test_nonfinite_nonpositive_and_partial_cost_timings_rejected(self):
+        for key, value in (("fresh_owner_seconds", float("nan")), ("resident_lag_seconds", 0),
+                           ("prepare_seconds", -1), ("fresh_owner_seconds", .003),
+                           ("normalized_score_error", .0021)):
+            rows = component_rows()
+            rows[1][key] = value
+            with self.subTest(key=key, value=value), self.assertRaises(ProbeError):
+                self.validate(rows)
+
+    def test_matrix_request_is_not_evidence_of_executed_arithmetic(self):
+        for key, value in (("matrix_calls", 0), ("matrix_int8_calls", 1),
+                           ("matrix_fft_fallback_counts", [0, 0, 0, 1, 0, 0]),
+                           ("matrix_fft_fallback_counts", [0]), ("matrix_output_values", 1),
+                           ("matrix_saturated_values", 1), ("matrix_nonfinite_values", 1),
+                           ("matrix_maximum_rows", 1024), ("score_rows", 1),
+                           ("allocator_peak_reserved_bytes", 2 * 2**30 + 1)):
+            rows = component_rows()
+            rows[1][key] = value
+            with self.subTest(key=key), self.assertRaises(ProbeError):
+                self.validate(rows)
+
+    def test_peak_reduction_preserves_full_grid_and_exact_frontier_payload(self):
+        for key in ("score_rows", "inverse_ffts", "fft_row_stages", "cuda_arrival_peak_rows",
+                    "cuda_arrival_peak_values", "download_bytes"):
+            rows = component_rows("peaks")
+            rows[1][key] -= 1
+            with self.subTest(key=key), self.assertRaises(ProbeError):
+                self.validate(rows, "peaks")
+
+    def test_identity_binds_fixture_and_actual_device_without_free_memory_equality(self):
+        identity = component_identity()
+        changed_free = dict(identity, initial_free_device_bytes=12 * 2**30, workspace_limit_bytes=128 * 2**20)
+        abbreviated.component_identity(changed_free, component_description(), identity)
+        for key, value in (("source_manifest_sha256", "f" * 64), ("fixture_source_sha256", "f" * 64),
+                           ("cuda", False), ("device_name", "Another GPU"), ("actual_device_work", True)):
+            changed = dict(identity, **{key: value})
+            with self.subTest(key=key), self.assertRaises(ProbeError):
+                abbreviated.component_identity(changed, component_description(), identity)
+
+    def run_fake(self, *, process=component_process, **options):
+        ComponentFixtureProbe.changed = False
+        with patch.object(abbreviated, "NativeProbe", ComponentFixtureProbe), patch.object(
+                abbreviated.subprocess, "run", side_effect=process):
+            return abbreviated.run_components(executable=Path("build/probe"), **options)
+
+    def test_bounded_all_mode_runs_only_two_describes_and_three_native_comparisons(self):
+        result = self.run_fake()
+        self.assertEqual(result["schema"], abbreviated.COMPONENT_SCHEMA)
+        self.assertEqual(result["status"], "component_checks_passed")
+        self.assertEqual(result["run_budget"]["native_calls"], 5)
+        self.assertEqual([entry["component"] for entry in result["components"]], ["fp16", "int8", "peaks"])
+        self.assertFalse(result["complete_receiver_capacity_qualified"])
+        self.assertFalse(result["cpu_forecast_qualified"])
+        self.assertFalse(result["relative_commit_regression_pass"])
+
+    def test_failure_preserves_partial_evidence_and_does_not_retry(self):
+        def fail(argv, **kwargs):
+            if "--matrix-math" in argv and argv[argv.index("--matrix-math") + 1] == "int8":
+                return subprocess.CompletedProcess(argv, 1, b'{"partial":true}\n', b"frozen numerical gate failed")
+            return component_process(argv, **kwargs)
+        result = self.run_fake(process=fail)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["run_budget"]["native_calls"], 4)
+        self.assertEqual(len(result["components"]), 1)
+        self.assertIn("frozen numerical gate failed", result["calls"][-1]["stderr"])
+        self.assertNotIn("identity_verified_at_completion", result)
+
+    def test_timeout_and_binary_drift_cannot_report_component_pass(self):
+        def expired(argv, **kwargs):
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"], output=b'{"partial":true}\n')
+        result = self.run_fake(process=expired)
+        self.assertEqual(result["status"], "incomplete")
+        self.assertTrue(result["calls"][-1]["timed_out"])
+        self.assertEqual(result["run_budget"]["native_calls"], 2)
+        def drift(argv, **kwargs):
+            result = component_process(argv, **kwargs)
+            ComponentFixtureProbe.changed = True
+            return result
+        result = self.run_fake(process=drift)
+        self.assertEqual(result["status"], "error")
+        self.assertIn("changed", result["reason"])
+        result = self.run_fake(benchmark_deadline_ms=1)
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["run_budget"]["native_calls"], 0)
+
+    def test_unavailable_receiver_stops_before_component_execution(self):
+        unavailable = component_description()
+        unavailable.update(status="unavailable", reason="CUDA not available in this runtime")
+        with patch.object(ComponentFixtureProbe, "call", return_value=unavailable), patch.object(
+                abbreviated, "NativeProbe", ComponentFixtureProbe), patch.object(abbreviated.subprocess, "run") as launch:
+            ComponentFixtureProbe.changed = False
+            result = abbreviated.run_components(executable=Path("build/probe"))
+        launch.assert_not_called()
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["run_budget"]["native_calls"], 1)
+        self.assertEqual(result["components"], [])
+
+    def test_changed_compiled_source_and_malformed_json_stop_before_benchmark(self):
+        def mismatch(argv, **kwargs):
+            identity = component_identity()
+            identity["source_manifest_sha256"] = "f" * 64
+            return subprocess.CompletedProcess(argv, 0, json.dumps(identity).encode() + b"\n", b"")
+        result = self.run_fake(process=mismatch)
+        self.assertEqual(result["status"], "error")
+        self.assertIn("identity mismatch", result["reason"])
+        self.assertEqual(result["run_budget"]["native_calls"], 2)
+        def duplicate(argv, **kwargs):
+            return subprocess.CompletedProcess(argv, 0, b'{"schema":"first","schema":"second"}\n', b"")
+        result = self.run_fake(process=duplicate)
+        self.assertEqual(result["status"], "error")
+        self.assertIn("Duplicate JSON", result["reason"])
+
+    def test_all_arithmetic_comparisons_share_input_and_deadline_preserves_prior_rows(self):
+        def changed_input(argv, **kwargs):
+            result = component_process(argv, **kwargs)
+            if "--matrix-math" in argv and argv[argv.index("--matrix-math") + 1] == "int8":
+                rows = [json.loads(line) for line in result.stdout.splitlines()]
+                for row in rows[1:]:
+                    row["input_fnv1a64"] = "9876"
+                result.stdout = b"\n".join(json.dumps(row).encode() for row in rows) + b"\n"
+            return result
+        result = self.run_fake(process=changed_input)
+        self.assertEqual(result["status"], "error")
+        self.assertIn("changed the fixed input", result["reason"])
+        self.assertEqual(len(result["components"]), 1)
+        def expired_second(argv, **kwargs):
+            if "--matrix-math" in argv and argv[argv.index("--matrix-math") + 1] == "int8":
+                raise subprocess.TimeoutExpired(argv, kwargs["timeout"], output=b"partial second arithmetic")
+            return component_process(argv, **kwargs)
+        result = self.run_fake(process=expired_second)
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(len(result["components"]), 1)
+        self.assertEqual(result["run_budget"]["native_calls"], 4)
+        self.assertEqual(result["calls"][-1]["stdout"], "partial second arithmetic")
+
+    def test_component_cli_rejects_cpu_forecast_and_ignored_options(self):
+        invalid = (("--device", "cpu"), ("--baseline", "old.json"), ("--cases",),
+                   ("--target-units", "1000"), ("--device-index", "0"), ("--threads", "24"))
+        for options in invalid:
+            with self.subTest(options=options), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                abbreviated.main(["--output", "unused.json", "--device", "cuda", "--components", "all", *options])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            abbreviated.main(["--output", "unused.json", "--device", "cuda", "--components", "peaks", "--matrix-case", "0"])
+        with self.assertRaises(ProbeError):
+            abbreviated.run_components(components="peaks", workspace_mib=1024)
 
 
 if __name__ == "__main__":

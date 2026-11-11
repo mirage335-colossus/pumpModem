@@ -8,6 +8,24 @@
 
 namespace datapump::triad::v3::receiver_detail {
 
+inline constexpr char mapping_c64_arithmetic_contract[] = "fp32-rn4-v1";
+
+// Four eager FP32 products establish the same explicit rounding boundaries as
+// the fused CUDA mapper. Materialize every product before updating either
+// component; complex multiplication may choose an architecture-dependent FMA.
+inline void rotate_mapping_c64(at::Tensor values, const at::Tensor& cosine, const at::Tensor& sine) {
+    const auto real = at::real(values);
+    const auto imag = at::imag(values);
+    auto real_cosine = real * cosine;
+    const auto imag_sine = imag * sine;
+    auto real_sine = real * sine;
+    const auto imag_cosine = imag * cosine;
+    real_cosine.sub_(imag_sine);
+    real_sine.add_(imag_cosine);
+    real.copy_(real_cosine);
+    imag.copy_(real_sine);
+}
+
 inline void render_aten_mapping(at::Tensor output, const at::Tensor& tile_storage, const at::Tensor& maps,
                                const at::Tensor& indices, const at::Tensor& offsets, at::ScalarType real_type,
                                std::int64_t tile_samples, std::int64_t maximum_pins) {
@@ -35,7 +53,15 @@ inline void render_aten_mapping(at::Tensor output, const at::Tensor& tile_storag
     }
     const auto cycles = maps.narrow(1, 2, 1) + maps.narrow(1, 3, 1) * offsets;
     const auto angle = ((cycles - cycles.floor()) * (2 * std::numbers::pi)).to(real_type);
-    values.mul_(at::complex(angle.cos(), angle.sin()));
+    if (real_type == at::kFloat) {
+        // Named mapping tensors through angle occupy 76 bytes per row/lane;
+        // cosine/sine plus the four product arrays add 24. These 100 bytes fit
+        // the existing 224-byte mapping reservation. Component views and the
+        // in-place sums/copies allocate no additional full-row tensors.
+        rotate_mapping_c64(values, angle.cos(), angle.sin());
+    } else {
+        values.mul_(at::complex(angle.cos(), angle.sin()));
+    }
     output.index_copy_(0, indices.select(1, 2), values);
 }
 
