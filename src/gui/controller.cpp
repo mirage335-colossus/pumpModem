@@ -138,6 +138,14 @@ std::string exact_frequency_text(double hz) {
 }
 
 }
+std::string gpu_search_diagnostics(const live::Snapshot& snapshot) {
+    auto text = snapshot.gpu_score_rows
+        ? "GPU search + native tracking · " + std::to_string(snapshot.gpu_score_rows) + " rows"
+        : std::string("GPU ready + native tracking");
+    if(snapshot.gpu_native_coarse_lag_sessions) text += " · native lag search selected";
+    return text + " · " + snapshot.gpu_device;
+}
+
 struct Controller::Impl {
     Options options;
     std::array<ui::FieldState,static_cast<std::size_t>(UiField::count)> fields;
@@ -1116,6 +1124,7 @@ struct Controller::Impl {
             value.receiver_error!=snapshot.receiver_error||value.transmitting!=snapshot.transmitting||
             value.running!=snapshot.running||value.bit_seconds!=snapshot.bit_seconds||
             value.gpu_device!=snapshot.gpu_device||value.gpu_score_rows!=snapshot.gpu_score_rows||
+            value.gpu_native_coarse_lag_sessions!=snapshot.gpu_native_coarse_lag_sessions||
             value.transmit_trace.revision!=snapshot.transmit_trace.revision;
         snapshot=std::move(value);
         apply_receptions(inbox,signals,snapshot);
@@ -1128,16 +1137,16 @@ struct Controller::Impl {
         f(UiField::diagnostics).text=snapshot.receiver_error;
         if(f(UiField::diagnostics).text.empty()) {
             if(settings.gpu&&!snapshot.gpu_device.empty()) {
-                if(snapshot.gpu_score_rows)
-                    f(UiField::diagnostics).text="GPU search + native tracking · "+std::to_string(snapshot.gpu_score_rows)+
-                        " rows · "+snapshot.gpu_device;
-                else f(UiField::diagnostics).text="GPU ready + native tracking · "+snapshot.gpu_device;
+                f(UiField::diagnostics).text=gpu_search_diagnostics(snapshot);
                 if(snapshot.bit_seconds)
                     f(UiField::diagnostics).text+=" · modeled DATA duration "+planner_number(*snapshot.bit_seconds)+" s · configured calendar";
-            } else if(snapshot.bit_seconds)
-                f(UiField::diagnostics).text=settings.transfer.modem.search_arithmetic==modem::SearchArithmetic::fp64
-                    ?"Native FP64 force · modeled DATA duration "+planner_number(*snapshot.bit_seconds)+" s · configured calendar"
-                    :"Native automatic precision · modeled DATA duration "+planner_number(*snapshot.bit_seconds)+" s · configured calendar";
+            } else if(snapshot.bit_seconds) {
+                const auto arithmetic=settings.transfer.modem.search_arithmetic;
+                const auto* policy=arithmetic==modem::SearchArithmetic::fp64?"Native FP64 force":
+                    arithmetic==modem::SearchArithmetic::fp32?"Native FP32 minimum":"Native automatic precision";
+                f(UiField::diagnostics).text=std::string(policy)+" · modeled DATA duration "+
+                    planner_number(*snapshot.bit_seconds)+" s · configured calendar";
+            }
         }
         const auto& trace=snapshot.transmit_trace;
         std::string active_fhss;

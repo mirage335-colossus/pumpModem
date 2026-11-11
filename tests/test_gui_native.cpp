@@ -1,6 +1,7 @@
 #include "../src/gui/state.hpp"
 #include "../src/gui/record_presentations.hpp"
 #include "../src/gui/application.hpp"
+#include "../src/gui/controller.hpp"
 #include "../src/gui/transmit_scope.hpp"
 #include "datapump/live.hpp"
 #include <algorithm>
@@ -111,6 +112,21 @@ void shared_gpu_toggle() {
         catch(const Error&) {unsupported=true;}
         check(unsupported);
     }
+}
+void gpu_route_diagnostics() {
+    live::Snapshot snapshot;
+    snapshot.gpu_device="fixture GPU";
+    check(gui::gpu_search_diagnostics(snapshot)=="GPU ready + native tracking · fixture GPU");
+    // Selection may be reported before any completed CPU or GPU scoring.
+    snapshot.gpu_native_coarse_lag_sessions=1;
+    check(gui::gpu_search_diagnostics(snapshot)==
+          "GPU ready + native tracking · native lag search selected · fixture GPU");
+    snapshot.gpu_score_rows=42;
+    check(gui::gpu_search_diagnostics(snapshot)==
+          "GPU search + native tracking · 42 rows · native lag search selected · fixture GPU");
+    snapshot.gpu_native_coarse_lag_sessions=0;
+    check(gui::gpu_search_diagnostics(snapshot)==
+          "GPU search + native tracking · 42 rows · fixture GPU");
 }
 void text_and_raw_draft_boundaries() {
     using F=gui::ui::Field;using C=gui::ui::Command;
@@ -315,6 +331,7 @@ int main() {
         planner_quick_references();
         shared_robust_target();
         shared_gpu_toggle();
+        gpu_route_diagnostics();
         text_and_raw_draft_boundaries();
         pending_transmit_trace();
         retained_raw_bits();

@@ -46,6 +46,11 @@ struct BulkReceipt {
     // Exact CUDA arrival selection, credited after validated frontier readback.
     std::uint64_t cuda_arrival_peak_rows = 0, cuda_arrival_peak_values = 0;
     std::uint64_t vulkan_dispatches = 0, vulkan_arrival_peak_rows = 0, vulkan_arrival_peak_values = 0;
+    std::uint64_t vulkan_fp32_score_rows = 0, vulkan_fp16_storage_score_rows = 0;
+    std::uint64_t vulkan_direct_dot_terms = 0;
+    std::uint64_t vulkan_direct_fp32_score_rows = 0, vulkan_direct_fp16_score_rows = 0;
+    std::uint64_t vulkan_direct_fp16_storage_score_rows = 0;
+    double vulkan_direct_dot_seconds = 0;
     std::uint64_t vulkan_peak_owner_bytes = 0, vulkan_active_sessions = 0;
     std::uint64_t vulkan_fft_cache_hits = 0, vulkan_fft_cache_misses = 0;
     double vulkan_fft_plan_seconds = 0, vulkan_shader_compile_seconds = 0;
@@ -187,6 +192,7 @@ using CoarsePeakSink = std::function<void(std::size_t first_workspace, std::size
 class CoarseBulk {
 public:
     virtual ~CoarseBulk() = default;
+    virtual std::string_view precision_reason() const noexcept { return {}; }
     // False keeps the canonical native FIR/channelizer before device upload.
     // It does not permit a fallback after any device operation has started.
     virtual bool supports_fir() const noexcept { return true; }
@@ -220,6 +226,7 @@ class ReceiverBulkBackend {
 public:
     virtual ~ReceiverBulkBackend() = default;
     virtual bool supports_fine() const noexcept { return true; }
+    virtual bool permits_native_exact_chirp_z() const noexcept { return false; }
     // Pure public-geometry selection, shared by preflight and construction.
     // Empty means the backend must construct the requested coarse session.
     virtual std::string_view coarse_fallback_reason(double, double, CoarseRoute) const noexcept { return {}; }

@@ -8,6 +8,9 @@
 #include <memory>
 
 namespace datapump::gui {
+// Display validated GPU scoring and native lag-route selection separately.
+// Selection is not a claim that native search has completed.
+std::string gpu_search_diagnostics(const live::Snapshot&);
 // Owns application state and workers. Invoke on one UI thread. Poll every 40 ms
 // independently of paint cadence; no method calls a toolkit or enters its loop.
 class Controller {

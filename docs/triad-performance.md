@@ -235,12 +235,21 @@ Retain the separate first-use compilation costs and measured memory charges.
 ### Native CPU arithmetic comparison
 
 The operating [automatic CPU policy](search-arithmetic.md) can use qualified
-post-filter FP32 frequency FFTs while retaining double-precision conditioning,
-coordinates, scores and fine state. The probe's
-`--native-coarse-precision automatic|fp64` records the requested policy in runtime
-identity and the actual selection/reason/scales in work receipts. Keep policies
-matched for ordinary regression baselines; a precision comparison explicitly
-declares that difference. Explicit FP64 is available only for the CPU reference.
+post-filter Q15 spectral products with FP32 FFTs or FP32 products/FFTs, while
+retaining double-precision conditioning, coordinates, scores and fine state. The
+probe's `--native-coarse-precision automatic|fp32|fp64|q15` records the requested
+policy in runtime identity and actual selection/reason/scales in work receipts.
+Automatic can instead select the scoped exact one-arrival FP64 chirp-Z route
+when its public-geometry cost estimate favors it by at least fourfold. Explicit
+FP32, FP64 and Q15 retain the frequency comparator on that geometry.
+The normal GUI's GPU Default setting can also choose native chirp-Z for a
+qualified Radeon/public-geometry and worker-adjusted crossover; a strict
+accelerator probe or explicit GPU precision still requires device work. Do not
+interpret a hybrid/native receipt as actual GPU scoring or a GPU speedup.
+Explicit Q15 rejects unsupported geometry; explicit FP64 is the CPU reference.
+Keep policies matched for ordinary regression baselines; a precision comparison
+explicitly declares the difference. See the operating guide for current hardware
+and geometry bounds and the distinction between Q15 products and an integer FFT.
 
 After relevant numerical checks, the optional compiled test target provides two
 fixed CPU-only comparisons without creating a Vulkan device:
@@ -252,13 +261,17 @@ fixed CPU-only comparisons without creating a Vulkan device:
 
 Each uses the same declared narrow or wide geometry above, full `W=2*H`, one
 separate first-use pair and three alternating explicit-FP64/automatic pairs
-under a 120-second cap. Input, template-bank conditioning, public work and exact
-candidate coordinates must agree, with the unchanged `3e-6` score gate. Report
-actual arithmetic and any FP64 exclusion; an automatic request on an unqualified
-CPU is not an FP32 measurement. Timings include preparation through owner
-teardown. Compare against the unchanged combined FP64 preparation schedule;
-additional control-only dispatches would bias the result. These are complete
-coarse-phase comparisons, not whole-receiver capacity or backlog tests.
+under a 120-second cap. These fixed two-ray fixtures exercise automatic FP32
+against FP64, not the single-ray Q15 route. Input, template-bank conditioning,
+public work and exact candidate coordinates must agree; the fixture retains its
+original `3e-6` score diagnostic. That fixed numerical comparison does not by
+itself qualify or reject a different Q15 geometry under the user's proportional
+sensitivity-versus-computation policy. Report actual arithmetic and any FP64
+exclusion; an automatic request on an unqualified CPU is not an FP32
+measurement. Timings include preparation through owner teardown. Compare against
+the unchanged combined FP64 preparation schedule; additional control-only
+dispatches would bias the result. These are complete coarse-phase comparisons,
+not whole-receiver capacity or backlog tests.
 
 ### Radeon arithmetic ceilings
 

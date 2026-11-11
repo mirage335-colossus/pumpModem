@@ -40,11 +40,18 @@ public:
     using Error::Error;
 };
 
+enum class VulkanCoarsePrecision { automatic, fp32, fp16_storage, direct_fp32, direct_fp16_storage, direct_fp16 };
+
 struct VulkanReceiverOptions {
     unsigned device_index = 0;
     // Per-coarse-owner allocation ceiling. On integrated GPUs this storage
     // consumes host RAM and is included in the native DSP preflight.
     std::size_t workspace_bytes = 0;
+    // Automatic selects reduced precision on qualified hardware and geometry.
+    VulkanCoarsePrecision coarse_precision = VulkanCoarsePrecision::automatic;
+    // Applications can permit a qualified native chirp-Z route before
+    // device scoring. Explicit device probes retain the default.
+    bool prefer_native_exact_chirp_z = false;
 };
 
 // Optional native Vulkan broad-frequency search. Channelization, fine state,

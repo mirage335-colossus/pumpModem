@@ -78,6 +78,7 @@ void require(bool condition, const char* message) {
 struct Options {
     std::string command, scenario, backend = "cpu", stratum = "active", tensor_precision = "automatic";
     std::string tensor_coarse_math = "fft";
+    std::string vulkan_precision = "automatic";
     std::string native_coarse_precision = "automatic";
     std::string base = "exact-fixture", shift = "exact-fixture";
     std::string spread = "none", selective = "off", timing = "fixture";
@@ -168,6 +169,7 @@ Options parse(int argc, char** argv) {
     assign("--backend", o.backend);
     assign("--tensor-precision", o.tensor_precision);
     assign("--tensor-coarse-math", o.tensor_coarse_math);
+    assign("--vulkan-precision", o.vulkan_precision);
     assign("--native-coarse-precision", o.native_coarse_precision);
     assign("--require-accelerator", o.require_accelerator);
     assign("--device-index", o.device_index);
@@ -241,8 +243,12 @@ Options parse(int argc, char** argv) {
     require(one_of(o.backend, {"cpu", "tensor-cpu", "cuda", "vulkan"}), "Unknown native probe backend");
     require(one_of(o.tensor_precision, {"automatic", "fp64"}), "Unknown tensor precision");
     require(one_of(o.tensor_coarse_math, {"fft", "fp16", "int8"}), "Unknown tensor coarse arithmetic");
-    require(one_of(o.native_coarse_precision, {"automatic", "fp64"}),
-            "--native-coarse-precision expects automatic or fp64");
+    require(one_of(o.vulkan_precision, {"automatic", "fp32", "fp16-storage", "direct-fp32",
+                                       "direct-fp16-storage", "direct-fp16"}) &&
+            (o.backend == "vulkan" || o.vulkan_precision == "automatic"),
+            "Invalid Vulkan precision policy or backend");
+    require(one_of(o.native_coarse_precision, {"automatic", "fp32", "fp64", "q15"}),
+            "--native-coarse-precision expects automatic, fp32, fp64 or q15");
     require(one_of(o.stratum, {"active", "noise", "cold-maximum", "terminal", "erasure"}),
             "Unknown native probe stratum");
     require(one_of(o.timing, {"broad", "fixture"}), "Unknown native probe timing policy");
@@ -264,7 +270,7 @@ Options parse(int argc, char** argv) {
     require(o.backend != "vulkan" || o.tensor_coarse_math == "fft",
             "Vulkan coarse search uses the full FFT; tensor matrix arithmetic is unsupported");
     require(o.native_coarse_precision == "automatic" || o.backend == "cpu",
-            "FP64 native coarse precision override requires --backend cpu");
+            "Native coarse precision overrides require --backend cpu");
     return o;
 }
 
@@ -283,8 +289,8 @@ live::Settings settings_for(const Options& o, std::size_t memory_limit) {
     live::Settings s;
     s.simulation = true;
     s.receiver_memory_limit = memory_limit;
-    s.transfer.modem.search_arithmetic = o.native_coarse_precision == "fp64"
-        ? modem::SearchArithmetic::fp64 : modem::SearchArithmetic::default_mode;
+    if (o.native_coarse_precision == "fp64") s.transfer.modem.search_arithmetic = modem::SearchArithmetic::fp64;
+    if (o.native_coarse_precision == "fp32") s.transfer.modem.search_arithmetic = modem::SearchArithmetic::fp32;
     s.transfer.modem.sample_rate = o.sample_rate;
     s.transfer.modem.carrier_hz = o.data_if_hz;
     s.transfer.modem.bandwidth_hz = o.rate_hz;
@@ -601,6 +607,13 @@ Json bulk_json(const BulkReceipt& r) {
         {"vulkan_dispatches", r.vulkan_dispatches},
         {"vulkan_arrival_peak_rows", r.vulkan_arrival_peak_rows},
         {"vulkan_arrival_peak_values", r.vulkan_arrival_peak_values},
+        {"vulkan_fp32_score_rows", r.vulkan_fp32_score_rows},
+        {"vulkan_fp16_storage_score_rows", r.vulkan_fp16_storage_score_rows},
+        {"vulkan_direct_dot_terms", r.vulkan_direct_dot_terms},
+        {"vulkan_direct_fp32_score_rows", r.vulkan_direct_fp32_score_rows},
+        {"vulkan_direct_fp16_score_rows", r.vulkan_direct_fp16_score_rows},
+        {"vulkan_direct_fp16_storage_score_rows", r.vulkan_direct_fp16_storage_score_rows},
+        {"vulkan_direct_dot_seconds", r.vulkan_direct_dot_seconds},
         {"native_coarse_lag_sessions", r.native_coarse_lag_sessions},
         {"native_coarse_precision_sessions", r.native_coarse_precision_sessions},
         {"native_fine_sessions", r.native_fine_sessions},
@@ -646,8 +659,13 @@ std::shared_ptr<ReceiverBulkBackend> selected_backend(const Options& o) {
             throw Unavailable("Vulkan accelerator qualification requires a complete coarse-search workload");
 #ifdef DATAPUMP_HAVE_TRIAD_VULKAN
         try {
+            const auto precision = o.vulkan_precision == "fp16-storage" ? VulkanCoarsePrecision::fp16_storage :
+                o.vulkan_precision == "direct-fp32" ? VulkanCoarsePrecision::direct_fp32 :
+                o.vulkan_precision == "direct-fp16-storage" ? VulkanCoarsePrecision::direct_fp16_storage :
+                o.vulkan_precision == "direct-fp16" ? VulkanCoarsePrecision::direct_fp16 :
+                o.vulkan_precision == "fp32" ? VulkanCoarsePrecision::fp32 : VulkanCoarsePrecision::automatic;
             return make_vulkan_receiver_backend({o.device_index,
-                o.device_memory_limit.value_or(256 * 1024 * 1024)});
+                o.device_memory_limit.value_or(256 * 1024 * 1024), precision});
         } catch (const VulkanBackendUnavailable& error) {
             throw Unavailable(error.what());
         }
@@ -1766,8 +1784,9 @@ void codec_run(Json& report, const Options& o, const Profile& profile, std::stop
 void help() {
     std::cout << "triad_receiver_probe describe|plan|slot|continuation|message|backlog|regression|codec [--flag value ...]\n"
         "  --backend cpu|tensor-cpu|cuda|vulkan --require-accelerator on|off --tensor-precision automatic|fp64\n"
-        "  --native-coarse-precision automatic|fp64 (CPU reference FFT arithmetic)\n"
+        "  --native-coarse-precision automatic|fp32|fp64|q15 (Q15 spectral products require native AVX2)\n"
         "  --tensor-coarse-math fft|fp16|int8 (post-channelization search; fallback is reported)\n"
+        "  --vulkan-precision automatic|fp32|fp16-storage|direct-fp32|direct-fp16-storage|direct-fp16\n"
         "  --device-index N --device-memory-limit-bytes N\n"
         "  --case hf|eme and the normalized manual-case options from triad_cases.py\n"
         "  --workers N --slot-owners N --memory-limit-bytes N --max-samples N --deadline-ms N\n"
@@ -1805,11 +1824,14 @@ Json identity() {
 void run(Json& report, const Options& o, std::stop_token stop) {
     report["identity"]["backend"] = o.backend;
     report["identity"]["receiver_arithmetic"] = o.backend == "vulkan"
-        ? "native_vulkan_fp32_fft_with_fp64_coordinates_scores_and_state"
+        ? "native_vulkan_selected_frequency_search_with_fp64_coordinates_scores_and_state"
         : o.backend != "cpu" ? "compiled_tensor_bulk_with_native_fp64_coordinates_and_state"
         : o.native_coarse_precision == "fp64" ? "native_fp64_coarse_fft_state_and_admission"
-        : "native_automatic_fp32_coarse_fft_with_fp64_guard_scoring_state_and_admission";
+        : o.native_coarse_precision == "q15" ? "native_q15_spectral_products_fp32_fft_fp64_score_and_state"
+        : o.native_coarse_precision == "fp32" ? "native_fp32_coarse_products_with_fp64_guards"
+        : "native_automatic_q15_or_fp32_coarse_products_with_fp64_guards";
     report["identity"]["require_accelerator"] = o.require_accelerator;
+    report["identity"]["requested_vulkan_precision"] = o.vulkan_precision;
     report["identity"]["requested_tensor_precision"] = o.tensor_precision;
     report["identity"]["requested_tensor_coarse_math"] = o.tensor_coarse_math;
     report["identity"]["requested_native_coarse_precision"] = o.native_coarse_precision;
@@ -1839,6 +1861,8 @@ void run(Json& report, const Options& o, std::stop_token stop) {
             {.simulation_seed = o.seed, .fixture_active_seconds = o.active_seconds});
         const auto preparation_elapsed = preparation.elapsed();
         profile.receiver.bulk_backend = backend;
+        if (o.native_coarse_precision == "q15")
+            profile.receiver.native_coarse_precision = NativeCoarsePrecision::q15;
         const auto slot = make_receiver_slot_plan(profile.waveform, profile.receiver, o.slot_index);
         report["configuration"] = profile_json(o, profile, slot, resources);
         const auto retained = slot.stop_sample - slot.first_sample;
@@ -1852,6 +1876,25 @@ void run(Json& report, const Options& o, std::stop_token stop) {
         phase(report, "profile_preparation", preparation_elapsed, 0, object({{"profile_ready", true}}),
               0, "one_time_profile_preparation");
         if (o.command == "plan") {
+            auto& configuration = report["configuration"];
+            try {
+                FrequencyInterval fallback{};
+                const auto intervals = public_frequency_intervals(profile.receiver, HelperResult{}, fallback);
+                const auto plan = coarse_work_plan(profile.receiver, slot, intervals, resources.workers);
+                configuration["coarse_full_prior"] = object({
+                    {"route", plan.route == CoarseRoute::lag_groups ? "lag_groups" : "frequency_tiles"},
+                    {"projected_sample_rate_hz", plan.projected_sample_rate_hz},
+                    {"projected_template_rows", plan.projected_template_rows},
+                    {"template_sampling_step", plan.template_sampling_step},
+                    {"frequency_points", plan.frequency_points}, {"frequency_groups", plan.frequency_groups},
+                    {"arrival_points", plan.arrival_points}, {"workspaces", plan.workspaces},
+                    {"rays", plan.rays}, {"correlation_fft_rows", plan.correlation_fft_rows},
+                    {"tile_width", plan.tile_width}, {"planned_tiles", plan.total_tiles},
+                    {"workspace_reserved_bytes", plan.workspace_reserved_bytes}});
+            } catch (const Error& error) {
+                configuration["coarse_full_prior"] = Json{};
+                configuration["coarse_full_prior_reason"] = error.what();
+            }
             report["result"] = object({{"planned", true}, {"actual_device_work", false},
                 {"duration_is_provisional", true}});
             return;
@@ -1875,12 +1918,21 @@ void run(Json& report, const Options& o, std::stop_token stop) {
         }
         if (o.backend == "vulkan" && o.require_accelerator && o.command != "codec") {
             const auto actual = backend->receipt();
-            if (!actual.vulkan || !actual.executed || !actual.fft_calls || !actual.score_rows ||
+            if (!actual.vulkan || !actual.executed || (!actual.fft_calls && !actual.vulkan_direct_dot_terms) ||
+                !actual.score_rows ||
                 !actual.vulkan_dispatches || !actual.vulkan_arrival_peak_rows ||
+                actual.vulkan_fp32_score_rows > actual.score_rows ||
+                actual.vulkan_fp16_storage_score_rows != actual.score_rows - actual.vulkan_fp32_score_rows ||
+                actual.vulkan_direct_fp32_score_rows > actual.vulkan_fp32_score_rows ||
+                actual.vulkan_direct_fp16_score_rows > actual.vulkan_fp16_storage_score_rows ||
+                actual.vulkan_direct_fp16_storage_score_rows >
+                    actual.vulkan_fp16_storage_score_rows - actual.vulkan_direct_fp16_score_rows ||
+                actual.vulkan_direct_dot_terms < actual.vulkan_direct_fp32_score_rows +
+                    actual.vulkan_direct_fp16_score_rows + actual.vulkan_direct_fp16_storage_score_rows ||
                 actual.workspace_scope != "per_coarse_session" || !actual.vulkan_peak_owner_bytes ||
                 actual.vulkan_peak_owner_bytes > actual.workspace_limit_bytes ||
                 actual.allocator_peak_reserved_bytes < actual.vulkan_peak_owner_bytes)
-                throw Incomplete("Vulkan receiver work did not execute a bounded full-frequency FFT and score batch");
+                throw Incomplete("Vulkan receiver work did not execute bounded full-frequency scoring");
         }
         if (o.require_accelerator && o.command == "codec")
             throw Incomplete("Isolated codec work does not execute accelerator stages");

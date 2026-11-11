@@ -95,8 +95,14 @@ struct Snapshot {
     std::optional<std::string> transmit_unavailable;
     std::optional<std::string> noise_transmit_unavailable;
     std::string status,error,receiver_error;
-    std::string gpu_device;
+    std::string gpu_device,gpu_precision;
     std::uint64_t gpu_score_rows=0;
+    // Bounded cumulative executed-work diagnostics for this settings generation.
+    std::uint64_t gpu_fp32_score_rows=0,gpu_fp16_storage_score_rows=0,gpu_packed_fp16_score_rows=0;
+    // Native lag selection is recorded before DSP completion; it is not a
+    // count of completed scores or evidence of GPU execution.
+    std::uint64_t gpu_native_coarse_lag_sessions=0;
+    bool gpu_native_lag_preference_supported=false;
     bool running=false,transmitting=false,simulation=false,simulation_replay=false;
     bool force_transmit_available=false;
 };

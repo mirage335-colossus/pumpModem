@@ -1082,6 +1082,12 @@ struct Session::Impl {
                 current.transmit_unavailable = preparing;
                 current.gpu_device.clear();
                 current.gpu_score_rows = 0;
+                current.gpu_precision.clear();
+                current.gpu_fp32_score_rows = 0;
+                current.gpu_fp16_storage_score_rows = 0;
+                current.gpu_packed_fp16_score_rows = 0;
+                current.gpu_native_coarse_lag_sessions = 0;
+                current.gpu_native_lag_preference_supported = false;
             }
             std::stop_callback shutdown(manager_stop, [source = generation_stop]() mutable { source.request_stop(); });
             std::shared_ptr<const Profile> active;
@@ -1116,12 +1122,16 @@ struct Session::Impl {
                 if (const auto reason = basic_transmit_reason(s)) throw Error(*reason);
                 if (s.gpu) {
 #if defined(DATAPUMP_HAVE_TRIAD_VULKAN)
-                    gpu_backend = make_vulkan_receiver_backend({0, 256U * 1024 * 1024});
+                    const auto precision = s.transfer.modem.search_arithmetic == modem::SearchArithmetic::fp32
+                        ? VulkanCoarsePrecision::fp32 : VulkanCoarsePrecision::automatic;
+                    const bool prefer_native = s.transfer.modem.search_arithmetic == modem::SearchArithmetic::default_mode;
+                    gpu_backend = make_vulkan_receiver_backend({0, 256U * 1024 * 1024, precision, prefer_native});
 #else
                     throw Error("GPU reception is unavailable in this build (Vulkan support required)");
 #endif
                 }
                 const auto gpu_device = gpu_backend ? gpu_backend->receipt().device_name : std::string{};
+                const bool native_lag_preference = gpu_backend && gpu_backend->permits_native_exact_chirp_z();
                 const auto prepare = [&] {
                     const auto anchor = s.simulation ? simulation_calendar(s) : *s.calendar;
                     auto prepared = detail::prepare_profile(s, anchor, stop);
@@ -1134,6 +1144,7 @@ struct Session::Impl {
                     if (owner != generation || stop.stop_requested()) return;
                     profile = active;
                     current.gpu_device = gpu_device;
+                    current.gpu_native_lag_preference_supported = native_lag_preference;
                     current.bit_seconds = calendar.geometry().bit_seconds;
                     current.slot_stride_seconds = static_cast<double>(calendar.calendar().distance(
                         initial.helper_begin, following.helper_begin)) / calendar.effective_sample_rate();
@@ -1460,8 +1471,15 @@ Snapshot Session::snapshot() {
         // The receipt lock only copies counters; it never calls the device or
         // takes this mutex. Do not lend the GUI a backend shared_ptr: it could
         // become the last owner and perform device teardown on this thread.
-        if (p.profile && p.profile->receiver.bulk_backend)
-            p.current.gpu_score_rows = p.profile->receiver.bulk_backend->receipt().score_rows;
+        if (p.profile && p.profile->receiver.bulk_backend) {
+            const auto receipt = p.profile->receiver.bulk_backend->receipt();
+            p.current.gpu_score_rows = receipt.score_rows;
+            p.current.gpu_precision = receipt.precision;
+            p.current.gpu_fp32_score_rows = receipt.vulkan_fp32_score_rows;
+            p.current.gpu_fp16_storage_score_rows = receipt.vulkan_fp16_storage_score_rows;
+            p.current.gpu_packed_fp16_score_rows = receipt.vulkan_direct_fp16_score_rows;
+            p.current.gpu_native_coarse_lag_sessions = receipt.native_coarse_lag_sessions;
+        }
         result = p.current;
         result.signals.swap(p.signal_events);
         result.received.swap(p.received_events);

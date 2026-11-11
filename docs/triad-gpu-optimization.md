@@ -22,11 +22,16 @@ The canonical native backend now contains optional FP16 and INT8
 post-channelization lag-DFT paths with reusable coefficients and bounded
 workspace/arrival batching. Bounded GPU fixtures and two large bulk shapes pass;
 complete-receiver qualification remains separate. The new FP4 candidate was
-removed after failing the frozen noise-peak gate, preserving its findings. Full
-frequency-tile and chirp/zoom FFT coverage remains the default: a dense matrix's
-sample-by-frequency arithmetic growth does not disappear when its storage is
-tiled. Promote a different default only with applicable complete-work and
-backlog evidence; an easy-case efficiency result is insufficient.
+removed after failing the then-frozen noise-peak gate, preserving its findings.
+That historical diagnostic failure alone is not a universal precision veto:
+current qualification compares complete cost, physical reception, false alarms
+and measured sensitivity loss with the user's proportional tradeoff in the
+[precision guide](gpu-precision-controls.md). CUDA full frequency-tile and
+chirp/zoom FFT coverage remains the default: a dense matrix's sample-by-frequency
+arithmetic growth does not disappear when its storage is tiled. The qualified
+Radeon direct route has a separately bounded envelope. Promote a different
+default only with applicable complete-work and backlog evidence; an easy-case
+efficiency result is insufficient.
 
 ## What to measure separately
 
@@ -112,6 +117,13 @@ measurement. Current scoped results and unresolved gates are in
 and cyclic-amplitude/QPSK waveform differ from the current receiver, so retain
 the transferable technique rather than restoring another receiver.
 
+The table retains original numerical thresholds, score errors and changed peak
+findings as historical observations. A score or peak difference alone does not
+quantify operational sensitivity loss or establish that a different low-precision
+method is inadmissible. Current evaluation must retain every public hypothesis
+and measure physical outcomes, false alarms, uncertainty, complete cost and the
+user's sensitivity-versus-computation tradeoff.
+
 | Historical group | Current native disposition |
 | --- | --- |
 | NVFP4 correlation and fused reconstruction | The historical Triton result remains a proven scoped win. A new native cuBLASLt analogue was removed: single-product FP4 failed the 1% score gate (5.03% error), and four-product/residual-scale repairs changed a unique noise peak. Active bulk costs improved against FFT but did not establish an advantage over qualified INT8. This does not reject other FP4 designs or transfer the historical result to current C++. |
@@ -123,7 +135,7 @@ the transferable technique rather than restoring another receiver.
 | Persistent whole-scan graph workspace | Exact descriptor and source-tile caches preserve part of the residency lesson; they are not graph replay. Bounded post-render projection/statistics capture remains an unimplemented candidate. |
 | Mixed precision and FP64 reduction organization | FP32 bulk with FP64 coordinates, statistics and posterior evidence is retained. The historical two-level reducer is not established as the same current implementation, so its ratio does not transfer. |
 | Prepared Gaussian design and simulator caches | Persistent native mapped bases, projection plans and device tiles are retained. Exact projection/offset descriptor reuse and shared block-pair transition preparation extend this lesson. Simulator truth remains outside receiver input. |
-| Cached direct-GEMM acquisition bank | Prepared native lag-group matrices and batching across workspaces/arrivals provide a shape-specific analogue. They preserve every public score and do not replace broad FFT acquisition with an unbounded dense bank. |
+| Cached direct-GEMM acquisition bank | Prepared native lag-group matrices and batching across workspaces/arrivals provide a shape-specific analogue. They evaluate every public hypothesis and do not replace broad FFT acquisition with an unbounded dense bank. |
 | Independent two-GPU trial sharding | Still applicable to independent compiled qualification jobs when needed. It is test orchestration, not one-stream receiver parallelism; it does not justify a second modem implementation. |
 
 Current matrix batches can combine up to 32 workspaces, 64 arrivals and two taps
@@ -135,8 +147,9 @@ maximum shape alone is not evidence that a test dispatched it.
 
 An optional split-BF16/TF32x3 variant would fit the prepared coarse matrix
 boundary, subject to supported library/device shapes, explicit complex packing,
-all split-product costs and scratch admission, and the same frozen score/work
-gates. It cannot replace the current Gaussian posterior or FP64 state by analogy
+all split-product costs and scratch admission, complete public work and current
+physical/sensitivity qualification. Historical score gates remain diagnostics,
+not universal sensitivity criteria. It cannot replace the current Gaussian posterior or FP64 state by analogy
 with the old phase lattice. The removed split-FP4 experiment informs that
 residual technique without establishing those absent arithmetic modes.
 

@@ -15,8 +15,19 @@ accelerator.** Do not let a familiar A100/A5000 or one slow small-matrix experim
 silently determine the development target. Qualify the actual precision and
 complete-work speedup on the selected hardware.
 Prefer INT8 when an available native implementation passes the unchanged
-numerical/work gates and gives the best complete cost for the challenging
+receiver/work gates and gives the best complete cost for the challenging
 geometry. A type selector or theoretical instruction rate is insufficient.
+Judge sensitivity loss proportionally against the complete computational
+benefit, including whether it enables reception several dB further into the
+noise floor. The user's examples are that under 1 dB may be worthwhile, around
+1.5 dB may be worthwhile for a multiple-times speedup, 2 dB deserves consideration
+for a drastic improvement, and around 3 dB is less acceptable. These are not
+automatic cutoffs or approval of an unqualified point estimate. A strict
+score-difference threshold by itself is a numerical diagnostic, not a demonstrated
+sensitivity-loss threshold. Compare with high-precision reception on predeclared
+signal, noise and conditioning strata, report uncertainty and false-alarm effects,
+and preserve full public work and physical completion. The sensitivity method
+and applicable bounds remain under investigation.
 
 **Choose the default for the computational ceiling of challenging reception,
 including wide frequency searches and accumulated input.** Efficiency on an easy
@@ -61,7 +72,7 @@ channel isolation. They require their own native implementation, work mapping,
 accuracy and complete-cost comparison. A dense DFT's quadratic work cannot be
 made equivalent to an FFT's `N log N` scaling merely by tiling or selecting INT8.
 The current `int8` option selects a bounded matrix contraction; unsupported or
-frequency-tiled work explicitly stays on FFT. cuFFT's documented transform
+CUDA frequency-tiled work explicitly stays on FFT. cuFFT's documented transform
 precisions are distinct from low-precision matrix multiplication. See
 [cuFFT's transform and precision documentation](https://docs.nvidia.com/cuda/cufft/).
 
@@ -70,20 +81,31 @@ applicable geometry. A replacement default must cover unsuccessful Helper
 acquisition and broad search, include recurring preparation and downstream work,
 and preserve all hypotheses under the target memory bound. An easy-case speedup
 well below real-time capacity is not a reason to choose a lower worst-case
-ceiling. Keep full FFT as the current default while qualifying alternatives.
+ceiling. CUDA retains its full FFT default; the qualified Radeon direct route
+has a separate explicitly bounded envelope and must retain full FFT fallback.
 
 ## Current implementation
 
 The default compiled receiver uses automatic native CPU arithmetic and has no
-Torch runtime dependency. On the qualified AVX2 frequency route, post-filter
-FFTs use FP32 after every double-precision template Gram passes the `1/16`
-minimum eigenvalue-ratio guard. Lag groups, compact tight-clock geometry,
-ill-conditioned banks and unqualified CPU kernels retain explicit FP64 routes.
+Torch runtime dependency. On qualified native exact single-ray AVX2 frequency
+searches not routed to chirp-Z, post-filter spectra use Q15 products and FP32
+FFTs, subject to checked native transform and workspace bounds;
+other qualified AVX2 frequency routes use FP32 products and FFTs after every
+double-precision template Gram passes the `1/16` minimum eigenvalue-ratio guard.
+Lag groups, compact tight-clock geometry, ill-conditioned banks and unqualified
+CPU kernels retain explicit FP64 routes.
 Coordinates, phase, Gram/quadratic scoring and fine state retain double precision.
 Rare extreme post-filter exponents use exact power-of-two block scaling and
 double-precision correlation restoration. See the [operating arithmetic policy](search-arithmetic.md)
 for shared GUI/launch controls and the CPU reference override. This policy keeps
 the full worker allocation and conservative memory admission.
+
+For a native single-ray AVX2 exact-projection frequency search, fused preparation
+can convert checked templates directly to FP32 spectra and quote a smaller
+phase-aware memory bound. The bound still charges FP64 projection/FP32-plan
+overlap and conversion work; other routes keep their existing bounds. Whether
+that reduces the complete slot lease depends on the separate Helper and fine
+bounds. See the [bounded comparison](validation.md#lower-precision-and-workspace-investigation).
 
 The optional `DATAPUMP_TRIAD_TENSOR` build links a C++ ATen
 bulk backend into that same receiver. Public coarse search, fine state, work
@@ -105,8 +127,11 @@ is silently selected from the observed score or transmitted truth.
 
 The optional `DATAPUMP_TRIAD_VULKAN` backend uses in-process Vulkan/VkFFT for
 filtered DATA frequency-search FFTs, scoring and exact arrival frontiers.
-Current transforms use FP32 bulk arithmetic; coordinates and quadratic scoring
-retain higher precision. Native FIR keeps strong Helper energy out of this
+The FFT route uses FP32 arithmetic; coordinates and quadratic scoring
+retain higher precision. On the locally qualified device and geometry below,
+automatic mode uses packed FP16 direct products with FP32 accumulation and FP64
+scoring. Other shapes can use qualified FP16 FFT storage with FP32 FFT arithmetic
+or FP32 storage. Native FIR keeps strong Helper energy out of this
 reduced-precision search. Helper acquisition, template generation, lag groups,
 the compact tight-clock FP64 class and fine processing stay on the canonical CPU
 path with explicit stage routing. A numerical or resource failure must not
@@ -121,11 +146,41 @@ On the 5650U, exposed shader FP16/INT8 types and the integer-dot extension do no
 by themselves prove packed throughput or accelerated dot products. The observed
 RADV device reports FP16 support but no accelerated 8-bit integer-dot variants.
 Vega can execute packed FP16 vector arithmetic; it has no qualified matrix/Tensor
-Core path here. The current FP32 FFT implementation does not use that optional
-packed arithmetic. VkFFT's FP16-storage mode still computes in FP32, so neither
-its storage size nor a half-typed buffer establishes a 2× arithmetic gain.
+Core path here. The current FFT implementation does not use that packed
+arithmetic. VkFFT's FP16-storage mode still computes in FP32, so neither its
+storage size nor a half-typed buffer establishes a 2× arithmetic gain.
 Keep the [hardware peak model](triad-performance.md#radeon-arithmetic-ceilings)
 separate from measured affected-phase and complete-receiver speedups.
+
+Half storage and packed arithmetic are different operations: VkFFT half storage
+retains FP32 compute, while the direct correlation executes packed FP16 products
+and FP32 reductions. Initial diagnostic score differences exceeding `3e-6` do
+not measure sensitivity loss. Bounded physical-reception checks and complete
+message measurements support automatic packed direct work only for Mesa RADV
+25.0.7 on PCI `1002:1638`, with compatible little-endian IEEE host, 16-bit buffer,
+shader FP16 and compute-subgroup support. The public geometry must have one ray,
+one arrival and at most 131,072 unpadded projected template rows; frequency and
+workspace totals are independently processed in bounded tiles subject to native
+plan and device limits. Exact power-of-two energy normalization is required.
+Longer eligible direct correlations or unsupported scaling use FP32 direct
+arithmetic; other unsupported geometry uses qualified half-storage FFT, FP32 GPU
+work or an explicit native fallback as applicable. The packed-length boundary is
+a conservative numerical envelope, not a universal reception-sensitivity proof;
+direct near-threshold checks currently extend to 65,670 template rows. The tested cases do not establish
+population sensitivity, every admitted combination, other drivers or whole-receiver
+capacity. Packed direct and packed FFT are different algorithms, with different
+cost scaling. See [the investigation](validation.md#packed-direct-correlation-follow-through).
+
+The local RADV path uses [Mesa's normal ACO compiler](https://docs.mesa3d.org/drivers/radv.html);
+switching its compiler backend is not an established optimization for this workload. AMD's current
+experimental [TheRock device status](https://github.com/ROCm/TheRock/blob/main/SUPPORTED_GPUS.md)
+lists `gfx90c` as build-passing, not sanity-tested; its nightlies include initial
+rocFFT/hipFFT support. The matching packages would total approximately 829 MiB
+compressed. Here a non-destructive host check found `/dev/kfd` inaccessible to
+the current user, although the Vulkan render node was usable; AMD documents
+`/dev/kfd` as a [ROCm compute requirement](https://rocm.docs.amd.com/projects/install-on-linux/en/docs-7.2.3/how-to/docker.html).
+No driver, permissions or packages were changed. This is an unexecuted ROCm
+alternative, not proof that the GPU lacks a possible ROCm implementation.
 
 Current Helper FFT work occurs before channel isolation and retains double
 precision; lowering it based only on the later quiet passband is not justified.
@@ -208,7 +263,7 @@ FFT calculation. Receipts distinguish `cpu-device`, `fp64-stage`,
 `device-capability` fallbacks. A requested CUDA backend still must execute on
 CUDA; this arithmetic fallback does not turn CPU work into GPU evidence.
 
-The scalable frequency-tile and chirp/zoom FFT searches remain the default.
+The scalable CUDA frequency-tile and chirp/zoom FFT searches remain the default.
 For a uniform grid, direct matrix correlation grows with samples times searched
 frequencies; tiling bounds its storage but does not remove that arithmetic growth.
 FFT search scales differently and must remain available for broad geometry.
@@ -259,7 +314,7 @@ checks the requested FP16/INT8 contractions and exact GPU peak reduction as
 separate production operations. It rejects matrix fallbacks as matrix
 qualification, binds fixture/input/device identities, and includes packing,
 preparation and search in its fresh-owner costs. Its three-pair ratios remain
-component evidence. The full FFT default and complete receiver qualification
+component evidence. The CUDA full FFT default and complete receiver qualification
 gates are unchanged.
 Its first actual RTX 4090 run passes both matrix modes and exact peak reduction
 within 6.439 s aggregate. The [source-bound results](validation.md#representative-receiver-hardware-checks)

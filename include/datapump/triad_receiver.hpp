@@ -12,9 +12,9 @@ namespace datapump::triad::v3 {
 
 namespace receiver_detail { class ReceiverBulkBackend; }
 
-// Receiver-local FFT preference. This does not change any public waveform or
-// key state; automatic may select a qualified CPU precision for a stage.
-enum class NativeCoarsePrecision { automatic, fp64 };
+// Automatic may choose Q15 products on a supported native AVX2 geometry.
+// FP32 permits higher precision fallback. Explicit Q15 requires support.
+enum class NativeCoarsePrecision { automatic, fp64, q15, fp32 };
 
 inline constexpr std::array<std::int64_t, 13> receiver_epoch_offsets{
     -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6};

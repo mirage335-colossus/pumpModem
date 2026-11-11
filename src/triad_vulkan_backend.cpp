@@ -20,6 +20,7 @@
 #include <map>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <sstream>
 #include <thread>
 #include <tuple>
@@ -38,6 +39,12 @@ constexpr std::size_t serialized_cache_metadata_bound = 64 * 1024;
 // compute units. Exact allocation checks halve this width when RAM is tighter.
 constexpr std::size_t maximum_batch = 64;
 constexpr std::size_t compiler_host_bound = 128 * mib;
+// A nonzero observation and the largest nonzero bank column are scaled to
+// norms in [64, 128). At this length, flushing subnormal operand components
+// adds at most sqrt(2 * rows) * 2^-14 to a column's absolute L2 error, one
+// binary16 unit roundoff of the largest norm. Weaker columns can have larger
+// relative error. Product underflow and FP32 accumulation are separate.
+constexpr std::size_t packed_dot_row_limit = 1u << 17;
 
 void require(bool ok, const char* message) { if (!ok) throw Error(message); }
 void check(VkResult status, const char* operation) {
@@ -59,14 +66,25 @@ std::uint32_t narrow(std::size_t value) {
     return static_cast<std::uint32_t>(value);
 }
 void count(std::uint64_t& into, std::uint64_t value) { into += std::min(value, UINT64_MAX - into); }
-void credit_fft_work(CoarseBulkWork& into, const CoarseBulkWork& completed) {
+void credit_search_work(CoarseBulkWork& into, const CoarseBulkWork& completed) {
     count(into.forward_ffts, completed.forward_ffts); count(into.inverse_ffts, completed.inverse_ffts);
     count(into.fft_rows, completed.fft_rows); count(into.fft_row_stages, completed.fft_row_stages);
+    count(into.singleton_dot_terms, completed.singleton_dot_terms);
 }
 
 struct FloatComplex { float real, imag; };
 static_assert(sizeof(FloatComplex) == 8);
-using FftKey = std::tuple<std::size_t, std::size_t, bool>;
+using FftKey = std::tuple<std::size_t, std::size_t, bool, bool>;
+constexpr auto fp32_arithmetic = "fp32_fft_fp64_coordinates_and_scores_native_fir_and_fine";
+constexpr auto half_storage_arithmetic = "fp16_fft_storage_fp32_fft_and_products";
+constexpr auto fp32_direct_arithmetic = "fp32_direct_dot_fp64_scoring";
+constexpr auto half_storage_direct_arithmetic = "fp16_storage_fp32_direct_dot_fp64_scoring";
+constexpr auto packed_direct_arithmetic = "packed_fp16_direct_dot_fp32_reduction_fp64_scoring";
+
+bool direct_request(VulkanCoarsePrecision precision) {
+    return precision == VulkanCoarsePrecision::direct_fp32 ||
+           precision == VulkanCoarsePrecision::direct_fp16_storage || precision == VulkanCoarsePrecision::direct_fp16;
+}
 
 struct SerializedFft {
     std::unique_ptr<unsigned char[]> bytes;
@@ -83,11 +101,12 @@ struct CachedFft {
 
 struct Shared {
     VulkanReceiverOptions options;
+    bool automatic_half_device = false, automatic_direct_device = false;
     VkInstance instance = VK_NULL_HANDLE;
     VkPhysicalDevice physical = VK_NULL_HANDLE;
     VkDevice device = VK_NULL_HANDLE;
     VkQueue queue = VK_NULL_HANDLE;
-    std::uint32_t family = 0;
+    std::uint32_t family = 0, timestamp_bits = 0;
     VkPhysicalDeviceProperties properties{};
     VkPhysicalDeviceMemoryProperties memory{};
     mutable std::mutex receipt_mutex;
@@ -100,6 +119,11 @@ struct Shared {
 
     explicit Shared(const VulkanReceiverOptions& requested) : options(requested) {
         require(options.workspace_bytes >= mib, "Robust Vulkan requires an explicit workspace of at least 1 MiB");
+        require(options.coarse_precision == VulkanCoarsePrecision::automatic ||
+                options.coarse_precision == VulkanCoarsePrecision::fp32 ||
+                options.coarse_precision == VulkanCoarsePrecision::fp16_storage ||
+                direct_request(options.coarse_precision),
+                "invalid Robust Vulkan storage precision policy");
         try { initialize(); } catch (...) { release(); throw; }
     }
     ~Shared() { release(); }
@@ -128,6 +152,8 @@ struct Shared {
         check(vkEnumeratePhysicalDevices(instance, &devices, available.data()), "device enumeration");
         physical = available[options.device_index];
         VkPhysicalDeviceSubgroupProperties subgroup{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
+        VkPhysicalDeviceDriverProperties driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+        subgroup.pNext = &driver;
         VkPhysicalDeviceShaderIntegerDotProductProperties dot{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_PROPERTIES};
         VkPhysicalDeviceProperties2 props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
         props.pNext = &subgroup;
@@ -145,8 +171,10 @@ struct Shared {
             vkGetPhysicalDeviceProperties2(physical, &props);
         }
         VkPhysicalDeviceVulkan12Features twelve{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+        VkPhysicalDeviceVulkan11Features eleven{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
+        eleven.pNext = &twelve;
         VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-        features.pNext = &twelve;
+        features.pNext = &eleven;
         vkGetPhysicalDeviceFeatures2(physical, &features);
         if (!features.features.shaderFloat64 || !features.features.shaderInt64)
             throw VulkanBackendUnavailable("Robust Vulkan requires FP64 scoring and 64-bit frontier indices");
@@ -163,6 +191,7 @@ struct Shared {
                 if (!(queues[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)) break;
             }
         if (family == families) throw VulkanBackendUnavailable("Vulkan device has no compute queue");
+        timestamp_bits = queues[family].timestampValidBits;
         const float priority = 1;
         VkDeviceQueueCreateInfo queue_info{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
         queue_info.queueFamilyIndex = family; queue_info.queueCount = 1; queue_info.pQueuePriorities = &priority;
@@ -170,6 +199,37 @@ struct Shared {
         enabled.shaderFloat64 = VK_TRUE; enabled.shaderInt64 = VK_TRUE;
         VkDeviceCreateInfo info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
         info.queueCreateInfoCount = 1; info.pQueueCreateInfos = &queue_info; info.pEnabledFeatures = &enabled;
+        VkPhysicalDeviceVulkan11Features enable_eleven{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
+        const bool storage_available = eleven.storageBuffer16BitAccess &&
+            std::endian::native == std::endian::little && std::numeric_limits<float>::is_iec559;
+        automatic_half_device = storage_available && driver.driverID == VK_DRIVER_ID_MESA_RADV &&
+            properties.vendorID == 0x1002 && properties.deviceID == 0x1638 &&
+            properties.driverVersion == VK_MAKE_VERSION(25, 0, 7);
+        const auto requested = options.coarse_precision;
+        const bool explicit_half = requested == VulkanCoarsePrecision::fp16_storage ||
+                                   requested == VulkanCoarsePrecision::direct_fp16_storage ||
+                                   requested == VulkanCoarsePrecision::direct_fp16;
+        if (explicit_half && !storage_available)
+            throw VulkanBackendUnavailable("Robust Vulkan FP16 storage requires compatible 16-bit device and host storage");
+        const bool subgroup_compute = (subgroup.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) &&
+            (subgroup.supportedOperations & VK_SUBGROUP_FEATURE_ARITHMETIC_BIT) &&
+            (subgroup.supportedOperations & VK_SUBGROUP_FEATURE_BASIC_BIT);
+        automatic_direct_device = automatic_half_device && subgroup_compute && twelve.shaderFloat16;
+        if (direct_request(requested) && !subgroup_compute)
+            throw VulkanBackendUnavailable("Robust Vulkan direct dot requires compute subgroup arithmetic");
+        VkPhysicalDeviceVulkan12Features enable_twelve{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+        if (requested == VulkanCoarsePrecision::direct_fp16 ||
+            (requested == VulkanCoarsePrecision::automatic && automatic_direct_device)) {
+            if (!twelve.shaderFloat16)
+                throw VulkanBackendUnavailable("Robust Vulkan packed direct dot requires shaderFloat16");
+            enable_twelve.shaderFloat16 = VK_TRUE;
+            enable_eleven.pNext = &enable_twelve;
+        }
+        if (explicit_half ||
+            (requested == VulkanCoarsePrecision::automatic && automatic_half_device)) {
+            enable_eleven.storageBuffer16BitAccess = VK_TRUE;
+            info.pNext = &enable_eleven;
+        }
         check(vkCreateDevice(physical, &info, nullptr, &device), "device creation");
         vkGetDeviceQueue(device, family, 0, &queue);
         total.device = "vulkan:" + std::to_string(options.device_index);
@@ -179,7 +239,11 @@ struct Shared {
         total.library_version = "VkFFT " + std::to_string(VkFFTGetVersion()) + "; glslang " +
             std::to_string(compiler_version.major) + "." + std::to_string(compiler_version.minor) + "." +
             std::to_string(compiler_version.patch);
-        total.precision = "fp32_fft_fp64_coordinates_and_scores_native_fir_and_fine";
+        total.precision = requested == VulkanCoarsePrecision::automatic ? "vulkan_frequency_automatic_pending" :
+            requested == VulkanCoarsePrecision::fp16_storage ? half_storage_arithmetic :
+            requested == VulkanCoarsePrecision::direct_fp16 ? packed_direct_arithmetic :
+            requested == VulkanCoarsePrecision::direct_fp16_storage ? half_storage_direct_arithmetic :
+            requested == VulkanCoarsePrecision::direct_fp32 ? fp32_direct_arithmetic : fp32_arithmetic;
         total.requested_coarse_math = "fft";
         total.vulkan = true;
         total.vulkan_api_version = properties.apiVersion; total.vulkan_driver_version = properties.driverVersion;
@@ -202,7 +266,21 @@ struct Shared {
         require(total.total_device_bytes && options.workspace_bytes <= total.total_device_bytes,
                 "Robust Vulkan workspace exceeds the physical device heap");
     }
-    BulkReceipt receipt() const { std::lock_guard lock(receipt_mutex); return total; }
+    BulkReceipt receipt() const {
+        std::lock_guard lock(receipt_mutex);
+        auto result = total;
+        if (result.score_rows) {
+            if (result.vulkan_direct_fp32_score_rows == result.score_rows) result.precision = fp32_direct_arithmetic;
+            else if (result.vulkan_direct_fp16_score_rows == result.score_rows) result.precision = packed_direct_arithmetic;
+            else if (result.vulkan_direct_fp16_storage_score_rows == result.score_rows)
+                result.precision = half_storage_direct_arithmetic;
+            else if (result.vulkan_direct_dot_terms) result.precision = "mixed_vulkan_frequency_arithmetic";
+            else result.precision = result.vulkan_fp16_storage_score_rows
+                    ? (result.vulkan_fp32_score_rows ? "mixed_fp16_fp32_fft_storage_fp32_compute" : half_storage_arithmetic)
+                    : fp32_arithmetic;
+        }
+        return result;
+    }
     std::shared_ptr<const SerializedFft> cached_fft(const FftKey& key) {
         std::lock_guard lock(fft_cache_mutex);
         const auto found = fft_cache.find(key);
@@ -260,12 +338,16 @@ struct Shared {
         ADD_FIELD(upload_bytes); ADD_FIELD(download_bytes); ADD_FIELD(synchronizations);
         ADD_FIELD(fft_calls); ADD_FIELD(fft_rows); ADD_FIELD(score_rows);
         ADD_FIELD(vulkan_dispatches); ADD_FIELD(vulkan_arrival_peak_rows); ADD_FIELD(vulkan_arrival_peak_values);
+        ADD_FIELD(vulkan_fp32_score_rows); ADD_FIELD(vulkan_fp16_storage_score_rows);
+        ADD_FIELD(vulkan_direct_dot_terms); ADD_FIELD(vulkan_direct_fp32_score_rows); ADD_FIELD(vulkan_direct_fp16_score_rows);
+        ADD_FIELD(vulkan_direct_fp16_storage_score_rows);
         ADD_FIELD(vulkan_fft_cache_hits); ADD_FIELD(vulkan_fft_cache_misses);
 #undef ADD_FIELD
         total.executed |= delta.executed;
         total.wall_seconds += delta.wall_seconds;
         total.vulkan_fft_plan_seconds += delta.vulkan_fft_plan_seconds;
         total.vulkan_shader_compile_seconds += delta.vulkan_shader_compile_seconds;
+        total.vulkan_direct_dot_seconds += delta.vulkan_direct_dot_seconds;
     }
 };
 
@@ -313,12 +395,14 @@ struct Context {
     VkCommandBuffer command = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
     VkDescriptorPool descriptors = VK_NULL_HANDLE;
+    VkQueryPool direct_timestamps = VK_NULL_HANDLE;
     std::size_t allocated = 0, peak_allocated = 0;
-    bool active = false;
+    bool active = false, half_storage = false, direct_dot = false, packed_direct = false, timed_direct = false;
     std::uint64_t age = 0;
     BulkReceipt local;
     std::map<FftKey, std::unique_ptr<FftPlan>> plans;
     std::unique_ptr<Pipeline> rotate, products, quadratic, peaks;
+    std::size_t fft_element_bytes() const { return half_storage ? sizeof(std::uint32_t) : sizeof(FloatComplex); }
 
     explicit Context(std::shared_ptr<Shared> owner) : shared(std::move(owner)) {
         try {
@@ -343,6 +427,8 @@ struct Context {
     ~Context() { release(); }
     void release() noexcept {
         plans.clear(); peaks.reset(); quadratic.reset(); products.reset(); rotate.reset();
+        if (direct_timestamps) vkDestroyQueryPool(shared->device, direct_timestamps, nullptr);
+        direct_timestamps = VK_NULL_HANDLE;
         if (descriptors) vkDestroyDescriptorPool(shared->device, descriptors, nullptr);
         if (fence) vkDestroyFence(shared->device, fence, nullptr);
         if (pool) vkDestroyCommandPool(shared->device, pool, nullptr);
@@ -358,11 +444,15 @@ struct Context {
         ADD_FIELD(upload_bytes); ADD_FIELD(download_bytes); ADD_FIELD(synchronizations);
         ADD_FIELD(fft_calls); ADD_FIELD(fft_rows); ADD_FIELD(score_rows);
         ADD_FIELD(vulkan_dispatches); ADD_FIELD(vulkan_arrival_peak_rows); ADD_FIELD(vulkan_arrival_peak_values);
+        ADD_FIELD(vulkan_fp32_score_rows); ADD_FIELD(vulkan_fp16_storage_score_rows);
+        ADD_FIELD(vulkan_direct_dot_terms); ADD_FIELD(vulkan_direct_fp32_score_rows); ADD_FIELD(vulkan_direct_fp16_score_rows);
+        ADD_FIELD(vulkan_direct_fp16_storage_score_rows);
         ADD_FIELD(vulkan_fft_cache_hits); ADD_FIELD(vulkan_fft_cache_misses);
 #undef ADD_FIELD
         local.wall_seconds += delta.wall_seconds; local.executed |= delta.executed;
         local.vulkan_fft_plan_seconds += delta.vulkan_fft_plan_seconds;
         local.vulkan_shader_compile_seconds += delta.vulkan_shader_compile_seconds;
+        local.vulkan_direct_dot_seconds += delta.vulkan_direct_dot_seconds;
         shared->accumulate(delta);
     }
     BulkReceipt receipt() const {
@@ -371,13 +461,20 @@ struct Context {
         COPY_FIELD(upload_bytes); COPY_FIELD(download_bytes); COPY_FIELD(synchronizations);
         COPY_FIELD(fft_calls); COPY_FIELD(fft_rows); COPY_FIELD(score_rows);
         COPY_FIELD(vulkan_dispatches); COPY_FIELD(vulkan_arrival_peak_rows); COPY_FIELD(vulkan_arrival_peak_values);
+        COPY_FIELD(vulkan_fp32_score_rows); COPY_FIELD(vulkan_fp16_storage_score_rows);
+        COPY_FIELD(vulkan_direct_dot_terms); COPY_FIELD(vulkan_direct_fp32_score_rows); COPY_FIELD(vulkan_direct_fp16_score_rows);
+        COPY_FIELD(vulkan_direct_fp16_storage_score_rows);
         COPY_FIELD(vulkan_fft_cache_hits); COPY_FIELD(vulkan_fft_cache_misses);
         COPY_FIELD(vulkan_fft_plan_seconds); COPY_FIELD(vulkan_shader_compile_seconds);
+        COPY_FIELD(vulkan_direct_dot_seconds);
         COPY_FIELD(wall_seconds); COPY_FIELD(executed);
 #undef COPY_FIELD
         // Generic allocation fields retain the shared backend's aggregate.
         result.vulkan_peak_owner_bytes = peak_allocated;
         result.fft_plan_cache_count = plans.size();
+        result.precision = direct_dot ? (packed_direct ? packed_direct_arithmetic :
+            half_storage ? half_storage_direct_arithmetic : fp32_direct_arithmetic) :
+            (half_storage ? half_storage_arithmetic : fp32_arithmetic);
         return result;
     }
     void barrier(VkPipelineStageFlags source_stage, VkAccessFlags source,
@@ -389,6 +486,21 @@ struct Context {
     void compute_barrier() {
         barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+    }
+    void begin_dot_timing() {
+        if (!shared->timestamp_bits || !(shared->properties.limits.timestampPeriod > 0)) return;
+        if (!direct_timestamps) {
+            VkQueryPoolCreateInfo info{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+            info.queryType = VK_QUERY_TYPE_TIMESTAMP; info.queryCount = 2;
+            if (vkCreateQueryPool(shared->device, &info, nullptr, &direct_timestamps) != VK_SUCCESS) return;
+        }
+        vkCmdResetQueryPool(command, direct_timestamps, 0, 2);
+        vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, direct_timestamps, 0);
+        timed_direct = true;
+    }
+    void end_dot_timing() {
+        if (timed_direct)
+            vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, direct_timestamps, 1);
     }
     void drain_submission() {
         // An OOM/unknown wait error says nothing about pending GPU work. Keep
@@ -417,6 +529,7 @@ struct Context {
         barrier(VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_WRITE_BIT,
                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
         BulkReceipt delta;
+        timed_direct = false;
         record(delta);
         barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
                 VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_READ_BIT);
@@ -438,14 +551,34 @@ struct Context {
         check(waited, "fence wait");
         delta.synchronizations = 1; delta.executed = true;
         delta.wall_seconds = std::chrono::duration<double>(Clock::now() - began).count();
+        if (timed_direct) {
+            std::array<std::uint64_t, 2> ticks{};
+            if (vkGetQueryPoolResults(shared->device, direct_timestamps, 0, 2, sizeof(ticks), ticks.data(),
+                                      sizeof(ticks[0]), VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
+                const auto bits = shared->timestamp_bits;
+                const auto mask = bits >= 64 ? UINT64_MAX : (std::uint64_t{1} << bits) - 1;
+                delta.vulkan_direct_dot_seconds = ((ticks[1] - ticks[0]) & mask) *
+                    static_cast<double>(shared->properties.limits.timestampPeriod) * 1e-9;
+            }
+        }
         account(delta);
         // Cancellation never releases buffers still referenced by a submission.
         cancelled(stop);
     }
     Pipeline& pipeline(std::unique_ptr<Pipeline>& slot, std::string_view source,
-                       std::uint32_t bindings, std::uint32_t push_bytes) {
+                       std::uint32_t bindings, std::uint32_t push_bytes, bool storage_shader = true) {
         if (!slot) {
             const auto began = Clock::now();
+            std::string code;
+            if (half_storage && storage_shader) {
+                constexpr std::string_view version = "#version 450\n";
+                const auto start = source.find(version);
+                require(start != std::string_view::npos, "invalid Vulkan precision shader prelude");
+                code.assign(source);
+                code.insert(start + version.size(), packed_direct
+                    ? "#define HALF_STORAGE\n#define PACKED_DIRECT\n" : "#define HALF_STORAGE\n");
+                source = code;
+            }
             slot = std::make_unique<Pipeline>(*this, source, bindings, push_bytes);
             BulkReceipt compiled;
             // Includes GLSL/SPIR-V compilation and native driver pipeline construction.
@@ -484,7 +617,7 @@ struct Context {
                   std::stop_token stop) {
         cancelled(stop);
         require(rows && std::has_single_bit(rows) && batches, "Robust Vulkan FFT requires bounded power-of-two rows");
-        const auto key = std::tuple(rows, batches, inverse);
+        const auto key = std::tuple(rows, batches, inverse, half_storage);
         if (auto found = plans.find(key); found != plans.end()) {
             require(data.bytes >= found->second->data_bytes && temporary.bytes >= found->second->temporary_bytes,
                     "Robust Vulkan cached FFT buffers are smaller than their plan extents");
@@ -506,9 +639,10 @@ struct Context {
         config.makeInversePlanOnly = inverse ? 1 : 0;
         config.normalize = 1; config.useLUT = -1; config.useLUT_4step = -1;
         config.userTempBuffer = 1;
-        result->data_bytes = mul(mul(rows, batches), sizeof(FloatComplex));
-        result->temporary_bytes = result->data_bytes;
-        require(data.bytes >= result->data_bytes && temporary.bytes >= result->data_bytes,
+        config.halfPrecision = half_storage;
+        result->data_bytes = mul(mul(rows, batches), fft_element_bytes());
+        result->temporary_bytes = mul(mul(rows, batches), sizeof(FloatComplex));
+        require(data.bytes >= result->data_bytes && temporary.bytes >= result->temporary_bytes,
                 "Robust Vulkan FFT buffers are smaller than their public geometry");
         result->data_handles[0] = data.handle; result->temporary_handles[0] = temporary.handle;
         config.buffer = &result->data_handles[0]; config.tempBuffer = &result->temporary_handles[0];
@@ -708,17 +842,60 @@ Pipeline::Pipeline(Context& context, std::string_view source, std::uint32_t inpu
     glslang_program_delete(program); glslang_shader_delete(shader);
 }
 
-void pack(Buffer& destination, std::span<const Complex> input, std::size_t first = 0) {
-    require(mul(add(first, input.size()), sizeof(FloatComplex)) <= destination.bytes,
+// Normalized bank samples are below 128. Round their IEEE binary32 encoding
+// to binary16, including ties and subnormals, without needing host F16C.
+std::uint32_t half_bits(float x) {
+    const auto bits = std::bit_cast<std::uint32_t>(x);
+    const auto sign = (bits >> 16) & 0x8000u;
+    const auto magnitude = bits & 0x7fffffffu;
+    if (magnitude < 0x33000000u) return sign;
+    if (magnitude >= 0x38800000u)
+        return sign | ((magnitude - 0x38000000u + 0xfffu + ((magnitude >> 13) & 1u)) >> 13);
+    const auto shift = 126u - (magnitude >> 23);
+    const auto mantissa = (magnitude & 0x7fffffu) | 0x800000u;
+    return sign | ((mantissa + (1u << (shift - 1)) - 1u + ((mantissa >> shift) & 1u)) >> shift);
+}
+
+void pack(Buffer& destination, std::span<const Complex> input, std::size_t first = 0,
+          double scale = 1, bool half = false) {
+    require(mul(add(first, input.size()), half ? sizeof(std::uint32_t) : sizeof(FloatComplex)) <= destination.bytes,
             "Robust Vulkan packed input exceeds storage");
-    auto* output = static_cast<FloatComplex*>(destination.mapped) + first;
     for (std::size_t i = 0; i < input.size(); ++i) {
-        const double real = input[i].real(), imag = input[i].imag();
+        const double real = input[i].real() * scale, imag = input[i].imag() * scale;
         constexpr double largest = std::numeric_limits<float>::max();
         require(std::isfinite(real) && std::isfinite(imag) && std::abs(real) <= largest && std::abs(imag) <= largest,
                 "Robust Vulkan FP32 packing is nonfinite or out of range");
-        output[i] = {static_cast<float>(real), static_cast<float>(imag)};
+        const auto a = static_cast<float>(real), b = static_cast<float>(imag);
+        if (half)
+            static_cast<std::uint32_t*>(destination.mapped)[first + i] = half_bits(a) | (half_bits(b) << 16);
+        else
+            static_cast<FloatComplex*>(destination.mapped)[first + i] = {a, b};
     }
+}
+
+std::optional<long double> energy(std::span<const Complex> input, std::stop_token stop) {
+    long double sum = 0;
+    bool nonzero = false;
+    for (std::size_t i = 0; i < input.size(); ++i) {
+        if ((i & 4095u) == 0) cancelled(stop);
+        const auto z = input[i];
+        const long double a = z.real(), b = z.imag();
+        sum += a * a + b * b;
+        nonzero |= a != 0 || b != 0;
+    }
+    if (!std::isfinite(sum) || (!sum && nonzero)) return {};
+    return sum;
+}
+
+int fft_scale(long double input_energy, std::size_t nfft) {
+    if (!input_energy) return 0;
+    const auto spectrum_norm = std::sqrt(input_energy) * std::sqrt(static_cast<long double>(nfft));
+    // The energy check and per-buffer uint32 geometry bound keep this finite.
+    // Parseval bounds each spectrum's L2 norm and Cauchy-Schwarz bounds the
+    // product's L1 norm. Scaling each norm below 128 bounds the unnormalized
+    // inverse partial sums below 16384, with margin for rounding. It avoids
+    // shrinking each operand by an extra sqrt(N), which underflows long FFTs.
+    return 7 - std::ilogb(spectrum_norm) - 1;
 }
 
 void validate_peaks(std::span<const CoarseBulkPeaks> rows, std::size_t arrivals) {
@@ -739,6 +916,7 @@ static_assert(sizeof(RotatePush) == 24 && sizeof(ProductPush) == 20 && sizeof(Sc
 class VulkanCoarse final : public CoarseBulk {
 public:
     explicit VulkanCoarse(std::shared_ptr<Shared> shared) : context_(std::move(shared)) {}
+    std::string_view precision_reason() const noexcept override { return precision_reason_; }
     bool supports_fir() const noexcept override { return false; }
     std::shared_ptr<const CoarseBulkFilter> prepare_filter(std::span<const double>, std::size_t,
         CoarseBulkWork&, std::stop_token) override {
@@ -762,13 +940,76 @@ public:
         started_ = true; geometry_ = geometry; count_ = bank.size();
         const auto nfft = geometry.correlation_fft_rows;
         const auto columns = mul(count_, geometry.taps);
-        narrow(mul(columns, nfft));
-        bank_ = std::make_unique<Buffer>(context_, mul(mul(columns, nfft), sizeof(FloatComplex)));
+        double obs_scale = 1, bank_scale = 1;
+        const auto request = context_.shared->options.coarse_precision;
+        const bool requested_direct = direct_request(request);
+        const bool single_arrival_rank_one = geometry.taps == 1 && geometry.lag_count == 1;
+        // Frequency and template totals repeat independent dots in bounded tiles.
+        const bool automatic_direct = request == VulkanCoarsePrecision::automatic &&
+            context_.shared->automatic_direct_device && single_arrival_rank_one;
+        const bool automatic_packed = automatic_direct && geometry.kernel_rows <= packed_dot_row_limit;
+        const bool qualified_fft_geometry = single_arrival_rank_one && nfft == 2048 &&
+            count_ == 26 && geometry.frequency_count >= 181 &&
+            geometry.frequency_count <= 1794;
+        context_.direct_dot = automatic_direct || (requested_direct && single_arrival_rank_one);
+        const auto bank_rows = context_.direct_dot ? geometry.kernel_rows : nfft;
+        narrow(mul(columns, bank_rows));
+        if (requested_direct && !context_.direct_dot)
+            precision_reason_ = "vulkan-fp32-direct-geometry-unqualified";
+        else if (request == VulkanCoarsePrecision::direct_fp32)
+            precision_reason_ = "vulkan-fp32-direct-requested";
+        else if (request == VulkanCoarsePrecision::fp32)
+            precision_reason_ = "vulkan-fp32-requested";
+        else if (automatic_direct && !automatic_packed)
+            precision_reason_ = "vulkan-fp32-direct-length-outside-packed-envelope";
+        else if (request == VulkanCoarsePrecision::automatic && !context_.shared->automatic_half_device)
+            precision_reason_ = "vulkan-fp32-device-unqualified";
+        else if (request == VulkanCoarsePrecision::automatic && !automatic_direct && !qualified_fft_geometry)
+            precision_reason_ = "vulkan-fp32-geometry-unqualified";
+        else {
+            // Establish both scales before allocating or submitting anything
+            // in the reduced representation. Keep the original variance if
+            // normalization cannot be represented by the FP64 scorer.
+            const auto obs_energy = energy(observation, stop);
+            std::optional<long double> bank_energy = 0;
+            for (const auto& row : bank) {
+                if (!bank_energy) break;
+                for (std::size_t tap = 0; tap < geometry.taps; ++tap) {
+                    const auto tap_energy = energy(row.columns[tap], stop);
+                    if (!tap_energy) { bank_energy.reset(); break; }
+                    *bank_energy = std::max(*bank_energy, *tap_energy);
+                }
+            }
+            precision_reason_ = context_.direct_dot ? "vulkan-fp32-direct-normalization-out-of-range" :
+                "vulkan-fp32-normalization-out-of-range";
+            if (obs_energy && bank_energy) {
+                const auto normalization_rows = context_.direct_dot ? 1 : nfft;
+                const auto obs_exponent = fft_scale(*obs_energy, normalization_rows);
+                const auto bank_exponent = fft_scale(*bank_energy, normalization_rows);
+                const auto observed = std::scalbn(1., obs_exponent);
+                const auto templated = std::scalbn(1., bank_exponent);
+                const auto variance = std::scalbn(geometry.variance, 2 * (obs_exponent + bank_exponent));
+                if (std::isnormal(variance) && std::isnormal(observed) && std::isnormal(templated)) {
+                    obs_scale = observed;
+                    bank_scale = templated;
+                    geometry_.variance = variance;
+                    context_.half_storage = true;
+                    context_.packed_direct = automatic_packed ||
+                        (context_.direct_dot && request == VulkanCoarsePrecision::direct_fp16);
+                    precision_reason_ = context_.direct_dot
+                        ? (automatic_packed ? "vulkan-packed-fp16-direct-qualified" :
+                           context_.packed_direct ? "vulkan-packed-fp16-direct-requested" :
+                           "vulkan-fp16-storage-direct-requested") :
+                        request == VulkanCoarsePrecision::automatic
+                        ? "vulkan-fp16-storage-qualified" : "vulkan-fp16-storage-requested";
+                }
+            }
+        }
+        bank_ = std::make_unique<Buffer>(context_, mul(mul(columns, bank_rows), context_.fft_element_bytes()));
         observation_ = std::make_unique<Buffer>(context_, mul(observation.size(), sizeof(FloatComplex)));
         coefficients_ = std::make_unique<Buffer>(context_, mul(count_, 4 * sizeof(double)));
-        auto& temporary = retain(temporary_, bank_->bytes);
         std::memset(bank_->mapped, 0, bank_->bytes);
-        pack(*observation_, observation);
+        pack(*observation_, observation, 0, obs_scale);
         auto* inverse = static_cast<double*>(coefficients_->mapped);
         for (std::size_t w = 0; w < count_; ++w) {
             cancelled(stop);
@@ -780,15 +1021,20 @@ public:
             inverse[w * 4 + 2] = row.inverse_b.real(); inverse[w * 4 + 3] = row.inverse_b.imag();
             for (std::size_t tap = 0; tap < geometry.taps; ++tap) {
                 require(row.columns[tap].size() == geometry.kernel_rows, "Robust Vulkan bank column length mismatch");
-                pack(*bank_, row.columns[tap], (w * geometry.taps + tap) * nfft);
+                pack(*bank_, row.columns[tap], (w * geometry.taps + tap) * bank_rows, bank_scale, context_.half_storage);
             }
         }
         BulkReceipt copies;
         copies.upload_bytes = add(add(bank_->bytes, observation_->bytes), coefficients_->bytes);
         context_.account(copies);
-        CoarseBulkWork completed_work;
-        context_.run(stop, [&](BulkReceipt& delta) { context_.fft(nfft, columns, *bank_, temporary, false, completed_work, delta, stop); });
-        credit_fft_work(work, completed_work);
+        if (!context_.direct_dot) {
+            auto& temporary = retain(temporary_, mul(mul(columns, nfft), sizeof(FloatComplex)));
+            CoarseBulkWork completed_work;
+            context_.run(stop, [&](BulkReceipt& delta) {
+                context_.fft(nfft, columns, *bank_, temporary, false, completed_work, delta, stop);
+            });
+            credit_search_work(work, completed_work);
+        }
         prepared_ = true;
     }
     void frequency_tile(std::span<const double> frequencies, const CoarseScoreSink& sink,
@@ -829,17 +1075,22 @@ private:
         for (;;) {
             cancelled(stop);
             try {
-                const auto spectra_bytes = mul(mul(frequencies, geometry_.correlation_fft_rows), sizeof(FloatComplex));
-                const auto product_rows = mul(mul(mul(width, frequencies), geometry_.taps), geometry_.correlation_fft_rows);
+                const auto element_bytes = context_.fft_element_bytes();
+                const auto spectrum_rows = context_.direct_dot ? geometry_.kernel_rows : geometry_.correlation_fft_rows;
+                const auto spectra_bytes = mul(mul(frequencies, spectrum_rows), element_bytes);
+                const auto product_rows = mul(mul(mul(width, frequencies), geometry_.taps),
+                                              context_.direct_dot ? 1 : geometry_.correlation_fft_rows);
                 const auto score_rows = mul(mul(width, frequencies), geometry_.lag_count);
                 narrow(product_rows); narrow(score_rows);
-                const auto product_bytes = mul(product_rows, sizeof(FloatComplex));
+                const auto product_bytes = mul(product_rows, context_.direct_dot ? sizeof(FloatComplex) : element_bytes);
                 retain(frequency_, mul(frequencies, sizeof(double)));
                 retain(spectra_, spectra_bytes);
                 retain(product_, product_bytes);
                 // Forward spectra and inverse products are serial submissions,
                 // so one charged temporary allocation serves both FFT stages.
-                retain(temporary_, std::max(spectra_bytes, product_bytes));
+                if (!context_.direct_dot)
+                    retain(temporary_, mul(std::max(mul(frequencies, geometry_.correlation_fft_rows), product_rows),
+                                           sizeof(FloatComplex)));
                 retain(values_, mul(score_rows, sizeof(double)));
                 if (separation) retain(frontier_, mul(mul(width, frequencies), sizeof(CoarseBulkPeaks)));
                 work_frequencies_ = frequencies; work_frontier_ = frontier; work_width_ = width;
@@ -863,7 +1114,8 @@ private:
                 "invalid Robust Vulkan frequency tile");
         for (double frequency : frequencies) require(std::isfinite(frequency), "Robust Vulkan frequency is nonfinite");
         const auto nfft = geometry_.correlation_fft_rows, nf = frequencies.size();
-        const auto spectra_count = mul(nf, nfft);
+        const auto spectrum_rows = context_.direct_dot ? geometry_.kernel_rows : nfft;
+        const auto spectra_count = mul(nf, spectrum_rows);
         narrow(spectra_count); narrow(mul(nf, geometry_.lag_count));
         const auto batch_width = prepare_work_buffers(nf, separation, stop);
         auto& frequency = *frequency_;
@@ -872,27 +1124,28 @@ private:
         auto& rotate = context_.pipeline(context_.rotate, vulkan_rotate_shader, 3, sizeof(RotatePush));
         const std::array<Buffer*, 3> rotate_buffers{observation_.get(), &frequency, &spectra};
         context_.bind(rotate, rotate_buffers);
-        {
-            auto& temporary = *temporary_;
-            const RotatePush push{narrow(observation_->bytes / sizeof(FloatComplex)), narrow(nfft), narrow(nf), 0,
-                                  geometry_.projected_sample_rate_hz};
+        const RotatePush rotate_push{narrow(observation_->bytes / sizeof(FloatComplex)), narrow(spectrum_rows),
+                                     narrow(nf), 0, geometry_.projected_sample_rate_hz};
+        if (!context_.direct_dot) {
             CoarseBulkWork completed_work;
             context_.run(stop, [&](BulkReceipt& delta) {
                 delta.upload_bytes = frequencies.size_bytes();
-                context_.dispatch(rotate, push, (spectra_count + 255) / 256, delta);
-                context_.fft(nfft, nf, spectra, temporary, false, completed_work, delta, stop);
+                context_.dispatch(rotate, rotate_push, (spectra_count + 255) / 256, delta);
+                context_.fft(nfft, nf, spectra, *temporary_, false, completed_work, delta, stop);
             });
-            credit_fft_work(work, completed_work);
+            credit_search_work(work, completed_work);
         }
-        auto& product_pipeline = context_.pipeline(context_.products, vulkan_products_shader, 3, sizeof(ProductPush));
-        auto& quadratic = context_.pipeline(context_.quadratic, vulkan_quadratic_shader, 3, sizeof(ScorePush));
+        auto& product_pipeline = context_.pipeline(context_.products,
+            context_.direct_dot ? vulkan_direct_dot_shader : vulkan_products_shader, 3, sizeof(ProductPush));
+        auto& quadratic = context_.pipeline(context_.quadratic, vulkan_quadratic_shader, 3, sizeof(ScorePush),
+                                            !context_.direct_dot);
         Pipeline* peak_pipeline = nullptr;
         if (separation) peak_pipeline = &context_.pipeline(context_.peaks, vulkan_coarse_peaks_shader, 2, sizeof(PeakPush));
         for (std::size_t first = 0; first < count_;) {
             cancelled(stop);
             const auto width = std::min(batch_width, count_ - first);
             const auto pairs = mul(width, nf), samples = mul(pairs, geometry_.lag_count);
-            const auto product_rows = mul(mul(pairs, geometry_.taps), nfft);
+            const auto product_rows = mul(mul(pairs, geometry_.taps), context_.direct_dot ? 1 : nfft);
             const std::array<Buffer*, 3> product_buffers{bank_.get(), &spectra, product_.get()};
             const std::array<Buffer*, 3> score_buffers{product_.get(), coefficients_.get(), values_.get()};
             context_.bind(product_pipeline, product_buffers); context_.bind(quadratic, score_buffers);
@@ -900,20 +1153,39 @@ private:
                 const std::array<Buffer*, 2> peak_buffers{values_.get(), frontier_.get()};
                 context_.bind(*peak_pipeline, peak_buffers);
             }
-            const ProductPush product_push{narrow(nfft), narrow(geometry_.taps), narrow(nf), narrow(width), narrow(first)};
-            const ScorePush score_push{narrow(nfft), narrow(geometry_.taps), narrow(nf), narrow(width),
+            const ProductPush product_push{narrow(spectrum_rows), narrow(geometry_.taps), narrow(nf), narrow(width), narrow(first)};
+            const ScorePush score_push{narrow(context_.direct_dot ? 1 : nfft), narrow(geometry_.taps), narrow(nf), narrow(width),
                                       narrow(geometry_.lag_count), narrow(first), geometry_.variance};
             const PeakPush peak_push{narrow(geometry_.lag_count), narrow(separation)};
             CoarseBulkWork completed_work;
             context_.run(stop, [&](BulkReceipt& delta) {
-                context_.dispatch(product_pipeline, product_push, (product_rows + 255) / 256, delta);
-                context_.fft(nfft, mul(pairs, geometry_.taps), *product_, *temporary_, true, completed_work, delta, stop);
+                if (context_.direct_dot) {
+                    if (!first) {
+                        delta.upload_bytes = frequencies.size_bytes();
+                        context_.dispatch(rotate, rotate_push, (spectra_count + 255) / 256, delta);
+                    }
+                    context_.begin_dot_timing();
+                    context_.dispatch(product_pipeline, product_push, pairs, delta);
+                    context_.end_dot_timing();
+                    count(completed_work.singleton_dot_terms, mul(pairs, geometry_.kernel_rows));
+                } else {
+                    context_.dispatch(product_pipeline, product_push, (product_rows + 255) / 256, delta);
+                    context_.fft(nfft, mul(pairs, geometry_.taps), *product_, *temporary_, true, completed_work, delta, stop);
+                }
                 context_.dispatch(quadratic, score_push, (samples + 255) / 256, delta);
                 if (separation) context_.dispatch(*peak_pipeline, peak_push, pairs, delta);
             });
-            credit_fft_work(work, completed_work);
+            credit_search_work(work, completed_work);
             BulkReceipt completed;
             completed.score_rows = samples;
+            if (context_.half_storage) completed.vulkan_fp16_storage_score_rows = samples;
+            else completed.vulkan_fp32_score_rows = samples;
+            if (context_.direct_dot) {
+                completed.vulkan_direct_dot_terms = completed_work.singleton_dot_terms;
+                if (context_.packed_direct) completed.vulkan_direct_fp16_score_rows = samples;
+                else if (context_.half_storage) completed.vulkan_direct_fp16_storage_score_rows = samples;
+                else completed.vulkan_direct_fp32_score_rows = samples;
+            }
             if (separation) {
                 const auto output = std::span(static_cast<const CoarseBulkPeaks*>(frontier_->mapped), pairs);
                 validate_peaks(output, geometry_.lag_count);
@@ -938,6 +1210,7 @@ private:
     std::unique_ptr<Buffer> bank_, observation_, coefficients_;
     std::unique_ptr<Buffer> frequency_, spectra_, temporary_, product_, values_, frontier_;
     CoarseBulkGeometry geometry_;
+    std::string_view precision_reason_;
     std::size_t count_ = 0;
     std::size_t work_frequencies_ = 0, work_width_ = 0;
     bool work_frontier_ = false;
@@ -948,6 +1221,11 @@ class VulkanBackend final : public ReceiverBulkBackend {
 public:
     explicit VulkanBackend(const VulkanReceiverOptions& options) : shared_(std::make_shared<Shared>(options)) {}
     bool supports_fine() const noexcept override { return false; }
+    bool permits_native_exact_chirp_z() const noexcept override {
+        return shared_->options.prefer_native_exact_chirp_z &&
+               shared_->options.coarse_precision == VulkanCoarsePrecision::automatic &&
+               shared_->automatic_direct_device;
+    }
     std::string_view coarse_fallback_reason(double rate, double clock, CoarseRoute route) const noexcept override {
         if (rate <= 10 && clock > 0 && clock <= .001) return "compact-tight-clock-fp64";
         if (route == CoarseRoute::lag_groups) return "native-lag-groups";

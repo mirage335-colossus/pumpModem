@@ -1,17 +1,18 @@
 # Validation status
 
-Qualified native AVX2 FP32 search is now the automatic CPU policy. The bounded
-comparison below improves a challenging five-slot receiver workload by
-**1.196×**; easier complete-service cases remain essentially unchanged. The
-local Radeon Vulkan backend also passes actual-device correctness checks. Its
-earlier **1.269× complete coarse-phase speedup** and narrow-case **39.6% slowdown**
-compare against the historical FP64 CPU path, not the new automatic CPU policy.
-Cold compilation remains a separate cost below.
+The native CPU automatic policy uses qualified Q15 spectral products with FP32
+FFTs on its supported AVX2 one-ray geometry, and FP32 or FP64 on other paths.
+An earlier bounded FP32-versus-FP64 comparison improved a challenging five-slot
+workload by **1.196×**; that historical comparison is not a current Q15 result.
+The local Radeon Vulkan backend uses qualified packed-FP16 direct work and passes
+actual-device correctness checks. Its earlier **1.269× complete coarse-phase
+speedup** and narrow-case **39.6% slowdown** compare against the historical FP64
+CPU path. Cold compilation remains a separate cost below.
 Earlier Ryzen CPU and RTX 4090 CUDA results retain their original source and
 hardware scope. No complete receiver-capacity or Tensor Core utilization claim
 follows.
 
-Updated 10 November 2026. The native history, matrix/preparation and wide-search
+Updated 11 November 2026. The native history, matrix/preparation and wide-search
 follow-through is complete with the scoped checks below, including the fine-tail
 repair. Complete-receiver capacity and refreshed CPU forecasts remain unresolved.
 The earlier
@@ -28,10 +29,524 @@ The historical cleanup checkpoint was based on
 `419e6bae8c4fe3b0f59be23a6dfb3b69fbaed80e`. Its concise outcomes and limitations
 remain below; they are not release certification or validation of changed code.
 
+## Lower-precision and workspace investigation
+
+The current investigation starts from `eddd12719b475e36b6d503b4965e0805f6ab7736`.
+At that checkpoint the qualified AVX2 FP32 FFT was already the operating CPU
+frequency search, so the initial local comparisons used automatic FP32 as the
+CPU control. Later Q15 auto-selection and its control are described separately.
+Historical FP64 fine-state and tight-clock failures motivate retaining those
+routes; they do not prove every present native geometry needs FP64. Full-band
+FIR and Helper filtering remain FP64 as a conservative choice; a frequency shift
+before the Helper filter alone does not isolate its input band.
+
+The latest integrated source manifest is
+`ce949002f0c6990aca9271f34c304588eaf608cadd6483df927fd742663113bc`, with
+native probe `fa1f80f8c66afe11aed5848ffcebfb8f2705f6cbf6de18a76130f6f2a15ad522`
+and GUI binary `ec4e5a843cff7ec8f4af4e55c2d095ef3afd135a41739e30a85e0f717a95cea8`.
+The native triad group passed **33/33** and affected checks **3/3**. The initial
+integrated build stopped before tests because the default ccache directory was
+read-only; the same build and checks succeeded with `CCACHE_DISABLE=1`. The
+actual Radeon GUI Session checks passed for automatic GPU and FP32 minimum,
+each reporting 130 actual GPU score rows, and for native-lag selection, which
+decoded `e`/`001` with two physical quiet slots and zero GPU scores. Earlier
+measurements below retain their respective source and binary provenance.
+
+### CPU one-ray preparation and admission
+
+For exact-projection, single-ray native AVX2 frequency work, the public one-column
+Gram ratio is 1. The candidate converts each FP64-checked template directly to
+its FP32 spectrum during bank preparation. It accounts for simultaneous FP64
+projection/FP32 plans and conversion transients, then releases the former before
+scoring. Two-ray conditioning, mapped, lag, bulk, tight-clock, scalar and forced
+FP64 paths retain their previous bounds. The reduced lease is an admitted DSP
+bound, not a measurement of RSS or a reduction in the global `W=2*H` allocation.
+
+The local Ryzen 5 PRO 5650U uses `H=12`, `W=24`; baseline and candidate probe
+source manifests were `ca22d0ce467751510fd123304e4fae7bfe2c62942109f1db14833b82e356604a`
+and `508a908820b662510ca42cdf880d8a9c21364c2ee1005e522d4b455cd19e9876`, and
+binary hashes were `e337eb61a5243ba3f4d22682132582248fe10ee0f22b4c56ec40299b9f8fdd39`
+and `86cb3b9e38b38a9857d622fe10d17538921111fe7077f60d5fa6dca699d6ed50`.
+The identical build-options hash was
+`63a1a31d84dfb81f992610f16c646d5f49b6f69bf7f0a0efa97ccd9180f14d41`.
+The native group passed **33/33**; focused precision scaling, cancellation,
+admission and FP64 reference checks passed.
+
+One first-use pair and three alternating complete five-slot pairs per geometry
+preserved input, scored work, DATA/quiet decisions and evidence. Narrow
+service medians were 354.304→338.277 ms, 1.047× (paired 1.019–1.081×); the
+1,794-frequency broad medians were 1,836.094→1,842.809 ms, 0.996× (paired
+0.939–1.055×). A brief metadata hash check overlapped the broad batch, so its
+timings are descriptive and do not establish an improvement or regression.
+Both short fixtures retain a 162,326,981-byte slot lease because fine work
+dominates, regardless of the smaller coarse quote.
+
+The fixed long noise pair retained exact proposals, work and quiet evidence at
+65,536 FFT rows, 343.2-second public bit and 516,837 captured rows. Coarse
+admission fell 291,691,128→252,893,816 bytes (13.30%); complete slot admission
+fell 300,542,893→261,745,581 bytes (37 MiB, 12.91%). Post-preparation retained
+bytes were unchanged at 14,719,312. The single fixed-order coarse timing was
+1.480→1.615 seconds; unchanged simulator and fine stages also slowed, so this
+pair establishes neither a causal regression nor a speedup. The initial long
+fixture expected 65,536 FFT rows but actually produced 32,768: its geometry
+assertion failed. The corrected 335-second request produced the reported long
+pair and passed; the original mismatch is not a passed 65,536-point test.
+
+The subsequent CPU spectral-product investigation added AVX2 SIMD FP32 products
+and a scaled Q15 complex product with FP32 inverse FFT and FP64 scoring. The
+Q15 path is selected automatically only for native, exact-projection,
+single-ray AVX2 frequency searches outside the compact tight-clock class and
+the separately selected exact chirp-Z route; explicit
+FP32 and FP64 controls remain available. Each complex product uses bounded INT32
+pair sums and a FP32 inverse FFT. There is no separate Q15 FFT-size cutoff; the
+checked native transform/workspace bounds remain. Unsupported explicit Q15
+requests fail before DSP. Other automatic geometry retains FP32 or the existing
+FP64 guards. The following initial results measured sizes through 65,536;
+the later integrated 131,072-row check is reported separately below.
+This is a Q15 spectral product, not an integer FFT.
+
+For four paired opposite-bit short trials, FP64 and Q15 had matching observed
+crossing brackets at 0.3125 dB-Hz resolution and Q15 passed +0.9 dB
+controls. One 65,536-point/139-frequency long active case had a matching
+`[-10.625, -10.0]` dB-Hz bracket and an independent quiet control. These few
+trials do not establish population sensitivity or a statistical loss bound.
+In a three-arm five-slot 1,794-frequency comparison, SIMD FP32 improved median
+service 2.0330→1.7369 seconds (1.171×, paired 1.112–1.213×) against the previous
+scalar-product implementation, with identical fine evidence and full work.
+Q15 had median 1.7021 seconds against SIMD FP32, but paired ratios crossed one
+(0.940–1.035×), so no reliable additional throughput gain is claimed. That
+experiment binds source
+`f1ca4a01e18acce669d29ab82dc6a54f6a4292f7da036eb89deff5aff512274d`.
+
+The later source `203ff175c20b92f70f6eb2e2f0f4f87f1cce7a149e1f518270b9addb513de036`,
+probe `80b6d7cf75fad14f14d466e31e66f7a9c60d3ef775298e9d29937500ae4bb8dd`,
+passed **33/33** native tests plus the FFT test, with matching Q15/FP32 quiet
+and near-threshold evidence and work in the long 65,536×139 geometry. The
+complete-slot admission bound fell 261,747,517→254,931,773 bytes (6.5 MiB,
+2.60%); three paired long-slot timings were effectively neutral, with ratios
+1.044, 1.013 and 0.964. This is a bound reduction, not measured RSS or a
+sustained receiver-capacity gain. A later source-bound automatic-policy comparison
+(`f5461cbe9f467e127f815e315bc5b57e24b46de22052db063aef9f98c98f6757`) used
+one first-use and three matched pairs per shape. Automatic Q15/FP32 control
+median service was 1.4610/1.4723 seconds for the 2,048×1,794 five-slot message
+and 3.4199/3.3481 seconds for a 65,536×139 quiet slot; the paired ratios varied
+and do not establish a general speedup. Input, work and fine evidence matched.
+The native group passed 33/33 (61.68 seconds) plus four GUI/FFT checks after an
+initial plan-rejection assertion mismatch was repaired. These frequency-route
+measurements predate the separately selected chirp-Z route below.
+
+The integrated source `021dace5b6915523b60f29be932ccb5d4a06eda4da4680fb7603a5a541fa01a8`
+and probe `be0e7751728a9d88637a649c22925cf2ea095d8759d6a50db219ef78896270c1`
+also exercised Q15 versus explicit FP32 at FFT 131,072, 137 frequencies,
+26 workspaces and one arrival with `W=24`. Matched inputs and complete work
+included 1,016,037 captured samples and 48,769,776 fine rows per slot; evidence
+matched exactly. Both noise cases were quiet, and both `-13` dB-Hz weak-active
+cases remained quiet despite an expected DATA decision (log-e 20.25024 versus
+threshold 21.49338). This matched miss is retained and does not establish
+successful reception or a sensitivity bound. The full slot admission bound
+fell 488,861,997→475,230,509 bytes (13 MiB, 2.79%). One FP32/Q15 quiet pair
+took 7.4166/7.0225 seconds and one weak-active pair 7.3113/6.9669 seconds;
+single pairs are descriptive, not sustained throughput evidence. A deterministic
+131,072-point coherent integer-product/FFT stress check also passed.
+
+### Exact one-arrival chirp-Z follow-through
+
+Automatic native CPU reception can now select the existing FP64 chirp-Z
+frequency scan for a no-Helper/no-bulk, exact-projection, single-ray,
+single-arrival profile when its predicted radix-row work is at least fourfold
+smaller than the frequency route. The existing lag-group size, group and
+workspace limits still apply. All public frequency scores remain evaluated.
+Explicit FP32, FP64 and Q15 policies retain the frequency-route comparator;
+the admission quote covers both possible routes and supports narrower permitted
+intervals without undercharging. The execution receipt identifies
+`exact-one-arrival-chirp-z`.
+
+On integrated source `021dace5b6915523b60f29be932ccb5d4a06eda4da4680fb7603a5a541fa01a8`
+and probe `be0e7751728a9d88637a649c22925cf2ea095d8759d6a50db219ef78896270c1`,
+one first-use and three alternating matched fresh-process looks used 24 workers,
+1,794 frequencies, 26 workspaces and one arrival. Median complete five-slot
+service was 1.44610 seconds for explicit Q15 frequency, 0.375587 for automatic
+CPU chirp-Z (**3.85×** versus Q15), and 0.574771 for actual packed Radeon work.
+The CPU/GPU comparison is 1.53× in favor of CPU on this geometry; it is not a
+universal device ranking. Whole-process medians were 2.5320, 1.2724 and 1.5955
+seconds respectively. Input, public work, fine rows, evidence, physical DATA
+and two quiet decisions, and EOF controls matched. Each GPU run executed 279,864
+packed score rows including EOF and no FFT. A separate 9 dB-Hz holdout matched
+all three plus an explicit FP64 frequency control; one holdout is not a
+population sensitivity bound. The complete slot lease was unchanged because
+fine work dominated. Native group **33/33** and four affected GUI/FFT checks
+passed on this integrated source. Receipt summaries in ignored
+`local-evidence/exact-native-chirpz/` support this current comparison; remove
+them after the claim or remaining work is superseded.
+
+The native exact one-arrival route now supports one uniform group through the
+public 65,536-point maximum, when the same cost and admission rules hold; the
+mapped lag route retains its existing group limit. A one-frequency native-only
+case can use an FP64 singleton dot when its modeled work is at least fourfold
+lower than the frequency FFT. One matched active and one matched quiet slot on
+source `f14b49ac912cfad6cddd474491f2a856554f78441ede0e1301dc575e2a7684f5`,
+probe `16130273e89aff6266fecd80d15aac845c433bcea3bdc563843b33f38ca1ef19`,
+preserved input, work, fine evidence and decisions against explicit Q15. The
+single-pair slot timings were 0.65428→0.59878 seconds active and
+0.58495→0.59487 seconds quiet, with unchanged 164,489,981-byte slot bound;
+these are descriptive, not a receiver speed claim.
+
+A valid large native active fixture at 600 Hz sample rate and 620 seconds used
+93,802 projected template rows, 55,037 frequencies, 78 workspaces and one
+arrival. It completed all **4,292,886** public coarse rows in four tiles,
+with 78 forward and 78 inverse FFTs plus setup. Coarse preparation/search/
+selection took 1.792/2.554/0.196 seconds, fine work 4.412 seconds and whole
+process 10.29 seconds. The expected active bit was missed: the slot scored
+quiet with log-e 4.3404 below threshold 21.4934. This establishes complete
+bounded work, not successful reception or a sensitivity threshold. Its source
+snapshot was `063b32c95c9813dd409fed22a7df0eb84ffa003288d6f6fa74e03dde8f970b77`;
+an earlier 240 Hz/360 Hz proposed fixture exceeded the transmitter Nyquist
+skirt and was plan-only, not a completed simulated reception.
+
+An independent synthetic post-channelization check evaluated four points of a
+different giant geometry (126,232 template rows, 54,718 frequencies) against
+scalar long-double direct dots. Maximum absolute complex-correlation difference
+was `1.47e-8`; the largest `20·log10(|candidate|/|reference|)` deviation was
+`2.42e-11` dB. A first wrapper used stale source attribution and was excluded;
+the corrected oracle does not establish receiver sensitivity.
+
+Single-arrival peak compaction removes the inert second peak placeholder while
+retaining every public score and the existing final candidate limits. A matched
+giant plan with 126,232 template rows, 54,718 frequencies, 78 workspaces and
+FFT 262,144 reduced the `W=24` complete-slot bound 517,227,936→414,795,840
+bytes, saving 102,432,096 bytes (97.69 MiB). The `W=2` bound fell
+393,178,560→290,746,464 bytes by the same amount. These are no-DSP admission
+quotes, not measured utilization, RSS, added owners or receiver throughput;
+explicit owner and worker caps remain unchanged.
+
+The shared GUI's GPU Default setting may choose this native chirp-Z route for
+the qualified local Radeon under the observed cost crossover and worker-adjusted
+public-geometry guards, while retaining device initialization and the full
+fallback reservation. Strict headless accelerator probes and explicit GPU
+precision modes still require their requested device execution. Actual routing
+is exposed to the GUI; the matched source-bound CPU/Radeon result above informs
+this decision, not a general GPU ranking. The crossover scales the measured
+`26×1,750×1,794 = 81,627,000` direct-term anchor by increases in estimated
+native radix work over `53×4,096×12 = 2,605,056` row-stages or fewer than 24
+admitted workers. The separate estimated fourfold native work advantage remains
+required. An admissible 126,232-row/54,718-frequency public plan implied about
+538.76 billion dense direct terms versus 0.741 billion modeled CPU row-stages;
+that geometry was plan-only, and its predicted crossover is not a measured GPU
+latency, utilization or receiver-capacity result.
+
+On the final `ce949002…` source, the actual-device Vulkan suite and plan test
+passed. Intermediate and giant tests checked native-preferred versus strict-GPU
+planning, identical public frequencies/workspaces, and an adequate union quote
+for a narrower singleton GPU alternative; giant planning did not execute DSP.
+In an actual strict 1,794-frequency slot, automatic mode scored 46,644 packed
+rows and 81,627,000 terms with no FFT or native-lag fallback. The explicit FP32
+control scored the same 46,644 rows with 151 FFT calls; decisions and fine
+evidence matched. The strict 65,670-row case also matched its prior bit and
+evidence while executing 6,864 packed rows and 450,758,880 terms. Test binary
+SHA-256: `d49cd705ba4e30cc0f92b6a0966be9e3a7599dae8031cb1a88f147e1202bdb55`;
+fixture source SHA-256:
+`161c0a7e0b28ce4ffd7164dbbbe5c17018e960d8a8c474732d114745262162f7`.
+
+### Bounded integer and Radeon screens
+
+On the local 5650U, AVX2, FMA and F16C are exposed; F16C converts half/single
+values and is not native FP16 arithmetic. This host does not expose VNNI/AMX.
+A bounded real-dot discriminator used 4,096 and 65,536 terms with coherent
+midpoint and seeded uncorrelated inputs, independently normalized operands,
+wider accumulation and FP64 reconstruction. Q15 normalized squared-score
+errors ranged `1.77e-5`–`1.22e-4`; Q7 errors ranged `0.0218`–`0.0402`, against
+the existing `3e-6` direct-score diagnostic. FP32 products with FP64 sums gave
+`8.0e-9`–`7.1e-8`. Exact scalar integer sums and executed AVX2 widening/multiply
+instructions were verified. An unsigned-by-signed byte multiply-add saturation
+control returned 32,767 for a mathematical sum of 64,516. These are bounded
+dot tests, not complete receiver decisions or throughput; they do not rule out
+other scaling, residual, mixed-precision or integer formulations.
+
+On the Radeon, two temporary native Vulkan candidates were screened against the
+existing `3e-6` independent direct-score diagnostic before long transforms or
+timing. The FP32 baseline passed at 16 and 256 FFT rows, maximum normalized
+errors `6.18e-7` and `7.63e-7`. Packed-FP16 products executed 50 scores at 16
+rows, with error `1.62065e-3`; RADV ISA showed two `v_pk_mul_f16` and one
+`v_pk_add_f16`, as well as four narrowing and two widening conversions.
+VkFFT half storage with FP32 computation executed 50 scores at 16 rows, with
+error `2.09520e-3`; the ISA showed FP32 arithmetic and half conversions, not
+packed FP16 arithmetic. The latter reduced the small-fixture device-owner peak
+from 6,880 to 5,024 bytes (27.0%) and uploads from 704 to 448 bytes. The
+required FP32-sized VkFFT scratch remains; the experiment did not establish a
+lower stream-admission bound. Its initial setup failed with
+`VKFFT_ERROR_INVALID_user_tempBuffer_too_small` before any score assertions;
+the subsequent scratch-size correction produced the reported results. The
+diagnostic score failures are not equivalent to measured reception sensitivity.
+These first screens were followed by the targeted tests below, rather than
+treated as an automatic rejection of lower precision.
+
+For longer transforms, the first half-storage and packed-product normalization
+experiment underflowed at FFT 65,536, giving error 1.0 and 1.58 respectively.
+The repaired power-of-two Parseval normalization gave `0.026928` and `0.001757`
+respectively versus FP32's `0.000118` for amplitude extremes `2^-80` and
+`2^40`. The diagnostic score differences remain visible. Four same-noise
+paired trials over 181 frequencies and both bits gave identical FP32,
+half-storage and packed-product decision brackets at 0.5 dB-Hz spacing; four
+quiet controls, a long-transform quiet check and failed-Helper quiet also
+matched. The first Helper control was invalid because its tone overlapped DATA;
+the corrected 1,725 Hz Helper at 6,000 Hz sample rate produced the intended
+`no_coarse_pilot` quiet result. A 181-frequency five-slot signal plus physical
+quiet and EOF control matched. These are small deterministic and paired trials,
+not a population sensitivity or false-alarm guarantee.
+
+The intermediate automatic Vulkan path used FP16 **storage** with FP32 FFT
+and product arithmetic only on qualified local RADV 25.0.7 PCI `1002:1638`
+hardware and 2,048-row, one-ray, 26-workspace, one-arrival searches with
+181–1,794 frequencies. It normalizes using exact power-of-two energy scales and
+requires representable variance. Other hardware, geometry and out-of-range
+normalization report FP32 storage or the appropriate existing native fallback.
+The selected precision/reason and actual per-mode score rows appear in receipts;
+this is not packed-FP16 FFT computation.
+
+Two fresh 1,794-frequency paired trials had the same FP32/automatic crossing
+brackets `[6.5, 7.0]` and `[5.0, 5.5]` dB-Hz, using 26 matched active pairs
+and two quiet controls. A separate 9 dB-Hz five-slot message matched DATA,
+two physical quiet decisions, public work and EOF. The 0.5 dB bracket spacing
+and only two fresh draws limit sensitivity inference. For the fixed broad
+high-SNR message, one first-use and three alternating FP32/automatic pairs gave
+service medians 1.44509→1.01680 seconds (**1.421×**; paired ratios
+1.295–1.457×), and whole-process medians 2.60192→2.09178 seconds (1.244×).
+The first-use pair was 1.56168→1.01526 seconds. Input and full work matched,
+including 279,864 actual score/frontier rows with EOF. Peak device memory per
+owner fell 21,311,408→15,790,000 bytes (25.9%); the shared-RAM admission at
+the same device cap did not decrease. In a separate single 16 MiB-per-owner
+pressure pair both completed; half storage used 906 versus 1,350 FFT calls and
+submissions and service was 0.97461 versus 1.35172 seconds. One pair is not a
+sustained capacity result. The packed-product alternative was slower than FP32
+in its scoped three-arm broad trial; this does not reject a different packed FFT.
+
+These half-storage Radeon checks bind production source manifest
+`203ff175c20b92f70f6eb2e2f0f4f87f1cce7a149e1f518270b9addb513de036`, probe binary
+`0b8440988da49d178bcf0c909547a83450db88229f67c7c6a64e86be30b6b2c2`, and test
+binary `e0c9aa5cc6060f94c29e8a0fe3103c7e81b691c288009b119cdf42e48319e6c6`.
+The compact `sensitivity-final-broad-{holdout,message}.json`,
+`sensitivity-final-message-timing.json` and `sensitivity-final-pressure.json`
+receipts retain these current claims. The source-bound test suite and 37 wrapper
+tests passed; larger sensitivity populations and other devices remain unqualified.
+
+### Packed direct correlation follow-through
+
+The subsequent native Vulkan path evaluates a single-arrival correlation
+directly, rather than through FFT convolution, where the measured geometry and
+device qualify. The automatic local route uses packed FP16 products, wider FP32
+accumulation/reduction and FP64 scoring; actual `v_pk_mul_f16`/`v_pk_fma_f16`
+instructions were observed. The widened selector requires the same RADV/PCI/driver
+and storage features, shader FP16 and compute-subgroup support, one ray, one
+arrival and no more than 131,072 unpadded projected template rows. Frequency and
+workspace totals run as independent dots in bounded tiles under native plan and
+device limits; not every admitted combination has direct empirical coverage.
+Power-of-two normalization must be representable. Longer eligible direct work or
+unrepresentable normalization retains FP32 direct arithmetic. Other unsupported
+shapes retain eligible half-storage FFT, FP32 GPU work or the existing explicit
+native fallback. A faster dense dot does not establish superior FFT asymptotic
+scaling.
+
+On frozen production source
+`8cfc77fe05a086a5666c4c5e3924423f622fab1e375ac233efeb4f7bbfd6b53d`, probe
+`59d7bebee72ecfb373065ce048a7098059f091ee2abfefd868287da07dd7c44d`, one
+first-use plus three alternating pairs of the complete five-slot 1,794-frequency
+message matched full work and decisions, including 279,864 score/frontier pairs
+with EOF. Compared with the earlier half-storage FFT, median receiver service
+fell 1.28209→0.677818 seconds (**1.891×**, pairs 1.749–2.171×) and whole
+process time 2.517→1.822 seconds (1.381×). The direct case executed 489,762,000
+complex dot terms, no FFT calls and 450 rather than 906 submissions. At a 1 MiB
+per-owner cap, FP32 and packed direct both completed matched work; observed
+device peaks were 749,968 and 399,968 bytes, while the same-cap host admission
+quote was unchanged. Device bytes and admitted workspace are distinct.
+
+In a separate matched four-arm trial, half-storage FFT, FP32 direct,
+FP16-storage/FP32 direct and packed FP16 direct completed in 1.03723, 0.57812,
+0.64286 and 0.57268 seconds respectively. Packed versus FP32 direct was
+essentially tied in that experiment (paired 0.975–1.078×); versus the same
+half-storage input with FP32 direct it was 1.122× faster. Four fresh paired
+draws with both bits over 181 and 1,794 frequencies, four quiet controls, two
+five-slot 10 dB-Hz messages and weak-Helper/no-pilot checks matched decisions
+and complete work. These finite fixtures do not establish a population
+sensitivity or false-alarm bound. Additional tests covered a one-frequency
+message; a 1,799-frequency, 78-workspace, 1,750-row case with both bits and quiet;
+and a 34,470-row, 65,536-point geometry with 139 frequencies, near-threshold DATA
+and quiet. For the last case matching FP32/direct decision brackets spanned
+`-10.625` to `-10.0` dB-Hz; the single `-10.0` active-slot service was 4.473
+seconds for FFT, 3.128 for FP32 direct and 3.048 for packed direct. These are
+single observations, not repeated complete-stream throughput measurements.
+The wide 1,799-frequency complete message used 841,932 score/frontier pairs;
+its single-case service was 4.934/1.841/1.722 seconds for those three paths.
+These extra strata support the stated envelope, not unmeasured combinations.
+
+The widened production selector was then exercised on actual Radeon hardware:
+one-frequency and 1,799-frequency/78-workspace complete messages, the
+34,470-row/139-frequency near-threshold active slot, and a new
+1,888-frequency/78-workspace active slot with 147,264 packed score rows and
+257,712,000 dot terms. A wider 5,384-frequency case had two arrivals and
+correctly fell back to the FP32 FFT, executing 839,904 score rows. The latter
+is a geometry fallback, not a failed packed computation. Actual-device checks
+passed 2/2. This widened-source evidence binds manifest
+`149d74436ea2bc27aa7c973fd8dde90005b5386407984914bbae7fa1cd8e7811`, probe
+`25bba84c61f2a9c3b8c7597a4e638021c85a4587772145495be7f921ff9e011f` and test
+binary `cbeed244a3af7a9a240c024cea30bcaeb6408567840c04334c13e863dc743e48`.
+
+A subsequent bounded long discriminator at 65,670 projected rows, FFT 131,072,
+26 workspaces, 264 frequencies and one arrival used seven actual-device native
+calls on the same `149d744…` source. The packed/FP32 direct controls matched
+input, public work, near-threshold active decisions and separate quiet; each
+evaluated 6,864 scores and 450,758,880 dot terms. Single-case service was 4.908
+seconds packed, 4.940 seconds FP32 direct and 8.328 seconds FFT; device-owner
+peaks were 13,695,328, 26,829,328 and 203,953,584 bytes respectively. This is
+not a population sensitivity or sustained throughput claim. Across three matched
+direct looks, median dot time was 0.063386 seconds packed versus 0.182378 seconds
+FP32 (2.88×), combining storage and arithmetic effects; no same-storage control
+was measured for this longer geometry. Median complete-slot service was
+4.811 versus 4.940 seconds (1.027×). The later 131,072
+row selector boundary is a conservative numerical envelope, not a hard
+sensitivity boundary. Observation energy and the largest nonzero bank-column
+energy determine common scales; the observation and largest column have norms
+in `[64,128)`. At `K≤131,072`, the L2 bound for flushing subnormal FP16 operand
+components is at most `sqrt(2K)·2^-14`, no more than one unit roundoff relative
+to that largest norm. Weaker columns can have a larger relative error, and
+product underflow and FP32 accumulation are separate error mechanisms. Direct
+empirical near-threshold work currently extends to 65,670 rows; it does not
+prove the reception sensitivity of every geometry. The integrated source
+`021dace5b6915523b60f29be932ccb5d4a06eda4da4680fb7603a5a541fa01a8` passed
+actual-device checks at the 131,072/131,073 selector boundary; probe
+`be0e7751728a9d88637a649c22925cf2ea095d8759d6a50db219ef78896270c1`, test
+binary `c72bdf19349f27433dbd874e01b8f95b69533974347b5127cebc879c655c1421`.
+On that integrated build, the 65,670-row active case retained matched input,
+decisions, evidence and 6,864 score rows with 450,758,880 actual packed dot
+terms, zero FFT calls and a 13,695,328-byte device-owner peak. These checks do
+not establish the direct/FFT performance crossover for every admitted F×K shape.
+
+For the earlier fused product trial, 489,762,000 complex terms counted at eight
+real operations per term give 47.0/47.6/54.5 GF/s equivalent for FP32 direct,
+FP32 direct with half storage and packed direct. This is a scoped operation-rate
+calculation from measured stage time, not a hardware utilization measurement.
+At the advertised 1.8 GHz, the conditional seven-CU Radeon model gives 1.61
+TFLOP/s FP32 or 3.23 TFLOP/s packed FP16 arithmetic peaks. The mixed direct
+kernel also uses conversions, FP32 accumulation, memory operations and other
+work, so the ratio to either ideal peak is not a measured utilization figure.
+The present data do not distinguish memory traffic, scheduling, synchronization,
+instruction mix and clock effects as the principal limit; hardware counters or
+equivalent profiling are needed before assigning that cause.
+See the [Radeon arithmetic ceiling](triad-performance.md#radeon-arithmetic-ceilings)
+and [AMD's packed-FP16 guidance](https://gpuopen.com/learn/first-steps-implementing-fp16/).
+
+Before adopting half storage, the FP32 Radeon path was compared with the then-current automatic CPU
+on the same fixed 377,637-row, five-slot, 1,794-frequency case, 4 GiB and W=24.
+One first-use pair and three alternating fresh-process pairs preserved input
+digest, full work, decisions and `5e-6` evidence, with actual GPU scoring and
+no coarse fallback. CPU/GPU service medians were 1.68099/1.46446 seconds
+(1.148×; pairs 1.124–1.157×), while full invocation medians including startup,
+simulation, profile and EOF were 2.84888/2.67355 seconds (1.066×). The first
+CPU/GPU service pair was 1.4340/1.4822 seconds and full invocation was
+2.4396/2.7577 seconds. Each GPU process incurred five cache misses and 25 hits;
+the later pairs are not cross-process warm-cache evidence. Peak device bytes per
+owner were 21,311,408; peak admitted shared-RAM reservations were approximately
+1.67 GB CPU and 3.18 GB GPU. This is not an APU capacity gain or sustained
+backlog test. The source manifest was
+`508a908820b662510ca42cdf880d8a9c21364c2ee1005e522d4b455cd19e9876`, build
+hash `1402552abf5b6fbff4e950c89404fc95182ca1e59e25f11137439237b7078f55`,
+and probe binary hash `b7042b90dfce4166381e3cb335c53199d562cd549b73f2fd7e1ea8907ac8e0a1`.
+The restored Radeon backend passed its actual-device frequency-grid, frontier
+and native-fine correctness check.
+
+The exact production route planner identifies a configured public broad-timing
+fixture at inner rate 1, two added symbols, crystal base oscillator, `cn0=0` and
+five slots. With no spread and with `hf-best` it reports `lag_groups`, 2,711
+projected template rows, 213 frequencies, 71 arrivals, 78 workspaces, one
+frequency group and FFT 4,096; projection is 5 Hz with source step 60 and the
+100.005 ppm clock span is outside the compact FP64 class. The planned coefficient
+storage is 4,619,544 bytes, within the shape bound for a declared 16 GiB arena.
+At `H=12`, `W=24`, the CPU coarse bounds are 54,959,672 bytes for one ray and
+61,112,504 for two rays. The five-slot fixture requires 4,057,300 and 4,057,301
+samples respectively. These are no-DSP geometry results: actual accelerator
+capability, dynamic allocation, matrix execution, complete costs and physical
+decisions remain separate gates. Planner receipt source manifest:
+`02b3d8b76c2fa68c79f70a02704b9de6e41de5a2f861ae736b7f7f54a6027829`.
+Two focused planner checks passed. An initial local planner build stopped before
+assertions because ccache could not write its configured read-only directory;
+rebuilding the same targets with `CCACHE_DIR=/tmp/pumpmodem-native-ccache`
+succeeded before those checks. This was a local setup failure, not the later
+cloud compilation or a numerical test failure.
+
+On a full NVIDIA RTX PRO 6000 Blackwell Server Edition (SM 12.0, 97,887 MiB,
+driver 595.91.07, CUDA 12.8.93 and LibTorch 2.9.1+cu128), the canonical native
+CUDA test passed with 35 actual FP16 and 35 actual INT8 GEMMs, zero capability
+fallbacks, and the retained 30/60 dB composite Helper/DATA checks. This is
+component and bounded receiver evidence for the frozen source, not proof that
+the planned public lag route runs on matrix arithmetic. Probe binary SHA-256:
+`3152ae5fb3262b9190d420fad532a8e507758f6cdabeb7328c663f1cf39ef0be`;
+CUDA test binary SHA-256:
+`415ad48f4640edcf4106d8478fb37239340ea9d380aa4bd9e930981ca264fb02`;
+build-options hash:
+`156c8e3becf263a3e99647ce07a50fd644336e76b642a4c3c227851694371cf7`.
+
+The configured-calendar lag fixture's CUDA FFT control failed the existing
+native mapped-template projector fidelity gate before coarse search at 1,500 Hz
+input sampling. A bounded 6,000 Hz discriminator retained the planned
+K=2,711, F=213, A=71 and 78-workspace geometry but failed the same guard.
+Both receipts report `executed=false`, zero GPU score rows and zero matrix
+calls. FP16/INT8 lag comparison was therefore not admitted; these failures do
+not establish matrix precision, sensitivity, performance or complete-service
+behavior. The experimental pod was terminated with no remaining pod or
+persistent storage.
+
+The gate's failure was traced to cubic mapped-template interpolation near the
+finite source endpoints. A bounded exact FIR edge-residual correction preserved
+the existing fidelity thresholds: one representative previously failing guard's
+projector error fell `0.01377818→9.828e-8`, relative template L2
+`0.01384220→1.032e-7` and Gram error `0.00284682→8.747e-8`. Focused native
+tests passed and CPU active/quiet controls each completed all 1,179,594 public
+lag scores, with the active input identical to the failing cloud capture. The
+corrected coarse lease is 55,155,704 bytes, while the complete slot remains
+177,034,256 bytes because fine work dominates. The new quote includes both edge
+scratch and other workspace-layout changes; do not attribute the entire delta
+from the earlier planner quote to the edge correction alone.
+
+A second bounded actual RTX PRO 6000 Blackwell run used corrected source
+`8cfc77fe05a086a5666c4c5e3924423f622fab1e375ac233efeb4f7bbfd6b53d` and probe
+`551bc0e91825baab9388cf5b587448a6bd9e3c376ddfa1885e26493869b17a4a`.
+The native CUDA suite passed again. One active and one quiet slot each for
+FFT, FP16 and INT8 completed all 1,179,594 public scores at `H=30`, `W=60`;
+each matrix case executed 36 GEMMs with no capability fallback. All expected
+DATA/quiet outcomes matched. FP16 active/quiet and INT8 active proposals matched
+the FFT control; INT8 quiet changed proposal coordinates and added 13,500 fine
+rows while retaining quiet and a `1.8e-15` log-e difference.
+
+| Complete coarse phase, including preparation and selection | Active | Quiet |
+| --- | ---: | ---: |
+| FFT | 0.36352 s | 0.27627 s |
+| FP16 matrix | 0.41407 s | 0.43040 s |
+| INT8 matrix | 0.35463 s | 0.33786 s |
+
+INT8 search tiles alone improved 1.459× active and 1.184× quiet, but its
+preparation increased 0.274→0.289 seconds and 0.196→0.266 seconds respectively;
+the complete coarse result shows no consistent advantage. Peak charged device
+workspace rose from 35.722 MB for FFT to 1,070.772 MB FP16 and 1,068.216 MB
+INT8; actual coarse-only allocator peaks were 27.263, 155.189 and 140.509 MB.
+Each stratum has one matched pair per mode, with variable fine-stage and process
+times; it is not a receiver throughput estimate or sensitivity bracket. The
+predeclared stop did not expand this unfavorable affected-stage/memory result
+into a five-slot CUDA campaign. This does not reject other matrix geometries or
+the separately documented historical component wins. Both cloud pods were
+terminated without retained volumes.
+
+The scoped CPU comparison receipts in ignored `local-evidence/lower-precision-cpu/`,
+Radeon screen/paired receipts in `local-evidence/radeon-precision-screen/`, and
+sanitized native CUDA test and projector-failure receipts in
+`local-evidence/lower-precision-cuda/` support this current investigation; remove
+them after their findings and any remaining qualification are resolved or
+superseded. No general CUDA lag speedup, sensitivity probability, complete
+capacity or refreshed CPU forecast is claimed.
+
 ## Native arithmetic selection
 
-The working change from `eaa0b805beaf788973da252dce03bb565e9f85be` selects
-post-filter FP32 frequency FFTs on AVX2, including live/simulated GUI reception.
+The earlier working change from `eaa0b805beaf788973da252dce03bb565e9f85be`
+selected post-filter FP32 frequency FFTs on AVX2, including live/simulated GUI
+reception. Later automatic spectral-product selection is described above.
 Every template Gram must have minimum/maximum eigenvalue ratio at least `1/16`.
 This is an empirical qualification envelope, not a universal roundoff theorem.
 Exact power-of-two block scaling preserves tiny inputs and noise-normalized

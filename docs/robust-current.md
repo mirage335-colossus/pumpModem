@@ -63,29 +63,46 @@ remaining slower overall than the original baseline; no throughput/utilization
 gain is claimed.
 See [CPU and memory ownership](development.md#receiver-cpu-allocation).
 
-The operating CPU receiver defaults to qualified FP32 frequency-search FFTs
-after native DATA channel isolation on AVX2, guarded by the complete bank's
-double-precision Gram conditioning. Lag/tight-clock and ill-conditioned or
-unqualified CPU routes retain FP64 with explicit reasons; coordinates, scoring
-and fine state remain double precision. The [shared arithmetic policy](search-arithmetic.md)
-defines the automatic and forced-FP64 controls, scaling and receipt identity.
-Neither arithmetic choice reduces public coverage, `W=2*H` or the conservative
-memory admission bound.
+The operating CPU receiver defaults to qualified reduced-precision frequency
+search after native DATA channel isolation on AVX2. Native single-ray exact
+projection can use Q15 spectral products with FP32 FFTs under checked native
+bounds; other eligible frequency banks use FP32 products and FFTs. For a
+qualifying no-Helper, single-ray, single-arrival search, automatic mode can
+instead choose FP64 chirp-Z when its estimated transform-row work is at least
+four times smaller; a single frequency can instead use a direct FP64 dot under
+the same modeled-advantage requirement. A single-ray bank has Gram ratio 1 and
+can convert each checked template directly, with a phase-aware
+admission bound charging FP64 projection and conversion overlap. Other automatic
+banks remain subject to the complete bank's double-precision conditioning check. Lag/tight-clock and
+ill-conditioned or unqualified CPU routes retain FP64 with explicit reasons;
+coordinates, scoring and fine state remain double precision. The
+[shared arithmetic policy](search-arithmetic.md) defines the automatic and
+forced-FP64 controls, scaling and receipt identity. Both choices preserve public
+coverage, `W=2*H` and full memory accounting. The smaller coarse bound can reduce
+the slot lease when coarse is dominant; it does not imply a reduction where
+Helper or fine work dominates.
 
 The optional [Vulkan backend](triad-performance.md#local-radeon-vulkan-processing)
 starts after native DATA channel isolation and accelerates the complete
-frequency-search grid and exact arrival frontiers. Helper, native FIR, template
+frequency-search grid and exact arrival frontiers. On the qualified local Radeon
+device/geometry, a scaled packed-FP16 direct correlation uses FP32 accumulation
+and FP64 scoring. Other cases can use FP32 direct arithmetic, qualified FP16 FFT
+storage with FP32 arithmetic, an FP32 FFT or explicit native fallback. Actual precision and
+fallback reason are reported. Helper, native FIR, template
 generation, lag groups, the compact tight-clock FP64 class and fine tracking
 remain in native CPU code. Stage capability/routing is explicit; workspace
 quotation and construction use the same decision. An APU's GPU allocations use
 shared host RAM, so the full per-session ceiling and separate staging remain
 charged through completion and cancellation. The backend's bounded serialized
 VkFFT program cache has a separate persistent host-memory charge, including idle
-lifetime; session device plans and buffers remain private. Default CPU operation
-and public route selection are unchanged. The shared GUI's **GPU** checkbox
-selects this backend for live reception and simulation, with the same native
-factory available to headless probes. Device initialization runs on the session
-manager rather than the UI thread. The backend/cache persists across
+lifetime; session device plans and buffers remain private. The shared GUI's
+**GPU** checkbox selects this backend for live reception and simulation. Its
+Default setting may choose native chirp-Z for the calibrated compatible
+Radeon/public-geometry/worker crossover, while preserving the full fallback
+reservation. Explicit GPU choices and strict headless accelerator probes retain
+requested device execution. The same native factory is available to headless
+probes. Device initialization runs on the session manager rather than the UI
+thread. The backend/cache persists across
 transmissions within a settings generation, and requested device failures remain
 explicit. The GUI charges a fixed 256 MiB per-owner device ceiling and preserves
 the full worker budget. See the [shared control contract](gui-contract.md).

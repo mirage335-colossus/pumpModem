@@ -37,10 +37,16 @@ def main(executable):
     forced = run("describe", "--native-coarse-precision", "fp64")
     assert forced["identity"]["requested_native_coarse_precision"] == "fp64"
     assert forced["identity"]["receiver_arithmetic"] == "native_fp64_coarse_fft_state_and_admission"
-    run("describe", "--native-coarse-precision", "fp32", code=1,
-        parse_error="--native-coarse-precision expects automatic or fp64")
+    q15 = run("describe", "--native-coarse-precision", "q15")
+    assert q15["identity"]["requested_native_coarse_precision"] == "q15"
+    assert q15["identity"]["receiver_arithmetic"] == "native_q15_spectral_products_fp32_fft_fp64_score_and_state"
+    fp32 = run("describe", "--native-coarse-precision", "fp32")
+    assert fp32["identity"]["requested_native_coarse_precision"] == "fp32"
+    assert fp32["identity"]["receiver_arithmetic"] == "native_fp32_coarse_products_with_fp64_guards"
+    run("describe", "--native-coarse-precision", "invalid", code=1,
+        parse_error="--native-coarse-precision expects automatic, fp32, fp64 or q15")
     run("describe", "--backend", "vulkan", "--native-coarse-precision", "fp64", code=1,
-        parse_error="FP64 native coarse precision override requires --backend cpu")
+        parse_error="Native coarse precision overrides require --backend cpu")
     tensor_on_cpu = run("describe", "--tensor-coarse-math", "int8", code=2)
     assert tensor_on_cpu["status"] == "unavailable" and not tensor_on_cpu["phases"]
     assert tensor_on_cpu["identity"]["requested_tensor_coarse_math"] == "int8"
@@ -61,6 +67,42 @@ def main(executable):
     assert stream_plan["spool_bytes"] == stream_plan["generated_samples"] * 17
     assert stream_plan["maximum_startup_carryover_slots"] == 1
     assert [row["name"] for row in plan["phases"]] == ["profile_preparation"]
+    assert plan["configuration"]["coarse_full_prior"]["route"] == "lag_groups"
+    assert plan["configuration"]["coarse_full_prior"]["correlation_fft_rows"] == 0
+    large_options = ("--seconds", "670", "--max-samples", "1200000")
+    large_auto = run("plan", *large_options)["configuration"]
+    large_fp32 = run("plan", *large_options, "--native-coarse-precision", "fp32")["configuration"]
+    assert large_auto["coarse_full_prior"]["route"] == "lag_groups"
+    assert large_auto["coarse_full_prior"]["correlation_fft_rows"] == 0
+    assert large_fp32["coarse_full_prior"]["correlation_fft_rows"] == 131072
+    explicit_large_q15 = run("plan", *large_options, "--native-coarse-precision", "q15")
+    large_q15 = explicit_large_q15["configuration"]
+    if description["identity"]["cpu_fft_kernel"] == "avx2":
+        assert large_q15["coarse_full_prior"]["correlation_fft_rows"] == 131072
+        assert large_q15["coarse_full_prior"]["workspace_reserved_bytes"] < large_fp32["coarse_full_prior"]["workspace_reserved_bytes"]
+    else:
+        assert large_q15["coarse_full_prior"] is None and large_q15["receiver_slot_workspace_bytes"] is None
+        assert "Q15 coarse products require" in large_q15["coarse_full_prior_reason"]
+    assert explicit_large_q15["observation"] is None
+    lag_options = ("--rate", "1", "--added-symbols", "2", "--timing-policy", "broad",
+                   "--base-oscillator", "crystal", "--max-samples", "900000")
+    lag = run("plan", *lag_options)
+    assert lag["observation"] is None and lag["result"]["actual_device_work"] is False
+    assert [row["name"] for row in lag["phases"]] == ["profile_preparation"]
+    lag_plan = lag["configuration"]["coarse_full_prior"]
+    assert lag_plan["route"] == "lag_groups" and lag_plan["frequency_groups"] == 1
+    assert lag_plan["projected_sample_rate_hz"] == 5 and lag_plan["template_sampling_step"] == 60
+    assert lag_plan["frequency_points"] == 213 and lag_plan["arrival_points"] == 71
+    assert 16 <= lag_plan["projected_template_rows"] <= 8192
+    assert lag_plan["workspaces"] == 78 and lag_plan["rays"] == 1
+    mapped = run("slot", *lag_options, "--cn0", "0", "--coarse-tiles", "1", code=2)
+    mapped_prepare = next(row["work"] for row in mapped["phases"] if row["name"] == "coarse_prepare")
+    mapped_tile = next(row["work"] for row in mapped["phases"] if row["name"] == "coarse_tiles")
+    assert mapped_prepare["route"] == "lag_groups"
+    assert mapped_prepare["mapped_fidelity"]["projected_columns"] > 0
+    assert mapped_tile["search"]["score_rows"] == lag_plan["frequency_points"] * lag_plan["arrival_points"]
+    assert mapped["result"]["acquisition"]["completed_tiles"] == 1
+    assert mapped["result"]["acquisition"]["selection_completed"] is False
     bounded = run("slot", "--max-samples", "1", code=2)
     assert bounded["status"] == "incomplete" and bounded["observation"] is None
     assert not bounded["configuration"]["slot_plan"]["fits_sample_budget"]
@@ -112,7 +154,9 @@ def main(executable):
     assert codec["result"]["marker_intervals"] > 1
     assert codec["result"]["complete_receiver_service"] is False
 
-    stream = run("message", "--max-samples", "600000", "--slots", "5")
+    stream = run("message", "--max-samples", "600000", "--slots", "5", "--seconds", ".1",
+                 "--rate", "120", "--shift-oscillator", "crystal", "--rf-hz", "200000",
+                 "--seed", "74207", "--cn0", "9")
     result = stream["result"]
     assert result["message_and_physical_quiet_verified"] and result["eof_control_verified"]
     observation = stream["observation"]
@@ -134,6 +178,9 @@ def main(executable):
     assert reserved <= generation["work"]["generation_preflight_reserved_bytes"] <= stream["allocation"]["memory_limit_bytes"]
     rows = result["stream"]["slots"]
     assert [row["decision"] for row in rows] == ["data"] * 3 + ["quiet"] * 2
+    assert all(row["coarse_precision_reason"] == "exact-one-arrival-chirp-z" and
+               row["coarse_frequency_points"] == 1794 and row["coarse_workspaces"] == 26 and
+               row["coarse_arrival_points"] == 1 for row in rows)
     assert [row["symbol_ordinal"] for row in rows] == list(range(rows[0]["symbol_ordinal"], rows[0]["symbol_ordinal"] + 5))
     assert [row["bit"] for row in rows[:3]] == [0, 0, 1]
     assert all(row["commit"]["input_stop"] >= row["stop_sample"] for row in rows)

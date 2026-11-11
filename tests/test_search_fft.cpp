@@ -86,6 +86,55 @@ int main() { try {
     std::vector<std::complex<float>> float_cancelled(8);
     rejects([&] { fft::fft(float_cancelled,false,singles,float_stop.get_token()); });
 
+    // Cover AVX2 lanes and a non-vector tail using differently scaled inputs.
+    std::array<std::complex<float>, 19> left{}, right{}, products{};
+    for (std::size_t i = 0; i < left.size(); ++i) {
+        const auto exponent = static_cast<int>(i) - 9;
+        left[i] = {std::ldexp(.7F, exponent), std::ldexp(-.9F, -exponent)};
+        right[i] = {std::ldexp(-.2F, -exponent), std::ldexp(.6F, exponent)};
+    }
+    fft::multiply_spectra(products, left, right);
+    for (std::size_t i = 0; i < products.size(); ++i)
+        check(products[i] == left[i] * right[i], "FP32 spectrum product changed scalar arithmetic");
+    rejects([&] { fft::multiply_spectra(products, left, right, float_stop.get_token()); });
+
+    // Use integer extrema, half-integer ties, distinct scales and a tail.
+    std::array<std::complex<float>, 19> q15_left{}, q15_right{};
+    q15_left[0] = {32767.F, -32767.F};
+    q15_right[0] = {-32767.F, 32767.F};
+    q15_left[1] = {1.5F, -2.5F};
+    q15_left[18] = {-1.5F, 2.5F};
+    for (std::size_t i = 1; i < q15_right.size(); ++i)
+        q15_right[i] = {static_cast<float>(i) + .5F, -static_cast<float>(i) - 1.5F};
+    for (auto& value : q15_right) value *= .125F;
+    const auto qleft = fft::pack_q15(q15_left), qright = fft::pack_q15(q15_right);
+    const auto scalar_left = fft::pack_q15(q15_left, {}, fft::Kernel::scalar);
+    const auto scalar_right = fft::pack_q15(q15_right, {}, fft::Kernel::scalar);
+    check(qleft.exponent() == 0 && qright.exponent() == -3 &&
+          qleft.components()[0] == 32767 && qleft.components()[1] == -32767 &&
+          qleft.components()[2] == 2 && qleft.components()[3] == -2 &&
+          qleft.components()[36] == -2 && qleft.components()[37] == 2 &&
+          std::ranges::equal(qleft.components(), scalar_left.components()) &&
+          std::ranges::equal(qright.components(), scalar_right.components()),
+          "Q15 quantization violated scaling, rounding or ISA parity");
+    fft::multiply_spectra(products, qleft, qright);
+    for (std::size_t i = 0; i < products.size(); ++i) {
+        const std::int64_t ar = qleft.components()[2 * i], ai = qleft.components()[2 * i + 1];
+        const std::int64_t br = qright.components()[2 * i], bi = qright.components()[2 * i + 1];
+        check(products[i] == std::complex<float>(static_cast<float>(ar * br - ai * bi),
+                                                  static_cast<float>(ar * bi + ai * br)),
+              "Q15 complex product changed the bounded widened integer result");
+    }
+    std::array<std::complex<float>, 2> q15_zero{};
+    const auto packed_zero = fft::pack_q15(q15_zero);
+    check(packed_zero.exponent() == 0 &&
+          std::ranges::all_of(packed_zero.components(), [](auto x) { return x == 0; }),
+          "Q15 zero spectrum introduced signal or scaling");
+    rejects([&] { (void)fft::pack_q15(q15_left, float_stop.get_token()); });
+    rejects([&] { fft::multiply_spectra(products, qleft, qright, float_stop.get_token()); });
+    q15_left[7] = {std::numeric_limits<float>::quiet_NaN(), 0};
+    rejects([&] { (void)fft::pack_q15(q15_left); });
+
     // A longer round-trip catches twiddle recurrence drift without relying on
     // the implementation's butterfly layout for its expected result.
     constexpr std::size_t long_size=1U<<16;
@@ -100,5 +149,18 @@ int main() { try {
     fft::fft(roundtrip,false,long_plan);fft::fft(roundtrip,true,long_plan);
     for(std::size_t i=0;i<long_size;++i)
         check(std::abs(roundtrip[i]-long_input[i])<2e-5F,"Long FP32 FFT round-trip lost precision");
+
+    // Constant spectra give a known coherent inverse-FFT peak. Exercise a
+    // 131072-row Q15 transform with packed products near the signed limit.
+    constexpr auto packed_size = 1U << 17;
+    const std::vector<std::complex<float>> constant(packed_size, {32767.F, -32767.F});
+    const auto packed_constant = fft::pack_q15(constant);
+    std::vector<std::complex<float>> inverse(packed_size);
+    fft::multiply_spectra(inverse, packed_constant, packed_constant);
+    fft::fft(inverse, true, fft::FloatPlan(packed_size));
+    const auto expected_peak = std::complex<float>(0, static_cast<float>(-2LL * 32767 * 32767));
+    check(inverse.front() == expected_peak &&
+          std::ranges::all_of(std::span(inverse).subspan(1), [](auto x) { return x == std::complex<float>{}; }),
+          "Long coherent Q15 inverse transform lost its finite peak or zero bins");
     std::cout << "Bounded FFT correctness and cancellation checks passed\n";
 } catch(const std::exception& error) { std::cerr<<error.what()<<'\n';return 1; } }

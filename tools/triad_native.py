@@ -125,6 +125,11 @@ def runtime_identity(receipt):
             "vulkan_float16", "vulkan_int8", "vulkan_integer_dot8_accelerated", "unified_memory",
             "numerical_threads", "precision", "workspace_scope", "workspace_limit_bytes", "total_device_bytes",
         )}
+        # The selected storage can differ by session and is known only after
+        # work executes. Bind current reports to their requested policy instead.
+        if "requested_vulkan_precision" in identity:
+            runtime["requested_vulkan_precision"] = identity["requested_vulkan_precision"]
+            del runtime["bulk"]["precision"]
     else:
         runtime["bulk"] = {name: bulk.get(name) for name in (
             "device", "device_name", "library_version", "cuda_runtime_version", "cuda_driver_version",
@@ -177,7 +182,8 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
         raise ProbeError("Invalid native observation receipt")
     identity = receipt["identity"]
     native_precision = identity.get("requested_native_coarse_precision")
-    if native_precision not in ("automatic", "fp64"):
+    if (native_precision not in ("automatic", "fp32", "fp64", "q15")
+            or (backend != "cpu" and native_precision in ("fp32", "q15"))):
         raise ProbeError("Complete native receipt lacks a valid requested native precision policy")
     if identity.get("backend") != backend:
         raise ProbeError("Native receipt backend disagrees with requested backend")
@@ -237,6 +243,41 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
             for key in ("vulkan_float16", "vulkan_int8", "vulkan_integer_dot8_accelerated"):
                 if type(bulk.get(key)) is not bool:
                     raise ProbeError("Vulkan receipt lacks queried arithmetic features")
+            if "requested_vulkan_precision" in identity:
+                requested = identity["requested_vulkan_precision"]
+                if requested not in ("automatic", "fp32", "fp16-storage",
+                                     "direct-fp32", "direct-fp16-storage", "direct-fp16"):
+                    raise ProbeError("Invalid Vulkan storage precision request")
+                total = positive_int(bulk.get("score_rows"), "Vulkan scored rows", allow_zero=True)
+                single = positive_int(bulk.get("vulkan_fp32_score_rows"), "Vulkan FP32 scored rows", allow_zero=True)
+                half = positive_int(bulk.get("vulkan_fp16_storage_score_rows"),
+                                    "Vulkan FP16-storage scored rows", allow_zero=True)
+                if single + half != total or (requested in ("fp32", "direct-fp32") and half):
+                    raise ProbeError("Vulkan receipt does not partition actual work by storage precision")
+                direct_single = positive_int(bulk.get("vulkan_direct_fp32_score_rows", 0),
+                                             "Vulkan FP32 direct rows", allow_zero=True)
+                direct_stored = positive_int(bulk.get("vulkan_direct_fp16_storage_score_rows", 0),
+                                             "Vulkan half-storage direct rows", allow_zero=True)
+                direct_packed = positive_int(bulk.get("vulkan_direct_fp16_score_rows", 0),
+                                             "Vulkan packed FP16 direct rows", allow_zero=True)
+                dot_terms = positive_int(bulk.get("vulkan_direct_dot_terms", 0),
+                                         "Vulkan direct-dot terms", allow_zero=True)
+                direct_total = direct_single + direct_stored + direct_packed
+                if (direct_single > single or direct_stored + direct_packed > half
+                        or bool(direct_total) != bool(dot_terms) or dot_terms < direct_total
+                        or (direct_packed and bulk["vulkan_float16"] is not True)
+                        or (requested in ("fp32", "fp16-storage") and direct_total)
+                        or (requested == "direct-fp16-storage" and direct_packed)):
+                    raise ProbeError("Vulkan receipt does not identify actual direct-dot arithmetic")
+                actual = ("fp32_direct_dot_fp64_scoring" if direct_single == total else
+                          "fp16_storage_fp32_direct_dot_fp64_scoring" if direct_stored == total else
+                          "packed_fp16_direct_dot_fp32_reduction_fp64_scoring" if direct_packed == total else
+                          "mixed_vulkan_frequency_arithmetic" if direct_total else
+                          "mixed_fp16_fp32_fft_storage_fp32_compute" if single and half else
+                          "fp16_fft_storage_fp32_fft_and_products" if half else
+                          "fp32_fft_fp64_coordinates_and_scores_native_fir_and_fine")
+                if total and bulk["precision"] != actual:
+                    raise ProbeError("Vulkan reported storage precision disagrees with scored rows")
         if command not in ("describe", "plan") and not receipt["phases"]:
             raise ProbeError("Complete native workload contains no measured phases")
         if command not in ("describe", "plan", "codec") and (
@@ -323,11 +364,15 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                 route_proof = regression_route
             else:
                 route_proof = frequency_route
+            work_counts = ("fft_calls", "vulkan_direct_dot_terms") if "requested_vulkan_precision" in identity else (
+                "fft_calls",)
             if (accelerator.get("vulkan") is not True or accelerator.get("executed") is not True
                     or not all(type(accelerator.get(key)) is int and accelerator[key] > 0
-                               for key in ("vulkan_dispatches", "vulkan_arrival_peak_rows", "fft_calls", "score_rows"))
+                               for key in ("vulkan_dispatches", "vulkan_arrival_peak_rows", "score_rows"))
+                    or not any(type(accelerator.get(key)) is int and accelerator[key] > 0
+                               for key in work_counts)
                     or not route_proof):
-                raise ProbeError("Complete Vulkan receipt does not prove GPU full-frequency FFT and score work")
+                raise ProbeError("Complete Vulkan receipt does not prove GPU full-frequency scoring")
     return receipt
 
 
@@ -411,6 +456,10 @@ class NativeProbe:
             if (receipt["identity"]["requested_native_coarse_precision"] !=
                     (options.get("native_coarse_precision") or "automatic")):
                 raise ProbeError("Native probe altered the requested native coarse precision policy")
+            if self.backend == "vulkan":
+                requested = argv[argv.index("--vulkan-precision") + 1] if "--vulkan-precision" in argv else "automatic"
+                if receipt["identity"].get("requested_vulkan_precision", "automatic") != requested:
+                    raise ProbeError("Native probe altered the requested Vulkan storage precision policy")
             actual = allocation(receipt)
             for key, value in limits.items():
                 if value is not None and actual[key] != value:

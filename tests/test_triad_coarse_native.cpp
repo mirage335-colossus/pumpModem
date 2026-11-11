@@ -102,8 +102,9 @@ Fixture capture(const datapump::Crypto& crypto, bool mapped,
             return ((t - f.arrival - delay) * (1 + f.clock * 1e-6) - s.source_start_seconds) * c.sample_rate_hz;
         };
         auto value = v::Complex(.8, .2) * source.sample_at(position(0));
-        value += v::Complex(.3, -.6) * source.sample_at(position(c.spread_delay_seconds)) *
-                 rotation(c.spread_doppler_hz * t);
+        if (spread_delay || spread_doppler)
+            value += v::Complex(.3, -.6) * source.sample_at(position(c.spread_delay_seconds)) *
+                     rotation(c.spread_doppler_hz * t);
         f.iq[i] = value * rotation(f.frequency * t);
     }
     return f;
@@ -180,13 +181,13 @@ void automatic_precision_qualification(const datapump::Crypto& crypto) {
                         work.workspace_frequency_pairs, work.score_rows, work.retained_peaks,
                         progress.selection.operations.selection_peak_rows);
     };
-    const auto check_pair = [&](const r::CoarseResult& low, const r::CoarseResult& ref) {
+    const auto check_pair = [&](const r::CoarseResult& low, const r::CoarseResult& ref, unsigned rank) {
         const auto& plan = low.work.plan;
-        check(plan.route == r::CoarseRoute::frequency_tiles && plan.rays == 2 &&
+        check(plan.route == r::CoarseRoute::frequency_tiles && plan.rays == rank &&
               plan.fft_precision == (cpu_fft_fp32_qualified ? "fp32" : "fp64") &&
               plan.precision_reason == (cpu_fft_fp32_qualified ? "qualified-post-filter-fft" : "cpu-kernel-unqualified") &&
               plan.minimum_eigenvalue_ratio >= 1. / 16,
-              "automatic two-ray search did not select its qualified precision");
+              "automatic search did not select its qualified precision");
         check(ref.work.plan.fft_precision == "fp64" && ref.work.plan.precision_reason == "explicit-fp64",
               "forced FP64 control did not report its executed arithmetic");
         check(search_work(low.work) == search_work(ref.work) &&
@@ -196,18 +197,91 @@ void automatic_precision_qualification(const datapump::Crypto& crypto) {
             const auto& selected = low.proposals[i];
             const auto& expected = ref.proposals[i];
             check(selected.coordinate == expected.coordinate && selected.rank == expected.rank &&
-                  selected.bit == expected.bit && selected.rank == 2 &&
+                  selected.bit == expected.bit && selected.rank == rank &&
                   std::abs(selected.score - expected.score) <= 3e-6 * std::max(1., std::abs(expected.score)),
-                  "automatic precision changed an ordered two-ray proposal beyond its score tolerance");
+                  "automatic precision changed an ordered proposal beyond its score tolerance");
         }
     };
+
+    // The single-column Gram has ratio one for all workspaces. Its compact
+    // bank must fit the smaller public lease and score the complete grid.
+    auto single = capture(crypto, false, 0, 0);
+    single.config.native_coarse_precision = v::NativeCoarsePrecision::fp32;
+    const auto single_result = run(single, v::NativeCoarsePrecision::fp32);
+    const auto single_ref = run(single, v::NativeCoarsePrecision::fp64);
+    check_winner(single, single_result);
+    check_pair(single_result, single_ref, 1);
+    const auto single_bound = single_result.work.plan.workspace_reserved_bytes;
+    check(cpu_fft_fp32_qualified ? single_bound < single_ref.work.plan.workspace_reserved_bytes :
+                                    single_bound == single_ref.work.plan.workspace_reserved_bytes,
+          "single-ray bank did not quote the bytes of its dispatch path");
+    rejects<v::ReceiverWorkspaceError>([&] {
+        (void)r::score_coarse(single.config, single.slot, crypto, single.iq, intervals, workers, single_bound - 1, {});
+    }, "single-ray bank exceeded its exact public workspace lease");
+    auto quiet_scale = single;
+    for (auto& sample : quiet_scale.iq) sample *= std::ldexp(1., -100);
+    quiet_scale.config.noise_variance *= std::ldexp(1., -200);
+    const auto small_single = run(quiet_scale, v::NativeCoarsePrecision::fp32);
+    check_pair(small_single, single_ref, 1);
+    check((small_single.work.plan.observation_scale_exponent != 0) == cpu_fft_fp32_qualified,
+          "single-ray bank did not record weak-input scaling on its selected path");
+    r::CoarseSession cancelled_single(single.config, single.slot, crypto, single.iq, intervals,
+                                      workers, single_bound);
+    cancelled_single.cancel();
+    check(cancelled_single.state() == r::CoarseState::cancelled && !cancelled_single.finish(),
+          "cancelled single-ray bank published its proposals");
+
+    auto packed_config = single.config;
+    packed_config.native_coarse_precision = v::NativeCoarsePrecision::q15;
+    if (cpu_fft_fp32_qualified) {
+        const auto packed = run(single, v::NativeCoarsePrecision::q15);
+        const auto automatic_packed = run(single, v::NativeCoarsePrecision::automatic);
+        const auto weak = run(quiet_scale, v::NativeCoarsePrecision::automatic);
+        const auto packed_bound = packed.work.plan.workspace_reserved_bytes;
+        check_winner(single, packed);
+        check_winner(quiet_scale, weak);
+        check(packed.work.plan.fft_precision == "fp32" &&
+              packed.work.plan.precision_reason == "q15-products-fp32-fft" &&
+              weak.work.plan.observation_scale_exponent != 0 &&
+              search_work(packed.work) == search_work(single_result.work) &&
+              search_work(weak.work) == search_work(single_result.work) &&
+              packed_bound < single_bound && packed.work.retained_bytes < single_result.work.retained_bytes,
+              "Q15 did not preserve public work and reduce the single-ray workspace");
+        check(automatic_packed.work.plan.precision_reason == packed.work.plan.precision_reason &&
+              automatic_packed.work.plan.workspace_reserved_bytes == packed_bound &&
+              automatic_packed.coordinates == packed.coordinates &&
+              search_work(automatic_packed.work) == search_work(packed.work) &&
+              weak.work.plan.precision_reason == packed.work.plan.precision_reason,
+              "automatic single-ray arithmetic differs from supported Q15 selection and admission");
+        rejects<v::ReceiverWorkspaceError>([&] {
+            (void)r::score_coarse(packed_config, single.slot, crypto, single.iq, intervals, workers, packed_bound - 1, {});
+        }, "Q15 admitted a truncated lease");
+        r::CoarseSession cancelled_packed(packed_config, single.slot, crypto, single.iq, intervals, workers, packed_bound);
+        cancelled_packed.cancel();
+        check(cancelled_packed.state() == r::CoarseState::cancelled && !cancelled_packed.finish(),
+              "cancelled Q15 bank published its proposals");
+    } else {
+        rejects([&] { (void)r::coarse_workspace(packed_config, single.slot, workers); },
+                "Q15 accepted an unsupported CPU");
+        auto automatic = single.config;
+        automatic.native_coarse_precision = v::NativeCoarsePrecision::automatic;
+        check(r::coarse_workspace(automatic, single.slot, workers) == single_bound,
+              "automatic precision changed the scalar fallback lease");
+    }
 
     // A demanding, wide public search with a conditioned full-rank two-ray
     // basis exercises both rays and the FP32 FFT path. The FP64 version is the
     // oracle; require stable proposal identity/order as well as score accuracy.
     const auto wide = capture(crypto, false);
+    auto unsupported = wide.config;
+    unsupported.native_coarse_precision = v::NativeCoarsePrecision::q15;
+    rejects([&] { (void)r::coarse_workspace(unsupported, wide.slot, workers); },
+            "Q15 accepted a conditional two-ray bank");
     const auto float_result = run(wide, v::NativeCoarsePrecision::automatic);
-    check_pair(float_result, run(wide, v::NativeCoarsePrecision::fp64));
+    const auto wide_ref = run(wide, v::NativeCoarsePrecision::fp64);
+    check_pair(float_result, wide_ref, 2);
+    check(float_result.work.plan.workspace_reserved_bytes == wide_ref.work.plan.workspace_reserved_bytes,
+          "conditional two-ray arithmetic changed the public fallback lease");
 
     // The two rays use the same measured geometry in the synthesized input
     // and the template bank. This ratio is close enough to 1/16 to exercise
@@ -217,7 +291,7 @@ void automatic_precision_qualification(const datapump::Crypto& crypto) {
     const auto ratio = boundary_result.work.plan.minimum_eigenvalue_ratio;
     check(ratio >= .065 && ratio <= .10, "boundary fixture left its near-cutoff conditioning range");
     check_winner(boundary, boundary_result);
-    check_pair(boundary_result, run(boundary, v::NativeCoarsePrecision::fp64));
+    check_pair(boundary_result, run(boundary, v::NativeCoarsePrecision::fp64), 2);
 
     // An input power change also changes the declared noise variance. Exact
     // exponent scaling must preserve the normalized score without making the
@@ -286,6 +360,127 @@ void slow_mapped(const datapump::Crypto& crypto) {
           "lag-domain session lost or repeated an admitted correlation");
 }
 
+void exact_single_arrival_chirp_z(const datapump::Crypto& crypto) {
+    auto f = capture(crypto, false, 0, 0);
+    f.config.helper_enabled = false;
+    f.config.frequency_bound_hz = 2;
+    f.slot.arrival_lower_seconds = f.slot.arrival_upper_seconds = f.arrival;
+    const std::array<r::FrequencyInterval, 1> prior{{{-2, 2}}};
+    constexpr unsigned workers = 3;
+    const auto limit = r::coarse_workspace(f.config, f.slot, workers);
+    const auto prepared = r::coarse_work_plan(f.config, f.slot, prior, workers);
+    check(prepared.route == r::CoarseRoute::lag_groups && prepared.template_sampling_step == 1 &&
+          prepared.rays == 1 && prepared.arrival_points == 1 && prepared.clocks == 3 &&
+          prepared.workspace_reserved_bytes == limit,
+          "broad exact one-arrival planner did not admit the chirp-Z bank");
+    r::CoarseSession chirp_grid(f.config, f.slot, crypto, f.iq, prior, workers, limit);
+    const std::vector<double> grid(chirp_grid.frequency_grid().begin(), chirp_grid.frequency_grid().end());
+    chirp_grid.advance(64);
+    const auto completed = chirp_grid.finish();
+    check(completed.has_value(), "exact chirp-Z did not finish its complete public grid");
+    const auto& result = *completed;
+    check_winner(f, result);
+    const auto& work = result.work.search.operations;
+    check(result.work.plan.precision_reason == "exact-one-arrival-chirp-z" &&
+          work.workspace_frequency_pairs == prepared.workspaces * prepared.frequency_points &&
+          work.score_rows == work.workspace_frequency_pairs &&
+          work.retained_peaks == work.score_rows &&
+          result.work.selection.operations.selection_peak_rows == work.score_rows &&
+          work.forward_ffts == prepared.workspaces && work.inverse_ffts == prepared.workspaces,
+          "exact chirp-Z search omitted scores, repeated transforms or stored an unused arrival peak");
+
+    auto reference_config = f.config;
+    reference_config.native_coarse_precision = v::NativeCoarsePrecision::fp64;
+    const auto reference_limit = r::coarse_workspace(reference_config, f.slot, workers);
+    r::CoarseSession reference_grid(reference_config, f.slot, crypto, f.iq, prior, workers, reference_limit);
+    check(std::ranges::equal(reference_grid.frequency_grid(), grid),
+          "exact chirp-Z changed the ordered public frequency grid");
+    reference_grid.advance(64);
+    const auto reference_result = reference_grid.finish();
+    check(reference_result.has_value(), "frequency-route control did not finish its public grid");
+    const auto& reference = *reference_result;
+    check(reference.work.plan.route == r::CoarseRoute::frequency_tiles &&
+          reference.work.selection.operations.selection_peak_rows == work.score_rows &&
+          result.proposal_count == reference.proposal_count &&
+          result.coordinates == reference.coordinates,
+          "exact chirp-Z changed the ordered FP64 reference candidates");
+    for (std::size_t i = 0; i < reference.proposal_count; ++i) {
+        const auto& proposal = result.proposals[i];
+        const auto& expected = reference.proposals[i];
+        check(proposal.coordinate == expected.coordinate && proposal.bit == expected.bit &&
+              proposal.rank == expected.rank,
+              "exact chirp-Z changed a selected public proposal");
+    }
+
+    const std::array<r::FrequencyInterval, 1> singleton{{{f.frequency, f.frequency}}};
+    const auto direct = r::score_coarse(f.config, f.slot, crypto, f.iq, singleton, workers, limit, {});
+    const auto direct_work = direct.work.search.operations;
+    check(direct.work.plan.route == r::CoarseRoute::lag_groups &&
+          direct.work.plan.precision_reason == "exact-one-arrival-singleton-dot" &&
+          direct.work.plan.correlation_fft_rows == 0 &&
+          direct.work.plan.workspace_reserved_bytes == limit &&
+          direct_work.score_rows == prepared.workspaces && !direct_work.forward_ffts && !direct_work.inverse_ffts &&
+          direct_work.singleton_dot_terms == prepared.workspaces * prepared.projected_template_rows,
+          "full-prior admission did not cover all narrowed singleton direct scores");
+    const std::array<r::FrequencyInterval, 1> narrowed{{
+        {f.frequency, f.frequency + .5 * prepared.maximum_frequency_step_hz}}};
+    const auto fallback = r::score_coarse(f.config, f.slot, crypto, f.iq, narrowed, workers, limit, {});
+    check(fallback.work.plan.route == r::CoarseRoute::frequency_tiles &&
+          fallback.work.plan.workspace_reserved_bytes == limit && fallback.frequency_points == 2,
+          "full-prior admission did not cover the narrower frequency route");
+    rejects<v::ReceiverWorkspaceError>([&] {
+        (void)r::score_coarse(f.config, f.slot, crypto, f.iq, prior, workers, limit - 1, {});
+    }, "unadmitted exact chirp-Z workspace was accepted");
+    std::stop_source stop;
+    r::CoarseSession cancelled(f.config, f.slot, crypto, f.iq, prior, workers, limit, stop.get_token());
+    cancelled.advance(1);
+    stop.request_stop();
+    check(cancelled.state() == r::CoarseState::cancelled && !cancelled.finish(),
+          "cancelled exact chirp-Z prefix published a partial result");
+}
+
+void exact_large_frequency_group(const datapump::Crypto& crypto) {
+    auto f = capture(crypto, false, 0, 0);
+    f.config.helper_enabled = false;
+    f.config.clock_bound_ppm = 0;
+    f.slot.arrival_lower_seconds = f.slot.arrival_upper_seconds = f.arrival;
+    const auto step = v::receiver_coarse_frequency_step(f.slot.format, f.config.sample_rate_hz);
+    const auto bound = 2200 * step;
+    f.config.frequency_bound_hz = bound;
+    const std::array<r::FrequencyInterval, 1> prior{{{-bound, bound}}};
+    constexpr unsigned workers = 3;
+    const auto limit = r::coarse_workspace(f.config, f.slot, workers);
+    r::CoarseSession session(f.config, f.slot, crypto, f.iq, prior, workers, limit);
+    const auto grid = session.frequency_grid();
+    const auto prepared = session.progress().plan;
+    check(prepared.route == r::CoarseRoute::lag_groups && prepared.frequency_groups == 1 &&
+          prepared.frequency_points == grid.size() && grid.size() > 4096 &&
+          grid.front() == -bound && grid.back() == bound && prepared.workspace_reserved_bytes == limit,
+          "large exact search lost its uniform public group or bypassed admission");
+    session.advance(64);
+    const auto result = session.finish();
+    check(result.has_value(), "large exact chirp-Z did not finish its complete public grid");
+    check_winner(f, *result);
+    const auto& work = result->work.search.operations;
+    check(work.score_rows == prepared.workspaces * grid.size() &&
+          work.workspace_frequency_pairs == work.score_rows && work.forward_ffts == prepared.workspaces &&
+          work.inverse_ffts == prepared.workspaces && result->work.retained_bytes <= limit,
+          "large exact chirp-Z repeated a transform or missed a public row");
+
+    const auto proposals = std::span(result->proposals).first(result->proposal_count);
+    const auto winner = std::ranges::max_element(proposals, {}, &r::CoarseProposal::score);
+    const auto frequency = winner->coordinate.frequency_hz;
+    const std::array<r::FrequencyInterval, 1> singleton{{{frequency, frequency}}};
+    f.config.native_coarse_precision = v::NativeCoarsePrecision::fp64;
+    const auto reference = r::score_coarse(f.config, f.slot, crypto, f.iq, singleton, workers, limit, {});
+    const auto reference_winner = std::ranges::max_element(
+        std::span(reference.proposals).first(reference.proposal_count), {}, &r::CoarseProposal::score);
+    check(reference.work.plan.route == r::CoarseRoute::frequency_tiles &&
+          reference_winner->coordinate == winner->coordinate && reference_winner->bit == winner->bit &&
+          reference_winner->rank == winner->rank,
+          "large chirp-Z winner disagreed with the FP64 singleton at the selected frequency");
+}
+
 void frequency_continuation(const datapump::Crypto& crypto) {
     const auto f = capture(crypto, false);
     const std::array<r::FrequencyInterval, 1> intervals{{{-.2, .2}}};
@@ -295,7 +490,8 @@ void frequency_continuation(const datapump::Crypto& crypto) {
     const auto initial = session.progress();
     const auto& plan = initial.plan;
     check(initial.state == r::CoarseState::prepared && plan.route == r::CoarseRoute::frequency_tiles &&
-          plan.total_tiles > 4 && plan.workers == workers && initial.completed_tiles == 0 && !session.finish() &&
+          plan.arrival_points > 1 && plan.total_tiles > 4 && plan.workers == workers &&
+          initial.completed_tiles == 0 && !session.finish() &&
           initial.retained_bytes > 0 && initial.retained_bytes <= limit,
           "coarse session did not retain a complete fixed prepared geometry");
     rejects([&] { session.advance(0); }, "zero-work coarse advance was accepted");
@@ -505,22 +701,53 @@ void exact_bulk_frontiers(const datapump::Crypto& crypto) {
     auto f = capture(crypto, false);
     const std::array<r::FrequencyInterval, 1> intervals{{{-.2, .2}}};
     constexpr unsigned workers = 3;
-    const auto result = [&](BulkFault mode) {
+    const auto result = [&](BulkFault mode, std::vector<double>& grid) {
         f.config.bulk_backend = std::make_shared<IncompleteCoarseBackend>(mode);
         const auto limit = r::coarse_workspace(f.config, f.slot, workers);
-        return r::score_coarse(f.config, f.slot, crypto, f.iq, intervals, workers, limit, {});
+        r::CoarseSession session(f.config, f.slot, crypto, f.iq, intervals, workers, limit);
+        const auto values = session.frequency_grid();
+        grid.assign(values.begin(), values.end());
+        session.advance(64);
+        const auto completed = session.finish();
+        check(completed.has_value(), "bulk peak-table fixture did not finish");
+        return *completed;
     };
-    const auto full = result(BulkFault::valid_scores), compressed = result(BulkFault::valid_frontiers);
-    check(full.coordinates == compressed.coordinates && full.proposal_count == compressed.proposal_count &&
-          full.work.search.operations.score_rows == compressed.work.search.operations.score_rows &&
-          full.work.search.operations.workspace_frequency_pairs == compressed.work.search.operations.workspace_frequency_pairs &&
-          full.work.search.operations.retained_peaks == compressed.work.search.operations.retained_peaks,
-          "compressed coarse frontiers changed canonical coverage or retained candidates");
-    for (std::size_t i = 0; i < full.proposal_count; ++i)
-        check(full.proposals[i].score == compressed.proposals[i].score &&
-              full.proposals[i].coordinate == compressed.proposals[i].coordinate &&
-              full.proposals[i].bit == compressed.proposals[i].bit && full.proposals[i].rank == compressed.proposals[i].rank,
-              "compressed coarse frontiers changed ordered proposal values");
+    for (const auto single_arrival : {false, true}) {
+        if (single_arrival) f.slot.arrival_lower_seconds = f.slot.arrival_upper_seconds = f.arrival;
+        std::vector<double> full_grid, compressed_grid;
+        const auto full = result(BulkFault::valid_scores, full_grid);
+        const auto compressed = result(BulkFault::valid_frontiers, compressed_grid);
+        const auto pairs = full.workspaces * full.frequency_points;
+        const auto peak_rows = pairs * (single_arrival ? 1 : 2);
+        check((full.arrival_points == 1) == single_arrival && full_grid == compressed_grid &&
+              full.coordinates == compressed.coordinates && full.proposal_count == compressed.proposal_count &&
+              full.work.search.operations.score_rows == pairs * full.arrival_points &&
+              full.work.search.operations.score_rows == compressed.work.search.operations.score_rows &&
+              full.work.search.operations.workspace_frequency_pairs == compressed.work.search.operations.workspace_frequency_pairs &&
+              full.work.search.operations.retained_peaks == compressed.work.search.operations.retained_peaks &&
+              full.work.selection.operations.selection_peak_rows == peak_rows &&
+              compressed.work.selection.operations.selection_peak_rows == peak_rows,
+              "bulk coarse sinks changed coverage, candidates or stored peak rows");
+        for (std::size_t i = 0; i < full.proposal_count; ++i)
+            check(full.proposals[i].score == compressed.proposals[i].score &&
+                  full.proposals[i].coordinate == compressed.proposals[i].coordinate &&
+                  full.proposals[i].bit == compressed.proposals[i].bit && full.proposals[i].rank == compressed.proposals[i].rank,
+                  "compressed coarse frontiers changed ordered proposal values");
+        if (single_arrival) {
+            const auto separated = std::ranges::find_if(full_grid, [&](double frequency) {
+                return frequency - full_grid.front() >= 2 * full.maximum_frequency_step_hz;
+            });
+            check(separated != full_grid.end() && full.proposal_count == 4 &&
+                  full.work.search.operations.retained_peaks == pairs &&
+                  full.proposals[0].coordinate.frequency_hz == full_grid.front() &&
+                  full.proposals[1].coordinate.frequency_hz == *separated &&
+                  full.proposals[2].coordinate.frequency_hz == full_grid.front() &&
+                  full.proposals[3].coordinate.frequency_hz == *separated,
+                  "single-arrival tied scores changed frequency ordering or suppression");
+            rejects([&] { (void)result(BulkFault::frontier_duplicate, compressed_grid); },
+                    "single-arrival bulk accepted two arrival peaks at one frequency");
+        }
+    }
 }
 
 void tied_arrival_frontier() {
@@ -547,6 +774,8 @@ int main() try {
     incomplete_bulk_cannot_publish(crypto);
     exact_bulk_frontiers(crypto);
     slow_mapped(crypto);
+    exact_single_arrival_chirp_z(crypto);
+    exact_large_frequency_group(crypto);
     return 0;
 } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

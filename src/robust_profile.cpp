@@ -231,8 +231,10 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     const auto shift_diffusion = osc.rf.phase_noise_degrees_per_sqrt_second * std::numbers::pi / 180;
 
     ReceiverConfig rx;
-    rx.native_coarse_precision = modem.search_arithmetic == modem::SearchArithmetic::fp64
-        ? NativeCoarsePrecision::fp64 : NativeCoarsePrecision::automatic;
+    if (modem.search_arithmetic == modem::SearchArithmetic::fp64)
+        rx.native_coarse_precision = NativeCoarsePrecision::fp64;
+    else if (modem.search_arithmetic == modem::SearchArithmetic::fp32)
+        rx.native_coarse_precision = NativeCoarsePrecision::fp32;
     rx.sample_rate_hz = fs;
     rx.data_if_hz = modem.carrier_hz;
     rx.clock_bound_ppm = osc.lf.accuracy_ppm / denominator * osc.margin;

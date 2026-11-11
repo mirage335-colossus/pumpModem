@@ -39,8 +39,8 @@ See [current architecture](robust-current.md) and
 | FHSS | Canonical envelope and illustrative frequency schedule; no external radio retuning. |
 | Target SNR dB/1Hz | One shared C/N0 target, default 32 dB-Hz, for provisional duration planning; separate from actual simulated C/N0. |
 | Error correction | Configured Off, RS20 or RS60 native short/long text profiles. Raw bits bypass text coding and FEC exactly. |
-| Search arithmetic | Default and FP32 minimum select qualified automatic native CPU arithmetic; FP64 force selects its explicit reference policy. Sensitive stages retain higher precision. |
-| GPU | Optional native Vulkan DATA coarse processing, shared by live reception and simulation; CPU remains the default. |
+| Search arithmetic | Default selects qualified automatic routing; FP32 minimum selects FP32 products/FFT with higher-precision guards; FP64 force selects its native CPU reference policy. Sensitive stages retain higher precision. |
+| GPU | Optional native Vulkan DATA coarse processing, shared by live reception and simulation, with a scoped native chirp-Z crossover in Default mode; GPU remains off by default. |
 | Simulation | Native emitted waveform through the selected continuous sampled channel and complete native receiver. |
 | Audio device, channel routing, Live/duplex, TX volume, Exclusive | Existing native device service, selected channel layout, capture/playback policy and output gain. |
 | Waterfall, Waveform, Receiver input I/Q | Bounded actual session observations; receiver I/Q is not a substitute TX trace. |
@@ -51,14 +51,17 @@ off, persists with the launch settings as `--gpu yes|no`, and is disabled with
 an explanation outside Robust mode, while busy or closing, or when the build
 has no Vulkan receiver backend. Enabling it initializes an actual GPU on the
 native session manager, away from the UI thread. A requested device failure
-is reported and prevents that session from starting; it never silently selects
-CPU processing. Turning GPU off explicitly returns to the native CPU path.
+is reported and prevents that session from starting. Once initialized, Default
+may choose the documented native chirp-Z route on the calibrated geometry; its
+actual routing is reported. Turning GPU off explicitly returns to the native CPU path.
 
 The [Search arithmetic preference](search-arithmetic.md) persists as
-`--search-arithmetic default|fp32-min|fp64-force`. Its help explains that automatic
-processing uses qualified post-filter FP32 coarse FFTs with FP64 exclusions and
-sensitive state. Diagnostics distinguish native automatic precision from forced
-FP64. GPU plus FP64 force is rejected because the Vulkan backend uses FP32 FFTs.
+`--search-arithmetic default|fp32-min|fp64-force`. Automatic native CPU processing
+can use Q15 spectral products with FP32 FFTs, FP32 products or a qualified FP64
+chirp-Z route; sensitive stages retain FP64. FP32 minimum keeps native spectral
+products at FP32 and selects the FP32 Vulkan FFT when GPU is enabled. Combining
+GPU with FP64 force is rejected. The displayed policy is distinct from actual
+per-slot routing and precision in receiver diagnostics/receipts.
 
 GPU readiness identifies the device; positive GPU scored-row evidence identifies
 executed work. Helper, FIR, template generation, native lag/tight-clock routes

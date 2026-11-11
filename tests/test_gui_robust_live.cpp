@@ -176,7 +176,7 @@ void native_precision_profile_policy() {
     s.transfer.modem.search_arithmetic = modem::SearchArithmetic::fp64;
     const auto fp64_force = live::detail::prepare_profile(s, *s.calendar, {});
     check(automatic.receiver.native_coarse_precision == triad::v3::NativeCoarsePrecision::automatic &&
-          fp32_min.receiver.native_coarse_precision == triad::v3::NativeCoarsePrecision::automatic &&
+          fp32_min.receiver.native_coarse_precision == triad::v3::NativeCoarsePrecision::fp32 &&
           fp64_force.receiver.native_coarse_precision == triad::v3::NativeCoarsePrecision::fp64,
           "GUI search arithmetic did not map to the native receiver precision policy");
 
@@ -571,7 +571,7 @@ void dated_live_data_then_eof() {
     }
 }
 
-void complete_native_simulation(bool gpu = false) {
+void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false) {
     // One predeclared functional stratum, not a sensitivity/capacity claim:
     // public calendar, clear e=001, FEC/Helper/spread/selective/FHSS Off, exact
     // oscillators, target and actual 80 dB-Hz with positive physical noise.
@@ -579,6 +579,7 @@ void complete_native_simulation(bool gpu = false) {
     const auto captures = fixture::capture_opens.load(), playbacks = fixture::playback_opens.load();
     auto simulated = settings(true);
     simulated.gpu = gpu;
+    if (gpu_fp32) simulated.transfer.modem.search_arithmetic = modem::SearchArithmetic::fp32;
     if (gpu) simulated.receiver_memory_limit = 1024U * 1024 * 1024;
     // The public slot cadence is at least a minute. A supported lower logical
     // sample rate keeps the full physical calendar inside the sample budget.
@@ -587,7 +588,10 @@ void complete_native_simulation(bool gpu = false) {
     live::Session session;
     session.start(simulated);
     const auto prepared = ready(session);
-    check(prepared.gpu_device.empty() == !gpu && prepared.gpu_score_rows == 0,
+    check(prepared.gpu_device.empty() == !gpu && prepared.gpu_score_rows == 0 &&
+          prepared.gpu_fp32_score_rows == 0 && prepared.gpu_fp16_storage_score_rows == 0 &&
+          prepared.gpu_packed_fp16_score_rows == 0 && prepared.gpu_native_coarse_lag_sessions == 0 &&
+          (!gpu_fp32 || !prepared.gpu_native_lag_preference_supported),
           "Robust GPU readiness does not match the selected backend");
     check(prepared.bit_seconds && prepared.slot_stride_seconds && *prepared.slot_stride_seconds * 6 * 1500 < 600000,
           "Robust simulation exceeds its predeclared sample budget");
@@ -629,6 +633,13 @@ void complete_native_simulation(bool gpu = false) {
     if (gpu) {
         check(!completed.gpu_device.empty() && completed.gpu_score_rows > 0,
               "GPU simulation decoded without actual accelerated scoring");
+        check(completed.gpu_fp32_score_rows + completed.gpu_fp16_storage_score_rows == completed.gpu_score_rows &&
+              completed.gpu_packed_fp16_score_rows <= completed.gpu_fp16_storage_score_rows,
+              "GPU session precision receipts do not account for actual scored work");
+        if (gpu_fp32)
+            check(completed.gpu_fp32_score_rows == completed.gpu_score_rows &&
+                  completed.gpu_fp16_storage_score_rows == 0 && completed.gpu_packed_fp16_score_rows == 0,
+                  "GPU FP32 minimum did not execute solely FP32 scoring");
         const auto rows = completed.gpu_score_rows;
         // Repeated profile preparation after TX must keep the same backend
         // and its cumulative work receipt for this settings generation.
@@ -642,10 +653,16 @@ void complete_native_simulation(bool gpu = false) {
         const auto resumed = ready(session);
         check(!resumed.gpu_device.empty() && resumed.gpu_score_rows == 0,
               "Resumed GPU generation retained stale completed-work evidence");
+        check(resumed.gpu_fp32_score_rows == 0 && resumed.gpu_fp16_storage_score_rows == 0 &&
+              resumed.gpu_packed_fp16_score_rows == 0 && resumed.gpu_native_coarse_lag_sessions == 0,
+              "Resumed GPU generation retained stale precision evidence");
         simulated.gpu = false;
         session.configure(simulated);
         const auto cpu = ready(session);
-        check(cpu.gpu_device.empty() && cpu.gpu_score_rows == 0,
+        check(cpu.gpu_device.empty() && cpu.gpu_score_rows == 0 && cpu.gpu_precision.empty() &&
+              cpu.gpu_fp32_score_rows == 0 && cpu.gpu_fp16_storage_score_rows == 0 &&
+              cpu.gpu_packed_fp16_score_rows == 0 && cpu.gpu_native_coarse_lag_sessions == 0 &&
+              !cpu.gpu_native_lag_preference_supported,
               "Switching GPU off retained the old generation's backend or work evidence");
         simulated.gpu = true;
         session.configure(simulated);
@@ -653,6 +670,55 @@ void complete_native_simulation(bool gpu = false) {
     }
     close(session);
     check(session.snapshot().received.empty(), "Stopped simulation emitted a late duplicate message");
+}
+
+bool native_lag_simulation() {
+    // One bounded actual Session fixture for the exact public one-arrival,
+    // wide-frequency route. The selection counter is not completion evidence;
+    // physical DATA and two scored quiet slots must also complete separately.
+    const auto resources = triad::v3::resolve_stream_receiver_resources();
+    if (resources.hardware_threads < 12 || resources.workers < 24) return false;
+    auto simulated = settings(true);
+    simulated.gpu = true;
+    simulated.receiver_memory_limit = 4ULL * 1024 * 1024 * 1024;
+    simulated.transfer.modem.sample_rate = 1500;
+    simulated.transfer.modem.carrier_hz = 500;
+    simulated.transfer.modem.oscillator_search = modem::OscillatorSearchConfig{
+        .lf = {0, 0}, .rf = {100, 0}, .rf_shift_hz = 200000, .margin = 1};
+    live::Session session;
+    session.start(simulated);
+    const auto prepared = ready(session);
+    if (!prepared.gpu_native_lag_preference_supported) { close(session); return false; }
+    check(prepared.bit_seconds && prepared.slot_stride_seconds &&
+          *prepared.slot_stride_seconds * 6 * 1500 < 600000,
+          "Native lag simulation exceeds its declared sample budget");
+    session.transmit(Message{.data = {'e'}});
+    std::vector<transfer::Received> received;
+    auto completed = wait(session, [&](auto& out) {
+        for (auto& event : out.received) received.push_back(std::move(event));
+        check(out.error.empty() && out.receiver_error.empty(),
+              "Native lag simulation failed: " + out.error + "; " + out.receiver_error);
+        check(out.pattern_steps.size() <= 5, "Native lag simulation exceeded five public slots");
+        return !out.transmitting;
+    }, "Native lag simulation exceeded its wall-time budget", 90s);
+    check(completed.gpu_native_coarse_lag_sessions > 0 && completed.gpu_score_rows == 0,
+          "Qualified GUI session did not select native lag without claiming GPU scores");
+    check(received.size() == 1 && received[0].stream_complete && received[0].content_validated &&
+          received[0].content.message.data == Bytes{'e'} && completed.pattern_steps.size() == 5,
+          "Native lag selection did not produce a physically complete message");
+    for (std::size_t i = 0; i < completed.pattern_steps.size(); ++i)
+        check(completed.pattern_steps[i].evidence_complete &&
+              completed.pattern_steps[i].decision == (i < 3 ? live::PatternDecision::data : live::PatternDecision::quiet),
+              "Native lag simulation lost DATA or physical quiet evidence");
+    simulated.gpu = false;
+    session.configure(simulated);
+    const auto cpu = ready(session);
+    check(cpu.gpu_device.empty() && !cpu.gpu_native_coarse_lag_sessions &&
+          !cpu.gpu_native_lag_preference_supported,
+          "GPU disable retained the native lag selection receipt");
+    close(session);
+    std::cout << "GPU Session selected native lag; physical e/001 completion passed\n";
+    return true;
 }
 
 void unavailable_gpu() {
@@ -685,6 +751,19 @@ int main(int argc, char** argv) {
         if (argc == 2 && std::string_view(argv[1]) == "--gpu") {
             check(live::gpu_receiver_available(), "Actual GPU session test requires Vulkan support");
             complete_native_simulation(true);
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--gpu-fp32") {
+            check(live::gpu_receiver_available(), "Actual GPU session test requires Vulkan support");
+            complete_native_simulation(true, true);
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--gpu-native-lag") {
+            check(live::gpu_receiver_available(), "Actual GPU session test requires Vulkan support");
+            if (!native_lag_simulation()) {
+                std::cout << "Native lag Session geometry unavailable on this GPU or CPU allocation\n";
+                return 77;
+            }
             return 0;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--gpu-unavailable") {

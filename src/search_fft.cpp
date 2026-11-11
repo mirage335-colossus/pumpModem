@@ -67,6 +67,59 @@ __attribute__((target("avx2"))) void butterflies(std::complex<float>* a,const st
     for(;j<half;++j){const auto w=inverse?std::conj(table[j]):table[j];const auto u=a[begin+j],v=a[begin+j+half]*w;
         a[begin+j]=u+v;a[begin+j+half]=u-v;}
 }
+
+__attribute__((target("avx2"))) std::size_t multiply_avx2(std::span<std::complex<float>> output,
+        std::span<const std::complex<float>> left, std::span<const std::complex<float>> right,
+        std::stop_token stop) {
+    auto* out = reinterpret_cast<float*>(output.data());
+    const auto* lhs = reinterpret_cast<const float*>(left.data());
+    const auto* rhs = reinterpret_cast<const float*>(right.data());
+    std::size_t i = 0;
+    for (; output.size() - i >= 4; i += 4) {
+        if ((i & 4095U) == 0) cancelled(stop);
+        const auto a = _mm256_loadu_ps(lhs + 2 * i), b = _mm256_loadu_ps(rhs + 2 * i);
+        const auto real = _mm256_mul_ps(_mm256_moveldup_ps(a), b);
+        const auto imag = _mm256_mul_ps(_mm256_movehdup_ps(a), _mm256_permute_ps(b, 0xb1));
+        _mm256_storeu_ps(out + 2 * i, _mm256_addsub_ps(real, imag));
+    }
+    return i;
+}
+
+__attribute__((target("avx2"))) std::size_t pack_q15_avx2(std::span<const float> input,
+        std::span<std::int16_t> output, float scale, std::stop_token stop) {
+    const auto factor = _mm256_set1_ps(scale);
+    std::size_t i = 0;
+    for (; input.size() - i >= 16; i += 16) {
+        if ((i & 8191U) == 0) cancelled(stop);
+        const auto first = _mm256_mul_ps(_mm256_loadu_ps(input.data() + i), factor);
+        const auto second = _mm256_mul_ps(_mm256_loadu_ps(input.data() + i + 8), factor);
+        const auto packed = _mm256_packs_epi32(
+            _mm256_cvttps_epi32(_mm256_round_ps(first, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC)),
+            _mm256_cvttps_epi32(_mm256_round_ps(second, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC)));
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(output.data() + i), _mm256_permute4x64_epi64(packed, 0xd8));
+    }
+    return i;
+}
+
+__attribute__((target("avx2"))) std::size_t multiply_q15_avx2(std::span<std::complex<float>> output,
+        std::span<const std::int16_t> left, std::span<const std::int16_t> right, std::stop_token stop) {
+    const auto real_sign = _mm256_set1_epi32(-65535); // Each I/Q pair is (+1, -1).
+    auto* out = reinterpret_cast<float*>(output.data());
+    std::size_t i = 0;
+    for (; output.size() - i >= 8; i += 8) {
+        if ((i & 4095U) == 0) cancelled(stop);
+        const auto lhs = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(left.data() + 2 * i));
+        const auto rhs = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(right.data() + 2 * i));
+        const auto swapped = _mm256_shufflehi_epi16(_mm256_shufflelo_epi16(rhs, 0xb1), 0xb1);
+        // Each pair is at most 2 * 32767^2 in magnitude, below INT32_MAX.
+        const auto real = _mm256_cvtepi32_ps(_mm256_madd_epi16(lhs, _mm256_sign_epi16(rhs, real_sign)));
+        const auto imag = _mm256_cvtepi32_ps(_mm256_madd_epi16(lhs, swapped));
+        const auto lo = _mm256_unpacklo_ps(real, imag), hi = _mm256_unpackhi_ps(real, imag);
+        _mm256_storeu_ps(out + 2 * i, _mm256_permute2f128_ps(lo, hi, 0x20));
+        _mm256_storeu_ps(out + 2 * i + 8, _mm256_permute2f128_ps(lo, hi, 0x31));
+    }
+    return i;
+}
 #endif
 template<class T> void execute(std::span<std::complex<T>> a,bool inverse,std::size_t maximum,
         const std::vector<std::complex<T>>& twiddles,std::stop_token stop,Kernel kernel){
@@ -96,4 +149,74 @@ FloatPlan::FloatPlan(std::size_t n,std::stop_token stop):maximum(n){make(twiddle
 const char* kernel_name(Kernel k){return use_avx2(k)?"avx2":"scalar";}
 void fft(std::span<std::complex<double>> a,bool inverse,const DoublePlan& p,std::stop_token stop,Kernel k){execute(a,inverse,p.maximum,p.twiddles,stop,k);}
 void fft(std::span<std::complex<float>> a,bool inverse,const FloatPlan& p,std::stop_token stop,Kernel k){execute(a,inverse,p.maximum,p.twiddles,stop,k);}
+
+void multiply_spectra(std::span<std::complex<float>> output, std::span<const std::complex<float>> left,
+                      std::span<const std::complex<float>> right, std::stop_token stop, Kernel kernel) {
+    if (output.size() != left.size() || output.size() != right.size())
+        throw Error("FP32 spectrum product geometry mismatch");
+    cancelled(stop);
+    std::size_t i = 0;
+#if defined(DATAPUMP_SEARCH_FFT_X86)
+    if (use_avx2(kernel)) i = multiply_avx2(output, left, right, stop);
+#else
+    (void)kernel;
+#endif
+    for (; i < output.size(); ++i) {
+        if ((i & 4095U) == 0) cancelled(stop);
+        output[i] = left[i] * right[i];
+    }
+}
+
+Q15Spectrum pack_q15(std::span<const std::complex<float>> spectrum, std::stop_token stop, Kernel kernel) {
+    if (spectrum.size() > std::numeric_limits<std::size_t>::max() / 2)
+        throw Error("Q15 spectrum size overflow");
+    cancelled(stop);
+    const auto values = std::span(reinterpret_cast<const float*>(spectrum.data()), 2 * spectrum.size());
+    float maximum = 0;
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if ((i & 8191U) == 0) cancelled(stop);
+        if (!std::isfinite(values[i])) throw Error("Q15 spectrum requires finite components");
+        maximum = std::max(maximum, std::abs(values[i]));
+    }
+    auto shift = maximum ? std::clamp(14 - std::ilogb(maximum), -126, 126) : 0;
+    if (std::scalbn(maximum, shift) > 32767.F) --shift;
+    const auto scale = std::scalbn(1.F, shift);
+    Q15Spectrum result;
+    result.components_.resize(values.size());
+    result.exponent_ = -shift;
+    std::size_t i = 0;
+#if defined(DATAPUMP_SEARCH_FFT_X86)
+    if (use_avx2(kernel)) i = pack_q15_avx2(values, result.components_, scale, stop);
+#else
+    (void)kernel;
+#endif
+    for (; i < values.size(); ++i) {
+        if ((i & 8191U) == 0) cancelled(stop);
+        const auto value = values[i] * scale;
+        const auto lower = std::floor(value);
+        const auto fraction = value - lower;
+        const bool up = fraction > .5F || (fraction == .5F && static_cast<int>(lower) % 2 != 0);
+        result.components_[i] = static_cast<std::int16_t>(lower + up);
+    }
+    return result;
+}
+
+void multiply_spectra(std::span<std::complex<float>> output, const Q15Spectrum& left,
+                      const Q15Spectrum& right, std::stop_token stop, Kernel kernel) {
+    const auto a = left.components(), b = right.components();
+    if (a.size() != b.size() || a.size() / 2 != output.size())
+        throw Error("Q15 spectrum product geometry mismatch");
+    cancelled(stop);
+    std::size_t i = 0;
+#if defined(DATAPUMP_SEARCH_FFT_X86)
+    if (use_avx2(kernel)) i = multiply_q15_avx2(output, a, b, stop);
+#else
+    (void)kernel;
+#endif
+    for (; i < output.size(); ++i) {
+        if ((i & 4095U) == 0) cancelled(stop);
+        const std::int32_t ar = a[2 * i], ai = a[2 * i + 1], br = b[2 * i], bi = b[2 * i + 1];
+        output[i] = {static_cast<float>(ar * br - ai * bi), static_cast<float>(ar * bi + ai * br)};
+    }
+}
 }

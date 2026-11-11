@@ -348,6 +348,50 @@ class AbbreviatedTests(unittest.TestCase):
             validate_receipt(wrong, command="message", backend="vulkan", returncode=0,
                              expected_require_accelerator=True)
 
+    def test_vulkan_automatic_identity_distinguishes_request_from_execution(self):
+        measured = message_receipt()
+        measured["identity"].update(backend="vulkan", configured_vulkan_backend=True, require_accelerator=True,
+                                    requested_vulkan_precision="automatic", backend_receipt=vulkan_bulk_receipt())
+        measured["identity"]["backend_receipt"].update(
+            precision="mixed_fp16_fp32_fft_storage_fp32_compute",
+            vulkan_fp32_score_rows=3, vulkan_fp16_storage_score_rows=5)
+        described = copy.deepcopy(measured)
+        described.update(command="describe", phases=[], observation=None, result={})
+        described["identity"]["backend_receipt"].update(
+            precision="vulkan_storage_automatic_pending", score_rows=0,
+            vulkan_fp32_score_rows=0, vulkan_fp16_storage_score_rows=0)
+        validate_receipt(described, command="describe", backend="vulkan", returncode=0)
+        validate_receipt(measured, command="message", backend="vulkan", returncode=0)
+        self.assertEqual(runtime_identity(described), runtime_identity(measured))
+        wrong = copy.deepcopy(measured)
+        wrong["identity"]["requested_vulkan_precision"] = "fp32"
+        self.assertNotEqual(runtime_identity(wrong), runtime_identity(measured))
+        with self.assertRaises(ProbeError):
+            validate_receipt(wrong, command="message", backend="vulkan", returncode=0)
+        for patch in ({"vulkan_fp16_storage_score_rows": 6},
+                      {"precision": "fp32_fft_fp64_coordinates_and_scores_native_fir_and_fine"}):
+            wrong = copy.deepcopy(measured)
+            wrong["identity"]["backend_receipt"].update(patch)
+            with self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="message", backend="vulkan", returncode=0)
+
+    def test_vulkan_direct_dot_has_actual_score_and_arithmetic_witnesses(self):
+        receipt = message_receipt()
+        receipt["identity"].update(backend="vulkan", configured_vulkan_backend=True, require_accelerator=True,
+                                   requested_vulkan_precision="direct-fp16", backend_receipt=vulkan_bulk_receipt())
+        receipt["identity"]["backend_receipt"].update(
+            precision="packed_fp16_direct_dot_fp32_reduction_fp64_scoring",
+            fft_calls=0, vulkan_fp32_score_rows=0, vulkan_fp16_storage_score_rows=8,
+            vulkan_direct_fp16_score_rows=8, vulkan_direct_dot_terms=8192)
+        validate_receipt(receipt, command="message", backend="vulkan", returncode=0)
+        for patch in ({"vulkan_direct_dot_terms": 0}, {"vulkan_direct_fp16_score_rows": 9},
+                      {"vulkan_float16": False},
+                      {"vulkan_direct_fp16_storage_score_rows": 1}):
+            wrong = copy.deepcopy(receipt)
+            wrong["identity"]["backend_receipt"].update(patch)
+            with self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="message", backend="vulkan", returncode=0)
+
     def test_vulkan_regression_receipt_uses_native_slot_work_shape(self):
         receipt = device_receipt()
         receipt["command"] = "regression"

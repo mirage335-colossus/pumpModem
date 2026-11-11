@@ -159,7 +159,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(control.field==Field::planner_target) {control.document_only=true;control.help="Robust target shared with Console and native modeled-duration planning. Full receiver sensitivity and CPU forecasts remain unqualified.";}
     if(control.field==Field::search_arithmetic) {
         control.document_only=true;control.developer_only=true;control.purpose=ControlPurpose::setup;
-        control.help="CPU search precision: Default and FP32 minimum use qualified FP32 after channel isolation, with FP64 for conditioning and fine processing. FP64 force is a CPU reference and cannot be combined with GPU. GPU uses its separately qualified precision policy.";
+        control.help="Default can use Q15 CPU products with FP32 FFTs after channel isolation. FP32 minimum keeps CPU products in floating point. Conditioning and fine processing can require FP64. FP64 force applies to CPU search. The GPU has its own precision policy.";
     }
     if(control.field==Field::receiver_strategy||control.field==Field::receiver_cpu_budget) {
         control.document_only=true;control.developer_only=true;control.purpose=ControlPurpose::setup;

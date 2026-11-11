@@ -119,6 +119,10 @@ private:
 // Bounds only the coarse stage. The caller retains the input lease and owns
 // the worker allocation. Coordinates are snapped by the fine admission grid.
 std::size_t coarse_workspace(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers);
+// Geometry and workspace quote from the same planner as a scoring session.
+// No input, preparation, arithmetic selection or device work is involved.
+CoarseWorkPlan coarse_work_plan(const ReceiverConfig&, const ReceiverSlotPlan&,
+                                std::span<const FrequencyInterval>, unsigned workers);
 struct CoarseFineGeometry {
     double projected_sample_rate_hz = 0, maximum_frequency_step_hz = 0, clock_gap_ppm = 0;
 };

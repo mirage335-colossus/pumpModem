@@ -274,7 +274,7 @@ void helper_composite_observation() {
                                    helper_workspace_limit);
     };
     const auto active_capture = observe(data);
-    const auto active = score_mode(active_capture, NativeCoarsePrecision::automatic);
+    const auto active = score_mode(active_capture, NativeCoarsePrecision::fp32);
     const auto active_fp64 = score_mode(active_capture, NativeCoarsePrecision::fp64);
     check(emission.report().helper_energy > 0 && emission.report().data_energy > 0,
           "composite capture must contain actual DATA and Helper energy");
@@ -307,7 +307,7 @@ void helper_composite_observation() {
           score_close(active.operational_threshold, active_fp64.operational_threshold),
           "automatic post-filter FP32 changed the DATA decision threshold beyond tolerance");
     const auto quiet_capture = observe(quiet);
-    const auto absent = score_mode(quiet_capture, NativeCoarsePrecision::automatic);
+    const auto absent = score_mode(quiet_capture, NativeCoarsePrecision::fp32);
     const auto absent_fp64 = score_mode(quiet_capture, NativeCoarsePrecision::fp64);
     check(absent.complete && absent.decision == SlotDecision::quiet && absent.noise_statistics_valid,
           "Helper-enabled receiver must score actual quiet after emission stops");
@@ -328,6 +328,21 @@ void helper_composite_observation() {
           absent_fp64.coarse_fft_precision == "fp64" &&
           absent_fp64.coarse_precision_reason == "explicit-fp64",
           "failed-Helper quiet receiver did not report the selected CPU precision paths");
+    if (cpu_fft_fp32_qualified) {
+        const auto compare_packed = [&](const Capture& capture, const ReceiverSlotScore& control) {
+            const auto packed = score_mode(capture, NativeCoarsePrecision::automatic);
+            check(packed.complete && packed.all_valid && packed.zero_h0_verified &&
+                  packed.coarse_precision_reason == "q15-products-fp32-fft" &&
+                  packed.decision == control.decision && packed.bit == control.bit &&
+                  packed.helper_status == control.helper_status &&
+                  packed.coarse_frequency_points == control.coarse_frequency_points &&
+                  packed.coarse_workspaces == control.coarse_workspaces &&
+                  packed.coarse_arrival_points == control.coarse_arrival_points,
+                  "Q15 changed a Helper-assisted or failed-Helper decision or public search coverage");
+        };
+        compare_packed(active_capture, active);
+        compare_packed(quiet_capture, absent);
+    }
 }
 
 void native_precision_near_decision_sides() {
@@ -365,10 +380,10 @@ void native_precision_near_decision_sides() {
             slot.window_capture_lead_seconds - slot.source_start_seconds) * fs);
 
     const auto score_both = [&](std::span<const Complex> input) {
-        auto automatic = base;
-        automatic.native_coarse_precision = NativeCoarsePrecision::automatic;
-        const auto low = score_receiver_slot(automatic, slot, key, input, {}, 1,
-            receiver_slot_workspace(automatic, slot, 1));
+        auto floating = base;
+        floating.native_coarse_precision = NativeCoarsePrecision::fp32;
+        const auto low = score_receiver_slot(floating, slot, key, input, {}, 1,
+            receiver_slot_workspace(floating, slot, 1));
         auto reference = base;
         reference.native_coarse_precision = NativeCoarsePrecision::fp64;
         const auto full = score_receiver_slot(reference, slot, key, input, {}, 1,
@@ -407,6 +422,30 @@ void native_precision_near_decision_sides() {
               std::abs(low.operational_log_e - low.operational_threshold) < .7 &&
               low.operational_passes_conditional_bound == expected_pass,
               "FP32 changed either original near-decision DATA side of the frozen .7 threshold bracket");
+        const auto direct = score_receiver_slot(base, slot, key, input, {}, 1,
+            receiver_slot_workspace(base, slot, 1));
+        check(direct.complete && direct.coarse_fft_precision == "fp64" &&
+              direct.coarse_precision_reason == "exact-one-arrival-singleton-dot" &&
+              direct.decision == full.decision && direct.bit == full.bit &&
+              direct.operational_passes_conditional_bound == expected_pass &&
+              direct.coarse_workspaces == full.coarse_workspaces &&
+              direct.coarse_frequency_points == full.coarse_frequency_points &&
+              direct.coarse_arrival_points == full.coarse_arrival_points,
+              "automatic singleton dot changed a near-threshold decision or public search geometry");
+        if (cpu_fft_fp32_qualified) {
+            auto packed_config = base;
+            packed_config.native_coarse_precision = NativeCoarsePrecision::q15;
+            const auto packed = score_receiver_slot(packed_config, slot, key, input, {}, 1,
+                receiver_slot_workspace(packed_config, slot, 1));
+            check(packed.complete && packed.coarse_fft_precision == "fp32" &&
+                  packed.coarse_precision_reason == "q15-products-fp32-fft" &&
+                  packed.decision == full.decision && packed.bit == full.bit &&
+                  packed.operational_passes_conditional_bound == expected_pass &&
+                  packed.coarse_workspaces == full.coarse_workspaces &&
+                  packed.coarse_frequency_points == full.coarse_frequency_points &&
+                  packed.coarse_arrival_points == full.coarse_arrival_points,
+                  "Q15 changed a near-threshold decision or public search geometry");
+        }
     }
 }
 }
