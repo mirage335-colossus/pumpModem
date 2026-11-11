@@ -596,12 +596,16 @@ set `LIBTORCH_PREFIX` to its absolute CMake prefix:
 TORCH_CUDA_ARCH_LIST=8.9 ./build.sh configure --cli --build-dir build/triad-cuda --jobs 2 -- \
   -DCMAKE_PREFIX_PATH="$LIBTORCH_PREFIX" -DCMAKE_CUDA_ARCHITECTURES=89 \
   -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON
-cmake --build build/triad-cuda --target triad_receiver_probe test_triad_tensor_cuda --parallel 2
-ctest --test-dir build/triad-cuda --output-on-failure -R '^triad_tensor_cuda$' --no-tests=error
+cmake --build build/triad-cuda --target triad_receiver_probe test_triad_tensor_cuda test_triad_tensor_cuda_automatic test_triad_tensor_fft --parallel 2
+ctest --test-dir build/triad-cuda --output-on-failure -R '^(triad_tensor_cuda|triad_tensor_cuda_automatic|triad_tensor_cuda_half_fft)$' --no-tests=error
 ```
 
-Use the actual device's architecture for other GPUs. The workflow executes
-`triad_tensor_cuda` and a probe
+Use the actual device's architecture for other GPUs. `triad_tensor_cuda` checks
+the explicit CUDA arithmetic path, `triad_tensor_cuda_automatic` checks the
+automatic CUDA policy, and `triad_tensor_cuda_half_fft` validates the native
+cuFFT FP16 transform route and its bounded numeric, cancellation, and workspace
+cases. The half FFT test is cuFFT evidence; it does not claim Tensor Core
+execution or complete-receiver sensitivity. The workflow also runs a probe
 that requires actual accelerator execution, then performs a bounded matched
 CUDA regression. Optional `components=fp16|int8|peaks|all` (default `off`) also
 runs the [bounded native component mode](triad-performance.md#bounded-native-component-comparisons)

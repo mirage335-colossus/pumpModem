@@ -149,18 +149,29 @@ not proof that GPU work completed. Receipts distinguish the requested `gpu`
 selector, actual `cuda`/`vulkan` device, selection reason, stage routing,
 arithmetic and completed device-work counters.
 
-Automatic CUDA bulk work keeps the scalable FP32 FFT search. It can select the
-exact device chirp-Z path only in its supported, profitable single-arrival
-geometry; that route still evaluates the complete public frequency set. CUDA's
-optional FP16 and INT8 matrix contractions remain explicit, shape-bounded
-alternatives. Historical isolated or matrix measurements do not make the
-automatic selector choose them from peak arithmetic rates, and neither type is
-an INT8 FFT. The deployed automatic GUI keeps coarse work on CUDA and routes fine
-processing to native CPU for public blocks of at most 512 rows, at most 40
-projected modes, one tap, AVX2, and an admitted worker share of at least 32.
-Other shapes retain CUDA fine processing. This scoped stage-routing choice does
-not change arithmetic precision and is not a claim that every CUDA geometry
-benefits. Vulkan fallback keeps its own precision and stage receipts. On
+Automatic CUDA retains the full FFT search algorithm, using guarded native
+half-cuFFT through NFFT=2^20 for qualified SM89/SM120 broad searches and FP32
+FFT fallback under work-volume, arrival, conditioning and workspace guards; the
+exact-device chirp-Z route remains limited to its supported, profitable
+single-arrival geometry while evaluating the complete public frequency set.
+The FP16/INT8 lag-matrix route is separate. Automatic INT8 is qualified as a
+bounded coarse-speed candidate when padded matrix cost is at most 30 paired-FFT
+row stages, there is one complete grouping and one tap, K≤8192, F=8–256, at
+least 1664 main complex rows, tile width at least 26, and A≥32 with shared
+cuBLASLt state. The main-row floor avoids packing-heavy small batches. The full
+rectangle must be admitted before dispatch; otherwise the full FFT is retained.
+Post-dispatch arithmetic or CUDA faults fail closed before batch publication;
+they do not retry through host unquantized data. The bounded receiver results
+show GPU- and geometry-dependent mixed-service tradeoffs, not a universal
+whole-receiver speedup. See [current qualification and limits](validation.md#current-cuda-precision-and-tensor-dispatch).
+Neither matrix type is an INT8 FFT.
+
+The current automatic GUI routes fine work to native CPU only for at most 1024
+public block rows, at most 40 projected modes, one tap, AVX2, and at least 26
+admitted workers. Sampled 750- and 1023-row fine clears were about 4–6× faster
+on CPU than GPU. Other shapes keep CUDA fine processing. This scoped stage route
+does not change arithmetic precision or prove every CUDA geometry benefits.
+Vulkan fallback keeps its own precision and stage receipts. On
 devices without shader FP64 or shader INT64, Vulkan can run FP32 FFT/product
 work with Q64 phase-step constants and 32-bit shader phase reduction, then use
 host FP64 scoring. This compatibility route performs real Vulkan transform or
@@ -194,14 +205,16 @@ execution. Comparisons retain the full `W=2*H` software-worker budget for other
 receiver stages and preserve the computational-ceiling and proportional
 sensitivity/cost contract above.
 
-The latest bounded automatic-GUI integration ran on a full RTX PRO 6000
-Blackwell. The scoped native-fine route improved the broad 25-slot stream from
+The 11 November 2026 bounded automatic-GUI timing checkpoint ran on a full RTX
+PRO 6000 Blackwell with an earlier fine-routing guard of at most 512 rows and
+at least 32 admitted workers. That checkpoint improved the broad 25-slot stream from
 8.2028 s to 1.3200 s (6.21×) and the eight-commit ready-input interval from
 2.6703 s to 0.36386 s (7.34×). On the long-transform stratum it was 0.56% slower
 for the full stream, 1.33% slower in the ready interval and 2.27% slower on the
 fresh five-slot holdout. These are bounded paired service comparisons, not a
-sustained capacity qualification; details and resource costs are in the
-[validation record](validation.md#nvidia-and-intel-gpu-toggle-integration).
+sustained capacity qualification or a matched timing of the current 1024-row /
+26-worker envelope; details, resource costs and the historical/current boundary
+are in the [validation record](validation.md#nvidia-and-intel-gpu-toggle-integration).
 Automatic GUI validation on RTX 4090 and RTX 5090 remains unavailable after
 deployment attempts yielded no instance. Historical RTX 4090 matrix-component
 qualification remains scoped to those components. Intel UHD 630 still has no

@@ -130,16 +130,30 @@ void gpu_route_diagnostics() {
 
     snapshot.gpu_backend="cuda:0";
     snapshot.gpu_statistics_blocks=7;
+    snapshot.gpu_cuda_fp16_calls=2;
+    snapshot.gpu_cuda_int8_calls=3;
     snapshot.gpu_selection_reason="automatic CUDA";
     check(gui::gpu_search_diagnostics(snapshot)==
-          "GPU search · 42 rows · GPU fine statistics 7 · automatic CUDA · fixture GPU");
+          "GPU search · 42 rows · GPU fine statistics 7 · FP16 matrix 2 calls · INT8 matrix 3 calls · automatic CUDA · fixture GPU");
+    snapshot.gpu_cuda_fp16_calls=0;
+    snapshot.gpu_cuda_int8_calls=0;
     snapshot.gpu_statistics_blocks=0;
     snapshot.gpu_cuda_native_fine_sessions=3;
     snapshot.gpu_cuda_native_fine_fallback_reason="small-chronological-blocks";
     check(gui::gpu_search_diagnostics(snapshot)==
           "GPU search · 42 rows · native fine fallback 3 sessions (small-chronological-blocks) · automatic CUDA · fixture GPU");
+    snapshot.gpu_cuda_native_fine_sessions=0;
+    snapshot.gpu_cuda_native_fine_fallback_reason.clear();
+    snapshot.gpu_cuda_half_fft_score_rows=987654;
+    check(gui::gpu_search_diagnostics(snapshot)==
+          "GPU search · 42 rows · FP16 FFT 987654 score rows · automatic CUDA · fixture GPU");
+    snapshot.gpu_cuda_half_fft_score_rows=0;
+    snapshot.gpu_cuda_half_fft_fallback_summary="lag-group-route=3, fp32-minimum=1";
+    check(gui::gpu_search_diagnostics(snapshot)==
+          "GPU search · 42 rows · FP16 FFT skipped lag-group-route=3, fp32-minimum=1 · automatic CUDA · fixture GPU");
 
     snapshot.gpu_backend="vulkan:0";
+    snapshot.gpu_cuda_half_fft_fallback_summary.clear();
     snapshot.gpu_cuda_native_fine_sessions=0;
     snapshot.gpu_cuda_native_fine_fallback_reason.clear();
     snapshot.gpu_vulkan_shared_workspace_limit_bytes=1024U*1024U*1024U;

@@ -24,6 +24,12 @@ inline constexpr std::array<std::string_view, 6> bulk_matrix_fallback_reasons{
     "workspace-limit", "device-capability"
 };
 
+inline constexpr std::array<std::string_view, 11> bulk_half_fft_fallback_reasons{
+    "cpu-device", "fp64-stage", "lag-group-route", "unsupported-plan", "workspace-limit",
+    "fp32-minimum", "unqualified-hardware", "unqualified-shape", "ill-conditioned-template",
+    "plan-allocation", "allocator-limit"
+};
+
 struct BulkReceipt {
     std::string device, device_name, library_version, precision, requested_coarse_math;
     std::string selection_reason;
@@ -31,6 +37,7 @@ struct BulkReceipt {
     std::string workspace_scope = "backend_shared";
     int cuda_runtime_version = 0, cuda_driver_version = 0;
     int cuda_blas_version = 0, cuda_compute_major = 0, cuda_compute_minor = 0;
+    int cuda_fft_version = 0;
     std::uint32_t vulkan_api_version = 0, vulkan_driver_version = 0;
     std::uint32_t vulkan_vendor_id = 0, vulkan_device_id = 0, vulkan_subgroup_size = 0;
     bool vulkan = false, unified_memory = false, vulkan_float16 = false, vulkan_int8 = false;
@@ -49,6 +56,14 @@ struct BulkReceipt {
     std::uint64_t score_rows = 0, statistics_blocks = 0, projected_values = 0, dc_reduction_values = 0;
     // Exact CUDA arrival selection, credited after validated frontier readback.
     std::uint64_t cuda_arrival_peak_rows = 0, cuda_arrival_peak_values = 0;
+    // Physical cuFFT transforms include padded rows. Score rows count only
+    // validated results on the public grid, with no padded hypotheses.
+    std::uint64_t cuda_half_fft_forward_ffts = 0, cuda_half_fft_inverse_ffts = 0;
+    std::uint64_t cuda_half_fft_padded_ffts = 0, cuda_half_fft_score_rows = 0;
+    std::size_t cuda_half_fft_peak_bank_bytes = 0, cuda_half_fft_peak_workspace_bytes = 0;
+    std::size_t cuda_half_fft_peak_phase_bytes = 0;
+    double cuda_half_fft_plan_seconds = 0;
+    std::array<std::uint64_t, bulk_half_fft_fallback_reasons.size()> half_fft_fallback_counts{};
     std::uint64_t vulkan_dispatches = 0, vulkan_arrival_peak_rows = 0, vulkan_arrival_peak_values = 0;
     std::uint64_t vulkan_host_scored_rows = 0;
     std::uint64_t vulkan_fp32_score_rows = 0, vulkan_fp16_storage_score_rows = 0;
@@ -70,8 +85,15 @@ struct BulkReceipt {
     std::uint64_t cuda_direct_gram_values = 0, cuda_bmm_gram_values = 0;
     // Post-channelization matrix work, credited only after synchronization.
     std::uint64_t cuda_matrix_fp16_calls = 0, cuda_matrix_int8_calls = 0;
+    // cuBLASLt algorithm implementation declarations. Legacy GemmEx provides
+    // no selected-algorithm witness. None of these are hardware counters.
+    std::uint64_t cuda_matrix_lt_hmma_calls = 0, cuda_matrix_lt_imma_calls = 0, cuda_matrix_unwitnessed_calls = 0;
     std::uint64_t cuda_matrix_inner_chunks = 0, cuda_matrix_padded_real_macs = 0;
     std::uint64_t cuda_matrix_packed_values = 0, cuda_matrix_output_values = 0;
+    // Cumulative prepared right operands (including padding), and successful
+    // synchronized group contractions using them. These are not peak bytes.
+    std::uint64_t cuda_matrix_prepared_b_groups = 0, cuda_matrix_prepared_b_bytes = 0;
+    std::uint64_t cuda_matrix_prepared_b_values = 0, cuda_matrix_prepared_b_uses = 0;
     std::uint64_t cuda_matrix_maximum_rows = 0, cuda_matrix_maximum_columns = 0, cuda_matrix_maximum_inner = 0;
     std::uint64_t cuda_matrix_nonfinite_values = 0, cuda_matrix_saturated_values = 0;
     double cuda_matrix_maximum_a_scale = 0, cuda_matrix_maximum_b_scale = 0;
@@ -193,6 +215,9 @@ struct CoarseBulkGeometry {
     std::size_t frequency_tile_width = 0;
     // Optional backend-specific allocation shape chosen for the full prior.
     std::size_t workspace_batch = 0, device_workspace_bytes = 0;
+    // Canonical FP64 template-bank conditioning after projection.
+    double minimum_eigenvalue_ratio = 1;
+    std::size_t lag_workspace_tile_width = 0;
 };
 
 struct CoarseFrequencyPlan {

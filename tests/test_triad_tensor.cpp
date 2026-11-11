@@ -564,8 +564,7 @@ struct MatrixCoarseFixture {
     MatrixCoarseFixture(std::size_t k, std::size_t f, std::size_t l, std::size_t rays,
                         std::size_t count = 2, bool full_oracle = true)
         : kernel(k), frequencies(f), arrivals(l), taps(rays), frequency(f),
-          columns(count * rays, std::vector<Complex>(k)), workspaces(count), phase(k),
-          convolution(std::bit_ceil(k + f - 1)), exponentials(k * f),
+          columns(count * rays, std::vector<Complex>(k)), workspaces(count), exponentials(k * f),
           active(k + l - 1), noise(active.size()), zero(active.size()),
           geometry{rays, k, std::bit_ceil(active.size()), l, f, fs, variance} {
         std::mt19937_64 generator(0x527814 + k + 7 * f);
@@ -583,13 +582,7 @@ struct MatrixCoarseFixture {
             for (std::size_t j = 0; j < kernel; ++j)
                 exponentials[f_index * kernel + j] = rotation(-(first + f_index * step) * j);
         }
-        for (std::size_t j = 0; j < kernel; ++j)
-            phase[j] = rotation(-first * j - .5 * step * j * j);
-        for (std::size_t j = 0; j < frequencies; ++j)
-            convolution[j] = rotation(.5 * step * j * j);
-        for (std::size_t j = 1; j < kernel; ++j)
-            convolution[convolution.size() - j] = rotation(.5 * step * j * j);
-        group = {0, frequencies, phase, convolution};
+        group = zoom_group(0, frequencies, phase, convolution);
         for (std::size_t j = 0; j < active.size(); ++j) {
             noise[j] = .2 * Complex(2 * unit() - 1, 2 * unit() - 1);
             active[j] = .05 * noise[j];
@@ -605,6 +598,21 @@ struct MatrixCoarseFixture {
             noise_scores = oracle(noise);
             zero_scores.resize(workspaces.size() * frequencies * arrivals);
         }
+    }
+
+    r::CoarseZoomGroup zoom_group(std::size_t first, std::size_t count,
+                                  std::vector<Complex>& input_phase, std::vector<Complex>& impulse) const {
+        input_phase.resize(kernel);
+        impulse.assign(std::bit_ceil(kernel + count - 1), {});
+        const auto step = 1. / kernel;
+        const auto start = (static_cast<double>(first) - static_cast<double>(frequencies / 2)) * step;
+        for (std::size_t j = 0; j < kernel; ++j)
+            input_phase[j] = rotation(-start * j - .5 * step * j * j);
+        for (std::size_t j = 0; j < count; ++j)
+            impulse[j] = rotation(.5 * step * j * j);
+        for (std::size_t j = 1; j < kernel; ++j)
+            impulse[impulse.size() - j] = rotation(.5 * step * j * j);
+        return {first, count, input_phase, impulse};
     }
 
     double oracle_point(std::span<const Complex> input, std::size_t w, std::size_t f, std::size_t arrival) const {
@@ -744,11 +752,17 @@ void matrix_coarse(r::ReceiverBulkBackend& backend, v::TensorCoarseMath math,
               "matrix coarse receipt did not cover the complete requested grid");
         const auto calls = matrix_calls(receipt, math);
         const auto all_calls = receipt.cuda_matrix_fp16_calls + receipt.cuda_matrix_int8_calls;
+        check(receipt.cuda_matrix_lt_hmma_calls <= receipt.cuda_matrix_fp16_calls &&
+              receipt.cuda_matrix_lt_imma_calls <= receipt.cuda_matrix_int8_calls &&
+              receipt.cuda_matrix_lt_hmma_calls + receipt.cuda_matrix_lt_imma_calls +
+                  receipt.cuda_matrix_unwitnessed_calls == all_calls,
+              "matrix coarse receipt did not attribute all completed GEMMs to their implementation");
         if (expect_matrix) {
+            const auto chunks = (fixture.kernel + 511) / 512;
             check(calls > 0 && all_calls == calls &&
                   calls == receipt.cuda_matrix_inner_chunks &&
                   receipt.cuda_matrix_output_values == repetitions * fixture.taps * expected.size() &&
-                  receipt.cuda_matrix_inner_chunks >= repetitions * ((fixture.kernel + 511) / 512) &&
+                  receipt.cuda_matrix_inner_chunks >= repetitions * chunks &&
                   receipt.cuda_matrix_maximum_rows == std::min<std::size_t>(32, fixture.workspaces.size()) *
                       std::min<std::size_t>(64, fixture.arrivals) * fixture.taps &&
                   receipt.cuda_matrix_maximum_columns == fixture.frequencies &&
@@ -758,8 +772,19 @@ void matrix_coarse(r::ReceiverBulkBackend& backend, v::TensorCoarseMath math,
                   std::all_of(receipt.matrix_fft_fallback_counts.begin(), receipt.matrix_fft_fallback_counts.end(),
                               [](auto value) { return value == 0; }),
                   "matrix coarse did not execute the requested bounded low-precision products");
+            const auto padded = [](std::size_t size) { return (size + 15) / 16 * 16; };
+            const auto packed_right_values = 4 * padded(fixture.frequencies) *
+                padded(std::min<std::size_t>(512, fixture.kernel)) * chunks;
+            check(receipt.cuda_matrix_prepared_b_groups == 1 &&
+                  receipt.cuda_matrix_prepared_b_values == packed_right_values &&
+                  receipt.cuda_matrix_prepared_b_bytes >= packed_right_values *
+                      (math == v::TensorCoarseMath::fp16 ? 2 : 1) &&
+                  receipt.cuda_matrix_prepared_b_uses * chunks == calls &&
+                  receipt.cuda_matrix_prepared_b_uses >= repetitions &&
+                  receipt.cuda_matrix_packed_values > packed_right_values,
+                  "matrix coarse did not reuse the prepared right operand across complete rectangles");
         } else {
-            check(all_calls == 0 &&
+            check(all_calls == 0 && !receipt.cuda_matrix_prepared_b_groups && !receipt.cuda_matrix_prepared_b_uses &&
                   receipt.matrix_fft_fallback_counts[matrix_fallback_index("unfavorable-shape")] > 0 &&
                   work.inverse_ffts > 0,
                   "matrix coarse silently dropped the full FFT fallback for an unfavorable shape");
@@ -779,6 +804,63 @@ void matrix_coarse(r::ReceiverBulkBackend& backend, v::TensorCoarseMath math,
           "matrix coarse owner destruction retained a charged workspace");
 }
 
+void cuda_matrix_grouped(r::ReceiverBulkBackend& backend, v::TensorCoarseMath math, bool tight) {
+    // A shared endpoint belongs to both groups, but only one score is
+    // published for that public frequency. The small last group uses FFT.
+    // The 4*113-bin case is below the old dense 16 MiB gate but its four
+    // padded FP16 operands exceed it. Complete FFT service still fits.
+    const MatrixCoarseFixture fixture(tight ? 4097 : 31, tight ? 449 : 17, 16, 1, 1, !tight);
+    const std::size_t groups_count = tight ? 4 : 2;
+    std::array<std::vector<Complex>, 4> phase, convolution;
+    std::array<r::CoarseZoomGroup, 4> groups;
+    for (std::size_t i = 0; i < groups_count; ++i) {
+        const auto first = tight ? 112 * i : 12 * i;
+        const auto count = tight ? 113 : (i ? 5 : 13);
+        groups[i] = fixture.zoom_group(first, count, phase[i], convolution[i]);
+    }
+    auto device = backend.make_coarse(MatrixCoarseFixture::fs, .25);
+    r::CoarseBulkWork preparation, work;
+    device->prepare(fixture.geometry, fixture.active, fixture.workspaces,
+                    std::span(groups).first(groups_count), preparation, {});
+    const double peak = tight ? 1. : std::max(1., *std::max_element(fixture.active_scores.begin(), fixture.active_scores.end()));
+    std::size_t seen = 0;
+    device->lag_tile(0, fixture.workspaces.size(),
+        [&](std::size_t first, std::size_t count, std::span<const double> scores) {
+            check(first == seen && count == 1 && scores.size() == fixture.frequencies * fixture.arrivals,
+                  "grouped CUDA matrix path did not publish one complete public grid");
+            for (std::size_t f = 0; f < fixture.frequencies; ++f) {
+                if (tight && f != 0 && f != fixture.frequencies / 2 && f != fixture.frequencies - 1) continue;
+                for (std::size_t a = 0; a < fixture.arrivals; ++a) {
+                    const auto i = f * fixture.arrivals + a;
+                    const auto expected = tight ? fixture.oracle_point(fixture.active, first, f, a)
+                                                : fixture.active_scores[i];
+                    if (tight || f >= 12) {
+                        near(scores[i], expected, 3e-5, "grouped CUDA FFT result disagrees with direct scores");
+                    } else {
+                        const auto tolerance = math == v::TensorCoarseMath::fp16 ? .002 : .01;
+                        check(std::abs(scores[i] - expected) <= tolerance * peak,
+                              "grouped CUDA matrix result disagrees with direct scores");
+                    }
+                }
+            }
+            seen += count;
+        }, work, {});
+    const auto receipt = device->receipt();
+    check(seen == 1 && receipt.cuda && receipt.executed && work.inverse_ffts &&
+          work.score_rows == fixture.frequencies * fixture.arrivals,
+          "grouped CUDA matrix or FFT fallback lost completed work");
+    if (tight) {
+        check(!receipt.cuda_matrix_prepared_b_groups && !matrix_calls(receipt, math) &&
+              receipt.matrix_fft_fallback_counts[matrix_fallback_index("workspace-limit")] == groups_count,
+              "matrix pre-admission did not refuse padded right operands over the configured cap");
+    } else {
+        check(receipt.cuda_matrix_prepared_b_groups == 1 && receipt.cuda_matrix_prepared_b_uses == 1 &&
+              matrix_calls(receipt, math) == 1 &&
+              receipt.matrix_fft_fallback_counts[matrix_fallback_index("unfavorable-shape")] == 1,
+              "mixed CUDA rectangle did not execute both prepared matrix and FFT groups");
+    }
+}
+
 void cuda_matrix_coarse(std::optional<v::TensorCoarseMath> selected = {}) {
     const MatrixCoarseFixture narrow(31, 17, 19, 1), wide(769, 129, 19, 2), fallback(769, 257, 19, 2);
     // Cross both B=32 workspace and A=64 arrival tiles, including their tails;
@@ -792,8 +874,12 @@ void cuda_matrix_coarse(std::optional<v::TensorCoarseMath> selected = {}) {
         matrix_coarse(*backend, math, wide, true);
         matrix_coarse(*backend, math, batch_boundary, true);
         matrix_coarse(*backend, math, fallback, false);
+        cuda_matrix_grouped(*backend, math, false);
+        if (math == v::TensorCoarseMath::fp16) cuda_matrix_grouped(*backend, math, true);
         const auto receipt = backend->receipt();
         std::cout << "Matrix " << matrix_math_name(math) << " actual GEMMs " << matrix_calls(receipt, math)
+                  << "; cuBLASLt declared HMMA/IMMA " << receipt.cuda_matrix_lt_hmma_calls << '/'
+                  << receipt.cuda_matrix_lt_imma_calls << "; legacy unwitnessed " << receipt.cuda_matrix_unwitnessed_calls
                   << "; capability fallbacks "
                   << receipt.matrix_fft_fallback_counts[matrix_fallback_index("device-capability")] << '\n';
     }
@@ -969,16 +1055,26 @@ void matrix_benchmark_work(const r::BulkReceipt& receipt, const MatrixCoarseFixt
           receipt.allocator_peak_reserved_bytes > 0 && receipt.allocator_peak_reserved_bytes <= receipt.workspace_limit_bytes))
         throw datapump::Error("matrix benchmark did not execute within the requested CUDA workspace" + diagnostic());
     if (math == v::TensorCoarseMath::fft) {
-        check(receipt.cuda_matrix_fp16_calls == 0 && receipt.cuda_matrix_int8_calls == 0 && receipt.fft_calls > 0,
+        check(receipt.cuda_matrix_fp16_calls == 0 && receipt.cuda_matrix_int8_calls == 0 && receipt.fft_calls > 0 &&
+              !receipt.cuda_matrix_prepared_b_groups && !receipt.cuda_matrix_prepared_b_uses &&
+              !receipt.cuda_matrix_lt_hmma_calls && !receipt.cuda_matrix_lt_imma_calls &&
+              !receipt.cuda_matrix_unwitnessed_calls,
               "matrix benchmark FFT reference changed its arithmetic");
     } else {
         const auto calls = matrix_calls(receipt, math);
         const auto all_calls = receipt.cuda_matrix_fp16_calls + receipt.cuda_matrix_int8_calls;
         const bool qualified = calls > 0 && all_calls == calls &&
               calls == receipt.cuda_matrix_inner_chunks &&
+              receipt.cuda_matrix_lt_hmma_calls <= receipt.cuda_matrix_fp16_calls &&
+              receipt.cuda_matrix_lt_imma_calls <= receipt.cuda_matrix_int8_calls &&
+              receipt.cuda_matrix_lt_hmma_calls + receipt.cuda_matrix_lt_imma_calls +
+                  receipt.cuda_matrix_unwitnessed_calls == calls &&
               receipt.cuda_matrix_maximum_rows == 4096 &&
               receipt.cuda_matrix_maximum_columns == fixture.frequencies &&
               receipt.cuda_matrix_maximum_inner == fixture.kernel &&
+              receipt.cuda_matrix_prepared_b_groups == 1 && receipt.cuda_matrix_prepared_b_values > 0 &&
+              receipt.cuda_matrix_prepared_b_uses * ((fixture.kernel + 511) / 512) == calls &&
+              receipt.cuda_matrix_prepared_b_uses >= repetitions &&
               receipt.cuda_matrix_output_values == repetitions * fixture.taps * fixture.workspaces.size() *
                   fixture.frequencies * fixture.arrivals &&
               !receipt.cuda_matrix_nonfinite_values && !receipt.cuda_matrix_saturated_values &&
@@ -1102,12 +1198,19 @@ void emit_matrix_benchmark(const MatrixBenchmarkMeasurement& result, const Matri
         << ",\"matrix_calls\":" << matrix_calls(receipt, math)
         << ",\"matrix_fp16_calls\":" << receipt.cuda_matrix_fp16_calls
         << ",\"matrix_int8_calls\":" << receipt.cuda_matrix_int8_calls
+        << ",\"matrix_lt_hmma_calls\":" << receipt.cuda_matrix_lt_hmma_calls
+        << ",\"matrix_lt_imma_calls\":" << receipt.cuda_matrix_lt_imma_calls
+        << ",\"matrix_unwitnessed_calls\":" << receipt.cuda_matrix_unwitnessed_calls
         << ",\"matrix_nonfinite_values\":" << receipt.cuda_matrix_nonfinite_values
         << ",\"matrix_saturated_values\":" << receipt.cuda_matrix_saturated_values
         << ",\"matrix_output_values\":" << receipt.cuda_matrix_output_values
         << ",\"matrix_inner_chunks\":" << receipt.cuda_matrix_inner_chunks
         << ",\"matrix_padded_real_macs\":" << receipt.cuda_matrix_padded_real_macs
         << ",\"matrix_packed_values\":" << receipt.cuda_matrix_packed_values
+        << ",\"matrix_prepared_b_groups\":" << receipt.cuda_matrix_prepared_b_groups
+        << ",\"matrix_prepared_b_bytes\":" << receipt.cuda_matrix_prepared_b_bytes
+        << ",\"matrix_prepared_b_values\":" << receipt.cuda_matrix_prepared_b_values
+        << ",\"matrix_prepared_b_uses\":" << receipt.cuda_matrix_prepared_b_uses
         << ",\"matrix_maximum_rows\":" << receipt.cuda_matrix_maximum_rows
         << ",\"matrix_maximum_columns\":" << receipt.cuda_matrix_maximum_columns
         << ",\"matrix_maximum_inner\":" << receipt.cuda_matrix_maximum_inner
@@ -2072,8 +2175,92 @@ void helper_composite_slot(const std::shared_ptr<r::ReceiverBulkBackend>& backen
               << 10 * std::log10(emitted.reference_helper_ratio) << " dB; Helper span " << span
               << " Hz; tensor " << after.device << (after.cuda ? " CUDA" : " CPU") << '\n';
 }
+void automatic_cuda_matrix(const std::shared_ptr<r::ReceiverBulkBackend>& backend) {
+    const auto identity = backend->status_receipt();
+    const auto capability = 10 * identity.cuda_compute_major + identity.cuda_compute_minor;
+    const bool qualified = capability == 89 || capability == 120;
+    const auto score = [&](r::ReceiverBulkBackend& selected, const MatrixCoarseFixture& fixture,
+                           std::size_t tile_width, bool matrix, std::string_view reason) {
+        const auto peak = fixture.oracle_point(fixture.active, 0, fixture.frequencies / 2 + 3, 7);
+        auto owner = selected.make_coarse(MatrixCoarseFixture::fs, .25);
+        auto geometry = fixture.geometry;
+        geometry.lag_workspace_tile_width = tile_width;
+        r::CoarseBulkWork prepare, search;
+        owner->prepare(geometry, fixture.active, fixture.workspaces, std::span(&fixture.group, 1), prepare, {});
+        check(owner->precision_reason() == reason, "automatic CUDA lag selection reason differs from its public geometry");
+        std::size_t seen = 0;
+        for (std::size_t first = 0; first < fixture.workspaces.size();) {
+            const auto rows = std::min(tile_width, fixture.workspaces.size() - first);
+            owner->lag_tile(first, rows, [&](std::size_t workspace, std::size_t count, std::span<const double> scores) {
+                const auto grid = fixture.frequencies * fixture.arrivals;
+                check(workspace == seen && scores.size() == count * grid,
+                      "automatic CUDA matrix or FFT changed public workspace order");
+                for (std::size_t row = 0; row < count; ++row) {
+                    for (const auto f : {std::size_t{0}, fixture.frequencies / 2 + 3, fixture.frequencies - 1}) {
+                        for (const auto a : {std::size_t{0}, std::size_t{7}, fixture.arrivals - 1}) {
+                            const auto actual = scores[row * grid + f * fixture.arrivals + a];
+                            const auto expected = fixture.oracle_point(fixture.active, workspace + row, f, a);
+                            if (matrix) {
+                                check(std::abs(actual - expected) <= .01 * std::max(1., peak),
+                                      "automatic CUDA INT8 component differs from direct scores");
+                            } else {
+                                near(actual, expected, 3e-5, "automatic CUDA FFT component differs from direct scores");
+                            }
+                        }
+                    }
+                }
+                seen += count;
+            }, search, {});
+            first += rows;
+        }
+        const auto receipt = owner->receipt();
+        check(seen == fixture.workspaces.size() && receipt.executed &&
+              search.score_rows == fixture.workspaces.size() * fixture.frequencies * fixture.arrivals &&
+              receipt.score_rows == search.score_rows && receipt.requested_coarse_math == "fft",
+              "automatic CUDA matrix or FFT skipped public scores or changed the requested policy");
+        if (matrix) {
+            check(receipt.cuda_matrix_lt_imma_calls && receipt.cuda_matrix_prepared_b_groups == 1 &&
+                  receipt.cuda_matrix_output_values == search.score_rows && search.inverse_ffts == 0 &&
+                  receipt.precision == "int8_matrix_fp64_coordinates_and_reductions",
+                  "automatic CUDA INT8 selection lacked complete Tensor Core work or arithmetic identity");
+        } else {
+            check(!receipt.cuda_matrix_int8_calls && !receipt.cuda_matrix_prepared_b_groups && search.inverse_ffts > 0,
+                  "automatic CUDA lag fallback executed matrix work or omitted FFT work");
+            if (reason == "cuda-int8-matrix-workspace-limit")
+                check(receipt.matrix_fft_fallback_counts[matrix_fallback_index("workspace-limit")] > 0,
+                      "partial CUDA phase lease omitted its matrix workspace fallback receipt");
+        }
+    };
+    const MatrixCoarseFixture fixture(769, 65, 64, 1, 32, false);
+    score(*backend, fixture, 32, qualified, qualified ? "cuda-int8-matrix" : "cuda-int8-matrix-unqualified-hardware");
+    auto fp32 = v::make_automatic_cuda_receiver_backend(v::TensorPrecision::fp32_minimum);
+    score(*fp32, fixture, 32, false, "cuda-int8-matrix-fp32-minimum");
+    if (!qualified) return;
+    score(*backend, fixture, 25, false, "cuda-int8-matrix-unqualified-shape");
+    // The full bank has 2496 rows, but each main dispatch has only 832.
+    const MatrixCoarseFixture narrow_arrival(769, 65, 32, 1, 78, false);
+    score(*backend, narrow_arrival, 26, false, "cuda-int8-matrix-unqualified-shape");
+
+    // Hold only an accounting lease. The remaining 40 MiB covers the
+    // canonical FFT minimum but cannot admit the full INT8 rectangle.
+    const auto available = identity.workspace_limit_bytes - identity.reserved_bytes;
+    constexpr std::size_t remaining = 40 * mib;
+    auto held = backend->make_coarse(MatrixCoarseFixture::fs, .25);
+    held->begin_fir_projection(1, 1, (available - remaining) / (3 * sizeof(std::complex<float>)), {});
+    score(*backend, fixture, 32, false, "cuda-int8-matrix-workspace-limit");
+}
+
 void automatic_cuda_backend() {
     const auto backend = v::make_automatic_cuda_receiver_backend();
+    for (const auto rows : {750u, 1024u})
+        check(backend->fine_fallback_reason({rows, 40, 1, 26, true}) == "small-chronological-blocks",
+              "bounded chronological block did not select native fine processing");
+    check(backend->fine_fallback_reason({1025, 40, 1, 32, true}).empty() &&
+          backend->fine_fallback_reason({750, 41, 1, 32, true}).empty() &&
+          backend->fine_fallback_reason({750, 40, 2, 32, true}).empty() &&
+          backend->fine_fallback_reason({750, 40, 1, 25, true}).empty() &&
+          backend->fine_fallback_reason({750, 40, 1, 32, false}).empty(),
+          "automatic native fine processing exceeded its public geometry or hardware bounds");
     const auto before = backend->status_receipt();
     check(before.cuda && !before.executed && !before.score_rows && !before.statistics_blocks &&
           before.workspace_limit_bytes >= 128 * mib && !before.allocator_reserved_bytes,
@@ -2137,6 +2324,7 @@ void automatic_cuda_backend() {
     if (wake_failure) std::rethrow_exception(wake_failure);
     check(backend->status_receipt().reserved_bytes == before.reserved_bytes, "CUDA phase lease was not released");
 
+    automatic_cuda_matrix(backend);
     coarse(*backend);
     full_slot(backend);
     if (std::string_view(datapump::modem::detail::search_fft::kernel_name()) == "avx2")

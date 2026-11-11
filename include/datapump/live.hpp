@@ -114,6 +114,10 @@ struct Snapshot {
     std::uint64_t gpu_vulkan_waiting_sessions=0,gpu_native_coarse_workspace_sessions=0;
     std::uint64_t gpu_host_scored_rows=0,gpu_statistics_blocks=0;
     std::uint64_t gpu_cuda_fp16_calls=0,gpu_cuda_int8_calls=0;
+    // CUDA half FFT counts cover public frequency/arrival score rows only.
+    // Fallback counts explain why automatic/explicit half work was skipped.
+    std::uint64_t gpu_cuda_half_fft_score_rows=0;
+    std::string gpu_cuda_half_fft_fallback_summary;
     bool gpu_native_lag_preference_supported=false;
     bool running=false,transmitting=false,simulation=false,simulation_replay=false;
     bool force_transmit_available=false;

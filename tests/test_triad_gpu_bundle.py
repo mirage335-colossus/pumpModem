@@ -41,8 +41,10 @@ class TriadGpuBundleTests(unittest.TestCase):
             "tools/build_capacity.py": "def usable_cpus(): return 1\n",
             "tools/diagnostic_iq_noise_options.hpp": "#pragma once\n",
             "tests/test_triad_tensor.cpp": "int main() {}\n",
+            "tests/test_triad_tensor_fft.cpp": '#include "triad_tensor_fft.hpp"\nint main() {}\n',
             "tests/test_triad_vulkan.cpp": "int main() {}\n",
             "tests/test_gui_robust_live.cpp": "#include \"datapump/live.hpp\"\nint main() {}\n",
+            "src/triad_tensor_fft.hpp": "#pragma once\n",
             "tests/test_triad_gpu_workload.py": "VALUE = 4\n",
             "tools/triad_gpu_bank.py": "# retired Python DSP\n",
             "tools/triad_receiver.py": "# retired Python receiver\n",
@@ -159,6 +161,7 @@ class TriadGpuBundleTests(unittest.TestCase):
         self.assertIn("tools/triad_probe_spool.hpp", names)
         self.assertIn("tools/triad_fixture_key.hpp", names)
         self.assertIn("tests/test_triad_tensor.cpp", names)
+        self.assertIn("tests/test_triad_tensor_fft.cpp", names)
         self.assertIn("tests/test_triad_vulkan.cpp", names)
         self.assertIn("tests/test_gui_robust_live.cpp", names)
         self.assertIn("cmake/TriadTensor.cmake", names)
@@ -185,6 +188,7 @@ class TriadGpuBundleTests(unittest.TestCase):
         bundle.create_bundle(MODULE.parents[1], out)
         pending = ["tools/triad-receiver-probe.cpp", "tools/triad-helper-export.cpp",
                    "tools/triad-audio-stream.cpp", "tests/test_triad_tensor.cpp",
+                   "tests/test_triad_tensor_fft.cpp",
                    "tests/test_triad_vulkan.cpp", "tests/test_gui_robust_live.cpp"]
         seen = set()
         with tarfile.open(out, "r:gz") as tar:

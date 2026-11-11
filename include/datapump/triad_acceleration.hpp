@@ -10,10 +10,10 @@ namespace datapump::triad::v3 {
 namespace receiver_detail { class ReceiverBulkBackend; }
 
 enum class TensorDevice { cpu, cuda };
-enum class TensorPrecision { automatic, fp64 };
-// Optional post-channelization coarse contractions. The full FFT search is
-// retained for every unsupported shape and remains the scalable default.
-enum class TensorCoarseMath { fft, fp16, int8 };
+enum class TensorPrecision { automatic, fp64, fp32_minimum };
+// Optional post-channelization coarse contractions and half FFT arithmetic.
+// The full FP32/FP64 FFT search remains the default and startup fallback.
+enum class TensorCoarseMath { fft, fp16, int8, fp16_fft };
 
 class TensorBackendUnavailable : public Error {
 public:

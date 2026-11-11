@@ -127,17 +127,20 @@ channel isolation. They require their own native implementation, work mapping,
 accuracy and complete-cost comparison. A dense DFT's quadratic work cannot be
 made equivalent to an FFT's `N log N` scaling merely by tiling or selecting INT8.
 The current `int8` option selects a bounded matrix contraction; unsupported or
-CUDA frequency-tiled work explicitly stays on FFT. cuFFT's documented transform
-precisions are distinct from low-precision matrix multiplication. See
-[cuFFT's transform and precision documentation](https://docs.nvidia.com/cuda/cufft/).
+CUDA frequency-tiled work explicitly stays on FFT. Automatic CUDA now also has
+a guarded native half-precision cuFFT route; cuFFT half arithmetic is not a
+Tensor Core FFT. See [current CUDA qualification](validation.md#current-cuda-precision-and-tensor-dispatch)
+and [cuFFT's transform and precision documentation](https://docs.nvidia.com/cuda/cufft/).
 
 Prefer the algorithm with the qualified ceiling on the most challenging
 applicable geometry. A replacement default must cover unsuccessful Helper
 acquisition and broad search, include recurring preparation and downstream work,
 and preserve all hypotheses under the target memory bound. An easy-case speedup
 well below real-time capacity is not a reason to choose a lower worst-case
-ceiling. CUDA retains its full FFT default; the qualified Radeon direct route
-has a separate explicitly bounded envelope and must retain full FFT fallback.
+ceiling. Automatic CUDA selects the guarded half-cuFFT route on the currently
+qualified SM89/SM120 geometry; unsupported or unqualified work keeps the full
+FP32 FFT fallback. The qualified Radeon direct route has a separate explicitly
+bounded envelope and must retain full FFT fallback.
 
 ## Current implementation
 
@@ -170,9 +173,12 @@ Python does not duplicate those algorithms.
 `TensorReceiverOptions` selects CPU or an exact CUDA device, a bounded shared
 workspace, `automatic` or `fp64` precision, and a separate coarse arithmetic
 policy. The native workload CLI exposes `--tensor-precision automatic|fp64` and
-`--tensor-coarse-math fft|fp16|int8`; `fft` remains the default. Automatic bulk
-work normally uses FP32 with
-FP64 coordinates and reductions. The compact tight-clock class (sample rate at
+`--tensor-coarse-math fft|fp16|int8|fp16-fft`. `fft` requests the FP32 FFT,
+`fp16` and `int8` request bounded lag-matrix contractions, and `fp16-fft`
+requests native half-cuFFT where its restrictions are met. Automatic CUDA uses
+the qualified half-cuFFT route for guarded broad-search geometry and retains
+FP32 fallback; CPU and unsupported CUDA cases retain their applicable native
+route. FP64 coordinates and reductions are preserved. The compact tight-clock class (sample rate at
 most 10 Hz and positive clock span at most 0.001 ppm) selects FP64. Receipts
 report the actual coarse and fine arithmetic, device/runtime and memory use.
 Fine Gaussian state retains the native higher-precision policy. No arithmetic
@@ -190,26 +196,38 @@ backend and selection reason; accelerator qualification additionally requires
 completed backend-specific work. Explicit CUDA and Vulkan probe modes remain
 pinned to their named backend.
 
-Automatic CUDA uses FP32 FFTs for scalable frequency search and retains exact
-device chirp-Z only for the supported, cost-qualified single-arrival geometry.
-The CUDA FP16/INT8 matrix path is still an explicit bounded option. Its earlier
-measured shapes and limitations do not qualify automatic matrix selection from
-Tensor Core peak rates, and a matrix contraction is not a low-precision FFT.
-The GPU selector must retain the full frequency/arrival hypothesis set under
-tile and device-memory limits; allocation or execution failure is explicit.
-Complete affected-stage cost, workspace, sensitivity and false-alarm tradeoffs
-govern any future automatic arithmetic change.
-
-FP32 is the currently qualified CUDA FFT route, **not a demonstrated precision
-or throughput ceiling**. Native half-precision cuFFT is a distinct unresolved
-candidate; the FP16/INT8 matrix checks do not evaluate it. NVIDIA's
-[cuFFT 12.8 guide](https://docs.nvidia.com/cuda/archive/12.8.1/cufft/index.html#half-precision-cufft-transforms)
-supports half transforms for power-of-two sizes and identifies intermediate
-range/overflow limits. A native candidate should test normalization and
-power-of-two scaling, full preparation/transfer/synchronization costs, workspace
-and reception tradeoffs. Those limits do not establish a universal FP16
-rejection. The current integration also leaves coarse FIR preparation/transfer
-overlap as a measured structural improvement opportunity.
+Automatic CUDA uses the guarded native half-cuFFT route for broad frequency
+search on exact SM89 or SM120 devices when NFFT is 4096–2^20, there are at least
+two arrivals, the measured double-precision Gram minimum-eigenvalue ratio is at
+least 1/16, and `NFFT × admitted_frequency_tile × min(W, 8) × taps ≥ 2^19`.
+This work-volume gate replaces the earlier fixture-only NFFT=131072/F≥32 caps.
+It power-of-two scales and packs isolated post-channelization spectra/templates,
+charges workspace, and preserves FP64 scoring/state. Before batch commitment, a failed guard, plan, or full
+workspace/allocation admission selects the full FP32 FFT route. After the
+reduced-precision batch is committed, arithmetic-flag or CUDA execution errors
+fail closed before publishing results; they do not silently retry as FP32 or
+retain an unquantized host bank. A post-dispatch OOM remains an explicit error.
+This is actual half arithmetic in cuFFT, not a Tensor Core FFT; instruction
+evidence and current whole-stream limits are recorded in
+[validation](validation.md#current-cuda-precision-and-tensor-dispatch).
+The exact cuFFT restrictions and intermediate range still limit this route.
+The CUDA FP16/INT8 lag-matrix path remains distinct. Automatic INT8 is qualified
+as a structural coarse-speed candidate for its bounded shape: padded matrix
+cost at most 30 paired-FFT row stages; one complete grouping and one tap;
+K≤8192; F=8–256; at least 1664 main complex rows; tile width at least 26; and
+A≥32, using the shared cuBLASLt context. The 1664-row floor prevents packing
+overhead on undersized matrices from selecting INT8. It must acquire the full
+rectangle lease before commitment; insufficient admission selects FFT. After
+dispatch, an error fails closed rather than retrying through an unquantized
+host path. This qualifies a bounded coarse candidate, not universal end-to-end
+speedup: mixed message/backlog costs and sensitivity results remain in
+[validation](validation.md#current-cuda-precision-and-tensor-dispatch). The
+matrix path reserves more workspace than FFT, so report the capacity tradeoff
+and preserve full-hypothesis memory admission. Neither matrix selection nor
+peak rates imply an INT8 FFT. The GPU selector must retain the full
+frequency/arrival hypothesis set under tile and device-memory limits. The current integration also leaves
+coarse FIR preparation/transfer overlap as a measured structural improvement
+opportunity.
 
 For portable Vulkan devices lacking shader FP64 or shader INT64, the receiver
 can keep bulk FFT/product arithmetic in FP32, represent frequency phase steps
@@ -223,16 +241,13 @@ use without optional GPU FP64/INT64 features. That hardware is unavailable here;
 the forced host-scoring path was exercised on a different physical Vulkan GPU,
 which establishes route behavior only, not Intel driver compatibility or speed.
 
-For hardware evidence, the bounded automatic-GUI comparison was measured on a
-full RTX PRO 6000 Blackwell. Its qualified CUDA policy uses native fine processing
-for a scoped small-block regime (public maximum block rows ≤512, projected modes
-≤40, one tap, AVX2 and admitted worker share ≥32) while retaining CUDA coarse
-work; outside that regime, CUDA fine remains selected. The broad 25-slot stream
-improved from 8.2028 s to 1.3200 s (6.21×), and its eight-commit ready-input
-interval from 2.6703 s to 0.36386 s (7.34×). The long-transform stream remained
-slightly slower: 0.56% for the full stream, 1.33% for the ready interval and
-2.27% on the fresh holdout. This is a bounded service result, not sustained
-capacity or a precision change; see [validation](validation.md#nvidia-and-intel-gpu-toggle-integration).
+The current CUDA fine-stage CPU route admits at most 1024 public block rows,
+40 projected modes, one tap, AVX2, and at least 26 admitted workers. Sampled
+750- and 1023-row fine clears were about 4–6× faster on CPU than GPU. This is a
+conditional stage-routing result, not a complete-stream speedup claim; current
+complete-stream and earlier 512-row/32-worker checkpoint results are reported
+separately in [validation](validation.md#current-cuda-precision-and-tensor-dispatch)
+and [the historical GUI integration record](validation.md#nvidia-and-intel-gpu-toggle-integration).
 
 Automatic-GUI validation on RTX 4090 and RTX 5090 remains unavailable after
 deployment attempts produced no instance. Historical RTX 4090 matrix-component

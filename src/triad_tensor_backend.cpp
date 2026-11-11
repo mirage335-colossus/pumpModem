@@ -9,6 +9,7 @@
 #include <torch/version.h>
 
 #if DATAPUMP_TRIAD_TENSOR_CUDA
+#include "triad_tensor_fft.hpp"
 #include "triad_tensor_mapping.cuh"
 #include "triad_tensor_matrix.hpp"
 #include "triad_tensor_peaks.hpp"
@@ -55,8 +56,21 @@ constexpr std::size_t maximum_matrix_frequencies = 256;
 constexpr std::size_t maximum_matrix_bytes = 32 * mib;
 constexpr std::size_t maximum_matrix_workspaces = 32;
 constexpr std::size_t maximum_matrix_arrivals = 64;
+constexpr std::size_t minimum_auto_matrix_workspaces = 26;
+constexpr std::size_t minimum_auto_matrix_rows = minimum_auto_matrix_workspaces * maximum_matrix_arrivals;
 constexpr auto tau = 2 * std::numbers::pi;
 constexpr std::string_view small_fine_fallback = "small-chronological-blocks";
+enum class HalfFftFallback : std::size_t {
+    cpu_device, fp64_stage, lag_group_route, unsupported_plan, workspace_limit,
+    fp32_minimum, unqualified_hardware, unqualified_shape, ill_conditioned_template,
+    plan_allocation, allocator_limit
+};
+constexpr std::array<std::string_view, bulk_half_fft_fallback_reasons.size()> half_fft_precision_reasons{
+    "cuda-fp16-fft-cpu-device", "cuda-fp16-fft-fp64-stage", "cuda-fp16-fft-lag-group-route",
+    "cuda-fp16-fft-unsupported-plan", "cuda-fp16-fft-workspace-limit", "cuda-fp16-fft-fp32-minimum",
+    "cuda-fp16-fft-unqualified-hardware", "cuda-fp16-fft-unqualified-shape", "cuda-fp16-fft-ill-conditioned-template",
+    "cuda-fp16-fft-plan-allocation", "cuda-fp16-fft-allocator-limit"
+};
 
 constexpr std::size_t fine_result_values(std::size_t taps) {
     return 2 * taps * (1 + taps) + 1; // Correlations and Gram for each bit, then the basis witness.
@@ -98,8 +112,33 @@ const char* coarse_math_name(TensorCoarseMath math) {
     case TensorCoarseMath::fft: return "fft";
     case TensorCoarseMath::fp16: return "fp16";
     case TensorCoarseMath::int8: return "int8";
+    case TensorCoarseMath::fp16_fft: return "fp16-fft";
     }
     throw Error("invalid Robust coarse tensor arithmetic policy");
+}
+
+bool requests_matrix(TensorCoarseMath math) noexcept {
+    return math == TensorCoarseMath::fp16 || math == TensorCoarseMath::int8;
+}
+
+bool automatic_half_fft_hardware(const BulkReceipt& identity) noexcept {
+    const auto capability = 10 * identity.cuda_compute_major + identity.cuda_compute_minor;
+    return capability == 89 || capability == 120;
+}
+
+void record_fft(std::size_t transforms, std::size_t rows, bool inverse,
+                BulkReceipt& work, CoarseBulkWork* coarse, std::size_t padded_transforms = 0) {
+    const auto total_rows = mul(transforms, rows);
+    count(work.fft_calls, 1);
+    count(work.fft_rows, total_rows);
+    work.executed = true;
+    if (coarse) {
+        const auto public_transforms = transforms - padded_transforms;
+        const auto public_rows = mul(public_transforms, rows);
+        count(inverse ? coarse->inverse_ffts : coarse->forward_ffts, public_transforms);
+        count(coarse->fft_rows, public_rows);
+        count(coarse->fft_row_stages, mul(public_rows, std::bit_width(rows - 1)));
+    }
 }
 
 void add_work(BulkReceipt& to, const BulkReceipt& from) noexcept {
@@ -114,6 +153,10 @@ void add_work(BulkReceipt& to, const BulkReceipt& from) noexcept {
     TRIAD_COUNT(score_rows);
     TRIAD_COUNT(cuda_arrival_peak_rows);
     TRIAD_COUNT(cuda_arrival_peak_values);
+    TRIAD_COUNT(cuda_half_fft_forward_ffts);
+    TRIAD_COUNT(cuda_half_fft_inverse_ffts);
+    TRIAD_COUNT(cuda_half_fft_padded_ffts);
+    TRIAD_COUNT(cuda_half_fft_score_rows);
     TRIAD_COUNT(statistics_blocks);
     TRIAD_COUNT(native_fine_sessions);
     TRIAD_COUNT(projected_values);
@@ -126,9 +169,16 @@ void add_work(BulkReceipt& to, const BulkReceipt& from) noexcept {
     TRIAD_COUNT(cuda_bmm_gram_values);
     TRIAD_COUNT(cuda_matrix_fp16_calls);
     TRIAD_COUNT(cuda_matrix_int8_calls);
+    TRIAD_COUNT(cuda_matrix_lt_hmma_calls);
+    TRIAD_COUNT(cuda_matrix_lt_imma_calls);
+    TRIAD_COUNT(cuda_matrix_unwitnessed_calls);
     TRIAD_COUNT(cuda_matrix_inner_chunks);
     TRIAD_COUNT(cuda_matrix_padded_real_macs);
     TRIAD_COUNT(cuda_matrix_packed_values);
+    TRIAD_COUNT(cuda_matrix_prepared_b_groups);
+    TRIAD_COUNT(cuda_matrix_prepared_b_bytes);
+    TRIAD_COUNT(cuda_matrix_prepared_b_values);
+    TRIAD_COUNT(cuda_matrix_prepared_b_uses);
     TRIAD_COUNT(cuda_matrix_output_values);
     TRIAD_COUNT(cuda_matrix_nonfinite_values);
     TRIAD_COUNT(cuda_matrix_saturated_values);
@@ -145,6 +195,12 @@ void add_work(BulkReceipt& to, const BulkReceipt& from) noexcept {
         count(to.direct_fallback_counts[i], from.direct_fallback_counts[i]);
     for (std::size_t i = 0; i < to.matrix_fft_fallback_counts.size(); ++i)
         count(to.matrix_fft_fallback_counts[i], from.matrix_fft_fallback_counts[i]);
+    for (std::size_t i = 0; i < to.half_fft_fallback_counts.size(); ++i)
+        count(to.half_fft_fallback_counts[i], from.half_fft_fallback_counts[i]);
+    to.cuda_half_fft_peak_bank_bytes = std::max(to.cuda_half_fft_peak_bank_bytes, from.cuda_half_fft_peak_bank_bytes);
+    to.cuda_half_fft_peak_workspace_bytes = std::max(to.cuda_half_fft_peak_workspace_bytes, from.cuda_half_fft_peak_workspace_bytes);
+    to.cuda_half_fft_peak_phase_bytes = std::max(to.cuda_half_fft_peak_phase_bytes, from.cuda_half_fft_peak_phase_bytes);
+    to.cuda_half_fft_plan_seconds += from.cuda_half_fft_plan_seconds;
     to.cuda_matrix_maximum_a_scale = std::max(to.cuda_matrix_maximum_a_scale, from.cuda_matrix_maximum_a_scale);
     to.cuda_matrix_maximum_b_scale = std::max(to.cuda_matrix_maximum_b_scale, from.cuda_matrix_maximum_b_scale);
     to.cuda_matrix_maximum_rows = std::max(to.cuda_matrix_maximum_rows, from.cuda_matrix_maximum_rows);
@@ -162,6 +218,15 @@ struct Arena {
     std::condition_variable_any available;
     std::deque<const std::size_t*> pending;
     std::size_t existing_allocations = 0;
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+    std::once_flag matrix_context_once;
+    std::shared_ptr<CudaComplexMatrix::Context> matrix_context;
+
+    std::shared_ptr<CudaComplexMatrix::Context> shared_matrix_context() {
+        std::call_once(matrix_context_once, [&] { matrix_context = CudaComplexMatrix::make_context(); });
+        return matrix_context;
+    }
+#endif
 
     explicit Arena(const TensorReceiverOptions& requested, bool automatic) : options(requested) {
         if (!automatic && (options.workspace_bytes < mib ||
@@ -230,6 +295,7 @@ struct Arena {
         // Bind runtime provenance before a describe-only request, rather
         // than changing identity when the first matrix stage is created.
         total.cuda_blas_version = cuda_matrix_library_version();
+        total.cuda_fft_version = cuda_fft_library_version();
         total.device = "cuda:" + std::to_string(options.device_index);
         total.device_name = properties.name;
         total.cuda_compute_major = properties.major;
@@ -347,6 +413,15 @@ public:
     bool fits(std::size_t bytes) const {
         std::lock_guard lock(mutex_);
         return bytes <= limit_ - used_;
+    }
+
+    void shrink_to(std::size_t bytes) {
+        std::lock_guard lock(mutex_);
+        require(leased_ && used_ <= bytes, "Robust CUDA cannot shrink below its resident device workspace");
+        if (limit_ > bytes) {
+            arena_->release(limit_ - bytes);
+            limit_ = bytes;
+        }
     }
 
     void begin(std::size_t minimum, std::size_t preferred, std::stop_token stop) {
@@ -468,6 +543,7 @@ public:
         report.cuda_runtime_version = identity.cuda_runtime_version;
         report.cuda_driver_version = identity.cuda_driver_version;
         report.cuda_blas_version = identity.cuda_blas_version;
+        report.cuda_fft_version = identity.cuda_fft_version;
         report.cuda_compute_major = identity.cuda_compute_major;
         report.cuda_compute_minor = identity.cuda_compute_minor;
         report.numerical_threads = identity.numerical_threads;
@@ -583,16 +659,7 @@ public:
                    CoarseBulkWork* coarse = nullptr, bool unitary = false) const {
         auto result = inverse ? at::fft_ifft(input, dim(rows), -1) :
             at::fft_fft(input, dim(rows), -1, unitary ? std::optional<std::string_view>("ortho") : std::nullopt);
-        const auto transforms = static_cast<std::uint64_t>(input.numel() / input.size(-1));
-        const auto total_rows = mul(transforms, rows);
-        count(work.fft_calls, 1);
-        count(work.fft_rows, total_rows);
-        work.executed = true;
-        if (coarse) {
-            count(inverse ? coarse->inverse_ffts : coarse->forward_ffts, transforms);
-            count(coarse->fft_rows, total_rows);
-            count(coarse->fft_row_stages, mul(total_rows, std::bit_width(rows - 1)));
-        }
+        record_fft(static_cast<std::size_t>(input.numel() / input.size(-1)), rows, inverse, work, coarse);
         return result;
     }
 
@@ -625,13 +692,15 @@ struct Filter final : CoarseBulkFilter {
 class TensorCoarse final : public CoarseBulk {
 public:
     TensorCoarse(std::shared_ptr<Arena> arena, std::shared_ptr<BulkReceipt> backend_work,
-                 bool precise, TensorCoarseMath math, bool leased)
-        : device_(std::move(arena), std::move(backend_work), precise, leased), math_(math) {}
+                 bool precise, TensorPrecision precision, TensorCoarseMath math, bool leased)
+        : device_(std::move(arena), std::move(backend_work), precise, leased), precision_(precision),
+          requested_math_(math), math_(math) {}
 
     std::string_view precision_reason() const noexcept override {
         if (device_.workspace->leased() && lag_ && geometry_.lag_count == 1 && groups_.size() == 1)
             return geometry_.frequency_count == 1 ? "cuda-one-arrival-singleton-dot" : "cuda-one-arrival-chirp-z";
-        return {};
+        if (!matrix_precision_reason_.empty()) return matrix_precision_reason_;
+        return half_fft_precision_reason_;
     }
 
     void begin_fir_projection(std::size_t maximum_fft_rows, std::size_t maximum_filters,
@@ -774,9 +843,15 @@ public:
             matrix_bytes = add(matrix_bytes, mul(mul(geometry.kernel_rows, group.frequencies), sizeof(Complex) / 2));
         }
         require(!lag_ || covered == geometry.frequency_count, "Robust tensor lag groups do not cover the full grid");
+        geometry_ = geometry;
+        count_ = bank.size();
+        const auto use_half = admit_half_frequency(op.work, stop);
+        select_automatic_matrix(groups);
+        matrix_fallback_ = matrix_policy_reason(geometry, groups, matrix_bytes);
         const auto bytes = resident_bytes(resident, bank.size(), device_.item_bytes);
         const auto preparation = add(mul(largest_fft, 12 * device_.item_bytes), 2 * maximum_upload_bytes);
-        if (device_.workspace->leased()) {
+        std::size_t fft_preferred = 0;
+        if (!use_half && device_.workspace->leased()) {
             // The FIR owner has released its spectra. Quote the resident bank
             // together with scratch for a complete scoring batch before any
             // new upload, so no owner can wait while pinning its bank.
@@ -794,16 +869,35 @@ public:
                 preferred_width = std::min(maximum_batch, bank.size());
             }
             const auto minimum = add(bytes, std::max(preparation, add(shared, batch)));
-            const auto preferred = add(bytes, std::max(preparation, add(shared, mul(batch, preferred_width))));
+            fft_preferred = add(bytes, std::max(preparation, add(shared, mul(batch, preferred_width))));
+            auto preferred = fft_preferred;
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+            if (automatic_matrix_ && matrix_fallback_ == no_matrix_fallback) {
+                const auto matrix = std::max(minimum, matrix_preferred_bytes(bytes, preparation));
+                if (matrix <= device_.arena->options.workspace_bytes - device_.arena->existing_allocations)
+                    preferred = matrix;
+                else
+                    matrix_fallback_ = 4;
+            }
+#endif
             device_.workspace->begin(minimum, preferred, stop);
+            if (automatic_matrix_ && matrix_fallback_ == no_matrix_fallback && !device_.workspace->fits(preferred))
+                matrix_fallback_ = 4;
         }
-        resident_ = Charge(device_.workspace, bytes);
-        Charge scratch(device_.workspace, preparation);
-        geometry_ = geometry;
-        count_ = bank.size();
-        matrix_fallback_ = matrix_policy_reason(geometry, matrix_bytes);
+        initialize_matrix();
+        if (automatic_matrix_ && matrix_fallback_ != no_matrix_fallback)
+            device_.workspace->shrink_to(fft_preferred);
+        Charge scratch;
+        if (!use_half) {
+            resident_ = Charge(device_.workspace, bytes);
+            scratch = Charge(device_.workspace, preparation);
+        }
         observation_ = device_.complex(observation, op.work);
-        bank_ = at::empty({dim(bank.size()), dim(geometry.taps), dim(bank_rows)}, device_.complex_options);
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        if (use_half) half_->diagnostics.zero_();
+        else
+#endif
+            bank_ = at::empty({dim(bank.size()), dim(geometry.taps), dim(bank_rows)}, device_.complex_options);
         std::vector<double> a, d;
         std::vector<Complex> b;
         a.reserve(bank.size());
@@ -818,6 +912,12 @@ public:
             for (std::size_t ray = 0; ray < geometry.taps; ++ray) {
                 require(row.columns[ray].size() == geometry.kernel_rows, "invalid Robust tensor bank column length");
                 auto source = device_.complex(row.columns[ray], op.work);
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+                if (use_half) {
+                    prepare_half_column(source, add(mul(i, geometry.taps), ray), work, op.work);
+                    continue;
+                }
+#endif
                 if (!lag_) source = device_.fft(source, bank_rows, false, op.work, &work).conj();
                 bank_.select(0, dim(i)).select(0, dim(ray)).copy_(source);
             }
@@ -832,37 +932,51 @@ public:
             if (!group.convolution.empty()) {
                 const auto impulse = device_.complex(group.convolution, op.work);
                 convolution = device_.fft(impulse, group.convolution.size(), false, op.work, &work);
-                if (math_ != TensorCoarseMath::fft && prepared.fallback == no_matrix_fallback) {
+                if (requests_matrix(math_) && prepared.fallback == no_matrix_fallback) {
                     if (group.frequencies < 8 || group.frequencies > maximum_matrix_frequencies) {
                         prepared.fallback = 3;
                     } else {
-                        const auto values = mul(geometry.kernel_rows, group.frequencies);
                         try {
-                            prepared.matrix_charge = Charge(device_.workspace, mul(values, device_.item_bytes));
-                            Charge temporary(device_.workspace, add(mul(values, sizeof(std::int64_t) + device_.item_bytes),
-                                mul(geometry.kernel_rows + group.frequencies, sizeof(std::int64_t))));
-                            const auto indices = at::remainder(
-                                at::arange(dim(group.frequencies), device_.options.dtype(at::kLong)).unsqueeze(0) -
-                                at::arange(dim(geometry.kernel_rows), device_.options.dtype(at::kLong)).unsqueeze(1),
-                                dim(group.convolution.size()));
-                            prepared.matrix = prepared.phase.unsqueeze(1) *
-                                impulse.index_select(0, indices.flatten()).reshape({dim(geometry.kernel_rows), dim(group.frequencies)});
-                            device_.synchronize(op.work);
+                            prepare_matrix(prepared, impulse, op.work);
                         } catch (const ReceiverWorkspaceError&) {
-                            prepared.matrix = at::Tensor{};
-                            prepared.matrix_charge = {};
+                            prepared.packed_right = at::Tensor{};
+                            prepared.packed_right_charge = {};
                             prepared.fallback = 4;
+                        } catch (const c10::OutOfMemoryError&) {
+                            if (!automatic_matrix_) throw;
+                            device_.synchronize(op.work);
+                            prepared.packed_right = at::Tensor{};
+                            prepared.packed_right_charge = {};
+                            prepared.fallback = 4;
+                            matrix_precision_reason_ = "cuda-int8-matrix-allocator-limit";
                         }
                     }
                 }
-            } else if (math_ != TensorCoarseMath::fft && prepared.fallback == no_matrix_fallback) {
+            } else if (requests_matrix(math_) && prepared.fallback == no_matrix_fallback) {
                 prepared.fallback = 3;
             }
             prepared.convolution = std::move(convolution);
-            has_matrix_ |= prepared.matrix.defined();
+            has_matrix_ |= prepared.packed_right.defined();
+            if (automatic_matrix_ && !has_matrix_ && prepared.fallback == 4 && matrix_precision_reason_.empty())
+                matrix_precision_reason_ = "cuda-int8-matrix-workspace-limit";
             groups_.push_back(std::move(prepared));
         }
-        device_.synchronize(op.work);
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        if (automatic_matrix_) {
+            if (has_matrix_) matrix_precision_reason_ = "cuda-int8-matrix";
+            else if (matrix_fallback_ == no_matrix_fallback) {
+                matrix_.reset();
+                device_.workspace->shrink_to(fft_preferred);
+            }
+        }
+#endif
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        if (use_half) {
+            check_half_diagnostics(op.work);
+            half_->bank_plan.reset();
+        } else
+#endif
+            device_.synchronize(op.work);
         cancelled(stop);
         prepared_ = true;
     }
@@ -915,7 +1029,14 @@ public:
             largest_fft = std::max(largest_fft, static_cast<std::size_t>(group.convolution.numel()));
         const auto per_lag = lag_batch_bytes(geometry_, largest_fft);
         if (has_matrix_) {
-            const auto completed = matrix_lag_tile(first_workspace, workspace_count, windows, per_lag,
+            const auto matrix_per_lag = matrix_lag_bytes();
+            // The resident operands determine which groups use FFT. A
+            // matrix-only rectangle needs no FFT batch scratch. Mixed
+            // groups retain a bound for either operation.
+            const bool all_matrix = std::all_of(groups_.begin(), groups_.end(),
+                [](const Group& group) { return group.packed_right.defined(); });
+            const auto rectangle_per_lag = all_matrix ? matrix_per_lag : std::max(per_lag, matrix_per_lag);
+            const auto completed = matrix_lag_tile(first_workspace, workspace_count, windows, rectangle_per_lag,
                                                    sink, work, op.work, stop);
             first_workspace += completed;
             workspace_count -= completed;
@@ -945,7 +1066,10 @@ public:
 
     BulkReceipt receipt() const override {
         auto report = device_.receipt();
-        report.requested_coarse_math = coarse_math_name(math_);
+        report.requested_coarse_math = coarse_math_name(requested_math_);
+        if (report.cuda_half_fft_forward_ffts) report.precision = "fp16_fft_fp64_coordinates_and_reductions";
+        if (report.cuda_matrix_int8_calls) report.precision = "int8_matrix_fp64_coordinates_and_reductions";
+        if (report.cuda_matrix_fp16_calls) report.precision = "fp16_matrix_fp64_coordinates_and_reductions";
         return report;
     }
     CoarseBulkCompletedWork completed_work() const override { return device_.coarse_work(); }
@@ -956,10 +1080,220 @@ private:
         std::size_t first, count;
         at::Tensor phase, convolution;
         // Tensor is destroyed before the reservation is released.
-        Charge matrix_charge;
-        at::Tensor matrix;
+        Charge packed_right_charge;
+        at::Tensor packed_right;
         std::size_t fallback = no_matrix_fallback;
     };
+
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+    struct HalfFrequency {
+        std::unique_ptr<CudaHalfFftPlan> bank_plan, observation_plan, inverse_plan;
+        std::size_t frequencies = 0, batch = 0, workspace_bytes = 0, scratch_bytes = 0;
+        at::Tensor bank, bank_exponents, scratch, diagnostics;
+    };
+
+    std::size_t half_bank_bytes(const HalfFrequency& plan) const {
+        return mul(mul(count_, geometry_.taps), add(plan.bank_plan->data_bytes(), sizeof(std::int32_t)));
+    }
+
+    std::size_t half_phase_bytes(const HalfFrequency& plan) const {
+        const auto observation_rows = add(geometry_.kernel_rows, geometry_.lag_count - 1);
+        const auto gram_bytes = mul(count_, 2 * sizeof(double) + sizeof(Complex));
+        const auto retained = add(add(half_bank_bytes(plan), mul(observation_rows, device_.item_bytes)),
+            add(gram_bytes, add(plan.scratch_bytes, sizeof(unsigned))));
+        // During a blocking upload the source and one device staging chunk
+        // can coexist. The projected observation is already in retained.
+        const auto upload = std::min(std::max(geometry_.kernel_rows, observation_rows),
+            maximum_upload_bytes / sizeof(Complex));
+        const auto prep = mul(add(geometry_.kernel_rows, upload), device_.item_bytes);
+        const auto spectra = add(plan.observation_plan->data_bytes(), mul(plan.frequencies, sizeof(std::int32_t)));
+        // Wrapped FP64 coordinates, angle temporaries and rotated C64 input.
+        // Their lifetime ends before allocating the inverse batch.
+        const auto rotation = add(mul(mul(plan.frequencies, observation_rows), 48),
+            mul(add(observation_rows, plan.frequencies), 2 * sizeof(double)));
+        const auto pairs = mul(plan.batch, plan.frequencies);
+        const auto arrivals = mul(pairs, geometry_.lag_count);
+        const auto correlations = mul(mul(arrivals, geometry_.taps), sizeof(Complex));
+        const auto scores = add(mul(arrivals, 96), add(mul(plan.batch, frontier_overhead(geometry_, plan.frequencies)),
+            sizeof(unsigned)));
+        const auto scoring = add(plan.inverse_plan->data_bytes(), add(correlations, scores));
+        // The arena also enforces the actual allocator reservation limit.
+        // Allow native 512-byte rounding of the bounded live tensor set.
+        return add(add(retained, std::max(prep, add(spectra, std::max(rotation, scoring)))), 32 * 512);
+    }
+
+    void record_half_fft(std::size_t transforms, std::size_t logical, bool inverse,
+                         CoarseBulkWork& work, BulkReceipt& receipt) const {
+        const auto padded = transforms - logical;
+        record_fft(transforms, geometry_.correlation_fft_rows, inverse, receipt, &work, padded);
+        count(inverse ? receipt.cuda_half_fft_inverse_ffts : receipt.cuda_half_fft_forward_ffts, transforms);
+        count(receipt.cuda_half_fft_padded_ffts, padded);
+    }
+
+    unsigned* half_diagnostics() const {
+        return reinterpret_cast<unsigned*>(half_->diagnostics.mutable_data_ptr<std::int32_t>());
+    }
+
+    void check_half_diagnostics(BulkReceipt& receipt) const {
+        std::array<std::int32_t, 1> flags{};
+        device_.download(half_->diagnostics, std::span<std::int32_t>(flags), at::kInt, receipt);
+        require(!flags.front(), "Robust half FFT input, product or arrival is invalid");
+    }
+
+    void prepare_half_column(const at::Tensor& source, std::size_t column,
+                             CoarseBulkWork& work, BulkReceipt& receipt) const {
+        const auto row_bytes = half_->bank_plan->data_bytes();
+        auto* packed = static_cast<std::byte*>(half_->bank.mutable_data_ptr()) + mul(column, row_bytes);
+        const auto stream = device_.cuda_stream();
+        C10_CUDA_CHECK(cuda_half_fft_pack(source.const_data_ptr<c10::complex<float>>(), packed,
+            half_->bank_exponents.mutable_data_ptr<std::int32_t>() + column, half_diagnostics(),
+            geometry_.correlation_fft_rows, geometry_.kernel_rows, 1,
+            half_->scratch.mutable_data_ptr(), half_->scratch_bytes, stream));
+        half_->bank_plan->enqueue(packed, half_->scratch.mutable_data_ptr(), half_->scratch_bytes, false);
+        record_half_fft(1, 1, false, work, receipt);
+    }
+#endif
+
+    bool admit_half_frequency(BulkReceipt& receipt, std::stop_token stop) {
+        const auto automatic = device_.workspace->leased();
+        if (!automatic && math_ != TensorCoarseMath::fp16_fft) return false;
+        const auto reject = [&](HalfFftFallback reason) {
+            const auto index = static_cast<std::size_t>(reason);
+            half_fft_precision_reason_ = half_fft_precision_reasons[index];
+            count(receipt.half_fft_fallback_counts[index], 1);
+            return false;
+        };
+        if (!device_.arena->device.is_cuda()) return reject(HalfFftFallback::cpu_device);
+        if (device_.precise) return reject(HalfFftFallback::fp64_stage);
+        if (lag_) return reject(HalfFftFallback::lag_group_route);
+        if (precision_ == TensorPrecision::fp32_minimum) return reject(HalfFftFallback::fp32_minimum);
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        const auto rows = geometry_.correlation_fft_rows;
+        const auto frequencies = geometry_.frequency_tile_width ? geometry_.frequency_tile_width : geometry_.frequency_count;
+        require(frequencies <= geometry_.frequency_count, "invalid Robust half FFT tile width");
+        auto batch = std::min(maximum_batch, count_);
+        if (automatic) {
+            if (!automatic_half_fft_hardware(device_.arena->total))
+                return reject(HalfFftFallback::unqualified_hardware);
+            // At 2^20 rows the absolute FP16 subnormal rounding contribution
+            // to a scaled dense input row's L2 norm is about 0.14%. This
+            // limits packing error, independent of cuFFT and sensitivity.
+            // Prefer enough inverse work to amortize plan and pack overhead.
+            // A long transform needs fewer frequencies to reach that work.
+            if (rows < 4096 || rows > (std::size_t{1} << 20) || geometry_.lag_count < 2 ||
+                mul(mul(rows, frequencies), mul(batch, geometry_.taps)) < (std::size_t{1} << 19))
+                return reject(HalfFftFallback::unqualified_shape);
+            // Match the conservative native guard until the corresponding
+            // two-ray sensitivity range has its own receiver evidence.
+            if (!(geometry_.minimum_eigenvalue_ratio >= 1. / 16))
+                return reject(HalfFftFallback::ill_conditioned_template);
+        }
+        const auto plan_fft = [&](std::size_t batch) {
+            const auto started = Clock::now();
+            try {
+                auto plan = CudaHalfFftPlan::make(rows, batch, device_.cuda_stream());
+                receipt.cuda_half_fft_plan_seconds += std::chrono::duration<double>(Clock::now() - started).count();
+                return plan;
+            } catch (const CudaHalfFftAllocationError&) {
+                receipt.cuda_half_fft_plan_seconds += std::chrono::duration<double>(Clock::now() - started).count();
+                throw;
+            }
+        };
+        auto candidate = std::make_unique<HalfFrequency>();
+        candidate->frequencies = frequencies;
+        cancelled(stop);
+        try {
+            candidate->bank_plan = plan_fft(1);
+            candidate->observation_plan = plan_fft(candidate->frequencies);
+        } catch (const CudaHalfFftAllocationError&) {
+            return reject(HalfFftFallback::plan_allocation);
+        }
+        if (!candidate->bank_plan || !candidate->observation_plan ||
+            (mul(count_, geometry_.taps) > 1 && candidate->bank_plan->data_bytes() % CudaHalfFftPlan::alignment))
+            return reject(HalfFftFallback::unsupported_plan);
+        auto failure = HalfFftFallback::unsupported_plan;
+        const auto inverse_plan = [&](std::size_t batch) {
+            if (candidate->inverse_plan && candidate->batch == batch) return true;
+            cancelled(stop);
+            candidate->inverse_plan.reset();
+            try {
+                candidate->inverse_plan = plan_fft(mul(mul(batch, candidate->frequencies), geometry_.taps));
+            } catch (const CudaHalfFftAllocationError&) {
+                failure = HalfFftFallback::plan_allocation;
+                return false;
+            }
+            if (!candidate->inverse_plan) {
+                failure = HalfFftFallback::unsupported_plan;
+                return false;
+            }
+            candidate->batch = batch;
+            candidate->workspace_bytes = std::max({candidate->bank_plan->workspace_bytes(),
+                candidate->observation_plan->workspace_bytes(), candidate->inverse_plan->workspace_bytes()});
+            candidate->scratch_bytes = std::max({candidate->workspace_bytes,
+                cuda_half_fft_pack_workspace_bytes(rows, geometry_.kernel_rows, 1),
+                cuda_half_fft_pack_workspace_bytes(rows, add(geometry_.kernel_rows, geometry_.lag_count - 1),
+                    candidate->frequencies)});
+            return true;
+        };
+        if (automatic) {
+            // No half buffer or FFT work is live while replacing the FIR
+            // lease. A one-workspace plan guarantees a feasible lower
+            // bound without waiting for another owner's preferred batch.
+            if (!inverse_plan(1)) return reject(failure);
+            auto minimum = half_phase_bytes(*candidate);
+            auto preferred = minimum;
+            if (inverse_plan(batch)) {
+                const auto full = half_phase_bytes(*candidate);
+                minimum = std::min(minimum, full);
+                preferred = std::max(preferred, full);
+            } else {
+                batch /= 2;
+            }
+            try {
+                device_.workspace->begin(minimum, preferred, stop);
+            } catch (const ReceiverWorkspaceError&) {
+                return reject(HalfFftFallback::workspace_limit);
+            }
+        }
+        const auto columns = mul(count_, geometry_.taps);
+        const auto options = device_.options.dtype(at::kByte);
+        for (; batch; batch /= 2) {
+            if (!inverse_plan(batch)) continue;
+            const auto bytes = half_phase_bytes(*candidate);
+            try {
+                Charge phase(device_.workspace, bytes);
+                // Empty allocations submit no GPU work. A failed candidate
+                // releases its tensors before the charge and can try a
+                // smaller plan or the canonical FP32 route without a copy.
+                auto bank = at::empty({dim(mul(columns, candidate->bank_plan->data_bytes()))}, options);
+                auto exponents = at::empty({dim(columns)}, options.dtype(at::kInt));
+                auto scratch = at::empty({dim(candidate->scratch_bytes)}, options);
+                auto diagnostics = at::empty({1}, options.dtype(at::kInt));
+                candidate->bank = std::move(bank);
+                candidate->bank_exponents = std::move(exponents);
+                candidate->scratch = std::move(scratch);
+                candidate->diagnostics = std::move(diagnostics);
+                resident_ = std::move(phase);
+            } catch (const ReceiverWorkspaceError&) {
+                failure = HalfFftFallback::workspace_limit;
+                continue;
+            } catch (const c10::OutOfMemoryError&) {
+                failure = HalfFftFallback::allocator_limit;
+                continue;
+            }
+            receipt.cuda_half_fft_peak_bank_bytes = half_bank_bytes(*candidate);
+            receipt.cuda_half_fft_peak_workspace_bytes = candidate->workspace_bytes;
+            receipt.cuda_half_fft_peak_phase_bytes = bytes;
+            half_ = std::move(candidate);
+            half_fft_precision_reason_ = "cuda-fp16-frequency-fft";
+            return true;
+        }
+        return reject(failure);
+#else
+        (void)stop;
+        return reject(HalfFftFallback::unsupported_plan);
+#endif
+    }
 
     std::size_t lag_batch_bytes(const CoarseBulkGeometry& geometry, std::size_t fft_rows) const {
         return add(mul(mul(fft_rows, geometry.taps), 14 * device_.item_bytes), mul(geometry.frequency_count, 112));
@@ -984,20 +1318,92 @@ private:
                        mul(mul(frequencies, geometry.lag_count), 96)), extra);
     }
 
+    at::Tensor rotate_observation(std::span<const double> frequencies, BulkReceipt& receipt) const {
+        const auto position = at::arange(observation_.size(0), device_.double_options) / geometry_.projected_sample_rate_hz;
+        const auto frequency = device_.upload(frequencies, at::kDouble, at::kDouble, receipt);
+        const auto cycles = -frequency.unsqueeze(1) * position;
+        const auto angle = ((cycles - cycles.floor()) * tau).to(device_.real_type);
+        return at::complex(angle.cos(), angle.sin()) * observation_;
+    }
+
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+    void clear_fft_tail(const at::Tensor& packed, std::size_t used_bytes) const {
+        const auto bytes = static_cast<std::size_t>(packed.nbytes());
+        require(used_bytes <= bytes, "Robust half FFT tile exceeds its admitted storage");
+        if (used_bytes != bytes)
+            C10_CUDA_CHECK(cudaMemsetAsync(static_cast<std::byte*>(packed.mutable_data_ptr()) + used_bytes,
+                0, bytes - used_bytes, device_.cuda_stream()));
+    }
+
+    template<class Publish>
+    void half_frequency_scores(std::span<const double> frequencies, CoarseBulkWork& work,
+                               BulkReceipt& receipt, std::stop_token stop, const Publish& publish_scores) {
+        const auto n = geometry_.correlation_fft_rows;
+        const auto f = frequencies.size();
+        require(f <= half_->frequencies, "Robust half FFT frequency tile exceeds its admitted width");
+        const auto stream = device_.cuda_stream();
+        const auto options = device_.options.dtype(at::kByte);
+        auto observation = at::empty({dim(half_->observation_plan->data_bytes())}, options);
+        auto observation_exponents = at::empty({dim(f)}, options.dtype(at::kInt));
+        {
+            const auto rotated = rotate_observation(frequencies, receipt);
+            require(rotated.is_contiguous(), "Robust half FFT requires contiguous rotated observations");
+            C10_CUDA_CHECK(cuda_half_fft_pack(rotated.const_data_ptr<c10::complex<float>>(), observation.mutable_data_ptr(),
+                observation_exponents.mutable_data_ptr<std::int32_t>(), half_diagnostics(), n,
+                static_cast<std::size_t>(observation_.numel()), f,
+                half_->scratch.mutable_data_ptr(), half_->scratch_bytes, stream));
+        }
+        const auto row_bytes = half_->observation_plan->data_bytes() / half_->frequencies;
+        clear_fft_tail(observation, mul(f, row_bytes));
+        half_->observation_plan->enqueue(observation.mutable_data_ptr(), half_->scratch.mutable_data_ptr(),
+            half_->scratch_bytes, false);
+        record_half_fft(half_->frequencies, f, false, work, receipt);
+
+        auto inverse = at::empty({dim(half_->inverse_plan->data_bytes())}, options);
+        const auto inverse_transforms = mul(mul(half_->batch, half_->frequencies), geometry_.taps);
+        for (std::size_t first = 0; first < count_;) {
+            cancelled(stop);
+            const auto width = std::min(half_->batch, count_ - first);
+            const auto first_column = mul(first, geometry_.taps);
+            const CudaHalfFftProductShape shape{n, width, f, geometry_.taps};
+            const auto* bank = static_cast<const std::byte*>(half_->bank.const_data_ptr()) + mul(first_column, row_bytes);
+            C10_CUDA_CHECK(cuda_half_fft_products(bank, observation.const_data_ptr(), inverse.mutable_data_ptr(),
+                half_diagnostics(), shape, stream));
+            const auto transforms = mul(mul(width, f), geometry_.taps);
+            clear_fft_tail(inverse, mul(transforms, row_bytes));
+            half_->inverse_plan->enqueue(inverse.mutable_data_ptr(), half_->scratch.mutable_data_ptr(),
+                half_->scratch_bytes, true);
+            record_half_fft(inverse_transforms, transforms, true, work, receipt);
+
+            auto correlations = at::empty({dim(width), dim(f), dim(geometry_.taps), dim(geometry_.lag_count)},
+                options.dtype(at::kComplexDouble));
+            C10_CUDA_CHECK(cuda_half_fft_arrivals(inverse.const_data_ptr(),
+                half_->bank_exponents.const_data_ptr<std::int32_t>() + first_column,
+                observation_exponents.const_data_ptr<std::int32_t>(), correlations.mutable_data_ptr<c10::complex<double>>(),
+                half_diagnostics(), shape, geometry_.lag_count, stream));
+            publish_scores(quadratic(correlations, first), first, width);
+            count(receipt.cuda_half_fft_score_rows, mul(mul(width, f), geometry_.lag_count));
+            first += width;
+        }
+    }
+#endif
+
     template<class Publish>
     void frequency_scores(std::span<const double> frequencies, std::size_t extra_per_workspace,
                           CoarseBulkWork& work, BulkReceipt& receipt, std::stop_token stop, const Publish& publish_scores) {
         require(prepared_ && !lag_ && !frequencies.empty() && frequencies.size() <= geometry_.frequency_count,
                 "invalid Robust tensor frequency tile");
-        if (math_ != TensorCoarseMath::fft) count(receipt.matrix_fft_fallback_counts[2], 1);
+        if (requests_matrix(math_)) count(receipt.matrix_fft_fallback_counts[2], 1);
         cancelled(stop);
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        if (half_) {
+            half_frequency_scores(frequencies, work, receipt, stop, publish_scores);
+            return;
+        }
+#endif
         const auto fft_rows = geometry_.correlation_fft_rows;
         Charge observation_charge(device_.workspace, observation_bytes(geometry_, frequencies.size()));
-        const auto position = at::arange(observation_.size(0), device_.double_options) / geometry_.projected_sample_rate_hz;
-        const auto frequency = device_.upload(frequencies, at::kDouble, at::kDouble, receipt);
-        auto cycles = -frequency.unsqueeze(1) * position;
-        const auto angle = ((cycles - cycles.floor()) * tau).to(device_.real_type);
-        const auto rotated = at::complex(angle.cos(), angle.sin()) * observation_;
+        const auto rotated = rotate_observation(frequencies, receipt);
         const auto spectra = device_.fft(rotated, fft_rows, false, receipt, &work);
         const auto per_workspace = frequency_batch_bytes(geometry_, frequencies.size(), extra_per_workspace,
                                                           device_.item_bytes);
@@ -1021,18 +1427,31 @@ private:
         const auto pairs = mul(width, frequencies);
         const auto values = mul(pairs, geometry_.lag_count);
         const auto bytes = mul(pairs, sizeof(CoarseBulkPeaks));
+        const auto packet_bytes = add(bytes, half_ ? sizeof(unsigned) : 0);
         require(scores.scalar_type() == at::kDouble && static_cast<std::size_t>(scores.numel()) == values,
                 "invalid Robust tensor peak score storage");
         const auto contiguous = scores.contiguous();
-        auto packed = at::empty({dim(bytes)}, device_.options.dtype(at::kByte));
+        auto packed = at::empty({dim(packet_bytes)}, device_.options.dtype(at::kByte));
         C10_CUDA_CHECK(cuda_select_coarse_peaks(contiguous.const_data_ptr<double>(),
             reinterpret_cast<CoarseBulkPeaks*>(packed.mutable_data_ptr()), pairs, geometry_.lag_count,
             separation, device_.cuda_stream()));
-        std::vector<CoarseBulkPeaks> host(pairs);
-        device_.download(packed, std::span(reinterpret_cast<std::uint8_t*>(host.data()), bytes), at::kByte, receipt);
+        // Append the arithmetic witness to the existing blocking frontier
+        // readback so a failed half batch cannot publish any scores.
+        if (half_)
+            C10_CUDA_CHECK(cudaMemcpyAsync(static_cast<std::byte*>(packed.mutable_data_ptr()) + bytes,
+                half_->diagnostics.const_data_ptr(), sizeof(unsigned), cudaMemcpyDeviceToDevice, device_.cuda_stream()));
+        std::vector<CoarseBulkPeaks> host(add(pairs, half_ ? 1 : 0));
+        auto* host_bytes = reinterpret_cast<std::uint8_t*>(host.data());
+        device_.download(packed, std::span(host_bytes, packet_bytes), at::kByte, receipt);
+        if (half_) {
+            unsigned flags = 0;
+            std::memcpy(&flags, host_bytes + bytes, sizeof(flags));
+            require(!flags, "Robust half FFT input, product or arrival is invalid");
+        }
+        const auto frontiers = std::span(host).first(pairs);
         // The kernel validates every input score, including rejected arrivals.
         // Validate the entire packed batch before publishing any frontier.
-        for (const auto& row : host) {
+        for (const auto& row : frontiers) {
             require(row.count > 0 && row.count <= 2, "Robust tensor coarse score is nonfinite or peak count is invalid");
             for (std::size_t i = 0; i < row.count; ++i)
                 require(row.lags[i] < geometry_.lag_count && std::isfinite(row.scores[i]) &&
@@ -1045,7 +1464,7 @@ private:
         count(work.score_rows, values);
         count(work.workspace_frequency_pairs, pairs);
         receipt.executed = true;
-        sink(first, width, host);
+        sink(first, width, frontiers);
 #else
         (void)scores;
         (void)first;
@@ -1060,27 +1479,109 @@ private:
 #endif
     }
 
-    std::size_t matrix_policy_reason(const CoarseBulkGeometry& geometry, std::size_t matrix_bytes) {
-        if (math_ == TensorCoarseMath::fft) return no_matrix_fallback;
+    void select_automatic_matrix(std::span<const CoarseZoomGroup> groups) {
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        if (!device_.workspace->leased() || requested_math_ != TensorCoarseMath::fft || geometry_.lag_count <= 1 || !lag_)
+            return;
+        if (device_.precise) return;
+        if (precision_ == TensorPrecision::fp32_minimum) {
+            matrix_precision_reason_ = "cuda-int8-matrix-fp32-minimum";
+            return;
+        }
+        const auto& identity = device_.arena->total;
+        const auto capability = 10 * identity.cuda_compute_major + identity.cuda_compute_minor;
+        if (capability != 89 && capability != 120) {
+            matrix_precision_reason_ = "cuda-int8-matrix-unqualified-hardware";
+            return;
+        }
+        // The broad frequency FFT and single-arrival chirp-Z have different
+        // work scaling. Consider only one complete lag group and large
+        // independent rows in the measured one-ray precision scope.
+        matrix_precision_reason_ = "cuda-int8-matrix-unqualified-shape";
+        if (groups.size() != 1 || geometry_.taps != 1 || geometry_.kernel_rows < 16 ||
+            geometry_.kernel_rows > maximum_matrix_kernel_rows || geometry_.frequency_count < 8 ||
+            geometry_.frequency_count > maximum_matrix_frequencies || geometry_.lag_count < 32 ||
+            std::min(count_, geometry_.lag_workspace_tile_width) < minimum_auto_matrix_workspaces ||
+            preferred_matrix_rows() < minimum_auto_matrix_rows || !std::has_single_bit(groups.front().convolution.size()))
+            return;
+        const auto fft_rows = groups.front().convolution.size();
+        const auto paired_fft_row_stages = mul(mul(2, fft_rows), std::bit_width(fft_rows - 1));
+        // A work crossover proxy calibrated on complete paired lag costs.
+        // The ratio is real padded MACs per complex FFT row-stage.
+        if (CudaComplexMatrix::padded_real_macs_per_row(geometry_.frequency_count, geometry_.kernel_rows) >
+            mul(30, paired_fft_row_stages)) return;
+        matrix_precision_reason_ = {};
+        automatic_matrix_ = true;
+        math_ = TensorCoarseMath::int8;
+#else
+        (void)groups;
+#endif
+    }
+
+    std::size_t matrix_policy_reason(const CoarseBulkGeometry& geometry, std::span<const CoarseZoomGroup> groups,
+                                     std::size_t matrix_bytes) const {
+        if (!requests_matrix(math_)) return no_matrix_fallback;
         if (!device_.arena->device.is_cuda()) return 0;
         if (device_.precise) return 1;
         if (!lag_) return 2;
         if (geometry.kernel_rows < 16 || geometry.kernel_rows > maximum_matrix_kernel_rows || geometry.lag_count < 16)
             return 3;
-        if (matrix_bytes > std::min(maximum_matrix_bytes, device_.arena->options.workspace_bytes / 8)) return 4;
+        const auto limit = std::min(maximum_matrix_bytes, device_.arena->options.workspace_bytes / 8);
+        if (matrix_bytes > limit) return 4;
 #if DATAPUMP_TRIAD_TENSOR_CUDA
-        matrix_ = std::make_unique<CudaComplexMatrix>();
-        {
-            std::lock_guard lock(device_.arena->mutex);
-            device_.arena->total.cuda_blas_version = matrix_->cublas_version();
-            device_.arena->total.cuda_compute_major = matrix_->device_major();
-            device_.arena->total.cuda_compute_minor = matrix_->device_minor();
-        }
-        if (!matrix_->supported(matrix_math())) return 5;
+        std::size_t packed_bytes = 0;
+        for (const auto& group : groups)
+            if (!group.convolution.empty() && group.frequencies >= 8 && group.frequencies <= maximum_matrix_frequencies)
+                packed_bytes = add(packed_bytes, CudaComplexMatrix::prepared_right_bytes(matrix_math(),
+                    group.frequencies, geometry.kernel_rows));
+        if (packed_bytes > limit) return 4;
+        const auto& identity = device_.arena->total;
+        const auto capability = 10 * identity.cuda_compute_major + identity.cuda_compute_minor;
+        if (capability < (matrix_math() == CudaMatrixMath::int8 ? 72 : 70)) return 5;
         return no_matrix_fallback;
 #else
+        (void)groups;
         return 5;
 #endif
+    }
+
+    void initialize_matrix() {
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        if (requests_matrix(math_) && matrix_fallback_ == no_matrix_fallback) {
+            try {
+                matrix_ = std::make_unique<CudaComplexMatrix>(device_.arena->shared_matrix_context());
+                if (automatic_matrix_ && !matrix_->has_tensor_algorithm(matrix_math(), preferred_matrix_rows(),
+                        geometry_.frequency_count, geometry_.kernel_rows))
+                    matrix_fallback_ = 5;
+            } catch (const CudaMatrixAllocationError&) {
+                // A failed call_once initialization remains retryable by the
+                // next owner. This owner still has its complete FFT minimum.
+                if (!automatic_matrix_) {
+                    matrix_ = std::make_unique<CudaComplexMatrix>();
+                    return;
+                }
+                matrix_fallback_ = 4;
+                matrix_precision_reason_ = "cuda-int8-matrix-allocator-limit";
+            }
+        }
+        if (automatic_matrix_ && matrix_fallback_ != no_matrix_fallback) {
+            if (matrix_precision_reason_.empty())
+                matrix_precision_reason_ = matrix_fallback_ == 4 ? "cuda-int8-matrix-workspace-limit"
+                                                                : "cuda-int8-matrix-device-capability";
+            matrix_.reset();
+        }
+#endif
+    }
+
+    std::size_t matrix_lag_bytes() const {
+        return add(mul(mul(geometry_.kernel_rows, geometry_.taps), device_.item_bytes),
+            mul(geometry_.frequency_count, geometry_.taps * sizeof(Complex) + 112));
+    }
+
+    std::size_t matrix_rectangle_bytes(std::size_t workspaces, std::size_t arrivals,
+                                       std::size_t per_lag, std::size_t scratch) const {
+        const auto score_bytes = mul(mul(geometry_.frequency_count, geometry_.lag_count), 3 * sizeof(double));
+        return add(mul(workspaces, score_bytes), add(mul(mul(workspaces, arrivals), per_lag), scratch));
     }
 
 #if DATAPUMP_TRIAD_TENSOR_CUDA
@@ -1088,21 +1589,80 @@ private:
         if (math_ == TensorCoarseMath::int8) return CudaMatrixMath::int8;
         return CudaMatrixMath::fp16;
     }
+
+    std::size_t preferred_matrix_workspaces() const {
+        return std::min({maximum_matrix_workspaces, count_, geometry_.lag_workspace_tile_width});
+    }
+
+    std::size_t preferred_matrix_rows() const {
+        return mul(mul(preferred_matrix_workspaces(), std::min(maximum_matrix_arrivals, geometry_.lag_count)),
+                   geometry_.taps);
+    }
+
+    std::size_t matrix_group_scratch_bytes(std::size_t rows, std::size_t columns) const {
+        const auto scratch = CudaComplexMatrix::workspace_bytes(matrix_math(), rows, columns, geometry_.kernel_rows);
+        // The contiguous input, C128 result and diagnostics coexist with
+        // the explicit library packing and accumulation workspace.
+        const auto tensors = add(mul(rows, add(mul(geometry_.kernel_rows, sizeof(Complex) / 2),
+                                               mul(columns, sizeof(Complex)))), sizeof(CudaMatrixDiagnostics));
+        return add(scratch, tensors);
+    }
+
+    std::size_t matrix_preferred_bytes(std::size_t resident, std::size_t preparation) const {
+        // Automatic admission selects exactly one complete matrix group.
+        const auto columns = geometry_.frequency_count;
+        const auto packed = CudaComplexMatrix::prepared_right_bytes(matrix_math(), columns, geometry_.kernel_rows);
+        const auto rectangle = matrix_rectangle_bytes(preferred_matrix_workspaces(),
+            std::min(maximum_matrix_arrivals, geometry_.lag_count), matrix_lag_bytes(),
+            matrix_group_scratch_bytes(preferred_matrix_rows(), columns));
+        return add(add(resident, packed), std::max(add(preparation, sizeof(CudaMatrixDiagnostics)), rectangle));
+    }
+
+    static void check_matrix_diagnostics(const CudaMatrixDiagnostics& observed, BulkReceipt& receipt) {
+        count(receipt.cuda_matrix_nonfinite_values, observed.nonfinite_values);
+        count(receipt.cuda_matrix_saturated_values, observed.saturated_values);
+        receipt.cuda_matrix_maximum_a_scale = std::max(receipt.cuda_matrix_maximum_a_scale, observed.maximum_a_scale);
+        receipt.cuda_matrix_maximum_b_scale = std::max(receipt.cuda_matrix_maximum_b_scale, observed.maximum_b_scale);
+        require(!observed.nonfinite_values && !observed.saturated_values,
+                "Robust coarse low-precision matrix input is nonfinite or saturated");
+    }
 #endif
+
+    void prepare_matrix(Group& group, const at::Tensor& impulse, BulkReceipt& receipt) {
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        require(static_cast<bool>(matrix_), "Robust coarse matrix handle was not prepared");
+        const auto bytes = CudaComplexMatrix::prepared_right_bytes(matrix_math(), group.count, geometry_.kernel_rows);
+        group.packed_right_charge = Charge(device_.workspace, bytes);
+        Charge diagnostics_charge(device_.workspace, sizeof(CudaMatrixDiagnostics));
+        group.packed_right = at::empty({dim(bytes)}, device_.options.dtype(at::kByte));
+        auto diagnostics = at::zeros({dim(sizeof(CudaMatrixDiagnostics))}, device_.options.dtype(at::kByte));
+        const auto packed = matrix_->prepare_right(matrix_math(), group.phase.const_data_ptr<c10::complex<float>>(),
+            impulse.const_data_ptr<c10::complex<float>>(), static_cast<std::size_t>(impulse.numel()),
+            group.count, geometry_.kernel_rows, group.packed_right.mutable_data_ptr(), bytes,
+            reinterpret_cast<CudaMatrixDiagnostics*>(diagnostics.mutable_data_ptr()), device_.cuda_stream());
+        CudaMatrixDiagnostics observed{};
+        static_assert(std::is_trivially_copyable_v<CudaMatrixDiagnostics>);
+        device_.download(diagnostics, std::span(reinterpret_cast<std::uint8_t*>(&observed), sizeof(observed)),
+                         at::kByte, receipt);
+        check_matrix_diagnostics(observed, receipt);
+        count(receipt.cuda_matrix_prepared_b_groups, 1);
+        count(receipt.cuda_matrix_prepared_b_bytes, bytes);
+        count(receipt.cuda_matrix_prepared_b_values, packed);
+        count(receipt.cuda_matrix_packed_values, packed);
+#else
+        (void)group;
+        (void)impulse;
+        (void)receipt;
+        throw TensorBackendUnavailable("Robust coarse matrix processing requires CUDA");
+#endif
+    }
 
     std::size_t matrix_scratch_bytes(std::size_t arrivals) const {
         std::size_t bytes = 0;
 #if DATAPUMP_TRIAD_TENSOR_CUDA
-        for (const auto& group : groups_) if (group.matrix.defined()) {
+        for (const auto& group : groups_) if (group.packed_right.defined()) {
             const auto rows = mul(arrivals, geometry_.taps);
-            // Price every resident matrix at the full rectangle row bound.
-            // Padded workspace is monotone, covering shorter arrival tails.
-            const auto scratch = CudaComplexMatrix::workspace_bytes(matrix_math(), rows, group.count, geometry_.kernel_rows);
-            // Contiguous input, C128 result and diagnostics have the same lifetime
-            // as the explicit library packing/accumulation workspace.
-            const auto tensors = add(mul(rows, add(mul(geometry_.kernel_rows, sizeof(Complex) / 2),
-                                                   mul(group.count, sizeof(Complex)))), sizeof(CudaMatrixDiagnostics));
-            bytes = std::max(bytes, add(scratch, tensors));
+            bytes = std::max(bytes, matrix_group_scratch_bytes(rows, group.count));
         }
 #else
         (void)arrivals;
@@ -1112,9 +1672,9 @@ private:
 
     void release_matrices(BulkReceipt& work) {
         device_.synchronize(work);
-        for (auto& group : groups_) if (group.matrix.defined()) {
-            group.matrix = at::Tensor{};
-            group.matrix_charge = {};
+        for (auto& group : groups_) if (group.packed_right.defined()) {
+            group.packed_right = at::Tensor{};
+            group.packed_right_charge = {};
             group.fallback = 4;
         }
         has_matrix_ = false;
@@ -1126,12 +1686,10 @@ private:
     };
 
     MatrixRectangle admit_matrix_rectangle(std::size_t maximum_workspaces, std::size_t per_lag) const {
-        const auto score_bytes = mul(mul(geometry_.frequency_count, geometry_.lag_count), 3 * sizeof(double));
         for (auto workspaces = maximum_workspaces; workspaces; workspaces /= 2) {
             for (auto arrivals = std::min(maximum_matrix_arrivals, geometry_.lag_count); arrivals; arrivals /= 2) {
-                const auto rows = mul(workspaces, arrivals);
-                const auto bytes = add(mul(workspaces, score_bytes),
-                                       add(mul(rows, per_lag), matrix_scratch_bytes(rows)));
+                const auto bytes = matrix_rectangle_bytes(workspaces, arrivals, per_lag,
+                    matrix_scratch_bytes(mul(workspaces, arrivals)));
                 try {
                     return {workspaces, arrivals, Charge(device_.workspace, bytes)};
                 } catch (const ReceiverWorkspaceError&) {
@@ -1149,7 +1707,9 @@ private:
         std::size_t completed = 0;
         while (completed < workspace_count) {
             cancelled(stop);
-            auto rectangle = admit_matrix_rectangle(std::min(maximum_matrix_workspaces, workspace_count - completed), per_lag);
+            const auto maximum = automatic_matrix_ ? std::min(maximum_matrix_workspaces, geometry_.lag_workspace_tile_width)
+                                                   : maximum_matrix_workspaces;
+            auto rectangle = admit_matrix_rectangle(std::min(maximum, workspace_count - completed), per_lag);
             if (!rectangle.workspaces) {
                 // Matrix residency can fit while packing cannot. The caller
                 // resumes its serial FFT path at the first unpublished
@@ -1194,9 +1754,12 @@ private:
         for (const auto& group : groups_) {
             cancelled(stop);
             auto destination = correlations.narrow(-1, dim(group.first), dim(group.count));
-            if (group.matrix.defined() && matrix_correlations(product, group, destination, receipt)) continue;
-            if (math_ != TensorCoarseMath::fft)
-                count(receipt.matrix_fft_fallback_counts[group.matrix.defined() ? 5 : group.fallback], 1);
+            if (group.packed_right.defined()) {
+                matrix_correlations(product, group, destination, receipt);
+                continue;
+            }
+            if (requests_matrix(math_))
+                count(receipt.matrix_fft_fallback_counts[group.fallback], 1);
             const auto input = product * group.phase;
             if (!group.convolution.defined()) {
                 destination.copy_(input.sum(-1, true, at::kComplexDouble));
@@ -1210,22 +1773,19 @@ private:
         }
     }
 
-    bool matrix_correlations(const at::Tensor& product, const Group& group, at::Tensor destination,
+    void matrix_correlations(const at::Tensor& product, const Group& group, at::Tensor destination,
                              BulkReceipt& receipt) {
 #if DATAPUMP_TRIAD_TENSOR_CUDA
-        require(matrix_ && group.matrix.defined(), "Robust coarse matrix workspace was not prepared");
+        require(matrix_ && group.packed_right.defined(), "Robust coarse matrix workspace was not prepared");
         const auto rows = static_cast<std::size_t>(product.numel()) / geometry_.kernel_rows;
         const auto scratch_bytes = CudaComplexMatrix::workspace_bytes(matrix_math(), rows, group.count, geometry_.kernel_rows);
         auto scratch = at::empty({dim(scratch_bytes)}, device_.options.dtype(at::kByte));
-        // Validate the actual shape and its already charged storage before
-        // dispatch. Unsupported shapes retain the complete FFT fallback.
-        if (!matrix_->supported_shape(matrix_math(), rows, group.count, geometry_.kernel_rows,
-                                      scratch.mutable_data_ptr(), scratch_bytes)) return false;
         auto diagnostics = at::zeros({dim(sizeof(CudaMatrixDiagnostics))}, device_.options.dtype(at::kByte));
         auto input = product.reshape({dim(rows), dim(geometry_.kernel_rows)}).contiguous();
         auto output = at::empty({dim(rows), dim(group.count)}, device_.options.dtype(at::kComplexDouble));
         const auto work = matrix_->launch(matrix_math(), input.const_data_ptr<c10::complex<float>>(),
-            group.matrix.const_data_ptr<c10::complex<float>>(), output.mutable_data_ptr<c10::complex<double>>(),
+            group.packed_right.const_data_ptr(), static_cast<std::size_t>(group.packed_right.nbytes()),
+            output.mutable_data_ptr<c10::complex<double>>(),
             rows, group.count, geometry_.kernel_rows, scratch.mutable_data_ptr(), scratch_bytes,
             reinterpret_cast<CudaMatrixDiagnostics*>(diagnostics.mutable_data_ptr()), device_.cuda_stream());
         destination.copy_(output.reshape(destination.sizes()));
@@ -1233,8 +1793,13 @@ private:
         static_assert(std::is_trivially_copyable_v<CudaMatrixDiagnostics>);
         device_.download(diagnostics, std::span(reinterpret_cast<std::uint8_t*>(&observed), sizeof(observed)),
                          at::kByte, receipt);
+        check_matrix_diagnostics(observed, receipt);
         count(math_ == TensorCoarseMath::int8 ? receipt.cuda_matrix_int8_calls : receipt.cuda_matrix_fp16_calls,
               work.gemm_calls);
+        count(math_ == TensorCoarseMath::int8 ? receipt.cuda_matrix_lt_imma_calls : receipt.cuda_matrix_lt_hmma_calls,
+              work.lt_tensor_calls);
+        count(receipt.cuda_matrix_unwitnessed_calls, work.gemm_calls - work.lt_tensor_calls);
+        count(receipt.cuda_matrix_prepared_b_uses, 1);
         count(receipt.cuda_matrix_inner_chunks, work.inner_chunks);
         count(receipt.cuda_matrix_padded_real_macs, work.padded_real_macs);
         count(receipt.cuda_matrix_packed_values, work.packed_values);
@@ -1242,13 +1807,6 @@ private:
         receipt.cuda_matrix_maximum_rows = std::max(receipt.cuda_matrix_maximum_rows, static_cast<std::uint64_t>(rows));
         receipt.cuda_matrix_maximum_columns = std::max(receipt.cuda_matrix_maximum_columns, static_cast<std::uint64_t>(group.count));
         receipt.cuda_matrix_maximum_inner = std::max(receipt.cuda_matrix_maximum_inner, static_cast<std::uint64_t>(geometry_.kernel_rows));
-        count(receipt.cuda_matrix_nonfinite_values, observed.nonfinite_values);
-        count(receipt.cuda_matrix_saturated_values, observed.saturated_values);
-        receipt.cuda_matrix_maximum_a_scale = std::max(receipt.cuda_matrix_maximum_a_scale, observed.maximum_a_scale);
-        receipt.cuda_matrix_maximum_b_scale = std::max(receipt.cuda_matrix_maximum_b_scale, observed.maximum_b_scale);
-        require(!observed.nonfinite_values && !observed.saturated_values,
-                "Robust coarse low-precision matrix input is nonfinite or saturated");
-        return true;
 #else
         (void)product;
         (void)group;
@@ -1290,6 +1848,9 @@ private:
         const auto pairs = mul(width, frequencies);
         std::vector<double> host(mul(pairs, geometry_.lag_count));
         device_.download(scores, std::span(host), at::kDouble, receipt);
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        if (half_) check_half_diagnostics(receipt);
+#endif
         require(std::all_of(host.begin(), host.end(), [](double value) { return std::isfinite(value); }),
                 "Robust tensor coarse score is nonfinite");
         count(receipt.score_rows, host.size());
@@ -1300,16 +1861,20 @@ private:
     }
 
     TensorContext device_;
-    TensorCoarseMath math_;
+    TensorPrecision precision_;
+    TensorCoarseMath requested_math_, math_;
     CoarseBulkGeometry geometry_;
     std::size_t count_ = 0;
     std::size_t matrix_fallback_ = no_matrix_fallback;
+    std::string_view half_fft_precision_reason_, matrix_precision_reason_;
+    bool automatic_matrix_ = false;
     bool lag_ = false, preparation_started_ = false, prepared_ = false, has_matrix_ = false;
     Charge resident_;
     at::Tensor observation_, bank_, inverse_a_, inverse_b_, inverse_d_;
     std::vector<Group> groups_;
 #if DATAPUMP_TRIAD_TENSOR_CUDA
     std::unique_ptr<CudaComplexMatrix> matrix_;
+    std::unique_ptr<HalfFrequency> half_;
 #endif
 };
 
@@ -1818,6 +2383,8 @@ public:
         : arena_(arena_for(options, automatic)), precision_(options.precision),
           coarse_math_(options.coarse_math), automatic_(automatic) {
         (void)coarse_math_name(coarse_math_);
+        require(precision_ != TensorPrecision::fp32_minimum || !requests_matrix(coarse_math_),
+                "Robust FP32 minimum conflicts with requested reduced-precision coarse contractions");
     }
 
     bool supports_exact_device_chirp_z() const noexcept override { return automatic_; }
@@ -1826,9 +2393,9 @@ public:
         // Small independent transforms and sparse projections lose their
         // advantage to the synchronous per-block CUDA preparation/readback.
         // Keep the native route within the measured AVX2 worker/shape class.
-        if (automatic_ && precision_ == TensorPrecision::automatic && geometry.native_avx2 &&
-            geometry.workers >= 32 && geometry.taps == 1 &&
-            geometry.maximum_block_rows && geometry.maximum_block_rows <= 512 &&
+        if (automatic_ && precision_ != TensorPrecision::fp64 && geometry.native_avx2 &&
+            geometry.workers >= 26 && geometry.taps == 1 &&
+            geometry.maximum_block_rows && geometry.maximum_block_rows <= 1024 &&
             geometry.maximum_projection_modes && geometry.maximum_projection_modes <= 40)
             return small_fine_fallback;
         return {};
@@ -1845,7 +2412,7 @@ public:
     }
 
     std::unique_ptr<CoarseBulk> make_coarse(double rate, double clock_span) override {
-        return std::make_unique<TensorCoarse>(arena_, work_, precise(rate, clock_span), coarse_math_, automatic_);
+        return std::make_unique<TensorCoarse>(arena_, work_, precise(rate, clock_span), precision_, coarse_math_, automatic_);
     }
 
     std::size_t maximum_frequency_tile_width(const CoarseBulkGeometry& geometry, std::size_t workspaces,
@@ -1880,8 +2447,14 @@ public:
         const auto staging = add(mul(maximum_fft_rows, 3 * sizeof(Complex)), 2 * maximum_upload_bytes);
         // One optional cuBLAS handle and bounded shape descriptors; no host
         // coefficient matrix is retained. Device packing remains arena-charged.
-        const auto matrix_metadata = arena_->device.is_cuda() && coarse_math_ != TensorCoarseMath::fft ? 2 * mib : 0;
-        return add(add(add(scores, staging), matrix_metadata), arena_->device.is_cpu() ? arena_->options.workspace_bytes : 0);
+        // The half route keeps at most three cuFFT plan handles and appends a
+        // diagnostic word to the existing host frontier packet.
+        const auto half = coarse_math_ == TensorCoarseMath::fp16_fft ||
+            (automatic_ && precision_ == TensorPrecision::automatic && automatic_half_fft_hardware(arena_->total));
+        const auto metadata = !arena_->device.is_cuda() ? 0 :
+            half ? 6 * mib + 2 * sizeof(CoarseBulkPeaks) :
+            requests_matrix(coarse_math_) ? 2 * mib : 0;
+        return add(add(add(scores, staging), metadata), arena_->device.is_cpu() ? arena_->options.workspace_bytes : 0);
     }
 
     BulkReceipt receipt() const override { return report(true); }
@@ -1890,7 +2463,8 @@ public:
 private:
     BulkReceipt report(bool query_runtime) const {
         auto report = arena_->receipt(query_runtime, work_.get());
-        report.precision = precision_ == TensorPrecision::fp64 ? "fp64" : "automatic";
+        report.precision = precision_ == TensorPrecision::fp64 ? "fp64" :
+            precision_ == TensorPrecision::fp32_minimum ? "fp32_minimum" : "automatic";
         report.requested_coarse_math = coarse_math_name(coarse_math_);
         if (automatic_) report.selection_reason = "cuda-discrete-gpu";
         if (report.native_fine_sessions) report.native_fine_fallback_reason = small_fine_fallback;

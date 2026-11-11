@@ -1101,6 +1101,8 @@ struct Session::Impl {
                 current.gpu_statistics_blocks = 0;
                 current.gpu_cuda_fp16_calls = 0;
                 current.gpu_cuda_int8_calls = 0;
+                current.gpu_cuda_half_fft_score_rows = 0;
+                current.gpu_cuda_half_fft_fallback_summary.clear();
                 current.gpu_native_lag_preference_supported = false;
             }
             std::stop_callback shutdown(manager_stop, [source = generation_stop]() mutable { source.request_stop(); });
@@ -1507,6 +1509,17 @@ Snapshot Session::snapshot() {
             p.current.gpu_statistics_blocks = receipt.statistics_blocks;
             p.current.gpu_cuda_fp16_calls = receipt.cuda_matrix_fp16_calls;
             p.current.gpu_cuda_int8_calls = receipt.cuda_matrix_int8_calls;
+            p.current.gpu_cuda_half_fft_score_rows = receipt.cuda_half_fft_score_rows;
+            p.current.gpu_cuda_half_fft_fallback_summary.clear();
+            for (std::size_t i = 0; i < receipt.half_fft_fallback_counts.size(); ++i) {
+                const auto count = receipt.half_fft_fallback_counts[i];
+                if (!count) continue;
+                if (!p.current.gpu_cuda_half_fft_fallback_summary.empty())
+                    p.current.gpu_cuda_half_fft_fallback_summary += ", ";
+                p.current.gpu_cuda_half_fft_fallback_summary +=
+                    std::string(triad::v3::receiver_detail::bulk_half_fft_fallback_reasons[i]) + "=" +
+                    std::to_string(count);
+            }
         }
         result = p.current;
         result.signals.swap(p.signal_events);

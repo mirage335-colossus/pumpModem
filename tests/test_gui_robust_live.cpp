@@ -603,6 +603,7 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false) {
           prepared.gpu_vulkan_leased_bytes == 0 && prepared.gpu_vulkan_peak_leased_bytes == 0 &&
           prepared.gpu_native_coarse_workspace_sessions == 0 &&
           prepared.gpu_cuda_fp16_calls == 0 && prepared.gpu_cuda_int8_calls == 0 &&
+          prepared.gpu_cuda_half_fft_score_rows == 0 && prepared.gpu_cuda_half_fft_fallback_summary.empty() &&
           prepared.gpu_fp32_score_rows == 0 && prepared.gpu_fp16_storage_score_rows == 0 &&
           prepared.gpu_packed_fp16_score_rows == 0 && prepared.gpu_native_coarse_lag_sessions == 0 &&
           (!gpu_fp32 || !prepared.gpu_native_lag_preference_supported),
@@ -692,7 +693,8 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false) {
               resumed.gpu_cuda_native_fine_fallback_reason.empty() &&
               resumed.gpu_vulkan_leased_bytes == 0 && resumed.gpu_vulkan_peak_leased_bytes == 0 &&
               resumed.gpu_native_coarse_workspace_sessions == 0 &&
-              resumed.gpu_cuda_fp16_calls == 0 && resumed.gpu_cuda_int8_calls == 0,
+              resumed.gpu_cuda_fp16_calls == 0 && resumed.gpu_cuda_int8_calls == 0 &&
+              resumed.gpu_cuda_half_fft_score_rows == 0 && resumed.gpu_cuda_half_fft_fallback_summary.empty(),
               "Resumed GPU generation retained stale completed-work evidence");
         if (resumed.gpu_backend.starts_with("vulkan:"))
             check(resumed.gpu_vulkan_shared_workspace_limit_bytes > 0 && resumed.gpu_vulkan_peak_leased_bytes == 0,
@@ -713,6 +715,7 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false) {
               cpu.gpu_vulkan_shared_workspace_limit_bytes == 0 && cpu.gpu_vulkan_leased_bytes == 0 &&
               cpu.gpu_vulkan_peak_leased_bytes == 0 && cpu.gpu_native_coarse_workspace_sessions == 0 &&
               cpu.gpu_host_scored_rows == 0 && cpu.gpu_cuda_fp16_calls == 0 && cpu.gpu_cuda_int8_calls == 0 &&
+              cpu.gpu_cuda_half_fft_score_rows == 0 && cpu.gpu_cuda_half_fft_fallback_summary.empty() &&
               cpu.gpu_fp32_score_rows == 0 && cpu.gpu_fp16_storage_score_rows == 0 &&
               cpu.gpu_packed_fp16_score_rows == 0 && cpu.gpu_native_coarse_lag_sessions == 0 &&
               !cpu.gpu_native_lag_preference_supported,

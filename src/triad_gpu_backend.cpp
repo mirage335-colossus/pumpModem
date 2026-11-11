@@ -70,9 +70,8 @@ std::shared_ptr<receiver_detail::ReceiverBulkBackend> make_gpu_receiver_backend(
     std::string unavailable;
 #if defined(DATAPUMP_HAVE_TRIAD_CUDA)
     try {
-        // Current automatic CUDA FFTs use FP32 bulk work and FP64 sensitive
-        // stages; FP32 minimum therefore has the same arithmetic floor.
-        return std::make_shared<SelectedGpu>(make_automatic_cuda_receiver_backend(),
+        const auto precision = options.fp32_minimum ? TensorPrecision::fp32_minimum : TensorPrecision::automatic;
+        return std::make_shared<SelectedGpu>(make_automatic_cuda_receiver_backend(precision),
             "automatic CUDA receiver");
     } catch (const TensorBackendUnavailable& error) {
         unavailable = std::string(error.what()).substr(0, 512);

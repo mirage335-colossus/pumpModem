@@ -34,6 +34,24 @@ def main(executable):
     assert not description["phases"]
     assert description["identity"]["requested_native_coarse_precision"] == "automatic"
     assert description["identity"]["requested_tensor_coarse_math"] == "fft"
+    assert description["identity"]["requested_gpu_fp32_minimum"] is False
+    if description["identity"].get("configured_vulkan_backend") is True:
+        # Vulkan describe serializes the shared BulkReceipt without doing DSP;
+        # the CUDA matrix counters must therefore be present and zero.
+        serialized = subprocess.run(
+            [str(executable), "describe", "--backend", "vulkan", "--workers", "1",
+             "--slot-owners", "1", "--deadline-ms", "12000"],
+            check=False, capture_output=True, text=True, timeout=18,
+        )
+        vulkan_description = json.loads(serialized.stdout)
+        assert serialized.returncode in (0, 2), vulkan_description
+        bulk = vulkan_description.get("identity", {}).get("backend_receipt")
+        if isinstance(bulk, dict):
+            for field in ("cuda_matrix_prepared_b_groups", "cuda_matrix_prepared_b_bytes",
+                          "cuda_matrix_prepared_b_values", "cuda_matrix_prepared_b_uses",
+                          "cuda_matrix_lt_hmma_calls", "cuda_matrix_lt_imma_calls",
+                          "cuda_matrix_unwitnessed_calls"):
+                assert type(bulk.get(field)) is int and bulk[field] == 0, (field, bulk.get(field))
     forced = run("describe", "--native-coarse-precision", "fp64")
     assert forced["identity"]["requested_native_coarse_precision"] == "fp64"
     assert forced["identity"]["receiver_arithmetic"] == "native_fp64_coarse_fft_state_and_admission"
@@ -52,6 +70,38 @@ def main(executable):
     assert tensor_on_cpu["identity"]["requested_tensor_coarse_math"] == "int8"
     run("describe", "--backend", "vulkan", "--tensor-coarse-math", "int8", code=1,
         parse_error="Vulkan coarse search uses the full FFT")
+    run("describe", "--tensor-coarse-math", "fp16-fft", code=1,
+        parse_error="fp16-fft requires explicit --backend cuda")
+    run("describe", "--backend", "tensor-cpu", "--tensor-coarse-math", "fp16-fft", code=1,
+        parse_error="fp16-fft requires explicit --backend cuda")
+    run("describe", "--backend", "vulkan", "--tensor-coarse-math", "fp16-fft", code=1,
+        parse_error="Vulkan coarse search uses the full FFT")
+    run("describe", "--backend", "gpu", "--tensor-coarse-math", "fp16-fft", code=1,
+        parse_error="Automatic GPU selection does not accept pinned device, workspace or backend arithmetic overrides")
+    run("describe", "--backend", "cpu", "--gpu-fp32-minimum", "on", code=1,
+        parse_error="--gpu-fp32-minimum is valid only with --backend gpu")
+    run("describe", "--backend", "vulkan", "--gpu-fp32-minimum", "on", code=1,
+        parse_error="--gpu-fp32-minimum is valid only with --backend gpu")
+    run("describe", "--backend", "gpu", "--gpu-fp32-minimum", "invalid", code=1,
+        parse_error="--gpu-fp32-minimum expects on or off")
+    automatic_gpu_floor = subprocess.run(
+        [str(executable), "describe", "--backend", "gpu", "--gpu-fp32-minimum", "on",
+         "--workers", "1", "--slot-owners", "1", "--deadline-ms", "12000"],
+        check=False, capture_output=True, text=True, timeout=18,
+    )
+    automatic_gpu_receipt = json.loads(automatic_gpu_floor.stdout)
+    assert automatic_gpu_floor.returncode in (0, 2), automatic_gpu_receipt
+    assert automatic_gpu_receipt["identity"]["requested_gpu_fp32_minimum"] is True
+    if automatic_gpu_floor.returncode == 0:
+        assert automatic_gpu_receipt["result"]["actual_device_work"] is False
+    explicit_half_fft = subprocess.run(
+        [str(executable), "describe", "--backend", "cuda", "--tensor-coarse-math", "fp16-fft",
+         "--workers", "1", "--slot-owners", "1", "--deadline-ms", "12000"],
+        check=False, capture_output=True, text=True, timeout=18,
+    )
+    half_fft_description = json.loads(explicit_half_fft.stdout)
+    assert explicit_half_fft.returncode in (0, 2), half_fft_description
+    assert half_fft_description["identity"]["requested_tensor_coarse_math"] == "fp16-fft"
     run("describe", "--backend", "vulkan", "--tensor-precision", "fp64", code=1,
         parse_error="Vulkan coarse search uses its native FP32 path")
     run("describe", "--backend", "gpu", "--device-index", "1", code=1,

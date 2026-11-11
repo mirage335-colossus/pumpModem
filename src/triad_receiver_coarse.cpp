@@ -2103,7 +2103,8 @@ struct CoarseSession::Impl {
         bulk->prepare({plan.rays, plan.projected_template_rows, plan.correlation_fft_rows,
                        plan.arrival_points, plan.frequency_points, plan.projected_sample_rate_hz, variance,
                        admission ? admission->tile_width : plan.tile_width,
-                       admission ? admission->workspace_batch : 0, admission ? admission->device_workspace_bytes : 0},
+                       admission ? admission->workspace_batch : 0, admission ? admission->device_workspace_bytes : 0,
+                       plan.minimum_eigenvalue_ratio, plan.route == CoarseRoute::lag_groups ? plan.tile_width : 0},
                       observation, columns, zoom, operations, stop);
         if (const auto reason = bulk->precision_reason(); !reason.empty())
             receipt.plan.precision_reason = reason;

@@ -147,6 +147,14 @@ std::string gpu_search_diagnostics(const live::Snapshot& snapshot) {
         else text = "GPU ready";
         if (snapshot.gpu_statistics_blocks)
             text += " · GPU fine statistics " + std::to_string(snapshot.gpu_statistics_blocks);
+        if (snapshot.gpu_cuda_fp16_calls)
+            text += " · FP16 matrix " + std::to_string(snapshot.gpu_cuda_fp16_calls) + " calls";
+        if (snapshot.gpu_cuda_int8_calls)
+            text += " · INT8 matrix " + std::to_string(snapshot.gpu_cuda_int8_calls) + " calls";
+        if (snapshot.gpu_cuda_half_fft_score_rows)
+            text += " · FP16 FFT " + std::to_string(snapshot.gpu_cuda_half_fft_score_rows) + " score rows";
+        if (!snapshot.gpu_cuda_half_fft_fallback_summary.empty())
+            text += " · FP16 FFT skipped " + snapshot.gpu_cuda_half_fft_fallback_summary;
         if (snapshot.gpu_cuda_native_fine_sessions) {
             text += " · native fine fallback " + std::to_string(snapshot.gpu_cuda_native_fine_sessions) + " sessions";
             if (!snapshot.gpu_cuda_native_fine_fallback_reason.empty())
@@ -1157,8 +1165,12 @@ struct Controller::Impl {
             value.gpu_device!=snapshot.gpu_device||value.gpu_score_rows!=snapshot.gpu_score_rows||
             value.gpu_backend!=snapshot.gpu_backend||value.gpu_precision!=snapshot.gpu_precision||
             value.gpu_statistics_blocks!=snapshot.gpu_statistics_blocks||
+            value.gpu_cuda_fp16_calls!=snapshot.gpu_cuda_fp16_calls||
+            value.gpu_cuda_int8_calls!=snapshot.gpu_cuda_int8_calls||
             value.gpu_cuda_native_fine_sessions!=snapshot.gpu_cuda_native_fine_sessions||
             value.gpu_cuda_native_fine_fallback_reason!=snapshot.gpu_cuda_native_fine_fallback_reason||
+            value.gpu_cuda_half_fft_score_rows!=snapshot.gpu_cuda_half_fft_score_rows||
+            value.gpu_cuda_half_fft_fallback_summary!=snapshot.gpu_cuda_half_fft_fallback_summary||
             value.gpu_vulkan_shared_workspace_limit_bytes!=snapshot.gpu_vulkan_shared_workspace_limit_bytes||
             value.gpu_vulkan_leased_bytes!=snapshot.gpu_vulkan_leased_bytes||
             value.gpu_vulkan_peak_leased_bytes!=snapshot.gpu_vulkan_peak_leased_bytes||

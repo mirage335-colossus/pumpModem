@@ -78,6 +78,28 @@ def vulkan_bulk_receipt(*, automatic=False):
             "fft_calls": 4, "score_rows": 8}
 
 
+def explicit_half_fft_receipt():
+    receipt = device_receipt()
+    receipt["identity"]["requested_tensor_coarse_math"] = "fp16-fft"
+    bulk = receipt["identity"]["backend_receipt"]
+    bulk.update(requested_coarse_math="fp16-fft", cuda_fft_version=12080,
+                fft_calls=4, score_rows=8, mapped_values=24, statistics_blocks=4,
+                cuda_half_fft_forward_ffts=8, cuda_half_fft_inverse_ffts=8,
+                cuda_half_fft_padded_ffts=0, cuda_half_fft_score_rows=8,
+                cuda_half_fft_peak_bank_bytes=4096, cuda_half_fft_peak_workspace_bytes=8192,
+                cuda_half_fft_peak_phase_bytes=12288, cuda_half_fft_plan_seconds=0.01,
+                half_fft_fallback_counts={key: 0 for key in (
+                    "cpu-device", "fp64-stage", "lag-group-route", "unsupported-plan", "workspace-limit",
+                    "fp32-minimum", "unqualified-hardware", "unqualified-shape",
+                    "ill-conditioned-template", "plan-allocation", "allocator-limit")})
+    receipt["phases"].insert(0, {
+        "name": "coarse_tiles", "wall_seconds": .01, "represented_seconds": 1,
+        "work": {"fft_precision": "fp16_fft_fp64_coordinates_and_reductions",
+                 "precision_reason": "cuda-fp16-frequency-fft",
+                 "bulk": {"precision": "fp16_fft_fp64_coordinates_and_reductions"}}})
+    return receipt
+
+
 def automatic_gpu_receipt(selected):
     if selected == "cuda":
         receipt = device_receipt()
@@ -274,6 +296,13 @@ class AbbreviatedTests(unittest.TestCase):
                 probe.call("describe", tensor_coarse_math="int8")
                 arguments = execute.call_args.args[0]
                 self.assertEqual(arguments[arguments.index("--tensor-coarse-math") + 1], "int8")
+                half_fft_policy = copy.deepcopy(receipt)
+                half_fft_policy["identity"]["requested_tensor_coarse_math"] = "fp16-fft"
+                half_fft_policy["identity"]["backend_receipt"]["requested_coarse_math"] = "fp16-fft"
+                execute.return_value = subprocess.CompletedProcess([], 0, json.dumps(half_fft_policy).encode(), b"")
+                probe.call("describe", tensor_coarse_math="fp16-fft")
+                arguments = execute.call_args.args[0]
+                self.assertEqual(arguments[arguments.index("--tensor-coarse-math") + 1], "fp16-fft")
                 with self.assertRaisesRegex(ProbeError, "altered the requested coarse"):
                     probe.call("describe", tensor_coarse_math="fp16")
                 wrong_policy = copy.deepcopy(receipt)
@@ -318,6 +347,7 @@ class AbbreviatedTests(unittest.TestCase):
             self.assertNotEqual(runtime_identity(changed), expected)
         for field, value in (("library_version", "2.14"), ("device_name", "Other GPU"),
                              ("cuda_driver_version", 12800), ("cuda_blas_version", 12805),
+                             ("cuda_fft_version", 12080),
                              ("cuda_compute_major", 10), ("cuda_compute_minor", 1), ("precision", "fp64"), ("requested_coarse_math", "fp16")):
             changed = copy.deepcopy(original)
             changed["identity"]["backend_receipt"][field] = value
@@ -345,6 +375,33 @@ class AbbreviatedTests(unittest.TestCase):
                 wrong["identity"]["backend_receipt"]["executed"] = False
             with self.subTest(change=change), self.assertRaises(ProbeError):
                 validate_receipt(wrong, command="continuation", backend="cuda", returncode=0)
+
+    def test_explicit_cuda_fp16_fft_requires_actual_half_scores(self):
+        receipt = explicit_half_fft_receipt()
+        validate_receipt(receipt, command="continuation", backend="cuda", returncode=0,
+                         expected_require_accelerator=True)
+        mutations = (
+            lambda x: x["identity"]["backend_receipt"].update(cuda_half_fft_score_rows=7),
+            lambda x: x["identity"]["backend_receipt"].update(cuda_half_fft_score_rows=0),
+            lambda x: x["identity"]["backend_receipt"].update(cuda_half_fft_forward_ffts=0),
+            lambda x: x["identity"]["backend_receipt"].update(cuda_half_fft_inverse_ffts=0),
+            lambda x: x["identity"]["backend_receipt"].update(cuda_fft_version=0),
+            lambda x: x["phases"][0]["work"].update(precision_reason="cuda-fp16-fft-workspace-limit"),
+            lambda x: x["phases"][0]["work"].update(fft_precision="fp32"),
+            lambda x: x["identity"]["backend_receipt"]["half_fft_fallback_counts"].pop("workspace-limit"),
+        )
+        for mutate in mutations:
+            wrong = copy.deepcopy(receipt)
+            mutate(wrong)
+            with self.subTest(mutation=mutate), self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="continuation", backend="cuda", returncode=0,
+                                 expected_require_accelerator=True)
+
+        automatic = copy.deepcopy(receipt)
+        automatic["identity"].update(backend="gpu", selected_accelerator_backend="cuda")
+        with self.assertRaises(ProbeError):
+            validate_receipt(automatic, command="continuation", backend="gpu", returncode=0,
+                             expected_require_accelerator=True)
 
     def test_vulkan_required_work_is_a_physical_full_frequency_dispatch(self):
         receipt = device_receipt()

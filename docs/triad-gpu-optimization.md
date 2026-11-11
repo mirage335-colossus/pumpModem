@@ -58,6 +58,73 @@ strict FP32, while joint FP8 quantization added misses in a 96-capture sample.
 These are useful counterexamples, not predictions for the current receiver,
 different hardware or different inputs.
 
+## Hardware and library dispatch
+
+Choose paths from queried hardware capabilities, library support, admitted
+geometry and measured end-to-end work. Product names alone do not establish the
+available instructions: record the physical GPU, compute capability, runtime
+and library versions, actual selected implementation, executed workload, and
+fallbacks. For matrix operations, cuBLASLt exposes numerical-implementation
+flags that can constrain heuristic results; a returned HMMA/IMMA-compatible
+algorithm is dispatch evidence. A kernel trace can show that the named kernel
+ran, while an authorized instruction/counter profile is needed to support
+stronger claims about generated Tensor Core instructions or utilization. Keep
+library selection, kernel names, SASS inspection, hardware counters and
+complete-receiver timing as distinct evidence.
+
+| Device family | Relevant implementation boundary |
+| --- | --- |
+| GeForce RTX 4090 and RTX 4060 Ti 16 GB | Ada, compute capability 8.9. The existing native FP16/INT8 lag-matrix path is eligible for Tensor Core library dispatch when geometry, workspace and implementation flags permit. Eligibility is not a claim that every call used Tensor Cores or that matrix work beats FFT search. Laptop RTX 4090 allocation and power configuration require separate measurement. |
+| GeForce RTX 5090 and full RTX PRO 6000 Blackwell | Blackwell, compute capability 12.0 for these devices. Confirm the exact full device and compiled architecture at runtime; do not transfer an SM100-specific path or an earlier GPU's shape results to SM120 by product name. Recheck library heuristic choices and actual receiver costs on both consumer and workstation devices. |
+| Ryzen 5 PRO 5650U Radeon Vega iGPU | The locally observed Vulkan device is gfx90c. Its supported packed FP16 vector route is not matrix Tensor Core hardware. Half-storage in an FP32 VkFFT path is a workspace reduction, not packed-FP16 computation. Qualify actual arithmetic and memory use through the native Vulkan route. |
+| Ryzen 7 8840U Radeon 780M | Identify the actual GPU architecture/runtime. A published rocWMMA support list that omits gfx1103 does not prove the hardware cannot run matrix operations, nor does a compatible build prove that it did. Require a working native library/kernel route and device evidence before reporting or dispatching one. |
+| Intel i9-9900K UHD 630 | This Coffee Lake iGPU predates Intel XMX hardware. Do not assign an XMX path based on a generic Intel GPU label. The project has no actual UHD 630 test host, so its native GPU path remains unmeasured. |
+
+cuFFT's half mode is a real half-precision FFT implementation, with documented
+power-of-two sizing and other transform restrictions; the API does not promise
+Tensor Core execution. Scaling and conversion costs, FFT intermediate range,
+batch occupancy, exact plan workspace, and complete search cost still require
+measurement. This differs from a Tensor Core FFT algorithm that factorizes a
+transform into smaller matrix products and permutation/twiddle stages. The
+published tcFFT study reports such an approach on V100/A100, but its reference
+implementation targets those older GPUs and is GPL-3.0; it is evidence that a
+factorized design can be useful (reported speedups were 1.29–3.24× on V100 and
+1.10–3.03× on A100), not a qualified Ada/Blackwell implementation or code to
+copy without resolving project licensing. An ordinary cuFFT half run must not
+be reported as a Tensor Core FFT.
+
+The authors' RTX 5090 batched-SGEMM study is another useful dispatch warning:
+in its tested matrix shapes and software stack, cuBLAS selected a small SIMT
+kernel that left substantial FMA capacity unused, while a tailored schedule
+improved those batches. That finding motivates checking actual shapes and
+library dispatch before declaring a device limit; it does not establish that a
+custom kernel improves this modem, whose packing, arrival coverage, FFT
+fallbacks and receiver work must be measured as a whole.
+
+Current C++ qualification has separate evidence for these paths: same-run
+CUPTI capture tied the executed half-cuFFT calls to loaded `__half` symbols, and
+SM120 cubin inspection found packed half arithmetic opcodes in those functions.
+This proves the selected implementation contains genuine half arithmetic; it
+does not quantify dynamic instruction issue or Tensor Core utilization. The
+matrix path separately traces cuBLASLt HMMA/IMMA-compatible kernel families.
+The current automatic half-cuFFT scope extends through NFFT=2^20 under a
+work-volume, arrival, conditioning, memory and fail-closed dispatch gate; it is
+not limited to the earlier NFFT=131072 fixture. Current costs, automatic
+guards, fallback rules and measurement limits are in
+[the validation record](validation.md#current-cuda-precision-and-tensor-dispatch).
+
+Sources: [NVIDIA compute capabilities](https://developer.nvidia.com/cuda-gpus),
+[CUDA programming guide](https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/compute-capabilities.html),
+[cuBLASLt implementation flags](https://docs.nvidia.com/cuda/archive/12.8.1/cublas/index.html#cublasltnumericalimplflags-t),
+[cuFFT half-precision limitations](https://docs.nvidia.com/cuda/archive/12.8.1/cufft/index.html#half-precision-cufft-transforms),
+[tcFFT paper](https://arxiv.org/abs/2104.11471) and
+[implementation](https://github.com/rox906/tcFFT),
+[RTX 5090 SGEMM dispatch study](https://labs.cloudrift.ai/research/beating-cublas-on-rtx-5090),
+[AMD ROCm GPU specifications](https://rocm.docs.amd.com/en/latest/reference/gpu-specs.html),
+[rocWMMA support](https://rocm.docs.amd.com/projects/rocWMMA/en/latest/install/installation.html),
+[Intel Core i9-9900K specifications](https://www.intel.com/content/www/us/en/products/sku/186605/intel-core-i99900k-processor-16m-cache-up-to-5-00-ghz/specifications.html),
+and [Intel legacy GPU support](https://dgpu-docs.intel.com/overview/supported-hardware/legacy-gpus.html).
+
 ## Verified Git history inventory
 
 The 10 November 2026 audit searched the 757 locally reachable commits

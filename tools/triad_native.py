@@ -137,6 +137,7 @@ def runtime_identity(receipt):
     else:
         runtime["bulk"] = {name: bulk.get(name) for name in (
             "device", "device_name", "library_version", "cuda_runtime_version", "cuda_driver_version",
+            "cuda_fft_version",
             "cuda_blas_version", "cuda_compute_major", "cuda_compute_minor",
             "cuda", "numerical_threads", "precision", "requested_coarse_math", "workspace_limit_bytes", "total_device_bytes",
             "fft_plan_cache_limit", "selection_reason",
@@ -243,7 +244,10 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                 "requested_tensor_coarse_math", "requested_native_coarse_precision")):
             raise ProbeError("Complete native receipt lacks compiler or arithmetic identity")
         coarse_math = identity["requested_tensor_coarse_math"]
-        if coarse_math not in ("fft", "fp16", "int8") or (backend == "cpu" and coarse_math != "fft"):
+        if (coarse_math not in ("fft", "fp16", "int8", "fp16-fft")
+                or (backend == "cpu" and coarse_math != "fft")
+                or (coarse_math == "fp16-fft" and backend != "cuda")
+                or (backend == "gpu" and coarse_math != "fft")):
             raise ProbeError("Complete native receipt has unsupported coarse arithmetic")
         if type(identity.get("configured_tensor_backend")) is not bool:
             raise ProbeError("Complete native receipt lacks the build backend configuration")
@@ -363,6 +367,44 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                     or not projected or not valid_operations
                     or (backend == "gpu" and not (actual_gpu_fine or recognized_native_fine))):
                 raise ProbeError("Complete CUDA receipt does not prove the required coarse and fine accelerator work")
+            if backend == "cuda" and coarse_math == "fp16-fft":
+                score_rows = positive_int(accelerator.get("score_rows"), "CUDA scored rows")
+                half_score_rows = positive_int(accelerator.get("cuda_half_fft_score_rows"),
+                                               "CUDA half-FFT scored rows", allow_zero=True)
+                forward_ffts = positive_int(accelerator.get("cuda_half_fft_forward_ffts"),
+                                            "CUDA half-FFT forward transforms", allow_zero=True)
+                inverse_ffts = positive_int(accelerator.get("cuda_half_fft_inverse_ffts"),
+                                            "CUDA half-FFT inverse transforms", allow_zero=True)
+                positive_int(accelerator.get("cuda_fft_version"), "CUDA cuFFT version")
+                positive_int(accelerator.get("cuda_half_fft_padded_ffts"),
+                             "CUDA half-FFT padded transforms", allow_zero=True)
+                for key, label in (("cuda_half_fft_peak_bank_bytes", "CUDA half-FFT bank peak"),
+                                   ("cuda_half_fft_peak_workspace_bytes", "CUDA half-FFT workspace peak"),
+                                   ("cuda_half_fft_peak_phase_bytes", "CUDA half-FFT phase peak")):
+                    positive_int(accelerator.get(key), label, allow_zero=True)
+                plan_seconds = accelerator.get("cuda_half_fft_plan_seconds")
+                fallbacks = accelerator.get("half_fft_fallback_counts")
+                expected_fallbacks = {"cpu-device", "fp64-stage", "lag-group-route",
+                                      "unsupported-plan", "workspace-limit", "fp32-minimum",
+                                      "unqualified-hardware", "unqualified-shape",
+                                      "ill-conditioned-template", "plan-allocation", "allocator-limit"}
+                if (type(score_rows) is not int or score_rows <= 0
+                        or half_score_rows != score_rows or forward_ffts <= 0 or inverse_ffts <= 0
+                        or not isinstance(plan_seconds, (int, float)) or not math.isfinite(plan_seconds)
+                        or plan_seconds < 0
+                        or not isinstance(fallbacks, dict) or set(fallbacks) != expected_fallbacks
+                        or any(type(count) is not int or count < 0 for count in fallbacks.values())):
+                    raise ProbeError("Explicit CUDA fp16-fft receipt lacks complete actual half-transform scores")
+                reason_observed = any(
+                    isinstance(phase.get("work"), dict)
+                    and phase["work"].get("precision_reason") == "cuda-fp16-frequency-fft"
+                    and phase["work"].get("fft_precision") == "fp16_fft_fp64_coordinates_and_reductions"
+                    and isinstance(phase["work"].get("bulk"), dict)
+                    and phase["work"]["bulk"].get("precision") ==
+                        "fp16_fft_fp64_coordinates_and_reductions"
+                    for phase in receipt["phases"] if phase.get("name") in ("coarse_prepare", "coarse_tiles"))
+                if not reason_observed:
+                    raise ProbeError("Explicit CUDA fp16-fft receipt lacks its selected coarse precision reason")
         require_accelerator = expected_require_accelerator
         if require_accelerator is None:
             require_accelerator = identity.get("require_accelerator") is True

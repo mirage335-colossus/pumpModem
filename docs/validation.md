@@ -62,13 +62,16 @@ paired descriptive measurements, not capacity passes or confidence intervals.
 
 The first all-CUDA candidate exposed many small fine dispatches. It completed
 the broad backlog in 8.0367 s CPU / 2.5076 s GPU, but the long backlog took
-16.5915 s CPU / 25.2777 s GPU. The qualified follow-up uses native fine work
-only for automatic CUDA when public maximum block rows ≤512, projected modes
-≤40, one tap, AVX2 and admitted worker share ≥32; larger blocks, multiple taps
-and smaller worker shares retain CUDA fine. This bounded stage-routing candidate
-improves the broad measurements while the long case remains slightly slower.
-The result therefore supports the scoped automatic route, not a claim that GPU
-selection accelerates every geometry.
+16.5915 s CPU / 25.2777 s GPU. The 11 November 2026 timing checkpoint's
+qualified follow-up used native fine work only for automatic CUDA when public
+maximum block rows ≤512, projected modes ≤40, one tap, AVX2 and admitted worker
+share ≥32; larger blocks, multiple taps and smaller worker shares retained CUDA
+fine. This bounded stage-routing candidate improves the broad measurements
+while the long case remains slightly slower. Its guard is historical and was
+superseded by the current 1024-row/26-worker route recorded in
+[current CUDA precision and Tensor dispatch](validation.md#current-cuda-precision-and-tensor-dispatch).
+The result therefore supports the earlier scoped automatic route, not a claim
+that GPU selection accelerates every geometry.
 
 The timing candidate checks bind probe hash
 `b19a5e4ddb29b3d064a2bdedf2d5932c9cb3c8ed4aa1d608af8e4194231755d` and source
@@ -1024,9 +1027,14 @@ and [ten CPU groups](triad-performance.md#earlier-cpu-implementations-worth-reco
 The canonical C++/CUDA implementation adds optional post-channelization FP16
 and INT8 lag matrices, bounded workspace/arrival batching, exact
 descriptor reuse, shared Gaussian transition preparation and an exact CUDA
-arrival-peak frontier. The full FFT
-search remains the default. Implementation does not transfer historical
-performance or qualify complete-receiver capacity; see the
+arrival-peak frontier, plus a guarded automatic half-cuFFT arithmetic route for
+qualifying broad searches. The FFT remains the search algorithm; the separately
+bounded dense lag-matrix candidates do not replace it automatically while the
+INT8 rule was being qualified at this earlier checkpoint; the later bounded
+automatic candidate result appears in
+[current CUDA precision and Tensor dispatch](validation.md#current-cuda-precision-and-tensor-dispatch).
+Implementation does not
+transfer historical performance or qualify complete-receiver capacity; see the
 [precision contract](gpu-precision-controls.md#stage-boundaries-and-optional-matrix-processing).
 
 The ordinary baseline triad group passed 32/32. The pre-tail-repair checkpoint passes:
@@ -1231,6 +1239,207 @@ remain until the claim is superseded or its remaining question is resolved.
 Changed matrix work is not mapped
 onto the existing CPU FFT forecast; no current matrix or preparation result
 qualifies complete-receiver nominal/conservative service or real-time capacity.
+
+## Current CUDA precision and Tensor dispatch
+
+The current C++ CUDA receiver adds guarded native half-cuFFT for broad
+post-channelization frequency search on SM89 and SM120. Automatic selection
+requires NFFT 4096–2^20, at least two arrivals, a double-precision
+template-Gram minimum-eigenvalue ratio of at least 1/16, and
+`NFFT × admitted_frequency_tile × min(W, 8) × taps ≥ 2^19`, plus successful
+plan and full-workspace admission. This cost gate replaces earlier fixture-only
+NFFT=131072/F≥32 caps. It scales and packs isolated spectra and
+templates; FP64 scoring and persistent state remain. Before batch commitment,
+a failed guard, plan or full-rectangle allocation admission selects the full
+FP32 FFT route. After batch commitment, arithmetic-flag or CUDA failures fail
+closed before publishing results; they do not retry with FP32 or retain an
+unquantized host bank. A post-dispatch OOM remains an explicit failure. This is
+cuFFT half arithmetic, not a Tensor Core FFT. Exact power-of-two energy scaling
+is a checked input/range guard; it does not prove cuFFT's internal rounding
+behavior.
+
+The final bounded half-scope extension is source-bound to backend SHA-256
+`5e72324c3a81ece99ed5aa91a7b2f2cc794b5fe2f7b413d2d0927f4f6a90cb45` and test
+SHA-256 `60fca3b8e3ce69a36bee13e006203b181150f2bb60627c81f64110e7df6d3eaa`.
+The compiled source manifest is
+`53c40bf182aba4123762448b87e7c1aba654d72712461c966bf5a685973709c6`. The
+RTX PRO 6000 probe binary is
+`62ed656aaffb320cff75ff1fa89fd06ce34297d7baab99fe4e77946e1519a9b6`; the
+RTX 4090 probe binary is
+`05fd473e37704d92227f91a09b2f1cbfc0997d98c122c2c45877999b94252a3b`.
+The wider transform/work-volume gate removes the previous fixture-only caps;
+it is still subject to the Gram, plan, memory and fail-closed dispatch rules
+above.
+
+| Matched geometry (same inputs; complete scores) | Coarse active/noise FP32 → half | Charged workspace FP32 → half | Actual live peak FP32 → half | Decision |
+| --- | ---: | ---: | ---: | --- |
+| RTX PRO 6000; N=262144, K=169275, F=137, A=2, W=26; 7,124 scores | 1.73590/1.63881 → 1.60634/1.63448 s | 15.143 → 1.163 GB | 3.443 → 1.163 GB | Same bit 0 / quiet outcome |
+| RTX PRO 6000; N=131072, F=8, A=2, W=26; 416 score rows | 1.59403/1.53190 → 1.53945/1.60851 s | 1.934 → 0.166 GB | 471.77 → 166.38 MB | Same paired decisions |
+
+The automatic PRO 6000 receiver also exercised N=262144 active input across
+7,124 half-FFT score rows and N=131072 noise input across 416 half-FFT score
+rows. Both receipts had zero half-FFT fallbacks, matching decisions between
+the FP32 and half CUDA routes on identical inputs, and complete work evidence.
+Raw inputs, commands and receipts are retained under
+`local-evidence/tensor-auto-policy/half-scope/`.
+`local-evidence/tensor-auto-policy/half-scope/`.
+
+The 262144 transform has mixed active/noise timing, while both geometries cut
+the charged workspace substantially. These are paired observations, not a
+throughput distribution or proof that half is faster on every case. A first
+Fs=1500 Hz setup represented a 670-second configured signal. Its measured
+phases totaled about 4.1 seconds before hitting the unchanged 30-million
+raw-template-sample cap, before coarse processing. The corrected Fs=750 Hz
+case retained the intended 250 Hz projected span and completed; the failed
+setup remains recorded and is not benchmark evidence.
+
+A dense N=2^20 component ran on both the RTX PRO 6000 and RTX 4090. The measured
+relative RMS error was 0.0022467 on each, and relevant subnormal values were
+preserved in that component. A conservative bound for worst additive subnormal
+contribution at this maximum transform is about 0.14% in L2 norm. Neither this
+component nor the analytical bound establishes near-threshold receiver
+sensitivity or an allowable dB loss; receiver decisions and paired signal/noise
+evidence remain the relevant gates.
+
+Same-run CUPTI resource-callback capture identified the loaded half-cuFFT
+symbols `vector_fft4096(__half)` and `regular_fft_factor256(__half)` in the
+executed kernels. `cuobjdump` of those loaded SM120 cubins found HADD2/HFMA2/
+HMUL2 instructions in both functions (97/178/72 in the vector function and
+64/150/95 in the factor function, respectively), alongside minor FP32
+instructions. These are static opcodes in captured executing functions, not
+dynamic instruction counts, utilization, or a claim of Tensor Core execution.
+Hardware counter collection remains unavailable under the provider's
+`ERR_NVGPUCTRPERM` restriction; no permission bypass was attempted. The
+evidence and exact commands are retained in
+`local-evidence/tensor-auto-policy/cuda-half-instructions.txt`.
+
+On a full RTX PRO 6000 Blackwell, a matched 63 MiB-admission broad coarse case
+scored all 98,465,484 public scores and completed every physical quiet slot.
+FP32-to-half coarse time was 340.82 to 213.36 ms (1.597x); charged workspace
+fell from 54.05 to 35.53 MB. Actual allocator live peak increased from 8.45 to
+16.05 MB because half admitted a larger batch. This distinction matters: the
+workspace bound improved while realized allocation increased. In the broad
+search receipts, half coarse totals on PRO 6000 were 0.3387/0.2883 s to
+0.2691/0.2668 s (active/noise), and on RTX 4090 were 0.2053/0.2050 s to
+0.1939/0.1893 s. Peak reserved memory fell about 63.4%; actual allocator peak
+live fell about 32% in that different batch configuration. These are bounded
+single paired observations, not a throughput distribution.
+
+Long two-tap NFFT=131072, K=86072, F=70, A=2 retained all coarse work with a
+candidate/baseline timing ratio of 0.979 (about 1.55 s, effectively neutral in
+this one pair). Reserved workspace fell from 7.57 GB to 581.7 MB; actual live
+peak fell from 1.72 GB to 581.6 MB. This qualifies substantial workspace
+capacity for this geometry, not a long-transform speedup. In a matched
+63 MiB-complete-message stream, automatic CUDA elapsed 1.79235 s FP32 versus
+1.80531 s with half (0.72% slower); the predeclared ready eight-slot interval
+improved 0.54196 to 0.48879 s (1.109x), and the fresh five-slot interval
+0.47687 to 0.43092 s (1.107x). All physical decisions matched. The complete
+stream result rules out claiming a universal whole-receiver improvement; the
+interval-specific result and saved workspace remain relevant to backlog and
+admission.
+
+Sensitivity spot checks used four independent paired seeds per level and
+verified identical input hashes, per-slot decisions, and physical completion.
+At 6 dB-Hz both arithmetic paths failed all four expected-message cases; at
+7.5 dB-Hz each succeeded on two of four. A separate INT8 near-threshold set at
+−9 dB-Hz used four seeds on both the PRO 6000 and RTX 4090: FP32 and automatic
+INT8 each completed one expected message and failed three. Every paired slot
+decision matched on the identical input, complete work was valid, and the
+receipt recorded zero unwitnessed IMMA calls. These bounded samples found no
+differential decision failures; they are not a sensitivity-loss estimate or
+evidence of zero dB loss. Longer messages, broader channels and independent
+holdouts remain unqualified.
+
+Preparation and Tensor dispatch also changed. Prepared right-hand operands and
+cuBLASLt reduced the measured full-stage matrix cost relative to the earlier
+matrix route and reduced reserved rectangles. For K=2711, F=213, A=71, W=78
+(1,179,594 scores), one active/noise pair of full-stage totals
+(`coarse_prepare` + every `coarse_tile` + `coarse_selection`) was: FP16
+0.407/0.372 s baseline, 0.345/0.325 s with prepared B, and 0.328/0.308 s
+with cuBLASLt; INT8 was 0.306/0.336 s, 0.270/0.276 s and 0.251/0.263 s,
+respectively. Reserved peak rectangles fell from about 1.07 GB to 183 MB
+(FP16) / 178 MB (INT8); actual allocator peak-live stayed about 121–126 MB.
+This is one active/noise pair per stage and arithmetic, not a timing
+distribution or whole-receiver result. The paired kernel trace reported
+executed HMMA-compatible FP16 and IMMA-compatible INT8 cuBLASLt kernel families;
+this is matrix-contraction evidence, not an FFT or complete-receiver result.
+Same-run CUPTI capture of the cuBLASLt INT8 call identified its loaded
+`cutlass_80_tensorop_i16832gemm_s8_128x64_64x6_tn_align16` SM120 cubin;
+`cuobjdump` found 32 static IMMA opcodes in that 1,216-instruction function.
+This proves packed integer matrix instructions exist in the captured function,
+not their dynamic count or utilization. The capture is retained in
+`local-evidence/tensor-auto-policy/cuda-int8-instructions.txt`. External
+instruction/counter profiling is still denied as noted above. The current
+automatic INT8 structural candidate uses padded matrix cost ≤30 paired-FFT row
+stages, one complete grouping, one tap, K≤8192, F=8–256, at least 1664 main
+complex rows, tile width ≥26 and A≥32, with shared cuBLASLt state. The F≥8 entry
+is the current source condition; for low F the planner may choose a larger
+frequency grouping. The 1664-row floor avoids packing overhead on undersized
+contractions. A complete matrix rectangle lease is required before dispatch;
+insufficient pre-commit admission retains the FFT. The accepted failure-
+recovery repair fails closed after dispatch on invalid arithmetic flags or CUDA
+faults before publishing a batch; there is no host unquantized retry.
+
+Automatic INT8 receiver results support its use as a bounded coarse-speed
+candidate but show mixed full-service costs. In the complete-message check, the
+PRO 6000 took 8.243806 s with FP32 FFT and 8.247843 s with automatic INT8; the
+RTX 4090 took 7.042574 s and 6.846154 s. In the 25-slot backlog, PRO 6000 total
+time improved 38.145562→37.484921 s and its ready interval 12.63247→12.39032 s;
+RTX 4090 total time regressed 34.698003→35.900528 s (3.47%), while its ready
+interval improved 11.55376→11.47646 s. Summed coarse-stage time improved
+4.454590→3.690055 s on PRO 6000 and 4.886528→4.398459 s on RTX 4090. The
+IF450/F192 holdout improved 8.31166→8.237773 s and 7.687852→7.527696 s,
+respectively. These brief measurements show a real coarse-stage benefit but no
+uniform whole-stream gain; the 4090 backlog regression must remain visible.
+
+Matrix workspace is a material cost, not a saving against FFT. With three
+owners, reserved/live peaks were 533/364 MB versus 107/20 MB for FFT on the
+PRO 6000, and 438/222 MB versus 107/20 MB on the RTX 4090. Therefore the
+automatic route must obtain the complete rectangle lease before dispatch and
+keep the FFT when admission fails. The current correctness run passed the
+repaired route checks, but these samples do not establish sustained capacity or
+population sensitivity. Separately, the
+AVX2 CPU fine route now admits up to 1024 rows for one-tap, at-most-40-mode
+geometry when at least 26 workers are admitted. In sampled 750- and 1023-row
+fine clears, CPU was about 4–6x faster than the GPU. That measured route is
+geometry-conditional and does not change the full `W=2*H` worker budget.
+
+Final PRO 6000 CI passed six tests, recorded in
+`local-evidence/tensor-auto-policy/final-pro-receipt.log`. On the RTX 4090,
+an earlier six-test CUDA CI group passed before the final half-scope extension,
+as recorded in `local-evidence/tensor-auto-policy/cuda-ci-4090.log`. For the
+final source, two arithmetic checks (automatic and half-FFT) passed in
+`half-scope-build-4090.log`, and three freshly relinked GUI checks passed in
+`half-scope-gui-4090.log`. Two GUI test names overlap between those runs, so
+there are five unique final-source tests. The build log's two GUI checks used
+stale binaries and are not counted as final-source tests.
+The separate `final-4090-receipt.log` records the dense half-FFT check and
+binary hash, not those arithmetic/GUI suites. Earlier local triad, GUI, Python,
+and bundle groups passed 33, 29, 42, and 10 checks. The final incremental
+CPU-only LibTorch guard-source library, probe and test-executable build passed;
+no runtime probe was run for this source increment. Earlier CPU-only LibTorch
+and native probe functional checks passed, but the broader groups were not
+rerun. These functional checks support the route and failure behavior; they do
+not strengthen the limited timing or sensitivity sample counts above. Backend,
+test, source-manifest and per-device binary hashes are bound above.
+
+Both RunPod pods were fully terminated and verified at 21:43 UTC; neither left
+a persistent volume. Cleanup removed obsolete local source bundles, copied
+source and raw campaign outputs. Remote build/profile artifacts were deleted
+with the pods; useful local build caches remain. Retain the matched receiver
+receipts, declared strata, compact half/INT8 instruction captures and final CI
+receipts only while they support current source/input matching or unresolved
+near-threshold claims; delete them when those claims are superseded or resolved.
+No cloud cleanup remains.
+
+All GPU timings above include the affected search stages as specified in the
+receipts; complete-stream timings include physical quiet-slot completion.
+These are brief bounded cases, not sustained backlog/capacity qualification or
+a population sensitivity result. The remaining
+`local-evidence/tensor-auto-policy/` receipts serve source/input matching,
+retained failures and instruction inspection. Remove them when their current
+qualification or unresolved-claim purpose ends. Current NVIDIA dispatch distinctions and sources are
+summarized in [hardware/library dispatch](triad-gpu-optimization.md#hardware-and-library-dispatch).
 
 ## Native throughput and precision investigation
 

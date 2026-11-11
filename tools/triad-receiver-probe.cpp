@@ -79,6 +79,7 @@ struct Options {
     std::string command, scenario, backend = "cpu", stratum = "active", tensor_precision = "automatic";
     std::string tensor_coarse_math = "fft";
     std::string vulkan_precision = "automatic";
+    bool gpu_fp32_minimum = false;
     std::string native_coarse_precision = "automatic";
     std::string base = "exact-fixture", shift = "exact-fixture";
     std::string spread = "none", selective = "off", timing = "fixture";
@@ -170,6 +171,8 @@ Options parse(int argc, char** argv) {
     assign("--tensor-precision", o.tensor_precision);
     assign("--tensor-coarse-math", o.tensor_coarse_math);
     assign("--vulkan-precision", o.vulkan_precision);
+    const bool gpu_fp32_minimum_supplied = values.contains("--gpu-fp32-minimum");
+    assign("--gpu-fp32-minimum", o.gpu_fp32_minimum);
     assign("--native-coarse-precision", o.native_coarse_precision);
     assign("--require-accelerator", o.require_accelerator);
     const bool device_index_supplied = values.contains("--device-index");
@@ -244,11 +247,14 @@ Options parse(int argc, char** argv) {
     if (!values.empty()) throw Error("Unknown native probe option " + std::string(values.begin()->first));
     require(one_of(o.backend, {"cpu", "tensor-cpu", "cuda", "vulkan", "gpu"}), "Unknown native probe backend");
     require(one_of(o.tensor_precision, {"automatic", "fp64"}), "Unknown tensor precision");
-    require(one_of(o.tensor_coarse_math, {"fft", "fp16", "int8"}), "Unknown tensor coarse arithmetic");
+    require(one_of(o.tensor_coarse_math, {"fft", "fp16", "int8", "fp16-fft"}),
+            "Unknown tensor coarse arithmetic");
     require(one_of(o.vulkan_precision, {"automatic", "fp32", "fp16-storage", "direct-fp32",
                                        "direct-fp16-storage", "direct-fp16"}) &&
             (o.backend == "vulkan" || o.backend == "gpu" || o.vulkan_precision == "automatic"),
             "Invalid Vulkan precision policy or backend");
+    require(!gpu_fp32_minimum_supplied || o.backend == "gpu",
+            "--gpu-fp32-minimum is valid only with --backend gpu");
     require(one_of(o.native_coarse_precision, {"automatic", "fp32", "fp64", "q15"}),
             "--native-coarse-precision expects automatic, fp32, fp64 or q15");
     require(one_of(o.stratum, {"active", "noise", "cold-maximum", "terminal", "erasure"}),
@@ -275,6 +281,8 @@ Options parse(int argc, char** argv) {
             o.tensor_precision == "automatic" && o.tensor_coarse_math == "fft" &&
             o.vulkan_precision == "automatic"),
             "Automatic GPU selection does not accept pinned device, workspace or backend arithmetic overrides");
+    require(o.tensor_coarse_math != "fp16-fft" || o.backend == "cuda",
+            "fp16-fft requires explicit --backend cuda");
     require(o.native_coarse_precision == "automatic" || o.backend == "cpu",
             "Native coarse precision overrides require --backend cpu");
     return o;
@@ -574,12 +582,16 @@ Json bulk_json(const BulkReceipt& r) {
     Json::Object fallbacks;
     for (std::size_t i = 0; i < r.direct_fallback_counts.size(); ++i)
         fallbacks.emplace(std::string(bulk_direct_fallback_reasons[i]), r.direct_fallback_counts[i]);
+    Json::Object half_fft_fallbacks;
+    for (std::size_t i = 0; i < r.half_fft_fallback_counts.size(); ++i)
+        half_fft_fallbacks.emplace(std::string(bulk_half_fft_fallback_reasons[i]), r.half_fft_fallback_counts[i]);
     Json::Object matrix_fallbacks;
     for (std::size_t i = 0; i < r.matrix_fft_fallback_counts.size(); ++i)
         matrix_fallbacks.emplace(std::string(bulk_matrix_fallback_reasons[i]), r.matrix_fft_fallback_counts[i]);
     return object({
         {"device", r.device}, {"device_name", r.device_name}, {"library_version", r.library_version},
         {"cuda_runtime_version", r.cuda_runtime_version}, {"cuda_driver_version", r.cuda_driver_version},
+        {"cuda_fft_version", r.cuda_fft_version},
         {"cuda_blas_version", r.cuda_blas_version},
         {"cuda_compute_major", r.cuda_compute_major}, {"cuda_compute_minor", r.cuda_compute_minor},
         {"numerical_threads", r.numerical_threads},
@@ -603,6 +615,15 @@ Json bulk_json(const BulkReceipt& r) {
         {"fir_output_contributions", r.fir_output_contributions}, {"score_rows", r.score_rows},
         {"cuda_arrival_peak_rows", r.cuda_arrival_peak_rows},
         {"cuda_arrival_peak_values", r.cuda_arrival_peak_values},
+        {"cuda_half_fft_forward_ffts", r.cuda_half_fft_forward_ffts},
+        {"cuda_half_fft_inverse_ffts", r.cuda_half_fft_inverse_ffts},
+        {"cuda_half_fft_padded_ffts", r.cuda_half_fft_padded_ffts},
+        {"cuda_half_fft_score_rows", r.cuda_half_fft_score_rows},
+        {"cuda_half_fft_peak_bank_bytes", r.cuda_half_fft_peak_bank_bytes},
+        {"cuda_half_fft_peak_workspace_bytes", r.cuda_half_fft_peak_workspace_bytes},
+        {"cuda_half_fft_peak_phase_bytes", r.cuda_half_fft_peak_phase_bytes},
+        {"cuda_half_fft_plan_seconds", r.cuda_half_fft_plan_seconds},
+        {"half_fft_fallback_counts", std::move(half_fft_fallbacks)},
         {"vulkan", r.vulkan}, {"vulkan_api_version", r.vulkan_api_version},
         {"vulkan_driver_version", r.vulkan_driver_version}, {"vulkan_vendor_id", r.vulkan_vendor_id},
         {"vulkan_device_id", r.vulkan_device_id}, {"vulkan_subgroup_size", r.vulkan_subgroup_size},
@@ -642,8 +663,15 @@ Json bulk_json(const BulkReceipt& r) {
         {"cuda_matrix_fp16_calls", r.cuda_matrix_fp16_calls},
         {"cuda_matrix_int8_calls", r.cuda_matrix_int8_calls},
         {"cuda_matrix_inner_chunks", r.cuda_matrix_inner_chunks},
+        {"cuda_matrix_lt_hmma_calls", r.cuda_matrix_lt_hmma_calls},
+        {"cuda_matrix_lt_imma_calls", r.cuda_matrix_lt_imma_calls},
+        {"cuda_matrix_unwitnessed_calls", r.cuda_matrix_unwitnessed_calls},
         {"cuda_matrix_padded_real_macs", r.cuda_matrix_padded_real_macs},
         {"cuda_matrix_packed_values", r.cuda_matrix_packed_values},
+        {"cuda_matrix_prepared_b_groups", r.cuda_matrix_prepared_b_groups},
+        {"cuda_matrix_prepared_b_bytes", r.cuda_matrix_prepared_b_bytes},
+        {"cuda_matrix_prepared_b_values", r.cuda_matrix_prepared_b_values},
+        {"cuda_matrix_prepared_b_uses", r.cuda_matrix_prepared_b_uses},
         {"cuda_matrix_output_values", r.cuda_matrix_output_values},
         {"cuda_matrix_maximum_rows", r.cuda_matrix_maximum_rows},
         {"cuda_matrix_maximum_columns", r.cuda_matrix_maximum_columns},
@@ -693,7 +721,7 @@ std::shared_ptr<ReceiverBulkBackend> selected_backend(const Options& o) {
         if (o.require_accelerator && (o.command == "codec" || o.work_only))
             throw Unavailable("GPU accelerator qualification requires a complete coarse-search workload");
         try {
-            return make_gpu_receiver_backend({o.vulkan_precision == "fp32"});
+            return make_gpu_receiver_backend({o.gpu_fp32_minimum});
         } catch (const GpuBackendUnavailable& error) {
             throw Unavailable(error.what());
         } catch (const TensorBackendUnavailable& error) {
@@ -709,8 +737,9 @@ std::shared_ptr<ReceiverBulkBackend> selected_backend(const Options& o) {
         return make_tensor_receiver_backend({o.backend == "cuda" ? TensorDevice::cuda : TensorDevice::cpu,
             o.device_index, o.device_memory_limit.value_or(256 * 1024 * 1024),
             o.tensor_precision == "fp64" ? TensorPrecision::fp64 : TensorPrecision::automatic,
-            o.tensor_coarse_math == "fp16" ? TensorCoarseMath::fp16 :
-                o.tensor_coarse_math == "int8" ? TensorCoarseMath::int8 : TensorCoarseMath::fft});
+            o.tensor_coarse_math == "fp16-fft" ? TensorCoarseMath::fp16_fft :
+                o.tensor_coarse_math == "fp16" ? TensorCoarseMath::fp16 :
+                    o.tensor_coarse_math == "int8" ? TensorCoarseMath::int8 : TensorCoarseMath::fft});
     } catch (const TensorBackendUnavailable& error) {
         throw Unavailable(error.what());
     }
@@ -964,7 +993,8 @@ Json coarse_json(const CoarseProgress& p) {
     return object({{"completed_tiles", p.completed_tiles}, {"planned_tiles", g.total_tiles},
         {"remaining_tiles", g.total_tiles - p.completed_tiles},
         {"tile_width", g.tile_width}, {"route", g.route == CoarseRoute::lag_groups ? "lag_groups" : "frequency_tiles"},
-        {"fft_precision", g.fft_precision}, {"precision_reason", g.precision_reason},
+        {"fft_precision", p.bulk && !p.bulk->precision.empty() ? p.bulk->precision : g.fft_precision},
+        {"precision_reason", g.precision_reason},
         {"minimum_eigenvalue_ratio", g.minimum_eigenvalue_ratio},
         {"observation_scale_exponent", g.observation_scale_exponent},
         {"scaled_template_workspaces", g.scaled_template_workspaces},
@@ -1820,8 +1850,9 @@ void help() {
     std::cout << "triad_receiver_probe describe|plan|slot|continuation|message|backlog|regression|codec [--flag value ...]\n"
         "  --backend cpu|tensor-cpu|cuda|vulkan|gpu --require-accelerator on|off --tensor-precision automatic|fp64\n"
         "  --native-coarse-precision automatic|fp32|fp64|q15 (Q15 spectral products require native AVX2)\n"
-        "  --tensor-coarse-math fft|fp16|int8 (post-channelization search; fallback is reported)\n"
+        "  --tensor-coarse-math fft|fp16|int8|fp16-fft (fp16/int8 matrices; fp16-fft is explicit CUDA FFT)\n"
         "  --vulkan-precision automatic|fp32|fp16-storage|direct-fp32|direct-fp16-storage|direct-fp16\n"
+        "  --gpu-fp32-minimum on|off (automatic GPU arithmetic floor; GPU backend only)\n"
         "  --device-index N --device-memory-limit-bytes N\n"
         "  --case hf|eme and the normalized manual-case options from triad_cases.py\n"
         "  --workers N --slot-owners N --memory-limit-bytes N --max-samples N --deadline-ms N\n"
@@ -1867,6 +1898,7 @@ void run(Json& report, const Options& o, std::stop_token stop) {
         : o.native_coarse_precision == "fp32" ? "native_fp32_coarse_products_with_fp64_guards"
         : "native_automatic_q15_or_fp32_coarse_products_with_fp64_guards";
     report["identity"]["require_accelerator"] = o.require_accelerator;
+    report["identity"]["requested_gpu_fp32_minimum"] = o.gpu_fp32_minimum;
     report["identity"]["requested_vulkan_precision"] = o.vulkan_precision;
     report["identity"]["requested_tensor_precision"] = o.tensor_precision;
     report["identity"]["requested_tensor_coarse_math"] = o.tensor_coarse_math;
