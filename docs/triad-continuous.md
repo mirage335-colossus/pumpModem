@@ -18,7 +18,8 @@ Whole-source exports and full-duration normalization/calibration are retired.
 
 Native `FineSession` retains Gaussian and timing state across bounded input
 continuations. Native `CoarseSession` exposes preparation, bounded search
-progress and completion from the same production coarse path. Probe prefixes
+progress and completion from the same production coarse path, and can acquire
+its frequency intervals while it prepares. Probe prefixes
 are diagnostics, not additional operational admission attempts. Observation
 endpoints, priors and permitted attempts remain explicit; incomplete input
 cannot be padded with fictitious observed zeros. Continuation does not reset
@@ -48,15 +49,15 @@ tracking remains distinct from physical-noise qualification.
 
 The native complete receiver separately maintains bounded ingress, independent
 slot ownership, ordered commit, quiet completion and continued listening. Slot
-roots and coarse/fine leaves share one lazy bounded executor; each owner keeps
+roots and Helper, coarse and fine leaves share one lazy bounded executor; each owner keeps
 its admitted scratch bound, and started idle stacks remain charged until close.
 Admission quotes the largest ready prefix at full-`W` scratch per owner,
 preferring balanced scratch only when its complete bound admits a strictly wider
 ready prefix. Ready leaves prioritize the oldest eligible public
 slot, and queued roots use otherwise unneeded lanes.
 Ingress backpressure waits for one completion before retry; EOF drains all
-accepted work. Standalone phase probes retain their local executor, so their
-timings alone do not qualify shared-pool throughput. Its
+accepted work. A standalone slot, coarse session or fine session owns a
+private instance of that executor, so its timings alone do not qualify shared-pool throughput. Its
 current scope and checks are in [validation](validation.md#native-codec-and-measurement-migration).
 
 The historical [continuous record](validation-data/triad-v3/2026-11-06-continuous/README.md)

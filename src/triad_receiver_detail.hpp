@@ -3,9 +3,18 @@
 #include "datapump/triad_receiver.hpp"
 #include "search_fft.hpp"
 
+#include <functional>
+#include <stop_token>
+
 namespace datapump::triad::v3::receiver_detail {
 
 struct FrequencyInterval { double lower_hz = 0, upper_hz = 0; };
+
+// A wave runs `count` independent indexed jobs, possibly at once on its
+// owner's lanes, and returns after all of them. Jobs must not throw for an
+// outcome their caller means to handle in index order.
+using LaneJob = std::function<void(std::size_t index, std::stop_token)>;
+using LaneWave = std::function<void(std::size_t count, const LaneJob&)>;
 
 struct AdmissionGrid {
     double lower, upper, clock_bound, frequency_step;

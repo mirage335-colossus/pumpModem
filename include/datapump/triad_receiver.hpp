@@ -91,6 +91,9 @@ struct ReceiverSlotScore {
     std::size_t affine_blocks = 0, adaptive_blocks = 0, adaptive_peak_states = 0;
     std::uint64_t adaptive_transition_edges = 0, basis_rows = 0;
     double helper_seconds = 0, coarse_seconds = 0, fine_seconds = 0;
+    // Helper acquisition ran beside coarse preparation: helper_seconds then
+    // lies inside coarse_seconds instead of preceding it.
+    bool helper_overlapped = false;
     std::string helper_status, reason;
 };
 
@@ -98,6 +101,11 @@ struct ReceiverSlotScore {
 // state. The stream controller supplies its admitted worker share and commits
 // these receipts in public order.
 std::size_t receiver_slot_workspace(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers);
+// The lease that also lets Helper acquisition run beside coarse preparation.
+// It is never below receiver_slot_workspace(), and equals it when no stage
+// can overlap or another stage already needs as much. A slot scored with at
+// least this limit overlaps; its decisions and evidence are identical.
+std::size_t receiver_slot_overlap_workspace(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers);
 ReceiverSlotScore score_receiver_slot(const ReceiverConfig&, const ReceiverSlotPlan&,
                                      const Crypto&, std::span<const Complex> iq,
                                      std::span<const std::uint8_t> valid, unsigned workers,

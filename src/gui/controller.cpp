@@ -1243,7 +1243,8 @@ struct Controller::Impl {
             text<<std::setprecision(4)<<" · affine ["<<step.bit_evidence[0]<<", "<<step.bit_evidence[1]
                 <<"] · evidence "<<step.operational_log_e<<" / "<<step.operational_threshold
                 <<" · quiet "<<step.quiet_energy<<" / "<<step.quiet_threshold<<" ("<<step.quiet_modes<<" modes)"
-                <<" · Helper/coarse/fine "<<step.helper_seconds<<" / "<<step.coarse_seconds<<" / "<<step.fine_seconds
+                <<" · Helper"<<(step.helper_overlapped?" (within coarse)":"")<<"/coarse/fine "
+                <<step.helper_seconds<<" / "<<step.coarse_seconds<<" / "<<step.fine_seconds
                 <<" s · "<<step.fine_candidates<<" candidates / "<<step.workers<<" workers"
                 <<" · adaptive diagnostic ["<<step.adaptive_bit_evidence[0]<<", "<<step.adaptive_bit_evidence[1]
                 <<"] · combined diagnostic ["<<step.combined_bit_evidence[0]<<", "<<step.combined_bit_evidence[1]<<"]";

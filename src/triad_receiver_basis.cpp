@@ -5,9 +5,9 @@
 #include <atomic>
 #include <cmath>
 #include <limits>
-#include <list>
 #include <map>
 #include <mutex>
+#include <shared_mutex>
 #include <numbers>
 #include <tuple>
 
@@ -55,9 +55,14 @@ void validate_shape(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
 struct MappedBasis::Impl {
     using Key = std::tuple<unsigned, unsigned, std::uint64_t>;
     using Tile = std::array<Complex, tile_samples>;
+    // Lookups hold the cache lock shared, so a lane preempted inside one
+    // cannot stall the others. Recency is a stamp instead of a list splice.
     struct Entry {
+        Entry(std::shared_ptr<const Tile> tile, std::uint64_t stamp) : data(std::move(tile)), used(stamp) {}
         std::shared_ptr<const Tile> data;
-        std::list<Key>::iterator order;
+        std::atomic<std::uint64_t> used;
+        // Filled ahead of its first request, which then accounts as the fill.
+        std::atomic<bool> ahead{false};
     };
     struct Sources {
         std::mutex mutex;
@@ -74,10 +79,13 @@ struct MappedBasis::Impl {
     std::uint64_t dense_samples;
     unsigned dense_factor = 1;
     std::array<Sources, owner_count> sources;
-    mutable std::mutex mutex;
-    std::list<Key> lru;
+    mutable std::shared_mutex mutex;
     std::map<Key, Entry> cache;
     MappedBasisReport statistics;
+    // Per-lookup and per-render receipts that need no exclusive lock.
+    std::atomic<std::uint64_t> recency{0}, cache_hits{0}, cache_misses{0};
+    std::atomic<std::uint64_t> calls{0}, interpolated_rows{0};
+    std::atomic<std::size_t> peak_pinned_tiles{0};
     std::atomic<unsigned> active{0};
 
     Impl(const ReceiverConfig& value, const ReceiverSlotPlan& plan, const Crypto& selected_key,
@@ -139,44 +147,41 @@ struct MappedBasis::Impl {
         pair = std::move(prepared);
     }
 
+    std::uint64_t stamp() { return recency.fetch_add(1, std::memory_order_relaxed)+1; }
+
+    // Caller holds the cache lock, shared or exclusive.
     std::shared_ptr<const Tile> find_locked(const Key& address) {
         const auto found = cache.find(address);
         if (found == cache.end()) return {};
-        lru.splice(lru.end(), lru, found->second.order);
-        ++statistics.cache_hits;
-        return found->second.data;
+        auto& entry = found->second;
+        entry.used.store(stamp(), std::memory_order_relaxed);
+        // A fill made ahead already counted this request's miss. Receipts
+        // therefore match on-demand filling of the same tiles.
+        if (!entry.ahead.load(std::memory_order_relaxed) || !entry.ahead.exchange(false, std::memory_order_relaxed))
+            cache_hits.fetch_add(1, std::memory_order_relaxed);
+        return entry.data;
     }
 
+    // Caller holds the cache lock exclusively.
     void insert_locked(const Key& address, std::shared_ptr<const Tile> data) {
-        if (const auto found = cache.find(address); found != cache.end()) {
-            lru.erase(found->second.order);
-            cache.erase(found);
-        }
+        cache.erase(address);
         while (cache.size() >= cache_limit/tile_bytes) {
-            cache.erase(lru.front());
-            lru.pop_front();
+            cache.erase(std::ranges::min_element(cache, {}, [](const auto& item) {
+                return item.second.used.load(std::memory_order_relaxed);
+            }));
             ++statistics.evictions;
         }
-        lru.push_back(address);
-        cache.emplace(address, Entry{std::move(data), std::prev(lru.end())});
+        cache.try_emplace(address, std::move(data), stamp());
         statistics.cache_bytes = cache.size()*tile_bytes;
         statistics.peak_cache_bytes = std::max(statistics.peak_cache_bytes, statistics.cache_bytes);
     }
 
-    std::shared_ptr<const Tile> tile(unsigned bit, unsigned epoch, std::uint64_t index,
+    // Caller holds this epoch's source lock and has counted the miss. Both
+    // bits enter the cache together. `ahead` marks the requested bit when no
+    // render is waiting for it; otherwise that bit becomes the latest use.
+    std::shared_ptr<const Tile> fill(unsigned bit, unsigned epoch, std::uint64_t index, bool ahead,
                                      std::stop_token stop) {
         const Key address{bit, epoch, index};
-        {
-            std::lock_guard lock(mutex);
-            if (auto found = find_locked(address)) return found;
-        }
-        std::lock_guard source_lock(sources[epoch].mutex);
-        cancelled(stop);
-        {
-            std::lock_guard lock(mutex);
-            if (auto found = find_locked(address)) return found;
-            ++statistics.cache_misses;
-        }
         prepare_sources(epoch);
         require(index <= UINT64_MAX/tile_samples, "mapped basis tile address overflow");
         const auto begin = index*tile_samples;
@@ -200,10 +205,74 @@ struct MappedBasis::Impl {
         for (unsigned b = 0; b != 2; ++b) insert_locked({b, epoch, index}, values[b]);
         ++statistics.native_preparation_calls;
         statistics.native_preparation_samples += 2*count;
-        // The requested bit is the latest use, just as in the Python cache.
         const auto found = cache.find(address);
-        lru.splice(lru.end(), lru, found->second.order);
+        if (ahead) found->second.ahead.store(true, std::memory_order_relaxed);
+        // The requested bit is the latest use, just as in the Python cache.
+        else found->second.used.store(stamp(), std::memory_order_relaxed);
         return found->second.data;
+    }
+
+    std::shared_ptr<const Tile> tile(unsigned bit, unsigned epoch, std::uint64_t index,
+                                     std::stop_token stop) {
+        const Key address{bit, epoch, index};
+        {
+            std::shared_lock lock(mutex);
+            if (auto found = find_locked(address)) return found;
+        }
+        std::lock_guard source_lock(sources[epoch].mutex);
+        cancelled(stop);
+        {
+            std::shared_lock lock(mutex);
+            if (auto found = find_locked(address)) return found;
+        }
+        cache_misses.fetch_add(1, std::memory_order_relaxed);
+        return fill(bit, epoch, index, false, stop);
+    }
+
+    // Pins a render group's tiles in bit-major order. One cache lock serves
+    // every tile already present; a missing tile takes the filling path.
+    void pin(unsigned first_bit, unsigned bits, unsigned epoch, std::uint64_t low, std::size_t count,
+             std::vector<std::shared_ptr<const Tile>>& pins, std::stop_token stop) {
+        const auto total = bits*count;
+        const auto address = [&](std::size_t item) {
+            return Key{first_bit+static_cast<unsigned>(item/count), epoch, low+item%count};
+        };
+        for (std::size_t next = 0; next != total;) {
+            {
+                std::shared_lock lock(mutex);
+                for (; next != total; ++next) {
+                    auto found = find_locked(address(next));
+                    if (!found) break;
+                    pins.push_back(std::move(found));
+                }
+            }
+            if (next == total) break;
+            const auto [bit, source, index] = address(next);
+            pins.push_back(tile(bit, source, index, stop));
+            ++next;
+        }
+    }
+
+    void note_pins(std::size_t pinned) {
+        for (auto peak = peak_pinned_tiles.load(std::memory_order_relaxed); pinned > peak &&
+             !peak_pinned_tiles.compare_exchange_weak(peak, pinned, std::memory_order_relaxed);) {}
+    }
+
+    // The fill a later render would otherwise wait for, with no lookup credit.
+    void fill_ahead(unsigned bit, unsigned epoch, std::uint64_t index, std::stop_token stop) {
+        const Key address{bit, epoch, index};
+        {
+            std::shared_lock lock(mutex);
+            if (cache.contains(address)) return;
+        }
+        std::lock_guard source_lock(sources[epoch].mutex);
+        cancelled(stop);
+        {
+            std::shared_lock lock(mutex);
+            if (cache.contains(address)) return;
+        }
+        cache_misses.fetch_add(1, std::memory_order_relaxed);
+        (void)fill(bit, epoch, index, true, stop);
     }
 
     void direct(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
@@ -240,7 +309,7 @@ struct MappedBasis::Impl {
     };
 
     Map mapping(const MappedBasisRow& row, const Tap& tap, std::uint64_t first,
-                std::span<const double> offsets) const {
+                double first_offset, double last_offset) const {
         Map map;
         const double scale = 1+row.clock_ppm*1e-6;
         const auto wide_scale = static_cast<long double>(scale);
@@ -249,8 +318,8 @@ struct MappedBasis::Impl {
         map.origin = std::floor(dense_origin);
         map.fraction = static_cast<double>(dense_origin-map.origin);
         map.scale = scale*dense_factor;
-        const double relative_first = offsets.front()*map.scale+map.fraction;
-        const double relative_last = offsets.back()*map.scale+map.fraction;
+        const double relative_first = first_offset*map.scale+map.fraction;
+        const double relative_last = last_offset*map.scale+map.fraction;
         const auto initial_time = static_cast<long double>(first)/config.sample_rate_hz;
         const auto difference = ((wide_scale-1)*first-wide_scale*shift)/config.sample_rate_hz;
         const std::array<long double, 3> phases{
@@ -278,8 +347,8 @@ struct MappedBasis::Impl {
         map.staging = count > maximum_pins;
         const auto origin = map.origin-static_cast<long double>(map.low_tile)*tile_samples;
         map.fallback = map.large_phase || map.staging || std::abs(relative_last) > 0x1p31 ||
-            std::abs(map.phase+map.phase_step*offsets.front()) > 0x1p30 ||
-            std::abs(map.phase+map.phase_step*offsets.back()) > 0x1p30 ||
+            std::abs(map.phase+map.phase_step*first_offset) > 0x1p30 ||
+            std::abs(map.phase+map.phase_step*last_offset) > 0x1p30 ||
             origin < static_cast<long double>(INT64_MIN) || origin > static_cast<long double>(INT64_MAX);
         if (map.fallback) map.fallback_reason = map.large_phase ? "large-phase" :
             map.staging ? "pinned-tile-limit" : "relative-map-range";
@@ -294,6 +363,17 @@ struct MappedBasis::Impl {
         require(std::isfinite(row.arrival_seconds) && std::isfinite(row.frequency_hz) &&
                 std::isfinite(row.clock_ppm) && row.clock_ppm > -1e6, "invalid mapped basis candidate");
         const auto epoch = source_index(row.epoch_offset_seconds);
+        // The receiver's own blocks use consecutive rows. Their bounds follow
+        // from the extent, with no per-row extended-precision proof.
+        bool consecutive = true;
+        for (std::size_t i = 0; i != offsets.size(); ++i) consecutive &= offsets[i] == static_cast<double>(i);
+        if (consecutive) {
+            require(offsets.size()-1 <= UINT64_MAX-first, "mapped basis offset outside bounded coordinates");
+            for (const auto& tap : taps)
+                require(std::isfinite(tap.delay_seconds) && tap.delay_seconds >= 0 && std::isfinite(tap.doppler_hz),
+                        "invalid mapped basis channel tap");
+            return epoch;
+        }
         long double previous = -1;
         for (const auto offset : offsets) {
             require(std::isfinite(offset) && offset >= 0 && offset <= 1048576 &&
@@ -314,10 +394,7 @@ struct MappedBasis::Impl {
         cancelled(stop);
         require(output.size() == 2*taps.size()*offsets.size(), "mapped basis output extent mismatch");
         const auto epoch = validate_request(row, taps, first, offsets);
-        {
-            std::lock_guard lock(mutex);
-            ++statistics.calls;
-        }
+        calls.fetch_add(1, std::memory_order_relaxed);
         if (!statistics.fallback_reason.empty() ||
                 (std::numeric_limits<long double>::digits < 64 && first > (UINT64_C(1)<<48))) {
             direct(row, taps, first, offsets, output, stop);
@@ -325,7 +402,7 @@ struct MappedBasis::Impl {
         }
         for (std::size_t t = 0; t != taps.size(); ++t) {
             cancelled(stop);
-            const auto map = mapping(row, taps[t], first, offsets);
+            const auto map = mapping(row, taps[t], first, offsets.front(), offsets.back());
             if (map.fallback) {
                 // Direct rendering is one bounded pair. Temporary output keeps
                 // the public [bit][tap][row] layout without aliasing other taps.
@@ -350,15 +427,13 @@ struct MappedBasis::Impl {
             for (unsigned begin = 0; begin != 2; begin += group) {
                 std::vector<std::shared_ptr<const Tile>> pins;
                 pins.reserve(group*map.count);
+                pin(begin, group, epoch, map.low_tile, map.count, pins, stop);
                 std::array<std::vector<const double*>, 2> tables;
                 std::array<TriadMappedRow, 2> rows;
                 for (unsigned b = 0; b != group; ++b) {
                     tables[b].reserve(map.count);
-                    for (std::size_t i = 0; i != map.count; ++i) {
-                        auto data = tile(begin+b, epoch, map.low_tile+i, stop);
-                        tables[b].push_back(reinterpret_cast<const double*>(data->data()));
-                        pins.push_back(std::move(data));
-                    }
+                    for (std::size_t i = 0; i != map.count; ++i)
+                        tables[b].push_back(reinterpret_cast<const double*>(pins[b*map.count+i]->data()));
                     rows[b] = {map.fraction, map.scale, map.phase, map.phase_step,
                         static_cast<std::int64_t>(map.origin-static_cast<long double>(map.low_tile)*tile_samples),
                         map.count, tables[b].data(),
@@ -367,13 +442,35 @@ struct MappedBasis::Impl {
                 cancelled(stop);
                 if (group == 2) triad_render_mapped_paired_v1(rows.data(), 1, offsets.data(), offsets.size(), tile_samples);
                 else triad_render_mapped_v1(rows.data(), 1, offsets.data(), offsets.size(), tile_samples);
-                std::lock_guard lock(mutex);
-                statistics.interpolated_rows += group;
-                statistics.peak_pinned_tiles = std::max(statistics.peak_pinned_tiles, pins.size());
+                interpolated_rows.fetch_add(group, std::memory_order_relaxed);
+                note_pins(pins.size());
             }
         }
-        for (const auto value : output)
-            require(std::isfinite(value.real()) && std::isfinite(value.imag()), "mapped basis produced nonfinite samples");
+        bool finite = true;
+        for (const auto value : output) finite &= std::isfinite(value.real()) & std::isfinite(value.imag());
+        require(finite, "mapped basis produced nonfinite samples");
+    }
+
+    // The tiles that render() pins for consecutive rows, and no others.
+    void prepare(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
+                 std::size_t rows, std::stop_token stop) {
+        cancelled(stop);
+        require(rows && rows <= maximum_rows && rows <= maximum_samples && !taps.empty() &&
+                taps.size() <= maximum_taps && rows-1 <= UINT64_MAX-first,
+                "mapped basis output extent mismatch");
+        require(std::isfinite(row.arrival_seconds) && std::isfinite(row.frequency_hz) &&
+                std::isfinite(row.clock_ppm) && row.clock_ppm > -1e6, "invalid mapped basis candidate");
+        const auto epoch = source_index(row.epoch_offset_seconds);
+        if (!statistics.fallback_reason.empty() ||
+                (std::numeric_limits<long double>::digits < 64 && first > (UINT64_C(1)<<48))) return;
+        for (const auto& tap : taps) {
+            require(std::isfinite(tap.delay_seconds) && tap.delay_seconds >= 0 && std::isfinite(tap.doppler_hz),
+                    "invalid mapped basis channel tap");
+            const auto map = mapping(row, tap, first, 0., static_cast<double>(rows-1));
+            if (map.fallback || map.empty) continue;
+            for (std::size_t i = 0; i != map.count; ++i)
+                for (unsigned bit = 0; bit != 2; ++bit) fill_ahead(bit, epoch, map.low_tile+i, stop);
+        }
     }
 
     void visit(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
@@ -381,9 +478,9 @@ struct MappedBasis::Impl {
         cancelled(stop);
         require(static_cast<bool>(sink), "mapped basis requires a synchronous mapping sink");
         const auto epoch = validate_request(row, taps, first, offsets);
+        calls.fetch_add(1, std::memory_order_relaxed);
         {
             std::lock_guard lock(mutex);
-            ++statistics.calls;
             ++statistics.prepared_calls;
         }
         auto fallback_reason = std::string_view(statistics.fallback_reason);
@@ -408,7 +505,7 @@ struct MappedBasis::Impl {
                 direct_columns(tap, fallback_reason);
                 continue;
             }
-            const auto map = mapping(row, taps[tap], first, offsets);
+            const auto map = mapping(row, taps[tap], first, offsets.front(), offsets.back());
             if (map.fallback) {
                 direct_columns(tap, map.fallback_reason);
                 std::lock_guard lock(mutex);
@@ -442,9 +539,9 @@ struct MappedBasis::Impl {
                 cancelled(stop);
                 sink(offsets, std::span<const BulkMappedColumn>(columns).first(group), {});
                 cancelled(stop);
+                note_pins(group*map.count);
                 std::lock_guard lock(mutex);
                 statistics.prepared_mapped_columns += group;
-                statistics.peak_pinned_tiles = std::max(statistics.peak_pinned_tiles, group*map.count);
             }
         }
     }
@@ -480,6 +577,14 @@ void MappedBasis::render_pair(const MappedBasisRow& row, std::span<const Tap> ta
     impl_->render(row, taps, first, offsets, output, stop);
 }
 
+void MappedBasis::prepare_pair(const MappedBasisRow& row, std::span<const Tap> taps,
+                               std::uint64_t first, std::size_t rows, std::stop_token stop) {
+    const auto before = impl_->active.fetch_add(1);
+    struct Release { std::atomic<unsigned>& active; ~Release() { active.fetch_sub(1); } } release{impl_->active};
+    require(before < impl_->workers, "mapped basis concurrency exceeds admitted worker share");
+    impl_->prepare(row, taps, first, rows, stop);
+}
+
 void MappedBasis::visit_pair(const MappedBasisRow& row, std::span<const Tap> taps,
                              std::uint64_t first, std::span<const double> offsets,
                              const BulkMappedSink& sink, std::stop_token stop) {
@@ -490,8 +595,14 @@ void MappedBasis::visit_pair(const MappedBasisRow& row, std::span<const Tap> tap
 }
 
 MappedBasisReport MappedBasis::report() const {
-    std::lock_guard lock(impl_->mutex);
-    return impl_->statistics;
+    std::shared_lock lock(impl_->mutex);
+    auto result = impl_->statistics;
+    result.cache_hits = impl_->cache_hits.load();
+    result.cache_misses = impl_->cache_misses.load();
+    result.calls = impl_->calls.load();
+    result.interpolated_rows = impl_->interpolated_rows.load();
+    result.peak_pinned_tiles = impl_->peak_pinned_tiles.load();
+    return result;
 }
 
 } // namespace datapump::triad::v3::receiver_detail

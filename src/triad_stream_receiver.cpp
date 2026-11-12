@@ -134,6 +134,8 @@ struct Work {
     ReceiverSlotPlan plan;
     unsigned workers = 0;
     std::size_t dsp = 0, input = 0, reserved = 0;
+    // Bytes of dsp and reserved beyond the sequential lease.
+    std::size_t overlap = 0;
 };
 
 struct Job {
@@ -201,7 +203,7 @@ struct CompleteStreamReceiver::Impl {
     Crypto key;
     StreamReceiverOptions options;
     StreamReceiverResources resources;
-    StreamWorkspace workspace;
+    StreamWorkspace workspace, overlap_workspace;
     StreamExecutorScorer scorer;
     StreamFootprint footprint;
     ContinuousMessageReceiver codec;
@@ -225,10 +227,11 @@ struct CompleteStreamReceiver::Impl {
 
     Impl(PublicProfile profile_value, ReceiverConfig config_value, Crypto key_value,
          StreamReceiverOptions stream, MessageDecoder decoder, MessageReceiverOptions message,
-         StreamWorkspace workspace_fn, StreamExecutorScorer score_fn, StreamFootprint footprint_fn)
+         StreamWorkspace workspace_fn, StreamExecutorScorer score_fn, StreamFootprint footprint_fn,
+         StreamWorkspace overlap_fn)
         : profile(std::move(profile_value)), config(std::move(config_value)), key(std::move(key_value)),
           options(stream), resources(resolve_stream_receiver_resources(options)),
-          workspace(std::move(workspace_fn)), scorer(std::move(score_fn)),
+          workspace(std::move(workspace_fn)), overlap_workspace(std::move(overlap_fn)), scorer(std::move(score_fn)),
           footprint(footprint_fn ? std::move(footprint_fn) : StreamFootprint(stream_controller_footprint_bytes)),
           codec(std::move(decoder), with_public_message_address(message, profile),
               options.first_slot, options.maximum_pending_messages),
@@ -417,9 +420,40 @@ struct CompleteStreamReceiver::Impl {
                 if (add(reserved(base, lanes), bytes)>resources.memory_limit_bytes) break;
                 work.push_back(next_work);
             }
-            if (work.size()==width) return work;
+            if (work.size()==width) return overlap(std::move(work), base);
         }
-        return full;
+        return overlap(std::move(full), base);
+    }
+
+    // Spare memory lets a slot's Helper acquisition run beside its coarse
+    // preparation. A wider lease is held until its slot ends, so it may take
+    // only memory that owners cannot use: every owner the cap still admits,
+    // and at least one, must then fit at this group's largest sequential
+    // lease. A balanced group already traded lanes for width and has none to
+    // spare. Oldest slots are served first.
+    std::vector<Work> overlap(std::vector<Work> work, const Reservation& base) const {
+        if (!overlap_workspace || work.empty()) return work;
+        std::size_t bytes = 0, largest = 0;
+        for (const auto& item : work) {
+            if (item.workers!=resources.workers) return work;
+            bytes = add(bytes, item.reserved);
+            largest = std::max(largest, item.reserved);
+        }
+        const auto owners = active()+work.size();
+        const auto cap = std::min<std::size_t>(resources.workers, resources.slot_owners);
+        const auto later = std::max<std::size_t>(1, cap>owners ? cap-owners : 0);
+        auto total = add(add(reserved(base, resources.workers), bytes), times(later, largest));
+        for (auto& item : work) {
+            const auto wider = overlap_workspace(config, item.plan, item.workers);
+            if (wider<=item.dsp) continue;
+            const auto extra = wider-item.dsp;
+            if (total>resources.memory_limit_bytes || extra>resources.memory_limit_bytes-total) continue;
+            item.overlap = extra;
+            item.dsp = wider;
+            item.reserved = add(item.reserved, extra);
+            total += extra;
+        }
+        return work;
     }
 
     void submit(const Work& work) {
@@ -444,9 +478,17 @@ struct CompleteStreamReceiver::Impl {
         const auto work = choose();
         if (work.empty() && !active())
             throw ReceiverWorkspaceError("Robust public window exceeds the admitted workspace");
-        for (const auto& item : work) {
+        for (auto item : work) {
             if (stop.stop_requested()) break;
-            const auto admitted = add(reserved(item.workers), item.reserved);
+            auto admitted = add(reserved(item.workers), item.reserved);
+            if (admitted>resources.memory_limit_bytes && item.overlap) {
+                // The process grew since the group was chosen. The slot
+                // keeps its place on the sequential lease.
+                item.dsp -= item.overlap;
+                item.reserved -= item.overlap;
+                item.overlap = 0;
+                admitted = add(reserved(item.workers), item.reserved);
+            }
             if (admitted>resources.memory_limit_bytes) {
                 if (active()) return;
                 throw ReceiverWorkspaceError("Robust process growth exhausted the local workspace");
@@ -634,7 +676,8 @@ struct CompleteStreamReceiver::Impl {
 CompleteStreamReceiver::CompleteStreamReceiver(PublicProfile profile, ReceiverConfig config, Crypto key,
     StreamReceiverOptions options, MessageDecoder decoder, MessageReceiverOptions message)
     : impl_(std::make_unique<Impl>(std::move(profile), std::move(config), std::move(key), options,
-        std::move(decoder), message, receiver_slot_workspace, receiver_detail::score_slot, StreamFootprint{})) {}
+        std::move(decoder), message, receiver_slot_workspace, receiver_detail::score_slot, StreamFootprint{},
+        receiver_slot_overlap_workspace)) {}
 CompleteStreamReceiver::CompleteStreamReceiver(PublicProfile profile, ReceiverConfig config, Crypto key,
     StreamReceiverOptions options, NativeMessageProfile message)
     : CompleteStreamReceiver(std::move(profile), std::move(config), std::move(key), options,
@@ -676,21 +719,23 @@ void CompleteStreamReceiver::request_cancel() noexcept { impl_->stop.request_sto
 
 CompleteStreamReceiver detail::StreamReceiverFixture::make(PublicProfile profile, ReceiverConfig config, Crypto key,
     StreamReceiverOptions options, StreamWorkspace workspace, StreamScorer scorer,
-    MessageDecoder decoder, MessageReceiverOptions message, StreamFootprint footprint) {
+    MessageDecoder decoder, MessageReceiverOptions message, StreamFootprint footprint,
+    StreamWorkspace overlap_workspace) {
     if (!scorer) throw Error("Invalid Robust stream fixture scorer");
     return make_with_executor(std::move(profile), std::move(config), std::move(key), options, std::move(workspace),
         [scorer = std::move(scorer)](const auto& config, const auto& plan, const auto& key, auto iq, auto valid,
             unsigned workers, std::size_t bytes, std::stop_token stop, ReceiverExecutor*) {
             return scorer(config, plan, key, iq, valid, workers, bytes, stop);
-        }, std::move(decoder), message, std::move(footprint));
+        }, std::move(decoder), message, std::move(footprint), std::move(overlap_workspace));
 }
 
 CompleteStreamReceiver detail::StreamReceiverFixture::make_with_executor(PublicProfile profile,
     ReceiverConfig config, Crypto key, StreamReceiverOptions options, StreamWorkspace workspace,
-    StreamExecutorScorer scorer, MessageDecoder decoder, MessageReceiverOptions message, StreamFootprint footprint) {
+    StreamExecutorScorer scorer, MessageDecoder decoder, MessageReceiverOptions message, StreamFootprint footprint,
+    StreamWorkspace overlap_workspace) {
     return CompleteStreamReceiver(std::make_unique<CompleteStreamReceiver::Impl>(std::move(profile),
         std::move(config), std::move(key), options, std::move(decoder), message,
-        std::move(workspace), std::move(scorer), std::move(footprint)));
+        std::move(workspace), std::move(scorer), std::move(footprint), std::move(overlap_workspace)));
 }
 
 } // namespace datapump::triad::v3

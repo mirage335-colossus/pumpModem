@@ -47,6 +47,8 @@ struct FineLaneWork {
 
 struct FinePhaseTimes {
     double preparation_seconds = 0, input_check_seconds = 0;
+    // Native observation, transition and pruning overlap fixed-affine state
+    // leaves, and observation also runs inside dispatch. Not additive.
     double observation_seconds = 0, transition_seconds = 0, bulk_statistics_seconds = 0, dispatch_seconds = 0;
     double pruning_seconds = 0, finish_seconds = 0;
     // Worker elapsed times can overlap and are not CPU or service time.
@@ -77,7 +79,8 @@ struct FineProgress {
 // extent and physical coordinates are chosen before observing samples. An
 // advance reveals a prefix of that lease and cannot change the terminal block,
 // reset the source/clock/cache, or score an incomplete segment. All calls are
-// on the owning controller thread; workers join each dispatch before it returns.
+// on the owning controller thread; every leaf of an advance completes before
+// it returns. Without a shared executor the session owns a private one.
 class FineSession {
 public:
     FineSession(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&, FineObservation,

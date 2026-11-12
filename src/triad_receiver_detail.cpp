@@ -111,7 +111,8 @@ void DftPlan::transform(std::span<Complex> samples, bool inverse, std::span<Comp
         if (!(i % 4096)) check_cancelled(stop);
         scratch[i] *= convolution_[i];
     }
-    modem::detail::search_fft::fft(scratch, true, fft_, stop);
+    // Only the original extent of the circular convolution is read.
+    modem::detail::search_fft::fft_prefix(scratch, true, fft_, samples_, stop);
     const auto scale = static_cast<double>(samples_);
     for (std::size_t i = 0; i < samples_; ++i) {
         if (!(i % 4096)) check_cancelled(stop);

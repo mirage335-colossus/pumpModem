@@ -68,6 +68,8 @@ struct PatternStep {
     std::array<double,2> bit_evidence{}, adaptive_bit_evidence{}, combined_bit_evidence{};
     double quiet_energy=0, quiet_threshold=0, operational_log_e=0, operational_threshold=0;
     double helper_seconds=0, coarse_seconds=0, fine_seconds=0;
+    // Helper acquisition ran beside coarse preparation, inside coarse_seconds.
+    bool helper_overlapped=false;
     std::size_t quiet_modes=0, fine_candidates=0;
     unsigned workers=0;
     bool evidence_complete=false;

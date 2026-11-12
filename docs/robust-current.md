@@ -40,7 +40,7 @@ qualification follows from these connections.
 | `triad_stream.hpp` | Public profile and slot geometry, bounded DATA/Helper/noise emission, and the shared source used by GUI and exporter. |
 | `triad_receiver.hpp` | Complete slot scoring: noisy Helper proposals, full public FFT screening, persistent fine tracking, bit/null evidence and resource preflight. |
 | `triad_stream_receiver.hpp` | Bounded continuous ingress, in-process slot ownership, ordered commit, backpressure and cancellation. |
-| `src/triad_receiver_executor.hpp` | Internal shared bounded worker pool for slot roots and coarse/fine stage tasks. |
+| `src/triad_receiver_executor.hpp` | Internal shared bounded worker pool for slot roots and their overlapped Helper, coarse and fine stages. |
 | `triad_message_receiver.hpp` | Bounded native short/long text profiles, lazy interval emission, configured FEC and two-scored-quiet completion. |
 | `robust_profile.hpp`, `live.hpp` | Validated GUI settings, duration/profile preparation, simulation/live session and bounded presentation snapshots. |
 | `audio.hpp`, `robust_audio_frontend.hpp` | Native device ownership, routing, gain, timestamped capture and bounded real-PCM-to-I/Q filtering. |
@@ -52,14 +52,23 @@ screening and fine scoring use the canonical native components. Independent
 slot owners keep mutable scorer state private while sharing immutable window
 samples. Ordered commit preserves physical chronology even when work finishes
 out of order. One lazy receiver executor shares at most `W = 2*H` software workers
-across slot roots and their coarse/fine tasks for effective hardware availability
-`H`; explicit allocations remain exact. A root participates in its own stage
-batch; available lanes prioritize ready leaves for the oldest eligible public
-slot, with queued roots using otherwise unneeded lanes.
+across slot roots and their Helper, coarse and fine tasks for effective hardware availability
+`H`; explicit allocations remain exact. A root is lane zero of its own stage;
+available lanes prioritize ready leaves for the oldest eligible public slot,
+with queued roots using otherwise unneeded lanes. Within a slot, serial steps
+[overlap independent parallel work](development.md#overlap-within-a-slot):
+Helper acquisition's pilot fits, refinements and branch filters as waves; the
+observation filter beside the template bank; and the fine fixed-affine lane,
+the next dispatch's observation and later source tiles beside the
+chronological adaptive lane. A slot whose lease has room also acquires beside
+coarse preparation, which then plans its frequency grid afterwards.
 Per-owner lane/scratch limits are fixed DSP bounds, not worker permits held
 exclusively through a slot. Admission quotes the largest ready prefix at full
 `W` scratch per owner, preferring balanced scratch only when it admits a
-strictly wider ready prefix within the full memory bound. Each admitted
+strictly wider ready prefix within the full memory bound. Memory beyond a
+sequential lease for every owner the cap still admits then grants slots,
+oldest first, the wider lease that lets Helper acquisition overlap coarse
+preparation. Each admitted
 shape remains fixed through its slot; the global `W` ceiling stays unchanged.
 
 Full per-owner DSP, input, prospective and started worker stacks, application
@@ -68,10 +77,11 @@ charged until close. Initialized input is covered once by footprint and ownershi
 floor; outstanding DSP/stacks/output bounds remain reserved because RSS cannot
 attribute anonymous memory to a scorer. `peak_running_owners` counts roots in
 actual scorer scope, while `peak_executor_workers` counts started pool threads;
-neither is a hardware-utilization measurement. Standalone phase probes retain
-their local executor. The current point improves first-message latency while
-remaining slower overall than the original baseline; no throughput/utilization
-gain is claimed.
+neither is a hardware-utilization measurement. A standalone slot, coarse
+session or fine session owns a private instance of the same executor. The matched row-5 replay
+is about 30% shorter than before the overlap and transform-order changes, with
+identical scores; its [scope and limits](validation.md#receiver-overlap-and-transform-order-follow-through)
+do not make it a capacity qualification.
 See [CPU and memory ownership](development.md#receiver-cpu-allocation).
 
 The operating CPU receiver defaults to qualified reduced-precision frequency
@@ -88,10 +98,16 @@ banks remain subject to the complete bank's double-precision conditioning check.
 ill-conditioned or unqualified CPU routes retain FP64 with explicit reasons;
 coordinates, scoring and fine state remain double precision. The
 [shared arithmetic policy](search-arithmetic.md) defines the automatic and
-forced-FP64 controls, scaling and receipt identity. Both choices preserve public
+forced-FP64 controls, scaling and receipt identity. The native radix-two
+transform finishes cache-sized blocks before whole-array stages, omits
+butterflies whose outputs a caller declares unread, and correlates spectra
+stored in transform order. Each computed value keeps the stage-major
+transform's operands, so every arithmetic class keeps its exact results. Both choices preserve public
 coverage, `W=2*H` and full memory accounting. The smaller coarse bound can reduce
 the slot lease when coarse is dominant; it does not imply a reduction where
-Helper or fine work dominates.
+fine work dominates. The Helper bound follows the public calendar: its largest
+transform step and a 16 MiB allowance for interval lists and records. It no
+longer sets the lease of a Helper slot.
 
 The optional [Vulkan backend](triad-performance.md#local-radeon-vulkan-processing)
 starts after native DATA channel isolation and accelerates GPU frequency-search

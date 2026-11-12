@@ -1,5 +1,7 @@
 #include "search_fft.hpp"
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cmath>
 #include <numbers>
 #include <type_traits>
@@ -35,37 +37,82 @@ template<class T> void make(std::vector<std::complex<T>>& table,std::size_t n,st
     }
 }
 #if defined(DATAPUMP_SEARCH_FFT_X86)
-__attribute__((target("avx2"))) void butterflies(std::complex<double>* a,const std::complex<double>* table,
-        std::size_t begin,std::size_t half,bool inverse){
-    std::size_t j=0;const auto mask=_mm256_set_pd(-0.,0.,-0.,0.);
-    for(;j+2<=half;j+=2){
-        const auto u=_mm256_loadu_pd(reinterpret_cast<const double*>(a+begin+j));
-        const auto v=_mm256_loadu_pd(reinterpret_cast<const double*>(a+begin+j+half));
-        auto w=_mm256_loadu_pd(reinterpret_cast<const double*>(table+j));if(inverse)w=_mm256_xor_pd(w,mask);
-        const auto real=_mm256_movedup_pd(v),imag=_mm256_permute_pd(v,0xf),swap=_mm256_permute_pd(w,0x5);
-        const auto product=_mm256_addsub_pd(_mm256_mul_pd(real,w),_mm256_mul_pd(imag,swap));
-        _mm256_storeu_pd(reinterpret_cast<double*>(a+begin+j),_mm256_add_pd(u,product));
-        _mm256_storeu_pd(reinterpret_cast<double*>(a+begin+j+half),_mm256_sub_pd(u,product));
+// Whole stages for lengths [first,last] on one block of at least two
+// elements. Every pair uses the scalar kernel's operands and operations:
+// v*w=(vr*wr-vi*wi,vr*wi+vi*wr), then u+v and u-v. Only the first `needed`
+// pairs of each butterfly group are required; it is a multiple of four.
+__attribute__((target("avx2"))) void stages_avx2(std::complex<double>* a,const std::complex<double>* twiddles,
+        std::size_t begin,std::size_t size,std::size_t first,std::size_t last,std::size_t needed,bool inverse){
+    auto* data=reinterpret_cast<double*>(a+begin);
+    const auto conjugate=_mm256_set_pd(-0.,0.,-0.,0.);
+    for(std::size_t length=first;length<=last;length*=2){
+        const auto half=length/2;const auto* table=reinterpret_cast<const double*>(twiddles+half-1);
+        if(half==1){
+            auto w=_mm_loadu_pd(table);if(inverse)w=_mm_xor_pd(w,_mm256_castpd256_pd128(conjugate));
+            const auto swap=_mm_shuffle_pd(w,w,1);
+            for(std::size_t i=0;i<2*size;i+=4){
+                const auto u=_mm_loadu_pd(data+i),v=_mm_loadu_pd(data+i+2);
+                const auto product=_mm_addsub_pd(_mm_mul_pd(_mm_movedup_pd(v),w),_mm_mul_pd(_mm_unpackhi_pd(v,v),swap));
+                _mm_storeu_pd(data+i,_mm_add_pd(u,product));_mm_storeu_pd(data+i+2,_mm_sub_pd(u,product));
+            }
+        }else{
+            const auto count=std::min(half,needed);
+            for(std::size_t block=0;block<size;block+=length){
+                auto* lower=data+2*block;auto* upper=lower+2*half;
+                for(std::size_t j=0;j<2*count;j+=4){
+                    const auto u=_mm256_loadu_pd(lower+j),v=_mm256_loadu_pd(upper+j);
+                    auto w=_mm256_loadu_pd(table+j);if(inverse)w=_mm256_xor_pd(w,conjugate);
+                    const auto real=_mm256_movedup_pd(v),imag=_mm256_permute_pd(v,0xf),swap=_mm256_permute_pd(w,0x5);
+                    const auto product=_mm256_addsub_pd(_mm256_mul_pd(real,w),_mm256_mul_pd(imag,swap));
+                    _mm256_storeu_pd(lower+j,_mm256_add_pd(u,product));_mm256_storeu_pd(upper+j,_mm256_sub_pd(u,product));
+                }
+            }
+        }
+        if(length==last)break;
     }
-    for(;j<half;++j){const auto w=inverse?std::conj(table[j]):table[j];const auto u=a[begin+j],v=a[begin+j+half]*w;
-        a[begin+j]=u+v;a[begin+j+half]=u-v;}
 }
-__attribute__((target("avx2"))) void butterflies(std::complex<float>* a,const std::complex<float>* table,
-        std::size_t begin,std::size_t half,bool inverse){
-    std::size_t j=0;
-    const auto mask=_mm256_set_ps(-0.,0.,-0.,0.,-0.,0.,-0.,0.);
-    for(;j+4<=half;j+=4){
-        const auto u=_mm256_loadu_ps(reinterpret_cast<const float*>(a+begin+j));
-        const auto v=_mm256_loadu_ps(reinterpret_cast<const float*>(a+begin+j+half));
-        auto w=_mm256_loadu_ps(reinterpret_cast<const float*>(table+j));
-        if(inverse)w=_mm256_xor_ps(w,mask);
-        const auto real=_mm256_moveldup_ps(v),imag=_mm256_movehdup_ps(v),swap=_mm256_permute_ps(w,0xb1);
-        const auto product=_mm256_addsub_ps(_mm256_mul_ps(real,w),_mm256_mul_ps(imag,swap));
-        _mm256_storeu_ps(reinterpret_cast<float*>(a+begin+j),_mm256_add_ps(u,product));
-        _mm256_storeu_ps(reinterpret_cast<float*>(a+begin+j+half),_mm256_sub_ps(u,product));
+// The same contract for a block of at least four elements.
+__attribute__((target("avx2"))) void stages_avx2(std::complex<float>* a,const std::complex<float>* twiddles,
+        std::size_t begin,std::size_t size,std::size_t first,std::size_t last,std::size_t needed,bool inverse){
+    auto* data=reinterpret_cast<float*>(a+begin);
+    const auto conjugate=_mm256_set_ps(-0.,0.,-0.,0.,-0.,0.,-0.,0.);
+    for(std::size_t length=first;length<=last;length*=2){
+        const auto half=length/2;const auto* table=reinterpret_cast<const float*>(twiddles+half-1);
+        if(half==1){
+            // Each 128-bit lane holds one pair: u, then v.
+            auto w=_mm256_castpd_ps(_mm256_broadcast_sd(reinterpret_cast<const double*>(table)));
+            if(inverse)w=_mm256_xor_ps(w,conjugate);
+            const auto swap=_mm256_permute_ps(w,0xb1);
+            for(std::size_t i=0;i<2*size;i+=8){
+                const auto x=_mm256_loadu_ps(data+i);
+                const auto u=_mm256_permute_ps(x,0x44),v=_mm256_permute_ps(x,0xee);
+                const auto product=_mm256_addsub_ps(_mm256_mul_ps(_mm256_moveldup_ps(v),w),
+                    _mm256_mul_ps(_mm256_movehdup_ps(v),swap));
+                _mm256_storeu_ps(data+i,_mm256_blend_ps(_mm256_add_ps(u,product),_mm256_sub_ps(u,product),0xcc));
+            }
+        }else if(half==2){
+            auto w=_mm_loadu_ps(table);if(inverse)w=_mm_xor_ps(w,_mm256_castps256_ps128(conjugate));
+            const auto swap=_mm_permute_ps(w,0xb1);
+            for(std::size_t i=0;i<2*size;i+=8){
+                const auto u=_mm_loadu_ps(data+i),v=_mm_loadu_ps(data+i+4);
+                const auto product=_mm_addsub_ps(_mm_mul_ps(_mm_moveldup_ps(v),w),_mm_mul_ps(_mm_movehdup_ps(v),swap));
+                _mm_storeu_ps(data+i,_mm_add_ps(u,product));_mm_storeu_ps(data+i+4,_mm_sub_ps(u,product));
+            }
+        }else{
+            const auto count=std::min(half,needed);
+            for(std::size_t block=0;block<size;block+=length){
+                auto* lower=data+2*block;auto* upper=lower+2*half;
+                for(std::size_t j=0;j<2*count;j+=8){
+                    const auto u=_mm256_loadu_ps(lower+j),v=_mm256_loadu_ps(upper+j);
+                    auto w=_mm256_loadu_ps(table+j);if(inverse)w=_mm256_xor_ps(w,conjugate);
+                    const auto real=_mm256_moveldup_ps(v),imag=_mm256_movehdup_ps(v),swap=_mm256_permute_ps(w,0xb1);
+                    const auto product=_mm256_addsub_ps(_mm256_mul_ps(real,w),_mm256_mul_ps(imag,swap));
+                    _mm256_storeu_ps(lower+j,_mm256_add_ps(u,product));_mm256_storeu_ps(upper+j,_mm256_sub_ps(u,product));
+                }
+            }
+        }
+        if(length==last)break;
     }
-    for(;j<half;++j){const auto w=inverse?std::conj(table[j]):table[j];const auto u=a[begin+j],v=a[begin+j+half]*w;
-        a[begin+j]=u+v;a[begin+j+half]=u-v;}
 }
 
 __attribute__((target("avx2"))) std::size_t multiply_avx2(std::span<std::complex<float>> output,
@@ -121,34 +168,103 @@ __attribute__((target("avx2"))) std::size_t multiply_q15_avx2(std::span<std::com
     return i;
 }
 #endif
+// Data bytes of one block finished within a cache level. Two SMT threads
+// share a core's caches, and each also reads that block's twiddle tables.
+constexpr std::size_t inner_block_bytes=8192,outer_block_bytes=65536;
+// Index bits are [A][c][B]: two halves of `half_bits` bits around an optional
+// middle bit. Its reversal is [rev B][c][rev A], so exactly the indices with
+// A<rev(B) are swapped. Enumerating those pairs needs no data-dependent
+// branch: one side stays inside row A and the other strides down a column.
+template<class T> void bit_reverse(std::span<std::complex<T>> a,std::stop_token stop){
+    const auto n=a.size();
+    if(n<4)return;
+    const auto bits=static_cast<unsigned>(std::countr_zero(n)),half_bits=bits/2;
+    constexpr unsigned table_bits=12;
+    if(half_bits>table_bits){
+        for(std::size_t i=1,j=0;i<n;++i){if((i&4095U)==0)cancelled(stop);
+            auto bit=n>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;if(i<j)std::swap(a[i],a[j]);}
+        return;
+    }
+    const std::size_t rows=std::size_t{1}<<half_bits,row=n/rows,middles=bits&1U?2:1;
+    std::array<std::uint32_t,std::size_t{1}<<table_bits> reversed;
+    reversed[0]=0;
+    for(std::size_t i=1;i<rows;++i)
+        reversed[i]=(reversed[i>>1]>>1)|static_cast<std::uint32_t>((i&1U)<<(half_bits-1));
+    auto* data=a.data();
+    for(std::size_t upper=0;upper+1<rows;++upper){
+        if((upper&63U)==0)cancelled(stop);
+        for(std::size_t middle=0;middle<middles;++middle){
+            auto* here=data+upper*row+middle*rows;
+            auto* there=data+middle*rows+reversed[upper];
+            for(std::size_t lower=upper+1;lower<rows;++lower)std::swap(here[reversed[lower]],there[lower*row]);
+        }
+    }
+}
+// Stage-major butterflies for lengths [first,last] on one block. A block's
+// leading `needed` outputs require only that many leading butterfly pairs.
+template<class T> void stages(std::complex<T>* a,const std::complex<T>* twiddles,std::size_t begin,
+        std::size_t size,std::size_t first,std::size_t last,std::size_t needed,bool inverse){
+    for(std::size_t length=first;length<=last;length*=2){
+        const auto half=length/2,count=std::min(half,needed);const auto* table=twiddles+half-1;
+        for(std::size_t block=begin;block<begin+size;block+=length)for(std::size_t j=0;j<count;++j){
+            const auto w=inverse?std::conj(table[j]):table[j];
+            const auto u=a[block+j],v=a[block+j+half]*w;a[block+j]=u+v;a[block+j+half]=u-v;
+        }
+        if(length==last)break;
+    }
+}
+// Every butterfly has the operands of a stage-major transform, so the result
+// is bit-identical. Finishing a cache-sized block before leaving it replaces
+// most whole-array passes. Outputs past `prefix` are left unspecified.
 template<class T> void execute(std::span<std::complex<T>> a,bool inverse,std::size_t maximum,
-        const std::vector<std::complex<T>>& twiddles,std::stop_token stop,Kernel kernel){
+        const std::vector<std::complex<T>>& twiddles,std::size_t prefix,bool permuted,std::stop_token stop,
+        Kernel kernel){
     const auto n=a.size();valid_size(n);
     if(n>maximum || twiddles.size()!=maximum-1)throw Error("native FFT plan geometry mismatch");
-    cancelled(stop);const bool avx=use_avx2(kernel);
-    for(std::size_t i=1,j=0;i<n;++i){if((i&4095U)==0)cancelled(stop);
-        auto bit=n>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;if(i<j)std::swap(a[i],a[j]);}
-    for(std::size_t length=2;length<=n;length*=2){
-        cancelled(stop);const auto half=length/2;const auto* table=twiddles.data()+half-1;
-        for(std::size_t begin=0;begin<n;begin+=length){
+    if(!prefix || prefix>n)throw Error("native FFT output prefix is outside its transform");
+    cancelled(stop);
+    if(!permuted)bit_reverse(a,stop);
+    // Whole vector lanes keep every computed pair on one arithmetic path.
+    const auto needed=std::min(n,(prefix+3)&~std::size_t{3});
+    const bool avx=use_avx2(kernel) && n>=4;
+    const auto run=[&](std::size_t begin,std::size_t size,std::size_t first,std::size_t last){
 #if defined(DATAPUMP_SEARCH_FFT_X86)
-            if(avx && half>=(std::is_same_v<T,float>?4U:2U)){butterflies(a.data(),table,begin,half,inverse);continue;}
-#else
-            (void)avx;
+        if(avx){stages_avx2(a.data(),twiddles.data(),begin,size,first,last,needed,inverse);return;}
 #endif
-            for(std::size_t j=0;j<half;++j){const auto w=inverse?std::conj(table[j]):table[j];
-                const auto u=a[begin+j],v=a[begin+j+half]*w;a[begin+j]=u+v;a[begin+j+half]=u-v;}
-        }
+        stages(a.data(),twiddles.data(),begin,size,first,last,needed,inverse);
+    };
+    (void)avx;
+    const auto inner=std::min(n,inner_block_bytes/sizeof(std::complex<T>));
+    const auto outer=std::min(n,outer_block_bytes/sizeof(std::complex<T>));
+    for(std::size_t block=0;block<n;block+=outer){
+        cancelled(stop);
+        for(std::size_t leaf=block;leaf<block+outer;leaf+=inner)run(leaf,inner,2,inner);
+        if(outer>inner)run(block,outer,2*inner,outer);
+    }
+    for(std::size_t length=2*outer;length<=n;length*=2){
+        cancelled(stop);
+        run(0,n,length,length);
         if(length==n)break;
     }
-    if(inverse)for(std::size_t i=0;i<n;++i){if((i&4095U)==0)cancelled(stop);a[i]/=static_cast<T>(n);}
+    // A power-of-two reciprocal scales exactly as the division does.
+    if(inverse){
+        const auto scale=1/static_cast<T>(n);
+        for(std::size_t first=0;first<needed;first+=4096){
+            cancelled(stop);
+            for(std::size_t i=first;i<std::min(needed,first+4096);++i)a[i]*=scale;
+        }
+    }
 }
 }
 DoublePlan::DoublePlan(std::size_t n,std::stop_token stop):maximum(n){make(twiddles,n,stop);}
 FloatPlan::FloatPlan(std::size_t n,std::stop_token stop):maximum(n){make(twiddles,n,stop);}
 const char* kernel_name(Kernel k){return use_avx2(k)?"avx2":"scalar";}
-void fft(std::span<std::complex<double>> a,bool inverse,const DoublePlan& p,std::stop_token stop,Kernel k){execute(a,inverse,p.maximum,p.twiddles,stop,k);}
-void fft(std::span<std::complex<float>> a,bool inverse,const FloatPlan& p,std::stop_token stop,Kernel k){execute(a,inverse,p.maximum,p.twiddles,stop,k);}
+void fft(std::span<std::complex<double>> a,bool inverse,const DoublePlan& p,std::stop_token stop,Kernel k){execute(a,inverse,p.maximum,p.twiddles,a.size(),false,stop,k);}
+void fft(std::span<std::complex<float>> a,bool inverse,const FloatPlan& p,std::stop_token stop,Kernel k){execute(a,inverse,p.maximum,p.twiddles,a.size(),false,stop,k);}
+void fft_prefix(std::span<std::complex<double>> a,bool inverse,const DoublePlan& p,std::size_t prefix,std::stop_token stop,Kernel k,bool permuted){execute(a,inverse,p.maximum,p.twiddles,prefix,permuted,stop,k);}
+void fft_prefix(std::span<std::complex<float>> a,bool inverse,const FloatPlan& p,std::size_t prefix,std::stop_token stop,Kernel k,bool permuted){execute(a,inverse,p.maximum,p.twiddles,prefix,permuted,stop,k);}
+void permute(std::span<std::complex<double>> a,std::stop_token stop){valid_size(a.size());cancelled(stop);bit_reverse(a,stop);}
+void permute(std::span<std::complex<float>> a,std::stop_token stop){valid_size(a.size());cancelled(stop);bit_reverse(a,stop);}
 
 void multiply_spectra(std::span<std::complex<float>> output, std::span<const std::complex<float>> left,
                       std::span<const std::complex<float>> right, std::stop_token stop, Kernel kernel) {

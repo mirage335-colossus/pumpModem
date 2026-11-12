@@ -2,6 +2,10 @@
 #include <array>
 #include <cmath>
 #include <complex>
+#include <cstdint>
+#include <cstring>
+#include <initializer_list>
+#include <span>
 #include <iostream>
 #include <numbers>
 #include <vector>
@@ -29,8 +33,80 @@ std::vector<std::complex<double>> dft(const std::vector<std::complex<float>>& in
     for(const auto value:input)widened.emplace_back(value.real(),value.imag());
     return dft(widened,inverse);
 }
+// The original stage-major radix-two order, using the plan's own twiddles.
+template<class T,class Plan>
+std::vector<std::complex<T>> stage_major(std::vector<std::complex<T>> a,bool inverse,const Plan& plan) {
+    const auto n=a.size();
+    for(std::size_t i=1,j=0;i<n;++i) {
+        auto bit=n>>1;
+        for(;j&bit;bit>>=1)j^=bit;
+        j^=bit;
+        if(i<j)std::swap(a[i],a[j]);
+    }
+    for(std::size_t length=2;length<=n;length*=2) {
+        const auto half=length/2;
+        const auto* table=plan.twiddles.data()+half-1;
+        for(std::size_t begin=0;begin<n;begin+=length)for(std::size_t j=0;j<half;++j) {
+            const auto w=inverse?std::conj(table[j]):table[j];
+            const auto u=a[begin+j],v=a[begin+j+half]*w;
+            a[begin+j]=u+v;a[begin+j+half]=u-v;
+        }
+    }
+    if(inverse)for(auto& value:a)value/=static_cast<T>(n);
+    return a;
+}
+// Cache blocking and an output prefix reorder or omit butterflies. Every
+// value a caller may read must keep the stage-major transform's exact bits.
+template<class T,class Plan>void blocked_order_is_exact(std::initializer_list<std::size_t> sizes) {
+    std::uint32_t state=0x9e3779b9U;
+    const auto next=[&] {
+        state=state*1664525U+1013904223U;
+        return static_cast<T>(static_cast<std::int32_t>(state))/static_cast<T>(1U<<30);
+    };
+    for(const auto size:sizes) {
+        const Plan plan(size);
+        std::vector<std::complex<T>> input(size);
+        for(auto& value:input)value={next(),next()};
+        // Signed zeros must survive the vectorized first stages unchanged.
+        for(std::size_t i=0;i<size;i+=7)input[i]={i%2?T(0):-T(0),i%3?-T(0):T(0)};
+        for(const bool inverse:{false,true}) {
+            const auto expected=stage_major(input,inverse,plan);
+            auto native=input,scalar=input;
+            fft::fft(std::span(native),inverse,plan);
+            fft::fft(std::span(scalar),inverse,plan,{},fft::Kernel::scalar);
+            const auto same=[&](const std::vector<std::complex<T>>& value,std::size_t count) {
+                return !std::memcmp(value.data(),expected.data(),count*sizeof(std::complex<T>));
+            };
+            check(same(native,size) && same(scalar,size),"cache-blocked FFT order changed stage-major arithmetic");
+            for(const std::size_t prefix:{std::size_t{1},std::size_t{3},std::size_t{5},size/8+1,size/2,size/2+1,size}) {
+                if(!prefix || prefix>size)continue;
+                auto pruned=input;
+                fft::fft_prefix(std::span(pruned),inverse,plan,prefix);
+                auto scalar_pruned=input;
+                fft::fft_prefix(std::span(scalar_pruned),inverse,plan,prefix,{},fft::Kernel::scalar);
+                check(same(pruned,prefix) && same(scalar_pruned,prefix),
+                      "FFT output prefix differs from the complete transform");
+            }
+            // A permuted operand skips the transform's own permutation.
+            auto permuted=input;
+            fft::permute(std::span(permuted));
+            auto twice=permuted;
+            fft::permute(std::span(twice));
+            check(!std::memcmp(twice.data(),input.data(),size*sizeof(std::complex<T>)),
+                  "FFT element permutation is not an involution");
+            fft::fft_prefix(std::span(permuted),inverse,plan,size,{},fft::Kernel::automatic,true);
+            check(same(permuted,size),"permuted FFT input changed the complete transform");
+            auto invalid=input;
+            rejects([&] { fft::fft_prefix(std::span(invalid),inverse,plan,0); });
+            rejects([&] { fft::fft_prefix(std::span(invalid),inverse,plan,size+1); });
+        }
+    }
+}
 }
 int main() { try {
+    // Below, at and above both block sizes for each element width.
+    blocked_order_is_exact<float,fft::FloatPlan>({1,2,4,8,16,1024,2048,8192,16384,65536});
+    blocked_order_is_exact<double,fft::DoublePlan>({1,2,4,8,512,1024,4096,8192,32768});
     fft::DoublePlan doubles(64);
     for(const std::size_t size:{1U,2U,8U,32U,64U})for(const bool inverse:{false,true}) {
         std::vector<std::complex<double>> input(size);

@@ -1,14 +1,17 @@
 #include "../src/triad_receiver_coarse.hpp"
+#include "../src/triad_receiver_executor.hpp"
 #include "../src/search_fft.hpp"
 #include "triad_crypto_fixture.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <iostream>
 #include <limits>
 #include <numbers>
 #include <stdexcept>
 #include <string_view>
+#include <thread>
 #include <tuple>
 
 namespace v = datapump::triad::v3;
@@ -472,7 +475,8 @@ void exact_large_frequency_group(const datapump::Crypto& crypto) {
     const auto frequency = winner->coordinate.frequency_hz;
     const std::array<r::FrequencyInterval, 1> singleton{{{frequency, frequency}}};
     f.config.native_coarse_precision = v::NativeCoarsePrecision::fp64;
-    const auto reference = r::score_coarse(f.config, f.slot, crypto, f.iq, singleton, workers, limit, {});
+    const auto reference = r::score_coarse(f.config, f.slot, crypto, f.iq, singleton, workers,
+        r::coarse_workspace(f.config, f.slot, workers), {});
     const auto reference_winner = std::ranges::max_element(
         std::span(reference.proposals).first(reference.proposal_count), {}, &r::CoarseProposal::score);
     check(reference.work.plan.route == r::CoarseRoute::frequency_tiles &&
@@ -750,6 +754,203 @@ void exact_bulk_frontiers(const datapump::Crypto& crypto) {
     }
 }
 
+auto operations(const r::CoarsePhaseWork& phase) {
+    const auto& o = phase.operations;
+    return std::tie(o.forward_ffts, o.inverse_ffts, o.fft_rows, o.fft_row_stages, o.source_render_calls,
+                    o.source_render_rows, o.projected_columns, o.fir_input_rows, o.fir_output_contributions,
+                    o.workspace_frequency_pairs, o.score_rows, o.singleton_dot_terms, o.retained_peaks,
+                    o.selection_peak_rows);
+}
+
+// Everything but elapsed time and the workspace quote.
+bool same_search(const r::CoarseResult& a, const r::CoarseResult& b) {
+    const auto& p = a.work.plan;
+    const auto& q = b.work.plan;
+    bool same = a.coordinates == b.coordinates && a.proposal_count == b.proposal_count && a.reason == b.reason &&
+        a.projected_sample_rate_hz == b.projected_sample_rate_hz &&
+        a.maximum_frequency_step_hz == b.maximum_frequency_step_hz && a.clock_gap_ppm == b.clock_gap_ppm &&
+        a.frequency_points == b.frequency_points && a.arrival_points == b.arrival_points &&
+        a.workspaces == b.workspaces && a.lag_frequency_search == b.lag_frequency_search &&
+        p.route == q.route && p.frequency_groups == q.frequency_groups && p.frequency_points == q.frequency_points &&
+        p.correlation_fft_rows == q.correlation_fft_rows && p.tile_width == q.tile_width &&
+        p.total_tiles == q.total_tiles && p.fft_precision == q.fft_precision &&
+        p.precision_reason == q.precision_reason && p.minimum_eigenvalue_ratio == q.minimum_eigenvalue_ratio &&
+        p.observation_scale_exponent == q.observation_scale_exponent &&
+        p.scaled_template_workspaces == q.scaled_template_workspaces &&
+        a.work.state == b.work.state && a.work.completed_tiles == b.work.completed_tiles &&
+        a.work.retained_bytes == b.work.retained_bytes && a.work.proposals == b.work.proposals &&
+        a.work.refined_coordinates == b.work.refined_coordinates &&
+        operations(a.work.filter_setup) == operations(b.work.filter_setup) &&
+        operations(a.work.mapped_fidelity) == operations(b.work.mapped_fidelity) &&
+        operations(a.work.template_bank) == operations(b.work.template_bank) &&
+        operations(a.work.observation) == operations(b.work.observation) &&
+        operations(a.work.lag_setup) == operations(b.work.lag_setup) &&
+        operations(a.work.search) == operations(b.work.search) &&
+        operations(a.work.selection) == operations(b.work.selection);
+    for (std::size_t i = 0; same && i < a.proposal_count; ++i) {
+        const auto& x = a.proposals[i];
+        const auto& y = b.proposals[i];
+        same = x.coordinate == y.coordinate && x.score == y.score && x.bit == y.bit && x.rank == y.rank;
+    }
+    return same;
+}
+
+// A session that acquires its intervals during preparation is the session
+// those intervals would have built directly: on a fixed frequency route, and
+// on a slow mapped profile whose route the intervals decide. A profile that
+// cannot defer its grid refuses the request.
+void overlapped_acquisition(const datapump::Crypto& crypto) {
+    const r::AssistanceBound bound{3 << 20, 4};
+    struct Receipt { unsigned calls = 0, waves = 0; bool owner_lanes = false, owner_thread = false, prepared = false; };
+    const auto run = [&](const Fixture& f, std::span<const r::FrequencyInterval> intervals,
+                         r::CoarseRoute route, const char* reason, bool owner_lanes, unsigned workers = 3) {
+        const auto direct_limit = r::coarse_workspace(f.config, f.slot, workers);
+        const auto direct = r::score_coarse(f.config, f.slot, crypto, f.iq, intervals, workers, direct_limit, {});
+        check(direct.work.plan.route == route && direct.work.plan.precision_reason == reason,
+              "overlapped acquisition fixture changed its route or arithmetic");
+        check(r::coarse_defers_frequency_grid(f.config, f.slot),
+              "coarse profile changed whether its grid can follow preparation");
+        // Acquisition scratch is charged beside the whole of preparation,
+        // which is at least a quarter of each of these fixtures' quotes. The
+        // quote grows only where that sum exceeds the search itself, by the
+        // scratch and by the few lanes its waves can add to a wide share.
+        constexpr std::size_t large = std::size_t{1} << 30;
+        const auto limit = r::coarse_workspace(f.config, f.slot, workers, bound);
+        check(limit >= direct_limit && limit <= direct_limit + bound.workspace_bytes + (std::size_t{8} << 20) &&
+              r::coarse_workspace(f.config, f.slot, workers, {large, bound.widest_wave}) >= large + direct_limit / 4,
+              "overlapped acquisition scratch was not charged beside preparation");
+        r::ReceiverExecutor executor(workers);
+        const auto owner = std::this_thread::get_id();
+        Receipt receipt;
+        const r::FrequencyAssistance assistance{[&](const r::LaneWave& wave, std::stop_token) {
+            ++receipt.calls;
+            receipt.owner_lanes = static_cast<bool>(wave);
+            receipt.owner_thread = std::this_thread::get_id() == owner;
+            // Preparation's jobs were released, and their lanes started,
+            // before the owner began to acquire.
+            receipt.prepared = executor.started_workers() > 0;
+            // The session's lanes run every job of a wave exactly once.
+            for (unsigned pass = 0; wave && pass < 3; ++pass) {
+                std::array<std::atomic<unsigned>, 4> ran{};
+                wave(ran.size(), [&](std::size_t index, std::stop_token) { ++ran[index]; });
+                check(std::ranges::all_of(ran, [](const auto& count) { return count == 1; }),
+                      "coarse lanes lost or repeated an acquisition job");
+                ++receipt.waves;
+            }
+            return intervals;
+        }, bound};
+        const auto overlapped = r::score_coarse(f.config, f.slot, crypto, f.iq, assistance, workers, limit, {},
+                                                &executor);
+        check(receipt.calls == 1 && receipt.owner_lanes == owner_lanes && (!owner_lanes || receipt.waves == 3),
+              "coarse session acquired its intervals more than once or on the wrong lanes");
+        // The owner acquires where it is free. Beside the mapped gate a lane
+        // does, unless the owner is the only lane and runs everything in turn.
+        check(receipt.owner_thread == (owner_lanes || workers == 1) && (workers == 1 || receipt.prepared),
+              "acquisition did not run beside released preparation work");
+        check(same_search(direct, overlapped), "overlapped acquisition changed the coarse search");
+        check(overlapped.work.plan.workspace_reserved_bytes == limit && overlapped.workspace_peak_bytes == limit,
+              "overlapped coarse session reported another workspace quote");
+        rejects<v::ReceiverWorkspaceError>([&] {
+            (void)r::score_coarse(f.config, f.slot, crypto, f.iq, assistance, workers, limit - 1, {});
+        }, "overlapped acquisition was admitted without its scratch");
+    };
+    using Route = r::CoarseRoute;
+    const char* automatic = cpu_fft_fp32_qualified ? "qualified-post-filter-fft" : "cpu-kernel-unqualified";
+
+    // The frequency route is fixed: the owner acquires and offers its lanes.
+    auto two_ray = capture(crypto, false);
+    const std::array<r::FrequencyInterval, 2> pair{{{-.2, -.13}, {.03125, .045}}};
+    two_ray.config.native_coarse_precision = v::NativeCoarsePrecision::fp64;
+    run(two_ray, pair, Route::frequency_tiles, "explicit-fp64", true);
+    two_ray.config.native_coarse_precision = v::NativeCoarsePrecision::automatic;
+    run(two_ray, pair, Route::frequency_tiles, automatic, true);
+    run(two_ray, pair, Route::frequency_tiles, automatic, true, 1);
+
+    // A share wider than the bank's jobs leaves lanes for the owner's waves.
+    // The quote charges those lanes, and only where the share reaches them.
+    auto single_clock = capture(crypto, false);
+    single_clock.config.clock_bound_ppm = 0;
+    single_clock.config.native_coarse_precision = v::NativeCoarsePrecision::fp64;
+    check(r::coarse_work_plan(single_clock.config, single_clock.slot, pair, 32).workspaces == 26,
+          "wide-share fixture changed its template bank");
+    run(single_clock, pair, Route::frequency_tiles, "explicit-fp64", true, 32);
+    {
+        constexpr std::size_t large = std::size_t{1} << 30;
+        const auto quote = [&](unsigned workers, std::size_t wave) {
+            return r::coarse_workspace(single_clock.config, single_clock.slot, workers, {large, wave});
+        };
+        check(quote(32, 4) > quote(32, 0) && quote(27, 4) == quote(27, 0),
+              "overlapped acquisition waves were not charged their lanes");
+    }
+
+    // The slow mapped profile takes either route once its intervals arrive.
+    // Its mapped gate holds the owner, so acquisition runs on a lane.
+    auto mapped = capture(crypto, true);
+    const std::array<r::FrequencyInterval, 1> narrow{{{-.005, .005}}};
+    run(mapped, narrow, Route::lag_groups, "lag-groups", false);
+    run(mapped, narrow, Route::lag_groups, "lag-groups", false, 1);
+    mapped.config.frequency_bound_hz = 2;
+    const std::array<r::FrequencyInterval, 1> wide{{{-2, -.4}}};
+    mapped.config.native_coarse_precision = v::NativeCoarsePrecision::fp64;
+    run(mapped, wide, Route::frequency_tiles, "explicit-fp64", false);
+    mapped.config.native_coarse_precision = v::NativeCoarsePrecision::automatic;
+    run(mapped, wide, Route::frequency_tiles, automatic, false);
+    // With a Helper, several acquired intervals still share one lag route.
+    mapped.config.helper_enabled = true;
+    mapped.config.helper.low_frequency_hz = 100;
+    mapped.config.helper.frequency_hz = 300;
+    mapped.config.helper.auxiliary_frequency_hz = 500;
+    mapped.config.frequency_bound_hz = .05;
+    const std::array<r::FrequencyInterval, 3> several{{{-.05, -.025}, {0, 0}, {.0125, .05}}};
+    run(mapped, several, Route::lag_groups, "lag-groups", false);
+
+    // The exact one-arrival bank follows its route, so it cannot defer.
+    auto exact = capture(crypto, false, 0, 0);
+    exact.config.helper_enabled = false;
+    exact.config.frequency_bound_hz = 2;
+    exact.slot.arrival_lower_seconds = exact.slot.arrival_upper_seconds = exact.arrival;
+    const std::array<r::FrequencyInterval, 1> prior{{{-2, 2}}};
+    const r::FrequencyAssistance unused{[&](const r::LaneWave&, std::stop_token) ->
+        std::span<const r::FrequencyInterval> { return prior; }, bound};
+    check(!r::coarse_defers_frequency_grid(exact.config, exact.slot), "exact one-arrival profile deferred its grid");
+    constexpr unsigned workers = 3;
+    rejects([&] { (void)r::coarse_workspace(exact.config, exact.slot, workers, bound); },
+            "a profile that cannot defer its grid quoted overlapped acquisition");
+    rejects([&] {
+        (void)r::score_coarse(exact.config, exact.slot, crypto, exact.iq, unused, workers,
+                              r::coarse_workspace(exact.config, exact.slot, workers), {});
+    }, "a profile that cannot defer its grid acquired during preparation");
+
+    // An acquisition failure or an invalid interval list is the session's
+    // failure, whichever lanes ran it, and never a preparation result.
+    struct Lost : std::runtime_error { using std::runtime_error::runtime_error; };
+    for (const auto* fixture : {&two_ray, &mapped}) {
+        const auto limit = r::coarse_workspace(fixture->config, fixture->slot, workers, bound);
+        const r::FrequencyAssistance failing{[](const r::LaneWave&, std::stop_token) ->
+            std::span<const r::FrequencyInterval> { throw Lost("acquisition failed"); }, bound};
+        rejects<Lost>([&] {
+            (void)r::score_coarse(fixture->config, fixture->slot, crypto, fixture->iq, failing, workers, limit, {});
+        }, "coarse session hid an acquisition failure");
+        const std::array<r::FrequencyInterval, 2> unordered{{{.01, .02}, {-.01, 0}}};
+        const r::FrequencyAssistance invalid{[&](const r::LaneWave&, std::stop_token) ->
+            std::span<const r::FrequencyInterval> { return unordered; }, bound};
+        rejects([&] {
+            (void)r::score_coarse(fixture->config, fixture->slot, crypto, fixture->iq, invalid, workers, limit, {});
+        }, "coarse session searched an invalid acquired interval list");
+        std::stop_source cancelled;
+        const r::FrequencyAssistance stopping{[&](const r::LaneWave&, std::stop_token stop) ->
+            std::span<const r::FrequencyInterval> {
+                cancelled.request_stop();
+                check(stop.stop_requested(), "acquisition did not observe its session's cancellation");
+                throw datapump::Error("acquisition cancelled");
+            }, bound};
+        rejects([&] {
+            (void)r::score_coarse(fixture->config, fixture->slot, crypto, fixture->iq, stopping, workers, limit,
+                                  cancelled.get_token());
+        }, "cancelled acquisition produced a coarse result");
+    }
+}
+
 void tied_arrival_frontier() {
     const auto endpoints = r::select_coarse_arrivals(std::array{0., 0., 1., 0., 0.}, 1);
     check(endpoints.count == 2 && endpoints.indices == std::array<std::size_t, 2>{4, 2},
@@ -776,6 +977,7 @@ int main() try {
     slow_mapped(crypto);
     exact_single_arrival_chirp_z(crypto);
     exact_large_frequency_group(crypto);
+    overlapped_acquisition(crypto);
     return 0;
 } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

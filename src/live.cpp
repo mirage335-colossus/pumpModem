@@ -230,6 +230,7 @@ PatternStep pattern_step(const StreamSlotReceipt& receipt) {
     row.operational_log_e = s.operational_log_e;
     row.operational_threshold = s.operational_threshold;
     row.helper_seconds = s.helper_seconds;
+    row.helper_overlapped = s.helper_overlapped;
     row.coarse_seconds = s.coarse_seconds;
     row.fine_seconds = s.fine_seconds;
     row.quiet_modes = s.noise_statistics_valid ? s.quiet_modes : 0;

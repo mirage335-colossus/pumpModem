@@ -2,11 +2,10 @@
 
 #include "datapump/triad_receiver.hpp"
 #include "triad_receiver_bulk.hpp"
+#include "triad_receiver_detail.hpp"
 #include "triad_receiver_fine.hpp"
 
 namespace datapump::triad::v3::receiver_detail {
-
-struct FrequencyInterval;
 
 struct CoarseProposal {
     FineCoordinate coordinate;
@@ -36,6 +35,8 @@ struct CoarseOperationCounts {
 
 struct CoarsePhaseWork {
     CoarseOperationCounts operations;
+    // The template bank, observation filter and mapped-profile gate overlap
+    // on one lane set. Each reports its own interval; these are not additive.
     double wall_seconds = 0;
 };
 
@@ -88,13 +89,37 @@ struct CoarseResult {
     CoarseProgress work;
 };
 
+// What frequency acquisition adds while it overlaps preparation: its live
+// scratch, and the most jobs any one of its waves runs at once.
+struct AssistanceBound {
+    std::size_t workspace_bytes = 0, widest_wave = 0;
+};
+
+// Frequency intervals that are still being acquired when a session is built.
+// The session runs `acquire` once, during its construction. Its owner thread
+// does so with a wave on the session's own lanes; when the mapped-profile
+// gate needs the owner, one of those lanes does so with no wave. The
+// returned intervals must outlive construction.
+struct FrequencyAssistance {
+    std::function<std::span<const FrequencyInterval>(const LaneWave&, std::stop_token)> acquire;
+    AssistanceBound bound;
+};
+
 // One full configured search over a fixed, immutable IQ lease. Preparation
 // consumes that lease synchronously and retains the projected observation.
-// Subsequent calls are confined to the owner thread, except cancel().
+// Subsequent calls are confined to the owner thread, except cancel(). Without
+// a shared executor the session owns a private one for its admitted lanes.
 class CoarseSession {
 public:
     CoarseSession(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                   std::span<const Complex>, std::span<const FrequencyInterval>,
+                  unsigned workers, std::size_t scratch_limit_bytes, std::stop_token = {},
+                  ReceiverExecutor* = nullptr);
+    // Acquisition runs beside the template bank and observation filter. This
+    // requires coarse_defers_frequency_grid(). Results are identical to a
+    // session given the acquired intervals.
+    CoarseSession(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
+                  std::span<const Complex>, const FrequencyAssistance&,
                   unsigned workers, std::size_t scratch_limit_bytes, std::stop_token = {},
                   ReceiverExecutor* = nullptr);
     ~CoarseSession();
@@ -103,6 +128,8 @@ public:
     CoarseSession(const CoarseSession&) = delete;
     CoarseSession& operator=(const CoarseSession&) = delete;
 
+    // Native tiles of one call are searched as a single span. An interrupted
+    // call publishes none of them.
     void advance(std::size_t maximum_tiles);
     CoarseState state() const noexcept;
     CoarseProgress progress() const;
@@ -119,7 +146,11 @@ private:
 
 // Bounds only the coarse stage. The caller retains the input lease and owns
 // the worker allocation. Coordinates are snapped by the fine admission grid.
-std::size_t coarse_workspace(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers);
+// An overlapped acquisition is charged beside the whole of preparation.
+std::size_t coarse_workspace(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers,
+                             AssistanceBound overlapped = {});
+// Public geometry alone decides whether preparation can precede the grid.
+bool coarse_defers_frequency_grid(const ReceiverConfig&, const ReceiverSlotPlan&);
 // Geometry and workspace quote from the same planner as a scoring session.
 // No input, preparation, arithmetic selection or device work is involved.
 CoarseWorkPlan coarse_work_plan(const ReceiverConfig&, const ReceiverSlotPlan&,
@@ -131,6 +162,10 @@ struct CoarseFineGeometry {
 CoarseFineGeometry coarse_fine_geometry(const ReceiverConfig&, const ReceiverSlotPlan&);
 CoarseResult score_coarse(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                           std::span<const Complex>, std::span<const FrequencyInterval>,
+                          unsigned workers, std::size_t scratch_limit_bytes, std::stop_token,
+                          ReceiverExecutor* = nullptr);
+CoarseResult score_coarse(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
+                          std::span<const Complex>, const FrequencyAssistance&,
                           unsigned workers, std::size_t scratch_limit_bytes, std::stop_token,
                           ReceiverExecutor* = nullptr);
 

@@ -1,9 +1,15 @@
 #include "triad_receiver_helper.hpp"
 
+#include "triad_receiver_executor.hpp"
+
+#include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <new>
 #include <numbers>
 #include <stdexcept>
 #include <stop_token>
@@ -14,6 +20,30 @@ using namespace datapump::triad::v3;
 using namespace datapump::triad::v3::receiver_detail;
 constexpr double tau = 2 * std::numbers::pi;
 constexpr std::size_t scratch_limit = 1U << 28;
+
+// This binary counts its live heap bytes, to hold acquisition to its bound.
+std::atomic<std::size_t> live_bytes{0}, peak_bytes{0};
+constexpr std::size_t allocation_header = 2 * sizeof(std::size_t);
+} // namespace
+
+void* operator new(std::size_t bytes) {
+    const auto block = static_cast<std::size_t*>(std::malloc(bytes + allocation_header));
+    if (!block) throw std::bad_alloc();
+    *block = bytes;
+    const auto now = live_bytes.fetch_add(bytes) + bytes;
+    auto seen = peak_bytes.load();
+    while (now > seen && !peak_bytes.compare_exchange_weak(seen, now)) {}
+    return block + 2;
+}
+void operator delete(void* pointer) noexcept {
+    if (!pointer) return;
+    const auto block = static_cast<std::size_t*>(pointer) - 2;
+    live_bytes.fetch_sub(*block);
+    std::free(block);
+}
+void operator delete(void* pointer, std::size_t) noexcept { operator delete(pointer); }
+
+namespace {
 
 void check(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
@@ -33,16 +63,16 @@ struct Fixture {
     std::vector<std::uint8_t> valid;
 };
 
-Fixture fixture(double arrival = .17, double amplitude = .11) {
+Fixture fixture(double arrival = .17, double amplitude = .11, unsigned rate = 512) {
     Fixture f;
     auto& c = f.config;
-    c.sample_rate_hz = 512; c.data_if_hz = 200; c.frequency_bound_hz = 6;
+    c.sample_rate_hz = rate; c.data_if_hz = 200; c.frequency_bound_hz = 6;
     c.clock_bound_ppm = 20; c.endpoint_clock_bound_ppm = 10;
     c.spread_delay_seconds = .001; c.spread_doppler_hz = 20;
     c.capture_tail_bound_seconds = .035; c.helper_enabled = true;
     c.helper.low_frequency_hz = 100; c.helper.frequency_hz = 300;
     auto& s = f.slot;
-    s.stop_sample = 512 * 84; s.window_capture_lead_seconds = 8;
+    s.stop_sample = rate * 84; s.window_capture_lead_seconds = 8;
     s.source_start_seconds = 37.866;
     s.arrival_lower_seconds = -7.035; s.arrival_upper_seconds = 7.035;
     s.helper_end_seconds = 61.6;
@@ -62,7 +92,7 @@ Fixture fixture(double arrival = .17, double amplitude = .11) {
         const double radius = std::sqrt(-2 * std::log(uniform()));
         const double angle = tau * uniform();
         Complex value = .4 * Complex(radius * std::cos(angle), radius * std::sin(angle));
-        const double t = i / 512. - 8;
+        const double t = i / static_cast<double>(rate) - 8;
         if (t >= arrival && t < arrival + 61.6) {
             for (const auto& [center, phase] : std::array<std::array<double, 2>, 2>{{{-100, .7}, {100, -2.4}}}) {
                 const double a = tau * (center + .7131) * t + phase;
@@ -75,8 +105,128 @@ Fixture fixture(double arrival = .17, double amplitude = .11) {
     return f;
 }
 
-HelperResult score(const Fixture& f) {
-    return score_helper(f.config, f.slot, f.input, f.valid, scratch_limit);
+HelperResult score(const Fixture& f, const LaneWave& wave = {}) {
+    return score_helper(f.config, f.slot, f.input, f.valid, scratch_limit, {}, wave);
+}
+
+bool same(const HelperResult& a, const HelperResult& b) {
+    const auto pilot = [](const HelperPilotDiagnostic& x, const HelperPilotDiagnostic& y) {
+        return x.usable == y.usable && x.best_shift_hz == y.best_shift_hz &&
+               x.presence_score == y.presence_score && x.peak_background_ratio == y.peak_background_ratio;
+    };
+    return a.narrowed == b.narrowed && a.reason == b.reason && a.onset_intervals == b.onset_intervals &&
+        std::ranges::equal(a.intervals, b.intervals, [](const auto& x, const auto& y) {
+            return x.lower_hz == y.lower_hz && x.upper_hz == y.upper_hz;
+        }) && pilot(a.coarse_pilots[0], b.coarse_pilots[0]) && pilot(a.coarse_pilots[1], b.coarse_pilots[1]) &&
+        a.onset_noise_level == b.onset_noise_level && a.onset_helper_level == b.onset_helper_level &&
+        a.onset_best_arrival_seconds == b.onset_best_arrival_seconds &&
+        a.frequency_observation_seconds == b.frequency_observation_seconds &&
+        a.onset_apertures == b.onset_apertures && a.prefix_samples == b.prefix_samples &&
+        a.workspace_peak_bytes == b.workspace_peak_bytes;
+}
+
+// Every field is the serial result whatever runs the independent steps: an
+// executor's lanes, or a wave that runs its jobs in the opposite order. The
+// waves are the two pilot fits, one refinement per target where the channel
+// has no spread, the branch filters in groups that fit the workspace bound,
+// and the final pilot fits.
+void lanes_do_not_change_the_result() {
+    ReceiverExecutor executor(4);
+    std::vector<std::size_t> waves;
+    const LaneWave lanes = [&](std::size_t count, const LaneJob& job) {
+        waves.push_back(count);
+        lane_wave(executor, 0, 4, {})(count, job);
+    };
+    const LaneWave reversed = [](std::size_t count, const LaneJob& job) {
+        for (std::size_t index = count; index--;) job(index, {});
+    };
+    using Waves = std::vector<std::size_t>;
+    struct Case { double arrival, amplitude, width; unsigned rate; const char* reason; Waves waves; };
+    const char* narrowed = "pilot_aware_onset_relative_frequency_proposal";
+    for (const auto& c : {Case{.17, .11, 0, 512, narrowed, {2, 4, 4, 2}},
+                          Case{7.03, .25, 0, 512, narrowed, {2, 4, 4, 2}},
+                          Case{.17, .4, .5, 512, narrowed, {2, 4, 2}},
+                          // Three branch transforms fit this geometry's bound, not four.
+                          Case{.17, .25, 0, 450, narrowed, {2, 4, 3, 1, 2}},
+                          Case{.17, 0, 0, 512, "no_coarse_pilot", {2}}}) {
+        auto f = fixture(c.arrival, c.amplitude, c.rate);
+        f.config.random_doppler_width_hz = c.width;
+        const auto serial = score(f);
+        check(serial.reason == c.reason, "Helper lane fixture changed its serial outcome");
+        waves.clear();
+        check(same(serial, score(f, lanes)), "Helper result changed on executor lanes");
+        check(waves == c.waves, "Helper changed which independent steps share its lanes");
+        check(same(serial, score(f, reversed)), "Helper result depends on the order its steps run");
+    }
+
+    // A step that fails on one lane ends acquisition exactly as in a serial
+    // pass: the earlier pilot's diagnostic stays, the later one is never read.
+    for (const bool first : {false, true}) {
+        auto f = fixture();
+        // This pilot's clock allowance alone needs more profile points than a fit admits.
+        (first ? f.config.helper.low_frequency_hz : f.config.helper.frequency_hz) = 4e7;
+        const auto serial = score(f);
+        check(serial.reason == "coarse_profile_work_limit" && serial.coarse_pilots[0].usable != first &&
+              !serial.coarse_pilots[1].usable && serial.intervals.empty(),
+              "Helper profile work limit changed its serial outcome");
+        waves.clear();
+        check(same(serial, score(f, lanes)) && waves == Waves{2} && same(serial, score(f, reversed)),
+              "a pilot's work limit ended acquisition differently on lanes");
+    }
+
+    // The longer frequency aperture needs more profile points than the
+    // coarse one. A pilot the coarse fit only skips then ends its aperture.
+    for (const bool first : {false, true}) {
+        auto f = fixture();
+        (first ? f.config.helper.low_frequency_hz : f.config.helper.frequency_hz) = 1.4e7;
+        const auto serial = score(f);
+        const std::size_t skipped = first ? 0 : 1;
+        check(serial.reason == "onset_branch_frequency_fallback" && serial.onset_apertures == 1 &&
+              !serial.coarse_pilots[skipped].usable && serial.coarse_pilots[1 - skipped].usable &&
+              serial.intervals.empty(), "Helper final-fit work limit changed its serial outcome");
+        waves.clear();
+        check(same(serial, score(f, lanes)) && waves == Waves{2, 2, 2, 2} && same(serial, score(f, reversed)),
+              "a final fit's work limit ended its aperture differently on lanes");
+    }
+
+    // A cancelled wave reports cancellation, never a partial result.
+    const auto f = fixture();
+    std::stop_source cancelled;
+    const LaneWave stopping = [&](std::size_t count, const LaneJob& job) {
+        cancelled.request_stop();
+        for (std::size_t index = 0; index < count; ++index) job(index, cancelled.get_token());
+    };
+    rejects([&] { score_helper(f.config, f.slot, f.input, f.valid, scratch_limit, cancelled.get_token(), stopping); },
+            "Helper ignored cancellation inside a wave");
+}
+
+// The bound follows the public calendar. Beyond its 16 MiB allowance for
+// interval lists and records it is the largest step, and live scratch stays
+// inside that with or without lanes: also where only three of the four
+// branch filters may run at once.
+void workspace_bound_covers_live_scratch() {
+    constexpr std::size_t records = 16U << 20, small = 64U << 10;
+    ReceiverExecutor executor(4);
+    const auto lanes = lane_wave(executor, 0, 4, {});
+    for (const unsigned rate : {512U, 450U}) for (const double width : {0., .5}) {
+        auto f = fixture(.17, .4, rate);
+        f.config.random_doppler_width_hz = width;
+        const auto bound = helper_workspace(f.config, f.slot);
+        check(bound > records && bound < f.input.size() * 1024,
+              "Helper workspace bound returned to a per-sample allowance");
+        std::size_t largest = 0;
+        for (const auto* wave : {static_cast<const LaneWave*>(nullptr), &lanes}) {
+            const auto before = live_bytes.load();
+            peak_bytes = before;
+            const auto result = wave ? score(f, *wave) : score(f);
+            const auto used = peak_bytes.load() - before;
+            check(result.narrowed && result.workspace_peak_bytes == bound, "Helper reported another workspace bound");
+            check(used + records <= bound + small, "Helper scratch exceeded its largest bounded step");
+            largest = std::max(largest, used);
+        }
+        // Fits are charged for their whole aperture, which they rarely use.
+        check(bound - records <= largest + largest / 2, "Helper workspace bound is no longer its largest live step");
+    }
 }
 
 void numerical_parity() {
@@ -119,14 +269,27 @@ void fallbacks_and_bounds() {
     check(result.reason == "helper_disabled" && result.intervals.empty() && helper_workspace(f.config, f.slot) == 0, "Disabled Helper acquired");
     f.config.helper_enabled = true; f.config.helper.pilot_dwell_gating = true;
     result = score(f);
-    check(result.reason == "gated_or_retuned_pilots_unsupported" && result.intervals.empty(), "Gated Helper narrowed prior");
+    check(result.reason == "gated_or_retuned_pilots_unsupported" && result.intervals.empty() &&
+          helper_workspace(f.config, f.slot) == 0, "Gated Helper narrowed prior");
     f.config.helper.pilot_dwell_gating = false; f.valid[20] = 0;
     result = score(f);
     check(result.reason == "known_erasure_in_helper_support" && result.intervals.empty(), "Helper ignored known erasure");
     f.valid[20] = 1; f.slot.source_start_seconds = 10;
     result = score(f);
-    check(result.reason == "insufficient_guaranteed_coarse_support" && result.intervals.empty(), "Helper used DATA-contaminated coarse aperture");
+    check(result.reason == "insufficient_guaranteed_coarse_support" && result.intervals.empty() &&
+          helper_workspace(f.config, f.slot) == 0, "Helper used DATA-contaminated coarse aperture");
     f.slot.source_start_seconds = 37.866;
+    // No scratch is quoted where acquisition returns before holding any.
+    f.config.clock_bound_ppm = 2e5;
+    result = score(f);
+    check(result.reason == "clock_envelope_unsupported" && helper_workspace(f.config, f.slot) == 0,
+          "Helper quoted scratch for an unsupported clock envelope");
+    f.config.clock_bound_ppm = 20;
+    auto overlong = f.slot;
+    overlong.stop_sample = 9'000'000;
+    overlong.window_capture_lead_seconds = 20'000;
+    check(helper_workspace(f.config, overlong) == 0 && helper_workspace(f.config, f.slot) > 0,
+          "Helper quoted scratch beyond its sample limit");
     rejects([&] { score_helper(f.config, f.slot, f.input, f.valid, 1); }, "Helper ignored memory lease");
     f.valid[20] = 2;
     rejects([&] { score(f); }, "Helper accepted invalid validity mask");
@@ -138,7 +301,12 @@ void fallbacks_and_bounds() {
 } // namespace
 
 int main() {
-    try { numerical_parity(); fallbacks_and_bounds(); }
+    try {
+        numerical_parity();
+        fallbacks_and_bounds();
+        lanes_do_not_change_the_result();
+        workspace_bound_covers_live_scratch();
+    }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
     std::cout << "native Helper parity and fallback checks passed\n";
 }

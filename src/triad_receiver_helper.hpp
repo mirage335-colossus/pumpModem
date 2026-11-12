@@ -24,10 +24,17 @@ struct HelperResult {
     std::size_t onset_apertures = 0, prefix_samples = 0, workspace_peak_bytes = 0;
 };
 
+// The most jobs one acquisition wave runs at once.
+inline constexpr std::size_t helper_widest_wave = 4;
+
 // Scratch only: the caller separately owns and charges the immutable input.
+// The bound follows the public calendar. Steps that run at once use only
+// what the largest single step already needs, so it has no lane term.
 std::size_t helper_workspace(const ReceiverConfig&, const ReceiverSlotPlan&);
+// A supplied wave runs the independent pilot fits, target refinements and
+// branch filters on its owner's lanes. The result is the same without one.
 HelperResult score_helper(const ReceiverConfig&, const ReceiverSlotPlan&,
                           std::span<const Complex>, std::span<const std::uint8_t>,
-                          std::size_t scratch_limit_bytes, std::stop_token = {});
+                          std::size_t scratch_limit_bytes, std::stop_token = {}, const LaneWave& = {});
 
 } // namespace datapump::triad::v3::receiver_detail

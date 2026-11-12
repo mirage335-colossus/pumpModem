@@ -162,8 +162,8 @@ For a native single-ray AVX2 exact-projection frequency search, fused preparatio
 can convert checked templates directly to FP32 spectra and quote a smaller
 phase-aware memory bound. The bound still charges FP64 projection/FP32-plan
 overlap and conversion work; other routes keep their existing bounds. Whether
-that reduces the complete slot lease depends on the separate Helper and fine
-bounds. See the [bounded comparison](validation.md#lower-precision-and-workspace-investigation).
+that reduces the complete slot lease depends on the separate fine bound, and
+on Helper scratch where acquisition overlaps coarse preparation. See the [bounded comparison](validation.md#lower-precision-and-workspace-investigation).
 
 The optional `DATAPUMP_TRIAD_TENSOR` build links a C++ ATen
 bulk backend into that same receiver. Public coarse search, fine state, work

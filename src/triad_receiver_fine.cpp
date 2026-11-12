@@ -5,13 +5,12 @@
 #include "datapump/execution.hpp"
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <compare>
 #include <exception>
-#include <functional>
 #include <limits>
+#include <memory>
 #include <numbers>
 #include <numeric>
 
@@ -225,91 +224,6 @@ private:
     std::optional<DftPlan> plan_;
 };
 
-class FineWorkers {
-public:
-    explicit FineWorkers(unsigned workers) {
-        threads_.reserve(workers - 1);
-        try {
-            for (unsigned worker = 1; worker < workers; ++worker)
-                threads_.emplace_back([this, worker] { run(worker); });
-        } catch (...) {
-            close();
-            throw;
-        }
-    }
-
-    ~FineWorkers() { close(); }
-
-    void dispatch(std::size_t count, std::function<void(unsigned, std::size_t)> function) {
-        {
-            std::lock_guard lock(mutex_);
-            function_ = std::move(function);
-            count_ = count;
-            next_ = 0;
-            failure_ = {};
-            failed_ = false;
-            pending_ = threads_.size();
-            ++generation_;
-        }
-        ready_.notify_all();
-        consume(0);
-        std::unique_lock lock(mutex_);
-        done_.wait(lock, [&] { return !pending_; });
-        function_ = {};
-        if (failure_) std::rethrow_exception(failure_);
-    }
-
-private:
-    void close() {
-        {
-            std::lock_guard lock(mutex_);
-            closing_ = true;
-        }
-        ready_.notify_all();
-        for (auto& thread : threads_) thread.join();
-        threads_.clear();
-    }
-
-    void consume(unsigned worker) {
-        try {
-            while (!failed_.load(std::memory_order_relaxed)) {
-                const auto index = next_.fetch_add(1, std::memory_order_relaxed);
-                if (index >= count_) break;
-                function_(worker, index);
-            }
-        } catch (...) {
-            failed_.store(true, std::memory_order_relaxed);
-            std::lock_guard lock(mutex_);
-            if (!failure_) failure_ = std::current_exception();
-        }
-    }
-
-    void run(unsigned worker) {
-        std::unique_lock lock(mutex_);
-        std::uint64_t seen = 0;
-        while (true) {
-            ready_.wait(lock, [&] { return closing_ || seen != generation_; });
-            if (closing_) return;
-            seen = generation_;
-            lock.unlock();
-            consume(worker);
-            lock.lock();
-            if (!--pending_) done_.notify_one();
-        }
-    }
-
-    execution::Mutex mutex_;
-    execution::Condition ready_, done_;
-    std::function<void(unsigned, std::size_t)> function_;
-    std::vector<execution::Task> threads_;
-    std::atomic<std::size_t> next_{0};
-    std::atomic<bool> failed_{false};
-    std::exception_ptr failure_;
-    std::size_t count_ = 0, pending_ = 0;
-    std::uint64_t generation_ = 0;
-    bool closing_ = false;
-};
-
 struct ChannelPosterior {
     std::array<Complex, 2> mean{};
     std::array<Complex, 4> covariance{};
@@ -327,16 +241,32 @@ double rank(const std::array<double, components>& weights) {
     return std::accumulate(weights.begin(), weights.end(), -infinity, log_add);
 }
 
+struct RankedIndex {
+    double rank;
+    std::uint32_t index;
+};
+
+// Keeps the `count` best-ranked elements, ordered by key. Each rank is
+// evaluated once: it is a log-sum over every channel component.
 template<typename T>
-void retain(std::vector<T>& states, std::size_t count) {
+void retain(std::vector<T>& states, std::size_t count, std::vector<RankedIndex>& ranking) {
     if (states.size() <= count) return;
-    std::partial_sort(states.begin(), states.begin() + static_cast<std::ptrdiff_t>(count), states.end(),
-        [](const T& a, const T& b) {
-            const auto first = rank(a.weights), second = rank(b.weights);
-            return first != second ? first > second : a.key < b.key;
+    ranking.resize(states.size());
+    for (std::size_t i = 0; i < states.size(); ++i)
+        ranking[i] = {rank(states[i].weights), static_cast<std::uint32_t>(i)};
+    std::nth_element(ranking.begin(), ranking.begin() + static_cast<std::ptrdiff_t>(count), ranking.end(),
+        [&](const RankedIndex& a, const RankedIndex& b) {
+            return a.rank != b.rank ? a.rank > b.rank : states[a.index].key < states[b.index].key;
         });
+    // Survivors move down in their original order, which is already by key
+    // for every caller. No destination has a source left to read.
+    std::sort(ranking.begin(), ranking.begin() + static_cast<std::ptrdiff_t>(count),
+        [](const RankedIndex& a, const RankedIndex& b) { return a.index < b.index; });
+    for (std::size_t i = 0; i < count; ++i)
+        if (ranking[i].index != i) states[i] = std::move(states[ranking[i].index]);
     states.resize(count);
-    std::sort(states.begin(), states.end(), [](const T& a, const T& b) { return a.key < b.key; });
+    const auto by_key = [](const T& a, const T& b) { return a.key < b.key; };
+    if (!std::is_sorted(states.begin(), states.end(), by_key)) std::sort(states.begin(), states.end(), by_key);
 }
 
 struct TimingGrid {
@@ -451,7 +381,8 @@ void append_edges(std::vector<TransitionEdge>& edges, const State& source, std::
 
 std::vector<State> predict(const std::vector<State>& previous, const TimingGrid& grid,
                            double elapsed, double boundary, double center, std::size_t taps,
-                           std::uint64_t& edges_scored, FineLaneWork* work, std::stop_token stop) {
+                           std::uint64_t& edges_scored, FineLaneWork* work, std::vector<RankedIndex>& ranking,
+                           std::stop_token stop) {
     std::vector<TransitionEdge> edges;
     edges.reserve(2 * previous.size() * (2 * grid.radius + 1));
     for (std::size_t i = 0; i < previous.size(); ++i) {
@@ -489,7 +420,7 @@ std::vector<State> predict(const std::vector<State>& previous, const TimingGrid&
             work->states_dropped += targets.size() - maximum_proposals;
         }
     }
-    retain(targets, maximum_proposals);
+    retain(targets, maximum_proposals, ranking);
 
     std::vector<State> result;
     result.reserve(targets.size());
@@ -749,6 +680,16 @@ double quiet_noise_threshold(std::size_t modes) {
 }
 
 namespace {
+// More keyed sources than this keep tile filling on demand.
+constexpr std::size_t maximum_fill_coordinates = 16;
+
+constexpr std::size_t dispatch_extent_bytes = 12 * sizeof(std::size_t);
+
+// A segment holds at most three blocks, so at most two dispatches.
+std::size_t maximum_dispatches(const BlockCalendar& calendar) {
+    return checked_multiply(2, calendar.rows / calendar.segment_rows + 1);
+}
+
 FineObservation whole_slot(const ReceiverSlotPlan& slot) {
     if (slot.stop_sample <= slot.first_sample || slot.stop_sample - slot.first_sample > SIZE_MAX)
         throw Error("invalid public fine observation size");
@@ -808,12 +749,18 @@ FineWorkspaceQuote workspace_for_plan(const ReceiverConfig& config, const Receiv
         add(rows, sizeof(std::size_t));
         fft_rows = std::max(fft_rows, DftPlan::scratch_samples(rows));
     }
-    add(fft_rows + 2 * max_rows, sizeof(Complex));
+    // The dispatch being scored and the one observed ahead of it.
+    add(fft_rows + 4 * max_rows, sizeof(Complex));
     // Both lane states can coexist with the predicted/merged adaptive states.
     add(3 * maximum_proposals, sizeof(State));
     add(2 * maximum_states * (2 * maximum_rate_radius + 1),
-        sizeof(TransitionTarget) + sizeof(TransitionEdge));
-    if (record_work) add(2 * maximum_proposals, sizeof(StateBlockWork));
+        sizeof(TransitionTarget) + sizeof(TransitionEdge) + sizeof(RankedIndex));
+    // Every dispatch's public geometry for one call.
+    add(maximum_dispatches(calendar), dispatch_extent_bytes);
+    // The fixed-affine lane's maps, source groups and chain progress.
+    add(maximum_proposals, sizeof(MappedBasisRow) + 3 * sizeof(std::uint32_t));
+    add(receiver_epoch_offsets.size(), sizeof(std::vector<std::uint32_t>));
+    if (record_work) add(3 * maximum_proposals, sizeof(StateBlockWork));
     const auto active = useful_fine_workers(workers);
     const auto mapped_rows = std::min(max_rows, maximum_basis_rows);
     const auto taps = config.spread_delay_seconds || config.spread_doppler_hz ? 2U : 1U;
@@ -877,6 +824,35 @@ std::size_t fine_workspace(const ReceiverConfig& config, const ReceiverSlotPlan&
 }
 
 struct FineSession::Impl {
+    // The public geometry of one dispatch: at most two consecutive blocks
+    // of one segment. It depends on the calendar and validity mask alone.
+    struct Extent {
+        std::size_t segment_first = 0, segment_rows = 0, base = 0, first = 0, count = 0;
+        std::array<std::size_t, 2> lengths{};
+        std::array<bool, 2> observed{};
+        bool opens_segment = false, closes_segment = false;
+    };
+    static_assert(sizeof(Extent) <= dispatch_extent_bytes);
+
+    // One dispatch's projected observation.
+    struct Pair {
+        const Extent* extent = nullptr;
+        std::array<ObservationBlock, 2> blocks;
+        std::array<double, 4 * 2 * models> transitions{};
+        std::uint64_t observed_rows = 0, modes = 0, basis_calls = 0;
+        std::span<const ObservationBlock> observations() const { return std::span(blocks).first(extent->count); }
+    };
+
+    // What the running urgent leaves read. The owner changes it only
+    // between waves, when none of them is running.
+    struct Wave {
+        const Pair* pair = nullptr;
+        Pair* ahead = nullptr;
+        ReceiverExecutor::Stage* stage = nullptr;
+        std::size_t first_leaf = 0, release = 0;
+        long double anchor = 0;
+    };
+
     ReceiverConfig config;
     FineObservation observation;
     ReceiverSlotPlan plan;
@@ -900,13 +876,33 @@ struct FineSession::Impl {
     std::vector<std::size_t> bulk_progress;
     std::array<std::vector<FineBulkStatistics>, 2> bulk_statistics;
     std::vector<WorkerScratch> scratch;
-    ReceiverExecutor* executor;
-    std::unique_ptr<FineWorkers> local_workers;
-    std::array<ObservationBlock, 2> blocks;
-    std::vector<StateBlockWork> state_work;
+    // A standalone session owns its lanes. A stream shares its receiver pool.
+    std::unique_ptr<ReceiverExecutor> owned_executor;
+    ReceiverExecutor& executor;
+    // Every dispatch of the current call, then the one being scored and the
+    // one observed ahead of it.
+    std::vector<Extent> extents;
+    std::array<Pair, 2> ring;
+    Wave wave;
+    std::size_t pair_serial = 0, call_serial = 0;
+    // Background leaves per dispatch: every fixed-affine state, then one
+    // tile-filling leaf per keyed source. Fills run `fill_depth` dispatches
+    // ahead, about two tiles, because one fill can outlast a dispatch.
+    std::size_t leaf_block = 0, fill_depth = 0;
+    // The fixed-affine lane's maps never change, so each of its states is an
+    // independent chain. Its states are grouped by the keyed source they read.
+    std::vector<MappedBasisRow> nominal_rows;
+    std::vector<std::vector<std::uint32_t>> epoch_states;
+    // Dispatches completed by each fixed-affine state in the current call.
+    execution::Mutex chain_mutex;
+    execution::Condition chain_advanced;
+    std::vector<std::uint32_t> nominal_progress;
+    std::array<std::vector<StateBlockWork>, 2> nominal_state_work;
+    std::vector<StateBlockWork> adaptive_state_work;
+    std::vector<RankedIndex> ranking;
     std::vector<State> nominal, adaptive;
 
-    long double first_anchor = 0, previous_anchor = 0, previous_last = 0, previous_block_center = 0;
+    long double first_anchor = 0, segment_anchor = 0, previous_anchor = 0, previous_last = 0, previous_block_center = 0;
     std::size_t available = 0, processed = 0, segments = 0, scored_blocks = 0, last_block_rows = 0;
     std::size_t invalid_rows = 0, discarded_rows = 0, erased_blocks = 0;
     std::size_t quiet_modes = 0, observed_modes = 0, workspace = 0;
@@ -921,12 +917,14 @@ struct FineSession::Impl {
          FineObservation extent, std::span<const Complex> samples, std::span<const std::uint8_t> valid,
          std::span<const FineCoordinate> selected, double projected_rate, double clock_gap,
          unsigned allocation, std::size_t scratch_limit, std::stop_token cancellation,
-         ReceiverExecutor* executor)
+         ReceiverExecutor* shared)
         : config(input_config), observation(extent), plan(observation_plan(config, slot, observation)),
           iq(samples), validity(valid), stop(cancellation), calendar(config, plan), grid(projected_rate, clock_gap),
           paths{{{0, 0}, {config.spread_delay_seconds, config.spread_doppler_hz}}},
           tap_count(paths[1].delay_seconds || paths[1].doppler_hz ? 2 : 1), workers(allocation),
-          stage_workers(useful_fine_workers(workers)), executor(executor) {
+          stage_workers(useful_fine_workers(workers)),
+          owned_executor(shared ? nullptr : std::make_unique<ReceiverExecutor>(std::max(1U, stage_workers))),
+          executor(shared ? *shared : *owned_executor) {
         check_cancelled(stop);
         if (iq.size() != observation.rows || (!validity.empty() && validity.size() != iq.size()))
             throw Error("fine input lease differs from the declared observation");
@@ -986,9 +984,22 @@ struct FineSession::Impl {
         scratch.reserve(stage_workers);
         for (unsigned worker = 0; worker < stage_workers; ++worker)
             scratch.emplace_back(bulk ? 0 : max_rows, bulk ? 0 : fft_rows);
-        if (!executor) local_workers = std::make_unique<FineWorkers>(stage_workers);
-        for (auto& block : blocks) block.projected.reserve(max_rows);
-        if (observation.record_work) state_work.resize(2 * maximum_proposals);
+        for (auto& pair : ring)
+            for (auto& block : pair.blocks) block.projected.reserve(max_rows);
+        extents.reserve(maximum_dispatches(calendar));
+        // More sources than this would have fills ahead displace live tiles.
+        if (!bulk && coordinates.size() <= maximum_fill_coordinates) {
+            const auto cache = basis->report();
+            const auto tile_rows = static_cast<double>(cache.tile_samples) / cache.dense_factor;
+            fill_depth = static_cast<std::size_t>(std::clamp(
+                std::round(2 * tile_rows / static_cast<double>(calendar.segment_rows)), 1., 8.));
+        }
+        nominal_progress.resize(nominal.size());
+        ranking.reserve(2 * maximum_states * (2 * maximum_rate_radius + 1));
+        if (observation.record_work) {
+            for (auto& item : nominal_state_work) item.resize(nominal.size());
+            adaptive_state_work.resize(maximum_proposals);
+        }
     }
 
     template<class Operation>
@@ -1000,6 +1011,42 @@ struct FineSession::Impl {
 
     bool observation_complete() const { return processed == observation.rows; }
     bool representative_work() const { return nominal_nonzero && adaptive_nonzero; }
+    std::span<const Tap> taps() const { return std::span(paths).first(tap_count); }
+
+    // The public geometry of the dispatch after `previous`, or of the first
+    // available one. A segment starts only when all of its rows are exposed.
+    bool plan_pair(Extent& next, const Extent* previous) const {
+        std::size_t segment_first, segment_rows, base, first;
+        if (previous && !previous->closes_segment) {
+            segment_first = previous->segment_first;
+            segment_rows = previous->segment_rows;
+            base = previous->base + previous->count;
+            first = previous->first + previous->lengths[0] + (previous->count > 1 ? previous->lengths[1] : 0);
+        } else {
+            segment_first = previous ? previous->segment_first + previous->segment_rows : processed;
+            if (segment_first == observation.rows) return false;
+            segment_rows = calendar.segment_length(segment_first);
+            if (segment_rows > available - segment_first) return false;
+            base = 0;
+            first = segment_first;
+        }
+        const auto block_count = calendar.block_count(segment_rows);
+        next.segment_first = segment_first;
+        next.segment_rows = segment_rows;
+        next.base = base;
+        next.first = first;
+        next.count = std::min(next.lengths.size(), block_count - base);
+        next.opens_segment = base == 0;
+        next.closes_segment = base + next.count == block_count;
+        for (std::size_t block = 0; block < next.count; ++block) {
+            const auto rows = calendar.block_length(segment_rows, base + block);
+            next.lengths[block] = rows;
+            const auto valid = validity.empty() ? validity : validity.subspan(first, rows);
+            next.observed[block] = std::find(valid.begin(), valid.end(), 0) == valid.end();
+            first += rows;
+        }
+        return true;
+    }
 
     void prepare(ObservationBlock& block, std::size_t first, std::size_t rows) {
         const auto projection = std::find_if(projections.begin(), projections.end(),
@@ -1035,30 +1082,112 @@ struct FineSession::Impl {
         }
     }
 
-    void dispatch(std::size_t count, long double anchor) {
-        const auto observations = std::span(blocks).first(count);
-        const auto states = nominal.size() + adaptive.size();
-        const auto taps = std::span(paths).first(tap_count);
-        std::uint64_t observed_rows = 0, modes = 0, basis_calls = 0;
-        std::array<std::uint64_t, 2> bulk_calls{};
-        for (const auto& block : observations) {
-            if (!block.observed) continue;
-            const auto rows = block.projection->rows();
-            observed_rows += rows;
-            modes += block.projection->modes();
-            basis_calls += 1 + (rows - 1) / maximum_basis_rows;
+    // Projects one dispatch's blocks in chronological order. Calls never
+    // overlap: each dispatch is observed before the next one is planned.
+    void observe(Pair& pair, const Extent& extent) {
+        time(times.observation_seconds, [&] {
+            auto first = extent.first;
+            pair.extent = &extent;
+            pair.observed_rows = pair.modes = pair.basis_calls = 0;
+            pair.transitions = {};
+            for (std::size_t i = 0; i < extent.count; ++i) {
+                auto& block = pair.blocks[i];
+                prepare(block, first, extent.lengths[i]);
+                first += extent.lengths[i];
+                // Elapsed intervals and channel models are common to all
+                // states, including for a missing block whose elapsed time
+                // still evolves the posterior.
+                for (std::size_t model = 0; model < models; ++model) {
+                    const auto offset = 4 * (i * models + model);
+                    const auto exponent = -block.elapsed / coherence_seconds[model];
+                    const auto decay = std::exp(exponent);
+                    pair.transitions[offset] = decay * decay;
+                    pair.transitions[offset + 1] = -std::expm1(2 * exponent);
+                    pair.transitions[offset + 2] = decay;
+                }
+                if (!block.observed) continue;
+                const auto rows = block.projection->rows();
+                pair.observed_rows += rows;
+                pair.modes += block.projection->modes();
+                pair.basis_calls += 1 + (rows - 1) / maximum_basis_rows;
+            }
+        });
+    }
+
+    // Serial work at a segment boundary. Background fixed-affine leaves keep
+    // the other lanes busy meanwhile.
+    void open_segment(const Extent& pair) {
+        const auto fs = static_cast<long double>(config.sample_rate_hz);
+        const auto first = pair.segment_first;
+        segment_anchor = (static_cast<long double>(first) + (pair.segment_rows - 1) / 2.L) / fs;
+        if (!first) {
+            first_anchor = segment_anchor;
+            nominal_rows.clear();
+            nominal_rows.reserve(nominal.size());
+            epoch_states.clear();
+            std::array<std::size_t, receiver_epoch_offsets.size()> group;
+            group.fill(receiver_epoch_offsets.size());
+            for (std::size_t i = 0; i < nominal.size(); ++i) {
+                const auto& key = nominal[i].key;
+                nominal_rows.push_back(mapped_row(config, plan, grid, coordinates[key.group], key, first_anchor, true));
+                auto& slot = group[static_cast<std::size_t>(nominal_rows.back().epoch_offset_seconds -
+                                                            receiver_epoch_offsets.front())];
+                if (slot == group.size()) {
+                    slot = epoch_states.size();
+                    epoch_states.emplace_back();
+                }
+                epoch_states[slot].push_back(static_cast<std::uint32_t>(i));
+            }
+        } else {
+            const auto boundary = (previous_last + static_cast<long double>(first) / fs) / 2 - previous_anchor;
+            time(times.transition_seconds, [&] {
+                adaptive = predict(adaptive, grid, static_cast<double>(segment_anchor - previous_anchor),
+                    static_cast<double>(boundary), config.data_if_hz, tap_count, adaptive_edges,
+                    observation.record_work ? &adaptive_work : nullptr, ranking, stop);
+            });
+            adaptive_work.transition_edges = adaptive_edges;
         }
-        if (bulk && observed_rows) time(times.bulk_statistics_seconds, [&] {
+        nominal_work.last_emission_states = nominal.size();
+        nominal_work.peak_emission_states = nominal.size();
+        adaptive_work.last_emission_states = adaptive.size();
+        adaptive_work.peak_emission_states = std::max(adaptive_work.peak_emission_states, adaptive.size());
+    }
+
+    void close_segment(const Extent& pair) {
+        const auto fs = static_cast<long double>(config.sample_rate_hz);
+        adaptive_nonzero |= std::any_of(adaptive.begin(), adaptive.end(),
+            [](const State& state) { return state.nonzero_basis; });
+        time(times.pruning_seconds, [&] {
+            if (observation.record_work && adaptive.size() > maximum_states) {
+                ++adaptive_work.pruning_events;
+                adaptive_work.states_dropped += adaptive.size() - maximum_states;
+            }
+            retain(adaptive, maximum_states, ranking);
+        });
+        nominal_work.peak_retained_states = nominal.size();
+        adaptive_work.peak_retained_states = std::max(adaptive_work.peak_retained_states, adaptive.size());
+        previous_anchor = segment_anchor;
+        previous_last = static_cast<long double>(pair.segment_first + pair.segment_rows - 1) / fs;
+        processed += pair.segment_rows;
+        ++segments;
+    }
+
+    // Device statistics for both lanes of one dispatch, on the owner.
+    std::array<std::uint64_t, 2> bulk_statistics_for(const Pair& pair) {
+        std::array<std::uint64_t, 2> bulk_calls{};
+        if (!pair.observed_rows) return bulk_calls;
+        const auto states = nominal.size() + adaptive.size();
+        time(times.bulk_statistics_seconds, [&] {
             bulk_rows.clear();
-            const auto append = [&](const std::vector<State>& states, bool fixed) {
-                for (const auto& state : states)
+            const auto append = [&](const std::vector<State>& lane, bool fixed) {
+                for (const auto& state : lane)
                     bulk_rows.push_back(mapped_row(config, plan, grid, coordinates[state.key.group], state.key,
-                                                   fixed ? first_anchor : anchor, fixed));
+                                                   fixed ? first_anchor : segment_anchor, fixed));
             };
             append(nominal, true);
             append(adaptive, false);
-            for (std::size_t i = 0; i < observations.size(); ++i) {
-                const auto& block = observations[i];
+            for (std::size_t i = 0; i < pair.extent->count; ++i) {
+                const auto& block = pair.blocks[i];
                 if (!block.observed) continue;
                 const auto rows = block.projection->rows();
                 auto& output = bulk_statistics[i];
@@ -1077,7 +1206,7 @@ struct FineSession::Impl {
                     if (candidate >= states || first != bulk_progress[candidate] || first > rows || take > rows - first ||
                         !take || take > bulk_offsets.size())
                         throw Error("Robust bulk backend requested a map outside its public block");
-                    basis->visit_pair(bulk_rows[candidate], taps, block.first + first,
+                    basis->visit_pair(bulk_rows[candidate], taps(), block.first + first,
                                       std::span(bulk_offsets).first(take), sink, stop);
                     bulk_progress[candidate] += take;
                     ++bulk_calls[candidate < nominal.size() ? 0 : 1];
@@ -1096,111 +1225,182 @@ struct FineSession::Impl {
                 bulk_work = completed;
             }
         });
-        time(times.dispatch_seconds, [&] {
-            check_cancelled(stop);
-            // Elapsed intervals and channel models are common to all states.
-            // Prepare them once per chronological block pair, including
-            // missing blocks whose elapsed time still evolves the posterior.
-            // Keep this recurring work inside the dispatch timing receipt.
-            std::array<double, 4 * 2 * models> transitions{};
-            for (std::size_t i = 0; i < observations.size(); ++i) {
-                for (std::size_t model = 0; model < models; ++model) {
-                    const auto offset = 4 * (i * models + model);
-                    const auto exponent = -observations[i].elapsed / coherence_seconds[model];
-                    const auto decay = std::exp(exponent);
-                    transitions[offset] = decay * decay;
-                    transitions[offset + 1] = -std::expm1(2 * exponent);
-                    transitions[offset + 2] = decay;
-                }
-            }
-            const auto update = [&](unsigned worker, std::size_t index, std::stop_token task_stop) {
-                check_cancelled(task_stop);
-                const bool fixed = index < nominal.size();
-                auto& state = fixed ? nominal[index] : adaptive[index - nominal.size()];
-                MappedBasisRow row;
-                std::array<const FineBulkStatistics*, 2> prepared{};
-                if (bulk) {
-                    for (std::size_t i = 0; i < observations.size(); ++i)
-                        if (observations[i].observed) prepared[i] = &bulk_statistics[i][index];
-                } else {
-                    row = mapped_row(config, plan, grid, coordinates[state.key.group], state.key,
-                                     fixed ? first_anchor : anchor, fixed);
-                }
-                advance_state(state, row, *basis, taps, observations, prepared, transitions, config.noise_variance,
-                              scratch[worker], observation.record_work ? &state_work[index] : nullptr, task_stop);
-            };
-            if (executor) executor->parallel(plan.index, states, stage_workers, stop, update);
-            else local_workers->dispatch(states, [&](unsigned worker, std::size_t index) {
-                update(worker, index, stop);
-            });
-        });
-        add_work(basis_rows, observed_rows * 2 * tap_count * states);
-        if (observation.record_work) {
-            const auto charge = [&](FineLaneWork& work, std::size_t first, std::size_t size, std::size_t lane) {
-                add_work(work.basis_rows, observed_rows * 2 * tap_count * size);
-                add_work(work.basis_calls, bulk ? bulk_calls[lane] : basis_calls * size);
-                add_work(work.projection_modes, modes * 2 * tap_count * size);
-                add_work(work.gaussian_updates, count * size * 3 * models);
-                for (std::size_t i = first; i < first + size; ++i) {
-                    add_work(work.positive_basis_blocks, state_work[i].positive_basis_blocks);
-                    work.projected_template_energy += state_work[i].template_energy;
-                }
-            };
-            charge(nominal_work, 0, nominal.size(), 0);
-            charge(adaptive_work, nominal.size(), adaptive.size(), 1);
-        }
-        scored_blocks += count;
+        return bulk_calls;
     }
 
-    void segment(std::size_t rows) {
-        const auto first = processed;
-        const auto fs = static_cast<long double>(config.sample_rate_hz);
-        const auto anchor = (static_cast<long double>(first) + (rows - 1) / 2.L) / fs;
-        if (!first) first_anchor = anchor;
-        else {
-            const auto boundary = (previous_last + static_cast<long double>(first) / fs) / 2 - previous_anchor;
-            time(times.transition_seconds, [&] {
-                adaptive = predict(adaptive, grid, static_cast<double>(anchor - previous_anchor),
-                    static_cast<double>(boundary), config.data_if_hz, tap_count, adaptive_edges,
-                    observation.record_work ? &adaptive_work : nullptr, stop);
-            });
-            adaptive_work.transition_edges = adaptive_edges;
-        }
-        nominal_work.last_emission_states = nominal.size();
-        nominal_work.peak_emission_states = nominal.size();
-        adaptive_work.last_emission_states = adaptive.size();
-        adaptive_work.peak_emission_states = std::max(adaptive_work.peak_emission_states, adaptive.size());
+    void update(State& state, const MappedBasisRow& row, const Pair& pair,
+                const std::array<const FineBulkStatistics*, 2>& prepared, unsigned lane,
+                StateBlockWork* work, std::stop_token leaf_stop) {
+        check_cancelled(leaf_stop);
+        advance_state(state, row, *basis, taps(), pair.observations(), prepared, pair.transitions,
+                      config.noise_variance, scratch[lane], work, leaf_stop);
+    }
 
-        auto block_first = first;
-        const auto count = calendar.block_count(rows);
-        for (std::size_t base = 0; base < count; base += blocks.size()) {
-            const auto pair = std::min(blocks.size(), count - base);
-            time(times.observation_seconds, [&] {
-                for (std::size_t block = 0; block < pair; ++block) {
-                    const auto length = calendar.block_length(rows, base + block);
-                    prepare(blocks[block], block_first, length);
-                    block_first += length;
+    // The tiles one keyed source must render for later dispatches. That
+    // preparation is serial per source, and would otherwise stall every
+    // state of that source when its dispatch arrives. Exactly the tiles the
+    // fixed-affine states will request are filled, so receipts are unchanged.
+    void fill_ahead(std::size_t dispatch, std::size_t group, std::stop_token leaf_stop) {
+        // The first leaf also covers the dispatches before its own target.
+        const auto last = dispatch + 1 + fill_depth;
+        for (auto target = dispatch ? last : std::size_t{1}; target <= last && target < extents.size(); ++target) {
+            const auto& extent = extents[target];
+            auto first = extent.first;
+            for (std::size_t block = 0; block < extent.count; ++block) {
+                const auto rows = extent.lengths[block];
+                if (extent.observed[block]) {
+                    for (const auto state : epoch_states[group]) {
+                        for (std::size_t offset = 0; offset < rows; offset += maximum_basis_rows)
+                            basis->prepare_pair(nominal_rows[state], taps(), first + offset,
+                                                std::min(maximum_basis_rows, rows - offset), leaf_stop);
+                    }
                 }
-            });
-            dispatch(pair, anchor);
+                first += rows;
+            }
         }
+    }
+
+    // Urgent leaves gate the next chronological step: the dispatch ahead is
+    // observed while this dispatch's adaptive states, whose pruning and
+    // prediction follow, are scored.
+    void urgent(unsigned lane, std::size_t leaf, std::stop_token leaf_stop) {
+        auto index = leaf - wave.first_leaf;
+        if (wave.ahead) {
+            if (!index) {
+                observe(*wave.ahead, extents[static_cast<std::size_t>(wave.pair->extent - extents.data()) + 1]);
+                wave.stage->release(wave.release);
+                return;
+            }
+            --index;
+        }
+        const auto& pair = *wave.pair;
+        if (bulk) {
+            const bool fixed = index < nominal.size();
+            auto& state = fixed ? nominal[index] : adaptive[index - nominal.size()];
+            std::array<const FineBulkStatistics*, 2> prepared{};
+            for (std::size_t i = 0; i < pair.extent->count; ++i)
+                if (pair.blocks[i].observed) prepared[i] = &bulk_statistics[i][index];
+            StateBlockWork* work = !observation.record_work ? nullptr :
+                fixed ? &nominal_state_work[0][index] : &adaptive_state_work[index - nominal.size()];
+            update(state, {}, pair, prepared, lane, work, leaf_stop);
+            return;
+        }
+        auto& state = adaptive[index];
+        update(state, mapped_row(config, plan, grid, coordinates[state.key.group], state.key, wave.anchor, false),
+               pair, {}, lane, observation.record_work ? &adaptive_state_work[index] : nullptr, leaf_stop);
+    }
+
+    // Dispatch-major: each fixed-affine state for one dispatch, then that
+    // dispatch's tile fills. The owner waits only for the states.
+    void background(unsigned lane, std::size_t leaf, std::stop_token leaf_stop) {
+        const auto local = leaf / leaf_block, index = leaf % leaf_block;
+        if (index >= nominal.size()) {
+            fill_ahead(local, index - nominal.size(), leaf_stop);
+            return;
+        }
+        const auto ready = [&] { return nominal_progress[index] == local; };
+        if (std::unique_lock lock(chain_mutex); !ready()) {
+            // This state's previous dispatch is still finishing on another
+            // lane, as happens when few states share many lanes. The wake
+            // registration must outlive the lock that its callback takes.
+            lock.unlock();
+            std::stop_callback wake(leaf_stop, [this] {
+                std::lock_guard cancelling(chain_mutex);
+                chain_advanced.notify_all();
+            });
+            lock.lock();
+            chain_advanced.wait(lock, [&] { return ready() || leaf_stop.stop_requested(); });
+            lock.unlock();
+        }
+        check_cancelled(leaf_stop);
+        const auto slot = (call_serial + local) % ring.size();
+        update(nominal[index], nominal_rows[index], ring[slot], {}, lane,
+               observation.record_work ? &nominal_state_work[slot][index] : nullptr, leaf_stop);
+        {
+            std::lock_guard lock(chain_mutex);
+            nominal_progress[index] = static_cast<std::uint32_t>(local + 1);
+        }
+        chain_advanced.notify_all();
+    }
+
+    void charge(FineLaneWork& work, const Pair& pair, std::size_t size, std::uint64_t calls,
+                std::span<const StateBlockWork> states) {
+        add_work(work.basis_rows, pair.observed_rows * 2 * tap_count * size);
+        add_work(work.basis_calls, calls);
+        add_work(work.projection_modes, pair.modes * 2 * tap_count * size);
+        add_work(work.gaussian_updates, pair.extent->count * size * 3 * models);
+        for (const auto& state : states) {
+            add_work(work.positive_basis_blocks, state.positive_basis_blocks);
+            work.projected_template_energy += state.template_energy;
+        }
+    }
+
+    // Scores every dispatch whose segment is wholly available. The adaptive
+    // lane is chronological: predict, score, prune. The fixed-affine lane has
+    // no such barrier, so its leaves run in the background, at most one
+    // dispatch ahead, and fill the lanes that the adaptive lane leaves idle
+    // during its serial steps and at the end of each of its waves.
+    void run() {
+        extents.clear();
+        for (Extent next; plan_pair(next, extents.empty() ? nullptr : &extents.back());) extents.push_back(next);
+        if (extents.empty()) return;
+        const auto serial = pair_serial;
+        observe(ring[serial % ring.size()], extents.front());
+        const bool overlap = !bulk;
+        const auto fixed = nominal.size();
+        call_serial = serial;
+        std::fill(nominal_progress.begin(), nominal_progress.end(), 0U);
+        ReceiverExecutor::Stage stage(executor, plan.index, stage_workers, stop,
+            [this](unsigned lane, std::size_t leaf, std::stop_token leaf_stop) { urgent(lane, leaf, leaf_stop); },
+            [this](unsigned lane, std::size_t leaf, std::stop_token leaf_stop) { background(lane, leaf, leaf_stop); });
+        std::size_t posted = 0;
+        for (std::size_t local = 0; local < extents.size(); ++local) {
+            auto& pair = ring[(serial + local) % ring.size()];
+            const auto& extent = *pair.extent;
+            const bool more = local + 1 < extents.size();
+            if (extent.opens_segment) open_segment(extent);
+            if (overlap && !local) {
+                // The keyed sources are known once the first segment opens.
+                leaf_block = fixed + (fill_depth ? epoch_states.size() : 0);
+                stage.release(fixed);
+            }
+            // Observing the dispatch ahead releases its states, and with
+            // them this dispatch's tile fills.
+            wave = {&pair, overlap && more ? &ring[(serial + local + 1) % ring.size()] : nullptr, &stage, posted,
+                    (local + 1) * leaf_block + fixed, segment_anchor};
+            const auto bulk_calls = bulk ? bulk_statistics_for(pair) : std::array<std::uint64_t, 2>{};
+            const auto leaves = (wave.ahead ? 1 : 0) + adaptive.size() + (overlap ? 0 : fixed);
+            time(times.dispatch_seconds, [&] {
+                stage.post(leaves);
+                stage.wait_urgent();
+            });
+            posted += leaves;
+            add_work(basis_rows, pair.observed_rows * 2 * tap_count * (fixed + adaptive.size()));
+            if (observation.record_work) {
+                charge(adaptive_work, pair, adaptive.size(), bulk ? bulk_calls[1] : pair.basis_calls * adaptive.size(),
+                       std::span(adaptive_state_work).first(adaptive.size()));
+                if (!overlap) charge(nominal_work, pair, fixed, bulk_calls[0], nominal_state_work[0]);
+            }
+            scored_blocks += extent.count;
+            if (extent.closes_segment) close_segment(extent);
+            if (overlap) {
+                // Earlier dispatches' tile fills may still be running.
+                time(times.dispatch_seconds, [&] {
+                    stage.wait_background(local * leaf_block + fixed, local * leaf_block);
+                });
+                if (observation.record_work)
+                    charge(nominal_work, pair, fixed, pair.basis_calls * fixed,
+                           nominal_state_work[(serial + local) % ring.size()]);
+            } else if (more) {
+                observe(ring[(serial + local + 1) % ring.size()], extents[local + 1]);
+            }
+        }
+        // A fill counts its miss before it renders. Let every one finish.
+        if (overlap) stage.wait_background((extents.size() - 1) * leaf_block + fixed);
+        pair_serial = serial + extents.size();
+        wave = {};
         nominal_nonzero |= std::any_of(nominal.begin(), nominal.end(),
             [](const State& state) { return state.nonzero_basis; });
-        adaptive_nonzero |= std::any_of(adaptive.begin(), adaptive.end(),
-            [](const State& state) { return state.nonzero_basis; });
-        time(times.pruning_seconds, [&] {
-            if (observation.record_work && adaptive.size() > maximum_states) {
-                ++adaptive_work.pruning_events;
-                adaptive_work.states_dropped += adaptive.size() - maximum_states;
-            }
-            retain(adaptive, maximum_states);
-        });
-        nominal_work.peak_retained_states = nominal.size();
-        adaptive_work.peak_retained_states = std::max(adaptive_work.peak_retained_states, adaptive.size());
-        previous_anchor = anchor;
-        previous_last = static_cast<long double>(first + rows - 1) / fs;
-        processed += rows;
-        ++segments;
     }
 };
 
@@ -1239,12 +1439,7 @@ void FineSession::advance_to(std::size_t available_rows) {
             });
         }
         p.available = available_rows;
-        while (!p.observation_complete()) {
-            const auto rows = p.calendar.segment_length(p.processed);
-            if (rows > p.available - p.processed) break;
-            check_cancelled(p.stop);
-            p.segment(rows);
-        }
+        p.run();
         check_cancelled(p.stop);
     } catch (...) {
         // Never retry a partially updated pair of likelihood lanes.

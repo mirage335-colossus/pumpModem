@@ -8,6 +8,7 @@
 #include "triad_receiver_coarse.hpp"
 #include "triad_receiver_bulk.hpp"
 #include "triad_receiver_driver.hpp"
+#include "triad_receiver_executor.hpp"
 #include "triad_receiver_helper.hpp"
 #include "triad_stream_resources.hpp"
 #if defined(DATAPUMP_HAVE_TRIAD_TENSOR) || defined(DATAPUMP_HAVE_TRIAD_VULKAN)
@@ -98,6 +99,7 @@ struct Options {
     bool encrypt = false, interleave = false, fhss = false, require_accelerator = false;
     bool helper = false, compression = true;
     bool work_only = false;
+    bool helper_overlap = true;
     FecMode fec = FecMode::off;
 };
 
@@ -193,6 +195,7 @@ Options parse(int argc, char** argv) {
     assign("--bit", o.bit);
     assign("--stratum", o.stratum);
     assign("--work-only", o.work_only);
+    assign("--helper-overlap", o.helper_overlap);
     if (const auto pilot = take("--pilot-workers")) {
         auto remaining = *pilot;
         do {
@@ -271,6 +274,7 @@ Options parse(int argc, char** argv) {
         require(o.stratum == "active" || o.stratum == "noise", "Use continuation for diagnostic fine strata");
     require(!o.work_only || (o.command == "continuation" && o.stratum != "active"),
             "Work-only diagnostics require continuation and a nonnominal stratum");
+    require(o.helper_overlap || o.command == "regression", "The Helper overlap lease applies only to regression");
     require(o.pilot_workers.empty() || o.command == "backlog", "Worker pilots require backlog replay");
     require(o.pilot_workers.empty() || o.backend == "cpu", "Worker allocation pilots require the native CPU backend");
     require(o.backend != "vulkan" || o.tensor_precision == "automatic",
@@ -974,6 +978,7 @@ Json score_json(const ReceiverSlotScore& score) {
         {"affine_blocks", score.affine_blocks},
         {"adaptive_blocks", score.adaptive_blocks}, {"helper_status", score.helper_status},
         {"helper_seconds", score.helper_seconds}, {"coarse_seconds", score.coarse_seconds},
+        {"helper_overlapped", score.helper_overlapped},
         {"fine_seconds", score.fine_seconds}, {"workspace_peak_bytes", score.workspace_peak_bytes}});
 }
 
@@ -1121,8 +1126,12 @@ CoarseResult acquire(Json& report, const Options& o, const Profile& profile, con
     const auto memory = standalone_scratch(resources);
     const auto helper_bound = helper_workspace(config, slot);
     if (helper_bound > memory) throw Incomplete("Native Helper preflight exceeds the local memory lease");
+    // These phases keep the sequential order, each on the same lanes: their
+    // walls add. A slot with a wider lease overlaps the first two instead.
+    ReceiverExecutor executor(resources.workers);
     const Timer helper_time;
-    const auto helper = score_helper(config, slot, capture.iq, capture.valid, helper_bound, stop);
+    const auto helper = score_helper(config, slot, capture.iq, capture.valid, helper_bound, stop,
+                                     lane_wave(executor, slot.index, resources.workers, stop));
     phase(report, "helper", helper_time.elapsed(), seconds, object({
         {"reason", helper.reason}, {"narrowed", helper.narrowed}, {"prefix_samples", helper.prefix_samples},
         {"onset_apertures", helper.onset_apertures}, {"workspace_peak_bytes", helper.workspace_peak_bytes},
@@ -1131,7 +1140,8 @@ CoarseResult acquire(Json& report, const Options& o, const Profile& profile, con
     FrequencyInterval fallback{};
     const auto intervals = public_frequency_intervals(config, helper, fallback);
     const Timer preparation_time;
-    CoarseSession coarse(config, slot, profile.key, capture.iq, intervals, resources.workers, memory, stop);
+    CoarseSession coarse(config, slot, profile.key, capture.iq, intervals, resources.workers, memory, stop,
+                         &executor);
     const auto preparation_elapsed = preparation_time.elapsed();
     auto progress = coarse.progress();
     auto prepared = coarse_json(progress);
@@ -1340,9 +1350,17 @@ void slot_run(Json& report, const Options& o, const Profile& profile, const Rece
             const auto lease_bytes = capture.iq.size() * (sizeof(Complex) + 1);
             if (workspace < lease_bytes || workspace - lease_bytes > standalone_scratch(resources))
                 throw Incomplete("Native regression unit exceeds its local memory lease");
+            // As in stream admission, spare local memory grants the lease that
+            // lets Helper acquisition run beside coarse preparation. The
+            // sequential control never overlaps, even where both leases agree.
+            const auto wider = receiver_slot_overlap_workspace(profile.receiver, slot, resources.workers);
+            const auto lease = o.helper_overlap && wider - lease_bytes <= standalone_scratch(resources) ? wider : workspace;
             const Timer began;
-            const auto score = score_receiver_slot(profile.receiver, slot, profile.key, capture.iq,
-                capture.valid, resources.workers, workspace, stop);
+            const auto score = o.helper_overlap ?
+                score_receiver_slot(profile.receiver, slot, profile.key, capture.iq, capture.valid,
+                                    resources.workers, lease, stop) :
+                score_slot_in_sequence(profile.receiver, slot, profile.key, capture.iq, capture.valid,
+                                       resources.workers, lease, stop, nullptr);
             const auto elapsed = began.elapsed();
             auto work = score_json(score);
             Digest digest;
@@ -1859,6 +1877,7 @@ void help() {
         "  --max-spool-bytes N --pilot-workers W1,W2,W3 (CPU backlog replays)\n"
         "  --coarse-tiles N --seed N --slot-index N --stratum active|noise|cold-maximum|terminal|erasure\n"
         "  --work-only on uses a non-admitting local noise crop for nonnominal continuation strata\n"
+        "  --helper-overlap off keeps regression in sequence: Helper, then coarse preparation\n"
         "  --slots N --units 1|2|4 --bit 0|1 --sample-rate HZ --data-if HZ\n"
         "  --target-cn0 DB_HZ --cn0 DB_HZ --seconds FIXED_ACTIVE_SECONDS --fec off|rs20|rs60\n"
         "JSON output uses datapump.triad.native-probe.v1. Exit 2 indicates unavailable or incomplete work.\n";

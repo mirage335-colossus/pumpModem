@@ -29,6 +29,292 @@ The historical cleanup checkpoint was based on
 `419e6bae8c4fe3b0f59be23a6dfb3b69fbaed80e`. Its concise outcomes and limitations
 remain below; they are not release certification or validation of changed code.
 
+The native CPU receiver's serial steps now overlap parallel work within a slot,
+and its transform visits the same butterflies in a cache-blocked order. Matched
+replays are 1.4–2.0× shorter with identical receipts on the one measured host.
+Earlier local CPU phase costs no longer describe this work; see the
+[follow-through](#receiver-overlap-and-transform-order-follow-through).
+Helper acquisition now uses the slot's lanes and, where the lease allows, runs
+beside coarse preparation. Its workspace bound follows the public calendar, so
+it no longer sets a Helper slot's lease; see the
+[Helper follow-through](#helper-acquisition-overlap-follow-through).
+
+## Receiver overlap and transform-order follow-through
+
+**Question.** Does the native CPU receiver leave hardware idle behind serial
+steps, per-wave barriers or fixed work shares, and does removing that waste
+shorten elapsed same-stream service without changing any result?
+
+Baseline is commit `22e92c3581b341c0c1293c24e084dc59fa493bb7`; the candidate is
+this change on top of it. Both are Release builds from the same profile with
+GNU 14.2.0, measured through `triad_receiver_probe` (SHA-256 `de87c65b…beb514`
+and `01693f3f…d951d4`) on the Ryzen 5 PRO 5650U: six cores, twelve logical
+CPUs, `H=12`, `W=24`, powersave governor. A desktop session used about 0.44
+logical CPU throughout, so about 96% busy is this host's practical ceiling.
+
+### Where the hardware was idle
+
+Stack samples of the baseline single-owner row-5 replay found fewer than twelve
+runnable threads in 11 of 70 samples. In the emptiest, 18–22 of 24 workers were
+blocked behind one source-tile fill in the mapped basis, or asleep between the
+fine stage's per-segment dispatches while the root predicted, pruned and
+projected the next blocks. Coarse work used fixed shares: 26 lane jobs on 24
+lanes, and one fixed share of each tile per lane. Helper acquisition, the
+observation filter and the mapped-profile gate's controls each ran on one
+thread with the rest of the pool idle.
+
+Three measurements bounded what scheduling alone can recover:
+
+| Observation | Result |
+| --- | --- |
+| Dynamic coarse jobs alone, quiet row 4, 64 tiles | Busy 88.2% → 94.1%, but elapsed only 23.9 → 23.5 s and CPU 251 → 265 s. |
+| Current build, six pinned cores versus twelve logical CPUs | 6.10 versus 6.07 ms per public frequency, at 99.8% and 93.1% busy. SMT adds no coarse-search throughput on this host. |
+| Observation filter split into parallel chunks, row 2, with the earlier stage-major transform | Coarse preparation CPU 16–17 → 27–33 s with no elapsed gain. Reverted; not repeated with the blocked transform. |
+
+A profile of the quiet row-4 search then put about 47% of its time in the
+transform's scalar parts: bit reversal, the first two stages and one call per
+small butterfly group. Row 6 spent about 46 ms of CPU per 262,144-point
+transform. The larger loss was unproductive busy time, not idle time.
+
+### Changes
+
+- One executor stage per owner with urgent and background leaves; see the
+  [overlap contract](development.md#overlap-within-a-slot). Standalone sessions
+  use a private instance, replacing their separate thread pools.
+- Coarse: per-workspace bank jobs, the observation filter as one overlapped
+  job, and each native advance searched as one span of dynamically claimed jobs.
+- Fine: fixed-affine states as background chains, observation one dispatch
+  ahead, source tiles filled about two tiles ahead, shared-locked tile lookups
+  and one rank evaluation per pruned state.
+- Transform: cache-blocked stage order, vectorized first stages, branch-free
+  bit reversal, omitted butterflies for outputs the caller does not read, and
+  correlation spectra stored in transform order.
+- Helper: one shared branch-filter plan and response for all pilot branches.
+
+### Results
+
+The final set was fixed before it ran and alternated builds: two looks of the
+12-slot row-5 replay at the default and one-owner allocations, one DATA slot
+for rows 2–8, one unassisted quiet row-4 slot and one five-slot row-4 message.
+Earlier exploratory runs are not counted. Elapsed seconds, baseline → current:
+
+| Same-stream work | Baseline | Current | Ratio |
+| --- | ---: | ---: | ---: |
+| Row 5, 12 slots, `W=24/O=24`, 686.47 s of baseband | 25.891, 25.905 | 17.909, 17.942 | 1.44× |
+| Its process CPU seconds and busy fraction | 293.2, 295.1; 94.4%, 94.9% | 206.3, 207.5; 96.0%, 96.4% | |
+| Row 5, 12 slots, one owner | 27.155, 27.005 | 18.497, 18.124 | 1.48× |
+| Its ready-input interval, commits 4→8, s/s; busy | 0.03783, 0.03773; 88.9%, 88.5% | 0.02544, 0.02564; 93.8%, 93.6% | 1.48× |
+| Row 4 message: three DATA and two unassisted quiet slots, 446.60 s of baseband | 245.39 | 124.17 | 1.98× |
+| Its DATA commits and final commit | 14.3, 22.8, 38.4; 245.4 | 7.1, 11.1, 16.6; 124.2 | |
+
+| One slot, standalone, `W=24` | Baseline | Current | Ratio | Fine busy |
+| --- | ---: | ---: | ---: | --- |
+| Row 2 DATA | 12.95 | 10.75 | 1.20× | 78% → 92% |
+| Row 3 DATA | 16.14 | 13.58 | 1.19× | 81% → 93% |
+| Row 4 DATA | 6.44 | 4.18 | 1.54× | 91% → 97% |
+| Row 5 DATA | 1.87 | 1.34 | 1.40× | 88% → 95% |
+| Row 6 DATA | 35.54 | 21.21 | 1.68× | 86% → 95% |
+| Row 7 DATA | 1.88 | 1.34 | 1.40× | 87% → 96% |
+| Row 8 DATA | 5.05 | 3.33 | 1.52× | 89% → 93% |
+| Row 4 quiet, complete 8,596-frequency search | 113.36 | 56.16 | 2.02× | 91% → 96% |
+
+The quiet row-4 window is 71.5 s on a 90 s cadence. That one slot's elapsed
+ratio fell from 1.26 to 0.62 s/s; an earlier, warmer baseline run took 138.5 s.
+Row 6's coarse search fell from 13.79 to 4.32 s, and row 2's coarse preparation
+from 2.23 to 1.43 s. The one-owner replay is now within 3% of the default one.
+
+**Identity.** Every listed pair has the same input digest (row 5
+`0673bd95…e12f4493`, row-4 message `f75ebde4…973ea250`). Apart from elapsed
+times, the automatic memory limit and workspace quotes, the receipts are
+identical field for field: decisions, bit and quiet evidence, coarse proposals
+and refined coordinates, work counters, mapped-basis cache receipts and
+messages. `test_search_fft` compares both transform kernels bit for bit with a
+stage-major reference, including signed zeros, output prefixes and permuted
+input.
+
+**Functional checks.** Triad 33/33, contract 35/35 and GUI 29/29 passed. A
+scratch ThreadSanitizer build, which is not a maintained profile, reported
+nothing in the FFT, stream, fine, coarse, native-receiver and message tests or
+in a five-slot, four-owner row-5 message.
+
+### Limits and unresolved work
+
+- One host, power- and thermally limited, with a desktop session running.
+  Elapsed values moved by several percent between thermal states, so only
+  alternated pairs are compared. This is not a capacity pass or an interval.
+- Row 1 was not measured: its capture exceeds the declared sample budgets. The
+  stream scheduler was measured on row 5 and one row-4 message only.
+- **Earlier local CPU phase costs and forecasts no longer apply** to coarse,
+  fine or Helper work. Refresh the affected calibration before any forecast.
+- No accelerator ran. Compiled CUDA was not built; only the Vulkan plan check
+  in the triad group passed. Device tiles and device fine statistics keep
+  their previous order.
+- The Radeon/native chirp-Z crossover constants were measured against the
+  earlier transform and now understate native speed. Re-measure before retuning.
+- Slot workspace quotes changed by 0–0.9%: row 2 +0.20%, rows 5 and 7 +0.14%,
+  row 6 +0.88%, row 8 +0.12%, rows 3 and 4 unchanged.
+- Helper acquisition was serial in this comparison: 0.34–0.36 s per Helper DATA
+  slot, 8.6% of the row-4 DATA slot. The
+  [next entry](#helper-acquisition-overlap-follow-through) overlaps it. FHSS
+  template-bank preparation stays near 8 s at 85% busy. Its FIR transforms are half padding, because 16,384 input rows plus
+  682 taps round up to 32,768; another chunk size changes rounding and needs
+  arithmetic qualification. In the current quiet row-4 search the transform's
+  butterflies are about 49% of thread samples; the spectral product, the
+  scalar score loop and arrival selection are about 18%, 14% and 12%.
+
+The 28 final receipts are in ignored `local-evidence/receiver-overlap/` to
+support this table and the identity claim. Retire them when a refreshed local
+calibration or an accepted follow-up measurement supersedes them. The baseline
+binary is not retained; rebuild it from its commit.
+
+## Helper acquisition overlap follow-through
+
+**Question.** Helper acquisition ran on one thread before the coarse stage. Can
+it use the slot's lanes and run beside coarse preparation without changing a
+result, and what does that cost in memory?
+
+Baseline is the build of the [previous entry](#receiver-overlap-and-transform-order-follow-through)
+(`triad_receiver_probe` SHA-256 `01693f3f…d951d4`); the candidate is this change
+on top of it (`3110f88f…d4a026`). Host, build profile and allocation are unchanged:
+Ryzen 5 PRO 5650U, twelve logical CPUs, `H=12`, `W=24`.
+
+### What the baseline did
+
+On row 4, acquisition took 0.36 s on one thread with every other lane idle:
+frequency refinement of four targets 0.14 s, four branch filters 0.08 s, two
+arbitrary-length periodograms 0.075 s, pilot fits 0.054 s and the filter plan
+0.011 s. Coarse preparation then ran for 0.30 s at 85% busy.
+
+Its workspace bound was 1,024 bytes per prefix sample plus padding: 522 MB on
+rows 3 and 4, which was 87% and 98.6% of those slots' whole lease. A counting
+allocator measured 36.0 MB of live scratch for the same acquisition.
+
+### Changes
+
+- Helper: the two pilot fits, each target's refinement and the branch filters
+  run as waves on the owner's lanes, with outcomes replayed in index order.
+  Refinement shares one window table. The bound is the largest step of the
+  public geometry plus a 16 MiB allowance for interval lists and records.
+- Coarse: a session can take its intervals from an acquisition that runs while
+  it prepares, and plan its grid afterwards. The slow mapped profile keeps its
+  bank in the time domain until the intervals fix its route.
+- Slot and stream: a [second, wider lease](development.md#overlap-within-a-slot)
+  holds acquisition scratch beside preparation. Stream admission grants it only
+  from memory beyond a sequential lease for every owner the cap still admits,
+  so a window that becomes ready later keeps its place and its full shape.
+- Executor: a closing pool no longer starts a worker for a stage that is still
+  open, and a stage publishes leaves only once their workers could be started.
+  The previous entry's stage rewrite had introduced both hazards.
+
+### Results
+
+The set was fixed before it ran and uses the final binary. Complete slots use
+`regression`, one unit per fresh process, alternating the baseline, the slot
+in sequence (`--helper-overlap off`) and the overlap lease. Elapsed seconds,
+median and range:
+
+| Complete DATA slot | Looks | Baseline | In sequence | Overlap lease |
+| --- | ---: | ---: | ---: | ---: |
+| Row 4 | 5 | 4.114 (4.054–4.196) | 3.986 (3.953–4.069) | 3.981 (3.884–4.101) |
+| Its Helper, then Helper + coarse | | 0.361, 0.927 | 0.234, 0.820 | 0.453, 0.741 |
+| Row 3 | 3 | 13.033 (13.024–13.160) | 12.906 (12.857–12.919) | 12.708 (12.672–12.815) |
+| Its Helper, then Helper + coarse | | 0.300, 2.060 | 0.184, 1.910 | 1.054, 1.812 |
+
+Row 3 is 1.01× shorter in sequence and 1.03× on the overlap lease, with
+ordered ranges. Row 4 is 1.03× shorter either way. Its Helper and coarse
+stages together fall from 0.93 s to 0.82 s in sequence and 0.74 s overlapped,
+but the overlapped stage varied between 0.70 and 0.86 s, and the two slot
+medians do not separate. Three earlier sets of the same design, taken before
+this entry's last corrections and not counted, had the overlap lease 0.10 to
+0.12 s ahead on row 4.
+
+| Memory | Baseline | In sequence | Overlap lease |
+| --- | ---: | ---: | ---: |
+| Helper bound, rows 3 and 4 | 521.6 MB | 53.0 MB | 53.0 MB |
+| Row 4 slot lease | 529.0 MB | 177.9 MB | 222.7 MB |
+| Row 3 slot lease | 596.7 MB | 243.2 MB | 245.0 MB |
+| Row 4 message, peak reserved | 3.64 GB | | 2.09 GB |
+
+Measured live Helper scratch is 36.0 MB at these rows' 6 kHz geometry and
+4.4 MB on the 512 Hz test fixture, whose bound is 21.4 MB.
+
+The row-4 message has three DATA slots and two unassisted quiet slots at the
+default allocation, with five owners running and every slot on the overlap
+lease. In two looks of alternating order its DATA commits arrived at 6.8, 10.7
+and 15.4 s and at 6.5, 10.4 and 14.9 s on the baseline, and at 6.3, 10.2 and
+15.0 s and at 5.9, 10.0 and 14.6 s now: 0.3 to 0.6 s earlier. Its last commit,
+which waits for the quiet slots' complete coarse search, came at 120.6 and
+121.0 s against 122.1 and 120.2 s: unchanged.
+
+Controls kept their leases, scores and times: row 8, whose Helper is gated,
+3.14 and 3.15 s against 3.11 and 3.14 s; row 5, with no Helper, 1.27 and
+1.30 s against 1.25 and 1.27 s.
+
+The probe's `slot` phases keep the sequential order. Their Helper phase fell
+from 0.362 to 0.218 s on row 4 and from 0.297 to 0.195 s on row 3, for 7% and
+14% more CPU. The coarse preparation that follows did not change in those
+single looks: 0.280 and 0.285 s on row 4, 1.458 and 1.371 s on row 3.
+
+### Identity
+
+Every alternated look has the same input digest and the same score: decision,
+bit, evidence, quiet statistics, coarse and fine work counters and Helper
+status, on all three variants. The `slot` receipts of rows 3 and 4, including
+the frequency-grid digest, and the message receipts are identical field for
+field apart from elapsed times, workspace quotes and reservations, and the new
+overlap flag.
+
+### Functional checks
+
+Triad 33/33, contract 35/35 and GUI 29/29 passed on the final source. A
+scratch ThreadSanitizer build, which is not a maintained profile, reported
+nothing in the FFT, Helper, stream, fine, coarse, native-receiver and message
+tests; in overlapped and in-sequence row-4 slots and an overlapped row-3 slot;
+or in a five-owner Helper message stream whose slots all overlapped.
+
+New tests compare every Helper field exactly with and without lanes, with jobs
+run in reverse order, and where a pilot fit fails on one lane; pin which steps
+form each wave, including branch filters split to fit the bound; and hold
+measured Helper heap inside the largest bounded step. They compare a session
+that acquires during preparation with the session its intervals build
+directly, on the fixed frequency route and on both routes of the slow mapped
+profile, and observe that preparation was released first. They score the
+Helper fixture on both leases, in sequence, at three worker shares and as two
+owners of one pool; and admit stream owners together and one after another,
+on either side of each memory threshold.
+
+### Limits and unresolved work
+
+- One host. With `W=2*H` and SMT, an overlapped serial chain shares hardware
+  threads with the bank: the Helper interval grew from 0.23 to 0.45 s on row 4
+  and from 0.18 to 1.05 s on row 3, where the mapped-profile gate holds the
+  owner and acquisition runs without waves. This bounds the gain here.
+- The gain is latency inside a slot. Total message time did not change.
+- Acquisition's two periodograms remain single transforms, and several onset
+  apertures still run one after another.
+- A compiled backend and the exact one-arrival profile keep the sequential
+  order. No accelerator ran.
+- When acquisition and preparation both fail, either failure can be reported.
+- Not exercised by any test: more than one onset aperture, a refinement that
+  fails on a lane, a worker that cannot be started while a stage posts, and
+  the GUI's stage-time label.
+- The probe's `slot` and `continuation` phases, and the capacity and forecast
+  tools that add them, measure the sequential lease. That bounds an overlapped
+  slot from above. Local CPU calibration still needs its refresh.
+- The compiled ATen test that calls the Helper directly was not built here.
+- Two findings predate this change and are not fixed: the forecast tool
+  expects a controller scope name the probe no longer emits, and a public
+  arrival window whose onset bounds cross sizes one Helper array from a
+  negative difference.
+
+The 40 receipts named `helper-*` are in ignored
+`local-evidence/receiver-overlap/` beside the previous entry's, to support
+these tables and the identity claim. The baseline binary is kept with them as
+`helper-baseline-triad_receiver_probe`, because the previous entry's source
+has no commit of its own to rebuild it from. Retire all of them when a
+refreshed local calibration or an accepted follow-up measurement supersedes
+them.
+
 ## NVIDIA and Intel GPU-toggle integration
 
 The shared C++ automatic selector tries compatible CUDA first, then a compatible

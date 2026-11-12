@@ -1,14 +1,19 @@
 #include "datapump/triad_receiver.hpp"
 #include "datapump/triad_stream.hpp"
 #include "../src/search_fft.hpp"
+#include "../src/triad_receiver_executor.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <limits>
 #include <numbers>
+#include <optional>
 #include <stdexcept>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 namespace {
@@ -176,7 +181,6 @@ void helper_composite_observation() {
     // window. Pull real composite I/Q through the complete streaming channel.
     // The receiver receives neither the bit, actual offset nor source endpoint.
     constexpr unsigned fs = 6000;
-    constexpr std::size_t helper_workspace_limit = 512 * 1024 * 1024;
     PublicProfileConfig settings;
     settings.format.sample_rate = fs;
     settings.format.inner_rate_hz = 120;
@@ -270,8 +274,9 @@ void helper_composite_observation() {
     const auto score_mode = [&](const Capture& captured, NativeCoarsePrecision precision) {
         auto selected = config;
         selected.native_coarse_precision = precision;
+        // The exact lease that lets Helper acquisition overlap preparation.
         return score_receiver_slot(selected, captured.plan, key, captured.iq, captured.valid, 2,
-                                   helper_workspace_limit);
+                                   receiver_slot_overlap_workspace(selected, captured.plan, 2));
     };
     const auto active_capture = observe(data);
     const auto active = score_mode(active_capture, NativeCoarsePrecision::fp32);
@@ -328,9 +333,113 @@ void helper_composite_observation() {
           absent_fp64.coarse_fft_precision == "fp64" &&
           absent_fp64.coarse_precision_reason == "explicit-fp64",
           "failed-Helper quiet receiver did not report the selected CPU precision paths");
+    // The sequential lease runs Helper acquisition before coarse preparation.
+    // A lease with room for both overlaps them. Decisions, evidence and work
+    // are the same, at every worker share, for DATA and for failed-Helper quiet.
+    const auto same_score = [](const ReceiverSlotScore& a, const ReceiverSlotScore& b) {
+        return a.decision == b.decision && a.bit == b.bit && a.complete == b.complete && a.all_valid == b.all_valid &&
+            a.zero_h0_verified == b.zero_h0_verified && a.noise_statistics_valid == b.noise_statistics_valid &&
+            a.operational_passes_conditional_bound == b.operational_passes_conditional_bound &&
+            a.bit_evidence == b.bit_evidence && a.adaptive_bit_evidence == b.adaptive_bit_evidence &&
+            a.combined_bit_evidence == b.combined_bit_evidence && a.quiet_energy == b.quiet_energy &&
+            a.quiet_threshold == b.quiet_threshold && a.operational_log_e == b.operational_log_e &&
+            a.operational_threshold == b.operational_threshold && a.selected_prior_mass == b.selected_prior_mass &&
+            a.quiet_modes == b.quiet_modes && a.fine_candidates == b.fine_candidates &&
+            a.coarse_workspaces == b.coarse_workspaces && a.coarse_frequency_points == b.coarse_frequency_points &&
+            a.coarse_arrival_points == b.coarse_arrival_points && a.coarse_fft_precision == b.coarse_fft_precision &&
+            a.coarse_precision_reason == b.coarse_precision_reason && a.affine_blocks == b.affine_blocks &&
+            a.adaptive_blocks == b.adaptive_blocks && a.adaptive_peak_states == b.adaptive_peak_states &&
+            a.adaptive_transition_edges == b.adaptive_transition_edges && a.basis_rows == b.basis_rows &&
+            a.consumed_samples == b.consumed_samples && a.helper_status == b.helper_status && a.reason == b.reason;
+    };
+    for (const auto* captured : {&active_capture, &quiet_capture}) {
+        auto selected = config;
+        selected.native_coarse_precision = NativeCoarsePrecision::fp32;
+        const auto lease = [&](unsigned workers, std::size_t bytes) {
+            return score_receiver_slot(selected, captured->plan, key, captured->iq, captured->valid, workers, bytes);
+        };
+        const auto minimum = receiver_slot_workspace(selected, captured->plan, 2);
+        const auto wider = receiver_slot_overlap_workspace(selected, captured->plan, 2);
+        check(wider > minimum && wider < 256U * 1024 * 1024,
+              "Helper overlap lease must exceed the sequential lease by its acquisition scratch only");
+        const auto sequential = lease(2, minimum), overlapped = lease(2, wider), short_of_overlap = lease(2, wider - 1);
+        check(!sequential.helper_overlapped && sequential.workspace_peak_bytes == minimum &&
+              overlapped.helper_overlapped && overlapped.workspace_peak_bytes == wider &&
+              !short_of_overlap.helper_overlapped && short_of_overlap.workspace_peak_bytes == minimum,
+              "slot must overlap Helper acquisition exactly when its lease covers both");
+        check(same_score(sequential, overlapped) && same_score(sequential, short_of_overlap),
+              "overlapping Helper acquisition with coarse preparation changed a slot's score");
+        rejects<ReceiverWorkspaceError>([&] { (void)lease(2, minimum - 1); },
+                                        "Helper-enabled slot was admitted below its sequential lease");
+        for (const unsigned workers : {1U, 5U})
+            check(same_score(sequential, lease(workers, receiver_slot_overlap_workspace(selected, captured->plan, workers))) &&
+                  same_score(sequential, lease(workers, receiver_slot_workspace(selected, captured->plan, workers))),
+                  "Helper-enabled score changed with its worker share");
+        // One lane runs acquisition and preparation in turn: one lease.
+        const auto single = receiver_slot_workspace(selected, captured->plan, 1);
+        check(receiver_slot_overlap_workspace(selected, captured->plan, 1) == single &&
+              !lease(1, single).helper_overlapped, "a single lane was quoted or reported an overlap");
+        // The measurement control never overlaps, whatever its lease.
+        const auto control = receiver_detail::score_slot_in_sequence(selected, captured->plan, key, captured->iq,
+            captured->valid, 2, wider, {}, nullptr);
+        check(!control.helper_overlapped && control.workspace_peak_bytes == minimum && same_score(sequential, control),
+              "the sequential control overlapped or changed a slot's score");
+    }
+    // Two owners on one shared pool each overlap, as stream slots do, and
+    // score what they score alone.
+    {
+        auto selected = config;
+        selected.native_coarse_precision = NativeCoarsePrecision::fp32;
+        receiver_detail::ReceiverExecutor pool(4);
+        const std::array captures{&active_capture, &quiet_capture};
+        std::array<std::optional<ReceiverSlotScore>, 2> scored;
+        std::array<std::exception_ptr, 2> failed;
+        std::atomic<unsigned> published = 0;
+        for (std::size_t i = 0; i < captures.size(); ++i)
+            pool.submit([&, i] {
+                try {
+                    const auto& captured = *captures[i];
+                    scored[i] = receiver_detail::score_slot(selected, captured.plan, key, captured.iq, captured.valid, 2,
+                        receiver_slot_overlap_workspace(selected, captured.plan, 2), {}, &pool);
+                } catch (...) {
+                    failed[i] = std::current_exception();
+                }
+            }, [&] { ++published; });
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(120);
+        while (published != captures.size() && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        check(published == captures.size(), "shared-pool Helper slots did not finish");
+        pool.close();
+        for (std::size_t i = 0; i < captures.size(); ++i) {
+            if (failed[i]) std::rethrow_exception(failed[i]);
+            const auto& alone = i ? absent : active;
+            check(scored[i] && scored[i]->helper_overlapped && same_score(alone, *scored[i]),
+                  "a Helper slot scored differently beside another owner on a shared pool");
+        }
+        check(pool.peak_running_roots() == 2, "shared-pool Helper slots did not run together");
+    }
+    // A known erasure still ends before any coarse work, on its sequential quote.
+    {
+        auto erased = active_capture;
+        erased.valid[erased.valid.size() - 7] = 0;
+        const auto gap = score_mode(erased, NativeCoarsePrecision::fp32);
+        auto selected = config;
+        selected.native_coarse_precision = NativeCoarsePrecision::fp32;
+        check(gap.reason == "coarse_erasures_unsupported" && !gap.helper_overlapped && !gap.complete &&
+              gap.decision == SlotDecision::ambiguous && !gap.coarse_workspaces && gap.coarse_seconds == 0 &&
+              gap.helper_status == active.helper_status &&
+              gap.workspace_peak_bytes == receiver_slot_workspace(selected, erased.plan, 2),
+              "erased Helper-enabled slot must stop after acquisition without coarse work");
+    }
     if (cpu_fft_fp32_qualified) {
         const auto compare_packed = [&](const Capture& capture, const ReceiverSlotScore& control) {
             const auto packed = score_mode(capture, NativeCoarsePrecision::automatic);
+            auto selected = config;
+            selected.native_coarse_precision = NativeCoarsePrecision::automatic;
+            const auto in_sequence = receiver_detail::score_slot_in_sequence(selected, capture.plan, key, capture.iq,
+                capture.valid, 2, receiver_slot_overlap_workspace(selected, capture.plan, 2), {}, nullptr);
+            check(packed.helper_overlapped && !in_sequence.helper_overlapped && same_score(in_sequence, packed),
+                  "Q15 slot changed when Helper acquisition overlapped its fused preparation");
             check(packed.complete && packed.all_valid && packed.zero_h0_verified &&
                   packed.coarse_precision_reason == "q15-products-fp32-fft" &&
                   packed.decision == control.decision && packed.bit == control.bit &&

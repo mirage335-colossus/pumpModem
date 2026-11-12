@@ -49,6 +49,12 @@ public:
     void render_pair(const MappedBasisRow&, std::span<const Tap>,
                      std::uint64_t first_window_sample, std::span<const double> offsets,
                      std::span<Complex> output, std::stop_token = {});
+    // Fills, ahead of need, exactly the tiles that render_pair pins for rows
+    // [first, first+rows) at unit spacing. A caller overlaps this serial
+    // per-epoch preparation with other lanes' rendering of earlier blocks.
+    // Cache receipts equal those of the same fills made on demand.
+    void prepare_pair(const MappedBasisRow&, std::span<const Tap>,
+                      std::uint64_t first_window_sample, std::size_t rows, std::stop_token = {});
     // Prepare the very same public map and cache tiles without rendering the
     // supported basis on the CPU. Columns are indexed [bit][tap]; the consumer
     // initializes missing/empty columns to zero. Each synchronous sink call

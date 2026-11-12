@@ -183,15 +183,19 @@ not prohibit qualified lower-precision bulk work; see the
 
 The native `CompleteStreamReceiver` shares immutable input buffers and admits
 independent in-process scorer owners for ready public windows. Resolve the total
-`2*H` worker budget once; slot roots and their coarse/fine tasks share a bounded
-executor. Per-owner lane/scratch caps bound DSP storage, not exclusive worker
+`2*H` worker budget once; slot roots and their Helper, coarse and fine tasks
+share a bounded executor. Per-owner lane/scratch caps bound DSP storage, not exclusive worker
 permits. Automatic owner count can grow to that budget, subject to useful work
 and full memory admission. Admission quotes the largest ready prefix at
 full-`W` scratch per owner, preferring balanced scratch only when its complete
-memory bound admits a strictly wider ready prefix. Each
+memory bound admits a strictly wider ready prefix. Memory beyond a sequential
+lease for every owner the cap still admits then gives slots, oldest first,
+the wider lease that overlaps Helper acquisition with coarse preparation. Each
 shape remains fixed through its slot; full DSP and started idle pool stacks
 remain charged. Ready leaves prioritize the oldest eligible public slot while
-queued roots use unneeded lanes. This does not change the aggregate `W` ceiling
+queued roots use unneeded lanes. Within a slot, serial steps
+[overlap independent parallel work](development.md#overlap-within-a-slot) on
+that owner's lanes. This does not change the aggregate `W` ceiling
 or supply a throughput guarantee. Explicit limits
 remain exact. There is no receiver subprocess,
 child bootstrap or `memfd` operating transport. Full accounting, ordered commit,
@@ -210,7 +214,9 @@ exists. Old three-owner, 3840 MiB or half-RAM settings are not portable defaults
 Measure productive work within one stream, including ready-input backlog and
 mostly-noise operation. Compare identical observations at serial, physical and
 logical allocations; distinguish software permits from the hardware-utilization
-denominator. Report elapsed service, busy cores, useful work, actual owners and
+denominator. A higher logical busy fraction with unchanged elapsed service is
+not a gain: on the measured six-core host the coarse search ran as fast on six
+pinned cores as on twelve logical CPUs. Report elapsed service, busy cores, useful work, actual owners and
 memory together. `peak_running_owners` distinguishes roots in scorer scope from
 admitted owners; `peak_executor_workers` reports started pool threads, not busy
 hardware cores. Roots executing their own leaves are not extra workers. Idle time after catching up is expected. Fewer useful tasks in
@@ -218,7 +224,8 @@ one stage must not become a global worker cap.
 
 For overlapping windows, measure the outer receive-service interval through
 ordered commit. Summed per-slot wall times double-count overlap; asynchronous
-input submission omits background DSP. CPU counters diagnose utilization and do
+input submission omits background DSP. Within a slot, a Helper interval
+reported as overlapped lies inside that slot's coarse interval. CPU counters diagnose utilization and do
 not replace elapsed service. Never divide service by core count or use parallel
 independent simulations as one receiver's throughput. Buffering can improve
 batching and trade latency, but cannot repair service slower than incoming data.
@@ -243,9 +250,16 @@ strata. Active/noise use public acquisition; cold-maximum, terminal and erasure
 may use explicitly declared non-admitting fine-only diagnostics. Those diagnostics
 do not qualify acquisition. Bounded coarse steps retain persistent state, but
 partial search cannot provide an operational decision or a qualified full-grid
-cost; a matched tile diagnostic remains separately labeled. Actual source
+cost; a matched tile diagnostic remains separately labeled. A native step
+searches its tiles as one span, so a one-tile step gives each lane a single
+job and costs more per tile than a long step. Actual source
 preparation, Helper, selection and real-audio projection are retained in the
 receipts. Operational coordinates are not supplied by simulator truth.
+The `slot` and `continuation` phases run Helper acquisition and then coarse
+preparation, each on the full lane set, so their walls add. That is the
+sequential lease, which every admitted slot can use. A slot with the wider
+lease overlaps the two and is no slower. `regression` grants that lease when
+local memory allows; `--helper-overlap off` scores the same slot in sequence.
 
 For eligible long windows, nominal fine measurement keeps one `FineSession`
 alive through a fixed two-second prefix and cumulative one-, two- and four-second

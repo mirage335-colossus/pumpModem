@@ -60,8 +60,14 @@ std::size_t validate(const ReceiverConfig& c, const ReceiverSlotPlan& s, unsigne
     return static_cast<std::size_t>(s.stop_sample - s.first_sample);
 }
 
+// The sequential lease runs Helper acquisition, the coarse search and fine
+// tracking one after another. The overlapped lease also holds acquisition
+// scratch beside coarse preparation. The two are equal when nothing overlaps
+// or another stage already needs more.
 struct StageWorkspace {
     std::size_t input, helper, coarse, fine, total;
+    bool overlappable;
+    std::size_t overlapped_coarse, overlapped_total;
 };
 
 StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers) {
@@ -70,8 +76,13 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
     const auto helper = helper_workspace(config, slot);
     const auto coarse = coarse_workspace(config, slot, workers);
     const auto fine = fine_workspace(config, slot, workers);
-    const auto total = checked_add(checked_add(input, receipts_bytes), std::max({helper, coarse, fine}));
-    return {input, helper, coarse, fine, total};
+    const auto lease = [&](std::size_t stage) { return checked_add(checked_add(input, receipts_bytes), stage); };
+    // One lane runs acquisition and preparation in turn: nothing coexists.
+    const bool overlappable = workers > 1 && helper && coarse_defers_frequency_grid(config, slot);
+    const auto overlapped_coarse = overlappable ?
+        coarse_workspace(config, slot, workers, {helper, helper_widest_wave}) : coarse;
+    return {input, helper, coarse, fine, lease(std::max({helper, coarse, fine})), overlappable,
+            overlapped_coarse, lease(std::max({helper, overlapped_coarse, fine}))};
 }
 
 double round_even(double value) {
@@ -179,10 +190,17 @@ std::size_t receiver_slot_workspace(const ReceiverConfig& config, const Receiver
     return plan_workspace(config, slot, workers).total;
 }
 
-ReceiverSlotScore receiver_detail::score_slot(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
-                                     const Crypto& key, std::span<const Complex> iq,
-                                     std::span<const std::uint8_t> valid, unsigned workers,
-                                     std::size_t memory_limit_bytes, std::stop_token stop, ReceiverExecutor* executor) {
+std::size_t receiver_slot_overlap_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                                            unsigned workers) {
+    return plan_workspace(config, slot, workers).overlapped_total;
+}
+
+namespace {
+ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                               const Crypto& key, std::span<const Complex> iq,
+                               std::span<const std::uint8_t> valid, unsigned workers,
+                               std::size_t memory_limit_bytes, std::stop_token stop, ReceiverExecutor* shared,
+                               bool may_overlap) {
     check_cancelled(stop);
     const auto workspace = plan_workspace(config, slot, workers);
     require(iq.size() == slot.stop_sample - slot.first_sample &&
@@ -197,7 +215,6 @@ ReceiverSlotScore receiver_detail::score_slot(const ReceiverConfig& config, cons
     score.quiet_first_sample = slot.quiet_first_sample;
     score.quiet_stop_sample = slot.quiet_stop_sample;
     score.sample_rate_hz = config.sample_rate_hz;
-    score.workspace_peak_bytes = workspace.total;
     score.all_valid = true;
     for (std::size_t i = 0; i < iq.size(); ++i) {
         if (!(i % 4096)) check_cancelled(stop);
@@ -207,21 +224,45 @@ ReceiverSlotScore receiver_detail::score_slot(const ReceiverConfig& config, cons
         score.all_valid &= mask != 0;
     }
 
-    auto began = Clock::now();
-    auto helper = score_helper(config, slot, iq, valid, workspace.helper, stop);
-    score.helper_seconds = elapsed(began);
-    score.helper_status = std::move(helper.reason);
+    // A wholly valid observation on a lease with room for it acquires beside
+    // coarse preparation. Any other slot keeps its sequential bound.
+    const bool overlap = may_overlap && score.all_valid && workspace.overlappable &&
+                         workspace.overlapped_total <= memory_limit_bytes;
+    score.workspace_peak_bytes = overlap ? workspace.overlapped_total : workspace.total;
+    // A standalone slot owns one pool for all of its stages.
+    const auto owned = shared ? nullptr : std::make_unique<ReceiverExecutor>(std::max(1U, workers));
+    const auto executor = shared ? shared : owned.get();
+    HelperResult helper;
     FrequencyInterval fallback;
-    const auto intervals = public_frequency_intervals(config, helper, fallback);
+    const auto acquire = [&](const LaneWave& wave, std::stop_token job_stop) {
+        const auto began = Clock::now();
+        helper = score_helper(config, slot, iq, valid, workspace.helper, job_stop, wave);
+        score.helper_seconds = elapsed(began);
+        score.helper_status = helper.reason;
+        return public_frequency_intervals(config, helper, fallback);
+    };
+    // Acquisition alone still fans its independent steps out on these lanes.
+    const auto lanes = lane_wave(*executor, slot.index, workers, stop);
     // The canonical full coarse screen requires a wholly valid observation.
     // Known erasures cannot become observed silence or complete a message.
     if (!score.all_valid) {
+        acquire(lanes, stop);
         score.reason = "coarse_erasures_unsupported";
         return score;
     }
 
-    began = Clock::now();
-    auto coarse = score_coarse(config, slot, key, iq, intervals, workers, workspace.coarse, stop, executor);
+    auto began = Clock::now();
+    CoarseResult coarse;
+    if (overlap) {
+        score.helper_overlapped = true;
+        coarse = score_coarse(config, slot, key, iq,
+            FrequencyAssistance{acquire, {workspace.helper, helper_widest_wave}},
+            workers, workspace.overlapped_coarse, stop, executor);
+    } else {
+        const auto intervals = acquire(lanes, stop);
+        began = Clock::now();
+        coarse = score_coarse(config, slot, key, iq, intervals, workers, workspace.coarse, stop, executor);
+    }
     score.coarse_seconds = elapsed(began);
     score.coarse_workspaces = coarse.workspaces;
     score.coarse_frequency_points = coarse.frequency_points;
@@ -241,6 +282,20 @@ ReceiverSlotScore receiver_detail::score_slot(const ReceiverConfig& config, cons
     score.fine_seconds = elapsed(began);
     check_cancelled(stop);
     return score;
+}
+} // namespace
+
+ReceiverSlotScore receiver_detail::score_slot(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+        const Crypto& key, std::span<const Complex> iq, std::span<const std::uint8_t> valid, unsigned workers,
+        std::size_t memory_limit_bytes, std::stop_token stop, ReceiverExecutor* shared) {
+    return score_stages(config, slot, key, iq, valid, workers, memory_limit_bytes, stop, shared, true);
+}
+
+ReceiverSlotScore receiver_detail::score_slot_in_sequence(const ReceiverConfig& config,
+        const ReceiverSlotPlan& slot, const Crypto& key, std::span<const Complex> iq,
+        std::span<const std::uint8_t> valid, unsigned workers, std::size_t memory_limit_bytes,
+        std::stop_token stop, ReceiverExecutor* shared) {
+    return score_stages(config, slot, key, iq, valid, workers, memory_limit_bytes, stop, shared, false);
 }
 
 ReceiverSlotScore score_receiver_slot(const ReceiverConfig& config, const ReceiverSlotPlan& slot,

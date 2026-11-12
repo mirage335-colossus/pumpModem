@@ -98,15 +98,79 @@ from hardware utilization.
 
 `CompleteStreamReceiver` admits independent in-process slot owners lazily when
 complete public windows are ready. One receiver-specific executor lazily starts
-at most `W` workers for all scoring roots and coarse/fine tasks. A slot scorer
-runs as a root on one worker and participates in its own synchronous stage
-batch; other workers may execute that batch's leaves or another admitted root.
-Ready leaf batches are prioritized by the oldest eligible public slot index;
-queued roots can use lanes that this work does not need. This is scheduling
-priority, not an additional worker allocation or a throughput guarantee.
-A root waits only for helpers already running after its batch has no unclaimed
-leaves. Do not add roots and stage task counts as separate busy workers when a
-root is itself executing a leaf.
+at most `W` workers for all scoring roots and Helper, coarse and fine tasks. A slot scorer
+runs as a root on one worker and is lane zero of its own stage; other workers
+may execute that stage's leaves or another admitted root. Ready leaves are
+prioritized by the oldest eligible public slot index; queued roots can use
+lanes that this work does not need. This is scheduling priority, not an
+additional worker allocation or a throughput guarantee. Do not add roots and
+stage task counts as separate busy workers when a root is itself executing a
+leaf.
+
+### Overlap within a slot
+
+**A slot's serial work must overlap independent parallel work on the same lane
+set.** A stage has two leaf classes. Urgent leaves gate the owner's next
+chronological step, and the owner runs them itself before waiting for helpers
+that are already running. Released background leaves are claimed in order by
+any lane with no urgent leaf to run, so they fill the tail of each urgent wave
+and the owner's serial steps. The owner waits only for the background range
+its next step needs; it never starts a leaf past that range.
+
+Current overlap, all on one admitted lane/scratch shape per owner:
+
+- Helper acquisition runs its independent steps as waves: both pilot fits,
+  each target's frequency refinement and the branch filters. Every job records
+  its own outcome, and the owner replays them in index order.
+- Coarse preparation runs the observation filter and the mapped-profile gate's
+  serial controls beside the template bank's per-workspace jobs.
+- A slot whose lease has room for both starts coarse preparation before the
+  frequency grid is known and acquires beside it. The owner acquires and posts
+  its waves on the preparation stage. Where the mapped-profile gate needs the
+  owner, acquisition runs whole on one lane instead.
+- A native coarse advance searches its tiles as one span of dynamically claimed
+  jobs. A fixed per-lane share idles every lane that finishes early.
+- The fine fixed-affine lane has no chronological barrier, so its states are
+  background leaves, at most one dispatch ahead. They overlap the adaptive
+  lane's prediction, pruning and wave tails. The dispatch ahead is observed,
+  and later dispatches' source tiles are filled, while the current one scores.
+
+Keep these properties when changing a stage:
+
+- Claim jobs one at a time. Give a lane reusable scratch instead of a fixed
+  share of the work, and size jobs so a wave has several per lane.
+- Overlap changes order and ownership, never arithmetic. Each job keeps its
+  operands, sums are combined in a fixed order, and work receipts match the
+  serial order. Preparation ahead of need may touch only what will be requested.
+- Bound lookahead by memory and charge it. Observation runs one dispatch ahead.
+  Tile fills run about two tiles ahead, and stay on demand for a fine bank of
+  more than 16 coordinates, whose fills ahead could displace live tiles.
+- Do not spread one memory-bound serial job across lanes without a measurement.
+  Splitting the observation filter's large transforms into parallel chunks
+  raised CPU 70–95% with no elapsed gain under the earlier transform, so it
+  remains one overlapped job.
+- Keep a lock that a leaf takes per lookup shared. With `W=2*H` a holder is
+  regularly preempted, and every lane then queues behind an exclusive one;
+  this stalled up to 18 lanes on the mapped-basis tile cache.
+- Logical-CPU busy time is not throughput. Check elapsed service and CPU
+  seconds for identical work together; see the
+  [measured limits](validation.md#receiver-overlap-and-transform-order-follow-through).
+- Replay parallel steps in serial order. A job that can end a serial loop
+  early stores its value or its failure, and the owner reads them by index:
+  later jobs may have run, but nothing after the first failure is read.
+- Start a stage before one of its inputs only where no choice in it needs that
+  input. Coarse preparation precedes the frequency grid without a compiled
+  backend and outside the exact one-arrival profile. A slow mapped profile,
+  whose route the intervals decide, keeps its bank in the time domain until
+  then. Work receipts must equal the session built from those intervals.
+- A slot that fails for one reason reports it as the sequential order would.
+  When acquisition and preparation both fail, either may be reported.
+
+Under the full software budget an overlapped serial chain shares hardware
+threads with the work beside it, so acquisition takes longer there than alone.
+Its two periodograms are single transforms, and several onset apertures still
+run one after another; see the
+[measured results](validation.md#helper-acquisition-overlap-follow-through).
 
 Each owner keeps private mutable state and an admitted maximum lane/scratch
 shape. This is a DSP memory bound, not an exclusive reservation of worker
@@ -114,18 +178,38 @@ permits for the entire slot. Quote the largest ready prefix at full `W` scratch
 per owner; prefer a balanced shape only when its full memory bound admits a
 strictly wider ready prefix. Keep that admitted shape fixed until the slot ends,
 even when peers finish. This prevents uncharged expansion; the aggregate worker ceiling remains
-`W` in either case. Reject inadmissible work if no shape fits the full DSP,
+`W` in either case.
+
+A slot has two leases. The sequential lease runs Helper acquisition, the coarse
+search and fine tracking one after another. The overlap lease also holds
+acquisition scratch beside coarse preparation; the two are equal where another
+stage already needs as much, and for a single lane, which has nothing to
+overlap. Choose the ready group from sequential leases. An overlap lease is
+held until its slot ends, so grant one, oldest slot first, only from memory
+that owners cannot use: afterwards every owner the cap still admits, and at
+least one, must fit at the group's largest sequential lease. A group on
+balanced shares gets none. A window that becomes ready later is then still
+admitted at once at its full shape. If the process has grown by dispatch, the
+slot keeps its place on the sequential lease. A slot scored with the wider
+lease overlaps, and reports that its Helper interval lies inside its coarse
+interval.
+
+Reject inadmissible work if no shape fits the full DSP,
 stack, input/output and ingress bounds. The shared executor bounds actual
 simultaneous work. The automatic owner cap is `W`; explicit owner limits remain
 exact and cannot exceed
 the worker budget. Do not create workers for empty work or reduce the global
-allocation merely because one stage has fewer useful tasks. Standalone phase
-probes retain their local executor and unchanged stage mathematics; they do not
-by themselves measure this shared stream scheduler.
-The current full-scratch/oldest-slot point improves first-message latency but
-remains slower overall than the original baseline. Earlier root-first and
-leaf-first failures remain in the record; see
-[the current evidence](validation.md#native-throughput-and-precision-investigation).
+allocation merely because one stage has fewer useful tasks. A standalone slot
+owns one private instance of the same executor for its three stages, and a
+standalone coarse or fine session owns its own, each with its caller as lane
+zero and unchanged stage mathematics; none by itself measures the shared
+stream scheduler.
+The earlier scheduler-only comparison improved first-message latency but
+remained slower overall than its baseline, and its root-first and leaf-first
+failures remain in
+[that record](validation.md#native-throughput-and-precision-investigation).
+The later overlap and transform-order changes shortened the matched replay;
+see [their evidence and limits](validation.md#receiver-overlap-and-transform-order-follow-through).
 
 Window samples are immutable shared native storage. Charge their assembly,
 retained input, live scorer workspaces, worker stacks, application baseline and

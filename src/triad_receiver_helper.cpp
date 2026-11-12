@@ -1,10 +1,15 @@
 #include "triad_receiver_helper.hpp"
 
+#include "datapump/execution.hpp"
+
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <numeric>
 #include <numbers>
+#include <optional>
 #include <utility>
 
 namespace datapump::triad::v3::receiver_detail {
@@ -14,6 +19,12 @@ constexpr double tau = 2 * pi;
 constexpr std::size_t maximum_samples = 8'000'000;
 constexpr std::size_t maximum_profile_points = 16'385;
 constexpr std::size_t maximum_fit_bins = 300'000;
+// Two pilots, each with its direct and Doppler-separated line.
+constexpr std::size_t maximum_targets = helper_widest_wave;
+// Frequency interval lists and result records. One fit has at most one
+// region for every two of its grid points, and eight apertures' unions and
+// their merge stay below 13 MB in the worst case.
+constexpr std::size_t record_bytes = 16U << 20;
 constexpr double coarse_guard = .1, minimum_coarse_seconds = 8;
 constexpr double filter_half_support = .3, onset_padding = .15;
 constexpr double frequency_seconds = 36, frequency_guard = .02;
@@ -22,6 +33,8 @@ using Interval = std::array<double, 2>;
 
 void check_stop(std::stop_token stop) {
     if (stop.stop_requested()) throw Error("Helper acquisition cancelled");
+    // Acquisition can share its owner's lanes with preparation.
+    execution::checkpoint();
 }
 std::size_t checked_mul(std::size_t a, std::size_t b) {
     if (b && a > std::numeric_limits<std::size_t>::max() / b)
@@ -42,6 +55,53 @@ std::size_t prefix_samples(const ReceiverConfig& c, const ReceiverSlotPlan& s) {
         std::max(0., s.arrival_upper_seconds) + 1) * c.sample_rate_hz);
     if (!std::isfinite(end)) throw Error("nonfinite Helper prefix");
     return end <= 0 ? 0 : end >= samples ? static_cast<std::size_t>(samples) : static_cast<std::size_t>(end);
+}
+bool bounded_uncertainty(const ReceiverConfig& c) {
+    for (double value : {c.clock_bound_ppm * 1e-6, c.endpoint_clock_bound_ppm * 1e-6, c.spread_delay_seconds,
+                        c.delay_excursion_seconds, c.random_doppler_width_hz, c.spread_doppler_hz,
+                        c.delay_motion_doppler_bound_hz, c.capture_tail_bound_seconds,
+                        c.relative_phase_diffusion_rad_sqrt_s})
+        if (!std::isfinite(value) || value < 0) return false;
+    return true;
+}
+bool finite_calendar(const ReceiverSlotPlan& s) {
+    return std::isfinite(s.arrival_lower_seconds) && std::isfinite(s.arrival_upper_seconds) &&
+        s.arrival_lower_seconds <= s.arrival_upper_seconds && std::isfinite(s.helper_begin_seconds) &&
+        std::isfinite(s.helper_end_seconds) && std::isfinite(s.source_start_seconds);
+}
+// A job's value, or the failure a serial pass would have met at its position.
+template<class T> struct Outcome {
+    std::optional<T> value;
+    std::exception_ptr failure;
+    template<class Job> bool run(Job&& job) {
+        try { value.emplace(job()); } catch (...) { failure = std::current_exception(); }
+        return !failure;
+    }
+    T take() {
+        if (failure) std::rethrow_exception(failure);
+        return std::move(*value);
+    }
+};
+// Runs independent jobs, at most `width` at once, and returns after them. A
+// job records its own outcome and reports whether it succeeded. The caller
+// replays values, early returns and failures in serial order, so nothing
+// after the first failure is read and a serial pass stops there as before.
+template<class Job> void each(const LaneWave& wave, std::size_t count, std::size_t width,
+                              std::stop_token stop, Job&& job) {
+    if (!wave || width <= 1 || count <= 1) {
+        for (std::size_t index = 0; index < count; ++index) if (!job(index, stop)) return;
+        return;
+    }
+    std::atomic<bool> failed = false;
+    try {
+        for (std::size_t first = 0; first < count && !failed; first += width)
+            wave(std::min(width, count - first), [&](std::size_t index, std::stop_token job_stop) {
+                if (!job(first + index, job_stop)) failed = true;
+            });
+    } catch (const Error&) {
+        check_stop(stop);
+        throw;
+    }
 }
 std::vector<double> linspace(double lo, double hi, std::size_t n) {
     if (!n) throw Error("empty Helper lattice");
@@ -191,14 +251,24 @@ Fit fit_pilot(const Spectrum& spectrum, double center, double bound, double audi
                              separation, sigma, iterations, stop);
     return result;
 }
-double refine_frequency(std::span<const Complex> input, double fs, double frequency, std::stop_token stop) {
+// The aperture window that every refinement evaluation applies.
+std::vector<double> refinement_window(std::size_t samples, std::stop_token stop) {
+    std::vector<double> window(samples);
+    for (std::size_t i = 0; i < samples; ++i) {
+        if ((i & 4095U) == 0) check_stop(stop);
+        window[i] = .5 - .5 * std::cos(tau * i / static_cast<double>(samples - 1));
+    }
+    return window;
+}
+double refine_frequency(std::span<const Complex> input, std::span<const double> window, double fs,
+                        double frequency, std::stop_token stop) {
     const double duration = input.size() / fs, radius = 1 / duration;
     const double tolerance = 1 / (1000 * duration);
     auto objective = [&](double f) {
         Complex sum{};
         for (std::size_t i = 0; i < input.size(); ++i) {
             if ((i & 4095U) == 0) check_stop(stop);
-            const double w = .5 - .5 * std::cos(tau * i / static_cast<double>(input.size() - 1));
+            const double w = window[i];
             const double t = (static_cast<double>(i) - (input.size() - 1) / 2.) / fs;
             sum += input[i] * w * std::polar(1., -tau * std::remainder(f * t, 1.));
         }
@@ -270,31 +340,42 @@ std::vector<double> lowpass(std::size_t half, double fs, double cutoff) {
     for (auto& value : taps) value /= sum;
     return taps;
 }
-std::vector<Complex> filtered_branch(std::span<const Complex> input, const std::vector<double>& taps,
+// The transform plan and filter response shared by every pilot branch. Its
+// radix-two length needs no transform scratch, so branches can share it.
+struct BranchFilter {
+    BranchFilter(std::size_t input_rows, const std::vector<double>& taps, std::stop_token stop)
+        : total(checked_add(input_rows, taps.size()) - 1), plan(next_power_two(total), stop),
+          kernel(next_power_two(total)) {
+        std::copy(taps.begin(), taps.end(), kernel.begin());
+        plan.transform(kernel, false, {}, stop);
+    }
+    std::size_t total;
+    DftPlan plan;
+    std::vector<Complex> kernel;
+};
+
+std::vector<Complex> filtered_branch(std::span<const Complex> input, const BranchFilter& filter,
                                      std::size_t decimation, double fs, double lead, double target,
                                      std::stop_token stop) {
-    const auto total = checked_add(input.size(), taps.size()) - 1;
-    const auto size = next_power_two(total);
-    std::vector<Complex> samples(size), kernel(size);
+    const auto size = filter.kernel.size();
+    std::vector<Complex> samples(size);
     for (std::size_t i = 0; i < input.size(); ++i) {
         if ((i & 4095U) == 0) check_stop(stop);
         samples[i] = input[i] * std::polar(1., -tau * std::remainder(target * (i / fs - lead), 1.));
     }
-    std::copy(taps.begin(), taps.end(), kernel.begin());
-    DftPlan plan(size, stop);
-    std::vector<Complex> scratch(DftPlan::scratch_samples(size));
-    plan.transform(samples, false, scratch, stop); plan.transform(kernel, false, scratch, stop);
-    for (std::size_t i = 0; i < size; ++i) samples[i] *= kernel[i];
-    plan.transform(samples, true, scratch, stop);
+    filter.plan.transform(samples, false, {}, stop);
+    for (std::size_t i = 0; i < size; ++i) samples[i] *= filter.kernel[i];
+    filter.plan.transform(samples, true, {}, stop);
     std::vector<Complex> result;
-    result.reserve((total - 1) / decimation + 1);
-    for (std::size_t i = 0; i < total; i += decimation) result.push_back(samples[i]);
+    result.reserve((filter.total - 1) / decimation + 1);
+    for (std::size_t i = 0; i < filter.total; i += decimation) result.push_back(samples[i]);
     return result;
 }
 struct FrequencyResult { bool narrowed = false; std::string reason; std::vector<Interval> intervals; };
 FrequencyResult final_frequency(const ReceiverConfig& c, const ReceiverSlotPlan& s,
                                 std::span<const Complex> raw, std::span<const std::uint8_t> valid,
-                                Interval arrival, double horizon, std::stop_token stop) {
+                                Interval arrival, double horizon, std::stop_token stop,
+                                const LaneWave& wave) {
     FrequencyResult result;
     auto finish = [&](const char* reason) { result.reason = reason; return result; };
     const double fs = c.sample_rate_hz, lead = static_cast<double>(s.window_capture_lead_seconds);
@@ -325,10 +406,18 @@ FrequencyResult final_frequency(const ReceiverConfig& c, const ReceiverSlotPlan&
         separation * endpoint / (1 - endpoint) + oscillator;
     bool boundary = false, flat = false;
     std::vector<std::vector<Interval>> usable;
-    for (const double pilot : {c.helper.low_frequency_hz, c.helper.frequency_hz}) {
-        const double center = pilot - c.data_if_hz;
+    const std::array pilots{c.helper.low_frequency_hz, c.helper.frequency_hz};
+    std::array<Outcome<Fit>, 2> fits;
+    each(wave, pilots.size(), pilots.size(), stop, [&](std::size_t index, std::stop_token job_stop) {
+        return fits[index].run([&] {
+            return fit_pilot(spectrum, pilots[index] - c.data_if_hz, c.frequency_bound_hz, audio, separation,
+                             sigma, duration, fs, 28, job_stop);
+        });
+    });
+    for (std::size_t index = 0; index < pilots.size(); ++index) {
+        const double center = pilots[index] - c.data_if_hz;
         Fit fit;
-        try { fit = fit_pilot(spectrum, center, c.frequency_bound_hz, audio, separation, sigma, duration, fs, 28, stop); }
+        try { fit = fits[index].take(); }
         catch (const Error& error) {
             const std::string message = error.what();
             if (message == "Helper profile work limit") return finish("profile_work_limit");
@@ -371,23 +460,130 @@ FrequencyResult final_frequency(const ReceiverConfig& c, const ReceiverSlotPlan&
     result.narrowed = true;
     return finish("engineering_frequency_regions_selected");
 }
+
+// The guaranteed Helper-only support inside the prefix. It follows from the
+// public calendar alone. Callers validate that calendar first.
+struct Support {
+    double settling = 0, end = 0;
+    std::size_t first = 0, last = 0;
+    bool enough = false;
+};
+Support coarse_support(const ReceiverConfig& c, const ReceiverSlotPlan& s, std::size_t prefix) {
+    const double fs = c.sample_rate_hz, lead = static_cast<double>(s.window_capture_lead_seconds);
+    const double endpoint = c.endpoint_clock_bound_ppm * 1e-6;
+    Support out;
+    out.settling = std::max(c.spread_delay_seconds + c.delay_excursion_seconds, c.capture_tail_bound_seconds);
+    const double begin = (s.arrival_upper_seconds + static_cast<double>(s.helper_begin_seconds) / (1 - endpoint) + out.settling + coarse_guard) * (1 + endpoint);
+    out.end = std::min((s.arrival_lower_seconds + static_cast<double>(s.source_start_seconds) / (1 + endpoint) - coarse_guard) * (1 - endpoint),
+                       (s.arrival_lower_seconds + static_cast<double>(s.helper_end_seconds) / (1 + endpoint) - coarse_guard) * (1 - endpoint));
+    const double first_real = std::max(0., std::ceil((begin + lead) * fs));
+    const double last_real = std::min(static_cast<double>(prefix), std::floor((out.end + lead) * fs));
+    out.enough = !((last_real - first_real) / fs < minimum_coarse_seconds);
+    if (out.enough) {
+        out.first = static_cast<std::size_t>(first_real);
+        out.last = static_cast<std::size_t>(last_real);
+    }
+    return out;
+}
+// The public onset search window and its grid.
+struct OnsetWindow { double start = 0, earliest = 0, latest = 0; };
+OnsetWindow onset_window(const ReceiverConfig& c, const ReceiverSlotPlan& s) {
+    const double endpoint = c.endpoint_clock_bound_ppm * 1e-6;
+    OnsetWindow out;
+    out.start = static_cast<double>(s.helper_begin_seconds);
+    out.earliest = (s.arrival_lower_seconds + out.start / (1 + endpoint)) * (1 - endpoint);
+    out.latest = (s.arrival_upper_seconds + out.start / (1 - endpoint)) * (1 + endpoint);
+    return out;
+}
+std::size_t onset_points(const OnsetWindow& window, double step) {
+    const double points = std::max(1., std::ceil((window.latest - window.earliest) / step));
+    // Any grid that fits a workspace quote converts exactly.
+    if (!(points < static_cast<double>(std::numeric_limits<std::size_t>::max() / 1024)))
+        throw Error("Helper workspace overflow");
+    return static_cast<std::size_t>(points) + 1;
+}
+
+// One periodogram's live scratch: the complex aperture, its transform plan
+// and scratch, and the returned frequency and power rows.
+std::size_t periodogram_bytes(std::size_t samples) {
+    return checked_add(checked_mul(samples, 2 * sizeof(Complex)), DftPlan::workspace_bytes(samples));
+}
+// One fit over a window of at most `bins` bins: the window's frequency copy,
+// the kernel offsets, three kernel rows, and the profile grid with its scores
+// and peaks. The fit pads its window by a full core on each side, so the
+// offsets reserved for two cores stay within twice the window.
+std::size_t fit_bytes(std::size_t bins) {
+    return checked_mul(checked_add(checked_mul(bins, 6), 4 * maximum_profile_points), sizeof(double));
+}
+// A periodogram, then both pilots' fits beside its retained spectrum. The
+// refinement window that can follow is smaller than either.
+std::size_t spectral_bytes(std::size_t samples, std::size_t bins) {
+    return std::max(periodogram_bytes(samples),
+                    checked_add(checked_mul(samples, 2 * sizeof(double)), checked_mul(2, fit_bytes(bins))));
+}
+
+// Public acquisition geometry and the scratch it bounds. No extent depends
+// on a received sample.
+struct Shape {
+    std::size_t half = 0, count = 0, decimation = 1, onset = 0;
+    double onset_step = 0;
+    // Branch filters that fit beneath the largest single step.
+    std::size_t branch_lanes = 1;
+    std::size_t bytes = 0;
+};
+Shape acquisition_shape(const ReceiverConfig& c, const ReceiverSlotPlan& s, std::size_t prefix,
+                        const Support& support) {
+    const double fs = c.sample_rate_hz, lead = static_cast<double>(s.window_capture_lead_seconds);
+    Shape out;
+    out.decimation = std::max<std::size_t>(1, static_cast<std::size_t>(fs / 100));
+    out.half = static_cast<std::size_t>(std::ceil(filter_half_support * fs));
+    out.count = std::min(prefix, static_cast<std::size_t>(std::max(0., std::ceil((support.end + lead + 2 * filter_half_support) * fs))));
+    out.onset_step = std::max(1 / (fs / out.decimation), .02);
+    out.onset = onset_points(onset_window(c, s), out.onset_step);
+    const auto taps = checked_add(checked_mul(out.half, 2), 1);
+    const auto total = checked_add(out.count, taps) - 1;
+    const auto transform = next_power_two(total);
+    const auto rows = (total - 1) / out.decimation + 1;
+    const double aperture = std::ceil(frequency_seconds * fs);
+    const auto frequency = aperture <= static_cast<double>(prefix)
+        ? spectral_bytes(static_cast<std::size_t>(aperture), std::min(static_cast<std::size_t>(aperture), maximum_fit_bins)) : 0;
+    const auto coarse = spectral_bytes(support.last - support.first, support.last - support.first);
+    // The taps, the shared plan and response, and one branch in flight.
+    const auto response = checked_add(checked_mul(taps, sizeof(double)),
+                                      checked_mul(checked_mul(transform, 2) - 1, sizeof(Complex)));
+    const auto branch = checked_mul(transform, sizeof(Complex));
+    // Decimated branches with their energy and dates, two level index lists
+    // that can hold twice their rows and one of them mid-growth, and the
+    // score prefix. Then the onset grid's three rows and its region lists:
+    // the regions, their padded copy and the merged result.
+    const auto retained = checked_add(checked_mul(taps, sizeof(double)),
+        checked_add(checked_mul(rows, maximum_targets * sizeof(Complex) + 8 * sizeof(double)),
+                    checked_mul(out.onset, 3 * sizeof(double) + 3 * sizeof(Interval))));
+    const auto filtering = checked_add(checked_add(response, branch), retained);
+    const auto largest = std::max({coarse, filtering, checked_add(retained, frequency)});
+    out.branch_lanes = 1 + std::min(maximum_targets - 1, (largest - filtering) / branch);
+    out.bytes = checked_add(largest, record_bytes);
+    return out;
+}
+// Acquisition returns or throws before any scratch unless these hold.
+bool supported(const ReceiverConfig& c, const ReceiverSlotPlan& s, std::size_t prefix) {
+    if (!c.helper_enabled || c.helper.pilot_dwell_gating || c.physical_rf_retuning) return false;
+    if (!prefix || prefix > maximum_samples) return false;
+    if (!bounded_uncertainty(c) || !finite_calendar(s)) return false;
+    return std::max(c.clock_bound_ppm, c.endpoint_clock_bound_ppm) * 1e-6 < .1;
+}
 } // namespace
 
 std::size_t helper_workspace(const ReceiverConfig& c, const ReceiverSlotPlan& s) {
-    if (!c.helper_enabled || c.helper.pilot_dwell_gating || c.physical_rf_retuning) return 0;
-    const auto samples = prefix_samples(c, s);
-    if (!samples || samples > maximum_samples) return 0;
-    const auto half = static_cast<std::size_t>(std::ceil(filter_half_support * c.sample_rate_hz));
-    const auto padded = next_power_two(checked_add(samples, checked_mul(half, 2)));
-    // This deliberately conservative bound covers all simultaneously retained
-    // spectral, filter, fitting and bounded diagnostic arrays, including the
-    // arbitrary-length transform's convolution plan and scratch.
-    return checked_add(checked_add(checked_mul(samples, 1024), checked_mul(padded, 256)), 16U << 20);
+    const auto prefix = prefix_samples(c, s);
+    if (!supported(c, s, prefix)) return 0;
+    const auto support = coarse_support(c, s, prefix);
+    return support.enough ? acquisition_shape(c, s, prefix, support).bytes : 0;
 }
 
 HelperResult score_helper(const ReceiverConfig& c, const ReceiverSlotPlan& s,
                           std::span<const Complex> input, std::span<const std::uint8_t> validity,
-                          std::size_t scratch_limit_bytes, std::stop_token stop) {
+                          std::size_t scratch_limit_bytes, std::stop_token stop, const LaneWave& wave) {
     HelperResult result;
     auto finish = [&](const char* reason) { result.reason = reason; return result; };
     check_stop(stop);
@@ -409,25 +605,17 @@ HelperResult score_helper(const ReceiverConfig& c, const ReceiverSlotPlan& s,
     }
     const double fs = c.sample_rate_hz, lead = static_cast<double>(s.window_capture_lead_seconds);
     const double audio = c.clock_bound_ppm * 1e-6, endpoint = c.endpoint_clock_bound_ppm * 1e-6;
-    for (double value : {audio, endpoint, c.spread_delay_seconds, c.delay_excursion_seconds,
-                        c.random_doppler_width_hz, c.spread_doppler_hz, c.delay_motion_doppler_bound_hz,
-                        c.capture_tail_bound_seconds, c.relative_phase_diffusion_rad_sqrt_s})
-        if (!std::isfinite(value) || value < 0) throw Error("invalid public Helper uncertainty");
-    if (!std::isfinite(s.arrival_lower_seconds) || !std::isfinite(s.arrival_upper_seconds) || s.arrival_lower_seconds > s.arrival_upper_seconds ||
-        !std::isfinite(s.helper_begin_seconds) || !std::isfinite(s.helper_end_seconds) || !std::isfinite(s.source_start_seconds))
-        throw Error("invalid public Helper calendar");
+    if (!bounded_uncertainty(c)) throw Error("invalid public Helper uncertainty");
+    if (!finite_calendar(s)) throw Error("invalid public Helper calendar");
     if (std::max(audio, endpoint) >= .1) return finish("clock_envelope_unsupported");
-    const double settling = std::max(c.spread_delay_seconds + c.delay_excursion_seconds, c.capture_tail_bound_seconds);
-    const double begin = (s.arrival_upper_seconds + static_cast<double>(s.helper_begin_seconds) / (1 - endpoint) + settling + coarse_guard) * (1 + endpoint);
-    const double end = std::min((s.arrival_lower_seconds + static_cast<double>(s.source_start_seconds) / (1 + endpoint) - coarse_guard) * (1 - endpoint),
-                               (s.arrival_lower_seconds + static_cast<double>(s.helper_end_seconds) / (1 + endpoint) - coarse_guard) * (1 - endpoint));
-    const double first_real = std::max(0., std::ceil((begin + lead) * fs));
-    const double last_real = std::min(static_cast<double>(raw.size()), std::floor((end + lead) * fs));
-    if ((last_real - first_real) / fs < minimum_coarse_seconds) return finish("insufficient_guaranteed_coarse_support");
-    const auto first = static_cast<std::size_t>(first_real), last = static_cast<std::size_t>(last_real);
+    const auto support = coarse_support(c, s, raw.size());
+    if (!support.enough) return finish("insufficient_guaranteed_coarse_support");
+    const double settling = support.settling, end = support.end;
+    const auto first = support.first, last = support.last;
     if (!valid.empty() && std::any_of(valid.begin(), valid.begin() + last, [](auto v) { return v != 1; }))
         return finish("known_erasure_in_helper_support");
-    result.workspace_peak_bytes = helper_workspace(c, s);
+    const auto shape = acquisition_shape(c, s, raw.size(), support);
+    result.workspace_peak_bytes = shape.bytes;
     if (result.workspace_peak_bytes > scratch_limit_bytes) throw ReceiverWorkspaceError("Helper scratch exceeds its admitted memory lease");
     const double duration = (last - first) / fs;
     const double width = c.random_doppler_width_hz, separation = c.spread_doppler_hz, motion = c.delay_motion_doppler_bound_hz;
@@ -436,10 +624,17 @@ HelperResult score_helper(const ReceiverConfig& c, const ReceiverSlotPlan& s,
     {
         const auto spectrum = periodogram(raw.subspan(first, last - first), fs, stop);
         const std::array pilots{c.helper.low_frequency_hz, c.helper.frequency_hz};
+        std::array<Outcome<Fit>, 2> fits;
+        each(wave, pilots.size(), pilots.size(), stop, [&](std::size_t index, std::stop_token job_stop) {
+            return fits[index].run([&] {
+                return fit_pilot(spectrum, pilots[index] - c.data_if_hz, c.frequency_bound_hz, audio, separation,
+                                 sigma, duration, fs, 20, job_stop);
+            });
+        });
         for (std::size_t index = 0; index < pilots.size(); ++index) {
             const double center = pilots[index] - c.data_if_hz;
             Fit fit;
-            try { fit = fit_pilot(spectrum, center, c.frequency_bound_hz, audio, separation, sigma, duration, fs, 20, stop); }
+            try { fit = fits[index].take(); }
             catch (const Error& error) {
                 if (std::string(error.what()) == "Helper profile work limit") return finish("coarse_profile_work_limit");
                 throw;
@@ -457,8 +652,16 @@ HelperResult score_helper(const ReceiverConfig& c, const ReceiverSlotPlan& s,
     }
     if (targets.empty()) return finish("no_coarse_pilot");
     if (width == 0 && motion == 0) {
+        // Every target refines against the same immutable aperture and window.
+        const auto window = refinement_window(last - first, stop);
+        std::vector<Outcome<double>> refined(targets.size());
+        each(wave, targets.size(), targets.size(), stop, [&](std::size_t index, std::stop_token job_stop) {
+            return refined[index].run([&] {
+                return refine_frequency(raw.subspan(first, last - first), window, fs, targets[index], job_stop);
+            });
+        });
         try {
-            for (auto& target : targets) target = refine_frequency(raw.subspan(first, last - first), fs, target, stop);
+            for (std::size_t index = 0; index < targets.size(); ++index) targets[index] = refined[index].take();
         } catch (const Error& error) {
             if (std::string(error.what()) == "Helper persistent frequency refinement failed")
                 return finish("coarse_frequency_refinement_failed");
@@ -466,24 +669,32 @@ HelperResult score_helper(const ReceiverConfig& c, const ReceiverSlotPlan& s,
         }
     }
     const double half_width = std::max(4., 3 * width + motion);
-    const auto decimation = std::max<std::size_t>(1, static_cast<std::size_t>(fs / 100));
+    const auto decimation = shape.decimation;
     const double output_fs = fs / decimation;
     if (half_width >= output_fs * .4) return finish("onset_filter_bandwidth_unsupported");
-    const auto half = static_cast<std::size_t>(std::ceil(filter_half_support * fs));
+    const auto half = shape.half;
     const auto taps = lowpass(half, fs, half_width);
-    const auto count = std::min(raw.size(), static_cast<std::size_t>(std::max(0., std::ceil((end + lead + 2 * filter_half_support) * fs))));
-    std::vector<std::vector<Complex>> branches;
-    std::vector<double> energy;
-    for (auto target : targets) {
-        branches.push_back(filtered_branch(raw.first(count), taps, decimation, fs, lead, target, stop));
-        if (energy.empty()) energy.resize(branches.back().size());
-        for (std::size_t i = 0; i < energy.size(); ++i) energy[i] += std::norm(branches.back()[i]);
+    const auto count = shape.count;
+    std::vector<std::vector<Complex>> branches(targets.size());
+    {
+        // The shared response is released before the frequency apertures.
+        const BranchFilter filter(count, taps, stop);
+        std::vector<Outcome<std::vector<Complex>>> filtered(targets.size());
+        each(wave, targets.size(), shape.branch_lanes, stop, [&](std::size_t index, std::stop_token job_stop) {
+            return filtered[index].run([&] {
+                return filtered_branch(raw.first(count), filter, decimation, fs, lead, targets[index], job_stop);
+            });
+        });
+        for (std::size_t index = 0; index < targets.size(); ++index) branches[index] = filtered[index].take();
     }
+    // Branch energy accumulates in target order.
+    std::vector<double> energy(branches.front().size());
+    for (const auto& branch : branches)
+        for (std::size_t i = 0; i < energy.size(); ++i) energy[i] += std::norm(branch[i]);
     std::vector<double> dates(energy.size());
     for (std::size_t i = 0; i < dates.size(); ++i) dates[i] = (static_cast<double>(i * decimation) - half) / fs - lead;
-    const double hstart = static_cast<double>(s.helper_begin_seconds);
-    const double earliest = (s.arrival_lower_seconds + hstart / (1 + endpoint)) * (1 - endpoint);
-    const double latest = (s.arrival_upper_seconds + hstart / (1 - endpoint)) * (1 + endpoint);
+    const auto window = onset_window(c, s);
+    const double hstart = window.start, earliest = window.earliest, latest = window.latest;
     std::vector<std::size_t> noise_indices, signal_indices;
     double v0 = 0, v1 = 0;
     for (std::size_t i = 0; i < dates.size(); ++i) {
@@ -496,8 +707,8 @@ HelperResult score_helper(const ReceiverConfig& c, const ReceiverSlotPlan& s,
     result.onset_noise_level = v0; result.onset_helper_level = v1;
     const double ratio = v1 / v0;
     if (ratio < 1.25) return finish("weak_filtered_helper_onset");
-    const double step = std::max(1 / output_fs, .02);
-    const auto grid = linspace(earliest, latest, static_cast<std::size_t>(std::max(1., std::ceil((latest - earliest) / step))) + 1);
+    const double step = shape.onset_step;
+    const auto grid = linspace(earliest, latest, shape.onset);
     std::vector<std::size_t> indices(grid.size());
     for (std::size_t i = 0; i < grid.size(); ++i) indices[i] = static_cast<std::size_t>(std::lower_bound(dates.begin(), dates.end(), grid[i]) - dates.begin());
     const auto a = indices.front(), b = indices.back();
@@ -537,7 +748,7 @@ HelperResult score_helper(const ReceiverConfig& c, const ReceiverSlotPlan& s,
     std::vector<Interval> frequency_intervals;
     const double horizon = (s.stop_sample - s.first_sample) / fs;
     for (std::size_t i = 0; i < cells; ++i) {
-        const auto frequency = final_frequency(c, s, raw, valid, {edges[i], edges[i + 1]}, horizon, stop);
+        const auto frequency = final_frequency(c, s, raw, valid, {edges[i], edges[i + 1]}, horizon, stop, wave);
         if (!frequency.narrowed) return finish("onset_branch_frequency_fallback");
         frequency_intervals.insert(frequency_intervals.end(), frequency.intervals.begin(), frequency.intervals.end());
     }

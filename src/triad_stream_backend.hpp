@@ -18,13 +18,15 @@ using StreamExecutorScorer = std::function<ReceiverSlotScore(const ReceiverConfi
     const Crypto&, std::span<const Complex>, std::span<const std::uint8_t>, unsigned,
     std::size_t, std::stop_token, receiver_detail::ReceiverExecutor*)>;
 using StreamFootprint = std::function<std::size_t()>;
+// The trailing workspace quotes the wider lease that lets a slot overlap
+// Helper acquisition with coarse preparation. Omitted, no slot is offered one.
 struct StreamReceiverFixture {
     static CompleteStreamReceiver make(PublicProfile, ReceiverConfig, Crypto, StreamReceiverOptions,
         StreamWorkspace, StreamScorer, MessageDecoder = decode_short_message,
-        MessageReceiverOptions = {}, StreamFootprint = {});
+        MessageReceiverOptions = {}, StreamFootprint = {}, StreamWorkspace = {});
     static CompleteStreamReceiver make_with_executor(PublicProfile, ReceiverConfig, Crypto, StreamReceiverOptions,
         StreamWorkspace, StreamExecutorScorer, MessageDecoder = decode_short_message,
-        MessageReceiverOptions = {}, StreamFootprint = {});
+        MessageReceiverOptions = {}, StreamFootprint = {}, StreamWorkspace = {});
 };
 
 } // namespace datapump::triad::v3::detail

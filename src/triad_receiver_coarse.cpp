@@ -108,9 +108,14 @@ void combine(CoarseOperationCounts& total, const CoarseBulkWork& part) {
     note(total.singleton_dot_terms, part.singleton_dot_terms);
 }
 
+// A caller that reads only leading outputs passes their count, and one
+// whose input is already in transform order says so. The logical transform
+// and its work credit are unchanged.
 void tracked_fft(std::span<Complex> values, bool inverse, const native_fft::DoublePlan& plan,
-                 CoarseOperationCounts& work, std::stop_token stop) {
-    native_fft::fft(values, inverse, plan, stop);
+                 CoarseOperationCounts& work, std::stop_token stop, std::size_t prefix = 0,
+                 bool permuted = false) {
+    native_fft::fft_prefix(values, inverse, plan, prefix ? prefix : values.size(), stop,
+                           native_fft::Kernel::automatic, permuted);
     note(inverse ? work.inverse_ffts : work.forward_ffts, 1);
     note(work.fft_rows, values.size());
     const auto levels = static_cast<std::uint64_t>(std::countr_zero(values.size()));
@@ -119,8 +124,10 @@ void tracked_fft(std::span<Complex> values, bool inverse, const native_fft::Doub
 }
 
 void tracked_fft(std::span<std::complex<float>> values, bool inverse, const native_fft::FloatPlan& plan,
-                 CoarseOperationCounts& work, std::stop_token stop) {
-    native_fft::fft(values, inverse, plan, stop);
+                 CoarseOperationCounts& work, std::stop_token stop, std::size_t prefix = 0,
+                 bool permuted = false) {
+    native_fft::fft_prefix(values, inverse, plan, prefix ? prefix : values.size(), stop,
+                           native_fft::Kernel::automatic, permuted);
     note(inverse ? work.inverse_ffts : work.forward_ffts, 1);
     note(work.fft_rows, values.size());
     const auto levels = static_cast<std::uint64_t>(std::countr_zero(values.size()));
@@ -136,53 +143,47 @@ void tracked_render(PatternSource& source, long double first, long double step,
     note(work.source_render_rows, output.size());
 }
 
+// Jobs are claimed one at a time, so a lane that finishes early takes more
+// work. A job receives the lane that runs it for private reusable scratch.
 template<class Job>
-void parallel(std::size_t jobs, unsigned workers, std::stop_token outer_stop, ReceiverExecutor* executor,
+void parallel(std::size_t jobs, unsigned lanes, std::stop_token stop, ReceiverExecutor& executor,
               std::uint64_t public_slot, Job run) {
-    if (executor) {
-        executor->parallel(public_slot, jobs, workers, outer_stop, [&](unsigned, std::size_t index, std::stop_token stop) {
-            run(index, stop);
-        });
-        return;
-    }
-    const auto active = std::min<std::size_t>(workers, jobs);
-    if (!active) return;
-    if (active == 1) {
-        for (std::size_t index = 0; index < jobs; ++index) {
-            check_stop(outer_stop);
-            run(index, outer_stop);
-        }
-        return;
-    }
-    std::atomic_size_t next{0};
-    std::stop_source cancellation;
-    std::stop_callback propagate(outer_stop, [&] { cancellation.request_stop(); });
-    std::vector<std::exception_ptr> errors(active);
-    auto worker = [&](std::size_t id) {
-        const auto stop = cancellation.get_token();
-        try {
-            while (!stop.stop_requested()) {
-                const auto index = next.fetch_add(1, std::memory_order_relaxed);
-                if (index >= jobs) return;
-                run(index, stop);
-            }
-        } catch (...) {
-            if (cancellation.request_stop()) errors[id] = std::current_exception();
-        }
-    };
-    std::vector<execution::Task> tasks;
-    tasks.reserve(active - 1);
-    try {
-        for (std::size_t id = 1; id < active; ++id) tasks.emplace_back([&, id] { worker(id); });
-        worker(0);
-    } catch (...) {
-        cancellation.request_stop();
-        throw;
-    }
-    for (auto& task : tasks) task.join();
-    for (const auto& error : errors) if (error) std::rethrow_exception(error);
-    check_stop(outer_stop);
+    executor.parallel(public_slot, jobs, lanes, stop, [&](unsigned lane, std::size_t index, std::stop_token job_stop) {
+        run(lane, index, job_stop);
+    });
 }
+
+// The interval from a job group's first start to its last finish. Groups that
+// overlap other preparation report their own interval; these are not additive.
+class PhaseSpan {
+public:
+    explicit PhaseSpan(PhaseClock::time_point origin) : origin_(origin) {}
+    class Scope {
+    public:
+        explicit Scope(PhaseSpan& span) : span_(span) {
+            const auto now = span_.now();
+            for (auto seen = span_.first_.load(); (!seen || now < seen) &&
+                 !span_.first_.compare_exchange_weak(seen, now);) {}
+        }
+        ~Scope() {
+            const auto now = span_.now();
+            for (auto seen = span_.last_.load(); now > seen && !span_.last_.compare_exchange_weak(seen, now);) {}
+        }
+    private:
+        PhaseSpan& span_;
+    };
+    double seconds() const {
+        const auto first = first_.load(), last = last_.load();
+        return last > first ? static_cast<double>(last - first) * 1e-9 : 0;
+    }
+
+private:
+    std::int64_t now() const {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(PhaseClock::now() - origin_).count() + 1;
+    }
+    PhaseClock::time_point origin_;
+    std::atomic<std::int64_t> first_{0}, last_{0};
+};
 
 struct Layout {
     std::size_t source_rows = 0, raw_rows = 0, kernel_rows = 0, lag_count = 0;
@@ -842,6 +843,7 @@ void to_float_spectrum(Workspace& workspace, const Layout& layout, const native_
         std::vector<Complex>().swap(input);
         tracked_fft(spectrum, false, fft, work, stop);
         for (auto& value : spectrum) value = std::conj(value);
+        native_fft::permute(spectrum, stop);
         if (pack) {
             workspace.packed_column = native_fft::pack_q15(spectrum, stop);
             std::vector<std::complex<float>>().swap(spectrum);
@@ -856,45 +858,110 @@ void to_spectrum(Columns& columns, const Layout& layout, const native_fft::Doubl
         std::copy(ray.begin(), ray.end(), spectrum.begin());
         tracked_fft(spectrum, false, fft, work, stop);
         for (auto& value : spectrum) value = std::conj(value);
+        native_fft::permute(spectrum, stop);
         ray = std::move(spectrum);
     }
 }
 
-std::vector<Workspace> prepare_bank(const Plan& plan, const ReceiverConfig& config,
-                                   const ReceiverSlotPlan& slot, const Crypto& key,
-                                   const Projection& projection, const MappedProjection* mapped,
-                                   const native_fft::DoublePlan* spectrum_fft,
-                                   const native_fft::FloatPlan* float_spectrum_fft, bool packed,
-                                   unsigned workers, CoarseOperationCounts& work, std::stop_token stop,
-                                   ReceiverExecutor* executor) {
-    std::vector<Workspace> bank(plan.workspaces());
-    std::array<CoarseOperationCounts, lanes> lane_work{};
-    parallel(lanes, workers, stop, executor, slot.index, [&](std::size_t lane, std::stop_token job_stop) {
-        auto format = slot.format;
-        format.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(format.epoch) + receiver_epoch_offsets[lane / 2]);
-        PatternSource source(format, key, static_cast<std::uint8_t>(lane % 2));
-        auto& counts = lane_work[lane];
-        const auto integer = mapped ? std::vector<Complex>{} : integer_source(plan, plan.layout, source, 0, counts, job_stop);
-        for (std::size_t clock = 0; clock < plan.clock_count; ++clock) {
-            check_stop(job_stop);
-            auto columns = make_columns(plan, plan.layout, config, projection, mapped, source, 0, integer,
-                                        plan.clocks[clock], counts, job_stop);
-            auto& destination = bank[plan.workspace_index(lane, clock)];
-            const auto g = gram(columns, plan.ray_count);
-            destination.inverse = invert(g, plan.ray_count);
-            if (plan.ray_count == 2) {
-                const auto smallest = std::max(0., (g.a * g.d - std::norm(g.b)) / destination.inverse.largest);
-                destination.eigenvalue_ratio = smallest / destination.inverse.largest;
-            }
-            if (spectrum_fft) to_spectrum(columns, plan.layout, *spectrum_fft, counts, job_stop);
-            destination.columns = std::move(columns);
-            if (float_spectrum_fft)
-                to_float_spectrum(destination, plan.layout, *float_spectrum_fft, counts, job_stop, packed);
-        }
-    });
-    for (const auto& counts : lane_work) combine(work, counts);
-    return bank;
+// One keyed source per epoch and bit, shared by that lane's clock hypotheses.
+struct LaneSource {
+    execution::Mutex mutex;
+    std::optional<PatternSource> source;
+    std::vector<Complex> integer;
+    std::size_t pending = 0;
+};
+
+// Lanes whose keyed sources can be live at once: one claimed group, and the
+// lanes of earlier groups that still have a running job.
+std::size_t bank_source_lanes(unsigned workers) {
+    return std::min<std::size_t>(lanes, mul(2, workers));
 }
+
+// One job prepares one workspace. Lanes advance in groups no wider than the
+// worker share. Clock-major order inside a group starts each lane's source
+// before that lane's next clock hypothesis is claimed.
+class BankJobs {
+public:
+    BankJobs(const Plan& plan, const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
+             const Projection& projection, const MappedProjection* mapped,
+             const native_fft::DoublePlan* spectrum_fft, const native_fft::FloatPlan* float_spectrum_fft,
+             bool packed, unsigned workers)
+        : plan_(plan), config_(config), slot_(slot), key_(key), projection_(projection), mapped_(mapped),
+          spectrum_fft_(spectrum_fft), float_spectrum_fft_(float_spectrum_fft), packed_(packed),
+          group_(std::min<std::size_t>(lanes, std::max(1U, workers))),
+          sources_(lanes), bank_(plan.workspaces()), work_(plan.workspaces()) {
+        for (auto& shared : sources_) shared.pending = plan.clock_count;
+    }
+
+    std::size_t size() const { return work_.size(); }
+
+    void run(std::size_t job, std::stop_token stop) {
+        const auto group = std::min(job / (group_ * plan_.clock_count), lanes / group_);
+        const auto first_lane = group * group_;
+        const auto width = std::min(group_, lanes - first_lane);
+        const auto local = job - first_lane * plan_.clock_count;
+        const auto clock = local / width, lane = first_lane + local % width;
+        auto& shared = sources_[lane];
+        auto& counts = work_[job];
+        Columns columns;
+        {
+            std::unique_lock lock(shared.mutex);
+            check_stop(stop);
+            if (!shared.source) {
+                auto format = slot_.format;
+                format.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(format.epoch) +
+                                                          receiver_epoch_offsets[lane / 2]);
+                PatternSource source(format, key_, static_cast<std::uint8_t>(lane % 2));
+                if (!mapped_) shared.integer = integer_source(plan_, plan_.layout, source, 0, counts, stop);
+                shared.source.emplace(std::move(source));
+            }
+            // The mapped renderer advances its keyed source. The exact
+            // route reads only the lane's immutable integer rendering.
+            if (mapped_)
+                columns = make_columns(plan_, plan_.layout, config_, projection_, mapped_, *shared.source, 0, {},
+                                       plan_.clocks[clock], counts, stop);
+        }
+        if (!mapped_)
+            columns = make_columns(plan_, plan_.layout, config_, projection_, nullptr, *shared.source, 0,
+                                   shared.integer, plan_.clocks[clock], counts, stop);
+        auto& destination = bank_[plan_.workspace_index(lane, clock)];
+        const auto g = gram(columns, plan_.ray_count);
+        destination.inverse = invert(g, plan_.ray_count);
+        if (plan_.ray_count == 2) {
+            const auto smallest = std::max(0., (g.a * g.d - std::norm(g.b)) / destination.inverse.largest);
+            destination.eigenvalue_ratio = smallest / destination.inverse.largest;
+        }
+        if (spectrum_fft_) to_spectrum(columns, plan_.layout, *spectrum_fft_, counts, stop);
+        destination.columns = std::move(columns);
+        if (float_spectrum_fft_)
+            to_float_spectrum(destination, plan_.layout, *float_spectrum_fft_, counts, stop, packed_);
+        std::lock_guard lock(shared.mutex);
+        if (!--shared.pending) {
+            shared.source.reset();
+            std::vector<Complex>().swap(shared.integer);
+        }
+    }
+
+    std::vector<Workspace> finish(CoarseOperationCounts& work) {
+        for (const auto& counts : work_) combine(work, counts);
+        return std::move(bank_);
+    }
+
+private:
+    const Plan& plan_;
+    const ReceiverConfig& config_;
+    const ReceiverSlotPlan& slot_;
+    const Crypto& key_;
+    const Projection& projection_;
+    const MappedProjection* mapped_;
+    const native_fft::DoublePlan* spectrum_fft_;
+    const native_fft::FloatPlan* float_spectrum_fft_;
+    bool packed_;
+    std::size_t group_;
+    std::vector<LaneSource> sources_;
+    std::vector<Workspace> bank_;
+    std::vector<CoarseOperationCounts> work_;
+};
 
 struct Peak {
     double score = -infinity;
@@ -907,9 +974,70 @@ std::size_t arrival_peak_slots(std::size_t arrivals) {
     return std::min(arrivals, retained_per_bit);
 }
 
-std::array<Peak, retained_per_bit> arrival_peaks(std::span<const double> values,
-                                               std::size_t distance, std::size_t frequency) {
-    const auto selected = select_coarse_arrivals(values, distance);
+std::size_t interior_peak_bound(std::size_t arrivals) { return arrivals / 2 + 1; }
+
+// The strict interior maxima are listed once into reusable scratch. Every
+// later ranking pass then reads that short list instead of all scores.
+CoarseArrivalPeaks select_arrivals(std::span<const double> scores, std::size_t separation,
+                                   std::vector<std::uint32_t>& interiors) {
+    require_coarse(!scores.empty() && separation > 0 && scores.size() <= UINT32_MAX,
+                   "invalid coarse arrival peak geometry");
+    if (scores.size() == 1) return {{0, 0}, 1};
+    interiors.clear();
+    interiors.reserve(interior_peak_bound(scores.size()));
+    for (std::size_t i = 1; i + 1 < scores.size();) {
+        if (!(scores[i - 1] < scores[i])) {
+            ++i;
+            continue;
+        }
+        auto end = i + 1;
+        while (end + 1 < scores.size() && scores[end] == scores[i]) ++end;
+        if (scores[end] < scores[i]) interiors.push_back(static_cast<std::uint32_t>(i + (end - i - 1) / 2));
+        i = end;
+    }
+    const auto better = [&](std::size_t a, std::size_t b) {
+        return scores[a] == scores[b] ? a > b : scores[a] > scores[b];
+    };
+    // Greedy distance suppression in descending score, then descending lag.
+    // Only the two best surviving interiors can enter the final frontier.
+    std::array<std::size_t, 4> choices{};
+    std::size_t interior_count = 0;
+    const auto available = [&](std::size_t index) {
+        for (std::size_t i = 0; i < interior_count; ++i)
+            if (std::max(index, choices[i]) - std::min(index, choices[i]) < separation) return false;
+        return true;
+    };
+    while (interior_count < retained_per_bit) {
+        auto best = scores.size();
+        for (const std::size_t index : interiors)
+            if (available(index) && (best == scores.size() || better(index, best))) best = index;
+        if (best == scores.size()) break;
+        choices[interior_count++] = best;
+    }
+    // The endpoint peaks have independent eligibility. Equal-score ranking
+    // uses the same higher-lag priority as the interior suppression step.
+    std::size_t count = interior_count;
+    if (scores[0] >= scores[1]) choices[count++] = 0;
+    if (scores.back() >= scores[scores.size() - 2]) choices[count++] = scores.size() - 1;
+    const bool clipped = count > retained_per_bit ||
+        (count == retained_per_bit && interior_count == retained_per_bit &&
+         std::ranges::any_of(interiors, available));
+    const auto sort_choices = [&](auto less) {
+        for (std::size_t i = 1; i < choices.size() && i < count; ++i)
+            for (auto j = i; j > 0 && less(choices[j], choices[j - 1]); --j)
+                std::swap(choices[j], choices[j - 1]);
+    };
+    if (clipped) {
+        sort_choices(better);
+        return {{choices[1], choices[0]}, retained_per_bit};
+    }
+    sort_choices(std::less<>{});
+    return {{choices[0], choices[1]}, count};
+}
+
+std::array<Peak, retained_per_bit> arrival_peaks(std::span<const double> values, std::size_t distance,
+                                               std::size_t frequency, std::vector<std::uint32_t>& interiors) {
+    const auto selected = select_arrivals(values, distance, interiors);
     std::array<Peak, retained_per_bit> result{};
     for (std::size_t i = 0; i < selected.count; ++i) {
         const auto lag = selected.indices[i];
@@ -921,13 +1049,22 @@ std::array<Peak, retained_per_bit> arrival_peaks(std::span<const double> values,
 template<class Fft>
 using FftComplex = std::conditional_t<std::is_same_v<Fft, native_fft::FloatPlan>, std::complex<float>, Complex>;
 
+// A lane's reusable transform buffers. Every element is rewritten per use.
 template<class Fft>
-std::vector<double> correlation_scores(const Plan& plan, const Layout& layout, const Workspace& workspace,
-                                       std::span<const FftComplex<Fft>> observation, double variance,
-                                       const Fft& fft, CoarseOperationCounts& work,
-                                       std::stop_token stop, int observation_exponent = 0,
-                                       const native_fft::Q15Spectrum* packed = nullptr) {
+struct CorrelationScratch {
     std::array<std::vector<FftComplex<Fft>>, 2> products;
+    std::vector<double> scores;
+    std::vector<std::uint32_t> interiors;
+};
+
+template<class Fft>
+std::span<const double> correlation_scores(const Plan& plan, const Layout& layout, const Workspace& workspace,
+                                           std::span<const FftComplex<Fft>> observation, double variance,
+                                           const Fft& fft, CorrelationScratch<Fft>& scratch,
+                                           CoarseOperationCounts& work, std::stop_token stop,
+                                           int observation_exponent = 0,
+                                           const native_fft::Q15Spectrum* packed = nullptr) {
+    auto& products = scratch.products;
     const auto& columns = [&]() -> const auto& {
         if constexpr (std::is_same_v<Fft, native_fft::FloatPlan>) return workspace.float_columns;
         else return workspace.columns;
@@ -942,9 +1079,12 @@ std::vector<double> correlation_scores(const Plan& plan, const Layout& layout, c
             for (std::size_t i = 0; i < product.size(); ++i)
                 product[i] = observation[i] * columns[ray][i];
         }
-        tracked_fft(product, true, fft, work, stop);
+        // Both operands are stored in transform order, so their product
+        // is too. Only the public arrival lags are scored.
+        tracked_fft(product, true, fft, work, stop, layout.lag_count, true);
     }
-    std::vector<double> scores(layout.lag_count);
+    auto& scores = scratch.scores;
+    scores.resize(layout.lag_count);
     for (std::size_t lag = 0; lag < scores.size(); ++lag) {
         const auto exponent = observation_exponent + workspace.scale_exponent +
             (packed ? packed->exponent() + workspace.packed_column.exponent() : 0);
@@ -958,12 +1098,14 @@ std::vector<double> correlation_scores(const Plan& plan, const Layout& layout, c
     return scores;
 }
 
+// Rewrites the whole reusable buffer, including its zero padding.
 template<class Fft>
-std::vector<FftComplex<Fft>> observation_spectrum(const Layout& layout, std::span<const Complex> observation,
-                                          double frequency, std::size_t output_fs,
-                                          const Fft& fft, CoarseOperationCounts& work,
-                                          std::stop_token stop, int scale_exponent = 0) {
-    std::vector<FftComplex<Fft>> spectrum(layout.nfft);
+void observation_spectrum(std::vector<FftComplex<Fft>>& spectrum, const Layout& layout,
+                          std::span<const Complex> observation, double frequency, std::size_t output_fs,
+                          const Fft& fft, CoarseOperationCounts& work,
+                          std::stop_token stop, int scale_exponent = 0) {
+    spectrum.resize(layout.nfft);
+    std::fill(spectrum.begin() + static_cast<std::ptrdiff_t>(observation.size()), spectrum.end(), FftComplex<Fft>{});
     if (!frequency) {
         for (std::size_t i = 0; i < observation.size(); ++i)
             spectrum[i] = static_cast<FftComplex<Fft>>(scaled(observation[i], -scale_exponent));
@@ -978,7 +1120,7 @@ std::vector<FftComplex<Fft>> observation_spectrum(const Layout& layout, std::spa
         }
     }
     tracked_fft(spectrum, false, fft, work, stop);
-    return spectrum;
+    native_fft::permute(std::span(spectrum), stop);
 }
 
 struct Orthonormal {
@@ -1085,21 +1227,22 @@ std::array<std::vector<Complex>, 2> fidelity_controls(const Plan& plan, const Re
                     values[i] = value;
                 }
             }, work, stop);
-        controls[mode] = observation_spectrum(layout, projected, 0, plan.output_fs, fft, work, stop);
+        observation_spectrum<native_fft::DoublePlan>(controls[mode], layout, projected, 0, plan.output_fs, fft, work, stop);
     }
     return controls;
 }
 
 void validate_mapped_profile(const Plan& plan, const ReceiverConfig& config, const ReceiverSlotPlan& slot,
                              const Crypto& key, const Projection& projection, const MappedProjection& mapped,
-                             const native_fft::DoublePlan& fft, unsigned workers, CoarseOperationCounts& work,
-                             std::stop_token stop, ReceiverExecutor* executor) {
+                             const native_fft::DoublePlan& fft, CoarseOperationCounts& work,
+                             std::stop_token stop, const LaneWave& run_epochs) {
     const auto& layout = plan.fidelity_layout;
     const auto observations = fidelity_controls(plan, config, slot, key, projection, fft, work, stop);
     using Scores = std::array<std::array<double, 2>, 2>; // exact/mapped, clean/noisy
     std::vector<Scores> scores(plan.workspaces());
     std::array<CoarseOperationCounts, receiver_epoch_offsets.size()> epoch_work{};
-    parallel(receiver_epoch_offsets.size(), workers, stop, executor, slot.index, [&](std::size_t epoch, std::stop_token job_stop) {
+    run_epochs(receiver_epoch_offsets.size(), [&](std::size_t epoch, std::stop_token job_stop) {
+        CorrelationScratch<native_fft::DoublePlan> scratch;
         auto format = slot.format;
         format.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(format.epoch) + receiver_epoch_offsets[epoch]);
         std::array<PatternSource, 2> sources{PatternSource(format, key, 0), PatternSource(format, key, 1)};
@@ -1138,7 +1281,8 @@ void validate_mapped_profile(const Plan& plan, const ReceiverConfig& config, con
                 auto& result = scores[plan.workspace_index(2 * epoch + bit, clock)];
                 for (std::size_t method = 0; method < pair.size(); ++method)
                     for (std::size_t input = 0; input < observations.size(); ++input) {
-                        const auto row = correlation_scores(plan, layout, pair[method], observations[input], 1, fft, counts, job_stop);
+                        const auto row = correlation_scores<native_fft::DoublePlan>(plan, layout, pair[method],
+                            observations[input], 1, fft, scratch, counts, job_stop);
                         result[method][input] = *std::max_element(row.begin(), row.end());
                     }
             }
@@ -1360,10 +1504,20 @@ std::size_t storage(std::size_t count, std::size_t complex_bytes = sizeof(Comple
 
 std::size_t scoring_worker_workspace(const Layout& layout, const Plan& plan,
                                      std::size_t complex_bytes = sizeof(Complex)) {
-    return add(storage(mul(layout.nfft, plan.ray_count), complex_bytes), mul(layout.lag_count, sizeof(double)));
+    return add(add(storage(mul(layout.nfft, plan.ray_count), complex_bytes), mul(layout.lag_count, sizeof(double))),
+               mul(interior_peak_bound(layout.lag_count), sizeof(std::uint32_t)));
 }
 
 struct WorkspaceQuote { std::size_t total = 0, bulk_host = 0; };
+
+// Preparation can start before the frequency intervals are known when no
+// preparation choice needs them. A compiled backend plans its session from
+// the route, and the exact one-arrival profile selects its bank from it.
+// Every other bank is either fixed on the frequency route or stays in the
+// time domain until the route is known.
+bool defers_frequency_grid(const Plan& plan, const ReceiverConfig& config) {
+    return !config.bulk_backend && !exact_chirp_z_profile(plan, config);
+}
 
 std::optional<CoarseFrequencyPlan> frequency_admission(const Plan& plan, const ReceiverConfig& config,
                                                        std::size_t frequency_count, unsigned workers) {
@@ -1378,7 +1532,8 @@ std::optional<CoarseFrequencyPlan> frequency_admission(const Plan& plan, const R
 }
 
 WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
-                                 std::size_t frequency_count, unsigned workers) {
+                                 std::size_t frequency_count, unsigned workers,
+                                 AssistanceBound overlapped = {}) {
     require_coarse(workers > 0, "coarse receiver requires an explicit positive worker share");
     const auto& layout = plan.layout;
     const auto peak_bytes = arrival_peak_slots(layout.lag_count) * sizeof(Peak);
@@ -1408,12 +1563,13 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
     // bounded controller metadata. Input and the fine stage are external.
     auto projection = storage(add(fused_float ? plan.filter_fft : nfft, mul(1 + phases, plan.filter_fft)));
     projection = add(projection, mul(add(mul(2, plan.taps), 4 * plan.source_step), sizeof(double)));
-    const auto base = add(mul(frequency_count, sizeof(double)), 128 * 1024);
+    // The frequency grid, controller metadata and one host frontier scratch.
+    const auto base = add(add(mul(frequency_count, sizeof(double)), 128 * 1024),
+                          mul(interior_peak_bound(layout.lag_count), sizeof(std::uint32_t)));
     const auto float_twiddles = fused_float ? storage(layout.nfft, complex_bytes) : 0;
     auto bank = storage(mul(mul(plan.workspaces(), plan.ray_count), layout.nfft), spectrum_bytes);
     bank = add(bank, mul(plan.workspaces(), sizeof(Workspace)));
     const auto source = add(plan.source_geometry.source_workspace_bytes, PatternSource::render_bank_scratch_bytes);
-    const auto input_rows = plan.source_step == 1 ? layout.source_rows : add(ceil_div(layout.raw_rows - 1, plan.source_step), 1);
     const auto raw_columns = storage(mul(plan.ray_count, layout.kernel_rows));
     auto bank_scratch = add(storage(plan.filter_fft), raw_columns);
     if (packed) {
@@ -1428,31 +1584,63 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
         // The original double destination may coexist with a raw column.
         bank_scratch = add(bank_scratch, storage(layout.nfft));
     }
-    auto per_bank_worker = add(add(source, storage(input_rows)), bank_scratch);
+    // Every lane's keyed source, and the exact route's rendered integer
+    // source, can stay live across that lane's clock hypotheses.
+    const auto lane_source = add(source, phases ? 0 : storage(layout.source_rows));
+    // One workspace job's private transient storage.
+    auto bank_job = bank_scratch;
     if (phases)
-        per_bank_worker = add(per_bank_worker, storage(2 * mapped_edge_samples(plan, layout)));
+        bank_job = add(bank_job, storage(add(add(ceil_div(layout.raw_rows - 1, plan.source_step), 1),
+                                             2 * mapped_edge_samples(plan, layout))));
     if (config.bulk_backend && phases)
-        per_bank_worker = add(per_bank_worker, storage(layout.kernel_rows));
-    const auto prep = add(bank, mul(std::min<std::size_t>(workers, lanes), per_bank_worker));
+        bank_job = add(bank_job, storage(layout.kernel_rows));
+    // The mapped-profile gate overlaps the bank and the observation filter.
+    std::size_t fidelity_controls_bytes = 0, fidelity_job = 0;
+    if (phases) {
+        const auto& local = plan.fidelity_layout;
+        fidelity_controls_bytes = storage(add(2 * local.nfft, add(local.crop_rows, plan.filter_fft)));
+        const auto local_knots = add(ceil_div(local.raw_rows - 1, plan.source_step), 1);
+        fidelity_job = add(mul(2, source), storage(add(add(2 * local.source_rows, local_knots), plan.filter_fft)));
+        fidelity_job = add(fidelity_job, storage(2 * mapped_edge_samples(plan, local)));
+        fidelity_job = add(fidelity_job, storage(mul(6 * plan.ray_count, local.kernel_rows)));
+        fidelity_job = add(fidelity_job, storage(mul(2 * plan.ray_count, local.nfft)));
+        fidelity_job = add(fidelity_job, scoring_worker_workspace(local, plan));
+    }
+    // The observation filter is one more job beside the workspaces.
+    const auto filter_job = storage(add(layout.crop_rows, plan.filter_fft));
+    // The owner runs one serial chain and its waves. Beside the mapped
+    // gate's epochs, an overlapped acquisition holds one lane of its own.
+    const auto preparation_jobs = add(add(plan.workspaces(), 1), !phases ? overlapped.widest_wave :
+        add(receiver_epoch_offsets.size(), overlapped.widest_wave ? 1 : 0));
+    const auto preparation = [&](std::size_t bank_bytes, std::size_t job_bytes) {
+        const auto shared = add(add(bank_bytes, mul(bank_source_lanes(workers), lane_source)),
+                                add(filter_job, fidelity_controls_bytes));
+        return add(shared, mul(std::min<std::size_t>(workers, preparation_jobs),
+                               std::max(job_bytes, fidelity_job)));
+    };
+    const auto prep = preparation(bank, bank_job);
     const auto tile = tile_points(plan, frequency_count, workers);
-    auto score = add(add(bank, storage(layout.crop_rows)), storage(mul(tile, layout.nfft), spectrum_bytes));
+    // A long span gives each lane its own spectrum. A short one shares a tile's.
+    const auto spectra = std::max(tile, std::min<std::size_t>(workers, frequency_count));
+    const auto score_lanes = std::min<std::size_t>(workers, std::max(mul(tile, plan.workspaces()), frequency_count));
+    auto score = add(add(bank, storage(layout.crop_rows)), storage(mul(spectra, layout.nfft), spectrum_bytes));
     score = add(score, mul(mul(frequency_count, plan.workspaces()), peak_bytes));
-    const auto products = mul(std::min<std::size_t>(workers, mul(tile, plan.workspaces())),
-                              scoring_worker_workspace(layout, plan, complex_bytes));
+    const auto products = mul(score_lanes, scoring_worker_workspace(layout, plan, complex_bytes));
     // Observation packing and correlation are consecutive batches. The
     // first can hold at most one temporary FP32 spectrum per frequency task.
     const auto observation_packing = packed ? storage(mul(std::min<std::size_t>(tile, workers), layout.nfft), complex_bytes) : 0;
     score = add(score, std::max(products, observation_packing));
     score = add(score, mul(plan.workspaces(), retained_per_bit * sizeof(CoarseProposal)));
-    const auto observation = add(bank, storage(add(layout.crop_rows, plan.filter_fft)));
     const auto preparation_base = add(projection, float_twiddles);
     const auto score_base = fused_float ? float_twiddles : projection;
-    auto high = std::max(add(preparation_base, std::max(prep, observation)), add(score_base, score));
+    // Overlapped acquisition holds its own scratch beside all of preparation.
+    auto high = std::max(add(add(preparation_base, prep), overlapped.workspace_bytes), add(score_base, score));
     if (lag_groups) {
         const auto zoom_plans = storage(add(mul(lag_groups, layout.kernel_rows),
             lag_convolution_rows(layout.kernel_rows, lag_points, lag_groups)));
         auto worker = storage(add(lag_fft, mul(plan.ray_count, lag_points)));
         worker = add(worker, mul(mul(lag_points, layout.lag_count), sizeof(double)));
+        worker = add(worker, mul(interior_peak_bound(layout.lag_count), sizeof(std::uint32_t)));
         const auto lag_bank = exact_chirp
             ? add(mul(raw_columns, plan.workspaces()), mul(plan.workspaces(), sizeof(Workspace))) : bank;
         auto lag = add(lag_bank, storage(layout.crop_rows));
@@ -1464,30 +1652,20 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
             // A caller can supply a narrower valid interval than the full
             // prior. Reserve the maximum of the frequency plan above and
             // the time-domain chirp-Z plan with its own FP64 columns and FFT.
-            const auto lag_bank_scratch = add(add(source, storage(input_rows)),
-                                              add(storage(plan.filter_fft), raw_columns));
-            const auto lag_prep = add(lag_bank, mul(std::min<std::size_t>(workers, lanes), lag_bank_scratch));
-            const auto lag_observation = add(lag_bank, storage(add(layout.crop_rows, plan.filter_fft)));
-            lag = std::max({lag, lag_prep, lag_observation});
+            lag = std::max(lag, preparation(lag_bank, add(storage(plan.filter_fft), raw_columns)));
         }
         const auto lag_projection = fused_float ? add(projection, storage(nfft - plan.filter_fft)) : projection;
         high = std::max(high, add(lag_projection, lag));
     }
     if (phases) {
-        const auto& local = plan.fidelity_layout;
-        const auto controls = storage(add(2 * local.nfft, add(local.crop_rows, plan.filter_fft)));
-        const auto local_knots = add(ceil_div(local.raw_rows - 1, plan.source_step), 1);
-        auto scratch = add(mul(2, source), storage(add(add(2 * local.source_rows, local_knots), plan.filter_fft)));
-        scratch = add(scratch, storage(2 * mapped_edge_samples(plan, local)));
-        scratch = add(scratch, storage(mul(6 * plan.ray_count, local.kernel_rows)));
-        scratch = add(scratch, storage(mul(2 * plan.ray_count, local.nfft)));
-        scratch = add(scratch, scoring_worker_workspace(local, plan));
-        const auto fidelity = add(controls, mul(std::min<std::size_t>(workers, receiver_epoch_offsets.size()), scratch));
+        // A compiled backend runs this gate alone, before its own bank.
+        const auto fidelity = add(fidelity_controls_bytes,
+            mul(std::min<std::size_t>(workers, receiver_epoch_offsets.size()), fidelity_job));
         high = std::max(high, add(projection, fidelity));
     }
     // Task metadata and the bounded active native call stack are charged
     // separately from shared immutable tables and algorithm buffers.
-    const auto task_overhead = mul(std::min<std::size_t>(workers, tile * plan.workspaces()), 128 * 1024);
+    const auto task_overhead = mul(std::max(score_lanes, std::min<std::size_t>(workers, preparation_jobs)), 128 * 1024);
     const auto rate = static_cast<double>(plan.output_fs), clock = 2 * config.clock_bound_ppm;
     const bool bulk_frequency = config.bulk_backend &&
         config.bulk_backend->coarse_fallback_reason(rate, clock, CoarseRoute::frequency_tiles).empty();
@@ -1569,14 +1747,67 @@ CoarseWorkPlan make_work_plan(const Plan& geometry, const FrequencyGrid& grid,
     return work;
 }
 
+// One job owns one public frequency: its observation spectrum, every
+// workspace correlation and their arrival frontiers. Jobs span the tiles of
+// one advance, so no lane waits for a tile's slowest fixed share.
 template<class Fft>
-CoarseOperationCounts score_frequency_tile(const Plan& plan, std::span<const Workspace> bank,
+CoarseOperationCounts score_frequencies(const Plan& plan, std::span<const Workspace> bank,
+                                         std::span<const Complex> observation, std::span<const double> grid,
+                                         std::span<Peak> peaks, std::size_t first, std::size_t count,
+                                         double variance, const Fft& fft, unsigned lanes, std::stop_token stop,
+                                         ReceiverExecutor& executor, std::uint64_t public_slot,
+                                         int observation_exponent = 0, bool pack = false) {
+    const auto& layout = plan.layout;
+    const auto peak_slots = arrival_peak_slots(layout.lag_count);
+    const auto local_count = mul(grid.size(), peak_slots);
+    const auto distance = std::max<std::size_t>(1, extent(std::ceil(plan.separation * plan.output_fs)));
+    struct Lane {
+        std::vector<FftComplex<Fft>> spectrum;
+        native_fft::Q15Spectrum packed;
+        CorrelationScratch<Fft> correlation;
+        CoarseOperationCounts work;
+    };
+    std::vector<Lane> scratch(std::min<std::size_t>(lanes, count));
+    parallel(count, static_cast<unsigned>(scratch.size()), stop, executor, public_slot,
+             [&](unsigned lane, std::size_t index, std::stop_token job_stop) {
+        auto& own = scratch[lane];
+        const auto frequency = first + index;
+        // A packed observation releases its FP32 transform buffer to the
+        // products, so one lane never holds both.
+        auto& spectrum = pack ? own.correlation.products[0] : own.spectrum;
+        observation_spectrum(spectrum, layout, observation, grid[frequency], plan.output_fs,
+                             fft, own.work, job_stop, observation_exponent);
+        const native_fft::Q15Spectrum* packed = nullptr;
+        if constexpr (std::is_same_v<Fft, native_fft::FloatPlan>) {
+            if (pack) {
+                own.packed = native_fft::pack_q15(spectrum, job_stop);
+                packed = &own.packed;
+            }
+        }
+        for (std::size_t workspace = 0; workspace < bank.size(); ++workspace) {
+            const auto scores = correlation_scores<Fft>(plan, layout, bank[workspace], spectrum, variance, fft,
+                                                        own.correlation, own.work, job_stop,
+                                                        observation_exponent, packed);
+            const auto arrivals = arrival_peaks(scores, distance, frequency, own.correlation.interiors);
+            const auto selected = std::span(arrivals).first(peak_slots);
+            std::copy(selected.begin(), selected.end(), peaks.begin() + workspace * local_count + frequency * peak_slots);
+            for (const auto& peak : selected) if (std::isfinite(peak.score)) note(own.work.retained_peaks, 1);
+        }
+    });
+    CoarseOperationCounts complete;
+    for (const auto& own : scratch) combine(complete, own.work);
+    return complete;
+}
+
+// A short span has too few frequencies to occupy every lane with whole
+// frequencies. Share its spectra and claim each workspace pair separately.
+template<class Fft>
+CoarseOperationCounts score_frequency_pairs(const Plan& plan, std::span<const Workspace> bank,
                                             std::span<const Complex> observation, std::span<const double> grid,
                                             std::span<Peak> peaks, std::size_t first, std::size_t count,
-                                            double variance, const Fft& fft,
-                                            unsigned workers, std::stop_token stop, ReceiverExecutor* executor,
-                                            std::uint64_t public_slot, int observation_exponent = 0,
-                                            bool pack = false) {
+                                            double variance, const Fft& fft, unsigned lanes, std::stop_token stop,
+                                            ReceiverExecutor& executor, std::uint64_t public_slot,
+                                            int observation_exponent = 0, bool pack = false) {
     const auto& layout = plan.layout;
     const auto peak_slots = arrival_peak_slots(layout.lag_count);
     const auto local_count = mul(grid.size(), peak_slots);
@@ -1584,9 +1815,9 @@ CoarseOperationCounts score_frequency_tile(const Plan& plan, std::span<const Wor
     std::vector<std::vector<FftComplex<Fft>>> spectra(count);
     std::vector<native_fft::Q15Spectrum> packed_spectra(pack ? count : 0);
     std::vector<CoarseOperationCounts> spectrum_work(count);
-    parallel(count, workers, stop, executor, public_slot, [&](std::size_t index, std::stop_token job_stop) {
-        spectra[index] = observation_spectrum(layout, observation, grid[first + index], plan.output_fs,
-                                               fft, spectrum_work[index], job_stop, observation_exponent);
+    parallel(count, lanes, stop, executor, public_slot, [&](unsigned, std::size_t index, std::stop_token job_stop) {
+        observation_spectrum(spectra[index], layout, observation, grid[first + index], plan.output_fs,
+                             fft, spectrum_work[index], job_stop, observation_exponent);
         if constexpr (std::is_same_v<Fft, native_fft::FloatPlan>) {
             if (pack) {
                 packed_spectra[index] = native_fft::pack_q15(spectra[index], job_stop);
@@ -1595,26 +1826,29 @@ CoarseOperationCounts score_frequency_tile(const Plan& plan, std::span<const Wor
         }
     });
     const auto jobs = mul(bank.size(), count);
-    const auto active = std::min<std::size_t>(workers, jobs);
-    std::vector<CoarseOperationCounts> worker_work(active);
-    parallel(active, workers, stop, executor, public_slot, [&](std::size_t task, std::stop_token job_stop) {
-        auto& work = worker_work[task];
-        for (auto index = task; index < jobs; index += active) {
-            const auto workspace = index / count;
-            const auto local_frequency = index % count;
-            const auto frequency = first + local_frequency;
-            const auto scores = correlation_scores<Fft>(plan, layout, bank[workspace], spectra[local_frequency],
-                                                    variance, fft, work, job_stop, observation_exponent,
+    struct Lane {
+        CorrelationScratch<Fft> correlation;
+        CoarseOperationCounts work;
+    };
+    std::vector<Lane> scratch(std::min<std::size_t>(lanes, jobs));
+    parallel(jobs, static_cast<unsigned>(scratch.size()), stop, executor, public_slot,
+             [&](unsigned lane, std::size_t index, std::stop_token job_stop) {
+        auto& own = scratch[lane];
+        // Frequency-major claims keep one spectrum warm across workspaces.
+        const auto local_frequency = index / bank.size(), workspace = index % bank.size();
+        const auto frequency = first + local_frequency;
+        const auto scores = correlation_scores<Fft>(plan, layout, bank[workspace], spectra[local_frequency],
+                                                    variance, fft, own.correlation, own.work, job_stop,
+                                                    observation_exponent,
                                                     pack ? &packed_spectra[local_frequency] : nullptr);
-            const auto arrivals = arrival_peaks(scores, distance, frequency);
-            const auto selected = std::span(arrivals).first(peak_slots);
-            std::copy(selected.begin(), selected.end(), peaks.begin() + workspace * local_count + frequency * peak_slots);
-            for (const auto& peak : selected) if (std::isfinite(peak.score)) note(work.retained_peaks, 1);
-        }
+        const auto arrivals = arrival_peaks(scores, distance, frequency, own.correlation.interiors);
+        const auto selected = std::span(arrivals).first(peak_slots);
+        std::copy(selected.begin(), selected.end(), peaks.begin() + workspace * local_count + frequency * peak_slots);
+        for (const auto& peak : selected) if (std::isfinite(peak.score)) note(own.work.retained_peaks, 1);
     });
     CoarseOperationCounts complete;
     for (const auto& work : spectrum_work) combine(complete, work);
-    for (const auto& work : worker_work) combine(complete, work);
+    for (const auto& own : scratch) combine(complete, own.work);
     return complete;
 }
 
@@ -1683,48 +1917,60 @@ void correlate_lag_group(std::span<const Complex> window, std::span<const Comple
         if ((i & 4095U) == 0) check_stop(stop);
         padded[i] *= kernel.convolution[i];
     }
-    tracked_fft(padded, true, fft, work, stop);
+    tracked_fft(padded, true, fft, work, stop, row.size());
     // The omitted output chirp and lag-origin rotation multiply both rays
     // by the same unit phase at each CFO. The Hermitian score cancels it.
     std::copy_n(padded.begin(), row.size(), row.begin());
 }
 
-CoarseOperationCounts score_lag_tile(const Plan& plan, std::span<const Workspace> bank,
-                                     std::span<const Complex> observation, std::span<const ZoomKernel> kernels,
-                                     std::size_t frequencies, std::size_t largest_fft, std::span<Peak> peaks,
-                                     double variance, const native_fft::DoublePlan& fft,
-                                     unsigned workers, std::stop_token stop, ReceiverExecutor* executor,
-                                     std::uint64_t public_slot) {
+// One job owns one workspace over the complete lag and frequency grid.
+CoarseOperationCounts score_lag_workspaces(const Plan& plan, std::span<const Workspace> bank,
+                                           std::span<const Complex> observation, std::span<const ZoomKernel> kernels,
+                                           std::size_t frequencies, std::size_t largest_fft, std::span<Peak> peaks,
+                                           double variance, const native_fft::DoublePlan& fft,
+                                           unsigned lanes, std::stop_token stop, ReceiverExecutor& executor,
+                                           std::uint64_t public_slot) {
     const auto& layout = plan.layout;
     const auto peak_slots = arrival_peak_slots(layout.lag_count);
     const auto local_count = mul(frequencies, peak_slots);
     const auto distance = std::max<std::size_t>(1, extent(std::ceil(plan.separation * plan.output_fs)));
-    std::vector<CoarseOperationCounts> worker_work(bank.size());
-    parallel(bank.size(), workers, stop, executor, public_slot, [&](std::size_t index, std::stop_token job_stop) {
-        auto& work = worker_work[index];
-        std::vector<Complex> products(largest_fft);
+    struct Lane {
+        std::vector<Complex> products;
         Columns correlations;
-        for (std::size_t ray = 0; ray < plan.ray_count; ++ray) correlations[ray].resize(frequencies);
-        std::vector<double> scores(mul(frequencies, layout.lag_count));
+        std::vector<double> scores;
+        std::vector<std::uint32_t> interiors;
+        CoarseOperationCounts work;
+    };
+    std::vector<Lane> scratch(std::min<std::size_t>(lanes, bank.size()));
+    parallel(bank.size(), static_cast<unsigned>(scratch.size()), stop, executor, public_slot,
+             [&](unsigned lane, std::size_t index, std::stop_token job_stop) {
+        auto& own = scratch[lane];
+        auto& work = own.work;
+        // Every reused element is rewritten for each lag and ray.
+        own.products.resize(largest_fft);
+        for (std::size_t ray = 0; ray < plan.ray_count; ++ray) own.correlations[ray].resize(frequencies);
+        own.scores.resize(mul(frequencies, layout.lag_count));
+        auto& scores = own.scores;
         const auto& workspace = bank[index];
         for (std::size_t lag = 0; lag < layout.lag_count; ++lag) {
             check_stop(job_stop);
             const auto window = observation.subspan(lag, layout.kernel_rows);
             for (std::size_t ray = 0; ray < plan.ray_count; ++ray)
                 for (const auto& kernel : kernels)
-                    correlate_lag_group(window, workspace.columns[ray], kernel, products, correlations[ray],
+                    correlate_lag_group(window, workspace.columns[ray], kernel, own.products, own.correlations[ray],
                                         fft, work, job_stop);
             for (std::size_t f = 0; f < frequencies; ++f) {
                 if ((f & 4095U) == 0) check_stop(job_stop);
-                const auto second = plan.ray_count == 2 ? correlations[1][f] : Complex{};
-                const auto score = quadratic(workspace.inverse.matrix, correlations[0][f], second) / variance;
+                const auto second = plan.ray_count == 2 ? own.correlations[1][f] : Complex{};
+                const auto score = quadratic(workspace.inverse.matrix, own.correlations[0][f], second) / variance;
                 require_coarse(std::isfinite(score), "nonfinite coarse lag correlation score");
                 scores[f * layout.lag_count + lag] = score;
             }
         }
         for (std::size_t f = 0; f < frequencies; ++f) {
             if ((f & 4095U) == 0) check_stop(job_stop);
-            const auto arrivals = arrival_peaks(std::span(scores).subspan(f * layout.lag_count, layout.lag_count), distance, f);
+            const auto arrivals = arrival_peaks(std::span(scores).subspan(f * layout.lag_count, layout.lag_count),
+                                                distance, f, own.interiors);
             const auto selected = std::span(arrivals).first(peak_slots);
             std::copy(selected.begin(), selected.end(), peaks.begin() + index * local_count + f * peak_slots);
             for (const auto& peak : selected) if (std::isfinite(peak.score)) note(work.retained_peaks, 1);
@@ -1733,17 +1979,18 @@ CoarseOperationCounts score_lag_tile(const Plan& plan, std::span<const Workspace
         note(work.score_rows, scores.size());
     });
     CoarseOperationCounts complete;
-    for (const auto& work : worker_work) combine(complete, work);
+    for (const auto& own : scratch) combine(complete, own.work);
     return complete;
 }
 
 void retain_proposals(CoarseResult& result, const Plan& plan, const ReceiverSlotPlan& slot,
                       const std::vector<Workspace>& bank, std::span<Peak> peaks, std::span<const double> grid,
-                      unsigned workers, std::stop_token stop, ReceiverExecutor* executor) {
+                      unsigned workers, std::stop_token stop, ReceiverExecutor& executor) {
     using Retained = std::array<CoarseProposal, retained_per_bit>;
     std::vector<Retained> retained(bank.size());
     const auto local_count = mul(grid.size(), arrival_peak_slots(plan.layout.lag_count));
-    parallel(bank.size(), workers, stop, executor, slot.index, [&](std::size_t workspace, std::stop_token job_stop) {
+    parallel(bank.size(), workers, stop, executor, slot.index,
+             [&](unsigned, std::size_t workspace, std::stop_token job_stop) {
         auto local = peaks.subspan(workspace * local_count, local_count);
         // Keep the original CFO-major order on equal scores. That order is
         // independent of worker completion and of the selected tile width.
@@ -1821,65 +2068,20 @@ void refine(CoarseResult& result, const Plan& plan, const ReceiverConfig& config
 } // namespace
 
 CoarseArrivalPeaks select_coarse_arrivals(std::span<const double> scores, std::size_t separation) {
-    require_coarse(!scores.empty() && separation > 0, "invalid coarse arrival peak geometry");
-    if (scores.size() == 1) return {{0, 0}, 1};
-    const auto visit_interiors = [&](auto visit) {
-        for (std::size_t i = 1; i + 1 < scores.size();) {
-            if (!(scores[i - 1] < scores[i])) {
-                ++i;
-                continue;
-            }
-            auto end = i + 1;
-            while (end + 1 < scores.size() && scores[end] == scores[i]) ++end;
-            if (scores[end] < scores[i] && visit(i + (end - i - 1) / 2)) return true;
-            i = end;
-        }
-        return false;
-    };
-    const auto better = [&](std::size_t a, std::size_t b) {
-        return scores[a] == scores[b] ? a > b : scores[a] > scores[b];
-    };
-    // Greedy distance suppression in descending score, then descending lag.
-    // Only the two best surviving interiors can enter the final frontier.
-    std::array<std::size_t, 4> choices{};
-    std::size_t interior_count = 0;
-    const auto available = [&](std::size_t index) {
-        for (std::size_t i = 0; i < interior_count; ++i)
-            if (std::max(index, choices[i]) - std::min(index, choices[i]) < separation) return false;
-        return true;
-    };
-    while (interior_count < retained_per_bit) {
-        auto best = scores.size();
-        visit_interiors([&](std::size_t index) {
-            if (available(index) && (best == scores.size() || better(index, best))) best = index;
-            return false;
-        });
-        if (best == scores.size()) break;
-        choices[interior_count++] = best;
-    }
-    // The endpoint peaks have independent eligibility. Equal-score ranking
-    // uses the same higher-lag priority as the interior suppression step.
-    std::size_t count = interior_count;
-    if (scores[0] >= scores[1]) choices[count++] = 0;
-    if (scores.back() >= scores[scores.size() - 2]) choices[count++] = scores.size() - 1;
-    const bool clipped = count > retained_per_bit ||
-        (count == retained_per_bit && interior_count == retained_per_bit && visit_interiors(available));
-    const auto sort_choices = [&](auto less) {
-        for (std::size_t i = 1; i < choices.size() && i < count; ++i)
-            for (auto j = i; j > 0 && less(choices[j], choices[j - 1]); --j)
-                std::swap(choices[j], choices[j - 1]);
-    };
-    if (clipped) {
-        sort_choices(better);
-        return {{choices[1], choices[0]}, retained_per_bit};
-    }
-    sort_choices(std::less<>{});
-    return {{choices[0], choices[1]}, count};
+    std::vector<std::uint32_t> interiors;
+    return select_arrivals(scores, separation, interiors);
 }
 
-std::size_t coarse_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers) {
+std::size_t coarse_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers,
+                             AssistanceBound overlapped) {
     const auto plan = make_plan(config, slot);
-    return scratch_workspace(plan, config, frequency_bound(plan, config), workers).total;
+    require_coarse(!overlapped.workspace_bytes || defers_frequency_grid(plan, config),
+                   "coarse preparation cannot overlap frequency acquisition for this profile");
+    return scratch_workspace(plan, config, frequency_bound(plan, config), workers, overlapped).total;
+}
+
+bool coarse_defers_frequency_grid(const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
+    return defers_frequency_grid(make_plan(config, slot), config);
 }
 
 CoarseWorkPlan coarse_work_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
@@ -1918,14 +2120,19 @@ struct CoarseSession::Impl {
     double variance = 0;
     bool q15_products = false;
     std::size_t cursor = 0;
-    ReceiverExecutor* executor;
+    // A standalone session owns its lanes. A stream shares its receiver pool.
+    std::unique_ptr<ReceiverExecutor> owned_executor;
+    ReceiverExecutor& executor;
     std::stop_source cancellation;
     std::stop_callback<PropagateStop> external_stop;
 
     Impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
          std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
-         unsigned workers, std::size_t limit, std::stop_token outer_stop, ReceiverExecutor* executor)
-        : config(config), slot(slot), executor(executor), external_stop(outer_stop, PropagateStop{cancellation}) {
+         const FrequencyAssistance* assistance,
+         unsigned workers, std::size_t limit, std::stop_token outer_stop, ReceiverExecutor* shared)
+        : config(config), slot(slot),
+          owned_executor(shared ? nullptr : std::make_unique<ReceiverExecutor>(std::max(1U, workers))),
+          executor(shared ? *shared : *owned_executor), external_stop(outer_stop, PropagateStop{cancellation}) {
         const auto began = PhaseClock::now();
         const auto stop = cancellation.get_token();
         check_stop(stop);
@@ -1937,12 +2144,23 @@ struct CoarseSession::Impl {
         geometry = make_plan(config, slot);
         const auto& layout = geometry.layout;
         require_coarse(iq.size() == capture_samples(slot), "coarse receiver input does not match its public window");
-        const auto workspace = scratch_workspace(geometry, config, frequency_bound(geometry, config), workers);
+        // Acquisition overlaps preparation, which needs a grid that can follow it.
+        const bool overlapped = assistance != nullptr;
+        require_coarse(!overlapped || (assistance->acquire && defers_frequency_grid(geometry, config)),
+                       "coarse preparation cannot overlap frequency acquisition for this profile");
+        const auto workspace = scratch_workspace(geometry, config, frequency_bound(geometry, config), workers,
+                                                 overlapped ? assistance->bound : AssistanceBound{});
         if (workspace.total > limit) throw ReceiverWorkspaceError("complete coarse receiver exceeds its admitted workspace");
-        grid = frequencies(geometry, config, intervals);
-        receipt.plan = make_work_plan(geometry, grid, config, slot, workers, workspace, limit);
+        const auto plan_search = [&](std::span<const FrequencyInterval> chosen) {
+            grid = frequencies(geometry, config, chosen);
+            receipt.plan = make_work_plan(geometry, grid, config, slot, workers, workspace, limit);
+        };
+        if (!overlapped) plan_search(intervals);
         auto& work = receipt.plan;
-        const bool lag = work.route == CoarseRoute::lag_groups;
+        // Only the slow mapped profile can still take either route once its
+        // intervals arrive. Its bank stays in the time domain until then.
+        const bool route_open = overlapped && lag_group_limit(geometry, config) != 0;
+        bool lag = !overlapped && work.route == CoarseRoute::lag_groups;
 
         // Check every borrowed sample, including those beyond the finite crop.
         for (std::size_t i = 0; i < iq.size(); ++i) {
@@ -1972,21 +2190,30 @@ struct CoarseSession::Impl {
                 const Projection reference(geometry, &reference_fft, nullptr, operations, stop);
                 const MappedProjection mapped(geometry, reference, &reference_fft, operations, stop);
                 validate_mapped_profile(geometry, config, slot, key, reference, mapped, reference_fft,
-                                        workers, operations, stop, executor);
+                    operations, stop, [&](std::size_t count, const LaneJob& job) {
+                        parallel(count, workers, stop, executor, slot.index,
+                                 [&](unsigned, std::size_t epoch, std::stop_token job_stop) { job(epoch, job_stop); });
+                    });
                 receipt.mapped_fidelity.wall_seconds = elapsed(fidelity);
             }
         }
         const bool compact_precision = compact_native_precision(geometry, config);
         const bool qualified_cpu = native_float_kernel();
         const bool fused_float = !lag && single_ray_float_bank(geometry, config);
+        require_coarse(!route_open || !fused_float, "an open coarse route cannot prepare the fused single-ray bank");
         q15_products = use_q15_products(config.native_coarse_precision, fused_float);
-        const bool split_bank = !bulk && !lag && config.native_coarse_precision != NativeCoarsePrecision::fp64 &&
-                                !compact_precision && qualified_cpu && !fused_float;
+        // The frequency route's FP32 choice waits for the bank's conditioning.
+        const bool float_route = config.native_coarse_precision != NativeCoarsePrecision::fp64 &&
+                                 !compact_precision && qualified_cpu && !fused_float;
+        bool split_bank = !bulk && !lag && float_route;
         {
             const auto setup = PhaseClock::now();
             if (!bulk || !bulk->supports_fir()) {
+                // A frequency route transforms at most layout.nfft rows. A
+                // transform's result does not depend on its plan's length.
                 const auto fft_rows = fused_float ? geometry.filter_fft :
-                    std::max({layout.nfft, geometry.filter_fft, geometry.fidelity_layout.nfft, work.correlation_fft_rows});
+                    std::max({layout.nfft, geometry.filter_fft, geometry.fidelity_layout.nfft,
+                              overlapped ? 0 : work.correlation_fft_rows});
                 fft = std::make_unique<native_fft::DoublePlan>(fft_rows, stop);
             }
             if (bulk && bulk->supports_fir()) {
@@ -2001,26 +2228,19 @@ struct CoarseSession::Impl {
             if (geometry.source_step > 1)
                 mapped.emplace(geometry, projection, fft.get(), receipt.filter_setup.operations, stop);
             receipt.filter_setup.wall_seconds += elapsed(setup);
-            if (mapped && !bulk) {
-                const auto fidelity = PhaseClock::now();
-                validate_mapped_profile(geometry, config, slot, key, projection, *mapped, *fft,
-                                        workers, receipt.mapped_fidelity.operations, stop, executor);
-                receipt.mapped_fidelity.wall_seconds = elapsed(fidelity);
-            }
-            const auto bank_started = PhaseClock::now();
             if (fused_float) float_fft = std::make_unique<native_fft::FloatPlan>(layout.nfft, stop);
-            bank = prepare_bank(geometry, config, slot, key, projection, mapped ? &*mapped : nullptr,
-                                !bulk && !lag && !split_bank && !fused_float ? fft.get() : nullptr,
-                                float_fft.get(), q15_products, workers,
-                                receipt.template_bank.operations, stop, executor);
-            receipt.template_bank.wall_seconds = elapsed(bank_started);
-            mapped.reset();
-            const auto input_started = PhaseClock::now();
-            observation = projection.apply(iq.size(), layout.crop_first, layout.crop_rows,
-                [&](std::size_t first, std::span<Complex> values) {
-                    std::copy_n(iq.begin() + first, values.size(), values.begin());
-                }, receipt.observation.operations, stop);
-            receipt.observation.wall_seconds = elapsed(input_started);
+            prepare(key, iq, projection, mapped ? &*mapped : nullptr,
+                    !bulk && !lag && !split_bank && !fused_float && !route_open ? fft.get() : nullptr, workers, stop,
+                    overlapped ? assistance : nullptr, plan_search);
+        }
+        if (route_open) {
+            lag = work.route == CoarseRoute::lag_groups;
+            split_bank = !lag && float_route;
+            // A lag group's zoom transform can exceed every preparation one.
+            if (lag && work.correlation_fft_rows > fft->maximum) {
+                fft.reset();
+                fft = std::make_unique<native_fft::DoublePlan>(work.correlation_fft_rows, stop);
+            }
         }
         if (fused_float) fft.reset();
         work.minimum_eigenvalue_ratio = 1;
@@ -2050,7 +2270,8 @@ struct CoarseSession::Impl {
                 if (q15_products) work.precision_reason = "q15-products-fp32-fft";
                 work.observation_scale_exponent = float_scale_exponent(maximum_component(observation));
             }
-            if (split_bank) {
+            // An open route left its columns in the time domain as well.
+            if (split_bank || route_open) {
                 const auto transform_started = PhaseClock::now();
                 if (work.fft_precision == "fp32") {
                     // FIR and independent mapped-fidelity work are finished. Do
@@ -2059,13 +2280,12 @@ struct CoarseSession::Impl {
                     fft.reset();
                     float_fft = std::make_unique<native_fft::FloatPlan>(layout.nfft, stop);
                 }
-                std::array<CoarseOperationCounts, lanes> transform_work{};
-                parallel(lanes, workers, stop, executor, slot.index, [&](std::size_t lane, std::stop_token job_stop) {
-                    for (std::size_t clock = 0; clock < geometry.clock_count; ++clock) {
-                        auto& workspace = bank[geometry.workspace_index(lane, clock)];
-                        if (float_fft) to_float_spectrum(workspace, layout, *float_fft, transform_work[lane], job_stop);
-                        else to_spectrum(workspace.columns, layout, *fft, transform_work[lane], job_stop);
-                    }
+                std::vector<CoarseOperationCounts> transform_work(bank.size());
+                parallel(bank.size(), workers, stop, executor, slot.index,
+                         [&](unsigned, std::size_t index, std::stop_token job_stop) {
+                    auto& workspace = bank[index];
+                    if (float_fft) to_float_spectrum(workspace, layout, *float_fft, transform_work[index], job_stop);
+                    else to_spectrum(workspace.columns, layout, *fft, transform_work[index], job_stop);
                 });
                 for (const auto& operations : transform_work) combine(receipt.template_bank.operations, operations);
                 receipt.template_bank.wall_seconds += elapsed(transform_started);
@@ -2083,6 +2303,119 @@ struct CoarseSession::Impl {
         refresh_retained_bytes();
         check_stop(stop);
         receipt.preparation_seconds = elapsed(began);
+    }
+
+    // The template bank, the observation filter, the mapped-profile gate and
+    // any overlapped frequency acquisition are mutually independent. One lane
+    // set runs them together while the bank's jobs and the filter fill it.
+    // The owner has one serial chain. The gate's controls take it when there
+    // is a gate, and acquisition then runs whole on a lane of its own.
+    // Otherwise the owner acquires and its waves use these lanes.
+    // The filter stays one job: its large transforms do not scale with lanes.
+    // A slot fails as the sequential order would whenever only acquisition
+    // or only preparation fails. Should both fail, either can be reported.
+    void prepare(const Crypto& key, std::span<const Complex> iq, const Projection& projection,
+                 const MappedProjection* mapped, const native_fft::DoublePlan* spectrum_fft,
+                 unsigned workers, std::stop_token stop, const FrequencyAssistance* acquisition,
+                 const std::function<void(std::span<const FrequencyInterval>)>& plan_search) {
+        const auto& layout = geometry.layout;
+        const auto origin = PhaseClock::now();
+        const auto filter = [&](std::stop_token job_stop) {
+            observation = projection.apply(iq.size(), layout.crop_first, layout.crop_rows,
+                [&](std::size_t first, std::span<Complex> values) {
+                    std::copy_n(iq.begin() + first, values.size(), values.begin());
+                }, receipt.observation.operations, job_stop);
+        };
+        BankJobs bank_jobs(geometry, config, slot, key, projection, mapped, spectrum_fft,
+                           float_fft.get(), q15_products, workers);
+        // A device FIR admits its own projection phase. It keeps its
+        // original lane bound, with the observation after the bank.
+        const bool device_fir = projection.bulk() != nullptr;
+        const bool fidelity = mapped && !bulk;
+        const std::size_t acquisitions = acquisition && fidelity ? 1 : 0;
+        const std::size_t filters = device_fir ? 0 : 1;
+        const auto serial = acquisitions + filters;
+        const auto jobs = add(bank_jobs.size(), serial);
+        const auto widest_wave = fidelity ? receiver_epoch_offsets.size() :
+                                 acquisition ? acquisition->bound.widest_wave : 0;
+        const auto lane_limit = std::min<std::size_t>(workers, device_fir ? lanes : add(jobs, widest_wave));
+        PhaseSpan bank_span(origin), observation_span(origin);
+        // The owner's waves are urgent leaves, indexed from each wave's first.
+        const LaneJob* wave_job = nullptr;
+        std::size_t posted = 0;
+        std::span<const FrequencyInterval> acquired;
+        std::exception_ptr acquisition_failure;
+        try {
+            ReceiverExecutor::Stage stage(executor, slot.index, static_cast<unsigned>(lane_limit), stop,
+                [&](unsigned, std::size_t index, std::stop_token job_stop) { (*wave_job)(index - posted, job_stop); },
+                [&](unsigned, std::size_t job, std::stop_token job_stop) {
+                    if (job < acquisitions) {
+                        // Only the session's own cancellation stops acquisition,
+                        // so a sibling's failure cannot become its outcome.
+                        try {
+                            acquired = acquisition->acquire({}, stop);
+                        } catch (...) {
+                            acquisition_failure = std::current_exception();
+                            throw;
+                        }
+                        return;
+                    }
+                    if (job < serial) {
+                        const PhaseSpan::Scope scope(observation_span);
+                        filter(job_stop);
+                        return;
+                    }
+                    const PhaseSpan::Scope scope(bank_span);
+                    bank_jobs.run(job - serial, job_stop);
+                });
+            const LaneWave wave = [&](std::size_t count, const LaneJob& job) {
+                wave_job = &job;
+                stage.post(count);
+                stage.wait_urgent();
+                posted += count;
+            };
+            stage.release(jobs);
+            if (acquisition && !acquisitions) plan_search(acquisition->acquire(wave, stop));
+            if (fidelity) {
+                const auto started = PhaseClock::now();
+                validate_mapped_profile(geometry, config, slot, key, projection, *mapped, *fft,
+                    receipt.mapped_fidelity.operations, stop, wave);
+                receipt.mapped_fidelity.wall_seconds = elapsed(started);
+            }
+            stage.wait_background(jobs);
+        } catch (...) {
+            if (acquisition_failure) std::rethrow_exception(acquisition_failure);
+            throw;
+        }
+        if (acquisitions) plan_search(acquired);
+        bank = bank_jobs.finish(receipt.template_bank.operations);
+        receipt.template_bank.wall_seconds = bank_span.seconds();
+        if (device_fir) {
+            const auto input_started = PhaseClock::now();
+            filter(stop);
+            receipt.observation.wall_seconds = elapsed(input_started);
+        } else {
+            receipt.observation.wall_seconds = observation_span.seconds();
+        }
+    }
+
+    // A long span gives every lane whole frequencies. A short one shares its
+    // tile's spectra so that every lane still has a workspace pair to score.
+    template<class Fft>
+    CoarseOperationCounts search(const Fft& transform, std::size_t first, std::size_t count,
+                                 int exponent, bool pack, std::stop_token stop) {
+        const auto& plan = receipt.plan;
+        if (count >= mul(2, plan.workers))
+            return score_frequencies(geometry, bank, observation, grid.values, peaks, first, count, variance,
+                                     transform, plan.workers, stop, executor, slot.index, exponent, pack);
+        CoarseOperationCounts completed;
+        for (std::size_t done = 0; done < count;) {
+            const auto width = std::min(plan.tile_width, count - done);
+            combine(completed, score_frequency_pairs(geometry, bank, observation, grid.values, peaks, first + done,
+                width, variance, transform, plan.workers, stop, executor, slot.index, exponent, pack));
+            done += width;
+        }
+        return completed;
     }
 
     void prepare_bulk(std::stop_token stop) {
@@ -2132,6 +2465,7 @@ struct CoarseSession::Impl {
         const auto distance = std::max<std::size_t>(1, extent(std::ceil(geometry.separation * geometry.output_fs)));
         auto next_workspace = first_workspace;
         CoarseOperationCounts completed;
+        std::vector<std::uint32_t> interiors;
         const auto sink = [&](std::size_t workspace, std::size_t rows, std::span<const double> scores) {
             check_stop(stop);
             require_coarse(workspace == next_workspace && rows > 0 && rows <= stop_workspace - next_workspace &&
@@ -2144,7 +2478,7 @@ struct CoarseSession::Impl {
                     require_coarse(std::ranges::all_of(values, [](double x) { return std::isfinite(x); }),
                                    "nonfinite coarse bulk correlation score");
                     const auto frequency = first_frequency + f;
-                    const auto arrivals = arrival_peaks(values, distance, frequency);
+                    const auto arrivals = arrival_peaks(values, distance, frequency, interiors);
                     const auto selected = std::span(arrivals).first(peak_slots);
                     std::copy(selected.begin(), selected.end(), peaks.begin() +
                               (workspace + row) * row_width + frequency * peak_slots);
@@ -2248,7 +2582,13 @@ struct CoarseSession::Impl {
 CoarseSession::CoarseSession(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
                              std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
                              unsigned workers, std::size_t limit, std::stop_token stop, ReceiverExecutor* executor)
-    : impl_(std::make_unique<Impl>(config, slot, key, iq, intervals, workers, limit, stop, executor)) {}
+    : impl_(std::make_unique<Impl>(config, slot, key, iq, intervals, nullptr, workers, limit, stop, executor)) {}
+
+CoarseSession::CoarseSession(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
+                             std::span<const Complex> iq, const FrequencyAssistance& assistance,
+                             unsigned workers, std::size_t limit, std::stop_token stop, ReceiverExecutor* executor)
+    : impl_(std::make_unique<Impl>(config, slot, key, iq, std::span<const FrequencyInterval>{}, &assistance,
+                                   workers, limit, stop, executor)) {}
 
 CoarseSession::~CoarseSession() = default;
 CoarseSession::CoarseSession(CoarseSession&&) noexcept = default;
@@ -2282,31 +2622,34 @@ void CoarseSession::advance(std::size_t maximum_tiles) {
     const auto extent = lag ? plan.workspaces : plan.frequency_points;
     const auto began = PhaseClock::now();
     try {
-        for (std::size_t tile = 0; tile < maximum_tiles && impl.cursor < extent; ++tile) {
+        // A device tile keeps its admitted batch shape. Native tiles of one
+        // advance form a single span: an interrupted span publishes nothing.
+        const auto tiles = std::min(maximum_tiles, ceil_div(extent - impl.cursor, plan.tile_width));
+        for (std::size_t tile = 0; impl.bulk && tile < tiles; ++tile) {
             check_stop(stop);
             const auto count = std::min(plan.tile_width, extent - impl.cursor);
+            combine(receipt.search.operations, impl.score_bulk(impl.cursor, count, stop));
+            impl.cursor += count;
+            ++receipt.completed_tiles;
+        }
+        if (!impl.bulk && tiles) {
+            const auto count = std::min(mul(tiles, plan.tile_width), extent - impl.cursor);
             CoarseOperationCounts completed;
-            if (impl.bulk) {
-                completed = impl.score_bulk(impl.cursor, count, stop);
-            } else if (lag) {
+            if (lag) {
                 const auto row_width = mul(plan.frequency_points, arrival_peak_slots(plan.arrival_points));
-                completed = score_lag_tile(impl.geometry, std::span(impl.bank).subspan(impl.cursor, count),
+                completed = score_lag_workspaces(impl.geometry, std::span(impl.bank).subspan(impl.cursor, count),
                     impl.observation, impl.kernels, plan.frequency_points, plan.correlation_fft_rows,
                     std::span(impl.peaks).subspan(mul(impl.cursor, row_width), mul(count, row_width)),
                     impl.variance, *impl.fft, plan.workers, stop, impl.executor, impl.slot.index);
             } else if (impl.float_fft) {
-                completed = score_frequency_tile(impl.geometry, impl.bank, impl.observation, impl.grid.values,
-                    impl.peaks, impl.cursor, count, impl.variance, *impl.float_fft, plan.workers, stop, impl.executor,
-                    impl.slot.index, plan.observation_scale_exponent,
-                    impl.q15_products);
+                completed = impl.search(*impl.float_fft, impl.cursor, count, plan.observation_scale_exponent,
+                                        impl.q15_products, stop);
             } else {
-                completed = score_frequency_tile(impl.geometry, impl.bank, impl.observation, impl.grid.values,
-                    impl.peaks, impl.cursor, count, impl.variance, *impl.fft, plan.workers, stop, impl.executor,
-                    impl.slot.index);
+                completed = impl.search(*impl.fft, impl.cursor, count, 0, false, stop);
             }
             combine(receipt.search.operations, completed);
             impl.cursor += count;
-            ++receipt.completed_tiles;
+            receipt.completed_tiles += tiles;
         }
         receipt.state = impl.cursor == extent ? CoarseState::searched : CoarseState::searching;
     } catch (...) {
@@ -2369,11 +2712,8 @@ std::optional<CoarseResult> CoarseSession::finish() {
     return impl.result;
 }
 
-CoarseResult score_coarse(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
-                          std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
-                          unsigned workers, std::size_t scratch_limit_bytes, std::stop_token stop,
-                          ReceiverExecutor* executor) {
-    CoarseSession session(config, slot, key, iq, intervals, workers, scratch_limit_bytes, stop, executor);
+namespace {
+CoarseResult complete(CoarseSession session) {
     for (auto state = session.state(); state != CoarseState::searched; state = session.state()) {
         if (state == CoarseState::cancelled || state == CoarseState::failed)
             throw Error("coarse receiver stopped before completing its public grid");
@@ -2382,6 +2722,21 @@ CoarseResult score_coarse(const ReceiverConfig& config, const ReceiverSlotPlan& 
     auto result = session.finish();
     if (!result) throw Error("coarse receiver cancelled before full selection");
     return std::move(*result);
+}
+} // namespace
+
+CoarseResult score_coarse(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
+                          std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
+                          unsigned workers, std::size_t scratch_limit_bytes, std::stop_token stop,
+                          ReceiverExecutor* executor) {
+    return complete(CoarseSession(config, slot, key, iq, intervals, workers, scratch_limit_bytes, stop, executor));
+}
+
+CoarseResult score_coarse(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
+                          std::span<const Complex> iq, const FrequencyAssistance& assistance,
+                          unsigned workers, std::size_t scratch_limit_bytes, std::stop_token stop,
+                          ReceiverExecutor* executor) {
+    return complete(CoarseSession(config, slot, key, iq, assistance, workers, scratch_limit_bytes, stop, executor));
 }
 
 } // namespace datapump::triad::v3::receiver_detail

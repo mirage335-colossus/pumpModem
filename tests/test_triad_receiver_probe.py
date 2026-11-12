@@ -203,6 +203,14 @@ def main(executable):
         assert all(row["work"]["decision"] == expected and row["work"]["complete"] for row in slots)
         assert slots[0]["work"]["work_identity_sha256"] == slots[1]["work"]["work_identity_sha256"]
         assert sum(row["name"] == "audio_frontend" for row in receipt["phases"]) == 2
+        if stratum == "active":
+            # The sequential control scores the same slot without overlap.
+            control = run("regression", "--stratum", stratum, "--units", "1", "--helper-overlap", "off")
+            unit = next(row["work"] for row in control["phases"] if row["name"] == "native_slot")
+            assert unit["helper_overlapped"] is False and unit["decision"] == expected
+            assert unit["work_identity_sha256"] == slots[0]["work"]["work_identity_sha256"]
+    run("slot", "--helper-overlap", "off", code=1,
+        parse_error="The Helper overlap lease applies only to regression")
 
     codec = run("codec", "--encrypt", "on")
     assert codec["result"]["decoded_after_two_quiet"]

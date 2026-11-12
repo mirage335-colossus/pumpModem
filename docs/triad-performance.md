@@ -523,6 +523,12 @@ steady-state service. Earlier same-process v2 reports have a different policy
 and are rejected. Mixing the first and subsequent slot costs failed the GPU
 fixed-geometry model gate; extra observations are not a repair for that mixture.
 
+A Helper-enabled `regression` unit takes the lease that overlaps Helper
+acquisition with coarse preparation when local memory allows, as stream
+admission does. Its coarse time then contains the Helper interval and its score
+reports `helper_overlapped`. `--helper-overlap off` scores the same slot in
+sequence for a matched comparison. The harness's own fixtures have no Helper.
+
 Each measurement uses bounded 1/2/4-unit batches and sequential looks at 3, 5
 and 9 observations. The four-unit holdout checks the fixed-geometry repeated-unit
 model. `--target-units` changes only the conditional projection, not the work
