@@ -1,6 +1,8 @@
 #include "datapump/fast/modem.hpp"
 #include "acoustic_ofdm.hpp"
 #include "filter_history.hpp"
+#include "single_carrier_waveform.hpp"
+#include "ssb_receiver.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -8,15 +10,19 @@
 #include <limits>
 #include <numbers>
 #include <stdexcept>
+#include <type_traits>
 
 namespace datapump::fast {
 namespace {
 using Complex = std::complex<double>;
 constexpr double pi = std::numbers::pi;
 constexpr double legacy_pulse_radius = 8;
-double radius(const Profile& p) { return p.capacity_mode ? std::ceil(6.4/p.rolloff) : legacy_pulse_radius; }
+double radius(const Profile& p) { return detail::single_carrier_pulse_radius(p); }
 std::size_t spacing(const Profile& p) { return p.capacity_mode ? p.pilot_spacing_symbols : pilot_spacing; }
-std::size_t pilot_length(const Profile& p) { return compact_acoustic_framing(p) ? 16 : pilot_symbols; }
+std::size_t pilot_length(const Profile& p) {
+    if(ssb_capacity_framing(p))return ssb_capacity_pilot_symbols;
+    return compact_acoustic_framing(p)?16:pilot_symbols;
+}
 std::size_t marker_length(const Profile& p) { return compact_acoustic_framing(p) ? 192 : sync_symbols; }
 std::size_t marker_size(const Profile& p,std::size_t index) { return !p.capacity_mode || index%p.marker_spacing_intervals==0 ? marker_length(p) : 0; }
 constexpr unsigned table_resolution = 2048;
@@ -25,12 +31,7 @@ unsigned label_bits(unsigned order) {
     throw std::invalid_argument("fast constellation must be a power of four in 4..4194304");
 }
 Profile validated(Profile p) {validate(p);return p;}
-std::size_t low_rate_decimation(const Profile& p) {
-    if(!p.capacity_mode || p.acoustic_ofdm || p.symbol_rate>=1000)return 1;
-    std::size_t factor=1;
-    while(static_cast<double>(p.sample_rate)/(2*factor)>=32*p.symbol_rate)factor*=2;
-    return factor;
-}
+std::size_t low_rate_decimation(const Profile& p) {return detail::single_carrier_low_rate_decimation(p);}
 // A bounded anti-alias cascade before the long low-baud RRC. The desired
 // baseband occupies at most 0.024 of the final sample rate, well inside every
 // half-band stage's flat passband. Odd half-band taps are exactly zero except
@@ -72,14 +73,7 @@ struct HalfBandDecimator {
         return true;
     }
 };
-Complex qam_point(unsigned order,unsigned label) {
-    const auto axis_bits=label_bits(order)/2,side=1u<<axis_bits;
-    auto i=label>>axis_bits,q=label&(side-1);
-    for(unsigned shift=1;shift<axis_bits;shift<<=1) {i^=i>>shift;q^=q>>shift;}
-    const auto scale=std::sqrt(2.*(order-1)/3.);
-    return {(2.*i+1-side)/scale,(2.*q+1-side)/scale};
-}
-Complex pilot(std::size_t index,const Profile& p) { return sync_symbol(11 + (compact_acoustic_framing(p)?index:index%4)*13); }
+Complex pilot(std::size_t index) { return sync_symbol(11+13*index); }
 std::array<Complex,192> sync_table() {
     std::array<Complex,192> result{};
     std::uint32_t state=0x65a39c17u;
@@ -106,23 +100,92 @@ double interpolation_weight(double coordinate) {
     const auto fraction=position-static_cast<double>(i);
     return table[i]+fraction*(table[i+1]-table[i]);
 }
-struct Pulse {
-    double pulse_radius;
-    std::vector<double> values;
-    explicit Pulse(double rolloff,double support):pulse_radius(support),values(static_cast<std::size_t>(support*table_resolution)+2) {
-        for(std::size_t i=0;i<values.size();++i)
-            values[i]=root_raised_cosine(static_cast<double>(i)/table_resolution,rolloff);
-    }
-    double operator()(double t) const {
-        t=std::abs(t);
-        if(t>pulse_radius)return 0;
-        const auto coordinate=t*table_resolution;
-        const auto i=static_cast<std::size_t>(coordinate);
-        const auto fraction=coordinate-static_cast<double>(i);
-        return values[i]*(1-fraction)+values[i+1]*fraction;
-    }
-};
 }
+
+namespace detail {
+SingleCarrierSchedule::SingleCarrierSchedule(const Profile& p):
+    bits_per_symbol(label_bits(p.constellation)),
+    data_symbols((physical_interval_bits+bits_per_symbol-1)/bits_per_symbol),
+    pilot_stride(spacing(p)),pilot_count(pilot_length(p)),
+    marker_cadence(p.capacity_mode?p.marker_spacing_intervals:1),
+    marker_span(marker_length(p)),
+    training_count(p.capacity_mode?(compact_acoustic_framing(p)?256:2048):training_symbols) {
+    if(p.acoustic_ofdm)throw std::invalid_argument("single-carrier schedule requires a single-carrier profile");
+}
+std::size_t SingleCarrierSchedule::marker_symbols(std::size_t ordinal) const {
+    return ordinal%marker_cadence==0?marker_span:0;
+}
+std::size_t SingleCarrierSchedule::interval_symbols(std::size_t ordinal) const {
+    return marker_symbols(ordinal)+data_symbols+((data_symbols+pilot_stride-1)/pilot_stride)*pilot_count;
+}
+std::size_t SingleCarrierSchedule::total_interval_symbols(std::size_t count) const {
+    if(!count)return 0;
+    const auto markers=(count-1)/marker_cadence+1;
+    const auto payload=interval_symbols(0)-marker_span;
+    if(markers>std::numeric_limits<std::size_t>::max()/marker_span ||
+       count>(std::numeric_limits<std::size_t>::max()-markers*marker_span)/payload)
+        throw std::overflow_error("fast interval symbol count overflow");
+    return count*payload+markers*marker_span;
+}
+Complex SingleCarrierSchedule::training_symbol(std::size_t k) const {
+    if(k>=training_count)throw std::out_of_range("single-carrier training position out of range");
+    // Distinct from the alignment word, preserving the public preamble.
+    return marker[(k*17+9)%sync_symbols]*Complex(0,1);
+}
+SingleCarrierSchedule::Position SingleCarrierSchedule::position(std::size_t ordinal,std::size_t k) const {
+    if(k>=interval_symbols(ordinal))throw std::out_of_range("single-carrier interval position out of range");
+    const auto marker_count=marker_symbols(ordinal);
+    // The compact 192-symbol marker uses the full table, not sync_symbol's
+    // deliberately wrapped 64-symbol public primitive.
+    if(k<marker_count)return {Kind::marker,marker[k]};
+    const auto local=k-marker_count;
+    const auto group=local/(pilot_stride+pilot_count);
+    const auto within=local%(pilot_stride+pilot_count);
+    const auto start=group*pilot_stride;
+    const auto available=std::min(pilot_stride,data_symbols-start);
+    if(within>=available) {
+        const auto index=within-available;
+        return {Kind::pilot,pilot(index)};
+    }
+    const auto bit_offset=(start+within)*bits_per_symbol;
+    return {Kind::data,{},bit_offset,static_cast<unsigned>(std::min<std::size_t>(bits_per_symbol,physical_interval_bits-bit_offset))};
+}
+Complex square_qam_point(unsigned order,unsigned label) {
+    const auto axis_bits=label_bits(order)/2,side=1u<<axis_bits;
+    auto i=label>>axis_bits,q=label&(side-1);
+    for(unsigned shift=1;shift<axis_bits;shift<<=1) {i^=i>>shift;q^=q>>shift;}
+    const auto scale=std::sqrt(2.*(order-1)/3.);
+    return {(2.*i+1-side)/scale,(2.*q+1-side)/scale};
+}
+double single_carrier_pulse_radius(const Profile& p) {
+    return p.capacity_mode?std::ceil(6.4/p.rolloff):legacy_pulse_radius;
+}
+std::size_t single_carrier_low_rate_decimation(const Profile& p) {
+    if(!p.capacity_mode || p.acoustic_ofdm || p.symbol_rate>=1000)return 1;
+    std::size_t factor=1;
+    while(static_cast<double>(p.sample_rate)/(2*factor)>=32*p.symbol_rate)factor*=2;
+    return factor;
+}
+RrcPulseTable::RrcPulseTable(double rolloff,double support):
+    radius_(support),values_(static_cast<std::size_t>(support*table_resolution)+2) {
+    for(std::size_t i=0;i<values_.size();++i)
+        values_[i]=root_raised_cosine(static_cast<double>(i)/table_resolution,rolloff);
+}
+double RrcPulseTable::operator()(double t) const {
+    t=std::abs(t);
+    if(t>radius_)return 0;
+    const auto coordinate=t*table_resolution;
+    const auto i=static_cast<std::size_t>(coordinate);
+    const auto fraction=coordinate-static_cast<double>(i);
+    return values_[i]*(1-fraction)+values_[i+1]*fraction;
+}
+double RrcPulseTable::slope(double t) const {
+    if(t==0 || std::abs(t)>radius_)return 0;
+    const auto i=static_cast<std::size_t>(std::abs(t)*table_resolution);
+    const auto slope=(values_[i+1]-values_[i])*table_resolution;
+    return t<0?-slope:slope;
+}
+} // namespace detail
 
 std::vector<Complex> square_qam_constellation(unsigned order) {
     const auto axis_bits=label_bits(order)/2;
@@ -209,24 +272,15 @@ Complex sync_symbol(std::size_t i) { return marker[i%sync_symbols]; }
 std::size_t interval_symbols(const Profile& p,std::size_t index) {
     validate(p);
     if(p.acoustic_ofdm)return acoustic_ofdm::interval_symbols(p,index);
-    const auto count=(physical_interval_bits+label_bits(p.constellation)-1)/label_bits(p.constellation);
-    const auto stride=spacing(p);
-    return marker_size(p,index)+count+((count+stride-1)/stride)*pilot_length(p);
+    return detail::SingleCarrierSchedule(p).interval_symbols(index);
 }
 std::size_t total_interval_symbols(const Profile& p,std::size_t count) {
     validate(p);
     if(p.acoustic_ofdm)return count?acoustic_ofdm::transmission_samples(p,count)/(p.ofdm_fft_size+p.ofdm_prefix_samples)-acoustic_ofdm::preamble_symbols(p):0;
-    if(!count)return 0;
-    const auto markers=p.capacity_mode?(count-1)/p.marker_spacing_intervals+1:count;
-    const auto marker_count=marker_length(p);
-    const auto payload=interval_symbols(p,0)-marker_count;
-    if(markers>std::numeric_limits<std::size_t>::max()/marker_count ||
-       count>(std::numeric_limits<std::size_t>::max()-markers*marker_count)/payload)
-        throw std::overflow_error("fast interval symbol count overflow");
-    return count*payload+markers*marker_count;
+    return detail::SingleCarrierSchedule(p).total_interval_symbols(count);
 }
 std::size_t pulse_tail_symbols(const Profile& p) {validate(p);return p.acoustic_ofdm?acoustic_ofdm::pulse_tail_symbols(p):static_cast<std::size_t>(2*radius(p));}
-std::size_t preamble_symbols(const Profile& p) {validate(p);return p.acoustic_ofdm?acoustic_ofdm::preamble_symbols(p):p.capacity_mode?(compact_acoustic_framing(p)?256:2048):training_symbols;}
+std::size_t preamble_symbols(const Profile& p) {validate(p);return p.acoustic_ofdm?acoustic_ofdm::preamble_symbols(p):detail::SingleCarrierSchedule(p).training_count;}
 std::uint64_t transmission_samples(const Profile& p,std::size_t count) {
     validate(p);
     if(p.acoustic_ofdm)return acoustic_ofdm::transmission_samples(p,count);
@@ -242,12 +296,11 @@ std::uint64_t end_silence_samples(const Profile& p) {
         // The next complete marker/pilot group can exceed the usual quarter
         // second guard, even above 100 baud with sparse pilots. Feed actual
         // silence through the filters and complete-symbol absence scorer.
-        const auto bps=label_bits(p.constellation);
-        const auto data_symbols=(physical_interval_bits+bps-1)/bps;
+        const detail::SingleCarrierSchedule schedule(p);
         // The first failed pilot cannot classify the preceding payload as
         // absent: it may be an isolated damaged pilot. Allow one following
         // complete group before charging its full failed duration.
-        const auto evidence_symbols=std::max(marker_length(p),2*(std::min(data_symbols,spacing(p))+pilot_length(p)));
+        const auto evidence_symbols=std::max(schedule.marker_span,2*(std::min(schedule.data_symbols,schedule.pilot_stride)+schedule.pilot_count));
         const auto observation_seconds=(evidence_symbols+12)/p.symbol_rate;
         if(observation_seconds>.25)
             return static_cast<std::uint64_t>(std::ceil(p.sample_rate*(6.25+observation_seconds)));
@@ -263,15 +316,15 @@ std::uint64_t end_silence_samples(const Profile& p) {
 
 struct Transmitter::Impl {
     Profile config;
+    detail::SingleCarrierSchedule schedule;
     IntervalReader source;
     SymbolObserver observer;
     std::vector<Complex> points;
-    Pulse pulse;
+    detail::RrcPulseTable pulse;
     std::array<std::uint8_t,physical_interval_bits> bits{};
     std::deque<std::pair<std::uint64_t,Complex>> history;
     std::uint64_t sample=0, symbol=0;
     std::size_t training=0, position=0, interval_index=0;
-    unsigned bps;
     double sps,omega;
     double pulse_radius;
     std::size_t low_rate_factor=1;
@@ -280,18 +333,18 @@ struct Transmitter::Impl {
     Complex carrier=1,carrier_step=1;
     bool ended=false,done=false,have_interval=false;
     std::uint64_t last_symbol=0;
-    Impl(Profile p,IntervalReader reader,SymbolObserver observe):config(p),source(std::move(reader)),observer(std::move(observe)),points(p.capacity_mode?std::vector<Complex>{}:constellation(p.constellation)),
-        pulse(p.rolloff,radius(p)),bps(label_bits(p.constellation)),sps(p.sample_rate/p.symbol_rate),omega(2*pi*p.carrier_hz/p.sample_rate),pulse_radius(radius(p)) {
+    Impl(Profile p,IntervalReader reader,SymbolObserver observe):config(p),schedule(p),source(std::move(reader)),observer(std::move(observe)),points(p.capacity_mode?std::vector<Complex>{}:constellation(p.constellation)),
+        pulse(p.rolloff,radius(p)),sps(p.sample_rate/p.symbol_rate),omega(2*pi*p.carrier_hz/p.sample_rate),pulse_radius(radius(p)) {
         validate(p);
         if(!source)throw std::invalid_argument("fast transmitter requires an interval source");
         low_rate_factor=low_rate_decimation(p);
         if(low_rate_factor>1)carrier_step=std::polar(1.,omega);
     }
     bool next(Complex& output) {
-        if(training<preamble_symbols(config)) {
+        if(training<schedule.training_count) {
             // Training differs from the alignment word so it cannot announce a
             // spurious interval before the first real alignment boundary.
-            output=marker[(training*17+9)%sync_symbols]*Complex(0,1);
+            output=schedule.training_symbol(training);
             ++training; return true;
         }
         if(!have_interval) {
@@ -300,26 +353,16 @@ struct Transmitter::Impl {
                 throw std::invalid_argument("fast interval source supplied a non-bit");
             have_interval=true; position=0;
         }
-        const auto marker_count=marker_size(config,interval_index);
-        const auto stride=spacing(config);
-        if(position<marker_count)output=marker[position];
+        const auto slot=schedule.position(interval_index,position);
+        if(slot.kind!=detail::SingleCarrierSchedule::Kind::data)output=slot.known_value;
         else {
-            const auto data_count=(physical_interval_bits+bps-1)/bps;
-            const auto local=position-marker_count;
-            const auto group=local/(stride+pilot_length(config));
-            const auto within=local%(stride+pilot_length(config));
-            const auto start=group*stride;
-            const auto available=std::min(stride,data_count-start);
-            if(within>=available)output=pilot(within-available,config);
-            else {
-                const auto start_bit=(start+within)*bps;
-                unsigned label=0;
-                for(unsigned b=0;b<bps;++b)label=(label<<1)|(start_bit+b<physical_interval_bits?bits[start_bit+b]:0);
-                output=config.capacity_mode?qam_point(config.constellation,label):points[label];
-                if(observer)try{observer(static_cast<std::complex<float>>(output));}catch(...){}
-            }
+            unsigned label=0;
+            for(unsigned b=0;b<slot.bit_count;++b)label=(label<<1)|bits[slot.bit_offset+b];
+            label<<=schedule.bits_per_symbol-slot.bit_count;
+            output=config.capacity_mode?detail::square_qam_point(config.constellation,label):points[label];
+            if(observer)try{observer(static_cast<std::complex<float>>(output));}catch(...){}
         }
-        if(++position==interval_symbols(config,interval_index)) {have_interval=false;++interval_index;}
+        if(++position==schedule.interval_symbols(interval_index)) {have_interval=false;++interval_index;}
         return true;
     }
     Complex grid_baseband(std::int64_t index) {
@@ -337,7 +380,15 @@ struct Transmitter::Impl {
             shaped+=point*pulse(time/sps-static_cast<double>(position)-pulse_radius);
         return shaped;
     }
-    std::size_t read_low_rate(std::span<float> out) {
+    template<class Sample>
+    Sample project(Complex value) const {
+        if constexpr(std::is_same_v<Sample,float>)
+            return static_cast<float>(config.amplitude*value.real());
+        else
+            return static_cast<std::complex<float>>(config.amplitude*value);
+    }
+    template<class Sample>
+    std::size_t read_low_rate(std::span<Sample> out) {
         if(grid_index<0) {
             grid_index=0;
             for(std::size_t i=0;i<grid_values.size();++i)grid_values[i]=grid_baseband(static_cast<std::int64_t>(i)-1);
@@ -356,14 +407,15 @@ struct Transmitter::Impl {
             const auto shaped=grid_values[0]*(-f*(f-1)*(f-2)/6)+
                 grid_values[1]*((f+1)*(f-1)*(f-2)/2)+
                 grid_values[2]*(-(f+1)*f*(f-2)/2)+grid_values[3]*((f+1)*f*(f-1)/6);
-            value=static_cast<float>(config.amplitude*std::real(shaped*carrier));
+            value=project<Sample>(shaped*carrier);
             ++sample;++written;
             if(sample%4096==0)carrier=std::polar(1.,omega*static_cast<double>(sample));
             else carrier*=carrier_step;
         }
         return written;
     }
-    std::size_t read(std::span<float> out) {
+    template<class Sample>
+    std::size_t read(std::span<Sample> out) {
         if(done||out.empty())return 0;
         if(low_rate_factor>1)return read_low_rate(out);
         std::size_t written=0;
@@ -379,7 +431,7 @@ struct Transmitter::Impl {
             Complex shaped=0;
             for(const auto& [index,point]:history)
                 shaped+=point*pulse(static_cast<double>(sample)/sps-static_cast<double>(index)-pulse_radius);
-            value=static_cast<float>(config.amplitude*std::real(shaped*std::polar(1.,omega*static_cast<double>(sample))));
+            value=project<Sample>(shaped*std::polar(1.,omega*static_cast<double>(sample)));
             ++sample;++written;
         }
         return written;
@@ -839,7 +891,7 @@ struct Receiver::Impl {
             const auto offset=(start+symbol_index)*bps;
             if(std::norm(value)<6)for(unsigned bit=0;bit<bps&&offset+bit<soft.size();++bit)
                 soft[offset+bit]=static_cast<float>(std::clamp(metrics[bit]/std::max(1e-9,noise_variance),-24.,24.));
-            const auto error=std::norm(value-qam_point(config.constellation,closest));
+            const auto error=std::norm(value-detail::square_qam_point(config.constellation,closest));
             evm=std::sqrt(.99*evm*evm+.01*error);
         }
         const auto pilot_residual=std::max(0.,pilot_energy+pilot_length(config)-2*std::abs(pilot_correlation))/pilot_length(config);
@@ -885,11 +937,11 @@ struct Receiver::Impl {
             if(!config.capacity_mode && marker_good && std::norm(value)>.002 && std::norm(value)<6)
                 for(unsigned bit=0;bit<bps && offset+bit<soft.size();++bit)
                     soft[offset+bit]=static_cast<float>(std::clamp((zeros[bit]-ones[bit])/std::max(config.capacity_mode?1e-9:.002,noise_variance),-24.,24.));
-            track(value,config.capacity_mode?qam_point(config.constellation,closest):points[closest],input,false);
+            track(value,config.capacity_mode?detail::square_qam_point(config.constellation,closest):points[closest],input,false);
         } else {
             const auto index=within-available;
             if(index==0) {pilot_correlation=0;pilot_energy=0;pilot_error=0;pilot_disagreements=0;}
-            const auto expected=pilot(index,config);
+            const auto expected=pilot(index);
             pilot_correlation+=value*std::conj(expected);pilot_energy+=std::norm(value);
             pilot_error+=std::norm(value-expected);
             pilot_disagreements+=(value.real()>0)!=(expected.real()>0);
@@ -1068,21 +1120,73 @@ Transmitter::Transmitter(Profile p,IntervalReader source,SymbolObserver observer
 Transmitter::~Transmitter()=default;
 Transmitter::Transmitter(Transmitter&&) noexcept=default;
 Transmitter& Transmitter::operator=(Transmitter&&) noexcept=default;
-std::size_t Transmitter::read(std::span<float> out){return acoustic_?acoustic_->read(out):impl_->read(out);}
+std::size_t Transmitter::read(std::span<float> out) {
+    if(out.empty())return 0;
+    if(output_==Output::analytic)throw Error("Fast transmitter already supplies analytic audio");
+    output_=Output::pcm;
+    return acoustic_?acoustic_->read(out):impl_->read(out);
+}
+std::size_t Transmitter::read_analytic(std::span<std::complex<float>> out) {
+    if(out.empty())return 0;
+    if(output_==Output::pcm)throw Error("Fast transmitter already supplies real PCM");
+    output_=Output::analytic;
+    return acoustic_?acoustic_->read_analytic(out):impl_->read(out);
+}
 bool Transmitter::finished() const{return acoustic_?acoustic_->finished():impl_->done;}
 std::uint64_t Transmitter::samples_generated() const{return acoustic_?acoustic_->samples_generated():impl_->sample;}
-std::size_t Transmitter::workspace_bytes() const{if(acoustic_)return acoustic_->workspace_bytes();return sizeof(Impl)+impl_->points.capacity()*sizeof(Complex)+impl_->pulse.values.capacity()*sizeof(double)+static_cast<std::size_t>(2*impl_->pulse_radius+4)*sizeof(std::pair<std::uint64_t,Complex>);}
+std::size_t Transmitter::workspace_bytes() const{if(acoustic_)return acoustic_->workspace_bytes();return sizeof(Impl)+impl_->points.capacity()*sizeof(Complex)+impl_->pulse.workspace_bytes()+static_cast<std::size_t>(2*impl_->pulse_radius+4)*sizeof(std::pair<std::uint64_t,Complex>);}
 Receiver::Receiver(Profile p,IntervalSink sink,SymbolObserver observer,SymbolObserver input_observer) {
     validate(p);
+    initialize_standard(p,std::move(sink),std::move(observer),std::move(input_observer));
+}
+void Receiver::initialize_standard(Profile p,IntervalSink sink,SymbolObserver observer,SymbolObserver input_observer) {
+    standard_ssb_=ssb_capacity_framing(p);
     if(p.acoustic_ofdm)acoustic_=std::make_unique<acoustic_ofdm::Receiver>(p,std::move(sink),std::move(observer),std::move(input_observer));
-    else impl_=std::make_unique<Impl>(validated(p),std::move(sink),std::move(observer),std::move(input_observer));
+    else impl_=std::make_unique<Impl>(p,std::move(sink),std::move(observer),std::move(input_observer));
+}
+Receiver::Receiver(Profile p,ValidatedIntervalSink sink,SymbolObserver observer,SymbolObserver input_observer,
+                   std::stop_token stop)
+    : stop_(stop) {
+    validate(p);
+    if(detail::supports_modeled_ssb_receiver(p)) {
+        ssb_=std::make_unique<detail::SsbReceiver>(detail::make_ssb_model_receiver(p,std::move(sink),stop,
+            std::move(observer),std::move(input_observer)));
+        return;
+    }
+    auto standard=sink?IntervalSink([submit=std::move(sink)](std::span<const float> soft) {
+        (void)submit(soft,false);
+    }):IntervalSink{};
+    initialize_standard(p,std::move(standard),std::move(observer),std::move(input_observer));
 }
 Receiver::~Receiver()=default;
 Receiver::Receiver(Receiver&&) noexcept=default;
 Receiver& Receiver::operator=(Receiver&&) noexcept=default;
-void Receiver::push(std::span<const float> samples){if(acoustic_)acoustic_->push(samples);else impl_->push(samples);}
-void Receiver::finish(){if(acoustic_)acoustic_->finish();else impl_->eof=true;}
-const ModemProgress& Receiver::progress() const{return acoustic_?acoustic_->progress():impl_->state;}
-std::size_t Receiver::workspace_bytes() const{if(acoustic_)return acoustic_->workspace_bytes();return sizeof(Impl)+(impl_->points.capacity()+impl_->raw.capacity()+impl_->filtered.capacity())*sizeof(Complex)+impl_->taps.capacity()*sizeof(double)+impl_->decimators.capacity()*sizeof(HalfBandDecimator);}
+void Receiver::push(std::span<const float> samples){(void)consume(samples);}
+std::size_t Receiver::consume(std::span<const float> samples) {
+    if(stop_.stop_requested())return 0;
+    if(ssb_)return ssb_->push(samples);
+    if(acoustic_)acoustic_->push(samples);
+    else impl_->push(samples);
+    return samples.size();
+}
+void Receiver::finish(){if(ssb_)ssb_->finish();else if(acoustic_)acoustic_->finish();else impl_->eof=true;}
+const ModemProgress& Receiver::progress() const {
+    if(ssb_)return ssb_->progress();
+    return acoustic_?acoustic_->progress():impl_->state;
+}
+std::size_t Receiver::workspace_bytes() const {
+    if(ssb_)return ssb_->workspace_bytes();
+    if(acoustic_)return acoustic_->workspace_bytes();
+    return sizeof(Impl)+(impl_->points.capacity()+impl_->raw.capacity()+impl_->filtered.capacity())*sizeof(Complex)+
+        impl_->taps.capacity()*sizeof(double)+impl_->decimators.capacity()*sizeof(HalfBandDecimator);
+}
+bool Receiver::uses_resilient_ssb() const noexcept{return bool(ssb_);}
+std::string_view Receiver::backend_name() const noexcept {
+    if(ssb_)return "resilient-ssb";
+    return standard_ssb_?"standard-ssb":"standard-fast";
+}
+std::optional<std::uint64_t> Receiver::physical_completion_input_tick() const noexcept {
+    return ssb_?ssb_->completion_tick():std::nullopt;
+}
 
 } // namespace datapump::fast

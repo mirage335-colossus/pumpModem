@@ -37,7 +37,7 @@ Control plot(Bitmap bitmap,const char* label,Slot slot,const char* help) {
     auto c=placed(Kind::bitmap,Field::count,Command::none,label,slot,help);c.bitmap=bitmap;c.font_size=12;return c;
 }
 }
-bool owns(Field field) {return field>=Field::fast_profile&&field<=Field::fast_files;}
+bool owns(Field field) {return field>=Field::fast_profile&&field<=Field::fast_sim_status;}
 bool owns(Command command) {return command>=Command::fast_open_key&&command<=Command::fast_toggle_qr_expanded;}
 const std::vector<Control>& screen() {
     static const std::vector<Control> controls{
@@ -84,7 +84,42 @@ const std::vector<Control>& screen() {
         placed(Kind::label,Field::fast_snr,Command::none,"",Slot::fast_snr),
         placed(Kind::choice,Field::fast_qr_brightness,Command::none,"",Slot::fast_qr_brightness),
         [] {auto c=plot(Bitmap::fast_qr,"",Slot::fast_qr,"Click to expand the message QR code. Escape restores the console.");c.bitmap_caption=BitmapCaption::overlay_error;c.click=Command::fast_toggle_qr_expanded;return c;}(),
-        placed(Kind::label,Field::fast_status,Command::none,"",Slot::fast_status)
+        placed(Kind::label,Field::fast_status,Command::none,"",Slot::fast_status),
+        [] {auto c=placed(Kind::choice,Field::fast_simulation,Command::none,"Mode",Slot::none);
+            c.page=Page::fast_simulation;c.row=0;c.stretch=3;c.purpose=ControlPurpose::setup;
+            c.help="Live audio uses the selected audio device. Simulation sends this modem's emitted waveform through the native sampled channel without acquiring hardware. Live loopback test runs the fixed local diagnostic described in the details note; it does not start continuous listening.";return c;}(),
+        [] {auto c=placed(Kind::text,Field::fast_sim_tx_power,Command::none,"Transmit power (W)",Slot::none);
+            c.page=Page::fast_simulation;c.row=1;c.stretch=1;c.purpose=ControlPurpose::planning;
+            c.help="Average transmitted power assumed by the synthetic link budget; it does not set a radio's output.";return c;}(),
+        [] {auto c=placed(Kind::text,Field::fast_sim_path_loss,Command::none,"Path loss (dB)",Slot::none);
+            c.page=Page::fast_simulation;c.row=1;c.stretch=1;c.purpose=ControlPurpose::planning;
+            c.help="Total synthetic path loss between the modeled endpoints; it does not measure propagation.";return c;}(),
+        [] {auto c=placed(Kind::text,Field::fast_sim_noise,Command::none,"Noise (dBm/Hz or off)",Slot::none);
+            c.page=Page::fast_simulation;c.row=1;c.stretch=1;c.purpose=ControlPurpose::planning;
+            c.help="Receiver noise density in dBm/Hz. Enter off to disable it. This is a sampled-channel assumption, not a measured physical noise level.";return c;}(),
+        [] {auto c=placed(Kind::choice,Field::fast_sim_baseband_oscillator,Command::none,"Baseband oscillator",Slot::none);
+            c.page=Page::fast_simulation;c.row=2;c.stretch=1;c.purpose=ControlPurpose::planning;
+            c.help="Uses the shared oscillator tuning registry. Values are illustrative relative two-end bounds, not device measurements or hardware control.";return c;}(),
+        [] {auto c=placed(Kind::choice,Field::fast_sim_shift_oscillator,Command::none,"Shift oscillator",Slot::none);
+            c.page=Page::fast_simulation;c.row=2;c.stretch=1;c.purpose=ControlPurpose::planning;
+            c.help="Choose an independent RF translation oscillator from the shared tuning registry or the same Baseband reference. This does not tune a radio.";return c;}(),
+        [] {auto c=placed(Kind::choice,Field::fast_sim_spread,Command::none,"Doppler / delay spread",Slot::none);
+            c.page=Page::fast_simulation;c.row=2;c.stretch=1;c.purpose=ControlPurpose::planning;return c;}(),
+        [] {auto c=placed(Kind::choice,Field::fast_sim_selective,Command::none,"Additional selective AM",Slot::none);
+            c.page=Page::fast_simulation;c.row=3;c.stretch=1;c.purpose=ControlPurpose::planning;return c;}(),
+        [] {auto c=placed(Kind::text,Field::fast_sim_margin,Command::none,"Search margin (x)",Slot::none);
+            c.page=Page::fast_simulation;c.row=3;c.stretch=1;c.purpose=ControlPurpose::planning;
+            c.help="Expands modeled oscillator and spread bounds by this factor. One leaves the selected bounds unchanged.";return c;}(),
+        [] {auto c=placed(Kind::text,Field::fast_sim_shift_hz,Command::none,"Shift frequency (RF coordinate, Hz)",Slot::none);
+            c.page=Page::fast_simulation;c.row=3;c.stretch=1;c.purpose=ControlPurpose::planning;
+            c.help="Shift is an RF frequency coordinate for the oscillator model only. It does not change the Fast audio carrier or passband.";return c;}(),
+        [] {auto c=placed(Kind::label,Field::fast_sim_status,Command::none,"",Slot::none);
+            c.page=Page::fast_simulation;c.row=4;c.stretch=3;c.purpose=ControlPurpose::presentation;return c;}(),
+        [] {auto c=placed(Kind::action,Field::count,Command::fast_transmit,"Transmit",Slot::none);
+            c.page=Page::fast_simulation;c.row=5;c.instance=1;c.purpose=ControlPurpose::operation;
+            c.help="Simulation uses the message or file from Console. Live loopback test uses the selected profile and encryption settings, and validates the locally captured result without changing the Console draft.";return c;}(),
+        [] {auto c=placed(Kind::action,Field::count,Command::fast_cancel,"Cancel",Slot::none);
+            c.page=Page::fast_simulation;c.row=5;c.instance=1;c.purpose=ControlPurpose::operation;return c;}()
     };
     return controls;
 }

@@ -33,7 +33,11 @@ void rate_and_spectrum_presentation() {
     const auto snr=fast_ui::waterfall_snr(d,profile);
     check(snr&&std::abs(*snr-10)<1e-4,"Waterfall SNR did not subtract matched in-band noise power");
     d.transmitting=true;check(!fast_ui::waterfall_snr(d,profile),"TX spectrum was labeled receiver SNR");
-    d.transmitting=false;d.spectrum_db.fill(-120);
+    d.transmitting=false;
+    fast::Snapshot simultaneous;simultaneous.loopback_test=simultaneous.transmitting=simultaneous.active=true;
+    check(simultaneous.transmitting&&!d.transmitting&&fast_ui::waterfall_snr(d,profile).has_value(),
+        "Captured RX telemetry could not expose SNR while a loopback snapshot also reports transmission");
+    d.spectrum_db.fill(-120);
     check(!fast_ui::waterfall_snr(d,profile),"Silent input fabricated a measured SNR");
     Application app({});
     check(app.field(ui::Field::fast_mode).selected=="fast","Ordinary launch did not default to Fast Modem");
@@ -69,9 +73,110 @@ void damaged_reception_presentation() {
     fast::Snapshot finishing;finishing.physical_complete=finishing.complete=finishing.active=true;
     check(fast_ui::transfer_stage(finishing)=="RECEIVED · checksum verified, unauthenticated",
         "A physically completed result was still presented as pending during worker cleanup");
+    finishing.simulated=true;
+    check(fast_ui::transfer_stage(finishing)=="SIMULATED · checksum verified, unauthenticated",
+        "A completed simulation was presented as a live reception");
+    fast::Snapshot replay;replay.simulated=replay.transmitting=replay.active=true;replay.failed_cycles=1;
+    check(fast_ui::transfer_stage(replay)=="SIMULATING / MISSING DATA",
+        "Simulation transmission state hid receiver damage");
+    fast::Snapshot loopback;loopback.loopback_test=loopback.transmitting=loopback.active=true;
+    check(fast_ui::transfer_stage(loopback)=="LOOPBACK TEST / CAPTURING AND CHECKING",
+        "Loopback test was presented as ordinary transmit or receive traffic");
+    loopback.complete=loopback.physical_complete=true;loopback.authenticated=true;
+    check(fast_ui::transfer_stage(loopback)=="LOOPBACK TEST · authenticated"&&
+          fast_ui::integrity_label(loopback).find("LOOPBACK TEST · ")==0,
+        "Completed loopback test was not clearly distinguished from regular received content");
     s.cancelled=true;
     check(fast_ui::transfer_stage(s)=="CANCELLED · no completion implied",
         "Damaged reception hid the explicit cancellation state");
+}
+const ui::Control& control(ui::Field field);
+void fast_simulation_controls() {
+    using F=ui::Field;using C=ui::Command;
+    Application app({.simulation=true});
+    app.select(F::fast_mode,"fast");
+    const auto tabs=app.tab_layout(ui::default_width,ui::default_height);
+    check(std::any_of(tabs.begin(),tabs.end(),[](const auto& tab){return tab.page==ui::Page::fast_simulation&&tab.visible;}),
+          "Fast simulation/live testing tab is hidden");
+    app.select_page(ui::Page::fast_simulation);
+    const auto& mode=control(F::fast_simulation);
+    check(app.control(mode).visible&&app.field(F::fast_simulation).selected=="live",
+          "Fast page did not default to live audio with a visible mode selector");
+    for(const auto field:{F::fast_sim_tx_power,F::fast_sim_path_loss,F::fast_sim_noise,F::fast_sim_baseband_oscillator,
+         F::fast_sim_shift_oscillator,F::fast_sim_spread,F::fast_sim_selective,F::fast_sim_margin,F::fast_sim_shift_hz})
+        check(!app.field(field).enabled,"Simulation-only assumptions remained editable in live mode");
+    app.select(mode,"simulation");
+    check(app.field(F::fast_sim_noise).text=="-174"&&app.field(F::fast_sim_tx_power).enabled,
+          "Simulation did not expose its independent channel assumptions and normal noise default");
+    check(app.field(F::fast_sim_tx_power).options.size()>=2&&app.field(F::fast_sim_path_loss).options.size()>=2&&
+          app.field(F::fast_sim_noise).options.size()>=2&&app.field(F::fast_sim_margin).options.size()>=2&&
+          app.field(F::fast_sim_shift_hz).options.size()>=3&&
+          std::any_of(app.field(F::fast_sim_baseband_oscillator).options.begin(),app.field(F::fast_sim_baseband_oscillator).options.end(),
+              [](const auto& option){return option.id=="off";})&&
+          std::any_of(app.field(F::fast_sim_shift_oscillator).options.begin(),app.field(F::fast_sim_shift_oscillator).options.end(),
+              [](const auto& option){return option.id=="off";}),
+          "Simulation text controls lack their shared preset dropdowns");
+    app.preset(control(F::fast_sim_path_loss),"180");
+    check(app.field(F::fast_sim_path_loss).text=="180","Path-loss dropdown did not update the editable value");
+    app.preset(control(F::fast_sim_path_loss),"130");
+    app.preset(control(F::fast_sim_shift_hz),"5800000000");
+    check(app.field(F::fast_sim_shift_hz).text=="5800000000","RF Shift frequency preset was not applied");
+    const auto old_detail=app.field(F::fast_detail).text;
+    app.edit(control(F::fast_sim_shift_hz),"14000000");
+    check(app.field(F::fast_sim_shift_hz).text=="14000000"&&app.field(F::fast_detail).text==old_detail,
+          "RF Shift frequency changed the Fast audio carrier/passband");
+    app.select(mode,"live");
+    check(app.field(F::fast_sim_shift_hz).text=="14000000"&&app.field(F::fast_sim_tx_power).enabled==false,
+          "Switching to live discarded simulation settings or left them active");
+    app.select(F::fast_mode,"robust");app.select(F::fast_mode,"fast");
+    check(app.field(F::fast_simulation).selected=="live"&&app.field(F::fast_sim_shift_hz).text=="14000000",
+          "Switching modem modes did not preserve Fast simulation choices independently");
+    app.close();
+
+    unsigned acquisitions=0;fast_ui::Controller controller([&] {++acquisitions;return true;});
+    controller.select(F::fast_simulation,"simulation");controller.set_selected(true);controller.poll();
+    controller.activate(C::fast_listen);
+    check(acquisitions==0&&!controller.enabled(C::fast_listen),
+          "Simulation mode attempted live audio acquisition or exposed hardware listening");
+    controller.edit(F::fast_text,"Repair an invalid simulation draft");
+    controller.edit(F::fast_sim_noise,"invalid");
+    controller.select(F::fast_simulation,"live");controller.select(F::fast_simulation,"simulation");controller.poll();
+    check(controller.field(F::fast_simulation).selected=="simulation"&&controller.field(F::fast_sim_noise).enabled&&
+          !controller.enabled(C::fast_transmit)&&acquisitions==0,
+          "Invalid simulation draft prevented re-entering its editor or started hardware capture");
+    controller.edit(F::fast_sim_noise,"-174");
+    check(controller.enabled(C::fast_transmit),"Correcting the simulation draft did not restore its start action");
+    controller.close();
+
+    acquisitions=0;fast_ui::Controller loopback([&] {++acquisitions;return false;});
+    loopback.select(F::fast_simulation,"loopback");loopback.set_selected(true);loopback.poll();
+    check(!loopback.enabled(C::fast_listen)&&loopback.enabled(C::fast_transmit)&&acquisitions==0&&
+          loopback.command_label(C::fast_transmit)=="Run loopback test"&&
+          loopback.field(F::fast_detail).text.find("fixed short diagnostic message")!=std::string::npos,
+          "Loopback test did not expose its fixed diagnostic action or incorrectly auto-listened");
+    const auto history_size=loopback.field(F::fast_history).records.size();
+    const auto history_selection=loopback.field(F::fast_history).selected;
+    loopback.activate(C::fast_transmit);
+    check(acquisitions==1&&loopback.active()&&
+          loopback.field(F::fast_status).text.find("Waiting for the audio device")!=std::string::npos&&
+          loopback.field(F::fast_history).records.size()==history_size&&
+          loopback.field(F::fast_history).selected==history_selection&&!loopback.enabled(C::fast_save),
+          "Empty Console draft blocked loopback or pending audio acquisition changed received history");
+    loopback.activate(C::fast_cancel);
+    loopback.select(F::fast_source,"text");loopback.edit(F::fast_text,"Console text draft stays here");
+    loopback.select(F::fast_source,"file");loopback.edit(F::fast_file,"unopened-source.bin");
+    loopback.activate(C::fast_transmit);
+    check(loopback.field(F::fast_text).text=="Console text draft stays here"&&
+          loopback.field(F::fast_file).text=="unopened-source.bin"&&
+          loopback.field(F::fast_history).records.size()==history_size&&
+          loopback.field(F::fast_history).selected==history_selection&&!loopback.enabled(C::fast_save),
+          "Loopback test consumed a Console draft or altered received history/file selection");
+    loopback.activate(C::fast_cancel);loopback.close();
+
+    fast_ui::FastPlots plots;
+    check(plots.title(ui::Bitmap::fast_waveform,true).find("LOOPBACK TEST · ")==0&&
+          plots.title(ui::Bitmap::fast_waveform).find("LOOPBACK TEST")==std::string::npos,
+          "Loopback plot titles were not distinct or changed ordinary plot labels");
 }
 const ui::Control& control(ui::Field field) {
     for(const auto& c:ui::console_screen())if(c.field==field)return c;
@@ -334,10 +439,10 @@ void presentation_and_retention() {
             check(app.control(c).visible==(c.field!=F::fast_file),"Fast interface failed to show the selected source controls");
     }
     for(const auto& tab:app.tab_layout(ui::default_width,ui::default_height))
-        check(tab.visible==(tab.page==ui::Page::console||tab.page==ui::Page::fast_modem),"Fast tabs are not scoped to Console and developer Modem details");
+        check(tab.visible==(tab.page==ui::Page::console||tab.page==ui::Page::fast_simulation||tab.page==ui::Page::fast_modem),"Fast tabs are not scoped to Console, simulation/live testing, and developer Modem details");
     app.toggle(F::developer_mode,false);
     for(const auto& tab:app.tab_layout(ui::default_width,ui::default_height))
-        check(tab.visible==(tab.page==ui::Page::console),"Normal Fast view must keep only Console visible");
+        check(tab.visible==(tab.page==ui::Page::console||tab.page==ui::Page::fast_simulation),"Normal Fast view must keep Console and simulation/live testing visible");
     app.toggle(F::developer_mode,true);
     const auto acoustic=fast::resolve_snr_preset(fast::Channel::acoustic,3).profile;
     const auto& profiles=app.field(F::fast_profile).options;
@@ -360,7 +465,34 @@ void presentation_and_retention() {
     app.edit(control(F::binary),"111");app.select(control(F::fec),"rs60");
     app.edit(F::message,"stale");app.dispatch(C::use_text);app.navigate(ui::Page::planner);
     check(app.field(F::binary).text==bits&&app.field(F::fec).selected==fec,"Inactive regular callbacks mutated retained settings");
-    app.select(control(F::fast_profile),"ssb");app.select(F::fast_constellation,"256");
+    app.select(control(F::fast_profile),"ssb");
+    check(app.field(F::fast_constellation).selected=="4"&&app.field(F::fast_detail).text.find("LDPC frame: 16200 bits")!=std::string::npos,
+          "Nominal SSB did not expose its short QPSK frame geometry");
+    check(std::any_of(app.field(F::fast_expected_snr).options.begin(),app.field(F::fast_expected_snr).options.end(),
+        [](const auto& option){return option.id=="20"&&option.label=="Resilient standard · 20 dB SNR";})&&
+          std::any_of(app.field(F::fast_expected_snr).options.begin(),app.field(F::fast_expected_snr).options.end(),
+        [](const auto& option){return option.id=="10"&&option.label=="Modeled · 10 dB SNR";}),
+          "SSB expected-SNR options did not distinguish the resilient default from modeled presets");
+    app.select(F::fast_expected_snr,"10");
+    check(app.field(F::fast_detail).text.find("Modeled SSB · 10 dB SNR")!=std::string::npos,
+          "Modeled SSB selection was not labeled in details");
+    app.select(F::fast_expected_snr,"20");
+    check(app.field(F::fast_detail).text.find("Resilient standard · 20 dB SNR")!=std::string::npos,
+          "Nominal SSB reset was not labeled as the resilient standard");
+    check(std::any_of(app.field(F::fast_coding).options.begin(),app.field(F::fast_coding).options.end(),
+        [](const auto& option){return option.id=="eight-ninths";}),
+        "Short SSB hid standard-frame rates needed for manual normalization");
+    app.select(F::fast_constellation,"4096");app.select(F::fast_coding,"eight-ninths");app.select(F::fast_depth,"8");
+    check(app.field(F::fast_detail).text.find("LDPC frame: 64800 bits")!=std::string::npos&&
+          app.field(F::fast_constellation).selected=="4096"&&app.field(F::fast_coding).selected=="eight-ninths"&&
+          app.field(F::fast_depth).selected=="8",
+          "Manual SSB high-rate choices did not normalize transactionally to the standard frame");
+    app.select(F::fast_profile,"wire");app.select(F::fast_profile,"ssb");
+    check(app.field(F::fast_detail).text.find("LDPC frame: 16200 bits")!=std::string::npos&&
+          app.field(F::fast_constellation).selected=="4"&&app.field(F::fast_coding).selected=="half"&&
+          app.field(F::fast_depth).selected=="1",
+          "Returning to the nominal SSB preset did not restore its short frame");
+    app.select(F::fast_constellation,"256");
     check(app.field(F::fast_mono).checked,"Radio output routing default changed");
     app.toggle(F::fast_mono,false);check(!app.field(F::fast_mono).checked,"Explicit radio stereo override ignored");
     app.select(F::fast_source,"file");
@@ -775,6 +907,6 @@ void robust_native_settings() {
 }
 }
 int main() {
-    try {audio_settings();rate_and_spectrum_presentation();damaged_reception_presentation();snr_and_symbol_rate_controls();message_submit_shortcut();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();robust_keyfile_menu_label();robust_public_key_warning();robust_boundary_keeps_polling();robust_native_settings();std::cout<<"Fast GUI isolation tests passed\n";}
+    try {audio_settings();rate_and_spectrum_presentation();damaged_reception_presentation();fast_simulation_controls();snr_and_symbol_rate_controls();message_submit_shortcut();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();robust_keyfile_menu_label();robust_public_key_warning();robust_boundary_keeps_polling();robust_native_settings();std::cout<<"Fast GUI isolation tests passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

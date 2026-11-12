@@ -5,6 +5,7 @@
 
 namespace datapump::fast {
 inline constexpr std::size_t physical_interval_bits=2048;
+inline constexpr std::size_t ssb_capacity_pilot_symbols=16;
 enum class Channel { wire, ssb, fm, acoustic, acoustic_short };
 enum class CodeRate { half, three_quarters, seven_eighths, seven_ninths, eight_ninths, nine_tenths, two_thirds };
 struct Profile {
@@ -41,6 +42,13 @@ Profile classic_profile(Channel channel);
 // Bulk-file capacity presets; acoustic uses its independently tested OFDM path,
 // and the IC-7100 profiles use a 300..2700 Hz single-carrier audio waveform.
 Profile capacity_profile(Channel channel=Channel::wire);
+inline bool ssb_capacity_framing(const Profile& p) {
+    return p.channel==Channel::ssb&&p.capacity_mode;
+}
+bool standard_ssb_capacity_timing(const Profile& profile) noexcept;
+// The fixed QPSK SSB waveform that supports the short LDPC frame. Device
+// sample rate and output level are local choices, outside wire geometry.
+bool supports_short_ssb_frame(const Profile& profile) noexcept;
 // The small LDPC family shares the short channel's compact acoustic framing.
 // Existing LDPC and convolutional profile identities and waveforms are intact.
 inline bool small_ldpc_frame(unsigned bits) {return bits==648||bits==1296||bits==1944;}

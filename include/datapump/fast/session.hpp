@@ -1,11 +1,14 @@
 #pragma once
 #include "datapump/audio.hpp"
 #include "datapump/fast/profile.hpp"
+#include "datapump/fast/simulation.hpp"
 #include "datapump/fast/telemetry.hpp"
 #include "datapump/crypto.hpp"
+#include <cstddef>
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <string_view>
 
 namespace datapump::fast {
 class ReceivedFile;
@@ -22,24 +25,30 @@ struct Settings {
     std::uint64_t quota_bytes=256ULL*1024*1024;
     double transmit_gain=1.0;
     bool exclusive=false;
+    std::optional<SimulationSettings> simulation;
 };
 struct Snapshot {
     bool active=false,transmitting=false,listening=false;
     bool physical_complete=false,complete=false,cancelled=false;
-    bool encrypted=false,authenticated=false;
+    bool encrypted=false,authenticated=false,simulated=false;
+    bool loopback_test=false;
     bool decoding_stopped=false;
     std::uint64_t revision=0,source_bytes=0,intervals=0,authenticated_groups=0;
     std::uint64_t checksum_groups=0;
     std::uint64_t corrected_bytes=0,erased_bytes=0;
     std::uint64_t ldpc_frames=0,ldpc_failed_frames=0,ldpc_iterations=0,ldpc_changed_bits=0;
     std::uint64_t coding_cycles=0,failed_cycles=0,verified_bytes=0;
+    std::size_t capture_queue_capacity_samples=0,peak_capture_backlog_samples=0,capture_queue_workspace_bytes=0;
     double estimated_seconds=0,transmit_fraction=0;
     double elapsed_seconds=0,goodput_bps=0,evm=0,carrier_error_hz=0,clock_error_ppm=0;
+    std::string_view receiver_backend;
+    std::optional<std::uint64_t> physical_completion_input_tick;
     std::string status="Fast mode ready",error;
     std::shared_ptr<const ReceivedFile> file;
     std::shared_ptr<const Diagnostics> diagnostics;
+    std::optional<SimulationReport> simulation;
 };
-// No GUI, regular receiver, simulation, or pattern dependencies.
+// Fast owns its local audio and simulation sessions independently of other modems.
 class Session {
 public:
     Session();
@@ -51,6 +60,9 @@ public:
     // Exact UTF-8 bytes use the same source stream as files, with no type header.
     void transmit_text(const std::string& text);
     void listen();
+    // Uses the configured device in both directions with a short diagnostic
+    // message. The channel model is applied before hardware playback.
+    void test_loopback(const SimulationSettings& channel);
     void cancel();
     Snapshot poll() const;
     void save(const std::filesystem::path& destination) const;

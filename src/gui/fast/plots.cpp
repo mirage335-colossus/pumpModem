@@ -91,14 +91,15 @@ bool FastPlots::update(std::shared_ptr<const fast::Diagnostics> diagnostics,bool
     frame_=std::move(next);++revision_;return true;
 }
 std::size_t FastPlots::history_size() const {return frame_->history.size();}
-std::string FastPlots::title(B id) const {
+std::string FastPlots::title(B id,bool loopback_test) const {
     const auto& d=frame_->diagnostics;
     const auto prefix=!d?"":!frame_->active?"Retained ":frame_->stale?"Stalled ":
         id==B::fast_constellation&&older_points(*d)?"Last ":"Live ";
     const auto direction=d?(d->transmitting?"TX ":"RX "):"";
-    if(id==B::fast_waveform)return std::string(prefix)+direction+"waveform";
-    if(id==B::fast_waterfall)return std::string(prefix)+direction+"waterfall";
-    if(id==B::fast_constellation)return std::string(prefix)+direction+
+    const std::string test=loopback_test?"LOOPBACK TEST · ":"";
+    if(id==B::fast_waveform)return test+prefix+direction+"waveform";
+    if(id==B::fast_waterfall)return test+prefix+direction+"waterfall";
+    if(id==B::fast_constellation)return test+prefix+direction+
         (d&&input_view(*d)?"input I/Q":d&&!d->transmitting?"equalized constellation":"constellation");
     return {};
 }

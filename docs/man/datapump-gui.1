@@ -33,6 +33,35 @@ option shares the selected Baseband model between sampling and mixers, counted
 once. Numerical oscillator/search information is under the Link planner's
 hideable Model limits and references.
 .PP
+Fast Modem's Simulation page offers Live audio (the default), Simulation,
+and Live loopback test. Ordinary Live uses the selected audio device and
+does not insert a synthetic channel.
+Simulation starts a local Fast transmission through the native Fast sampled
+channel and receiver; results are labeled as simulated. Its controls set
+assumed transmit power in watts, path loss in dB, receiver noise density in
+dBm/Hz or Off, Baseband and Shift oscillator presets (including Off and Same
+Baseband reference), Doppler/delay spread, additional selective AM, search
+margin, and Shift frequency in Hz. These values describe the software model,
+not measurements or physical radio controls. Shift frequency affects the
+oscillator model only and does not change the Fast audio carrier or passband.
+Simulation preserves channel tails and a scored quiet completion interval
+without opening hardware audio.
+.PP
+Run loopback test sends a fixed short diagnostic through the selected channel
+model, physical audio output, connected loopback path, and captured Fast
+receiver. It uses the selected profile, device, output routing and encryption;
+encrypted tests require the selected key. Capture starts before playback,
+using the normal shared-audio handoff. Output gain is fixed at 0.1; the test
+allows at most 75 seconds of audio and 110 seconds of elapsed time. The Console
+message and file drafts are preserved and are not sent. Test status, counters
+and captured receiver plots are labeled LOOPBACK TEST. No diagnostic enters
+Signals history or creates a text/file or Save handle, and the test does not
+start automatic listening. A pass requires exact diagnostic reception,
+integrity verification and scored physical absence. Cancellation, limits and
+audio discontinuities leave the test incomplete. A cable test exercises the
+local audio path with modeled effects; it does not qualify RF propagation or
+a named transceiver.
+.PP
 FLTK and Rev builds provide the same application controls.
 The backend is selected at build time and reported by
 .BR \-\-version ;
@@ -316,10 +345,11 @@ Choose an audio device and matching peer settings before transmitting.
 Use Message for text or Attach file for an attachment; Use text restores the
 text draft. Live audio reception pauses during transmission and resumes afterward.
 .PP
-In Fast Modem, Ctrl+Enter transmits; Enter inserts a newline.
+In Fast Modem, Ctrl+Enter starts the selected transmit, simulation or loopback
+action; Enter inserts a newline.
 In Robust Modem, Enter transmits by default; the send preference can require
 Ctrl+Enter instead.
-Cancel stops the current transmission or simulation.
+Cancel stops the current transmission, simulation or loopback test.
 .PP
 Robust text of 1\(en16 source bytes uses the native short dictionary. Off sends
 its exact short bits; RS20 and RS60 use the configured bounded text-FEC profile.

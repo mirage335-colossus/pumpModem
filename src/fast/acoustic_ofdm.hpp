@@ -24,6 +24,7 @@ public:
     Transmitter(Profile,IntervalReader,SymbolObserver={});
     ~Transmitter();
     std::size_t read(std::span<float>);
+    std::size_t read_analytic(std::span<std::complex<float>>);
     bool finished() const;
     std::uint64_t samples_generated() const;
     std::size_t workspace_bytes() const;

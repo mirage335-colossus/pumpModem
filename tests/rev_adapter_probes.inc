@@ -89,7 +89,8 @@
                     require(!encryption->value&&application.enabled(ui::Command::fast_listen)&&application.field(ui::Field::fast_source).selected=="text"&&
                         !by_field(ui::Field::fast_text).element->resolved.hidden&&by_field(ui::Field::fast_file).element->resolved.hidden,
                         "Rev Fast did not default to plain text and keyless receive");
-                    require(!tabs.at(ui::Page::console)->resolved.hidden&&tabs.at(ui::Page::fast_modem)->resolved.hidden,"Rev Fast default tabs are incorrect");
+                    require(!tabs.at(ui::Page::console)->resolved.hidden&&!tabs.at(ui::Page::fast_simulation)->resolved.hidden&&
+                        tabs.at(ui::Page::fast_modem)->resolved.hidden,"Rev Fast default tabs are incorrect");
                     auto* brightness=by_field(ui::Field::fast_qr_brightness).choice;
                     require(brightness&&allows_input(brightness),"Rev Fast QR brightness is unavailable");
                     for(const auto* value:{"normal","dim","dark","off"}) {
@@ -166,7 +167,8 @@
                     } else if(fast&&b.control.scope==ui::ScreenScope::regular)
                         require(b.element->resolved.hidden,"Rev Fast retained a regular native control");
                 }
-                if(fast)for(const auto& [id,button]:tabs)require(button->resolved.hidden==(id!=ui::Page::console),"Rev Fast tab visibility is inconsistent");
+                if(fast)for(const auto& [id,button]:tabs)require(button->resolved.hidden==
+                    (id!=ui::Page::console&&id!=ui::Page::fast_simulation),"Rev Fast tab visibility is inconsistent");
                 require(application.field(ui::Field::binary).text=="001"&&application.take_services().empty(),
                     "Rev mode switching or stale callbacks changed the regular source or opened a service");
             }
@@ -293,7 +295,8 @@
                     "Rev developer mode did not hide/show an entire advanced control in place");
             for(const auto& definition:ui::pages()) {
                 auto* button=tabs.at(definition.id);
-                require(button->resolved.hidden==(definition.id==ui::Page::fast_modem||(!checked&&definition.developer_only)),
+                require(button->resolved.hidden==(definition.id==ui::Page::fast_modem||definition.id==ui::Page::fast_simulation||
+                    (!checked&&definition.developer_only)),
                     "Rev developer mode did not refresh native tab visibility without resizing");
                 if(button->resolved.hidden) {
                     require(!allows_input(button),"Rev hidden advanced tab retained keyboard input eligibility");

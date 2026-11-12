@@ -15,11 +15,15 @@ struct SnrPreset {
 double default_expected_snr(Channel channel);
 std::vector<double> expected_snr_options(Channel channel);
 SnrPreset resolve_snr_preset(Channel channel,double expected_snr_db);
+// An explicit wire edit outside the fixed short SSB geometry selects the
+// ordinary capacity frame. Matching edits retain the current frame size.
+Profile normalize_ssb_frame_size(Profile profile) noexcept;
 
 struct SymbolRateOption {std::string id,label;};
 std::vector<SymbolRateOption> symbol_rate_options(const Profile& profile);
 std::string symbol_rate_option_id(const Profile& profile);
-// Explicit rates retain the current waveform, QAM, LDPC, depth and passband
-// centre. Auto restores only the channel's default timing for that waveform.
+// Explicit rates retain QAM, coding rate, depth and passband centre. The
+// fixed short SSB frame requires its standard timing. Auto restores the
+// channel's default timing for the current waveform.
 Profile apply_symbol_rate_option(Profile profile,std::string_view id);
 }

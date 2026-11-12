@@ -341,8 +341,9 @@ std::vector<ui::TabLayout> Application::tab_layout(int width,int height) const {
     return result;
 }
 bool Application::page_visible(ui::Page page) const {
-    if(impl_->fast_selected())return page==ui::Page::console||(page==ui::Page::fast_modem&&impl_->developer_mode.checked);
-    if(!impl_->regular_selected()||page==ui::Page::fast_modem)return false;
+    if(impl_->fast_selected())return page==ui::Page::console||page==ui::Page::fast_simulation||
+        (page==ui::Page::fast_modem&&impl_->developer_mode.checked);
+    if(!impl_->regular_selected()||page==ui::Page::fast_modem||page==ui::Page::fast_simulation)return false;
     const auto& definitions=ui::pages();
     const auto found=std::find_if(definitions.begin(),definitions.end(),[&](const auto& item){return item.id==page;});
     return found!=definitions.end()&&(!found->developer_only||impl_->developer_mode.checked);

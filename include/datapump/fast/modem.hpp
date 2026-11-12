@@ -1,16 +1,21 @@
 #pragma once
 
+#include "datapump/fast/codec.hpp"
 #include "datapump/fast/profile.hpp"
 #include <complex>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
+#include <stop_token>
+#include <string_view>
 #include <vector>
 
 namespace datapump::fast {
 namespace acoustic_ofdm { class Transmitter; class Receiver; }
+namespace detail { class SsbReceiver; struct ReceiverDiagnostics; }
 
 inline constexpr std::size_t sync_symbols = 64;
 inline constexpr std::size_t training_symbols = 128;
@@ -22,6 +27,9 @@ inline constexpr std::size_t pilot_symbols = 4;
 // zero is an erasure. There are no received lengths or modulation headers.
 using IntervalReader = std::function<bool(std::span<std::uint8_t>)>;
 using IntervalSink = std::function<void(std::span<const float>)>;
+// A request permits a fixed, integrity-checked cycle receipt from the decoder.
+// It never changes interval timing, physical completion or the wire format.
+using ValidatedIntervalSink = std::function<std::optional<ValidatedCapacityCycle>(std::span<const float>,bool request)>;
 // Optional display-only payload-symbol observation. Receiver values are actual
 // normalized/equalized points before slicing; transmitter values are mapper
 // outputs. Observer exceptions are ignored and cannot change transport results.
@@ -69,6 +77,9 @@ public:
     // Ends after the pulse-shaping tail. The physical channel must subsequently
     // supply silence; TX EOF is never forwarded as receiver completion.
     std::size_t read(std::span<float> output);
+    // The analytic audio waveform has the same real projection as read().
+    // Choose one output method for the lifetime of a transmitter.
+    std::size_t read_analytic(std::span<std::complex<float>> output);
     bool finished() const;
     std::uint64_t samples_generated() const;
     std::size_t workspace_bytes() const;
@@ -76,11 +87,13 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
     std::unique_ptr<acoustic_ofdm::Transmitter> acoustic_;
+    enum class Output { unset, pcm, analytic };
+    Output output_ = Output::unset;
 };
 
 class Receiver {
 public:
-    // input_observer receives actual matched-filter I/Q at approximately two
+    // input_observer receives actual receive-filter I/Q at approximately two
     // samples per nominal symbol, on a free-running display-only cadence. It
     // has no acquired timing, gain or carrier correction and is not evidence
     // of payload symbols. Its exceptions cannot change receiver decisions.
@@ -88,21 +101,34 @@ public:
     // matched filter; callers still supply PCM and count time at
     // profile.sample_rate.
     Receiver(Profile profile, IntervalSink sink, SymbolObserver observer={},SymbolObserver input_observer={});
+    // The typed path supplies validated coding-cycle feedback to the modeled
+    // receiver when the local profile supports it.
+    Receiver(Profile profile, ValidatedIntervalSink sink, SymbolObserver observer,SymbolObserver input_observer,
+             std::stop_token stop);
     ~Receiver();
     Receiver(Receiver&&) noexcept;
     Receiver& operator=(Receiver&&) noexcept;
     Receiver(const Receiver&) = delete;
     Receiver& operator=(const Receiver&) = delete;
     void push(std::span<const float> samples);
+    std::size_t consume(std::span<const float> samples);
     // Marks an input EOF only. No missing samples, absent symbols, final
     // interval or physical completion are fabricated.
     void finish();
     const ModemProgress& progress() const;
     std::size_t workspace_bytes() const;
+    bool uses_resilient_ssb() const noexcept;
+    std::string_view backend_name() const noexcept;
+    std::optional<std::uint64_t> physical_completion_input_tick() const noexcept;
 private:
+    friend struct detail::ReceiverDiagnostics;
     struct Impl;
+    void initialize_standard(Profile,IntervalSink,SymbolObserver,SymbolObserver);
     std::unique_ptr<Impl> impl_;
     std::unique_ptr<acoustic_ofdm::Receiver> acoustic_;
+    std::unique_ptr<detail::SsbReceiver> ssb_;
+    std::stop_token stop_;
+    bool standard_ssb_ = false;
 };
 
 } // namespace datapump::fast

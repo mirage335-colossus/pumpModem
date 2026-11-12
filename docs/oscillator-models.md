@@ -1,11 +1,16 @@
 # Oscillator references and timing assumptions
 
-Baseband Osc and Shift Osc configure reference assumptions in the native Robust
-GUI session: sampled-channel impairments, duration planning and public receiver
-search bounds. They do not connect GPS hardware, discipline clocks or tune a
-radio. A selected model is not measured device accuracy, sensitivity or complete
-receiver coverage. Live reception remains scoped to the configured public
-calendar; see [current architecture and limits](robust-current.md).
+Baseband and Shift oscillator presets configure reference assumptions in the
+native Robust GUI session and the Fast Simulation page. In Robust they inform
+sampled-channel impairments, duration planning and public receiver search
+bounds; in Fast they configure the sampled channel used by **Simulation** and
+the explicit **Live loopback test**. The latter passes the modeled PCM through
+physical audio playback and capture; ordinary **Live audio** does not insert
+these synthetic oscillator effects. They do not
+connect GPS hardware, discipline clocks or tune a radio. A selected model is
+not measured device accuracy, sensitivity or complete receiver coverage. Live
+Robust reception remains scoped to the configured public calendar; see
+[current architecture and limits](robust-current.md).
 
 ## Independent physical quantities
 
@@ -17,17 +22,23 @@ when the delivered audio tone is low. Sample-rate error also accumulates timing
 drift across a long observation. Static error, random phase diffusion and
 clock wander are different model components.
 
-Carrier is the absolute frequency and Shift is the nonnegative translation
+In Robust, Carrier is the absolute frequency and Shift is the nonnegative translation
 frequency. With upper-sideband convention the real-stream tone is Carrier minus
 Shift, which must be positive. A 1.0015 MHz Carrier and 1 MHz Shift produce a
 1.5 kHz tone; direct 1.0015 MHz sampling needs a suitable sample rate and device.
 These are frequency coordinates, not hardware retuning commands.
 
-At zero Shift the Shift Osc control is inactive. A genuinely shared reference
-within a radio can link sampling and conversion errors; count that reference
-once instead of adding a second independent error. Sharing within one radio
-does not make the two stations identical or remove synthesizer noise. A USB
-interface or a radio model name is not evidence of a common RF/audio reference.
+The Shift oscillator is inactive at zero Shift. A genuinely shared
+reference within a radio can link sampling and conversion errors; count that
+reference once instead of adding a second independent error. Sharing within
+one radio does not make the two stations identical or remove synthesizer noise.
+A USB interface or a radio model name is not evidence of a common RF/audio
+reference.
+The Fast Simulation page exposes Shift frequency only as an RF coordinate for
+its oscillator-error model in Simulation and Live loopback test. Changing it
+does not translate the Fast audio carrier or alter its passband. Its
+shared-reference choice prevents counting
+the same modeled reference twice; it does not describe an actual radio's wiring.
 
 ## Illustrative profiles
 

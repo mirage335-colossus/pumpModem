@@ -205,7 +205,8 @@ const std::vector<PageDefinition>& pages() {
         {Page::compression,"compression","Compression / raw bits",false,200,true},
         {Page::flow,"flow","Modem flow",true,114,true},
         {Page::transmission,"transmission","Transmission layout",true,204,true},
-        {Page::fast_modem,"fast-modem","Modem details",false,142,true}
+        {Page::fast_modem,"fast-modem","Modem details",false,142,true},
+        {Page::fast_simulation,"fast-simulation","Simulation / live testing",false,190}
     };
     return definitions;
 }

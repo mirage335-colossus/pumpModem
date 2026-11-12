@@ -9,6 +9,7 @@
 #include <numbers>
 #include <numeric>
 #include <stdexcept>
+#include <type_traits>
 
 namespace datapump::fast::acoustic_ofdm {
 namespace {
@@ -117,7 +118,10 @@ double gross_bitrate(const Profile& p){Geometry g(p);return static_cast<double>(
 
 struct Transmitter::Impl {
     Profile p;Geometry g;IntervalReader source;SymbolObserver observer;
-    Bytes bits;std::vector<float> pcm;std::size_t position=0,block_in_cycle=0;
+    Bytes bits;
+    std::vector<float> pcm;
+    std::vector<std::complex<float>> analytic;
+    std::size_t position=0,block_in_cycle=0;
     std::uint64_t block=0,samples=0;bool done=false,have_cycle=false,refresh=false;
     Impl(Profile config,IntervalReader reader,SymbolObserver cb):p(checked(config)),g(p),source(std::move(reader)),observer(std::move(cb)),bits(g.cycle_bits) {
         validate(p);if(!source)throw Error("Missing acoustic OFDM source");
@@ -133,7 +137,8 @@ struct Transmitter::Impl {
         }
         have_cycle=true;block_in_cycle=0;refresh=block>=p.ofdm_training_blocks;return true;
     }
-    bool next() {
+    template<class Sample>
+    bool next(std::vector<Sample>& output) {
         if(!have_cycle&&!load_cycle()){done=true;return false;}
         std::vector<C> spectrum(g.n);
         if(block<p.ofdm_training_blocks) {
@@ -158,21 +163,31 @@ struct Transmitter::Impl {
             }
             if(++block_in_cycle==g.blocks)have_cycle=false;
         }
-        for(const auto k:g.active)spectrum[g.n-k]=std::conj(spectrum[k]);
+        if constexpr(std::is_same_v<Sample,float>)
+            for(const auto k:g.active)spectrum[g.n-k]=std::conj(spectrum[k]);
         fft(spectrum,true);
         // One fixed scale for every block; amplitude/4.5 is nominal RMS.
         const auto scale=p.amplitude*g.n/(4.5*std::sqrt(2.*g.active.size()));
-        pcm.resize(g.length);
-        for(std::size_t i=0;i<g.length;++i)pcm[i]=static_cast<float>(spectrum[(i+g.n-g.cp)%g.n].real()*scale);
+        output.resize(g.length);
+        for(std::size_t i=0;i<g.length;++i) {
+            const auto value=spectrum[(i+g.n-g.cp)%g.n];
+            if constexpr(std::is_same_v<Sample,float>)
+                output[i]=static_cast<float>(value.real()*scale);
+            else
+                // The real path sums conjugate bins. The analytic projection
+                // doubles the positive bins to reproduce that same real part.
+                output[i]=static_cast<std::complex<float>>(value*(2*scale));
+        }
         ++block;position=0;return true;
     }
-    std::size_t read(std::span<float> out) {
+    template<class Sample>
+    std::size_t read(std::span<Sample> out,std::vector<Sample>& buffer) {
         if(done)return 0;
         std::size_t count=0;
         while(count<out.size()) {
-            if(position==pcm.size()&&!next())break;
-            const auto amount=std::min(out.size()-count,pcm.size()-position);
-            std::copy_n(pcm.begin()+static_cast<std::ptrdiff_t>(position),amount,out.begin()+static_cast<std::ptrdiff_t>(count));
+            if(position==buffer.size()&&!next(buffer))break;
+            const auto amount=std::min(out.size()-count,buffer.size()-position);
+            std::copy_n(buffer.begin()+static_cast<std::ptrdiff_t>(position),amount,out.begin()+static_cast<std::ptrdiff_t>(count));
             count+=amount;position+=amount;samples+=amount;
         }
         return count;
@@ -485,10 +500,11 @@ struct Receiver::Impl {
 
 Transmitter::Transmitter(Profile p,IntervalReader r,SymbolObserver o):impl_(std::make_unique<Impl>(p,std::move(r),std::move(o))){}
 Transmitter::~Transmitter()=default;
-std::size_t Transmitter::read(std::span<float> out){return impl_->read(out);}
+std::size_t Transmitter::read(std::span<float> out){return impl_->read(out,impl_->pcm);}
+std::size_t Transmitter::read_analytic(std::span<std::complex<float>> out){return impl_->read(out,impl_->analytic);}
 bool Transmitter::finished()const{return impl_->done;}
 std::uint64_t Transmitter::samples_generated()const{return impl_->samples;}
-std::size_t Transmitter::workspace_bytes()const{return sizeof(Impl)+impl_->bits.capacity()+impl_->pcm.capacity()*sizeof(float)+impl_->g.n*sizeof(C);}
+std::size_t Transmitter::workspace_bytes()const{return sizeof(Impl)+impl_->bits.capacity()+impl_->pcm.capacity()*sizeof(float)+impl_->analytic.capacity()*sizeof(std::complex<float>)+impl_->g.n*sizeof(C);}
 Receiver::Receiver(Profile p,IntervalSink s,SymbolObserver o,SymbolObserver i,DiagnosticObserver d):impl_(std::make_unique<Impl>(p,std::move(s),std::move(o),std::move(i),std::move(d))){}
 Receiver::~Receiver()=default;
 void Receiver::push(std::span<const float> values){impl_->push(values);}

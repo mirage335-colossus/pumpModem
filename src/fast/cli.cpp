@@ -17,6 +17,7 @@
 #include <map>
 #include <set>
 #include <thread>
+#include <utility>
 
 namespace datapump::fast {
 namespace {
@@ -154,6 +155,7 @@ Settings settings(const Args& a,bool load_key) {
     s.channel_mode=a.has("right-mono")?audio::ChannelMode::right_mono:
         s.mono?audio::ChannelMode::left_mono:audio::ChannelMode::stereo;
     auto quota=a.integer("quota-mb",256);if(!quota||quota>256)throw Error("Fast quota must be 1..256 MiB");s.quota_bytes=quota*1024*1024;
+    s.profile=normalize_ssb_frame_size(std::move(s.profile));
     validate(s.profile);
     if(encryption_enabled(a)&&load_key) {
         auto ring=load_keyring(a.get("keyfile"),a.has("pad")?std::optional<std::filesystem::path>(a.get("pad")):std::nullopt);
@@ -242,6 +244,8 @@ int cli_main(int argc,char** argv) {
             <<",\"occupied_lower_hz\":"<<occupied_lower_hz(p)<<",\"occupied_upper_hz\":"<<occupied_upper_hz(p);
         if(p.channel==Channel::acoustic_short&&p.capacity_mode&&!p.compact_convolutional)
             std::cout<<",\"ldpc_frame_bits\":"<<p.ldpc_frame_bits<<",\"ofdm_training_blocks\":"<<p.ofdm_training_blocks;
+        if(p.channel==Channel::ssb&&p.capacity_mode)
+            std::cout<<",\"ldpc_frame_bits\":"<<p.ldpc_frame_bits;
         if(a.has("estimate-bytes")) {
             const auto estimate=estimate_transmission(p,encrypted,a.integer("estimate-bytes",0));
             std::cout<<",\"estimated_seconds\":"<<estimate.seconds<<",\"estimated_source_bps\":"<<estimate.source_bps

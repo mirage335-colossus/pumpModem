@@ -20,6 +20,7 @@
 #include <fstream>
 #include <limits>
 #include <mutex>
+#include <new>
 #include <string_view>
 #include <thread>
 #include <utility>
@@ -271,6 +272,13 @@ Bytes capacity_encode(const Profile& p,std::span<const std::uint8_t> systematic)
         const auto bits=ldpc::interleave(ldpc::encode(std::span(rs).subspan(block*block_bytes,block_bytes),p.code_rate,p.ldpc_frame_bits),p.ldpc_frame_bits);
         for(std::size_t column=0;column<p.ldpc_frame_bits;++column)wire[column*p.interleave_depth+(block+rotations[column])%p.interleave_depth]=bits[column];
     }
+    return wire;
+}
+Bytes encode_capacity_wire(const Profile& p,std::span<const std::uint8_t> systematic,
+                           std::uint64_t wire_ordinal,bool physical_fill) {
+    auto wire=capacity_encode(p,systematic);
+    if(physical_fill)wire.resize(cycle_intervals(p)*physical_interval_bits);
+    whitening_bits(wire.size(),wire_ordinal,[&](std::size_t i,unsigned bit){wire[i]^=static_cast<std::uint8_t>(bit);});
     return wire;
 }
 Bytes capacity_decode(const Profile& p,std::span<const float> wire,DecodeSnapshot& stats) {
@@ -556,9 +564,7 @@ struct StreamEncoder::Impl {
             systematic=keys?seal(profile,*keys,salt,ordinal,random(16),area):public_seal(profile,salt,ordinal,area);
             ++ordinal;OPENSSL_cleanse(area.data(),area.size());
         }
-        wire=capacity_encode(profile,systematic);
-        wire.resize(cycle_intervals(profile)*physical_interval_bits);
-        whitening_bits(wire.size(),wire_ordinal,[&](std::size_t i,unsigned bit){wire[i]^=static_cast<std::uint8_t>(bit);});
+        wire=encode_capacity_wire(profile,systematic,wire_ordinal,true);
         offset=0;
     }
     unsigned next_source_bit() {
@@ -631,7 +637,7 @@ struct StreamDecoder::Impl {
         stats.encrypted=crypto.has_value();
     }
     void fail(const std::string& why) {stats.failed=true;stats.decoding_stopped=true;stats.status=why;}
-    void cycle() {
+    std::optional<ValidatedCapacityCycle> cycle(bool want_feedback) {
         if(stats.coding_cycles==std::numeric_limits<std::uint64_t>::max())throw Error("Fast cycle counter exhausted");
         const auto physical_cycle=stats.coding_cycles++;
         const bool bootstrap=!bootstrap_received;
@@ -679,14 +685,14 @@ struct StreamDecoder::Impl {
                 throw Error("Non-finite fast soft evidence");
             reject(error.what());
             if(bootstrap)fail(error.what());
-            soft.clear();return;
+            soft.clear();return std::nullopt;
         }
         if(bootstrap) {
             salt.assign(systematic.begin(),systematic.begin()+32);
             if(!same(std::span(systematic).subspan(32,32),bootstrap_tag(profile,crypto,salt,source_encoding)) ||
                std::any_of(systematic.begin()+64,systematic.end(),[](auto b){return b!=0;})) {
                 const auto why=crypto?"Fast bootstrap integrity failed":"Fast public bootstrap checksum failed";
-                reject(why);fail(why);soft.clear();return;
+                reject(why);fail(why);soft.clear();return std::nullopt;
             }
             if(crypto)keys=std::make_unique<Keys>(profile,*crypto,salt);
             bootstrap_received=true;
@@ -709,6 +715,16 @@ struct StreamDecoder::Impl {
             }
         }
         soft.clear();
+        if(!want_feedback || !profile.capacity_mode || rejected)return std::nullopt;
+        try {
+            return ValidatedCapacityCycle{physical_cycle,
+                crypto?CapacityCycleValidation::authenticated:CapacityCycleValidation::checksummed,
+                encode_capacity_wire(profile,systematic,physical_cycle,false)};
+        }catch(const std::bad_alloc&) {
+            // Decoding and integrity checks have already succeeded. Optional
+            // channel evidence can be dropped if its allocation fails.
+            return std::nullopt;
+        }
     }
     std::shared_ptr<ReceivedFile::Impl> interpret_capacity() {
         const auto width=source_bytes_per_group(profile,crypto.has_value());
@@ -780,17 +796,28 @@ StreamDecoder::~StreamDecoder()=default;
 StreamDecoder::StreamDecoder(StreamDecoder&&) noexcept=default;
 StreamDecoder& StreamDecoder::operator=(StreamDecoder&&) noexcept=default;
 void StreamDecoder::push_interval(std::span<const float> soft_bits) {
+    (void)ingest_interval(soft_bits,false);
+}
+std::optional<ValidatedCapacityCycle> StreamDecoder::push_interval_with_feedback(std::span<const float> soft_bits) {
+    return ingest_interval(soft_bits,true);
+}
+std::optional<ValidatedCapacityCycle> StreamDecoder::push_interval(std::span<const float> soft_bits,bool request_feedback) {
+    return ingest_interval(soft_bits,request_feedback);
+}
+std::optional<ValidatedCapacityCycle> StreamDecoder::ingest_interval(std::span<const float> soft_bits,bool want_feedback) {
     if(soft_bits.size()!=physical_interval_bits)throw Error("Fast interval must have exactly 2048 positions");
     if(impl_->stats.physical_end)throw Error("Fast reception already physically ended");
     if(impl_->stats.intervals==std::numeric_limits<std::uint64_t>::max()) {
         impl_->soft.clear();impl_->fail("Fast interval counter exhausted");
         throw Error("Fast interval counter exhausted");
     }
-    ++impl_->stats.intervals;if(impl_->stats.decoding_stopped)return;
+    ++impl_->stats.intervals;if(impl_->stats.decoding_stopped)return std::nullopt;
     try {
         impl_->soft.insert(impl_->soft.end(),soft_bits.begin(),soft_bits.end());
-        if(impl_->soft.size()==cycle_intervals(impl_->profile)*physical_interval_bits)impl_->cycle();
+        if(impl_->soft.size()==cycle_intervals(impl_->profile)*physical_interval_bits)
+            return impl_->cycle(want_feedback);
     }catch(const std::exception& error) {impl_->soft.clear();impl_->fail(error.what());}
+    return std::nullopt;
 }
 void StreamDecoder::finish(bool physical_end) {
     if(impl_->stats.physical_end)return;

@@ -176,17 +176,55 @@ class FastCLI(unittest.TestCase):
         self.run_pump("fast-info", "--format", "classic", "--code-rate", "2/3", ok=False)
 
     def test_radio_capacity_defaults(self):
+        source_bytes = 50_000_000
         for profile in ("ssb", "fm"):
             info = json.loads(self.run_pump("fast-info", "--profile", profile,
-                                          "--estimate-bytes", "50000000").stdout)
+                                          "--estimate-bytes", str(source_bytes)).stdout)
             self.assertEqual(info["format"], "capacity")
-            self.assertEqual(info["constellation"], 64)
-            self.assertEqual(info["code_rate"], "3/4")
+            self.assertEqual(info["constellation"], 4 if profile == "ssb" else 64)
+            self.assertEqual(info["code_rate"], "1/2" if profile == "ssb" else "3/4")
             self.assertAlmostEqual(info["occupied_bandwidth_hz"], 2400)
             self.assertAlmostEqual(info["symbol_rate"], 2400 / 1.1)
-            self.assertGreater(info["estimated_source_bps"], 8600)
+            self.assertEqual(info["marker_spacing_intervals"], 4)
+            self.assertEqual(info["pilot_spacing_symbols"], 16 if profile == "ssb" else 64)
+            if profile == "ssb":
+                self.assertEqual(info["ldpc_frame_bits"], 16200)
+                self.assertEqual(info["ldpc_blocks_per_cycle"], 1)
+                self.assertEqual(info["cycle_intervals"], 8)
+                self.assertEqual(info["source_bytes_per_cycle"], 863)
+                intervals = 8 * (2 + source_bytes // 863)
+                # Training, QPSK data plus pilots, periodic markers and RRC tail.
+                last_symbol = 2048 + intervals * 2048 + (intervals // 4) * 64 + 128 - 1
+                # The 48 kHz waveform uses 22 samples per symbol and 6.25 seconds of quiet.
+                samples = 22 * last_symbol + 1 + 300_000
+                self.assertEqual(info["estimated_intervals"], intervals)
+                self.assertEqual(info["estimated_samples"], samples)
+                self.assertAlmostEqual(info["estimated_source_bps"], 8 * source_bytes * 48000 / samples)
+            else:
+                self.assertGreater(info["estimated_source_bps"], 8600)
             self.assertEqual(info["snr_reference_bandwidth_hz"], 2400)
             self.assertEqual(info["expected_snr_db"], 20)
+
+    def test_ssb_short_default_promotes_manual_long_geometry(self):
+        short = json.loads(self.run_pump("fast-info", "--profile", "ssb",
+                                        "--estimate-bytes", "50000000").stdout)
+        self.assertEqual(short["ldpc_frame_bits"], 16200)
+        self.assertEqual((short["constellation"], short["code_rate"], short["ldpc_blocks_per_cycle"]),
+                         (4, "1/2", 1))
+
+        long = json.loads(self.run_pump("fast-info", "--profile", "ssb", "--qam", "4096",
+                                        "--code-rate", "8/9", "--interleave", "8",
+                                        "--estimate-bytes", "50000000").stdout)
+        self.assertEqual(long["ldpc_frame_bits"], 64800)
+        self.assertEqual((long["constellation"], long["code_rate"], long["ldpc_blocks_per_cycle"]),
+                         (4096, "8/9", 8))
+        self.assertGreater(long["estimated_source_bps"], short["estimated_source_bps"])
+
+        restored = json.loads(self.run_pump("fast-info", "--profile", "ssb",
+                                           "--estimate-bytes", "50000000").stdout)
+        self.assertEqual(restored["ldpc_frame_bits"], 16200)
+        self.assertEqual((restored["constellation"], restored["code_rate"], restored["ldpc_blocks_per_cycle"]),
+                         (4, "1/2", 1))
 
     def test_expected_snr_presets_and_overrides(self):
         for profile, low, reference in (("wire", 25, 18000), ("acoustic", -27, 17500),
@@ -197,6 +235,8 @@ class FastCLI(unittest.TestCase):
                 self.assertEqual(info["expected_snr_db"], low)
                 self.assertEqual(info["snr_reference_bandwidth_hz"], reference)
                 self.assertTrue(info["snr_preset_unmodified"])
+                if profile == "ssb":
+                    self.assertEqual(info["ldpc_frame_bits"], 64800)
                 self.assertLessEqual(info["occupied_bandwidth_hz"], reference)
                 if profile != "wire":
                     self.assertLess(info["symbol_rate"], 10)

@@ -9,7 +9,7 @@ inline void finish_worker(Snapshot& out,bool stop_requested) {
     out.cancelled=stop_requested&&!out.complete;
     if(out.cancelled) {
         out.complete=false;out.authenticated=false;out.file.reset();
-        out.status="Cancelled; transfer incomplete";
+        out.status=out.loopback_test?"Cable test cancelled; transfer incomplete":"Cancelled; transfer incomplete";
     }
     out.active=false;out.transmitting=false;out.listening=false;
 }

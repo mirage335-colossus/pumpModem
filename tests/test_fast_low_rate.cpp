@@ -147,6 +147,7 @@ void sampled(Profile p,double reference_snr_db=100,double reference_bandwidth=24
 
 void minimum_baud_bounds() {
     auto p=capacity_profile(Channel::ssb);
+    p.ldpc_frame_bits=64800;
     p.symbol_rate=1;p.sample_rate=192000;p.rolloff=.02;p.constellation=4;
     p.pilot_spacing_symbols=1024;validate(p);
     Transmitter tx(p,[](std::span<std::uint8_t>){return false;});
@@ -165,6 +166,7 @@ void minimum_baud_bounds() {
 int main() {try {
     minimum_baud_bounds();
     auto p=capacity_profile(Channel::ssb);
+    p.ldpc_frame_bits=64800;
     p.interleave_depth=1;p.constellation=16;p.rolloff=.2;
     p.marker_spacing_intervals=1;p.pilot_spacing_symbols=16;
     p.symbol_rate=5;sampled(p);

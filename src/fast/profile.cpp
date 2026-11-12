@@ -4,6 +4,22 @@
 #include <cmath>
 
 namespace datapump::fast {
+namespace {
+constexpr double radio_symbol_rate=2400/1.10, radio_carrier_hz=1500, radio_rolloff=.10;
+constexpr unsigned radio_marker_spacing=4, ssb_pilot_spacing=16;
+}
+
+bool standard_ssb_capacity_timing(const Profile& p) noexcept {
+    return ssb_capacity_framing(p) && !p.acoustic_ofdm && !p.compact_convolutional && !p.robust &&
+        p.symbol_rate==radio_symbol_rate &&
+        p.carrier_hz==radio_carrier_hz && p.rolloff==radio_rolloff &&
+        p.marker_spacing_intervals==radio_marker_spacing && p.pilot_spacing_symbols==ssb_pilot_spacing;
+}
+
+bool supports_short_ssb_frame(const Profile& p) noexcept {
+    return p.constellation==4 && p.code_rate==CodeRate::half && p.interleave_depth==1 && standard_ssb_capacity_timing(p);
+}
+
 Profile classic_profile(Channel channel) {
     Profile p;p.channel=channel;
     p.capacity_mode=false;p.marker_spacing_intervals=4;
@@ -29,14 +45,14 @@ Profile capacity_profile(Channel channel) {
     case Channel::wire: break;
     case Channel::ssb:
     case Channel::fm:
-        // IC-7100 audio modem: occupy 300..2700 Hz, independent of its RF/IF
-        // filter bandwidth. Gray QAM, LDPC and the compact source format give
-        // both radio modes the same high-quality-link throughput. The shorter
-        // pilot/marker cadence follows radio phase and gain changes more often
-        // than the direct cable preset. No radio control or PTT is implied.
-        p.constellation=64;p.code_rate=CodeRate::three_quarters;p.interleave_depth=4;
-        p.symbol_rate=2400/1.10;p.carrier_hz=1500;p.rolloff=.10;p.amplitude=.30;
-        p.marker_spacing_intervals=4;p.pilot_spacing_symbols=64;
+        // The radio presets share the 300..2700 Hz audio passband. SSB uses
+        // the denser known-symbol cadence selected for fading-channel tests.
+        p.constellation=channel==Channel::ssb?4:64;
+        p.code_rate=channel==Channel::ssb?CodeRate::half:CodeRate::three_quarters;
+        p.interleave_depth=channel==Channel::ssb?1:4;
+        if(channel==Channel::ssb)p.ldpc_frame_bits=16200;
+        p.symbol_rate=radio_symbol_rate;p.carrier_hz=radio_carrier_hz;p.rolloff=radio_rolloff;p.amplitude=.30;
+        p.marker_spacing_intervals=radio_marker_spacing;p.pilot_spacing_symbols=channel==Channel::ssb?ssb_pilot_spacing:64;
         break;
     case Channel::acoustic:
     case Channel::acoustic_short:
@@ -126,9 +142,13 @@ void validate(const Profile& p) {
     if(p.ofdm_training_blocks!=16 && (p.channel!=Channel::acoustic_short||
        !p.acoustic_ofdm||p.ofdm_training_blocks<6||p.ofdm_training_blocks>16))
         throw Error("Short acoustic OFDM training must use 6..16 blocks");
-    if(p.ldpc_frame_bits!=64800 && (p.channel!=Channel::acoustic_short||
-       !p.capacity_mode||(p.ldpc_frame_bits!=16200&&!small_ldpc_frame(p.ldpc_frame_bits))))
-        throw Error("Short LDPC frames require the acoustic-short capacity profile");
+    if(p.ldpc_frame_bits!=64800) {
+        const bool short_ssb=p.ldpc_frame_bits==16200 && supports_short_ssb_frame(p);
+        const bool short_acoustic=p.channel==Channel::acoustic_short && p.capacity_mode &&
+            (p.ldpc_frame_bits==16200 || small_ldpc_frame(p.ldpc_frame_bits));
+        if(!short_ssb && !short_acoustic)
+            throw Error("Short LDPC frames require acoustic-short capacity or the fixed 16200-bit SSB capacity geometry");
+    }
     if(p.capacity_mode) {
         if(p.ldpc_frame_bits!=64800&&p.code_rate!=CodeRate::half&&
            p.code_rate!=CodeRate::two_thirds&&p.code_rate!=CodeRate::three_quarters)
@@ -172,7 +192,7 @@ void validate(const Profile& p) {
 Bytes profile_id(const Profile& p) {
     validate(p);
     Bytes out{'d','a','t','a','p','u','m','p','/','f','a','s','t','/','v','1'};
-    if(p.capacity_mode)out.back()='2';
+    if(p.capacity_mode)out.back()=ssb_capacity_framing(p)?'3':'2';
     const auto append=[&](std::uint64_t n) {for(int i=7;i>=0;--i)out.push_back(static_cast<std::uint8_t>(n>>(i*8)));};
     if(p.compact_convolutional)
         out.insert(out.end(),{'/','c','o','m','p','a','c','t','/','v','1'});
@@ -196,6 +216,9 @@ Bytes profile_id(const Profile& p) {
     append(std::bit_cast<std::uint64_t>(p.carrier_hz));
     append(std::bit_cast<std::uint64_t>(p.rolloff));
     if(p.capacity_mode) {append(p.marker_spacing_intervals);append(p.pilot_spacing_symbols);}
+    // The SSB v3 identity binds the sixteen-symbol sequence defined by
+    // sync_symbol(11 + 13*j), j in [0,16). It keeps the 2048/64 sync words.
+    if(ssb_capacity_framing(p))append(ssb_capacity_pilot_symbols);
     return out;
 }
 double gross_bitrate(const Profile& p) {validate(p);return p.acoustic_ofdm?acoustic_ofdm::gross_bitrate(p):p.symbol_rate*std::log2(p.constellation);}

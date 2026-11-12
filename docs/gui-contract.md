@@ -25,6 +25,34 @@ settings do not implement unknown-start acquisition or measure the audio device.
 See [current architecture](robust-current.md) and
 [current validation](validation.md#native-gui-integration).
 
+Fast Modem's **Simulation** page offers **Live audio** (the default),
+**Simulation**, and **Live loopback test**. Ordinary Live uses the selected audio
+device; the synthetic link controls are disabled and no synthetic channel is
+inserted. In Simulation, the locally emitted Fast waveform passes through the Fast native
+sampled channel and Fast receiver. The page configures assumed transmit power
+(W), path loss (dB), receiver noise density (dBm/Hz or off), Baseband and Shift
+oscillator presets (including Off and a shared Baseband reference), Doppler /
+delay spread, additional selective AM, search margin, and Shift frequency in Hz.
+These are simulation assumptions, not radio controls or physical measurements;
+the Shift frequency affects the oscillator model only and leaves the Fast audio
+carrier and passband fixed. Simulation results are labeled separately from live
+audio results. A simulation begins from a local transmission and retains the
+channel's delayed tail and scored quiet completion without opening hardware audio.
+
+**Run loopback test** uses a fixed short diagnostic with the selected profile,
+key/encryption, channel assumptions, device and output routing. It acquires the
+shared audio service, starts capture before playback, and sends the modeled
+waveform through the physical loopback path into the native Fast receiver.
+Output gain is fixed at 0.1, with limits of 75 seconds of audio and 110 seconds
+of elapsed time. Draft text/file selections remain intact and are not sent.
+The explicit test does not start automatic listening. Status, counters and
+captured receiver plots show **LOOPBACK TEST**. The diagnostic never enters
+Signals history, changes its selection or eviction, or exposes a text/file or
+Save handle. A pass requires exact diagnostic reception, integrity and scored
+physical absence; cancellation, limits and audio discontinuities remain
+incomplete. Both native frontends use this same in-process workflow.
+See [Fast mode](fast-mode.md#fast-simulation) for operation and qualification limits.
+
 | Shared control | Native meaning |
 | --- | --- |
 | Encryption | Off preserves unencrypted DATA; keyfile and AMATEUR select the effective key. AMATEUR is public key material, not confidentiality. |

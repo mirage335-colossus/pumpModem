@@ -189,7 +189,23 @@ void acoustic_wave_tail() {
         }
     }
 }
+void short_ssb_wave_eof() {
+    Directory directory;
+    Settings settings;settings.profile=capacity_profile(Channel::ssb);
+    const auto wave=directory.path/"short-ssb.wav";
+    transmit_text_wave(settings,"WAV prefix",wave);
+    constexpr std::uint32_t pcm_bytes=2048;
+    std::filesystem::resize_file(wave,44+pcm_bytes);
+    {
+        std::fstream file(wave,std::ios::in|std::ios::out|std::ios::binary);
+        put32(file,4,36+pcm_bytes);put32(file,40,pcm_bytes);
+    }
+    const auto pending=receive_wave(settings,wave);
+    check(pending.receiver_backend=="resilient-ssb" && !pending.physical_complete &&
+          !pending.physical_completion_input_tick && !pending.complete && !pending.file,
+          "Canonical SSB WAV EOF bypassed the modeled receiver or exposed an incomplete result");
+}
 int main() {
-    try{test_files();text_wave_roundtrips();dense_s16_file();acoustic_wave_tail();std::cout<<"fast bounded local WAV/file tests passed\n";}
+    try{test_files();text_wave_roundtrips();dense_s16_file();acoustic_wave_tail();short_ssb_wave_eof();std::cout<<"fast bounded local WAV/file tests passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

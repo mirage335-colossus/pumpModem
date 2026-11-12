@@ -41,7 +41,14 @@ int main() {try {
             }
             require(bandwidth<=preset.reference_bandwidth_hz+1e-8,"preset escaped reference band");
             const auto actual=estimate_transmission(p,false,50000000).source_bps;
-            require(actual<=previous+1e-7,"lower SNR increased bulk throughput");previous=actual;
+            if(channel==Channel::ssb)
+                require(p.ldpc_frame_bits==(snr==top?16200U:64800U),"SSB SNR preset selected the wrong frame size");
+            // The resilient SSB standard and modeled long-frame settings
+            // have distinct overhead. Verify monotonicity within the family.
+            if(channel!=Channel::ssb||snr<top) {
+                require(actual<=previous+1e-7,"lower SNR increased bulk throughput within the preset family");
+                previous=actual;
+            }
             const auto shannon=preset.reference_bandwidth_hz*std::log2(1+std::pow(10.,snr/10.));
             require(actual<shannon,"preset exceeds reference-band Gaussian capacity");
             const auto selected=snr+10*std::log10(preset.reference_bandwidth_hz/bandwidth);
@@ -65,19 +72,46 @@ int main() {try {
         rejects([&]{resolve_snr_preset(channel,std::numeric_limits<double>::quiet_NaN());});
         rejects([&]{resolve_snr_preset(channel,std::numeric_limits<double>::infinity());});
     }
-    // The short acoustic profile is additional; original local IDs and frame
-    // geometries keep their existing enum ordinals and default parameters.
+    // Channel IDs and the other capacity frame defaults remain stable.
     require(static_cast<unsigned>(Channel::wire)==0&&static_cast<unsigned>(Channel::ssb)==1&&
         static_cast<unsigned>(Channel::fm)==2&&static_cast<unsigned>(Channel::acoustic)==3,
         "existing channel identity changed");
     for(const auto channel:{Channel::wire,Channel::ssb,Channel::fm,Channel::acoustic}) {
-        require(profile(channel).ldpc_frame_bits==64800&&profile(channel).ofdm_training_blocks==16,
+        require(profile(channel).ldpc_frame_bits==(channel==Channel::ssb?16200U:64800U)&&profile(channel).ofdm_training_blocks==16,
             "existing channel frame/training geometry changed");
         auto invalid=profile(channel);invalid.ldpc_frame_bits=16200;
-        rejects([&]{validate(invalid);});
+        if(channel!=Channel::ssb)rejects([&]{validate(invalid);});
         invalid=profile(channel);invalid.ofdm_training_blocks=6;
         rejects([&]{validate(invalid);});
     }
+    const auto short_ssb=capacity_profile(Channel::ssb);
+    auto ssb=short_ssb;ssb.ldpc_frame_bits=64800;
+    require(profile_id(short_ssb)!=profile_id(ssb) && cycle_intervals(short_ssb)==8 &&
+        capacity_coded_bits(short_ssb)==16200 && capacity_information_bytes(short_ssb)==900 &&
+        preamble_symbols(short_ssb)==preamble_symbols(ssb) &&
+        total_interval_symbols(short_ssb,8)==total_interval_symbols(ssb,8),
+        "Standard short SSB LDPC must retain its waveform and bind its own eight-interval code geometry");
+    auto local_short=short_ssb;local_short.sample_rate=44100;local_short.amplitude=.1;
+    require(profile_id(normalize_ssb_frame_size(local_short))==profile_id(short_ssb),
+        "Local PCM settings or matching manual geometry changed the short SSB wire identity");
+    auto manual_ssb=short_ssb;manual_ssb.constellation=4096;manual_ssb.code_rate=CodeRate::eight_ninths;
+    const auto promoted=normalize_ssb_frame_size(manual_ssb);
+    require(promoted.ldpc_frame_bits==64800 && promoted.constellation==4096 &&
+        promoted.code_rate==CodeRate::eight_ninths && profile_id(promoted)!=profile_id(short_ssb),
+        "An explicit high-rate SSB edit did not select its ordinary capacity frame");
+    const auto narrowed=apply_symbol_rate_option(short_ssb,"sc:1000");
+    require(narrowed.symbol_rate==1000 && narrowed.ldpc_frame_bits==64800 &&
+        apply_symbol_rate_option(short_ssb,"auto").ldpc_frame_bits==16200,
+        "A manual SSB timing change did not preserve the appropriate frame size");
+    const auto short_rates=symbol_rate_options(short_ssb);
+    require(std::ranges::any_of(short_rates,[](const auto& option){return option.id=="sc:1000";}),
+        "Short SSB hid a valid manual timing choice");
+    auto short_ssb_qam=short_ssb;short_ssb_qam.constellation=16;
+    rejects([&]{validate(short_ssb_qam);});
+    auto unsupported_ssb=short_ssb;unsupported_ssb.pilot_spacing_symbols=64;
+    rejects([&]{validate(unsupported_ssb);});
+    unsupported_ssb=classic_profile(Channel::ssb);unsupported_ssb.ldpc_frame_bits=16200;
+    rejects([&]{validate(unsupported_ssb);});
     require(parse_channel("acoustic-short")==Channel::acoustic_short&&
         channel_name(Channel::acoustic_short)=="acoustic-short", "short profile name is not canonical");
     require(default_expected_snr(Channel::acoustic_short)==-6,"short profile must default to -6 dB");

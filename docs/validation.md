@@ -43,6 +43,158 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Fast simulation and manual-channel investigation — 12 November 2026
+
+The Fast testing page now uses the native analytic transmitter, sampled channel,
+receiver and protected source codec. Controls cover the declared link budget,
+oscillators, RF shift coordinate, Doppler/delay spread, selective AM and margin.
+Live remains a separate audio-device mode. Simulation cannot acquire hardware
+audio, and cancellation, EOF or a failed test limit cannot manufacture physical
+completion. The native probe and ordered manual-case runner test encrypted XZ
+attachments with exact byte comparison and record limits, channel/profile
+settings, device formats, workspace, capture backlog and receiver costs.
+
+On the Ryzen 5 PRO 5650U, the initial unchanged-receiver patch passed all
+**39 Fast checks** and **29 shared GUI checks**, including analytic/real waveform
+parity, continuous channel state, delayed tails, encrypted simulation completion
+and cancellation. Native adapter checks exposed outdated tab assertions and an
+invalid-draft re-entry issue; the assertions and draft editor were corrected.
+All **three native FLTK checks** then passed on a private 1920×1440 Xvfb
+display. Two test fixtures now account for window-manager resize limits;
+the corresponding desktop probes passed too. A separate desktop run's external
+clipboard contention was resolved by display isolation, not a clipboard change.
+These checks are not a new release certification or a qualification of the
+optional Rev frontend.
+
+The public Fast SSB default is now QPSK rate-1/2 with 16,200 coded bits
+(7,200 information bits), depth 1 at 48 kHz. The typed receiver facade dispatches
+this profile and the exact explicit 4096-QAM/8/9/64,800-bit profile to the
+modeled SSB receiver; unsupported sample rates and unqualified variants retain
+the standard SSB fallback. The focused dispatch group passed 9/9 tests
+([log](../local-evidence/fast-channel/ssb-v3-final-facade-focused.log)). The
+shared Session loopback test also passed on the EME419 cable case: an encrypted
+31-byte diagnostic authenticated over 16 intervals/two LDPC frames/four
+iterations, physical completion was observed at tick 1,084,512, and 512 actual
+input I/Q points were reported. It exposed no file, peaked at 5.823 seconds in
+the 8-second capture queue, and reported no Session error; ALSA warnings remain
+in stderr. This is bounded Session/cable functionality, not an end-to-end file
+transfer or a GUI-button hardware run. The loopback action received direct GUI
+testing and independent source review; Live audio remains unqualified.
+
+The first final Fast CLI group run exposed a stale public-SSB assertion that
+required throughput above 1,000 bit/s. The adopted 50 MB public-file geometry
+computes 912.222 bit/s including exact wire and tail overhead; encrypted bulk is
+895.317 bit/s. This is a test-expectation mismatch rather than a receiver
+failure. The corrected targeted `fast_cli` test passed in 31.45 s, and the
+corrected `fast_ssb_pulse` test passed in 0.05 s; see [CLI rerun](../local-evidence/fast-channel/ssb-v3-final-cli-corrected.log)
+and [fixture rerun](../local-evidence/fast-channel/ssb-v3-final-fixtures-corrected.log).
+The original combined 52-test run passed 49 and failed three: that CLI assertion,
+the `gui_fast` fixed diagnostic-action assertion, and the short-LDPC profile
+validation. Correcting the first GUI assertion exposed another stale expectation:
+that an empty Console draft should block loopback or bypass device acquisition.
+The final test now checks active loopback status and `Waiting for device`;
+direct GUI testing passed and independent review accepted the test-only changes.
+No production source changed for these three corrections. The final GUI CTest
+group passed 29/29, but its wrapper exited 1 after sandbox Xvfb could not bind
+local sockets and cleanup reported a missing process. That wrapper result is
+an environment failure, not a GUI test failure
+([log](../local-evidence/fast-channel/ssb-v3-final-gui-group.log)). A
+separate final native run outside the sandbox passed all three GUI workflow,
+adapter and document checks under private Xvfb ([log](../local-evidence/fast-channel/ssb-v3-final-native-group.log)).
+The software display emitted AMDGPU permission warnings; this was not GPU
+execution or a GUI-button hardware run. The original 52-case batch had 49
+passes; all three failed cases subsequently passed their corrected focused or
+shared-GUI checks. This coverage came from separate runs, not a single 52/52
+batch.
+
+Both exact `_tests_FastModem.md` rows failed acquisition in the initial receiver
+and in separate bounded 60-second physical cable tests. The operator confirmed
+−174 dBm/Hz and the usual connected cable; the failed manual-row captures had no
+clipped samples and at most 25 ms backlog. A shortened clean encrypted cable
+baseline recovered, and an independent flat 35 dB software case recovered
+80 KiB at 10.58 kbit/s including startup and quiet. The −28 dB one-baud prefix
+failed its first full acquisition opportunity. These original results do not
+qualify complete sensitivity.
+
+The canonical fixed 16/16-pilot v3 HF417 full run decoded both LDPC frames but
+failed physical-end completion at EOF, withholding the file (208.534 s
+whole-process CPU, 206.019 s receiver wall / 67.8155 s audio; 139.705 s modeled
+backlog). Fixed-8 HF417 later passed a full native simulation and one physical
+headphone-to-mic cable run: exact encrypted 367-byte authentication, 64
+intervals, two LDPC frames, and about 6.1 s quiet. Cable RX was 67.0086 s for
+68.0793 s audio; the 8-second FIFO peaked at 6.448 s and drained to 2.121 s.
+Audio-ready VmSize exceeded 512 MiB, so the successful cable used a 1 GiB
+virtual-memory limit. The earlier 512 MiB FIFO overflow and separate
+`std::bad_alloc` are retained. This is one seed and one host/device, not RF,
+reliability or receiver-capacity evidence. Fixed-8 interruption/resume and
+positive/null controls passed. See the [HF results](fast-radio-capacity.md#native-v3-receiver-evidence).
+
+For QPSK depth-1 at 16,200 bits, the actual protected payload is 7,200 bits
+(the nominal rate-1/2 label). HF and EME both passed the exact 367-byte short
+simulation, but its 895 bit/s bulk estimate is below the 64,800-bit geometry's
+1,052 bit/s estimate (both encrypted bulk estimates). Public 50 MB SSB finite-
+source estimate is 912.222 bit/s including fixed overhead. Physical short-code cable checks also passed: EME on a
+pre-value-only binary and corrected HF after an earlier retained-prefix refit
+caused FIFO overflow. The corrected HF run preserved all 32,768 LLRs in matched
+replay while reducing two refits from roughly 4.8 s to 1.14 s; on cable it
+completed with two refits, 16 intervals and 2 LDPC iterations. EME completed
+16 intervals/2 frames/6 iterations. Both have narrow single-cable provenance
+and are not sustained capacity qualification. One optimized recurring EME
+simulation recovered a 1,000-byte source over three exact cycles with two phase
+updates, but overall service remained 1.0244 s/s. At the precise SSB short/long
+family boundary, the nominal SNR label is allowed to differ because the
+7,200/16,200 protected-bit format begins with a verified tracking geometry and
+has a lower bulk ceiling than the modeled 64,800-bit family. Other channels and
+within-long-family SNR labels retain strict monotonicity; no rate cap was added.
+
+Canonical 64,800-bit EME has not passed physical completion: its cable attempt
+overflowed the 8-second FIFO after 22 intervals and 80 no-detections from
+22.14 s, with no bootstrap or authenticated file. The earlier sparse full
+simulation also failed late (57/64 intervals, three erasures); the forced-local
+prefix failed startup, and a fresh pooled-start pair missed its fixed gate. A
+separate midpoint-model EME simulation passed one exact source but was slightly
+slower than real time by receiver wall and is not cable evidence. Keep the
+failures and this isolated simulated pass distinct; details are in the
+[capacity findings](fast-radio-capacity.md#native-v3-receiver-evidence).
+
+A 4096-QAM, LDPC 8/9 flat-channel seed-417 run recovered/authenticated a
+23,000-byte encrypted file over 160 intervals/five LDPC frames and five
+iterations, with 6.149 s quiet; it used 20.645 s receiver wall for 33.792 s
+audio (0.611 s/s). Whole-file goodput was 5.445 kbit/s; three measured source
+areas gave a derived 10.693 kbit/s sustained interval rate after bootstrap/final
+fill were excluded. A fresh seed-418 bootstrap was accepted but its
+32-slot run intentionally stopped at 6.45 s without file or exported feedback
+event. A separate exact 16-QAM short-code comparison passed HF and failed EME;
+QPSK is the adopted common manual format, with no further constellation sweep.
+Neither result qualifies a manual fading row; the high-rate profile remains an
+explicit alternate, not the default. The exact profile dispatch is focused-test
+qualified, but these measurements themselves are native probe results and not
+manual-row evidence.
+
+A reviewed outer-pilot prefix comparison found a flat-channel fit improvement,
+but did not establish adoption benefit in the single HF/EME manual-seed
+comparison. The layout used 20% pilot power and 54.2% fewer baud than full-band
+v3, and failed the independent EME marker check; it did not test FEC, physical
+completion or live acquisition. Keep this scoped finding and its limits in the
+[capacity guide](fast-radio-capacity.md#bounded-outer-pilot-comparison).
+The adopted QPSK SSB digital PCM spectrum has a 99% occupied interval of
+404.66–2593.87 Hz and 99.9% interval of 338.75–2648.07 Hz; power outside
+300–2700 Hz was −62.08 dB in the specified 2–18 s Hann-windowed measurement.
+This is a generated PCM result, not radio or RF-emission qualification; see the
+[spectrum receipt](../local-evidence/fast-channel/spectrum/README.txt).
+Ignored `local-evidence/fast-channel/` retains compact receipts/hashes and three
+actual ADC captures needed for physical-input and bit-exact replay findings:
+the [original HF overflow prefix](../local-evidence/fast-channel/ssb-v3-hf417-short-ldpc-cable.f32le),
+[corrected HF pass](../local-evidence/fast-channel/ssb-v3-hf417-short-ldpc-optimized-cable.f32le),
+and [EME pass](../local-evidence/fast-channel/ssb-v3-eme419-short-ldpc-cable.f32le).
+These samples cannot be regenerated by the synthetic channel model; remove each
+when its replay/validation claim is superseded, retaining the concise result and
+original failure. Obsolete copied sources, executables, archives and dumps are
+removed. The compiled Session proof wrapper is also removed; its small [source](../local-evidence/fast-channel/ssb-v3-session-live/session_test.cpp),
+[receipt](../local-evidence/fast-channel/ssb-v3-session-live/eme419.json),
+stderr and [hash manifest](../local-evidence/fast-channel/ssb-v3-session-live/sha256.txt)
+remain as the shared-Session validation record.
+
 ## Manual rate, spreading and burst trends — 12 November 2026
 
 The eight current manual rows were screened for a lower computational burden.

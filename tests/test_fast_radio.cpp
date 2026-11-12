@@ -2,6 +2,7 @@
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/ldpc.hpp"
 #include "datapump/fast/modem.hpp"
+#include "fast/single_carrier_waveform.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -21,23 +22,43 @@ Bytes source_bytes() {
 void defaults_and_codec() {
     for(const auto channel:{Channel::ssb,Channel::fm}) {
         const auto p=profile(channel);validate(p);
+        const bool ssb=channel==Channel::ssb;
         require(p.capacity_mode&&!p.acoustic_ofdm&&!p.robust,"radio must use single-carrier capacity codec");
-        require(p.constellation==64&&p.code_rate==CodeRate::three_quarters&&p.interleave_depth==4,
+        require(p.constellation==(ssb?4U:64U) && p.code_rate==(ssb?CodeRate::half:CodeRate::three_quarters) &&
+                p.interleave_depth==(ssb?1U:4U) && p.ldpc_frame_bits==(ssb?16200U:64800U),
             "radio constellation/LDPC defaults changed");
         require(std::abs(occupied_lower_hz(p)-300)<1e-9&&std::abs(occupied_upper_hz(p)-2700)<1e-9,
             "radio must occupy its audio passband rather than the FM IF bandwidth");
-        require(p.marker_spacing_intervals==4&&p.pilot_spacing_symbols==64,"radio tracking cadence changed");
+        require(p.marker_spacing_intervals==4&&p.pilot_spacing_symbols==(ssb?16U:64U),"radio tracking cadence changed");
+        const fast::detail::SingleCarrierSchedule schedule(p);
+        require(schedule.training_count==2048 && schedule.marker_symbols(0)==64 &&
+                schedule.marker_symbols(1)==0 && schedule.marker_symbols(4)==64,
+                "radio preamble or marker geometry changed");
+        require(schedule.pilot_count==(ssb?16U:4U),"radio pilot count changed");
+        for(std::size_t j=0;j<schedule.pilot_count;++j) {
+            const auto pilot=schedule.position(0,64+schedule.pilot_stride+j);
+            require(pilot.kind==fast::detail::SingleCarrierSchedule::Kind::pilot &&
+                    pilot.known_value==sync_symbol(11+13*j),"radio pilot sequence differs from its wire definition");
+        }
+        const auto id=profile_id(p);
+        const std::string_view domain(reinterpret_cast<const char*>(id.data()),16);
+        require(domain==(ssb?"datapump/fast/v3":"datapump/fast/v2") &&
+                id.size()==(ssb?129U:96U) && (!ssb || id.back()==16),
+                "radio wire identity omitted its pilot revision");
         const auto parity=2*capacity_parity_symbols(p);
-        const auto data=p.interleave_depth*ldpc::data_bits(p.code_rate)/8-parity;
-        require(double(parity)/data>=.003&&double(parity)/data<.0033,"radio RS parity exceeds compact budget");
+        const auto data=capacity_information_bytes(p)-parity;
+        require(double(parity)/data>=.003&&double(parity)/data<(ssb?.0045:.0033),
+                "radio RS parity exceeds compact budget");
         const auto legacy=classic_profile(channel);
         require(!legacy.capacity_mode&&legacy.symbol_rate==2000&&legacy.rolloff==.2&&legacy.robust,
             "explicit classic radio profile changed");
         for(const bool encrypted:{false,true}) {
             const auto next=estimate_transmission(p,encrypted,50000000);
             const auto previous=estimate_transmission(legacy,encrypted,50000000);
-            require(next.source_bps>previous.source_bps*(channel==Channel::ssb?1.8:3.5),
-                "capacity radio profile did not improve bulk throughput");
+            if(ssb)require(next.source_bps>890 && next.source_bps<930,
+                           "Short dense-pilot SSB bulk estimate changed");
+            else require(next.source_bps>previous.source_bps*3.5,
+                         "FM capacity profile lost its bulk throughput improvement");
             std::cout<<channel_name(channel)<<" encrypted="<<encrypted<<" old_bps="<<previous.source_bps
                 <<" new_bps="<<next.source_bps<<" speedup="<<next.source_bps/previous.source_bps<<'\n';
             std::optional<Crypto> crypto;
@@ -50,7 +71,7 @@ void defaults_and_codec() {
                 rx.push_interval(soft);
             }
             require(!rx.result()&&!rx.snapshot().complete,"radio source exposed before physical end");
-            require(rx.snapshot().ldpc_frames==8,"default radio cycles did not use all LDPC frames");
+            require(rx.snapshot().ldpc_frames==2*p.interleave_depth,"default radio cycles did not use all LDPC frames");
             rx.finish(true);
             require(rx.result()&&rx.snapshot().complete&&std::equal(source.begin(),source.end(),rx.result()->bytes().begin(),rx.result()->bytes().end()),
                 "default radio codec changed exact bytes");
@@ -60,6 +81,7 @@ void defaults_and_codec() {
 }
 void sampled_radio(Channel channel,double snr_db,bool impaired=false) {
     auto p=profile(channel);
+    if(channel==Channel::ssb)p.ldpc_frame_bits=64800;
     // One frame instead of four keeps this sampled regression bounded; the
     // default four-frame interleaver and complete source path are tested above.
     p.interleave_depth=1;

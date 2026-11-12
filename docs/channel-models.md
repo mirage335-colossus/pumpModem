@@ -1,4 +1,4 @@
-# Sampled Robust channel models
+# Sampled channel models
 
 The current Robust channel is the native streaming channel used with the
 canonical `IndependentApskV2` waveform. Its public configuration and report are
@@ -9,6 +9,24 @@ the complete native receiver. Python may test or compare the implementation but
 is not in that operating path. A channel connection or component parity result
 does not qualify physical hardware or all receiver configurations; see
 [current validation](validation.md#native-gui-integration).
+
+Fast Modem has a separate native sampled channel in
+[`fast/simulation.cpp`](../src/fast/simulation.cpp). Its Simulation page starts
+from a local Fast transmission and sends the resulting waveform through that
+channel and the Fast receiver. It models link power/path loss and noise,
+oscillator offsets and phase, selected delay/Doppler spread, and optional
+selective AM. It reuses the neutral spread-ray and selective-perturbation
+kernels, but does not instantiate the Robust receiver or Robust DATA/Helper
+waveform. The channel preserves delayed and filter-decay tails and supplies a
+quiet interval for Fast completion. **Simulation** runs entirely in software.
+The explicit **Live loopback test** instead sends this channel's PCM through
+physical playback and capture before the same Fast receiver. It uses a fixed
+diagnostic, output gain 0.1 and bounded audio/time budgets; its captured result
+is labeled separately. These effects still describe a synthetic propagation
+path, even when the audio cable is physical. Ordinary **Live audio** continues
+through the selected audio device without the synthetic channel. Channel
+reports never select receiver geometry or establish physical completion.
+See [Fast mode](fast-mode.md#fast-simulation) for the test workflow and limits.
 
 ## Baseline and channel stages
 

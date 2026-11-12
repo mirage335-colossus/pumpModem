@@ -18,7 +18,7 @@ public:
     void reset();
     BitmapSource source(ui::Bitmap) const;
     std::uint64_t revision() const {return revision_;}
-    std::string title(ui::Bitmap) const;
+    std::string title(ui::Bitmap,bool loopback_test=false) const;
     std::string caption(ui::Bitmap,unsigned width=640) const;
     std::size_t history_size() const;
 private:

@@ -42,9 +42,16 @@ can invalidate this white-noise model. The UI displays both bandwidths.
 
 ## Selection and limits
 
-The highest menu presets preserve the qualified cable/acoustic settings and
-the sampled radio default. The default assumptions resolve the existing
-presets at those actual assumptions. Lower settings compare implemented square-QAM/LDPC
+The highest menu presets select each channel's standard waveform. IC-7100 SSB
+uses the **Resilient standard** at 20 dB. It uses QPSK with 7,200 information
+bits per 16,200-bit LDPC frame, eight physical intervals, and dense public
+pilots. The shorter bootstrap supplies verified timing evidence earlier.
+The **Modeled** SSB choices use 64,800-bit LDPC and can have higher estimated
+bulk throughput near the top of the menu. Throughput remains monotonic as
+expected SNR decreases within the modeled family. See the scoped simulation
+and cable results in the [radio profile study](fast-radio-capacity.md).
+
+Lower settings compare implemented square-QAM/LDPC
 combinations using estimated 50 MB source throughput, including actual cycle,
 marker, pilot and padding overhead. They do not optimize a received channel
 response or promise globally optimal coding.
@@ -58,7 +65,6 @@ convolutional coding, six-block OFDM training and a compact single-carrier path.
 LDPC retains the short-profile-only 2 dB decoder allowance and 6 dB acquisition
 floor; compact QPSK at rate 1/2 targets 6 dB selected-band SNR. The minimum is
 about 9.8 seconds at −6 dB; still weaker settings can exceed ten seconds.
-The other profiles retain their existing settings and selection rules.
 
 Low-order decoder thresholds use the archived
 [LDPC/QAM margin analysis](fast-acoustic-margin-targets.md); higher-order
@@ -66,8 +72,8 @@ thresholds use Gaussian capacity plus a 2.5 dB implementation/shaping allowance.
 The sampled radio 64-QAM 3/4 result requires a larger allowance. A further
 3 dB engineering allowance is used when selecting reduced-SNR modes. These
 are modeled settings, not statistical error-rate or whole-file guarantees.
-The unchanged nominal radio setting is separately based on its sampled
-18/20 dB results; it does not claim the same 3 dB allowance.
+The nominal FM setting uses the sampled 18/20 dB results. The resilient SSB
+standard uses the scoped manual channel qualification described above.
 
 A production-decoder check caught a failure that the capacity approximation
 missed: 1,048,576-QAM with LDPC 1/2 failed all four screened frames at 36 dB,
@@ -81,8 +87,9 @@ AWGN frames each. The [104-frame screen and exact sources](https://github.com/mi
 include deliberate failed candidates and additional nearby points; these
 decoder tests do not constitute full acoustic or cable waveform trials.
 
-Synchronization imposes an additional floor. The current single-carrier
-capacity marker requires exact agreement on 128 signs. Its presets retain
+Synchronization imposes an additional floor. The legacy single-carrier
+acquisition used by the narrower capacity presets requires exact agreement
+on 128 marker signs. Those presets retain
 at least about **13 dB in the selected band**, even when LDPC payload symbols
 could decode at lower SNR. OFDM acquisition has 256 independently checked marker
 signs with at most 16 disagreements; its selection floor is **6 dB**. After
@@ -142,7 +149,10 @@ Single-carrier choices report symbols/s, including the exact fractional
 nominal rates and lower rates down to one symbol/s. OFDM choices report
 symbols/s **per tone**, plus block duration; they select FFT size while
 preserving the current cyclic prefix and passband. Invalid combinations are
-omitted. Changing symbol rate does not silently change QAM, LDPC or depth.
+omitted. Changing symbol rate retains QAM, coding rate and depth. An SSB
+change outside the fixed short-frame geometry selects the 64,800-bit frame.
+Matching explicit settings preserve the short frame, and the Fast details
+show the resulting frame size and estimated rate.
 
 With an automatic SNR selection, rate **Auto** uses that preset's timing.
 With manual settings, it restores channel-default timing for the current
@@ -164,8 +174,9 @@ earlier waveforms. The JSON report gives `expected_snr_db`,
 ## Verification
 
 Preset regressions cover the entire menu span, valid bandwidths, bounded
-throughput below the reference Shannon limit, monotonic menu throughput,
-exact nominal settings and rate IDs, overrides, and invalid inputs. Shared
+throughput below the reference Shannon limit, monotonic throughput within
+each preset family, the SSB short-to-long frame boundary, exact nominal
+settings and rate IDs, overrides, and invalid inputs. Shared
 GUI tests cover channel retention, active-transfer controls, mode isolation
 and layout. Sampled radio tests and their limitations are recorded in the
 [radio profile study](fast-radio-capacity.md). New low-rate DSP tests exercise

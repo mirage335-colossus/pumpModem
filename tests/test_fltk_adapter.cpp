@@ -654,7 +654,28 @@ void fast_mode_visibility() {
         require(text->visible_r()&&choose->visible_r()&&buffer_text(*text->buffer())=="Native fast café\nSecond line"&&
             app.application.field(ui::Field::fast_file).text=="/tmp/native-fast-source.bin"&&std::string(transmit->label())=="Transmit text",
             "Fast native source switching changed independent drafts");
-        for(const auto& page:ui::pages())require(find_button(*window,page.title)->visible_r()==(page.id==ui::Page::console),"Fast tab visibility is inconsistent");
+        for(const auto& page:ui::pages())require(find_button(*window,page.title)->visible_r()==
+            (page.id==ui::Page::console||page.id==ui::Page::fast_simulation),"Fast tab visibility is inconsistent");
+        find_button(*window,"Simulation / live testing")->do_callback();refresh();
+        auto* simulation=field_widget.template operator()<NativeChoice>("Mode");
+        auto* shift=field_widget.template operator()<NativeInput>("Shift frequency (RF coordinate, Hz)");
+        require(simulation&&shift&&simulation->visible_r()&&shift->visible_r()&&!shift->active_r(),
+            "Fast testing page did not expose its live mode and inactive channel assumptions");
+        simulation->picked(simulation->menu()+1);refresh();
+        require(shift->active_r()&&app.application.field(ui::Field::fast_simulation).selected=="simulation",
+            "Native simulation selector did not enable its channel assumptions");
+        auto* shift_oscillator=field_widget.template operator()<NativeChoice>("Shift oscillator");
+        const auto& oscillator_options=app.application.field(ui::Field::fast_sim_shift_oscillator).options;
+        const auto gpsdo=std::find_if(oscillator_options.begin(),oscillator_options.end(),[](const auto& option){return option.id=="gpsdo-ocxo";});
+        require(shift_oscillator&&gpsdo!=oscillator_options.end(),"Native testing page omitted its GPSDO oscillator preset");
+        shift_oscillator->picked(shift_oscillator->menu()+std::distance(oscillator_options.begin(),gpsdo));refresh();
+        const auto before_shift=app.application.field(ui::Field::fast_detail).text;
+        shift->value("5800000000");shift->do_callback();refresh();
+        require(app.application.field(ui::Field::fast_sim_shift_hz).text=="5800000000"&&
+            app.application.field(ui::Field::fast_detail).text==before_shift,
+            "Native Shift frequency callback changed the audio waveform");
+        simulation->picked(simulation->menu());refresh();
+        find_button(*window,"Console")->do_callback();refresh();
         require(text->x()+text->w()<=window->w()&&text->y()+text->h()<=window->h(),"Fast native composer escaped the viewport");
         const auto draft=app.application.field(ui::Field::binary).text;
         regular->do_callback();refresh();
@@ -693,6 +714,12 @@ void fast_mode_visibility() {
 void developer_mode_visibility() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
     auto* window=application_window();require(window,"Developer mode fixture has no native window");
+#ifdef __linux__
+    // This probe compares absolute client coordinates through a resize and a
+    // mode switch. Keep the window manager from substituting its work-area
+    // height for the requested viewport on smaller X11 displays.
+    window->hide();window->set_override();window->show();Fl::check();
+#endif
     auto* toggle=dynamic_cast<NativeCheckbox*>(find_button(*window,"Developer mode"));
     auto* shellcode=dynamic_cast<NativeCheckbox*>(find_button(*window,"Shellcode mode"));
     auto* clear=find_button(*window,"Clear received");
@@ -708,6 +735,8 @@ void developer_mode_visibility() {
     const auto set_mode=[&](bool checked) {toggle->value(checked);toggle->do_callback();refresh();};
     for(const auto& size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
         window->size(size.first,size.second);refresh();
+        const auto preserved_window=std::pair{window->w(),window->h()};
+        require(preserved_window==size,"Developer mode fixture could not establish its requested client viewport");
         require(toggle->x()+toggle->w()<=shellcode->x()&&shellcode->x()+shellcode->w()<clear->x()&&
             toggle->y()==shellcode->y()&&shellcode->y()==clear->y(),
             "Developer and Shellcode modes are not adjacent before Clear received");
@@ -758,7 +787,8 @@ void developer_mode_visibility() {
                     "Developer mode did not hide/show an entire advanced control in place");
                 for(const auto& definition:ui::pages()) {
                     auto* button=find_button(*window,definition.title);
-                    require(static_cast<bool>(button->visible_r())==((checked||!definition.developer_only)&&definition.id!=ui::Page::fast_modem),
+                    require(static_cast<bool>(button->visible_r())==((checked||!definition.developer_only)&&
+                        definition.id!=ui::Page::fast_modem&&definition.id!=ui::Page::fast_simulation),
                         "Developer mode did not update native tab visibility without resizing");
                     if(!button->visible_r()) {
                         require(!button->take_focus(),"Hidden advanced tab retained keyboard focus eligibility");
@@ -766,8 +796,16 @@ void developer_mode_visibility() {
                             "A stale native callback selected a hidden advanced tab");
                     }
                 }
-                for(const auto& [widget,bounds]:preserved)require(frame(widget)==bounds,
-                    "Toggling developer mode moved an existing native control or tab");
+                for(const auto& [widget,bounds]:preserved)if(const auto actual=frame(widget);actual!=bounds) {
+                    const auto rect_text=[](ui::Rect r) {
+                        return std::to_string(r.x)+","+std::to_string(r.y)+" "+
+                            std::to_string(r.w)+"x"+std::to_string(r.h);
+                    };
+                    throw std::runtime_error(std::string("Toggling developer mode moved native control or tab '")+
+                        (widget->label()?widget->label():"")+"' from "+rect_text(bounds)+" to "+rect_text(actual)+
+                        " as the window went from "+std::to_string(preserved_window.first)+"x"+
+                        std::to_string(preserved_window.second)+" to "+std::to_string(window->w())+"x"+std::to_string(window->h()));
+                }
                 for(const auto& tab:app.application.tab_layout(window->w(),window->h())) {
                     const auto& definitions=ui::pages();
                     const auto definition=std::find_if(definitions.begin(),definitions.end(),[&](const auto& value){return value.id==tab.page;});
@@ -834,7 +872,8 @@ void tab_clicks() {
     for(const auto& size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
         window->size(size.first,size.second);
         for(const auto& initial:ui::pages())for(const auto& target:ui::pages()) {
-            if(initial.id==ui::Page::fast_modem||target.id==ui::Page::fast_modem)continue;
+            if(initial.id==ui::Page::fast_modem||target.id==ui::Page::fast_modem||
+                initial.id==ui::Page::fast_simulation||target.id==ui::Page::fast_simulation)continue;
             app.application.select_page(initial.id);refresh();selected(initial.id);
             auto* button=find_button(*window,target.title);
             CallbackProbe probe(*button);
@@ -854,7 +893,7 @@ void tab_clicks() {
         }
     }
     for(const auto& target:ui::pages()) {
-        if(target.id==ui::Page::fast_modem)continue;
+        if(target.id==ui::Page::fast_modem||target.id==ui::Page::fast_simulation)continue;
         auto* button=find_button(*window,target.title);
         const int px=button->x()+button->w()/2,py=button->y()+button->h()/2;
         for(bool return_inside:{false,true}) {
@@ -1047,6 +1086,8 @@ void expanded_bitmap_clicks() {
         app.application.select(ui::Field::qr_brightness,"dark");refresh();
         require(fingerprint(*view)!=updated,"Expanded bitmap ignored a brightness update");
         window->size(original.w+77,original.h+59);refresh();
+        const ui::Rect enlarged{window->x(),window->y(),window->w(),window->h()};
+        require(enlarged.w!=original.w||enlarged.h!=original.h,"Expanded bitmap fixture did not resize its client area");
         require(overlay->w()==window->w()&&overlay->h()==window->h()&&view->w()==window->w()&&view->h()==window->h()&&
             window_count()==original_windows,"Expanded bitmap did not follow an app window resize");
         // The overlay intentionally deactivates the native background. Check
@@ -1058,15 +1099,20 @@ void expanded_bitmap_clicks() {
             "Second bitmap click did not restore the existing app view");
         require(Fl::focus()==previous_focus,"Second bitmap click did not restore the original keyboard focus");
         const auto restored=ui::control_layout(*declared,app.application.control(*declared).state,window->w(),window->h()).widget;
-        require(window->x()==original.x&&window->y()==original.y&&window->w()==original.w+77&&window->h()==original.h+59&&
+        // The window manager can clamp or reposition the resize. Dismissing
+        // the overlay must preserve the actual client rectangle it received.
+        require(ui::Rect{window->x(),window->y(),window->w(),window->h()}==enlarged&&
             ui::Rect{original_preview->x(),original_preview->y(),original_preview->w(),original_preview->h()}==restored,
             "Second bitmap click did not restore the native preview layout at the current app size");
         window->size(original.w,original.h);refresh();
-        require(ui::Rect{original_preview->x(),original_preview->y(),original_preview->w(),original_preview->h()}==geometry.widget,
-            "Restoring the app size did not recover the original preview geometry");
+        const ui::Rect reopened{window->x(),window->y(),window->w(),window->h()};
+        const auto reopened_preview=ui::control_layout(*declared,app.application.control(*declared).state,reopened.w,reopened.h).widget;
+        require((reopened.w!=enlarged.w||reopened.h!=enlarged.h)&&
+            ui::Rect{original_preview->x(),original_preview->y(),original_preview->w(),original_preview->h()}==reopened_preview,
+            "Restoring the app size did not recover its shared preview geometry");
         app.application.edit(ui::Field::message,"Native expanded bitmap");
         app.application.select(ui::Field::qr_brightness,"normal");refresh();
-        click(geometry.widget.x+geometry.widget.w/2,geometry.widget.y+geometry.widget.h/2);refresh();
+        click(reopened_preview.x+reopened_preview.w/2,reopened_preview.y+reopened_preview.h/2);refresh();
         overlay=expanded();require(overlay,"Restored bitmap could not be expanded again");
         app.application.edit(ui::Field::message,std::string(4096,'x'));
         // Bitmap sources poll every 40 ms; native presentation polls every
@@ -1082,7 +1128,7 @@ void expanded_bitmap_clicks() {
             "Expanded bitmap lost its error caption or caption tone");
         Fl::e_keysym=FL_Escape;Fl::e_state=0;Fl::handle(FL_KEYDOWN,window);refresh();
         require(!expanded()&&!app.application.overlay()&&!app.application.closing()&&window_count()==original_windows&&
-            ui::Rect{window->x(),window->y(),window->w(),window->h()}==original,
+            ui::Rect{window->x(),window->y(),window->w(),window->h()}==reopened,
             "Escape did not dismiss only the expanded bitmap within the original app window");
         app.application.edit(ui::Field::message,"Native expanded bitmap");refresh();
     }
@@ -1791,6 +1837,9 @@ int main(int argc,char** argv) {
         }
         if(argc==2&&std::string_view(argv[1])=="--expanded-hover") {
             theme::apply_palette();expanded_bitmap_hover_repaint();return 0;
+        }
+        if(argc==2&&std::string_view(argv[1])=="--expanded-clicks") {
+            theme::apply_palette();expanded_bitmap_clicks();return 0;
         }
         if(argc==2&&std::string_view(argv[1])=="--compression-labels") {
             theme::apply_palette();compression_page_labels();return 0;

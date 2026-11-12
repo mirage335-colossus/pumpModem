@@ -45,16 +45,29 @@ inline std::optional<double> waterfall_snr(const fast::Diagnostics& d,const fast
 }
 // Reception labels describe the captured result, never a later settings edit.
 inline std::string transfer_stage(const fast::Snapshot& snapshot) {
+    const auto completed_label=[&] {
+        if(snapshot.loopback_test)return std::string("LOOPBACK TEST")+
+            (snapshot.authenticated?" · authenticated":" · checksum verified, unauthenticated");
+        return std::string(snapshot.simulated?"SIMULATED":"RECEIVED")+
+            (snapshot.authenticated?" · authenticated":" · checksum verified, unauthenticated");
+    };
     // Content completion is already gated on observed physical absence. The
     // session worker can still be unwinding after it publishes that result.
-    if(snapshot.complete)return snapshot.authenticated?"RECEIVED · authenticated":"RECEIVED · checksum verified, unauthenticated";
+    if(snapshot.complete)return completed_label();
     if(snapshot.active) {
-        if(snapshot.transmitting)return "TRANSMITTING";
-        if(snapshot.decoding_stopped)return "RECEIVING / DECODING STOPPED";
-        if(snapshot.failed_cycles)return "RECEIVING / MISSING DATA";
-        return "RECEIVING / PENDING";
+        if(snapshot.loopback_test) {
+            if(snapshot.decoding_stopped)return "LOOPBACK TEST / DECODING STOPPED";
+            if(snapshot.failed_cycles)return "LOOPBACK TEST / MISSING DATA";
+            return "LOOPBACK TEST / CAPTURING AND CHECKING";
+        }
+        if(snapshot.transmitting&&!snapshot.simulated)return "TRANSMITTING";
+        const std::string operation=snapshot.simulated?"SIMULATING":"RECEIVING";
+        if(snapshot.decoding_stopped)return operation+" / DECODING STOPPED";
+        if(snapshot.failed_cycles)return operation+" / MISSING DATA";
+        return operation+" / PENDING";
     }
-    if(snapshot.cancelled)return "CANCELLED · no completion implied";
+    if(snapshot.cancelled)return snapshot.loopback_test?"LOOPBACK TEST · CANCELLED · no completion implied":"CANCELLED · no completion implied";
+    if(snapshot.loopback_test&&(snapshot.failed_cycles||snapshot.decoding_stopped||!snapshot.error.empty()))return "LOOPBACK TEST · INCOMPLETE";
     if(snapshot.failed_cycles||snapshot.decoding_stopped||!snapshot.error.empty())return "INCOMPLETE";
     return snapshot.source_bytes?"TRANSMISSION FINISHED":"READY";
 }
@@ -66,7 +79,8 @@ inline std::string integrity_label(const fast::Snapshot& snapshot) {
         "Public data · "+std::to_string(snapshot.checksum_groups)+" checksum-verified groups";
     const auto damage=snapshot.failed_cycles?
         " · "+std::to_string(snapshot.failed_cycles)+(snapshot.failed_cycles==1?" damaged cycle":" damaged cycles"):std::string{};
-    return protection+damage+"\n"+(snapshot.encrypted?"":"Unauthenticated · ")+(snapshot.complete?"received bytes available":snapshot.physical_complete?
+    return (snapshot.loopback_test?"LOOPBACK TEST · ":"")+protection+damage+"\n"+(snapshot.encrypted?"":"Unauthenticated · ")+(snapshot.complete?
+        (snapshot.loopback_test?"test validated":"received bytes available"):snapshot.physical_complete?
         "physical end; validation pending/failed":snapshot.decoding_stopped?"decoding stopped; awaiting physical end":
         snapshot.failed_cycles?"decoding continues; awaiting physical end":"awaiting physical end");
 }

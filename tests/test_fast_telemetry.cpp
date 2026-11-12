@@ -264,6 +264,22 @@ void observers() {
     for(auto& sample:noisy)sample=.71f*sample+noise(rng);
     noisy.insert(noisy.begin(),73,0);
     const auto baseline=receive(p,noisy);
+    std::stop_source stop;
+    std::vector<float> typed_soft;
+    Receiver typed(p,[&](std::span<const float> interval,bool feedback) -> std::optional<ValidatedCapacityCycle> {
+        require(!feedback,"Classic receiver requested capacity-cycle feedback");
+        typed_soft.insert(typed_soft.end(),interval.begin(),interval.end());
+        return {};
+    },{},{},stop.get_token());
+    require(typed.consume(noisy)==noisy.size() && !typed_soft.empty() && typed_soft.size()<=baseline.soft.size() &&
+            std::ranges::equal(typed_soft,std::span(baseline.soft).first(typed_soft.size())),
+            "Typed receiver sink changed classic source evidence");
+    stop.request_stop();
+    const auto typed_intervals=typed.progress().intervals;
+    require(typed.consume(noisy)==0,"Stopped typed receiver consumed new samples");
+    typed.finish();
+    require(!typed.progress().physical_complete && typed.progress().intervals==typed_intervals,
+            "Typed receiver cancellation or EOF produced source evidence");
     std::vector<std::complex<float>> observed;
     const auto with_points=receive(p,noisy,[&](auto symbol){observed.push_back(symbol);});
     std::size_t throwing_rx=0;

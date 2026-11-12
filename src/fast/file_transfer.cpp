@@ -145,10 +145,14 @@ Snapshot transmit_text_wave(const Settings& s,const std::string& text,const std:
 }
 Snapshot receive_wave(const Settings& settings,const std::filesystem::path& wave,ProgressCallback progress,std::stop_token stop) {
     Reader input(wave);auto s=settings;s.profile.sample_rate=input.rate;check_settings(s);
-    StreamDecoder codec(s.profile,s.key,s.quota_bytes,SourceEncoding::xz);Receiver modem(s.profile,[&](auto bits){codec.push_interval(bits);});
+    StreamDecoder codec(s.profile,s.key,s.quota_bytes,SourceEncoding::xz);
+    Receiver modem(s.profile,[&](std::span<const float> bits,bool feedback){
+        return codec.push_interval(bits,feedback);},{},{},stop);
     Snapshot result;result.listening=true;result.encrypted=s.key.has_value();std::array<float,4096> block{};std::uint64_t samples=0;
+    result.receiver_backend=modem.backend_name();
     while(!stop.stop_requested()) {
-        const auto n=input.read(block,audio::output_channels(s.mono,s.channel_mode));if(!n)break;modem.push(std::span(block).first(n));samples+=n;
+        const auto n=input.read(block,audio::output_channels(s.mono,s.channel_mode));if(!n)break;
+        samples+=modem.consume(std::span(block).first(n));
         auto c=codec.snapshot();const auto& d=modem.progress();result.intervals=c.intervals;result.authenticated_groups=c.authenticated_groups;
         result.checksum_groups=c.checksum_groups;
         result.ldpc_frames=c.ldpc_frames;result.ldpc_failed_frames=c.ldpc_failed_frames;
@@ -160,11 +164,13 @@ Snapshot receive_wave(const Settings& settings,const std::filesystem::path& wave
         if(d.physical_complete)break;
     }
     modem.finish();result.physical_complete=!stop.stop_requested()&&modem.progress().physical_complete;
+    if(result.physical_complete)result.physical_completion_input_tick=modem.physical_completion_input_tick();
     codec.finish(result.physical_complete);const auto c=codec.snapshot();result.complete=c.complete;result.file=codec.result();result.source_bytes=c.source_bytes;
     result.encrypted=c.encrypted;result.authenticated=c.authenticated;result.authenticated_groups=c.authenticated_groups;result.checksum_groups=c.checksum_groups;
     result.decoding_stopped=c.decoding_stopped;result.coding_cycles=c.coding_cycles;
     result.failed_cycles=c.failed_cycles;result.verified_bytes=c.verified_bytes;
     result.cancelled=stop.stop_requested();result.status=c.status;result.listening=false;
+    if(result.receiver_backend=="standard-ssb")result.status+=" · Standard SSB receiver for this profile";
     if(result.cancelled) {
         result.complete=false;result.authenticated=false;result.file.reset();
         result.status="Cancelled; transfer incomplete";

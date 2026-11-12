@@ -22,10 +22,13 @@ std::atomic<bool> last_exclusive=false;
 std::mutex mutex;
 std::vector<float> input;
 std::vector<float> output;
-std::size_t offset=0;
-bool hold=false,record=false;
-void reset(std::vector<float> samples={},bool pause=false,bool record_output=false) {
-    std::lock_guard lock(mutex);input=std::move(samples);offset=0;hold=pause;record=record_output;output.clear();
+std::size_t offset=0,capture_limit=0;
+bool hold=false,record=false,loopback=false;
+std::atomic<bool> fail_playback=false;
+void reset(std::vector<float> samples={},bool pause=false,bool record_output=false,bool loop=false,bool fail=false) {
+    std::lock_guard lock(mutex);
+    input=std::move(samples);offset=0;capture_limit=0;hold=pause;record=record_output;
+    loopback=loop;fail_playback=fail;output.clear();
 }
 }
 // Device fixture replaces hardware symbols only in this executable. It never
@@ -35,14 +38,19 @@ void capture(std::uint32_t rate,const std::string&,const CaptureCallback& consum
     ++fixture::opened;++fixture::active;
     struct Done {~Done(){--fixture::active;}} done;
     if(format)format({rate,rate,rate*.49,4096});
+    std::size_t delivered=0;
     while(!stop.stop_requested()) {
         std::vector<float> block;
         {
             std::lock_guard lock(fixture::mutex);
-            const auto n=std::min<std::size_t>(rate/20,fixture::input.size()-fixture::offset);
+            if(fixture::capture_limit && delivered>=fixture::capture_limit)break;
+            const auto maximum=fixture::capture_limit?
+                std::min<std::size_t>(rate/20,fixture::capture_limit-delivered):rate/20;
+            const auto n=std::min(maximum,fixture::input.size()-fixture::offset);
             if(n) {block.assign(fixture::input.begin()+static_cast<std::ptrdiff_t>(fixture::offset),fixture::input.begin()+static_cast<std::ptrdiff_t>(fixture::offset+n));fixture::offset+=n;}
-            else if(!fixture::hold)block.assign(rate/20,0);
+            else if(!fixture::hold)block.assign(maximum,0);
         }
+        delivered+=block.size();
         if(!block.empty()&&!consume(block))break;
         // Capacity decoding is intentionally exercised against the production
         // one-second FIFO. Feed Fast's 50 ms blocks at audio pace; the old 3 ms
@@ -53,11 +61,17 @@ void capture(std::uint32_t rate,const std::string&,const CaptureCallback& consum
 void playback(std::uint32_t rate,const std::string&,const PlaybackCallback& source,std::stop_token stop,StreamFormatCallback format,ChannelMode channels) {
     fixture::last_channels=channels;
     ++fixture::active;struct Done {~Done(){--fixture::active;}} done;
+    if(fixture::fail_playback.load())throw Error("fixture playback failure");
     if(format)format({rate,rate,rate*.49,4096});
     std::vector<float> block(rate/20);
     while(!stop.stop_requested()) {
         auto n=source(block);if(!n)break;++fixture::played;
-        {std::lock_guard lock(fixture::mutex);if(fixture::record)fixture::output.insert(fixture::output.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(n));}
+        {
+            std::lock_guard lock(fixture::mutex);
+            const auto end=block.begin()+static_cast<std::ptrdiff_t>(n);
+            if(fixture::record)fixture::output.insert(fixture::output.end(),block.begin(),end);
+            if(fixture::loopback)fixture::input.insert(fixture::input.end(),block.begin(),end);
+        }
         std::this_thread::sleep_for(3ms);
     }
 }
@@ -221,4 +235,99 @@ void damaged_cycle_continues() {
     check(refused,"Session allowed saving an incomplete file");
 }
 }
-int main(){try{fast_cancel();text_audio_roundtrip();damaged_cycle_continues();std::cout<<"fast session ownership, text transfer and damaged-cycle continuation passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+void cable_test() {
+    fast::Settings settings;
+    settings.device="fixture";
+    settings.profile=fast::classic_profile(fast::Channel::wire);
+    settings.profile.constellation=4;settings.profile.code_rate=fast::CodeRate::three_quarters;
+    settings.profile.interleave_depth=1;settings.profile.symbol_rate=12000;settings.profile.carrier_hz=10000;
+    settings.key=fast_test::key(Bytes(32,0x73));
+    settings.transmit_gain=.27;
+    fast::SimulationSettings channel;
+    channel.noise_dbm_hz.reset();
+    channel.seed=7401;
+    fast::Session session;
+    session.configure(settings);
+
+    fixture::reset({},false,false,true);
+    session.test_loopback(channel);
+    const auto active=session.poll();
+    check(active.active&&active.loopback_test&&active.transmitting&&active.listening&&!active.simulated&&
+          active.diagnostics&&!active.diagnostics->transmitting,
+          "Fast cable test did not publish actual receive diagnostics and duplex identity");
+    await([&]{return !session.active();},"Fast cable test did not finish after actual capture");
+    const auto complete=session.poll();
+    if(!complete.complete)throw Error(complete.status+" ("+complete.error+")");
+    check(complete.loopback_test&&complete.physical_complete&&complete.authenticated&&!complete.file&&
+          complete.source_bytes>0&&complete.simulation&&complete.simulation->quiet_start_sample&&
+          complete.diagnostics&&!complete.diagnostics->transmitting&&complete.diagnostics->input_count>0,
+          "Fast cable test did not prove its exact protected diagnostic through actual PCM");
+    check(fixture::active==0&&fixture::last_gain==.1,"Fast cable test lost its local gain or leaked an audio worker");
+
+    fixture::reset({},false,false,true);
+    {
+        std::lock_guard lock(fixture::mutex);
+        fixture::capture_limit=static_cast<std::size_t>(*complete.simulation->quiet_start_sample)+settings.profile.sample_rate;
+    }
+    session.test_loopback(channel);
+    await([&]{return !session.active();},"Fast cable capture EOF did not stop the test");
+    const auto eof=session.poll();
+    check(eof.loopback_test&&eof.intervals>0&&!eof.complete&&!eof.physical_complete&&!eof.authenticated&&
+          !eof.file&&eof.error.find("capture ended")!=std::string::npos&&fixture::active==0,
+          "Cable capture EOF after actual payload fabricated physical completion or exposed source bytes");
+
+    const auto key=settings.key;
+    settings.key.reset();
+    session.configure(settings);
+    fixture::reset({},false,false,true);
+    session.test_loopback(channel);
+    await([&]{return !session.active();},"Public Fast cable test did not finish");
+    const auto public_result=session.poll();
+    check(public_result.complete&&public_result.physical_complete&&public_result.loopback_test&&
+          !public_result.encrypted&&!public_result.authenticated&&!public_result.file&&
+          public_result.source_bytes==complete.source_bytes&&fixture::active==0,
+          "Public cable diagnostic failed its exact source/quiet validation or exposed a file");
+    settings.key=key;
+    session.configure(settings);
+
+    fixture::reset({},true,false,true);
+    const auto opened=fixture::opened.load(),played=fixture::played.load();
+    session.test_loopback(channel);
+    await([&]{return fixture::opened>opened;},"Fast cable test did not open capture");
+    check(fixture::played==played,"Fast cable playback started without actual capture preroll");
+    session.cancel();
+    await([&]{return !session.active();},"Fast cable test cancellation did not join audio");
+    const auto cancelled=session.poll();
+    check(cancelled.loopback_test&&cancelled.cancelled&&!cancelled.complete&&!cancelled.physical_complete&&
+          !cancelled.file&&fixture::active==0&&fixture::played==played,
+          "Fast cable cancellation fabricated a result or started playback");
+
+    fixture::reset({},false,false,true,true);
+    session.test_loopback(channel);
+    await([&]{return !session.active();},"Fast cable output failure did not stop capture");
+    const auto failed=session.poll();
+    check(!failed.complete&&!failed.physical_complete&&!failed.file&&
+          failed.error.find("fixture playback failure")!=std::string::npos&&fixture::active==0,
+          "Fast cable output error was lost or completed the transfer");
+
+    settings.profile=fast::capacity_profile(fast::Channel::wire);
+    settings.profile.constellation=4;settings.profile.symbol_rate=1;
+    session.configure(settings);
+    fixture::reset();
+    const auto before=fixture::opened.load();
+    session.test_loopback(channel);
+    await([&]{return !session.active();},"Oversized Fast cable test was not rejected");
+    const auto limited=session.poll();
+    check(!limited.complete&&limited.error.find("75-second")!=std::string::npos&&fixture::opened==before,
+          "Fast cable test opened audio for a profile outside its local time bound");
+}
+int main(int argc,char** argv) try {
+    if(argc==1) {
+        fast_cancel();text_audio_roundtrip();damaged_cycle_continues();
+    } else if(argc!=2 || std::string_view(argv[1])!="--cable")return 2;
+    cable_test();
+    std::cout<<"Fast Session checks passed\n";
+    return 0;
+} catch(const std::exception& e) {
+    std::cerr<<e.what()<<'\n';return 1;
+}

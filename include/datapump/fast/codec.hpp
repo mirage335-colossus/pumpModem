@@ -84,6 +84,17 @@ struct DecodeSnapshot {
     std::string status = "Waiting for fast stream";
 };
 
+enum class CapacityCycleValidation { authenticated, checksummed };
+
+struct ValidatedCapacityCycle {
+    // Zero is the bootstrap. Each timed capacity cycle advances the ordinal,
+    // including rejected cycles and cycles that contain erased intervals.
+    std::uint64_t wire_ordinal;
+    CapacityCycleValidation validation;
+    // One whitened bit per byte, in wire order, before physical alignment fill.
+    Bytes protected_bits;
+};
+
 enum class SourceEncoding { raw, xz };
 
 class StreamEncoder {
@@ -120,6 +131,11 @@ public:
     StreamDecoder& operator=(StreamDecoder&&) noexcept;
     // Positive soft values mean one; zero means an unknown timed position.
     void push_interval(std::span<const float> soft_bits);
+    // Optional local channel tracking evidence. Only the push that completes
+    // an integrity-checked capacity cycle can return its reconstructed bits.
+    // This evidence has no effect on source interpretation or completion.
+    std::optional<ValidatedCapacityCycle> push_interval_with_feedback(std::span<const float> soft_bits);
+    std::optional<ValidatedCapacityCycle> push_interval(std::span<const float> soft_bits,bool request_feedback);
     // Only the DSP's observed six-second absence event may pass true here.
     // EOF/cancellation pass false and cannot make a source available.
     // XZ source decoding, when locally requested, also waits for this event.
@@ -129,6 +145,7 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    std::optional<ValidatedCapacityCycle> ingest_interval(std::span<const float>,bool want_feedback);
     friend std::optional<Bytes> testing::retained_source_area(const StreamDecoder&,std::uint64_t);
 };
 

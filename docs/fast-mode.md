@@ -10,8 +10,9 @@ to an expected 36 dB SNR; speakers/microphone defaults to 3 dB and its short
 profile to −6 dB. Switching channel
 profiles reapplies that profile's default SNR and waveform settings.
 
-Enter a Message or Attach file, then transmit. Use text restores the retained
-text draft. Sending pauses listening and resumes it afterward, including after
+In ordinary **Live audio**, enter a Message or Attach file, then transmit. Use
+text restores the retained draft. Sending pauses listening and resumes it
+afterward, including after
 cancelling transmission. Cancel applies to transmission; listening needs no
 separate control. Encryption is optional and initially off;
 enabling it requires a key. Both peers need matching local settings and source
@@ -59,6 +60,64 @@ codewords, time/key search or single-bit recovery. Text and files use
 [streaming XZ source compression](fast-xz.md). Its known
 training, markers, pilots, occupied spectrum and transmission duration are public.
 
+## Fast simulation
+
+The Fast **Simulation** page offers **Live audio**, **Simulation**, and
+**Live loopback test**. Live audio is the default and uses the selected audio
+device for ordinary transmission and reception without a synthetic channel.
+Simulation sends the Console message or file through the native Fast sampled
+channel and receiver entirely in software, without opening hardware audio.
+Its results are labeled separately from live audio.
+
+**Run loopback test** sends a fixed short diagnostic through the selected
+channel model, physical audio output, connected loopback path, and captured
+Fast receiver. It uses the selected profile, device, channel routing and
+encryption choice; encryption requires the selected key. Capture starts before
+playback, through the normal shared-audio handoff. The test uses output gain
+**0.1**, with limits of **75 seconds of audio** and **110 seconds of elapsed
+time**. A profile whose diagnostic exceeds the audio budget is rejected. The
+Console message and attachment drafts are preserved and are not transmitted.
+Test status, counters and captured receiver plots are labeled **LOOPBACK TEST**;
+the test adds no Signals history entry, exposes no diagnostic text or file,
+and creates no Save handle. It does not start automatic listening afterward.
+Cancel stops the test without manufacturing a completed reception.
+
+The GUI exposes assumed transmit power, path loss, noise density (or off),
+Baseband and Shift oscillator presets
+(including Off and a shared reference), Doppler/delay spread, selective AM,
+search margin, and Shift frequency. Presets are declared assumptions, not
+measurements or radio controls. Shift frequency affects only oscillator error
+in the model; it does not change the Fast audio carrier or passband. These
+controls apply to Simulation and Live loopback test; ordinary Live audio leaves
+them inactive. The channel preserves modeled delayed tails and runs a scored
+quiet interval for completion.
+It reuses native spread and selective-AM kernels without using the Robust
+receiver. A loopback pass requires physical absence, integrity verification and
+an exact diagnostic-message comparison. An audio/time limit, capture gap or
+early receiver end is incomplete. A cable test exercises that local audio path
+with synthetic propagation effects; it does not establish RF propagation or
+transceiver qualification. See the [current measured outcomes and limits](fast-radio-capacity.md#propagation-and-differential-carrier-qualification).
+
+The bounded native probe runs the ordered editable manual cases, including
+encryption, exact attachment comparison and scored physical completion:
+
+```sh
+./build.sh configure
+cmake --build build/dev --target fast_channel_probe --parallel 4
+python3 tools/fast_manual_cases.py --list
+python3 tools/fast_manual_cases.py --output local-evidence/fast-channel/manual-simulation.json
+# Physical cable only; select the actual connected playback/capture route:
+python3 tools/fast_manual_cases.py --live --device default --tx-gain 0.1 \
+  --output local-evidence/fast-channel/manual-live.json
+```
+
+The probe's deterministic encryption keys and source are test fixtures, never
+operating keys. `--case-index N` selects rows after validating the entire list;
+duplicates remain separate. Shortened or changed coding settings require
+explicit `--profile-override` and are recorded separately from the defaults.
+An audio/wall limit, missing acquisition or failed authentication is not a pass.
+See the [current measured outcomes and limits](fast-radio-capacity.md#propagation-and-differential-carrier-qualification).
+
 ## Live signal plots
 
 The Fast interface shows waveform, waterfall and constellation plots while
@@ -100,8 +159,8 @@ completion. Both native backends render the same immutable plot snapshots.
 
 ## Channel profiles
 
-The raw API/CLI reference profiles below describe the established high-SNR
-operating points. The GUI resolves its Expected SNR (36 dB cable, 3 dB acoustic,
+The raw API/CLI profiles below include the fixed SSB standard and the high-SNR
+cable, FM and acoustic reference points. The GUI resolves its Expected SNR (36 dB cable, 3 dB acoustic,
 −6 dB acoustic short) into the corresponding lower-order settings; the CLI does likewise when passed
 `--expected-snr`. See [SNR presets](fast-snr-presets.md).
 
@@ -118,7 +177,7 @@ transfer in 1,290.664 seconds (21m 30.664s)**, including device startup and an
 eight-second real silence tail. The signal occupied 1,281.087 seconds; all
 6,980 LDPC frames converged and the complete source SHA-256 matched. The output
 sample peak was 0.8922 with no digital clipping, no capture overrun, and a
-maximum capture backlog of 0.304 seconds, below production's one-second FIFO.
+maximum capture backlog of 0.304 seconds, below that cable profile's one-second FIFO.
 **One successful whole-file trial does not establish an 80% success rate.**
 Earlier 1,048,576-QAM / LDPC 9/10 development trials also transferred 5 MB
 exactly; one used 139.043 seconds of signal with all 696 LDPC frames converged.
@@ -131,7 +190,7 @@ measured trials, failures and limits.
 | --- | --- | ---: | ---: | --- | --- | ---: |
 | `wire` | Capacity | 17,647.0588 | 9,300 Hz | 300–18,300 Hz | 4,194,304-QAM | 388.24 kbit/s |
 | `wire --format classic` | Classic | 15,000 | 9,300 Hz | 300–18,300 Hz | 256-APSK | 120 kbit/s |
-| `ssb` | Capacity | 2,181.8182 | 1,500 Hz | 300–2,700 Hz | 64-QAM | 13.09 kbit/s |
+| `ssb` | Capacity | 2,181.8182 | 1,500 Hz | 300–2,700 Hz | QPSK | 4.36 kbit/s |
 | `fm` | Capacity | 2,181.8182 | 1,500 Hz | 300–2,700 Hz | 64-QAM | 13.09 kbit/s |
 | `acoustic` | Capacity OFDM | 1.302 blocks/s | Multicarrier | 501–18,000 Hz | 16-QAM | 52.10 kbit/s coded |
 | `acoustic --format classic` | Classic | 500 | 1,800 Hz | 1,500–2,100 Hz | QPSK | 1 kbit/s |
@@ -154,23 +213,41 @@ tested 2.5 KiB attachment at an explicitly selected 3 dB expected SNR. Its gener
 preset search targets approximately ten-second minimum transfers, allowing 12.5 seconds
 for a substantial throughput gain. Small LDPC gives about 9.8 seconds at −6 dB
 and 12.3 seconds at 0 dB; larger messages take longer. The short profile is the
-initial GUI selection at −6 dB expected SNR. Other profiles are unchanged.
+initial GUI selection at −6 dB expected SNR.
 All four classic presets remain available through the CLI with
 `--format classic`.
 
-The IC-7100 defaults use LDPC 3/4, four frames per cycle, 10% RRC rolloff,
-amplitude 0.30, a full marker every four intervals, and four pilots per
-64 payload symbols. They share the compact capacity source codec and sparse
-outer RS. Estimated 50 MB public-file throughput is 8.70 kbit/s. The
-[radio study](fast-radio-capacity.md) records sampled tests, comparisons and
-the remaining need for actual radio qualification.
+The SSB capacity default uses **QPSK, one 16,200-bit LDPC frame per coding
+cycle, depth 1, and 16 known pilots per 16 payload symbols**. The selected
+DVB-S2 short-table code is labeled **1/2**, but its actual information size is
+**7,200 bits**: the information fraction is 4/9 before outer coding and source
+protection. The FM default uses 64-QAM and four rate-3/4 frames per cycle,
+with four pilots per 64 payload
+symbols. Both use 10% RRC rolloff, amplitude 0.30, and a 64-symbol marker
+every four intervals, after a 2,048-symbol preamble. SSB capacity uses the v3
+profile identity for its sixteen-symbol pilot sequence. This is a matching
+one-way transmission format; receiver-local channel fitting does not negotiate
+or change the transmitted format. The [radio study](fast-radio-capacity.md)
+records throughput, spectrum, sampled tests and the limits of qualification.
+
+The native receiver facade with validated codec feedback selects the
+**resilient-ssb** backend for the exact 48 kHz standard geometry above and for
+the explicit 48 kHz, 4,096-QAM, 64,800-bit LDPC 8/9, depth-1 variant with the
+same carrier, baud, rolloff and marker/pilot cadence. Other valid SSB settings
+use the **standard-ssb** receiver and are labeled accordingly. Receiver
+selection is local; it is not another wire format. This dispatch description
+does not qualify all manual settings or imply that the high-order variant is
+the resilient default.
 
 **Expected SNR** uses original-band assumptions: cable 65 dB over 18 kHz,
 acoustic 13 dB over 17.5 kHz, and radio 20 dB over 2.4 kHz. Each menu extends
 40 dB downward, with notable 3/10 dB steps. Weak settings narrow bandwidth
 and reduce rate; the lowest acoustic settings switch from OFDM to a narrow
 single carrier. The menu neither measures nor negotiates SNR. Both ends need
-the same settings. See [SNR presets](fast-snr-presets.md) for the noise model,
+the same settings. The SSB nominal 20 dB entry is labeled **Resilient standard**;
+other SSB entries are **Modeled** alternatives using long LDPC frames. They do
+not automatically adapt the standard transmission to receiver feedback.
+See [SNR presets](fast-snr-presets.md) for the noise model,
 synchronization limits and qualification status.
 
 Manual rate/QAM/LDPC/depth changes mark the SNR selector **Manual**.
@@ -292,8 +369,8 @@ profiles. Allocation and boundaries follow matching local settings. Attachment
 filenames belong to the post-completion source interpretation, never modem
 framing. Source completion flags never choose a modem boundary.
 
-Capacity transmission starts with **2,048 known QPSK training symbols**. A full
-64-symbol public QPSK marker precedes interval zero and every 16th interval
+The cable capacity reference starts with **2,048 known QPSK training symbols**.
+A full 64-symbol public QPSK marker precedes interval zero and every 16th interval
 thereafter by default. Its length is preserved; the frequency of insertion is
 reduced. Four known QPSK pilots follow every group of up to 256 data symbols.
 At the default 22-bit QAM order, each interval has 94 data symbols and one
@@ -302,17 +379,24 @@ the 2,048-bit codec span. An interval therefore uses 98 symbols without a
 marker or 162 with one. The 2% RRC pulse has a 640-symbol finite span to reduce
 filter truncation error in dense QAM.
 
+The SSB standard keeps that 2,048-symbol preamble and the 64-symbol marker,
+inserting the marker every four intervals and sixteen known pilots after each
+group of up to sixteen data symbols. Short acoustic formats have their own
+training geometry; see [short acoustic transfers](fast-acoustic-short.md).
+
 Square QAM uses independent Gray-labelled amplitude axes and unit mean symbol
 energy. Demapping computes bit likelihoods from nearest alternative axis levels,
-without scanning millions of constellation points. Capacity reception uses
-longer fractional interpolation, a 21-tap fractionally spaced equalizer,
+without scanning millions of constellation points. Standard single-carrier
+reception uses longer fractional interpolation, a 21-tap fractionally spaced equalizer,
 training-based timing/phase/frequency fits and pilot/decision tracking. The
-LDPC matrices are from DVB-S2/S2X; this application is not a DVB wire protocol.
+resilient SSB backend instead uses the native learned-channel forward model
+and bounded interval inversion. These SSB LDPC matrices are from DVB-S2;
+this application is not a DVB wire protocol.
 
 ## Capacity coding and source bytes
 
-The default cycle combines four 64,800-bit LDPC 8/9 frames. Their information
-areas total 28,800 bytes. A shortened GF(65536) RS word uses **88 parity bytes
+The cable reference cycle combines four 64,800-bit LDPC 8/9 frames. Their
+information areas total 28,800 bytes. A shortened GF(65536) RS word uses **88 parity bytes
 and 28,712 systematic bytes**, so parity/data is **0.30649%**. It can correct up
 to 22 unknown 16-bit symbol errors. This outer code repairs sparse LDPC residuals;
 it cannot recover a wholly lost LDPC frame.
@@ -393,9 +477,18 @@ before decryption. Missing, reordered or mixed-transfer groups cannot silently
 join source prefixes. Public checksums detect corruption but can be rewritten
 by an adversary; they do not authenticate.
 
+For public distribution of signed programs, carry the original signed artifact
+and verify its publisher signature separately after saving it. Fast's public
+checksum is not a publisher signature. Received attachments remain inert data;
+the application does not execute them.
+
 Encrypted capacity uses `DataPump/fast/capacity/v2/serpent-aes-v4/...`
-domains and a `datapump/fast/v2` profile context; encrypted classic uses
-`DataPump/fast/v1/serpent-aes-v4/...` and its classic profile context. Public
+domains. SSB capacity binds the `datapump/fast/v3` profile context; other
+capacity formats retain `datapump/fast/v2`. The SSB context also binds its
+sixteen-symbol pilot count and, for the short default, its 16,200-bit frame
+geometry. The v3 profile change does not rename the capacity cipher domains.
+Encrypted classic uses `DataPump/fast/v1/serpent-aes-v4/...` and its classic
+profile context. Public
 checksum domains remain separate. The cipher layers derive their keys from
 separate Serpent and AES roots. Bootstrap authentication XORs the full
 HMAC-SHA256 outputs under independently derived lane keys. The same two-lane
@@ -429,9 +522,13 @@ Failed marker groups retain their timed positions as erasures. Trailing absent
 intervals are held as a bounded count and delivered only if a later marker
 resumes the stream, avoiding fictitious source data during end silence.
 A capture overrun with unknown missing time fails the transfer. Capture runs
-separately from DSP/FEC with a bounded one-second queue; decoding near its
-iteration limit requires measured scheduling headroom. There is no automatic
-retransmission, arbitrary mid-file join or recovery across unknown time gaps.
+separately from DSP/FEC with a bounded queue: eight seconds for the selected
+48 kHz dense-pilot SSB geometries, four seconds for acoustic OFDM, and one
+second for other single-carrier profiles. The GUI and cable probe share this
+queue policy. Decoding near its iteration limit requires measured scheduling
+headroom; a larger queue does not establish sustained real-time capacity.
+There is no automatic retransmission, arbitrary mid-file join or recovery
+across unknown time gaps.
 
 Receive source-area storage is capped at 256 MiB and compacts in place after
 physical completion. Missing areas consume their full fixed logical space in
@@ -537,7 +634,7 @@ time. Callback timing is reported separately from mean real-time ratio;
 occasional FEC work exceeds one PCM chunk duration and requires the live queue.
 
 The recorded four-profile sweep contains 92 seeded sampled tests. The previous
-classic wire preset and current SSB preset use 16-APSK, fail closed at 10 dB and recover
+classic wire and classic SSB presets use 16-APSK, fail closed at 10 dB and recover
 exact files at 15–120 dB;
 FM and acoustic default QPSK recover at every tested point. A single seed and
 file per point do not estimate a reliable BER/PER curve. Separate DSP tests

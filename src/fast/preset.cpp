@@ -64,6 +64,7 @@ double decoder_snr(unsigned order,CodeRate rate,Channel channel) {
 }
 Profile single_carrier_base(Channel c) {
     auto p=profile(c);
+    if(c==Channel::ssb)p.ldpc_frame_bits=64800;
     if(c==Channel::acoustic||c==Channel::acoustic_short) {
         p.acoustic_ofdm=false;p.ofdm_training_blocks=16;p.carrier_hz=1800;p.rolloff=.20;
         // OFDM's nominal PCM RMS is amplitude/4.5; the unit-energy
@@ -194,15 +195,19 @@ SnrPreset resolve_snr_preset(Channel c,double expected) {
         "Assumed SNR in the original channel bandwidth; local settings must match at both ends. "
         "Narrowing assumes unchanged total received signal power and flat noise density. "
         "Modeled presets require link testing; they are not measured margins."};
+    if(c==Channel::ssb) {
+        if(expected==nominal)
+            result.note+=" The resilient SSB standard uses QPSK and 16,200-bit LDPC to verify tracking earlier.";
+        else result.note+=" Modeled SSB presets use 64,800-bit LDPC and can have a higher estimated bulk rate than the resilient standard.";
+    }
     if(c==Channel::acoustic_short) {
         result.profile=short_acoustic_preset(expected);
         result.note+=" Coding-block selection limits minimum transfer overhead; weaker presets may still exceed the 12.5-second target.";
         return result;
     }
-    // Preserve the previously qualified nominal cable/acoustic waveforms and
-    // the sampled radio default exactly, including sparse framing and depth.
+    // The nominal point uses each channel's standard waveform.
     if(expected==nominal)return result;
-    const auto default_profile=profile(c);
+    const auto default_profile=c==Channel::ssb?single_carrier_base(c):profile(c);
     const auto refresh_blocks=default_profile.acoustic_ofdm?
         total_interval_symbols(default_profile,cycle_intervals(default_profile))+1:0;
     const auto max_efficiency=std::log2(default_profile.constellation)*code_rate_value(default_profile.code_rate);
@@ -256,6 +261,11 @@ SnrPreset resolve_snr_preset(Channel c,double expected) {
         result.note+=" Narrow single-carrier presets retain about 13 dB selected-band SNR for marker acquisition.";
     return result;
 }
+Profile normalize_ssb_frame_size(Profile p) noexcept {
+    if(ssb_capacity_framing(p) && p.ldpc_frame_bits==16200 && !supports_short_ssb_frame(p))
+        p.ldpc_frame_bits=64800;
+    return p;
+}
 std::string symbol_rate_option_id(const Profile& p) {
     validate(p);
     return p.acoustic_ofdm?"ofdm:"+std::to_string(p.ofdm_fft_size):
@@ -269,6 +279,7 @@ std::vector<SymbolRateOption> symbol_rate_options(const Profile& p) {
     std::vector<SymbolRateOption> out{{"auto",auto_label}};
     std::vector<Profile> choices;
     const auto add=[&](Profile q) {
+        q=normalize_ssb_frame_size(q);
         if(!valid(q))return;
         if(std::none_of(choices.begin(),choices.end(),[&](const auto& old){return symbol_rate_option_id(old)==symbol_rate_option_id(q);}))choices.push_back(q);
     };
@@ -315,6 +326,7 @@ Profile apply_symbol_rate_option(Profile p,std::string_view id) {
         p.symbol_rate=parse_rate(id.substr(3));
         if(p.symbol_rate>maximum_baud(p)*(1+1e-12))throw Error("Symbol rate exceeds the channel bandwidth");
     } else throw Error("Symbol-rate selection does not match the current Fast waveform");
+    p=normalize_ssb_frame_size(p);
     validate(p);return p;
 }
 }
