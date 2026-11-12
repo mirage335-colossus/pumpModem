@@ -194,6 +194,10 @@ struct CoarseFirCrop {
     std::size_t output_origin = 0, output_stride = 0, first_output = 0, output_rows = 0;
 };
 
+inline constexpr std::size_t coarse_fir_chunk_rows = 16'384;
+
+// Calls for one crop supply contributing chunks in input order. Separate
+// crops can fill concurrently, so their callbacks own private or immutable data.
 using CoarseFirSource = std::function<void(std::size_t first_row, std::span<Complex>)>;
 
 struct CoarseBulkWorkspace {

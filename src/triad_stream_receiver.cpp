@@ -420,38 +420,49 @@ struct CompleteStreamReceiver::Impl {
                 if (add(reserved(base, lanes), bytes)>resources.memory_limit_bytes) break;
                 work.push_back(next_work);
             }
-            if (work.size()==width) return overlap(std::move(work), base);
+            if (work.size()==width) return work;
         }
-        return overlap(std::move(full), base);
+        return overlap(std::move(full), capacity, total);
     }
 
-    // Spare memory lets a slot's Helper acquisition run beside its coarse
-    // preparation. A wider lease is held until its slot ends, so it may take
-    // only memory that owners cannot use: every owner the cap still admits,
-    // and at least one, must then fit at this group's largest sequential
-    // lease. A balanced group already traded lanes for width and has none to
-    // spare. Oldest slots are served first.
-    std::vector<Work> overlap(std::vector<Work> work, const Reservation& base) const {
-        if (!overlap_workspace || work.empty()) return work;
-        std::size_t bytes = 0, largest = 0;
-        for (const auto& item : work) {
-            if (item.workers!=resources.workers) return work;
-            bytes = add(bytes, item.reserved);
-            largest = std::max(largest, item.reserved);
-        }
-        const auto owners = active()+work.size();
-        const auto cap = std::min<std::size_t>(resources.workers, resources.slot_owners);
-        const auto later = std::max<std::size_t>(1, cap>owners ? cap-owners : 0);
-        auto total = add(add(reserved(base, resources.workers), bytes), times(later, largest));
+    // Widen leases oldest first, after protecting full sequential quotes for
+    // the next public windows that can use vacant owner positions. Allow for
+    // their incoming sample payload too. The exact footprint and queue state
+    // are still checked when those windows become ready.
+    std::vector<Work> overlap(std::vector<Work> work, std::size_t capacity, std::size_t total) const {
+        if (!overlap_workspace || work.empty() || total>=resources.memory_limit_bytes) return work;
+        auto spare = resources.memory_limit_bytes-total;
+        bool protected_refills = false;
         for (auto& item : work) {
             const auto wider = overlap_workspace(config, item.plan, item.workers);
             if (wider<=item.dsp) continue;
             const auto extra = wider-item.dsp;
-            if (total>resources.memory_limit_bytes || extra>resources.memory_limit_bytes-total) continue;
+            if (extra>spare) continue;
+            if (!protected_refills) {
+                auto index = work.back().plan.index;
+                auto input = input_stop;
+                for (auto later=work.size(); later<capacity && index<last_public_slot; ++later) {
+                    try {
+                        const auto future = prepare(plan(++index), resources.workers);
+                        const auto first = std::max(input, future.plan.first_sample);
+                        const auto incoming = first<future.plan.stop_sample ?
+                            window_bytes(static_cast<std::size_t>(future.plan.stop_sample-first)) : 0;
+                        if (future.reserved>spare || incoming>spare-future.reserved) return work;
+                        spare -= future.reserved+incoming;
+                        input = std::max(input, future.plan.stop_sample);
+                    } catch (const Error&) {
+                        // An unready window that cannot be quoted cannot
+                        // justify widening the current valid window's lease.
+                        return work;
+                    }
+                }
+                protected_refills = true;
+            }
+            if (extra>spare) continue;
             item.overlap = extra;
             item.dsp = wider;
             item.reserved = add(item.reserved, extra);
-            total += extra;
+            spare -= extra;
         }
         return work;
     }

@@ -69,7 +69,7 @@ def forecast_inputs():
 
     def backlog(seed):
         control = make_phase("controller_service", dict(may_overlap_slot_dsp=True), seconds=10, wall=.02)
-        control["scope"] = "controller_wall_excluding_instrumented_cv_wait"
+        control["scope"] = "controller_wall_excluding_instrumented_cv_wait_and_spool_io"
         return envelope("backlog", seed=seed, phases=[control], result=dict(
             complete_receiver_service=True, configured_calendar_reacquired=True,
             backlog_interval=dict(complete=True, service_seconds_per_baseband_second=.2),
@@ -108,6 +108,14 @@ def forecast_inputs():
 
 
 class NativeForecastTests(unittest.TestCase):
+    def test_controller_scope_matches_current_probe_and_rejects_stale_scope(self):
+        receipt = forecast_inputs()[0]["cases"][0]["measurements"]["backlog"][0]
+        self.assertAlmostEqual(forecast._fixed_controller(receipt), .002)
+        stale = deepcopy(receipt)
+        stale["phases"][0]["scope"] = "controller_wall_excluding_instrumented_cv_wait"
+        with self.assertRaisesRegex(forecast.ProbeError, "Native controller cost is unavailable"):
+            forecast._fixed_controller(stale)
+
     def test_old_cpu_calibration_fails_before_considering_transport_or_gpu(self):
         with self.assertRaisesRegex(forecast.ProbeError, "Fresh native CPU calibration"):
             forecast.estimate({"schema": "triad-manual-complete-capacity-v3"}, {}, {}, {}, holdout={})

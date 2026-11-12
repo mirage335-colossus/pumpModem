@@ -228,6 +228,10 @@ unsigned ReceiverExecutor::Stage::lanes() const noexcept {
     return static_cast<unsigned>(batch_->flight.size());
 }
 
+std::stop_token ReceiverExecutor::Stage::stop_token() const noexcept {
+    return batch_->stop.get_token();
+}
+
 void ReceiverExecutor::Stage::post(std::size_t count) {
     auto& batch = *batch_;
     std::lock_guard lock(executor_.mutex_);

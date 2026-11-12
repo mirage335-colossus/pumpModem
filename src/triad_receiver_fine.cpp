@@ -1048,7 +1048,8 @@ struct FineSession::Impl {
         return true;
     }
 
-    void prepare(ObservationBlock& block, std::size_t first, std::size_t rows) {
+    void prepare(ObservationBlock& block, std::size_t first, std::size_t rows, std::stop_token leaf_stop) {
+        check_cancelled(leaf_stop);
         const auto projection = std::find_if(projections.begin(), projections.end(),
             [&](const Projection& candidate) { return candidate.rows() == rows; });
         if (projection == projections.end()) throw Error("Robust likelihood block has no public projection");
@@ -1070,7 +1071,7 @@ struct FineSession::Impl {
         }
         const auto raw = iq.subspan(first, rows);
         block.projected.assign(raw.begin(), raw.end());
-        projection->apply(block.projected, observation_scratch, stop);
+        projection->apply(block.projected, observation_scratch, leaf_stop);
         block.projected.resize(projection->modes());
         observed_modes += projection->modes();
         const auto quiet_first = plan.quiet_first_sample - plan.first_sample;
@@ -1083,16 +1084,18 @@ struct FineSession::Impl {
     }
 
     // Projects one dispatch's blocks in chronological order. Calls never
-    // overlap: each dispatch is observed before the next one is planned.
-    void observe(Pair& pair, const Extent& extent) {
+    // overlap: the next dispatch waits for this observation to finish before
+    // another observation starts or either ring entry is reused.
+    void observe(Pair& pair, const Extent& extent, std::stop_token leaf_stop) {
         time(times.observation_seconds, [&] {
+            check_cancelled(leaf_stop);
             auto first = extent.first;
             pair.extent = &extent;
             pair.observed_rows = pair.modes = pair.basis_calls = 0;
             pair.transitions = {};
             for (std::size_t i = 0; i < extent.count; ++i) {
                 auto& block = pair.blocks[i];
-                prepare(block, first, extent.lengths[i]);
+                prepare(block, first, extent.lengths[i], leaf_stop);
                 first += extent.lengths[i];
                 // Elapsed intervals and channel models are common to all
                 // states, including for a missing block whose elapsed time
@@ -1111,6 +1114,8 @@ struct FineSession::Impl {
                 pair.modes += block.projection->modes();
                 pair.basis_calls += 1 + (rows - 1) / maximum_basis_rows;
             }
+            if (observation.observed) observation.observed(extent.first, leaf_stop);
+            check_cancelled(leaf_stop);
         });
     }
 
@@ -1173,7 +1178,8 @@ struct FineSession::Impl {
     }
 
     // Device statistics for both lanes of one dispatch, on the owner.
-    std::array<std::uint64_t, 2> bulk_statistics_for(const Pair& pair) {
+    std::array<std::uint64_t, 2> bulk_statistics_for(const Pair& pair, std::stop_token leaf_stop) {
+        check_cancelled(leaf_stop);
         std::array<std::uint64_t, 2> bulk_calls{};
         if (!pair.observed_rows) return bulk_calls;
         const auto states = nominal.size() + adaptive.size();
@@ -1187,6 +1193,7 @@ struct FineSession::Impl {
             append(nominal, true);
             append(adaptive, false);
             for (std::size_t i = 0; i < pair.extent->count; ++i) {
+                check_cancelled(leaf_stop);
                 const auto& block = pair.blocks[i];
                 if (!block.observed) continue;
                 const auto rows = block.projection->rows();
@@ -1207,10 +1214,11 @@ struct FineSession::Impl {
                         !take || take > bulk_offsets.size())
                         throw Error("Robust bulk backend requested a map outside its public block");
                     basis->visit_pair(bulk_rows[candidate], taps(), block.first + first,
-                                      std::span(bulk_offsets).first(take), sink, stop);
+                                      std::span(bulk_offsets).first(take), sink, leaf_stop);
                     bulk_progress[candidate] += take;
                     ++bulk_calls[candidate < nominal.size() ? 0 : 1];
-                }, output, stop);
+                }, output, leaf_stop);
+                check_cancelled(leaf_stop);
                 if (!std::all_of(bulk_progress.begin(), bulk_progress.end(), [&](auto extent) { return extent == rows; }))
                     throw Error("Robust bulk backend did not process its complete public block");
                 const auto completed = bulk->completed_work();
@@ -1267,7 +1275,8 @@ struct FineSession::Impl {
         auto index = leaf - wave.first_leaf;
         if (wave.ahead) {
             if (!index) {
-                observe(*wave.ahead, extents[static_cast<std::size_t>(wave.pair->extent - extents.data()) + 1]);
+                observe(*wave.ahead, extents[static_cast<std::size_t>(wave.pair->extent - extents.data()) + 1],
+                        leaf_stop);
                 wave.stage->release(wave.release);
                 return;
             }
@@ -1290,9 +1299,18 @@ struct FineSession::Impl {
                pair, {}, lane, observation.record_work ? &adaptive_state_work[index] : nullptr, leaf_stop);
     }
 
-    // Dispatch-major: each fixed-affine state for one dispatch, then that
-    // dispatch's tile fills. The owner waits only for the states.
+    // Compiled work releases one independent observation. Native work is
+    // dispatch-major: each fixed-affine state, then that dispatch's tile fills.
+    // The native owner waits only for the states.
     void background(unsigned lane, std::size_t leaf, std::stop_token leaf_stop) {
+        if (bulk) {
+            // Only one CPU observation is released beside the owner's device
+            // call. Its address must not depend on wave, which the owner may
+            // update while this independent projection is still running.
+            const auto next = leaf + 1;
+            observe(ring[(call_serial + next) % ring.size()], extents[next], leaf_stop);
+            return;
+        }
         const auto local = leaf / leaf_block, index = leaf % leaf_block;
         if (index >= nominal.size()) {
             fill_ahead(local, index - nominal.size(), leaf_stop);
@@ -1340,12 +1358,14 @@ struct FineSession::Impl {
     // no such barrier, so its leaves run in the background, at most one
     // dispatch ahead, and fill the lanes that the adaptive lane leaves idle
     // during its serial steps and at the end of each of its waves.
+    // Compiled statistics stay serial on the owner while a CPU lane observes
+    // the next dispatch in the same two-pair ring.
     void run() {
         extents.clear();
         for (Extent next; plan_pair(next, extents.empty() ? nullptr : &extents.back());) extents.push_back(next);
         if (extents.empty()) return;
         const auto serial = pair_serial;
-        observe(ring[serial % ring.size()], extents.front());
+        observe(ring[serial % ring.size()], extents.front(), stop);
         const bool overlap = !bulk;
         const auto fixed = nominal.size();
         call_serial = serial;
@@ -1368,7 +1388,21 @@ struct FineSession::Impl {
             // them this dispatch's tile fills.
             wave = {&pair, overlap && more ? &ring[(serial + local + 1) % ring.size()] : nullptr, &stage, posted,
                     (local + 1) * leaf_block + fixed, segment_anchor};
-            const auto bulk_calls = bulk ? bulk_statistics_for(pair) : std::array<std::uint64_t, 2>{};
+            // The backend stays on the owner, while a spare lane projects the
+            // next immutable input pair. With one lane retain serial order.
+            if (bulk && more && stage.lanes() > 1) stage.release(local + 1);
+            std::array<std::uint64_t, 2> bulk_calls{};
+            if (bulk) {
+                try {
+                    bulk_calls = bulk_statistics_for(pair, stage.stop_token());
+                } catch (...) {
+                    // A backend may report cancellation after the ahead leaf
+                    // failed. Preserve that original stage failure; the stage
+                    // destructor drains its borrowed observation before exit.
+                    if (stage.stop_token().stop_requested()) stage.wait_urgent();
+                    throw;
+                }
+            }
             const auto leaves = (wave.ahead ? 1 : 0) + adaptive.size() + (overlap ? 0 : fixed);
             time(times.dispatch_seconds, [&] {
                 stage.post(leaves);
@@ -1392,7 +1426,11 @@ struct FineSession::Impl {
                     charge(nominal_work, pair, fixed, pair.basis_calls * fixed,
                            nominal_state_work[(serial + local) % ring.size()]);
             } else if (more) {
-                observe(ring[(serial + local + 1) % ring.size()], extents[local + 1]);
+                if (stage.lanes() > 1) {
+                    time(times.dispatch_seconds, [&] { stage.wait_background(local + 1, local); });
+                } else {
+                    observe(ring[(serial + local + 1) % ring.size()], extents[local + 1], stage.stop_token());
+                }
             }
         }
         // A fill counts its miss before it renders. Let every one finish.

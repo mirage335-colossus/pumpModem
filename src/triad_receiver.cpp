@@ -70,7 +70,8 @@ struct StageWorkspace {
     std::size_t overlapped_coarse, overlapped_total;
 };
 
-StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers) {
+StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers,
+                              bool quote_overlap) {
     const auto rows = validate(config, slot, workers);
     const auto input = checked_multiply(rows, sizeof(Complex) + sizeof(std::uint8_t));
     const auto helper = helper_workspace(config, slot);
@@ -78,7 +79,7 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
     const auto fine = fine_workspace(config, slot, workers);
     const auto lease = [&](std::size_t stage) { return checked_add(checked_add(input, receipts_bytes), stage); };
     // One lane runs acquisition and preparation in turn: nothing coexists.
-    const bool overlappable = workers > 1 && helper && coarse_defers_frequency_grid(config, slot);
+    const bool overlappable = quote_overlap && workers > 1 && helper && coarse_defers_frequency_grid(config, slot);
     const auto overlapped_coarse = overlappable ?
         coarse_workspace(config, slot, workers, {helper, helper_widest_wave}) : coarse;
     return {input, helper, coarse, fine, lease(std::max({helper, coarse, fine})), overlappable,
@@ -187,12 +188,12 @@ double elapsed(Clock::time_point began) {
 } // namespace
 
 std::size_t receiver_slot_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers) {
-    return plan_workspace(config, slot, workers).total;
+    return plan_workspace(config, slot, workers, false).total;
 }
 
 std::size_t receiver_slot_overlap_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
                                             unsigned workers) {
-    return plan_workspace(config, slot, workers).overlapped_total;
+    return plan_workspace(config, slot, workers, true).overlapped_total;
 }
 
 namespace {
@@ -202,7 +203,7 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
                                std::size_t memory_limit_bytes, std::stop_token stop, ReceiverExecutor* shared,
                                bool may_overlap) {
     check_cancelled(stop);
-    const auto workspace = plan_workspace(config, slot, workers);
+    const auto workspace = plan_workspace(config, slot, workers, may_overlap);
     require(iq.size() == slot.stop_sample - slot.first_sample &&
         (valid.empty() || valid.size() == iq.size()), "Robust input differs from the full public observation");
     if (workspace.total > memory_limit_bytes)

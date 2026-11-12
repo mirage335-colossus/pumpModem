@@ -21,10 +21,13 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstring>
+#include <exception>
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <mutex>
 #include <numbers>
 #include <numeric>
 #include <optional>
@@ -338,6 +341,131 @@ void fir(r::ReceiverBulkBackend& backend) {
     check(receipt.precision == "fp64" && receipt.executed && work.forward_ffts == 4 &&
           work.inverse_ffts == 3 && work.fir_input_rows == input.size(),
           "compiled FIR did not report tight-clock work");
+}
+
+void staged_fir(r::ReceiverBulkBackend& backend) {
+    auto device = backend.make_coarse(8, .0001);
+    const std::array<double, 5> taps{.125, .25, .5, .25, .125};
+    const r::CoarseFirCrop crop{80, 7, 1, 3, 6, 25};
+    constexpr std::size_t first_chunk = 14;
+    std::array<std::array<Complex, 80>, 2> input{};
+    for (std::size_t lane = 0; lane < input.size(); ++lane)
+        for (std::size_t i = 0; i < input[lane].size(); ++i)
+            input[lane][i] = Complex(.001 * (lane + 1) * i * i, -.05 * (lane + 2) * i);
+    r::CoarseBulkWork setup;
+    const auto filter = device->prepare_filter(taps, 16, setup, {});
+    const auto before = device->receipt();
+
+    const auto check_output = [&](std::span<const Complex> source, std::span<const Complex> result) {
+        check(result.size() == crop.output_rows, "staged compiled FIR returned an incomplete crop");
+        for (std::size_t i = 0; i < result.size(); ++i) {
+            const auto position = crop.output_origin + (i + crop.first_output) * crop.output_stride;
+            Complex expected{};
+            for (std::size_t j = 0; j < taps.size(); ++j)
+                if (position >= j && position - j < source.size()) expected += source[position - j] * taps[j];
+            near(result[i], expected, 2e-12, "staged compiled FIR lost order, tail or crop phase");
+        }
+    };
+
+    // Two independent crops can fill their leading chunks on the same
+    // session before either begins its serialized device transaction.
+    std::mutex mutex;
+    std::condition_variable ready;
+    std::size_t leading_chunks = 0;
+    std::array<std::exception_ptr, 2> failures;
+    const auto run = [&](std::size_t lane) {
+        try {
+            auto next = first_chunk;
+            r::CoarseBulkWork work;
+            const auto result = device->project_fir(*filter, crop, [&](std::size_t first, std::span<Complex> values) {
+                check(first == next, "compiled FIR filled a chunk out of order");
+                if (first == first_chunk) {
+                    std::unique_lock lock(mutex);
+                    ++leading_chunks;
+                    ready.notify_all();
+                    check(ready.wait_for(lock, std::chrono::seconds(3), [&] { return leading_chunks == 2; }),
+                          "compiled FIR serialized independent leading chunks");
+                }
+                next += values.size();
+                std::copy_n(input[lane].begin() + first, values.size(), values.begin());
+            }, work, {});
+            check_output(input[lane], result);
+            check(next == crop.input_rows && work.forward_ffts == 10 && work.inverse_ffts == 10 &&
+                  work.fir_input_rows == crop.input_rows - first_chunk,
+                  "staged compiled FIR omitted contributing chunks");
+        } catch (...) {
+            failures[lane] = std::current_exception();
+        }
+    };
+    {
+        std::jthread first(run, 0), second(run, 1);
+    }
+    for (const auto& failure : failures) if (failure) std::rethrow_exception(failure);
+    const auto after = device->receipt();
+    if (after.cuda) {
+        // Batches of 4, 4 and 2 include one short row. Each crop uses three
+        // blocking uploads, two inter-batch waits and one blocking readback.
+        check(after.upload_bytes - before.upload_bytes == 2 * (crop.input_rows - first_chunk) * sizeof(Complex) &&
+              after.synchronizations - before.synchronizations == 12,
+              "compiled FIR did not use the expected packed transfers and inter-batch waits");
+    }
+
+    // The second batch's fill can fail or cancel while the first owns device buffers.
+    for (const bool cancel : {false, true}) {
+        std::stop_source stop;
+        r::CoarseBulkWork partial;
+        bool rejected = false;
+        try {
+            (void)device->project_fir(*filter, crop, [&](std::size_t first, std::span<Complex> values) {
+                if (first == first_chunk + 4 * crop.chunk_rows) {
+                    if (!cancel) throw datapump::Error("staged FIR fill failure");
+                    stop.request_stop();
+                }
+                std::copy_n(input[0].begin() + first, values.size(), values.begin());
+            }, partial, stop.get_token());
+        } catch (const datapump::Error& error) {
+            rejected = std::string_view(error.what()) ==
+                (cancel ? "Robust tensor operation cancelled" : "staged FIR fill failure");
+        }
+        check(rejected && partial.forward_ffts == 4 && partial.inverse_ffts == 4 &&
+              device->receipt().reserved_bytes == before.reserved_bytes,
+              "failed FIR lookahead did not drain its submitted batch and release its workspace");
+    }
+    if (after.cuda)
+        check(device->receipt().synchronizations - after.synchronizations == 4,
+              "failed FIR lookahead did not drain the stream after each first upload");
+    r::CoarseBulkWork retried;
+    const auto result = device->project_fir(*filter, crop, [&](std::size_t first, std::span<Complex> values) {
+        std::copy_n(input[0].begin() + first, values.size(), values.begin());
+    }, retried, {});
+    check_output(input[0], result);
+    check(retried.forward_ffts == 10 && device->receipt().reserved_bytes == before.reserved_bytes,
+          "compiled FIR could not run a complete crop after a failed fill");
+}
+
+void tight_staged_fir() {
+    // 2048-point FP64 FIR scratch needs 512 KiB per chunk. Once the filter
+    // and output are resident, this workspace can admit only one chunk.
+    auto backend = v::make_tensor_receiver_backend({v::TensorDevice::cpu, 0, mib, v::TensorPrecision::fp64});
+    auto device = backend->make_coarse(100, 0);
+    const std::array<double, 2> taps{.75, .25};
+    r::CoarseBulkWork work;
+    const auto filter = device->prepare_filter(taps, 2048, work, {});
+    const r::CoarseFirCrop crop{5123, 1024, 0, 1, 0, 5124};
+    const auto input = [&](std::size_t i) {
+        return i < crop.input_rows ? Complex(.001 * i, -.01 * (i % 31)) : Complex{};
+    };
+    const auto result = device->project_fir(*filter, crop, [&](std::size_t first, std::span<Complex> values) {
+        for (std::size_t i = 0; i < values.size(); ++i) values[i] = input(first + i);
+    }, work, {});
+    check(result.size() == crop.output_rows, "tight staged FIR returned an incomplete crop");
+    for (std::size_t i = 0; i < result.size(); ++i)
+        near(result[i], taps[0] * input(i) + (i ? taps[1] * input(i - 1) : Complex{}), 2e-12,
+             "tight staged FIR lost a chunk at width one");
+    const auto receipt = device->receipt();
+    check(work.fir_input_rows == crop.input_rows && work.forward_ffts == 7 && work.inverse_ffts == 6 &&
+          receipt.fft_calls == 13 && receipt.peak_reserved_bytes <= mib,
+          "tight staged FIR changed its complete work or exceeded the workspace");
 }
 
 void coarse_helper_dynamic_range(r::ReceiverBulkBackend& backend) {
@@ -2444,10 +2572,12 @@ int main(int argc, char** argv) {
         check(!cuda, "CUDA tensor test requires the compiled mapping parity fixture");
 #endif
         fir(*backend);
+        staged_fir(*backend);
         coarse_helper_dynamic_range(*backend);
         coarse(*backend);
         if (!cuda) {
             matrix_policy_fallback(false);
+            tight_staged_fir();
             tight_descriptor_workspace();
         }
         fine(*backend);

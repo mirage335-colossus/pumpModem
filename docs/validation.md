@@ -12,9 +12,11 @@ Earlier Ryzen CPU and RTX 4090 CUDA results retain their original source and
 hardware scope. No complete receiver-capacity or Tensor Core utilization claim
 follows.
 
-Updated 11 November 2026. The native history, matrix/preparation and wide-search
-follow-through is complete with the scoped checks below, including the fine-tail
-repair. Complete-receiver capacity and refreshed CPU forecasts remain unresolved.
+Updated 12 November 2026. The prior native history, matrix/preparation and
+wide-search follow-through remains complete with its scoped checks below,
+including the fine-tail repair. Current overlap follow-up has focused functional
+and paired service evidence below; complete-receiver capacity and refreshed CPU
+forecasts remain unresolved.
 The earlier
 bounded native throughput/precision investigation
 from `6bc9b0e3dd0ca91b3b8e3f4851301e6cf1b1371d` is complete. It supports scoped
@@ -34,10 +36,103 @@ and its transform visits the same butterflies in a cache-blocked order. Matched
 replays are 1.4–2.0× shorter with identical receipts on the one measured host.
 Earlier local CPU phase costs no longer describe this work; see the
 [follow-through](#receiver-overlap-and-transform-order-follow-through).
-Helper acquisition now uses the slot's lanes and, where the lease allows, runs
-beside coarse preparation. Its workspace bound follows the public calendar, so
-it no longer sets a Helper slot's lease; see the
-[Helper follow-through](#helper-acquisition-overlap-follow-through).
+Helper acquisition now uses the slot's lanes and, where the resource shape
+allows, can run beside coarse preparation. Its workspace bound follows the
+public calendar, so it no longer sets a Helper slot's lease; see the
+[Helper follow-through](#helper-acquisition-overlap-follow-through). The exact
+one-arrival coarse profile disables Helper; its bank and observation filter
+already overlap, so Helper overlap is inapplicable to that profile.
+
+## Current receiver overlap qualification
+
+The current source has identified two admission/clock defects for bounded
+follow-up: the receiver admission quote used a current-group maximum proxy
+instead of the next window's full-`W` shape plus incoming payload only for
+vacant ready-prefix positions (and could charge a phantom owner at `O=1` or a
+full owner cap), and Helper arrival-clock bounds mishandled signed arrivals,
+including negative allocation. The current changes address those rules; live
+RSS admission still applies and does not promise unconditional admission after
+process growth. Regression measurement is production whole-slot time; backlog
+measurement is whole-stream ready-interval service. Summed serial slot and
+continuation phases remain model inputs, not a universal upper bound.
+
+Fine/source cancellation and owner-stop now propagate stage tokens while
+preserving the recorded first failure; coarse Helper and mapped-profile owner
+stops follow the same rule. Helper arrival-clock bounds now account for the
+global capture-lead clock term and signed corner cases. Exact forward and
+inverse corner bounds and prefix behavior were checked with nonzero
+`first_sample`, real ±10 ppm offsets and more than one onset aperture; serial,
+executor and reverse-order results matched. The focused Helper check passed in
+0.901 s. Fine, stream and receiver checks passed 3/3 in about 29.7 s. The
+forecast producer/consumer scope correction passed 9 focused Python tests.
+
+Fine-owner observation work is bounded to one CPU dispatch ahead while owner
+GPU statistics run, using existing full-`W` and two-ring bounds; it adds no GPU
+reentrancy or threads. CUDA FIR staged-fill/GPU-compute overlap is implemented
+with one first chunk per worker outside the device lock, one charged four-chunk
+host stage, one packed upload, and CPU filling the next leaf while the prior
+asynchronous FFT runs. The filter is the first leaf of the coarse stage;
+device output and batch work remain serialized, with fixed memory and full-`W`
+limits.
+
+Current focused checks passed: triad 33/33 (89.58 s), GUI 29/29 (106.45 s),
+and forecast producer/consumer tests 9/9. Sanitizer runs passed for Helper,
+fine and stream paths. The full sanitizer coarse run and the earlier
+overlap-only sanitizer run each timed out at 60 s; both failures remain
+recorded. A 30 s coarse trace used 41.1 s CPU and progressed through fixed
+cases and mapped W=3 before timing out on mapped W=1 direct. The focused ASan/
+UBSan error/drain check using `--overlap-failures` passed in 0.086 s (exit 0);
+it verifies waiting for peer stop/drain while preserving the original
+exception. The full default-Release coarse suite passed after the final
+test-only addition (17.10 s reported, 17.11 s wall). Five Ada component tests
+passed.
+
+Matched CPU measurements are descriptive only. Row 4 whole-slot mean changed
+from 4.37909 to 4.30098 s (1.78% lower). The two-pair row-5, O=1/W=24
+ready-input mean over 240 s of samples changed from 6.7975 to 6.6501 s;
+measured busy fraction changed from 88.05% to 89.76%. These do not establish
+receiver capacity. The baseline runtime manifest is
+`0f827344bba1af64d0f821400e49c8ae6fbb67df25a45834bb458c80b3e934f0`; the
+reviewed baseline source commit is `8b8429164c9ce60680329db8de52a0545985d495`,
+despite stale configure commit
+`22e92c3581b341c0c1293c24e084dc59fa493bb7`. Candidate manifest is
+`d32beb7d614f8f34fa239b6218402b176a6747fb85b63ac844b12340657e8a9a`.
+
+One matched actual Radeon run processed 279,864 packed-FP16 score rows; the
+whole five-slot comparison changed from 1.016828020 to 0.977967 s. This is a
+single-pair result, not an automatic-mode or capacity qualification. On the
+full RTX PRO 6000 Blackwell, the original two-pair large-workload whole mean
+changed from 3.603 to 3.101 s (13.9% lower), and a fresh-seed comparison
+changed from 3.106 to 2.422 s (22.0% lower), with matched work/evidence. The CUDA
+receiver comparisons used explicit W=32 and a 16 GiB host limit on both NVIDIA devices.
+For the large FIR case, the host workspace quote rose by 1 MiB and GPU peak
+memory was unchanged. The measured receiver path used half cuFFT and zero
+HMMA/IMMA; separate Tensor Core component tests passed but do not qualify this
+path.
+
+On the RTX 4090 (Ada), the two-pair large-workload whole mean changed from
+6.021763 to 5.395978 s (10.39% lower); a fresh-seed comparison changed from
+5.788111867 to 5.000541055 s (13.61% lower). The failed-Helper whole comparison
+changed from 7.415118945 to 7.149399353 s (3.58% lower), with the same work over
+8,596 frequencies. The original small ready-interval mean regressed from
+0.823282 to 0.870745 s (5.77% slower), while a fresh holdout improved from
+0.894183115 to 0.789065660 s (11.76% lower); that holdout's whole-stream time
+changed from 2.866356449 to 2.533790929 s. These bounded, mixed comparisons are
+inconclusive for general backlog service. Both NVIDIA receiver paths used half
+cuFFT with zero HMMA/IMMA. Five separate Ada component tests passed.
+
+On Blackwell, backlog evidence is mixed. The original small-backlog two-pair
+mean was 5.7% slower on whole-stream time and 14.6% slower on the ready interval. A
+fresh holdout changed whole-stream time from 0.910624566 to 0.786921768 s and
+its authoritative ready-interval wall from 0.274719919 to 0.248533140 s (9.53%
+lower). Retain the negative original result: these bounded pairs remain inconclusive for a general
+backlog or capacity claim. Overall, no receiver-capacity, communication
+sensitivity, global-optimum or end-to-end Tensor Core claim is established.
+Retain raw artifacts under ignored
+`local-evidence/overlap-review/` only for current qualification and
+source/input matching, with NVIDIA receipts in its `blackwell/` and `ada/`
+subdirectories. Remove these raw artifacts when accepted follow-ups supersede
+that purpose.
 
 ## Receiver overlap and transform-order follow-through
 
@@ -299,8 +394,11 @@ on either side of each memory threshold.
   fails on a lane, a worker that cannot be started while a stage posts, and
   the GUI's stage-time label.
 - The probe's `slot` and `continuation` phases, and the capacity and forecast
-  tools that add them, measure the sequential lease. That bounds an overlapped
-  slot from above. Local CPU calibration still needs its refresh.
+  tools that add them, measure serial-model phase costs. They are not a
+  universal upper bound for production overlapping work; contending jobs can
+  make elapsed time worse. The `regression` command measures production
+  whole-slot time, while ready-backlog qualification separately measures
+  whole-stream service. Local CPU calibration still needs its refresh.
 - The compiled ATen test that calls the Helper directly was not built here.
 - Two findings predate this change and are not fixed: the forecast tool
   expects a controller scope name the probe no longer emits, and a public

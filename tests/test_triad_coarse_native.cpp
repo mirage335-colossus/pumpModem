@@ -5,9 +5,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <iostream>
 #include <limits>
+#include <mutex>
 #include <numbers>
 #include <stdexcept>
 #include <string_view>
@@ -795,12 +798,80 @@ bool same_search(const r::CoarseResult& a, const r::CoarseResult& b) {
     return same;
 }
 
+constexpr r::AssistanceBound acquisition_bound{3 << 20, 4};
+
+void acquisition_failures(const datapump::Crypto& crypto, const Fixture& fixture, bool owner_lanes) {
+    constexpr unsigned workers = 3;
+    const auto limit = r::coarse_workspace(fixture.config, fixture.slot, workers, acquisition_bound);
+    struct Lost : std::runtime_error { using std::runtime_error::runtime_error; };
+    if (owner_lanes) {
+        std::stop_source external;
+        std::mutex mutex;
+        std::condition_variable_any changed;
+        bool peer_entered = false, peer_stopped = false;
+        bool owner_saw_stage_stop = false, owner_saw_drained_peer = false;
+        const r::FrequencyAssistance peer_failed{[&](const r::LaneWave& wave, std::stop_token stop) ->
+            std::span<const r::FrequencyInterval> {
+            try {
+                wave(2, [&](std::size_t index, std::stop_token leaf_stop) {
+                    std::unique_lock lock(mutex);
+                    if (!index) {
+                        peer_entered = true;
+                        changed.notify_all();
+                        changed.wait_for(lock, leaf_stop, std::chrono::seconds(5), [] { return false; });
+                        peer_stopped = leaf_stop.stop_requested();
+                        return;
+                    }
+                    check(changed.wait_for(lock, std::chrono::seconds(5), [&] { return peer_entered; }),
+                          "failed wave did not start its waiting sibling");
+                    throw Lost("planned acquisition wave failure");
+                });
+            } catch (const Lost&) {
+                std::lock_guard lock(mutex);
+                owner_saw_stage_stop = stop.stop_requested() && !external.stop_requested();
+                owner_saw_drained_peer = peer_stopped;
+                throw datapump::Error("owner acquisition stopped by its failed leaf");
+            }
+            throw std::runtime_error("acquisition wave swallowed its failure");
+        }, acquisition_bound};
+        rejects<Lost>([&] {
+            (void)r::score_coarse(fixture.config, fixture.slot, crypto, fixture.iq, peer_failed, workers,
+                                  limit, external.get_token());
+        }, "coarse session replaced its leaf failure with the owner's cancellation");
+        check(owner_saw_stage_stop && owner_saw_drained_peer,
+              "failed leaf did not stop owner work and drain its waiting sibling");
+    }
+    // Both acquisition placements report failure and never publish results.
+    const r::FrequencyAssistance failing{[](const r::LaneWave&, std::stop_token) ->
+        std::span<const r::FrequencyInterval> { throw Lost("acquisition failed"); }, acquisition_bound};
+    rejects<Lost>([&] {
+        (void)r::score_coarse(fixture.config, fixture.slot, crypto, fixture.iq, failing, workers, limit, {});
+    }, "coarse session hid an acquisition failure");
+    const std::array<r::FrequencyInterval, 2> unordered{{{.01, .02}, {-.01, 0}}};
+    const r::FrequencyAssistance invalid{[&](const r::LaneWave&, std::stop_token) ->
+        std::span<const r::FrequencyInterval> { return unordered; }, acquisition_bound};
+    rejects([&] {
+        (void)r::score_coarse(fixture.config, fixture.slot, crypto, fixture.iq, invalid, workers, limit, {});
+    }, "coarse session searched an invalid acquired interval list");
+    std::stop_source cancelled;
+    const r::FrequencyAssistance stopping{[&](const r::LaneWave&, std::stop_token stop) ->
+        std::span<const r::FrequencyInterval> {
+            cancelled.request_stop();
+            check(stop.stop_requested(), "acquisition did not observe its session's cancellation");
+            throw datapump::Error("acquisition cancelled");
+        }, acquisition_bound};
+    rejects([&] {
+        (void)r::score_coarse(fixture.config, fixture.slot, crypto, fixture.iq, stopping, workers, limit,
+                              cancelled.get_token());
+    }, "cancelled acquisition produced a coarse result");
+}
+
 // A session that acquires its intervals during preparation is the session
 // those intervals would have built directly: on a fixed frequency route, and
 // on a slow mapped profile whose route the intervals decide. A profile that
 // cannot defer its grid refuses the request.
 void overlapped_acquisition(const datapump::Crypto& crypto) {
-    const r::AssistanceBound bound{3 << 20, 4};
+    const auto bound = acquisition_bound;
     struct Receipt { unsigned calls = 0, waves = 0; bool owner_lanes = false, owner_thread = false, prepared = false; };
     const auto run = [&](const Fixture& f, std::span<const r::FrequencyInterval> intervals,
                          r::CoarseRoute route, const char* reason, bool owner_lanes, unsigned workers = 3) {
@@ -921,34 +992,8 @@ void overlapped_acquisition(const datapump::Crypto& crypto) {
                               r::coarse_workspace(exact.config, exact.slot, workers), {});
     }, "a profile that cannot defer its grid acquired during preparation");
 
-    // An acquisition failure or an invalid interval list is the session's
-    // failure, whichever lanes ran it, and never a preparation result.
-    struct Lost : std::runtime_error { using std::runtime_error::runtime_error; };
-    for (const auto* fixture : {&two_ray, &mapped}) {
-        const auto limit = r::coarse_workspace(fixture->config, fixture->slot, workers, bound);
-        const r::FrequencyAssistance failing{[](const r::LaneWave&, std::stop_token) ->
-            std::span<const r::FrequencyInterval> { throw Lost("acquisition failed"); }, bound};
-        rejects<Lost>([&] {
-            (void)r::score_coarse(fixture->config, fixture->slot, crypto, fixture->iq, failing, workers, limit, {});
-        }, "coarse session hid an acquisition failure");
-        const std::array<r::FrequencyInterval, 2> unordered{{{.01, .02}, {-.01, 0}}};
-        const r::FrequencyAssistance invalid{[&](const r::LaneWave&, std::stop_token) ->
-            std::span<const r::FrequencyInterval> { return unordered; }, bound};
-        rejects([&] {
-            (void)r::score_coarse(fixture->config, fixture->slot, crypto, fixture->iq, invalid, workers, limit, {});
-        }, "coarse session searched an invalid acquired interval list");
-        std::stop_source cancelled;
-        const r::FrequencyAssistance stopping{[&](const r::LaneWave&, std::stop_token stop) ->
-            std::span<const r::FrequencyInterval> {
-                cancelled.request_stop();
-                check(stop.stop_requested(), "acquisition did not observe its session's cancellation");
-                throw datapump::Error("acquisition cancelled");
-            }, bound};
-        rejects([&] {
-            (void)r::score_coarse(fixture->config, fixture->slot, crypto, fixture->iq, stopping, workers, limit,
-                                  cancelled.get_token());
-        }, "cancelled acquisition produced a coarse result");
-    }
+    acquisition_failures(crypto, two_ray, true);
+    acquisition_failures(crypto, mapped, false);
 }
 
 void tied_arrival_frontier() {
@@ -966,9 +1011,21 @@ void tied_arrival_frontier() {
 }
 } // namespace
 
-int main() try {
+// Run test_triad_coarse_native --overlap-failures to check fixed-route
+// acquisition error propagation and draining under sanitizers.
+// The default CTest invocation still runs the full coarse suite.
+int main(int argc, char** argv) try {
+    const bool overlap_failures = argc == 2 && std::string_view(argv[1]) == "--overlap-failures";
+    if (argc != 1 && !overlap_failures) {
+        std::cerr << "Usage: test_triad_coarse_native [--overlap-failures]\n";
+        return 2;
+    }
     const auto crypto = key();
     tied_arrival_frontier();
+    if (overlap_failures) {
+        acquisition_failures(crypto, capture(crypto, false), true);
+        return 0;
+    }
     exact_two_ray(crypto);
     automatic_precision_qualification(crypto);
     frequency_continuation(crypto);

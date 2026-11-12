@@ -702,10 +702,14 @@ strata; the current message/two-quiet/EOF gate; three actual ready-backlog CPU
 calibration intervals; a fresh matched holdout at the declared preflight horizon;
 measured controller work excluding condition-variable wait and separately
 quantified spool reads/hash; and local fixed 180-byte multiblock codec
-work with a matching holdout. Controller work is charged in full as a serialized
-upper bound even when it may overlap DSP. Do not add whole overlapped stream wall
-time to phase costs and count the DSP twice. Both the complete bound and measured
-backlog must support the real-time criterion. Missing work leaves complete
+work with a matching holdout. Controller work remains a separately charged
+model input even where it may overlap DSP; summed serial phase costs are not a
+universal upper bound because contending jobs can worsen elapsed time. The
+abbreviated `regression` command measures production whole-slot elapsed time,
+while ready-backlog qualification measures whole-stream service over its
+declared interval. Do not add whole overlapped stream wall time to phase costs
+and count the DSP twice. Both the complete model and measured backlog must
+support the real-time criterion. Missing work leaves complete
 capacity unresolved; a numeric point at or above 1 s/s fails. GUI presentation,
 hardware-rate resampling and unknown-calendar acquisition remain outside that
 logical-rate forecast. Preserve these limits in any application-level claim.

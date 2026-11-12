@@ -21,7 +21,7 @@
 namespace datapump::triad::v3::receiver_detail {
 namespace {
 namespace native_fft = modem::detail::search_fft;
-constexpr std::size_t chunk_samples = 16384;
+constexpr std::size_t chunk_samples = coarse_fir_chunk_rows;
 constexpr std::size_t lanes = 2 * receiver_epoch_offsets.size();
 constexpr std::size_t retained_per_bit = 2;
 constexpr std::size_t max_intervals = 64;
@@ -1571,6 +1571,8 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
     bank = add(bank, mul(plan.workspaces(), sizeof(Workspace)));
     const auto source = add(plan.source_geometry.source_workspace_bytes, PatternSource::render_bank_scratch_bytes);
     const auto raw_columns = storage(mul(plan.ray_count, layout.kernel_rows));
+    // The FFT-sized scratch also covers a compiled FIR worker's first host
+    // chunk while it waits for the serialized device operation.
     auto bank_scratch = add(storage(plan.filter_fft), raw_columns);
     if (packed) {
         // FIR scratch ends before conversion. Before packing, the raw
@@ -1606,7 +1608,8 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
         fidelity_job = add(fidelity_job, storage(mul(2 * plan.ray_count, local.nfft)));
         fidelity_job = add(fidelity_job, scoring_worker_workspace(local, plan));
     }
-    // The observation filter is one more job beside the workspaces.
+    // The observation filter is one more job beside the workspaces. Its
+    // FFT-sized scratch likewise covers the compiled FIR's first host chunk.
     const auto filter_job = storage(add(layout.crop_rows, plan.filter_fft));
     // The owner runs one serial chain and its waves. Beside the mapped
     // gate's epochs, an overlapped acquisition holds one lane of its own.
@@ -2328,13 +2331,13 @@ struct CoarseSession::Impl {
         };
         BankJobs bank_jobs(geometry, config, slot, key, projection, mapped, spectrum_fft,
                            float_fft.get(), q15_products, workers);
-        // A device FIR admits its own projection phase. It keeps its
-        // original lane bound, with the observation after the bank.
+        // The device context still serializes output and batch admission.
+        // Let the observation share the existing lanes with host source
+        // preparation without expanding the device FIR lane bound.
         const bool device_fir = projection.bulk() != nullptr;
         const bool fidelity = mapped && !bulk;
         const std::size_t acquisitions = acquisition && fidelity ? 1 : 0;
-        const std::size_t filters = device_fir ? 0 : 1;
-        const auto serial = acquisitions + filters;
+        const auto serial = acquisitions + 1;
         const auto jobs = add(bank_jobs.size(), serial);
         const auto widest_wave = fidelity ? receiver_epoch_offsets.size() :
                                  acquisition ? acquisition->bound.widest_wave : 0;
@@ -2344,20 +2347,12 @@ struct CoarseSession::Impl {
         const LaneJob* wave_job = nullptr;
         std::size_t posted = 0;
         std::span<const FrequencyInterval> acquired;
-        std::exception_ptr acquisition_failure;
-        try {
+        {
             ReceiverExecutor::Stage stage(executor, slot.index, static_cast<unsigned>(lane_limit), stop,
                 [&](unsigned, std::size_t index, std::stop_token job_stop) { (*wave_job)(index - posted, job_stop); },
                 [&](unsigned, std::size_t job, std::stop_token job_stop) {
                     if (job < acquisitions) {
-                        // Only the session's own cancellation stops acquisition,
-                        // so a sibling's failure cannot become its outcome.
-                        try {
-                            acquired = acquisition->acquire({}, stop);
-                        } catch (...) {
-                            acquisition_failure = std::current_exception();
-                            throw;
-                        }
+                        acquired = acquisition->acquire({}, job_stop);
                         return;
                     }
                     if (job < serial) {
@@ -2375,28 +2370,27 @@ struct CoarseSession::Impl {
                 posted += count;
             };
             stage.release(jobs);
-            if (acquisition && !acquisitions) plan_search(acquisition->acquire(wave, stop));
-            if (fidelity) {
-                const auto started = PhaseClock::now();
-                validate_mapped_profile(geometry, config, slot, key, projection, *mapped, *fft,
-                    receipt.mapped_fidelity.operations, stop, wave);
-                receipt.mapped_fidelity.wall_seconds = elapsed(started);
+            const auto stage_stop = stage.stop_token();
+            try {
+                if (acquisition && !acquisitions) plan_search(acquisition->acquire(wave, stage_stop));
+                if (fidelity) {
+                    const auto started = PhaseClock::now();
+                    validate_mapped_profile(geometry, config, slot, key, projection, *mapped, *fft,
+                        receipt.mapped_fidelity.operations, stage_stop, wave);
+                    receipt.mapped_fidelity.wall_seconds = elapsed(started);
+                }
+            } catch (...) {
+                // A failed leaf can stop the owner's serial work. Report the
+                // recorded failure before draining the remaining stage jobs.
+                if (stage_stop.stop_requested()) stage.wait_urgent();
+                throw;
             }
             stage.wait_background(jobs);
-        } catch (...) {
-            if (acquisition_failure) std::rethrow_exception(acquisition_failure);
-            throw;
         }
         if (acquisitions) plan_search(acquired);
         bank = bank_jobs.finish(receipt.template_bank.operations);
         receipt.template_bank.wall_seconds = bank_span.seconds();
-        if (device_fir) {
-            const auto input_started = PhaseClock::now();
-            filter(stop);
-            receipt.observation.wall_seconds = elapsed(input_started);
-        } else {
-            receipt.observation.wall_seconds = observation_span.seconds();
-        }
+        receipt.observation.wall_seconds = observation_span.seconds();
     }
 
     // A long span gives every lane whole frequencies. A short one shares its

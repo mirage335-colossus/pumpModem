@@ -749,7 +749,7 @@ def measure_complete_case(case, *, invoke, plan, worker_allocation, family_size,
     else:
         missing.append("observed stream workspace")
     orchestration = measured_ratio(controller_ratios, family_size=family_size) | {
-        "scope": "Native controller wall outside instrumented waits, charged separately in serialized phase costs"}
+        "scope": "Native controller wall excluding instrumented CV wait and spool I/O, charged separately in serialized phase costs"}
     row["nominal"] = combine_components(nominal | {"orchestration": orchestration},
                                        complete_work_covered=not missing, workspace=workspace)
     long_codec = measured_ratio(codec_ratios, family_size=family_size) | {

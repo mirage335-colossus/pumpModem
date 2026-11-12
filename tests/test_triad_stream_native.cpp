@@ -174,19 +174,13 @@ void order_and_backpressure() {
               "codec reset changed global waveform coordinates");
 }
 
-// The ready group is chosen from sequential leases. An overlap lease is held
-// until its slot ends, so it is granted only from memory that owners cannot
-// use: afterwards every owner the cap still admits, and at least one, must fit
-// at the group's largest sequential lease. Oldest slots are served first, and
-// a group that already traded lanes for width gets none.
+// The ready group keeps its width. Overlap leases use memory left after
+// quoting the actual next windows that can use vacant owners.
 void overlap_lease_uses_only_spare_memory() {
     constexpr std::size_t mib = 1024*1024, extra = 24*mib, overhead = 4096;
     const auto p = profile(true);
     const auto sequential = [](const ReceiverConfig& c, const ReceiverSlotPlan& plan, unsigned workers) {
         return workspace(c, plan, workers) + 8*mib;
-    };
-    const auto wider = [&](const ReceiverConfig& c, const ReceiverSlotPlan& plan, unsigned workers) {
-        return sequential(c, plan, workers) + extra;
     };
     struct Admitted { std::array<std::size_t, 2> lease; std::array<unsigned, 2> workers; std::size_t reserved; };
     const auto admit = [&](std::size_t limit, unsigned owners, const StreamWorkspace& quote,
@@ -197,6 +191,9 @@ void overlap_lease_uses_only_spare_memory() {
         std::array<std::atomic<std::size_t>, 2> lease{};
         std::array<std::atomic<unsigned>, 2> share{};
         std::atomic<bool> release = false;
+        const auto wider = [&](const ReceiverConfig& c, const ReceiverSlotPlan& plan, unsigned workers) {
+            return quote(c, plan, workers) + extra;
+        };
         auto score = [&](const ReceiverConfig& c, const ReceiverSlotPlan& plan, const Crypto&,
             auto, auto, unsigned workers, std::size_t memory, std::stop_token stop) {
             if (plan.index<lease.size()) {
@@ -208,8 +205,9 @@ void overlap_lease_uses_only_spare_memory() {
         };
         auto stream = StreamReceiverFixture::make(p, receiver(p), Crypto::amateur(), o, quote, score,
             decode_short_message, {}, [] { return 8*mib; }, wider);
-        const auto two = p.slot(1).observation.stop;
-        check(two<=o.maximum_input_chunk_samples, "overlap lease fixture does not admit both windows at once");
+        const auto expected = std::min(owners, 2U);
+        const auto end = p.slot(expected-1).observation.stop;
+        check(end<=o.maximum_input_chunk_samples, "overlap lease fixture does not fit one input chunk");
         const auto deadline = std::chrono::steady_clock::now()+5s;
         if (!together) {
             // The second window becomes ready while the first owner runs.
@@ -217,11 +215,12 @@ void overlap_lease_uses_only_spare_memory() {
             while (!lease[0] && std::chrono::steady_clock::now()<deadline) std::this_thread::sleep_for(1ms);
             check(lease[0] && !lease[1], "overlap lease fixture did not admit its first window alone");
         }
-        feed(stream, two);
-        while ((!lease[0] || !lease[1]) && std::chrono::steady_clock::now()<deadline)
+        feed(stream, end);
+        const auto started = [&] { return lease[0] && (expected==1 || lease[1]); };
+        while (!started() && std::chrono::steady_clock::now()<deadline)
             std::this_thread::sleep_for(1ms);
         const auto report = stream.report();
-        check(lease[0] && lease[1] && report.active_owners==2,
+        check(started() && report.active_owners==expected,
               "an overlap lease narrowed the ready group or delayed an owner");
         const Admitted admitted{{lease[0].load(), lease[1].load()}, {share[0].load(), share[1].load()},
                                 report.peak_reserved_bytes};
@@ -232,7 +231,6 @@ void overlap_lease_uses_only_spare_memory() {
     const auto config = receiver(p);
     const std::array plans{make_receiver_slot_plan(p, config, 0), make_receiver_slot_plan(p, config, 1)};
     const std::array narrow{sequential(config, plans[0], 4), sequential(config, plans[1], 4)};
-    const auto largest = std::max(narrow[0], narrow[1]) + overhead;
 
     // Ample memory: both ready slots overlap, with both owners of the cap used.
     const auto spare = admit(256*mib, 2, sequential);
@@ -242,32 +240,45 @@ void overlap_lease_uses_only_spare_memory() {
     const auto fixed = spare.reserved - (spare.lease[0]+spare.lease[1]+2*overhead);
     const auto group = fixed + narrow[0] + narrow[1] + 2*overhead;
 
-    // With the cap reached, one more sequential lease must still fit.
-    const auto both = admit(group + largest + 2*extra + 2*mib, 2, sequential);
+    // Both owner positions are occupied, so there is no third lease to protect.
+    const auto both = admit(group + 2*extra + 2*mib, 2, sequential);
     check(both.lease==std::array{narrow[0]+extra, narrow[1]+extra},
-          "memory beyond one further lease did not grant both overlap leases");
-    const auto one = admit(group + largest + extra + 2*mib, 2, sequential);
+          "a full owner group reserved a nonexistent extra owner");
+    const auto one = admit(group + extra + 2*mib, 2, sequential);
     check(one.lease==std::array{narrow[0]+extra, narrow[1]},
           "memory for one overlap lease was not given to the oldest ready slot alone");
-    const auto none = admit(group + largest + extra - 2*mib, 2, sequential);
-    check(none.lease==narrow, "an overlap lease took the headroom of a further owner");
+    const auto none = admit(group + extra - 2*mib, 2, sequential);
+    check(none.lease==narrow, "an overlap lease exceeded the memory available to the ready group");
+
+    const auto single = admit(256*mib, 1, sequential);
+    const auto tight_single = admit(single.reserved + 2*mib, 1, sequential);
+    check(tight_single.lease==std::array<std::size_t, 2>{narrow[0]+extra, 0},
+          "a single-owner receiver reserved a nonexistent extra owner");
 
     // Two more owners under the cap need two further leases first.
-    const auto capped = admit(group + 2*largest + extra - 2*mib, 4, sequential);
+    const auto future = sequential(config, make_receiver_slot_plan(p, config, 2), 4) +
+                        sequential(config, make_receiver_slot_plan(p, config, 3), 4) + 2*overhead;
+    const auto capped = admit(group + future + extra - 2*mib, 4, sequential);
     check(capped.lease==narrow, "an overlap lease took memory that the owner cap could still use");
-    const auto uncapped = admit(group + 2*largest + extra + 2*mib, 4, sequential);
+    const auto uncapped = admit(group + future + extra + 2*mib, 4, sequential);
     check(uncapped.lease==std::array{narrow[0]+extra, narrow[1]},
           "memory beyond every remaining owner's lease did not grant an overlap lease");
 
-    // A window that becomes ready later is still admitted at once at its
-    // full shape: an earlier owner alone takes an overlap lease only if this
-    // one's sequential lease would also fit.
+    // Protect the full quote for the next window before it is ready.
     const auto held = admit(group + extra - 2*mib, 2, sequential, false);
     check(held.lease==narrow && held.workers==std::array{4U, 4U},
           "an overlap lease took the memory of a window that became ready later");
     const auto later = admit(group + extra + 4*mib, 2, sequential, false);
     check(later.lease==std::array{narrow[0]+extra, narrow[1]} && later.workers==std::array{4U, 4U},
           "a later window was narrowed or its predecessor denied spare memory");
+    constexpr auto larger = 12*mib;
+    const auto variable = [&](const ReceiverConfig& c, const ReceiverSlotPlan& plan, unsigned workers) {
+        return sequential(c, plan, workers) + (plan.index==1 ? larger : 0);
+    };
+    const auto later_larger = admit(group + larger + extra - 2*mib, 2, variable, false);
+    check(later_larger.lease==std::array{narrow[0], narrow[1]+larger} &&
+          later_larger.workers==std::array{4U, 4U},
+          "a widened predecessor consumed the larger next window's sequential lease");
 
     // A group that fits only at balanced shares has no memory to spare.
     const auto shaped = [&](const ReceiverConfig& c, const ReceiverSlotPlan& plan, unsigned workers) {
@@ -526,43 +537,50 @@ void simultaneous_batches_isolate_leaf_failure() {
 // once, and a leaf can release more of them.
 void stage_background_overlaps_urgent_leaf() {
     const auto deadline = std::chrono::steady_clock::now()+5s;
-    const auto await = [&](const std::atomic<bool>& flag) {
-        while (!flag && std::chrono::steady_clock::now()<deadline) std::this_thread::sleep_for(1ms);
-        return flag.load();
+    const auto await = [&](auto ready, std::stop_token stop = {}) {
+        while (!ready() && !stop.stop_requested() && std::chrono::steady_clock::now()<deadline)
+            std::this_thread::sleep_for(1ms);
+        return ready();
     };
     receiver_detail::ReceiverExecutor executor(3);
     std::array<std::atomic<unsigned>, 6> runs{};
-    std::atomic<bool> first_wave_done = false, owner_overlapped = false, urgent_saw_overlap = false;
+    std::atomic<bool> urgent_entered = false, urgent_saw_overlap = false;
     std::atomic<bool> release_held = false, held_started = false, owner_passed_limit = false;
-    std::atomic<unsigned> completed = 0;
+    std::atomic<unsigned> started = 0, early_completed = 0, completed = 0;
     receiver_detail::ReceiverExecutor::Stage* handle = nullptr;
     receiver_detail::ReceiverExecutor::Stage stage(executor, 0, 3, {},
-        [&](unsigned lane, std::size_t, std::stop_token) {
+        [&](unsigned lane, std::size_t, std::stop_token stop) {
             check(lane==0, "the owner did not run its own urgent leaf on lane zero");
-            urgent_saw_overlap = await(first_wave_done);
+            urgent_entered = true;
+            urgent_saw_overlap = await([&] { return early_completed==4; }, stop);
         },
-        [&](unsigned lane, std::size_t index, std::stop_token) {
+        [&](unsigned lane, std::size_t index, std::stop_token stop) {
             check(lane<3, "background leaf received a lane outside its stage");
-            if (!first_wave_done && !lane) owner_overlapped = true;
             ++runs.at(index);
+            if (index<2) {
+                // Occupy the two helper lanes until the owner enters its leaf.
+                ++started;
+                check(await([&] { return urgent_entered.load(); }, stop), "the owner did not enter its urgent leaf");
+            }
             if (index==4) {
                 if (!lane) owner_passed_limit = true;
                 held_started = true;
-                (void)await(release_held);
+                (void)await([&] { return release_held.load(); }, stop);
             }
             if (index==3) handle->release(6);
-            if (++completed==4) first_wave_done = true;
+            ++completed;
+            if (index<4) ++early_completed;
         });
     handle = &stage;
     check(stage.lanes()==3, "stage did not report its admitted lane bound");
     stage.release(4);
+    check(await([&] { return started==2; }), "the fixture did not occupy both helper lanes");
     stage.post(1);
     stage.wait_urgent();
-    check(urgent_saw_overlap && !owner_overlapped,
-          "released background leaves did not overlap the running urgent leaf");
+    check(urgent_saw_overlap, "released background leaves did not overlap the running urgent leaf");
     // The owner does not start a released leaf past its limit. A helper does.
     stage.wait_background(4);
-    check(await(held_started) && !owner_passed_limit,
+    check(await([&] { return held_started.load(); }) && !owner_passed_limit,
           "the owner, not a free helper, started the leaf past its limit");
     // Nor does it wait for that running leaf, which precedes this range.
     stage.wait_background(6, 5);
@@ -590,16 +608,24 @@ void stage_urgent_priority_and_failure() {
     std::atomic<unsigned> urgent_started = 0, late_background = 0, early_background = 0;
     {
         receiver_detail::ReceiverExecutor::Stage stage(executor, 0, 2, {},
-            [&](unsigned, std::size_t, std::stop_token) {
+            [&](unsigned, std::size_t index, std::stop_token stop) {
                 ++urgent_started;
-                std::this_thread::sleep_for(2ms);
+                // Leave one lane in its urgent leaf until the other lane
+                // has entered the last one. This makes entry order visible
+                // without assuming a claimed leaf is already executing.
+                if (index==2) return;
+                const auto need = index==0 ? 2U : 3U;
+                const auto deadline = std::chrono::steady_clock::now()+5s;
+                while (urgent_started<need && !stop.stop_requested() && std::chrono::steady_clock::now()<deadline)
+                    std::this_thread::sleep_for(1ms);
+                check(urgent_started>=need, "the urgent-priority fixture did not start its next leaf");
             },
             [&](unsigned, std::size_t, std::stop_token) {
                 if (urgent_started<3) ++early_background;
                 else ++late_background;
             });
-        stage.release(3);
         stage.post(3);
+        stage.release(3);
         stage.wait_urgent();
         stage.wait_background(3);
         check(urgent_started==3 && !early_background && late_background==3,
@@ -607,10 +633,13 @@ void stage_urgent_priority_and_failure() {
     }
     std::atomic<unsigned> after_failure = 0;
     bool failed = false;
-    try {
-        receiver_detail::ReceiverExecutor::Stage stage(executor, 0, 2, {},
+    std::stop_source external_stop;
+    std::stop_token owner_stop;
+    {
+        receiver_detail::ReceiverExecutor::Stage stage(executor, 0, 2, external_stop.get_token(),
             [](unsigned, std::size_t, std::stop_token) {},
             [&](unsigned, std::size_t index, std::stop_token stop) {
+                check(stop==owner_stop, "owner and leaves received different stage stop tokens");
                 if (!index) throw Error(planned_failure);
                 // Leaves already running observe the stage's cancellation.
                 const auto deadline = std::chrono::steady_clock::now()+5s;
@@ -618,10 +647,16 @@ void stage_urgent_priority_and_failure() {
                     std::this_thread::sleep_for(1ms);
                 if (!stop.stop_requested()) ++after_failure;
             });
+        owner_stop = stage.stop_token();
+        check(owner_stop.stop_possible() && !owner_stop.stop_requested(), "a live stage lacked its own stop token");
         stage.release(64);
-        stage.wait_background(64);
-    } catch (const Error& error) {
-        failed = std::string_view(error.what())==planned_failure;
+        try {
+            stage.wait_background(64);
+        } catch (const Error& error) {
+            failed = std::string_view(error.what())==planned_failure;
+        }
+        check(owner_stop.stop_requested() && !external_stop.stop_requested(),
+              "a leaf failure did not stop owner work independently of the receiver");
     }
     check(failed && !after_failure, "background leaf failure did not stop its stage and reach the owner");
 }

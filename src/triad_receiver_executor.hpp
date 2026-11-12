@@ -44,6 +44,8 @@ public:
 
         // Leaves receive a lane below this bound. The owner is lane zero.
         unsigned lanes() const noexcept;
+        // Owner-side work can observe cancellation or failure of a leaf.
+        std::stop_token stop_token() const noexcept;
         // Appends urgent leaves, indexed consecutively from zero.
         void post(std::size_t count);
         // Permits background leaves [0, limit) to start.

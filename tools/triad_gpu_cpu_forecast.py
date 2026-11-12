@@ -308,7 +308,7 @@ def _qualify_backlog(receipts, description):
 
 def _fixed_controller(receipt):
     phase = phase_once(receipt, "controller_service")
-    require(phase["scope"] == "controller_wall_excluding_instrumented_cv_wait" and
+    require(phase["scope"] == "controller_wall_excluding_instrumented_cv_wait_and_spool_io" and
             phase["work"].get("may_overlap_slot_dsp") is True and phase["represented_seconds"] > 0,
             "Native controller cost is unavailable")
     return _wall(receipt, "controller_service") / phase["represented_seconds"]

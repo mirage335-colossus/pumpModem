@@ -63,7 +63,9 @@ struct Fixture {
     std::vector<std::uint8_t> valid;
 };
 
-Fixture fixture(double arrival = .17, double amplitude = .11, unsigned rate = 512) {
+Fixture fixture(double arrival = .17, double amplitude = .11, unsigned rate = 512,
+                double calendar_offset = 0, double capture_lead = 8,
+                std::uint64_t source_date = 0, double tx_scale = 1, double rx_scale = 1) {
     Fixture f;
     auto& c = f.config;
     c.sample_rate_hz = rate; c.data_if_hz = 200; c.frequency_bound_hz = 6;
@@ -72,11 +74,12 @@ Fixture fixture(double arrival = .17, double amplitude = .11, unsigned rate = 51
     c.capture_tail_bound_seconds = .035; c.helper_enabled = true;
     c.helper.low_frequency_hz = 100; c.helper.frequency_hz = 300;
     auto& s = f.slot;
-    s.stop_sample = rate * 84; s.window_capture_lead_seconds = 8;
-    s.source_start_seconds = 37.866;
-    s.arrival_lower_seconds = -7.035; s.arrival_upper_seconds = 7.035;
-    s.helper_end_seconds = 61.6;
-    f.input.resize(s.stop_sample); f.valid.resize(s.stop_sample, 1);
+    s.first_sample = source_date * rate; s.stop_sample = s.first_sample + rate * 84;
+    s.window_capture_lead_seconds = capture_lead - calendar_offset - source_date;
+    s.source_start_seconds = source_date + 37.866;
+    s.arrival_lower_seconds = calendar_offset - 7.035; s.arrival_upper_seconds = calendar_offset + 7.035;
+    s.helper_begin_seconds = source_date; s.helper_end_seconds = source_date + 61.6;
+    f.input.resize(s.stop_sample - s.first_sample); f.valid.resize(f.input.size(), 1);
     // The exact integer RNG and Box-Muller map define a repeatable Gaussian
     // fixture, independent of the C++ standard library's distribution ABI.
     std::uint64_t state = 30;
@@ -92,11 +95,16 @@ Fixture fixture(double arrival = .17, double amplitude = .11, unsigned rate = 51
         const double radius = std::sqrt(-2 * std::log(uniform()));
         const double angle = tau * uniform();
         Complex value = .4 * Complex(radius * std::cos(angle), radius * std::sin(angle));
-        const double t = i / static_cast<double>(rate) - 8;
-        if (t >= arrival && t < arrival + 61.6) {
+        // Moving the calendar changes the capture origin, not the pilot's
+        // arbitrary initial phase or the sample-to-sample phase increments.
+        const double t = (source_date + i / static_cast<double>(rate)) / rx_scale - capture_lead;
+        const double source_time = (t - arrival) * tx_scale;
+        if (source_time >= source_date && source_time < source_date + 61.6) {
+            const double phase_time = tx_scale == 1 && rx_scale == 1 ? t - source_date :
+                source_time - source_date + arrival;
             for (const auto& [center, phase] : std::array<std::array<double, 2>, 2>{{{-100, .7}, {100, -2.4}}}) {
-                const double a = tau * (center + .7131) * t + phase;
-                const double b = tau * (center + 20.7131) * t - 1.4 * phase;
+                const double a = tau * (center + .7131) * phase_time + phase;
+                const double b = tau * (center + 20.7131) * phase_time - 1.4 * phase;
                 value += amplitude * (Complex(std::cos(a), std::sin(a)) + .7 * Complex(std::cos(b), std::sin(b)));
             }
         }
@@ -198,6 +206,85 @@ void lanes_do_not_change_the_result() {
     };
     rejects([&] { score_helper(f.config, f.slot, f.input, f.valid, scratch_limit, cancelled.get_token(), stopping); },
             "Helper ignored cancellation inside a wave");
+
+    // Refinement outcomes must replay an error from either end of the target
+    // list even when another target has already completed. Cancellation is a
+    // real worker failure; the ordinary caller token deliberately stays live.
+    for (const std::size_t failed : {std::size_t{0}, std::size_t{3}}) {
+        std::size_t wave_count = 0, refined = 0;
+        const LaneWave failed_refinement = [&](std::size_t count, const LaneJob& job) {
+            ++wave_count;
+            if (wave_count != 2) {
+                for (std::size_t index = 0; index < count; ++index) job(index, {});
+                return;
+            }
+            check(count == 4, "Helper refinement failure fixture lost a target");
+            for (std::size_t index = count; index--;) {
+                job(index, index == failed ? cancelled.get_token() : std::stop_token{});
+                ++refined;
+            }
+        };
+        rejects([&] { score(f, failed_refinement); }, "Helper lost a target's refinement failure");
+        check(wave_count == 2 && refined == 4, "Helper continued after a failed refinement wave");
+    }
+}
+
+void signed_calendars_and_multiple_apertures() {
+    ReceiverExecutor executor(4);
+    std::vector<std::size_t> waves;
+    const LaneWave lanes = [&](std::size_t count, const LaneJob& job) {
+        waves.push_back(count);
+        lane_wave(executor, 0, 4, {})(count, job);
+    };
+    const LaneWave reversed = [](std::size_t count, const LaneJob& job) {
+        for (std::size_t index = count; index--;) job(index, {});
+    };
+    const auto verify = [&](const Fixture& f, double arrival, bool multiple) {
+        const auto serial = score(f);
+        check(serial.narrowed && serial.reason == "pilot_aware_onset_relative_frequency_proposal",
+              "Helper did not acquire a signed-calendar fixture");
+        check(!serial.onset_intervals.empty() && serial.onset_intervals.front()[0] <= arrival &&
+              serial.onset_intervals.back()[1] >= arrival,
+              "Helper signed clock envelope excluded the actual arrival");
+        check(serial.workspace_peak_bytes == helper_workspace(f.config, f.slot),
+              "Helper signed clock envelope changed its public workspace bound");
+        check(multiple ? serial.onset_apertures > 1 : serial.onset_apertures == 1,
+              "Helper signed-calendar fixture changed its onset aperture count");
+        if (multiple) {
+            const auto nominal_prefix = std::ceil((f.slot.window_capture_lead_seconds +
+                f.slot.source_start_seconds + f.slot.arrival_upper_seconds + 1) * f.config.sample_rate_hz);
+            check(serial.prefix_samples > nominal_prefix,
+                  "Helper prefix omitted the late physical clock envelope");
+        }
+        waves.clear();
+        check(same(serial, score(f, lanes)) && same(serial, score(f, reversed)),
+              "Helper signed-calendar result depends on target or pilot execution order");
+        check(waves.size() >= serial.onset_apertures &&
+              std::all_of(waves.end() - serial.onset_apertures, waves.end(), [](auto count) { return count == 2; }),
+              "Helper omitted a frequency fit for a retained onset aperture");
+    };
+
+    // A fixed negative date used to reverse the endpoint-clock interval:
+    // -1000*(1-e) is later, not earlier, than -1000*(1+e). The resulting
+    // descending onset grid underflowed its prefix-score allocation.
+    auto negative = fixture(0, .4, 512, -1000);
+    negative.slot.arrival_lower_seconds = negative.slot.arrival_upper_seconds = -1000;
+    verify(negative, -1000, false);
+
+    auto crossing = fixture(0, .4);
+    crossing.slot.arrival_lower_seconds = -.01;
+    crossing.slot.arrival_upper_seconds = .01;
+    verify(crossing, 0, false);
+
+    // A late source-clock date has seconds of endpoint-clock uncertainty,
+    // even though this local capture is still only 84 seconds. Keep the
+    // global capture lead at 16 s and shift the receiver sample coordinate
+    // with the source date. Every retained aperture must fit both pilots
+    // against its own window, with no stale spectrum from another aperture.
+    constexpr std::uint64_t source_date = 100000;
+    auto multiple = fixture(.17, .4, 512, 0, 16, source_date, 1 - 1e-5, 1 + 1e-5);
+    multiple.slot.source_start_seconds = source_date + 50;
+    verify(multiple, .17, true);
 }
 
 // The bound follows the public calendar. Beyond its 16 MiB allowance for
@@ -235,12 +322,17 @@ void numerical_parity() {
     // was supplied as complex128, truncated by the public Helper-prefix rule;
     // continuous frequency selection used future_horizon_seconds=84. These
     // are engineering-selection parity values, not sensitivity qualification.
+    // Onset endpoints use the corrected physical receive-clock envelope:
+    // ((8 + arrival) * rx_scale - 8), rather than arrival * rx_scale.
+    // The retained grid edges are still {355,369}, {0,4}, {701,704},
+    // {343,363} of 704 intervals. Expand them by .17 observed seconds, then
+    // invert exactly as ((observed + 8) / rx_scale - 8), not a clock padding.
     struct Case { double arrival, amplitude, width, onset_low, onset_high, frequency_low, frequency_high; };
     const std::array cases{
-        Case{.17, .11, 0, -.11011296504336432, .5099695741342725, .6569552456263594, .7846336689232938},
-        Case{-7.03, .25, 0, -7.035, -6.7848457667748185, .6569552456263594, .7846336689232938},
-        Case{7.03, .25, 0, 6.804972262229363, 7.035, .6569552456263594, .7846336689232938},
-        Case{.17, .4, .5, -.34994251049791014, .39005480140699955, -1.0222291404312298, 2.460208307097896}
+        Case{.17, .11, 0, -.11005048131336803, .5099178355419927, .6569552456263594, .7846336689232938},
+        Case{-7.03, .25, 0, -7.035, -6.7850534096250055, .6569552456263594, .7846336689232938},
+        Case{7.03, .25, 0, 6.805044231375868, 7.035, .6569552456263594, .7846336689232938},
+        Case{.17, .4, .5, -.349880355741897, .3900005000050015, -1.0222291404312298, 2.460208307097896}
     };
     for (const auto& c : cases) {
         auto f = fixture(c.arrival, c.amplitude);
@@ -305,6 +397,7 @@ int main() {
         numerical_parity();
         fallbacks_and_bounds();
         lanes_do_not_change_the_result();
+        signed_calendars_and_multiple_apertures();
         workspace_bound_covers_live_scratch();
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

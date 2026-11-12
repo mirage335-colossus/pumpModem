@@ -49,8 +49,10 @@ constexpr std::size_t maximum_pins = 32;
 constexpr std::size_t mapping_rows = 16'384;
 constexpr std::size_t maximum_states = 512;
 constexpr std::size_t maximum_batch = 8;
+constexpr std::size_t maximum_fir_batch = 4;
 constexpr std::size_t maximum_direct_gram_modes = 128;
 constexpr std::size_t maximum_upload_bytes = 16 * mib;
+static_assert(maximum_fir_batch * coarse_fir_chunk_rows * sizeof(Complex) <= maximum_upload_bytes);
 constexpr std::size_t maximum_matrix_kernel_rows = 8192;
 constexpr std::size_t maximum_matrix_frequencies = 256;
 constexpr std::size_t maximum_matrix_bytes = 32 * mib;
@@ -498,8 +500,8 @@ public:
     // before publication or release of their workspace charge.
     class Operation {
     public:
-        explicit Operation(TensorContext& context)
-            : context_(context), began_(Clock::now()), lock_(context.mutex)
+        explicit Operation(TensorContext& context, Clock::time_point began = Clock::now())
+            : context_(context), began_(began), lock_(context.mutex)
 #if DATAPUMP_TRIAD_TENSOR_CUDA
               , guard_(context.stream)
 #endif
@@ -509,17 +511,21 @@ public:
                     "Robust ATen work requires one numerical thread per receiver worker");
         }
         ~Operation() {
-#if DATAPUMP_TRIAD_TENSOR_CUDA
-            if (context_.stream && std::uncaught_exceptions()) {
-                // Do not leave kernels using an operation's released charge.
-                (void)cudaStreamSynchronize(context_.stream->stream());
-                count(work.synchronizations, 1);
-            }
-#endif
+            if (std::uncaught_exceptions()) drain_failure();
             work.wall_seconds += std::chrono::duration<double>(Clock::now() - began_).count();
             add_work(context_.local, work);
             std::lock_guard lock(context_.arena->mutex);
             add_work(*context_.backend_work, work);
+        }
+
+        void drain_failure() noexcept {
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+            if (context_.stream && !failure_drained_) {
+                (void)cudaStreamSynchronize(context_.stream->stream());
+                count(work.synchronizations, 1);
+                failure_drained_ = true;
+            }
+#endif
         }
         BulkReceipt work;
     private:
@@ -529,6 +535,7 @@ public:
         c10::InferenceMode inference_;
 #if DATAPUMP_TRIAD_TENSOR_CUDA
         c10::cuda::OptionalCUDAStreamGuard guard_;
+        bool failure_drained_ = false;
 #endif
     };
 
@@ -711,7 +718,7 @@ public:
         const auto output = mul(maximum_output_rows, 3 * device_.item_bytes);
         const auto batch = mul(16, spectrum);
         device_.workspace->begin(add(add(resident, output), batch),
-                                 add(add(resident, output), mul(4, batch)), stop);
+                                 add(add(resident, output), mul(maximum_fir_batch, batch)), stop);
     }
 
     static std::size_t maximum_frequency_tile_width(const CoarseBulkGeometry& geometry, std::size_t workspaces,
@@ -742,70 +749,132 @@ public:
 
     std::vector<Complex> project_fir(const CoarseBulkFilter& filter_base, const CoarseFirCrop& crop,
         const CoarseFirSource& fill, CoarseBulkWork& work, std::stop_token stop) override {
+        const auto began = Clock::now();
         const auto* filter = dynamic_cast<const Filter*>(&filter_base);
         require(filter && filter->owner == &device_, "Robust FIR filter belongs to a different tensor session");
         require(crop.output_stride && crop.chunk_rows && crop.input_rows &&
+                crop.chunk_rows <= coarse_fir_chunk_rows &&
                 crop.chunk_rows <= filter->rows - filter->taps + 1 && fill,
                 "invalid Robust tensor FIR crop");
         if (!crop.output_rows) return {};
-        TensorContext::Operation op(device_);
         const auto output_stop = add(crop.first_output, crop.output_rows);
         (void)add(crop.output_origin, mul(output_stop - 1, crop.output_stride));
-        const auto output_bytes = mul(crop.output_rows, device_.item_bytes);
-        Charge output_charge(device_.workspace, mul(output_bytes, 3));
-        auto output = at::zeros({dim(crop.output_rows)}, device_.complex_options);
+        const auto chunk_rows = std::min(crop.chunk_rows, crop.input_rows);
         struct Job {
             std::size_t first, rows, out_first, out_stop;
         };
-        std::array<Job, 4> jobs{};
-        std::size_t first = 0;
-        const auto chunk_fft_bytes = mul(filter->rows, 16 * device_.item_bytes);
-        while (first < crop.input_rows) {
+        std::array<Job, maximum_fir_batch> jobs{};
+        std::size_t first = 0, queued = 0, staged_rows = 0;
+        const auto stage = [&](std::vector<Complex>& staged, std::size_t width) {
             cancelled(stop);
-            const auto [width, batch_charge] = admit(4, [&](std::size_t n) { return mul(n, chunk_fft_bytes); });
-            std::size_t actual = 0;
-            while (first < crop.input_rows && actual < width) {
-                const auto rows = std::min(crop.chunk_rows, crop.input_rows - first);
+            while (first < crop.input_rows && queued < width) {
+                const auto rows = std::min(chunk_rows, crop.input_rows - first);
                 const auto tail = add(first, add(rows, filter->taps - 1));
                 const auto low = first > crop.output_origin ? ceil_div(first - crop.output_origin, crop.output_stride) : 0;
                 const auto high = tail > crop.output_origin ? ceil_div(tail - crop.output_origin, crop.output_stride) : 0;
                 const auto lo = std::max(low, crop.first_output);
                 const auto hi = std::min(high, output_stop);
-                if (lo < hi) jobs[actual++] = {first, rows, lo, hi};
+                if (lo < hi) {
+                    cancelled(stop);
+                    const auto end = add(staged_rows, rows);
+                    if (end > staged.size()) staged.resize(end);
+                    fill(first, std::span(staged).subspan(staged_rows, rows));
+                    staged_rows = end;
+                    jobs[queued++] = {first, rows, lo, hi};
+                }
                 first += rows;
             }
-            if (!actual) continue;
-            auto input = at::zeros({dim(actual), dim(filter->rows)}, device_.complex_options);
-            std::vector<Complex> staging(crop.chunk_rows);
-            for (std::size_t i = 0; i < actual; ++i) {
-                const auto& job = jobs[i];
-                fill(job.first, std::span(staging).first(job.rows));
-                device_.put_complex(input.select(0, dim(i)).narrow(0, 0, dim(job.rows)),
-                                    std::span(staging).first(job.rows), op.work);
-                count(op.work.fir_input_rows, job.rows);
-                count(work.fir_input_rows, job.rows);
+        };
+
+        // Each workspace worker can render one chunk while a peer owns the
+        // device. Only the owner extends staging to a whole host batch.
+        std::vector<Complex> leading;
+        stage(leading, 1);
+        TensorContext::Operation op(device_, began);
+        auto staged = std::move(leading);
+        if (queued) staged.reserve(std::min(crop.input_rows, mul(maximum_fir_batch, chunk_rows)));
+        const auto chunk_fft_bytes = mul(filter->rows, 16 * device_.item_bytes);
+        struct Batch {
+            Charge charge;
+            at::Tensor uploaded, input, spectrum, convolved;
+        };
+        Charge output_charge;
+        at::Tensor output;
+        std::optional<Batch> batch;
+        try {
+            output_charge = Charge(device_.workspace, mul(crop.output_rows, 3 * device_.item_bytes));
+            output = at::zeros({dim(crop.output_rows)}, device_.complex_options);
+            std::size_t lookahead = 1;
+            for (;;) {
+                // Borrowed host uploads complete inside upload(). The next
+                // fill can reuse host staging while the prior FFT and ordered
+                // overlap-add are still in flight on this context's stream.
+                stage(staged, lookahead);
+                if (!queued) break;
+                if (batch) {
+                    device_.synchronize(op.work);
+                    batch.reset();
+                }
+                cancelled(stop);
+                auto [width, charge] = admit(maximum_fir_batch, [&](std::size_t n) { return mul(n, chunk_fft_bytes); });
+                batch.emplace();
+                batch->charge = std::move(charge);
+                // Reuse the previous width as the lookahead. Other device
+                // owners can change the available space in an unleased arena.
+                stage(staged, width);
+                lookahead = width;
+                const auto actual = std::min(width, queued);
+                const auto full = actual - (jobs[actual - 1].rows < chunk_rows);
+                const auto full_rows = mul(full, chunk_rows);
+                const auto tail_rows = full == actual ? 0 : jobs[full].rows;
+                const auto input_rows = add(full_rows, tail_rows);
+                batch->uploaded = device_.upload(std::span<const Complex>(staged).first(input_rows),
+                    at::kComplexDouble, device_.type, op.work);
+                batch->input = at::zeros({dim(actual), dim(filter->rows)}, device_.complex_options);
+                if (full)
+                    batch->input.narrow(0, 0, dim(full)).narrow(1, 0, dim(chunk_rows)).copy_(
+                        batch->uploaded.narrow(0, 0, dim(full_rows)).reshape({dim(full), dim(chunk_rows)}));
+                if (tail_rows)
+                    batch->input.select(0, dim(full)).narrow(0, 0, dim(tail_rows)).copy_(
+                        batch->uploaded.narrow(0, dim(full_rows), dim(tail_rows)));
+                count(op.work.fir_input_rows, input_rows);
+                count(work.fir_input_rows, input_rows);
+                batch->spectrum = device_.fft(batch->input, filter->rows, false, op.work, &work);
+                batch->spectrum.mul_(filter->spectrum);
+                batch->convolved = device_.fft(batch->spectrum, filter->rows, true, op.work, &work);
+                for (std::size_t i = 0; i < actual; ++i) {
+                    const auto& job = jobs[i];
+                    const auto first_sample = crop.output_origin + job.out_first * crop.output_stride - job.first;
+                    const auto rows = job.out_stop - job.out_first;
+                    const auto stop_sample = add(first_sample, add(mul(rows - 1, crop.output_stride), 1));
+                    output.narrow(0, dim(job.out_first - crop.first_output), dim(rows)).add_(
+                        batch->convolved.select(0, dim(i)).slice(0, dim(first_sample), dim(stop_sample), dim(crop.output_stride)));
+                    count(op.work.fir_output_contributions, rows);
+                    count(work.fir_output_contributions, rows);
+                }
+                // A constrained lease may take only part of the staged batch.
+                // Keep its unsubmitted suffix in the same input order.
+                queued -= actual;
+                if (queued) {
+                    std::move(jobs.begin() + actual, jobs.begin() + actual + queued, jobs.begin());
+                    std::move(staged.begin() + input_rows, staged.begin() + staged_rows, staged.begin());
+                }
+                staged_rows -= input_rows;
             }
-            auto spectrum = device_.fft(input, filter->rows, false, op.work, &work);
-            spectrum.mul_(filter->spectrum);
-            auto convolved = device_.fft(spectrum, filter->rows, true, op.work, &work);
-            for (std::size_t i = 0; i < actual; ++i) {
-                const auto& job = jobs[i];
-                const auto first_sample = crop.output_origin + job.out_first * crop.output_stride - job.first;
-                const auto rows = job.out_stop - job.out_first;
-                const auto stop_sample = add(first_sample, add(mul(rows - 1, crop.output_stride), 1));
-                output.narrow(0, dim(job.out_first - crop.first_output), dim(rows)).add_(
-                    convolved.select(0, dim(i)).slice(0, dim(first_sample), dim(stop_sample), dim(crop.output_stride)));
-                count(op.work.fir_output_contributions, rows);
-                count(work.fir_output_contributions, rows);
-            }
-            // FFT work areas and tensor staging may be reused by the next
-            // batch only after the current charge's work has completed.
-            device_.synchronize(op.work);
+            std::vector<Complex> result(crop.output_rows);
+            // Blocking readback also drains the last submitted batch.
+            device_.download(output, std::span(result), at::kComplexDouble, op.work);
+            cancelled(stop);
+            return result;
+        } catch (...) {
+            // A fill can throw while the previous batch owns live device
+            // buffers. Drain before freeing those buffers or their charges.
+            op.drain_failure();
+            batch.reset();
+            output = at::Tensor{};
+            output_charge = Charge{};
+            throw;
         }
-        std::vector<Complex> result(crop.output_rows);
-        device_.download(output, std::span(result), at::kComplexDouble, op.work);
-        cancelled(stop);
-        return result;
     }
 
     void prepare(const CoarseBulkGeometry& geometry, std::span<const Complex> observation,
@@ -2444,7 +2513,8 @@ public:
         // the downloaded POD tensor and copied frontier vector can be larger.
         const auto frontiers = arena_->device.is_cuda() ? mul(rows, 2 * sizeof(CoarseBulkPeaks)) : 0;
         const auto scores = std::max(full_scores, frontiers);
-        const auto staging = add(mul(maximum_fft_rows, 3 * sizeof(Complex)), 2 * maximum_upload_bytes);
+        const auto fir_staging = mul(std::min(maximum_fft_rows, coarse_fir_chunk_rows), maximum_fir_batch * sizeof(Complex));
+        const auto staging = add(add(mul(maximum_fft_rows, 3 * sizeof(Complex)), 2 * maximum_upload_bytes), fir_staging);
         // One optional cuBLAS handle and bounded shape descriptors; no host
         // coefficient matrix is retained. Device packing remains arena-charged.
         // The half route keeps at most three cuFFT plan handles and appends a

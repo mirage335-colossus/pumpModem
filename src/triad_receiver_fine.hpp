@@ -5,6 +5,7 @@
 #include "triad_receiver_detail.hpp"
 
 #include <compare>
+#include <functional>
 
 namespace datapump::triad::v3::receiver_detail {
 
@@ -23,6 +24,12 @@ struct FineObservation {
     std::size_t rows = 0;
     FineRunKind kind = FineRunKind::operational;
     bool record_work = false;
+    // Optional internal diagnostic witness, after a dispatch's projection.
+    // It may run on an executor leaf: captured state must be thread-safe and
+    // remain alive until advance_to has drained, including on failure. The
+    // callback receives the dispatch's first row and its effective stop token;
+    // it cannot change production dispatch or arithmetic choices.
+    std::function<void(std::size_t, std::stop_token)> observed = {};
 };
 
 struct FineStateKey {
@@ -48,7 +55,8 @@ struct FineLaneWork {
 struct FinePhaseTimes {
     double preparation_seconds = 0, input_check_seconds = 0;
     // Native observation, transition and pruning overlap fixed-affine state
-    // leaves, and observation also runs inside dispatch. Not additive.
+    // leaves; compiled statistics can overlap the next CPU observation.
+    // Observation also runs inside dispatch. These intervals are not additive.
     double observation_seconds = 0, transition_seconds = 0, bulk_statistics_seconds = 0, dispatch_seconds = 0;
     double pruning_seconds = 0, finish_seconds = 0;
     // Worker elapsed times can overlap and are not CPU or service time.

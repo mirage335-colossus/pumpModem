@@ -1,11 +1,15 @@
 #include "triad_receiver_fine.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <iostream>
 #include <limits>
+#include <mutex>
 #include <numbers>
 #include <stdexcept>
+#include <thread>
 
 namespace {
 using namespace datapump;
@@ -133,6 +137,7 @@ struct ProjectionWitness {
     std::size_t cursor = 0, quiet_stop = 0, quiet_modes = 0;
     double variance = 0, quiet_energy = 0;
     std::vector<std::size_t> lengths;
+    std::function<void(std::stop_token)> before_statistics;
 };
 
 // This fixture observes the production observation projection, independently
@@ -143,8 +148,9 @@ public:
     explicit ProjectionWitnessBulk(std::shared_ptr<ProjectionWitness> witness) : witness_(std::move(witness)) {}
 
     void statistics(const FineBulkBlock& block, std::size_t candidates, const FineMappingSource& source,
-                    std::span<FineBulkStatistics> output, std::stop_token) override {
+                    std::span<FineBulkStatistics> output, std::stop_token stop) override {
         auto& witness = *witness_;
+        if (witness.before_statistics) witness.before_statistics(stop);
         check(block.rows <= witness.input.size() - witness.cursor, "projection must stay inside the real input");
         check(block.projected_y.size() == block.projection_indices.size(), "projected mode dimensions must agree");
         long double expected_energy = 0;
@@ -199,6 +205,177 @@ public:
 private:
     std::shared_ptr<ProjectionWitness> witness_;
 };
+
+enum class OverlapAction { finish, owner_failure, observation_failure, cancel };
+
+// No sleeps or performance thresholds: the fake backend holds its first call
+// until the second observation reaches its completion witness. Failure paths
+// hold one participant until the effective stage token cancels it. Timeouts
+// only bound a broken scheduler's test duration.
+struct FineOverlapGate {
+    std::mutex mutex;
+    std::condition_variable_any changed;
+    const std::thread::id owner = std::this_thread::get_id();
+    const bool parallel;
+    const OverlapAction action;
+    std::stop_source external;
+    std::vector<std::size_t> observed_firsts;
+    std::size_t calls = 0;
+    bool bulk_entered = false, ahead_ready = false, ahead_drained = false;
+    bool observed_cancel = false, bulk_cancel = false;
+
+    explicit FineOverlapGate(bool parallel, OverlapAction action = OverlapAction::finish)
+        : parallel(parallel), action(action) {}
+
+    template<class Predicate>
+    void wait(std::unique_lock<std::mutex>& lock, Predicate predicate, const char* reason) {
+        check(changed.wait_for(lock, std::chrono::seconds(5), predicate), reason);
+    }
+
+    void observed(std::size_t first, std::stop_token stop) {
+        std::unique_lock lock(mutex);
+        observed_firsts.push_back(first);
+        if (observed_firsts.size() != 2) return;
+        check(stop.stop_possible(), "ahead observation must receive an effective stage stop token");
+        if (!parallel) {
+            check(std::this_thread::get_id() == owner && calls > 0,
+                  "W1 must observe the next dispatch serially on its owner");
+            ahead_ready = ahead_drained = true;
+            return;
+        }
+        check(std::this_thread::get_id() != owner, "compiled lookahead must use a spare CPU lane");
+        wait(lock, [&] { return bulk_entered; }, "owner must enter the backend while observation is ahead");
+        ahead_ready = true;
+        changed.notify_all();
+        if (action == OverlapAction::observation_failure) {
+            ahead_drained = true;
+            throw Error("injected observation failure");
+        }
+        if (action == OverlapAction::owner_failure || action == OverlapAction::cancel) {
+            if (action == OverlapAction::cancel) {
+                lock.unlock();
+                external.request_stop();
+                lock.lock();
+            }
+            changed.wait_for(lock, stop, std::chrono::seconds(5), [] { return false; });
+            check(stop.stop_requested(), "ahead observation must drain on stage cancellation");
+            observed_cancel = true;
+        }
+        ahead_drained = true;
+        changed.notify_all();
+    }
+
+    void statistics(std::stop_token stop) {
+        std::unique_lock lock(mutex);
+        check(std::this_thread::get_id() == owner, "every compiled backend call must stay on its owner");
+        if (++calls != 1) return;
+        bulk_entered = true;
+        changed.notify_all();
+        if (!parallel) {
+            check(observed_firsts.size() == 1, "W1 must not observe ahead of the owner's first bulk call");
+            return;
+        }
+        wait(lock, [&] { return ahead_ready; }, "CPU observation must progress while the bulk call is held");
+        if (action == OverlapAction::owner_failure) throw Error("injected bulk failure");
+        if (action == OverlapAction::observation_failure || action == OverlapAction::cancel) {
+            changed.wait_for(lock, stop, std::chrono::seconds(5), [] { return false; });
+            check(stop.stop_requested(), "bulk work must receive peer or external cancellation");
+            bulk_cancel = true;
+            throw Error("injected bulk cancellation");
+        }
+        wait(lock, [&] { return ahead_drained; }, "ahead observation must finish before the held bulk call returns");
+    }
+};
+
+void compiled_observation_overlap() {
+    const Fixture f(240, 60);
+    const FineObservation extent{f.slot.first_sample + 2 * f.fs, 3 * f.fs + 17, FineRunKind::probe, true};
+    struct Result {
+        ReceiverSlotScore score;
+        FineProgress progress;
+        std::vector<std::size_t> lengths, firsts;
+    };
+    const auto run = [&](unsigned workers, bool erase) {
+        auto config = f.config;
+        auto witness = std::make_shared<ProjectionWitness>();
+        std::vector<Complex> observed_input(f.samples(extent).begin(), f.samples(extent).end());
+        std::vector<std::uint8_t> valid(extent.rows, 1);
+        if (erase) {
+            valid[f.fs + f.fs / 4 - 1] = 0;
+            observed_input.erase(observed_input.begin() + f.fs, observed_input.begin() + f.fs + f.fs / 4);
+        }
+        witness->input = observed_input;
+        witness->variance = config.noise_variance;
+        config.bulk_backend = std::make_shared<ProjectionWitnessBackend>(witness);
+        FineOverlapGate gate(workers > 1);
+        witness->before_statistics = [&](std::stop_token stop) { gate.statistics(stop); };
+        auto observed = extent;
+        observed.observed = [&](auto first, auto stop) { gate.observed(first, stop); };
+        FineSession session(config, f.slot, f.key, observed, f.samples(extent), valid, f.coordinates,
+                            100, 12, workers, fine_workspace(config, f.slot, observed, workers));
+        // Two advances exercise nonzero call_serial and reuse of both ring
+        // entries, including the enlarged final calendar block.
+        session.advance_to(f.fs);
+        session.advance_to(extent.rows);
+        Result result;
+        session.finish(result.score);
+        result.progress = session.progress();
+        result.lengths = witness->lengths;
+        result.firsts = gate.observed_firsts;
+        check(gate.ahead_ready && gate.ahead_drained && witness->cursor == observed_input.size() &&
+              result.progress.erased_blocks == (erase ? 1U : 0U),
+              "all projected input and held observation must finish before publishing progress");
+        return result;
+    };
+    const auto same_lane = [](const FineLaneWork& a, const FineLaneWork& b) {
+        return a.retained_states == b.retained_states && a.bit_scores == b.bit_scores &&
+            a.transition_edges == b.transition_edges && a.merged_channel_components == b.merged_channel_components &&
+            a.basis_calls == b.basis_calls && a.basis_rows == b.basis_rows &&
+            a.gaussian_updates == b.gaussian_updates && a.projection_modes == b.projection_modes &&
+            a.positive_basis_blocks == b.positive_basis_blocks && a.projected_template_energy == b.projected_template_energy;
+    };
+    for (const bool erase : {false, true}) {
+        const auto serial = run(1, erase), parallel = run(2, erase);
+        check(serial.lengths == parallel.lengths && serial.firsts == parallel.firsts &&
+          serial.score.bit_evidence == parallel.score.bit_evidence &&
+          serial.score.adaptive_bit_evidence == parallel.score.adaptive_bit_evidence &&
+          serial.score.combined_bit_evidence == parallel.score.combined_bit_evidence &&
+          serial.score.quiet_energy == parallel.score.quiet_energy &&
+          serial.score.quiet_modes == parallel.score.quiet_modes &&
+          serial.score.basis_rows == parallel.score.basis_rows &&
+          same_lane(serial.progress.initial_affine, parallel.progress.initial_affine) &&
+          same_lane(serial.progress.adaptive, parallel.progress.adaptive) &&
+          serial.progress.bulk->statistics_blocks == parallel.progress.bulk->statistics_blocks &&
+          serial.progress.bulk->projected_values == parallel.progress.bulk->projected_values,
+          "compiled lookahead must preserve serial projection, mapping, state work and final evidence");
+        check(!parallel.score.complete && parallel.score.decision == SlotDecision::ambiguous,
+              "a synthetic-statistics diagnostic must never qualify physical slot completion");
+    }
+
+    for (const auto action : {OverlapAction::owner_failure, OverlapAction::observation_failure, OverlapAction::cancel}) {
+        auto config = f.config;
+        auto witness = std::make_shared<ProjectionWitness>();
+        witness->input = f.samples(extent);
+        witness->variance = config.noise_variance;
+        config.bulk_backend = std::make_shared<ProjectionWitnessBackend>(witness);
+        FineOverlapGate gate(true, action);
+        witness->before_statistics = [&](std::stop_token stop) { gate.statistics(stop); };
+        auto observed = extent;
+        observed.observed = [&](auto first, auto stop) { gate.observed(first, stop); };
+        FineSession session(config, f.slot, f.key, observed, witness->input, {}, f.coordinates,
+                            100, 12, 2, fine_workspace(config, f.slot, observed, 2), gate.external.get_token());
+        const auto expected = action == OverlapAction::owner_failure ? "injected bulk failure" :
+            action == OverlapAction::observation_failure ? "injected observation failure" : "Robust reception cancelled";
+        rejects_with([&] { session.advance_to(extent.rows); }, expected,
+                     "overlapped fine work must preserve the initiating failure or external cancellation");
+        check(gate.ahead_ready && gate.ahead_drained &&
+              (action == OverlapAction::observation_failure ? gate.bulk_cancel : gate.observed_cancel),
+              "failure or cancellation must drain the peer before advance returns");
+        rejects([&] { (void)session.progress(); }, "failed overlap cannot publish partial evidence");
+        ReceiverSlotScore score;
+        rejects([&] { session.finish(score); }, "failed overlap cannot finish a slot");
+    }
+}
 
 void terminal_projection_boundaries() {
     struct Case {
@@ -520,6 +697,7 @@ int main() {
     try {
         helper_terminal_geometry();
         terminal_projection_boundaries();
+        compiled_observation_overlap();
         production_equivalence();
         uninterrupted_interior_probe();
         erasure_and_failure();

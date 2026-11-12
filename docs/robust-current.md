@@ -63,13 +63,14 @@ the next dispatch's observation and later source tiles beside the
 chronological adaptive lane. A slot whose lease has room also acquires beside
 coarse preparation, which then plans its frequency grid afterwards.
 Per-owner lane/scratch limits are fixed DSP bounds, not worker permits held
-exclusively through a slot. Admission quotes the largest ready prefix at full
-`W` scratch per owner, preferring balanced scratch only when it admits a
-strictly wider ready prefix within the full memory bound. Memory beyond a
-sequential lease for every owner the cap still admits then grants slots,
-oldest first, the wider lease that lets Helper acquisition overlap coarse
-preparation. Each admitted
-shape remains fixed through its slot; the global `W` ceiling stays unchanged.
+exclusively through a slot. For an incoming window, admission now quotes its
+full-`W` shape and only the extra payload for positions vacant in the ready
+prefix; it does not count a prospective owner when `O=1` or the owner cap is
+full. Live RSS admission still applies, so this quote does not guarantee
+admission after arbitrary process growth. Each admitted shape remains fixed
+through its slot; the global `W` ceiling stays unchanged. Helper overlap with
+coarse preparation is available only where the profile and resource shape
+permit it, and does not guarantee lower whole-slot time under contention.
 
 Full per-owner DSP, input, prospective and started worker stacks, application
 baseline and retained-result memory are charged. Started idle pool stacks remain

@@ -46,16 +46,6 @@ std::size_t next_power_two(std::size_t n) {
     while (result < n) result = checked_mul(result, 2);
     return result;
 }
-std::size_t prefix_samples(const ReceiverConfig& c, const ReceiverSlotPlan& s) {
-    if (s.stop_sample < s.first_sample || !std::isfinite(c.sample_rate_hz) || c.sample_rate_hz <= 0)
-        throw Error("invalid Helper window geometry");
-    const auto samples = s.stop_sample - s.first_sample;
-    if (samples > std::numeric_limits<std::size_t>::max()) throw Error("Helper window exceeds host extent");
-    const long double end = std::ceil((s.window_capture_lead_seconds + s.source_start_seconds +
-        std::max(0., s.arrival_upper_seconds) + 1) * c.sample_rate_hz);
-    if (!std::isfinite(end)) throw Error("nonfinite Helper prefix");
-    return end <= 0 ? 0 : end >= samples ? static_cast<std::size_t>(samples) : static_cast<std::size_t>(end);
-}
 bool bounded_uncertainty(const ReceiverConfig& c) {
     for (double value : {c.clock_bound_ppm * 1e-6, c.endpoint_clock_bound_ppm * 1e-6, c.spread_delay_seconds,
                         c.delay_excursion_seconds, c.random_doppler_width_hz, c.spread_doppler_hz,
@@ -68,6 +58,61 @@ bool finite_calendar(const ReceiverSlotPlan& s) {
     return std::isfinite(s.arrival_lower_seconds) && std::isfinite(s.arrival_upper_seconds) &&
         s.arrival_lower_seconds <= s.arrival_upper_seconds && std::isfinite(s.helper_begin_seconds) &&
         std::isfinite(s.helper_end_seconds) && std::isfinite(s.source_start_seconds);
+}
+// A source-clock date reaches global receiver sample time at
+// (capture_lead + arrival + source_date / tx_scale + settling + guard) * rx_scale.
+// The Helper date axis subtracts the nominal global capture lead again.
+// Both endpoint clocks are independently bounded. Multiplication by a
+// positive receive scale is monotone in arrival, but its extremum changes
+// clock endpoint when that intermediate date is negative. Evaluate the
+// corners rather than assuming every absolute date follows time zero.
+long double global_capture_lead(const ReceiverConfig& c, const ReceiverSlotPlan& s) {
+    return s.window_capture_lead_seconds + static_cast<long double>(s.first_sample) / c.sample_rate_hz;
+}
+Interval observed_bounds(Interval arrival, long double source_date, double endpoint, long double lead,
+                         double settling = 0, double guard = 0) {
+    Interval result{std::numeric_limits<double>::infinity(),
+                    -std::numeric_limits<double>::infinity()};
+    for (const auto value : arrival) for (const auto tx : {1 - endpoint, 1 + endpoint})
+        for (const auto rx : {1 - endpoint, 1 + endpoint}) {
+            const double date = static_cast<double>((value + source_date / tx + settling + guard) * rx +
+                                                    lead * (static_cast<long double>(rx) - 1));
+            if (!std::isfinite(date)) throw Error("nonfinite public Helper clock envelope");
+            result[0] = std::min(result[0], date);
+            result[1] = std::max(result[1], date);
+        }
+    return result;
+}
+// Invert the same affine clock model over every endpoint combination. A
+// first-order clock padding omits both capture lead and the receive divisor.
+Interval arrival_bounds(Interval observed, long double source_date, double endpoint, long double lead) {
+    Interval result{std::numeric_limits<double>::infinity(),
+                    -std::numeric_limits<double>::infinity()};
+    for (const auto value : observed) for (const auto tx : {1 - endpoint, 1 + endpoint})
+        for (const auto rx : {1 - endpoint, 1 + endpoint}) {
+            const auto inverse_rx = 1 / static_cast<long double>(rx);
+            const double date = static_cast<double>(value * inverse_rx + lead * (inverse_rx - 1) - source_date / tx);
+            if (!std::isfinite(date)) throw Error("nonfinite public Helper arrival envelope");
+            result[0] = std::min(result[0], date);
+            result[1] = std::max(result[1], date);
+        }
+    return result;
+}
+std::size_t prefix_samples(const ReceiverConfig& c, const ReceiverSlotPlan& s) {
+    if (s.stop_sample < s.first_sample || !std::isfinite(c.sample_rate_hz) || c.sample_rate_hz <= 0)
+        throw Error("invalid Helper window geometry");
+    const auto samples = s.stop_sample - s.first_sample;
+    if (samples > std::numeric_limits<std::size_t>::max()) throw Error("Helper window exceeds host extent");
+    long double end_seconds = s.window_capture_lead_seconds + s.source_start_seconds +
+        std::max(0., s.arrival_upper_seconds) + 1;
+    if (bounded_uncertainty(c) && finite_calendar(s) && c.endpoint_clock_bound_ppm * 1e-6 < .1) {
+        const auto latest = observed_bounds({s.arrival_lower_seconds, s.arrival_upper_seconds},
+            s.source_start_seconds, c.endpoint_clock_bound_ppm * 1e-6, global_capture_lead(c, s))[1];
+        end_seconds = std::max(end_seconds, latest + s.window_capture_lead_seconds + 1);
+    }
+    const long double end = std::ceil(end_seconds * c.sample_rate_hz);
+    if (!std::isfinite(end)) throw Error("nonfinite Helper prefix");
+    return end <= 0 ? 0 : end >= samples ? static_cast<std::size_t>(samples) : static_cast<std::size_t>(end);
 }
 // A job's value, or the failure a serial pass would have met at its position.
 template<class T> struct Outcome {
@@ -380,10 +425,14 @@ FrequencyResult final_frequency(const ReceiverConfig& c, const ReceiverSlotPlan&
     auto finish = [&](const char* reason) { result.reason = reason; return result; };
     const double fs = c.sample_rate_hz, lead = static_cast<double>(s.window_capture_lead_seconds);
     const double audio = c.clock_bound_ppm * 1e-6, endpoint = c.endpoint_clock_bound_ppm * 1e-6;
+    const auto capture_lead = global_capture_lead(c, s);
     const double settling = std::max(c.spread_delay_seconds + c.delay_excursion_seconds, c.capture_tail_bound_seconds);
-    const double begin = (arrival[1] + static_cast<double>(s.helper_begin_seconds) / (1 - endpoint) + settling + frequency_guard) * (1 + endpoint);
-    const double data_start = (arrival[0] + static_cast<double>(s.source_start_seconds) / (1 + endpoint) - frequency_guard) * (1 - endpoint);
-    const double end_limit = std::min(data_start, (arrival[0] + static_cast<double>(s.helper_end_seconds) / (1 + endpoint) - frequency_guard) * (1 - endpoint));
+    const double begin = observed_bounds(arrival, static_cast<double>(s.helper_begin_seconds), endpoint,
+                                         capture_lead, settling, frequency_guard)[1];
+    const double data_start = observed_bounds(arrival, static_cast<double>(s.source_start_seconds), endpoint,
+                                              capture_lead, 0, -frequency_guard)[0];
+    const double end_limit = std::min(data_start,
+        observed_bounds(arrival, static_cast<double>(s.helper_end_seconds), endpoint, capture_lead, 0, -frequency_guard)[0]);
     const double first_real = std::max(0., std::ceil((begin + lead) * fs));
     const double count_real = std::ceil(frequency_seconds * fs);
     if (count_real > maximum_samples) return finish("fft_work_limit");
@@ -471,14 +520,19 @@ struct Support {
 Support coarse_support(const ReceiverConfig& c, const ReceiverSlotPlan& s, std::size_t prefix) {
     const double fs = c.sample_rate_hz, lead = static_cast<double>(s.window_capture_lead_seconds);
     const double endpoint = c.endpoint_clock_bound_ppm * 1e-6;
+    const auto capture_lead = global_capture_lead(c, s);
     Support out;
     out.settling = std::max(c.spread_delay_seconds + c.delay_excursion_seconds, c.capture_tail_bound_seconds);
-    const double begin = (s.arrival_upper_seconds + static_cast<double>(s.helper_begin_seconds) / (1 - endpoint) + out.settling + coarse_guard) * (1 + endpoint);
-    out.end = std::min((s.arrival_lower_seconds + static_cast<double>(s.source_start_seconds) / (1 + endpoint) - coarse_guard) * (1 - endpoint),
-                       (s.arrival_lower_seconds + static_cast<double>(s.helper_end_seconds) / (1 + endpoint) - coarse_guard) * (1 - endpoint));
+    const Interval arrival{s.arrival_lower_seconds, s.arrival_upper_seconds};
+    const double begin = observed_bounds(arrival, static_cast<double>(s.helper_begin_seconds), endpoint,
+                                         capture_lead, out.settling, coarse_guard)[1];
+    out.end = std::min(observed_bounds(arrival, static_cast<double>(s.source_start_seconds), endpoint, capture_lead, 0, -coarse_guard)[0],
+                       observed_bounds(arrival, static_cast<double>(s.helper_end_seconds), endpoint, capture_lead, 0, -coarse_guard)[0]);
     const double first_real = std::max(0., std::ceil((begin + lead) * fs));
     const double last_real = std::min(static_cast<double>(prefix), std::floor((out.end + lead) * fs));
-    out.enough = !((last_real - first_real) / fs < minimum_coarse_seconds);
+    if (!std::isfinite(first_real) || !std::isfinite(last_real))
+        throw Error("nonfinite public Helper support");
+    out.enough = last_real >= first_real && (last_real - first_real) / fs >= minimum_coarse_seconds;
     if (out.enough) {
         out.first = static_cast<std::size_t>(first_real);
         out.last = static_cast<std::size_t>(last_real);
@@ -491,8 +545,10 @@ OnsetWindow onset_window(const ReceiverConfig& c, const ReceiverSlotPlan& s) {
     const double endpoint = c.endpoint_clock_bound_ppm * 1e-6;
     OnsetWindow out;
     out.start = static_cast<double>(s.helper_begin_seconds);
-    out.earliest = (s.arrival_lower_seconds + out.start / (1 + endpoint)) * (1 - endpoint);
-    out.latest = (s.arrival_upper_seconds + out.start / (1 - endpoint)) * (1 + endpoint);
+    const auto bounds = observed_bounds({s.arrival_lower_seconds, s.arrival_upper_seconds}, out.start, endpoint,
+                                        global_capture_lead(c, s));
+    out.earliest = bounds[0];
+    out.latest = bounds[1];
     return out;
 }
 std::size_t onset_points(const OnsetWindow& window, double step) {
@@ -734,10 +790,14 @@ HelperResult score_helper(const ReceiverConfig& c, const ReceiverSlotPlan& s,
     }
     const auto best = static_cast<std::size_t>(std::max_element(scores.begin(), scores.end()) - scores.begin());
     result.onset_best_arrival_seconds = grid[best] - hstart;
-    const double clock_pad = (std::max(std::abs(earliest), std::abs(latest)) + std::abs(hstart)) * std::max(audio, endpoint);
-    const double padding = onset_padding + step + clock_pad;
+    const double padding = onset_padding + step;
     std::vector<Interval> intervals;
-    for (auto v : regions(grid, scores, 6)) intervals.push_back({std::max(s.arrival_lower_seconds, v[0] - hstart - padding), std::min(s.arrival_upper_seconds, v[1] - hstart + padding)});
+    for (auto v : regions(grid, scores, 6)) {
+        const auto arrival = arrival_bounds({v[0] - padding, v[1] + padding}, s.helper_begin_seconds,
+                                            endpoint, global_capture_lead(c, s));
+        intervals.push_back({std::max(s.arrival_lower_seconds, arrival[0]),
+                             std::min(s.arrival_upper_seconds, arrival[1])});
+    }
     result.onset_intervals = merge(std::move(intervals));
     if (result.onset_intervals.empty()) return finish("onset_region_empty");
     const Interval hull{result.onset_intervals.front()[0], result.onset_intervals.back()[1]};

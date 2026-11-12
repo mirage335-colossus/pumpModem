@@ -188,12 +188,14 @@ share a bounded executor. Per-owner lane/scratch caps bound DSP storage, not exc
 permits. Automatic owner count can grow to that budget, subject to useful work
 and full memory admission. Admission quotes the largest ready prefix at
 full-`W` scratch per owner, preferring balanced scratch only when its complete
-memory bound admits a strictly wider ready prefix. Memory beyond a sequential
-lease for every owner the cap still admits then gives slots, oldest first,
-the wider lease that overlaps Helper acquisition with coarse preparation. Each
-shape remains fixed through its slot; full DSP and started idle pool stacks
-remain charged. Ready leaves prioritize the oldest eligible public slot while
-queued roots use unneeded lanes. Within a slot, serial steps
+memory bound admits a strictly wider ready prefix. For an incoming window the
+incremental quote uses its full-`W` shape and adds payload only for positions
+vacant in the ready prefix; it does not create a prospective owner at `O=1` or
+when the owner cap is full. Live RSS admission still applies, so this is not an
+absolute guarantee after intervening process growth. Each shape remains fixed
+through its slot; full DSP and started idle pool stacks remain charged. Ready
+leaves prioritize the oldest eligible public slot while queued roots use
+unneeded lanes. Within a slot, serial steps
 [overlap independent parallel work](development.md#overlap-within-a-slot) on
 that owner's lanes. This does not change the aggregate `W` ceiling
 or supply a throughput guarantee. Explicit limits
@@ -255,11 +257,15 @@ searches its tiles as one span, so a one-tile step gives each lane a single
 job and costs more per tile than a long step. Actual source
 preparation, Helper, selection and real-audio projection are retained in the
 receipts. Operational coordinates are not supplied by simulator truth.
-The `slot` and `continuation` phases run Helper acquisition and then coarse
-preparation, each on the full lane set, so their walls add. That is the
-sequential lease, which every admitted slot can use. A slot with the wider
-lease overlaps the two and is no slower. `regression` grants that lease when
-local memory allows; `--helper-overlap off` scores the same slot in sequence.
+The `slot` and `continuation` Helper/coarse phase costs are serial-model inputs:
+they measure those phases in sequence and are not a universal upper bound for
+the production scheduler. Contending jobs can make overlapped work slower.
+`regression` measures production whole-slot elapsed time directly;
+ready-backlog qualification separately measures whole-stream service over its
+declared interval. `--helper-overlap off` is a sequential comparison mode. In
+the exact one-arrival coarse profile Helper is disabled, so Helper/coarse
+overlap does not apply; native bank/filter overlap is already part of that
+profile.
 
 For eligible long windows, nominal fine measurement keeps one `FineSession`
 alive through a fixed two-second prefix and cumulative one-, two- and four-second

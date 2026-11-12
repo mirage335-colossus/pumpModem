@@ -160,7 +160,9 @@ Keep these properties when changing a stage:
   later jobs may have run, but nothing after the first failure is read.
 - Start a stage before one of its inputs only where no choice in it needs that
   input. Coarse preparation precedes the frequency grid without a compiled
-  backend and outside the exact one-arrival profile. A slow mapped profile,
+  backend. The exact one-arrival coarse profile disables Helper, so Helper
+  acquisition and its overlap with coarse preparation do not apply there; its
+  native bank and observation filter already overlap. A slow mapped profile,
   whose route the intervals decide, keeps its bank in the time domain until
   then. Work receipts must equal the session built from those intervals.
 - A slot that fails for one reason reports it as the sequential order would.
@@ -176,23 +178,21 @@ Each owner keeps private mutable state and an admitted maximum lane/scratch
 shape. This is a DSP memory bound, not an exclusive reservation of worker
 permits for the entire slot. Quote the largest ready prefix at full `W` scratch
 per owner; prefer a balanced shape only when its full memory bound admits a
-strictly wider ready prefix. Keep that admitted shape fixed until the slot ends,
-even when peers finish. This prevents uncharged expansion; the aggregate worker ceiling remains
-`W` in either case.
+strictly wider ready prefix. The incremental quote for a newly ready window
+uses that window's full-`W` shape and adds incoming payload only for positions
+not already covered by the prefix. Keep the admitted shape fixed until the
+slot ends, even when peers finish. This prevents uncharged expansion; the
+aggregate worker ceiling remains `W` in either case.
 
-A slot has two leases. The sequential lease runs Helper acquisition, the coarse
-search and fine tracking one after another. The overlap lease also holds
-acquisition scratch beside coarse preparation; the two are equal where another
-stage already needs as much, and for a single lane, which has nothing to
-overlap. Choose the ready group from sequential leases. An overlap lease is
-held until its slot ends, so grant one, oldest slot first, only from memory
-that owners cannot use: afterwards every owner the cap still admits, and at
-least one, must fit at the group's largest sequential lease. A group on
-balanced shares gets none. A window that becomes ready later is then still
-admitted at once at its full shape. If the process has grown by dispatch, the
-slot keeps its place on the sequential lease. A slot scored with the wider
-lease overlaps, and reports that its Helper interval lies inside its coarse
-interval.
+For a newly ready window, admission quotes its full `W`-scratch shape and the
+additional incoming payload needed only for positions not already covered by
+the current ready prefix. It does not create a prospective owner for a vacant
+position when `O=1` or the owner cap is full. Live RSS admission still applies;
+the quote is not an absolute guarantee that a later window will be admitted
+regardless of intervening process growth. The admitted shape remains fixed
+through its slot. A slot may use an overlap lease when its resource bound
+allows Helper acquisition beside coarse preparation; this scheduling choice
+does not guarantee lower whole-slot elapsed time under contention.
 
 Reject inadmissible work if no shape fits the full DSP,
 stack, input/output and ingress bounds. The shared executor bounds actual
