@@ -8,10 +8,9 @@ receiver thermal noise and message encryption. The shared implementation is
 `src/audio_output.cpp`, with `background_noise` as its cryptographic source.
 Use this stage instead of implementing another generator in a backend.
 
-This shared component remains available independently of the Robust GUI backend.
-The [current Robust status](robust-current.md) does not promise a connected GUI
-transmitter or receiver. Historical adapter and CLI recipes are not current
-entry points.
+The [current Robust status](robust-current.md) describes the native GUI
+transmitter and receiver that use the shared audio output component. Historical
+adapter and CLI recipes are not current entry points.
 
 ## Randomness and state
 

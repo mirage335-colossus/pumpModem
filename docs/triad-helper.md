@@ -24,6 +24,7 @@ proposal selection and repeated attempts belong in the accounting.
 
 The [extended evidence](validation-data/triad-v3/2026-11-05-helper-extended/README.md)
 and [coverage lessons](triad-helper-coverage.md) preserve supported configurations
-and failures. Native Generator plus current weak acquisition is the supported
-source path; earlier HelperData/raw/finite-bank wrappers and campaign drivers
-are retired. GUI integration and complete message reception remain unavailable.
+and failures. The canonical native Generator and complete receiver are integrated
+into the GUI; earlier HelperData/raw/finite-bank wrappers and campaign drivers
+are retired. These historical Helper results do not qualify current GUI
+integration or complete-message reception; see [current validation](validation.md).

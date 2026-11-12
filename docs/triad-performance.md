@@ -215,11 +215,14 @@ fresh five-slot holdout. These are bounded paired service comparisons, not a
 sustained capacity qualification or a matched timing of the current 1024-row /
 26-worker envelope; details, resource costs and the historical/current boundary
 are in the [validation record](validation.md#nvidia-and-intel-gpu-toggle-integration).
-Automatic GUI validation on RTX 4090 and RTX 5090 remains unavailable after
-deployment attempts yielded no instance. Historical RTX 4090 matrix-component
-qualification remains scoped to those components. Intel UHD 630 still has no
-available test host. The scoped CUDA native-fine policy is not evidence for
-those devices.
+Later headless `--backend gpu` checks exercised the GUI's shared native factory
+on an actual RTX 4090 and full RTX PRO 6000 Blackwell, including bounded large
+slots, unsuccessful Helper searches and ready-backlog intervals; see the
+[current overlap qualification](validation.md#current-receiver-overlap-qualification).
+That evidence does not qualify interactive GUI/audio hardware or sustained
+capacity. Current-path RTX 5090 qualification remains open, and Intel UHD 630
+still has no available test host. Historical matrix-component results remain
+scoped to their source and fixtures.
 
 Default-selection experiments follow the
 [automatic-mode computational-ceiling contract](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling).

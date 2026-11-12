@@ -1,9 +1,10 @@
 # Full-audio clock discipline and tracking lessons
 
-The native continuous-clock and audio-mapping components remain available for
-the canonical backend. The old source-only `bounded-data` controller and its
-standalone receiver modes are removed. There is no GUI Robust operation yet;
-see [current architecture](robust-current.md).
+The old source-only `bounded-data` controller and its standalone receiver modes
+are removed. The current native Robust stack is integrated with GUI simulation
+and live audio; these historical clock-control experiments do not qualify that
+integrated path. See [current architecture](robust-current.md) and
+[current validation](validation.md).
 
 ## Mechanism and limits
 

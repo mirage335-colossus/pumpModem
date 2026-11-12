@@ -17,6 +17,10 @@ PCM or analog audio interfaces. Saves are explicit.
 
 ## Robust modem status
 
+Start with the [Robust operating guide and experimental lessons](docs/indexes/robust.md)
+for peer setup, transmission format, sensitivity assumptions, hardware choices
+and useful alternatives with their measured limits.
+
 Robust uses one compiled C++ three-adjacent-carrier `IndependentApskV2` stack
 linked into the GUI: DATA and Helper generation, continuous channel simulation,
 complete receiver processing and native audio. In-process worker owners share

@@ -225,9 +225,12 @@ speedup: mixed message/backlog costs and sensitivity results remain in
 matrix path reserves more workspace than FFT, so report the capacity tradeoff
 and preserve full-hypothesis memory admission. Neither matrix selection nor
 peak rates imply an INT8 FFT. The GPU selector must retain the full
-frequency/arrival hypothesis set under tile and device-memory limits. The current integration also leaves
-coarse FIR preparation/transfer overlap as a measured structural improvement
-opportunity.
+frequency/arrival hypothesis set under tile and device-memory limits. Bounded
+coarse FIR staging now overlaps preparation with device work, and eligible fine
+processing observes one CPU batch ahead of owner-only GPU statistics. The
+[overlap qualification](validation.md#current-receiver-overlap-qualification)
+records the larger-case gains, mixed small-backlog results and added host
+workspace; it is not a universal throughput or capacity claim.
 
 For portable Vulkan devices lacking shader FP64 or shader INT64, the receiver
 can keep bulk FFT/product arithmetic in FP32, represent frequency phase steps
@@ -249,12 +252,14 @@ complete-stream and earlier 512-row/32-worker checkpoint results are reported
 separately in [validation](validation.md#current-cuda-precision-and-tensor-dispatch)
 and [the historical GUI integration record](validation.md#nvidia-and-intel-gpu-toggle-integration).
 
-Automatic-GUI validation on RTX 4090 and RTX 5090 remains unavailable after
-deployment attempts produced no instance. Historical RTX 4090 matrix-component
-results remain valid only for their recorded explicit-CUDA build and fixtures;
-they do not qualify this GUI receiver path. Intel UHD 630 remains unmeasured
-because no test host is available. Preserve these device-specific gaps and the
-long-case regression alongside the broad-case gain.
+The current headless `--backend gpu` checks exercise this same factory on an
+actual RTX 4090 and full RTX PRO 6000 Blackwell; see the
+[matched native results](validation.md#current-receiver-overlap-qualification).
+They do not qualify interactive GUI/audio hardware, all configurations or
+absolute receiver capacity. Current-path RTX 5090 qualification and actual
+Intel UHD 630 measurements remain open; historical component results retain
+their own scope. Preserve these gaps and the earlier long-case regression
+alongside the broad-case gains and mixed backlog measurements.
 
 ### Vulkan on Vega integrated graphics
 

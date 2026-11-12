@@ -5,6 +5,12 @@ Use the [documentation index](docs/README.md) for maintained guidance. Check
 and [current Robust architecture](docs/robust-current.md) before changing those areas.
 Search `src/`, `include/`, `tests/` and `cmake/` first when locating implementation.
 
+For Robust operating choices or algorithm changes, consult the
+[operating guide and experimental lessons](docs/indexes/robust.md). Preserve
+notable positive, negative and conditional findings in the relevant maintained
+guide, including their source/geometry limits and when an alternative merits
+reconsideration; a temporary benchmark directory is not durable documentation.
+
 ## Prioritize receiver computational ceiling in automatic mode
 
 **Automatic mode must prioritize complete-receiver throughput and DSP workspace

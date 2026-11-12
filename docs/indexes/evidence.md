@@ -26,7 +26,7 @@ they are not a reason to restore or retain parallel source, executable copies,
 or raw outputs. Preserve only a concise alternative-algorithm conclusion when it
 has a concrete bearing on the current triad, with source, configuration, input
 and computational-regime limits. Such a finding does not qualify the canonical
-transmitter/channel/Helper generator or the staged Python receiver components.
+native transmitter/channel/Helper generator or complete receiver.
 
 ## Fast measurements and reproduction
 

@@ -1,5 +1,9 @@
 # Robust modem: current architecture and status
 
+For practical setup and situation-dependent choices, start with the
+[operating guide and experimental lessons](indexes/robust.md). This page defines
+the current implementation; linked historical findings retain their original scope.
+
 Robust uses one compiled C++ `IndependentApskV2` modem stack linked into the GUI
 application. Native Helper, DATA, complete receiver processing and audio connect
 through internal interfaces and shared buffers. There is no operating Python
@@ -139,10 +143,14 @@ waiters and native workspace fallbacks. A geometry that cannot fit the smallest
 admissible Vulkan shape uses the complete native coarse path and is reported as
 `native-vulkan-workspace`; it is not counted as GPU work. Explicit pinned Vulkan
 probes retain their configured per-owner limit. Default may choose the scoped
-native chirp-Z crossover on qualified Vulkan geometry;
-FP32 minimum disables it. CUDA's current automatic FFT work is FP32, so its
-FP32-minimum route keeps the same FP32 bulk arithmetic and higher-precision
-sensitive stages. FP64 force cannot be combined with GPU. Readiness, backend
+native chirp-Z crossover on qualified Vulkan geometry; FP32 minimum disables it.
+Automatic CUDA can use guarded half-cuFFT on SM89/SM120 for qualifying broad
+multi-arrival searches, with FP32 FFT fallback before dispatch when its shape,
+conditioning or workspace guards fail. Its FP32-minimum route instead retains
+FP32 bulk arithmetic. Sensitive scoring/state remains higher precision in both
+cases. Half-cuFFT is distinct from the optional Tensor Core lag-matrix path;
+see the [current selection rules](gpu-precision-controls.md#gui-automatic-gpu-selection).
+FP64 force cannot be combined with GPU. Readiness, backend
 identity, actual work, selection reason and fallback are reported; a CPU route
 is never counted as GPU work. Device initialization stays on the session
 manager thread, and bounded backend state is released on reconfiguration/close.

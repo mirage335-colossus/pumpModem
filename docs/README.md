@@ -10,6 +10,11 @@ obsolete code, experiments and generated outputs when that purpose ends.
 
 ## Current Robust modem
 
+Use the [Robust operating guide and experimental lessons](indexes/robust.md)
+to connect a situation or configuration choice to its transmission contract,
+measured benefits, failures and remaining limits. It also indexes conditional
+techniques worth revisiting without restoring retired implementations.
+
 **Automatic CPU/GPU choices must prioritize challenging-case receiver capacity
 and prevent input backlog.** Start with the
 [automatic-mode contract](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling)

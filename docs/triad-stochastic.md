@@ -2,8 +2,10 @@
 
 This page retains compact findings from the isolated three-carrier stochastic
 channel study. It is research context, not a current receiver guide or execution
-recipe. See [current Robust status](robust-current.md) for the canonical native
-transmitter/channel/Helper path and the disconnected Python receiver stages.
+recipe. The current Robust GUI uses the canonical native C++
+transmitter/channel/Helper and complete receiver path described in
+[current Robust status](robust-current.md). This historical study's receiver
+and measurements do not qualify that integrated path.
 
 ## Technique and scope
 
