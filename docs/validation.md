@@ -43,6 +43,163 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Manual rate, spreading and burst trends — 12 November 2026
+
+The eight current manual rows were screened for a lower computational burden.
+None had a conservative capacity qualification applicable to this native
+revision. The Nov 8 files named `robust-manual-*-current` retain historical
+timings from another runtime and smaller worker allocations; they were not used
+as current CPU calibration. The editable `_tests-RobustModem.md` was preserved.
+
+These are **configuration comparisons, not implementation speedups or new
+complete-capacity passes**. All tests used the current native CPU receiver on
+the Ryzen 5 PRO 5650U, six cores/twelve logical CPUs, `W=24`, automatic arithmetic
+and an explicit 9 GiB application limit. The full-slot comparisons executed
+FP32 coarse FFTs with higher-precision fine/state processing. They retained each
+row's channel, link power, clock and public search bounds, native target C/N0
+32 dB-Hz and modeled duration. Changing rate or spreading changes the waveform,
+work and sometimes cadence; it does not compare identical input samples.
+Enabling spreading from Off also explicitly enables Interleave.
+
+### Bounded method and measured directions
+
+Native correctness passed **33/33** with `./build.sh test triad` (48.56 s).
+Planning screened admission and the 24-slot calendar before timing. A successful
+`plan` response with no slot workspace was rejected as inadmissible. Short
+non-admitting fine diagnostics covered noise (2-second prefix and 1/2/4-second
+continuation) and cold-maximum (two half-second segments and their transition).
+They generally showed little change per processed second; they do not measure
+full acquisition or all candidates. Material directions were followed with
+production whole-slot `regression --units 1` and fresh seed 97021 after seed
+84021, reversing baseline/candidate order. Whole-slot times below include the
+separately measured audio projection, exclude simulation and one-time profile
+preparation, and retain recurring receiver preparation.
+
+The predeclared descriptive rule required at least 15% improvement on both seeds
+to call a material repeatable direction; two observations do not supply a
+confidence interval. HF-FHSS meets that rule on active and quiet slots. The
+smaller row-5/7 improvements are directional, with varying magnitude. EME 2x
+spreading meets it on quiet slots; active-slot changes ranged from 14.4% to
+28.4%. Timing replicas are not a communication-success probability estimate.
+
+| Row and changed setting | Active slot, baseline → candidate | Quiet slot, baseline → candidate | Change in cost per scheduled second |
+| --- | ---: | ---: | --- |
+| 2, groundwave GPSDO: Off → 2x Interleave, keep 1 Hz | Not measured | 11.029 → 8.728 s | **1.1% higher**: cadence shortens 690 → 540 s, cancelling the 20.9% slot saving |
+| 5, HF encrypted GPSDO: 36 → 72 Hz, keep 10x | 1.413 → 1.201 s | 1.321 → 1.177 s | 15.0% / 10.9% lower; cadence stays 60 s |
+| 6, HF-FHSS: 36 → 72 Hz, keep 10x | 20.754 → 1.783 s | 22.883 → 2.163 s | **61.3% / 57.5% lower**, after cadence changes 270 → 60 s |
+| 7, HF unencrypted GPSDO: 36 → 72 Hz, keep 10x | 1.433 → 1.154 s | 1.330 → 1.178 s | 19.5% / 11.4% lower; cadence stays 60 s |
+| 8, EME: Off → 2x Interleave, keep 360 Hz | 3.276 → 2.576 s | 4.155 → 2.877 s | **21.4% / 30.7% lower**; cadence stays 90 s |
+
+Entries are two-seed means. Dividing a slot by its public cadence describes
+scheduled slot demand, not measured steady-state receiver service. HF-FHSS's
+full-slot window contracts from 271.673 to 37.135 s and its slot DSP/workspace
+bound from **1150.2 to 293.2 MiB** (74.5% lower). Mean active coarse work drops
+from about 11.50 to 0.65 s and fine work from 9.15 to 1.11 s. Its active-slot
+busy-hardware fraction was 87–91%; worker permits were not used as the hardware
+denominator. The initial 20-second HF-FHSS attempts timed out before a completed
+slot receipt; those failures remain, separately from the bounded 45-second
+follow-ups that completed. No timeout was treated as a measured slot duration.
+
+The remaining rows and unfavorable directions matter:
+
+* **Row 1, sub-9 kHz:** 0.1 → 0.2 Hz halves the planned receive window
+  (6766.977 → 3390.977 s) and nearly halves its slot bound
+  (1344.4 → 686.9 MiB). Fine cost per processed second stayed approximately
+  flat. Cadence also nearly halves, so this does not establish lower average
+  CPU demand. Enabling 2x Interleave at 0.1 Hz gives a 5310.977 s window and
+  958.6 MiB bound, with no demonstrated fine-cost benefit. Full acquisition
+  and whole-slot timing were not run for these long windows.
+* **Row 2:** halving rate to 0.5 Hz increased measured sequential whole-slot
+  phase work from 11.006 to 20.420 s while cadence changed 690 → 1350 s.
+  The resulting 5.2% lower model duty is a single descriptive point, with a
+  larger window and workspace. It is not a meaningful established ceiling
+  improvement. Rates 1.5/2 Hz exceeded the bounded public-template work limit.
+* **Row 3, groundwave Helper:** 2x Interleave reduced sequential phase work
+  14.844 → 11.904 s, but cadence 720 → 570 s left model duty **1.3% higher**.
+  Halving rate increases full-prior coarse tiles 4 → 302; its bounded noise
+  acquisition did not complete. Rates 1.5/2 Hz also exceed the template limit.
+  Sequential phase sums are model inputs, not production overlap upper bounds.
+* **Row 4, HF Helper:** 54 Hz at 10x and 72 Hz at 5x are admitted. Active
+  acquisition completed within the 16-tile diagnostic budget, with sequential
+  phase costs 4.113 → 3.836 / 3.943 s. The corresponding quiet searches stopped
+  at 16 tiles; they do not establish full failed-Helper service. At 54 Hz the
+  planned full prior drops 359 → 284 tiles, but its sampled tile cost did not
+  improve. Halving rate grows the full prior to 705 tiles. Keep these directions
+  provisional. Rate 72 Hz at 10x, or spreading 20x at 36 Hz, overlaps the public
+  Helper exclusion and is inadmissible.
+* **Spreading is not a general cost reducer:** row 5 at 10x → 5x had a 10.5%
+  active-slot saving but a 4.8% quiet-slot increase in the first matched pair;
+  that direction was not promoted. In row 6, 72 Hz/5x has a 143.673 s window
+  and 591.1 MiB bound, less attractive geometrically than 72 Hz/10x. Half-rate
+  FHSS rows 6/8 and half-spreading row 6 have no protected dwell cells; row-6
+  20x exceeds the template-work bound. These are configuration rejections.
+* **Do not raise EME rate on timing alone:** 720 Hz missed DATA on seed 84021;
+  540 Hz missed DATA on 84021 and passed on 97021. The failed active observations
+  were scored quiet. Their faster quiet processing does not rescue reception.
+  At unchanged 360 Hz, 2x Interleave passed both sampled active and quiet checks;
+  4x was rejected by the fixed Helper-tone separation guard.
+
+### Burst waits and complete short-message checks
+
+Minimum waits are whole logical DATA-bit waits. They preserve the scored quiet
+completion rule and do not reduce one slot's peak workspace. With the original
+waveforms, the smallest tested wait that lengthened minimum cadence was one for
+rows 1/2/3/6/8, and five for rows 4/5/7. The 24-slot minimum cadences were:
+
+| Row | Minimum wait | Original → changed cadence |
+| --- | ---: | ---: |
+| 1 | 1 | 6750 → 12510 s |
+| 2 | 1 | 690 → 1260 s |
+| 3 | 1 | 720 → 1290 s |
+| 4 | 5 | 90 → 120 s |
+| 5 | 5 | 60 → 90 s |
+| 6 | 1 | 270 → 540 s |
+| 7 | 5 | 60 → 90 s |
+| 8 | 1 | 90 → 120 s |
+
+One matched five-slot `DDDQQ` message replay of original row 5 with wait 5
+changed receiver service plus full capture audio projection from
+7.602/266.473 to 7.564/386.473 seconds: **31.4% lower average service per input
+second**, at longer message latency. Original row 8 with wait 1 changed
+18.430/461.253 to 18.363/581.253 seconds, **20.9% lower**. All four replays
+decoded `e`, scored both quiet endpoints and passed the incomplete-EOF control.
+They are short startup/drain-inclusive replays, not ready-backlog qualification.
+Peak reserved totals increased slightly (row 5: 1.825 → 1.846 GB; row 8:
+1.897 → 1.925 GB); waiting is not a memory optimization.
+
+Fresh-seed single-message checks also passed for row 5/6/7 at 72 Hz/10x and
+row 8 at 360 Hz/2x Interleave, including both physical quiet endpoints and the
+incomplete-EOF control. They support these bounded candidate configurations;
+they do not establish population sensitivity, a conservative state envelope,
+sustained backlog capacity or an unknown-calendar receiver. No modeled
+nominal/conservative complete-service interval was qualified by this experiment.
+Do not combine the separately tested burst and waveform changes and inherit
+their results without checking the new calendar and reception.
+
+### Identity and retention
+
+Source was `98b82ccce0439a1882c68b14204abd2851cba29e`, native source manifest
+`d32beb7d614f8f34fa239b6218402b176a6747fb85b63ac844b12340657e8a9a`, probe SHA-256
+`3dbc006ac6615ceafa4379932c354cd3e67edbb754d9c408bdd481108e03d27b`, GNU 14.2
+Release/AVX2. Manual-list SHA-256 was
+`b04820861e1ffe4f8b22e2c1f7c0dfc77035cf43126f25f7f4a828fa0f5fdc6b`.
+Local CPU timing directly answered this comparison; no RunPod resources were
+created. Native probes were serialized, with 15-second fine, initially
+20-second whole-slot and selectively 30/45-second follow-up limits. Sample
+bounds were 4,194,304, selectively 9,000,000 for long groundwave observations.
+All incomplete acquisition, deadline and decision receipts remain distinct.
+
+Temporary plans, orchestration and raw receipts in ignored
+`local-evidence/rate-spread-burst/` support these unresolved candidate settings
+and their paired comparisons. Its `candidate-cases.md` is a separately parsed
+eight-row input list: rows 5/6/7 use 72 Hz/10x, row 8 uses 360 Hz/2x Interleave,
+and the other rows remain unchanged. Its normalized native arguments match those measured
+above; it is a candidate list, not an adopted or qualified manual suite. Burst
+alternatives remain separately described above. Retain these artifacts until accepted qualification or a
+replacement comparison supersedes this claim; then preserve these concise
+findings and remove the redundant raw files. Generated capture spools were
+temporary native-owned files, not retained datasets.
+
 ## Current receiver overlap qualification
 
 The current source has identified two admission/clock defects for bounded
