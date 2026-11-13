@@ -40,6 +40,17 @@ struct ReceiverConfig {
     double relative_phase_diffusion_rad_sqrt_s = 0;
     double selective_modulation_rate_hz = 0, selective_slow_depth = 0, selective_fast_depth = 0;
     double source_spectral_skirt_allowance_hz = 0;
+    // Add bounded proposals and a shorter-coherence receive model. Both
+    // fields are public assumptions, never a realization from simulation.
+    bool time_varying_channel = false;
+    double time_varying_common_doppler_hz = 0;
+    // Additional atmospheric offset outside the legacy static frequency
+    // prior. Supplemental proposals use their sum without enlarging the
+    // legacy exhaustive coherent grid.
+    double time_varying_atmospheric_hz = 0;
+    // Varying reception can erase a slot with insufficient separation of
+    // the two bit scores even when the presence bound passes.
+    double time_varying_minimum_bit_log_separation = 5.293304824724492; // log(199)
     // Public noise normalization and absolute basis gain. Neither is inferred
     // from a decoded bit, a private sample realization, or the episode length.
     double noise_variance = 0, data_basis_gain = 1;
@@ -81,6 +92,9 @@ struct ReceiverSlotScore {
     bool complete = false, all_valid = false, zero_h0_verified = false;
     bool noise_statistics_valid = false, operational_passes_conditional_bound = false;
     std::array<double, 2> bit_evidence{}, adaptive_bit_evidence{}, combined_bit_evidence{};
+    // Prior-corrected evidence actually used for operational bit selection.
+    std::array<double, 2> operational_bit_evidence{};
+    double operational_bit_log_separation = 0, operational_minimum_bit_log_separation = 0;
     double quiet_energy = 0, quiet_threshold = 0;
     double quiet_noise_upper_tail_probability = .001;
     double operational_log_e = 0, operational_threshold = 0;
@@ -90,6 +104,28 @@ struct ReceiverSlotScore {
     std::string coarse_fft_precision, coarse_precision_reason;
     std::size_t affine_blocks = 0, adaptive_blocks = 0, adaptive_peak_states = 0;
     std::uint64_t adaptive_transition_edges = 0, basis_rows = 0;
+    std::size_t varying_candidates = 0, varying_blocks = 0, varying_block_rows = 0;
+    std::uint64_t varying_basis_rows = 0;
+    double varying_coarse_seconds = 0, varying_fine_seconds = 0;
+    std::size_t varying_timing_blocks = 0, varying_timing_frequencies = 0;
+    std::string varying_timing_status;
+    std::array<double, 2> varying_bit_evidence{};
+    std::string varying_status;
+    std::size_t varying_frequency_states = 0;
+    std::array<double, 2> tracked_frequency_bit_evidence{};
+    std::size_t coherent_gain_candidates = 0, coherent_gain_blocks = 0, coherent_gain_frequency_states = 0;
+    std::array<double, 2> coherent_gain_bit_evidence{};
+    double coherent_gain_seconds = 0;
+    std::string coherent_gain_status;
+    std::size_t varying_quiet_modes = 0;
+    double varying_quiet_energy = 0, varying_quiet_threshold = 0;
+    std::string varying_quiet_status;
+    double varying_line_frequency_hz = 0, varying_line_log_evidence = 0;
+    std::size_t drift_timing_atoms = 0, drift_slopes = 0, drift_frequency_bins = 0;
+    std::size_t drift_observation_rows = 0, drift_proposal_stride = 0;
+    double drift_seconds = 0;
+    std::array<double, 2> drift_bit_evidence{};
+    std::string drift_status;
     double helper_seconds = 0, coarse_seconds = 0, fine_seconds = 0;
     // Helper acquisition ran beside coarse preparation: helper_seconds then
     // lies inside coarse_seconds instead of preceding it.

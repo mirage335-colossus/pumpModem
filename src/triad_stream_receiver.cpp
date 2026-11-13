@@ -167,7 +167,8 @@ ReceiverSlotPlan make_receiver_slot_plan(const PublicProfile& profile, const Rec
                                          std::uint64_t index) {
     const auto& declared = profile.config();
     if (config.sample_rate_hz!=profile.effective_sample_rate() || config.data_if_hz!=profile.data_if_hz() ||
-        config.clock_bound_ppm!=declared.clock_bound_ppm || config.frequency_bound_hz!=declared.cfo_bound_hz ||
+        config.clock_bound_ppm!=declared.clock_bound_ppm ||
+        config.frequency_bound_hz+config.time_varying_atmospheric_hz!=declared.cfo_bound_hz ||
         config.helper_enabled!=declared.helper_enabled)
         throw Error("Robust scorer and public stream profile differ");
     const auto slot = profile.slot(index);

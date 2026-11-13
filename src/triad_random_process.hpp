@@ -149,4 +149,73 @@ public:
         return nominal_ + amplitude_*(a+(b-a)*s);
     }
 };
+
+// Compact nonstationary two-ray realization. Independent counter-based knot
+// values make the curves deterministic at fixed physical times without
+// duration-sized storage or per-chunk reseeding. Quintic smootherstep joins
+// knots with zero first and second derivatives at each boundary. The echo
+// ratio and frequency stay inside their declared limits by construction.
+class BoundedRandomSpread {
+    std::uint64_t seed_;
+    double maximum_delay_, doppler_bound_, interval_;
+    long double initial_phase_;
+    double delay_;
+    long double previous_time_ = 0, phase_cycles_ = 0;
+    double previous_doppler_ = 0;
+    bool initialized_ = false;
+
+    static double curve(std::uint64_t seed, long double seconds, double interval) {
+        const long double coordinate = seconds / interval +
+            random_process_uniform(seed ^ 0x4b4e4f544f524947ULL, 0);
+        if (!(std::isfinite(coordinate) && coordinate > INT64_MIN + 2.L &&
+              coordinate < INT64_MAX - 2.L))
+            throw Error("bounded spread physical-time coordinate overflow");
+        const auto floor = std::floor(coordinate);
+        const auto index = static_cast<std::int64_t>(floor);
+        const double u = static_cast<double>(coordinate - floor);
+        const double s = u*u*u*(10 + u*(-15 + 6*u));
+        const double a = 2*random_process_uniform(seed, index)-1;
+        const double b = 2*random_process_uniform(seed, index+1)-1;
+        return a+(b-a)*s;
+    }
+public:
+    struct State {
+        double delay_seconds = 0, echo_ratio = 0, doppler_hz = 0;
+        double direct_gain = 1, echo_gain = 0, phase_radians = 0;
+    };
+
+    BoundedRandomSpread(double maximum_delay, double doppler_bound,
+                        double interval, std::uint64_t seed)
+        : seed_(seed), maximum_delay_(maximum_delay),
+          doppler_bound_(std::abs(doppler_bound)), interval_(interval),
+          initial_phase_(random_process_uniform(seed ^ 0x5350524541445048ULL, 0)),
+          delay_(maximum_delay*random_process_uniform(seed ^ 0x5350524541445441ULL, 0)) {
+        if (!(std::isfinite(maximum_delay_) && maximum_delay_ >= 0 &&
+              std::isfinite(doppler_bound_) && doppler_bound_ >= 0 &&
+              std::isfinite(interval_) && interval_ > 0))
+            throw Error("bounded spread requires finite nonnegative support and a positive knot interval");
+    }
+
+    State at(long double seconds) {
+        if (!std::isfinite(seconds) || (initialized_ && seconds < previous_time_))
+            throw Error("bounded spread physical time must be finite and increasing");
+        const double ratio = .5*(curve(seed_ ^ 0x535052454144414dULL, seconds, interval_)+1);
+        const double doppler = doppler_bound_ *
+            curve(seed_ ^ 0x5350524541444651ULL, seconds, interval_);
+        if (initialized_) {
+            phase_cycles_ = std::remainder(phase_cycles_ +
+                .5L*(previous_doppler_+doppler)*(seconds-previous_time_), 1.L);
+        }
+        previous_time_ = seconds;
+        previous_doppler_ = doppler;
+        initialized_ = true;
+        const double normalization = 1/std::sqrt(1+ratio*ratio);
+        const double echo_weight = ratio*normalization;
+        const double direct_weight = normalization;
+        const double phase = std::remainder(static_cast<double>(initial_phase_+
+            std::remainder(phase_cycles_, 1.L)), 1.0)*2*std::numbers::pi;
+        return {delay_, ratio, doppler, direct_weight, echo_weight, phase};
+    }
+    double excess_delay_seconds() const { return delay_; }
+};
 } // namespace datapump::triad::v3::detail

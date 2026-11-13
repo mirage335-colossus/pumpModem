@@ -123,7 +123,52 @@ void score_fine(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                 double projected_sample_rate_hz, double coarse_clock_gap_ppm,
                 unsigned workers, ReceiverSlotScore&, std::size_t scratch_limit_bytes, std::stop_token,
                 ReceiverExecutor* = nullptr);
+// Optional, separately normalized fixed-affine likelihood. Public geometry
+// determines whether a short-block projection can separate DATA and Helper.
+struct VaryingFinePlan {
+    std::size_t block_rows = 0, workspace_bytes = 0;
+    std::string_view status;
+    bool track_frequency = false;
+    bool coherent_gain_blocks = false;
+};
+struct LineAtom {
+    std::size_t first = 0, stop = 0;
+    double frequency_hz = 0, log_weighted_evidence = 0;
+};
+std::size_t varying_line_workspace(const ReceiverConfig&, const ReceiverSlotPlan&);
+std::optional<LineAtom> find_varying_line(const ReceiverConfig&, const ReceiverSlotPlan&,
+                                        std::span<const Complex>, std::stop_token);
+VaryingFinePlan varying_fine_plan(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers,
+                                 bool project_line = false, bool coherent_gain_blocks = false);
+void score_varying_fine(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
+                        const VaryingFinePlan&, std::span<const Complex>, std::span<const FineCoordinate>,
+                        std::span<const FineCoordinate> segmented_timing,
+                        double projected_sample_rate_hz, double coarse_clock_gap_ppm, unsigned workers,
+                        ReceiverSlotScore&, std::stop_token, ReceiverExecutor&, const LineAtom* = nullptr);
+std::size_t varying_quiet_workspace(const ReceiverConfig&, const ReceiverSlotPlan&);
+void score_varying_quiet(const ReceiverConfig&, const ReceiverSlotPlan&, std::span<const Complex>,
+                         ReceiverSlotScore&, std::stop_token);
+
+// A fixed finite bank of constant-frequency and linear-drift models. The
+// retained timing atoms select only which rows of its public prior to score.
+struct DriftPlan {
+    std::size_t first = 0, raw_rows = 0, rows = 0, sample_stride = 1, nfft = 0;
+    std::size_t slope_budget = 0, workspace_bytes = 0, projection_blocks = 0, ridge_segments = 0;
+    std::size_t slow_ridge_segments = 0;
+    std::int64_t slope_radius = 0;
+    std::int64_t frequency_radius = 0;
+    double frequency_step = 0, slope_step = 0, slope_reference_seconds = 0;
+    bool project_data = false;
+    std::string_view status;
+};
+DriftPlan drift_plan(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers, bool project_line = false);
+void score_drift_fine(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&, const DriftPlan&,
+                       std::span<const Complex>, std::span<const FineCoordinate>,
+                       std::span<const FineCoordinate> epoch_timing, unsigned workers,
+                       ReceiverSlotScore&, std::stop_token, ReceiverExecutor&, const LineAtom* = nullptr);
 void classify_fine_slot(ReceiverSlotScore&, const AdmissionGrid&);
+void classify_varying_slot(ReceiverSlotScore&, const AdmissionGrid&, const AdmissionGrid*,
+                            const DriftPlan*, double minimum_separation);
 double quiet_noise_threshold(std::size_t modes);
 
 } // namespace datapump::triad::v3::receiver_detail

@@ -100,10 +100,63 @@ decay tails; do not truncate at the emitted source endpoint. Its report
 separates source length, complete output, tail, observation padding, erased
 samples, converter clipping, and model diagnostics.
 
+## Robust GUI changing-channel realization
+
+The Robust GUI now treats the selected spread as support for a changing
+synthetic realization. `HF Worst` declares 7 ms excess-delay support and
+30 Hz differential Doppler before the configured margin. One echo delay is
+drawn inside that support. The receiver does not use the realized delay; it
+scores separately declared bounded delay bases.
+Its echo/direct amplitude ratio varies smoothly between zero and one, and
+its instantaneous frequency varies within the signed Doppler support.
+The two path powers sum to one before their interference and selective
+filtering; the direct path stays present. Effective delay spread changes with
+the echo power. This is not rapid physical motion of a millisecond-delay path.
+
+The selected spread Doppler also supplies a common atmospheric excursion
+allowance; the magnitude in the explicit Doppler field adds to it. Thus
+HF Worst still permits common frequency motion with exact oscillators and
+the explicit Doppler at zero. The explicit field no longer selects one
+constant simulated offset. Echo
+and common frequency are integrated into continuous phase, with independent
+seed domains and no resets across reads and public slots throughout one emitted
+source. A separate simulation creates fresh channel state. Common wander and
+relative echo Doppler add: at HF Worst with 3× margin and explicit Doppler zero,
+the direct path can reach ±90 Hz and the echo ±180 Hz absolute shift. Capture
+allowances account for this sum. Common wander, echo strength and echo frequency
+use smooth independently drawn knots at `max(1, 1/max(bound, 1/3600))`
+seconds. These are reproducible synthetic timescales, not a calibrated HF
+law. The report distinguishes configured bounds from extrema actually visited;
+a short realization need not visit the extremes.
+
+Selected amplitude perturbations use the existing bounded Gaussian-erf
+coefficient law. Slow and fast depths remain separate (Each 65% sets both to
+0.65); they do not promise a total ±65% waveform envelope. The underlying fast
+spectral width is one tenth of the existing selected modulation allowance,
+with slow width another factor of ten smaller. This matches the channel's
+ten-width-per-edge capture convention without enlarging the GUI's declared
+audio passband. That convention is an allowance for spectral tails, not a
+hard bandlimit. Off retains exact bypass.
+
+Low-level `StreamingChannel` defaults retain the fixed two-ray diagnostic
+control; `PathEvolutionConfig` explicitly enables bounded echo variation and
+common wander. A single channel instance processes the entire emitted composite,
+including Helper, silence, delayed tails and erased observations. The waveform
+generator and real playback remain clean. **Simulation = No** bypasses synthetic
+effects in both duplex states; **Live/Duplex** changes capture ownership.
+
+This two-path family does not cover direct-path disappearance, arbitrary
+diffuse scattering, all independent carrier fades or arbitrary variation rates.
+Other native path laws remain available as independent stresses. Simulation
+support and a receiver parameter are not themselves a reception guarantee.
+See [research reconciliation](triad-stochastic.md#nonstationary-channel-research-reconciliation)
+for the distinctions and contrary findings that guide qualification.
+
 ## Interpretation limits
 
-- Two-ray spread is an illustrative equal-power direct and delayed ray, not a
-  measured delay or scattering spectrum. Static separation and selected
+- The fixed two-ray control has equal-power direct and delayed rays; the GUI
+  changing realization varies their ratio. Neither is a measured delay or
+  scattering spectrum. Static separation and selected
   stochastic ray evolution are distinct assumptions.
 - Selective perturbation is a synthetic signal-level stress model. It is not a
   calibrated per-carrier fading prediction, and its diagnostic energy reports

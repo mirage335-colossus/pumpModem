@@ -177,6 +177,19 @@ struct SampledFrontendConfig {
 // calibration. Physical time is n/(effective_sample_rate*rx_clock_scale)-capture_lead_seconds;
 // sample zero can precede time zero. Off preserves the established channel exactly.
 struct PathEvolutionConfig {
+    // Optional smooth, bounded shift of the whole received waveform. The
+    // selected static Doppler remains a separate fixed offset; callers that
+    // want only a changing common shift set that offset to zero. This is a
+    // synthetic bounded trajectory, not a field-derived spectrum.
+    double common_doppler_wander_hz = 0, common_doppler_knot_seconds = 1;
+    // Optional bounded, nonstationary two-path stress realization. When
+    // enabled, the channel chooses one excess delay uniformly inside the
+    // configured spread-delay support and varies the relative echo power and
+    // echo Doppler smoothly on independently seeded knots in physical time.
+    // The Doppler is integrated into a continuous phase. This compact model
+    // keeps the direct path present; it is not a universal HF fading law.
+    // Zero preserves the historical fixed equal-power SpreadRay exactly.
+    double bounded_spread_knot_seconds = 0;
     // Independent stationary proper-complex OU gains on the direct and delayed
     // rays: E[g]=0, E[|g|^2]=1, E[g(t+dt)conj(g(t))]=exp(-dt/coherence).
     // Existing SpreadRay still supplies equal ray powers and Doppler separation.
@@ -310,6 +323,22 @@ struct StreamChannelReport {
     std::uint64_t impulse_events = 0, overload_samples = 0;
     double maximum_adc_input_component = 0;
     double path_diurnal_initial_phase_radians = 0;
+    struct BoundedSpreadReport {
+        double excess_delay_seconds = 0, knot_seconds = 0, doppler_bound_hz = 0;
+        double minimum_echo_ratio = 1, maximum_echo_ratio = 0;
+        double minimum_doppler_hz = 0, maximum_doppler_hz = 0;
+        std::uint64_t seed = 0, processed_rows = 0;
+    };
+    // Present only for the optional bounded two-path realization above.
+    // Extremes describe processed simulation samples, not receiver estimates.
+    std::optional<BoundedSpreadReport> bounded_spread;
+    struct CommonDopplerReport {
+        double bound_hz = 0, knot_seconds = 0;
+        double minimum_hz = 0, maximum_hz = 0;
+        std::uint64_t seed = 0, processed_rows = 0;
+    };
+    // Present only when a bounded common-frequency trajectory is configured.
+    std::optional<CommonDopplerReport> common_doppler_wander;
     double path_gaussian_sample_interval_seconds = 0;
     // Simulation-model diagnostics, not receiver channel realizations. Exact
     // finite-teacher covariance at lag m is sum_k h[k]h[k+m]; empty when off.

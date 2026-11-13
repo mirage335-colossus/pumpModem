@@ -1240,15 +1240,19 @@ struct Controller::Impl {
                 records.push_back({std::to_string(step.index),{{text.str(),7,0,1900,17,10,ui::TextTone::muted,false}},true,false});
                 continue;
             }
-            text<<std::setprecision(4)<<" · affine ["<<step.bit_evidence[0]<<", "<<step.bit_evidence[1]
+            text<<std::setprecision(4)<<" · bit evidence ["<<step.operational_bit_evidence[0]<<", "<<step.operational_bit_evidence[1]
                 <<"] · evidence "<<step.operational_log_e<<" / "<<step.operational_threshold
+                <<" · bit separation "<<step.operational_bit_log_separation<<" / "<<step.operational_minimum_bit_log_separation
                 <<" · quiet "<<step.quiet_energy<<" / "<<step.quiet_threshold<<" ("<<step.quiet_modes<<" modes)"
                 <<" · Helper"<<(step.helper_overlapped?" (within coarse)":"")<<"/coarse/fine "
                 <<step.helper_seconds<<" / "<<step.coarse_seconds<<" / "<<step.fine_seconds
                 <<" s · "<<step.fine_candidates<<" candidates / "<<step.workers<<" workers"
+                <<" · affine diagnostic ["<<step.bit_evidence[0]<<", "<<step.bit_evidence[1]<<"]"
                 <<" · adaptive diagnostic ["<<step.adaptive_bit_evidence[0]<<", "<<step.adaptive_bit_evidence[1]
                 <<"] · combined diagnostic ["<<step.combined_bit_evidence[0]<<", "<<step.combined_bit_evidence[1]<<"]";
             if(!step.helper_status.empty())text<<" · "<<step.helper_status;
+            if(!step.varying_status.empty())text<<" · "<<step.varying_status;
+            if(!step.drift_status.empty())text<<" · "<<step.drift_status;
             if(!step.reason.empty())text<<" · "<<step.reason;
             records.push_back({std::to_string(step.index),{{text.str(),7,0,1900,17,10,
                 step.decision==live::PatternDecision::data?ui::TextTone::data:ui::TextTone::normal,false}},true,false});

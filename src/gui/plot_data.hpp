@@ -12,8 +12,8 @@
 
 namespace datapump::gui::plots {
 // One completed public-slot observation. Missing/invalid evidence stays absent;
-// it is never drawn as a zero score. Bit values include the same original-grid
-// prior correction as the aggregate operational log evidence.
+// it is never drawn as a zero score. Bit values include the model and original
+// public-coordinate priors used in the aggregate operational log evidence.
 struct PatternEvidencePoint {
     std::uint64_t slot=0;
     std::optional<std::array<double,2>> bit_log_e;

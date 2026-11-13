@@ -49,6 +49,7 @@ struct CoarseWorkPlan {
     std::size_t projected_observation_rows = 0, template_sampling_step = 0;
     std::size_t fir_taps = 0, fir_fft_rows = 0, correlation_fft_rows = 0;
     std::size_t frequency_groups = 0, frequency_points = 0, arrival_points = 0;
+    std::size_t segmented_timing_blocks = 0, segmented_timing_frequencies = 0, segmented_timing_hop = 0;
     std::size_t workspaces = 0, rays = 0, clocks = 0;
     // One tile advances either adjacent CFOs for all workspaces or adjacent
     // workspaces for all CFOs. The final tile may be smaller.
@@ -72,6 +73,11 @@ struct CoarseProgress {
     // Operations count completed native work. An interrupted tile does not
     // publish work credit or candidates. Wall time includes interrupted work.
     CoarsePhaseWork filter_setup, mapped_fidelity, template_bank, observation, lag_setup, bulk_prepare, search, selection;
+    // Native differential products after channel isolation. This proposal
+    // pass has no statistical admission authority or device-work credit.
+    CoarsePhaseWork varying_proposals;
+    std::size_t segmented_timing_blocks = 0, segmented_timing_frequencies = 0;
+    std::string_view segmented_timing_status;
     std::optional<BulkReceipt> bulk;
     std::string native_fallback_reason;
     double preparation_seconds = 0;
@@ -80,6 +86,9 @@ struct CoarseProgress {
 
 struct CoarseResult {
     std::vector<FineCoordinate> coordinates;
+    std::vector<FineCoordinate> varying_coordinates;
+    std::vector<FineCoordinate> segmented_timing_coordinates;
+    std::vector<FineCoordinate> epoch_timing_coordinates;
     std::array<CoarseProposal, 4> proposals{};
     std::size_t proposal_count = 0;
     double projected_sample_rate_hz = 0, maximum_frequency_step_hz = 0, clock_gap_ppm = 0;

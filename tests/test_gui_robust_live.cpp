@@ -334,12 +334,17 @@ void simulation_cancel_is_not_completion() {
           "Cancelled simulation emitted a late message or acquired audio");
 }
 
-void long_live_prefix_and_cancel() {
+void long_live_prefix_and_cancel(bool duplex) {
     using namespace triad::v3;
     auto s = settings(false);
     s.transfer.modem.bandwidth_hz = 3600;
     s.transfer.fec = FecMode::rs20;
     s.transfer.key = Crypto::amateur();
+    s.full_duplex = duplex;
+    // These settings bound the receiver's HF search. With Simulation off,
+    // physical playback must still be the canonical, unperturbed emission.
+    s.spread_preset = "hf-worst";
+    s.selective_perturbation = "each-65";
     // One highly compressible long draft. Validate its first physical DATA
     // waveform, then cancel. Whole-interval codec and quiet completion are
     // covered by the separate native codec/short waveform gates.
@@ -377,6 +382,11 @@ void long_live_prefix_and_cancel() {
         epoch = static_cast<std::uint64_t>(*fixture::scheduled_epoch);
     }
     const auto profile = live::detail::prepare_profile(s, *s.calendar, {});
+    check(std::abs(profile.receiver.spread_delay_seconds - .007) < 1e-12 &&
+          std::abs(profile.receiver.spread_doppler_hz - 30.) < 1e-12 &&
+          profile.receiver.selective_slow_depth == .65 &&
+          profile.receiver.selective_fast_depth == .65,
+          "HF Worst / Each 65% did not remain configured as receive-side search bounds");
     const auto& calendar = profile.waveform;
     const auto slot = calendar.first_slot_not_before({epoch, 0});
     const auto start = calendar.transmit_slot(slot).helper_begin;
@@ -429,6 +439,70 @@ void full_duplex_reserves_long_preparation() {
           fixture::capture_opens == captures && fixture::playback_opens == playbacks,
           "Full-duplex preparation spent an unreserved workspace or opened audio");
     close(session);
+}
+
+void nonstationary_channel_profile() {
+    for (const auto simulation : {false, true}) {
+        for (const auto duplex : {false, true}) {
+            auto s = settings(simulation);
+            s.full_duplex = duplex;
+            s.spread_preset = "hf-worst";
+            s.selective_perturbation = "each-65";
+            s.doppler_shift_hz = 8;
+            const auto profile = live::detail::prepare_profile(s, *s.calendar, {},
+                {.simulation_seed = 37});
+            check(profile.receiver.time_varying_channel &&
+                  profile.receiver.time_varying_common_doppler_hz == 38 &&
+                  profile.receiver.time_varying_atmospheric_hz == 30 &&
+                  std::abs(profile.receiver.spread_delay_seconds - .007) < 1e-12 &&
+                  std::abs(profile.receiver.spread_doppler_hz - 30.) < 1e-12 &&
+                  profile.receiver.selective_slow_depth == .65 &&
+                  profile.receiver.selective_fast_depth == .65,
+                  "HF channel choices did not retain their receiver bounds and variation state");
+            check(profile.channel.path_evolution.bounded_spread_knot_seconds > 0 &&
+                  profile.channel.path_evolution.common_doppler_wander_hz == 38 &&
+                  profile.channel.effects.static_doppler_hz == 0 &&
+                  profile.channel.selective_model.coefficient_law == triad::v3::SelectiveCoefficientLaw::GaussianErf &&
+                  profile.channel.selective_model.modulation_rate_hz ==
+                      profile.receiver.selective_modulation_rate_hz / 10,
+                  "HF simulation did not use the bounded evolving path and selective channel models");
+        }
+    }
+
+    auto atmospheric = settings(true);
+    atmospheric.spread_preset = "hf-worst";
+    atmospheric.selective_perturbation = "each-65";
+    atmospheric.doppler_shift_hz = 0;
+    const auto varying = live::detail::prepare_profile(atmospheric, *atmospheric.calendar, {},
+        {.simulation_seed = 37});
+    check(varying.receiver.frequency_bound_hz == 0 &&
+          varying.receiver.time_varying_atmospheric_hz == 30 &&
+          varying.receiver.time_varying_common_doppler_hz == 30 &&
+          varying.channel.path_evolution.common_doppler_wander_hz == 30 &&
+          varying.waveform.config().cfo_bound_hz == 30,
+          "Atmospheric search was lost with exact oscillators and zero explicit Doppler");
+
+    auto off = settings(true);
+    off.spread_preset = "none";
+    off.selective_perturbation = "off";
+    off.doppler_shift_hz = 0;
+    const auto profile = live::detail::prepare_profile(off, *off.calendar, {},
+        {.simulation_seed = 37});
+    check(!profile.receiver.time_varying_channel &&
+          profile.receiver.time_varying_common_doppler_hz == 0 &&
+          profile.receiver.time_varying_atmospheric_hz == 0 &&
+          profile.receiver.spread_delay_seconds == 0 && profile.receiver.spread_doppler_hz == 0 &&
+          profile.receiver.selective_modulation_rate_hz == 0 &&
+          profile.channel.path_evolution.bounded_spread_knot_seconds == 0 &&
+          profile.channel.path_evolution.common_doppler_wander_hz == 0 &&
+          profile.channel.effects.static_doppler_hz == 0 &&
+          profile.channel.effects.spread_delay_ms == 0 &&
+          profile.channel.effects.spread_doppler_hz == 0 &&
+          profile.channel.effects.perturbation_slow_depth == 0 &&
+          profile.channel.effects.perturbation_fast_depth == 0 &&
+          profile.channel.selective_model.coefficient_law == triad::v3::SelectiveCoefficientLaw::GaussianErf &&
+          profile.channel.selective_model.modulation_rate_hz == 0,
+          "Off must bypass all dynamic path and selective channel effects");
 }
 
 void late_affine_clock_support() {
@@ -571,11 +645,13 @@ void dated_live_data_then_eof() {
     }
 }
 
-void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false) {
+void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dynamic_channel = false) {
     // One predeclared functional stratum, not a sensitivity/capacity claim:
-    // public calendar, clear e=001, FEC/Helper/spread/selective/FHSS Off, exact
+    // public calendar, clear e=001, FEC/Helper/FHSS Off and exact
     // oscillators, target and actual 80 dB-Hz with positive physical noise.
-    // At most five complete scored windows, 600,000 samples and 90s wall time.
+    // The default case has spread/selective Off. The optional nonstationary
+    // case exercises HF Worst, Each 65%, and a bounded common-shift trajectory.
+    // Both score at most five complete windows, 600,000 samples and 90s.
     const auto captures = fixture::capture_opens.load(), playbacks = fixture::playback_opens.load();
     auto simulated = settings(true);
     simulated.gpu = gpu;
@@ -594,6 +670,11 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false) {
     // sample rate keeps the full physical calendar inside the sample budget.
     simulated.transfer.modem.sample_rate = 1500;
     simulated.transfer.modem.carrier_hz = 500;
+    if (dynamic_channel) {
+        simulated.spread_preset = "hf-worst";
+        simulated.selective_perturbation = "each-65";
+        simulated.doppler_shift_hz = 8;
+    }
     live::Session session;
     session.start(simulated);
     const auto prepared = ready(session);
@@ -624,9 +705,25 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false) {
         check(out.pattern_steps.size() <= 5, "Native simulation exceeded five public scoring windows");
         return !out.transmitting;
     }, "Native complete simulation exceeded its wall-time budget", 90s);
-    check(received.size() == 1 && received[0].stream_complete && received[0].content_validated &&
-          received[0].short_text_decoded && received[0].content.message.data == Bytes{'e'} &&
-          received[0].raw_bits == Bytes({0, 0, 1}) && received[0].missing_symbols == 0,
+    const bool decoded = received.size() == 1 && received[0].stream_complete && received[0].content_validated &&
+        received[0].short_text_decoded && received[0].content.message.data == Bytes{'e'} &&
+        received[0].raw_bits == Bytes({0, 0, 1}) && received[0].missing_symbols == 0;
+    if (!decoded && dynamic_channel) {
+        for (const auto& row : completed.pattern_steps) {
+            std::cerr << "nonstationary slot=" << row.index
+                      << " decision=" << static_cast<unsigned>(row.decision)
+                      << " bit=" << (row.bit ? std::to_string(*row.bit) : "null")
+                      << " evidence=" << row.bit_evidence[0] << ',' << row.bit_evidence[1]
+                      << " operational_log_e=" << row.operational_log_e
+                      << " threshold=" << row.operational_threshold
+                      << " helper_s=" << row.helper_seconds
+                      << " coarse_s=" << row.coarse_seconds
+                      << " fine_s=" << row.fine_seconds
+                      << " complete=" << row.evidence_complete
+                      << " reason=" << row.reason << '\n';
+        }
+    }
+    check(decoded,
           "Actual native DSP did not decode physically complete e/001");
     check(completed.pattern_steps.size() == 5, "Robust message did not score all three DATA and two quiet slots");
     for (std::size_t i = 0; i < completed.pattern_steps.size(); ++i) {
@@ -826,6 +923,10 @@ int main(int argc, char** argv) {
             }
             return 0;
         }
+        if (argc == 2 && std::string_view(argv[1]) == "--nonstationary") {
+            complete_native_simulation(false, false, true);
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--gpu-unavailable") {
             unavailable_gpu();
             return 0;
@@ -836,8 +937,10 @@ int main(int argc, char** argv) {
         inactive_and_audio_ownership();
         live_transmit_and_cancel(false);
         live_transmit_and_cancel(true);
-        long_live_prefix_and_cancel();
+        long_live_prefix_and_cancel(false);
+        long_live_prefix_and_cancel(true);
         full_duplex_reserves_long_preparation();
+        nonstationary_channel_profile();
         late_affine_clock_support();
         simulation_cancel_is_not_completion();
         std::cout << "Native Robust lifecycle, duplex routing, and cancellation passed\n" << std::flush;

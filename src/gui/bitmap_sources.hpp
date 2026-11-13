@@ -11,22 +11,13 @@ inline std::vector<plots::PatternEvidencePoint> pattern_evidence_points(std::spa
     for(const auto& step:steps) {
         if(cleared_through && step.index<=*cleared_through)continue;
         plots::PatternEvidencePoint point;point.slot=step.index;
-        if(step.evidence_complete && std::isfinite(step.bit_evidence[0]) && std::isfinite(step.bit_evidence[1]) &&
+        if(step.evidence_complete && std::isfinite(step.operational_bit_evidence[0]) &&
+           std::isfinite(step.operational_bit_evidence[1]) &&
            std::isfinite(step.operational_log_e) && std::isfinite(step.operational_threshold)) {
-            // The scorer's aggregate is the equally weighted bit mixture plus
-            // one common original-grid prior/null correction. Recover that
-            // correction stably, without redoing or changing a DSP decision.
-            const auto a=static_cast<long double>(step.bit_evidence[0]);
-            const auto b=static_cast<long double>(step.bit_evidence[1]);
-            const auto maximum=std::max(a,b);
-            const auto normalization=std::log1p(std::exp(std::min(a,b)-maximum))-std::log(2.L);
-            const std::array<double,2> alternatives{
-                static_cast<double>(step.operational_log_e+(a-maximum)-normalization),
-                static_cast<double>(step.operational_log_e+(b-maximum)-normalization)};
-            if(std::isfinite(alternatives[0]) && std::isfinite(alternatives[1])) {
-                point.bit_log_e=alternatives;point.operational_log_e=step.operational_log_e;
-                point.operational_threshold=step.operational_threshold;
-            }
+            // Channel branches need not favor the same bit as the affine
+            // diagnostic. Plot the scorer's actual prior-corrected alternatives.
+            point.bit_log_e=step.operational_bit_evidence;point.operational_log_e=step.operational_log_e;
+            point.operational_threshold=step.operational_threshold;
         }
         if(step.evidence_complete && step.quiet_modes && std::isfinite(step.quiet_energy) && step.quiet_energy>=0 &&
            std::isfinite(step.quiet_threshold) && step.quiet_threshold>0) {

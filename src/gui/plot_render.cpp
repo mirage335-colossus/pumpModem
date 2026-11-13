@@ -526,7 +526,7 @@ std::string PlotSnapshot::caption(unsigned width) const {
             if(latest.operational_log_e)out << std::setprecision(5) << "log E " << *latest.operational_log_e
                 << " / threshold " << *latest.operational_threshold;
             else out << "latest evidence incomplete";
-            out << "\nFixed-affine 0 (data), 1 (comparison), aggregate (white); dashed threshold applies only to aggregate.";
+            out << "\nOperational bit 0 (data), 1 (comparison), aggregate (white); dashed threshold applies only to aggregate.";
             out << "\n";
             if(latest.quiet_energy)out << "Quiet energy " << *latest.quiet_energy << " / " << *latest.quiet_threshold << "; ";
             out << "bottom ratio 0..2 (clipped). Conditional model; adaptive lanes are diagnostic only.";

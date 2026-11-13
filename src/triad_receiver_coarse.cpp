@@ -191,6 +191,13 @@ struct Layout {
     long double origin = 0, source_start = 0;
 };
 
+struct SegmentedTimingPlan {
+    std::size_t blocks = 0, fft_rows = 0, radius = 0, phases = 0, bin_stride = 1, tracking_hop = 0;
+    double lattice_step = 0;
+    std::string_view status;
+    std::size_t frequencies() const { return 2 * radius + 1; }
+};
+
 struct Plan {
     Geometry source_geometry;
     Layout layout;
@@ -201,6 +208,9 @@ struct Plan {
     std::size_t fidelity_source_first = 0, fidelity_capture_rows = 0;
     double source_rate = 0, pass_edge = 0, stop_edge = 0;
     double max_frequency_step = 0, separation = 0;
+    bool varying_passband = false;
+    SegmentedTimingPlan segmented_timing;
+    SegmentedTimingPlan faster_timing;
 
     std::size_t workspaces() const { return lanes * clock_count; }
     std::size_t workspace_index(std::size_t lane, std::size_t clock) const {
@@ -287,8 +297,12 @@ Plan make_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
         plan.clock_count = 1;
     }
     plan.ray_count = config.spread_delay_seconds || config.spread_doppler_hz ? 2 : 1;
-    const double required = .5 * plan.source_geometry.occupied_bandwidth_hz +
-                            std::abs(config.spread_doppler_hz) + config.frequency_bound_hz;
+    const double base_required = .5 * plan.source_geometry.occupied_bandwidth_hz +
+                                 std::abs(config.spread_doppler_hz) + config.frequency_bound_hz;
+    const double varying_required = base_required + config.time_varying_atmospheric_hz +
+        3 * config.random_doppler_width_hz + config.delay_motion_doppler_bound_hz;
+    plan.varying_passband = config.time_varying_channel && varying_required < .4 * plan.fs;
+    const auto required = plan.varying_passband ? varying_required : base_required;
     require_coarse(required < .4 * plan.fs, "coarse DATA prior is outside the projected passband");
     // Find the smallest integer divisor with sufficient public passband.
     const auto exact_projected_rate = smallest_projected_rate(plan.fs, required);
@@ -333,6 +347,70 @@ Plan make_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
     plan.filter_fft = fft_size(add(chunk_samples, plan.taps - 1));
     plan.layout = make_layout(plan, config, slot, source_rows, capture_rows,
                               slot.window_capture_lead_seconds, slot.source_start_seconds);
+    if (plan.varying_passband && plan.layout.lag_count >= 32 && plan.layout.kernel_rows >= 128 &&
+        (config.time_varying_common_doppler_hz > 0 || config.random_doppler_width_hz > 0)) {
+        const auto duration = static_cast<double>(plan.layout.kernel_rows) / plan.output_fs;
+        const auto wander = config.time_varying_common_doppler_hz;
+        // Short coherent matches suppress the quadratic phase error without
+        // needing the frequency's order or any feedback from the transmitter.
+        // Keep enough coherent energy per block and keep arrival FFTs bounded.
+        const auto full_center = config.frequency_bound_hz + config.time_varying_atmospheric_hz;
+        const auto baseline_centers = 2 * full_center /
+            receiver_coarse_frequency_step(slot.format, config.sample_rate_hz) + 1;
+        const auto budget = static_cast<long double>(plan.layout.nfft) * std::max(64., baseline_centers);
+        const auto make_segmented = [&](double center_bound, double curvature_bound, bool track) {
+            const auto ideal = std::max(std::sqrt(2 * curvature_bound * duration),
+                                        4 * config.random_doppler_width_hz * duration / 3);
+            const auto nominal_blocks = std::min(std::max<std::size_t>(8, extent(std::ceil(ideal))),
+                                                 plan.layout.kernel_rows / 16);
+            const auto minimum_blocks = track ? std::max<std::size_t>(8, nominal_blocks - nominal_blocks / 4) : nominal_blocks;
+            const auto maximum_blocks = track ? std::min(plan.layout.kernel_rows / 16,
+                add(nominal_blocks, nominal_blocks / 4)) : nominal_blocks;
+            SegmentedTimingPlan best;
+            std::size_t best_distance = SIZE_MAX;
+            for (auto blocks = minimum_blocks; blocks <= maximum_blocks; ++blocks) {
+                const auto rows = ceil_div(plan.layout.kernel_rows, blocks);
+                const auto nfft = fft_size(add(rows, plan.layout.lag_count - 1));
+                const auto phases = std::max<std::size_t>(1, ceil_div(2 * rows, nfft));
+                const auto lattice_rows = mul(nfft, phases);
+                const auto lattice_step = static_cast<double>(plan.output_fs) / lattice_rows;
+                // Padding for arrival uncertainty must not make local CFO
+                // search finer. The nominal step is a half cycle per block.
+                const auto stride = std::max<std::size_t>(1, lattice_rows / mul(2, rows));
+                const auto radius = extent(std::ceil(center_bound / (stride * lattice_step)));
+                // Visit every public arrival, clock and epoch. Bound extra
+                // transforms relative to the existing complete coherent search.
+                const auto rays = config.random_doppler_width_hz > 0 ? plan.ray_count : 1;
+                const auto products = static_cast<long double>(blocks) * (2 * radius + 1) * nfft * rays;
+                if (rows < 16 || mul(radius, stride) >= lattice_rows / 2 || products > budget)
+                    continue;
+                const auto distance = std::max(blocks, nominal_blocks) - std::min(blocks, nominal_blocks);
+                if (distance >= best_distance) continue;
+                best_distance = distance;
+                const auto drift_per_block = 2 * curvature_bound / duration * (rows / static_cast<double>(plan.output_fs));
+                const auto hop = track ? std::min(radius, std::max<std::size_t>(1,
+                    extent(std::round(drift_per_block / (stride * lattice_step))))) : 0;
+                best = SegmentedTimingPlan{blocks, nfft, radius, phases, stride, hop, lattice_step,
+                    track ? "segmented_smooth_frequency_timing" :
+                    (ideal > blocks ? "segmented_coherent_timing_partial_curvature" : "segmented_coherent_timing")};
+            }
+            return best;
+        };
+        const auto broad_center = full_center * duration > 256 && wander * duration > 256 &&
+            plan.layout.lag_count > 512;
+        if (broad_center && config.random_doppler_width_hz == 0) {
+            // A slower proposal can integrate weak paths that stay within
+            // a local frequency neighborhood. Its center grid still covers
+            // the full public bound. Reuse the same emissions for free hops.
+            const auto slow_curvature = wander / 8;
+            plan.segmented_timing = make_segmented(full_center, slow_curvature, true);
+            if (plan.segmented_timing.blocks)
+                plan.faster_timing = make_segmented(full_center, wander, false);
+        }
+        if (!plan.segmented_timing.blocks)
+            plan.segmented_timing = make_segmented(full_center, wander, false);
+        if (!plan.segmented_timing.blocks) plan.segmented_timing.status = "segmented_timing_public_work_limit";
+    }
     plan.max_frequency_step = receiver_coarse_frequency_step(slot.format, config.sample_rate_hz);
     plan.separation = .5 / plan.source_geometry.fine_chip_rate_hz;
     if (plan.source_step > 1) {
@@ -804,6 +882,34 @@ struct Workspace {
     native_fft::Q15Spectrum packed_column;
 };
 
+using DifferentialPeaks = std::array<CoarseProposal, retained_per_bit>;
+class DifferentialSearch;
+
+// Lag-one products of an aligned single path have a frequency-dependent
+// rotation rather than a phase history. Subtract the common product mean
+// of the template so stationary colored noise and a residual tone cannot
+// match simply through the mean energy envelope. This is only a proposal
+// statistic, with no Gaussian-null interpretation.
+template<class T>
+void differential_spectrum(std::span<const Complex> input, std::vector<std::complex<T>>& output,
+                           bool template_column, double scale, std::size_t fft_rows,
+                           CoarseOperationCounts& work, std::stop_token stop) {
+    output.assign(fft_rows, {});
+    Complex mean{};
+    for (std::size_t i = 0; i + 1 < input.size(); ++i) {
+        if (!(i % 4096)) check_stop(stop);
+        const auto value = (input[i + 1] * scale) * std::conj(input[i] * scale);
+        output[i] = static_cast<std::complex<T>>(value);
+        mean += value;
+    }
+    if (template_column && input.size() > 1) {
+        mean /= input.size() - 1;
+        for (std::size_t i = 0; i + 1 < input.size(); ++i)
+            output[i] -= static_cast<std::complex<T>>(mean);
+    }
+    note(work.singleton_dot_terms, input.size() - 1);
+}
+
 // Block scaling changes only representation, after native channel isolation.
 // Ordinary normalized audio needs no extra multiplication. Rare exponent
 // extremes are scaled by an exact power of two and restored in FP64 scoring.
@@ -885,11 +991,11 @@ public:
     BankJobs(const Plan& plan, const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
              const Projection& projection, const MappedProjection* mapped,
              const native_fft::DoublePlan* spectrum_fft, const native_fft::FloatPlan* float_spectrum_fft,
-             bool packed, unsigned workers)
+             bool packed, unsigned workers, DifferentialSearch* varying)
         : plan_(plan), config_(config), slot_(slot), key_(key), projection_(projection), mapped_(mapped),
           spectrum_fft_(spectrum_fft), float_spectrum_fft_(float_spectrum_fft), packed_(packed),
           group_(std::min<std::size_t>(lanes, std::max(1U, workers))),
-          sources_(lanes), bank_(plan.workspaces()), work_(plan.workspaces()) {
+          sources_(lanes), bank_(plan.workspaces()), work_(plan.workspaces()), varying_(varying) {
         for (auto& shared : sources_) shared.pending = plan.clock_count;
     }
 
@@ -924,7 +1030,9 @@ public:
         if (!mapped_)
             columns = make_columns(plan_, plan_.layout, config_, projection_, nullptr, *shared.source, 0,
                                    shared.integer, plan_.clocks[clock], counts, stop);
-        auto& destination = bank_[plan_.workspace_index(lane, clock)];
+        const auto workspace = plan_.workspace_index(lane, clock);
+        if (varying_) score_varying(workspace, columns, stop);
+        auto& destination = bank_[workspace];
         const auto g = gram(columns, plan_.ray_count);
         destination.inverse = invert(g, plan_.ray_count);
         if (plan_.ray_count == 2) {
@@ -948,6 +1056,7 @@ public:
     }
 
 private:
+    void score_varying(std::size_t, const Columns&, std::stop_token);
     const Plan& plan_;
     const ReceiverConfig& config_;
     const ReceiverSlotPlan& slot_;
@@ -961,6 +1070,7 @@ private:
     std::vector<LaneSource> sources_;
     std::vector<Workspace> bank_;
     std::vector<CoarseOperationCounts> work_;
+    DifferentialSearch* varying_;
 };
 
 struct Peak {
@@ -1044,6 +1154,340 @@ std::array<Peak, retained_per_bit> arrival_peaks(std::span<const double> values,
         result[i] = {values[lag], frequency, lag};
     }
     return result;
+}
+
+class DifferentialSearch {
+public:
+    DifferentialSearch(const Plan& plan, const ReceiverSlotPlan& slot, const ReceiverConfig& config,
+                       PhaseSpan& span, std::stop_token stop)
+        : plan_(plan), slot_(slot), config_(config), peaks_(plan.workspaces()), work_(plan.workspaces()), span_(span) {
+        if (config.native_coarse_precision == NativeCoarsePrecision::fp64)
+            double_fft_.emplace(plan.layout.nfft, stop);
+        else
+            float_fft_.emplace(plan.layout.nfft, stop);
+        if (plan.segmented_timing.blocks) {
+            segmented_peaks_.resize(plan.workspaces());
+            if (plan.segmented_timing.tracking_hop) smooth_peaks_.resize(plan.workspaces());
+            if (double_fft_) segmented_double_fft_.emplace(plan.segmented_timing.fft_rows, stop);
+            else segmented_float_fft_.emplace(plan.segmented_timing.fft_rows, stop);
+        }
+        if (plan.faster_timing.blocks) {
+            fast_peaks_.resize(plan.workspaces());
+            if (double_fft_) fast_double_fft_.emplace(plan.faster_timing.fft_rows, stop);
+            else fast_float_fft_.emplace(plan.faster_timing.fft_rows, stop);
+        }
+    }
+
+    void prepare(std::span<const Complex> input, double noise_power, std::stop_token stop) {
+        segmented_noise_power_ = noise_power;
+        if (double_fft_) {
+            prepare_with(input, double_observation_, *double_fft_, stop);
+            if (segmented_double_fft_)
+                prepare_segments(plan_.segmented_timing, input, segmented_double_, *segmented_double_fft_, stop);
+            if (fast_double_fft_)
+                prepare_segments(plan_.faster_timing, input, fast_double_, *fast_double_fft_, stop);
+        } else {
+            prepare_with(input, float_observation_, *float_fft_, stop);
+            if (segmented_float_fft_)
+                prepare_segments(plan_.segmented_timing, input, segmented_float_, *segmented_float_fft_, stop);
+            if (fast_float_fft_)
+                prepare_segments(plan_.faster_timing, input, fast_float_, *fast_float_fft_, stop);
+        }
+        {
+            std::lock_guard lock(mutex_);
+            ready_.store(true, std::memory_order_release);
+        }
+        ready_changed_.notify_all();
+    }
+
+    void score(std::size_t workspace, const Columns& columns, std::stop_token stop) {
+        const auto& direct = columns[0];
+        if (double_fft_) {
+            score_with(workspace, direct, double_observation_, *double_fft_, stop);
+            if (segmented_double_fft_)
+                score_segments(plan_.segmented_timing, workspace, columns, segmented_double_, *segmented_double_fft_,
+                               segmented_peaks_, stop);
+            if (fast_double_fft_)
+                score_segments(plan_.faster_timing, workspace, columns, fast_double_, *fast_double_fft_, fast_peaks_, stop);
+        } else {
+            score_with(workspace, direct, float_observation_, *float_fft_, stop);
+            if (segmented_float_fft_)
+                score_segments(plan_.segmented_timing, workspace, columns, segmented_float_, *segmented_float_fft_,
+                               segmented_peaks_, stop);
+            if (fast_float_fft_)
+                score_segments(plan_.faster_timing, workspace, columns, fast_float_, *fast_float_fft_, fast_peaks_, stop);
+        }
+    }
+
+    void finish(std::array<CoarseProposal, 2 * retained_per_bit>& result, std::size_t& count,
+                std::vector<FineCoordinate>& segmented, CoarseOperationCounts& work) {
+        combine(work, observation_work_);
+        for (const auto& operations : work_) combine(work, operations);
+        for (std::size_t bit = 0; bit < 2; ++bit) {
+            DifferentialPeaks best{};
+            for (std::size_t workspace = bit; workspace < peaks_.size(); workspace += 2) {
+                for (const auto& peak : peaks_[workspace]) {
+                    if (peak.score > best[0].score) {
+                        best[1] = best[0];
+                        best[0] = peak;
+                    } else if (peak.score > best[1].score) best[1] = peak;
+                }
+            }
+            for (const auto& peak : best)
+                if (peak.score > 0) result[count++] = peak;
+        }
+        if (segmented_peaks_.empty()) return;
+        const auto append = [&](const auto& pool, std::size_t limit) {
+            std::vector<CoarseProposal> peaks;
+            peaks.reserve(2 * pool.size());
+            for (const auto& workspace : pool)
+                for (const auto& peak : workspace)
+                    if (peak.score > 0) peaks.push_back(peak);
+            std::stable_sort(peaks.begin(), peaks.end(), [](const auto& a, const auto& b) { return a.score > b.score; });
+            for (const auto& peak : peaks) {
+                if (std::ranges::find(segmented, peak.coordinate) == segmented.end())
+                    segmented.push_back(peak.coordinate);
+                if (segmented.size() == limit) break;
+            }
+        };
+        if (!smooth_peaks_.empty()) append(smooth_peaks_, fast_peaks_.empty() ? 6 : 5);
+        if (!fast_peaks_.empty()) append(fast_peaks_, 7);
+        append(segmented_peaks_, 8);
+    }
+
+private:
+    void wait_ready(std::stop_token stop) {
+        if (!ready_.load(std::memory_order_acquire)) {
+            std::stop_callback wake(stop, [this] {
+                std::lock_guard lock(mutex_);
+                ready_changed_.notify_all();
+            });
+            std::unique_lock lock(mutex_);
+            ready_changed_.wait(lock, [&] {
+                return ready_.load(std::memory_order_acquire) || stop.stop_requested();
+            });
+        }
+        check_stop(stop);
+    }
+
+    template<class T, class Fft>
+    void prepare_segments(const SegmentedTimingPlan& plan, std::span<const Complex> input,
+                          std::vector<std::complex<T>>& spectra,
+                          const Fft& fft, std::stop_token stop) {
+        const PhaseSpan::Scope timing(span_);
+        const auto length = plan_.layout.kernel_rows;
+        spectra.resize(mul(mul(plan.blocks, plan.phases), plan.fft_rows));
+        const auto maximum = maximum_component(input);
+        const auto exponent = maximum ? float_scale_exponent(maximum) : 0;
+        const auto scale = std::scalbn(1., -exponent);
+        for (std::size_t block = 0; block < plan.blocks; ++block) {
+            const auto first = block * length / plan.blocks;
+            const auto rows = (block + 1) * length / plan.blocks - first + plan_.layout.lag_count - 1;
+            for (std::size_t phase_index = 0; phase_index < plan.phases; ++phase_index) {
+                check_stop(stop);
+                const auto frequency = phase_index * plan.lattice_step;
+                const auto increment = std::polar(1., -2 * pi * frequency / plan_.output_fs);
+                auto phase = Complex{scale};
+                auto target = std::span(spectra).subspan((block * plan.phases + phase_index) * plan.fft_rows, plan.fft_rows);
+                for (std::size_t i = 0; i < rows; ++i) {
+                    target[i] = static_cast<std::complex<T>>(input[first + i] * phase);
+                    phase *= increment;
+                }
+                tracked_fft(target, false, fft, observation_work_, stop);
+            }
+        }
+    }
+
+    template<class T, class Fft>
+    void score_segments(const SegmentedTimingPlan& plan, std::size_t workspace, const Columns& columns,
+                        const std::vector<std::complex<T>>& spectra, const Fft& fft,
+                        std::vector<DifferentialPeaks>& retained,
+                        std::stop_token stop) {
+        const PhaseSpan::Scope timing(span_);
+        wait_ready(stop);
+        const auto arrivals = plan_.layout.lag_count;
+        const auto frequencies = plan.frequencies();
+        auto& work = work_[workspace];
+        std::vector<std::complex<T>> column(plan.fft_rows), product(plan.fft_rows);
+        const bool diffuse = config_.random_doppler_width_hz > 0;
+        std::vector<double> score(arrivals), block_score(arrivals);
+        std::vector<double> stationary_scores(diffuse ? mul(frequencies, arrivals) : 0);
+        std::vector<T> previous(plan.tracking_hop ? mul(frequencies, arrivals) : 0), next(previous.size());
+        std::vector<double> smooth_score(previous.empty() ? 0 : arrivals);
+        const auto noise_power = segmented_noise_power_;
+        // A hop pays for choosing an additional local frequency, in
+        // units of projected noise energy. The unlinked ranks also retain
+        // unrestricted block-to-block frequency changes.
+        const auto hop_penalty = static_cast<T>(std::log(2.));
+        const auto hop = plan.tracking_hop;
+        const auto length = columns[0].size();
+        const auto rays = diffuse ? plan_.ray_count : 1;
+        for (std::size_t block = 0; block < plan.blocks; ++block) {
+            const auto first = block * length / plan.blocks;
+            const auto rows = (block + 1) * length / plan.blocks - first;
+            std::ranges::fill(block_score, 0.);
+            for (std::size_t ray = 0; ray < rays; ++ray) {
+                std::ranges::fill(column, std::complex<T>{});
+                double energy = 0;
+                for (std::size_t i = 0; i < rows; ++i) {
+                    const auto value = columns[ray][first + i];
+                    energy += std::norm(value);
+                    column[i] = static_cast<std::complex<T>>(value);
+                }
+                if (!(energy > 0)) {
+                    if (hop) next = previous;
+                    continue;
+                }
+                tracked_fft(column, false, fft, work, stop);
+                for (std::size_t index = 0; index < frequencies; ++index) {
+                    check_stop(stop);
+                    const auto frequency_index = (static_cast<std::int64_t>(index) -
+                        static_cast<std::int64_t>(plan.radius)) * static_cast<std::int64_t>(plan.bin_stride);
+                    const auto phases = static_cast<std::int64_t>(plan.phases);
+                    const auto phase_index = (frequency_index % phases + phases) % phases;
+                    const auto shift = (frequency_index - phase_index) / phases;
+                    const auto observation = std::span(spectra).subspan(
+                        (block * plan.phases + static_cast<std::size_t>(phase_index)) * plan.fft_rows, plan.fft_rows);
+                    for (std::size_t i = 0; i < product.size(); ++i)
+                        product[i] = observation[(static_cast<std::uint64_t>(shift) + i) & (plan.fft_rows - 1)] *
+                            std::conj(column[i]);
+                    tracked_fft(product, true, fft, work, stop, arrivals);
+                    for (std::size_t lag = 0; lag < arrivals; ++lag) {
+                        const auto value = std::norm(static_cast<Complex>(product[lag])) / energy;
+                        if (diffuse) stationary_scores[index * arrivals + lag] += value;
+                        else {
+                            block_score[lag] = std::max(block_score[lag], value);
+                            if (hop) {
+                                const auto at = index * arrivals + lag;
+                                auto best = previous[at];
+                                for (std::size_t offset = 1; offset <= hop; ++offset) {
+                                    if (index >= offset) best = std::max(best, previous[at - offset * arrivals] - hop_penalty);
+                                    if (index + offset < frequencies)
+                                        best = std::max(best, previous[at + offset * arrivals] - hop_penalty);
+                                }
+                                next[at] = static_cast<T>(value / noise_power) + best;
+                            }
+                        }
+                    }
+                }
+                note(work.score_rows, mul(frequencies, arrivals));
+            }
+            if (!diffuse)
+                for (std::size_t lag = 0; lag < arrivals; ++lag) score[lag] += block_score[lag];
+            if (hop) previous.swap(next);
+        }
+        if (hop)
+            for (std::size_t index = 0; index < frequencies; ++index)
+                for (std::size_t lag = 0; lag < arrivals; ++lag)
+                    smooth_score[lag] = std::max<double>(smooth_score[lag], previous[index * arrivals + lag]);
+        if (diffuse)
+            for (std::size_t index = 0; index < frequencies; ++index)
+                for (std::size_t lag = 0; lag < arrivals; ++lag)
+                    score[lag] = std::max(score[lag], stationary_scores[index * arrivals + lag]);
+        std::vector<std::uint32_t> interiors;
+        const auto distance = std::max<std::size_t>(1, extent(std::ceil(plan_.separation * plan_.output_fs)));
+        const auto bit = static_cast<std::uint8_t>(workspace % 2);
+        const auto epoch = workspace / (2 * plan_.clock_count);
+        const auto clock = workspace / 2 % plan_.clock_count;
+        const auto retain = [&](std::span<const double> ranks, auto& peaks) {
+            const auto selected = select_arrivals(ranks, distance, interiors);
+            for (std::size_t i = 0; i < selected.count; ++i) {
+                const auto lag = selected.indices[i];
+                const auto arrival = slot_.arrival_lower_seconds + static_cast<double>(lag) / plan_.output_fs;
+                peaks[i] = {{receiver_epoch_offsets[epoch], arrival, 0., plan_.clocks[clock]}, ranks[lag], bit, 1};
+                note(work.retained_peaks, 1);
+            }
+        };
+        retain(score, retained[workspace]);
+        if (hop) retain(smooth_score, smooth_peaks_[workspace]);
+    }
+
+    template<class T, class Fft>
+    void prepare_with(std::span<const Complex> input, std::vector<std::complex<T>>& observation,
+                      const Fft& fft, std::stop_token stop) {
+        const PhaseSpan::Scope timing(span_);
+        // Normalize the common observation by an exact power of two before
+        // forming products. All workspace ranks retain the same scale.
+        const auto max = maximum_component(input);
+        const auto exponent = max ? std::clamp(std::ilogb(max), -1022, 1023) : 0;
+        differential_spectrum(input, observation, false, std::scalbn(1., -exponent),
+                              plan_.layout.nfft, observation_work_, stop);
+        tracked_fft(observation, false, fft, observation_work_, stop);
+        native_fft::permute(std::span(observation), stop);
+    }
+
+    template<class T, class Fft>
+    void score_with(std::size_t workspace, std::span<const Complex> direct,
+                    const std::vector<std::complex<T>>& observation, const Fft& fft, std::stop_token stop) {
+        const PhaseSpan::Scope timing(span_);
+        auto& work = work_[workspace];
+        std::vector<std::complex<T>> product;
+        differential_spectrum(direct, product, true, 1, plan_.layout.nfft, work, stop);
+        double energy = 0;
+        for (const auto& value : product) energy += std::norm(static_cast<Complex>(value));
+        if (!(energy > 0 && std::isfinite(energy))) return;
+        tracked_fft(product, false, fft, work, stop);
+        native_fft::permute(std::span(product), stop);
+        wait_ready(stop);
+        for (std::size_t i = 0; i < product.size(); ++i) {
+            if (!(i % 4096)) check_stop(stop);
+            product[i] = observation[i] * std::conj(product[i]);
+        }
+        const auto arrivals = plan_.layout.lag_count;
+        tracked_fft(product, true, fft, work, stop, arrivals, true);
+        std::vector<double> scores(arrivals);
+        const auto bit = static_cast<std::uint8_t>(workspace % 2);
+        const auto epoch = workspace / (2 * plan_.clock_count);
+        const auto clock = workspace / 2 % plan_.clock_count;
+        for (std::size_t lag = 0; lag < arrivals; ++lag)
+            scores[lag] = std::norm(static_cast<Complex>(product[lag])) / energy;
+        note(work.score_rows, scores.size());
+        std::vector<std::uint32_t> interiors;
+        const auto distance = std::max<std::size_t>(1, extent(std::ceil(plan_.separation * plan_.output_fs)));
+        const auto selected = select_arrivals(scores, distance, interiors);
+        for (std::size_t i = 0; i < selected.count; ++i) {
+            const auto lag = selected.indices[i];
+            if (!(std::isfinite(scores[lag]) && scores[lag] > 0)) continue;
+            const auto arrival = slot_.arrival_lower_seconds + static_cast<double>(lag) / plan_.output_fs;
+            const auto inferred = std::arg(static_cast<Complex>(product[lag])) * plan_.output_fs / (2 * pi);
+            const auto bound = config_.frequency_bound_hz + config_.time_varying_atmospheric_hz;
+            const auto frequency = std::clamp(inferred, -bound, bound);
+            peaks_[workspace][i] = {{receiver_epoch_offsets[epoch], arrival, frequency, plan_.clocks[clock]},
+                                     scores[lag], bit, 1};
+            note(work.retained_peaks, 1);
+        }
+    }
+
+    const Plan& plan_;
+    const ReceiverSlotPlan& slot_;
+    const ReceiverConfig& config_;
+    std::optional<native_fft::FloatPlan> float_fft_;
+    std::optional<native_fft::DoublePlan> double_fft_;
+    std::optional<native_fft::FloatPlan> segmented_float_fft_;
+    std::optional<native_fft::DoublePlan> segmented_double_fft_;
+    std::optional<native_fft::FloatPlan> fast_float_fft_;
+    std::optional<native_fft::DoublePlan> fast_double_fft_;
+    std::vector<std::complex<float>> float_observation_;
+    std::vector<Complex> double_observation_;
+    std::vector<std::complex<float>> segmented_float_;
+    std::vector<Complex> segmented_double_;
+    std::vector<std::complex<float>> fast_float_;
+    std::vector<Complex> fast_double_;
+    std::vector<DifferentialPeaks> peaks_;
+    std::vector<DifferentialPeaks> segmented_peaks_;
+    std::vector<DifferentialPeaks> smooth_peaks_;
+    std::vector<DifferentialPeaks> fast_peaks_;
+    CoarseOperationCounts observation_work_;
+    std::vector<CoarseOperationCounts> work_;
+    double segmented_noise_power_ = 1.;
+    PhaseSpan& span_;
+    std::atomic<bool> ready_{false};
+    execution::Mutex mutex_;
+    execution::Condition ready_changed_;
+};
+
+void BankJobs::score_varying(std::size_t workspace, const Columns& columns, std::stop_token stop) {
+    varying_->score(workspace, columns, stop);
 }
 
 template<class Fft>
@@ -1681,6 +2125,40 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
         bulk_lag ? nfft : std::max({layout.nfft, plan.filter_fft, plan.fidelity_layout.nfft}),
         std::max(bulk_frequency && !frequency ? tile : 0, bulk_lag ? lag_points : 0), layout.lag_count) : 0;
     const auto bulk_host = add(persistent, std::max(legacy, frequency ? frequency->host_workspace_bytes : 0));
+    // Varying proposals borrow each already-isolated time-domain
+    // template before the coherent search consumes it. Its own transform
+    // and observation, and one private product/arrival row per live job,
+    // can all coexist with ordinary preparation.
+    if (plan.varying_passband) {
+        const auto sample_bytes = config.native_coarse_precision == NativeCoarsePrecision::fp64 ?
+            sizeof(Complex) : sizeof(std::complex<float>);
+        const auto spectra = storage(mul(2, layout.nfft), sample_bytes);
+        const auto lane_bytes = add(storage(layout.nfft, sample_bytes),
+            add(mul(layout.lag_count, sizeof(double)),
+                mul(interior_peak_bound(layout.lag_count), sizeof(std::uint32_t))));
+        const auto jobs = std::min<std::size_t>(workers, plan.workspaces());
+        const auto metadata = mul(plan.workspaces(), sizeof(DifferentialPeaks) + sizeof(CoarseOperationCounts));
+        high = add(high, add(add(spectra, mul(jobs, lane_bytes)), metadata));
+        std::size_t segmented_shared = 0, segmented_lane = 0;
+        for (const auto* segmented : {&plan.segmented_timing, &plan.faster_timing}) {
+            if (!segmented->blocks) continue;
+            const auto spectra = storage(mul(segmented->fft_rows, add(1, mul(segmented->blocks, segmented->phases))),
+                                         sample_bytes);
+            segmented_shared = add(segmented_shared, add(spectra, mul(plan.workspaces(),
+                (segmented->tracking_hop ? 4 : 3) * sizeof(DifferentialPeaks))));
+            auto lane = add(storage(mul(2, segmented->fft_rows), sample_bytes),
+                add(mul(2 * layout.lag_count, sizeof(double)),
+                    mul(interior_peak_bound(layout.lag_count), sizeof(std::uint32_t))));
+            if (config.random_doppler_width_hz > 0)
+                lane = add(lane, storage(mul(segmented->frequencies(), layout.lag_count), sizeof(double)));
+            if (segmented->tracking_hop) {
+                lane = add(lane, storage(mul(mul(2, segmented->frequencies()), layout.lag_count), sample_bytes / 2));
+                lane = add(lane, storage(layout.lag_count, sizeof(double)));
+            }
+            segmented_lane = std::max(segmented_lane, lane);
+        }
+        high = add(high, add(segmented_shared, mul(jobs, segmented_lane)));
+    }
     return {add(add(add(base, high), task_overhead), bulk_host), bulk_host};
 }
 
@@ -1692,6 +2170,9 @@ CoarseWorkPlan make_work_plan(const Plan& geometry, const FrequencyGrid& grid,
     CoarseWorkPlan work;
     work.route = lag ? CoarseRoute::lag_groups : CoarseRoute::frequency_tiles;
     work.public_slot = slot.index;
+    work.segmented_timing_blocks = geometry.segmented_timing.blocks;
+    work.segmented_timing_frequencies = geometry.segmented_timing.blocks ? geometry.segmented_timing.frequencies() : 0;
+    work.segmented_timing_hop = geometry.segmented_timing.tracking_hop;
     work.pattern_epoch = slot.format.epoch;
     work.symbol_ordinal = slot.format.symbol_ordinal;
     work.first_sample = slot.first_sample;
@@ -2039,16 +2520,31 @@ void retain_proposals(CoarseResult& result, const Plan& plan, const ReceiverSlot
         }
         for (const auto& row : best) if (std::isfinite(row.score)) result.proposals[result.proposal_count++] = row;
     }
+    if (plan.varying_passband) {
+        result.epoch_timing_coordinates.reserve(2 * receiver_epoch_offsets.size());
+        for (std::size_t epoch = 0; epoch < receiver_epoch_offsets.size(); ++epoch) {
+            for (std::size_t bit = 0; bit < 2; ++bit) {
+                CoarseProposal best;
+                best.score = -infinity;
+                for (std::size_t clock = 0; clock < plan.clock_count; ++clock) {
+                    const auto& candidate = retained[(epoch * plan.clock_count + clock) * 2 + bit][0];
+                    if (candidate.score > best.score) best = candidate;
+                }
+                if (std::isfinite(best.score)) result.epoch_timing_coordinates.push_back(best.coordinate);
+            }
+        }
+    }
 }
 
-void refine(CoarseResult& result, const Plan& plan, const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
+void refine(std::vector<FineCoordinate>& result, std::span<const CoarseProposal> proposals,
+            const Plan& plan, const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
     const auto half_step = config.clock_bound_ppm / 2;
     const auto center = slot.source_start_seconds + .5L * plan.layout.source_rows / plan.fs;
     using Token = std::tuple<std::int64_t, double, double, double>;
     std::array<Token, 3 * 2 * retained_per_bit> tokens{};
-    result.coordinates.reserve(tokens.size());
-    for (std::size_t i = 0; i < result.proposal_count; ++i) {
-        const auto& coordinate = result.proposals[i].coordinate;
+    result.reserve(tokens.size());
+    for (const auto& proposal : proposals) {
+        const auto& coordinate = proposal.coordinate;
         const auto old_clock = coordinate.clock_ppm;
         const auto old_scale = 1 + old_clock * 1e-6;
         for (const auto delta : {-half_step, 0., half_step}) {
@@ -2060,10 +2556,10 @@ void refine(CoarseResult& result, const Plan& plan, const ReceiverConfig& config
                                            slot.arrival_lower_seconds, slot.arrival_upper_seconds);
             const Token token{coordinate.epoch_offset_seconds, std::round(arrival * 1e12),
                               std::round(coordinate.frequency_hz * 1e12), std::round(clock * 1e9)};
-            const auto end = tokens.begin() + result.coordinates.size();
+            const auto end = tokens.begin() + result.size();
             if (std::find(tokens.begin(), end, token) != end) continue;
             *end = token;
-            result.coordinates.push_back({coordinate.epoch_offset_seconds, arrival, coordinate.frequency_hz, clock});
+            result.push_back({coordinate.epoch_offset_seconds, arrival, coordinate.frequency_hz, clock});
         }
     }
 }
@@ -2119,6 +2615,8 @@ struct CoarseSession::Impl {
     std::vector<Complex> observation;
     std::vector<ZoomKernel> kernels;
     std::vector<Peak> peaks;
+    std::vector<FineCoordinate> varying_coordinates;
+    std::vector<FineCoordinate> segmented_timing_coordinates;
     std::optional<CoarseResult> result;
     double variance = 0;
     bool q15_products = false;
@@ -2323,14 +2821,18 @@ struct CoarseSession::Impl {
                  const std::function<void(std::span<const FrequencyInterval>)>& plan_search) {
         const auto& layout = geometry.layout;
         const auto origin = PhaseClock::now();
+        PhaseSpan varying_span(origin);
+        std::optional<DifferentialSearch> differential;
+        if (geometry.varying_passband) differential.emplace(geometry, slot, config, varying_span, stop);
         const auto filter = [&](std::stop_token job_stop) {
             observation = projection.apply(iq.size(), layout.crop_first, layout.crop_rows,
                 [&](std::size_t first, std::span<Complex> values) {
                     std::copy_n(iq.begin() + first, values.size(), values.begin());
                 }, receipt.observation.operations, job_stop);
+            if (differential) differential->prepare(observation, projection.variance(config.noise_variance), job_stop);
         };
         BankJobs bank_jobs(geometry, config, slot, key, projection, mapped, spectrum_fft,
-                           float_fft.get(), q15_products, workers);
+                           float_fft.get(), q15_products, workers, differential ? &*differential : nullptr);
         // The device context still serializes output and batch admission.
         // Let the observation share the existing lanes with host source
         // preparation without expanding the device FIR lane bound.
@@ -2391,6 +2893,16 @@ struct CoarseSession::Impl {
         bank = bank_jobs.finish(receipt.template_bank.operations);
         receipt.template_bank.wall_seconds = bank_span.seconds();
         receipt.observation.wall_seconds = observation_span.seconds();
+        if (differential) {
+            std::array<CoarseProposal, 2 * retained_per_bit> proposals{};
+            std::size_t count = 0;
+            differential->finish(proposals, count, segmented_timing_coordinates, receipt.varying_proposals.operations);
+            refine(varying_coordinates, std::span(proposals).first(count), geometry, config, slot);
+            receipt.varying_proposals.wall_seconds = varying_span.seconds();
+        }
+        receipt.segmented_timing_blocks = geometry.segmented_timing.blocks;
+        receipt.segmented_timing_frequencies = geometry.segmented_timing.blocks ? geometry.segmented_timing.frequencies() : 0;
+        receipt.segmented_timing_status = geometry.segmented_timing.status;
     }
 
     // A long span gives every lane whole frequencies. A short one shares its
@@ -2563,8 +3075,13 @@ struct CoarseSession::Impl {
             bytes = add(bytes, storage(kernel.convolution.capacity()));
         }
         bytes = add(bytes, mul(peaks.capacity(), sizeof(Peak)));
+        bytes = add(bytes, mul(varying_coordinates.capacity(), sizeof(FineCoordinate)));
+        bytes = add(bytes, mul(segmented_timing_coordinates.capacity(), sizeof(FineCoordinate)));
         if (result) {
             bytes = add(bytes, mul(result->coordinates.capacity(), sizeof(FineCoordinate)));
+            bytes = add(bytes, mul(result->varying_coordinates.capacity(), sizeof(FineCoordinate)));
+            bytes = add(bytes, mul(result->segmented_timing_coordinates.capacity(), sizeof(FineCoordinate)));
+            bytes = add(bytes, mul(result->epoch_timing_coordinates.capacity(), sizeof(FineCoordinate)));
             bytes = add(bytes, result->reason.capacity() + 1);
         }
         if (bytes > receipt.plan.workspace_reserved_bytes)
@@ -2682,7 +3199,10 @@ std::optional<CoarseResult> CoarseSession::finish() {
         result.lag_frequency_search = plan.route == CoarseRoute::lag_groups;
         retain_proposals(result, impl.geometry, impl.slot, impl.bank, impl.peaks, impl.grid.values,
                          plan.workers, stop, impl.executor);
-        refine(result, impl.geometry, impl.config, impl.slot);
+        refine(result.coordinates, std::span(result.proposals).first(result.proposal_count),
+               impl.geometry, impl.config, impl.slot);
+        result.varying_coordinates = std::move(impl.varying_coordinates);
+        result.segmented_timing_coordinates = std::move(impl.segmented_timing_coordinates);
         check_stop(stop);
         impl.result.emplace(std::move(result));
         impl.refresh_retained_bytes();

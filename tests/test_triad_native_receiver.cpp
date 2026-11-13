@@ -1,10 +1,13 @@
 #include "datapump/triad_receiver.hpp"
 #include "datapump/triad_stream.hpp"
 #include "../src/search_fft.hpp"
+#include "../src/triad_receiver_coarse.hpp"
 #include "../src/triad_receiver_executor.hpp"
+#include "../src/triad_receiver_fine.hpp"
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -46,7 +49,7 @@ struct Fixture {
     Crypto key = Crypto::amateur();
 };
 
-Fixture fixture(std::optional<std::uint8_t> bit, bool spread, bool encrypt) {
+Fixture fixture(std::optional<std::uint8_t> bit, bool spread, bool encrypt, std::uint64_t seed = 37) {
     Fixture f;
     auto& c = f.config;
     c.sample_rate_hz = sample_rate;
@@ -80,7 +83,7 @@ Fixture fixture(std::optional<std::uint8_t> bit, bool spread, bool encrypt) {
     f.iq.resize(count);
     f.valid.resize(count, 1);
 
-    std::uint64_t rng = 37;
+    auto rng = seed;
     const auto uniform = [&]() {
         rng += 0x9e3779b97f4a7c15ULL;
         auto x = rng;
@@ -145,6 +148,480 @@ void complete_data() {
           serial.adaptive_bit_evidence == result.adaptive_bit_evidence &&
           serial.quiet_energy == result.quiet_energy && serial.bit == result.bit,
           "same-window evidence must match under independent worker shares");
+}
+
+// One short DATA window per case, same observation and declared static
+// search with and without the added model. Exact channel slope, offset and
+// timing go only to the independent waveform generator.
+void bounded_drift_recovery() {
+    const auto prepare = [](std::uint64_t seed) {
+        auto input = fixture(std::nullopt, true, false, seed);
+        input.config.frequency_bound_hz = 8;
+        input.config.spread_delay_seconds = .007;
+        input.config.spread_doppler_hz = 30;
+        return input;
+    };
+    const auto synthesize = [](Fixture& input, std::uint8_t bit, int epoch, double lag,
+                               double clock, double offset, double slope, double gain, Complex echo) {
+        auto tx = input.slot.format;
+        tx.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(tx.epoch) + epoch);
+        PatternSource source(tx, input.key, bit);
+        Candidate truth;
+        truth.clock_ppm = clock;
+        const auto scale = 1 + clock * 1e-6;
+        truth.arrival_seconds = static_cast<double>(input.slot.window_capture_lead_seconds + lag +
+            input.slot.source_start_seconds / scale);
+        truth.frequency_hz = offset - input.config.data_if_hz * (scale - 1);
+        truth.frequency_drift_hz_per_second = slope;
+        truth.channel.taps.push_back({.007, 30});
+        const auto rows = input.iq.size();
+        std::vector<double> offsets(rows);
+        for (std::size_t row = 0; row < rows; ++row) offsets[row] = row;
+        std::vector<Complex> basis(2 * rows);
+        shaped_basis_mapped(source, truth, input.config.sample_rate_hz, 0, offsets, basis,
+                            input.config.data_if_hz);
+        for (std::size_t row = 0; row < rows; ++row)
+            input.iq[row] += gain * basis[row] + echo * basis[rows + row];
+    };
+    const auto check_both = [](Fixture input, std::uint8_t expected) {
+        const auto original = score(input, 2);
+        input.config.time_varying_channel = true;
+        input.config.time_varying_common_doppler_hz = 8;
+        const auto changed = score(input, 2);
+        check(original.complete && original.decision != SlotDecision::data,
+              "linear-drift discriminator no longer exercises the original loss of admission");
+        check(changed.decision == SlotDecision::data && changed.bit == expected && changed.complete &&
+              changed.all_valid && changed.zero_h0_verified && changed.operational_passes_conditional_bound &&
+              changed.drift_timing_atoms > 0 && changed.drift_slopes > changed.drift_timing_atoms &&
+              changed.drift_frequency_bins > 1 && changed.drift_bit_evidence[expected] >
+                  changed.drift_bit_evidence[1 - expected],
+              "bounded coherent drift search did not recover the DATA alternative");
+        check(changed.coarse_workspaces == original.coarse_workspaces &&
+              changed.coarse_frequency_points == original.coarse_frequency_points &&
+              changed.coarse_arrival_points == original.coarse_arrival_points &&
+              changed.bit_evidence == original.bit_evidence,
+              "varying-channel proposals changed the original search coverage or evidence");
+    };
+    auto rising = prepare(37);
+    const double duration = geometry(rising.slot.format).source_samples / effective_sample_rate(rising.slot.format);
+    synthesize(rising, 0, 2, .004, 6, -6 - 12 * .004 / duration, 12 / duration, .05, {.03, .02});
+    check_both(std::move(rising), 0);
+
+    auto falling = prepare(579);
+    const auto slope = -10 / duration;
+    const auto start = static_cast<double>(falling.slot.window_capture_lead_seconds - .003 +
+        falling.slot.source_start_seconds / (1 - 4e-6));
+    synthesize(falling, 1, -3, -.003, -4, 5.7 - slope * start, slope, .08, {.025, .029});
+    check_both(std::move(falling), 1);
+
+    auto noise = prepare(2026);
+    noise.config.time_varying_channel = true;
+    noise.config.time_varying_common_doppler_hz = 8;
+    const auto quiet = score(noise, 2);
+    check(quiet.drift_timing_atoms > 0 && quiet.varying_candidates > 0 &&
+          quiet.decision == SlotDecision::quiet && !quiet.bit && quiet.complete &&
+          quiet.zero_h0_verified && !quiet.operational_passes_conditional_bound &&
+          quiet.varying_quiet_modes > 0 && quiet.varying_quiet_energy <= quiet.varying_quiet_threshold,
+          "the extra channel priors changed a scored quiet window into DATA");
+}
+
+void long_drift_recovery(bool broad) {
+    constexpr double fs = 6000;
+    Format format;
+    format.sample_rate = fs;
+    format.inner_rate_hz = 36;
+    format.added_symbols = 10;
+    format.bit_seconds = 30;
+    format.pulse_shape = PulseShape::TaperedRrc;
+    format.epoch = 1793850000;
+    format.symbol_ordinal = 7000037;
+    auto tx = format;
+    tx.epoch += broad ? 0 : 3;
+    const std::uint8_t bit = broad ? 0 : 1;
+    const std::uint64_t seed = broad ? 37 : 983;
+    const auto key = Crypto::amateur();
+    PatternSource source(tx, key, bit);
+    const auto g = geometry(format);
+    StreamChannelConfig channel_config;
+    channel_config.effects.sample_rate = fs;
+    channel_config.effects.occupied_bandwidth_hz = g.occupied_bandwidth_hz;
+    channel_config.effects.rf_hz = 30e6;
+    channel_config.effects.nominal_conversion_if_hz = 0;
+    channel_config.effects.capture_lead_seconds = 2.017;
+    channel_config.effects.capture_trail_seconds = broad ? 1. : .5;
+    channel_config.effects.spread_delay_ms = 7;
+    channel_config.effects.spread_doppler_hz = 30;
+    channel_config.effects.static_doppler_hz = broad ? -6. : 5.5;
+    channel_config.effects.seed = seed;
+    channel_config.path_seed = seed;
+    channel_config.noise_seed = seed;
+    channel_config.signal_gain = .05;
+    channel_config.complex_noise_variance = .25 / sample_rate * fs;
+    channel_config.tx_frequency_drift_hz_per_second = (broad ? 12. : -10.) / g.bit_seconds;
+    channel_config.maximum_chunk_samples = 8192;
+    StreamingChannel channel(source, channel_config);
+    check(channel.total_samples() < 230'000, "long drift fixture exceeds its sample bound");
+    std::vector<Complex> iq(channel.total_samples());
+    for (std::size_t first = 0; first < iq.size();) {
+        const auto rows = std::min(channel_config.maximum_chunk_samples, iq.size() - first);
+        check(channel.read(std::span(iq).subspan(first, rows)) == rows, "long drift capture truncated");
+        first += rows;
+    }
+    ReceiverConfig config;
+    config.sample_rate_hz = fs;
+    config.noise_variance = channel_config.complex_noise_variance;
+    config.frequency_bound_hz = broad ? .009 : 8.;
+    config.spread_delay_seconds = .007;
+    config.spread_doppler_hz = 30;
+    config.time_varying_channel = true;
+    config.time_varying_common_doppler_hz = broad ? 90. : 8.;
+    config.time_varying_atmospheric_hz = broad ? 89.991 : 0.;
+    ReceiverSlotPlan slot;
+    slot.stop_sample = iq.size();
+    slot.format = format;
+    slot.arrival_lower_seconds = broad ? -.5 : -.4;
+    slot.arrival_upper_seconds = broad ? .5 : .4;
+    slot.window_capture_lead_seconds = 2;
+    slot.quiet_first_sample = static_cast<std::uint64_t>(std::ceil((2 + g.bit_seconds + .057) * fs));
+    slot.quiet_stop_sample = slot.stop_sample;
+    const auto result = score_receiver_slot(config, slot, key, iq, {}, 4, workspace_limit);
+    check(result.complete && result.decision == SlotDecision::data && result.bit == bit &&
+          result.varying_timing_blocks > 1 && result.varying_timing_frequencies > 1 &&
+          result.drift_observation_rows > 131'072 && result.drift_proposal_stride > 1 &&
+          result.drift_timing_atoms > 0 && result.drift_bit_evidence[bit] > result.drift_bit_evidence[1 - bit],
+          "broad timing search missed the weak long drift after exceeding the old raw FFT limit");
+    if (broad)
+        check(result.varying_timing_status == "segmented_smooth_frequency_timing" && result.coarse_arrival_points > 512,
+              "the wide public prior did not execute the smooth timing proposal");
+}
+
+void weak_diffuse_fading_recovery() {
+    constexpr double width = 1.5;
+    Format format;
+    format.sample_rate = sample_rate;
+    format.inner_rate_hz = 36;
+    format.added_symbols = 10;
+    format.bit_seconds = 30;
+    format.pulse_shape = PulseShape::TaperedRrc;
+    format.epoch = 1793850000;
+    format.symbol_ordinal = 7000037;
+    const auto g = geometry(format);
+    const auto key = Crypto::amateur();
+    ReceiverConfig config;
+    config.sample_rate_hz = sample_rate;
+    config.noise_variance = .25;
+    config.frequency_bound_hz = 8;
+    config.spread_delay_seconds = .007;
+    config.spread_doppler_hz = 30;
+    config.random_doppler_width_hz = width;
+    config.time_varying_channel = true;
+    config.time_varying_common_doppler_hz = 8;
+    ReceiverSlotPlan slot;
+    slot.format = format;
+    slot.arrival_lower_seconds = -.4;
+    slot.arrival_upper_seconds = .4;
+    slot.window_capture_lead_seconds = 2;
+    const auto run = [&](double gain) {
+        PatternSource source(format, key, 0);
+        StreamChannelConfig channel_config;
+        channel_config.effects.sample_rate = sample_rate;
+        channel_config.effects.occupied_bandwidth_hz = g.occupied_bandwidth_hz;
+        channel_config.effects.rf_hz = 30e6;
+        channel_config.effects.nominal_conversion_if_hz = 0;
+        channel_config.effects.capture_lead_seconds = 2;
+        channel_config.effects.capture_trail_seconds = .5;
+        channel_config.effects.spread_delay_ms = 7;
+        channel_config.effects.spread_doppler_hz = 30;
+        channel_config.effects.static_doppler_hz = -6;
+        channel_config.effects.seed = 101;
+        channel_config.path_seed = 101;
+        channel_config.noise_seed = 101;
+        channel_config.signal_gain = gain;
+        channel_config.path_evolution.random_doppler_width_hz = width;
+        channel_config.complex_noise_variance = config.noise_variance;
+        channel_config.maximum_chunk_samples = 8192;
+        StreamingChannel channel(source, channel_config);
+        check(channel.total_samples() < 19'000, "diffuse fading fixture exceeds its sample bound");
+        std::vector<Complex> iq(channel.total_samples());
+        for (std::size_t first = 0; first < iq.size();) {
+            const auto rows = std::min(channel_config.maximum_chunk_samples, iq.size() - first);
+            check(channel.read(std::span(iq).subspan(first, rows)) == rows, "diffuse fading capture truncated");
+            first += rows;
+        }
+        slot.stop_sample = iq.size();
+        const auto quiet = static_cast<std::uint64_t>(std::ceil((2 + g.bit_seconds + .007 + .05) * sample_rate));
+        slot.quiet_first_sample = std::min(quiet, slot.stop_sample);
+        slot.quiet_stop_sample = slot.stop_sample;
+        return score_receiver_slot(config, slot, key, iq, {}, 4, workspace_limit);
+    };
+    const auto data = run(.05);
+    check(data.complete && data.decision == SlotDecision::data && data.bit == 0 &&
+          data.operational_passes_conditional_bound && data.varying_timing_blocks > 1 &&
+          data.coherent_gain_candidates && data.coherent_gain_blocks > 100 &&
+          data.coherent_gain_frequency_states > 1 && data.coherent_gain_bit_evidence[0] > data.coherent_gain_bit_evidence[1],
+          "the receiver lost weak DATA under independent diffuse Gaussian ray gains");
+    const auto noise = run(0);
+    check(noise.complete && !noise.bit && noise.decision != SlotDecision::data &&
+          !noise.operational_passes_conditional_bound && noise.coherent_gain_blocks == data.coherent_gain_blocks,
+          "the diffuse fading models mistook the matched noise observation for DATA");
+}
+
+void large_aperture_supplemental_plans() {
+    using namespace receiver_detail;
+    constexpr std::size_t former_raw_limit = 1'048'576;
+    constexpr double fs = 32'000;
+    Format format;
+    format.sample_rate = fs;
+    format.inner_rate_hz = 36;
+    format.added_symbols = 10;
+    format.bit_seconds = 30;
+    format.pulse_shape = PulseShape::TaperedRrc;
+    format.epoch = 1793850000;
+    const auto source_rows = geometry(format).source_samples;
+    check(source_rows > former_raw_limit && source_rows < 1'200'000,
+          "large aperture fixture must cross the former raw limit within its sample budget");
+    ReceiverConfig config;
+    config.sample_rate_hz = fs;
+    config.noise_variance = .25;
+    config.frequency_bound_hz = 8;
+    config.time_varying_channel = true;
+    config.time_varying_common_doppler_hz = 8;
+    ReceiverSlotPlan slot;
+    slot.format = format;
+    slot.stop_sample = source_rows + 128;
+    slot.quiet_first_sample = 0;
+    slot.quiet_stop_sample = source_rows;
+    const auto plain = drift_plan(config, slot, 1);
+    const auto projected = drift_plan(config, slot, 1, true);
+    check(plain.workspace_bytes && plain.raw_rows == source_rows && plain.rows <= 131'072 &&
+          projected.workspace_bytes > plain.workspace_bytes && projected.raw_rows == plain.raw_rows &&
+          projected.projection_blocks > 1 && varying_line_workspace(config, slot) > 0,
+          "large aperture supplemental plans must charge their bounded work");
+
+    std::vector<Complex> observation(slot.stop_sample);
+    constexpr double line_frequency = 81.2345;
+    const auto step = std::polar(1., 2 * std::numbers::pi * line_frequency / fs);
+    auto tone = Complex{.1};
+    for (std::size_t row = 0; row < source_rows; ++row) {
+        observation[row] = tone;
+        tone *= step;
+    }
+    const auto line = find_varying_line(config, slot, observation, {});
+    check(line && line->first == 0 && line->stop == source_rows &&
+          std::abs(line->frequency_hz - line_frequency) < .0002 &&
+          line->log_weighted_evidence > receiver_operational_threshold(),
+          "bounded coherent line search did not rescore the complete large aperture");
+
+    config.sample_rate_hz = 6000;
+    slot.format.sample_rate = 6000;
+    slot.format.bit_seconds = 270;
+    slot.stop_sample = geometry(slot.format).source_samples + 128;
+    const auto longer = drift_plan(config, slot, 1);
+    check(longer.workspace_bytes && longer.raw_rows > former_raw_limit && longer.ridge_segments > 64 &&
+          longer.rows <= 131'072,
+          "long drift must shorten the proposal segments to retain coherent curvature coverage");
+}
+
+void broad_frequency_timing_plan() {
+    using namespace receiver_detail;
+    ReceiverConfig config;
+    config.sample_rate_hz = 6000;
+    config.noise_variance = .25;
+    config.frequency_bound_hz = .009;
+    config.spread_delay_seconds = .007;
+    config.spread_doppler_hz = 30;
+    config.time_varying_channel = true;
+    config.time_varying_common_doppler_hz = 90;
+    config.time_varying_atmospheric_hz = 89.991;
+    ReceiverSlotPlan slot;
+    slot.stop_sample = 320'000;
+    slot.arrival_lower_seconds = -7;
+    slot.arrival_upper_seconds = 7.07;
+    slot.window_capture_lead_seconds = 9;
+    slot.format.sample_rate = 6000;
+    slot.format.inner_rate_hz = 36;
+    slot.format.added_symbols = 10;
+    slot.format.bit_seconds = 30;
+    slot.format.pulse_shape = PulseShape::TaperedRrc;
+    slot.format.epoch = 1793850000;
+    const auto plan = [&] {
+        const FrequencyInterval oscillator{-config.frequency_bound_hz, config.frequency_bound_hz};
+        return coarse_work_plan(config, slot, std::span(&oscillator, 1), 4);
+    };
+    const auto gps = plan();
+    const auto gps_drift = drift_plan(config, slot, 4);
+    config.frequency_bound_hz = 8;
+    config.time_varying_atmospheric_hz = 82;
+    const auto wide_oscillator = plan();
+    const auto wide_drift = drift_plan(config, slot, 4);
+    config.frequency_bound_hz = 90;
+    config.time_varying_atmospheric_hz = 0;
+    const auto explicit_doppler = plan();
+    const auto explicit_drift = drift_plan(config, slot, 4);
+    const auto same_timing = [&](const CoarseWorkPlan& other) {
+        return gps.arrival_points == other.arrival_points && gps.workspaces == other.workspaces &&
+            gps.segmented_timing_blocks == other.segmented_timing_blocks &&
+            gps.segmented_timing_frequencies == other.segmented_timing_frequencies &&
+            gps.segmented_timing_hop == other.segmented_timing_hop;
+    };
+    const auto same_drift = [&](const DriftPlan& other) {
+        return gps_drift.sample_stride == other.sample_stride && gps_drift.rows == other.rows &&
+            gps_drift.nfft == other.nfft && gps_drift.slope_budget == other.slope_budget &&
+            gps_drift.frequency_radius == other.frequency_radius && gps_drift.slope_radius == other.slope_radius &&
+            gps_drift.ridge_segments == other.ridge_segments && gps_drift.slow_ridge_segments == other.slow_ridge_segments;
+    };
+    check(gps.arrival_points > 8000 && gps.workspaces == 2 * receiver_epoch_offsets.size() &&
+          gps.segmented_timing_blocks > 1 && gps.segmented_timing_frequencies > 400 && gps.segmented_timing_hop == 2 &&
+          gps_drift.slow_ridge_segments > 0 && same_timing(wide_oscillator) && same_timing(explicit_doppler) &&
+          same_drift(wide_drift) && same_drift(explicit_drift),
+          "broad timing support must depend on the public total frequency bound");
+    config.frequency_bound_hz = .009;
+    for (const auto bound : {30., 32., 33.}) {
+        config.time_varying_atmospheric_hz = bound - config.frequency_bound_hz;
+        config.time_varying_common_doppler_hz = bound;
+        const auto narrower = plan();
+        check(narrower.segmented_timing_blocks > 1 && narrower.segmented_timing_frequencies > 1 &&
+              narrower.segmented_timing_hop > 0 && narrower.arrival_points > 7000 &&
+              narrower.workspaces == gps.workspaces,
+              "narrower frequency bounds removed broad public timing proposals");
+    }
+    config.time_varying_atmospheric_hz = 89.991;
+    config.time_varying_common_doppler_hz = 90;
+    config.time_varying_channel = false;
+    const auto off = plan();
+    check(!off.segmented_timing_blocks && !off.segmented_timing_hop &&
+          gps.workspace_reserved_bytes > off.workspace_reserved_bytes,
+          "broad frequency timing must reserve its concurrent proposal state");
+}
+
+void varying_quiet_band(double line_amplitude, bool half_bin) {
+    auto input = fixture(std::nullopt, false, false);
+    input.config.time_varying_channel = true;
+    input.config.time_varying_common_doppler_hz = 90;
+    input.config.time_varying_atmospheric_hz = 90;
+    const auto begin = input.slot.quiet_first_sample - input.slot.first_sample;
+    const auto end = input.slot.quiet_stop_sample - input.slot.first_sample;
+    const auto coarse_fft_spacing = sample_rate / static_cast<double>(std::bit_ceil(2 * (end - begin)));
+    const auto frequency = half_bin ? (std::floor(80 / coarse_fft_spacing) + .5) * coarse_fft_spacing : 80.;
+    // A non-DATA signal outside the old narrow DATA band but well within
+    // the declared atmospheric extension must prevent physical completion.
+    for (auto row = begin; row < end; ++row)
+        input.iq[row] += std::polar(line_amplitude, 2 * std::numbers::pi * frequency * row / sample_rate);
+    const auto expanded = score(input, 2);
+    check(expanded.complete && !expanded.bit && expanded.decision == SlotDecision::ambiguous &&
+          expanded.quiet_energy <= expanded.quiet_threshold &&
+          expanded.varying_quiet_energy > expanded.varying_quiet_threshold &&
+          expanded.reason == "coherent_line_in_public_data_aperture" &&
+          std::abs(expanded.varying_line_frequency_hz - frequency) < .01,
+          "energy in the declared varying DATA band became a scored quiet slot");
+
+    // A keyed, independently drifting DATA carrier can coexist with the
+    // same off-lattice line. Suppressing every supplemental decision on
+    // detecting a line would fail this control.
+    PatternSource source(input.slot.format, input.key, 1);
+    Candidate truth;
+    truth.arrival_seconds = .4;
+    const auto duration = geometry(input.slot.format).source_samples / effective_sample_rate(input.slot.format);
+    truth.frequency_drift_hz_per_second = -9 / duration;
+    truth.frequency_hz = 10.5 - truth.arrival_seconds * truth.frequency_drift_hz_per_second;
+    std::vector<double> offsets(input.iq.size());
+    std::vector<Complex> basis(input.iq.size());
+    for (std::size_t row = 0; row < offsets.size(); ++row) offsets[row] = row;
+    shaped_basis_mapped(source, truth, sample_rate, 0, offsets, basis, input.config.data_if_hz);
+    for (std::size_t row = 0; row < basis.size(); ++row) input.iq[row] += .14 * basis[row];
+    const auto coexist = score(input, 2);
+    check(coexist.complete && coexist.decision == SlotDecision::data && coexist.bit == 1 &&
+          coexist.reason == "varying_data_evidence_with_coherent_line" &&
+          std::abs(coexist.varying_line_frequency_hz - frequency) < .01,
+          "a coherent line suppressed a separable keyed DATA alternative");
+}
+
+void varying_bit_separation() {
+    using namespace receiver_detail;
+    const AdmissionGrid grid(0, 0, 0, 0, .01);
+    ReceiverSlotScore observation;
+    observation.complete = observation.all_valid = observation.zero_h0_verified = observation.noise_statistics_valid = true;
+    observation.fine_candidates = 1;
+    observation.quiet_threshold = 10;
+    observation.bit_evidence = {45., 44.};
+    const auto minimum = ReceiverConfig{}.time_varying_minimum_bit_log_separation;
+    classify_varying_slot(observation, grid, &grid, nullptr, minimum);
+    check(observation.operational_passes_conditional_bound && observation.decision == SlotDecision::ambiguous &&
+          !observation.bit && observation.operational_bit_log_separation < minimum,
+          "near-tied bit evidence became DATA or scored silence");
+    observation.varying_candidates = 1;
+    observation.varying_bit_evidence = {40., 55.};
+    classify_varying_slot(observation, grid, &grid, nullptr, minimum);
+    check(observation.operational_passes_conditional_bound && observation.decision == SlotDecision::data &&
+          observation.bit == 1 && observation.operational_bit_evidence[1] > observation.operational_bit_evidence[0] &&
+          observation.operational_bit_log_separation >= minimum,
+          "separated supplemental evidence did not resolve the earlier near tie");
+}
+
+void varying_helper_coexistence() {
+    constexpr double fs = 1500, center = 475;
+    ReceiverConfig config;
+    config.sample_rate_hz = fs;
+    config.data_if_hz = center;
+    config.noise_variance = .25;
+    config.frequency_bound_hz = 8;
+    config.time_varying_channel = true;
+    config.time_varying_common_doppler_hz = 8;
+    config.helper_enabled = true;
+    config.helper.low_frequency_hz = 175;
+    config.helper.auxiliary_frequency_hz = 1000;
+    config.helper.frequency_hz = 1050;
+    ReceiverSlotPlan slot;
+    slot.first_sample = 20'000;
+    slot.index = 37;
+    slot.window_capture_lead_seconds = -2;
+    slot.source_start_seconds = 4;
+    slot.helper_begin_seconds = 2.5;
+    slot.helper_end_seconds = 23;
+    slot.format.sample_rate = fs;
+    slot.format.inner_rate_hz = 120;
+    slot.format.added_symbols = 1;
+    slot.format.epoch = 1793850000;
+    slot.format.symbol_ordinal = 7000037;
+    slot.format.bit_seconds = .001;
+    auto tx = slot.format;
+    ++tx.epoch;
+    const auto key = Crypto::amateur();
+    const auto source_rows = geometry(tx).source_samples;
+    const auto rows = static_cast<std::size_t>(3 * fs) + source_rows;
+    check(rows < 23'000, "varying Helper coexistence fixture exceeds its sample bound");
+    slot.stop_sample = slot.first_sample + rows;
+    slot.quiet_first_sample = slot.first_sample + static_cast<std::size_t>(2 * fs);
+    slot.quiet_stop_sample = slot.quiet_first_sample + source_rows;
+    std::vector<Complex> observation(rows), pattern(rows);
+    std::vector<double> offsets(rows);
+    for (std::size_t row = 0; row < rows; ++row) offsets[row] = row;
+    PatternSource source(tx, key, 1);
+    Candidate truth;
+    truth.arrival_seconds = 2;
+    truth.frequency_drift_hz_per_second = 9 / (source_rows / fs);
+    truth.frequency_hz = -4.5 - 2 * truth.frequency_drift_hz_per_second;
+    shaped_basis_mapped(source, truth, fs, 0, offsets, pattern, center);
+    for (std::size_t row = 0; row < rows; ++row) {
+        const double t = row / fs;
+        const auto tone = [t](double f) { return std::polar(1., 2 * std::numbers::pi * f * t); };
+        // A deterministic off-band interferer and actual separated Helper
+        // tones. The short public lead intentionally forces acquisition fallback.
+        observation[row] = .45 * tone(.754877666 * fs);
+        if (t > .5)
+            observation[row] += .2 * (tone(175 - center) + tone(1050 - center)) + .06 * tone(1000 - center);
+    }
+    const auto lease = receiver_slot_overlap_workspace(config, slot, 2);
+    const auto helper_only = score_receiver_slot(config, slot, key, observation, {}, 2, lease);
+    check(helper_only.complete && helper_only.decision == SlotDecision::quiet &&
+          helper_only.varying_frequency_states > 0 && helper_only.varying_quiet_modes > 0,
+          "separated Helper tones created DATA or prevented the scored quiet control");
+    for (std::size_t row = 0; row < rows; ++row) observation[row] += .04 * pattern[row];
+    const auto data = score_receiver_slot(config, slot, key, observation, {}, 2, lease);
+    check(data.complete && data.decision == SlotDecision::data && data.bit == 1 &&
+          data.drift_timing_atoms > 0 && data.varying_frequency_states > 0 &&
+          data.operational_bit_log_separation >= data.operational_minimum_bit_log_separation,
+          "projected dynamic receiver did not recover the drift with Helper present");
 }
 
 void physical_quiet_and_limits() {
@@ -562,6 +1039,16 @@ void native_precision_near_decision_sides() {
 int main() {
     try {
         complete_data();
+        bounded_drift_recovery();
+        long_drift_recovery(false);
+        long_drift_recovery(true);
+        weak_diffuse_fading_recovery();
+        large_aperture_supplemental_plans();
+        broad_frequency_timing_plan();
+        varying_quiet_band(.5, false);
+        varying_quiet_band(1.5, true);
+        varying_bit_separation();
+        varying_helper_coexistence();
         physical_quiet_and_limits();
         helper_composite_observation();
         native_precision_near_decision_sides();

@@ -1,4 +1,5 @@
 #include "datapump/triad_modem_v3.hpp"
+#include "../src/triad_random_process.hpp"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -73,6 +74,60 @@ void chunk_state_and_tails(){
     const auto retained=capture(echo,19);
     check(std::abs(retained.samples[390])>0,"source quiet interval gated away a delayed echo");
 }
+void bounded_spread_evolves_and_streams(){
+    auto cfg=settings();cfg.effects.spread_delay_ms=21;cfg.effects.spread_doppler_hz=9;
+    cfg.path_evolution.bounded_spread_knot_seconds=.13;
+    const auto a=capture(cfg,31),b=capture(cfg,127);
+    check(a.samples==b.samples&&a.valid==b.valid,"bounded spread changed across read chunk boundaries");
+    check(a.report.bounded_spread.has_value(),"bounded spread realization was not reported");
+    const auto& r=*a.report.bounded_spread;
+    check(r.excess_delay_seconds>=0&&r.excess_delay_seconds<=.021&&r.processed_rows==a.samples.size(),
+          "bounded spread delay or physical-row accounting escaped its public support");
+    check(r.minimum_echo_ratio>=0&&r.maximum_echo_ratio<=1&&
+          r.maximum_echo_ratio-r.minimum_echo_ratio>.1,
+          "bounded echo gain did not visit different in-support regimes");
+    check(r.minimum_doppler_hz>=-9&&r.maximum_doppler_hz<=9&&
+          r.maximum_doppler_hz-r.minimum_doppler_hz>.1,
+          "bounded echo Doppler did not vary inside its public support");
+    check(a.report.tail_samples>0,"random interior delay lost the bounded delayed tail");
+    cfg.effects.seed++;
+    const auto other=capture(cfg,31);
+    check(other.samples!=a.samples,"bounded spread ignored its independent simulation seed");
+}
+void bounded_spread_phase_integrates_frequency(){
+    using datapump::triad::v3::detail::BoundedRandomSpread;
+    BoundedRandomSpread field(.01,12,.05,0x12345678);
+    auto previous=field.at(-.1L);
+    for(int i=1;i<=100;++i){
+        const long double time=-.1L+i*.001L;
+        const auto state=field.at(time);
+        check(state.delay_seconds>=0&&state.delay_seconds<=.01&&state.echo_ratio>=0&&state.echo_ratio<=1&&
+              state.doppler_hz>=-12&&state.doppler_hz<=12&&
+              std::abs(state.direct_gain*state.direct_gain+state.echo_gain*state.echo_gain-1)<1e-12,
+              "bounded path state violated its parameter or power limits");
+        const double delta=std::remainder(state.phase_radians-previous.phase_radians,2*std::numbers::pi);
+        const double expected=2*std::numbers::pi*.001*.5*(state.doppler_hz+previous.doppler_hz);
+        check(std::abs(std::remainder(delta-expected,2*std::numbers::pi))<1e-9,
+              "echo phase did not integrate the continuous bounded Doppler path");
+        previous=state;
+    }
+}
+void common_doppler_wander_is_bounded_and_continuous(){
+    auto cfg=settings();cfg.effects.static_doppler_hz=1.5;
+    cfg.path_evolution.common_doppler_wander_hz=6;
+    cfg.path_evolution.common_doppler_knot_seconds=.15;
+    const auto a=capture(cfg,29),b=capture(cfg,113);
+    check(a.samples==b.samples&&a.valid==b.valid,
+          "common Doppler phase changed across read chunk boundaries");
+    check(a.samples!=capture(settings(),29).samples,
+          "common Doppler wander did not affect the complete waveform");
+    check(a.report.common_doppler_wander.has_value(),
+          "common Doppler realization was not reported");
+    const auto& r=*a.report.common_doppler_wander;
+    check(r.bound_hz==6&&r.processed_rows==a.samples.size()&&
+          r.minimum_hz>=-6&&r.maximum_hz<=6&&r.maximum_hz-r.minimum_hz>.1,
+          "common Doppler wander exceeded its configured support or did not evolve");
+}
 void effects_and_erasures(){
     auto cfg=settings();cfg.effects.noise_enabled=true;cfg.complex_noise_variance=.001;
     cfg.effects.fhss=true;cfg.effects.hop_offsets_hz={0};
@@ -101,6 +156,14 @@ void bounds(){
     cfg=settings();cfg.missed_receiver_dwell_indices={1,1};rejects([&]{v::StreamingChannel channel(source(),cfg);});
     auto missing=source();missing.sample_at={};cfg=settings();rejects([&]{v::StreamingChannel channel(missing,cfg);});
     cfg=settings();cfg.path_evolution.delay_excursion_seconds=1;rejects([&]{v::StreamingChannel channel(source(),cfg);});
+    cfg=settings();cfg.path_evolution.bounded_spread_knot_seconds=.1;rejects([&]{v::StreamingChannel channel(source(),cfg);});
+    cfg=settings();cfg.effects.spread_delay_ms=21;cfg.path_evolution.bounded_spread_knot_seconds=.1;
+    cfg.path_evolution.random_doppler_width_hz=.5;rejects([&]{v::StreamingChannel channel(source(),cfg);});
+    cfg=settings();cfg.effects.spread_delay_ms=21;cfg.path_evolution.bounded_spread_knot_seconds=.1;
+    cfg.path_evolution.outage_start_seconds=0;cfg.path_evolution.outage_end_seconds=1;
+    rejects([&]{v::StreamingChannel channel(source(),cfg);});
+    cfg=settings();cfg.effects.static_doppler_hz=100;cfg.path_evolution.common_doppler_wander_hz=1000;
+    rejects([&]{v::StreamingChannel channel(source(),cfg);});
 }
 }
-int main(){try{exact_bypass();chunk_state_and_tails();effects_and_erasures();bounds();std::cout<<"triad streaming channel invariants passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+int main(){try{exact_bypass();chunk_state_and_tails();bounded_spread_evolves_and_streams();bounded_spread_phase_integrates_frequency();common_doppler_wander_is_bounded_and_continuous();effects_and_erasures();bounds();std::cout<<"triad streaming channel invariants passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

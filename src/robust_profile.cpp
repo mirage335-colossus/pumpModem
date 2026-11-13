@@ -252,11 +252,21 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     // synthetic rate. Off bypasses the stage even when ray Doppler is present.
     rx.selective_modulation_rate_hz = (slow_depth || fast_depth)
         ? (rx.spread_doppler_hz > 0 ? rx.spread_doppler_hz : .1) : 0;
+    rx.time_varying_channel = rx.spread_delay_seconds > 0 || rx.spread_doppler_hz != 0 ||
+        rx.selective_modulation_rate_hz > 0 || s.doppler_shift_hz != 0;
+    // A selected atmospheric spread must also allow the whole signal to move,
+    // including with GPS-disciplined oscillators and the explicit Doppler at
+    // zero. Keep this allowance outside the legacy constant-oscillator grid;
+    // the bounded changing-channel proposal searches its public support.
+    rx.time_varying_atmospheric_hz = std::abs(rx.spread_doppler_hz);
+    rx.time_varying_common_doppler_hz = std::abs(s.doppler_shift_hz) + rx.time_varying_atmospheric_hz;
     rx.helper_enabled = helper::effective_helper_power(helper) > 0;
 
     const auto minimum = plan_shaping(format);
     if (stop.stop_requested()) throw Error("Robust preparation cancelled");
     DurationOptions duration;
+    const auto bit_budget = (1 - duration.correct_probability) / (2 * duration.planning_bits);
+    rx.time_varying_minimum_bit_log_separation = std::log((1 - bit_budget) / bit_budget);
     duration.target_cn0_db_hz = s.target_cn0_db_hz;
     duration.arrival_lower_seconds = arrival.lower;
     duration.arrival_upper_seconds = arrival.upper;
@@ -287,7 +297,7 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     configuration.capture_trail_seconds = .25;
     configuration.audio_pair_ppm = 2 * nominal_endpoint_ppm;
     configuration.clock_bound_ppm = rx.clock_bound_ppm;
-    configuration.cfo_bound_hz = rx.frequency_bound_hz;
+    configuration.cfo_bound_hz = rx.frequency_bound_hz + rx.time_varying_atmospheric_hz;
     configuration.spread_delay_ms = 1000 * rx.spread_delay_seconds;
     configuration.spread_doppler_hz = rx.spread_doppler_hz;
     configuration.selective_signal_tail = rx.selective_modulation_rate_hz > 0;
@@ -303,7 +313,8 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
         passband.lower_hz = std::min(passband.lower_hz, helper::low_pilot_frequency_hz - 100);
         passband.upper_hz = std::max(passband.upper_hz, rx.helper.frequency_hz + 100);
     }
-    const double skirts = rx.frequency_bound_hz + rx.spread_doppler_hz + rx.selective_modulation_rate_hz;
+    const double skirts = rx.frequency_bound_hz + rx.time_varying_atmospheric_hz +
+        rx.spread_doppler_hz + rx.selective_modulation_rate_hz;
     const auto minimum_hz = passband.lower_hz - skirts;
     const auto maximum_hz = passband.upper_hz + skirts;
     check(minimum_hz > 0 && maximum_hz < fs / 2.,
@@ -317,12 +328,26 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     effects.nominal_conversion_if_hz = modem.carrier_hz;
     effects.capture_lead_seconds = waveform.config().capture_lead_seconds;
     effects.capture_trail_seconds = waveform.config().capture_trail_seconds;
-    effects.static_doppler_hz = s.doppler_shift_hz;
+    // The GUI declares support, not the exact realization received by DATA.
+    // Common atmospheric shift evolves independently of the echo trajectory;
+    // its fixed diagnostic counterpart remains available in StreamingChannel.
+    effects.static_doppler_hz = 0;
+    channel.path_evolution.common_doppler_wander_hz = rx.time_varying_common_doppler_hz;
+    const auto knot_seconds = [](double bound) {
+        return std::max(1., 1. / std::max(bound, 1. / 3600.));
+    };
+    channel.path_evolution.common_doppler_knot_seconds = knot_seconds(rx.time_varying_common_doppler_hz);
     effects.spread_delay_ms = waveform.config().spread_delay_ms;
     effects.spread_doppler_hz = rx.spread_doppler_hz;
+    if (rx.spread_delay_seconds > 0 || rx.spread_doppler_hz != 0)
+        channel.path_evolution.bounded_spread_knot_seconds = knot_seconds(std::abs(rx.spread_doppler_hz));
     effects.perturbation_slow_depth = slow_depth;
     effects.perturbation_fast_depth = fast_depth;
-    channel.selective_model.modulation_rate_hz = rx.selective_modulation_rate_hz;
+    // Gaussian-erf coefficients renew randomly. The native channel admits ten
+    // spectral widths per edge, so retain the same declared receive allowance
+    // rather than silently multiplying the GUI's required audio passband.
+    channel.selective_model.coefficient_law = SelectiveCoefficientLaw::GaussianErf;
+    channel.selective_model.modulation_rate_hz = rx.selective_modulation_rate_hz / 10;
     channel.selective_model.correlation_spacing_hz = geometry.carrier_spacing_hz;
     channel.maximum_chunk_samples = 4096;
     if (s.simulation) {

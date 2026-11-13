@@ -5,6 +5,7 @@
 #include "datapump/execution.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <compare>
@@ -121,15 +122,24 @@ struct ProjectionBands {
     FrequencyInterval required;
     std::array<FrequencyInterval, 3> excluded{};
     bool use_exclusions;
+    bool omit_overlapping_modes;
     double sample_rate;
 
-    ProjectionBands(const ReceiverConfig& config, const ReceiverSlotPlan& slot)
-        : use_exclusions(config.helper_enabled), sample_rate(config.sample_rate_hz) {
+    enum class Policy { legacy, separable_varying };
+
+    ProjectionBands(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                    Policy policy = Policy::legacy)
+        : use_exclusions(config.helper_enabled), omit_overlapping_modes(policy == Policy::separable_varying),
+          sample_rate(config.sample_rate_hz) {
+        const bool varying = policy != Policy::legacy;
         const double excursion = std::abs(config.spread_doppler_hz) +
             3 * config.random_doppler_width_hz + config.delay_motion_doppler_bound_hz;
         const double clock = config.clock_bound_ppm * 1e-6;
-        const double common = excursion + config.frequency_bound_hz;
-        const double half = geometry(slot.format).occupied_bandwidth_hz * .5 * (1 + clock) + common;
+        const double selective = varying ? config.selective_modulation_rate_hz : 0;
+        const double common = excursion + config.frequency_bound_hz + selective +
+            (varying ? config.time_varying_atmospheric_hz : 0);
+        const double skirts = varying ? config.source_spectral_skirt_allowance_hz : 0;
+        const double half = geometry(slot.format).occupied_bandwidth_hz * .5 * (1 + clock) + common + skirts;
         required = {-half, half};
         if (use_exclusions) {
             const double gating = config.helper.pilot_dwell_gating ? 200. : 0.;
@@ -150,7 +160,8 @@ struct ProjectionBands {
             for (const auto& band : excluded) {
                 if (!inside(band))
                     throw Error("Robust Helper projection exclusion lies outside receiver Nyquist");
-                if (std::max(required.lower_hz, band.lower_hz) <=
+                if (policy != Policy::separable_varying &&
+                    std::max(required.lower_hz, band.lower_hz) <=
                     std::min(required.upper_hz, band.upper_hz))
                     throw Error("Robust DATA projection overlaps a public Helper exclusion");
             }
@@ -174,12 +185,18 @@ std::size_t visit_projection_modes(std::size_t rows, const ProjectionBands& band
         const auto hz = static_cast<double>(bin) * spacing;
         if (hz < bands.required.lower_hz - half_bin || hz > bands.required.upper_hz + half_bin)
             continue;
+        bool excluded = false;
         if (bands.use_exclusions) {
             for (const auto& band : bands.excluded) {
-                if (hz >= band.lower_hz - half_bin && hz <= band.upper_hz + half_bin)
-                    throw Error("Robust likelihood block cannot resolve DATA and Helper bands");
+                if (hz >= band.lower_hz - half_bin && hz <= band.upper_hz + half_bin) {
+                    if (!bands.omit_overlapping_modes)
+                        throw Error("Robust likelihood block cannot resolve DATA and Helper bands");
+                    excluded = true;
+                    break;
+                }
             }
         }
+        if (excluded) continue;
         store(index);
         ++modes;
     }
@@ -200,6 +217,16 @@ public:
     std::size_t modes() const { return indices_.size(); }
     std::span<const std::size_t> indices() const { return indices_; }
 
+    // In the original DFT order with unitary normalization. A caller
+    // applying a circular frequency-bin shift needs every template bin,
+    // including those outside the final observed subspace.
+    void transform_full(std::span<Complex> values, std::span<Complex> scratch,
+                        std::stop_token stop) const {
+        if (!plan_) throw Error("Robust full DFT requires a nontrivial DATA projection");
+        plan_->transform(values, false, scratch, stop);
+        for (auto& value : values) value *= normalization_;
+    }
+
     // Destructive only on caller-private render scratch.
     void apply(std::span<Complex> values, std::span<Complex> scratch, std::stop_token stop) const {
         if (!plan_) {
@@ -215,6 +242,30 @@ public:
         // Sorted indices make the in-place compact gather safe.
         for (std::size_t i = 0; i < indices_.size(); ++i)
             values[i] = values[indices_[i]] * normalization_;
+    }
+
+    // Orthogonal projection in the original sample coordinates. The same
+    // unitary subspace is used by the projected likelihood. This inverse is
+    // for an inexpensive matched-product proposal, never an assumption of
+    // independent time-domain noise.
+    void retain_time(std::span<Complex> values, std::span<Complex> scratch, std::stop_token stop) const {
+        if (!plan_) {
+            Complex dc{};
+            for (std::size_t i = 0; i < values.size(); ++i) {
+                if (!(i % 4096)) check_cancelled(stop);
+                dc += values[i];
+            }
+            std::fill(values.begin(), values.end(), dc / static_cast<double>(rows_));
+            return;
+        }
+        plan_->transform(values, false, scratch, stop);
+        std::size_t keep = 0;
+        for (std::size_t i = 0; i < values.size(); ++i) {
+            if (!(i % 4096)) check_cancelled(stop);
+            if (keep < indices_.size() && i == indices_[keep]) ++keep;
+            else values[i] = {};
+        }
+        plan_->transform(values, true, scratch, stop);
     }
 
 private:
@@ -470,10 +521,39 @@ std::vector<State> predict(const std::vector<State>& previous, const TimingGrid&
 struct ObservationBlock {
     const Projection* projection = nullptr;
     std::vector<Complex> projected;
+    std::span<const Complex> line;
     std::size_t first = 0;
     double elapsed = 0;
     bool observed = true;
 };
+
+void remove_line(std::span<Complex> values, std::span<const Complex> unit_line) {
+    Complex component{};
+    for (std::size_t i = 0; i < unit_line.size(); ++i) component += std::conj(unit_line[i]) * values[i];
+    for (std::size_t i = 0; i < unit_line.size(); ++i) values[i] -= unit_line[i] * component;
+}
+
+std::span<const Complex> project_line(const LineAtom& line, const Projection& projection,
+        std::size_t first, double fs, std::span<Complex> values, std::span<Complex> scratch,
+        std::stop_token stop) {
+    const auto begin = std::max(first, line.first);
+    const auto end = std::min(first + projection.rows(), line.stop);
+    if (begin >= end) return {};
+    std::ranges::fill(values, Complex{});
+    const auto increment = std::polar(1., tau * line.frequency_hz / fs);
+    Complex phase = 1.;
+    for (auto row = begin; row < end; ++row) {
+        if (!((row - begin) % 4096)) check_cancelled(stop);
+        values[row - first] = phase;
+        phase *= increment;
+    }
+    projection.apply(values, scratch, stop);
+    auto mode_values = values.first(projection.modes());
+    const auto norm = std::sqrt(finite_energy(mode_values));
+    if (!(norm > 1e-12)) return {};
+    for (auto& value : mode_values) value /= norm;
+    return mode_values;
+}
 
 struct WorkerScratch {
     std::vector<Complex> raw, chunk, fft;
@@ -510,6 +590,7 @@ void sufficient_statistics(MappedBasis& basis, const MappedBasisRow& row, std::s
         // Required for a complete receipt even on slots that contain only noise.
         if (!nonzero_basis) nonzero_basis = finite_energy(values) > 0;
         block.projection->apply(values, scratch.fft, stop);
+        remove_line(values, block.line);
     }
     const auto tap_count = taps.size();
     for (std::size_t hypothesis = 1; hypothesis <= 2; ++hypothesis) {
@@ -556,11 +637,13 @@ void advance_state(State& state, const MappedBasisRow& row, MappedBasis& basis,
                    std::span<const Tap> taps, std::span<const ObservationBlock> blocks,
                    const std::array<const FineBulkStatistics*, 2>& prepared,
                    const std::array<double, 4 * 2 * models>& transitions,
-                   double variance, WorkerScratch& scratch, StateBlockWork* work, std::stop_token stop) {
+                   double variance, WorkerScratch& scratch, StateBlockWork* work, std::stop_token stop,
+                   double path_power = 1) {
     const auto tap_count = taps.size(), tap_square = tap_count * tap_count;
     std::array<Complex, 2 * 3 * 2> correlations{};
     std::array<Complex, 2 * 3 * 4> grams{};
-    std::array<double, 2> powers{1. / tap_count, 1. / tap_count};
+    const double tap_power = path_power / tap_count;
+    std::array<double, 2> powers{tap_power, tap_power};
     if (work) *work = {};
     const auto basis_began = work ? FineClock::now() : FineClock::time_point{};
     for (std::size_t i = 0; i < blocks.size(); ++i) {
@@ -1596,6 +1679,1505 @@ void score_fine(const ReceiverConfig& config, const ReceiverSlotPlan& plan, cons
                         coarse_clock_gap_ppm, workers, scratch_limit, stop, executor);
     session.advance_to(iq.size());
     session.finish(score);
+}
+
+namespace {
+constexpr std::size_t maximum_varying_coordinates = 24;
+constexpr std::size_t maximum_segmented_timing_coordinates = 8;
+constexpr double varying_power = 1. / 16;
+constexpr std::array tracking_powers{varying_power, 1. / 256, 1. / 512, 1. / 4096};
+constexpr std::size_t maximum_tracking_states = 65;
+
+struct DriftGram {
+    // Cholesky factor of I + A^H A/(noise variance * precision).
+    double first = 1, second = 1, logdet = 0;
+    Complex lower{};
+
+    DriftGram(double g0, double g1, Complex cross, double precision, double variance) {
+        const auto scale = 1 / (variance * precision);
+        first = std::sqrt(1 + g0 * scale);
+        lower = std::conj(cross) * (scale / first);
+        second = std::sqrt(1 + g1 * scale - std::norm(lower));
+        logdet = 2 * (std::log(first) + std::log(second));
+        if (!(first > 0 && second > 0 && std::isfinite(logdet)))
+            throw Error("Robust varying likelihood has invalid template Gram");
+    }
+
+    double score(Complex r0, Complex r1, double gain) const {
+        const auto x = r0 / first;
+        const auto y = (r1 - lower * x) / second;
+        return (std::norm(x) + std::norm(y)) * gain - logdet;
+    }
+};
+
+struct FrequencyTrackingPlan {
+    std::size_t fft_rows = 0, states = 0, step_bins = 1;
+    double step_hz = 0;
+    std::int64_t radius = 0;
+    bool coherent_gain_blocks = false;
+};
+
+FrequencyTrackingPlan tracking_plan(const ReceiverConfig& config, std::size_t block_rows,
+                                     std::size_t final_rows, bool coherent_gain_blocks = false) {
+    const auto bound = config.frequency_bound_hz + config.time_varying_atmospheric_hz;
+    if (!coherent_gain_blocks && (config.time_varying_common_doppler_hz * block_rows /
+        config.sample_rate_hz <= .25 || !(bound > 0)))
+        return {};
+    FrequencyTrackingPlan result;
+    result.coherent_gain_blocks = coherent_gain_blocks;
+    result.fft_rows = std::bit_ceil((coherent_gain_blocks ? 4 : 2) * final_rows);
+    const auto bin_hz = config.sample_rate_hz /
+        (config.helper_enabled ? 2 * block_rows : result.fft_rows);
+    result.step_bins = std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(
+        bound / (bin_hz * (maximum_tracking_states / 2)))));
+    result.step_hz = result.step_bins * bin_hz;
+    result.radius = static_cast<std::int64_t>(std::ceil(bound / result.step_hz));
+    if (result.radius * result.step_hz >= .5 * config.sample_rate_hz) return {};
+    result.states = static_cast<std::size_t>(2 * result.radius + 1);
+    return result;
+}
+
+using FrequencyWeights = std::array<double, maximum_tracking_states>;
+using TrackingLogWeights = std::array<std::array<FrequencyWeights, tracking_powers.size()>, 2>;
+struct CoherentGainState {
+    ChannelPosterior posterior;
+    double log_evidence = 0;
+};
+using TrackingPosteriors =
+    std::array<std::array<std::array<CoherentGainState, maximum_tracking_states>, tracking_powers.size()>, 2>;
+
+double tracking_emission(double direct, double echo, Complex cross, Complex r0, Complex r1,
+                         std::size_t taps, double power, double variance) {
+    const double precision = taps / power;
+    const DriftGram gram(direct, echo, cross, precision, variance);
+    const double scaling = 1. / (std::sqrt(precision) * std::sqrt(variance));
+    return gram.score(r0 * scaling, r1 * scaling, 1 / variance);
+}
+
+double coherent_gain_update(ChannelPosterior& posterior, double direct, double echo, Complex cross,
+                            Complex r0, Complex r1, std::size_t taps, double power, double variance,
+                            double correlation) {
+    const double path_power = power / taps;
+    const std::array<double, 2> powers{path_power, path_power};
+    const std::array<double, 4> transition{correlation * correlation,
+        1 - correlation * correlation, correlation, 0.};
+    std::array<Complex, 3 * 2> r{}, mean{};
+    std::array<Complex, 3 * 4> g{}, covariance{};
+    const auto square = taps * taps;
+    r[taps] = r0 / variance;
+    g[square] = direct / variance;
+    if (taps == 2) {
+        r[taps + 1] = r1 / variance;
+        g[square + 1] = cross / variance;
+        g[square + 2] = std::conj(g[square + 1]);
+        g[square + 3] = echo / variance;
+    }
+    std::copy_n(posterior.mean.begin(), taps, mean.data() + taps);
+    std::copy_n(posterior.covariance.begin(), square, covariance.data() + square);
+    std::array<double, 3> score{};
+    std::array<double, 2> diagnostic{};
+    const auto status = triad_gaussian_update_v1(taps, 1, 1, 1, 0, 1,
+        reinterpret_cast<const double*>(r.data()), reinterpret_cast<const double*>(g.data()),
+        powers.data(), transition.data(), reinterpret_cast<double*>(mean.data()),
+        reinterpret_cast<double*>(covariance.data()), score.data(), diagnostic.data());
+    if (status || score[0] != 0. || score[2] != 0.)
+        throw Error("Robust coherent gain update failed (" + std::to_string(status) + ")");
+    std::copy_n(mean.data() + taps, taps, posterior.mean.begin());
+    std::copy_n(covariance.data() + square, square, posterior.covariance.begin());
+    return score[1];
+}
+
+void update_frequency_weights(std::span<const double> evidence, std::span<double> previous, bool constant) {
+    if (constant) {
+        for (std::size_t i = 0; i < previous.size(); ++i) previous[i] += evidence[i];
+        return;
+    }
+    std::array<double, maximum_tracking_states> next{};
+    const auto total = std::accumulate(previous.begin(), previous.end(), -infinity, log_add);
+    // Markov prior: 96% stay/local walk and a 4% uniformly distributed
+    // reacquisition. Reflect blocked edge steps into the stay mass.
+    const auto reset = total + std::log(.04 / previous.size());
+    constexpr double neighbor = .12, stay = .72;
+    const auto log_neighbor = std::log(neighbor);
+    const auto log_stay = std::log(stay);
+    const auto log_edge = std::log(stay + neighbor);
+    for (std::size_t i = 0; i < previous.size(); ++i) {
+        auto predicted = log_add(previous[i] + (i == 0 || i + 1 == previous.size() ? log_edge : log_stay), reset);
+        if (i) predicted = log_add(predicted, previous[i - 1] + log_neighbor);
+        if (i + 1 < previous.size()) predicted = log_add(predicted, previous[i + 1] + log_neighbor);
+        if (!std::isfinite(evidence[i])) throw Error("Robust tracked frequency evidence is nonfinite");
+        next[i] = predicted + evidence[i];
+    }
+    std::copy_n(next.begin(), previous.size(), previous.begin());
+}
+
+void track_projected_block(std::span<const Complex> templates, std::size_t taps,
+                            const ObservationBlock& block, double variance, double fs,
+                            const FrequencyTrackingPlan& plan, WorkerScratch& scratch,
+                            std::span<Complex> spectrum, TrackingLogWeights& log_weights,
+                            TrackingPosteriors* persistent, double gain_correlation,
+                            std::stop_token stop) {
+    const auto& projection = *block.projection;
+    const auto rows = projection.rows();
+    TrackingLogWeights evidence{};
+    std::array<std::int64_t, maximum_tracking_states> bins{};
+    for (std::size_t i = 0; i < plan.states; ++i) {
+        const auto half_bins = 2 * rows * plan.step_hz * (static_cast<std::int64_t>(i) - plan.radius) / fs;
+        // Distinguish the two sampled Nyquist endpoints. Keep a rounding
+        // error within the half-bin lattice even on the merged last block.
+        const auto last = static_cast<std::int64_t>(rows) - 1;
+        bins[i] = std::clamp(static_cast<std::int64_t>(std::llround(half_bins)), -last, last);
+    }
+    const auto indices = projection.indices();
+    // The second lattice reuses the same columns shifted half a DFT bin.
+    // Integer shifts then rotate the full transformed template; the actual
+    // likelihood observes only orthogonal DATA bins outside Helper support.
+    for (std::int64_t half = 0; half < 2; ++half) {
+        for (std::size_t column = 0; column < 2 * taps; ++column) {
+            auto values = spectrum.subspan(column * rows, rows);
+            auto phase = Complex{1};
+            const auto increment = std::polar(1., half * std::numbers::pi / rows);
+            for (std::size_t i = 0; i < rows; ++i) {
+                if (!(i % 4096)) check_cancelled(stop);
+                values[i] = templates[column * rows + i] * phase;
+                phase *= increment;
+            }
+            projection.transform_full(values, scratch.fft, stop);
+        }
+        for (std::size_t state = 0; state < plan.states; ++state) {
+            const auto residue = (bins[state] % 2 + 2) % 2;
+            if (residue != half) continue;
+            const auto shift = (bins[state] - half) / 2;
+            for (std::size_t bit = 0; bit < 2; ++bit) {
+                const auto column = bit * taps * rows;
+                std::array<Complex, 2> correlation{};
+                std::array<double, 2> diagonal{};
+                Complex cross{};
+                std::array<Complex, 2> line_correlation{};
+                for (std::size_t i = 0; i < indices.size(); ++i) {
+                    auto bin = static_cast<std::int64_t>(indices[i]) - shift;
+                    if (bin < 0) bin += static_cast<std::int64_t>(rows);
+                    if (bin >= static_cast<std::int64_t>(rows)) bin -= static_cast<std::int64_t>(rows);
+                    const auto template_bin = static_cast<std::size_t>(bin);
+                    const auto first = spectrum[column + template_bin];
+                    correlation[0] += std::conj(first) * block.projected[i];
+                    diagonal[0] += std::norm(first);
+                    if (!block.line.empty()) line_correlation[0] += std::conj(block.line[i]) * first;
+                    if (taps == 2) {
+                        const auto echo = spectrum[column + rows + template_bin];
+                        correlation[1] += std::conj(echo) * block.projected[i];
+                        diagonal[1] += std::norm(echo);
+                        cross += std::conj(first) * echo;
+                        if (!block.line.empty()) line_correlation[1] += std::conj(block.line[i]) * echo;
+                    }
+                }
+                if (!block.line.empty()) {
+                    for (std::size_t path = 0; path < taps; ++path)
+                        diagonal[path] = std::max(0., diagonal[path] - std::norm(line_correlation[path]));
+                    cross -= std::conj(line_correlation[0]) * line_correlation[1];
+                }
+                for (std::size_t power = 0; power < tracking_powers.size(); ++power) {
+                    evidence[bit][power][state] = tracking_emission(diagonal[0], diagonal[1], cross,
+                        correlation[0], correlation[1], taps, tracking_powers[power], variance);
+                    if (persistent) {
+                        // Correct the deterministic per-state frequency
+                        // reference before transporting a complex gain.
+                        const auto hz = bins[state] * fs / (2 * rows);
+                        const auto phase = std::polar(1., -tau * hz * block.first / fs);
+                        auto& posterior = (*persistent)[bit][power][state];
+                        const auto value = coherent_gain_update(posterior.posterior, diagonal[0], diagonal[1], cross,
+                            correlation[0] * phase, correlation[1] * phase, taps, tracking_powers[power],
+                            variance, gain_correlation);
+                        // The persistent branch uses its own accumulated
+                        // likelihood. Keep its independent gain peer below.
+                        posterior.log_evidence += value;
+                    }
+                }
+            }
+        }
+    }
+    for (std::size_t bit = 0; bit < 2; ++bit)
+        for (std::size_t power = 0; power < tracking_powers.size(); ++power)
+            update_frequency_weights(std::span(evidence[bit][power]).first(plan.states),
+                                     std::span(log_weights[bit][power]).first(plan.states), plan.coherent_gain_blocks);
+}
+
+void track_frequency_block(MappedBasis& basis, const MappedBasisRow& map, std::span<const Tap> taps,
+                            std::size_t first, std::span<const Complex> observation, double variance,
+                            const FrequencyTrackingPlan& plan,
+                            const modem::detail::search_fft::DoublePlan& fft, WorkerScratch& scratch,
+                            std::span<Complex> spectrum, TrackingLogWeights& log_weights,
+                            const ObservationBlock* projected, double sample_rate, TrackingPosteriors* persistent,
+                            double gain_correlation, std::stop_token stop) {
+    const auto rows = observation.size();
+    const auto columns = 2 * taps.size();
+    auto templates = std::span(scratch.raw).first(columns * rows);
+    // Tracking uses a compact block, so this render is always one cache request.
+    basis.render_pair(map, taps, first, std::span(scratch.offsets).first(rows), templates, stop);
+    if (projected) {
+        track_projected_block(templates, taps.size(), *projected, variance, sample_rate, plan,
+                              scratch, spectrum, log_weights, persistent, gain_correlation, stop);
+        return;
+    }
+    for (std::size_t column = 0; column < columns; ++column) {
+        auto values = spectrum.subspan(column * plan.fft_rows, plan.fft_rows);
+        std::fill(values.begin(), values.end(), Complex{});
+        for (std::size_t i = 0; i < rows; ++i)
+            values[i] = std::conj(templates[column * rows + i]) * observation[i];
+        modem::detail::search_fft::fft(values, false, fft, stop);
+    }
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        const auto column = bit * taps.size();
+        double direct_energy = 0, echo_energy = 0;
+        Complex cross{};
+        for (std::size_t i = 0; i < rows; ++i) {
+            const auto direct = templates[column * rows + i];
+            direct_energy += std::norm(direct);
+            if (taps.size() == 2) {
+                const auto echo = templates[(column + 1) * rows + i];
+                echo_energy += std::norm(echo);
+                cross += std::conj(direct) * echo;
+            }
+        }
+        // A constant finite Gaussian gain model for this block. Frequency
+        // states change only its phase, so all states share the same Gram.
+        for (std::size_t power = 0; power < tracking_powers.size(); ++power) {
+            const double precision = taps.size() / tracking_powers[power];
+            const DriftGram gram(direct_energy, echo_energy, cross, precision, variance);
+            const double scaling = 1. / (std::sqrt(precision) * std::sqrt(variance));
+            FrequencyWeights evidence{};
+            for (std::size_t i = 0; i < plan.states; ++i) {
+                const auto signed_bin = (static_cast<std::int64_t>(i) - plan.radius) *
+                    static_cast<std::int64_t>(plan.step_bins);
+                const auto bin = static_cast<std::size_t>(signed_bin < 0 ?
+                    signed_bin + static_cast<std::int64_t>(plan.fft_rows) : signed_bin);
+                const auto r0 = spectrum[column * plan.fft_rows + bin];
+                const auto r1 = taps.size() == 2 ? spectrum[(column + 1) * plan.fft_rows + bin] : Complex{};
+                evidence[i] = gram.score(r0 * scaling, r1 * scaling, 1 / variance);
+                if (persistent) {
+                    const auto hz = signed_bin * sample_rate / plan.fft_rows;
+                    const auto phase = std::polar(1., -tau * hz * first / sample_rate);
+                    auto& posterior = (*persistent)[bit][power][i];
+                    posterior.log_evidence += coherent_gain_update(posterior.posterior, direct_energy, echo_energy, cross,
+                        r0 * phase, r1 * phase, taps.size(), tracking_powers[power], variance, gain_correlation);
+                }
+            }
+            update_frequency_weights(std::span(evidence).first(plan.states),
+                                     std::span(log_weights[bit][power]).first(plan.states), plan.coherent_gain_blocks);
+        }
+    }
+}
+
+struct VaryingBasis {
+    std::array<Tap, 2> taps{};
+    std::size_t count = 1;
+};
+
+// A physical two-path basis and a shorter interior pair. Selective stress
+// also gives a useful delay scale, distinct from the physical echo bound.
+// Each pair owns its own normalized likelihood. Repeated geometry coalesces.
+std::array<VaryingBasis, 3> varying_bases(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                                        std::size_t& count) {
+    std::array<VaryingBasis, 3> result{};
+    const auto spread = std::abs(config.spread_doppler_hz);
+    const auto delay = config.spread_delay_seconds;
+    const auto append = [&](double second_delay, double doppler) {
+        for (const auto& candidate : std::span(result).first(count))
+            if (candidate.taps[1].delay_seconds == second_delay && candidate.taps[1].doppler_hz == doppler)
+                return;
+        auto& model = result[count++];
+        model.taps[1] = {second_delay, doppler};
+        model.count = second_delay || doppler ? 2 : 1;
+    };
+    // Stronger narrow echo may sit well inside the preset. The all-sign
+    // envelope isn't a guarantee that these two delay anchors fit it.
+    append(delay, config.spread_doppler_hz);
+    if (delay || spread) append(delay * .5, 0);
+    if (config.selective_modulation_rate_hz > 0 &&
+        (config.selective_slow_depth || config.selective_fast_depth))
+        append(1 / (3 * geometry(slot.format).carrier_spacing_hz), 0);
+    return result;
+}
+
+bool projected_block_supported(std::size_t rows, const ProjectionBands& bands) {
+    if (!bands.omit_overlapping_modes)
+        throw Error("Robust supplemental block requires its separable DATA projection");
+    const double spacing = bands.sample_rate / static_cast<double>(rows);
+    const double half = spacing / 2;
+    if (!bands.use_exclusions) return true;
+    // Signed DFT centers within the expanded DATA interval. Both bands'
+    // boundaries use the same half-bin convention as the projection.
+    const auto first = -static_cast<double>(rows / 2);
+    const auto last = static_cast<double>((rows - 1) / 2);
+    const auto lower = std::max(first, std::ceil((bands.required.lower_hz - half) / spacing));
+    const auto upper = std::min(last, std::floor((bands.required.upper_hz + half) / spacing));
+    auto bin = lower;
+    // At most three excluded intervals can cover successive bins.
+    // Advance past their union without walking every raw DFT index.
+    for (std::size_t attempt = 0; attempt <= bands.excluded.size() && bin <= upper; ++attempt) {
+        auto next = bin;
+        for (const auto& excluded : bands.excluded) {
+            const auto start = std::ceil((excluded.lower_hz - half) / spacing);
+            const auto stop = std::floor((excluded.upper_hz + half) / spacing);
+            if (start <= bin && bin <= stop) next = std::max(next, stop + 1);
+        }
+        if (next == bin) return true;
+        bin = next;
+    }
+    return false;
+}
+} // namespace
+
+VaryingFinePlan varying_fine_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers,
+                                 bool project_line_atom, bool coherent_gain_blocks) {
+    if (!config.time_varying_channel) return {};
+    const auto fs = config.sample_rate_hz;
+    const auto rows = static_cast<std::size_t>(slot.stop_sample - slot.first_sample);
+    const auto chip_rate = geometry(slot.format).fine_chip_rate_hz;
+    const auto nominal_rows = round_rows(coherent_gain_blocks ? 1. : .25, fs);
+    // Keep at least two fine cells in a fitted block. Over a single cell
+    // an unconstrained frequency-selective fit can erase bit distinctions.
+    // A quarter cycle is the target residual change, not a coverage claim.
+    const auto residual = std::max({config.time_varying_common_doppler_hz,
+        3 * config.random_doppler_width_hz + config.delay_motion_doppler_bound_hz,
+        .1 * config.selective_modulation_rate_hz, std::abs(config.spread_doppler_hz) * .25});
+    if (!(2 / chip_rate < (coherent_gain_blocks ? 1. : .25)))
+        return {0, 0, "fine_cells_too_slow_for_short_block"};
+    // Limit the declared diffuse width to 3/8 cycle per medium block when
+    // supported by the minimum cadence. A narrower width retains .5 s.
+    const auto coherent_interval = std::clamp(.375 / std::max(.75, config.random_doppler_width_hz), .25, .5);
+    const auto ideal = std::max(2 / chip_rate,
+        coherent_gain_blocks ? coherent_interval : .25 / std::max(2., residual));
+    // Above this time-bandwidth product the fixed center grid would
+    // undersample the residual within each medium-coherence block.
+    if (coherent_gain_blocks && (config.frequency_bound_hz + config.time_varying_atmospheric_hz) * ideal > 8)
+        return {0, 0, "coherent_gain_center_grid_exceeds_work_limit"};
+    auto block = std::min(rows, round_rows(ideal, fs));
+    if (block >= nominal_rows) return {0, 0, "no_short_block_geometry"};
+    std::optional<ProjectionBands> bands;
+    try {
+        bands.emplace(config, slot, ProjectionBands::Policy::separable_varying);
+    } catch (const Error&) {
+        return {0, 0, "varying_data_and_helper_bands_not_separable"};
+    }
+    const auto remainder_for = [&](std::size_t span) { return rows % span; };
+    for (;;) {
+        const auto remainder = remainder_for(block);
+        const auto final = remainder ? block + remainder : block;
+        if (projected_block_supported(block, *bands) && projected_block_supported(final, *bands)) break;
+        // Doubling retains bounded initialization and lets wider bands use
+        // enough orthogonal modes to exclude Helper, where a gap exists.
+        if (block >= std::min(rows, nominal_rows) / 2)
+            return {0, 0, "short_block_cannot_resolve_helper"};
+        block *= 2;
+    }
+    const auto final = block + remainder_for(block);
+    const auto fft = std::max(DftPlan::scratch_samples(block), DftPlan::scratch_samples(final));
+    auto bytes = checked_add(DftPlan::workspace_bytes(block), DftPlan::workspace_bytes(final));
+    const auto add = [&](std::size_t count, std::size_t width) {
+        bytes = checked_add(bytes, checked_multiply(count, width));
+    };
+    add(block + final, sizeof(std::size_t)); // projection indices
+    add(final + fft, sizeof(Complex));       // observation + scratch
+    if (project_line_atom) add(final, sizeof(Complex));
+    std::size_t geometry_count = 0;
+    (void)varying_bases(config, slot, geometry_count);
+    const auto states = maximum_varying_coordinates * geometry_count;
+    const auto active = std::min<std::size_t>(workers, states);
+    const auto mapped = std::min(maximum_basis_rows, final);
+    auto tracking_config = config;
+    tracking_config.helper_enabled |= project_line_atom;
+    auto track = final <= maximum_basis_rows ?
+        tracking_plan(tracking_config, block, final, coherent_gain_blocks) : FrequencyTrackingPlan{};
+    if (track.states && tracking_config.helper_enabled) {
+        const auto non_dc = [&](std::size_t rows) {
+            const auto spacing = fs / rows;
+            const auto use = [&](double hz) {
+                if (hz < bands->required.lower_hz - spacing / 2 || hz > bands->required.upper_hz + spacing / 2)
+                    return false;
+                return !bands->use_exclusions || std::ranges::none_of(bands->excluded, [&](const auto& excluded) {
+                    return hz >= excluded.lower_hz - spacing / 2 && hz <= excluded.upper_hz + spacing / 2;
+                });
+            };
+            return use(spacing) || use(-spacing) || !use(0);
+        };
+        if (!non_dc(block) || !non_dc(final)) track = {};
+    }
+    if (coherent_gain_blocks && !track.states) return {0, 0, "coherent_gain_blocks_unavailable"};
+    if (!coherent_gain_blocks) add(states, sizeof(State) + sizeof(MappedBasisRow));
+    add(active, sizeof(WorkerScratch));
+    add(checked_multiply(active, 4 * final + fft + (final > mapped ? 4 * mapped : 0)), sizeof(Complex));
+    add(checked_multiply(active, mapped), sizeof(double));
+    add(1, MappedBasis::workspace_bytes(config, slot, mapped, static_cast<unsigned>(active)));
+    if (track.states) {
+        add(track.fft_rows, sizeof(Complex));
+        add(maximum_varying_coordinates + maximum_segmented_timing_coordinates,
+            sizeof(TrackingLogWeights) + sizeof(MappedBasisRow));
+        if (coherent_gain_blocks)
+            add(maximum_varying_coordinates + maximum_segmented_timing_coordinates, sizeof(TrackingPosteriors));
+        add(checked_multiply(active, 4 * track.fft_rows), sizeof(Complex));
+    }
+    add(1, 64 * 1024);
+    return {block, bytes, coherent_gain_blocks ? "coherent_gain_blocks" :
+            (residual * final / fs > .25 ? "short_block_partial_bandwidth" : "short_block"),
+            track.states != 0, coherent_gain_blocks};
+}
+
+void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
+                        const VaryingFinePlan& plan, std::span<const Complex> iq,
+                        std::span<const FineCoordinate> selected, std::span<const FineCoordinate> segmented_timing,
+                        double projected_rate, double clock_gap,
+                        unsigned workers, ReceiverSlotScore& score, std::stop_token stop,
+                        ReceiverExecutor& executor, const LineAtom* line) {
+    check_cancelled(stop);
+    if (!plan.block_rows || selected.empty() || selected.size() > maximum_varying_coordinates ||
+        segmented_timing.size() > maximum_segmented_timing_coordinates ||
+        iq.size() != slot.stop_sample - slot.first_sample)
+        throw Error("varying fine scorer requires its bounded public slot and coordinates");
+    const auto began = FineClock::now();
+    const auto block_rows = plan.block_rows;
+    const auto final_rows = block_rows + iq.size() % block_rows;
+    const auto fft_rows = std::max(DftPlan::scratch_samples(block_rows), DftPlan::scratch_samples(final_rows));
+    const ProjectionBands bands(config, slot, ProjectionBands::Policy::separable_varying);
+    const Projection block_projection(block_rows, bands, stop);
+    const Projection final_projection(final_rows, bands, stop);
+    const TimingGrid grid(projected_rate, clock_gap);
+    std::size_t model_count = 0;
+    const auto bases = varying_bases(config, slot, model_count);
+    const auto active = std::min<std::size_t>(workers, selected.size() * model_count);
+    MappedBasis basis(config, slot, key, std::min(final_rows, maximum_basis_rows), static_cast<unsigned>(active));
+    std::vector<WorkerScratch> scratch;
+    scratch.reserve(active);
+    for (std::size_t lane = 0; lane < active; ++lane) scratch.emplace_back(final_rows, fft_rows);
+    std::vector<MappedBasisRow> mapped;
+    mapped.reserve(selected.size());
+    for (const auto& coordinate : selected)
+        mapped.push_back(mapped_row(config, slot, grid, coordinate, {}, 0, true));
+    auto tracking_config = config;
+    tracking_config.helper_enabled |= line != nullptr;
+    const auto track = plan.track_frequency ?
+        tracking_plan(tracking_config, block_rows, final_rows, plan.coherent_gain_blocks) : FrequencyTrackingPlan{};
+    std::optional<modem::detail::search_fft::DoublePlan> tracking_fft;
+    std::vector<TrackingLogWeights> tracking_weights;
+    std::vector<TrackingPosteriors> tracking_posteriors;
+    std::vector<FineCoordinate> tracking_coordinates;
+    std::vector<std::vector<Complex>> tracking_scratch;
+    std::vector<MappedBasisRow> tracking_maps;
+    if (track.states) {
+        tracking_fft.emplace(track.fft_rows, stop);
+        tracking_coordinates.reserve(selected.size() + segmented_timing.size());
+        const auto append = [&](FineCoordinate coordinate) {
+            coordinate.frequency_hz = 0;
+            if (std::ranges::find(tracking_coordinates, coordinate) == tracking_coordinates.end())
+                tracking_coordinates.push_back(coordinate);
+        };
+        for (const auto& coordinate : selected) append(coordinate);
+        for (const auto& coordinate : segmented_timing) append(coordinate);
+        tracking_weights.resize(tracking_coordinates.size());
+        const auto prior = -std::log(static_cast<double>(track.states * tracking_coordinates.size() * tracking_powers.size()));
+        for (auto& atom : tracking_weights)
+            for (auto& bit : atom)
+                for (auto& power : bit) power.fill(prior);
+        if (plan.coherent_gain_blocks) {
+            tracking_posteriors.resize(tracking_coordinates.size());
+            const std::size_t taps = config.spread_delay_seconds || config.spread_doppler_hz ? 2 : 1;
+            for (auto& atom : tracking_posteriors)
+                for (auto& bit : atom)
+                    for (std::size_t power = 0; power < tracking_powers.size(); ++power)
+                        for (auto& state : std::span(bit[power]).first(track.states)) {
+                            state.log_evidence = prior;
+                            for (std::size_t tap = 0; tap < taps; ++tap)
+                                state.posterior.covariance[tap * taps + tap] = tracking_powers[power] / taps;
+                        }
+        }
+        tracking_scratch.resize(active);
+        for (auto& lane : tracking_scratch) lane.resize(4 * track.fft_rows);
+        tracking_maps.reserve(tracking_coordinates.size());
+        for (const auto& coordinate : tracking_coordinates)
+            tracking_maps.push_back(mapped_row(config, slot, grid, coordinate, {}, 0, true));
+    }
+    std::vector<State> states(plan.coherent_gain_blocks ? 0 : selected.size() * model_count);
+    const auto prior = states.empty() ? 0. : -std::log(static_cast<double>(states.size() * models));
+    for (std::size_t candidate = 0; candidate < states.size(); ++candidate) {
+        auto& state = states[candidate];
+        const auto taps = bases[candidate % model_count].count;
+        state.weights.fill(prior);
+        for (auto& channel : state.posterior)
+            for (std::size_t tap = 0; tap < taps; ++tap)
+                channel.covariance[tap * taps + tap] = varying_power / taps;
+    }
+    std::vector<Complex> observation_scratch(fft_rows);
+    std::vector<Complex> line_storage(line ? final_rows : 0);
+    ObservationBlock block;
+    block.observed = true;
+    block.projected.reserve(final_rows);
+    std::uint64_t rendered_rows = 0;
+    double previous_center = 0;
+    for (std::size_t first = 0; first < iq.size();) {
+        check_cancelled(stop);
+        const auto terminal = iq.size() - first < 2 * block_rows;
+        const auto& projection = terminal ? final_projection : block_projection;
+        const auto rows = projection.rows();
+        block.first = first;
+        block.projection = &projection;
+        const auto center = (static_cast<double>(first) + (rows - 1) * .5) / config.sample_rate_hz;
+        block.elapsed = first ? center - previous_center : 0;
+        previous_center = center;
+        // Diffuse Gaussian amplitude correlations decay with squared lag.
+        // The first-order approximation retains the correct block-step
+        // correlation without keeping any realized channel history.
+        const auto gain_width = config.random_doppler_width_hz > 0 ? config.random_doppler_width_hz : .35;
+        const auto gain_lag = std::numbers::pi * gain_width * block.elapsed;
+        const auto gain_correlation = std::exp(-.5 * gain_lag * gain_lag);
+        const auto raw = iq.subspan(first, rows);
+        block.projected.assign(raw.begin(), raw.end());
+        projection.apply(block.projected, observation_scratch, stop);
+        block.projected.resize(projection.modes());
+        if (line) {
+            block.line = project_line(*line, projection, first, config.sample_rate_hz,
+                std::span(line_storage).first(rows), observation_scratch, stop);
+            remove_line(block.projected, block.line);
+        }
+        std::array<double, 4 * 2 * models> transitions{};
+        const auto coherence = block_rows / config.sample_rate_hz;
+        for (std::size_t model = 0; model < models; ++model) {
+            const double exponent = -block.elapsed / (coherence * (1 << model));
+            transitions[4 * model] = std::exp(2 * exponent);
+            transitions[4 * model + 1] = -std::expm1(2 * exponent);
+            transitions[4 * model + 2] = std::exp(exponent);
+        }
+        executor.parallel(slot.index, states.size() + tracking_weights.size(), static_cast<unsigned>(active), stop,
+            [&](unsigned lane, std::size_t candidate, std::stop_token leaf_stop) {
+                if (candidate >= states.size()) {
+                    const auto index = candidate - states.size();
+                    // One short interior echo with a free gain. A stable
+                    // geometry term and the original dynamic gains remain in
+                    // the other half of this public likelihood mixture.
+                    const auto delay = config.spread_delay_seconds * (plan.coherent_gain_blocks ? 1. : .5);
+                    const auto offset = plan.coherent_gain_blocks ? config.spread_doppler_hz : 0.;
+                    const std::array<Tap, 2> paths{{{0, 0}, {delay, offset}}};
+                    track_frequency_block(basis, tracking_maps[index], std::span(paths).first(delay || offset ? 2 : 1),
+                        first, raw, config.noise_variance, track, *tracking_fft, scratch[lane],
+                        tracking_scratch[lane], tracking_weights[index], tracking_config.helper_enabled ? &block : nullptr,
+                        config.sample_rate_hz, tracking_posteriors.empty() ? nullptr : &tracking_posteriors[index],
+                        gain_correlation, leaf_stop);
+                    return;
+                }
+                const auto& paths = bases[candidate % model_count];
+                advance_state(states[candidate], mapped[candidate / model_count], basis,
+                    std::span(paths.taps).first(paths.count), std::span(&block, 1), {},
+                    transitions, config.noise_variance, scratch[lane], nullptr, leaf_stop, varying_power);
+            });
+        for (std::size_t model = 0; !plan.coherent_gain_blocks && model < model_count; ++model)
+            add_work(rendered_rows, checked_multiply(rows, 2 * bases[model].count * selected.size()));
+        if (track.states)
+            add_work(rendered_rows, checked_multiply(rows,
+                2 * (config.spread_delay_seconds || (plan.coherent_gain_blocks && config.spread_doppler_hz) ? 2 : 1) *
+                tracking_coordinates.size()));
+        first += rows;
+        ++score.varying_blocks;
+    }
+    if (!plan.coherent_gain_blocks && !std::ranges::any_of(states, [](const State& state) { return state.nonzero_basis; })) {
+        score.varying_status = "no_observed_varying_basis";
+        return;
+    }
+    score.varying_candidates = selected.size();
+    score.varying_block_rows = block_rows;
+    score.varying_basis_rows = rendered_rows;
+    score.varying_bit_evidence = plan.coherent_gain_blocks ?
+        std::array<double, 2>{-infinity, -infinity} : bit_scores(states);
+    if (track.states) {
+        // The same selected full-grid mass is applied by the caller. Undo
+        // that factor locally for this branch's separate timing prior.
+        const auto log_adjustment = std::log(static_cast<double>(tracking_coordinates.size())) -
+            std::log(static_cast<double>(selected.size())) +
+            std::log1p(2 * std::ceil((config.frequency_bound_hz + config.time_varying_atmospheric_hz) /
+                std::min(.01, receiver_coarse_frequency_step(slot.format, config.sample_rate_hz))));
+        score.varying_frequency_states = track.states;
+        for (std::size_t bit = 0; bit < 2; ++bit) {
+            auto total = -infinity;
+            for (const auto& atom : tracking_weights)
+                for (const auto& power : atom[bit])
+                    total = std::accumulate(power.begin(), power.begin() + track.states, total, log_add);
+            if (!tracking_posteriors.empty()) {
+                double persistent = -infinity;
+                for (const auto& atom : tracking_posteriors)
+                    for (const auto& power : atom[bit])
+                        for (const auto& state : std::span(power).first(track.states))
+                            persistent = log_add(persistent, state.log_evidence);
+                total = log_add(total, persistent) - log_two;
+            }
+            score.tracked_frequency_bit_evidence[bit] = total;
+            const auto calibrated = total + log_adjustment;
+            score.varying_bit_evidence[bit] = plan.coherent_gain_blocks ? calibrated :
+                log_add(score.varying_bit_evidence[bit], calibrated) - log_two;
+        }
+    }
+    score.varying_fine_seconds = seconds_since(began);
+}
+
+std::size_t varying_quiet_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
+    if (!config.time_varying_channel) return 0;
+    const BlockCalendar calendar(config, slot);
+    const auto lengths = calendar.lengths();
+    const auto maximum = *std::ranges::max_element(lengths);
+    return checked_add(DftPlan::workspace_bytes(maximum),
+        checked_add(checked_multiply(maximum, sizeof(std::size_t)),
+                    checked_multiply(maximum + DftPlan::scratch_samples(maximum), sizeof(Complex))));
+}
+
+namespace {
+constexpr std::size_t maximum_line_fft_rows = 262'144;
+constexpr std::size_t line_frequency_refinement = 512;
+
+std::size_t line_fft_rows(const ReceiverSlotPlan& slot) {
+    const auto rows = static_cast<std::size_t>(slot.quiet_stop_sample - slot.quiet_first_sample);
+    if (rows < 16) return 0;
+    return rows >= maximum_line_fft_rows / 2 ? maximum_line_fft_rows : std::bit_ceil(2 * rows);
+}
+} // namespace
+
+std::size_t varying_line_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
+    const auto fft_rows = config.time_varying_channel ? line_fft_rows(slot) : 0;
+    return checked_multiply(2 * fft_rows, sizeof(Complex));
+}
+
+std::optional<LineAtom> find_varying_line(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                                        std::span<const Complex> iq, std::stop_token stop) {
+    const auto fft_rows = line_fft_rows(slot);
+    if (!fft_rows) return std::nullopt;
+    std::optional<ProjectionBands> bands;
+    try {
+        bands.emplace(config, slot, ProjectionBands::Policy::separable_varying);
+    } catch (const Error&) {
+        return std::nullopt;
+    }
+    const auto first = slot.quiet_first_sample - slot.first_sample;
+    const auto stop_row = slot.quiet_stop_sample - slot.first_sample;
+    const auto observed = iq.subspan(first, stop_row - first);
+    const auto fs = config.sample_rate_hz;
+    const auto search_row_count = std::min(observed.size(), fft_rows / 2);
+    const auto search = observed.subspan((observed.size() - search_row_count) / 2, search_row_count);
+    const auto retained_hz = [&](double frequency) {
+        return frequency >= bands->required.lower_hz && frequency <= bands->required.upper_hz &&
+            (!bands->use_exclusions || std::ranges::none_of(bands->excluded, [&](const auto& band) {
+                return band.lower_hz <= frequency && frequency <= band.upper_hz;
+            }));
+    };
+    std::vector<Complex> spectrum(fft_rows);
+    std::ranges::copy(search, spectrum.begin());
+    const modem::detail::search_fft::DoublePlan fft(fft_rows, stop);
+    modem::detail::search_fft::fft(std::span(spectrum), false, fft, stop);
+    const double fft_spacing = fs / fft_rows;
+    const auto radius = static_cast<std::int64_t>(std::min(fft_rows / 2 - 1,
+        static_cast<std::size_t>(std::ceil(bands->required.upper_hz / fft_spacing))));
+    double power = 0, frequency = 0;
+    for (auto bin = -radius; bin <= radius; ++bin) {
+        if (!(static_cast<std::uint64_t>(bin) & 4095)) check_cancelled(stop);
+        if (!retained_hz(bin * fft_spacing)) continue;
+        const auto index = static_cast<std::size_t>(bin < 0 ? bin + fft_rows : bin);
+        const auto candidate = std::norm(spectrum[index]);
+        if (candidate > power) {
+            power = candidate;
+            frequency = bin * fft_spacing;
+        }
+    }
+    // Reject ordinary noise peaks before the more precise search. This
+    // only selects which fixed nuisance model, if any, will be scored.
+    if (power <= search_row_count * config.noise_variance * receiver_operational_threshold())
+        return std::nullopt;
+    const auto likelihood_power = [&](double hz, std::span<const Complex> samples) {
+        const auto increment = std::polar(1., -tau * hz / fs);
+        auto phase = Complex{1};
+        Complex correlation{};
+        for (std::size_t i = 0; i < samples.size(); ++i) {
+            if (!(i % 4096)) {
+                check_cancelled(stop);
+                phase = std::polar(1., -tau * hz * i / fs);
+            }
+            correlation += samples[i] * phase;
+            phase *= increment;
+        }
+        return std::norm(correlation);
+    };
+    const double spacing = fs / (observed.size() * static_cast<double>(line_frequency_refinement));
+    const auto radius_exact = std::ceil(bands->required.upper_hz / spacing);
+    if (!std::isfinite(radius_exact) || radius_exact >= 0x1p60) return std::nullopt;
+    const auto public_radius = static_cast<std::int64_t>(radius_exact);
+    // Coarse-to-fine local coherent proposals on a predetermined grid.
+    // The normalization counts every public grid position, including
+    // unscored ones and those outside the separable band.
+    const auto step_exact = std::ceil(fft_spacing / spacing);
+    if (!std::isfinite(step_exact) || step_exact >= 0x1p60) return std::nullopt;
+    auto step = std::bit_ceil(static_cast<std::uint64_t>(step_exact));
+    auto center = static_cast<std::int64_t>(std::llround(frequency / (step * spacing))) * static_cast<std::int64_t>(step);
+    for (; step; step /= 2) {
+        auto best = center;
+        power = -1;
+        for (const auto offset : {-1, 0, 1}) {
+            const auto atom = center + offset * static_cast<std::int64_t>(step);
+            if (std::abs(atom) > public_radius || !retained_hz(atom * spacing)) continue;
+            const auto trial = likelihood_power(atom * spacing, step * spacing > fs / observed.size() / 4 ? search : observed);
+            if (trial > power) {
+                best = atom;
+                power = trial;
+            }
+        }
+        center = best;
+    }
+    if (!(power > 0)) return std::nullopt;
+    const auto variance = config.noise_variance;
+    const auto inverse_signal_to_noise = variance / observed.size();
+    const auto log_determinant = inverse_signal_to_noise < 1 ?
+        std::log1p(inverse_signal_to_noise) + std::log(static_cast<double>(observed.size())) - std::log(variance) :
+        std::log1p(1 / inverse_signal_to_noise);
+    // Unit variance proper complex line amplitude, independent of DATA
+    // in the orthogonal complement. Keep the selected line's public mass.
+    const auto log_weighted = (power / observed.size()) / variance / (1 + inverse_signal_to_noise) -
+        log_determinant - std::log1p(2 * public_radius);
+    if (!(log_weighted >= receiver_operational_threshold())) return std::nullopt;
+    return LineAtom{first, stop_row, center * spacing, log_weighted};
+}
+
+void score_varying_quiet(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                         std::span<const Complex> iq, ReceiverSlotScore& score, std::stop_token stop) {
+    if (!config.time_varying_channel || iq.size() != slot.stop_sample - slot.first_sample)
+        throw Error("Robust varying quiet requires its complete public observation");
+    std::optional<ProjectionBands> bands;
+    try {
+        bands.emplace(config, slot, ProjectionBands::Policy::separable_varying);
+    } catch (const Error&) {
+        score.varying_quiet_status = "varying_quiet_capture_band_unavailable";
+        return;
+    }
+    const BlockCalendar calendar(config, slot);
+    const auto quiet_first = slot.quiet_first_sample - slot.first_sample;
+    const auto quiet_stop = slot.quiet_stop_sample - slot.first_sample;
+    // The legacy calendar fixes the physical aperture. This extra test uses
+    // the same whole, disjoint blocks and only changes public frequency bins.
+    // Candidate scores, confidence and retained models never choose a bin.
+    for (const auto rows : calendar.lengths()) {
+        if (!rows || !projected_block_supported(rows, *bands)) continue;
+        Projection projection(rows, *bands, stop);
+        std::vector<Complex> projected(rows), scratch(DftPlan::scratch_samples(rows));
+        for (std::size_t segment_first = 0; segment_first < quiet_stop;) {
+            check_cancelled(stop);
+            const auto segment = calendar.segment_length(segment_first);
+            auto first = segment_first;
+            for (std::size_t block = 0; block < calendar.block_count(segment); ++block) {
+                const auto length = calendar.block_length(segment, block);
+                if (length == rows && quiet_first <= first && first + rows <= quiet_stop) {
+                    std::ranges::copy(iq.subspan(first, rows), projected.begin());
+                    projection.apply(projected, scratch, stop);
+                    score.varying_quiet_modes = checked_add(score.varying_quiet_modes, projection.modes());
+                    for (const auto value : std::span(projected).first(projection.modes()))
+                        score.varying_quiet_energy += std::norm(value) / config.noise_variance;
+                }
+                first += length;
+            }
+            segment_first += segment;
+        }
+    }
+    if (!score.varying_quiet_modes) {
+        score.varying_quiet_status = "varying_quiet_aperture_has_no_separable_data_modes";
+        return;
+    }
+    if (!std::isfinite(score.varying_quiet_energy))
+        throw Error("Robust varying quiet energy is nonfinite");
+    score.varying_quiet_threshold = quiet_noise_threshold(score.varying_quiet_modes);
+    score.varying_quiet_status = score.varying_quiet_energy <= score.varying_quiet_threshold ?
+        "scored_public_varying_quiet_aperture" : "energy_in_public_varying_quiet_aperture";
+}
+
+namespace {
+constexpr std::size_t maximum_drift_fft_rows = 262'144;
+// Per retained timing atom: at most four transform rows per slope (two
+// bits and two paths). Bound failure and noise slots as well as positives.
+constexpr std::size_t maximum_drift_fft_rows_per_atom = 2 * 1024 * 1024;
+constexpr std::size_t maximum_drift_timing_atoms = 8;
+constexpr std::size_t minimum_drift_segments = 8;
+constexpr std::int64_t maximum_drift_proposal_slope_radius = 128;
+constexpr std::int64_t maximum_drift_proposal_frequency_radius = 512;
+
+template<class T>
+struct DriftScratch {
+    std::array<std::vector<Complex>, 4> products;
+    std::vector<std::complex<T>> frequency;
+    std::vector<std::complex<T>> segment_spectrum;
+    std::vector<double> segment_power;
+    std::vector<double> segment_centers;
+    std::vector<std::int64_t> segment_offsets;
+    std::vector<Complex> raw;
+    std::vector<Complex> rendered;
+    std::vector<double> offsets;
+    std::vector<Complex> projected_columns;
+    std::vector<Complex> projection_scratch;
+};
+
+struct DriftPeak {
+    double rank = -infinity;
+    std::int64_t slope = 0, center = 0;
+};
+
+struct DriftStatistics {
+    std::array<Complex, 2> correlation{};
+    std::array<double, 2> diagonal{};
+    Complex off_diagonal{};
+};
+
+struct DriftProjection {
+    DriftProjection(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const DriftPlan& plan,
+                    std::span<const Complex> input, const LineAtom* line, std::stop_token stop)
+        : small_rows(input.size() / plan.projection_blocks), large_blocks(input.size() % plan.projection_blocks),
+          blocks(plan.projection_blocks), ranking(input.begin(), input.end()), observed(input.begin(), input.end()) {
+        const ProjectionBands bands(config, slot, ProjectionBands::Policy::separable_varying);
+        small.emplace(small_rows, bands, stop);
+        if (large_blocks) large.emplace(small_rows + 1, bands, stop);
+        std::vector<Complex> scratch(DftPlan::scratch_samples(max_rows()));
+        if (line) line_storage.resize(input.size());
+        for (std::size_t block = 0, first = 0; block < blocks; ++block) {
+            const auto& transform = at(block);
+            const auto rows = transform.rows();
+            const auto target = std::span(ranking).subspan(first, rows);
+            if (line) {
+                // Ranking can use the same fitted line's time-domain
+                // complement before the exact projected likelihood.
+                const auto begin = std::max(plan.first + first, line->first);
+                const auto end = std::min(plan.first + first + rows, line->stop);
+                if (begin < end) {
+                    auto overlap = target.subspan(begin - plan.first - first, end - begin);
+                    auto tone = std::span(line_storage).subspan(first, overlap.size());
+                    const auto norm = 1 / std::sqrt(static_cast<double>(overlap.size()));
+                    const auto increment = std::polar(1., tau * line->frequency_hz / config.sample_rate_hz);
+                    auto phase = Complex{norm};
+                    for (auto& value : tone) {
+                        value = phase;
+                        phase *= increment;
+                    }
+                    remove_line(overlap, tone);
+                }
+            }
+            transform.retain_time(target, scratch, stop);
+            transform.apply(std::span(observed).subspan(first, rows), scratch, stop);
+            if (line) {
+                const auto unit = project_line(*line, transform, plan.first + first, config.sample_rate_hz,
+                    std::span(line_storage).subspan(first, rows), scratch, stop);
+                if (!unit.empty()) remove_line(std::span(observed).subspan(first, rows), unit);
+                else std::ranges::fill(std::span(line_storage).subspan(first, rows), Complex{});
+            }
+            first += rows;
+        }
+    }
+
+    const Projection& at(std::size_t block) const { return block < large_blocks ? *large : *small; }
+    std::size_t max_rows() const { return small_rows + (large_blocks != 0); }
+
+    std::size_t small_rows, large_blocks, blocks;
+    std::optional<Projection> small, large;
+    std::vector<Complex> ranking, observed, line_storage;
+};
+
+constexpr std::size_t retained_drift_per_bit = 8;
+
+bool same_timing(const FineCoordinate& a, const FineCoordinate& b) {
+    return a.epoch_offset_seconds == b.epoch_offset_seconds && a.arrival_seconds == b.arrival_seconds &&
+           a.clock_ppm == b.clock_ppm;
+}
+
+std::size_t fft_bin(std::int64_t signed_bin, std::size_t fft_rows) {
+    return static_cast<std::size_t>(signed_bin < 0 ? signed_bin + static_cast<std::int64_t>(fft_rows) : signed_bin);
+}
+
+// Match a linear ridge through short coherent spectra. This ranking only
+// chooses exact slope atoms of the fixed full-slot likelihood below. Noise
+// maxima get no posterior mass credit for discarded alternatives.
+struct DriftProposals {
+    std::vector<std::int64_t> slopes;
+    double rank = 0;
+};
+
+template<class T, class Fft>
+DriftProposals drift_slope_proposals(
+        DriftScratch<T>& scratch, const DriftPlan& plan, const Fft& fft, double fs, double normalized, std::size_t taps,
+        const std::array<std::array<double, 2>, 2>& energy, std::size_t drift_segments,
+        std::size_t slope_budget, std::stop_token stop) {
+    DriftProposals proposals;
+    auto& result = proposals.slopes;
+    result.reserve(slope_budget);
+    const auto append = [&](std::int64_t slope) {
+        if (result.size() < slope_budget && std::abs(slope) <= plan.slope_radius &&
+            std::ranges::find(result, slope) == result.end()) result.push_back(slope);
+    };
+    append(0);
+    if (2 * plan.slope_radius + 1 <= static_cast<std::int64_t>(slope_budget)) {
+        for (auto slope = -plan.slope_radius; slope <= plan.slope_radius; ++slope) append(slope);
+        return proposals;
+    }
+
+    const auto fft_rows = std::bit_ceil(2 * ((plan.rows + drift_segments - 1) / drift_segments));
+    const double frequency_step = fs / fft_rows;
+    const auto& products = scratch.products;
+    const auto columns = 2 * taps;
+    scratch.segment_spectrum.resize(fft_rows);
+    scratch.segment_power.assign(2 * drift_segments * fft_rows, 0.);
+    auto& centers = scratch.segment_centers;
+    centers.resize(drift_segments);
+    for (std::size_t segment = 0; segment < drift_segments; ++segment) {
+        const auto first = plan.rows * segment / drift_segments;
+        const auto stop_row = plan.rows * (segment + 1) / drift_segments;
+        centers[segment] = (plan.first + (plan.sample_stride - 1) * .5) / (fs * plan.sample_stride) +
+            (first + stop_row - 1) * .5 / fs - plan.slope_reference_seconds;
+        for (std::size_t column = 0; column < columns; ++column) {
+            auto& spectrum = scratch.segment_spectrum;
+            std::fill(spectrum.begin(), spectrum.end(), std::complex<T>{});
+            for (auto i = first; i < stop_row; ++i)
+                spectrum[i - first] = static_cast<std::complex<T>>(products[column][i] * normalized);
+            modem::detail::search_fft::fft(spectrum, false, fft, stop);
+            const auto bit = column / taps;
+            const auto tap = column % taps;
+            if (energy[bit][tap] <= 0) continue;
+            auto* power = scratch.segment_power.data() + (bit * drift_segments + segment) * fft_rows;
+            for (std::size_t bin = 0; bin < fft_rows; ++bin)
+                power[bin] += std::norm(static_cast<Complex>(spectrum[bin])) / energy[bit][tap];
+        }
+    }
+    const auto nominal_slope_stride = std::max<std::int64_t>(1, std::llround(frequency_step /
+        (plan.slope_step * std::max(std::abs(centers.front()), std::abs(centers[drift_segments - 1])))));
+    const auto slope_stride = std::max(nominal_slope_stride,
+        1 + (plan.slope_radius - 1) / maximum_drift_proposal_slope_radius);
+    const auto bin_radius = std::min(static_cast<std::int64_t>(fft_rows / 2 - 1),
+        static_cast<std::int64_t>(std::ceil(plan.frequency_radius * plan.frequency_step / frequency_step)));
+    const auto bin_stride = std::max<std::int64_t>(1,
+        1 + (bin_radius - 1) / maximum_drift_proposal_frequency_radius);
+    struct Ridge { double score = -infinity; std::int64_t slope = 0, center = 0; };
+    constexpr std::size_t retained = 4;
+    std::array<std::array<Ridge, retained>, 2> best{};
+    auto consider = [&](std::int64_t slope) {
+        check_cancelled(stop);
+        auto& offset = scratch.segment_offsets;
+        offset.resize(drift_segments);
+        for (std::size_t s = 0; s < drift_segments; ++s)
+            offset[s] = std::llround(slope * plan.slope_step * centers[s] / frequency_step);
+        std::array<Ridge, 2> score{};
+        for (auto center = -bin_radius; center <= bin_radius; center += bin_stride) {
+            std::array<double, 2> evidence{};
+            for (std::size_t segment = 0; segment < drift_segments; ++segment) {
+                const auto signed_bin = center + offset[segment];
+                if (std::abs(signed_bin) >= static_cast<std::int64_t>(fft_rows / 2)) continue;
+                const auto bin = fft_bin(signed_bin, fft_rows);
+                for (std::size_t bit = 0; bit < 2; ++bit)
+                    evidence[bit] += scratch.segment_power[(bit * drift_segments + segment) * fft_rows + bin];
+            }
+            for (std::size_t bit = 0; bit < 2; ++bit)
+                if (evidence[bit] > score[bit].score) score[bit] = {evidence[bit], slope, center};
+        }
+        for (std::size_t bit = 0; bit < 2; ++bit) {
+            auto& frontier = best[bit];
+            const auto where = std::ranges::find_if(frontier, [&](const auto& peak) {
+                return score[bit].score > peak.score;
+            });
+            if (where == frontier.end()) continue;
+            std::move_backward(where, frontier.end() - 1, frontier.end());
+            *where = score[bit];
+        }
+    };
+    consider(-plan.slope_radius);
+    for (auto slope = -(plan.slope_radius / slope_stride) * slope_stride;
+         slope <= plan.slope_radius; slope += slope_stride) {
+        if (slope != -plan.slope_radius && slope != plan.slope_radius) consider(slope);
+    }
+    consider(plan.slope_radius);
+    // Adjacent coarse slope hypotheses can differ by many full-aperture
+    // bins. Refine the best ridges on the stored spectra before spending
+    // an exact dechirp FFT on a nominal neighbor.
+    const auto coarse_best = best;
+    const auto interpolate_power = [&](std::size_t bit, std::size_t segment, double bin) {
+        const auto low = static_cast<std::int64_t>(std::floor(bin));
+        if (low <= -static_cast<std::int64_t>(fft_rows / 2) || low + 1 >= static_cast<std::int64_t>(fft_rows / 2))
+            return 0.;
+        const auto* row = scratch.segment_power.data() + (bit * drift_segments + segment) * fft_rows;
+        return std::lerp(row[fft_bin(low, fft_rows)], row[fft_bin(low + 1, fft_rows)], bin - low);
+    };
+    for (std::size_t bit = 0; plan.slow_ridge_segments && bit < 2; ++bit) {
+        for (auto& peak : best[bit]) peak = {};
+        for (const auto& seed : coarse_best[bit]) {
+            if (!std::isfinite(seed.score)) continue;
+            auto local = seed;
+            auto consider_local = [&](std::int64_t slope, std::int64_t center) {
+                if (std::abs(slope) > plan.slope_radius || std::abs(center) > bin_radius) return;
+                double score = 0;
+                for (std::size_t segment = 0; segment < drift_segments; ++segment)
+                    score += interpolate_power(bit, segment, center + slope * plan.slope_step * centers[segment] / frequency_step);
+                if (score > local.score) local = {score, slope, center};
+            };
+            local.score = -infinity;
+            consider_local(seed.slope, seed.center);
+            auto slope_step = std::max<std::int64_t>(1, slope_stride / 2);
+            auto center_step = std::max<std::int64_t>(1, bin_stride / 2);
+            for (;;) {
+                const auto anchor = local;
+                for (const auto ds : {-slope_step, std::int64_t{0}, slope_step})
+                    for (const auto df : {-center_step, std::int64_t{0}, center_step})
+                        consider_local(anchor.slope + ds, anchor.center + df);
+                if (slope_step == 1 && center_step == 1) break;
+                slope_step = std::max<std::int64_t>(1, slope_step / 2);
+                center_step = std::max<std::int64_t>(1, center_step / 2);
+            }
+            auto& frontier = best[bit];
+            if (std::ranges::any_of(frontier, [&](const auto& peak) {
+                return std::isfinite(peak.score) && local.slope == peak.slope;
+            })) continue;
+            const auto where = std::ranges::find_if(frontier, [&](const auto& peak) { return local.score > peak.score; });
+            if (where != frontier.end()) {
+                std::move_backward(where, frontier.end() - 1, frontier.end());
+                *where = local;
+            }
+        }
+    }
+    for (const auto& peak : {best[0][0], best[1][0]})
+        if (std::isfinite(peak.score)) append(peak.slope);
+    for (std::int64_t delta = 1; result.size() < slope_budget && delta <= slope_stride; ++delta) {
+        const bool wide = plan.slow_ridge_segments && slope_stride > 16;
+        const auto ranks = wide ? 1U : retained;
+        const auto offset = wide ? delta * std::max<std::int64_t>(1, slope_stride / 12) : delta;
+        for (std::size_t rank = 0; rank < ranks && result.size() < slope_budget; ++rank)
+            for (const auto& peak : {best[0][rank], best[1][rank]})
+                if (std::isfinite(peak.score)) {
+                    append(peak.slope - offset);
+                    append(peak.slope + offset);
+                }
+    }
+    proposals.rank = std::max(best[0][0].score, best[1][0].score);
+    return proposals;
+}
+} // namespace
+
+DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers,
+                     bool project_line_atom) {
+    if (!config.time_varying_channel || !(config.time_varying_common_doppler_hz > 0)) return {};
+    const auto fs = config.sample_rate_hz;
+    const auto source_geometry = geometry(slot.format);
+    const double duration = source_geometry.source_samples / effective_sample_rate(slot.format);
+    const double clock = config.clock_bound_ppm * 1e-6;
+    const auto first = slot.window_capture_lead_seconds + slot.arrival_lower_seconds +
+                       slot.source_start_seconds / (1 + clock);
+    const auto stop = slot.window_capture_lead_seconds + slot.arrival_upper_seconds +
+        (slot.source_start_seconds + duration) / (1 - clock) + config.spread_delay_seconds;
+    const auto full_rows = static_cast<std::size_t>(slot.stop_sample - slot.first_sample);
+    const auto start_row = static_cast<std::size_t>(std::clamp(std::floor(first * fs), 0.L,
+                                                              static_cast<long double>(full_rows)));
+    const auto stop_row = static_cast<std::size_t>(std::clamp(std::ceil(stop * fs), 0.L,
+                                                             static_cast<long double>(full_rows)));
+    if (stop_row <= start_row || stop_row - start_row < minimum_drift_segments)
+        return {.status = "drift_public_aperture_too_short"};
+    DriftPlan result;
+    result.first = start_row;
+    result.raw_rows = stop_row - start_row;
+    result.sample_stride = 1 + (result.raw_rows - 1) / (maximum_drift_fft_rows / 2);
+    const auto center_bound = config.frequency_bound_hz + config.time_varying_atmospheric_hz;
+    const auto edge_bound = center_bound + config.time_varying_common_doppler_hz *
+        ((stop - first) / duration);
+    // A box sum is a proposal accelerator only. At the public residual
+    // edge its coherent gain stays above sinc(pi/4) even in the wide
+    // two-scale bank. Exact likelihoods still use every raw sample.
+    const auto wide_frequency = wide_varying_frequency_support(config, duration);
+    if (result.sample_stride > 1) {
+        const auto largest_stride = std::min<double>(result.raw_rows / 2048,
+            fs / ((wide_frequency ? 4 : 8) * edge_bound));
+        if (largest_stride < result.sample_stride)
+            return {.status = "drift_public_bandwidth_exceeds_reduced_proposal_limit"};
+        result.sample_stride = static_cast<std::size_t>(largest_stride);
+    }
+    result.rows = 1 + (result.raw_rows - 1) / result.sample_stride;
+    const auto proposal_rate = fs / result.sample_stride;
+    result.project_data = config.helper_enabled || project_line_atom;
+    const auto render_rows = std::min(maximum_basis_rows, result.raw_rows);
+    std::size_t projection_rows = 0;
+    if (result.project_data) {
+        result.projection_blocks = result.sample_stride == 1 && !project_line_atom ?
+            1 : 1 + (result.raw_rows - 1) / std::min(render_rows, round_rows(.25, fs));
+        const auto min_rows = result.raw_rows / result.projection_blocks;
+        projection_rows = min_rows + (result.raw_rows % result.projection_blocks != 0);
+        try {
+            const ProjectionBands bands(config, slot, ProjectionBands::Policy::separable_varying);
+            if (!projected_block_supported(min_rows, bands) || !projected_block_supported(projection_rows, bands))
+                return {.status = "drift_data_and_helper_bands_not_separable"};
+        } catch (const Error&) {
+            return {.status = "drift_data_and_helper_bands_not_separable"};
+        }
+    }
+    result.nfft = std::bit_ceil(2 * result.rows);
+    result.frequency_step = proposal_rate / result.nfft;
+    result.frequency_radius = static_cast<std::int64_t>(std::ceil(std::min(fs * .499,
+        config.frequency_bound_hz + config.time_varying_atmospheric_hz) / result.frequency_step));
+    result.frequency_radius = std::min(result.frequency_radius, static_cast<std::int64_t>(result.nfft / 2 - 1));
+    const auto public_radius = std::ceil(2 * config.time_varying_common_doppler_hz * duration);
+    if (!std::isfinite(public_radius) || public_radius >= (1ULL << 40))
+        return {.status = "drift_public_slope_bound_overflow"};
+    result.slope_radius = static_cast<std::int64_t>(public_radius);
+    result.slope_budget = std::min<std::size_t>(64, maximum_drift_fft_rows_per_atom / result.nfft);
+    // For a centered quadratic, half-step mismatch at a waveform edge
+    // is at most pi/8 radians at this nominal slope spacing.
+    result.slope_step = 1 / (duration * duration);
+    result.slope_reference_seconds = first + (stop - first) * .5L;
+    // Keep within-segment quadratic phase departure bounded as the
+    // public aperture grows. A single fixed eight-block transform loses
+    // coherence on long windows even for moderate edge frequencies.
+    const auto segments = [&](double radius) {
+        return std::max(minimum_drift_segments, static_cast<std::size_t>(std::min<double>(result.rows,
+            std::ceil(std::sqrt(radius * result.slope_step) * (stop - first)))));
+    };
+    result.ridge_segments = segments(result.slope_radius);
+    if (result.slope_budget >= 8 && wide_frequency) {
+        const auto slow_segments = segments(result.slope_radius / 8.);
+        if (slow_segments < result.ridge_segments) result.slow_ridge_segments = slow_segments;
+    }
+    result.status = 2 * result.slope_radius + 1 > static_cast<std::int64_t>(result.slope_budget) ?
+        "linear_drift_ridge_proposals" : "linear_drift";
+    const auto active = std::min<std::size_t>(workers, maximum_drift_timing_atoms);
+    const auto tile = std::max(render_rows, projection_rows);
+    const auto segment_extent = [&](std::size_t count) {
+        return count ? std::bit_ceil(2 * ((result.rows + count - 1) / count)) : std::size_t{0};
+    };
+    const auto fast_fft = segment_extent(result.ridge_segments);
+    const auto slow_fft = segment_extent(result.slow_ridge_segments);
+    const auto segment_fft = std::max(fast_fft, slow_fft);
+    const auto segment_power_rows = std::max(result.ridge_segments * fast_fft, result.slow_ridge_segments * slow_fft);
+    const auto fft_value_bytes = config.native_coarse_precision == NativeCoarsePrecision::fp64 ?
+        sizeof(Complex) : sizeof(std::complex<float>);
+    auto bytes = checked_multiply(result.nfft + fast_fft + slow_fft, fft_value_bytes);
+    const auto per_lane = checked_add(
+        checked_multiply(4 * result.rows + 4 * (tile + render_rows), sizeof(Complex)),
+        checked_add(checked_multiply(4 * result.nfft + segment_fft, fft_value_bytes),
+                    checked_multiply(tile + 2 * segment_power_rows, sizeof(double))));
+    const auto ridge_metadata = checked_multiply(result.ridge_segments, sizeof(double) + sizeof(std::int64_t));
+    bytes = checked_add(bytes, checked_multiply(active, checked_add(per_lane, ridge_metadata)));
+    bytes = checked_add(bytes, MappedBasis::workspace_bytes(config, slot, render_rows, static_cast<unsigned>(active)));
+    if (result.project_data) {
+        const auto scratch = DftPlan::scratch_samples(projection_rows);
+        bytes = checked_add(bytes, checked_multiply(2, DftPlan::workspace_bytes(projection_rows)));
+        bytes = checked_add(bytes, checked_multiply(2 * projection_rows, sizeof(std::size_t)));
+        const auto observation = checked_add(checked_multiply(2, result.raw_rows), scratch);
+        bytes = checked_add(bytes, checked_multiply(observation, sizeof(Complex)));
+        if (project_line_atom) bytes = checked_add(bytes, checked_multiply(result.raw_rows, sizeof(Complex)));
+        // Each admitted lane projects two template columns, reused for
+        // each retained bit/hypothesis. No candidate-wide spectra bank.
+        bytes = checked_add(bytes, checked_multiply(active,
+            checked_multiply(2 * projection_rows + scratch, sizeof(Complex))));
+    }
+    result.workspace_bytes = checked_add(bytes, 64 * 1024);
+    return result;
+}
+
+namespace {
+template<class T, class Fft>
+void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
+                       const DriftPlan& plan, std::span<const Complex> iq,
+                       std::span<const FineCoordinate> selected, std::span<const FineCoordinate> epoch_timing,
+                       unsigned workers,
+                       ReceiverSlotScore& score, std::stop_token stop, ReceiverExecutor& executor, const LineAtom* line) {
+    if (!plan.workspace_bytes || selected.empty() || selected.size() > maximum_varying_coordinates ||
+        iq.size() != slot.stop_sample - slot.first_sample)
+        throw Error("Robust drift scorer requires bounded public timing atoms and observation");
+    const auto began = FineClock::now();
+    std::vector<FineCoordinate> timing;
+    timing.reserve(selected.size() + epoch_timing.size());
+    const auto append = [&](const FineCoordinate& coordinate) {
+        if (std::none_of(timing.begin(), timing.end(), [&](const auto& other) { return same_timing(coordinate, other); }))
+            timing.push_back(coordinate);
+    };
+    for (const auto& coordinate : selected) append(coordinate);
+    for (const auto& coordinate : epoch_timing) append(coordinate);
+    const auto active = std::min({static_cast<std::size_t>(workers), timing.size(), maximum_drift_timing_atoms});
+    const auto tile = std::min(maximum_basis_rows, plan.raw_rows);
+    const auto count = static_cast<std::size_t>(2 * plan.frequency_radius + 1);
+    const auto public_slopes = 2 * plan.slope_radius + 1;
+    const std::array<Tap, 2> paths{{{0, 0}, {config.spread_delay_seconds, config.spread_doppler_hz}}};
+    const auto taps = (paths[1].delay_seconds || paths[1].doppler_hz) ? 2U : 1U;
+    const double variance = config.noise_variance;
+    const auto input = iq.subspan(plan.first, plan.raw_rows);
+    std::optional<DriftProjection> projection;
+    if (plan.project_data) projection.emplace(config, slot, plan, input, line, stop);
+    const auto ranking_observation = projection ? std::span<const Complex>(projection->ranking) : input;
+    MappedBasis basis(config, slot, key, tile, static_cast<unsigned>(active));
+    const Fft fft(plan.nfft, stop);
+    const auto segment_rows = std::bit_ceil(2 * ((plan.rows + plan.ridge_segments - 1) / plan.ridge_segments));
+    const Fft segment_fft(segment_rows, stop);
+    std::optional<Fft> slow_fft;
+    if (plan.slow_ridge_segments)
+        slow_fft.emplace(std::bit_ceil(2 * ((plan.rows + plan.slow_ridge_segments - 1) / plan.slow_ridge_segments)), stop);
+    std::vector<DriftScratch<T>> scratch(active);
+    std::vector<std::array<double, 2>> evidence(timing.size(), {-infinity, -infinity});
+    std::vector<std::size_t> scored_slopes(timing.size());
+    std::vector<double> ranks(timing.size());
+    std::vector<std::size_t> survivors(timing.size());
+    std::iota(survivors.begin(), survivors.end(), 0);
+    const auto evaluate = [&](unsigned lane, std::size_t index, bool rank_only, std::stop_token leaf_stop) {
+            auto& own = scratch[lane];
+            for (auto& product : std::span(own.products).first(2 * taps)) product.assign(plan.rows, {});
+            own.frequency.resize(4 * plan.nfft);
+            own.raw.resize(2 * taps * tile);
+            own.offsets.resize(tile);
+            std::iota(own.offsets.begin(), own.offsets.end(), 0.);
+            const auto& coordinate = timing[index];
+            const double scale = 1 + coordinate.clock_ppm * 1e-6;
+            const auto start = slot.window_capture_lead_seconds + coordinate.arrival_seconds +
+                               slot.source_start_seconds / scale;
+            const MappedBasisRow row{coordinate.epoch_offset_seconds, static_cast<double>(start),
+                                     -config.data_if_hz * (scale - 1), coordinate.clock_ppm};
+            std::array<std::array<double, 2>, 2> energy{};
+            std::array<Complex, 2> cross{};
+            for (std::size_t first = 0; first < plan.raw_rows;) {
+                const auto rows = std::min(tile, plan.raw_rows - first);
+                auto rendered = std::span(own.raw).first(2 * taps * rows);
+                basis.render_pair(row, std::span(paths).first(taps), plan.first + first,
+                                  std::span(own.offsets).first(rows), rendered, leaf_stop);
+                for (std::size_t i = 0; i < rows; ++i) {
+                    const auto observation = ranking_observation[first + i];
+                    for (std::size_t bit = 0; bit < 2; ++bit) {
+                        const auto offset = bit * taps;
+                        const auto direct = rendered[offset * rows + i];
+                        energy[bit][0] += std::norm(direct);
+                        const auto store = [&](std::size_t path, Complex value) {
+                            own.products[offset + path][(first + i) / plan.sample_stride] +=
+                                observation * std::conj(value);
+                        };
+                        store(0, direct);
+                        if (taps == 2) {
+                            const auto echo = rendered[(offset + 1) * rows + i];
+                            energy[bit][1] += std::norm(echo);
+                            cross[bit] += std::conj(direct) * echo;
+                            store(1, echo);
+                        }
+                    }
+                }
+                first += rows;
+            }
+            double maximum_product = 0;
+            for (const auto& product : std::span(own.products).first(2 * taps))
+                for (const auto value : product)
+                    maximum_product = std::max({maximum_product, std::abs(value.real()), std::abs(value.imag())});
+            const std::array<double, 3> precision{static_cast<double>(taps), 16. * taps, 256. * taps};
+            const auto exponent = maximum_product ? std::clamp(std::ilogb(maximum_product), -1022, 1023) : 0;
+            const auto normalized = std::scalbn(1., -exponent);
+            const auto inverse_variance = 1 / variance;
+            const auto projected_rate = config.sample_rate_hz / plan.sample_stride;
+            // Use the same bounded exact slope budget. A small fast
+            // frontier remains even where the slower ridge is more
+            // sensitive. No data-selected slope gets extra prior mass.
+            const auto fast_budget = slow_fft ? std::max<std::size_t>(3, plan.slope_budget / 4) : plan.slope_budget;
+            auto slopes = drift_slope_proposals(own, plan, segment_fft, projected_rate, normalized, taps,
+                                                energy, plan.ridge_segments, fast_budget, leaf_stop);
+            if (slow_fft) {
+                const auto slow = drift_slope_proposals(own, plan, *slow_fft, projected_rate, normalized, taps,
+                    energy, plan.slow_ridge_segments, plan.slope_budget - fast_budget + 1, leaf_stop);
+                slopes.rank = std::max(slopes.rank, slow.rank);
+                for (const auto slope : slow.slopes)
+                    if (std::ranges::find(slopes.slopes, slope) == slopes.slopes.end())
+                        slopes.slopes.push_back(slope);
+            }
+            if (rank_only) {
+                // All atoms use the same physical variance. Undo scaling to
+                // make matched-product ranks comparable between atoms.
+                ranks[index] = std::scalbn(slopes.rank, 2 * exponent);
+                return;
+            }
+            std::array<std::array<DriftPeak, retained_drift_per_bit>, 2> peaks{};
+            scored_slopes[index] = slopes.slopes.size();
+            for (const auto slope : slopes.slopes) {
+                check_cancelled(leaf_stop);
+                const double rate = slope * plan.slope_step;
+                const double delta = plan.sample_stride / config.sample_rate_hz;
+                const double first_t = (plan.first + (plan.sample_stride - 1) * .5) /
+                    config.sample_rate_hz - plan.slope_reference_seconds;
+                const auto curve = std::polar(1., -std::numbers::pi * rate * delta * delta * 2);
+                Complex phase, step;
+                for (std::size_t i = 0; i < plan.rows; ++i) {
+                    if (!(i % 256)) {
+                        check_cancelled(leaf_stop);
+                        const double t = first_t + i * delta;
+                        phase = std::polar(1., -std::numbers::pi * rate * t * t);
+                        step = std::polar(1., -std::numbers::pi * rate * delta * (2 * t + delta));
+                    }
+                    const auto correction = phase * normalized;
+                    for (std::size_t column = 0; column < 2 * taps; ++column)
+                        own.frequency[column * plan.nfft + i] =
+                            static_cast<std::complex<T>>(own.products[column][i] * correction);
+                    phase *= step;
+                    step *= curve;
+                }
+                for (std::size_t column = 0; column < 2 * taps; ++column) {
+                    auto values = std::span(own.frequency).subspan(column * plan.nfft, plan.nfft);
+                    std::fill(values.begin() + static_cast<std::ptrdiff_t>(plan.rows), values.end(), std::complex<T>{});
+                    modem::detail::search_fft::fft(values, false, fft, leaf_stop);
+                }
+                for (auto bin = -plan.frequency_radius; bin <= plan.frequency_radius; ++bin) {
+                    if (!(static_cast<std::uint64_t>(bin) & 4095U)) check_cancelled(leaf_stop);
+                    const auto offset = fft_bin(bin, plan.nfft);
+                    for (std::size_t bit = 0; bit < 2; ++bit) {
+                        const auto column = bit * taps;
+                        const auto r0 = static_cast<Complex>(own.frequency[column * plan.nfft + offset]);
+                        const auto r1 = taps == 2 ?
+                            static_cast<Complex>(own.frequency[(column + 1) * plan.nfft + offset]) : Complex{};
+                        auto& frontier = peaks[bit];
+                        const auto rank = std::norm(r0) + std::norm(r1);
+                        const auto where = std::ranges::find_if(frontier, [&](const DriftPeak& peak) {
+                            return rank > peak.rank;
+                        });
+                        if (where != frontier.end()) {
+                            std::move_backward(where, frontier.end() - 1, frontier.end());
+                            *where = {rank, slope, bin};
+                        }
+                    }
+                }
+            }
+            std::array<std::array<DriftStatistics, retained_drift_per_bit>, 2> statistics{};
+            const auto with_phase = [&](const DriftPeak& peak, std::size_t first, std::size_t rows,
+                                        double direction, const auto& accumulate) {
+                const auto delta = 1 / config.sample_rate_hz;
+                const auto frequency = direction * peak.center * plan.frequency_step;
+                const auto rate = direction * peak.slope * plan.slope_step;
+                const auto first_time = (plan.first + first) * delta - plan.slope_reference_seconds;
+                const auto curve = std::polar(1., tau * rate * delta * delta);
+                Complex phase, step;
+                for (std::size_t i = 0; i < rows; ++i) {
+                    if (!(i % 256)) {
+                        check_cancelled(leaf_stop);
+                        const auto t = first_time + i * delta;
+                        phase = std::polar(1., tau * (frequency * t + .5 * rate * t * t));
+                        step = std::polar(1., tau * delta * (frequency + rate * (t + .5 * delta)));
+                    }
+                    accumulate(i, phase);
+                    phase *= step;
+                    step *= curve;
+                }
+            };
+            if (!projection && plan.sample_stride == 1) {
+                // The unreduced proposal products are already exact FP64
+                // sufficient statistics apart from the carrier phase.
+                for (std::size_t bit = 0; bit < 2; ++bit)
+                    for (std::size_t atom = 0; atom < peaks[bit].size(); ++atom) {
+                        const auto& peak = peaks[bit][atom];
+                        if (!std::isfinite(peak.rank)) continue;
+                        auto& stats = statistics[bit][atom];
+                        with_phase(peak, 0, plan.raw_rows, -1., [&](std::size_t i, Complex phase) {
+                            for (std::size_t path = 0; path < taps; ++path)
+                                stats.correlation[path] += own.products[bit * taps + path][i] * phase;
+                        });
+                    }
+            } else {
+                // Every retained atom shares the same raw render. For a long
+                // aperture, never retain a raw template for every atom.
+                const auto blocks = projection ? projection->blocks : 1 + (plan.raw_rows - 1) / tile;
+                const auto max_rows = projection ? projection->max_rows() : tile;
+                own.rendered.resize(2 * taps * max_rows);
+                if (projection) {
+                    own.projected_columns.resize(taps * max_rows);
+                    own.projection_scratch.resize(DftPlan::scratch_samples(max_rows));
+                }
+                for (std::size_t block = 0, first = 0; block < blocks; ++block) {
+                    const auto* transform = projection ? &projection->at(block) : nullptr;
+                    const auto rows = transform ? transform->rows() : std::min(tile, plan.raw_rows - first);
+                    for (std::size_t offset = 0; offset < rows; offset += tile) {
+                        const auto count = std::min(tile, rows - offset);
+                        const auto rendered = std::span(own.raw).first(2 * taps * count);
+                        basis.render_pair(row, std::span(paths).first(taps), plan.first + first + offset,
+                                          std::span(own.offsets).first(count), rendered, leaf_stop);
+                        for (std::size_t column = 0; column < 2 * taps; ++column)
+                            std::ranges::copy(rendered.subspan(column * count, count),
+                                own.rendered.begin() + static_cast<std::ptrdiff_t>(column * rows + offset));
+                    }
+                    for (std::size_t bit = 0; bit < 2; ++bit)
+                        for (std::size_t atom = 0; atom < peaks[bit].size(); ++atom) {
+                            const auto& peak = peaks[bit][atom];
+                            if (!std::isfinite(peak.rank)) continue;
+                            auto& stats = statistics[bit][atom];
+                            const auto columns = std::span(own.rendered).subspan(bit * taps * rows, taps * rows);
+                            if (!transform) {
+                                with_phase(peak, first, rows, -1., [&](std::size_t i, Complex phase) {
+                                    const auto observation = input[first + i] * phase;
+                                    for (std::size_t path = 0; path < taps; ++path)
+                                        stats.correlation[path] += std::conj(columns[path * rows + i]) * observation;
+                                });
+                                continue;
+                            }
+                            with_phase(peak, first, rows, 1., [&](std::size_t i, Complex phase) {
+                                for (std::size_t path = 0; path < taps; ++path)
+                                    own.projected_columns[path * rows + i] = columns[path * rows + i] * phase;
+                            });
+                            for (std::size_t path = 0; path < taps; ++path) {
+                                auto column = std::span(own.projected_columns).subspan(path * rows, rows);
+                                transform->apply(column, own.projection_scratch, leaf_stop);
+                                if (line) remove_line(column, std::span(projection->line_storage).subspan(first, transform->modes()));
+                                for (std::size_t i = 0; i < transform->modes(); ++i) {
+                                    stats.correlation[path] += std::conj(column[i]) * projection->observed[first + i];
+                                    stats.diagonal[path] += std::norm(column[i]);
+                                    if (path == 1)
+                                        stats.off_diagonal += std::conj(own.projected_columns[i]) * column[i];
+                                }
+                            }
+                        }
+                    first += rows;
+                }
+            }
+            for (std::size_t bit = 0; bit < 2; ++bit)
+                for (std::size_t atom = 0; atom < peaks[bit].size(); ++atom) {
+                    if (!std::isfinite(peaks[bit][atom].rank)) continue;
+                    const auto& stats = statistics[bit][atom];
+                    const auto& diagonal = projection ? stats.diagonal : energy[bit];
+                    const auto off_diagonal = projection ? stats.off_diagonal : cross[bit];
+                    for (const auto p : precision) {
+                        const DriftGram gram(diagonal[0], diagonal[1], off_diagonal, p, variance);
+                        const auto scale = 1. / (std::sqrt(variance) * std::sqrt(p));
+                        const auto value = gram.score(stats.correlation[0] * scale, stats.correlation[1] * scale,
+                                                      inverse_variance);
+                        if (!std::isfinite(value)) throw Error("Robust projected drift evidence is nonfinite");
+                        evidence[index][bit] = log_add(evidence[index][bit], value);
+                    }
+                }
+    };
+    if (survivors.size() > maximum_drift_timing_atoms) {
+        executor.parallel(slot.index, timing.size(), static_cast<unsigned>(active), stop,
+            [&](unsigned lane, std::size_t index, std::stop_token leaf_stop) {
+                evaluate(lane, index, true, leaf_stop);
+            });
+        std::partial_sort(survivors.begin(), survivors.begin() + maximum_drift_timing_atoms, survivors.end(),
+            [&](std::size_t a, std::size_t b) { return ranks[a] != ranks[b] ? ranks[a] > ranks[b] : a < b; });
+        survivors.resize(maximum_drift_timing_atoms);
+        std::ranges::sort(survivors);
+    }
+    executor.parallel(slot.index, survivors.size(), static_cast<unsigned>(active), stop,
+        [&](unsigned lane, std::size_t index, std::stop_token leaf_stop) {
+            evaluate(lane, survivors[index], false, leaf_stop);
+        });
+    const auto log_mass = std::log(static_cast<double>(count)) + std::log(static_cast<double>(public_slopes)) +
+        std::log(3.) + std::log(static_cast<double>(survivors.size()));
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        double total = -infinity;
+        for (const auto& atom : evidence) total = log_add(total, atom[bit]);
+        score.drift_bit_evidence[bit] = total - log_mass;
+    }
+    score.drift_timing_atoms = survivors.size();
+    score.drift_slopes = std::accumulate(scored_slopes.begin(), scored_slopes.end(), std::size_t{});
+    score.drift_frequency_bins = count;
+    score.drift_observation_rows = plan.raw_rows;
+    score.drift_proposal_stride = plan.sample_stride;
+    score.drift_seconds = seconds_since(began);
+}
+} // namespace
+
+void score_drift_fine(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
+                       const DriftPlan& plan, std::span<const Complex> iq,
+                       std::span<const FineCoordinate> selected, std::span<const FineCoordinate> epoch_timing,
+                       unsigned workers, ReceiverSlotScore& score, std::stop_token stop,
+                       ReceiverExecutor& executor, const LineAtom* line) {
+    namespace fft = modem::detail::search_fft;
+    if (config.native_coarse_precision == NativeCoarsePrecision::fp64)
+        score_drift_impl<double, fft::DoublePlan>(config, slot, key, plan, iq, selected, epoch_timing,
+                                                workers, score, stop, executor, line);
+    else
+        score_drift_impl<float, fft::FloatPlan>(config, slot, key, plan, iq, selected, epoch_timing,
+                                               workers, score, stop, executor, line);
 }
 
 } // namespace datapump::triad::v3::receiver_detail

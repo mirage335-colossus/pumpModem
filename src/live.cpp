@@ -225,10 +225,13 @@ PatternStep pattern_step(const StreamSlotReceipt& receipt) {
     row.bit_evidence = s.bit_evidence;
     row.adaptive_bit_evidence = s.adaptive_bit_evidence;
     row.combined_bit_evidence = s.combined_bit_evidence;
+    row.operational_bit_evidence = s.operational_bit_evidence;
     row.quiet_energy = s.quiet_energy;
     row.quiet_threshold = s.quiet_threshold;
     row.operational_log_e = s.operational_log_e;
     row.operational_threshold = s.operational_threshold;
+    row.operational_bit_log_separation = s.operational_bit_log_separation;
+    row.operational_minimum_bit_log_separation = s.operational_minimum_bit_log_separation;
     row.helper_seconds = s.helper_seconds;
     row.helper_overlapped = s.helper_overlapped;
     row.coarse_seconds = s.coarse_seconds;
@@ -238,6 +241,8 @@ PatternStep pattern_step(const StreamSlotReceipt& receipt) {
     row.workers = receipt.workers;
     row.evidence_complete = s.complete && s.all_valid && s.zero_h0_verified && s.fine_candidates > 0;
     row.helper_status = s.helper_status;
+    row.varying_status = s.varying_status;
+    row.drift_status = s.drift_status;
     row.reason = s.reason;
     return row;
 }

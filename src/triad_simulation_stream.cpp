@@ -81,9 +81,12 @@ void validate_frontend(const SampledFrontendConfig& f, double sample_rate) {
 }
 
 void validate_path_evolution(const PathEvolutionConfig& p) {
-    require(finite_nonnegative(p.ray_coherence_seconds) &&
+    require(finite_nonnegative(p.common_doppler_wander_hz) &&
+            std::isfinite(p.common_doppler_knot_seconds) && p.common_doppler_knot_seconds > 0 &&
+            finite_nonnegative(p.ray_coherence_seconds) &&
             finite_nonnegative(p.gaussian_doppler_width_hz) &&
             finite_nonnegative(p.random_doppler_width_hz) &&
+            finite_nonnegative(p.bounded_spread_knot_seconds) &&
             finite_nonnegative(p.delay_excursion_seconds) &&
             std::isfinite(p.delay_knot_seconds) && p.delay_knot_seconds > 0 &&
             detail::SmoothRandomDelay::maximum_slope(p.delay_excursion_seconds,p.delay_knot_seconds) < 1 &&
@@ -96,6 +99,11 @@ void validate_path_evolution(const PathEvolutionConfig& p) {
             static_cast<int>(p.gaussian_doppler_width_hz > 0) +
             static_cast<int>(p.random_doppler_width_hz > 0) <= 1,
             "OU, sampled Gaussian and fixed-time Gaussian ray evolution are mutually exclusive");
+    require(static_cast<int>(p.bounded_spread_knot_seconds > 0) +
+            static_cast<int>(p.ray_coherence_seconds > 0) +
+            static_cast<int>(p.gaussian_doppler_width_hz > 0) +
+            static_cast<int>(p.random_doppler_width_hz > 0) <= 1,
+            "bounded spread cannot be combined with another stochastic ray-gain law");
     require(std::isfinite(6*(p.gaussian_doppler_width_hz+p.random_doppler_width_hz)),
             "Gaussian path capture allowance overflow");
     const bool outage_off = p.outage_start_seconds == -1 && p.outage_end_seconds == -1;
@@ -320,6 +328,14 @@ StreamChannelConfig checked_config(const StreamChannelConfig& cfg, const Format&
     validate_path_evolution(cfg.path_evolution);
     require(cfg.path_evolution.delay_excursion_seconds <= cfg.effects.spread_delay_ms*.001,
             "random delay excursion exceeds nominal excess delay");
+    const bool spread_enabled = cfg.effects.spread_delay_ms > 0 || cfg.effects.spread_doppler_hz != 0;
+    require(cfg.path_evolution.bounded_spread_knot_seconds == 0 || spread_enabled,
+            "bounded spread evolution needs a configured two-path channel");
+    require(cfg.path_evolution.bounded_spread_knot_seconds == 0 ||
+            (cfg.path_evolution.delay_excursion_seconds == 0 &&
+             cfg.path_evolution.diurnal_phase_amplitude_radians == 0 &&
+             cfg.path_evolution.outage_start_seconds == -1 && cfg.path_evolution.outage_end_seconds == -1),
+            "bounded spread cannot be combined with moving delay, diurnal phase or an outage");
     require((!cfg.selective_model.modulation_rate_hz ||
              finite_nonnegative(*cfg.selective_model.modulation_rate_hz)) &&
             finite_nonnegative(cfg.selective_model.correlation_spacing_hz) &&
@@ -386,6 +402,8 @@ struct StreamingChannel::Impl {
     std::unique_ptr<detail::GaussianRayFading> gaussian_path;
     std::array<std::unique_ptr<detail::FixedGaussianRay>,2> random_path;
     std::unique_ptr<detail::SmoothRandomDelay> random_delay;
+    std::unique_ptr<detail::BoundedRandomSpread> bounded_spread;
+    std::unique_ptr<detail::BoundedRandomSpread> common_doppler_wander;
     std::unique_ptr<SpreadRay> spread;
     std::unique_ptr<DispersiveSelectivePerturbation> dispersive_perturbation;
     std::vector<long double> hop_prefix;
@@ -542,6 +560,7 @@ struct StreamingChannel::Impl {
             effects.nominal_conversion_if_hz *
                 (std::abs(effects.tx.audio_ppm) + std::abs(effects.rx.audio_ppm)) * 1e-6 +
             std::abs(effects.static_doppler_hz) +
+            config.path_evolution.common_doppler_wander_hz +
             (spread_enabled ? effects.spread_doppler_hz : 0) +
             selective_capture_allowance + delay_motion_allowance + std::abs(config.tx_frequency_drift_hz_per_second) *
                 (static_cast<double>(geometry.source_samples) * dt_tx) +
@@ -579,6 +598,7 @@ struct StreamingChannel::Impl {
                 std::abs(effects.static_doppler_hz);
             const long double propagation_allowance = (spread_enabled ? effects.spread_doppler_hz : 0) +
                 selective_capture_allowance + delay_motion_allowance + gaussian_allowance * .5L +
+                config.path_evolution.common_doppler_wander_hz +
                 config.path_evolution.diurnal_phase_amplitude_radians / config.path_evolution.diurnal_period_seconds;
             const long double low = static_cast<long double>(src.minimum_frequency_hz) * tx_scale;
             const long double high = static_cast<long double>(src.maximum_frequency_hz) * tx_scale;
@@ -626,8 +646,13 @@ struct StreamingChannel::Impl {
             (gaussian_path ? gaussian_path->working_bytes() : 0) +
             (random_path[0] ? 2*sizeof(detail::FixedGaussianRay) : 0) +
             (random_delay ? sizeof(detail::SmoothRandomDelay) : 0) +
+            (config.path_evolution.bounded_spread_knot_seconds > 0 ?
+                sizeof(detail::BoundedRandomSpread) : 0) +
+            (config.path_evolution.common_doppler_wander_hz > 0 ?
+                sizeof(detail::BoundedRandomSpread) : 0) +
             stats.path_gaussian_fir_coefficients.capacity()*sizeof(double) +
-            (spread_enabled ? sizeof(SpreadRay) : 0) +
+            (spread_enabled && config.path_evolution.bounded_spread_knot_seconds == 0 ?
+                sizeof(SpreadRay) : 0) +
             (perturb_enabled ? sizeof(DispersiveSelectivePerturbation) +
                 DispersiveSelectivePerturbation::memory_samples(effects.sample_rate * rx_scale,
                                                                selective_spacing)*sizeof(Complex) +
@@ -641,9 +666,32 @@ struct StreamingChannel::Impl {
         }
         tx_history.resize(history_count);
 
-        if (spread_enabled) spread = std::make_unique<SpreadRay>(
+        if (spread_enabled && config.path_evolution.bounded_spread_knot_seconds == 0)
+            spread = std::make_unique<SpreadRay>(
             effects.sample_rate * rx_scale, effects.spread_doppler_hz,
             effects.seed ^ 0x325449415443484eULL);
+        if (config.path_evolution.bounded_spread_knot_seconds > 0) {
+            spread.reset();
+            const auto seed = root_seed(config.path_seed,effects.seed)^0x424f554e44535052ULL;
+            bounded_spread = std::make_unique<detail::BoundedRandomSpread>(
+                effects.spread_delay_ms*.001, effects.spread_doppler_hz,
+                config.path_evolution.bounded_spread_knot_seconds, seed);
+            auto& diagnostic = stats.bounded_spread.emplace();
+            diagnostic.excess_delay_seconds = bounded_spread->excess_delay_seconds();
+            diagnostic.knot_seconds = config.path_evolution.bounded_spread_knot_seconds;
+            diagnostic.doppler_bound_hz = std::abs(effects.spread_doppler_hz);
+            diagnostic.seed = seed;
+        }
+        if (config.path_evolution.common_doppler_wander_hz > 0) {
+            const auto seed = root_seed(config.path_seed,effects.seed)^0x434f4d4d4f4e4652ULL;
+            common_doppler_wander = std::make_unique<detail::BoundedRandomSpread>(
+                0, config.path_evolution.common_doppler_wander_hz,
+                config.path_evolution.common_doppler_knot_seconds, seed);
+            auto& diagnostic = stats.common_doppler_wander.emplace();
+            diagnostic.bound_hz = config.path_evolution.common_doppler_wander_hz;
+            diagnostic.knot_seconds = config.path_evolution.common_doppler_knot_seconds;
+            diagnostic.seed = seed;
+        }
         if (perturb_enabled) {
             const auto seed = effects.seed ^ 0x3254494154504552ULL;
             auto& diagnostic = stats.selective_perturbation.emplace();
@@ -764,7 +812,10 @@ struct StreamingChannel::Impl {
         const long double physical_time = static_cast<long double>(n) /
             (static_cast<long double>(effects.sample_rate) * rx_scale) - effects.capture_lead_seconds;
         const double t = static_cast<double>(physical_time);
-        const double excess_delay_seconds = random_delay ? random_delay->value(physical_time) :
+        const auto bounded_state = bounded_spread ?
+            std::optional<detail::BoundedRandomSpread::State>(bounded_spread->at(physical_time)) : std::nullopt;
+        const double excess_delay_seconds = bounded_state ? bounded_state->delay_seconds :
+            random_delay ? random_delay->value(physical_time) :
             effects.spread_delay_ms*.001;
         // Preserve the exact integer lattice when the clocks/offset agree;
         // avoid a lossy double sample -> seconds -> sample round trip.
@@ -773,7 +824,7 @@ struct StreamingChannel::Impl {
             (static_cast<long double>(effects.capture_lead_seconds) + effects.timing_offset_seconds) *
                 effects.sample_rate * tx_scale;
         // Keep legacy off-path multiplication ordering exactly unchanged.
-        const long double delay_seconds = random_delay ? static_cast<long double>(excess_delay_seconds) :
+        const long double delay_seconds = (random_delay || bounded_state) ? static_cast<long double>(excess_delay_seconds) :
             static_cast<long double>(effects.spread_delay_ms)*.001L;
         const long double delayed_pos = direct_pos - delay_seconds * tx_scale * effects.sample_rate;
         auto needed_last = [&](long double position) {
@@ -811,7 +862,7 @@ struct StreamingChannel::Impl {
             hop_cycles(effects, delayed_calendar, hop_prefix) - hop_cycles(effects, receive_calendar, hop_prefix)), 1.0);
         direct *= std::polar(1.0, direct_phase);
         delayed *= std::polar(1.0, delayed_phase);
-        if(random_delay) {
+        if(random_delay || bounded_state) {
             const auto cycles=std::remainder((static_cast<long double>(effects.rf_hz)+
                 effects.nominal_conversion_if_hz)*delay_seconds,1.L);
             delayed*=std::polar(1.0,-tau*static_cast<double>(cycles));
@@ -839,7 +890,37 @@ struct StreamingChannel::Impl {
             direct*=random_path[0]->value(physical_time);
             delayed*=random_path[1]->value(physical_time);
         }
-        Complex propagated = spread ? spread->process(direct, delayed) : direct;
+        Complex propagated;
+        if (bounded_state) {
+            direct *= bounded_state->direct_gain;
+            delayed *= bounded_state->echo_gain;
+            delayed *= std::polar(1., bounded_state->phase_radians);
+            propagated = direct + delayed;
+            auto& diagnostic = *stats.bounded_spread;
+            diagnostic.minimum_echo_ratio = std::min(diagnostic.minimum_echo_ratio,bounded_state->echo_ratio);
+            diagnostic.maximum_echo_ratio = std::max(diagnostic.maximum_echo_ratio,bounded_state->echo_ratio);
+            if (diagnostic.processed_rows == 0)
+                diagnostic.minimum_doppler_hz = diagnostic.maximum_doppler_hz = bounded_state->doppler_hz;
+            else {
+                diagnostic.minimum_doppler_hz = std::min(diagnostic.minimum_doppler_hz,bounded_state->doppler_hz);
+                diagnostic.maximum_doppler_hz = std::max(diagnostic.maximum_doppler_hz,bounded_state->doppler_hz);
+            }
+            ++diagnostic.processed_rows;
+        } else {
+            propagated = spread ? spread->process(direct, delayed) : direct;
+        }
+        if (common_doppler_wander) {
+            const auto state = common_doppler_wander->at(physical_time);
+            propagated *= std::polar(1., state.phase_radians);
+            auto& diagnostic = *stats.common_doppler_wander;
+            if (diagnostic.processed_rows == 0)
+                diagnostic.minimum_hz = diagnostic.maximum_hz = state.doppler_hz;
+            else {
+                diagnostic.minimum_hz = std::min(diagnostic.minimum_hz,state.doppler_hz);
+                diagnostic.maximum_hz = std::max(diagnostic.maximum_hz,state.doppler_hz);
+            }
+            ++diagnostic.processed_rows;
+        }
         const auto& path = config.path_evolution;
         if (path.diurnal_phase_amplitude_radians > 0) {
             const auto cycles = std::remainder(physical_time/path.diurnal_period_seconds, 1.L);

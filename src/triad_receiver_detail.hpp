@@ -10,6 +10,17 @@ namespace datapump::triad::v3::receiver_detail {
 
 struct FrequencyInterval { double lower_hz = 0, upper_hz = 0; };
 
+// The wide dynamic proposals depend on the physical frequency support
+// and curvature, independently of how the public controls divide the bound.
+inline bool wide_varying_frequency_support(const ReceiverConfig& config, double seconds) {
+    const auto center = config.frequency_bound_hz + config.time_varying_atmospheric_hz;
+    // A spectral lattice tuned to the slot duration can still be modest
+    // when the center search fits within the receiver's 65-state grid
+    // at one-second resolution.
+    return center > 32 && center * seconds > 256 &&
+        config.time_varying_common_doppler_hz * seconds > 256;
+}
+
 // A wave runs `count` independent indexed jobs, possibly at once on its
 // owner's lanes, and returns after all of them. Jobs must not throw for an
 // outcome their caller means to handle in index order.

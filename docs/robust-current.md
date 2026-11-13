@@ -192,12 +192,56 @@ appropriate address hypotheses, incorrect-address checks and measured costs;
 no semantic transmitter-identity classifier is required. Different keyed epochs
 cannot reuse waveform prefixes solely because their UTC spans overlap.
 
-Fine processing runs fixed-affine, adaptive and combined evidence. Only the
-fixed-affine lane supplies operational admission and the final bit; the other
-lanes are diagnostics. Quiet evidence uses complete orthogonal blocks wholly
-inside the native public aperture, bounded by neighboring possible DATA support.
-All input still participates in fine likelihoods. No received length or codec
-field controls DSP geometry, allocation or physical completion.
+With changing-channel controls Off, the fixed-affine lane supplies operational
+admission and the final bit. The older adaptive timing and combined lanes remain
+diagnostics. Selected atmospheric or selective perturbations add bounded,
+properly weighted likelihood alternatives: shorter gain-coherence models, a
+chronological common-frequency mixture, medium-duration coherent Gaussian-gain
+models (independent and causal AR), and coherent linear-drift matching.
+The original coherent search and its public hypotheses remain available.
+Differential and segmented spectral statistics propose candidates; they are
+not admission statistics. Retained candidates keep their original public
+prior mass, and a skipped model does not transfer its weight to another model.
+The frequency mixture retains a small state vector instead of enumerating
+histories. Final likelihoods and sensitive state use FP64; reduced precision is
+used only for guarded proposal work. Whole-slot drift proposals use reduced-rate
+matched products followed by tiled exact scoring; neither a raw-row cutoff nor
+a fixed ridge-segment count excludes long captures. Public work, sample and
+alias bounds still apply. Drift proposals refine frequency/slope basins before
+spending their bounded exact-scoring work. Segmented timing reuses observation
+transforms across the public hypotheses. Broad searches retain fast proposals
+and add a slower coherence scale with bounded frequency-path proposals when
+admitted, retaining only two score planes rather than enumerating histories.
+Unrestricted block-frequency peaks
+remain an alternative. Proposal spacing follows coherent duration, not padded
+arrival uncertainty; its work reference uses the combined oscillator and
+atmospheric support. All public arrival, epoch, clock and center-frequency
+coordinates remain available. Extra proposal state is included in the admitted
+workspace. Status receipts distinguish supported, unnecessary and guarded
+paths; these finite models do not cover every bounded physical trajectory.
+
+Changing-channel admission also requires separation between the operational bit
+scores. Its public policy derives `beta=(1-p)/(2*N)` from the duration planner's
+fixed planning probability and bit count, then requires `log((1-beta)/beta)`
+separation (5.2933 nats at the default p=0.99, N=1). These are public assumptions,
+never received message lengths. Strong DATA presence with insufficient bit
+separation remains an erasure and allows later models to run; it cannot count
+as physical quiet. This is a conservative decision policy, not a qualified bit
+error probability or an exact posterior bound for data-selected sub-mixtures.
+A proper single-line nuisance alternative projects both observations and DATA
+templates before its conditional rescore. It keeps the line factor in both
+numerator and denominator, permitting real DATA alongside a coherent interferer;
+this is not a general interference model.
+
+Quiet evidence uses complete orthogonal blocks wholly inside the native public
+aperture, bounded by neighboring possible DATA support. No received length or
+codec field controls DSP geometry, allocation or physical completion. Selected
+changing-channel modes also require absence in the unnotched expanded band;
+an unavailable expanded-band check cannot confirm quiet. The GUI
+plots actual operational bit alternatives, separately from affine and adaptive
+diagnostics. See [changing-channel behavior](channel-models.md#robust-gui-changing-channel-realization),
+[research and contrary findings](triad-stochastic.md#nonstationary-channel-research-reconciliation)
+and the current [validation record](validation.md).
 
 ## GUI settings and operating limits
 

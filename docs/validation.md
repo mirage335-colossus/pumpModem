@@ -12,7 +12,7 @@ Earlier Ryzen CPU and RTX 4090 CUDA results retain their original source and
 hardware scope. No complete receiver-capacity or Tensor Core utilization claim
 follows.
 
-Updated 12 November 2026. The prior native history, matrix/preparation and
+Updated 13 November 2026. The prior native history, matrix/preparation and
 wide-search follow-through remains complete with its scoped checks below,
 including the fine-tail repair. Current overlap follow-up has focused functional
 and paired service evidence below; complete-receiver capacity and refreshed CPU
@@ -42,6 +42,254 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 [Helper follow-through](#helper-acquisition-overlap-follow-through). The exact
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
+
+## Robust changing-channel receiver follow-up — 13 November 2026
+
+The bounded changing-channel work extends the native GUI and receiver using a
+declared synthetic family: up to 90 Hz common Doppler wander, an independently
+varying echo Doppler within the same 90 Hz limit and an interior excess delay
+within the configured 21 ms support (HF Worst at 3× margin), plus Each 65%
+Gaussian-erf selective modulation. Frequency trajectories retain phase
+continuity; echo power changes while the direct path remains present. The
+simulator reports each realization. These are bounded engineering stresses,
+not measured atmospheric distributions or a universal HF channel model. See
+the [channel-model research reconciliation](triad-stochastic.md#nonstationary-channel-research-reconciliation)
+for literature, the earlier weak-sweep failure and its labelled dechirp-oracle
+control, and the limits of the chosen channel family.
+
+The current native CPU path combines original coherent evidence with bounded
+short-block changing-channel likelihoods, coherent-drift matching, a chronological
+frequency-state mixture, and independent/causal-AR medium-duration Gaussian
+gain alternatives. Frequency-state continuity alone does not preserve phase
+coherence between the short blocks. The medium branch retains useful history
+under its declared correlation model. It keeps the original
+public coordinates and physical
+quiet-slot test. On the Ryzen 5 PRO 5650U, the 12-hardware-thread allocation
+resolved to `W=24`; the 6 kHz configured-calendar fixture retained an automatic
+owner ceiling of 24, subject to its explicit memory admission.
+The target was 32 dB-Hz and the simulated received level was 20 dB-Hz; each
+DATA bit lasted 11.6 seconds. This is a focused low-level deterministic stress
+fixture, not a sensitivity threshold or an absolute receiver-capacity test.
+
+Three separate channel seeds (101, 503 and 1009) each decoded the expected
+three DATA bits and then scored two physical quiet slots. Every replay verified
+the full source and quiet completion. Each channel trace covered about 252.4
+seconds of baseband samples; reported native receiver process CPU was about
+30–31 seconds per replay, with 24 workers. Seed 101's DATA log-e values were
+47.47, 55.87 and 59.84 against a conditional threshold of 21.49. The other
+two seeds also passed all three DATA decisions. A 3/3 deterministic result does
+not establish population reliability, general weak-signal sensitivity or
+complete-receiver service for the manual workload suite. Separate 80 dB-Hz
+three-seed controls passed at 1 GiB with 7 ms/30 Hz echo settings and 38 Hz
+common wander; their easy coherent route does not test the low-level
+90 Hz changing-channel state model.
+
+The implementation stages retain their original outcomes. At a 1 GiB receiver
+limit, seed 101 failed workspace admission before a scored slot. At 2 GiB, the
+earlier receiver patch decoded the first two bits but left the third ambiguous:
+log E 16.74, below the 21.49 threshold, so the declared message failed despite
+physical quiet completion. The subsequent chronological frequency-state
+patch passed seeds 101, 503 and 1009 at the same 2 GiB limit. These are distinct
+source-manifest builds under configure commit `a0801df`; the 2 GiB intermediate
+seed-101 report records manifest
+`6609c39dc9ce8fb078cace6f6391e67209fe833a57e53d2adeb28daa9d45ebb0`, the tracked-frequency
+seed-101 report `2dcec1ac2bd7c1ce8d0934cfd69278f1948435a81e78744e5f0a1d3d30ede4f2`,
+and the seed-503/1009 reports
+`c9e6a939020f6d8e8129bde251dbfc19879ba5ec8cac03de7efc0aba548f874f`. All were
+CPU automatic arithmetic on GNU 14.2; they do not represent GPU execution.
+
+With a 3 GiB limit, the Helper-present seed-101 DATA run also decoded all three
+bits and completed two quiet slots, but all slots reported `no_coarse_pilot`;
+the DATA result therefore does not demonstrate successful Helper acquisition
+or Helper assistance. A separate Helper-only native fixture using the same
+channel bounds correctly returned quiet (`log E = -4.3150`, quiet energy
+4846.25 below threshold 5058.86), with 13 tracked states, zero DATA energy and
+nonzero Helper energy. That compact owner-reported receipt is a control, not a
+full stream-replay or broad Helper-acquisition qualification.
+
+Additional bounded discriminators exposed two distinct weaknesses. A 34.8-second
+weak linear sweep missed at both 497 Hz and 6 kHz capture rates, at equal noise
+density `0.25/497` and signal gain 0.05; the matched static 6 kHz control passed
+with log evidence 128.71. Removing the 131,072-row drift-FFT cutoff admitted
+215,249 raw rows through reduced-rate proposals but did not alone fix reception.
+Giving only the exact public timing to the production drift scorer restored
+106.56 versus -10.62 evidence. This labelled oracle isolates a coarse timing
+proposal failure; it is not an operational receiver input. Segmented coherent
+public timing now repairs both cases: log evidence 126.02 at 497 Hz and 104.48
+at 6 kHz. A fresh descending-sweep seed 983 with a different epoch and 17 ms
+arrival offset recovered bit 1 with evidence 88.95. A 69.6-second, 6 kHz
+holdout (seed 503, gain 0.06) recovered bit 1 with evidence 430.87 in 12.64
+seconds at four workers. A separate 32 kHz stage check scored 1,123,420 raw
+rows with reduced-rate proposals and exact final drift evidence 153.09; its
+three supplied timing candidates included truth, so it qualifies long-capture
+scoring, not acquisition. Fixed raw-row and ridge-count cutoffs were removed;
+bounded proposal work, alias limits and memory admission remain explicit.
+
+An independent native Gaussian-ray case (width 1.5 Hz, seed 101, gain 0.05,
+34.8-second duration, 497 Hz capture) originally missed; its noise-only
+control returned no bit. This family lacks the GUI stress model's persistent
+direct path. Shared constant-frequency segmented proposals, proper power
+mixtures and medium coherent gain integration repaired the miss. The final
+public cadence is `0.375/max(0.75, width)` seconds, clipped to 0.25–0.5 seconds;
+the causal AR option uses the declared positive width, with a 0.35 Hz fallback
+when no width is declared. This finite AR approximation is not an exact
+Gaussian Doppler spectrum. At 0.25-second cadence the original seed admitted
+bit 0 with alternatives 49.55/10.73; a fresh seed 1009 with shifted epoch,
+17 ms arrival and +4.5 Hz offset admitted bit 1 with 9.44/49.31. The matched
+zero-signal control produced 7.40/9.43 and no DATA. Its short quiet aperture
+does not qualify expanded-band quiet completion. These one-worker diagnostics
+took 10.6–11.9 seconds. The maintained regression now checks the original weak
+positive and its matched null at four workers.
+
+A slower, weaker Gaussian holdout (0.15 Hz, gain 0.035, seed 211) remains an
+erasure. Retaining causal history raised correct-bit evidence from 7.94 to
+21.82, while wrong-bit evidence rose from 7.09 to 9.14, for about 2% more slot
+time (10.90 to 11.12 seconds). This conditional sensitivity benefit justifies
+retaining the AR alternative despite no admission on that trial. Earlier
+descending-sweep gain-0.067 testing likewise retained a near-threshold miss
+(19.34 versus 21.49); a stronger fresh gain-0.08 fixture passed. These finite
+controls do not establish a sensitivity boundary.
+
+A native tone-only negative control (0.5-amplitude, 80 Hz) falsely passed as
+DATA with log E 1238.75 and a bit-score gap of 93.84. A subsequent proper
+joint line-plus-DATA model rejects that control and recovers a keyed signal
+coexisting with the line in focused native tests. It preserves unnotched
+expanded-band energy for quiet classification. Maintained tests also pass a
+1.5-amplitude line exactly halfway between coarse frequency bins and the same
+line coexisting with keyed DATA. These checks do not establish rejection of all
+interference or all off-grid lines. The GUI now plots the actual operational
+bit alternatives and reports their required separation; its older affine and
+adaptive traces remain diagnostics. Real TX PCM stays identical to the clean
+canonical emission with simulation disabled in either duplex state.
+
+A predeclared full-worker failed-Helper/null cost check before the wide-arrival
+refinement used the native
+slot path on one immutable proper-complex white-noise capture (seed 211), not
+independent simulations as a throughput substitute. Settings were 6 kHz,
+rate 36, ten added symbols with interleave, HF Worst/Each 65%, 3× margin,
+target 32 dB-Hz and assumed DATA 20 dB-Hz, Helper 0.2 W, public arrival
+[-7, 7.07] seconds, and a 6 GiB explicit lease. Its 428,840 rows covered
+71.473 seconds. Native calendar metadata confirms 90 seconds between public
+DATA starts, 11.6 seconds of active bit duration and 11.8675 seconds of source
+support. Capture aperture and active duration are not recurrence denominators.
+Both the supplemental-model-disabled control and enabled
+receiver completed quiet with `no_coarse_pilot`. With automatic H=12/W=24,
+wall times were 2.413/4.707 seconds, process CPU 24.280/41.231 seconds, and
+slot DSP bounds 185,231,712/262,963,608 bytes. The enabled path reported
+`segmented_timing_public_work_limit`, then executed short-state (1.207 s) and
+drift (1.050 s) fallback work; medium gain is inapplicable to this broad width.
+This exposed a gap in broad segmented timing admission that was investigated
+below. It is a single affected-work comparison against a model toggle, not an old
+binary comparison, full-stream memory accounting, sustained backlog service,
+or complete-receiver capacity qualification.
+
+Widening only a weak sweep's declared arrival/frequency support then exposed
+an avoidable acquisition cliff. At 6 kHz, 34.8 seconds, gain 0.05, arrival
+[-7, 7.07] seconds and combined center support ±90 Hz, the ordinary search
+missed. Merely admitting three times the segmented work (80 short blocks,
+161 frequencies) still missed in 12.76 seconds. Longer independent blocks
+also missed: maximizing each block over all frequencies overfit noise paths
+and discarded the true timing. Even exact timing initially failed because
+the drift proposal's coarse slope spacing left gaps that its few ±1 exact
+neighbors could not reach. A labelled exact-slope control restored evidence
+126.97; that control is not an operating input.
+
+The repair uses two public coherence scales (full curvature and curvature/8),
+full combined center support, and bounded local frequency-path proposals in
+the slower scale. Two FP32 score planes retain state; no sequence of channel
+histories is enumerated. The shared spectra are charged together and private
+per-worker scratch is charged at its sequential maximum. Eight timing
+candidates reserve two for fast proposals, one for unlinked slow proposals
+and five for smooth paths, filling unused places after deduplication. Local
+frequency moves cover every grid cell within the derived hop. The exact drift
+stage refines slope/frequency basins using bounded proposals and keeps original
+public prior weights. A curvature/16 trial and independent long-block maxima
+did not repair the miss; neither is retained as a competing implementation.
+
+The final dual-scale receiver, with GPS-like static ±0.009 Hz plus ±89.991 Hz
+atmospheric support, recovered the original seed 37 bit 0 with evidence 117.23
+in 17.53 seconds, reserving 943,269,463 bytes at automatic W=24. A fresh seed
+983, epoch +3, arrival +2.413 seconds and descending +5.5→−4.5 Hz recovered
+bit 1 with evidence 133.43 in 18.29 seconds. The matched zero-signal control
+returned no DATA in 17.64 seconds. A further predeclared seed 619 used gain
+0.08, epoch +2, arrival +2.013 seconds and a +55→−55 Hz sweep; it recovered
+bit 1 with evidence 219.77 in 17.46 seconds. Its short-block alternatives
+20.61/20.85 were insufficient alone. All four used 6 kHz, the same broad
+public bounds, fewer than 327,000 captured rows and a 2 GiB explicit lease,
+without supplied truth coordinates. These are affected-slot measurements,
+not sustained complete-stream capacity.
+
+The dynamic work reference now uses combined oscillator-plus-atmospheric
+support instead of the legacy oscillator grid alone. Maintained planner checks
+compare 8+82, 0.009+89.991 and 90+0 Hz splits, including local CFO spacing,
+arrival/epoch coverage, drift decimation and both coherence scales. A native
+regression caught an intermediate loss on a previously passing narrow weak
+sweep; the final geometry dispatch preserves its original proposal behavior.
+This distinction avoids making a zero atmospheric field an accidental switch
+for otherwise equivalent broad dynamic searches.
+Final review also caught an over-padding admission cliff at 30/32 Hz: a
+field/extent guard left local frequency spacing unnecessarily fine and omitted
+the timing bank. Spacing now follows coherent block duration independently of
+that fine-stage dispatch. Maintained planner checks admit 30/32/33 Hz (17×329,
+17×351 and 18×273 block/frequency shapes); the measured 90 Hz shape and original
+narrow 8 Hz shape are unchanged. This planner check is not an additional
+reception measurement at those intermediate bounds.
+A compact full-production regression retains the same weak broad-frequency
+signal with a ±0.5-second public arrival interval (601 arrival points). It
+recovers bit 0 with evidence 102.15 using both coherence banks and the smooth
+proposal path, taking 5.84 seconds with four explicit workers and a
+112,138,511-byte DSP bound. This is the maintained functional check; the
+larger ±7-second replays above are bounded service diagnostics.
+
+Repeating the identical failed-Helper/null cost capture after the repair gives
+2.174/19.965 seconds wall time and 24.666/210.112 seconds process CPU for
+supplemental models disabled/enabled. DSP bounds are
+185,231,712/737,456,196 bytes at H=12/W=24. Both still return complete quiet
+with `no_coarse_pilot`. The enabled result now executes the smooth-frequency
+timing bank (17 primary blocks, with the separate faster bank), with 15.634
+seconds coarse and 4.293 seconds fine work; short-state and drift components
+take 1.410 and 0.852 seconds. This substantially increases work over the
+non-varying model toggle, because the previously omitted broad dynamic search
+now runs. It does not establish sustained service, other-device performance,
+or reuse of earlier local CPU calibration. The single-slot DSP bound also
+excludes complete-stream application, owner-stack and retained-result costs.
+
+Validation uses deterministic strata before bounded signal/null discriminators:
+Off/clean TX, streaming continuity, changing trajectories, weak structured
+drift, independent diffuse fading, noise, line coexistence, long capture and
+configured-calendar message/physical quiet completion. Each diagnostic used
+one or the predeclared three seeds, stopped after the declared check, and kept
+fresh holdouts separate from repair cases. No population reliability interval
+is claimed from these small samples. The local processor was Ryzen 5 PRO 5650U
+(6 cores/12 hardware threads, approximately 15 GiB RAM), GNU 14.2 native CPU
+automatic arithmetic; proposal precision and final FP64 scoring follow the
+production dispatch. No GPU execution, RunPod spending, other-device
+qualification or calibrated manual-case capacity follows from this work.
+
+The final `./build.sh test triad --stop-on-failure` passed **33/33** checks in
+67.40 seconds, including the native receiver (52.13 s), GUI Robust (4.85 s)
+and native orchestration (6.23 s). `./build.sh test gui --stop-on-failure`
+passed **30/30** in 154.58 seconds before the last coarse-only admission repair;
+the final triad run repeated the affected Robust GUI coverage. Earlier full
+runs and their corrected setup failure (`off` instead of the supported `none`
+spread preset) are distinct from this final pass. Native/data-path regressions
+described above were actual executed assertion failures, not setup errors.
+Changed-document local links and `git diff --check` pass.
+
+Configure base is `a0801dfabff3e03d67be34203af7c8ec0f621ce0`. Final transitive
+source manifest is
+`be47453d07fb27afe4cf4c168f76390de193cf57a403009a1078dccca6f01aa2`,
+build-options hash
+`63a1a31d84dfb81f992610f16c646d5f49b6f69bf7f0a0efa97ccd9180f14d41`,
+and probe binary SHA-256
+`0f88a51d5761413fb189d12fc4450f6411ec7baab3ae75889a2ac7c015c056f7`.
+The final broad failed-Helper cost pair used source manifest
+`eca6a1c8c753bd9dadf5a6cbdefd99cf398a56add3818c5f6636e02a022e907c`;
+the last planner repair leaves its executed 90 Hz route unchanged. These
+identities establish provenance, not release certification. The temporary
+captures, copied diagnostic sources, binaries and logs were removed after their
+failure/repair findings were distilled here; maintained regressions retain the
+current reproducible checks. Compatible build outputs and caches remain in use.
 
 ## Fast acoustic acquisition and noise-reference follow-up — 12 November 2026
 

@@ -66,14 +66,18 @@ struct PatternStep {
     PatternDecision decision=PatternDecision::ambiguous;
     std::optional<std::uint8_t> bit;
     std::array<double,2> bit_evidence{}, adaptive_bit_evidence{}, combined_bit_evidence{};
+    // Actual bit alternatives, including all operational channel-model and
+    // public-coordinate priors. The affine diagnostics above can disagree.
+    std::array<double,2> operational_bit_evidence{};
     double quiet_energy=0, quiet_threshold=0, operational_log_e=0, operational_threshold=0;
+    double operational_bit_log_separation=0, operational_minimum_bit_log_separation=0;
     double helper_seconds=0, coarse_seconds=0, fine_seconds=0;
     // Helper acquisition ran beside coarse preparation, inside coarse_seconds.
     bool helper_overlapped=false;
     std::size_t quiet_modes=0, fine_candidates=0;
     unsigned workers=0;
     bool evidence_complete=false;
-    std::string helper_status, reason;
+    std::string helper_status, varying_status, drift_status, reason;
 };
 struct Snapshot {
     std::vector<float> waveform;

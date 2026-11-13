@@ -93,7 +93,7 @@ struct Options {
     std::size_t maximum_coarse_tiles = 4096;
     unsigned units = 1, sample_rate = 1500, added_symbols = 1, waits = 0;
     unsigned slots = 10, bit = 0, device_index = 0;
-    double data_if_hz = 500, rate_hz = 120, rf_hz = 0, margin = 1;
+    double data_if_hz = 500, rate_hz = 120, rf_hz = 0, margin = 1, doppler_hz = 0;
     double data_w = .1, helper_w = 0, loss_db = 114, noise_dbm_hz = -174;
     std::optional<double> target_cn0, active_seconds, observed_cn0;
     bool encrypt = false, interleave = false, fhss = false, require_accelerator = false;
@@ -212,6 +212,7 @@ Options parse(int argc, char** argv) {
     assign("--data-if", o.data_if_hz);
     assign("--rate", o.rate_hz);
     assign("--rf-hz", o.rf_hz);
+    assign("--doppler-hz", o.doppler_hz);
     assign("--margin", o.margin);
     assign("--base-oscillator", o.base);
     assign("--shift-oscillator", o.shift);
@@ -329,6 +330,7 @@ live::Settings settings_for(const Options& o, std::size_t memory_limit) {
         oscillator.rf = tuning::oscillator_model(tuning::parse_oscillator_preset(o.shift));
     }
     s.transfer.modem.oscillator_search = oscillator;
+    s.doppler_shift_hz = o.doppler_hz;
     // An explicit broad region remains broad for FHSS. GUI Default is a
     // separate policy which can assume synchronized hop clocks.
     s.transfer.clock_sync = o.timing == "broad" ? clock_sync::Policy{0, 14, 0}
@@ -530,6 +532,7 @@ Json profile_json(const Options& o, const Profile& profile, const ReceiverSlotPl
         {"scenario", o.scenario.empty() ? "bounded-native-fixture-v1" : o.scenario},
         {"sample_rate_hz", config.sample_rate_hz}, {"data_if_hz", config.data_if_hz},
         {"rf_hz", o.rf_hz}, {"inner_rate_hz", o.rate_hz}, {"data_power_w", o.data_w},
+        {"declared_doppler_hz", o.doppler_hz},
         {"requested_helper_power_w", o.helper_w}, {"effective_helper_power_w", config.helper.effective_power_w},
         {"path_loss_db", o.loss_db}, {"case_noise_dbm_hz", o.noise_dbm_hz},
         {"observed_cn0_override", o.observed_cn0 ? Json(*o.observed_cn0) : Json{}},
@@ -541,6 +544,17 @@ Json profile_json(const Options& o, const Profile& profile, const ReceiverSlotPl
         {"frequency_bound_hz", config.frequency_bound_hz}, {"clock_bound_ppm", config.clock_bound_ppm},
         {"spread_preset", o.spread}, {"spread_delay_seconds", config.spread_delay_seconds},
         {"spread_doppler_hz", config.spread_doppler_hz}, {"selective_perturbation", o.selective},
+        {"time_varying_channel", config.time_varying_channel},
+        {"time_varying_common_doppler_hz", config.time_varying_common_doppler_hz},
+        {"time_varying_atmospheric_hz", config.time_varying_atmospheric_hz},
+        {"time_varying_minimum_bit_log_separation", config.time_varying_minimum_bit_log_separation},
+        {"channel_bounded_spread_knot_seconds", channel.path_evolution.bounded_spread_knot_seconds},
+        {"channel_common_doppler_wander_hz", channel.path_evolution.common_doppler_wander_hz},
+        {"channel_common_doppler_knot_seconds", channel.path_evolution.common_doppler_knot_seconds},
+        {"channel_selective_coefficient_law", channel.selective_model.coefficient_law ==
+            SelectiveCoefficientLaw::GaussianErf ? "gaussian-erf" : "sinusoidal"},
+        {"channel_selective_modulation_rate_hz", channel.selective_model.modulation_rate_hz
+            ? Json(*channel.selective_model.modulation_rate_hz) : Json{}},
         {"selective_slow_depth", config.selective_slow_depth}, {"selective_fast_depth", config.selective_fast_depth},
         {"selective_modulation_rate_hz", config.selective_modulation_rate_hz}, {"margin", o.margin},
         {"arrival_lower_seconds", slot.arrival_lower_seconds}, {"arrival_upper_seconds", slot.arrival_upper_seconds},
@@ -569,6 +583,19 @@ Json profile_json(const Options& o, const Profile& profile, const ReceiverSlotPl
 }
 
 Json observation(const Capture& capture, std::uint64_t stop, const ReceiverSlotPlan& slot, const Options& o) {
+    Json spread, common;
+    if (const auto& r = capture.channel.bounded_spread) {
+        spread = object({{"seed", r->seed}, {"processed_rows", r->processed_rows},
+            {"excess_delay_seconds", r->excess_delay_seconds}, {"knot_seconds", r->knot_seconds},
+            {"doppler_bound_hz", r->doppler_bound_hz},
+            {"minimum_echo_ratio", r->minimum_echo_ratio}, {"maximum_echo_ratio", r->maximum_echo_ratio},
+            {"minimum_doppler_hz", r->minimum_doppler_hz}, {"maximum_doppler_hz", r->maximum_doppler_hz}});
+    }
+    if (const auto& r = capture.channel.common_doppler_wander) {
+        common = object({{"seed", r->seed}, {"processed_rows", r->processed_rows},
+            {"bound_hz", r->bound_hz}, {"knot_seconds", r->knot_seconds},
+            {"minimum_hz", r->minimum_hz}, {"maximum_hz", r->maximum_hz}});
+    }
     return object({{"input_sha256", capture.digest}, {"first_sample", capture.first}, {"stop_sample", stop},
                    {"input_hash_encoding", "sha256_of_iq_f64le_and_mask_sha256_hex"},
                    {"samples", capture.rows()}, {"generated_samples", capture.generated_samples},
@@ -579,6 +606,8 @@ Json observation(const Capture& capture, std::uint64_t stop, const ReceiverSlotP
                    {"seed", o.seed}, {"public_slot", slot.index}, {"pattern_epoch", slot.format.epoch},
                    {"symbol_ordinal", slot.format.symbol_ordinal}, {"channel_erased_rows", capture.channel.erased_samples},
                    {"channel_workspace_bytes", capture.channel.working_bytes},
+                   {"bounded_spread_realization", std::move(spread)},
+                   {"common_doppler_realization", std::move(common)},
                    {"evaluator_bit", o.stratum == "noise" ? Json{} : Json(o.bit)}});
 }
 
@@ -972,6 +1001,36 @@ Json score_json(const ReceiverSlotScore& score) {
         {"quiet_threshold", score.quiet_threshold}, {"quiet_modes", score.quiet_modes},
         {"fine_candidates", score.fine_candidates}, {"adaptive_peak_states", score.adaptive_peak_states},
         {"adaptive_transition_edges", score.adaptive_transition_edges}, {"basis_rows", score.basis_rows},
+        {"varying_candidates", score.varying_candidates}, {"varying_blocks", score.varying_blocks},
+        {"varying_block_rows", score.varying_block_rows}, {"varying_basis_rows", score.varying_basis_rows},
+        {"varying_coarse_seconds", score.varying_coarse_seconds},
+        {"varying_fine_seconds", score.varying_fine_seconds},
+        {"varying_bit_evidence", scores(score.varying_bit_evidence)}, {"varying_status", score.varying_status},
+        {"varying_frequency_states", score.varying_frequency_states},
+        {"varying_timing_blocks", score.varying_timing_blocks},
+        {"varying_timing_frequencies", score.varying_timing_frequencies},
+        {"varying_timing_status", score.varying_timing_status},
+        {"tracked_frequency_bit_evidence", scores(score.tracked_frequency_bit_evidence)},
+        {"operational_bit_evidence", scores(score.operational_bit_evidence)},
+        {"operational_bit_log_separation", score.operational_bit_log_separation},
+        {"operational_minimum_bit_log_separation", score.operational_minimum_bit_log_separation},
+        {"varying_quiet_modes", score.varying_quiet_modes},
+        {"varying_quiet_energy", score.varying_quiet_energy},
+        {"varying_quiet_threshold", score.varying_quiet_threshold},
+        {"varying_quiet_status", score.varying_quiet_status},
+        {"varying_line_frequency_hz", score.varying_line_frequency_hz},
+        {"varying_line_log_evidence", score.varying_line_log_evidence},
+        {"coherent_gain_candidates", score.coherent_gain_candidates},
+        {"coherent_gain_blocks", score.coherent_gain_blocks},
+        {"coherent_gain_frequency_states", score.coherent_gain_frequency_states},
+        {"coherent_gain_bit_evidence", scores(score.coherent_gain_bit_evidence)},
+        {"coherent_gain_seconds", score.coherent_gain_seconds},
+        {"coherent_gain_status", score.coherent_gain_status},
+        {"drift_timing_atoms", score.drift_timing_atoms}, {"drift_slopes", score.drift_slopes},
+        {"drift_observation_rows", score.drift_observation_rows},
+        {"drift_proposal_stride", score.drift_proposal_stride},
+        {"drift_frequency_bins", score.drift_frequency_bins}, {"drift_seconds", score.drift_seconds},
+        {"drift_bit_evidence", scores(score.drift_bit_evidence)}, {"drift_status", score.drift_status},
         {"coarse_workspaces", score.coarse_workspaces}, {"coarse_frequency_points", score.coarse_frequency_points},
         {"coarse_arrival_points", score.coarse_arrival_points},
         {"coarse_fft_precision", score.coarse_fft_precision}, {"coarse_precision_reason", score.coarse_precision_reason},
@@ -1879,6 +1938,7 @@ void help() {
         "  --work-only on uses a non-admitting local noise crop for nonnominal continuation strata\n"
         "  --helper-overlap off keeps regression in sequence: Helper, then coarse preparation\n"
         "  --slots N --units 1|2|4 --bit 0|1 --sample-rate HZ --data-if HZ\n"
+        "  --doppler-hz HZ (bounded common wander; selected spread adds atmospheric support)\n"
         "  --target-cn0 DB_HZ --cn0 DB_HZ --seconds FIXED_ACTIVE_SECONDS --fec off|rs20|rs60\n"
         "JSON output uses datapump.triad.native-probe.v1. Exit 2 indicates unavailable or incomplete work.\n";
 }

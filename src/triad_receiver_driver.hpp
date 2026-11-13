@@ -15,6 +15,9 @@ std::span<const FrequencyInterval> public_frequency_intervals(
 struct FinePreparation {
     AdmissionGrid grid;
     std::vector<FineCoordinate> coordinates;
+    std::vector<FineCoordinate> varying_coordinates;
+    std::vector<FineCoordinate> epoch_timing_coordinates;
+    std::vector<FineCoordinate> segmented_timing_coordinates;
 };
 
 // A complete coarse search selects these coordinates. Partial work must never

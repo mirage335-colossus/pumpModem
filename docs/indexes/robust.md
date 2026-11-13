@@ -99,13 +99,21 @@ on settings; they are not recommended values or a radio AGC/sensitivity test.
 Full setup, hashes and failure rows are in the [pattern evidence](../validation-data/triad-v3/2026-11-06-independent-patterns/README.md)
 and [spacing evidence](../validation-data/triad-v3/2026-11-06-spacing/README.md).
 
-For decoding, the current receiver computes fixed-affine, adaptive and combined
-evidence, but only the fixed-affine lane controls operational admission and the
-final bit. Treat the others as diagnostics. Historical evolving-ray and
-phase-particle likelihoods are possible model choices, not GUI modes or proven
-improvements over the current decision rule. Revisit them only when a measured
-channel failure identifies the missing dynamics and the native alternative
-preserves the full search, false-admission accounting and end-of-message tests.
+For decoding, the original fixed-affine lane remains operational. Changing-channel
+settings also enable bounded short-coherence, common-frequency tracking,
+medium coherent gain and whole-slot drift alternatives. Their properly weighted likelihoods participate in
+the final bit decision; the older adaptive timing and combined lanes remain
+diagnostics. A weak native sweep missed by the original model and a complete
+random-HF message miss motivated these additions. Short blocks alone did not
+fix either weakness: structured drift preserved long-coherent evidence, while
+a small chronological frequency mixture recovered the random-HF example.
+Independent diffuse fading exposed another weak-signal miss: coherent timing
+proposals and causal gain history repaired the sampled case. Slower fading
+also benefited from history even when its weak holdout remained an erasure.
+These bounded findings do not establish all-channel sensitivity. Historical
+evolving-ray and phase-particle likelihoods remain alternatives to revisit when
+a measured failure identifies missing dynamics and the native implementation
+preserves full search, false-admission accounting and end-of-message tests.
 See [receiver details](../robust-current.md#configured-calendar-reception) and
 [historical likelihood research](../triad-v3.md#likelihood-techniques-worth-retaining).
 

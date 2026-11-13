@@ -213,7 +213,11 @@ void environmental_oscilloscope() {
 void pattern_evidence() {
     live::PatternStep step;
     step.index=10;step.evidence_complete=true;
-    step.bit_evidence={std::log(2.),std::log(6.)};
+    // An evolving-channel branch reverses the affine diagnostic preference.
+    // The plot must use the operational alternatives without reconstructing
+    // their ratio from the now nonoperational affine scores.
+    step.bit_evidence={std::log(6.),std::log(2.)};
+    step.operational_bit_evidence={0.,std::log(3.)};
     step.operational_log_e=std::log(2.);step.operational_threshold=3.;
     step.quiet_modes=5;step.quiet_energy=4.;step.quiet_threshold=8.;
     const auto points=pattern_evidence_points(std::span(&step,1));
@@ -237,7 +241,7 @@ void pattern_evidence() {
           "empty/incomplete evidence has no honest status");
 
     step.evidence_complete=true;
-    step.bit_evidence[0]=std::numeric_limits<double>::quiet_NaN();
+    step.operational_bit_evidence[0]=std::numeric_limits<double>::quiet_NaN();
     step.quiet_energy=std::numeric_limits<double>::infinity();
     const auto invalid=pattern_evidence_points(std::span(&step,1));
     check(invalid==pattern_evidence_points(std::span(&step,1)) &&
