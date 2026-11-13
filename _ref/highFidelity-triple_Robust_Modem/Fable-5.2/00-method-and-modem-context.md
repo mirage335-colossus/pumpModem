@@ -2,7 +2,7 @@
 
 - **Purpose.** Shared foundation for the chapters in this directory: how evidence is graded, which conventions are used, and what the literature is being compared with — the triple Robust Modem's waveform and its present simulated channel.
 - **Scope.** Documentation only. No repository file outside this directory was changed, and nothing was built or run on the modem. Numbers marked [E] are this record's own estimates; the larger ones are collected in [90](90-cross-check-calculations.md).
-- **Source revision.** Tree at `0801e5c7`, clean. Statements about the modem were read from the maintained guides and the cited source lines at that revision. Bit lengths and observation windows of the eight manual rows are quoted from planner receipts recorded on 2026-11-12 (section 4.1); they were not regenerated.
+- **Source revision.** Original inspection used `0801e5c7`; the completion pass starts from clean `33f6e461fce12f4079870091b6d1aaa9c2f50821`. A Git comparison found no changes in production source, headers, tests, build definitions or maintained guides between the intervening research revision `07bcbc5d` and this baseline. Source-derived contracts were rechecked; the historical planner receipts were not rerun. Section 7 separates exact source geometry from their rounded observation summaries.
 - **Lifecycle.** Remove this directory once its applicable findings have been distilled into the maintained guides ([channel models](../../../docs/channel-models.md), [Robust operating guide](../../../docs/indexes/robust.md)) and into scenario records of the appraisal suite under `_appraisal/highFidelity-triple_Robust_Modem/`. No maintained guide could be edited during this work, so this purpose and trigger are recorded only here.
 
 ## 1. The question
@@ -101,7 +101,7 @@ The eight rows of the [manual test list](../../../_tests-RobustModem.md) give th
 
 | Row | Setting | Cell | Carrier spacing; occupied | Bit | Window / slot spacing | Simulated C/N0 |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| 1 | Sub-9 kHz: 1 mW, 200 dB, Rate 0.1 Hz, Shift 0 | 60 s | 0.021 Hz; 0.0625 Hz | 5,760 s (96 min) | 6,767 s / 6,750 s | −36 dB-Hz |
+| 1 | Sub-9 kHz: 1 mW, 200 dB, Rate 0.1 Hz, Shift 0 | 60 s | 0.0208333 Hz; 0.0625 Hz | 5,760.4 s (about 96 min) | about 6,767 s / 6,750 s | −36 dB-Hz |
 | 2, 3 | Groundwave 500 kHz: 4 W, 180 dB, Rate 1 Hz | 6 s | 0.21 Hz; 0.625 Hz | 576 s | 690–735 s / 690–720 s | 20 dB-Hz |
 | 4, 5, 7 | HF 30 MHz: 4 W, 180 dB, Rate 36 Hz, Spreading 10× | 16.7 ms | 75 Hz; 225 Hz | 11.6 s | 26.5–71.5 s / 60–90 s | 20 dB-Hz |
 | 6 | HF 30 MHz, hopping | 16.7 ms | 75 Hz; 225 Hz | 257 s (642 dwells) | 272 s / 270 s | 20 dB-Hz |
@@ -109,6 +109,7 @@ The eight rows of the [manual test list](../../../_tests-RobustModem.md) give th
 
 - In row 1 the Shift is zero: the audio waveform is the radio signal, radiated directly at its audio carrier frequency.
 - The Helper, where enabled, adds pilots at 550 Hz and at 2,400 Hz or higher and an auxiliary tone at 950 Hz, leading DATA by 38 s (`include/datapump/helper_carrier.hpp:40`, `include/datapump/triad_stream.hpp:15`). At 40 W and 180 dB its total power is at 30 dB-Hz; at 15 kW and 200 dB, 36 dB-Hz [E].
+- The high pilot starts at `max(2400, minimum_high, DATA_passband_upper + 450)` Hz and may move upward for the power/leakage guard (`src/helper_carrier.cpp`, placement algorithm). Direct DATA near 8,270 Hz therefore requires a high pilot at least near 8,720 Hz, not 2,400 Hz. Save the actual `helper_plan()`; its returned band and shaping skirts determine whether a sub-9 kHz antenna/band constraint is met. The low pilot and auxiliary remain 550 and 950 Hz.
 - Target C/N0, 32 dB-Hz by default, plans the duration. It is separate from the simulated link.
 
 **What these scales mean for a channel.** An effect matters to a row when it changes within one of that row's time scales or across its bandwidth.
@@ -185,6 +186,122 @@ Absence from this list is not a defect. The present channel is a declared synthe
 
 Two cautions apply to all five. A simulator can be correct as mathematics and still wrong as physics. And a model that matches the available measurements can still disagree with another equally matching model about what the modem does; when that happens the difference is model uncertainty and has to be carried, not resolved by choosing the more favourable one.
 
-## 7. How the chapters are organised
+## 7. Reproducible source and evidence contract
+
+The following closes common choices for the mathematical scenarios in 81–85.
+These are explicit research fixtures of the canonical native source, not a
+claim that they reproduce every GUI/manual row. A physical carrier `fc` is
+distinct from the positive digital DATA IF used to construct a public profile;
+the channel's RF frequency is `fc + ν` for a baseband offset `ν`. Ideal frequency
+translation changes that reference, not the propagation/noise laws.
+
+### Source, calendar and hidden truth
+
+Use the `Format`, `PublicProfileConfig`, `Crypto`, `PreparedTextMessage` and
+`Emission` interfaces at the source revision above. Initialize structs to their
+declared defaults at that revision, then apply the following explicit overrides;
+record the resulting full structs as run inputs so later defaults cannot change
+the experiment. No received content selects these settings.
+
+| Item | Reference choice |
+| --- | --- |
+| Waveform | `IndependentApskV2`; RRC pulse, interleave on, amplitude depth 0.25; minimum inner coefficients 64; sample-rate denominator 1; no burst waits |
+| Base sample/IF | 960 samples/s and DATA IF 240 Hz, Helper off, direct complex-envelope injection; valid only when the complete declared source/channel/receiver containment guards pass. It is a translated reference, not the sub-9 kHz direct-audio GUI row |
+| Physical-band/Helper comparison | 48,000 samples/s; DATA IF 8,270 Hz for the direct sub-9 kHz branch, 1,725 Hz for the other families. For this comparison set `helper_enabled=true`, `helper.power_w=2`, `helper.data_power_w=1`, `helper.ratio_limit_db=90`, `helper.frequency=helper::Frequency::high`, `helper.callsign="TEST"`, `helper.timecode=true`. Here `power_w` is the total requested budget: effective Helper power is the excess over DATA, capped by the ratio limit; 1/1 would produce zero Helper. These choices specify a synthetic 1:1 Helper/DATA balance, not delivered antenna watts. Native metadata time follows epoch plus dwell time. Use the returned Helper placement/powers and reject an out-of-band antenna or sampled configuration instead of moving tones silently |
+| Rate and duration | Sub-9 kHz: rate 0.1, added symbols 1, FHSS off, requested bit duration 16 s; the 64-coefficient constraint produces a 5,760.4 s tile. Groundwave slow case: rate 1, added symbols 1, FHSS off, requested 16 s. HF: rate 36, added symbols 10, FHSS off, requested 16 s, yielding two 11.6 s tiles (23.2 s active geometry). EME: rate 360, added symbols 1, FHSS on, requested 26.4 s, dwell 0.4 s, quiet 0, ramp 0.02 s, margin 0.005 s. Retain the actual returned geometry rather than rounding it |
+| Profile timing | Whole-bit waits 0, random extra bits 0, first public slot 0, initial ordinal 0; epoch is the scenario's UTC start rounded down to a multiple of 30 seconds. No calendar key selects the deterministic public schedule. Propagation delays and maximum filter tails are supplied as explicit public bounds by the selected scenario |
+| Waveform key | `Crypto::amateur()` at the pinned revision, with its two fixed zero-filled 64-byte roots, and `Format.encrypt=true`; use the same key at both endpoints. A 32-byte `Crypto(span)` is insufficient for that encryption setting. Message mode only; Noise mode and `Crypto::temporary()` deliberately use fresh OS randomness |
+| Source message | One uppercase ASCII `A` byte, `0x41`, no newline; `NativeMessageProfile` has FEC off, compression true, content limit 16 bytes and the same key. Use `prepare_text_message` and `wire_bits()`/`bit_source()`; the native short-prefix table gives thirteen bits, `1111101000001`, as a cross-check rather than a second codec implementation |
+| Public receiver | Same waveform/key/calendar/ordinal and declared uncertainty bounds; canonical native receiver with the full public hypotheses and W=2H unless an exact allocation is supplied. No realized channel, bit truth, active-slot count, source endpoint or future fade is receiver input |
+
+Use the native bounded deterministic power reference, not the realized message
+or received samples, to assign physical power. Let
+`mu=Emission.report().data_reference.mean_norm`, `G=report.data_gain`, and
+`R_emit=mu*G*G`. The pinned native construction makes R_emit approximately 1
+for both Helper-off and Helper-on DATA, while its composite report retains
+Helper balance. For DATA reference power C watts multiply the **whole emitted
+composite once** by `sqrt(C/R_emit)`; for magnetic RMS amplitude A use
+`A/sqrt(R_emit)`. Do not divide the already normalized emission by sqrt(mu)
+again. Save the reference's node/tile counts and reported relative standard
+error (bounded fixed-bit reference, at most 16 tiles × 2048 nodes), plus actual
+energy as a distinct output. A receiver using the raw PatternSource basis must
+use `data_basis_gain=physical_multiplier*G` and the matching noise variance;
+otherwise physical scaling is not undone by the declared receiver. Helper-on
+comparisons keep DATA reference power fixed and add the specified Helper power.
+
+Long sub-9 kHz messages last much longer than six hours. A single active bit is
+a component diagnostic; it does not establish a successfully decoded message.
+For a whole-message trial the horizon is derived from the actual encoded bit
+count and returned public slots, with noise/channel evolution continued through
+the final two scored quiet slots and filter/propagation tails. If that trial is
+outside a bounded work budget, report it unrun; do not shorten the bit or pretend
+one-bit calibration is complete-receiver qualification.
+
+Let `M=wire_bits()`. A clear completion control transmits slots `0,…,M−1`, then
+physical silence. The physical completion rule remains two scored quiet slots, normally M and M+1 when their full input windows are uncontaminated. The fixed observation horizon follows [86](86-statistics-and-calculation-checks.md): let q0 be the first public slot whose entire scoring-input window begins after the final nonzero source sample plus the declared propagation-support bound and filter-tail allowance. Render through the full input window of q0+2, including native lookahead: three final quiet opportunities, with one observation margin. Only the evaluator computes that horizon; the receiver never receives M, q0 or the source endpoint. No call turns EOF into success. An interior-fade
+counterexample chooses slots `i=floor(M/2)` and `i+1`, retaining later DATA; if
+`M<4` in another explicitly substituted codec fixture, choose ASCII `AA` and recalculate.
+Set the fade before the earliest contributing source/filter sample for those
+quiet-score apertures and keep it through their end. Log the exact sample
+ranges, avoiding a fixed “30 minute” substitute. The channel state continues
+even during observation gaps; a missing sample is invalid, not valid silence.
+
+Exact ranges come from `transmit_slot(i)` and `slot(i)`, including
+`data_support`, `observation`, `quiet_aperture` and adjacent-signal exclusions.
+For the sub-9 kHz tile, the halo is approximately 480 seconds on each side.
+The exact native integer expression is `ceil(8.L*Fs/fine_chip_rate_hz)+2`
+samples; source length is `ceil(bit_seconds*Fs + 2*halo_samples)`. Binary
+floating-point rates can move a ceiling by one sample, so neither an algebraic
+`480+2/Fs` simplification nor a rounded support duration is authoritative. Save
+the returned geometry (at Fs=960 the inspected rate expression gives 460803
+halo samples). With Helper and waits off the recurrence
+rounds to 6,750 s. The earlier approximately 6,767 s observation receipt is
+configuration-specific. See [native calendar](../../../include/datapump/triad_stream.hpp),
+[geometry](../../../src/triad_modem_v3.cpp), and
+[physical completion](../../../src/triad_message_receiver.cpp).
+
+For this thirteen-bit message, the first two final quiet slots are 13 and 14.
+The source's declared spectral support includes pulse margins: with 225 Hz
+occupied width and a 0.02 s ramp, `Emission::source()` declares ±362.5 Hz before
+channel offsets. Fs=960 leaves 117.5 Hz to Nyquist, not 367.5 Hz. Use 48,000
+samples/s for any specified branch that exceeds the 960-sample containment
+budget, retaining its physical evolution and all public hypotheses. Set
+`nominal_conversion_if_hz` and receiver IF to the same 240 Hz in the translated
+base branch; positive IF is required even though emitted I/Q is DATA-centered.
+RF oscillator errors use the physical carrier where specified and cannot be
+inferred from the IF. These guards are part of the proposed fixture, not a
+configure/runtime pass performed here.
+
+### Randomness and numerical decisions
+
+Each stochastic branch specifies a probability law separately from a reproducible
+finite seed set. For an initial deterministic comparison use roots `5489+r`,
+`r=0,…,19`; these are paired diagnostic realizations, not independently sampled
+field episodes or a basis for a natural success probability. A later iid model
+trial must independently sample its episode roots under the design in 86.
+
+For a native implementation reference, use `std::mt19937_64` initialized with
+`root + 104729*d` modulo 2^64 for domain `d`: 1 path, 2 external noise, 3 pulse
+times, 4 pulse marks, 5 equipment oscillator, 6 receiver noise, 7 interference.
+Use the engine's upper 52 bits as `(integer+0.5)/2^52`; the midpoint is exactly representable in binary64 and lies strictly between zero and one. Successive pairs feed the
+explicit Box–Muller transform for standard normal variates. Do not use a
+library-dependent normal-distribution transform. Consumption order is physical
+sample/event order within each domain, never thread or chunk completion order.
+When a branch requires dependence it shares the specified latent sequence
+explicitly; merely reusing seeds is not a physical dependence model. Engine
+substreams are deterministic numerical devices, not a proof of statistical
+independence. Alternative indexed generators may later be qualified against
+the same declared law and paired experiment.
+
+Critical input provenance belongs with each scenario: a source passage/locator,
+measurement conditions and estimator for observed values; an equation and inputs
+for calculations; a named fixed value or grid for engineering assumptions.
+No free “realistic default” completes a missing input. Distinguish numerical
+convergence from model discrepancy and empirical validation. Absolute physical
+calibration is not supplied by fixing a digital gain.
+
+## 8. How the chapters are organised
 
 Each scenario chapter has the same sections: physical mechanisms; measured and reported values; a moderate-to-worst-case table; how the literature models or simulates the condition; what a high-fidelity simulation would need; contradictions, open questions and things not found; references. The [README](README.md) lists the chapters and summarises their findings.
+
+Equal seed roots do not create identical physical white-noise histories at different sample rates. Pair deterministic signal/channel checks across rates, and compare noise PSD/ENBW separately unless an explicit common-band reconstruction couples the two noise processes.

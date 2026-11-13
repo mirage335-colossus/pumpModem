@@ -5,6 +5,8 @@
 - **How it was made.** Pure-Python scripts using only the standard library, written for this work and run on 13 November 2026 in the session's scratch directory. They are not part of the repository. Each section states the formulas and assumptions needed to reproduce its numbers.
 - **Related chapters.** groundwave [20](20-groundwave-1mhz.md) and [25](25-groundwave-30mhz.md); sub-9 kHz [10](10-sub9khz-propagation.md), [11](11-sub9khz-antennas-links-and-practice.md) and [12](12-sub9khz-noise.md); Earth–Moon–Earth [40](40-eme-lunar-scattering-and-geometry.md) and [41](41-eme-systems-practice-and-environment.md); skywave [31](31-skywave-dispersion-midlatitude-nvis-longhaul.md) and [33](33-hf-channel-models-and-simulators.md); noise [12](12-sub9khz-noise.md) and [50](50-noise-and-interference-mf-hf.md).
 
+**Current numerical evidence (13 November 2026).** [86](86-statistics-and-calculation-checks.md) independently reproduces the scalar antenna, field/noise, EME range/gain, mirror-path, width and integration calculations and selected lunar integrals. The original ground-wave residue-series implementation is absent: checking 144 field-to-loss conversions does **not** independently reproduce its fields, threshold distances, height effects or complex phase. Those historical solver outputs remain illustrative, not acceptance targets or calibrated scenario inputs. The Fable scenario chapters specify their own selected laws; in particular the selected eleven-node lunar law in [84](84-scenarios-eme.md) is different from this chapter's illustrative Hagfors/diffuse table. The numerical coverage table in 86 states exactly which quantities were checked.
+
 ## 1. Smooth-earth ground wave
 
 ### 1.1 Method and checks
@@ -216,7 +218,7 @@ The loading inductance resonates the antenna capacitance: 340 pF at 8.27 kHz nee
 | 1 kHz, top-loaded | 1 kW | 591 Ω | 1.3 A | 207 kV | 74 µW | −71 dB | 0.82 µV/m (2.7 fT) | 270; 3.7 Hz |
 
 - Several entries exceed practical insulation and corona limits. If the antenna voltage is capped at 30 kV, the bare wire at 8.27 kHz is limited to 0.53 A and 0.31 mW radiated, whatever the transmitter power, and the top-loaded case to 1.6 A and 7.3 mW. Voltage, not transmitter power, is then the binding limit; [11](11-sub9khz-antennas-links-and-practice.md) and [55](55-equipment-and-front-end-effects.md) give the limits reported in practice.
-- The loaded bandwidth is a few hertz to tens of hertz. A 0.06 Hz-wide signal sees a flat response, but the antenna's resonance sets the phase: a fractional capacitance change ΔC/C detunes the resonance by Δf/f = ΔC/(2C), which rotates the radiated phase by about arctan(Q ΔC/C). For a 1 % change that is 35° at Q = 70, 57° at Q = 155 and 63° at Q = 200. A capacitance that wanders with wind or rain therefore acts as phase noise on the transmitted carrier, separate from any propagation effect.
+- The loaded bandwidth is a few hertz to tens of hertz. A 0.06 Hz-wide signal sees a flat response, but the antenna's resonance sets the phase: a fractional capacitance change ΔC/C detunes the resonance by Δf₀/f₀ ≈ −ΔC/(2C) at fixed inductance. At a fixed operating frequency the magnitude of the resulting phase change is about arctan(Q ΔC/C) (its sign depends on the transfer-function convention). For a 1 % change that is 35° at Q = 70, 57° at Q = 155 and 63° at Q = 200. A capacitance that wanders with wind or rain therefore acts as phase noise on the transmitted carrier, separate from any propagation effect.
 
 ### 2.4 C/N0 at 100 km against measured noise levels
 
@@ -229,7 +231,7 @@ The fields of section 2.3 are compared with four noise field densities at 8.27 k
 | 8.27 kHz, top-loaded, 100 W | 4.7 µV/m | 2.7 | 6.3 | −7.8 | −24.2 |
 | 8.27 kHz, top-loaded, 1 kW | 15 µV/m | 12.7 | 16.3 | 2.2 | −14.2 |
 
-Row 1 of the manual test list, "1 mW, 200 dB" at −164 dBm/Hz, is −36 dB-Hz. One milliwatt of e.m.r.p. gives 3 µV/m at 100 km by inverse distance, so −36 dB-Hz is reached at about 250 km under the P.372 maximum noise, and only well beyond the range of the inverse-distance approximation (about 5,500 km) under the minimum. Physically, then, "1 mW" in row 1 can only be read as roughly the radiated power. Under the assumptions of section 2.1 that needs about 40 W into the top-loaded antenna or about 220 W into the bare wire at 8.27 kHz, and kilowatts at 3 kHz; with a 30 kV voltage cap the bare wire cannot radiate 1 mW at 8.27 kHz at all. The C/N0 the same radiated power gives varies by up to 27 dB with the noise conditions. These are estimates; measured links are in [11](11-sub9khz-antennas-links-and-practice.md).
+Row 1 of the manual test list, "1 mW, 200 dB" at −164 dBm/Hz, is −36 dB-Hz. One milliwatt of e.m.r.p. gives 3 µV/m at 100 km by inverse distance, so −36 dB-Hz is reached at about 250 km under the P.372 maximum noise, and only well beyond the range of the inverse-distance approximation (about 5,500 km) under the minimum. One physically illustrative interpretation of the synthetic row is roughly 1 mW of radiated power. The GUI power/path-loss pair itself does not fix that reference plane or uniquely determine antenna input power. Under the assumptions of section 2.1 that needs about 40 W into the top-loaded antenna or about 220 W into the bare wire at 8.27 kHz, and kilowatts at 3 kHz; with a 30 kV voltage cap the bare wire cannot radiate 1 mW at 8.27 kHz at all. The C/N0 the same radiated power gives varies by up to 27 dB with the noise conditions. These are estimates; measured links are in [11](11-sub9khz-antennas-links-and-practice.md).
 
 ### 2.5 Mains-harmonic wander near 8.27 kHz
 
@@ -280,7 +282,7 @@ where ρπa² is the Moon's radar cross-section. Geocentric (centre-to-centre) d
 
 The 160 Hz value at 1.2 µrad/s agrees with the 164–165 Hz maximum reported for 40° latitude in [40](40-eme-lunar-scattering-and-geometry.md) and [41](41-eme-systems-practice-and-environment.md). The actual rate at a given time combines the diurnal and libration terms vectorially and needs an ephemeris.
 
-- **Speckle size on the ground.** For whole-disc illumination the echo's speckle pattern on Earth has a scale of about λD/(2a) = 5.8 m at 5,760 MHz and mean distance, or larger when the effective scattering area is concentrated near the disc centre. Stations or antenna elements further apart than this fade almost independently. [40](40-eme-lunar-scattering-and-geometry.md) gives about 6.5 m by a different route.
+- **Speckle size on the ground.** For whole-disc illumination the echo's speckle pattern on Earth has a scale of about λD/(2a) = 5.8 m at 5,760 MHz and mean distance, or larger when the effective scattering area is concentrated near the disc centre. This dimensional scale alone does not establish independence between stations or aperture elements. Their covariance depends on the illuminated brightness/scattering distribution, separation direction, polarization and averaging; use its spatial Fourier transform or matched measurements. [40](40-eme-lunar-scattering-and-geometry.md) gives about 6.5 m by a different route.
 
 ### 3.3 Doppler spectrum and delay profile from assumed scattering laws
 
@@ -306,8 +308,8 @@ The echo is integrated over the visible hemisphere with σ⁰(φ) = (1 − f_d)�
 | 3 m (1.21°) | 0.190 | 0.84 | 0.38 | 0.199 / 0.68 | 2.16 ms | 2.70 ms | 0.17 / 0.41 / 0.52 | −0.3 dB |
 | 5 m (0.73°) | 0.182 | 0.72 | 0.35 | 0.178 / 0.63 | 1.83 ms | 2.47 ms | 0.19 / 0.45 / 0.57 | −0.8 dB |
 | 7.3 m (0.50°) | 0.170 | 0.57 | 0.31 | 0.151 / 0.55 | 1.36 ms | 2.05 ms | 0.22 / 0.52 / 0.66 | −1.6 dB |
-| 10 m (0.36°) | 0.158 | 0.45 | 0.25 | 0.126 / 0.43 | 0.87 ms | 1.46 ms | 0.27 / 0.62 / 0.76 | −2.5 dB |
-| 25 m (0.15°) | 0.115 | 0.24 | 0.12 | 0.072 / 0.19 | 0.16 ms | 0.21 ms | 0.52 / 0.94 / 0.99 | −5.8 dB |
+| 10 m (0.36°) | 0.158 | 0.45 | 0.25 | 0.126 / 0.43 | 0.88 ms | 1.46 ms | 0.27 / 0.62 / 0.76 | −2.5 dB |
+| 25 m (0.15°) | 0.115 | 0.24 | 0.12 | 0.072 / 0.19 | 0.17 ms | 0.21 ms | 0.52 / 0.94 / 0.99 | −5.8 dB |
 | 64 m (0.057°) | 0.066 | 0.12 | 0.057 | 0.038 / 0.094 | 0.04 ms | 0.04 ms | 0.92 / 1.00 / 1.00 | −10.9 dB |
 
 What these show:
@@ -329,7 +331,7 @@ What these show:
 | 10 m | 53.0 dBi | 0.36° | 0.70 |
 | 25 m | 61.0 dBi | 0.15° | 0.28 |
 
-**The manual EME row.** Two 3 m dishes give a net loss of 284.1 − 2 × 42.6 = 199.0 dB at mean geocentric distance; 200 dB corresponds to two 2.8 m dishes. The GUI's "40 W, 200 dB" at −164 dBm/Hz gives 10.0 dB-Hz. With two 3 m dishes and a 40 W transmitter, the scalar radar-equation result is `C/N₀ = 28.6, 26.6 and 23.9 dB-Hz` at system temperatures 50, 80 and 150 K respectively (N₀ = −181.6, −179.6 and −176.9 dBm/Hz), before Moon noise, pointing, polarisation and narrow-beam corrections. The GUI default noise density corresponds to a system temperature of about 2,900 K. The 15 kW Helper pilot through the same path at 80 K would be about 52.3 dB-Hz. [41](41-eme-systems-practice-and-environment.md) gives the full station budgets and noise contributions.
+**The manual EME row.** Two 3 m dishes give a net loss of 284.1 − 2 × 42.6 = 199.0 dB at mean geocentric distance; 200 dB corresponds to two 2.8 m dishes. The GUI's "40 W, 200 dB" at −164 dBm/Hz gives 10.0 dB-Hz. With two 3 m dishes and a 40 W transmitter, the scalar radar-equation result is `C/N₀ = 28.6, 26.6 and 23.9 dB-Hz` at system temperatures 50, 80 and 150 K respectively (N₀ = −181.6, −179.6 and −176.9 dBm/Hz), before pointing, polarisation and narrow-beam corrections. Here system temperature means the total on-Moon input-referred temperature: lunar antenna noise must already be included in the stated 50/80/150 K. If those numbers instead denote receiver-plus-off-Moon temperatures, add the beam-weighted lunar excess once and recompute; do not count it twice. The GUI default noise density corresponds to a system temperature of about 2,900 K. The 15 kW Helper pilot through the same path at 80 K would be about 52.3 dB-Hz. [41](41-eme-systems-practice-and-environment.md) gives the full station budgets and noise contributions.
 
 ### 3.5 Faraday rotation
 
@@ -347,7 +349,7 @@ At 5,760 MHz Faraday rotation is negligible for polarisation matching. Its frequ
 
 ## 4. Noise conversions
 
-From section 3.1 of [00](00-method-and-modem-context.md): N0 = −174 + F_a dBm/Hz at the terminals of a lossless reference antenna, and E_n = F_a + 20 log f_MHz − 95.5 dB(µV/m) in 1 Hz for a short vertical monopole. The magnetic flux density uses B = E/c.
+From section 3.1 of [00](00-method-and-modem-context.md): N0 = −174 + F_a dBm/Hz at the terminals of a lossless reference antenna, and E_n = F_a + 20 log f_MHz − 95.5 dB(µV/m) in 1 Hz for a short vertical monopole. The magnetic flux density uses the plane-wave conversion B = E/c. This is a formal comparison for a propagating plane wave; local reactive fields and Earth–ionosphere modes need their actual E/H impedance, so it does not calibrate a VLF magnetic receiver.
 
 | Frequency | F_a | N0 | E_n | E_n | B_n |
 | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -430,5 +432,5 @@ The 3 dB point is at B·T ≈ 1.3, consistent with the "about 3 dB at roughly 1.
 - The ground-wave model is smooth and homogeneous. It contains no mixed paths, terrain, buildings, vegetation, ducting or sea roughness, and no sky wave.
 - The antenna model uses assumed capacitance, effective height and losses. It does not include corona, insulator leakage, environmental losses varying with weather, or the waveguide field structure beyond 100 km.
 - The lunar model uses assumed scattering laws, a geometric delay–Doppler mapping and Gaussian beams. It contains no regional albedo variation, no polarisation, no ephemeris-driven rotation vector and no measured 5–6 cm data, which [40](40-eme-lunar-scattering-and-geometry.md) reports do not exist in the sources found.
-- The skywave delay table uses a mirror model with fixed heights and no group retardation. Its tabulated mode differences do not bound actual multi-hop delays or discriminate discrete modes from scatter.
+- The skywave delay table uses a mirror model with fixed heights and no group retardation. Its tabulated mode differences do not bound actual multi-hop delays or discriminate discrete modes from scatter. Equal-hop reflection points are imposed geometrically; visibility and ionospheric support must also be checked before treating any row as a physical mode.
 - None of these calculations has been compared with a measurement made for this work. Their value is as an independent check on arithmetic and conventions, and as a statement of what simple physics alone predicts.

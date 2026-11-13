@@ -9,7 +9,7 @@ benchmarked simulator. It extends the existing
 [appraisal protocol](../../../_appraisal/highFidelity-triple_Robust_Modem/experiment-protocol.md)
 with current interface and build findings rather than creating a second protocol.
 
-Source inspection used `07bcbc5da41ea5e8ec43517ffb92e51710037744`. The production
+Initial source inspection used `07bcbc5da41ea5e8ec43517ffb92e51710037744`; the completion pass rechecked interfaces at `33f6e461fce12f4079870091b6d1aaa9c2f50821`. The production
 `src/`, `include/`, `tests/`, `cmake/` and `docs/` trees have no changes between
 the chapters' cited `0801e5c7` and that revision. This establishes source
 continuity, not the accuracy of every earlier interpretation or planner receipt.
@@ -58,6 +58,36 @@ continuous-time ideal has a Lorentzian spectrum; sampling yields its aliased
 discrete-time counterpart. Chapter 00 now corrects its earlier blanket claim of
 Lorentzian absence. Arbitrary measured spectra, coupled scattering and empirical
 calibration remain different requirements.
+
+## Exact fixture and public receiver mapping
+
+[00 section 7](00-method-and-modem-context.md#7-reproducible-source-and-evidence-contract)
+is the selected source contract. In particular, a positive DATA IF is required
+even for translated complex injection; `Format.encrypt=true` needs the two-root
+`Crypto::amateur()` fixture rather than the single 32-byte constructor; the
+Helper power option is total requested power, so equal total/DATA values give
+zero Helper. Native Emission already normalizes DATA with its bounded fixed-bit
+reference. Use its `mu*data_gain²` reference once when assigning physical power.
+A nominal 16 s HF request returns 23.2 s active geometry, and exact integer
+ceilings determine pulse halos. Save returned values rather than infer them
+from rounded historical manual rows.
+
+Construct `ReceiverConfig` from pinned defaults plus the explicit per-scenario
+bounds. Match `frequency_bound_hz` to profile `cfo_bound_hz`, relative clock
+bounds, profile arrival interval, and spread with the exact ms-to-seconds
+conversion. Set endpoint clocks and profile `audio_pair_ppm` consistently.
+Use `data_basis_gain=physical_multiplier*Emission.report().data_gain` for a raw
+PatternSource basis, with public noise variance in the same sample/physical
+plane. A non-flat or nonlinear front-end comparison must state its fixed public
+calibration rather than insert evaluator-known instantaneous gain/noise.
+
+There is **no independent native drift-bound field in Hz/s**. The varying-channel
+common/atmospheric fields are hertz; the fine bank derives slope hypotheses
+from their values and source duration, with its own admission limits. A declared
+physical drift envelope is not proof that this receiver family can represent it.
+Preserve all configured hypotheses and report model mismatch or insufficient
+resource admission as a result. No source-only inspection qualifies acquisition
+or capacity.
 
 ## Candidate channel representations
 
@@ -174,6 +204,17 @@ respect exact explicit caps, and share one bounded receiver executor. Charge
 channel buffers and latent state in addition to the receiver's full live-owner,
 DSP, input, stack and retained-result bounds. The simulation must not hide
 unbounded precomputation outside its memory report.
+
+The literal EME reference is 256×512 cells at 48 ksample/s: over 1800 s
+that is 11,324,620,800,000 cell-sample products before receiver work. Fifteen
+sub-9 kHz complete messages already span at least 421.875 physical hours.
+Neither is an automatically admitted campaign. Start with 86's short component
+calibration and independent holdout; only an applicable complete-cost upper
+forecast within the declared thirty-minute campaign budget permits the
+corresponding full-message work. A reduced delay–Doppler or low-rate latent
+representation can change cost substantially, but needs a small exact-reference
+comparison before its results stand in for the literal model. These operation
+counts are not processor timing estimates or permission to rent hardware.
 
 Choose bulk arithmetic by the
 [automatic capacity contract](../../../docs/gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling).

@@ -209,7 +209,7 @@ Published anchor values in [P618] Table 1 are 30 rotations at 0.1 GHz, 108° at 
 
 Scintillation: classed weak for S4 < 0.3, moderate 0.3–0.6, strong above 0.6; peak-to-peak fluctuation ≈ 27.5 S4^1.26 dB; fading rate "about 0.1 to 1 Hz"; intensity is Nakagami-distributed with m = 1/S4² ([P531] §§5.1, 5.4) [S]. At equatorial stations in solar-maximum years it occurs "almost every evening after sunset, with the peak-to-peak fluctuations … at 4 GHz exceeding 10 dB" ([P531] §5.2.2) [S]; [P618] Table 1 gives more than 20 dB at 1 GHz, about 10 dB at 3 GHz and about 4 dB at 10 GHz for such conditions [S]. Events last "from 30 min to hours" ([P531] §5.2.2) [S].
 
-*Measured.* The only gigahertz occurrence statistics in [P531] are 4 GHz geostationary-satellite records from the Hong Kong and Taipei earth stations, 1975–1980, at elevations of about 20° and 30° (Fig. 14). In the solar-maximum year (sunspot number 153–165) the peak-to-peak fluctuation on the 20° path exceeded about 5 dB for 1 % of the year, 10 dB for 0.1 % and 14 dB for 0.01 % (read from the figure) [S]. For high latitudes [P531] gives only VHF and UHF examples (Fig. 5) and a qualitative world map of fading depth at 1.5 GHz (Fig. 6). At 1.575 GHz a station in northern Norway measured S4 above 0.5 and power fades of 12 dB-Hz during the 17 March 2015 storm, one of the largest of the last solar maximum, while noting that high-latitude events usually show phase scintillation with little or no amplitude scintillation ([JO18]) [P].
+*Measured.* The only gigahertz occurrence statistics in [P531] are 4 GHz geostationary-satellite records from the Hong Kong and Taipei earth stations, 1975– 1980, at elevations of about 20° and 30° (Fig. 14). In the solar-maximum year (sunspot number 153–165) the peak-to-peak fluctuation on the 20° path exceeded about 5 dB for 1 % of the year, 10 dB for 0.1 % and 14 dB for 0.01 % (read from the figure) [S]. For high latitudes [P531] gives only VHF and UHF examples (Fig. 5) and a qualitative world map of fading depth at 1.5 GHz (Fig. 6). At 1.575 GHz a station in northern Norway measured S4 above 0.5 and power fades of 12 dB-Hz during the 17 March 2015 storm, one of the largest of the last solar maximum, while noting that high-latitude events usually show phase scintillation with little or no amplitude scintillation ([JO18]) [P].
 
 *Extrapolated.* [P531] §5.8 scales 4 GHz peak-to-peak values by (f/4)^−1.5, which at 5.76 GHz gives 2.9, 5.8 and 8.1 dB (S4 ≈ 0.17, 0.29, 0.38) for the 1 %, 0.1 % and 0.01 % levels [E]. Applying the same law to S4 instead, as §5.1 states it for weak and moderate scintillation, gives 2.5, 5.0 and 7.0 dB (S4 ≈ 0.15, 0.26, 0.34) [E]; log-interpolating [P618] Table 1 gives about 6 dB for the post-sunset equinox case [E]. For link budgets [P531] converts a peak-to-peak fluctuation to a loss of Pfluc/√2 (§5.8) [S]. The L-band storm value scales to S4 ≈ 0.07, about 1 dB peak-to-peak, at 5.76 GHz [E]. All of these are one-way, point-source figures. At mid-latitudes fades at 1 GHz are 0.1 dB for 1 % and 0.3 dB for 0.1 % of the time ([P618] Table 2) [S], so nothing measurable is expected at 5.76 GHz. "At some locations, ionospheric scintillation may be important at frequencies below about 6 GHz" ([P618] §2.3) [S]. For EME the handbook notes that scintillation "can increase the fading rates produced by Earth rotation and lunar librations", with frequency spread from a fraction of a hertz to several hertz, mainly at VHF and UHF ([Hbk10] §30.9.4) [B].
 
@@ -291,7 +291,7 @@ Values are for 5.76–5.8 GHz unless stated. "Worst" cells combine conditions th
 - **Mode simulators** in WSJT-X apply white Gaussian noise plus a single "Doppler spread" parameter and produce the threshold curves above ([Q65QS]; [FT16]) [G]; in the current Q65 simulator that parameter is the full support of a truncated-Lorentzian Rayleigh-fading spectrum, and the simulator also offers a linear drift and a tracking-step size ([Q65sim]) [G]. They do not model delay spread, the measured spectrum shape per band or non-Gaussian interference; [W3SZ19] argues that the result depends on the assumed spectrum shape (its own tests used one, centrally peaked shape), and the 24 GHz experience in [MT13] supports this.
 - **Echo mode** in WSJT-X 2.6 integrates power over the predicted width and replaces an estimator that read about 12 dB low at 30 Hz spread ([Echo22]; [KA1GT-Echo]) [G]; it is the practical validation instrument.
 - **ITU-R methods**: [P676] (gases; line-by-line valid to 1,000 GHz), [P838] and [P618] (rain to 55 GHz; r.m.s. error of the total-attenuation method about 33 %), [P840] (cloud), [P618] §2.4 (scintillation, 4–55 GHz, elevation ≥ 5°, and a low-angle method fitted to 6–38 GHz data at 1–4°), [P834] (refraction), [P531] (ionosphere, with the GISM scintillation model and NeQuick2), [P372] (noise). All are built for a point source at a satellite. None treats the Moon as an extended, already-fading target, and [P372]'s lunar temperature is too coarse at centimetre wavelengths.
-- **Lunar thermal models**: [Linsky73] (mean brightness versus wavelength with error budget), [KT63] (Fourier components versus wavelength) and the Krotikov–Pelyushenko (1987) compilation of T0, T1 and phase versus frequency ([Hafez13]). Later models from orbiting microwave radiometers exist but were not obtained.
+- **Lunar thermal models**: [Linsky73] (mean brightness versus wavelength with error budget), [KT63] (Fourier components versus wavelength) and the Krotikov–Pelyushenko (1987) compilation of T0, T1 and phase versus frequency ([Hafez13]). Yang 2019’s regional orbital radiometry was subsequently inspected in full; its calibration-bias findings and limited transfer are recorded below.
 - **Data sets**: [Zenodo22] holds I/Q recordings of 433.8 MHz moon echoes with transmit references; WSJT-X sample files include 10 GHz and 6 m EME recordings ([Q65QS] p. 4). No 5.76 GHz I/Q data set was found.
 
 ## What a high-fidelity simulation would need
@@ -335,9 +335,161 @@ The Sub9, HF and Aurora presets describe other channels; "Aurora worst" is the n
 4. **Link budget versus observation.** Agreement is good for beams wider than the Moon; a 2–4.5 dB shortfall is reported for a 0.3° transmit beam at 10 GHz ([OE2IGL-10]). The 5.76 GHz narrow-beam factors above are a crude estimate.
 5. **Historical details.** First operation of the Communication Moon Relay is given as 1959 ([vanKeuren97], [Jaffe66]) with public inauguration in January 1960. [Jaffe66] dates Project Diana to 11 January 1946, other accounts to 10 January. [DeWitt49] cites about 15 kW peak for one series; the commonly quoted 3 kW was not checked. Early theory ([Grieg48]) expected teleprinter-only bandwidth; [Trexler58] measured far less delay spread at 198 Mc, but at C band the diffuse share is larger. The Communication Moon Relay frequency is "around 400 megahertz" in [vanKeuren97] but "438–455 mc" in [EW60], and the 1960 demonstration used four teletypewriter channels against the sixteen-channel capacity in [vanKeuren97].
 6. **Ionospheric scintillation on EME paths.** No measurement at 5–6 GHz on a lunar path was found. The C-band figures here are 4 GHz geostationary-satellite statistics from Hong Kong and Taipei ([P531] Fig. 14) scaled in frequency, and the high-latitude figure is a GPS L-band storm measurement ([JO18]) scaled likewise. [P531] gives two scaling rules, S4 ∝ f^−1.5 (§5.1) and peak-to-peak dB ∝ f^−1.5 (§5.8), which differ by about 1 dB at 5.76 GHz for a 14 dB event at 4 GHz; [P618] Table 1 interpolates to about 6 dB. How the fades of the two passes combine, and how an extended, already-fading target changes them, is unknown.
-7. **Not found or not obtained.** TRSSCOMM operating frequency, data rate and availability statistics (the NSA history is heavily redacted; frequency unverified). Availability or error-rate statistics for the Communication Moon Relay beyond the mutual-visibility statement of [EW60]; the NRL sources cited by [vanKeuren97], including L. A. Gebhard's NRL Report 8300 (1979), whose DTIC copy refused automated access. DUBUS articles (links dead). EMECalc documentation, RSGB and ARRL microwave handbooks. The C-band scintillation papers behind [P531] Fig. 14 (D. J. Fang and M. S. Pontes, COMSAT Tech. Rev. 11, 293–320, 1981; T. A. Mollen, C. H. Liu and D. J. Fang, Radio Sci. 23, 337–345, 1988; identified through a NASA Propagation Information Center review, N94-14671) and any C-band measurement at auroral latitudes. **Source-access update:** Yang et al.'s 2019 Chang'E-2 polar radiometer paper (DOI 10.1155/2019/3940837), described as snippet-only in the earlier research pass, was inspected in full via an open article copy on 2026-11-13 [Yang19]. It analyzes passive regional brightness temperatures at 3, 7.8, 19.35 and 37 GHz; the authors report a nearly constant negative bias, likely from cold-reference antenna heat contamination, while retaining variation trends. This is not a disc-integrated 5.76 GHz system temperature and does not measure a coherent EME scattering kernel; channel-2 data also depart from earlier results. A formal Q65 design paper beyond the quick-start guide and user guide (searched). Analysis of the 2021 LoRa delay–Doppler data beyond the press release and data-set description (searched; a promised conference presentation was not found). Project Echo's preliminary moon-bounce tests [recollection, unverified]. The sense of circular polarisation used at 5,760 MHz.
-8. **Coverage and transfer of recent literature.** The 2015–2026 search is targeted rather than systematic. Gao et al. 2023 is local Mini-RF dielectric inversion (abstract/index record accessible; publisher full-text fetch blocked); Campbell 2025 is a 12.6/70-cm Stokes-polarimetry paper (publisher preview/abstract only) and cautions that physical labels assigned to polarimetric components are non-unique; Fassett et al. 2025 is an LPSC abstract on 98 local 4.2/12.6-cm bistatic SAR collects, where incidence angle dominates median response and phase angle has modest median variation; JPL IPN 42-216C is full text but models a lunar-surface asset downlink to a directional DSN receiver; and the 2024 Mini-RF paper is monostatic S-band image correction. None measures a disc-integrated 5.8-GHz EME scattering function. Keep local/orbital radar and one-way lunar downlink as transfer controls only, with their geometry and observable named.
+7. **Historical missing-source record; current per-item dispositions below.** TRSSCOMM operating frequency, data rate and availability statistics (the NSA history is heavily redacted; frequency unverified). Availability or error-rate statistics for the Communication Moon Relay beyond the mutual-visibility statement of [EW60]; the NRL sources cited by [vanKeuren97], including L. A. Gebhard's NRL Report 8300 (1979), whose DTIC copy refused automated access. DUBUS articles (links dead). EMECalc documentation, RSGB and ARRL microwave handbooks. The C-band scintillation papers behind [P531] Fig. 14 (D. J. Fang and M. S. Pontes, COMSAT Tech. Rev. 11, 293–320, 1981; T. A. Mollen, C. H. Liu and D. J. Fang, Radio Sci. 23, 337–345, 1988; identified through a NASA Propagation Information Center review, N94-14671) and any C-band measurement at auroral latitudes. **Source-access update:** Yang et al.'s 2019 Chang'E-2 polar radiometer paper (DOI 10.1155/2019/3940837), described as snippet-only in the earlier research pass, was inspected in full via an open article copy on 2026-11-13 [Yang19]. It analyzes passive regional brightness temperatures at 3, 7.8, 19.35 and 37 GHz; the authors report a nearly constant negative bias, likely from cold-reference antenna heat contamination, while retaining variation trends. This is not a disc-integrated 5.76 GHz system temperature and does not measure a coherent EME scattering kernel; channel-2 data also depart from earlier results. A formal Q65 design paper beyond the quick-start guide and user guide (searched). Analysis of the 2021 LoRa delay–Doppler data beyond the press release and data-set description (searched; a promised conference presentation was not found). Project Echo's preliminary moon-bounce tests [recollection, unverified]. The sense of circular polarisation used at 5,760 MHz.
+8. **Coverage and transfer of recent literature.** The earlier 2015– 2026 search was targeted rather than systematic. The 2026-11-13 source/data pass below supplies actual query routes and individual dispositions; it does not assert an exhaustive census. Gao et al. 2023 is local Mini-RF dielectric inversion (abstract/index record accessible; publisher full-text fetch blocked); Campbell 2025 is a 12.6/70-cm Stokes-polarimetry paper (publisher preview/abstract only) and cautions that physical labels assigned to polarimetric components are non-unique; Fassett et al. 2025 is an LPSC abstract on 98 local 4.2/12.6-cm bistatic SAR collects, where incidence angle dominates median response and phase angle has modest median variation; JPL IPN 42-216C is full text but models a lunar-surface asset downlink to a directional DSN receiver; and the 2024 Mini-RF paper is monostatic S-band image correction. None measures a disc-integrated 5.8-GHz EME scattering function. Keep local/orbital radar and one-way lunar downlink as transfer controls only, with their geometry and observable named.
 9. **Different estimators across chapters.** The half-power delay at 5.76 GHz is 0.53 ms here (log-interpolation of [K1JT10]'s figures from Hagfors) and about 0.75 ms in chapter [40](40-eme-lunar-scattering-and-geometry.md) (Lincoln Laboratory law, surface-area weighting); coherence times here are inverse widths (17–40 ms at the median), while chapter 40's field-correlation estimate is 13 ms to a correlation of 0.5. These are different estimators applied to related data, not conflicting measurements.
+
+## Completion pass: systems, data and calibration (2026-11-13)
+
+The historical search notice records earlier limitations. Its source obligations
+have now been individually assessed below. The mathematical EME scenario is
+fixed in [84](84-scenarios-eme.md), while empirical target-band validation is a
+separate unmet requirement. Source access, a model definition and an actual
+channel/receiver measurement must not be conflated.
+
+### Concrete public data routes and what they contain
+
+**433.8 MHz SigMF.** [Zenodo5832579](https://zenodo.org/records/5832579),
+version 1, is the Telkamp–Zeppenfeldt–van Muijlwijk–Dijkema dataset, published
+2022-01-29 for the 2021-10-05 Dwingeloo experiments. This is single-station
+self-EME, not the two-Earth-station 5.76 GHz scenario. The record warns that the
+computer was not synchronized: file creation timestamps and guessed
+first-sample timing are distinct; logs use local CEST. Preserve that warning
+instead of treating a metadata UTC-like field as a surveyed precision epoch.
+
+| Actual inspected artifact | Content / calibration consequence |
+| --- | --- |
+| [LoRa receive JSON](https://zenodo.org/records/5832579/files/camras-rx-2021_10_05_14_38_49.sigmf-meta?download=1) | `cf32_le`, SigMF1.0.0, sample rate2000000, frequency433800000 Hz, sample_start0, datetime 2021-10-05T13:38:53.200000; hardware description names LR1110 and Ettus B210; annotations empty |
+| [CW transmit/receive JSON](https://zenodo.org/records/5832579/files/camras-txrx-2021_10_05_13_31_37.sigmf-meta?download=1) | Same complex float format/sample rate/frequency; datetime 2021-10-05T12:31:41.2; CW description; empty annotations |
+| Matching IQ file listings | LoRa receive96.0 MB, displayed MD5`6e525853ef03204e4d42c2756c29a943`; CW80.0 MB, MD5`9372d0232c1b102c4156f1e956fcc7e3`. Checksums were read from the repository listing, **not verified against downloaded sample bytes** |
+| Metadata license fields | Explicit `https://creativecommons.org/licenses/by/4.0/` in both inspected JSON files; preserve creator attribution on reuse |
+| [Horizontal receiver log](https://zenodo.org/records/5832579/files/lora_log_horizontal.txt?download=1),13:05:22/25 and13:11:06/08 entries | Direct/echo-like pairs report decoded six-byte `PI9CAM`; the first pair’s time difference is about 2.435 s and the later echo-like entry reports SNR−16 dB. Earlier log entries have nonsensical lunar “Distance” values, so labels alone are not calibrated ranges or evidence that every entry is an echo |
+
+The log is an **instrument report**, not an independent decode performed here.
+`BW:1` is an unexplained device enum; it is not safe to infer bandwidth1 Hz or
+an exact LoRa noise reference from that integer. RSSI/SNR fields do not provide
+ADC-to-watt calibration, receiver noise temperature, front-end linearity,
+polarization response or a denominator of all attempted packets. The dataset
+can support its own-band relative echo delay, frequency shift and packet
+reproduction after aligning actual transmit/receive windows. It cannot by
+itself estimate natural 5.76 GHz success probability, calibrated C/N0 or
+whole-disc short-wavelength scattering. No raw IQ, measured delay–Doppler
+surface or complete packet-denominator analysis was produced in this pass.
+The recorded 210 kHz carrier offset must be accounted for before decimation;
+it is not an unexplained lunar Doppler shift.
+
+**Orbital radar.** Official [PDS/ODE Mini-RF documentation](https://ode.rsl.wustl.edu/Moon/pagehelp/Content/Missions_Instruments/Lunar%20Reconnaissance%20Orbiter%20(LRO)/Mini-RF/Derived.htm)
+links the PDS4 bundle `urn:nasa:pds:lro_minirf_bistatic`. The inspected
+[archive root](https://pds-geosciences.wustl.edu/lro/urn-nasa-pds-lro_minirf_bistatic/)
+and [readme](https://pds-geosciences.wustl.edu/lro/urn-nasa-pds-lro_minirf_bistatic/readme.txt)
+are concrete public acquisition routes. The ODE product note says PDS4 adds
+calibration/housekeeping and combines the real and imaginary calibrated
+components previously stored separately. Derived Stokes/CPR products and
+geometry backplanes remain **local Earth-to-LRO SAR**, not an Earth receiver’s
+whole-disc voltage time series. Product labels/calibration version must be
+checked before using them; public availability is not confirmation of a
+particular processing correction or target-band suitability.
+
+A primary [2011 Mini-RF quick-look memo](https://pds-geosciences.wustl.edu/lro/lro-l-mrflro-2_3_5-bistatic-v3/lromrf_3xxx/document/bistatic.htm),
+“Raw Pulse Power” and “Spectrum of the Pulsed-CW Data,” describes asynchronous
+Arecibo pulses, low-bit quantization and a horizontal-channel clipping/image
+problem. This is direct counterevidence to treating archived IQ as automatically
+ideal or calibrated. Its rough budget agreement is explicitly qualified by
+the authors. New Peters 2026/Chan 2025 calibration material in chapter 40 further
+requires polarimetric correction; no whole-disc law has been reconstructed here.
+
+**Target-band route result.** Exact 5.7/5.76/5.8 GHz spectrum/recording searches,
+Zenodo, official PDS/ODE and current ngRadar records did not identify a
+calibrated public 5–6 cm whole-disc two-station record with the required station,
+time, beam and noise metadata. This is a bounded search result, not proof that
+no such measurement exists. The nearest inspected raw-data candidate above is
+433.8 MHz; local 4.2 cm SAR and 13.9 GHz Green Bank images do not fill its role.
+
+### Recovered scintillation source and fixed thermal interpretation
+
+The previously missing [Fang–Pontes1981 original COMSAT paper](https://www.comsat-legacy.org/COMSAT%20Technical%20Review/CTR%20Fall%201981,%20V.11--2.PDF)
+was inspected at printed pp. 293–320, especially measurement setup/Tables 1–2
+(pp. 295–299), temporal behavior (pp. 304–307) and statistics/conclusions
+(pp. 310–317). Hong Kong monitored satellite beacons and communication carriers
+in 1977– 1980, with separate uplink/downlink frequencies and geographically
+different paths. It reports strong events up to 14 dB peak-to-peak and breakdown
+of weak-scattering frequency-power scaling. The worst-month statistic has a
+specified threshold/denominator; it is not a bit-failure probability. This
+remedies access to a decision-driving original source but **does not** measure
+two 5.76 GHz lunar legs or their dependence. Strong-event frequency scaling
+and an assumed independent product of two fades therefore cannot be promoted
+to a calibrated EME scenario.84 uses fixed smooth attenuation controls instead.
+
+For thermal calculations, distinguish brightness temperature Tb from
+beam-weighted antenna temperature and full on-Moon Tsys. For a centred Gaussian
+beam on a uniform disc, the small-angle fill fraction is
+`F=1−exp[−4ln2(rMoon/β)²]`; a receiver term plus
+`Tbackground+(Tb−Tbackground)F` gives a useful explicit comparator. Receiver
+loss and spillover require their own reference planes. The 225 K brightness
+in 84 is an assumed intermediate centimetre-wave value;80 K is its assumed
+**total** on-Moon system temperature. They are not quantities to add. Narrower
+beams increase both signal gain/coupling and lunar noise; compare both changes.
+Yang 2019’s already inspected regional measurements/bias are retained rather
+than misrepresented as an independently calibrated disc-integrated 5.76 GHz
+antenna temperature. Exact topographic/thermal maps remain an optional,
+calibration-dependent extension.
+
+### Individual disposition of the historical list
+
+| Original source/topic | Current decision and residual scope |
+| --- | --- |
+| TRSSCOMM frequency | Unverified in available redacted history; withdraw as a numerical input or evidence of operation at the scenario carrier |
+| TRSSCOMM rate/availability | No quantified calibrated performance claim retained; historical existence does not set a modem threshold |
+| CMR BER/availability | Not established beyond the cited visibility/history; no success probability inferred |
+| Gebhard NRL 8300 / original NRL sources | Prior DTIC refusal retained. NASA history is sufficient for nonnumerical context; inaccessible report supplies no scenario parameter |
+| DUBUS articles / dead links | Accessible author reprints MT13/Echo22/G3WDG retained at their exact scope; missing articles supply no unique threshold or spectrum parameter |
+| EMECalc documentation | Not a selected authority;84 supplies explicit radar/beam/noise equations and assumptions instead of opaque tool defaults |
+| RSGB microwave handbook | Not obtained; no selected parameter depends on unseen text |
+| ARRL microwave handbook | Not obtained; existing Hbk10 is identified separately, not represented as this missing book |
+| Fang–Pontes 1981 | Access remedied by full original issue; conditions and transfer limit above |
+| Mollen–Liu–Fang 1988 | Exact primary title/DOI established: *A study of C band equatorial scintillation in the Asian sector*,10.1029/RS023i003p00337; publisher route failed. Fang 1981 provides direct source evidence, without claiming this distinct study was read |
+| C-band auroral scintillation | No matching lunar-path measurement found; GPS L-band storm scaling remains a sensitivity analogy only |
+| Yang 2019 | Earlier full-text remedy retained, with regional brightness/bias limits; no redundant claim of a new reading |
+| Formal Q65 design paper | Accessible quick-start, user guide and simulator remain actual authorities. A formal paper is not invented; exact 2021 curve/simulator revision remains unverified, so thresholds are not transfer-calibrated to Robust |
+|2021 LoRa analysis/presentation | Actual metadata and receiver log inspected above; promised presentation remains unlocated. Raw-IQ decoding/channel estimation is unexecuted and no success-denominator claim is made |
+| Project Echo preliminary tests recollection | Withdrawn as evidential support; no implementation/design claim depends on it |
+| Circular sense used by all 5,760 MHz stations | Not inferred as universal.84 defines the propagation-direction convention and separate receiver-port controls; cited practical feed reports remain station-specific |
+|5.7 GHz measured spectrum / widths | Visual widths near libration minima remain grey evidence with unspecified detection threshold/window, not a measured full power spectrum |
+| Whole-disc 5.76 GHz IQ | Open empirical qualification dependency; targeted routes/results above |
+| Recent 2015– 2026 lunar work | Expanded with 2026 journal architecture/calibration,2025 abstracts and actual archive routes; geometry/estimator exclusions below. No exhaustive-literature claim |
+
+### Search receipt and estimator reconciliation
+
+All queries here were executed 2026-11-13. In addition to the exact-query table
+in [40](40-eme-lunar-scattering-and-geometry.md), this systems pass used
+`"Fang" "Pontes" "1981" scintillation` (original COMSAT issue),
+`"Mollen" "Liu" "Fang" "1988" scintillation` (publisher contents/DOI),
+`"lunar" "433.8" "delay Doppler" Telkamp` (Zenodo), and direct opens of the
+actual JSON/log links above. PDS/ODE product documents were followed from
+`site.pds-geosciences.wustl.edu lunar radar 4.2 cm Mini RF bistatic data`.
+These are source/contents receipts, not a claim to have processed large binary
+archives. A shell download attempt for the alternative historical ZPC scan
+failed at DNS resolution; web metadata/text routes remained usable. No source
+was upgraded solely because its URL existed.
+
+The selected recent literature now includes 2017 long-wave and bistatic radar,
+2019 radiometry/downlink modeling,2023 dielectric inversion,2024 topographic
+image correction,2025 local bistatic/calibration studies and 2026 journal
+instrument processing. Local SAR, passive regional thermal radiation and
+one-way downlinks are excluded as direct whole-disc 5.76 GHz calibration.
+Peters 2026’s journal paper specifically corrects the old missing-journal claim;
+its existence does not remove the missing empirical EME record.
+
+Delay t50 means integrated power below excess delay, RMS means deviation about
+mean delay, and support means the entire geometric interval. The 0.53 ms
+K1JT interpolation, chapter 40 full-table≈0.75 ms and 84 sparse-table 0.708 ms
+are different reconstructions, not three measurements at 5.76 GHz. Surface-area
+weighting must follow LL67; projected-area weighting is a different kernel.
+Similarly limb-to-limb Doppler support, central power-containing band, PSD
+FWHM, PSD-autocorrelation width and visually detected extent are distinct.
+Inverse width is not interchangeable with field-correlation threshold time.
+Any future data comparison must publish integration time, window, resolution,
+noise subtraction and censoring before treating a discrepancy as model failure.
 
 ## References
 
@@ -391,7 +543,7 @@ Access status: "read" means the cited passage was read in full text; page pointe
 - OE2IGL web pages (G. Ihninger, 2022–2026), https://www.wettersat.bplaced.net/ : [OE2IGL-10] eme10ghz.html; [OE2IGL-24] eme24ghz.html; [OE2IGL-LB] emelinkbudget.html.
 - [NL2506], [NL2609], [NL2610] *432 and Above EME News* (founded by K2UYH): issue pages https://eme.radio/432-and-above-newsletter/432-and-above-2025-06 and https://eme.radio/432-and-above-newsletter/432-and-above-2026-09 ; October 2026 (vol. 55 no. 10) PDF https://eme.radio/images/newsletter/pdf/2026-10-vol-55-10.pdf
 - [Lacuna21] Lacuna Space, "First LoRa message bounced off the moon", 24 Nov 2021. https://lacuna.space/lora-moon-bounce/
-- [Zenodo22] T. Telkamp, F. Zeppenfeldt, J. van Muijlwijk and T. J. Dijkema, "SDR moonbounce signals at 433.8MHz", data set, 29 Jan 2022, doi:10.5281/zenodo.5832579 — read record description.
+- [Zenodo22] T. Telkamp, F. Zeppenfeldt, J. van Muijlwijk and T. J. Dijkema, "SDR moonbounce signals at 433.8 MHz", data set, 29 Jan 2022, doi:10.5281/zenodo.5832579 — record, two actual SigMF metadata JSON files and horizontal receiver log inspected 2026-11-13; raw IQ not analyzed; exact receipts below.
 - [Wiki-TRSSCOMM] Wikipedia, "Technical Research Ship Special COMMunications" (tertiary; used only for the 10 kW figure). https://en.wikipedia.org/wiki/Technical_Research_Ship_Special_COMMunications
 - [EW60] "Revolutionary moon-relay communications system unveiled by Navy", Spot News, *Electronics World*, April 1960 (contemporary trade report). Transcription: https://www.rfcafe.com/references/electronics-world/electronic-industry-news-electronics-world-april-1960.htm — read.
 - [G3WDG10] C. Suckling (G3WDG), "Predicting libration fading on the EME path", 14 June 2010 (the "G3WDG libration paper"). https://bobatkins.com/radio/g3wdg_libration.html — read.
@@ -404,3 +556,7 @@ Access status: "read" means the cited passage was read in full text; page pointe
 - [FASSETT25] Fassett, C. I. et al. (2025). Mini-RF X/C-band bistatic radar observations of the Moon as a function of incidence and phase angles. 56th Lunar and Planetary Science Conference, abstract 2129. https://www.hou.usra.edu/meetings/lpsc2025/pdf/2129.pdf — abstract read. [G]
 - [JPL216C] Sanchez-Net, M. (2019). Analysis of the fading channel in downlinks from the lunar South Pole to the Deep Space Network. *IPN Progress Report* 42-216C. https://ipnpr.jpl.nasa.gov/progress_report/42-216/42-216C.pdf — full report read; one-way lunar asset-to-DSN geometry. [T]
 - [KIRK24] Improved orthorectification and empirical reduction of topographic effects in monostatic Mini-RF S-band observations of the Moon. *The Planetary Science Journal* 5(1), 4 (2024). https://doi.org/10.3847/PSJ/ad0a61 — abstract checked; local image correction. [P]
+
+- [FANG81] Fang, D. J., Pontes, M. S. (1981). *4/6-GHz ionospheric scintillation measurements during the peak of sunspot cycle 21*. COMSAT Technical Review 11(2),293–320. [Original issue](https://www.comsat-legacy.org/COMSAT%20Technical%20Review/CTR%20Fall%201981,%20V.11--2.PDF) — measurement/statistics/conclusion sections inspected 2026-11-13; satellite-link evidence. [P]
+- [MOLLEN88] Mollen, T. A., Liu, C. H., Fang, D. J. (1988). *A study of C band equatorial scintillation in the Asian sector*. Radio Science 23,337–345. https://doi.org/10.1029/RS023i003p00337 — publisher contents record/title confirmed; full text not obtained. [P]
+- [PDS-MRF] NASA PDS Geosciences/ODE. [Mini-RF derived-data documentation](https://ode.rsl.wustl.edu/Moon/pagehelp/Content/Missions_Instruments/Lunar%20Reconnaissance%20Orbiter%20(LRO)/Mini-RF/Derived.htm), [PDS4 archive](https://pds-geosciences.wustl.edu/lro/urn-nasa-pds-lro_minirf_bistatic/) — product/route text inspected 2026-11-13; binary products not analyzed. [T]

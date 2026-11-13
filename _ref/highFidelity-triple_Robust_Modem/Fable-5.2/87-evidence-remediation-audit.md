@@ -1,182 +1,125 @@
-# Audit of search limitations and evidence remediation
+# Search-limit remediation and completion evidence
 
-Audited November 13, 2026 against commit
-`07bcbc5da41ea5e8ec43517ffb92e51710037744` and the subsequent working-tree
-research additions. **The historical search gaps have only partly been remedied.**
-Seven identifiable search-coverage notices occur in the committed chapters.
-Six retain their original notice wording; the seventh, in chapter 41, now
-describes a targeted rather than systematic search and adds newer references.
-Both explicit statements that a search allowance or budget ran out remain.
-Several consequential source, calibration and model-specification gaps remain
-as well. The earlier description of the research pass as completed must not be
-read as closure of these obligations or as research readiness for every family.
+Updated 13 November 2026. The old search-budget notices have now received
+substantive follow-up: renewed primary-source searches, newly retrieved full
+texts, source-specific dispositions, corrected claims, explicit mathematical
+scenario definitions and independent checks. They are historical provenance,
+not the reason this pass stopped a research branch. **This does not mean every
+named source was obtained or every desired empirical measurement exists.**
+Remaining access and calibration gaps are stated with their consequences in
+the owning chapters and the gate table below.
 
-The [completion plan](80-completion-plan.md) is the active plan for closing this
-work. This audit supplies its historical evidence and concrete backlog; it is
-not a second operating protocol or a claim-by-claim certification of the corpus.
+The research began with sixteen chapters at
+`07bcbc5da41ea5e8ec43517ffb92e51710037744`. The earlier planning/audit work was
+subsequently committed; this execution pass began at clean
+`33f6e461fce12f4079870091b6d1aaa9c2f50821`. The earlier audit's statements that
+07bcbc5d was still HEAD and all additions were uncommitted are historical,
+not descriptions of the present baseline. The source trees were unchanged
+between the research revisions; source interpretations were nevertheless
+rechecked. No historical planner receipt or native receiver result was rerun.
 
-## Baseline and limits of this audit
+## What “remedied” means here
 
-The cited commit is the current HEAD at audit time, titled “DRAFT - WIP -
-degrading research beginning with Fable 5.2 continued with Opus 5.5 .”, committed
-November 13, 2026 at 11:44:32 -0600. It is the only commit returned by the
-directory's path history. Its sixteen chapters are the historical comparison
-set. The later sixteen chapter edits and nine added documents were uncommitted
-at the start of this audit; they must not be attributed to a later Git commit.
+A full-text retrieval closes an access problem only for the inspected passages.
+It does not calibrate a different frequency, antenna, estimator or population.
+A corrected or withdrawn unsupported assertion closes that assertion, while
+preserving the resulting loss of empirical coverage. A mathematical alternative
+can be specified completely without establishing that nature follows its law.
 
-The audit compared those versions, inspected search-limit and missing-work
-sections across the sixteen chapters, reviewed the scenario companions, and
-tested selected consequential access claims against primary sources. It did
-not independently verify every assertion in approximately 234,000 words of
-historical research. The seven-notice census is an exact textual inventory of
-the identified search-coverage notices, not a count of all missing sources or
-unique scientific questions. Broader historical searches produced 173 candidate
-lines about missing material or source access across fifteen chapters. Those
-lines were not all individually adjudicated in this audit; they are locators,
-not 173 distinct unresolved obligations. One paragraph can list many sources; a single
-gap can recur in several chapters. The grouped obligations below are planning
-units, not a statistical estimate of research completeness.
+This audit covers the seven historical notice sites and the broader grouped
+obligations below. The earlier 173 text matches were search locators, not a
+denominator of independent scientific claims. No percentage of the roughly
+234,000-word original corpus is asserted to be certified. Review concentrated
+on selected scenario inputs, feasibility claims, extrema, model-selection
+arguments and contradictory source interpretations. Nonselected inaccessible
+historical leads retain their actual status in chapter-local inventories.
 
-## Historical notice census
+## Seven historical notice sites
 
-Line numbers below refer to the baseline and the pre-audit working files;
-these particular notice locations coincide in both. Later insertions may move
-lines, so the quoted phrase and named section identify the durable location.
+| Notice | Original location / subject | Current substantive disposition |
+| --- | --- | --- |
+| N1 | 12 opening: limited searches and thin recent literature | Full Gu 2021 and Raab text, recent VLF/tweek work, instrument/cadence/bandwidth extraction and actual query log. A 0.0625-Hz natural amplitude/arrival law is still unsupported; explicit controls are in 81/85. |
+| N2 | 20 opening: eleven searches and incomplete 2015–2026 coverage | Renewed title/mechanism searches, NAVTEX/IALA/M.823/DRM/medium-wave sources, full Chilcote 2015 inspection, and parameter-source matrix. Historical search count no longer describes current effort or coverage. |
+| N3 | 20 gaps: allowance ran out before 630/160 m, NAVTEX and DRM work | Each named route now has a disposition. Operator/reception records and nearby-frequency observations do not become calibrated 1-MHz coherent-path data. Unsupported microhertz and within-message stability guarantees were removed or made explicit model assumptions. |
+| N4 | 31 opening: web budget ran out after about 25 searches | Renewed source-by-source work across 30–33, including original CCIR report, sounder/thesis/model papers, recent polar observations and explicit geography/estimator limitations. Actual new queries are recorded; old undocumented searches are not reconstructed. |
+| N5 | 31 gaps: full texts missing because of budget/access | CCIR 549-2, Gherm, Heitmann and other accessible passages were inspected. WHISPER, Canadian/Chinese/MITRE/DRM/Indian/book leads have individual access/use dispositions. Sources still unavailable cannot supply numerical model inputs. |
+| N6 | 41 gaps: limited 2015–2026 coverage | Original scintillation paper, 2026 Mini-RF journal/calibration evidence, radiometry, public SigMF metadata and PDS4 data routes were examined. Local/orbital radar, point-source scintillation and 433.8-MHz I/Q remain distinct from calibrated whole-disc 5.76-GHz EME. |
+| N7 | 60 opening: limited method/validation searches | Named original omissions now have individual dispositions; CTIA, stochastic-generator, clustering and recent surrogate/validation sources were examined. Exact finite mathematical controls and a bounded inference/admission design replace an unspecified method menu. |
 
-| Notice | Chapter and line | Historical subject | Current disposition |
-| --- | --- | --- | --- |
-| N1 | [12](12-sub9khz-noise.md), 10 | Web searching limited; recent literature thinner | Retained. Sources not obtained and topics not searched remain in its final gap section |
-| N2 | [20](20-groundwave-1mhz.md), 12 | Eleven searches; incomplete 2015–2026 coverage | Retained. A search count is historical provenance, not a coverage criterion |
-| N3 | [20](20-groundwave-1mhz.md), 401 | Allowance ran out before renewed searches for 630/160 m, NAVTEX and DRM field records | Retained. A relevant NAVTEX paper was found during this audit, but the grouped obligation is not closed |
-| N4 | [31](31-skywave-dispersion-midlatitude-nvis-longhaul.md), 10 | Budget ran out after about 25 searches | Retained. Later direct downloads and rechecks are described, but full coverage is not demonstrated |
-| N5 | [31](31-skywave-dispersion-midlatitude-nvis-longhaul.md), 417 | Sources not obtained in full because of budget or access | Retained. CCIR, Canadian wideband, MITRE/Chinese conference, WHISPER, DRM, Indian and book leads still need individual dispositions |
-| N6 | [41](41-eme-systems-practice-and-environment.md), 339 | 2015–2026 searches limited to priority topics | Revised with recent source identities and transfer limits; still explicitly non-systematic. No resulting whole-disc C-band measurement is established |
-| N7 | [60](60-simulation-methods-and-validation.md), 19 | Limited literature search and briefly/unsearched topics | Retained. Its final gap section still identifies simulator, noise and verification literature not inspected |
+The old notices may remain explicitly dated or quoted. Counting the words
+“budget” or “not obtained” is not a substantive closure test: some are historical
+provenance, and some identify genuinely inaccessible nonselected sources.
+No search-quota exhaustion was encountered as the stopping reason of this
+completion pass.
 
-The following exact-expression check returns **seven baseline matches and six
-working-tree matches** in the sixteen historical chapters. N6 changed wording;
-following that paragraph manually gives seven surviving notice sites. Do not
-report seven literal current matches for this expression.
+## Consequential obligation map
 
-```sh
-git grep -n -i -E 'Search limitation: eleven web searches|search allowance ran out|web-search budget ran out|not obtained in full \(search budget or access\)|web searching for this chapter was limited|searches for 2015–2026 peer-reviewed work were limited|literature search was limited' 07bcbc5da41ea5e8ec43517ffb92e51710037744 -- _ref/highFidelity-triple_Robust_Modem/Fable-5.2
-```
+The source extraction, precise locators, executed queries, exclusions and
+contradictions remain in their owning chapters; this table maps outcomes
+without duplicating their bibliographies.
 
-For current original chapters, apply the same expression with `rg` to the
-sixteen chapter paths, excluding the index and documents 70–87: this audit and
-the plan themselves quote the notices. Broader searches for budget, allowance,
-exhaustion, limited search, not searched/obtained, and abstract-only statements
-are necessary to discover obligations outside this phrase census. Mere keyword
-matches also include unrelated link budgets and physical search limits and
-must be inspected in context.
+| Group | Completed research remedy | Remaining empirical or implementation boundary |
+| --- | --- | --- |
+| G01 — VLF noise | 12 separates raw acquisition from selected processing, frequency/bandwidth/threshold conditioning and mains frequency versus amplitude/occupancy. | No target-site sub-hertz joint noise waveform population; 81/85 controls carry assumed laws. |
+| G02 — VLF propagation | 10 adds recent attenuation/conductivity/eclipse evidence; 81 pins LMP v0.4.1 including its low-frequency mode-search fix and a specific relative-Ez calculation. | Below roughly 4 kHz discrepancy remains; no unqualified Ez-to-B conversion or absolute range claim. Solver and convergence checks are unrun. |
+| G03 — 61 m antenna | 11/81 specify geometry, loss alternatives, series-RLC dynamics, voltage/current/detuning and independently checked arithmetic; modern small-loop/airborne evidence has explicit transfer limits. | No calibrated matching 61 m ground installation below 9 kHz. Magnetic comparison and antenna circuit are separate conditional models. |
+| G04 — MF source backlog | 20 individually investigates 630/160 m, NAVTEX, DRM and standards; full Chilcote gives a close-band measured spectral bound. | RSSI, successful decodes and frequency shift are not calibrated path loss or long-window coherent phase. |
+| G05 — MF time/ground | 20 reconciles conflicting geometry/estimator claims; 82 freezes homogeneous/mixed/layer-boundary and coherent skywave controls. | Real seasonal ground maps and 1–600 s coherent amplitude/phase series remain missing; layered boundary checks are not a full layered-earth solver. |
+| G06 — upper-HF mechanisms | 25 includes full Halverson and Hansen evidence, cap/selection/fitting limits and terrain/report routes; 82 pins LFMF v1.1, mixed-path, diffraction and competing-path controls. | No calibrated generic 30-MHz temporal law. Rough-sea full-path and field replay branches remain distinct from synthetic attenuation controls. |
+| G07 — HF original source sets | 31/33 individual source inventories, full CCIR Annex I and model/software comparisons; misleading simulator-label equivalence removed. | Unobtained full texts and proprietary datasets are not selected calibration inputs. |
+| G08 — HF geography/outages | 30/32 reconcile radar/sounder/decoded observables and recent storm/polar results, including Gillies 2026 scheduled-pulse denominator assumptions. | Processed event curves cannot supply coherent IQ or unconditional availability; measurement operations and nondetections must remain in a later analysis. |
+| G09 — HF joint processes | 83 freezes Gaussian/OU/coherent, covariance, microtap, availability, transition and outage laws with common physical-frequency response. | Shared/independent alternatives are hypotheses; measured fine-spacing joint covariance and transition rates remain unresolved. |
+| G10 — EME kernel | 40/84 specify surface weighting, numerical kernel endpoints, Doppler/delay coupling, polarization and pinned geometry/orientation inputs; independent quadrature checks agree. | Geometry has not been executed; assumptions are not measured whole-disc C-band calibration. |
+| G11 — EME measurements/thermal | 41 inspects original system/scintillation/radiometry sources and public data metadata; 84 separates noise, pointing, clock and scattering uncertainty. | SigMF metadata is not raw-IQ analysis or a transferable 5.76-GHz distribution; calibrated whole-disc field validation remains open. |
+| G12 — MF/HF noise | 50 inspects Fockens papers, Giesbrecht papers/thesis and Lemmon proceedings/full NTIA report; conditional distributions and failed high-threshold fits retained. | One-site selected records and man-made bursts cannot calibrate a universal atmospheric law or 250-Hz occupancy probability. |
+| G13 — large NTIA sources | Full TR-25-579 downloaded through ordinary public HTTP after the web-size/DNS failures; full 93-293 scanned report identified and visually inspected. Methods, exclusion and calibration limits now extracted in 50/55. | Site-specific PSD statistics and selected second-long cases are not target long-duration coherent waveform populations. |
+| G14 — equipment | 55 distinguishes device evidence and mechanisms; 85 closes explicit filter, saturation, AGC, oscillator, ADC, clock and interference controls with physical planes. | Those numerical values are constructed controls, not a particular receiver calibration. Hardware transfer/recovery remains a measurement task. |
+| G15 — numerical/statistical methods | 60/86 select reproducible Gaussian/OU references, state/tail/convergence checks, fixed inference and computational admission. | No renderer or statistical campaign has run; diagnostic seeds are not iid natural episodes. |
+| G16 — calculations/native context | 00/86/90 independently check consequential scalar identities, source timing/Helper/power conventions and limits. | Historical ground-wave solver magnitudes were not recertified by checking their field/loss conversions; native reception and capacity remain untested. |
+| G17 — integration/readiness | All sixteen original chapters have updated source/critical-input dispositions; 70 and 81–86 provide the implementation/statistical handoff. Independent reviews corrected residual overclaims and cross-chapter contracts. | This is a research handoff with explicit conditional branches, not universal claim certification, simulator verification or empirical qualification. |
 
-## How remediation is classified
+## Access failures actually resolved
 
-Use separate source-access and scientific-support decisions. Full text becoming
-available resolves an access obstacle; it does not establish that a particular
-model parameter or extrapolation is supported.
+- **Gu 2021:** publisher full text became readable. The ordinary public Figshare
+  API later returned dataset version 1, CC BY 4.0, one 22,627,532-byte RAR file;
+  chapter 12 records the matching MD5 and 28-member inventory: derived figure/MATLAB/text and lightning-rate series, with no raw high-rate capture or independent calibration record. The sampled 6 kHz series has month/hour coordinates; it cannot supply a sub-hertz waveform law. Earlier failed browser/API attempts remain historical, not current
+  assertions of unavailability.
+- **QAN–ALE:** the ordinary Harvard Dataverse API returned released version 1,
+  CC0 1.0 and the unrestricted 221,380,570-byte MATLAB archive. Chapter 32
+  records its posted-MD5/CRC check, 5,588-file inventory and six sampled MATLAB schemas: received-burst summaries, not raw I/Q. Actual names/dates differ from the metadata template/span; calibration units and the attempted-pulse denominator remain unresolved. The earlier HTML robot page did
+  not imply that the official public API was access restricted; no login,
+  challenge circumvention or private route was used.
+- **TR-25-579:** the official 30,682,577-byte PDF downloaded successfully to
+  temporary storage. Chapter 50 now cites report pages/tables, not merely the
+  landing-page abstract. The compressed/overloaded exclusions and antenna
+  calibration uncertainty materially limit interpretation.
+- **NTIA 93-293:** a previously downloaded official scanned PDF was located,
+  its title/version confirmed, and selected method/result pages visually read.
+  Lack of usable OCR is distinct from lack of source access.
+- **NTIA IER 38 / ITSA 38:** the official 25,774,823-byte report downloaded
+  successfully; chapter 25 records the relevant inspection and limits.
+  Downloading a report is not validation of its associated raw-data archive.
+- **CCIR 549-2, Hansen 1977 and several journal papers:** lawful official or
+  public author/article text routes supplied passages that earlier passes had
+  left abstract-only. The owning chapters preserve exact routes and locators.
 
-| Disposition | Required evidence |
+Temporary downloads exist only to resolve these active source/data questions.
+Retain their durable URL, version, checksum where verified, schema/measurement
+findings and limits in the chapters. Remove temporary copies after the review
+and metadata extraction end; do not commit whole papers or raw campaigns.
+
+## What is ready, and what is not
+
+| Deliverable | Current permissible claim |
 | --- | --- |
-| Resolved by evidence | Supporting primary passage and locator inspected; conditions and uncertainty extracted; affected claim/scenario updated consistently |
-| Resolved by correction or withdrawal | Unsupported assertion corrected or removed, dependent conclusions repaired, and resulting coverage loss made explicit |
-| Partly resolved | Particular corrected/source-supported elements identified alongside remaining obligations |
-| Open | Named search, source inspection, calibration, derivation or specification is still needed |
-| Access limited | Actual access level and attempted lawful route recorded; weaker claim bounded; alternative route and consequence specified |
-| Not established by record | No adequate trace from old obligation to supporting remedy; no inference that an unrecorded investigation did or did not occur |
+| Literature synthesis | Renewed foundational/recent research with explicit source conditions, contrary evidence, actual search logs and bounded unresolved results across all five requested families |
+| Mathematical experiments | Specified controls and alternatives in 81–85, with source/receiver fixtures in 00 and independent numerical/validation requirements in 60/86/90 |
+| Empirical replay | Only where a later acquisition/schema/calibration/holdout gate passes; public metadata or processed tables alone do not grant waveform replay |
+| Native simulator | Design and contained build route in 70; not configured, built or verified |
+| Real-world fidelity | Unqualified until source-matched and independent measurement comparisons pass |
+| Modem reliability/capacity | Unqualified: no complete receiver trial, real-time measurement or hardware result was produced by this research work |
 
-A historical “not found” statement need not be erased. Date it and append the
-current disposition. A general disclaimer or a synthetic fallback cannot close
-a required empirical claim. Conversely, a deliberately withdrawn, nonessential
-claim need not force an indefinite search for its original source.
-
-## Substantive remedies and remaining obligations
-
-These groups cover the consequential omissions found in the chapter-level
-audit. They are not an exhaustive bibliography. Package names refer to the
-existing A–L work packages in the completion plan; the active execution order
-is in its section 13.
-
-| Group and provenance | What has actually improved | Remaining work and effect on readiness | Packages |
-| --- | --- | --- | --- |
-| G01 — N1; 12 final gap section | Additional regional noise references and narrower Gaussian/noise claims | Extract recent sub-9 kHz PSD/APD, sferic clustering, duration, storms, mains and receiver calibration; no universal narrowband Gaussian or event probability from site-limited summaries | B/C/D/F |
-| G02 — 10 final gaps; 81 | Measured/model overlap at 5.17 kHz clarified; lower-frequency disagreement retained | Inspect missing finite-difference and attenuation sources; define field component, path, ionosphere and uncertainty below roughly 4 kHz; select a solver and source-matched comparison | B/C/E/F |
-| G03 — 11 open questions; 81 | Antenna assumptions, field/current conversions and some historical reports clarified | No demonstrated matching 61 m installation record below 9 kHz; efficiency, ground/coil loss, weather/corona/detuning and long-window phase remain conditional. Specify calibrated inputs or bounded forecast-only alternatives | C/D/E/F |
-| G04 — N2/N3; 20 | MF mixed-path and layered-ice evidence has clearer scope; this audit found a 2026 NAVTEX field paper | Finish named 630/160 m, NAVTEX, DRM and M.823/IALA searches/inspection. Nearby frequency or receiver RSSI cannot silently become calibrated 1 MHz path loss | B/C/D/F |
-| G05 — 20 temporal/ground gaps; 82 | Complex-field comparator and phase-reference requirements are clearer | Find or bound 1–600 s amplitude/phase evolution, conductivity/seasonal/layered uncertainty and nighttime mode mixtures. A route-average field standard supplies no joint temporal process | C/D/E/F |
-| G06 — 25 missing measurements; 82 | Kirincich–Emery frequency/geometry and distinct Dagefu studies corrected; wanted versus unwanted scattering distinguished | Retrieve 25 MHz sea-state and 30–100 MHz terrain leads; identify surface/space/diffraction/radar mechanisms before importing values; obtain path-resolved competitors or keep a derived sensitivity | B/C/D/F |
-| G07 — N4/N5; 31 tables J and final gaps | Watterson/source-estimator checks and NVIS O/X interpretation improved | Dispose of each named source individually: CCIR 549/266, WHISPER, Canadian wideband, MITRE/Chinese statistics, DRM, Indian sounding, books and historical spread studies. A collective “access” label is insufficient | B/C |
-| G08 — 30/32; 83 | Storm context, detection censoring and geographic strata improved; Cameron full text located in this audit | Extract detected/non-detected denominators, operational gaps, instrument ceilings and joint observables. Obtain the May 2024 trace before calling it replay; strengthen equatorial and low-HF coverage independently | B/C/D/F |
-| G09 — 31/33; 83 | Continuous phase and one-composite-channel requirements clarified | Actual carrier-spacing complex covariance, mode birth/death, slow quality variation and model bandwidth validity remain unresolved. Specify competing dependence/model branches and a source-matched discriminator | C/D/E/F |
-| G10 — 40/41; 84 | Coupled geometry, power normalization and radar-transfer limits corrected | Retrieve original angular laws and conventions; freeze numerical endpoint functions, wavelength interpolation, polarization and diffuse/specular mixture. Current kernel family is not one deterministic ready-to-run channel | B/C/E/F |
-| G11 — N6; 41 measurements and access gaps | Recent local SAR evidence and its non-transfer to whole-disc EME made explicit; Yang full text located in this audit | Find calibrated whole-disc 5–6 cm echo/IQ or preserve the prediction-only limit; inspect 433.8 MHz LoRa data on its own terms; assess beam-weighted lunar temperature and unmeasured EME scintillation without substituting point-source statistics | C/D/E/F |
-| G12 — 50 missing-source lists; 85 | Cyprus papers now substantively inspected with thresholds/bandwidth/antenna caveats; unsupported 250 Hz occupancy conversion removed | Inspect Fockens/thesis, Lemmon/Giesbrecht and other decision-driving noise works; retain distinction between occupancy, antenna-port PSD/APD and decode probability; no fabricated subchannel probability | B/C/D/F |
-| G13 — 50/85 NTIA source note | TR 25-579 identified and limited to its abstract; this audit found a short primary companion paper | Full report methods, calibration, compression handling and tables remain uninspected here. Companion study supplies useful partial evidence, not full-report closure | B/C/D |
-| G14 — 55; 85 | Noise planes, physical ordering and conditional equipment cases clarified | Pin target front ends or explicitly synthetic transfer functions; specify phase noise, clocks, filtering, nonlinear recovery, AGC, ADC and blocker measurements. Hardware realism remains unqualified | C/D/E/F |
-| G15 — N7; 60/70/86 | Episode-level replication, fixed-sample stopping, censoring and dependent-test caveats corrected | Inspect remaining selected generator/validation methods; tie validation tolerances to source uncertainty and use; specify a concrete sampling distribution and holdouts before invoking probabilistic intervals | B/C/E/G |
-| G16 — 00/90 and all scenarios | OU description, source grades, numerical examples and several physical interpretations repaired | Independently reproduce all decision-driving calculations and trace assumptions, estimator differences and source values; scalar agreement does not validate models | B/E/G |
-| G17 — all chapters and 70–86 | Index, native options and family specifications now exist | A complete claim inventory, reproducible recent-search coverage and independent readiness review are still absent. Missing physical inputs cannot be filed as mere coding details | A–H |
-
-The improvements in this table are substantive. They do not support a claim
-that all old notices were merely deleted, nor a claim that every obligation
-behind them was completed. No such all-or-nothing inference is warranted.
-
-## Primary-source checks that change the next actions
-
-These are bounded checks for this audit, not the promised comprehensive search.
-Access was checked on November 13, 2026. Each source must ultimately be entered
-once in its owning chapter's evidence table with exact supporting locators.
-
-| Source and inspected access | Consequence and remaining limit |
-| --- | --- |
-| [Cameron et al. 2024](https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2023RS007897), full publisher text; measurement and statistical-analysis sections | Chapter 32 was abstract-only at audit start; its source status and detection-conditioned interpretation are now corrected, with section/figure locators. The full text gives the Qaanaaq–Alert acquisition/cadence, quality gates and operational coverage. The scheduled frequencies do not establish simultaneous complex covariance at the modem's carrier spacing; a calibrated joint scenario remains open |
-| [QAN–ALE dataset, DOI 10.7910/DVN/RGDNR1](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/RGDNR1), identified in Cameron section 2 | The paper identifies unfiltered 2012–2016 data, including low-SNR and 18.4 MHz records. Dataset access reached a JavaScript/robot-verification page; file contents, format and license were not inspected. This is a concrete acquisition candidate, not verified usable IQ or a ready holdout |
-| [DRDC/RDDC 2018 sounding report](https://publications.gc.ca/collections/collection_2019/rddc-drdc/D68-2-122-2018-eng.pdf), full report, sections 2.2–3 | Useful high-latitude estimator, instrument-limit and local-stationarity evidence. Use its actual path and censoring; do not convert a sounder ceiling into an environmental upper bound |
-| [Nissen et al. 2003](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2002RS002746), full publisher text | Useful low-frequency long-path spread evidence, but selected single-mode records exclude multimode cases. Preserve that selection when comparing distributions |
-| [Yang et al. 2019](https://doi.org/10.1155/2019/3940837), [full article copy](https://pdfs.semanticscholar.org/e85f/02aa867290416a7c6d972882a7dc556cf947.pdf), pp. 1–9 | Chapter 41's snippet-only status at audit start is now corrected, retaining earlier access history and adding supporting section locators. Its regional passive radiometry at 3, 7.8, 19.35 and 37 GHz includes calibration-bias/topography/seasonal concerns; it supplies neither a disc-integrated 5.76 GHz antenna temperature nor a coherent radar scattering kernel |
-| [Fassett et al. 2025, LPSC 2129](https://www.hou.usra.edu/meetings/lpsc2025/pdf/2129.pdf), full conference abstract | Local X/C-band bistatic SAR constraints support caution about incidence and phase dependence. Full inspection of an abstract does not make it a full journal paper or a whole-disc EME dataset |
-| [Valčić et al. 2026](https://hrcak.srce.hr/en/345745), full NAVTEX article, sections 2–4 | Relevant weak/failed 490/518 kHz reception observations partially address G04. Receiver-display power and assumed ground/transmitter inputs do not establish calibrated 1 MHz transfer or maximum range; investigate the anomaly without adopting the authors' model-failure interpretation as established |
-| [Rogers et al. 2016 proceedings lead](https://sites.nationalacademies.org/cs/groups/pgasite/documents/webpage/pga_183636.pdf), proceedings abstract entry pp. 155–156 | Describes 30–100 MHz NLOS terrain measurements and antenna/soil/topographic inputs. Quantitative data are not supplied by this abstract; retrieve the associated paper/data before parameter use |
-| [25 MHz radar range study, 2017](https://journals.ametsoc.org/view/journals/atot/34/2/jtech-d-16-0139.1.xml), DOI 10.1175/JTECH-D-16-0139.1 | Search/index material identified a near-surface conductivity/sea-state/tide study; publisher open returned HTTP 403. Full methods/results remain uninspected in this audit. Radar working range is not one-way communications path loss |
-| [Haralambous et al. 2022, HF noise over Cyprus](https://www.mdpi.com/2072-4292/14/23/6040), full HTML | Confirms an actual source-access remedy and method-specific noise evidence in chapter 50. Separate it from the related [congestion paper](https://www.mdpi.com/2076-3417/12/22/11808); these are different observables |
-| [ITU-R P.372-18 official record](https://www.itu.int/rec/R-REC-P.372-18-202609-I), edition/status page | Confirms the September 2026 edition. This audit's metadata check is not a new reading of all normative equations/tables; retain earlier passage-level receipts where present and resolve differing access records |
-| [NTIA TR 25-579](https://its.ntia.gov/publications/details?pub=4563), official September 2025 record and abstract | Abstract supports scope, sites and broad comparison only. Earlier large-PDF retrieval failed; no new full-report inspection is claimed |
-| [Hicks and Achatz, 2026 USNC-URSI paper](https://usncursi.org/archive/nrsm/2026/papers/1203.pdf), full two-page text, sections III–IV | Gives a partial alternative primary route: active-rod measurement chain and minute sweeps; 1,071 of 1,443 MGS captures were excluded for compression. Treat this as selection/censoring evidence, not ambient-tail calibration. The paper has inconsistent site naming in its summary; resolve identity before reuse. It does not replace TR 25-579 |
-
-The NTIA short paper's text was available, but a web screenshot attempt returned
-a cache miss; no visual verification of its table values is claimed. The
-compression count above is stated in the prose. No data downloads, waveform
-analysis, receiver tests or site calibration were performed in this audit.
-
-The parent audit used exact queries `site.its.ntia.gov "TR-25-579"`,
-`site.itu.int "P.372-18" "2026"`, and `"McMurdo" "radio noise" NTIA 2025`,
-followed by the official records and the short-paper PDF. Domain checks also
-used targeted title/DOI and source opens; their returned source identities and
-inspection levels are above. Complete query/result logs for those checks were
-not retained, so this table is source-check provenance rather than a
-reproducible systematic-search log. The active plan requires such logs for the
-next coverage pass and does not invent historical queries.
-
-## What must be true before calling the old gaps remedied
-
-1. Every N1–N7 notice has a dated current disposition, mapping each of its
-   named sources and unsearched topics to a supporting passage, corrected
-   claim, or explicit unresolved consequence. This includes G01–G17 and any
-   further obligations discovered during the full chapter inventory.
-2. Newly available full texts are reconciled with their owning chapters and
-   all dependent scenario assertions. A source-status update alone is not
-   quantitative extraction or model validation.
-3. Required source gaps have an inspected primary route or an honestly weaker
-   research branch. If a required observed family remains unsupported, keep
-   that family gate open; a synthetic case cannot satisfy it by relabeling.
-4. Selected scenario definitions contain numerical laws and inputs, including
-   uncertainty/dependence branches, instead of instructions that an implementer
-   must still research. Named missing datasets remain external prerequisites
-   for empirical replay or validation.
-5. The coverage matrix, contradiction review and independent source audit
-   satisfy the completion plan's gates. Formatting checks, citation counts,
-   exhausted web resources and reviewer agreement without evidence cannot
-   substitute for those gates.
-
-This audit and plan can be complete while the research remains in progress.
-That distinction is the applicable status now.
+The remaining plan in [80](80-completion-plan.md) therefore distinguishes
+research handoff from implementation, measurement and qualification. A later
+new dataset, contrary result or failed model check should reopen the affected
+choice. Better models and implementations remain possible.

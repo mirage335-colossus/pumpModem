@@ -41,9 +41,253 @@ These cases are conditional anchors. Values taken from ITU or field studies reta
 | **N5: HF blocker and front-end stress** | Add one or more explicit upstream interferers at calibrated antenna-terminal power (dBm), with offsets, bandwidths, modulation, phase/noise, pulse timing and duty. Choose device-specific AGC, filter and ADC parameters from chapter 55 or measured hardware; initialize and carry AGC/filter/oscillator state. Include a blocker below and above the measured compression/clip point as separate fixed cases. | Deliberate robustness stress unless a matched field record establishes its occurrence. Measure wanted gain/phase, compression, IM products, reciprocal mixing and overrange at each stage. A software-only post-ADC tone cannot test pre-ADC blocking. |
 | **N6: receiver-noise-limited comparison** | At the same calibrated antenna-terminal plane compare external noise with receiver-added noise using stated temperature, preamp state, noise figure, loss and ENBW. Include an external-noise-dominated case and a receiver-noise-dominated case only where the antenna/site/device combination supports them. | Prevents applying P.372 external-noise medians where equipment noise dominates. 5.76 GHz system-temperature rows and MF/HF receiver NF tables have different bands and hardware; do not use them as one continuous frequency curve. |
 
-The 2025 NTIA McMurdo-area HF report is a potential independent site-specific comparison, but its PDF (30,682,577 bytes) exceeded the web reader's content-size limit and an unprivileged direct download failed with DNS resolution error (`Could not resolve host: its.ntia.gov`); no report pages or tables were extracted. Its landing-page abstract supports only seven Antarctic-area sites, HF 3–30 MHz, portable rod and fixed conical monopoles, and occupancy plots showing most signals below 15 MHz. It does not justify numerical scenario parameters or claims about estimator/instrument details beyond the abstract. The 2025 impulsive-noise harmonization preprint informs measurement descriptors, not natural HF rates or a source distribution. The 2026 Ofcom indoor model is specified for 80 MHz–2 GHz; it is outside this chapter's HF scenario domain.
+The full [NTIA TR-25-579](https://its.ntia.gov/publications/download/TR-25-579.pdf)
+was retrieved and inspected during completion after the web reader's size limit
+and earlier sandbox DNS failure. Chapter 50 gives the exact Appendix G medians
+and pages. Its seven Antarctic-area sites, 3–30 MHz antennas and site-specific
+noise/occupancy comparisons are now a usable source-conditioned reference.
+They do not define a joint waveform law: minute-spaced PSDs, 7.647 kHz ENBW,
+manual gain, overload exclusions, theory/manufacturer-based antenna corrections
+and incomplete observation periods constrain transfer. In particular, BITF
+lost 00:00–04:30 observations to overload. These are external-noise factors,
+including natural noise, not pure residential man-made-noise factors.
+The complete NTIA 93-293 report is also now inspected: its five selected
+one-second cases include man-made impulse models and explicitly omit atmospheric
+waveform modeling. Its high-threshold discrepancies argue against using its
+burst parameters as a universal lightning law. Both sources inform the
+measurement/validation route; neither calibrates C1's deliberately constructed
+arrival and energy distribution. The 2026 Ofcom indoor model remains outside
+the HF domain (80 MHz–2 GHz).
 
-## 5. Calibration, observables, and acceptance boundaries
+## 5. Closed mathematical controls for implementation
+
+The N0–N6 rows above describe evidence-conditioned families. They are not all
+executable specifications: a calibrated record and a measured receiver cannot
+be replaced by an instruction to choose them later. The controls below close
+those choices for an implementable mathematical comparison. Their numerical
+laws are **[E] engineering assumptions**, not inferred lightning, occupancy,
+storm or hardware populations. Use them alongside, not as validation of, the
+measurement-conditioned alternatives. Better fitted laws remain possible.
+
+### Common signal and normalization
+
+Use the source, codec, calendar, randomness and full-message observation contract
+in [00, section 7](00-method-and-modem-context.md#7-reproducible-source-and-evidence-contract).
+For these broadband front-end controls select the HF waveform (rate 36, added symbols 10, FHSS off, requested 16 s; actual 23.2 s active geometry). Use `Fs=48000 samples/s`, the physical-band
+IF branch and the actual returned Helper plan; reference run has Helper off.
+The channel/equipment input is a **complex power wave**: `E|x|²` is watts at a
+matched antenna-terminal reference plane, not the sum of two independent RF
+polarizations. A complex proper white sequence with density `N0` W/Hz has
+`E|n|²=N0 Fs`, shared equally by its real and imaginary parts. Density refers to
+the full complex interval `[-Fs/2,Fs/2)`; the corresponding physical real passband
+has the same available power. This convention prevents a hidden 3 dB change.
+
+The reference density is −164 dBm/Hz (`3.981071706e−20 W/Hz`), a chosen flat
+reference matching the old simulator, not a P.372 site prediction. Set the
+unfaded wanted reference to `C/N0=20 dB-Hz`, hence `C=3.981071706e−18 W`.
+Use the native deterministic DATA power reference and exact multiplier
+`sqrt(C/(mu*G²))` from 00, applied once to the whole emitted composite. Do not
+renormalize each received slot or realization, or divide a normalized Emission
+by sqrt(mu) a second time. Report that DATA reference, its bounded-estimate
+uncertainty, Helper ratio and actual signal energy separately when ramps,
+waits or hopping change occupancy. Other propagation chapters may substitute
+their explicitly stated C and N0 with this same normalization.
+The sub-9 kHz magnetic-field comparison uses its own fT/√Hz plane; it must not
+silently acquire this watts conversion.
+
+The reference epoch is `2025-03-20T00:00:00Z`. Use the domain-separated seed
+construction in 00. The independent diagnostic roots there test repeatability;
+the probability design of [86](86-statistics-and-calculation-checks.md) governs
+any probability claim. All schedules below use elapsed physical time from the
+first active DATA support, including the prehistory needed by each component.
+
+For C0–C4 use explicit public search settings: profile CFO bound 100 Hz,
+arrival interval `[0,.2] s`, spread bound 1 ms, delay excursion zero,
+relative clock bound 10 ppm and `audio_pair_ppm=10`. Receiver settings are
+`frequency_bound_hz=100`, `spread_delay_seconds=.001`,
+`clock_bound_ppm=10`, `endpoint_clock_bound_ppm=5`,
+`delay_excursion_seconds=0`, `time_varying_channel=true`,
+`time_varying_common_doppler_hz=1`, `time_varying_atmospheric_hz=0` and automatic
+native coarse precision. Only C4 injects the declared ±5 ppm receive-clock
+error; the wider public support is not a second random impairment. These
+search choices are not a guarantee that every OU realization is contained or
+that nonlinear equipment fits the native receiver's model. Preserve failed
+acquisition/out-of-model outcomes. Tail/halo allocation covers the entire
+selected FIR/delay support; AGC recovery continues through the observation
+without being mistaken for signal-path delay. For C3 the static public
+noise/gain calibration uses the chosen pre-blocker linear filter and initial
+gain g0 below (`noise_variance=Npre·ENBW·g0²` and the matching deterministic
+DATA basis gain). It is not updated from evaluator-known impulses, fades or
+future AGC state. Receiver sensitivity to that calibration mismatch is an
+observable of the experiment.
+
+### C0: Gaussian background and passive-noise accounting
+
+The ideal control is the wanted composite plus proper white external noise at
+the stated N0, with no added equipment effects. The passive comparison has
+linear power loss `L=2` (3.0103 dB), physical temperature 290 K, followed by an
+amplifier of unit signal gain and input-equivalent added temperature 100 K.
+Use exact `k=1.380649e−23 J/K`. At that amplifier input the external noise is
+`N0/L`, loss noise is `k·290·(1−1/L)`, and amplifier noise is `k·100`, all W/Hz;
+the wanted signal loses the same factor L. These are three independent proper
+Gaussian components. A second fixed case uses external antenna temperature
+20 K (`N0=k·20`) to expose receiver-noise dominance. The 20 K case is a
+mathematical comparison, not an HF sky-temperature claim; keep wanted C unchanged between the two noise-temperature cases. Do not add these
+temperatures to a measured system temperature that already includes them.
+
+### C1: equal-power independent and clustered impulses
+
+Use a real causal double-exponential shape with rise constant `τr=50 µs`,
+decay constant `τd=500 µs` and finite support `T=5 ms`. At this Fs define
+`q[k]=exp(−k/(Fs τd))−exp(−k/(Fs τr))`, `0≤k<240`, zero elsewhere,
+and normalize `p[k]=q[k]/sqrt(sum(q²)/Fs)` so each unit-energy discrete pulse
+obeys `sum(|p|²)/Fs=1`. Round each continuous arrival to the nearest sample,
+ties upward; this quantization is part of this digital control. It is not
+claimed to preserve an unmeasured analog sub-sample pulse shape.
+
+Compare three fixed branches: no impulses; independent Poisson arrivals at
+8/s; and Poisson parents at 2/s, each with four children at offsets
+`{0, 0.003, 0.011, 0.029} s`. Draw parent gaps by `−ln(U)/λ` and each child
+phase independently uniform on `[0,2π)`. Parent/child sharing is a deliberately
+simple cluster law. Start the stationary parent process before the first
+needed sample by `T+0.029 s`; generate a Poisson count in this prehistory and
+uniform conditional positions, then exponential gaps forward from the boundary.
+This retains every finite-support pulse contributing to the observation and
+does not create an artificial empty first interval.
+
+Choose mean impulsive power ratios `ρ∈{1,10}` relative to `N0 Fs` as separate
+fixed cases. The mean child energy is `Jbar=ρ N0 Fs/8 joules`. Each child has
+energy `J0=Jbar/1.99` with probability 0.99 or `100 J0` with probability 0.01;
+its contribution is `sqrt(J) exp(jφ) p[k]`. Independent phases make the expected
+cross terms zero even where pulses overlap. Both arrival models therefore
+have the same mean power and mark law, allowing clustering to be the tested
+difference. These probabilities belong only to the constructed control.
+The source domain is wideband at Fs; changing Fs requires preserving the
+declared physical bandwidth and pulse energy, not silently reusing `N0 Fs`.
+
+For a deterministic nonstationary sensitivity, multiply both background and
+impulse amplitudes by `10^(a(t)/20)`, with `a(t)=10 sin²(πt/1800) dB` for
+`0≤t≤1800 s` and zero outside. Compare that common driver with a branch that
+applies it only to the impulses. No recurrence rate or measured cross-band
+dependence is assigned to this one constructed episode. Pass each complete
+waveform through the same equipment chain; do not fit its post-filter APD
+and then add a second independently fitted impulse process.
+
+### C2: continuous, mains-like and swept interference
+
+At the antenna-terminal plane, add complex tones at offsets +1000 and +2000 Hz
+relative to DATA centre, each at either −40 or −20 dBm as two separate cases,
+independent initial uniform phases and constant instantaneous frequency. Their
+third-order product `2f1−f2` falls at DATA centre. These powers deliberately
+stress the constructed chain; they are not measured HF occupancy levels.
+The component-control on interval is `[60,120] s`, with 10 ms raised-cosine amplitude ramps inside its ends and zero elsewhere. The separate full-message challenge substitutes the single interval `[tm,tm+60] s`, where tm is the middle active slot's DATA-support start; it does not also retain the component interval. Report the actual overlap with DATA and quiet apertures.
+
+A distinct mains-like control puts a single line at `ν0=0.01 Hz` with phase
+`2πν0 t + 0.02 sin(2πt/10)` radians and power `C` (0 dB relative to the
+unfaded wanted reference). A swept control at the same power crosses offsets
+−150 to +150 Hz linearly in 30 s, restarts every 60 s with 0.1 s cosine ramps
+and silence in the second half of each period. Define phase by integrating
+the linear frequency on each active interval, beginning each interval at the
+same seeded phase. These are reproducible interference discriminators, not
+calibrated mains harmonics, radars or communication emitters. They remain
+separate branches; simultaneous maxima are not labeled an observed worst case.
+
+### C3: explicit front-end memory, clipping and quantization
+
+After the optional passive/noise stage, apply the following frozen constructed
+chain in order. All amplitudes retain the square-root-watt convention:
+
+1. A complex one-pole preselector, `v[n]=(1−a)x[n]+a v[n−1]`, with
+   `a=exp(−2π·3000/Fs)`. Its exact discrete ENBW is
+   `Fs(1−a)/(1+a)` Hz for the complex full interval. This broad scalar filter
+   is a control with known gain/phase, not a measured SSB transceiver filter.
+2. Compression `z=v/sqrt(1+|v|²/Psat)`, `Psat=1e−6 W`.
+   Compare AM/PM off with phase factor
+   `exp(j·0.1 |v|²/(Psat+|v|²))`. This bounded memoryless response defines its
+   own distortion; it is not a quoted P1dB/IP3 model of a commercial receiver.
+3. Optional oscillator frequency error f, an OU process with stationary
+   standard deviation 0.05 Hz and correlation time 10 s. On each sample,
+   `f[n+1]=b f[n]+0.05 sqrt(1−b²) Z[n]`, `b=exp(−1/(10 Fs))`,
+   initialized `f[0]~Normal(0,0.05²)`. Start phase uniform on `[0,2π)`;
+   linearly interpolate f between samples and integrate exactly with
+   `φ[n+1]=φ[n]+π(f[n]+f[n+1])/Fs`. Multiply the whole composite by
+   `exp(jφ)`, once, defining `w=z exp(jφ)`. This is residual mixer-frequency noise in hertz, not a
+   physical fractional-frequency law to extrapolate across RF carriers.
+4. A power detector `d[n]=ad d[n−1]+(1−ad)|w[n]|²`, with
+   `ad=exp(−1/(Fs τd))`, `τd=0.01 s` when input power exceeds the old d,
+   otherwise 1 s. Desired amplitude gain is
+   `g*=clamp(sqrt(1e−8/max(d,1e−20)),0.01,1000)`.
+   Update `g[n]=ag g[n−1]+(1−ag)g*`, `ag=exp(−1/(Fs τg))`, with τg=0.02 s when g* is below the previous gain and τg=2 s otherwise. The ADC input is `g[n] w[n]`; no second phase multiplication occurs.
+5. Quantize real and imaginary components separately with 16-bit midrise
+   quantization, full-scale A=`sqrt(1e−6)`, step `Δ=2A/65536`,
+   `Q(u)=Δ(floor(u/Δ)+1/2)` clamped to `[-A+Δ/2,A−Δ/2]`.
+   No dither. Count pre-clamp overrange separately. Compare against an
+   unquantized/unclipped branch with the same upstream state.
+
+For C3 use **explicit settled approximation**, not a claimed exact stationary
+nonlinear state: start filter=0; detector `d0=Npre·Fs(1−a)/(1+a)` where Npre is the sum of the selected preselector-input densities (C0 with loss/noise if enabled, otherwise N0); and gain `clamp(sqrt(1e−8/max(d0,1e−20)),0.01,1000)`. This deterministic starting approximation ignores nonlinear compression and impulse power; the burn-in check tests that dependence. Run a 60 s noise/interference prehistory
+before the earliest retained source support. Retain the final states and label
+this finite burn-in. The impulse process and oscillator run throughout it;
+the OU frequency itself has stationary initialization. A coupled 120 s
+burn-in comparison uses the identical physical innovations, pulse/tone history and oscillator increments from −60 s onward, adding only the earlier 60 s prehistory; it must show that the reported observables are insensitive to
+this initialization: compare retained-window mean output power within 0.1 dB, detector/gain median and 99th percentile within 1%, and ADC-overrange fraction within 0.001 absolute. These are declared numerical comparison gates, not proven measurement uncertainties or receiver-loss tolerances. Otherwise report state dependence and redesign the initialization before a qualified campaign. The fixed 60 s branch remains uniquely defined even when its convergence check fails. Never reset the filter,
+detector, gain or oscillator at DATA, Helper, chunk or quiet-slot boundaries.
+After source completion, emit the full physical/receiver quiet apertures plus
+60 s equipment recovery; retain any remaining gain excursion as a result.
+
+### C4: sample-time disturbance with an explicit validity mask
+
+C4 is a **separate linear HF control**, using the wanted source plus C0
+background only, before any nonlinear stage or ADC. It does not resample C1
+impulses or quantized C3 output as though they were an unspecified continuous
+bandlimited waveform. At nominal Fs=48000, first apply the exactly defined
+1025-tap FIR with coefficients proportional to
+`(2fc/Fs) sinc((2fc/Fs)(k−512)) · (1−cos(2πk/1024))/2`, `k=0,…,1024`,
+`fc=8000 Hz`, normalized to unit DC gain, `sinc(u)=sin(πu)/(πu)` with
+`sinc(0)=1`. Preserve its 512-sample group delay and full support. This is a
+constructed antialias/reconstruction input, not a measured analog filter.
+
+Define the continuous reconstruction of its samples v[k] as
+`vhat(t)=sum_k v[k] K(Fs·t−k) / sum_k K(Fs·t−k)`, with
+`K(u)=sinc(u)(1+cos(πu/64))/2` for `|u|<64`, zero otherwise.
+The finite sum is over all contributing integer k, including retained source,
+noise and FIR prehistory; use the exact limiting sinc value at zero. This
+fixed windowed-sinc law specifies interpolation rather than leaving its choice
+open. The clock-only control has constant +5 ppm rate error and zero epoch
+error: output sample n is `vhat(n/(Fs(1+5e−6)))`. Compare −5 and zero ppm.
+A support-128 kernel comparison and 2049-tap FIR comparison are separate
+numerical-convergence checks: require ≤10⁻⁶ relative mean-square difference
+and ≤0.01 dB wanted-tone gain difference, after aligning their known group
+delays, before asserting adequate approximation to an ideal bandlimited clock
+model. Those gates have not been executed. A failed gate does not change the
+already defined finite mathematical control.
+
+Apply the same ADC rule only **after** these sample-time operations when an
+ADC comparison is selected. This timing error is not an extra RF CFO; an RF
+oscillator tied to the same reference needs a separately declared common
+fractional-frequency model. The dropout control invalidates a 0.1 s interval starting at the middle active
+slot's observation midpoint. Samples retain their timestamps and invalid mask;
+do not concatenate around the gap or turn it into zeros interpreted as quiet.
+The masked interval is a fixed stress, not an observed operating-system rate.
+
+### Traceability and unresolved calibration
+
+| Required input | Closed control here | Physical-source constraint / alternative |
+| --- | --- | --- |
+| N0, units, passive loss and temperature | Exact C0 numbers and equations | P.372 component/site statistics in 50; a measured system temperature must have matching reference planes |
+| Impulse shape, rate, marks and clustering | C1 explicit finite pulse and point process | VLF cluster measurements and context-specific APD/Bi-Kappa evidence do not calibrate these numbers; replay needs raw calibrated waveforms |
+| Occupancy, line and sweep schedules | C2 deterministic schedule | Cyprus congestion Q is not a waveform or a 250 Hz failure probability; SPINE is a possible source/path model, with stated missing source classes |
+| Filter, nonlinear response and AGC | C3 fully specified constructed chain | 55's receiver evidence supports mechanisms and ordering, not these time constants or saturation levels |
+| LO and sample clock | C3 OU residual f; C4 separate fixed clock cases | Sub-kHz phase-noise/clock covariance and hardware recovery remain target-specific measurements |
+| State and dependence | One composite stream; explicit prehistory and shared-driver alternatives | Compare measured cross-spectra and transient recovery when records become available; independent noise terms are a control assumption |
+
+No choice in this table grants a calibrated natural probability. The research
+specification for these mathematical controls is closed; measured replay and
+device reproduction remain conditional on the identified data. The later suite
+must report mathematical verification, source reproduction, receiver outcome
+and real-time capacity as four different results.
+
+## 6. Calibration, observables, and acceptance boundaries
 
 Before receiver outcomes, check independent quantities at each boundary: (1) field-to-antenna-terminal transfer and impedance; (2) integrated noise power against ∫S(f)|H(f)|² df for colored noise, or PSD × ENBW when the density is approximately flat over the filter; declare one-/two-sided and complex-I/Q conventions; plus spectrum and APD under stated detector/averaging; (3) tone gain, phase, group delay and latency; (4) blocker rejection, compression, intermodulation and reciprocal-mixing spectrum; (5) AGC gain trajectory/recovery; (6) ADC full scale, overrange count and quantization; (7) calibrated I/Q, sample rate, timestamp, invalid intervals, state continuity and delayed tails. Match the cited measurement bandwidth, estimator, antenna and period before claiming source reproduction. A decoded result is a separate end-to-end observable; it does not prove that the injected PSD or front-end model matched reality.
 
@@ -56,4 +300,4 @@ Receiver appraisal must then use the canonical native C++ receiver and preserve 
 - There are no defensible occupancy rates for this modem's 250 Hz slots, nor a full emission waveform corpus paired with the relevant allocation occupancy statistic.
 - Sub-hertz impulse amplitude, timing and correlation distributions are unvalidated; similarly, cross-band noise covariance is not established by the cited marginal maps.
 - Some transceiver sub-kHz phase noise, AGC-induced phase change, audio-clock wander/dropout, blocker recovery and input-field-to-ADC calibration remain unmeasured. See chapter 55 for the detailed inventory.
-- Numerical entries and all method details beyond the NTIA McMurdo report landing-page abstract remain unverified; retrieval evidence and the abstract-supported scope are recorded above. No report-page extraction was possible in this pass.
+- The full NTIA McMurdo and 1993 reports now have inspected methods/results in chapter 50. Their PSD/case-study records still do not supply a calibrated long-duration, sub-hertz target-site waveform or a joint modem outcome population.
