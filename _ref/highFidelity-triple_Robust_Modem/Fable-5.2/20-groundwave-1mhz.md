@@ -1,0 +1,476 @@
+# Groundwave near 1 MHz
+
+- **Part of.** [High-fidelity weak-signal channels for the triple Robust Modem](README.md). Evidence grades, access-status words and conventions are defined in [00-method-and-modem-context](00-method-and-modem-context.md).
+- **Scope.** Literature review only. Nothing was built or run on the modem, and no repository file outside this directory was changed.
+- **Status.** Prepared on 13 November 2026 by one research pass, then checked against its sources by a second, independent pass. Sources that could not be opened are marked by access status; values not read in a source are not presented as verified.
+- **Related chapters.** groundwave near 30 MHz [25](25-groundwave-30mhz.md); night-time skywave level [30](30-skywave-signal-level-and-outages.md) and dispersion [31](31-skywave-dispersion-midlatitude-nvis-longhaul.md); noise [50](50-noise-and-interference-mf-hf.md); independent arithmetic [90](90-cross-check-calculations.md).
+
+**Summary.** Rec. ITU-R P.368-10 (08/2022) is in force; it replaced the GRWAVE curve atlas of P.368-9 with an "integral" C++ implementation of the NTIA/ITS LFMF smooth-earth model. An independent residue-series code written for these notes reproduces the published NTIA test vectors to 0.1 dB and the P.368-9 1 000 kHz curves to ≤0.5 dB. For 1 kW e.m.r.p. at 1 MHz the field is 68.5/50.5/37.8/29.3/14.4 dB(µV/m) at 100 km over sea/10/3/1/0.1 mS/m ground (basic transmission loss 73.5–127.6 dB), 54.8 to −12.9 dB(µV/m) at 300 km (87–155 dB) and 22.2 to −81 dB(µV/m) at 1 000 km (120–223 dB). Ground conductivity is the dominant uncertainty (one atlas class step is 8–13 dB at 100–300 km). Measured departures from the smooth-earth picture are large: winter–summer 4–18 dB, day-to-day 0.5–4 dB (occasionally 5–6 dB), location σ 3–4 dB in the open and 7–10 dB in dense streets, 20–30 dB below inverse distance across central London. By day the ground wave is close to a static single path: standards model it as AWGN, R-Mode range residuals are 3–6 m (1–2° at 300 kHz) over 60–270 km, 100 kHz eLoran delays wander by tens of nanoseconds a day with temperature, and propagation Doppler is of order µHz. At night a delayed sky wave equals the ground wave at roughly 50–110 km over 1–10 mS/m land and about 500 km over sea (1 MHz), with 0.1–0.5 ms (E) or 0.4–1.3 ms (F; uncertain by about ±0.2 ms) excess delay, 10–30 fades per hour (Doppler spread of a few mHz), but measured Doppler shifts of tenths of a hertz (travelling disturbances; mostly within ±0.1 Hz at 810 kHz in a 2020–21 receiver network) and nearly 1 Hz at the terminator. In winter a midday sky wave about 33 dB below the night value can equal the ground wave beyond about 180–680 km over 1–30 mS/m land (260–415 km over 3–10 mS/m). The preset applied to rows 2 and 3, "HF best" (0.1 Hz, 0.5 ms), overstates daytime dynamics by about four orders of magnitude; at night its delay lies inside the sky-wave range and its Doppler value matches the DRM channel-2 test spread and the scale of travelling-disturbance shifts, but it is 10–25 times the spread implied by measured fade rates and short of the terminator shifts, so it is neither typical nor bounding. The GUI's "4 W, 180 dB at −164 dBm/Hz" (20 dB-Hz) corresponds to a real, noise-limited MF link only when L_b + F_a ≈ 193.5 dB (ideal transmitting antenna): with a night-time F_a of 80 dB at 1 MHz, about 100–250 km of 1–10 mS/m land, inside or beyond the night fading zone (see "Comparison with the modem's presets").
+
+Evidence grades: [S] standard/ITU handbook, [P] peer-reviewed, [T] technical report, [B] book, [G] grey literature, [E] own estimate. Access status is given per source in the reference list; "fig-read" means the value was read off a published graph (stated tolerance).
+
+Search limitation: eleven web searches in all were made for this chapter (six when it was written, five on review). Everything else came from direct retrieval of documents at known or reference-listed URLs, so coverage of 2015–2026 work is incomplete (see the last section).
+
+## Physical mechanisms
+
+### Surface wave over a homogeneous smooth earth
+
+- With both antennas at the ground the direct and ground-reflected rays cancel (R_v = −1) and only the Norton surface wave remains: E = (300 √P_kW / d_km)·|W| mV/m, where 300 mV/m at 1 km is the field of a short vertical monopole radiating 1 kW over a perfectly conducting plane (cymomotive force 300 V) and W is the attenuation function. [S] ITU Handbook on Ground Wave Propagation 2014 (HDB-GW), eqs. (9), (14); P.368-10 Annex 1.
+- Flat earth (Sommerfeld–Norton): W = F(p) = 1 − j√(πp)·e^(−p)·erfc(j√p), with numerical distance p = −j(kd/2)Δ² and normalised surface impedance Δ = √(ε_c − 1)/ε_c, ε_c = ε_r − j60λσ = ε_r − j1.8×10⁴ σ/f_MHz. [S] HDB-GW eqs. (5)–(8), (17)–(19). |F| ≈ 1 near the antenna (field ∝ 1/d) and tends to 1/(2|p|) (field ∝ 1/d²) at large numerical distance. [S] HDB-GW §3.2.1.
+- The flat-earth form holds to about d = 80/f_MHz^(1/3) km (80 km at 1 MHz, 120 km at 0.3 MHz, 55 km at 3 MHz); beyond it the decay becomes exponential. [S] HDB-GW eq. (15) (the equation is garbled in the PDF text; the constant is confirmed by the LFMF source, which switches methods at `80/cbrt(f_MHz)`).
+- Spherical earth (van der Pol–Bremmer residue series in Fock/Wait form): W(x,q) = √(πx)·e^(−jπ/4)·Σ_s exp(−j x t_s)/(t_s − q²), x = ν·d/a_e, ν = (k a_e/2)^(1/3), q = −jνΔ, with t_s the roots of w₁′(t) − q w₁(t) = 0. This is the form coded in NTIA LFMF (`ResidueSeries.cpp`), which cites DeMinco NTIA 99-368 eq. (26). [T]
+- Magnitudes at 1 MHz (4/3 earth, ν = 44.6): |q| = 0.15 (sea), 3.3 (10 mS/m), 5.8 (3 mS/m), 9.1 (1 mS/m), 20.9 (0.1 mS/m); numerical distance |p| at 100 km = 0.012, 5.7, 17.9, 43.6, 230. [E] (own code; inputs are the P.368 ground constants.)
+- Far-zone decay beyond 1 000 km is 4.3 dB/100 km over sea at 1 MHz, 3.5 dB/100 km at 0.5 MHz, and 8.4 dB/100 km over 10 mS/m at 1 MHz. [E]
+- Atmosphere. P.368-9 curves assume an exponential refractivity profile (GRWAVE); P.368-10 assumes a linear decrease. [S] The Handbook states that near the MF broadcast band the equivalent effective-earth-radius factor is 1.20–1.25 for most grounds (citing Rotheram), rising to 4/3 at VHF. [S] HDB-GW §3.3. LFMF takes a_e = 6370/(1 − 0.04665·exp(0.005577 N_s)) km, i.e. 4/3 for N_s = 301. [T] The factor matters only at long range (table below).
+- Dispersion. The surface wave "suffers negligible dispersion"; fading occurs only if the path changes in time. [S] HDB-GW §1.
+
+### Units and conversions used in these notes
+
+- Basic transmission loss for the P.368 reference radiator: L_b = 142.0 + 20 log f_MHz − E[dB(µV/m)]. [S] P.368-10 Annex 1 Note 1.
+- 1 kW e.m.r.p. (short monopole, g = 3, 4.8 dBi) ≡ 3 kW e.i.r.p.; λ/4 monopole 314 V; isotropic 173 V. [S] P.341-7 Table 1.
+- A lossless short monopole on a perfect ground has receiving gain g_r = 0.75 (not 3), so the system loss between two such antennas is L_b − 3.5 dB. [S] P.341-7 Annex 3. Hence P_r[dBm] = E[dB(µV/m)] − 20 log f_MHz − 78.5. [E] (S = E²/120π; A_e = 0.75 λ²/4π; 1 µV/m at 1 MHz → −78.47 dBm.)
+- External-noise field in bandwidth b for the same antenna: E_n = F_a + 20 log f_MHz + 10 log b − 95.5 dB(µV/m). [S] P.372-18 eq. (7). Therefore, when external noise dominates, C/N0 [dB-Hz] = E − F_a − 20 log f_MHz + 95.5. [E] F_a values and their distributions are in [50](50-noise-and-interference-mf-hf.md).
+- For the modem's nominal "4 W, 180 dB" case P_r = −144 dBm and C/N0 = 30 − F_a + L_rx dB-Hz, where L_rx is whatever part of the 180 dB is receive-antenna inefficiency (it attenuates signal and external noise alike). [E]
+- Convention trap: the LFMF code reports received power with G_rx = 4.77 dBi, 6 dB more than the P.341/P.372 convention. [T] `LFMF.cpp`.
+
+### Ground constants, penetration depth, layering
+
+- Complex permittivity ε_r′ − jσ/(ωε₀); penetration depth δ = (λ/2π)·√{2/[√(ε′² + ε″²) − ε′]}. [S] P.527-6 eqs. (1b), (4).
+- At 1 MHz δ ≈ 0.23 m (sea, 5 S/m), 3.0 m (30 mS/m), 5.5 m (10 mS/m), 11 m (3 mS/m), 23 m (1 mS/m), 50 m (0.3 mS/m), 96 m (0.1 mS/m), 300–900 m (fresh-water ice). [E] from P.527-6 eq. (4); agrees with the Handbook's "about 25 cm" for sea and "about 25 m" for medium-dry ground. [S] HDB-GW §6.1.
+- Because of this depth the sub-surface geology, not the topsoil, sets the effective conductivity at MF; probe or soil-sample measurements "are very unlikely to give useful results". [S] HDB-GW §6.1. Layered ground is handled through "effective" homogeneous parameters. [S] P.527-6 §2.1.
+- Soil conductivity rises about 3 % per °C at low frequencies; permittivity is nearly temperature-independent; at freezing both drop sharply. Moisture is the major factor; below about 1 m depth wetness is "typically constant" at a given site. [S] P.527-6 §§4.2–4.4.
+- Sea water: σ = 0.18 C^0.93 [1 + 0.02(T − 20)] S/m (C salinity g/l, T °C); about 3.5 S/m for cold and 5 S/m for warm seas. [S] HDB-GW eq. (21).
+
+### Reactive (inductive) surfaces: buildings, vegetation, thin ice
+
+- Vertical conductors in buildings and even trees "effectively produce an inductive ground plane"; attenuation with distance then differs from a smooth earth and E/H no longer equals 120π Ω. [S] HDB-GW §2 (summarising Causebrook).
+- For a general surface impedance "the inductive type of boundary enhances the total field" and, when the resistive part is small, "rather strong interference takes place between the trapped surface wave and the usual ground wave" (illustrated for 1–30 MHz). [P, abstract] Hill & Wait 1980.
+- Causebrook's low-density result: Δ ≈ Δ_ground + jkD[1 − ln(1+10B)/(10B)], D building height, B fractional ground coverage. [T] as quoted in Hill, NTIA 82-114 eq. (44). Causebrook's ρ-plane (his numerical distance) has a null on the radial at about 51°, i.e. surface-impedance phase about 70.5°. [T] BBC RD 1977/25 Appendix.
+- Evaluating F(p) confirms a deep null at |p| ≈ 8 on that radial and a few dB of enhancement before it. [E] With D = 15 m, B = 0.4 over 10 mS/m ground (ε_r 15 assumed) Δ becomes 0.23∠77° at 908 kHz and 0.34∠79° at 1 457 kHz, which moves the predicted collapse from about 15–30 km to about 5–10 km as frequency rises: the same ordering that Causebrook measured (next section), though not the same distances (he found the drop at about 30 km for 908 kHz and 20 km for 1 457 kHz). [E]; illustrative only: a homogeneous flat-earth surface is not his segmented model, and B = 0.4 lies outside the B ≪ 1 for which eq. (44) was derived (NTIA 82-114).
+- A lossy dielectric slab representation (forest, buildings, snow) is implemented in the integral-equation code WAGSLAB; Dence–Tamir forest classes are 5/10/20 m height, ε 1.03/1.1/1.3, σ 3×10⁻⁵/10⁻⁴/3×10⁻⁴ S/m, said to be valid below about 200 MHz. The code was applied at 3–30 MHz and is said to become more efficient as frequency decreases; no experimental results were available to the author. [T] NTIA 82-114 §§5, 7 and Conclusions.
+
+### Mixed paths and terrain
+
+- Millington's construction: E_R = E₁(d₁) − E₂(d₁) + E₂(d₁+d₂) − …, the same in the reverse direction, and the dB average of the two; it forces reciprocity and "has proved to be very satisfactory for moderately smooth earth". Phase is treated analogously (Millington–Pressey). [S] P.368-10 Annex 2; HDB-GW §§7, 19.4.
+- The land-to-sea "recovery effect" is a real rise of field with distance after a coast. [S] HDB-GW §7.1. Example, 1 MHz, 50 km land (3 mS/m) + 100 km sea + 50 km land: 52.0 dB(µV/m) at the first coast, 54.0 at 75 km, 53.2 at 100 km, 50.3 at 149 km, then 46.9 at 155 km and 33.8 at 200 km, against 22.4 for an all-land path. [E] (Millington applied to the homogeneous curves of Table B1; an independent implementation reproduced these values to within 0.4 dB on review.)
+- At a conductivity boundary the wavefront bends toward the lower-conductivity side (coastal refraction; a direction-finding problem). [S] HDB-GW §19.4.
+- Terrain matters when irregularities are comparable with λ (300 m at 1 MHz) and close to the receiver; the general method is the Hufford integral equation solved numerically (Ott & Berry; program WAGNER). [S] HDB-GW §§2, 14.
+
+### Sky-wave contamination
+
+- By day D-region absorption "effectively prevents" MF sky-wave propagation; at night E-layer reflection dominates, with F-layer reflection when f > foE·sec i (highest MF frequencies, short paths, late night, sunspot minimum). [S] P.1321-5 §2.2; P.1147-4 Annex 1.
+- Excess delay over the ground wave for reflection height h, curved earth: 1E (100 km) 0.52/0.41/0.28/0.21/0.14/0.09 ms at 50/100/200/300/500/1 000 km; 1F (220 km, the F-layer height P.1147-4 Annex 1 prescribes) 1.31/1.17/0.95/0.79/0.58/0.36 ms; 2E 1.04/0.83/0.48 ms at 100/200/500 km; 2F 2.6 ms at 100 km. [E] The 1E values match P.1321-5 Fig. 3 (E 0.40 ms at 100 km, 0.27 at 200 km, 0.21 at 300 km, 0.16 at 500 km; fig-read ±0.02 ms). [S] The 1F values match its F curve only at 100 km (1.2 ms); beyond, the figure is lower (0.80 ms at 200 km, 0.62 at 300 km, 0.42 at 500 km), which implies an effective height of about 185–195 km, whereas P.1321-5 Fig. 2 places 1F at 1 MHz at about 1.3 ms (100 km) and 1.15 ms (200 km), implying about 240–250 km. [S, fig-read; E] The F-mode delay is therefore uncertain by about ±0.2 ms.
+- Elevation angle of the 1E ray is 76°/63°/44°/33°/21° at 50/100/200/300/500 km. A short vertical transmitting antenna radiates cos ψ of its horizontal field toward it (−12/−7/−3/−1.5/−0.6 dB), and a vertical receiving whip loses the same factor again relative to a loop. [E]
+- Doppler. A reflection-height change Δh in time T changes the 1E path by 26/16/6.6 km for 85→100 km at d = 100/300/1 000 km, giving −24/−15/−6 mHz at 1 MHz if spread over an hour and three times that over 20 min. A quiet-night drift of 0.5 km in 10 min gives 1–5 mHz. Values scale with frequency. [E]
+
+## Measured and reported values
+
+### A. Standards status and the associated software (checked 13 Nov 2026 on itu.int)
+
+| Document | Edition in force | What matters here | Grade |
+|---|---|---|---|
+| P.368 | **P.368-10 (08/2022)**; P.368-9 (02/2007) superseded | Title changed from "curves" to "prediction method". Recommends "the integral software implementation" (zip attached). Atmosphere: refractive index "decreases linearly with height" (P.368-9: exponential, GRWAVE, Annex 3). Antennas "on or near" the ground (P.368-9: at ground level). 50 figures reduced to four example curve sets labelled "LFMF" plus a path sketch; graphical Millington shortcut and GRWAVE annex removed. Notes on location variability, seasonal variation and near field retained. | [S] |
+| SG3 software list | — | P.368 software = "LFMF-smoothEarth model", integral, C++, version 10, with supplementary M-script and Windows executable. GRWAVE appears only under deprecated products kept "for historical reference" against P.368-9. | [S] |
+| P.527 | P.527-6 (09/2021; editorial amendments 2026) | Permittivity/conductivity models for water, sea water, ice, snow, soil (texture + moisture + temperature), vegetation to 1 000 GHz; the old σ/ε chart is retained as Fig. 24 for use with P.368/P.832. | [S] |
+| P.832 | P.832-4 (07/2015) | World atlas; MF maps standardised to 1 MHz. | [S] |
+| P.1147 | P.1147-4 (08/2007; editorial 2015) | Night sky-wave field 150–1 700 kHz. | [S] |
+| P.1321 | P.1321-5 (07/2015) | Propagation factors for digital modulation at LF/MF. | [S] |
+| P.341 | P.341-7 (08/2019) | Transmission-loss concepts, reference antennas. | [S] |
+
+- One paper describes the P.368-10 LFMF package as using "an atmospheric refraction index with exponential decay". [P] Hehenkamp et al. 2024 §2. The Recommendation says linear. The code uses a constant effective radius computed from surface refractivity N_s. [T] Both descriptions are loose; the practical point is a height-independent gradient.
+
+### B. Smooth homogeneous earth: field strength and basic transmission loss
+
+Own computation [E]: residue series (root tracking by dt/dq = 1/(t − q²)), cross-checked against the flat-earth function and Wait's curvature-corrected form (agreement 0.001 dB at 10–30 km, ≤0.06 dB at 100 km). Validation:
+
+- NTIA LFMF test vectors: 1 MHz, 5 000 km, ε 15, σ 5 mS/m, 5 kW: −387.50 vs −387.5 dB(µV/m); 0.45 MHz, 3 000 km, N_s 315: −129.27 vs −129.3. [T]
+- P.368-9 Fig. 30 (1 000 kHz), digitised from the scan (±0.4 dB): every curve that could be separated (sea and 3×10⁻² to 10⁻⁴ S/m) agrees within 0.5 dB at 10, 30, 100 and 300 km. At 1 000 km the curve reads 21.9 (sea) and −17.7 (30 mS/m) against 22.2 and −16.8 computed here with a 4/3 earth and 21.6/−17.5 with factor 1.30. [S, fig-read; not re-digitised on review]
+- P.1321-5 Fig. 2 ground-wave markers at 1 MHz/100 km: about 68, 50, 30 dB(µV/m) for 5 S/m, 10 mS/m, 1 mS/m (fig-read ±2 dB); computed here 68.5, 50.5, 29.3. [S]
+- On review an independent residue-series implementation reproduced both LFMF test vectors (−387.50 and −129.27 dB(µV/m)), Table B1 to within 0.1–0.5 dB and Table G1 to within 1 km. Two such codes agreeing does not validate either against measurement. [E]
+
+**Table B1. 1 MHz, 1 kW e.m.r.p. short vertical monopole, effective earth radius 4/3. Entries: E dB(µV/m) / L_b dB.** [E]
+
+| Ground (σ S/m, ε_r) | 1 km | 10 km | 30 km | 100 km | 300 km | 1 000 km |
+|---|---|---|---|---|---|---|
+| Inverse distance | 109.5 / 32.5 | 89.5 / 52.5 | 80.0 / 62.0 | 69.5 / 72.5 | 60.0 / 82.0 | 49.5 / 92.5 |
+| Sea water, 5, 70 | 109.5 / 32.5 | 89.5 / 52.5 | 79.8 / 62.2 | 68.5 / 73.5 | 54.8 / 87.2 | 22.2 / 119.8 |
+| Sea, low salinity, 1, 80 | 109.5 / 32.5 | 89.5 / 52.5 | 79.8 / 62.2 | 68.3 / 73.7 | 54.5 / 87.5 | 22.1 / 119.9 |
+| Land, 3×10⁻², 40 | 109.4 / 32.6 | 88.5 / 53.5 | 77.3 / 64.7 | 61.3 / 80.7 | 38.0 / 104.0 | −16.8 / 158.8 |
+| Wet ground, 10⁻², 30 | 109.0 / 33.0 | 86.5 / 55.5 | 72.5 / 69.5 | 50.5 / 91.5 | 23.3 / 118.7 | −38.8 / 180.8 |
+| Fresh water, 3×10⁻³, 80 | 107.0 / 35.0 | 80.5 / 61.5 | 64.0 / 78.0 | 42.1 / 99.9 | 16.0 / 126.0 | −47.3 / 189.3 |
+| Land, 3×10⁻³, 22 | 107.7 / 34.3 | 80.5 / 61.5 | 61.6 / 80.4 | 37.8 / 104.2 | 11.0 / 131.0 | −54.4 / 196.4 |
+| Medium dry, 10⁻³, 15 | 104.9 / 37.1 | 72.1 / 69.9 | 52.2 / 89.8 | 29.3 / 112.7 | 2.4 / 139.6 | −64.4 / 206.4 |
+| Dry, 3×10⁻⁴, 7 | 100.5 / 41.5 | 63.3 / 78.7 | 43.7 / 98.3 | 21.1 / 120.9 | −6.1 / 148.1 | −74.0 / 216.0 |
+| Very dry, 10⁻⁴, 3 | 95.3 / 46.7 | 56.4 / 85.6 | 37.0 / 105.0 | 14.4 / 127.6 | −12.9 / 154.9 | −81.4 / 223.4 |
+| Fresh-water ice −1 °C, 3×10⁻⁵, 3 | 94.5 / 47.5 | 56.1 / 85.9 | 36.8 / 105.2 | 14.3 / 127.7 | −13.0 / 155.0 | −81.5 / 223.5 |
+| Fresh-water ice −10 °C, 10⁻⁵, 3 | 94.4 / 47.6 | 56.1 / 85.9 | 36.8 / 105.2 | 14.3 / 127.7 | −13.0 / 155.0 | −81.5 / 223.5 |
+
+Ground types and constants are those of P.368-9 Figs. 1–11 (the Handbook's Table 2 lists ε = 80 for average sea water where the P.368-9 figure caption has 70; immaterial at MF). The ice rows are a homogeneous ice half-space, as in P.368; see section C for floating ice.
+
+**Table B2. Frequency dependence, same radiator, E dB(µV/m). L_b = 142.0 + 20 log f − E; the 20 log f term is −10.5, −6.5, 0, +5.6, +9.5 dB for the five columns.** [E]
+
+| Ground | d (km) | 0.3 MHz | 0.475 MHz | 1.0 MHz | 1.9 MHz | 3.0 MHz |
+|---|---|---|---|---|---|---|
+| Sea 5 S/m | 100 | 69.0 | 68.8 | 68.5 | 68.0 | 67.5 |
+| | 300 | 57.1 | 56.4 | 54.8 | 52.8 | 50.8 |
+| | 1 000 | 33.1 | 29.5 | 22.2 | 14.0 | 6.3 |
+| 3×10⁻² | 100 | 68.3 | 67.2 | 61.3 | 48.0 | 37.4 |
+| | 300 | 55.5 | 52.2 | 38.0 | 18.5 | 5.4 |
+| | 1 000 | 29.9 | 19.5 | −16.8 | −56.8 | −85.2 |
+| 10⁻² | 30 | 79.2 | 78.1 | 72.5 | 60.6 | 51.6 |
+| | 100 | 66.9 | 63.7 | 50.5 | 36.3 | 27.6 |
+| | 300 | 51.8 | 43.8 | 23.3 | 6.6 | −5.0 |
+| | 1 000 | 20.2 | 0.3 | −38.8 | −72.7 | −98.4 |
+| 3×10⁻³ | 30 | 77.4 | 73.9 | 61.6 | 50.0 | 43.6 |
+| | 100 | 62.0 | 53.8 | 37.8 | 26.7 | 19.9 |
+| | 300 | 40.9 | 28.7 | 11.0 | −3.3 | −13.0 |
+| | 1 000 | −1.1 | −21.4 | −54.4 | −84.6 | −107.8 |
+| 10⁻³ | 30 | 72.7 | 65.4 | 52.2 | 43.7 | 38.8 |
+| | 100 | 51.9 | 42.1 | 29.3 | 20.5 | 15.1 |
+| | 300 | 27.7 | 17.5 | 2.4 | −9.6 | −18.0 |
+| | 1 000 | −17.5 | −35.0 | −64.4 | −91.9 | −113.6 |
+| 10⁻⁴ | 100 | 30.0 | 23.2 | 14.4 | 7.9 | 3.2 |
+| | 300 | 6.5 | −1.5 | −12.9 | −22.6 | −30.3 |
+
+Sensitivity to the effective-earth-radius factor k_e at 1 MHz (E relative to 4/3) [E]: at 100 km ≤0.45 dB for k_e 1.0–2.0; at 300 km −1.7 to −2.8 dB (k_e = 1.0) and +0.6 to +0.9 dB (1.5); at 1 000 km −7.5/−12.7/−14.7 dB (k_e = 1.0; sea/10/3 mS/m), −2.6/−4.4/−5.0 dB (1.2), +2.6/+4.5/+5.2 dB (1.5). So P.368-9 and P.368-10 differ by under 1 dB out to 1 000 km if the GRWAVE curves behave like k_e ≈ 1.30, as the digitisation indicates.
+
+Near field: the curves give the total field within 1 dB for kr > 10; the correction 10 log[1 − 1/(kr)² + 1/(kr)⁴] is −0.01 dB at 1 km/1 MHz and −0.11 dB at 1 km/0.3 MHz. [S] P.368-10 Note 3; arithmetic [E].
+
+### C. Ground constants: atlases, spread, sensitivity
+
+- P.832-4 classes: standard values 5 S/m and 3×10⁻²…10⁻⁵ S/m, each covering a factor of about 1.8 either side (e.g. 3×10⁻³ spans 1.7–5.5×10⁻³). MF maps (Figs. 7–42) come from national administrations, are standardised to 1 MHz, contain "no allowance for seasonal variations", and show discontinuities at borders because methods differ. Where nothing was measured a provisional world map (Fig. 43) has only five classes: ≤0.1, 3, 8, 15, 30 mS/m. Indian data suggested negligible seasonal change in the tropics at 1 MHz. [S] P.832-4 §§2–4, Table 1.
+- The Handbook calls conductivity estimation the "biggest uncertainty" and says the global map gives only "a broad indication". [S] HDB-GW §6.1.
+- Users in 2024: the atlas has "simply no data" for many regions, German data are "decades" old, the maps are not machine-readable (the authors digitised them), and atlas error was their largest source of ground-wave delay prediction error. [P] Hehenkamp et al. 2024 §2. (They cite P.832-3; P.832-4 is current.)
+- P.1147-4 Annex 1 quotes effective conductivities from 0.5 to 40 mS/m, "typically 3 to 10 mS/m". [S]
+- The United States FCC map was derived by the attenuation method (fitting measured field-strength-versus-distance curves to theoretical curves). [T] NTIA 78-12 App. B, citing Fine (1953). The current rules describe Figure M3 (replicated as Figure R3) as showing "the conductivity throughout the United States by general areas", warn that "in areas of limited size or over a particular path, the conductivity may vary widely from the values given", and allow the maps only "when accurate and acceptable measurements have not been made"; their curves assume ε = 15 for land and 80 for sea water, and mixed paths are handled by the equivalent-distance method, not Millington's. [S] 47 CFR 73.183(b)(1), (d), 73.184 (US regulation, eCFR text current to 5 Nov 2026). The rule text does not list the map's class values, so the 0.5–30 mS/m range sometimes quoted for M3 remains unverified.
+- A daytime test of a conductivity database at 300 kHz (DGPS signal, about 500 W radiated, five routes up to 330–700 km in the north-western United States): smooth-earth predictions agreed on the Spokane route (43 dB(µV/m) at 350 km with the database's 4 mS/m), but at Bellingham (330 km, mountainous) the measured 28 dB(µV/m) was more than 10 dB below the prediction with the same 4 mS/m and needed 0.8 mS/m to match; an irregular-terrain model gave nearly the same prediction, so the error was attributed to the sparse conductivity data, not terrain. [T] NTIA 98-346 §§9–10.
+- Measured local conductivities can contradict geology tables: on a granite ridge values measured under wet conditions were "much higher" than the tabulated dry-rock value. [T] NTIA 79-20, Santa Rita path discussion.
+- Sensitivity at 1 MHz [E]: one class step (10 → 3 → 1 mS/m) is 12.7 and 8.5 dB at 100 km, 12.3 and 8.6 dB at 300 km. A ±30 % change in σ gives +3.1/−4.1 dB (10 mS/m), +2.4/−2.8 dB (3 mS/m), +1.5/−1.6 dB (1 mS/m) at 100 km, with 1–10° of carrier phase. A factor of 2 gives 2.5–9 dB and up to 20°.
+- Layered and frozen ground. P.368's ice curves treat ice as a half-space and then equal the very-dry-ground curve (L_b 127.7 dB at 100 km). Floating ice a few metres thick is electrically thin at MF (penetration depth in ice hundreds of metres); a thin-slab impedance Δ_sea + jkh(ε−1)/ε is almost purely inductive, and the flat-earth function then predicts fields at or above the open-sea value (+2 to +5 dB at 100 km for 0.5–1 m of ice at 1 MHz, +1 to +2 dB at 0.5 MHz), not extra loss. [E]; consistent in sign with the Hill & Wait 1980 abstract [P, abstract]. Their sea-ice papers (1981) were not obtained, but a 2025 model built on their layered surface impedance and Copernicus ice maps finds the same sign at 308 kHz: relative to ice-free sea the ground-wave gain rises with ice thickness and path length, to about 4 dB at 2.5 m and 200 km (fig-read), while the phase is delayed (about 10 m of range for 1 m of ice over 20 km, 5 m for 0.5 m; about 20 ns in a Gulf of St. Lawrence scenario at 319 kHz); the effect is described as much weaker at MF than at HF, and the model has not yet been validated against measurement. [P] Hehenkamp et al. 2025 (ARS) §§2.2, 4. Decca and Loran-C trials in the Beaufort Sea reportedly showed no significant variation with sea ice at LF. [P, secondary] Lachapelle et al. 1993, citing Gray (1975) and Eaton et al. (1982). The thin-slab values above are therefore unvalidated estimates of the right sign and order of magnitude. For a 1–2 m frozen layer over 10 mS/m soil the same estimate gives +0.8 to +1.5 dB at 10 km and −2.6 to −6 dB at 100 km. [E]; not validated by any source found, and snow cover at MF was not treated by any source found.
+- Sea state: Barrick's rough-sea loss theory applies at HF; the Handbook reports that at λ = 295 m a field increase of 1.5–2 times was observed over slightly rough sea within about 100 km of the coast. [S, secondary] HDB-GW §8, citing Kashprovsky & Kuzubov 1971. Tidal change can produce slow fading on over-sea paths. [S] HDB-GW §1.
+
+### D. Temporal variation of the daytime ground wave
+
+Seasonal:
+
+- P.368-10: winter–summer difference of monthly medians at 500–1 000 kHz from 5 dB (mean January temperature +4 °C) to 15 dB (−16 °C). [S] Annex 1 Note 2. P.1321-5 Table 1: 4, 8, 13, 15 dB at +4, 0, −10, −16 °C. [S] (The two texts differ by 1 dB at +4 °C.)
+- P.1321-5: mid-latitude continental climate with woodland, links to about 100 km: 10–18 dB on average; about 10 dB for links starting in a large city, up to 15 dB crossing one, 15–18 dB rural. [S] §4.1.1.
+- Handbook history: Philadelphia-area monthly means varying 4–5 dB (the Handbook dates the first such measurements to the 1920s, but its Fig. 20 reproduces Gracely's May 1939–August 1940 Philadelphia–Baltimore record; Gracely's own records span 1938–42); Switzerland 1938–44 (556–677 kHz, 62–93 km) up to 8 dB; Moscow region 10–15 dB; Siberia (576 kHz, Tomsk) about 15 dB or more. [S] HDB-GW §11.1.
+- Gracely (FCC), six US paths 30–45° N, daily or 4-daily 1:30 p.m. readings: shortest path (1 170 kHz, 122 km, 475 days) mean 289 µV/m, max 470, min 175 (2.7:1, 8.6 dB); longest (820 kHz, 898 km, 504 days) mean 5.3 µV/m, max 26, min 1.3 (20:1, 26 dB). Intensity falls at high temperature; the fall grows with path length in wavelengths; temperature correlated better than rain, humidity, pressure or a soil-moisture index. [P] Gracely 1949, pp. 360–363, Table I.
+- Montreal, 730 kHz, 50 kW, 29.8 km, five years of daily readings (from March 1958, taken between 9 and 10 a.m.): 21 mV/m in June, 38 mV/m in January (5.2 dB); no correlation with rain or snow. His Table 1 adds three US stations at 1 310, 1 420 and 1 570 kHz with winter/summer ratios of 3.0, 5.0 and 4.7 dB (distances not given). [G] Spencer.
+- Sign problem. Freezing lowers conductivity and permittivity (P.527-6 §4.3), which for a half-space lowers the field, yet measured fields are highest in winter. Candidate causes listed by the Handbook are tropospheric refractivity, vegetation state, water table, freezing and snow. [S] HDB-GW §11. Gracely already wrote that no single explanation covers all results. [P]
+
+Day-to-day and within the day:
+
+- Gracely, Philadelphia–Baltimore, one month: mean deviation within the 9 a.m.–3 p.m. window 8.5, and mean day-to-day deviation of daily means 16.6, against a 289 µV/m mean (units not printed beside the numbers; if µV/m these are about 3 % and 6 %, i.e. 0.25 and 0.5 dB). He concluded variations within and between days are of the same kind, scaling with the time interval. [P] p. 361–362. On the units: every intensity in the paper and its figures is in µV/m, he compares the two numbers directly with the 7 h and 24 h periods, and the daily 1:30 p.m. values in his Fig. 1 mostly lie within about ±30 µV/m of a monthly level of 250–330 µV/m (fig-read), which fits a mean deviation near 16.6 µV/m but not one of 16.6 % (about 48 µV/m). µV/m is therefore the likelier reading; it remains an inference. [E] A later trade article quotes Gracely's shortest-path extremes as 47.0 and 17.5 mV/m: the 2.7:1 ratio of his 470 and 175 µV/m, but not his unit. [G] Spencer, Table 1.
+- P.1321-5: rms deviation of the hourly median from the monthly median at MF, paths 20–120 km, σ_M = 0.0018 f_kHz + 0.6 dB: 1.5 dB at 500 kHz, 2.4 dB at 1 MHz, 3.3 dB at 1.5 MHz. [S] §4.1.2.
+- Handbook, Moscow region: day-to-day changes at MF over tens of km "typically 2–4 dB, and occasionally up to 5–6 dB", much larger than at LF. [S] HDB-GW §11.2.
+- Indoor MF measurements in Spain: time standard deviations below 1 dB. [S, secondary] HDB-GW §17 (Fernández et al. 2011).
+- 500 kHz amateur experimental stations: daytime ground-wave signals "very steady and free from fading". [G] WD2XSH report M08-2.
+- IMO planning allows a 3 dB fading margin for MF ground-wave links and ITU-R calls A2 ground-wave coverage "largely stable". [S] M.1467-1 Table 1, §1.
+
+### E. Phase and time-of-arrival stability
+
+- Loran-C (100 kHz): time-of-arrival variations up to ±0.5 µs, diurnal and long-term, correlated with the gradient of the dry refractivity term and with frontal passages. [S, secondary] HDB-GW §19.6 (Doherty & Johler 1975; Samaddar 1980; originals not obtained).
+- eLoran, China, wet ground, receivers 45 km apart: calculated propagation delay typically off by about 500 ns (error analysis; the measured mean timing error before correction was 395 ns); user timing error standard deviation 32.7 ns before and 19.0 ns after differential correction; the two sites' delays vary together. [P] Li et al. 2020 §§3, 6. (33 ns is 1.2° at 100 kHz.)
+- eLoran, Korea, 218 km Gwangju–Pyeongtaek path, 12 days in April 2022, 1 h moving average: the time of arrival swings by roughly 30–50 ns between day and night and by about ±40 ns overall (fig-read), and correlates with temperature along the path (Pearson r ≈ 0.77; humidity and pressure about −0.45). [G] Song & Son 2025 (preprint). At 100 kHz, ±40 ns is ±1.4° of carrier phase.
+- Loran-C, Lower St. Lawrence, winter (February–March) against summer (July–August) 1991: mean time-difference changes up to 0.24 µs (average 0.20 µs, about 72 m); a refractivity change from 310 to 330 N-units explains only 0.04 µs, so the rest was attributed to conductivity changes. [P] Lachapelle et al. 1993. At 100 kHz 0.2 µs is 7° of phase.
+- US eLoran planning model: the year-round standard deviation of the correlated propagation component is about 0 to 340 ns per 1 000 km of path depending on region (largest round the Great Lakes and in the North-East, least in the mountain West), with an extra uncorrelated term for short-term winter fluctuations. [G] Wenzel et al. 2006. At 100 kHz 340 ns is 12° of phase.
+- MF R-Mode (two CW tones ±225 Hz around a 283.5–315 kHz beacon carrier (European allocation), 1 s phase estimates, stable reference clock, research vessel near Rostock, 2021 campaign; the paper gives February 2021 for the campaign and 22 September for the night data set):
+  - Day, 6 h: 95 % horizontal error 15.1 m; receiver clock bias σ = 11.3 ns. Range-error σ by station: 3.0 m (62 km), 5.9 m (212 km, mostly sea), 6.0 m (267 km, half land). [P] Rizzi et al. 2023 §4.1–4.2, Fig. 9. At λ ≈ 1 km these are 1.1–2.2° of phase, noise included.
+  - An earlier sea trial reached 12 m (95 %); residual slow biases were attributed to conductivity-related delays and a transmitter fault. [P] Grundhöfer et al. 2021.
+  - Static monitor, Sept 2023: some stations show time-varying phase biases of hardware origin; phase scatter otherwise follows the C/N0-based bound over 7.5–22.5 dB-Hz. [P] Rizzi et al. 2025 §5.
+  - Uncorrected ground-wave delay produced range biases of tens of metres up to about 160 m on one mixed path; temporal change from temperature, moisture and ice is "not predictable" from static maps. [P] Hehenkamp et al. 2024 §§3, 4.1.
+- Scaling to 1 MHz [E]: surface refractivity change ΔN alters the phase by k·d·ΔN×10⁻⁶ (2.4° per 20 N-units per 100 km). A change of k_e between 1.2 and 1.5 moves the phase by ±1.5° at 100 km, ±3–8° at 300 km and ±12–32° at 1 000 km. A 30 % conductivity change gives 1–10° at 30–300 km. Ten degrees in one hour is 8 µHz. If the Korean eLoran day–night swing of 30–50 ns were a frequency-independent delay, it would be 11–18° at 1 MHz over about 200 km, still of order µHz as a frequency; the conductivity-driven part scales differently with frequency, so this is an indication, not a measurement at MF.
+
+### F. Spatial variability, built-up areas, terrain, structures
+
+- Open/rural: nearby locations differ log-normally, σ 3–4 dB (mean 3.5). [S] P.368-10 Note 2. σ = 3.7 dB for separations of order 1 km, similar worldwide. [S] P.1321-5 §4.2, Fig. 5.
+- Cities, open places and wide streets: mean about 5 dB below rural at the same distance, σ 1.7–5 dB (mean 3.5). Courtyards of tall buildings: 15–20 dB drops; σ at least 6–8 dB. Higher MF frequencies in built-up Moscow: σ 7–10 dB. [S] HDB-GW §§15, 15.1.
+- DRM campaigns (Mexico City, New Delhi, Madrid; 96 routes, >500 km): loss relative to P.368 in medium streets 4±1 (666 kHz), 6±4 (810), 3±3 (1 060), 11±6 dB (1 260 kHz); narrow streets 12±6, 9±5, 19±8 dB. 810 vs 1 260 kHz at the same spot differ by 6–28 dB (mostly 6–16). [S] HDB-GW §15.2–15.3, Table 4.
+- Urban Moscow: beyond 500 m the field behaves like σ = 1 mS/m ground and follows roughly 1/R² from 0.7 to 10 km. [S] HDB-GW §10.1.3.
+- London (Brookmans Park transmitter, 29 km north of the centre; 908, 1 214, 1 457 kHz; 500 m medians of H along two radials to 50 km). The distance-normalised field 20 log(H·d) holds near 79–80 dB to about 23 km at 908 kHz, then collapses to 57–59 dB near 30 km and recovers to 63–65 dB at 35–43 km. At 1 214 kHz: 77–78 → 52–53 dB near 26 km → 59–60 dB. At 1 457 kHz: 77 → 46–47 dB at 23–27 km → 56–57 dB at 33 km. So 21, 25 and 30 dB below the near-in level, the drop starting nearer the transmitter at higher frequency, with 6–10 dB recovery beyond the dense area. Near the transmitter fields were "higher than expected". [T] BBC RD 1977/25 §2, Fig. 1 (the 181° radial; fig-read ±1 dB). Assigning an effective conductivity reproduced these results poorly. [T] ibid. §3.
+- Indoors: 15 dB (600 kHz) to 24 dB (1 600 kHz) below P.368; log-normal σ = 11.8 dB; up to 50 dB spread within one building; mean penetration loss 6.7 dB; lifts 40 dB. [S] HDB-GW §17.
+- Structures: power lines, large buildings or metalwork raise the field by up to 10 dB or, rarely, lower it 15–20 dB. Overpass fade depths: 23.1 dB (18–24 m wide), 12.6, 9.8, 8.3 dB (narrower), pedestrian bridge 6.5 dB, sign gantry 5.1 dB. [S] HDB-GW §16, Table 5. E-field antennas see more spatial variation than loops in obstructed surroundings. [S] HDB-GW §12.
+- Terrain: more than 10 dB (medians) of shadow behind the Somosierra range, with gradual recovery beyond; a λ/4-high obstacle close to the receiver also produced a drop. Empirical loss L_irr = (−17.2 log d_km + 25.1)·log(2.84 h_λ) dB, negligible for d > 25 km and h < 2λ. [S] HDB-GW §14, eq. (44).
+- Integral-equation validation: nine paths, 120 kHz–50 MHz, "encouraging agreement"; agreement was better at 1.6–2 MHz than at the lower frequencies, and sensitive to the conductivity assumed. [T] NTIA 79-20. Underlying measurements: four paths ≤50 km, six frequencies 100–2 000 kHz, accuracy +1.6/−3.0 dB. [T] NTIA 78-12 §6. For terrain variations below a wavelength smooth-earth models are comparably accurate. [T] NTIA 99-368 §3.1.3.
+- Mixed-path validation: Millington's 77 MHz short-range test, Millington & Isted's cross-Channel test near 3 MHz, a 3.9 MHz Baltic land–sea–land–sea test, and NTIA measurements at 100–2 000 kHz and 285–325 kHz all show the recovery effect. [S, secondary] HDB-GW §7.1, Figs. 5–7. For all-land paths a length-weighted mean conductivity is said to be adequate. [S] HDB-GW §7.3.
+
+### G. Night-time and daytime sky wave against the ground wave
+
+Levels:
+
+- P.1147-4: E = V + G_S − L_p + 107 − 20 log p − k√(p/1000) − L_t − L_r dB(µV/m), p = √(d² + 200²) km, k = 2π + 4.95 tan²Φ (Φ geomagnetic latitude); annual median of half-hourly medians six hours after sunset; valid 50–12 000 km; assumes average ground at the terminals (an order of magnitude lower conductivity costs up to 10 dB per terminal). [S] §2, Annex 1.
+- Variability: field exceeded 10 % of the time is 6–10 dB above the median, 1 % is 11–15 dB above (MF). Night-to-night hourly medians are log-normal with semi-interdecile range 3.5–9 dB. Seasonal: strongest at the equinoxes, up to 15 dB range at the low end of MF and 3 dB at the top. [S] P.1147-4 §3, Annex 1; P.1321-5 §4.3.
+- US measurements show the opposite frequency trend to the ITU method: 1 530 kHz is typically 5–10 dB stronger than 700 kHz about two hours after sunset and about 3 dB stronger six hours after. [S] ITU ionosphere handbook §5.1.2.2. NTIA 99-368 §4 quotes about 15 dB at sunset or sunrise, 3–5 dB two hours after sunset (against the handbook's 5–10 dB) and a negligible difference at midnight. [T]
+- P.1321-5 Fig. 2 (median, four hours after sunset, sunspot minimum, antenna pattern excluded; fig-read ±2 dB): at 700 kHz the 1E mode is about 43/42/44 dB(µV/m) at 100/200/500 km with 2E about 21 dB lower at 100 and 200 km and about 28 dB lower at 500 km; at 1 MHz the first mode at 100 and 200 km is 1F at about 40 dB(µV/m) (1.3 and 1.15 ms), and at 500 km 1E at about 45 dB(µV/m). [S]
+- The two Recommendations disagree at short range: P.1147 gives 54.7 dB(µV/m) at 100 km (Φ = 45°, before antenna pattern) against about 43 in P.1321 Fig. 2, and 52.0 against about 41 at 200 km; at 500 km they agree within about 2 dB (44.1 against about 46). [E from S] The gap is not one of definition. P.1321's four hours after sunset against P.1147's six is worth under 0.5 dB by P.1147's own hourly loss factor; at Φ ≤ 45° P.1147 has no solar-activity term, so P.1321's sunspot minimum adds nothing; summing P.1321's weaker modes raises its first mode by under 0.1 dB; and both exclude the transmitting-antenna pattern. [E from S] It is a difference of model: P.1321 Fig. 2 is a wave-hop illustration "using the above simple propagation models", for whose mode amplitudes §2.2 points to the reflection coefficients of P.684, a Recommendation intended mainly for frequencies below 500 kHz, whereas P.1147 is fitted to broadcast measurements, and "there are far fewer experimental data for distances less than 300 km than for greater distances". [S] P.1321-5 §§2.2, 3; P.1147-4 §1; ITU ionosphere handbook §5.1.1. Among the FCC, CCIR (identical to P.1147-4) and Wang sky-wave models, the CCIR model gave the strongest sky wave at 300 kHz. [T] Johnson & Swaszek 2014 §2.3.3. No measurement found settles the 100–200 km level, so the difference is carried as model uncertainty.
+
+Where sky wave equals ground wave (the "night fading zone", P.1321-5 §3):
+
+**Table G1. 1 MHz, short vertical transmitting antenna (cos ψ pattern), loop reception, P.1147 annual-median night field at Φ = 45°, ground-wave curves of Table B1.** [E from S; reproduced to ±1 km by an independent calculation on review]
+
+| Ground | GW 10 dB above sky | Equal (35°…55°) | GW 10 dB below sky | Equal at 0.5 MHz |
+|---|---|---|---|---|
+| Sea 5 S/m | 230 km | 542 km (477…698) | 893 km | 704 km |
+| 3×10⁻² | 118 km | 191 km (179…218) | 305 km | 415 km |
+| 10⁻² | 76 km | 111 km (106…122) | 165 km | 228 km |
+| 3×10⁻³ | 47 km | 68 km (65…74) | 100 km | 122 km |
+| 10⁻³ | 33 km | 49 km (47…53) | 72 km | 77 km |
+| 10⁻⁴ | 20 km | 27 km (26…30) | 40 km | 37 km |
+
+Using P.1321's sky-wave levels instead (lower at 100–200 km, slightly higher at 500 km) moves the equal-amplitude distance to about 500 km (sea), 145 km (10 mS/m), 77 km (3 mS/m), 50 km (1 mS/m). These four values are reproduced only if P.1321's levels are used without the transmitting-antenna pattern applied in the table; with the cos ψ factor of a 1E or 1F ray they become about 490–520, 180–210, 115–140 and 85–105 km. [E, re-check] A vertical receiving whip pushes all distances outward (it rejects the steep ray by a further 7 dB at 100 km). Below 50 km P.1147 is outside its stated range.
+
+- Field evidence at about 300 kHz: no sky-wave effect at 62 km at night (range σ 1.7 m, lower than by day); 212 km mostly over sea 5.9 → 8.3 m; 267 km half over land 6.0 → 15.3 m (factor 2.6); stations at 334–486 km unusable at night but accurate by day; night 95 % position error 55.3 m and clock σ 32.3 ns. [P] Rizzi et al. 2023 §4.2. A beacon with 285 km nominal range was received at about 500 km by day. [P] Koch & Gewies 2020, discussion section.
+- Phase effect of an unresolved sky wave of relative amplitude r: a 15 dB margin is needed to keep the error below 100 ns at 300 kHz. [T] Johnson & Swaszek 2014 §2.3.3, Fig. 15. The bound is arcsin r: 10° at −15 dB, 30° at −6 dB. [E] Amplitude ripple is 20 log(1 ± r): +1.4/−1.7 dB at −15 dB, +3.5/−6.0 dB at −6 dB. [E]
+
+Fading rate, depth, Doppler:
+
+- Individual sky-wave modes: log-normal within the hour, σ about 3 dB, 10–30 fades per hour. [S] P.1321-5 §4.3. About 10 upward median crossings per hour at 1 MHz on long E-layer paths in Europe, about three times that in Japan, proportional to frequency, faster when F-layer or two comparable modes are present; Rayleigh over two or three fading cycles at upper MF. [S] ITU ionosphere handbook §§5.2.1–5.2.2. Rayleigh below 40° latitude. [T] NTIA 99-368 §4.
+- Two-year statistics on 539 kHz over 860 km: 1.8–3.5 median-level excesses per hour through the night, 1.5–2.5 lower-decile fades per hour; median excess duration about 4 min (5 min at 155 kHz, 1 550 km). [S] P.1321-5 Appendix 2, Tables 3–5.
+- Composite ground + sky (power sum, sky σ 3 dB): sky/ground −6 dB → mean +1.3 dB, σ 0.72 dB; 0 dB → 4.4 dB, 1.35 dB; +6 dB → 5.7 dB, 2.0 dB. [S] P.1321-5 Table 2.
+- Delay window containing 98 % of the energy: under 3 ms. [S] P.1321-5 §5.
+- "The frequency shift of sky-wave modes … will be small." [S] P.1321-5 §4.3.
+- Measured on AM broadcast carriers (three receivers, two stations, north-eastern USA, 11 nights March–April 2012): about 40 min periodic Doppler variations with amplitudes "up to a few tenths of a hertz" from lower-F-region travelling disturbances, correlated across the array, and "large (nearly 1 Hz)" shifts, upward at dawn and downward at dusk; for 0000–0400 UT on 13 April 2012 GPS total electron content, Digisonde and SuperDARN radar data confirmed disturbances with the same characteristics. [P, abstract] Chilcote et al. 2015. A later account describes the shifts as about 0.1 Hz on paths of several hundred kilometres, with a principal event of about 1 h period travelling north-east at 330 m/s. [P, secondary] Trop et al. 2025 §§1, 3.
+- A six-receiver network (April 2020–March 2021) round the 50 kW, 810 kHz clear-channel station WGY (Schenectady, NY), with five receivers at one-hop distance (reflection points on a circle of about 100 km radius, so paths near 200 km), also tracked stations on 1 080 and 1 560 kHz; spectra had 0.016 Hz resolution every 33.5 s, for 12–14 night hours a day. A receiver beside each transmitter was needed to separate transmitter carrier drift from ionospheric Doppler; only WGY's carrier needed correcting. On 26 September 2020 the 810 kHz Doppler varied coherently at all sites from 01:30 to 04:00 UTC (20:30–23:00 local time), mostly within about ±0.1 Hz with quasi-periods of tens of minutes (fig-read ±0.03 Hz). The shift is Δf = −2fv/c for a layer moving vertically at v, so signatures scale with frequency; below 1 MHz they were weaker and more often multi-valued, and an automated tracker over 359 nights found 18, 25 and 46 events on 810, 1 080 and 1 560 kHz. [P] Trop et al. 2025 §§2–3, 6.
+- Conversion [E]: for a Rayleigh component with Gaussian Doppler spectrum of standard deviation σ_f the median upward-crossing rate is N = 2√π·σ_f·ρ·e^(−ρ²) with ρ² = ln 2, i.e. N = 1.476 σ_f. Then 10 and 30 fades per hour give σ_f = 1.9 and 5.6 mHz (two-sided 2σ spread 3.8 and 11 mHz); 1.8–3.5 per hour give 0.3–0.7 mHz. The 50 % coherence time 0.187/σ_f is about 100 s and 33 s. P.1321 describes the modes as log-normal, so this is indicative.
+
+Daytime sky wave:
+
+- Annual-median midday sky-wave field is about 43 dB below the six-hours-after-sunset value; the average winter month is about 10 dB above that median; winter-to-summer ratio can exceed 30 dB; the level exceeded on 10 % of days is about 13 dB above the median. [S] P.1147-4 Annex 2. A common engineering allowance is a flat 30 dB. [T] NTIA 99-368 §4; P.1147-4 §2.7 likewise caps the hourly loss factor at 30 dB near midday. [S]
+- Resulting distances at 1 MHz where the midday sky wave equals the ground wave [E from S]: winter month (−33 dB) 182/260/415/678 km over 1/3/10/30 mS/m and 1 640 km over sea; annual median (−43 dB) 275/379/558/847 km.
+- Observation at 500 kHz with ≤20 W ERP: in December–January daytime reception over 800–1 450 km, judged "well beyond the capability of ground-wave", attributed to a weak winter D layer. [G] WD2XSH report M08-2.
+- Implication for Gracely's 898 km path: the P.1147 midday sky wave (about 11 dB(µV/m) annual median, about 21 in a winter month, for an assumed 50 kW; the paper does not state the power) is comparable with his 5.3 µV/m (14.5 dB(µV/m)) mean, so part of his 26 dB "ground-wave" range may be winter sky wave. [E]; conjecture. Spencer remarked that the distances of Gracely's study "tend to indicate that ionospheric transmission is involved", while arguing from his own 30 km record that the ground wave dominates the variations. [G] Spencer.
+
+### H. Antennas and radiated power
+
+- Ship MF/HF antennas are assumed 25 % efficient for A2 and NAVTEX planning; receive-antenna gain on ships varies ±5 dB with hull interaction and a 10 dB allowance is made for poor condition. [S] M.1467-1 Table 1, §2.5.3.2.
+- A DGPS beacon antenna at 300 kHz: equivalent surface-wave gain 3.2 dBi including 53 % efficiency. A 1 m whip on a van: −21.3 dB at 300 kHz and −13.1 dB at 760 kHz equivalent gain. λ/4 monopole on 120 radials: 4.7 dB. [T] NTIA 99-368 §5.
+- Radiated power should be measured, not assumed: field at about 1 km against 109.5 dB(µV/m) per kW e.m.r.p.; in built-up surroundings such measurements scatter (σ 6.6 dB in one case). [S] HDB-GW §18.2.
+- Short vertical radiator: radiation resistance about 40π²(h/λ)² Ω without top loading and up to 160π²(h/λ)² Ω with full top loading. For h = 10 m this is 0.44–1.75 Ω at 1 MHz and 0.10–0.40 Ω at 475 kHz, so 10 Ω of ground and coil loss gives 4–15 % and 1–4 % efficiency. [E]; standard textbook formula, not checked against a cited source for this chapter (the arithmetic was re-checked).
+
+### I. Documented ranges and weak links
+
+- NAVTEX (490/518 kHz, 300 Hz, required C/N0 35 dB-Hz at the ship, 90 % availability): predicted sea range for a 1 kW transmitter is 700 nmi (upper-decile ship F_a 75 dB) to 100 nmi (120 dB) at 100 % antenna efficiency; 685 → 137 nmi (F_a 70 → 110) at 25 %; 475 → 103 nmi (70 → 100) at 1 %. [S] M.1467-1 §2.2.3, Fig. 5 (fig-read ±10 nmi). The system was designed for about 250 nmi offshore. [G] Wikipedia "NAVTEX".
+- A2 (2 182 kHz voice, 9 dB in 3 kHz, 52 dB-Hz): 60 W into a 25 % antenna (15 W e.m.r.p.) reaches 285 nmi at coastal F_a = 57.5 dB and 83 nmi at 82.5 dB. [S] M.1467-1 Fig. 4 (fig-read).
+- DGNSS radiobeacons (283.5–325 kHz): nominal ranges 50–550 km, mean 250 km for 357 beacons. [P] Koch & Gewies 2020. The US Coast Guard minimum field strength for DGPS coverage is 37.5 dB(µV/m); a 1998 measurement system reached 1 dB(µV/m) in 300 Hz, and by day a 300 kHz signal of about 500 W radiated gave 43 dB(µV/m) at 350 km on a favourable route and 28 dB(µV/m) at 330 km on a mountainous one. [T] NTIA 98-346 §§3, 9.
+- ARRL 600 m experimental licence WD2XSH (initially 505–510 kHz, CW, up to 20 W ERP): daytime ground-wave contacts over 140 km and 204 km; PSK31 over 447 km (the same table lists a 628 km PSK31 reception at 22 UTC in September, also as ground wave); "communication or reception at distances up to 300 mi" (483 km) with CW, QRSS and PSK31; many reliable daytime links at 160–320 km in summer. A midday mobile test with 30–70 W into a 12 m inverted-L gave S9 over S3 noise at 50–65 km. [G] WD2XSH reports M06-8, M07-2S, M07-112, M08-2, M08-7. The reports give no absolute field strengths, only S-meter readings and relative comparisons. The residue-series computation of section B gives 22, 10 and −7 dB(µV/m) at 483 km for 20 W ERP (referred to a half-wave dipole, about 11 W e.m.r.p.) over 30, 10 and 3 mS/m at 0.5 MHz. [E]
+- Historical 500 kHz maritime: daytime ranges "300–1 500 miles", with Terman's 1948 handbook cited for 1 500 miles from 1 kW over salt water. [G] Wikipedia "500 kHz". The smooth-earth field at 2 400 km over sea for 1 kW e.m.r.p. at 0.5 MHz is −18.6 dB(µV/m) (29.1 at 1 000 km, 11.6 at 1 500 km). [E] The upper figure is therefore not supported as pure ground wave.
+- 630 m and 160 m amateur ground-wave records with levels: not found (see last section). Estimate only: 5 W e.i.r.p. at 475 kHz is −27.8 dB re 1 kW e.m.r.p., giving 26, 1 and −49 dB(µV/m) at 100, 300 and 1 000 km over 3 mS/m. [E]
+
+### J. What corresponds to a 180 dB transmitter-to-receiver loss
+
+Total loss = L_b − 3.5 dB + antenna losses (both ends, relative to lossless short monopoles). Distances at which the total is 180 dB [E]:
+
+| Antenna losses (Tx + Rx) | L_b | Sea | 30 mS/m | 10 mS/m | 3 mS/m | 1 mS/m | 0.1 mS/m |
+|---|---|---|---|---|---|---|---|
+| **1 MHz** 0 dB | 183.5 | 2 530 km | 1 340 | 1 030 | 860 | 750 | 580 |
+| 20 dB | 163.5 | 2 040 | 1 060 | 800 | 640 | 540 | 380 |
+| 40 dB | 143.5 | 1 560 | 790 | 570 | 430 | 340 | 200 |
+| 60 dB | 123.5 | 1 090 | 530 | 350 | 230 | 165 | 80 |
+| 80 dB | 103.5 | 630 | 290 | 170 | 100 | 63 | 28 |
+| **0.475 MHz** 40 dB | 143.5 | 2 110 | 1 660 | 1 150 | 800 | 620 | 370 |
+| 60 dB | 123.5 | 1 510 | 1 180 | 800 | 510 | 360 | 170 |
+| **1.9 MHz** 40 dB | 143.5 | 1 190 | 430 | 320 | 240 | 200 | 120 |
+| 60 dB | 123.5 | 810 | 250 | 170 | 110 | 84 | 44 |
+
+- With efficient antennas 180 dB is roughly 600–1 300 km of land (860–1 030 km over 3–10 mS/m) or 2 500 km of sea at 1 MHz: geometries where, per section G, the received signal is sky-wave dominated at night and may contain a comparable sky wave at winter midday.
+- With realistic small antennas (about 1 % efficient vertical, −20 dB; whip or small loop receiver, −20 to −40 dB) it is a 200–600 km land path or about 1 000–1 500 km over sea at 1 MHz.
+- Add 5–20 dB for a city terminal and ±3–9 dB for a conductivity error of a factor of two.
+
+### K. 2015–2026 work that qualifies P.368 or Millington (as far as it was read)
+
+- P.368-10 (2022) itself: the curve atlas became software; no change of physics, under 1 dB change out to 1 000 km at 1 MHz by the comparison in section B. [S]/[E]
+- LFMF plus P.832 delay maps tested at sea (Baltic): corrections reduced range error for most transmitters, over-corrected one near-sea path (Gross Mohrdorf; attributed to western-Baltic salinity higher than the atlas reference, and on another day alternatively to land conductivity higher than the atlas value), and on one mixed path (Rozewie) reduced the spread of a range bias whose uncorrected distribution was bimodal (about −20 m and −160 m) without removing the bias; terrain effects were not modelled. [P] Hehenkamp et al. 2024 §4.1, §5.
+- Sea ice modelled with Earth-observation maps: higher ground-wave gain and extra phase delay at about 300 kHz, of order 20 ns in a Gulf of St. Lawrence case; not yet validated by measurement. [P] Hehenkamp et al. 2025 (ARS).
+- AM-band Doppler sounding of travelling disturbances is markedly more effective above 1 MHz than at 810 kHz, because the shift scales with frequency and lower frequencies give weaker, more often multi-valued traces. [P] Trop et al. 2025.
+- eLoran delay at 100 kHz over 218 km follows air temperature along the path (r ≈ 0.77) with day–night swings of tens of nanoseconds. [G] Song & Son 2025.
+- Night-time degradation depends on land fraction as well as distance (factor 2.6 at 267 km half over land, small at 212 km over sea). [P] Rizzi et al. 2023.
+- Nominal beacon ranges understate daytime ground-wave reach (285 km nominal, about 500 km observed). [P] Koch & Gewies 2020.
+- Calculated 100 kHz ground-wave delay is typically wrong by about 500 ns (measured mean timing error 395 ns over a plain); differential correction is useful only within about 55 km on land for 100 ns. [P] Li et al. 2020.
+- Transmitter hardware produces slow phase biases and one-second phase jumps of several metres that could be mistaken for propagation. [P] Rizzi et al. 2025 §5; Rizzi et al. 2023 §5.
+- MF sky-wave Doppler shifts are larger than the standards' wording suggests. [P, abstract] Chilcote et al. 2015.
+
+## Moderate → adverse → worst-case parameter table
+
+Values at 1 MHz unless stated. "Worst case" entries are not known to have been observed together.
+
+| Parameter | Moderate | Adverse | Worst case / outage |
+|---|---|---|---|
+| L_b, smooth homogeneous path, 100 km | 91.5 dB (10 mS/m); 73.5 dB (sea) [E] | 104–113 dB (3–1 mS/m) [E] | 128 dB (0.1 mS/m, ice half-space) [E] |
+| L_b, 300 km | 119 dB (10 mS/m); 87 dB (sea) [E] | 131–140 dB [E] | 155 dB [E] |
+| Error from conductivity knowledge | within one P.832 class: about ±4–6 dB at 100–300 km [E from S] | one class wrong: 8–13 dB [E] | no national map (five-class Fig. 43): 20 dB or more [E from S]; more than 10 dB measured at 330 km on a mountainous 300 kHz route (database 4 mS/m, fitted 0.8 mS/m) [T] |
+| Seasonal range (winter − summer) | 4–5 dB (January +4 °C) [S] | 8–13 dB (0 to −10 °C) [S] | 15 dB (−16 °C) [S]; 15–18 dB on rural wooded links where January averages −10 °C [S]; 26 dB extreme range on a 900 km path [P] |
+| Day-to-day change of midday level | about 0.5 dB mean deviation (122 km) [P] | 2–4 dB rms (tens of km); σ_M 2.4 dB [S] | 5–6 dB occasionally [S] |
+| Change within the day (daytime) | about 0.25 dB mean deviation over 6 h [P]; <1 dB σ [S] | not quantified; rain and frontal passages | not found |
+| Site/location offset (fixed stations: a static unknown) | σ 2–4 dB open country [S] | σ 3.5–5 dB and −5 dB mean in open urban spaces [S] | σ 7–10 dB dense streets; −15 to −24 dB indoors (σ 11.8 dB); 5–23 dB under bridges [S] |
+| Built-up excess loss on the path | 3–11 dB medium streets [S] | 9–19 dB narrow streets [S] | 21–30 dB below inverse distance across central London, 908–1 457 kHz [T] |
+| Terrain shadow | none if relief ≪ λ [T] | 3.6 dB (λ-high obstacle 10 km before the receiver) to 9–15 dB (λ–2λ high, 2 km) from L_irr [E from S] | >10 dB median behind a mountain range, measured [S] |
+| Night ground/sky amplitude ratio | >+10 dB inside 33–76 km (1–10 mS/m), 230 km (sea) [E] | within ±10 dB: 33–165 km land, 230–890 km sea [E] | sky dominant beyond; upper-decile sky +6 to +10 dB [S] |
+| Sky-wave excess delay | 0.1–0.3 ms (1E, >200 km) [S/E] | 0.4–1.3 ms (1E <100 km; 1F) [S/E] | to 3 ms with multi-hop (98 % window <3 ms) [S] |
+| Doppler shift of the sky component | ≤5 mHz quiet night, E layer [E]; "small" [S] | 15–75 mHz during twilight height change [E] | mostly within ±0.1 Hz at 810 kHz, up to a few tenths of Hz (travelling disturbances), nearly 1 Hz at the terminator; F region, AM band [P] |
+| Doppler spread (two-sided 2σ) | 0 by day (AWGN channel) [S] | 4–11 mHz from 10–30 fades/h [E from S] | 0.1 Hz assumed in DRM channel 2; 0.1–2 Hz in channel 3 [S] |
+| Coherence time of the sky component (50 %) | hours (ground wave alone) [E] | 30–100 s [E] | seconds while a 0.1–1 Hz shifted component is present [E] |
+| Fade depth of the sum | ≤±1.5 dB (sky 15 dB down) [E] | +3.5/−6 dB (6 dB down); mean +4.4 dB, σ 1.35 dB power-sum at equality [S] | nulls >20 dB at equal amplitudes; Rayleigh when sky alone [S/T] |
+| Fade duration | — | median 4 min above the median level (539 kHz, 860 km) [S] | lower-decile fades 1.5–2.5 per hour, minutes long [S] |
+| Daytime sky wave re night level | negligible in summer (winter/summer >30 dB) [S] | −43 dB annual-median midday [S] | −33 dB winter month, −30 dB on 10 % of days: equals ground wave beyond 180–680 km over land [E from S] |
+| Ground-wave carrier phase | 1–2° σ over hours at 300 kHz, 60–270 km, including receiver noise [P] | several degrees to about 10° over days from refractivity and moisture, 100–300 km [E]; day–night swings of 30–50 ns (1–2°) at 100 kHz over 218 km [G] | tens of degrees seasonally or at 1 000 km [E]; ±0.5 µs reported at 100 kHz [S]; winter–summer 0.2 µs at 100 kHz [P]; planning σ up to 340 ns per 1 000 km at 100 kHz [G] |
+| Frequency selectivity over ≤3 kHz | flat (single path) [S] | nulls every 1/τ = 0.8–10 kHz; flat across 0.6 Hz [E] | a null inside the SSB passband, on the signal [E] |
+| Transmit antenna efficiency | 25–53 % (ship planning value; beacon site) [S/T] | 1–15 % (10 m vertical) [E] | <1 % |
+| Receive antenna "gain" | −1.25 dBi lossless short monopole [S] | −13 to −21 dB for a 1 m whip (760/300 kHz) [T]; ±5 dB installation scatter [S] | further loss matters only once internal noise exceeds external noise |
+
+## How the literature models or simulates this
+
+- **Smooth homogeneous earth.** P.368-10 software (LFMF-smoothEarth): flat-earth function with Wait's curvature correction for d < 80/f^(1/3) km, residue series beyond; inputs frequency, distance, ε_r, σ, N_s, polarisation, antenna heights below 50 m; outputs field, basic transmission loss and a received power (note the 6 dB gain convention above). [T] GRWAVE (Rotheram; exponential atmosphere, elevated antennas to 10 GHz) is now deprecated on the ITU site but remains the origin of all P.368-9 curves and of most published comparisons. [S] Validated domain: smooth, electrically homogeneous paths; "satisfactory" when height irregularities are small against λ and not abrupt. [S] HDB-GW §4. Known failures: built-up areas, forests, steep terrain, any layered or seasonal ground not captured by one (σ, ε) pair; amplitude only in the Recommendation (phase requires modifying the code, as DLR did).
+- **Mixed paths.** Millington (P.368 Annex 2); length-weighted conductivity for all-land paths; the US rules instead prescribe the equivalent-distance method, which keeps the field continuous at each boundary and so cannot produce the over-sea recovery. [S] 47 CFR 73.183(d); [E] for the consequence. DeMinco's LF/MF model packages smooth, mixed and irregular-earth options with antenna models and three sky-wave models (FCC/Region 2, ITU, Wang). [T] NTIA 99-368. The three sky-wave models give "significantly different" fade margins; the CCIR model, identical to P.1147-4, gave the worst (strongest sky wave). [T] Johnson & Swaszek 2014 §2.3.3, Fig. 13.
+- **Irregular and covered terrain.** Hufford's integral equation as programmed by Ott & Berry/Ott (WAGNER) and extended by Hill to slabs (WAGSLAB); tested on nine paths; costly; needs the conductivity along the path, which is usually the weaker input. [T] The Handbook offers the empirical single-obstacle loss L_irr. [S] Parabolic-equation, FDTD and method-of-moments ground-wave tools (Sevgi, Akleman, Felsen and co-workers) exist; only bibliographic records were verified (the 2002 tutorial; split-step and finite-element parabolic-equation packages by Apaydın and Sevgi, 2010–2011, which according to abstract snippets were tested against canonical exact solutions, against each other and against ITU Recommendations on mixed irregular paths; and a hybrid FDTD–PE Loran-C ASF method by Wang et al.), and none was read, so no MF accuracy against measurement can be quoted from them. [P, record]
+- **Built-up areas.** Causebrook's segmented surface-impedance model (building height and coverage per segment), fitted to London; the Handbook notes it "has, so far, not been developed nor widely tested as a prediction tool". Empirical alternatives: street-width loss classes from DRM trials; treating a city as 1 mS/m ground (Moscow). [S/T]
+- **Ground data.** P.832-4 atlas (classes; national maps of mixed vintage), P.527-6 soil model driven by texture, volumetric water content and temperature, with pointers to HWSD and GLDAS data. [S] The P.527-6 soil model has not, in anything read for this chapter, been validated for MF ground-wave prediction; DLR list it as future work. [P] Hehenkamp et al. 2024 §5. The same group's sea-ice model combines P.527-6 with Copernicus land-cover, soil-water, sea-surface and ice-thickness products on a 100 m grid. [P] Hehenkamp et al. 2025 (ARS) §2.
+- **Sky wave.** P.1147-4 (empirical, night median, 50–12 000 km); P.1321-5 (wave-hop illustration of mode delays and levels; composite statistics); P.684 for reflection coefficients below about 500 kHz.
+- **Channel models used for modem testing.** DRM/ETSI ES 201 980 Annex B and BS.1615-3: channel 1 is AWGN, "typical … ground-wave propagation during daytime in LF and MF"; channel 2 is the MF night channel: a fixed path plus a second path delayed 1 ms, amplitude 0.5, Doppler shift 0, Doppler spread 0.1 Hz (Gaussian spectrum, spread defined as 2σ containing 68 % of power); channel 3 (HF/MF) has four paths to 2.2 ms with 0.1–1 Hz shifts and 0.1–2 Hz spreads. [S] BS.1615-3 Table 14 labels channel 2 "typical/moderate" and channel 3 "bad" for MF. [S] These are test conditions, not measured statistics: channel 2's spread corresponds to about 270 median crossings per hour, an order of magnitude faster than the 10–30 per hour of P.1321.
+- **Navigation community.** Loran: primary, secondary and additional secondary factors; Millington–Pressey phase; integral equation for rough terrain; in practice surveyed ASF maps plus monitor-station temporal corrections. [S] HDB-GW §19; [P] Hehenkamp et al. 2024 §3.2. MF R-Mode: predicted "atmospheric and ground-wave delay factor" maps from modified LFMF plus digitised P.832, and a single-reflection two-ray model for night error bounds. [P]
+
+## What a high-fidelity simulation would need
+
+Inputs (per path):
+
+- Frequency, great-circle distance, and the path's conductivity/permittivity segments (with an explicit uncertainty of at least one P.832 class), sea fraction and coast positions, built-up fraction near each terminal, major terrain obstacles near the receiver.
+- Radiated power as e.m.r.p. (antenna efficiency separated from path loss) and the receive antenna type (whip or loop), because the type changes the sky-to-ground ratio by cos ψ.
+- Epoch: season, local time relative to sunset and sunrise at the path midpoint, geomagnetic latitude, solar activity.
+
+Model-structure options, with limits:
+
+1. *Static ground-wave gain from P.368/LFMF plus Millington.* Correct mean level for smooth paths. Should carry a slowly varying log-normal offset: seasonal term (amplitude 2–9 dB about the annual mean depending on climate and woodland), day-to-day term (σ about 0.5–4 dB, correlation time of order days), and a fixed site offset (σ 3–4 dB open, larger in towns). Limits: the time-correlation of the day-to-day amplitude term is not documented in the sources read; Gracely's remark that deviations scale with interval length is the only guide (for delay, the 1 h-averaged 100 kHz eLoran series of Song & Son shows a diurnal cycle superposed on multi-day swings).
+2. *Phase of the ground wave.* A deterministic secondary-phase lag (from the same W) plus a drift process of a few degrees over hours to days. At the modem's time scale (6 s chips, 10 min bits) this is indistinguishable from a constant; oscillator error will dominate. It should be included only to show that it is negligible, with the R-Mode day figures as the validation target.
+3. *Night and twilight: ground wave plus one or more sky-wave taps.* Each tap needs excess delay from geometry (0.1–1.3 ms, multi-hop to 3 ms), median level from P.1147 (or P.1321's lower short-range values, the difference being a declared uncertainty), night-to-night log-normal variation, within-hour fading, and a Doppler shift process. Options for the fading process: (a) Gaussian-spectrum Rayleigh or log-normal tap with 2σ spread of a few mHz (matches P.1321 rates); (b) the DRM channel-2 value of 0.1 Hz as a deliberately harsh case; (c) a deterministic slowly varying frequency offset representing layer motion (tens of mHz at twilight, tenths of Hz for F-region disturbances, up to about 1 Hz at the terminator; proportional to frequency, Δf = −2fv/c). A single "Doppler" number cannot represent both (a) and (c).
+4. *Daytime winter sky wave.* The same tap at −30 to −43 dB relative to its night level, relevant only on long or poor-ground paths.
+5. *Reactive-surface effects (cities, forests, thin ice).* No generally validated model exists at MF; the options are an added loss drawn from the measured ranges, Causebrook's segmented impedance where building data exist, or for sea ice the layered impedance of Hill & Wait driven by ice-thickness maps (modelled at about 300 kHz, not yet validated).
+
+Observables to validate against:
+
+- Field strength versus distance on measured radials (NTIA 78-12/79-20 paths; Causebrook's London radials; DRM route data summarised in the Handbook).
+- Seasonal and daily series (Gracely Table I paths; Montreal five-year record).
+- Night fading-zone location and range-error growth with distance and land fraction (R-Mode Baltic stations at 62, 212, 267 km).
+- Fade-rate and excess-duration statistics (P.1321 Appendix 2), delay values (P.1321 Fig. 3), and the Doppler excursions reported by Chilcote et al. and Trop et al. (810, 1 080 and 1 560 kHz, about 200 km paths).
+
+Better approaches may exist, for example driving the ground constants from soil-moisture and temperature reanalyses through P.527-6, or full-wave terrain codes; no MF validation of either against measurement was found.
+
+## Comparison with the modem's presets
+
+Rows 2 and 3 (500 kHz, Shift, 4 W, 180 dB, 0.625 Hz occupied, 576 s bits, 1/T = 1.7 mHz) use "HF best". Across 0.625 Hz any delay up to the 3 ms window gives |cos(πΔfτ)| > 0.9999, so for DATA the presets' delays act only as phase and timing terms; they matter between DATA and the Helper pilots where the Helper is enabled, through nulls every 1/τ (2 kHz for 0.5 ms; 0.8–10 kHz for the measured sky-wave modes). [E, from [00](00-method-and-modem-context.md) §4.1] The comparison therefore turns on the Doppler value, which in the GUI bounds the offset and wander of a two-path family rather than giving a fading width.
+
+| Preset (Doppler; delay) | Daytime ground wave | Night: ground wave plus sky wave |
+|---|---|---|
+| None (0; 0) | Closest: a static single path; DRM channel 1 is AWGN; propagation Doppler of order µHz; phase σ 1–2° over hours at 300 kHz | Omits the sky wave, which equals the ground wave at 77–228 km over 1–10 mS/m at 0.5 MHz (50–110 km at 1 MHz) |
+| Sub9 best (1 mHz; 0.005 ms) | About 100 times the µHz-scale wander, still below 1/T | Near the low end of night values: σ of 0.3–0.7 mHz implied by the 539 kHz, 860 km fade counts; 1–5 mHz quiet-night shift |
+| Sub9 moderate (5 mHz; 0.05 ms) | Overstates by about 10³ | Matches the quiet-night E-layer shift (≤5 mHz) and the 2σ spread implied by 10–30 fades per hour (4–11 mHz); delay below every sky-wave mode (0.09–1.3 ms) |
+| Sub9 worst (0.05 Hz; 5 ms) | Overstates by about 10⁴ | Within the twilight height-change shifts (15–75 mHz); delay beyond the 3 ms window holding 98 % of the energy |
+| HF best (0.1 Hz; 0.5 ms), present setting | Overstates by about 10⁴ and adds an echo that does not exist by day | Delay inside the measured range (1E at about 50 km); Doppler equal to the DRM channel-2 test spread and of the scale of travelling-disturbance shifts (±0.1 Hz at 810 kHz, about ±0.06 Hz scaled to 500 kHz by Δf ∝ f), but 10–25 times the spread implied by measured fade rates and about a tenth of the terminator shifts |
+| HF moderate (10 Hz; 6 ms), HF worst (30 Hz; 7 ms) | Not an MF condition | Doppler 10–30 times the largest MF value found (about 1 Hz); delay beyond the 3 ms window |
+| Aurora best, Aurora worst, EME focused | Not applicable | Not applicable |
+
+Structure matters as much as the numbers. The GUI's direct path never fades and its echo-to-direct ratio stays between 0 and 1; that matches the night channel only inside the fading zone. Beyond it the sky wave exceeds the ground wave (by 10 dB at 72–165 km over 1–10 mS/m at 1 MHz, with upper-decile levels a further 6–10 dB up), and the sky component fades log-normally (σ about 3 dB within the hour) or as Rayleigh at upper MF, 10–30 times per hour, with median-level excesses of about 4 min at 539 kHz. A bounded smooth wander on a synthetic time scale reproduces neither these fade statistics nor the deterministic twilight and travelling-disturbance offsets, which the sources treat as different quantities. [S/P/E]
+
+For T = 576 s, whole-bit coherence loses about 3 dB to a diffuse spread near 2.1 mHz and about 1 dB to a drift near 6 µHz/s (00 §4.1). By day the ground wave is far inside both limits. At night the spread implied by measured fade rates exceeds the first whenever the sky wave is comparable with the ground wave; a ±0.1 Hz travelling-disturbance shift with a 40 min period drifts at up to 2π × 0.1/2 400 ≈ 0.26 mHz/s, about 40 times the second; twilight height changes (15–75 mHz over 20–60 min) drift at about 4–60 µHz/s. [E] These describe whole-bit coherence, not the present receiver, which adds shorter-coherence, common-frequency and drift alternatives when changing-channel settings are selected (00 §4.1).
+
+Level and noise: "4 W, 180 dB at −164 dBm/Hz" gives P_r = −144 dBm and 20 dB-Hz. With external noise dominant, C/N0 = 30 − F_a + L_rx (section "Units and conversions"), so 20 dB-Hz needs the 180 dB to contain about F_a − 10 dB of receive-antenna loss, or equivalently L_b + F_a + (transmit-antenna loss) ≈ 193.5 dB (00 §3.1). For the night-time F_a of about 80 dB at 1 MHz quoted in 00 §3.1 and an ideal transmitting antenna, L_b ≈ 113 dB: about 100 km over 1 mS/m, 250 km over 10 mS/m or 850 km over sea (Table B1, interpolated), where by Table G1 the night sky wave exceeds the ground wave by roughly 10 dB or more. Read instead as a plain 180 dB power loss between lossless antennas (Table J), 4 W and 180 dB is 750–1 030 km over 1–10 mS/m land or 2 500 km of sea at 1 MHz, and the real C/N0 would be 30 − F_a dB-Hz, F_a − 10 dB below the simulated 20 dB-Hz. [E] F_a at 500 kHz by day and night is in [50](50-noise-and-interference-mf-hf.md). The GUI's constant level is adequate by day within one 690–735 s window, since the daytime ground wave changes there by well under 1 dB; seasonal (4–18 dB), site (σ 3–4 dB) and conductivity (8–13 dB per class) offsets change the path-loss number to use, not the dynamics within a message. [S/P/E]
+
+## Contradictions, open questions, and things not found
+
+Contradictions and tensions:
+
+- **Sign of the seasonal effect.** Freezing should lower effective conductivity and hence the field, but every measurement series shows winter maxima. Vegetation loss in summer is the usual explanation; Gracely could not reproduce it by season at equal temperature, and no source read for this chapter resolves it. The thin-frozen-layer estimate of section C does not produce a winter gain at 100 km either. At 100 kHz a winter–summer delay change was likewise attributed mainly to conductivity rather than refractivity (Lachapelle et al. 1993), which does not settle the sign of the amplitude effect at MF.
+- **Effective earth radius at MF.** Handbook: 1.20–1.25, which it says underlie the P.368 graphs. P.368-10/LFMF: effectively 4/3. The digitisation of the P.368-9 1 MHz curve in section B: about 1.30. The spread is 0.5–2.5 dB at 1 000 km over sea and irrelevant below 300 km.
+- **Short-range sky-wave level.** P.1147-4 and P.1321-5 Fig. 2 differ by about 10–12 dB at 100–200 km and agree within about 2 dB at 500 km. The difference is one of model, not of definition (section G). P.1147 states validity from 50 km but is built on broadcast data mostly from longer paths; there are "far fewer experimental data" below 300 km; and in one R-Mode planning comparison the CCIR (P.1147) model gave the strongest sky wave of three. No measurement found settles it.
+- **Sky-wave frequency dependence.** The ITU frequency term is opposite to US and Brazilian measurements near sunset; the size of the US effect two hours after sunset is 5–10 dB in the ITU handbook and 3–5 dB in NTIA 99-368.
+- **Doppler.** P.1321 says the sky-wave frequency shift "will be small"; DRM tests with 0.1 Hz spread; Chilcote et al. and Trop et al. measured shifts of about 0.1 Hz to a few tenths of a hertz from travelling disturbances and nearly 1 Hz at the terminator, with signatures weaker below 1 MHz, as Δf ∝ f predicts. These refer to different quantities (shift versus spread), layers (E versus F) and times, and are not reconciled in any source read.
+- **Day-to-day variability.** About 0.5 dB mean deviation on one US path in 1939 against 2–4 dB rms in the Moscow region; different estimators, paths and environments.
+- **P.368-10 description.** Recommendation text says linear refractivity; a 2024 paper says exponential; the LFMF source uses a constant effective radius from N_s, and its published test vectors use N_s = 301 and 315; the default N_s of the ITU package itself was not checked (the zip was not downloaded or run).
+- **Sea ice.** Layered-impedance modelling (Hill & Wait 1981; Hehenkamp et al. 2025) predicts extra phase delay and a field gain over ice-covered sea, while Decca and Loran-C trials in the Beaufort Sea reportedly showed no significant variation at LF; no MF measurement was found.
+- **Mixed-path practice.** The US rules prescribe the equivalent-distance method, which cannot show the over-sea recovery that Millington's method and the measurements cited in section F show; land–sea–land predictions therefore depend on the method chosen.
+- **Received-power convention.** LFMF's reported received power is 6 dB above the P.341/P.372 convention for a ground-based monopole.
+- **Forest slab parameters.** Applying the HF-derived Dence–Tamir classes in a thin-slab impedance at 1 MHz gives 10–35 dB extra loss over 100 km [E], well beyond the 10–18 dB seasonal ranges measured in wooded regions; MF-specific vegetation parameters were not found.
+
+Looked for and not found, or not obtained:
+
+- Bremmer (1949), Wait (1998), Rotheram (1981), Norton (1936–41), Millington (1949), Millington & Isted (1950), Hufford (1952), Ott (1971), DeMinco (2000), Causebrook (1978, Proc. IEE): bibliographic records verified by DOI (Bremmer via the Handbook); full texts not read. Their content above is via the ITU Handbook, NTIA reports or BBC RD 1977/25.
+- Hill & Wait sea-ice papers (1981): not obtained; their layered-impedance model is applied at about 300 kHz by Hehenkamp et al. 2025 (read). Hill & Wait forest papers, Ott (1992) and the Luo (2000) urban model: not located; no content used. Apaydın & Sevgi parabolic-equation papers (2010, 2011) and the Wang et al. FDTD–PE Loran-C method (2019): records verified by DOI, full texts not read; no MF validation against measurement was found in what was seen of them.
+- Chilcote et al. 2015: full text not obtained (closed access); content is from the abstract and from the account in Trop et al. 2025 (read).
+- Loran ASF temporal studies by Last, Williams & Ward, Lo et al., Johler (NBS/ITS reports), Doherty & Johler, Samaddar; the US Coast Guard signal-stability studies of the 1980s on which the US temporal-variation model rests; Korean and Chinese ASF mapping and seasonal-delay papers other than Song & Son 2025; UK eLoran ASF quality-assurance work: not retrieved. Read: Li et al. 2020, Song & Son 2025, Lachapelle et al. 1993 and Wenzel et al. 2006.
+- R-Mode: the WMU Journal 2023 mitigation paper, the 2022 IEEE Access estimator paper (record verified), Korean skywave analyses (Jeong & Son 2022), US demonstrations (Johnson et al. 2017, 2020) and the Baltic project final reports were not read. No R-Mode source read gives a spectrum or time series of night-time phase, so the fade rate at 300 kHz is not established from that literature.
+- 630 m and 160 m amateur ground-wave records with field strengths or WSPR statistics, NAVTEX measured (rather than predicted) ranges, and DRM medium-wave field trials of ground-wave stability or night-time sky-wave interference beyond the urban results summarised in the Handbook: not found; the search allowance ran out before they could be searched for again. DGNSS minimum field strength: the US Coast Guard value of 37.5 dB(µV/m) was found (NTIA 98-346); the ITU-R M.823 and IALA texts were not read.
+- FCC rules: 47 CFR 73.183, 73.184 and 73.190 were obtained (eCFR); the M3 map's class values are not in the text, and its accuracy has been assessed here only through the single NTIA 98-346 test.
+- Measured MF ground-wave phase stability at about 1 MHz (as opposed to 100 and 300 kHz): none found; the figures given are scaled estimates.
+- Any measurement of ground-wave amplitude or phase fluctuation spectra on 1–600 s time scales by day: none found. The closest records are R-Mode's 1 s phase estimates (summarised only as standard deviations) and the 1 h-averaged 100 kHz eLoran series of Song & Son. The statement that the daytime path is effectively static on the modem's time scales rests on monitoring practice, R-Mode residuals and physical reasoning, not on a dedicated measurement.
+- Permafrost paths: no MF measurements found; the "very dry ground/ice" curves are the only basis. Snow cover at MF: no source found.
+
+## References
+
+Access: **read** = supporting passage read in full text; **abstract** = abstract or metadata only; **secondary** = via the named source; **record** = bibliographic record verified by DOI lookup, text not read.
+
+Standards and handbooks
+
+- ITU-R P.368-10 (08/2022), Ground-wave propagation prediction method for frequencies between 10 kHz and 30 MHz. https://www.itu.int/rec/R-REC-P.368/en — read. [S]
+- ITU-R P.368-9 (02/2007), Ground-wave propagation curves … (superseded). https://www.itu.int/dms_pubrec/itu-r/rec/p/R-REC-P.368-9-200702-S!!PDF-E.pdf — read; Figs. 2, 30, 40 viewed, Fig. 30 digitised. [S]
+- ITU-R Study Group 3 software and data page. https://www.itu.int/en/ITU-R/study-groups/rsg3/Pages/iono-tropo-spheric.aspx — read (13 Nov 2026). [S]
+- ITU, Handbook on Ground Wave Propagation, edition of 2014 (R-HDB-59). https://www.itu.int/dms_pub/itu-r/opb/hdb/R-HDB-59-2014-PDF-E.pdf — read. [S]
+- ITU-R P.527-6 (09/2021), Electrical characteristics of the surface of the Earth. https://www.itu.int/rec/R-REC-P.527/en — read (§§1–5.2, Fig. 24). [S]
+- ITU-R P.832-4 (07/2015), World Atlas of Ground Conductivities. https://www.itu.int/rec/R-REC-P.832/en — read (text; maps not examined individually). [S]
+- ITU-R P.1147-4 (08/2007), Prediction of sky-wave field strength at frequencies between about 150 and 1 700 kHz. https://www.itu.int/rec/R-REC-P.1147/en — read. [S]
+- ITU-R P.1321-5 (07/2015), Propagation factors affecting systems using digital modulation techniques at LF and MF. https://www.itu.int/rec/R-REC-P.1321/en — read; Figs. 2–4 viewed. [S]
+- ITU-R P.341-7 (08/2019), The concept of transmission loss for radio links. https://www.itu.int/rec/R-REC-P.341/en — read (Table 1, Annexes 1–3). [S]
+- ITU-R P.372-18 (09/2026), Radio noise. https://www.itu.int/rec/R-REC-P.372/en — read (eq. 7 only). [S]
+- ITU-R M.1467-1 (03/2006), Prediction of sea area A2 and NAVTEX ranges … https://www.itu.int/rec/R-REC-M.1467/en — read; Figs. 4–5 viewed. [S]
+- ITU-R BS.1615-3 (11/2023), "Planning parameters" for digital sound broadcasting at frequencies below 30 MHz. https://www.itu.int/rec/R-REC-BS.1615/en — read (Table 1, §2, Attachment 3 Table 14). [S]
+- ETSI ES 201 980 V4.2.1 (2021-01), Digital Radio Mondiale (DRM); System Specification. https://www.etsi.org/deliver/etsi_es/201900_201999/201980/04.02.01_60/es_201980v040201p.pdf — read (Annex B, Table B.1); on review the ETSI site refused automated access, and the channel values were re-checked against BS.1615-3 Table 14. [S]
+- ITU, Handbook "The ionosphere and its effects on radiowave propagation" (1998, R-HDB-32). https://www.itu.int/dms_pub/itu-r/opb/hdb/R-HDB-32-1998-PDF-E.pdf — read (§§5.1.1, 5.1.2.2, 5.2.1–5.2.2). [S]
+- United States, 47 CFR 73.183 (Groundwave signals), 73.184 (Groundwave field strength graphs), 73.190 (Engineering charts and related formulas), eCFR text current to 5 November 2026, retrieved through the eCFR API, e.g. https://www.ecfr.gov/api/versioner/v1/full/2026-11-05/title-47.xml?part=73&section=73.183 — read (text only; the conductivity maps are images and were not examined). [S] (US regulation)
+
+Reports
+
+- DeMinco, N., Medium Frequency Propagation Prediction Techniques and Antenna Modeling for ITS Broadcast Applications, NTIA Report 99-368, Aug. 1999. https://its.ntia.gov/publications/download/99-368_ocr.pdf — read (§§3–5). [T]
+- NTIA/ITS, LFMF (Low Frequency / Medium Frequency propagation model), C++ source and test data. https://github.com/NTIA/LFMF ; https://github.com/NTIA/LFMF-test-data — read (source text of `LFMF.cpp`, `FlatEarthCurveCorrection.cpp`, `ResidueSeries.cpp`, `LFMF.h`; test table). Not executed. [T]
+- Hill, D. A., HF Ground Wave Propagation over Forested and Built-up Terrain, NTIA Report 82-114, Dec. 1982. https://www.its.ntia.gov/publications/download/82-114_ocr.pdf — read (abstract, §§5, 7, Conclusions). [T]
+- Kissick, W. A., Haakinson, E. J., Stonehocker, G. H., Measurements of LF and MF Radio Propagation over Irregular, Inhomogeneous Terrain, NTIA Report 78-12, Nov. 1978. https://its.ntia.gov/publications/download/78-12_ocr.pdf — read (abstract, §6, App. B excerpt). [T]
+- Ott, R. H., Vogler, L. E., Hufford, G. A., Ground Wave Propagation over Irregular, Inhomogeneous Terrain: Comparisons of Calculations and Measurements, NTIA Report 79-20, May 1979. https://its.ntia.gov/publications/download/79-20_ocr.pdf — read (abstract, path discussions). [T]
+- Causebrook, J. H., Ground-wave propagation at medium frequency in built-up areas, BBC Research Department Report RD 1977/25, July 1977. https://downloads.bbc.co.uk/rd/pubs/reports/1977-25.pdf — read (summary, §§1–3, Fig. 1, §8, Appendix; scanned images). [T]
+- Johnson, G., Swaszek, P., Feasibility Study of R-Mode using MF DGPS Transmissions, ACCSEAS/German Federal Waterways and Shipping Administration, 2014. https://www.iala.int/content/uploads/2016/08/accseas_r_mode_feasibility_study_mf_dgps_transmissions.pdf — read (§2.3.3–2.3.6). [T]
+- Hoffman, J. R., Lemmon, J. J., Ketchum, R. L., DGPS Field Strength Measurements at a GWEN Site, NTIA Report 98-346, March 1998. https://its.ntia.gov/publications/download/98-346.pdf — read (§§1–10). [T]
+
+Papers
+
+- Gracely, F. R., "Temperature variations of ground-wave signal intensity at standard broadcast frequencies," Proc. IRE 37(4), 360–363, 1949. doi:10.1109/JRPROC.1949.231640. Scan: https://worldradiohistory.com/Archive-IRE/40s/IRE-1949-04.pdf — read (on review the site refused a fresh automated fetch; pp. 360–362, Fig. 1 and Table I were re-read from the copy retrieved when the chapter was written). [P]
+- Rizzi, F. G., Grundhöfer, L., Gewies, S., Ehlers, T., "Performance assessment of the medium frequency R-Mode Baltic testbed at sea near Rostock," Appl. Sci. 13, 1872, 2023. doi:10.3390/app13031872; repository copy https://elib.dlr.de/193839/1/applsci-13-01872-v2.pdf — read. [P]
+- Grundhöfer, L., Rizzi, F. G., Gewies, S., Hoppe, M., Bäckstedt, J., Dziewicki, M., Del Galdo, G., "Positioning with medium frequency R-Mode," NAVIGATION 68(4), 829–841, 2021. doi:10.1002/navi.450; https://navi.ion.org/content/68/4/829 — read (parts). [P]
+- Hehenkamp, N., Rizzi, F. G., Grundhöfer, L., Gewies, S., "Prediction of ground wave propagation delay for MF R-Mode," Sensors 24, 282, 2024. doi:10.3390/s24010282; open copy PMC10781354 (Europe PMC) — read (parts). [P]
+- Hehenkamp, N., Grundhöfer, L., Rizzi, F. G., Gewies, S., "Modeling ground-wave propagation across sea ice for radio navigation applications," Adv. Radio Sci. 22, 77–86, 2025. doi:10.5194/ars-22-77-2025 — read. [P]
+- Trop, C. C., LaBelle, J., Erickson, P. J., Zhang, S.-R., McGaw, D., Kovacs, T., "Tracking traveling ionospheric disturbances through Doppler-shifted AM radio transmissions," Atmos. Meas. Tech. 18, 1909–1925, 2025. doi:10.5194/amt-18-1909-2025 — read. [P]
+- Lachapelle, G., Townsend, B., Hains, D., "Analysis and calibration of Loran-C signals in the Lower St. Lawrence area using GPS," International Hydrographic Review LXX(2), September 1993. https://journals.lib.unb.ca/index.php/ihr/article/download/23225/27000 — read (propagation discussion and winter–summer comparison). [P]
+- Rizzi, F. G., Grundhöfer, L., Hehenkamp, N., Gewies, S., Medina, D., Gandarias, J. M., "In-band medium-frequency R-Mode signal quality estimation," Eng. Proc. 88, 50, 2025. doi:10.3390/engproc2025088050; https://elib.dlr.de/215645/1/engproc-88-00050.pdf — read. [P]
+- Koch, P., Gewies, S., "Worldwide availability of maritime medium-frequency radio infrastructure for R-Mode-supported navigation," J. Mar. Sci. Eng. 8, 209, 2020. doi:10.3390/jmse8030209 — read (parts). [P]
+- Li, Y., Hua, Y., Yan, B., Guo, W., "Research on the eLoran differential timing method," Sensors 20, 6518, 2020. doi:10.3390/s20226518; open copy PMC7697629 (Europe PMC) — read (parts). [P]
+- Chilcote, M., LaBelle, J., Lind, F. D., Coster, A. J., et al., "Detection of traveling ionospheric disturbances by medium-frequency Doppler sounding using AM radio transmissions," Radio Sci. 50(3), 249–263, 2015. doi:10.1002/2014RS005617 — abstract (Crossref record); full text not obtained. [P]
+- Hill, D. A., Wait, J. R., "Ground wave attenuation function for a spherical earth with arbitrary surface impedance," Radio Sci. 15(3), 637–643, 1980. doi:10.1029/RS015i003p00637 — abstract. [P]
+- Norton, K. A., Proc. IRE 24(10), 1367–1387, 1936 (doi:10.1109/JRPROC.1936.227360); 25(9), 1203–1236, 1937 (doi:10.1109/JRPROC.1937.228544); 29(12), 623–639, 1941 (doi:10.1109/JRPROC.1941.233636) — record. [P]
+- Millington, G., "Ground-wave propagation over an inhomogeneous smooth earth," Proc. IEE Part III 96(39), 53–64, 1949. doi:10.1049/pi-3.1949.0013 — record. Millington, G., Isted, G. A., "… Part 2: Experimental evidence and practical implications," Proc. IEE Part III 97(48), 209–221, 1950. doi:10.1049/pi-3.1950.0039 — record; results secondary via the Handbook. [P]
+- Hufford, G. A., "An integral equation approach to the problem of wave propagation over an irregular surface," Quart. Appl. Math. 9(4), 391–404, 1952. doi:10.1090/qam/44350 — record. [P]
+- Ott, R. H., Berry, L. A., Radio Sci. 5(5), 767–771, 1970 (doi:10.1029/RS005i005p00767) — record; Ott, R. H., Radio Sci. 6(4), 429–435, 1971 (doi:10.1029/RS006i004p00429) — abstract. [P]
+- Rotheram, S. (given as A. S. in the ITU Handbook), "Ground-wave propagation. Part 1 / Part 2," IEE Proc. F 128(5), 275 and 285, 1981. doi:10.1049/ip-f-1.1981.0046, .0047 — record; content secondary via the Handbook. [P]
+- Causebrook, J. H., "Medium-wave propagation in built-up areas," Proc. IEE 125(9), 804, 1978. doi:10.1049/piee.1978.0193 — record; content via BBC RD 1977/25 and NTIA 82-114. [P]
+- Wait, J. R., "The ancient and modern history of EM ground-wave propagation," IEEE Antennas Propag. Mag. 40(5), 7–24, 1998. doi:10.1109/74.735961 — record. [P]
+- DeMinco, N., "Propagation prediction techniques and antenna modeling (150 to 1705 kHz) for ITS broadcast applications," IEEE Antennas Propag. Mag. 42(4), 9–34, 2000. doi:10.1109/74.868050 — record. [P]
+- Sevgi, L., Akleman, F., Felsen, L. B., "Groundwave propagation modeling: problem-matched analytical formulations and direct numerical techniques," IEEE Antennas Propag. Mag. 44(1), 55–75, 2002. doi:10.1109/74.997903 — record. [P]
+- Apaydın, G., Sevgi, L., "The split-step-Fourier and finite-element-based parabolic-equation propagation-prediction tools: canonical tests, systematic comparisons, and calibration," IEEE Antennas Propag. Mag. 52(3), 66–79, 2010, doi:10.1109/MAP.2010.5586576; "A novel split-step parabolic-equation package for surface-wave propagation prediction along multiple mixed irregular-terrain paths," ibid. 52(4), 90–97, 2010, doi:10.1109/MAP.2010.5638238; Apaydın, G., Ozgun, O., Kuzuoglu, M., Sevgi, L., "A novel two-way finite-element parabolic equation groundwave propagation tool: tests with canonical structures and calibration," IEEE Trans. Geosci. Remote Sens. 49(8), 2887–2899, 2011, doi:10.1109/TGRS.2011.2114889 — record (with abstract snippets). [P]
+- Wang, D.-D., Pu, Y.-R., Xi, X.-L., Zhou, L.-L., "Hybrid FDTD–PE method for Loran-C ASF prediction with near-source complex topography," IET Microw. Antennas Propag. 14(2), 171–176 (Crossref issue date 2019). doi:10.1049/iet-map.2019.0179 — record. [P]
+- Grundhöfer, L., Wirsing, M., Gewies, S., Del Galdo, G., "Phase estimation of single tones next to modulated signals in the medium frequency R-Mode system," IEEE Access 10, 73309–73316, 2022. doi:10.1109/ACCESS.2022.3190544 — record. [P]
+- Bremmer, H., Terrestrial Radio Waves, Elsevier, 1949 — secondary (Handbook ref. [23]). [B]
+
+Grey literature
+
+- Spencer, L., "Signal variations over a five-year period," Broadcast Engineering (issue date not shown on the scan). https://bh.hallikainen.org/DonaldEveristLibrary/Papers/Signal%20Variations%20Over%20Five-Year%20Period.pdf — read. [G]
+- Raab, F. H. (W1FR), ARRL 600 Meter Experimental Group (WD2XSH) project status reports M06-8, M07-2S, M07-5, M07-112, M08-2, M08-51, M08-7, M08-8, 2006–2008. Index: https://www.500kc.com/reports.htm — read. [G]
+- Wikipedia, "500 kHz" (https://en.wikipedia.org/wiki/500_kHz), "NAVTEX" (https://en.wikipedia.org/wiki/NAVTEX), "630-meter band" (raw wikitext, 13 Nov 2026) — read; used only as leads; not re-checked on review. [G]
+- Wenzel, R., Morris, P., Montgomery, K., "An examination of Loran signal propagation temporal variation modeling," International Loran Association meeting, 2006, Session 5 (Noise and ASF Variation). https://www.loran.org/proceedings/Meeting2006/Session%205%20-%20Noise%20and%20ASF%20Variation/s5n6_text.pdf — read (model description, Figs. 2–3). [G]
+- Song, J., Son, P.-W., "Path-based correlation analysis of meteorological factors and eLoran signal delay variations," arXiv:2509.26020v1, 30 September 2025 (preprint). https://arxiv.org/abs/2509.26020 — read. [G]
+
+Own computations [E]: pure-Python residue-series, flat-earth, slab and ray-geometry scripts written for this record and not kept in the repository; formulas as stated in "Physical mechanisms". On review an independent residue-series implementation reproduced the LFMF test vectors, Tables B1 and G1, the midday crossing distances, the conductivity sensitivities and the Millington example to within 0.5 dB or 1 km.
