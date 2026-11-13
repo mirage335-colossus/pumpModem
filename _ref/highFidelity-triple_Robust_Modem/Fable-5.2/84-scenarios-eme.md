@@ -3,7 +3,7 @@
 - **Purpose/status.** Fixed mathematical research specification, not an empirically
   validated 5.76 GHz channel or a modem result. The baseline kernel, interpolation,
   polarization alternatives and severity controls are specified below. Better
-  models may supersede them. No renderer or receiver trial is implemented here.
+  models may supersede them. Kernel acquisition, selected-epoch retarded geometry, surface quadrature and beam/noise discriminators have been executed below. No waveform renderer or receiver trial is implemented here.
   Use the [common native source contract](00-method-and-modem-context.md#7-reproducible-source-and-evidence-contract);
   rounded waveform values below never replace its actual sample/slot geometry.
 - **Scope.** Passive two-Earth-station Earth–Moon–Earth (EME), 5.760 GHz
@@ -22,8 +22,8 @@
 |---|---|---|
 | Transmit station A | Geodetic 40.000° N, 75.000° W, 0 m; WGS-84 | Explicit assumed coordinate fixture; not a named/ surveyed installation |
 | Receive station B | Geodetic 50.000° N, 10.000° E, 0 m; WGS-84 | Assumed fixture, matching a station-pair geometry analyzed in chapter 40 |
-| Geometry source | JPL DE440s geometric centre states plus the explicit NAIF lunar/Earth orientation inputs below; UTC input, TDB dynamics; solve the two retarded legs once. Apparent directions are only for epoch visibility selection; beam angles use the geometric retarded legs defined below, with no second light-time correction | The earlier DE441/Horizons proposal is replaced here by the fixed DE440-compatible input set below; record acquired file hashes and exact software build |
-| Epoch selection | Sample UTC hourly from 2025-01-01 00:00 through 2025-01-08 00:00 inclusive; retain samples with both apparent lunar elevations ≥10° and select the smallest absolute elevation difference, breaking ties by earliest UTC. If none qualify, extend the hourly scan through 2025-12-31 23:00. Then scan UTC seconds within ±1,800 s of the selected hour under the same elevation rule and tie-break; save the resulting epoch and state vectors. Generate one-second geometry knots over the complete prepared native message, a two-slot preroll, two following scored quiet slots, the propagation delay and all channel/filter tails. Do not truncate a longer message at 360 seconds. The actual selected epoch and archived vectors have not been generated here; this is deterministic input acquisition, not an unresolved model choice. This bounded rule does not claim the globally closest elevation equality over the year. | Deterministic selection rule avoids asserting unverified visibility at a hand-picked timestamp; archived result is part of the run input |
+| Geometry source | JPL DE440s geometric centre states plus the explicit NAIF lunar/Earth orientation inputs below; UTC input, TDB dynamics; solve the two retarded legs once. Apparent directions are only for epoch visibility selection; beam angles use the geometric retarded legs defined below, with no second light-time correction | The earlier DE441/Horizons proposal is replaced here by the fixed DE440-compatible input set below; acquired file hashes, exact software and selected geometry are recorded below |
+| Epoch selection | Sample UTC hourly from 2025-01-01 00:00 through 2025-01-08 00:00 inclusive; retain samples with both apparent lunar elevations ≥10° and select the smallest absolute elevation difference, breaking ties by earliest UTC. If none qualify, extend the hourly scan through 2025-12-31 23:00. Then scan UTC seconds within ±1,800 s of the selected hour under the same elevation rule and tie-break; save the resulting epoch and state vectors. Generate one-second geometry knots over the complete prepared native message, a two-slot preroll, two following scored quiet slots, the propagation delay and all channel/filter tails. Do not truncate a longer message at 360 seconds. The executed rule selects2025-01-03T17:02:32 UTC; vectors, kernel hashes and numerical limits are below. This bounded rule does not claim the globally closest elevation equality over the year. | Deterministic selection rule avoids asserting unverified visibility at a hand-picked timestamp; archived result is part of the run input |
 | RF and waveform reference | \(f_c=5.760\) GHz, \(\lambda=c/f_c=0.052047\) m; 40 W and the EME native research profile in [00 §7](00-method-and-modem-context.md#7-reproducible-source-and-evidence-contract), with Fs=48,000, DATA IF=1,725 Hz and HelperOff. Requested bit duration 26.4 s, rate 360, added symbols 1, FHSS on/dwell 0.4 s, quiet 0, ramp 0.02 s, margin 0.005 s; no waits. Use actual returned slots (60 s recurrence for this fixture) | Explicit research fixture. The historical row 8 has 90-s spacing; it is context, not this profile’s calendar. 40 W is an assumption, not operating advice |
 | Antennas | Both 3.0-m circular-aperture dishes, aperture efficiency 0.55, boresight tracking, Gaussian power beam \(G_i(\theta)/G_{i0}=\exp[-4\ln2(\theta/\beta_i)^2]\), HPBW \(\beta_i=70\lambda/D=1.215°\); fixed 0.05° offset toward increasing elevation at A and toward increasing azimuth on the local tangent sky at B (angular displacement, not an azimuth-coordinate increment) | Assumed identical systems. A 0.518° lunar disc is narrower than each beam; do not call this perfect uniform illumination |
 | Polarization | Transmit/receive opposite-sense circular (the strong classical return); ideal matching in baseline | Define each circular sense looking along that wave’s propagation direction; OC is opposite rotational sense. This is a simulator convention, not a claim about every amateur feed |
@@ -35,8 +35,7 @@
 ### Exact geometry input set
 
 Use native [CSPICE N0067](https://naif.jpl.nasa.gov/naif/toolkit) as a reference geometry implementation, with these
-public NAIF files (names/metadata inspected 2026-11-13, binary kernels not
-executed here): [de440s.bsp](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp),
+public NAIF files (downloaded, hashed and executed2026-11-13): [de440s.bsp](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp),
 [moon_pa_de440_200625.bpc](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/moon_pa_de440_200625.bpc),
 [moon_de440_250416.tf](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/fk/satellites/moon_de440_250416.tf),
 [earth_1962_260806_2126_combined.bpc](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/earth_1962_260806_2126_combined.bpc)
@@ -78,8 +77,7 @@ residual test. Record input precision separately.
 Input files retain their NAIF notices and provenance; SPICE use/distribution
 follows the published [NAIF rules](https://naif.jpl.nasa.gov/naif/rules.html),
 not an invented generic open-source license. No kernel or third-party source
-is vendored by this documentation change. Acquisition/hash/coverage and the
-native geometry checks remain unexecuted fixture-validation steps.
+is vendored by this documentation change. Acquisition/hash/coverage and the bounded reference geometry checks below are complete. Full waveform/receiver qualification remains separate.
 
 The station-pair table in chapter 40 reports for this geometry a 2025
 two-station limb-to-limb width with 10th percentile 41 Hz, median 79 Hz, 90th
@@ -116,7 +114,7 @@ kernel for the selected receive polarization to its corresponding source
 cross-section before applying the two beam factors: in the wide-beam,
 far-field limit, \(\int q_{p_0}dA\) must recover the selected
 opposite-circular cross-section \(\sigma_{p_0}\). Model the other polarization
-branch separately using its measured/interpolated ratio; do not normalize each
+branch separately using its explicitly assumed ratio; do not normalize each
 polarization branch to the same \(\sigma\). For an unequal-station bistatic link the surface scattering
 law must be evaluated at the actual bistatic angle, and its departure from the
 monostatic law is an explicit uncertainty branch. Use T52 with the MEAN bistatic extension defined in the frozen-kernel section
@@ -314,6 +312,21 @@ preserves baseline noise power. This fixes a mathematical noise model, not a
 measured feed/noise covariance. The separate atmospheric overlay replaces both
 port temperatures by its stated Tsys before the same transformation.
 
+A source-shape discriminator, **SC-angle**, sets
+`qSC=qOC×10^(−d(θ)/10)`, with d linearly interpolated in dB at
+θ={0,5,15,30,40,90}° and d={16,16,8,5,3.5,3} dB. These rounded3.8-cm
+ZPC74 graph estimates are a conditional transfer alternative, not calibrated
+5.76 GHz coefficients. Do not separately force its integrated ratio tor=.20:
+its broad-beam monostatic ratio is.245730 withT38 and.231151 withT52.
+This resolves a real incompatibility: the simpler independently normalized
+cosθ SC branch matches the approximate integrated fraction but cannot also
+match every source angular ratio. Preserve both branches rather than hiding
+the mismatch in a scalar feed loss. The unit-norm leakage row and its
+orthogonal companion form a real unitary rotation, so the two-port energy
+and isotropic noise trace are conserved even when individual port signals
+change. Port exchange is a permutation; absolute antenna handedness remains
+a station calibration question.
+
 **Grid and random field:** use a full body-fixed equal-area sphere, initially
 Nμ=256,Nφ=512; μj=−1+2(j+1/2)/Nμ, φk=2π(k+1/2)/Nφ,
 ΔA=4πa²/(NμNφ), cell index i=jNφ+k. Keep each cell’s coefficient through
@@ -458,13 +471,19 @@ measured scintillation process. The two legs may share the same slow envelope
 or use one affected end only as separate controls; neither independence nor
 perfect dependence is an empirical finding.
 
-For D-dish, report both fixed-Tsys and beam-consistent thermal results. In the
-latter use uniform lunar brightness 225 K, background 3 K and the same fixed
-receiver/spillover term at both diameters, calibrated so centred 3 m totals 80 K.
-For centred Gaussian beams, F=1−exp[−4ln2(rMoon/β)²] and
-Tsys=Tfixed+3+(225−3)F. Determine Tfixed once from 3 m, then hold it fixed.
-Use the two-dimensional integral for offsets. This assumed comparator avoids
-adding lunar noise twice or pretending 80 K is dish-independent measurement.
+For D-dish, report both fixed-Tsys and beam-consistent thermal results. The
+latter uses uniform lunar brightness225 K, background2.7 K and the same
+remaining noise term at both diameters, fixed so the actual offset3-m case
+totals80 K. With the stated gain and Gaussian width, main-beam efficiency is
+`ηmb=G0 Ωmb/(4π)=.730580`, where `Ωmb≈πβ²/(4ln2)`.
+Use `ΔTmoon=ηmb(Tb−Tbackground) Foffset`, integrating the displaced disc
+in two angular dimensions. The remainder is59.66621 K for the executed epoch;
+it includes background, sidelobes, receiver and any other assumed contributions
+at the same input plane. It is held fixed only for this comparator. The old
+unit-main-beam example (163.95 K at7 m) remains an explicitly different
+assumption, superseded for this branch by142.49 K below. Aperture efficiency
+.55 is not by itself a measured noise/spillover efficiency. No lunar term is
+added to the baseline80 K a second time.
 
 ## Reproduced arithmetic and remaining qualification
 
@@ -496,8 +515,7 @@ amplitudes. Unit-pulse tests must preserve delayed energy and full support.
 Report central equal-tail 50/90%-power Doppler bands, PSD FWHM,
 PSD-autocorrelation FWHM, visual estimator (if any), and first field-correlation
 |Rh(Δt)|≤0.5 separately. Reciprocal bandwidth is not automatically that field
-coherence time. Geometry, derivative, noise, mesh, phase, filtering, native
-receiver, outage and completion checks remain **unexecuted acceptance tests**.
+coherence time. The bounded geometry, derivative, mean-power, mesh and phase checks below are executed. Sample-level filtering, native receiver, outage and completion checks remain **unexecuted acceptance tests**.
 The declared FIR was also checked by direct scalar frequency-response sums:
 DC gain 0 dB, response−0.000516 dB at 5 kHz and−84.5055 dB at 6 kHz;
 group delay 5.333333 ms, causal support 10.666667 ms. These are isolated
@@ -509,10 +527,190 @@ validation. A rotating-point, equal-range retarded-path check with R=384400 km,
 θ=0.7 rad,φ=0.3 rad and the stated ω gives −24.7030543 Hz. Finite differences
 at 1/0.5/0.25 s agree with the analytic retarded-time derivative within
 2.4e−6 Hz for both rotation signs; this is a scalar toy-geometry check, not a
-DE440 station-geometry run. The centred thermal comparator gives fills 0.118448
-and 0.496609 for 3/7 m, hence 80 K and 163.9518 K with the fixed receiver term.
-Only these scalar checks and the quadratures above were run for this document. No 5–6 cm
+DE440 station-geometry run. The earlier unit-main-beam centred thermal comparator gives fills0.118448 and0.496609 for3/7 m, hence80 K and163.9518 K. The beam/gain-consistent branch above and below supersedes that assumption for D-dish.
+The subsequent executed reference checks extend these earlier scalar results. No 5–6 cm
 whole-disc calibrated two-station complex echo was acquired; the verified
 433.8 MHz SigMF and local 4.2/12.6 cm orbital products in chapter 41 do not
 close that empirical dependency. Fixed mathematical experiments can proceed
 without claiming that missing validation has occurred.
+
+## Executed retarded geometry, surface and thermal checks
+
+These are bounded numerical research discriminators executed2026-11-13,
+not a rendered1800-s complex waveform or a Robust receiver test. The reference
+used Python3.13 with NumPy2.5.4, SciPy1.18.1 and SpiceyPy8.4.0 calling the
+compiled **CSPICE_N0067** toolkit. The temporary environment was created with
+`python3 -m venv /tmp/fable-eme-research/venv`; the pinned packages are
+`numpy==2.5.4 scipy==1.18.1 spiceypy==8.4.0`. The native operating modem
+remains C++; this analysis neither introduces a Python receiver nor qualifies
+an implementation. Public kernel downloads used `curl -L --fail URL -o FILE`
+from the exact links above, followed by SHA256 of all bytes.
+
+| Exact file | Bytes | SHA256 |
+| --- | ---: | --- |
+| `de440s.bsp` | 32726016 | `c1c7feeab882263fc493a9d5a5b2ddd71b54826cdf65d8d17a76126b260a49f2` |
+| `moon_pa_de440_200625.bpc` | 12863488 | `60cd55aa401ea2ea97360636f567554bfe4e37bb829f901b4460a455dfaf783f` |
+| `moon_de440_250416.tf` | 19478 | `a47c71e9c9f33796bdafb2c9d69a7ee447b6016ecad80f71cd6f3e479f9cf768` |
+| `earth_1962_260806_2126_combined.bpc` | 31318016 | `cc87ad1a495cf598800ba403763d350f087ac0b97da9fec603278a3864c6a53e` |
+| `naif0012.tls` | 5257 | `678e32bdb5a744117a467cd9601cd6b373f0e9bc9bbde1371d5eee39600a039b` |
+
+SPK coverage for301/399 is ET[−4734072000,4735368000]; lunar PCK31008 is
+[−14200747200,20514081600]; Earth PCK3000 is
+[−1197547158.815519,4002609669.182509]. All cover the tested horizon.
+The exact frame rotations at the epoch have determinant1 to5×10⁻¹⁶ and
+maximum `|R Rᵀ−I|=2.22×10⁻¹⁶`. The leap-second file determines UTC→TDB;
+no current mutable Earth-kernel alias, inferred DUT1 or mixed lunar frame was used.
+
+The169 hourly candidates contain23 jointly visible epochs. The winning hour
+is2025-01-03T17:00:00; all3601 second-level candidates within its±1800-s
+window meet the10° cutoff. The selected UTC epoch is
+**2025-01-03T17:02:32**, ET789195821.1839275; elevations are18.47540699°
+and18.47634612°. This is the stated discrete rule, not continuous equality.
+
+| Receiver offset s | Elevation A / B degrees | Centre round-trip s | Analytic centre Doppler Hz | Bistatic angle degrees |
+| ---: | ---: | ---: | ---: | ---: |
+| -120 | 18.175235 / 18.653791 | 2.4836732440 | 2991.600588 | 0.940293 |
+| 0 | 18.475407 / 18.476346 | 2.4836116705 | 2919.428095 | 0.940359 |
+| 900 | 20.677367 / 17.082139 | 2.4831980293 | 2374.056524 | 0.938818 |
+| 1800 | 22.785348 / 15.581621 | 2.4828700718 | 1823.041146 | 0.933674 |
+
+The epoch's centre TX/RX legs are1.2417193541/1.2418923163 s.
+At their respective retarded epochs the barycentric J2000 position vectors,
+in km, are A=(−34527299.544486,130693737.136600,56689630.733322),
+Moon=(−34202593.488818,130536613.364596,56597684.071016), and
+B=(−34524485.437640,130699105.696454,56690401.460451).
+The actual minimum spherical-surface path is741093.3634196 km,
+2.4720213723 s; its PA-frame latitude/longitude are.0711645491/−.0601691527
+radians. Its local-interpolant Doppler is2919.42362 Hz. **That surface
+reference**, rather than the centre used for the diagnostic table, defines
+bulk subtraction in the waveform contract. Residual surface Dopplers must
+be relative to the same chosen reference.
+
+A1927-point one-second visibility check over offsets−123…1803 s gives
+A18.167712…22.792206° and B15.576451…18.658201°. Thus the ephemeris and
+visibility cover the declared source window and3.1-s propagation/filter
+allowance. This does not verify the eventual native message's q0+2 endpoint;
+that endpoint must still be exposed by the contained implementation.
+
+An independent official [Horizons vector query](https://ssd-api.jpl.nasa.gov/doc/horizons.html)
+used target301/399, `CENTER=500@0`, `EPHEM_TYPE=VECTORS`, `VEC_CORR=NONE`,
+`REF_SYSTEM=ICRF`, `REF_PLANE=FRAME`, `OUT_UNITS=KM-S`, `VEC_TABLE=2`,
+`CSV_FORMAT=YES`, and `TLIST=2460679.2108933325` inTDB.
+Horizons identified **DE441**, so this is a different-ephemeris plausibility
+check, not byte-equivalentDE440 validation. Comparing at the returned
+roundedJDTDB gives Moon/Earth position differences1.744/1.235 m and
+velocity differences.00611/.000303 mm/s. These are computational differences,
+not claimed ephemeris uncertainties or physical centimetre accuracy.
+
+**Numerical discriminator.** Directly perturbing a large absoluteET in the
+two-leg solver produced up to.118 Hz discrepancy in quarter-second path
+finite differences: binary time quantization multiplied by barycentric
+velocities contaminates that calculation. It was not accepted as a Doppler
+reference. For uA/uB pointing from cell to stations, analytic
+`dtA/dtm=(1+uA·vcell/c)/(1+uA·vA/c)` and
+`dtm/dtr=(1−uB·vB/c)/(1−uB·vcell/c)` give
+`ν=fc[(dtA/dtm)(dtm/dtr)−1]`.
+Cubic Hermite interpolation of positions/velocities after subtracting a
+common Earth-origin position, and of rotation/matrix derivatives, uses small
+relative seconds. At the centre, .5-s knots give2919.427653 Hz;
+central differences withh=.125,.25,.5,1 s give2919.427687,.427750,.427868,
+.428002 Hz. The directCSPICE analytic state gives2919.428095 Hz.
+The discrepancy is below.00045 Hz, with no inferred physical precision.
+
+Comparing1-s and.5-s knots near the epoch on643 stratified visible cells gives
+maximum phase difference.000366 rad and Doppler difference.000507 Hz.
+A separate128-cell full-sphere grid at offsets−120,0,300,600,900,1200,1500,1803 s
+(with receiver evaluation .137 s off each knot origin) gives maximum
+.001139 rad/.000810 Hz. This passes the specified.01-rad interpolation
+check on these bounded probes; it is not a proof for every waveform sample.
+The fixed-point residual is at floating-point rounding level; it is not
+sub-picosecond physical ranging accuracy.
+
+**Surface-law check.** For T52+MEAN without beams, equal-area128×256,
+256×512 and512×1024 sphere grids give t50=.70213,.70799,.70767 ms;
+t90=5.08365,5.08028,5.07960 ms; RMS delay2.17901,2.17875,2.17881 ms.
+The final central50/90%-power Doppler widths are16.0503/53.7655 Hz,
+RMS14.9718 Hz and sampled support2876.0256…2962.7676 Hz.
+The normalized field correlation reaches.5 at13.038 ms in the frozen
+Gaussian-facet branch. At frequency separations6,250,1000 Hz its magnitudes
+are.996637,.460452,.242006. These computations include finite distances and
+bistatic incidence; the earlier scalar monostatic figures remain separate
+checks. They do not establish a measured distribution.
+
+The power calculation retains the **fixed monostatic normalization**
+652583.44555 km² for the rawT52 integral; the actual mutually visible
+unbeamed integral is647103.75575 km² (factor.9916031). It must not be
+renormalized to restore that loss. Each cell then receives its own range
+factor `(RAcentre/RAcell)²(RBcentre/RBcell)²` and both beam factors.
+Using only centre ranges would omit about.070 dB at this epoch. These
+corrections affect mean power; normalized delay quantiles are separate.
+
+The following joint sweep uses that same512×1024 geometry, both stated.05°
+pointing offsets, equal dishes and the beam-consistent thermal comparator.
+Its finite grid checks256×512→512×1024 change signal power by less than
+.00004 dB; delay quantiles by at most.0030 ms and Doppler quantiles by.045 Hz.
+The tabulation therefore meets the chapter's.1-dB and2% or1-µs/1-Hz
+integration criteria (the100-m t50 change is1.7%). It does not certify a
+sample-level speckle renderer. Nonmonotonic t50 at the largest diameters is
+physical within this assumed model: fixed pointing offsets increasingly
+weight a displaced patch rather than the minimum-delay point.
+
+| Both dishes m | Pr dBm | Tsys comparator K | C/N0 dB-Hz | t50 / t90 ms | Central50 /90%-power Doppler Hz |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | -171.529 | 62.072 | 9.141 | 0.6925 / 5.0148 | 15.923 / 53.396 |
+| 3 | -152.714 | 80.000 | 26.855 | 0.6148 / 4.6703 | 15.218 / 51.349 |
+| 7 | -139.091 | 142.490 | 37.970 | 0.3930 / 3.1771 | 12.786 / 42.225 |
+| 25 | -122.344 | 221.985 | 52.792 | 0.1438 / 0.6061 | 7.272 / 18.334 |
+| 60 | -114.443 | 222.074 | 60.691 | 0.1602 / 0.3587 | 3.999 / 9.432 |
+| 100 | -111.391 | 222.074 | 63.743 | 0.1801 / 0.3007 | 2.380 / 5.845 |
+
+At3 m the boresight gain is42.5611 dBi per end; centre-range isotropic loss
+is283.58468 dB, total beam/visibility/range factor.9393274, and
+`N0=kB×80 K=−179.56827 dBm/Hz`. This closes the mathematical26.855-dB-Hz
+input-plane budget. None of the very favorable large-dish levels is a
+hardware, weather, phase-stability or modem-success prediction.
+
+For reproducibility, solve `db=|B(tr)−[M(tr−db)+R(tr−db)r]|/c`, then
+`da=|M(tm)+R(tm)r−A(tm−da)|/c`, with fixed body-frame cellr andtm=tr−db.
+Use the exact equal-area nodes defined above,8 fixed-point iterations per leg,
+128/256/512 latitude counts and twice as many longitudes. Find the continuous
+minimum over body-fixed latitude/longitude starting at the station bisector
+(Nelder–Mead, xatol1e−10 rad, fatol1e−8 km). A symmetric1e−4-rad
+finite-difference check gives Hessian eigenvalues3473.32/3491.02 km/rad²
+and residual gradient(−.000365,−.000226) km/rad: the implied local
+minimizer displacement is about1.2e−7 rad and path change below1e−10 km.
+In a frozen-position/rotation control, station swap leaves both tested
+centre/surface paths identical, Doppler is zero, and the A=A monostatic
+solution equals twice the direct distance to floating-point rounding.
+Retarded station reversal at a common receiveUTC is not expected to give
+identical paths because its emission/reflection epochs differ. Form weighted quantiles from
+sorted cell delays/frequencies and integrate `Σw exp(−i2πΔfτ)/Σw` for
+frequency covariance. The knots for each short probe are−5…6 s around its
+local epoch; use0.5 s for the refinement. Thermal disc integration uses96-point
+Gauss–Legendre radius and128 equally spaced azimuths, and the main-beam
+solid angle above. All source coefficients, exact input files, quadrature
+nodes, interpolation choices, software versions and reported outputs are
+contained here; temporary downloads are not release assets.
+
+### Source-to-scenario closure and remaining boundaries
+
+| Selected source/input | Parameter or operation | Supported conclusion / remaining limit |
+| --- | --- | --- |
+| LL67 TableII + Thompson2011 §2 | T52 power/angle interpolation and surface measure | A reproducible conditional shape; target-band measurements still absent |
+| LL67 TableIII + Sultan-Salem–Tyler2006 | C44/H25–35 normalized alternatives | Backscatter sensitivity, no unique roughness or general bistatic EM solution |
+| ZPC74 + EV69 + Peters2026/Chan2025 | OC/SC/angular and calibration alternatives | Source-dependent polarization; SC-angle exposes the cosθ mismatch, no universal feed ratio |
+| DE440s + lunarPA/EarthPCK + frame + leap seconds | Fixed epoch, retarded states and derivatives | Executed reference geometry and bounded numerical convergence |
+| WGS84 coordinates, Gaussian beams, .55 efficiency, .05° offsets | Antenna/geometric control | Explicit assumed installations; dish sweep is not a surveyed station result |
+| Centimetre radiometry + uniform225-K assumption | Lunar brightness→beam increment | Main-beam weighting and reference planes close; real stationTsys remains unmeasured |
+| Assumed40 W,80 K and residual2+.02t Hz | Input-plane level/clock fixture | Defined controlled severity; no field probability |
+| 41's verified433.8-MHz IQ /2026 PDS local product | Relative self-echo / localCPR | Actual bounded observations with explicit geometry/calibration limits |
+| 00 native profile, FIR and86 endpoint contract | Receiver calendar/IF/completion | Specification only; contained native renderer/admission and full receiver trial remain implementation work |
+
+The literature/data obligations now have either an inspected source, an
+executed bounded discriminator, a withdrawn nonessential dependency, or a
+precise physical measurement boundary. The still-unexecuted reduced
+renderer, full q0+2/tail check, cost forecast and native receiver trial are
+implementation obligations (E13/E31/E32/E34), outside this research-only
+write scope. Real5–6 cm joint delay–Doppler/polarization/covariance and
+site-specific calibration/availability remain external measurements(E33).
+No literature inference or numerical agreement has been substituted for them.

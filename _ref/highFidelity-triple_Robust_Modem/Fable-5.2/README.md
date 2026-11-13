@@ -1,36 +1,36 @@
-# High fidelity weak signal research
+# High fidelity weak-signal research
 
-Research in this directory is **substantial but incomplete**. It covers
-sub-9 kHz with a 200 ft antenna, 1 MHz and 30 MHz groundwave, 1–30 MHz skywave,
-and Earth–Moon–Earth. The prior pass produced a bounded research and
-specification handoff; it did not close every obligation in the original
-request. The earlier wording “completed research” overstated that result.
+This directory contains the research for sub-9 kHz with a 200 ft antenna,
+1 MHz and 30 MHz groundwave, 1–30 MHz skywave, and Earth–Moon–Earth.
+The requested research work is complete as a literature, public-data analysis,
+calculation and implementation-specification handoff. Independent all-family
+review concluded that the research is ready to conclude; its remaining
+scientific and qualification limits are explicitly recorded.
 
-The [completion plan](80-completion-plan.md) separates unfinished literature,
-public-data analysis, calculations and physical specifications from external
-measurement dependencies and later implementation. The
-[incomplete-work inventory and remediation audit](87-evidence-remediation-audit.md)
-identifies the questions, evidence, next actions and closure criteria.
+Start with the [research execution and conclusions](80-completion-plan.md).
+The [evidence audit](87-evidence-remediation-audit.md) tracks all 200 original
+work items and distinguishes completed analyses, contradictory or unidentified
+physics, inaccessible source bodies, external measurements and later native
+implementation. Detailed source passages, conventions, inputs, results and
+reproduction recipes remain in the subject chapters.
 
-The old web-search-budget notices received substantive follow-up, including
-new full-source retrievals, public-data inspection and corrected interpretations.
-Those remedies remain useful. Some accessible evidence is still unanalyzed,
-source claims remain unresolved or inconsistent, and synthetic controls do not
-supply missing natural-environment distributions. A successful source download,
-a closed mathematical control or a document check is not research completion.
+The earlier web-search-budget notices have received substantive remedies:
+additional primary texts, actual public-data analysis, official reference-model
+runs and independent numerical checks. They are historical notices, not the
+reason this work stops. A downloaded source, corrected calculation or failed
+access route is not by itself scientific closure; each consequential conclusion
+retains its evidence and domain limits.
 
-No simulator, complete-receiver trial, physical-link qualification or hardware
-capacity result is supplied by these documents. Those later stages retain their
-own evidence gates. Better models and implementations remain possible.
-
-The original sixteen chapters contained about 234,000 whitespace-delimited
-words. This is historical inventory, not a verified-claim count. The current
-26-document audit addresses the original requirements, present obligations and
-historical omissions; its method and coverage boundaries are in the audit.
+The research does not establish a universal natural worst-case distribution,
+qualify an implemented simulator, demonstrate complete-receiver communication
+success, or measure hardware capacity. Some questions require calibrated
+measurements that the inspected public sources do not contain. The documents
+specify those inputs and preserve alternative models rather than inventing
+missing distributions. Better models and implementations may still be found.
 
 ## Reading map
 
-| Subject | Existing research | Completion focus |
+| Subject | Research chapter | Coverage |
 | --- | --- | --- |
 | Evidence, units and modem context | [00](00-method-and-modem-context.md) | Correct source-derived overstatements, separate source type from review status, bind scenario assumptions |
 | Sub-9 kHz propagation | [10](10-sub9khz-propagation.md) | Waveguide validity, measured phase and level, transitions and model discrepancy |
@@ -48,14 +48,14 @@ historical omissions; its method and coverage boundaries are in the audit.
 | Equipment | [55](55-equipment-and-front-end-effects.md) | Reference planes, measured transfer functions, clocks, nonlinear recovery |
 | Simulation and statistics | [60](60-simulation-methods-and-validation.md) | Generator credibility, long-time behavior, bounded inference and model discrepancy |
 | Native implementation planning | [70](70-implementation-options.md) | Existing interfaces, candidate representations, containment and build feasibility |
-| Completion plan | [80](80-completion-plan.md) | Unfinished research, dependencies, execution packages and objective completion gates |
+| Research execution and qualification | [80](80-completion-plan.md) | Executed packages, conclusions, remaining evidence and later qualification |
 | Sub-9 kHz scenarios | [81](81-scenarios-sub9.md) | Top-loaded reference, transition and fade; explicitly required path/solver inputs |
 | 1 and 30 MHz groundwave scenarios | [82](82-scenarios-groundwave.md) | Surface, coastal, terrain, competing-mode and outage branches |
 | HF skywave scenarios | [83](83-scenarios-skywave.md) | Standard controls, measured-mode parameters, geographic strata and censored observations |
 | EME scenarios | [84](84-scenarios-eme.md) | 5.76 GHz bistatic geometry, link budget and coupled lunar scattering |
 | Noise and equipment scenarios | [85](85-scenarios-noise-and-equipment.md) | Reference planes, observable front-end effects and conditional noise cases |
 | Statistics and scalar checks | [86](86-statistics-and-calculation-checks.md) | Fixed-sample pilot design and independently recalculated examples |
-| Incomplete-work inventory | [87](87-evidence-remediation-audit.md) | Original/current obligations, source/data/calculation gaps, consequences and closure checks |
+| Evidence audit | [87](87-evidence-remediation-audit.md) | Original obligations, executed results, access/measurement limits and qualification boundaries |
 | Calculation appendix | [90](90-cross-check-calculations.md) | Reproducible arithmetic and physical applicability checked separately |
 
 ## Relationship to existing work
@@ -81,19 +81,20 @@ completion, and the full `W = 2*H` receiver worker budget.
 
 ## Evidence status
 
-The all-family research-completion gate has **not** passed. The selected
-mathematical controls are useful starting points, but source-backed physical
-specification, claim consistency, public-data analysis and independent
-calculation work remain. Some empirical calibration/replay branches depend on
-external inputs; that does not make every uncompleted analysis external.
+Read the executed result and its scope together. A standard channel, deterministic
+outage or explicit covariance law is a reproducible control; a measured episode
+supports only its frequency, geometry, estimator and selection. Numerical
+convergence does not establish that nature follows the model. Source reproduction,
+empirical transfer and complete-receiver qualification have separate gates.
 
-Follow the research work packages before treating the directory as ready for
-an all-family appraisal. Later implementation preserves one canonical native
-C++ modem, continuous Helper/DATA/quiet-tail state, configured-calendar scope,
-all public hypotheses, physical completion and `W=2H`. Numerical work must use
-bounded discriminators and explicit resource admission; long physical durations
-are not permission for routine multi-day campaigns.
+The proposed implementation preserves one canonical native C++ modem,
+continuous Helper/DATA/quiet-tail state, configured-calendar scope, all public
+hypotheses, physical completion and `W=2H`. Bounded discriminators and explicit
+resource admission come before costly trials. The statistical design separates
+failure finding, conditional probability confirmation and hardware capacity.
 
-Keep these documents while they serve a concrete research/appraisal purpose.
-After authorized adoption, preserve unique findings and provenance in the
-maintained guides and appraisal records before removing superseded material.
+Keep these documents while they serve the research/appraisal purpose. After
+authorized adoption, distill unique findings, contrary evidence and provenance
+into the maintained guides and appraisal records before removing superseded
+material. Temporary downloads and calculation outputs have their own recorded
+review purpose and cleanup trigger.

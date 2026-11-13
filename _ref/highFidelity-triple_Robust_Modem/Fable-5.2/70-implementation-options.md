@@ -9,10 +9,35 @@ benchmarked simulator. It extends the existing
 [appraisal protocol](../../../_appraisal/highFidelity-triple_Robust_Modem/experiment-protocol.md)
 with current interface and build findings rather than creating a second protocol.
 
-Initial source inspection used `07bcbc5da41ea5e8ec43517ffb92e51710037744`; the completion pass rechecked interfaces at `33f6e461fce12f4079870091b6d1aaa9c2f50821`. The production
+Initial source inspection used `07bcbc5da41ea5e8ec43517ffb92e51710037744`; the earlier source review rechecked interfaces at `33f6e461fce12f4079870091b6d1aaa9c2f50821`; the research execution began at clean `280b32e47af6f2066fcc44a8966d6af0b220d706`. The production
 `src/`, `include/`, `tests/`, `cmake/` and `docs/` trees have no changes between
-the chapters' cited `0801e5c7` and that revision. This establishes source
+the chapters' cited `0801e5c7` and the research execution baseline. This establishes source
 continuity, not the accuracy of every earlier interpretation or planner receipt.
+
+## Reconciliation with the existing research and appraisal
+
+The source/API trees and maintained guides are unchanged between the earlier
+Fable source review at `33f6e461` and this execution baseline `280b32e4`.
+The adjacent documents were compared read-only; they are not superseded wholesale.
+The following decisions identify reuse, added evidence and actual disagreements.
+
+| Existing work | Fable contribution or correction | Decision and destination |
+| --- | --- | --- |
+| Astra evidence method: conditioned geometry, joint extremes, separate measurement/theory/control | Detailed source/estimator/consumer maps and the observed-versus-theoretical branches in81–85 | Reuse the conditioning rule; source details remain in the owning Fable chapters. No product of marginal maxima becomes an observed event. |
+| Appraisal scenario-record schema | Fable adds exact source fixture, frequency/reference planes, source locators, finite laws, uncertainty and public-data observability | Use the existing schema as the eventual implementation record; do not invent a competing format or edit its directory during research. |
+| Astra sub9 vertical and alternative coupling | Fable separates selected61m geometry, matching/ground circuit, LMP fields and receive-sensor transfer | Retain the vertical as an explicit reference, not the only meaning of a200ft antenna. Electrode and magnetic-loop branches keep different coupling equations. |
+| Astra groundwave evidence and coastal comparisons | Independent fields, archive/calibration and mechanism work in20/25/82/90; two adjacent citation identities require correction | The DOI10.1029/2002RS002696 belongs to Casciato, Oveisgharan and Sarabandi(2003), not Durney/Kempel; DOI10.1587/comex.3.182 belongs to Nishioka, Inasawa and Miyashita(2014), not Kawano. Use the corrected primary identities in Fable. Adjacent files remain unchanged. |
+| Astra stationary-versus-changing HF and radar-transfer cautions | Source-specific width, operation/selection, official-loss and event analyses in30–33/83 | Reuse the distinction; standard controls and processed observables are not new coherent-channel measurements. |
+| Astra EME assumed station budget and passive lunar physics | Exact retarded-geometry/kernel conventions, numerical checks and bounded public-product analysis in40/41/84/90 | Keep assumptions visible; a local radar product or different-band self-echo does not calibrate whole-disc5.76GHz. |
+| Astra implementation-family comparison | Fable defines source/interface and finite numerical requirements for each proposed representation | Retain replay, conditioned stochastic, physical-plus-residual and detailed-reference alternatives. Select by identified observable, error and cost, not complexity. |
+| Appraisal StagesA/B: generator checks and independent source reproduction | Fable adds explicit initialization, covariance/interpolation, tails and actual source-normalization conventions | Reuse canonical tests where applicable; new math/reference results do not mean these native generator tests ran. |
+| Appraisal StageC: up to12 wanted plus6 negative/control trials for one stratum | Fable86 separates this failure-finding question from conditional probability confirmation, adds shared impairment coverage and attainable inference criteria | Use the reconciled design in86 for later execution. The former15-stratum/195-episode screen is not an extra mandatory campaign. |
+| Existing outcome taxonomy and capacity distinction | Fable preserves physical quiet, interior outage, reacquisition, invalid observations and exact resource failures | Adopt those meanings unchanged. Channel generation, communication outcome and complete same-stream capacity require different evidence. |
+
+Later adoption should move only unique, qualified findings into the maintained
+guides and appraisal records after authorization, retaining contrary results and
+scope. No second modem, duplicate protocol or copied historical campaign is
+needed to reuse this research.
 
 ## Existing integration route
 

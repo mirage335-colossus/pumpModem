@@ -194,8 +194,7 @@ power thresholds. Without such a calibration, run only a dimensionless
 normalized nonlinearity and label its threshold in field/noise units. Never
 apply a −dBm threshold directly to fT samples. A true sferic replay additionally
 requires a calibrated broadband waveform, antenna component/orientation,
-receiver transfer, arrival times and saturation flags. Gu's Figshare link is
-identified, but those dataset contents have not been verified here.
+receiver transfer, arrival times and saturation flags. Gu's verified Figshare deposit has been analyzed in chapter 12; it contains derived amplitudes/spectra but no suitable calibrated high-rate event waveform.
 
 For a defined coupled sensitivity use B1 and B3 with their exact schedules,
 and separately B1 plus A1 with Φ=π/2. The deterministic shared clock is the
@@ -228,16 +227,14 @@ The 1,000 W setting is a common normalization for ratios, **not** the 100 W
 feed power of the 61 m antenna. No direct relation between those power
 conventions is assumed.
 
-Keep `LMPParams()` and the default mesh at that pinned commit, explicitly
-recording all returned fields/dependency versions in any later calculation.
+The executed baseline used `LMPParams()` and the default mesh at that pinned commit; the convergence reference below tightens its stated numerical controls. Record returned fields/dependency versions when reproducing it.
 Material defaults include top height 110 km, Earth radius 6,369 km, curvature
 on at reference height 50 km, exact susceptibility, root tolerance 10⁻⁵,
 Vern7 reflection integration tolerance 10⁻⁵, 2,049 wavefield heights and
 Tsit5 wavefield tolerance 10⁻⁶. Radiation-resistance correction is off. The
 [pinned source](https://github.com/fgasdia/LongwaveModePropagator.jl/blob/9231e40d86c201944d08a9100c927bf3ca985105/src/LongwaveModePropagator.jl)
 and [public API](https://fgasdia.github.io/LongwaveModePropagator.jl/stable/lib/public/)
-resolve the remaining defaults; the future run must save its actual environment,
-not rely on a moving `stable` documentation URL.
+resolve the remaining defaults. The executed environment is recorded below; a moving `stable` documentation URL alone does not reproduce it.
 
 E0 holds `(h′,β)=(87,0.30)` everywhere. E1 uses exactly
 
@@ -276,7 +273,7 @@ an explicit unresolved numerical result, never a phase reset.
 
 Before using this scalar approximation for the full native source, evaluate
 frequency dependence at the carrier, both occupied-band edges, and the
-returned complete source-support edges. Refine each interval at its midpoint
+declared source guard edges. These are computational bounds, not hard spectral support: the finite shaped source has nonzero spectral tails. Refine each interval at its midpoint
 until the same complex-error criterion is satisfied against direct solutions;
 no default dense sweep is prescribed. A frequency-selective branch must use
 the resulting `G_E(t,ν)` on the **single composite waveform**, with continuous
@@ -287,10 +284,122 @@ band, report the branch unavailable rather than extrapolating the 8.27 kHz
 model. The rectangular-mesh mode search should also be repeated with halved
 mesh spacing, a widened search boundary and tolerances one decade tighter at
 these representative states; inspect newly found mode contributions and
-complex-field changes. These solver and rendering checks are not performed
-in this documentation pass. The frozen mathematical inputs remove “choose a
-solver/profile” as a research omission; they do not manufacture numerical or
-field validation.
+complex-field changes. The bounded solver checks below were executed. Causal native rendering and source-tail qualification remain implementation checks; numerical convergence is not field validation.
+
+### Executed waveguide checks and a preserved numerical failure
+
+The reference calculations used Julia 1.10.10 and LMP 0.4.1 at the commit above. Algorithm dependencies were OrdinaryDiffEq 6.92.0, OrdinaryDiffEqVerner 1.4.0, OrdinaryDiffEqTsit5 1.3.0, RootsAndPoles 2.0.0, StaticArrays 1.9.25, ModifiedHankelFunctionsOfOrderOneThird 1.1.3, Romberg 0.2.0 and Interpolations 0.15.2; SciMLBase was 2.77.2, DiffEqCallbacks 3.9.1 and LinearSolve 2.39.1. The resolved Manifest SHA-256 was `b0eafc39159c50a9de2aeb63f4232f3b9ecbb691676d0ef284c3e8740a7636fe`. This is reference research, with no native receiver or deployed channel implementation. The initial RAM-disk precompile failed with `No space left on device`; after relocation to disk and removal of this run's incomplete cache, package loading and the calculations succeeded. That setup failure performed no numerical assertions.
+
+The default 8.27-kHz search is the rectangular eigenangle region Re θ = 1–89.9°, Im θ = −89–0°, with 1° coarse spacing (9,315 input nodes). The widened comparison uses Re θ = 0.1–89.99°, Im θ = −89.9–0°, also 1° (9,510 nodes); its half-spacing check has 37,739 nodes. Tight controls change root tolerance to 10⁻⁶, reflection integration tolerance to 10⁻⁶ and wavefield tolerance to 10⁻⁷; no tolerance was relaxed. The original E0, midpoint and day calculations returned 18, 16 and 17 modes. Widening/tightening returned 18, 17 and 19. The E0 sets share 17 roots and replace one deep root; widening is **not** a proven superset. Returned roots were retained in each run, without claiming that every physical root was found.
+
+The original default E0 field was approximately −204.92 + 332.24i µV/m; midpoint/E0 was 1.24919 − 0.16103i (+2.004 dB, −7.345°), and day/E0 was 1.36889 + 0.44756i (+3.168 dB, +18.105°). Halving the original E0 mesh changed the complex field by 1.95×10⁻⁴ relative. **The original widened E0 sum failed with NaN**, although its 18 returned eigenangles were finite. This failure is retained: it is not a successful unmodified upstream run.
+
+The cause is intermediate Hankel-function overflow in the deepest returned mode, not evidence of an infinite received field. For θ ≈ 0.046129305 − 1.554635363i, the asymptotic exponential has real exponent −717.53364; its reciprocal exceeds Float64's approximately 709.78271 logarithmic limit. The propagation attenuation exponent is −394.59221. LMP's [modal source](https://github.com/fgasdia/LongwaveModePropagator.jl/blob/9231e40d86c201944d08a9100c927bf3ca985105/src/modesum.jl) forms individually large height and excitation factors that cancel at zero height.
+
+For this **homogeneous, curved-Earth, zero-height vertical transmitter and zero-height Ez receiver only**, let S = sin θ at the curvature reference, S₀ = sin θ₀ after `referencetoground`, and let `(D′,R,Rg)` be the unchanged `solvedmodalequation` outputs. The ground-to-ground modal excitation/height product simplifies exactly to
+
+`P = S₀² √S (1+Rg₁₁)² (1−R₂₂ Rg₂₂)/(D′ Rg₁₁)`.
+
+In the original source, the excitation denominator is `(F₁h₁+F₂h₂)²`, while both ground height gains equal `F₁h₁+F₂h₂`; cancellation gives this expression without calculating either overflowing factor. Keep the original complex square-root branch, ground reflection matrices, phase and normalization. An independent equation and arithmetic review confirmed the identity. Across 106 finite original modal terms, the maximum absolute difference was 1.28×10⁻¹³ µV/m and maximum relative difference 8.37×10⁻¹⁶. The two originally NaN terms instead give finite contributions of magnitude about 2.5×10⁻¹⁶⁹ µV/m. **Every returned mode is included**, including these terms. This is a separately checked equivalent reference evaluation, not a general LMP fix or a license to discard modes, change fields, disable curvature, alter source height, or infer a segmented-waveguide result. Require finite nonzero `D′*Rg[1,1]`.
+
+The following portable Julia fragment specifies that evaluation; use the package/dependency versions above and the stated profiles. `tight=false, wide=false` reproduces the baseline numerical controls; `spacing=0.5` selects the mesh comparison. The unchanged upstream `propagate(guide,tx,GroundSampler(d,Fields.Ez); modes=modes,params=p,unwrap=false)` is the comparison that must retain its NaN failure where present.
+
+```julia
+using LongwaveModePropagator
+const LMP = LongwaveModePropagator
+function ground_reference(h, beta; f=8270.0, spacing=1.0,
+                          tight=true, wide=true)
+    d = 1e6
+    tx = Transmitter(VerticalDipole(), f, 1000.0)
+    e = Species(LMP.QE, LMP.ME,
+        z -> waitprofile(z,h,beta;cutoff_low=0,threshold=1e12),
+        electroncollisionfrequency)
+    guide = HomogeneousWaveguide(BField(50e-6,deg2rad(65),0),
+                                 e,Ground(22,0.003))
+    p = LMPParams()
+    if tight
+        p = LMPParams(p; grpfparams=GRPFParams(100000,1e-6,true),
+            integrationparams=IntegrationParams(p.integrationparams;tolerance=1e-6),
+            wavefieldintegrationparams=IntegrationParams(
+                p.wavefieldintegrationparams;tolerance=1e-7))
+    end
+    mesh = wide ? LMP.defaultmesh(f;Δr_coarse=deg2rad(spacing),
+                rmin=deg2rad(.1),rmax=deg2rad(89.99),imin=deg2rad(-89.9)) :
+                LMP.defaultmesh(f;Δr_coarse=deg2rad(spacing))
+    modes = findmodes(PhysicalModeEquation(tx.frequency,guide),mesh;params=p)
+    Q = .6822408*sqrt(f*1000)/sqrt(abs(sin(d/p.earthradius)))
+    terms = ComplexF64[]
+    for ea in modes
+        df,R,Rg = LMP.solvedmodalequation(
+            PhysicalModeEquation(ea,tx.frequency,guide);params=p)
+        S = ea.sinθ
+        S0 = referencetoground(ea;params=p).sinθ
+        P = S0^2*sqrt(S)*(1+Rg[1,1])^2*(1-R[2,2]*Rg[2,2])/(df*Rg[1,1])
+        push!(terms,Q*P*cis(-tx.frequency.k*
+            (referencetoground(S;params=p)-1)*d))
+    end
+    return sum(terms), modes, terms
+end
+```
+
+The root triangulation dependency shuffles insertion order. Repeated solves can differ within root/integration error; bit-for-bit root lists are not promised by a fixed profile and mesh. Report complex-field changes and roots, not just a printed decimal match. The finite-term comparison above is performed with identical roots, so this variation cannot explain away or manufacture the algebraic agreement.
+
+The selected response checks comprise 52 solves for profiles, meshes, time and initial frequency holdouts, followed by four locally refined frequency solves. The 1° widened/tight E0 reference in that run was `−204.85024+332.09227i µV/m`; its finite magnitude makes the declared normalization usable. Small final-digit differences from earlier runs reflect the root-search behavior above.
+
+| Profile at 8,270 Hz | Returned modes, 1° → 0.5° | Relative complex-field change | Amplitude / phase change |
+|---|---:|---:|---:|
+| Night 87/.30 | 18 → 19 | 2.24×10⁻⁵ | −0.000021 dB / +0.00128° |
+| Midpoint 80.5/.40 | 17 → 18 | 2.50×10⁻⁶ | +0.000009 dB / −0.00013° |
+| Day 74/.50 | 19 → 19 | 7.35×10⁻⁶ | +0.000045 dB / +0.00030° |
+| Shoulder u=−2 | 19 → 19 | 1.68×10⁻⁵ | +0.000132 dB / +0.00041° |
+| Shoulder u=+2 | 19 → 19 | 1.78×10⁻⁵ | −0.000098 dB / −0.00079° |
+
+For each time holdout `t=t₀−3600,t₀,t₀+3600 s`, directly solve the stated profile at t and at `t±Δt/2`; compare the average endpoint complex field with the direct field. The normalized error is `|G_interp−G_direct|/max(1,|G_direct|)`, whose acceptance limit remains 0.01. E0's constant-profile interpolation is exact algebraically. The non-monotonic tiny shoulder errors below are comparable to numerical search variability, rather than evidence that temporal refinement worsens the physical model.
+
+| Time holdout | 60-s grid error | 30-s grid error | 15-s grid error |
+|---|---:|---:|---:|
+| u=−2 | 2.67×10⁻⁶ | 1.41×10⁻⁵ | 3.53×10⁻⁵ |
+| u=0 | 0.003067 | 0.001484 | 0.000434 |
+| u=+2 | 2.34×10⁻⁵ | 1.32×10⁻⁵ | 3.71×10⁻⁶ |
+
+The largest 60-s amplitude/phase interpolation errors were −0.0221 dB and −0.0988° at u=0. These representative holdouts pass; they do not certify every possible time or an untested geographic sunrise trajectory.
+
+The inspected native source at revision `280b32e47af6f2066fcc44a8966d6af0b220d706` uses `Bocc/2 + 1/ramp_seconds + 200 Hz` for its guard (`src/triad_stream.cpp`, `Emission::source`, lines 476–486 and constant at line 17). With Bocc=0.0625 Hz, ramp=0.02 s and Helper off, this gives physical RF guard edges **8,019.96875 and 8,520.03125 Hz**. The finite RRC/message source is not compactly bandlimited (`src/triad_shaping.cpp`, line 246); guard edges are computational bounds with residual tails, not complete hard support.
+
+Initial frequency knots were `[8019.96875,8269.96875,8270,8270.03125,8520.03125] Hz`; solve each adjacent midpoint directly. Use the same E0 **carrier** reference and LMP relative-vacuum phase convention at all frequencies. At the three night/mid/day profiles, occupied-edge field differences from the carrier were ≤3.59×10⁻⁵ relative (≤0.00028 dB and 0.00154°). Those values are near solver variability and cannot establish ultra-precise group delay. The full guard has materially larger variation:
+
+| Profile | Low guard / carrier, amplitude and phase | High guard / carrier, amplitude and phase | Largest initial interpolation error |
+|---|---:|---:|---:|
+| Night | −0.395 dB / −1.492° | +0.581 dB / +1.849° | 0.01057 **fails** |
+| Midpoint | +0.417 dB / +6.248° | −1.065 dB / −2.085° | 0.02714 **fails** |
+| Day | −0.070 dB / +6.708° | −0.124 dB / −5.761° | 0.00687 |
+
+For the two failing upper intervals, retain the direct midpoint at 8,395.03125 Hz as a new knot and check 8,332.53125 and 8,457.53125 Hz. The child-interval errors were 0.00902/0.00318 (night) and 0.00976/0.00597 (midpoint), all below 0.01. No threshold was relaxed and the original failures remain recorded. These are tested interval-midpoint errors, not a uniform mathematical supremum over frequency. The carrier-only scalar approximation is acceptable as the specified very narrow occupied-band control; it does **not** qualify the full guarded composite waveform. Native frequency/time interpolation, causal filtering, reference delay and nonzero spectral tails still require implementation checks. A common two-dimensional time/frequency grid also needs its own holdouts.
+
+A separate 16-solve domain comparison used the same geometry, ground and magnetoionic inputs at 1/3/6/9 kHz, night/day profiles, widened rectangular 1°/0.5° meshes and tight tolerances. The official low-frequency rectangular mesh applies below 12 kHz; no high-frequency wedge was used at 1 kHz. Each returned root set was evaluated at 100/1,000/3,000 km without another root search. The 100-km value is a numerical mode-sum comparison, not validation of near-field completeness; 9 kHz is a boundary check, not strictly below 9 kHz.
+
+| Frequency / profile | Returned roots, 1° → 0.5° | Largest relative complex-field difference over three ranges |
+|---|---:|---:|
+| 1 kHz / night | 3 → 3 | 6.28×10⁻⁶ |
+| 1 kHz / day | 3 → 2 | **0.501 — fails** |
+| 3 kHz / night | 9 → 9 | 2.78×10⁻⁵ |
+| 3 kHz / day | 6 → 6 | 5.04×10⁻⁵ |
+| 6 kHz / night | 14 → 14 | 2.46×10⁻⁵ |
+| 6 kHz / day | 13 → 13 | 2.42×10⁻⁵ |
+| 9 kHz / night | 21 → 21 | 4.76×10⁻⁶ |
+| 9 kHz / day | 21 → 21 | 4.91×10⁻⁶ |
+
+The 1-kHz/day failure is a root-census defect, not a newly inferred physical mode or a demonstrated frequency-domain limit. The failing list contains `1.4164281059−0.4554907696i` and `1.4164229223−0.4554866308i`, only 6.6333×10⁻⁶ rad apart, plus one deep mode. The half mesh returns one nearby root and the deep mode. The pinned `findmodes` implementation rounds roots to five decimal places at root tolerance 10⁻⁶ before applying `unique!`. These two candidates straddle a rounding-bin boundary (`1.41643` versus `1.41642`), defeating the intended near-duplicate exclusion. The original 1,000-km field was `442.75301−304.99674i µV/m` (54.60978 dBµV/m); half spacing gives `221.38311−152.48699i` (48.58915 dBµV/m). No candidate was silently deleted to turn this failure into a pass.
+
+One additional widened 1° solve with root/reflection tolerances 10⁻⁷ returns two roots and `221.36752−152.51934i` (48.58932 dBµV/m). For each of the two coarse candidates and the half-mesh candidate, an actual-helper Newton discriminator uses `F=modalequation(R,Rg)` and `θ_next=θ−F/D′`, with `(D′,R,Rg)=solvedmodalequation(θ,me)` and reflection tolerance 10⁻⁹. All three reach approximately `1.41643075−0.45549149i` after one step; later steps jitter within about 1.7×10⁻⁸ rad rather than converging to arbitrarily exact decimals. Separate `solvemodalequation` residuals remain of order 10⁻⁶ because the two integration routes have finite error. This is consistent evidence for a shared root, not by itself a proof of multiplicity.
+
+Independent checks strengthen the diagnosis: 48-point determinant contours centered on `1.41642279074−0.45548663076i`, enclosing both candidates at radii 2×10⁻⁵ and 6×10⁻⁵ rad give winding number +1 at reflection tolerances 10⁻⁶, 10⁻⁸ and 10⁻¹⁰ (largest sampled phase increment 0.692 rad, no sampled zero). The official **unwidened** 1° and 0.5° meshes both return two roots for this same profile; tight 1,000-km amplitudes are 48.589169 and 48.589168 dBµV/m, with relative complex-field difference ≤2.16×10⁻⁶ over the three ranges. A second profile from the official 1-kHz example, h′=75 km, β=.35 km⁻¹, vertical B and Ground(15,.001), also returns two roots with those meshes. These are corroborating counterchecks, not an all-root proof. A scan of pair separations below 10⁻⁴ rad in all 84 archived pilot, identity, convergence, refinement, domain and diagnostic solves found only the failing pair; no such pair occurred in the selected 8.27-kHz checks.
+
+The original failed result remains rejected. A future robust root-census implementation must compare distances/residuals and preserve genuinely distinct nearby roots; decimal-bin rounding is inadequate. No upstream library code or native modem was changed here. The broader research check is completed with a diagnosed failure and independently corroborated reference values; it is not a claim that unmodified LMP passes every mesh or profile.
+
+
+These finite comparisons are useful counterexamples and numerical controls, not an independent propagation validation. In particular they cannot resolve Taylor's below-4-kHz measurements versus the older profile theories, select a natural day/night attenuation law, establish global root completeness, or justify extrapolating the 8.27-kHz scenario to the entire band.
+
 
 ## 5. Scenario T — transmitting-antenna circuit and Helper limits
 
@@ -326,16 +435,26 @@ stationary free-response envelope time constant is `2L/R=5.57319 ms`; a
 0.2 s continuation reduces that envelope by about 2.6×10⁻¹⁶. This is a
 model-tail check, not a bound on an unmodeled real antenna's modes.
 
-A possible native reference discretization is RK4 with a maximum substep
+A candidate native reference discretization is RK4 with a maximum substep
 `1/(16 Fs)` on the 48,000 samples/s direct physical-band branch, evaluating
 the analytic C(t) at each stage and linearly interpolating the voltage samples.
 Halve the substep and double the source rate on short steady, detuning and
 turn-off holdouts before accepting the interpolation/integration error.
 An exact state-space or envelope implementation can later replace this
 expensive reference when it reproduces the specified transfer and memory.
-Neither discretization was implemented or run here. The simple instantaneous
+The bounded circuit checks below were executed against an analytic sinusoidal source; a complete sampled native waveform has not been rendered through the circuit. The simple instantaneous
 ratio `R₀/[R(t)+j(ω₀L−1/(ω₀C(t)))]` supplies the B3 slow-detuning arithmetic
 checks only; it is not the full circuit's transient response.
+
+### Bounded circuit checks executed in the research pass
+
+The constant-C equation was integrated with ordinary RK4 at `dt=1/(16×48000)` and half that step. A 20-ms cosine turn-on from `q=i=0` was compared at every step with the exact solution: `i_p=I_pk cos(ω₀t)`, `q_p=I_pk sin(ω₀t)/ω₀`, plus the homogeneous solution `exp(−at)[A cos(ω_dt)+B sin(ω_dt)]`, where `a=R/(2L)`, `ω_d=sqrt(1/(LC)−a²)`, `A=0`, `B=−I_pk/ω_d` and `I_pk=sqrt(2)V₀/R`. Normalize current error by `I_pk` and charge error by `I_pk/ω₀`; the maximum is 4.414×10⁻⁵ and 2.759×10⁻⁶, respectively. Their ratio is consistent with fourth-order convergence. An independent 20-ms **source-off** continuation initialized from the exact turn-on state has normalized endpoint errors 4.691×10⁻⁶ and 2.908×10⁻⁷. This tests decay as well as driven steady response.
+
+A deliberately faster-than-B3 holdout increases C linearly by 0.1% over 20 ms. The two RK4 runs end at `(q,i)=(1.4495281×10⁻⁵ C, −0.8426729 A)` and `(1.4494666×10⁻⁵ C, −0.8427087 A)`, a normalized endpoint difference below 3.1×10⁻⁵. That is a convergence comparison, not a measured weather model or exact reference. These short research integrations contain no modem DSP or receiver state.
+
+The voltage reconstruction needs its own correction: **linear interpolation of 48-ksample/s voltage is not transparent at 8.27 kHz**. Its fundamental response is `sinc²(πf/Fs)`, giving 0.906078 (−0.8567 dB) at 48 ksample/s and 0.975823 (−0.2126 dB) at 96 ksample/s. Reducing only the ODE substep does not remove this bias or the interpolation images. Therefore the original 48-kHz linear-interpolation candidate is not accepted as a high-fidelity source interface. A later native implementation must use qualified band-limited reconstruction or demonstrate convergence of the complete source at higher rate, including images, occupied support and tails. The analytic-driver checks qualify the RLC integration alone.
+
+With the declared constant-R approximation, normalized current at 550/950/2400 Hz is −66.72/−61.90/−53.20 dB relative to resonance; at 8,720 Hz it is −23.74 dB. At 8,270±0.03125 Hz it differs by only −0.0000052 dB with phases ∓0.06270°. These are exact impedance calculations, not calibrated multi-frequency coil losses. They explain why a narrow DATA passband may survive the circuit while distant physical Helper frequencies do not. The circuit cannot be applied only to DATA and called a complete transmitted link.
 
 The ordinary A/B magnetic controls do not automatically inherit this circuit.
 A hybrid control may multiply their wanted signal by the circuit's normalized
@@ -410,8 +529,8 @@ The required evidence is deliberately staged:
 1. Check the source/PSD/unit conventions, deterministic trajectories, circuit
    impedance, tail bound and zero-effect limits with short component records.
    Check a deliberate chunk-boundary change leaves the same physical sequence.
-2. For E, complete the selected solver's root, grid, frequency and rendering
-   checks before using its output. Preserve convergence failures and model
+2. For E, preserve the bounded solver checks and failures in §4; complete
+   native rendering and full-source/tail checks before receiver use. Preserve convergence failures and model
    alternatives separately from stochastic receiver variability.
 3. Test single mechanisms before the explicitly paired combinations. Carry
    all configured public hypotheses and complete receiver costs. A short
@@ -423,9 +542,7 @@ The required evidence is deliberately staged:
    independent field episodes, selection/censoring information and a justified
    joint population; twenty fixed diagnostic seeds do not provide it.
 
-The arithmetic in §§1, 3 and 5 was independently recomputed in this pass from
-the written formulas. No waveguide solve, antenna time integration, native
-receiver trial or empirical replay was executed. Implementation readiness of
+The arithmetic in §§1, 3 and 5 and the circuit integration checks in §5 were executed from the written formulas. No native receiver trial or empirical waveform replay was executed. The separate waveguide numerical status is recorded in §4. Implementation readiness of
 a mathematical control is distinct from an implemented harness and from
 empirical qualification.
 
@@ -434,8 +551,7 @@ sub-9 kHz electric antenna's current/efficiency and detuning time series;
 matched complex wanted-field and receiver-noise recordings on long apertures;
 receiver effective area/height, component orientation, transfer and self-noise;
 sub-9 kHz marked sferic/line amplitudes and timing; and independent
-geometry/season/receiver holdouts. Gu's identified Figshare dataset has not
-yet supplied verified files, calibration or licence. Reuveni's 75 Hz,
+geometry/season/receiver holdouts. Gu's Figshare v1 files and CC BY 4.0 licence are verified; chapter 12 now analyzes all numeric arrays. Its sub-9-kHz products are regional monthly/hour-of-day log-band amplitudes. The saved minute workspace is labelled 28 kHz, and the deposit supplies no raw coherent capture or traceable transfer-calibration record. Reuveni's 75 Hz,
 one-minute records sampled every fifteen minutes and Gu's intermittent
 wideband measurements cannot be silently resampled into an observed
 0.0625 Hz joint process. Practitioner successful decodes are useful
@@ -453,3 +569,50 @@ noise law, detuning trajectory and fade schedule are replaced above by explicit
 controls. The remaining calibration and validation dependencies are not
 web-search-budget notices and are not claimed to have been experimentally
 resolved.
+
+## 8. Research dispositions and dependency map
+
+These dispositions refer to the V01–V27 inventory in [87](87-evidence-remediation-audit.md). “Research resolved” means the cited reading, analysis, or explicitly limited model choice is documented; it does not mean the natural environment is known exactly. **E** denotes a required external measurement/calibration for an empirical claim; **I** denotes later native harness/receiver work. A remaining theoretical or numerical research question is named as such rather than reclassified as a new measurement.
+
+| ID | Completed research result | Exact residual and permitted conclusion |
+|---|---|---|
+| V01 | Taylor's 2–4-kHz low-reliability attenuation estimates are separated from the classical anisotropic/isotropic calculations, Barr's resolution alternative and modern RT/FDTD comparison in 10. | Physical discrepancy remains; no universal low-band attenuation is selected. Barr's full paper remains unread, with no adopted numerical parameter depending on it. A calibrated low-band comparison is E; the table is an explicit theory/observation bracket. |
+| V02 | Exact LMP v0.4.1 source/API, magnetic inputs and dependency environment established. | The executed checks in §4 retain the NaN and the separate 1-kHz duplicate-root failure, with independently checked diagnoses/reference evaluations. Selected mesh/time/frequency holdouts pass; global mode completeness and physical accuracy remain unproved. Root-census hardening is I, not an adopted fabricated propagation law. |
+| V03 | Vector E/H→sensor transfer, loading and covariance chain derived in 11; public LMP electric sampler limitation verified. | Magnetic modal-sum interface is I; calibrated sensor/field covariance is E. E0 is not silently converted to B. |
+| V04 | Source/feed/EMRP/ERP and receiver reference conventions reconciled; worked budgets now label P.368-style loss below 10 kHz as an equivalent coordinate outside the recommendation's range. | Absolute calibrated link/range is E, including mode excitation, field component and receiver transfer. |
+| V05 | Existing 91-m measurements and full Siple primary article are compared with the 61-m electrostatic/circuit estimate. | No matched measured 50–100-m sub-9-kHz efficiency supplied by these sources. Measurement is E; modeled 2.02-mW result is not empirical efficiency. |
+| V06 | Reference T dimensions and distinct bare/umbrella/lofted/ground-wire alternatives are explicit in 11 Tables A–E; selected C/he independently agree within ≈1%. | Site structure/soil/nearby objects are E; no “200 ft” scalar uniquely fixes an antenna. |
+| V07 | Wheeler and Moore–Blair primary equations plus an independent reciprocal boundary-field derivation resolve the factor 2 for the stipulated short uniform-current good-conductor limit (11). | Maxwell surface asymptote is preferred in that limit; Wheeler remains a historical approximation. Finite-length/current, electrodes, layering and measured efficiency are E/model-domain dependencies. No ground-wire superiority or real range is certified; selected vertical T is unaffected. |
+| V08 | RLC/loss/bandwidth arithmetic and exact driven/turn-off integration checks executed; distant Helper attenuation computed. | Sampled-voltage reconstruction fails transparency at 48 kHz with linear interpolation; complete source interface/native implementation is I. Real frequency-dependent losses/matching are E. |
+| V09 | Deterministic slow and fast detuning laws are distinguished from the source geometry's measured weather effects; circuit fast-ramp convergence checked. | Joint C/loss/corona/weather distribution and installation limits are E. No probability is attached to the stress schedule. |
+| V10 | Long-aperture operator records and their averaging/selection limits retained; phase-rate calculations remain conditional. | Matched raw phase/noise/oscillator traces needed for natural coherence and fade fits are E. A successful decode is not an outage denominator. |
+| V11 | Full Thomson (2025) dawn/dusk and McCormick–Cohen (2021) split-profile methods/results read; frequency/path dependence and inverse-model selection made explicit. | E1 is a fixed two-parameter diagnostic; empirical correlated profile uncertainty is E. A ledge/SZA-driven alternative is documented, not asserted universally optimal. |
+| V12 | Deterministic shallow/deep/null and outage cases cover failure mechanisms without inventing fade probabilities. | Natural tails, event durations and rates are E; complete-message/final-quiet behavior is I. |
+| V13 | Existing flare/storm/eclipse evidence separated by frequency/path; recent eclipse and non-monotonic dawn findings prevent importing one signed gain law. | No matched sub-9-kHz storm/eclipse carrier population established. Sub9 magnitudes remain conditional sensitivities; measured event qualification is E. |
+| V14 | Early/Trimpi mechanisms and the specific 3.79-kHz abstract's limitations remain explicit. | No calibrated general sub-9-kHz event law is inferred; raw matched episodes are E. Abstract-only event detail is not a numerical input. |
+| V15 | LMP E0/E1 are correctly identified as magnetoionic; classical and recent directional evidence, ground segmentation and detection censoring are reconciled. | Synthetic reverse-bearing comparison is a separate physical case, not complex conjugation. Site-dependent direction calibration is E. |
+| V16 | Ferguson (1998) manual recovered/read, including approximate/full mode conversion and profile/noise defaults; LMP/LWPC/MODEFNDR identities distinguished. | Marshall (2017) remains abstract-only after public-route checks, with no selected numerical input depending uniquely on it. Its quoted agreement is not adopted as a validation tolerance. |
+| V17 | Read Wait/Galejs/NBS modal and near-field sources remain the derivation basis; Qin (2019) supplies a qualified low-VLF ray alternative. | Classical lateral/near-field model limits are preserved. Later native implementations require their own numerical checks (I), not new unsourced propagation laws. |
+| V18 | Strategic ELF, Siple and heating experiments retain frequency, radiator and measurement scope; full 1974 Siple paper resolves that source omission. | Secondary or abstract-only historical leads are contextual; none sets 61-m efficiency or service probability. Such measurements are E. |
+| V19 | Earth-mode/through-earth mechanisms and the separately read Raab treatment remain distinct from Earth–ionosphere propagation. | Matched mine/soil geometry and transfer data are E; the branch is not given an invented waveguide attenuation. |
+| V20 | All 28 Gu members extracted; numeric arrays, dates, aggregation, band metadata and seasonal/lightning coupling analyzed in 12. | Accessible-data task resolved. No high-rate sub-9-kHz complex capture or traceable calibration is contained in this deposit (E for replay). |
+| V21 | PSD/impulse/line/slow-state observables separated; Gu seasonal-correlation sensitivity executed. | Joint law remains unidentified; factorized/deterministic controls are valid conditional models. Calibrated target-band joint records are E. |
+| V22 | Every previously named noise lead has a disposition in 12; original reports rather than unread article details support adopted gains/statistics. | Context-only unread items remain explicitly unread. No Hall/Middleton/ELF parameter is silently promoted to a sub-hertz 8-kHz fit. Target-band refitting is E. |
+| V23 | Field→sensor→ADC/self-noise construction and source calibration limitations specified; instantaneous, band-average and plane-wave-equivalent units distinguished. | Transfer calibration, clipping metadata and field component covariance are E; native realization is I. |
+| V24 | Books and operator records individually classified; successes, contradictory estimator conventions and limits retained. | Unread contextual books cannot supply unique critical inputs. No unsupported source access is claimed. |
+| V25 | Defined A/B/C/E/T inputs, zero controls, dependence alternatives and component acceptance coordinates are recorded; circuit/data analyses executed. | LMP numerical results are in §4; native full-source/receiver and chunk/causal-render checks are I. A mathematically specified case is not an executed modem experiment. |
+| V26 | Physical model→native interfaces and rejected interpolation choice are documented. | Native circuit, field renderer, sensor and receiver integration is I, outside this documentation-only scope. |
+| V27 | Empirical claim requirements identify calibration, episode denominator/censoring, geometry/season holdouts and uncertainty. | A calibrated new campaign is E. No current table estimates universal service availability or worst-case occurrence. |
+
+| Selected consequential input | Source → calculation | Consumer and boundary |
+|---|---|---|
+| Native geometry, source normalization, calendars and absence completion | 00's pinned compiled-source inspection → complete composite/support/reference energy | Every scenario; full-source execution and complete receiver evaluation remain I. |
+| 2.47/0.247/0.0247 fT and 20/50 fT/√Hz with 0/5 fT/√Hz self-noise | Declared field levels and chapter 12 order-of-magnitude evidence → `C/N0=20log10(A)−10log10(N_ext+N_rx)` | A/B/C are ideal magnetic conditional controls, not field availability percentiles. |
+| Independent proper complex Gaussian background | Explicit engineering law → quadrature variance `N_B Fs/2` | A0 statistical control; no claim this is an observed post-blanker law. |
+| +10-dB noise ramp, harmonic trace, deterministic pulse/nonlinearity and fades | Literature establishes mechanisms; schedules/amplitudes in §§2–3/6 are chosen → causal factorized trajectories | B/C probe moderate/adverse/severe/outage mechanisms; neither frequency-grid statistics nor Gu correlations set a joint occurrence law. |
+| Gu 4/6/8-kHz monthly bands | Verified deposit → 13.05/12.55/10.79-dB seasonal log-amplitude spans and correlation sensitivity | Context for slow-level comparisons only; B2 half-hour trajectory remains synthetic. |
+| 61-m T: C/he, Q 400, 30 Ω, tanδ .003 | 11 electrostatics and explicit losses → RLC response,η 2.02255×10⁻⁵,τ 5.573 ms | T sensitivity; exact equation checks in §5, hardware calibration E. |
+| Homogeneous 1,000-km path, εr 22, σ .003 S/m, B 50 µT, dip 65°, azimuth 0 | Declared inputs and pinned LMP source → complex Ez ratio | E0/E1 only; no sensor voltage, source-power calibration or geographic route inferred. |
+| Night 87/.30 and tanh → day 74/.50 | Declared diagnostic Wait–Spies law, checked against literature's contrasting profiles → time-varying relative field | Synthetic E1; Thomson/McCormick alternatives constrain interpretation, not its event probability. |
+| Mesh, solver/tolerance/defaults and interpolation bound | LMP source/API → executed numerical checks in §4 | Numerical error coordinates; do not substitute them for empirical model discrepancy. |
+| Ground-wire normalization; below-4-kHz attenuation bracket | Wheeler/Moore–Blair/reciprocity resolve the shared asymptote; Wait/Taylor support a separate theory/observation bracket | Ground-wire finite-geometry qualification and low-band physical discrepancy remain distinct; neither calibrates the selected 8.27-kHz T/E. |

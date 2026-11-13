@@ -4,9 +4,12 @@ These specifications close the mathematical input choices for the 1 MHz and
 30 MHz research branches. They distinguish **a reproducible control**, **a
 source-conditioned propagation calculation**, and **a measured-path replay**.
 The first two can be implemented from the definitions below; neither is a
-validated real-world episode. No simulator, LFMF build, calibrated capture or
-modem trial was run for this chapter. The measured-path requirements at the end
-remain external evidence dependencies, not unnamed defaults in the controls.
+validated real-world episode. The pinned LFMF reference and independent
+smooth-earth calculations were executed in [90](90-cross-check-calculations.md);
+public measurement archives were inspected in 20/25. No native channel
+simulator, matched calibrated complex-channel replay or modem trial was run.
+The measured-path requirements at the end remain external evidence
+dependencies, not unnamed defaults in the controls.
 
 The physical evidence and contradictory findings are in
 [20](20-groundwave-1mhz.md) and [25](25-groundwave-30mhz.md). Moderate and adverse
@@ -77,8 +80,11 @@ in N-units, not an effective-earth-radius factor. Choose
 
 so that the pinned implementation's `a_e/6370 km` is exactly 4/3. Its internal
 transmitting and receiving gains are both 4.77 dBi. The received-power output
-therefore has about 6.02 dB more receiving gain than the P.372 plane above; use
-its field output and the declared conversion instead. These details follow the
+therefore uses a different receive reference. Its hardcoded power formula is
+`P_rx=E−20log10(f_MHz)−72.43`, **6.07 dB** above this chapter's rounded
+`E−20log10(f_MHz)−78.5` conversion. The ideal antenna-gain ratio is
+`10log10(3/.75)=6.0206 dB`; implementation constants introduce the remaining
+rounding difference. Use the field output and the declared conversion instead. These details follow the
 [pinned implementation](https://github.com/NTIA/LFMF/blob/57886e9d0a29fd8f04a6416dc3f782322f5a3589/src/LFMF.cpp).
 
 For each selected route, calculate at the carrier with `P_tx_W=1`; independently
@@ -102,8 +108,10 @@ ceiling. Consequently the 30 MHz control holds its carrier magnitude fixed
 across the envelope and labels that approximation. A frequency-dependent
 comparison uses **29.99 MHz** with every evaluated source frequency within
 0.01–30 MHz. For a richer phase model, [90 §1.1](90-cross-check-calculations.md#11-method-and-checks)
-gives the Fock/Bremmer/Wait complex prescription; its missing original solver
-must be reimplemented and checked before it can replace this phase control.
+gives the Fock/Bremmer/Wait complex prescription. The original research solver
+was recovered, and independent Airy-root checks now reproduce its complex
+outputs (90 §1.1). This qualifies the recorded constant-radius arithmetic,
+not a measured environmental phase history or a native streaming operator.
 A second build of LFMF is a numerical comparison, not an independent physical
 theory. The [input validator](https://github.com/NTIA/LFMF/blob/57886e9d0a29fd8f04a6416dc3f782322f5a3589/src/ValidateInputs.cpp)
 also rejects heights outside 0–50 m and `N_s` outside 250–400: the raised 100 m
@@ -152,6 +160,40 @@ under reversal within numerical rounding; do not require either directional
 intermediate to agree. As a conductivity sensitivity, repeat the baseline with
 sea sigma 4 S/m and with both land sigmas .001 S/m, one change at a time.
 
+### 1M-B2: near-band observed geography and method disagreement
+
+Use the published Nishioka–Inasawa–Miyashita 2014 route summarized in
+[20](20-groundwave-1mhz.md): **1.242 MHz**, 19 km land followed by 71 km sea,
+land `(sigma,epsilon_r)=(.001,15)`, sea `(5,70)`, nominal heights zero.
+These are the paper's modeling inputs, not a new local ground survey.
+The paper observes relative coastal recovery with an unknown receive gain;
+it cannot validate absolute field or phase. Retain the carrier label 1.242 MHz.
+
+The following **executed reference calculations**, in dBµV/m for **1 kW**
+e.m.r.p., use the pinned LFMF with the section 2 radius and the same curves
+for both stitching methods (90 §1.6). For this chapter's 1 W source subtract
+30 dB from every field before the section 2 receive-plane conversion.
+
+| Total path, km | Homogeneous land | Homogeneous sea | Millington land→sea | Equivalent-distance land→sea | Equivalent-distance sea→land |
+| --- | --- | --- | --- | --- | --- |
+| 19 | 57.326177 | 83.855695 | 57.326177 | 57.326177 | 57.326177 |
+| 30 | 49.028822 | 79.788803 | 61.888994 | 56.661127 | 54.655940 |
+| 50 | 39.626383 | 75.125498 | 59.642799 | 55.479029 | 52.792259 |
+| 90 | 28.318421 | 69.442402 | 55.027506 | 53.199046 | 50.632386 |
+
+The equivalent-distance algorithm preserves field at the interface, substitutes
+its distance on the next homogeneous curve, then adds the remaining physical
+segment length. This is the construction in [47 CFR 73.183(d)–(e), preceding
+§73.184's graphs](https://www.govinfo.gov/content/pkg/CFR-2025-title47-vol4/pdf/CFR-2025-title47-vol4-sec73-184.pdf).
+Here it uses **LFMF curves**, not the official FCC curves and their sea
+permittivity 80. The land interface maps to 246.301119 km on the sea curve.
+The forward/reverse equivalent-distance answers differ by 2.0–2.7 dB, whereas
+Millington is reciprocal by construction and permits recovery after the coast.
+This isolates a method choice. It is not GRWAVE exponential-atmosphere parity,
+an FCC service-area determination, or a fit to the unknown-gain measurements.
+For the modem control, use Millington amplitude and the explicit vacuum-slope
+phase of section 2; the phase remains synthetic.
+
 ### 1M-C: seasonal and layered-ground comparisons
 
 **C1 is a complete homogeneous-state comparison**, not a time model of a
@@ -186,7 +228,7 @@ or single-angle reflection coefficient must not simply multiply the 100 km
 LFMF field and be called layered-groundwave loss. Published 308/319 kHz sea-ice
 calculations in [20](20-groundwave-1mhz.md) remain useful model comparators with
 frequency and empirical-validation limits; no numerical 1 MHz layer correction
-is selected from the historical unretained scratch solver.
+is selected from the historical scratch calculation.
 
 ### 1M-D: one coherent night-return control
 
@@ -208,6 +250,14 @@ losses, so a separate elevation-pattern penalty would count them twice. The
 initial phase, drift and sinusoid are engineering assumptions. Delayed-copy
 frequency selectivity, cancellation, and an apparent phase jump at a deep null
 then emerge from the sum. No additional independent Doppler process is added.
+
+P.1147's composite short-loop field and P.1321's individual-mode illustration
+are retained as **separate source-model comparators**, not automatic gains for
+this equation. Chapter 20 §G records their 100–200 km printed disagreement and
+unmatched receiver observable. The selected R already refers to the same
+receiver plane for both components; a physical prediction must first supply
+that matched field/pattern transformation. Neither a PSD-only AM archive nor
+300 kHz estimator variance supplies the missing complex tap amplitudes.
 
 For a transition control, multiply only the reflected term by
 `w(t)=ramp((t−t_on)/600)` where `ramp(z)=0` for z≤0, `(1−cos(πz))/2` for
@@ -268,16 +318,34 @@ Compare a second dependence alternative with the phase sine shifted by π/2,
 using the same amplitude law. These controls are fully specified and synthetic;
 they must not be labeled a Barrick simulation or a recorded rough-sea event.
 
-A **physical rough-sea model remains a separate research alternative**. It needs
-a directional surface-wave spectrum and its evolution, a selected rough-surface
-impedance/scattering prescription, and validity checks at 30 MHz. A wind-only
-spectrum can be a hypothesis but does not close sea-state uncertainty; the
-16.188 MHz one-way Kirincich–Emery evidence and 25 MHz Halverson radar evidence
-in [25](25-groundwave-30mhz.md) explicitly warn against treating their reported
-losses or radar ranges as a universal 30 MHz correction. No unmeasured spectrum
-is used here to manufacture a calibrated result. A better boundary solver or
-measured spectrum may replace this sensitivity comparison once it has numerical
-and held-out physical checks.
+**B2 is a source-conditioned mean-loss comparison.** Change A to heights 0 m,
+`sigma=4 S/m`, `epsilon_r=80`, keeping 30 MHz and 100 km. Barrick's read 1970
+report [25 R18] Fig.31 uses a Phillips isotropic developed wind-sea spectrum;
+its figure-read added losses at this frequency/range are about **1, 6 and
+11 dB** for sea states **1, 3 and 6** (5, 15 and 30 knot wind labels), each
+about ±1 dB reading uncertainty. Apply each loss as one constant amplitude
+factor `10^(−L/20)` for the entire record; compare L±1 dB separately. This is
+a declared approximation to the published coherent mean-loss curves, not a
+new integration of its roughness spectrum or a measured sea state. The roughest
+branch is a perturbation-limit sensitivity: small height/slope assumptions
+are marginal at upper HF, and the wind label does not include swell, fetch
+or local wave history. It must not be called a validated severe-sea forecast.
+
+The corresponding physical implementation alternative is the report's
+**complex mean impedance derived from a named directional height spectrum**,
+inserted in a spherical-earth solution. Validate its smooth limit, spectrum
+normalization, small-roughness domain and the source figures before replacing
+B2. It supplies a coherent mean, not the incoherent fluctuation PSD or a Rician K.
+B2 deliberately retains section 2's synthetic phase; an additional sinusoid
+would be an explicitly named stress combination, not a consequence of Barrick.
+The Neumann–Pierson directional spectrum is a competing theory branch, with
+several-dB differences already recorded in 25, not an uncertainty distribution.
+
+The 16.188 MHz one-way Kirincich–Emery and 25 MHz Halverson radar results in 25
+constrain transfer and confounding; their power/radar-range observations do
+not validate this 30 MHz loss or phase. A measured sea spectrum plus a matched
+complex forward channel would permit a separate fluctuation comparison.
+No universal sea-state occurrence rate is assigned.
 
 ### 30M-C: short terrain and raised-receiver geometry controls
 
@@ -360,24 +428,46 @@ it is not independent interference merely because it is not groundwave.
 Non-detection provides an upper bound conditioned on the detector/noise, not
 proof of exact physical zero.
 
+### 30M-F: observed terrain-loss comparator at its actual frequencies
+
+The official NTIA Phase 1 archive was retrieved and analyzed in
+[25's completion section](25-groundwave-30mhz.md#completion-analysis-of-accessible-groundwave-evidence).
+It supplies **20.084/49.72 MHz** Colorado and **19.97/49.72 MHz** Ohio spot
+observables, not a 30 MHz complex replay. Preserve its principal/optimized-site
+separation, per-site antenna exceptions, ±3 dB gain uncertainty, dates,
+missing `999` cells and `500+q` loss lower bounds. The six principal-site
+summaries in 25 are detected-only descriptive statistics.
+
+A compact adapter check is PL-05-P1, 4.96 km: excess attenuation 33.0 dB at
+20.084 MHz and 51.1 dB at 49.72 MHz gives basic losses **105.41664 and
+131.39026 dB** from `Lbf=32.45+20log10(f_MHz*d_km)`. This checks data units
+and observation definitions. It does not set a scalar 30 MHz gain or temporal
+fading law. A future same-frequency terrain comparison must use the actual
+profile, gains and site record and hold out whole site groups; no model fit
+or modem trial is claimed. The observed Ohio censoring prevents interpreting
+a lower detected-only 50 MHz median as a more favorable complete distribution.
+
 ## 5. Traceability, dependence and validation decisions
 
 | Critical input | Evidence or calculation | Permitted inference and remaining limit |
 | --- | --- | --- |
 | Smooth-earth field and ground-constant response | P.368-10 Annex 1; pinned LFMF v1.1 interface and source, sections 1–2 above | Exact reproducible model inputs; no measured local conductivity, terrain or antenna efficiency is supplied |
-| Coastal amplitude construction | P.368-10 Annex 2 equations (1)–(3); 1M-B equations | Reciprocal amplitude reference; no measured coastal phase law or exact 1 MHz mixed-path calibration |
+| Coastal amplitude construction | P.368-10 Annex 2 equations (1)–(3); 1M-B; Nishioka2014 §3/Figs.2–3 and executed 1M-B2 | Reciprocal amplitude reference and observed near-band relative recovery; equivalent-distance method disagreement isolated. No absolute/phase validation |
 | Short-time MF behavior | Chilcote et al. 2015 methods/results at 810/1030 kHz, summarized with conditions in 20; R-Mode/eLoran comparators remain at lower frequencies | Select a quiet baseline and separate night return; not an inferred 1–600 s coherent groundwave PSD or a joint occurrence model |
 | Layer/ice behavior | Exact selected TM slab equations and numerical material values in 1M-C; nearby-frequency literature in 20 | Boundary-response check only. Full curved-earth layered-path field still requires a separately qualified solver and physical inputs |
 | Night return delay | Virtual-mirror geometry and c, 1M-D | 276.333544 µs for the stated mirror; R, phase and onset are engineering assumptions, not a fitted E/F distribution |
-| Sea roughness and salinity | Kirincich–Emery 16.188 MHz one-way study; Halverson et al. 2017 25 MHz radar study and their confounders, 25 | Motivate separate environment-conditioned branches; do not transfer radar range into one-way loss or prescribe a universal 30 MHz sea correction |
-| Terrain/raised receiver | Explicit 1 km Fresnel and two-ray equations, 30M-C | Reproducible geometry controls; no long-path groundwave, building or forest calibration |
+| Sea roughness and salinity | Barrick1970 §§III–IV/Fig.31 → B2 constant mean-loss comparison; Kirincich–Emery and Halverson methods/limitations in 25 | Mean-loss theory versus synthetic fluctuations are separate. Radar range and remote conductivity/wind proxies do not determine a 30 MHz forward channel |
+| Terrain/raised receiver | Explicit 1 km Fresnel/two-ray equations, 30M-C; NTIA Phase 1 method/decoded cells → F; Casciato2003 §§2.3–3 → resolved-coast alternative | Geometry and observed spot loss are distinct. No long-path complex, building or forest calibration; homogeneous height gain is not a cliff prediction |
 | Noise and equipment | Fixed Fa/Te in section 1; physical-plane conventions in 00/20/50; optional cases in 85 | Constant Gaussian base law is an assumption; empirical PSD/APD/occupancy, antenna factors and front-end recovery remain separate evidence |
 | Outage and source completion | Native source/calendar contract in 00; declared all-path versus surface-only attenuation | Hidden evaluator truth, continuous state and quiet slots; no known future fade or packet length is disclosed to the receiver |
 
-**Numerical checks before use.** Reproduce the pinned LFMF reference tests,
-return codes and both radiator power normalizations; verify the 6.02 dB
-receive-gain convention explicitly. Check carrier-center and translated-band
-limits. Check mixed-route reversal, equal-layer and zero-thickness limits,
+**Numerical checks and implementation gates.** The pinned LFMF reference tests,
+return codes, power normalizations and independent smooth-earth comparisons
+were executed in 90 §1.1; the implemented receive-power constants and 6.07 dB
+reference difference are explicit above. Mixed-route reference calculations
+and the slab scalar limits are also recorded. Native adapter checks must still
+cover carrier-center and translated-band limits, mixed-route reversal,
+equal-layer and zero-thickness limits,
 Fresnel endpoints, ray delay signs, the six coherent MF comparisons and
 continuous event phase. Compare the deterministic wanted path at Fs=960 and Fs=48,000 where both are
 valid, with the same continuous phase/delay history. Verify noise PSD and receiver
@@ -385,8 +475,37 @@ equivalent noise bandwidth separately: equal seed numbers at different sample
 rates do not create the same noise realization. Refine the delay/filter operator
 once; do not use a failed containment check or aliasing to characterize receiver
 sensitivity.
-The historical field tables in 90 were not regenerated here and are not exact
-acceptance targets for a newly pinned solver.
+The historical field/range/phase/height calculations were regenerated in 90.
+Their printed rounding and constant-radius model are explicit; they are
+arithmetic references, not independent evidence of physical accuracy.
+
+**Severity and time/dependence map (GW15).** “Moderate,” “adverse” and “severe”
+below rank the specified conditional mechanism or receiver stress. They are
+not site percentiles, and rows do not define one naturally probable joint event.
+
+| Mechanism and source → selected case | Moderate/reference | Adverse/severe or outage comparison | Time/correlation and observable consequence |
+| --- | --- | --- | --- |
+| P.368/LFMF field → 1M-A, 30M-A/E | Fixed homogeneous soil or smooth sea, declared antenna plane | Poor land, longer sea range, changed refractivity or lower C/N0 | Material/geometry constant throughout a record. Field weakens; environmental evolution and mode identity are not inferred from loss |
+| P.368 Annex2; Nishioka relative recovery → 1M-B/B2 | Homogeneous and coastal amplitudes on the same curves | Unequal land segments, reversal, equivalent-distance comparator | Spatial recovery, not temporal fading. Delay/phase control remains synthetic; no random coastal phase draws |
+| Gracely/Handbook; Blomquist; P.527 → 1M-C1 | Fixed reference material state | Dry/frozen half-space alternatives; season-sign counterexample retained in 20 | Months/season and daily statistics differ. Soil, vegetation, refractivity and skywave may share causes; no fitted joint law or imposed freeze-transition time |
+| Layered boundary theory; Hehenkamp adjacent MF → 1M-C2 | Zero-thickness/equal-medium limits | Specified soil or ice slab | Static boundary response only; not a 100 km propagation gain. Snow/permafrost/ice field and temporal corrections remain unvalidated |
+| Chilcote day/night evidence; distinct P.1147/P.1321 observables → 1M-D | Quiet A; weak return R=−10 dB | Comparable/strong return R=0/+10 dB, coherent null, prescribed onset | Same source, continuous phase, shared path copies; geometry delay known, gain/drift/onset chosen. Spectral-power records do not determine complex taps |
+| Barrick mean impedance; contradictory coastal/radar observables → 30M-B2 | Smooth or low mean-loss comparison | Published stronger mean-loss branch with perturbation warning; directional-spectrum alternative | State fixed per record; mean field is separate from fluctuations. Salinity/tide/wave history needs joint inputs, not independent marginal maxima |
+| Explicit sensitivity rather than measured phase → 1M-A phase alternative, 30M-B | No prescribed variation | Stated level/phase functions and phase-lag alternative | Exact periodic controls, never labeled a wind-sea process or calibrated groundwave PSD |
+| Fresnel/two-ray geometry; NTIA spot loss; Casciato ideal coast → 30M-C/F | Unobstructed scalar ray/short route | Edge obstruction, raised receiver, actual-frequency observed-loss comparison | Geometry fixed; spatial ripple is not time Doppler at a stationary terminal. Moving foliage/buildings lack a selected temporal law |
+| P.843/Haakinson meteor, Hansen duct episode, SIMONe nearby modes → 30M-D | Surface/ray reference with declared absent competitor control | Specified delayed same-source term; separate mechanism-specific candidate branches in 25 | +1 Hz/5 ms/onset/duration are controlled choices, not bounds on meteor/auroral spectra or rates. Unknown natural competitors are not certified absent |
+| P.341/P.372; explicit Fa/Te → sections1/2, 85 alternatives | Fixed reference antenna and Gaussian noise | Named noise/impulse/blocker/antenna alternatives from85 | Common receiver plane required. Instrument/antenna drift and interference are separate from propagation; no silent power renormalization |
+| Physical-source/calendar contract → 1M-E, 30M-E | Source ends after its actual native emission | Deep finite fade, surface-only disappearance, total wanted disappearance | All relevant delayed tails retained; only evaluator knows source/fade. A surviving same-source return may carry DATA; non-detection is conditional, not exact physical zero |
+
+The component evidence in 25 does not supply a calibrated **180 dB** mode ranking.
+Meteor arrival rate, aircraft RCS/trajectory, duct refractivity, backscatter
+geometry, ocean scattering and auroral event conditioning remain separate
+inputs. The new 32.55 MHz SIMONe source establishes coexistence and selection
+limits, not direct-path-relative calibration. Its selected radar products are
+not a weak-signal IQ replay. A scientifically conditioned severe branch must
+retain each unknown competitor as an explicit alternative or “unmeasured”;
+the surface-only branch is only the declared control. These research selections
+allow later implementation without claiming universal extreme probabilities.
 
 **Model uncertainty.** Run the stated conductivity, refractivity, path-ratio and
 dependence alternatives as distinct paired controls. Add alternative receiver
@@ -432,7 +551,57 @@ passive reflection magnitudes (0.46389184 for the soil slab, 0.94396540 for the
 ice slab). An asymmetric arbitrary-field example checked the forward/reverse
 Millington algebra; it was not an LFMF propagation calculation. Local link
 targets existed and `git diff --check` passed. These were arithmetic and document
-checks, not a groundwave solver, native DSP implementation or receiver trial.
+checks. The later executed reference work in 90 additionally covers all 95
+official LFMF vectors (5 valid, 90 invalid), 144 field/loss pairs, 216 range
+thresholds, 18 conductivity magnitude/phase pairs, 45 height cells and 12
+power-normalization pairs. Independent complex residue checks cover 96 cells;
+maximum agreement errors are about 0.000201 dB and 0.0000133 rad. Official versus
+original unrounded fields differ by at most 0.05475 dB for the compared set,
+with a documented near-range curvature-branch difference. These are solver
+arithmetic checks, not a native DSP implementation or receiver trial.
 The explicit research inputs replace earlier instructions such as “specify a
 measured spectrum” inside a nominally runnable case; the unavailable measured
-rough-sea and layered-path alternatives remain separately identified.
+complex rough-sea and full layered-path alternatives remain separately
+identified. Chapter 25 records actual Phase 1 data analysis and the SIMONe
+public-payload transfer limit; chapter 20 records the AM archive's PSD-only
+contents and unresolved frequency-index details. None was relabeled as a
+calibrated complex-channel replay. Temporary source data are reproducible from
+the URLs/hashes; durable findings and small reproducing expressions remain here.
+Temporary downloads and parses under `/tmp/fable-ground-research` served review
+of these receipts and were removed after its acceptance. The large
+AM nightly archive was already removed after its inventory and byte checks;
+its public identifier, hashes, decoding inputs and results above remain.
+
+## 7. Individual groundwave research dispositions
+
+These are the final research-pass dispositions for GW01–GW16 in
+[87](87-evidence-remediation-audit.md), dated 13 November 2026. “Completed”
+means the stated source/data/calculation or specification work was performed;
+it never means that a missing empirical channel was measured. The full source
+access and named-item ledgers remain in [20](20-groundwave-1mhz.md) and
+[25](25-groundwave-30mhz.md), rather than being duplicated here.
+
+| Item | Completed research and consuming result | Remaining boundary and classification |
+| --- | --- | --- |
+| **GW01 — near-1 MHz coherent channel** | Targeted source/data review plus inspection of one complete AM nightly archive and the public dataset manifest. The inspected product is relative PSD, with explicit cadence, hash, shape and unresolved frequency-index details. This supports night/Doppler context and the quiet-versus-synthetic distinction in 1M-A/D. | A matched, calibrated 1–600 s groundwave-dominant complex record was not found. Its acquisition is external measurement work; PSD cannot supply missing phase. Reproducing the archived Doppler ridge would additionally require the identified processing/index metadata and would still not close this channel requirement. |
+| **GW02 — seasonal/day-to-day behavior** | Source comparisons separate mean deviation, rms, monthly/seasonal medians, path length and possible skywave. Read Blomquist's cold-region body and the R-Mode estimator/mitigation bodies; preserve contrary winter enhancement and calibration effects. Consumed by 1M-C and the severity map. | Seasonal cause and joint soil/vegetation/refractivity/skywave dependence remain unresolved in the evidence. No universal coefficient or cross-band temporal process is fitted. A contemporaneous matched environmental/complex record is external evidence, not a remaining unnamed literature task. |
+| **GW03 — conductivity and mixed paths** | Fixed Nishioka's actual 1.242 MHz coastal geography and its modeled materials; established FCC map units/vintage without pretending to obtain a precise current raster. Executed same-input Millington and equivalent-distance comparisons in both directions (1M-B2; 90 §1.6). Slab and complete-path quantities are separate. | The observations have unknown receive gain and no phase calibration. The comparison uses LFMF curves, not official FCC service curves or GRWAVE parity. Local maps and a field survey remain needed for a deployment prediction; the research controls use explicit tuples. |
+| **GW04 — ice, snow and frozen layers** | Checked Hill–Wait title/DOI/NIST routes; retained the full-read Hehenkamp 308/319 kHz model and its unvalidated status. Added cold-region contrary evidence, and explicitly separated frozen half-space, finite TM slab and complete curved-earth propagation in 1M-C. | Primary Hill–Wait originals remain access-limited; no uniquely imported equation depends on them. No matched MF ice/snow/permafrost measurement was found. Boundary checks do not validate an end-to-end ice gain; a qualified layered propagation implementation is later work. |
+| **GW05 — MF competing skywave** | Reconciled P.1147 composite loop observable versus P.1321 per-mode illustration, retaining the printed disagreement without assigning it wholly to physics or antenna projection. Defined geometry delay, post-receiver-plane ratio, phase, onset and coherent cancellation separately in 1M-D. | No matched near-1 MHz complex tap distribution or joint event prevalence. R, phase trajectory and ramp remain explicit controls. The historical crossover arithmetic is conditional and does not qualify a whip-receiver range. |
+| **GW06 — named MF sources** | Every named original/lead has a read, access-limited or explicitly noncritical disposition in 20, including the two newly read R-Mode papers and empirical archive findings. No source is described as read merely because its record was found. | Unselected originals do not supply hidden numerical coefficients. The identified empirical gaps remain external; the selected equations have reviewed ITU/NTIA support. |
+| **GW07 — NTIA archive and Parts II/III** | Downloaded, inventoried and parsed Phase 1; read the primary methods and sample records in Parts II/III. Reproduced six principal-site count/quantile rows, a paired loss-unit check and distance-stratified censoring example. Manifest, hashes, code and antenna/site exceptions are durable in 25; consumed by 30M-F. | These are spot received-loss observations at their actual 20/50 MHz frequencies, not exact 30 MHz complex data. No terrain solver fit was executed. A per-site fit would require the report-specific geometry/date/calibration inputs and retention of nondetections. |
+| **GW08 — Rogers NLOS campaign** | Rechecked exact title/authors and available proceedings routes; the two-page primary contribution remains the only recovered body. Its campaign description is retained as context. | No fuller numerical outcomes or raw data recovered. It sets no loss/phase law and does not prove a surface-wave mode. A later public data release would be new evidence. |
+| **GW09 — upper-HF temporal channel** | Reviewed actual observables in Hansen, Kirincich–Emery, Halverson, NTIA and the newly read SIMONe source; separated power, spot loss, radar products and complex phase. 30M-B/D retain explicitly chosen temporal controls. | No matched long-path 20–50 MHz forward groundwave complex/phase record found. Stationarity, fluctuation PSD and a natural temporal distribution remain unvalidated; a coherent campaign is external work. |
+| **GW10 — rough sea and salinity** | Selected the full-read Barrick1970 mean-impedance theory as the mathematical basis; recorded spectrum/roughness limits and adjacent-frequency observational confounders. Added a source-conditioned mean-loss comparison in 30M-B2. Corrected the unsupported forward K/PSD inference. | Mean-loss theory does not determine incoherent fluctuation power or covariance. Barrick1971/Forget1982 bodies remain access-limited; no selected coefficient requires an unread body. A matched wave spectrum/complex channel is external; a full spectral impedance solver is a later implementation alternative. |
+| **GW11 — atmosphere, terrain and structures** | Read Casciato2003's explicit 30 MHz coast/height theory; combined its applicability limits with NTIA terrain methods and existing short-range 40 MHz evidence. Kept Fresnel/two-ray controls, constant-radius versus atmosphere limits and source-specific loss conventions. | No calibrated long-path urban/forest/building temporal law or modern PE/FDTD field-validation claim. Homogeneous height gain cannot predict a cliff. A chosen terrain solver would need separate numerical and matched physical qualification. |
+| **GW12 — competing modes and 180 dB** | Audited each retained meteor/aircraft/duct/backscatter/sea-clutter claim. Added full-read SIMONe32.55 MHz coexistence and processing limits; inspected its public dataset metadata and archive header. The 30M-D/E branches distinguish surviving wanted paths from total disappearance. | No calibrated 180 dB mode ranking, general event-rate law or direct-path-relative competitor spectrum. SIMONe payload range transfer timed out/failed connection; no payload replay claimed. That specific transfer/processing dependency matters only if a selected-product replay is pursued. |
+| **GW13 — named upper-HF sources** | Every previously named upper-HF source/phenomenon has a disposition in 25, including source substitutions, the actual NTIA analysis, resolved Casciato identity, new backscatter evidence and shared P.372 reconciliation. | Unselected or access-limited bodies do not underpin new numerical claims. “Not found” is limited to recorded routes, not proof that a phenomenon or dataset does not exist. |
+| **GW14 — numerical verification** | Pinned LFMF public vectors, power normalizations, field/range/height/radius/conductivity results and independent complex residue checks were executed in 90. Section 6 reports their scope; source hashes and tolerances are in 90. Mixed-path and scalar boundary checks are explicit. | Numerical agreement is not field validation. Native streaming fractional delay, sample-rate invariance, full noise/receiver planes, physical completion and modem outcomes are later implementation tests; none was counted as passed. |
+| **GW15 — severity and coverage** | Section 5 maps every retained mechanism to its baseline/adverse/severe or outage comparison, source class, time/dependence status and receiver implication. Added coastal model disagreement, mean-sea-loss theory and observed terrain comparator without turning them into random natural laws. | Unmeasured dependence and extreme probabilities remain unknown. The Cartesian product of conditional stresses is not a measured natural worst case or a reliability prediction. |
+| **GW16 — classical originals** | Recorded the individually named unread classics and why reviewed P.368/HDB-GW/NTIA equations or implementations suffice for the selected calculation. No broad recovery campaign is required by a uniquely used original result. | Revisit an original if a future selected solver depends uniquely on it. Current completion does not claim that every historical publication was obtained or read. |
+
+No web-search-budget exhaustion prevented this pass. Public-data availability,
+source reading, arithmetic verification, native implementation and empirical
+qualification remain distinct outcomes. Better physical models and numerical
+implementations can supersede these choices when their domains and evidence
+are established.

@@ -2,10 +2,10 @@
 
 - **Part of.** [High-fidelity weak-signal channels for the triple Robust Modem](README.md). Conventions and evidence grades are defined in [00-method-and-modem-context](00-method-and-modem-context.md).
 - **What this is.** Model calculations made for this set, to check numbers in the chapters against an independent implementation. Every value here is graded [E]. None is a measurement, and none replaces a cited source: where a chapter quotes a source and this appendix differs, the source governs unless the difference is explained.
-- **How it was made.** Pure-Python scripts using only the standard library, written for this work and run on 13 November 2026 in the session's scratch directory. They are not part of the repository. Each section states the formulas and assumptions needed to reproduce its numbers.
+- **How it was made.** The original calculations used standard-library Python scripts. On 13 November 2026 the surviving scripts were recovered and checked using pinned official NTIA C++ routines, a separate complex Airy-root calculation and independent C++ lunar quadrature. Python only orchestrated these small research calculations and compared results. No modem implementation or receiver performance was tested. Reproduction inputs, algorithms, versions and numerical residuals are recorded below; temporary source copies and outputs are not repository dependencies.
 - **Related chapters.** groundwave [20](20-groundwave-1mhz.md) and [25](25-groundwave-30mhz.md); sub-9 kHz [10](10-sub9khz-propagation.md), [11](11-sub9khz-antennas-links-and-practice.md) and [12](12-sub9khz-noise.md); Earth–Moon–Earth [40](40-eme-lunar-scattering-and-geometry.md) and [41](41-eme-systems-practice-and-environment.md); skywave [31](31-skywave-dispersion-midlatitude-nvis-longhaul.md) and [33](33-hf-channel-models-and-simulators.md); noise [12](12-sub9khz-noise.md) and [50](50-noise-and-interference-mf-hf.md).
 
-**Current numerical evidence (13 November 2026).** [86](86-statistics-and-calculation-checks.md) independently reproduces the scalar antenna, field/noise, EME range/gain, mirror-path, width and integration calculations and selected lunar integrals. The original ground-wave residue-series implementation is absent: checking 144 field-to-loss conversions does **not** independently reproduce its fields, threshold distances, height effects or complex phase. Those historical solver outputs remain illustrative, not acceptance targets or calibrated scenario inputs; the material checks and their propagation into claims are tracked in [C09](87-evidence-remediation-audit.md#c09). The Fable scenario chapters specify their own selected laws; in particular the selected eleven-node lunar law in [84](84-scenarios-eme.md) is different from this chapter's illustrative Hagfors/diffuse table. The numerical coverage table in 86 states exactly which quantities were checked.
+**Current numerical evidence (13 November 2026).** The earlier statement that the ground-wave source was absent was incorrect: the original `xcheck/airy_gw.py`, `mk_tables.py`, `gw_more.py` and lunar scripts survived in the original research scratch directory. Section 1.1 now independently checks the actual fields, loss thresholds, height and radius effects, and complex conductivity response, rather than only converting fields to losses. Section 3.3 independently checks all eight whole-disc and six beam-limited lunar laws, including every Doppler-width column. [86](86-statistics-and-calculation-checks.md) records the complementary scalar checks. These are checks of the stated mathematical models, not measured path validation. The selected eleven-node lunar law in [84](84-scenarios-eme.md) remains a different law from this appendix's illustrative Hagfors/diffuse mixture.
 
 ## 1. Smooth-earth ground wave
 
@@ -24,9 +24,32 @@ The roots t_s satisfy w1′(t) = q w1(t), where w1 is the Airy-type function 2�
 
 The ground classes are the eight of P.368 (σ in S/m, ε_r): sea water 5, 70; land 3×10⁻², 40; wet ground 10⁻², 30; land 3×10⁻³, 22; medium dry ground 10⁻³, 15; dry ground 3×10⁻⁴, 7; very dry ground 10⁻⁴, 3; fresh-water ice 10⁻⁵, 3. The effective earth-radius factor is 4/3 unless stated.
 
-Self-checks passed: Ai(0) and Ai′(0) to 15 digits; the first ten zeros of Ai and Ai′ to six digits; continuity of the series/asymptotic Airy evaluation to about 5×10⁻⁴ relative at the switch-over radius; |W| → 1 for a perfect conductor at short range (0.999 at 5 km, 0.989 at 20 km at 1 MHz); and flat-earth and spherical-earth results within 0.25 dB at 5–40 km over 3×10⁻³ S/m at 1 MHz.
+The original calculation reported these internal self-checks: Ai(0) and Ai′(0) to 15 digits; the first ten zeros of Ai and Ai′ to six digits; continuity of the series/asymptotic Airy evaluation to about 5×10⁻⁴ relative at the switch-over radius; |W| → 1 for a perfect conductor at short range (0.999 at 5 km, 0.989 at 20 km at 1 MHz); and flat-earth and spherical-earth results within 0.25 dB at 5–40 km over 3×10⁻³ S/m at 1 MHz.
 
-**Agreement with the chapters.** The research passes for [20](20-groundwave-1mhz.md) and [25](25-groundwave-30mhz.md) wrote their own residue-series codes and checked them against the P.368-9 curves, NTIA test vectors and Barrick's curves. Their reported 1 MHz values (sea 68.5 dB(µV/m) and 73.5 dB at 100 km; 10 mS/m 50.5 and 91.5 dB; 3 mS/m 37.8 and 104.2 dB; 1 mS/m 29.3 and 112.7 dB; 118.7 dB at 300 km over 10 mS/m) are identical to the tables below to 0.1 dB. Their 30 MHz values (sea 132 dB at 100 km and 186 dB at 300 km; land 131 dB at 10 km and 182 dB at 100 km; 180 dB reached at about 280 km over sea and 57–113 km over land) agree to within 1 dB. Three implementations agreeing shows the arithmetic is consistent. It does not validate the model for any real path.
+**Independent reproduction receipt.** Historical printed values were checked against repository revision `280b32e47af6f2066fcc44a8966d6af0b220d706`. The reference is [NTIA LFMF v1.1 at commit `57886e9d0a29fd8f04a6416dc3f782322f5a3589`](https://github.com/NTIA/LFMF/tree/57886e9d0a29fd8f04a6416dc3f782322f5a3589), with its [test-data submodule at `d3cc4d6efff973b1a4fac4dbf3074439aa3246ba`](https://github.com/NTIA/LFMF-test-data/tree/d3cc4d6efff973b1a4fac4dbf3074439aa3246ba). The public routine returns field magnitude, basic loss and a conventional received power; it does **not** return complex phase. The official code uses `a_e = 6370/[1 − 0.04665 exp(0.005577 N_s)]` km. Matching the original radius **6371 × 4/3 km** therefore requires **N_s = 301.1043147623609**, not 301 and not the **301.0199014826777** used for **6370 × 4/3 km** in [82](82-scenarios-groundwave.md). All ground tables below retain their original rounded normalization, `109.54` and `142.0`; the official code uses its own SI constants and rounded 4.77 dBi transmitter gain. This small normalization difference is retained in the comparison.
+
+For complex checking, a separate wrapper evaluated the displayed residue sum using the official `WiRoot(s, …, q, …, AiryKind::WONE, AiryScaling::WAIT)` roots and `Airy(…, WONE, WAIT)` values in place of the original custom Airy/Newton/continuation code. It used `ε_c = ε_r − i σ/(2πf ε₀)`, `G_s(h) = w1(t_s − kh/ν)/w1(t_s)`, `ν = (ka/2)^(1/3)`, and the displayed `exp(+iωt)` convention. Summation at 400 and 800 roots checked truncation. Relative phase is unwrapped sequentially in the listed conductivity order, anchored to the first conductivity at each distance. This is an independent special-function/root implementation of the **same mathematical theory**, not an empirical phase measurement. Taking an absolute value from the public API alone would not have closed the phase check.
+
+The following were actually executed. Residuals against printed tables include their display rounding; they are **numerical comparison results, not physical error bars**.
+
+| Check and full inventory | Result |
+| --- | --- |
+| Official `LFMF_Examples.csv`: 95 vectors, of which 5 are valid and 90 intentionally invalid | All 95 return codes and all 5 valid solution-method enums matched; all 15 valid field/loss/power values within the published 0.1 dB tolerance; maximum residual 0.047503 dB |
+| 144 field-strength and basic-loss pairs in §1.2 | Original rerun reproduces fields within 0.049727 dB of the printed values. Official field vs unrounded original: maximum 0.054745 dB, at 30 MHz/ice/3 km, where the original uses a flat-earth approximation and the reference includes curvature correction. Official vs printed: maximum 0.072896 dB in field and 0.064284 dB in loss |
+| 96 cells in the original residue-series region | Independent complex reference vs original: maximum 0.000201 dB in magnitude and 0.000013292 rad in phase; 400→800-root change at most 0.000001913 dB and 0.000000121 rad |
+| All 216 loss-threshold distances in §1.3 | Public LFMF, 48 geometric bisections on 0.001–10,000 km; largest distance difference from print 0.805010 km (500 kHz, sea, 140 dB: 1962.805010 vs 1962 km). Maximum final loss residual 3.64×10⁻¹² dB. At the shortest 30 MHz/ice/100 dB cell, 0.753810 km rounds to 0.8 km: its 6.13% displayed relative difference is predominantly coarse distance rounding |
+| All 21 radius sensitivities in §1.4 | Independent complex reference vs print: maximum 0.049517 dB; 400/800-root results identical at double precision for these cells. The un-refracted 6371 km case is an explicit mathematical extension, outside the public routine's allowed refractivity interval |
+| All 18 conductivity magnitude/relative-phase pairs | Maximum printed residual 0.049296 dB and 0.004939 rad; maximum 400→800-root phase change 2.81×10⁻⁹ rad |
+| All 45 antenna-height losses | Public API vs print: maximum 0.061244 dB. Complex reference with original normalization vs print: 0.049253 dB; 400/800-root magnitudes identical at double precision for these cells |
+| Four frequency-derivative cases in §1.4 | Independently reproduced; 400/800-root endpoint results identical at double precision. Group delay and its variation are now distinguished explicitly |
+| All downstream noise/loss choices and ranges in §1.5 | **11 noise cases × 2 antenna-loss choices = 22 loss targets; two ground classes give 44 distances**, not 24. Exact noise formulas, rather than displayed rounded F_a, give maximum distance difference 0.753059 km |
+| 12 paired 1 W/1 kW power-plane checks: 1/30 MHz × sea/3 mS/m land × 30/100/300 km, zero heights, N_s = 301 | Field rises by 30 dB (maximum residual 1.43×10⁻¹⁴ dB); basic loss is invariant (maximum residual 5.69×10⁻¹⁴ dB) |
+
+For a short reproducible public-API check, use vertical polarization, 1 kW, zero heights, the matched refractivity above, and 100 km. Expected `(E, L_b)` in dB are `(68.489835437, 73.496154814)` at 1 MHz over sea, `(37.847171738, 104.138818513)` at 1 MHz over 3 mS/m land, `(39.150484393, 132.377930952)` at 30 MHz over sea and `(−9.972689615, 181.501104961)` at 30 MHz over that land. The full matrix inputs are the ground constants, frequencies, distances and heights printed in §§1.2–1.4. For a threshold, repeatedly replace the lower or upper geometric bracket endpoint according to whether the returned basic loss is below or above the target; retain valid return codes and verify the final loss, not only the distance.
+
+Build used Debian `g++ 14.2.0-19`, `-O2 -std=c++17 -shared -fPIC`, the pinned `include/` directory, a small public-call/complex-sum wrapper, and the source files `LFMF.cpp`, `ValidateInputs.cpp`, `ResidueSeries.cpp`, `FlatEarthCurveCorrection.cpp`, `Airy.cpp`, `WiRoot.cpp`, `wofz.cpp` (seven library translation units), with no source modification. An initial all-source compile lacked the build-system definitions `LIBRARY_NAME`/`LIBRARY_VERSION` needed by `ReturnCodes.cpp` and failed **before any numerical assertions**; compiling the stated computational closure resolved that setup issue. No failing numerical vector was suppressed. For provenance, SHA-256 of the official downloaded archive was `37afe4dc6198fb926d93fb2749adffd4b8d6775a12545c8310851011b6d2ffe6`; the stable individual-source hash for `LFMF.cpp` is `a36f146dcf120d08d2432d12947c8ac89658af4a873724963c52828cd979ae99`, and `LFMF_Examples.csv` is `cb17a9334f3f51a226d1cd025047dd98d0ec0f77533362771cd9e2e24e16f2c2`. The recovered original `airy_gw.py` hash is `d1113c9d7ad6fc854ebefa6f42b09db75436c954a2886b510b6ec9bbf2e1313e`. These pins plus the equations and complete input grids identify the calculation independently of the temporary scratch path. Temporary source copies, wrappers and result files served review of this receipt and were removed after acceptance; this specification and its observed check results are retained.
+
+**Applicability.** Public LFMF input bounds include 0.01–30 MHz, 0–50 m antenna heights, 250–400 N-units and 0.001–10,000 km distance; allowed inputs do not mean every real path in that rectangle is described adequately. The original switch at `x < 0.06` is different from LFMF's switch at `d < 80/f_MHz^(1/3)` km and its curvature-corrected flat solution. P.368-9's GRWAVE exponential atmosphere, P.368-10's linear-atmosphere formulation and this constant-effective-radius LFMF calculation must not be called identical physics; see [20](20-groundwave-1mhz.md). Agreement supports arithmetic and the selected smooth-earth model. It does not validate real terrain, mixed-media paths, surface roughness, temporal conductivity fluctuations or an operating receiver.
 
 ### 1.2 Field strength and basic transmission loss
 
@@ -118,7 +141,7 @@ Distances in km; ground-level antennas; 4/3 earth radius.
 
 ### 1.4 Sensitivities
 
-**Effective earth radius.** Changing the factor from 4/3 to 1 (no atmospheric refraction) lowers the field by the following amounts, in dB. It matters at 30 MHz and beyond a few hundred kilometres at MF; ITU-R P.368 uses an exponential atmosphere instead of either constant factor.
+**Effective earth radius.** Changing the factor from 4/3 to 1 (no atmospheric refraction) lowers the field by the following amounts, in dB. It matters at 30 MHz and beyond a few hundred kilometres at MF. These are constant-radius sensitivity controls: P.368-9 GRWAVE uses an exponential atmosphere, while P.368-10 describes a linear-atmosphere formulation. Neither is reproduced merely by choosing one constant radius.
 
 | Frequency, ground | 100 km | 300 km | 1,000 km |
 | --- | ---: | ---: | ---: |
@@ -138,7 +161,7 @@ Distances in km; ground-level antennas; 4/3 earth radius.
 | 100 km | −18.9 dB, 0 | −32.1 dB, +0.07 | −35.6 dB, +0.20 | −40.2 dB, +0.52 | −42.7 dB, +0.86 | −43.5 dB, +1.05 |
 | 300 km | −36.8 dB, 0 | −49.4 dB, +0.26 | −52.9 dB, +0.42 | −57.6 dB, +0.77 | −60.1 dB, +1.13 | −60.9 dB, +1.33 |
 
-A halving of conductivity between 10⁻³ and 5×10⁻⁴ S/m changes this calculated 100 km field by 2.5 dB and its phase by 0.34 rad. The few-microhertz figure follows only if that phase difference evolves smoothly over hours; it is not an observed phase trajectory or a demonstrated bound on within-message frequency error. The calculation also does not establish that amplitude is the receiver-relevant effect: that depends on the temporal law, path, reference phase, and modem response. Chapter 20's seasonal amplitude observations have their own frequency, path, and estimator limits. Do not select amplitude-only variation for a time-varying scenario until [C09](87-evidence-remediation-audit.md#c09) closes the solver/phase applicability question.
+A halving of conductivity between 10⁻³ and 5×10⁻⁴ S/m changes this calculated 100 km field by 2.5 dB and its phase by 0.34 rad. The few-microhertz figure follows only if that phase difference evolves smoothly over hours; it is not an observed phase trajectory or a demonstrated bound on within-message frequency error. The calculation also does not establish that amplitude is the receiver-relevant effect: that depends on the temporal law, path, reference phase, and modem response. Chapter 20's seasonal amplitude observations have their own frequency, path, and estimator limits. The independent phase calculation above closes the numerical reproduction question. It does not supply a measured temporal law, so an amplitude-only time-varying scenario still needs its own physical justification.
 
 **Antenna height at 30 MHz.** L_b in dB with both antennas at the stated height.
 
@@ -154,13 +177,22 @@ A halving of conductivity between 10⁻³ and 5×10⁻⁴ S/m changes this calcu
 | Dry ground, 3×10⁻⁴ S/m | 10 m | 145.3 | 156.3 | 175.5 | 207.0 | 237.2 |
 | Dry ground, 3×10⁻⁴ S/m | 30 m | 127.7 | 138.6 | 157.8 | 189.3 | 219.4 |
 
-In this smooth-earth calculation over land at 30 MHz, raising both antennas from ground level to 30 m reduces the computed loss by 24–33 dB. The calculation gives a small loss increase over seawater. Its attribution to seawater conductivity and surface-wave dominance is not independently established by these height tables; retain it as a solver interpretation pending the field, height, and mechanism checks in [C09](87-evidence-remediation-audit.md#c09).
+In this smooth-earth calculation over land at 30 MHz, raising both antennas from ground level to 30 m reduces the computed loss by 24–33 dB. The calculation gives a small loss increase over seawater. The independent public API and complex-root calculations reproduce that sign, so it is a property of this selected smooth-surface solution rather than an isolated implementation discrepancy. It is not a general prediction for a raised real seawater antenna: direct/reflected space waves, terrain and actual antenna coupling require their own calculation. The table alone does not isolate a unique physical mechanism for a measured height dependence.
 
-**Frequency selectivity across a 3 kHz channel.** Over 3×10⁻³ S/m land, W changes by less than 0.07 dB in amplitude and less than 0.03 µs in group delay across 3 kHz at 1 MHz (100 and 300 km), and by less than 0.002 dB and 0.003 µs at 30 MHz (30 and 100 km). Within this selected smooth, homogeneous-earth calculation and listed frequencies/distances, the computed response changes little across 3 kHz. These cells do not establish that all real ground-wave paths are flat or that any observed selectivity must come from other mechanisms: mixed media, terrain, roughness, layering, skywave, antenna and receiver effects are outside this comparison. The numerical result also depends on the unrecertified field solver noted in [C09](87-evidence-remediation-audit.md#c09).
+**Frequency selectivity across a 3 kHz channel.** For 3×10⁻³ S/m land, evaluate the independent complex W at `f₀ ± 1500 Hz`. The signed amplitude tilt is `20 log₁₀|W₊/W₋|`; the phase-secant group delay is `−arg(W₊/W₋)/(2π·3000)`. To measure **variation of group delay**, estimate the local derivative at each endpoint with an additional ±10 Hz central difference and subtract those two delays. The original prose confused a group-delay value with its variation.
+
+| Centre frequency; distance | Amplitude tilt across 3 kHz | Secant group delay of W | Endpoint-to-endpoint change of local group delay |
+| --- | ---: | ---: | ---: |
+| 1 MHz; 100 km | −0.057046 dB | −0.028002 µs | −0.00011707 µs |
+| 1 MHz; 300 km | −0.068316 dB | +0.023191 µs | −0.00011381 µs |
+| 30 MHz; 30 km | −0.00096731 dB | +0.00016351 µs | +0.00000004947 µs |
+| 30 MHz; 100 km | −0.00143302 dB | +0.00256629 µs | −0.00000008845 µs |
+
+These delays describe the **attenuation function**, with the common propagation delay `d/c` removed; a negative entry is not a negative arrival time. The 30 MHz central derivative evaluates the analytic residue model just above 30 MHz as well as below; it is not an out-of-range public-LFMF acceptance claim. Within these four smooth, homogeneous-earth cases the calculated response changes little across 3 kHz. Mixed media, terrain, roughness, layering, skywave, antennas and receiver response are outside this comparison; the result does not establish that every real ground-wave path is flat.
 
 ### 1.5 What the GUI's "180 dB at −164 dBm/Hz" corresponds to on a ground-wave path
 
-From section 3.1 of [00](00-method-and-modem-context.md), a GUI path loss of 180 dB against −164 dBm/Hz reproduces a real link's C/N0 when L_b + F_a + X = 193.5 dB, where X is the transmitting antenna's loss relative to an ideal short monopole. The table gives the corresponding L_b and the smooth-earth distances, for X = 0 and X = 20 dB. Man-made F_a are the ITU-R P.372 median formulas (c − d log f_MHz: quiet rural 53.6/28.6, rural 67.2/27.7, city 76.8/27.7); galactic 52 − 23 log f_MHz; the night atmospheric values are the 1 MHz range given in [50](50-noise-and-interference-mf-hf.md). This assumes the external noise stays above the receiver's own noise after receive-antenna losses.
+From section 3.1 of [00](00-method-and-modem-context.md), a GUI path loss of 180 dB against −164 dBm/Hz reproduces a real link's C/N0 when L_b + F_a + X = 193.5 dB, where X is the transmitting antenna's loss relative to an ideal short monopole. The table gives the corresponding L_b and the smooth-earth distances, for X = 0 and X = 20 dB. Man-made F_a are the ITU-R P.372 median formulas (c − d log f_MHz: quiet rural 53.6/28.6, rural 67.2/27.7, city 76.8/27.7); galactic 52 − 23 log f_MHz; the night atmospheric values are the 1 MHz range given in [50](50-noise-and-interference-mf-hf.md). This assumes the external noise stays above the receiver's own noise after receive-antenna losses. The field/available-power plane is the total field at a grounded, lossless short vertical receiving antenna: `P_av = E_dBµV/m − 20 log₁₀(f_MHz) − 78.5 dBm`, with effective aperture `0.75 λ²/(4π)`. It is not the public LFMF `P_rx` convention; see §4. Solve ranges with unrounded `F_a` and `L_b = 193.5 − F_a − X`; displayed rounded loss targets are labels, not the inversion inputs. These are C/N₀ equivalences under the stated assumptions, not communication-success ranges.
 
 | Frequency | Noise case | F_a | Equivalent L_b and distance, X = 0 | X = 20 dB |
 | --- | --- | ---: | --- | --- |
@@ -178,15 +210,49 @@ From section 3.1 of [00](00-method-and-modem-context.md), a GUI path loss of 180
 
 "Land" is 3×10⁻³ S/m, ε 22, with ground-level antennas. The ground-wave distances at MF at night are not usable alone: beyond the fading zone the sky wave dominates ([20](20-groundwave-1mhz.md), [30](30-skywave-signal-level-and-outages.md)). At 30 MHz over land, elevated antennas, terrain and competing modes govern ([25](25-groundwave-30mhz.md)).
 
+### 1.6 Mixed-path reference control
+
+A bounded additional calculation addresses the 1.242 MHz, 19 km land plus 71 km sea profile discussed in [20](20-groundwave-1mhz.md), sourced there to Nishioka, Inasawa and Miyashita (2014). For this **control**, use the same pinned LFMF, 1 kW, zero heights, `N_s = 301.0199014826777`, land `(σ, ε_r) = (0.001, 15)` and sea `(5, 70)`. For total distance `d > l = 19 km`, let `E_L(d)` and `E_S(d)` be the homogeneous fields in dB(µV/m). The reciprocal Millington estimate is
+
+    E_mix(d) = [E_L(l) + E_S(d) − E_S(l)
+                + E_S(d−l) + E_L(d) − E_L(d−l)] / 2.
+
+At `d = l`, use the homogeneous land value without calling a zero-distance solver.
+
+| Distance | Homogeneous land | Homogeneous sea | 19 km land then sea, Millington |
+| --- | ---: | ---: | ---: |
+| 19 km | 57.326177 | 83.855695 | 57.326177 |
+| 30 km | 49.028822 | 79.788803 | 61.888994 |
+| 50 km | 39.626383 | 75.125498 | 59.642799 |
+| 90 km | 28.318421 | 69.442402 | 55.027506 |
+
+All entries are calculated field strengths in dB(µV/m). The initial recovery after the coastline is part of this reciprocal mixed-path construction. This is not a reproduction of the paper's exponential-atmosphere GRWAVE calculation, an absolute fit to its unknown receiving gain, or measured validation of this constant-radius implementation.
+
+A same-input comparison also applies the **equivalent-distance algorithm** described in FCC 47 CFR **73.183(d)–(e)**, whose propagation curves are in 73.184. At the interface, find an effective sea distance `x` for which `E_S(x) = E_L(19 km)`, then continue along the sea curve for the physical sea-segment length. Reversing the path instead matches the first sea-segment field to a distance on the land curve, then adds 19 km. The algorithm keeps the interface field continuous and is not constructed to be reciprocal. [Official 2025 text, including 73.183(d)–(e) immediately before 73.184](https://www.govinfo.gov/content/pkg/CFR-2025-title47-vol4/pdf/CFR-2025-title47-vol4-sec73-184.pdf).
+
+For the **same LFMF curves and constants as above**, the forward equivalent sea distance at the first boundary is **246.301119318 km**, with field **57.326176758 dB(µV/m)**. Field inversion used 48 geometric bisections over 0.001–10,000 km, with all final interface residuals below 10⁻⁹ dB.
+
+| Total path | Reciprocal Millington | Equivalent distance, land→sea | Equivalent distance, reversed sea→land | Forward minus reverse |
+| --- | ---: | ---: | ---: | ---: |
+| 19 km, land only | 57.326177 | 57.326177 | 57.326177 | 0 dB |
+| 30 km | 61.888994 | 56.661127 | 54.655940 | 2.005187 dB |
+| 50 km | 59.642799 | 55.479029 | 52.792259 | 2.686770 dB |
+| 90 km | 55.027506 | 53.199046 | 50.632386 | 2.566660 dB |
+
+The first three numerical columns are fields in dB(µV/m). Reversing the segments leaves the Millington expression unchanged, whereas equivalent-distance stitching changes these fields by 2.0–2.7 dB. This controlled comparison isolates the stitching algorithm: it is **not an official FCC curve prediction**, because those curves specify different normalization and sea permittivity (80 rather than this calculation's 70), among other model choices. It also does not infer conductivity or calibrate an absolute link from the relative Japanese measurements.
+
+
 ## 2. A 61 m antenna below 9 kHz
 
 ### 2.1 Assumptions
 
 - **Capacitance.** A bare vertical wire, height h = 60.96 m and radius a: C = 2πε₀h / (ln(h/a) − 1), giving 339 pF for a = 1 mm, 403 pF for 5 mm and 786 pF for a 0.3 m tower-like radius. "Bare wire" below uses 340 pF; "top-loaded" assumes 1 nF, an illustrative value for a modest top hat.
 - **Effective height.** h/2 = 30.5 m for the bare wire; 50 m assumed for the top-loaded case.
-- **Radiation resistance.** R_r = 160π²(h_e/λ)², for a short monopole over perfect ground. Radiated power I²R_r is then numerically the e.m.r.p.
+- **Radiation resistance and power plane.** R_r = 160π²(h_e/λ)², for a short monopole over perfect ground, with **rms base current** I. Radiated power I²R_r is then numerically the e.m.r.p. This reference has directivity 3; if a source explicitly means e.r.p. relative to a half-wave dipole, the conversion is `(3/1.64) P_rad`, about +2.62 dB. An unexplained source label “ERP” is not enough to choose that conversion. Antenna input power includes the stated loading and ground losses, and is not radiated power.
 - **Losses.** Loading-coil Q of 300 (loss X_C/300), plus 60 Ω of ground and environment loss. Both are assumptions; real values vary widely ([11](11-sub9khz-antennas-links-and-practice.md), [55](55-equipment-and-front-end-effects.md)).
-- **Field.** E = 120π I h_e/(λ d), the inverse-distance radiation field at 100 km, ignoring the Earth–ionosphere waveguide. At 100 km this is an order-of-magnitude reference only; [10](10-sub9khz-propagation.md) gives the waveguide treatment.
+- **Field.** E = 120π I h_e/(λ d) is the rms inverse-distance radiation field at 100 km. Together with R_r this gives `E² = 90 P_emrp/d²` in SI units, hence 300 mV/m at 1 km for 1 kW, consistent with §1. This is a radiation-field reference, not a VLF waveguide solution. The parenthesized magnetic fields in §2.3 use the additional plane-wave relation `B = E/c`; Earth–ionosphere modes and local/reactive fields need their actual vector field impedance. [10](10-sub9khz-propagation.md) supplies the propagation treatment. The capacitance/effective-height/loss assumptions here are not automatically the selected antenna law in [81](81-scenarios-sub9.md).
+
+The selected circuit branch in [81](81-scenarios-sub9.md) instead specifies a 61 m vertical with a 122 m horizontal top wire, 2 mm wire diameter, **C₀ = 0.902 nF, h_e = 49.8 m, coil Q = 400, ground resistance 30 Ω and tanδ = 0.003**. This appendix's generic top-loaded example uses 1 nF, 50 m, Q = 300 and a combined 60 Ω ground/environment allowance. Those are different circuit inputs, so its current, voltage, efficiency and antenna-input power rows must not be copied into 81 without recalculation. A common 200 ft height does not establish the same current moment or radiated power. Modal field fits in 81 also retain their cited electric/magnetic component and power convention; the inverse-distance radiation reference here does not determine those transfers.
 
 ### 2.2 Electrical parameters
 
@@ -220,9 +286,9 @@ The loading inductance resonates the antenna capacitance: 340 pF at 8.27 kHz nee
 - Several entries exceed practical insulation and corona limits. If the antenna voltage is capped at 30 kV, the bare wire at 8.27 kHz is limited to 0.53 A and 0.31 mW radiated, whatever the transmitter power, and the top-loaded case to 1.6 A and 7.3 mW. Voltage, not transmitter power, is then the binding limit; [11](11-sub9khz-antennas-links-and-practice.md) and [55](55-equipment-and-front-end-effects.md) give the limits reported in practice.
 - The loaded bandwidth is a few hertz to tens of hertz. A 0.06 Hz-wide signal sees a flat response, but the antenna's resonance sets the phase: a fractional capacitance change ΔC/C detunes the resonance by Δf₀/f₀ ≈ −ΔC/(2C) at fixed inductance. At a fixed operating frequency the magnitude of the resulting phase change is about arctan(Q ΔC/C) (its sign depends on the transfer-function convention). For a 1 % change that is 35° at Q = 70, 57° at Q = 155 and 63° at Q = 200. A capacitance that wanders with wind or rain therefore acts as phase noise on the transmitted carrier, separate from any propagation effect.
 
-### 2.4 C/N0 at 100 km against measured noise levels
+### 2.4 Formal field/noise comparisons at 100 km
 
-The fields of section 2.3 are compared with four noise field densities at 8.27 kHz: the minimum and maximum of the ITU-R P.372 below-10 kHz figure as digitised in [12](12-sub9khz-noise.md) (F_a 147.8 and 174.7 dB, giving 3.4 and 75 µV/m/√Hz by E_n = F_a + 20 log f_MHz − 95.5), and the Stanford 8 kHz monthly mean envelope densities of 7.5 and 38 fT/√Hz reported there, converted by E = cB to 2.25 and 11.4 µV/m/√Hz. The Stanford values are mean envelopes, not rms, so these two columns are indicative only.
+The fields of section 2.3 are compared with four noise field densities at 8.27 kHz: the minimum and maximum of the ITU-R P.372 below-10 kHz figure as digitised in [12](12-sub9khz-noise.md) (F_a 147.8 and 174.7 dB, giving 3.4 and 75 µV/m/√Hz by E_n = F_a + 20 log f_MHz − 95.5), and the Stanford 8 kHz monthly mean envelope densities of 7.5 and 38 fT/√Hz reported there, converted by E = cB to 2.25 and 11.4 µV/m/√Hz. The Stanford values are mean envelopes, not rms, and the magnetic receiver observes a different field component from this ideal electric monopole. Thus the two Stanford columns are **formal plane-wave/envelope comparisons**, not calibrated available-power C/N₀. Even a statistical envelope-to-rms conversion would not establish the mode impedance, directional noise distribution or receiving-antenna calibration. The P.372 columns likewise retain the specified ideal antenna and digitized noise assumptions; no actual 100 km link was measured here.
 
 | Case | Field at 100 km | P.372 minimum | 7.5 fT/√Hz | 38 fT/√Hz | P.372 maximum |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -242,7 +308,9 @@ The nearest power-line harmonic to 8.27 kHz is the 165th of 50 Hz (8,250 Hz) or 
 | 50 Hz grid, n = 165 | 1.7 Hz | 3.3 Hz | 8.2 Hz | 16.5 Hz | 33.0 Hz |
 | 60 Hz grid, n = 138 | 1.4 Hz | 2.8 Hz | 6.9 Hz | 13.8 Hz | 27.6 Hz |
 
-A grid deviation of a few tens of millihertz corresponds to a several-hertz harmonic-frequency offset under the stated multiplication. That is much wider than the modem's 0.06 Hz occupied bandwidth. The table gives frequency offsets, not a measured line trajectory or its starting separation from a selected signal; it therefore does not establish a crossing within minutes or show that a fixed comb notch fails to follow a particular line. Those claims require a measured time series with line presence, initial offset and crossing rate, or should remain conditional controls. See [C12](87-evidence-remediation-audit.md#c12).
+A grid deviation of a few tens of millihertz can move a harmonic by several hertz, but the nearest nominal lines begin **20 Hz below** and **10 Hz above** 8270 Hz. An actual crossing requires the 50 Hz grid to reach `8270/165 = 50.1212121212 Hz`, or the 60 Hz grid to reach `8270/138 = 59.9275362319 Hz`. Wander smaller than those required signed offsets never reaches the carrier in this ideal harmonic model.
+
+For a locally linear grid-frequency rate `α` in Hz/s, a present harmonic moves at `nα`; its residence time across occupied width B is `B/|nα|`, conditional on the trajectory actually crossing. For example, **assumed**, not measured, `|α| = 0.001 Hz/s` and `B = 0.0625 Hz` give 0.3788 s for n = 165 and 0.4529 s for n = 138. Moving a harmonic by 1 Hz over 60 s instead requires grid rates of 0.00010101 and 0.00012077 Hz/s respectively. Offsets alone establish neither occurrence probability nor a “within minutes” crossing. Those occurrence claims are withdrawn; a measured line-presence/trajectory record is needed to estimate them. A tracked comb and a fixed notch are distinct controls whose effect depends on their actual tracking bandwidth and the observed trajectory.
 
 ## 3. Earth–Moon–Earth
 
@@ -286,38 +354,61 @@ The 160 Hz value at 1.2 µrad/s agrees with the 164–165 Hz maximum reported fo
 
 ### 3.3 Doppler spectrum and delay profile from assumed scattering laws
 
-The echo is integrated over the visible hemisphere with σ⁰(φ) = (1 − f_d)·k_q · (C/2)(cos⁴φ + C sin²φ)^(−3/2) + f_d·k_d · cosⁿφ. This is a Hagfors quasi-specular term plus a diffuse term, normalised so that the diffuse share of whole-disc power is f_d. A surface point at fractional radius r contributes at excess delay (2a/c)(1 − cos φ) and at a Doppler offset proportional to its projected distance from the apparent rotation axis. Widths are fractions of the limb-to-limb width LL (multiply by LL from section 3.2 to get hertz). The parameter values are illustrative spans, not fits: [40](40-eme-lunar-scattering-and-geometry.md) discusses measured parameters and transfer limits near 5 cm. Widths in the tables below are this chapter's model outputs; [86](86-statistics-and-calculation-checks.md) independently checks selected delay integrals but not every FWHM, −10 dB, rms or percentile Doppler-width column. Those columns, and the resulting dish-size/6 Hz interpretations, remain conditional until the width calculations and convergence are independently reproduced. See [C10](87-evidence-remediation-audit.md#c10).
+The echo is integrated over the visible hemisphere with an assumed **cross-section per unit physical surface area**,
+
+    σ⁰(φ) = (1 − f_d) k_q (C/2)(cos⁴φ + C sin²φ)^(−3/2)
+            + f_d k_d cosⁿφ.
+
+The quasi-specular and diffuse components are separately normalized so that f_d is the diffuse fraction of whole-disc power. This fixes the area convention: a law quoted per projected area needs conversion before substitution. A surface point has excess delay `(2a/c)(1 − cos φ)` and a Doppler offset proportional to its projected displacement from the rotation axis. All Doppler widths below are fractions of the full limb-to-limb width LL. The parameters are illustrative spans, **not fitted lunar measurements**, and no OC/SC polarization ratio is inferred from this scalar law. [40](40-eme-lunar-scattering-and-geometry.md) distinguishes the measured angular, wavelength and polarization conventions.
+
+**Independent integral and convergence check.** Set `u = cos φ`, `r = sqrt(1−u²)` and `T = 2a/c = 11.5906851799454 ms`. Define `Q(u) = (C/2)[u⁴ + C(1−u²)]^(−3/2)` and `D(u) = uⁿ`. Normalize each by its integral on `0≤u≤1`; their mixture is `p(u) = (1−f_d)Q/∫Q + f_d D/∫D`. This integration measure follows directly from spherical surface area `dA ∝ du dθ`.
+
+For the same circular Gaussian power beam at both ends, let `h = HPBW / lunar angular diameter` and multiply the mixture by **`exp[−2 ln(2)(1−u²)/h²]`**, the product of the two one-way power gains. Denote the resulting law by `p_h` and its integral by Z. No beam means weight 1 and Z = 1. Reproduction equations are:
+
+    S(x) ∝ 2 ∫₀^(π/2) p_h(sqrt(1−x²) cos θ) dθ,  −1≤x≤1
+    FWHM/LL: solve S(x)/S(0) = 0.5, x≥0
+    −10 dB width/LL: solve S(x)/S(0) = 0.1
+    (2 rms Doppler width)/LL = sqrt[∫₀¹ (1−u²)p_h(u)du / (2Z)]
+    F(x) = ∫₀¹ p_h(u) A(x,sqrt(1−u²))du / Z
+    A(x,r) = 1 if r≤x, otherwise (2/π) asin(x/r)
+    Central p-power width/LL: solve F(x) = p
+    Delay moments: E[t^k] = ∫₀¹ [T(1−u)]^k p_h(u)du / Z
+    P(t<t₀) = ∫_(1−t₀/T)^1 p_h(u)du / Z
+    Relative echo power = 10 log₁₀ Z.
+
+Here Doppler frequency is `ν = (LL/2)x`; a symmetric interval `−x…x` therefore has full width `x·LL`. The “rms delay” column is the standard deviation about the mean, not `sqrt(E[t²])`. To avoid an endpoint singularity in the percentile integral, split it at `u = sqrt(1−x²)` before quadrature.
+
+A separate C++ Gauss–Legendre implementation evaluated **all 14 laws and all six Doppler-width definitions (84 quantities)**, plus 14 sets of delay moments, five delay fractions and relative power. It used 1024 then 2048 quadrature nodes, 55 bisection steps for spectral widths and 48 for central-power widths. Maximum refinement change among all 196 stored scalar outputs was **4.42×10⁻⁸** (a normalized central-power width for the narrowest beam); this is an observed quadrature refinement result, not a measurement uncertainty. The original angular histogram/trapezoid code was not reused. Two independent analytic limits also passed: diffuse-only `n=0` gives a flat Doppler spectrum, widths 1/1, `2 rms/LL = 1/√3`, central fractions equal to x, mean delay T/2 and rms delay T/√12; diffuse-only `n=1` gives `S(x) ∝ sqrt(1−x²)`, FWHM `√3/2`, −10 dB width `√0.99` and `2 rms/LL = 1/2`. At 512 nodes the largest listed analytic-percentile discrepancy was 1.04×10⁻⁹; analytic widths/moments agree to numerical precision. The quadrature implementation used `g++ 14.2.0-19`, `-O2 -std=c++17 -shared -fPIC`; SHA-256 of its temporary `moon.cpp` was `1448d7bd1f7e1f7980b706383161fcf787c4e0a8aad1d72200ede69262731341`. The equations and all inputs here are the durable reproduction specification.
 
 **Whole-disc illumination**
 
-| Law: C, f_d, n | FWHM | −10 dB width | 2 × rms | Width with 50 % of power | 80 % | 90 % | Mean delay | rms delay | Power within 0.1 / 0.5 / 1 / 2 / 5 ms |
+| Law: C, f_d, n | FWHM | −10 dB width | 2 × rms | Width with 50% of power | 80% | 90% | Mean delay | rms delay | Power within 0.1 / 0.5 / 1 / 2 / 5 ms |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| 150, 0.10, 1.5 | 0.085 | 0.28 | 0.27 | 0.091 | 0.29 | 0.49 | 1.12 ms | 2.16 ms | 0.43 / 0.68 / 0.76 / 0.83 / 0.93 |
-| 95, 0, 1.5 | 0.105 | 0.33 | 0.27 | 0.099 | 0.28 | 0.46 | 1.08 ms | 2.16 ms | 0.39 / 0.68 / 0.78 / 0.85 / 0.93 |
-| 95, 0.20, 1.5 | 0.111 | 0.45 | 0.32 | 0.127 | 0.39 | 0.59 | 1.52 ms | 2.40 ms | 0.31 / 0.56 / 0.66 / 0.76 / 0.89 |
-| 65, 0.25, 1.5 | 0.140 | 0.63 | 0.34 | 0.158 | 0.44 | 0.63 | 1.78 ms | 2.52 ms | 0.24 / 0.49 / 0.60 / 0.71 / 0.88 |
-| 65, 0.25, 1.0 | 0.139 | 0.65 | 0.35 | 0.160 | 0.46 | 0.66 | 1.92 ms | 2.68 ms | 0.24 / 0.49 / 0.59 / 0.69 / 0.86 |
-| 40, 0.35, 1.0 | 0.196 | 0.90 | 0.39 | 0.213 | 0.53 | 0.71 | 2.38 ms | 2.82 ms | 0.16 / 0.38 / 0.49 / 0.61 / 0.82 |
-| 40, 0.50, 1.0 | 0.226 | 0.96 | 0.42 | 0.253 | 0.58 | 0.74 | 2.72 ms | 2.87 ms | 0.12 / 0.31 / 0.42 / 0.54 / 0.78 |
-| 20, 0.50, 1.0 | 0.366 | 0.99 | 0.44 | 0.291 | 0.61 | 0.76 | 2.98 ms | 2.91 ms | 0.08 / 0.24 / 0.36 / 0.50 / 0.76 |
+| 150, 0.10, 1.5 | 0.085 | 0.284 | 0.273 | 0.091 | 0.286 | 0.492 | 1.117 ms | 2.158 ms | 0.429 / 0.677 / 0.758 / 0.830 / 0.925 |
+| 95, 0.00, 1.5 | 0.105 | 0.327 | 0.267 | 0.099 | 0.275 | 0.459 | 1.075 ms | 2.164 ms | 0.386 / 0.680 / 0.775 / 0.851 / 0.930 |
+| 95, 0.20, 1.5 | 0.111 | 0.449 | 0.318 | 0.127 | 0.387 | 0.591 | 1.523 ms | 2.401 ms | 0.313 / 0.565 / 0.661 / 0.756 / 0.895 |
+| 65, 0.25, 1.5 | 0.140 | 0.631 | 0.344 | 0.158 | 0.441 | 0.634 | 1.783 ms | 2.520 ms | 0.241 / 0.492 / 0.599 / 0.710 / 0.876 |
+| 65, 0.25, 1.0 | 0.139 | 0.647 | 0.354 | 0.160 | 0.458 | 0.658 | 1.921 ms | 2.678 ms | 0.240 / 0.487 / 0.590 / 0.695 / 0.856 |
+| 40, 0.35, 1.0 | 0.196 | 0.899 | 0.393 | 0.213 | 0.533 | 0.711 | 2.375 ms | 2.822 ms | 0.156 / 0.379 / 0.490 / 0.614 / 0.817 |
+| 40, 0.50, 1.0 | 0.226 | 0.956 | 0.420 | 0.253 | 0.583 | 0.743 | 2.718 ms | 2.870 ms | 0.124 / 0.311 / 0.415 / 0.545 / 0.785 |
+| 20, 0.50, 1.0 | 0.365 | 0.987 | 0.439 | 0.290 | 0.608 | 0.760 | 2.980 ms | 2.907 ms | 0.077 / 0.244 / 0.358 / 0.502 / 0.764 |
 
-**Beam-limited illumination.** Law C = 40, f_d = 0.35, n = 1, the same Gaussian beam at both ends, with half-power beamwidth 70λ/D at 5,760 MHz; "Relative power" is the echo power relative to uniform whole-disc illumination at the same on-axis gain.
+**Beam-limited illumination.** C = 40, f_d = 0.35, n = 1. The exact inputs here are the **rounded ratios h = 2.34, 1.41, 0.96, 0.70, 0.28, 0.11** inherited from the original calculation. The dish/beamwidth labels approximately follow `HPBW = 70λ/D` degrees at 5760 MHz; substituting the unrounded diameter formula gives a slightly different calculation. Relative power compares to whole-disc illumination at the **same on-axis gain**, not to a smaller dish's absolute received power.
 
-| Dish diameter (beamwidth) | FWHM | −10 dB width | 2 × rms | Width with 50 % / 90 % of power | Mean delay | rms delay | Power within 0.1 / 0.5 / 1 ms | Relative power |
+| Approximate dish (beamwidth); exact h | FWHM | −10 dB width | 2 × rms | Width with 50% / 80% / 90% of power | Mean delay | rms delay | Power within 0.1 / 0.5 / 1 ms | Relative power |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| 3 m (1.21°) | 0.190 | 0.84 | 0.38 | 0.199 / 0.68 | 2.16 ms | 2.70 ms | 0.17 / 0.41 / 0.52 | −0.3 dB |
-| 5 m (0.73°) | 0.182 | 0.72 | 0.35 | 0.178 / 0.63 | 1.83 ms | 2.47 ms | 0.19 / 0.45 / 0.57 | −0.8 dB |
-| 7.3 m (0.50°) | 0.170 | 0.57 | 0.31 | 0.151 / 0.55 | 1.36 ms | 2.05 ms | 0.22 / 0.52 / 0.66 | −1.6 dB |
-| 10 m (0.36°) | 0.158 | 0.45 | 0.25 | 0.126 / 0.43 | 0.88 ms | 1.46 ms | 0.27 / 0.62 / 0.76 | −2.5 dB |
-| 25 m (0.15°) | 0.115 | 0.24 | 0.12 | 0.072 / 0.19 | 0.17 ms | 0.21 ms | 0.52 / 0.94 / 0.99 | −5.8 dB |
-| 64 m (0.057°) | 0.066 | 0.12 | 0.057 | 0.038 / 0.094 | 0.04 ms | 0.04 ms | 0.92 / 1.00 / 1.00 | −10.9 dB |
+| 3 m (1.21°); 2.34 | 0.190 | 0.837 | 0.377 | 0.199 / 0.503 / 0.684 | 2.162 ms | 2.695 ms | 0.168 / 0.405 / 0.522 | -0.326 dB |
+| 5 m (0.73°); 1.41 | 0.182 | 0.721 | 0.351 | 0.178 / 0.452 / 0.635 | 1.831 ms | 2.465 ms | 0.188 / 0.450 / 0.574 | -0.836 dB |
+| 7.3 m (0.50°); 0.96 | 0.170 | 0.570 | 0.308 | 0.151 / 0.375 / 0.546 | 1.357 ms | 2.048 ms | 0.222 / 0.524 / 0.658 | -1.593 dB |
+| 10 m (0.36°); 0.70 | 0.158 | 0.449 | 0.253 | 0.126 / 0.294 / 0.430 | 0.868 ms | 1.462 ms | 0.271 / 0.620 / 0.761 | -2.491 dB |
+| 25 m (0.15°); 0.28 | 0.115 | 0.241 | 0.118 | 0.072 / 0.145 / 0.193 | 0.164 ms | 0.210 ms | 0.523 / 0.935 / 0.990 | -5.821 dB |
+| 64 m (0.057°); 0.11 | 0.066 | 0.122 | 0.057 | 0.038 / 0.073 / 0.094 | 0.038 ms | 0.040 ms | 0.923 / 1.000 / 1.000 | -10.850 dB |
 
-What these show:
+The independent integrals correct several older histogram/rounding entries, for example the 10 m mean delay from 0.88 to **0.868 ms** and the 25 m mean from 0.17 to **0.164 ms**. More materially, the earlier prose saying the 25 m example placed half its power within **0.5 ms** was wrong: it places **52.294% within 0.1 ms** and **93.523% within 0.5 ms**.
 
-- The spectrum is peaked and heavy-tailed, not Gaussian. Its half-power width is only 8–37 % of the limb-to-limb width, while 90 % of the power needs 46–76 %. A single quoted "spread" is therefore ambiguous by a factor of three to five unless its definition is stated.
-- The delay profile is continuous from 0 to 11.6 ms, with between a quarter and two thirds of the power within 0.5 ms and 7–24 % beyond 5 ms for whole-disc illumination. It is not a pair of discrete rays.
-- Under these assumed illumination laws, a beam narrower than the Moon shortens the computed delay profile and Doppler spectrum while reducing relative echo power. The listed 25 m result places about half the modeled power within 0.5 ms. These table outputs need the independent width and convergence checks in [C10](87-evidence-remediation-audit.md#c10) before they support a dish-size conclusion.
-- **The "EME focused 6 Hz 0.5 ms" preset.** The ratio calculation compares 6 Hz with the median limb-to-limb width of about 86 Hz reported in [41](41-eme-systems-practice-and-environment.md). The dish-size estimate (about 60 m under these laws) depends on the unverified modeled Doppler-width columns, beam assumptions, and applicable libration geometry. The 0.5 ms comparison is likewise model-derived and depends on the selected delay law. Treat both as hypotheses for further check, not an established preset equivalence. The distinction between a modeled result and the measured scattering evidence in [40](40-eme-lunar-scattering-and-geometry.md) is tracked in [C10](87-evidence-remediation-audit.md#c10).
+The modeled spectrum is strongly peaked with substantial tails. Whole-disc FWHM spans 8.46–36.55% of LL, whereas its central 90%-power width spans 45.92–75.98%. These width definitions must accompany any number. The modeled delay profile extends continuously from 0 to 11.59 ms; whole-disc power within 0.5 ms spans 24.45–67.97%, and power beyond 5 ms spans 7.03–23.63%. A narrower beam concentrates the modeled delay and Doppler distributions and reduces their whole-disc-relative power. This is an integrated result for the assumed law, not evidence that a measured Moon follows that law.
+
+**The “EME focused 6 Hz 0.5 ms” preset.** Condition on LL = 86 Hz, C = 40, f_d = 0.35, n = 1, identical Gaussian beams, a 0.518° lunar diameter and the **unrounded** `70λ/D` beam formula. Solving the integrals for a 6 Hz width gives **58.93 m for FWHM**, **50.09 m for twice rms**, or **91.45 m for central 90%-power width**. The unrounded solutions were rechecked at 2048 nodes (the last refined to 91.44561173 m), with maximum residual from 6 Hz below 3×10⁻¹⁰ Hz. Thus the old “about 60 m” estimate is specifically a FWHM comparison; there is no unique dish equivalent to an undefined 6 Hz spread. These three solutions have mean delays 0.04376, 0.05672 and 0.02090 ms respectively, and fractions within 0.5 ms of 0.999948, 0.999462 and more than 0.999999999. A 0.5 ms support, rms spread, mean or percentile is also a different quantity in each case. A Gaussian modem spread generally specified as twice rms must be compared with that same definition, while retaining the non-Gaussian lunar shape. Neither this calculation nor matching one width establishes an equivalent joint delay–Doppler channel, a calibrated K1JT estimator output, or an empirical preset. The ephemeris, scattering, polarization and estimator choices in [40](40-eme-lunar-scattering-and-geometry.md), [41](41-eme-systems-practice-and-environment.md) and [84](84-scenarios-eme.md) remain necessary.
 
 ### 3.4 Station figures at 5,760 MHz
 
@@ -345,11 +436,21 @@ One-way rotation Ω = 2.36×10⁴ · B∥ · TEC / f² rad, with B∥ = 40 µT, 
 | 1,296 MHz | 0.056 rad (3.2°) | 0.56 rad (32°) |
 | 5,760 MHz | 0.0029 rad (0.16°) | 0.029 rad (1.6°) |
 
-For the tabulated TEC examples, the single-leg Faraday rotation at 5,760 MHz is small; the frequency change across 225 Hz is smaller still under the same formula. This does not by itself establish negligible polarization impact for every two-leg EME geometry, magnetic-field direction, polarization convention, or receiver calibration. Check the full path and basis before using that conclusion; see [C12](87-evidence-remediation-audit.md#c12) and [C11](87-evidence-remediation-audit.md#c11).
+For a two-leg 5760 MHz calculation, use the **slant** electron-column integral on each leg and the signed magnetic projection in a consistent propagation/polarization basis. The table above replaces that integral by a constant 40 µT times TEC. Without assuming cancellation, the magnitude of the combined rotation is bounded by the **sum of the two leg magnitudes**. The following conditional bounds assume each leg has the listed TEC and `|B∥|≤40 µT` throughout that column.
+
+| TEC on each leg | Bound on combined rotation | Additional loss for initially aligned linear antennas | Bound on rotation change across 225 Hz |
+| --- | ---: | ---: | ---: |
+| 10 TECU | 0.00569059 rad (0.32605°) | 0.00014064 dB | 4.446×10⁻¹⁰ rad |
+| 100 TECU | 0.05690586 rad (3.26047°) | 0.0140713 dB | 4.446×10⁻⁹ rad |
+| 1000 TECU, stress assumption | 0.56905864 rad (32.6047°) | 1.48954 dB | 4.446×10⁻⁸ rad |
+
+The linear-antenna entry is `−20 log₁₀ cos(2|Ω_leg|)` and presumes alignment before Faraday rotation, no other polarization mixing and a bound below π/2; a pre-existing near-orthogonal mismatch can be much more sensitive. For a band of full width Δf centered at f, the exact worst-signed two-leg change under the same frequency-independent column assumptions is bounded by `4|Ω_leg| (Δf/f) / [1 − (Δf/2f)²]²`. The 225 Hz entries use that expression; its leading derivative term `4|Ω_leg|·225/f` is indistinguishable at the displayed precision. The 1000 TECU row is a selected stress calculation, not an assigned occurrence rate.
+
+For ideal circular polarization, a pure uniform Faraday rotation has Jones eigenvalues `exp(±iΩ)`: it changes phase but not power in a matching circular basis. This does not remove lunar cross-polar scattering, leakage, spatially varying rotation or basis/handedness changes at reflection. Thus **differential Faraday rotation across the narrow channel** is bounded and very small under these assumptions; **total linear-polarization mismatch** is small for the 10/100 TECU examples, potentially material for the 1000 TECU control, and not universally negligible. Exact two-leg geometry and the receiver polarization convention must be supplied to make a specific link claim.
 
 ## 4. Noise conversions
 
-From section 3.1 of [00](00-method-and-modem-context.md): N0 = −174 + F_a dBm/Hz at the terminals of a lossless reference antenna, and E_n = F_a + 20 log f_MHz − 95.5 dB(µV/m) in 1 Hz for a short vertical monopole. The magnetic flux density uses the plane-wave conversion B = E/c. This is a formal comparison for a propagating plane wave; local reactive fields and Earth–ionosphere modes need their actual E/H impedance, so it does not calibrate a VLF magnetic receiver.
+From section 3.1 of [00](00-method-and-modem-context.md): N0 = −174 + F_a dBm/Hz at the terminals of a lossless reference antenna, and E_n = F_a + 20 log f_MHz − 95.5 dB(µV/m) in 1 Hz for a short vertical monopole. The field relation is the **total field** at a grounded short vertical monopole, whose receiving effective aperture is `0.75λ²/(4π)` in this convention ([00 §3.1.1](00-method-and-modem-context.md#311-grounded-monopole-reference-plane-check), following P.341 Annex 3). With exact SI constants at 290 K, `P_av = E_dBµV/m − 20 log₁₀(f_MHz) − 78.46538 dBm` and the 1 Hz noise-field constant is −95.50981; the rounded −78.5/−95.5 forms above are consistent approximations. In contrast, the pinned LFMF implementation reports `P_rx = E_dBµV/m − 20 log₁₀(f_MHz) − 72.43`: this differs by **6.07 dB** from the rounded grounded-total-field formula, or **6.03538 dB** from its SI form. The ideal receiving-aperture ratio 3/0.75 alone is **6.02060 dB**; the residual reflects the code's rounded constants. Do not insert that API power directly into the P.372 grounded-antenna noise plane. [82](82-scenarios-groundwave.md) makes the same separation. The magnetic flux density uses the plane-wave conversion B = E/c. This is a formal comparison for a propagating plane wave; local reactive fields and Earth–ionosphere modes need their actual E/H impedance, so it does not calibrate a VLF magnetic receiver.
 
 | Frequency | F_a | N0 | E_n | E_n | B_n |
 | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -407,7 +508,15 @@ In this fixed-height mirror construction, the displayed 7 ms separation occurs o
 | 7 ms | 48 Hz | 71 Hz | 143 Hz | 0.08 / 0.99 / 0.23 |
 | 11 ms | 30 Hz | 45 Hz | 91 Hz | 0.85 / 0.45 / 0.08 |
 
-For the listed carriers and delay profiles, the calculated correlation oscillates with τ: it is high at 0.5–2 ms, nearly zero at 7 ms, and high again at about 13 ms. This comparison does not prove that two discrete paths are a worst case across admissible channels; no extremum over a defined channel class has been established. A continuous delay profile can smooth this particular periodic pattern. Keep the two-path result scoped to the shown example until [C12](87-evidence-remediation-audit.md#c12) records the applicable bound or narrower conclusion.
+The correlation oscillates for **a fixed two-ray spacing**, separately at each carrier separation. It is not simultaneously small at all three separations: for example the 7 ms row gives 0.07846 at 75 Hz but 0.98769 at 150 Hz. The earlier general statement “nearly zero at 7 ms” was therefore too broad.
+
+A precise extremum is available for a defined channel class. Let P be a nonnegative normalized delay-power measure supported in an interval of width D, and assume uncorrelated scattering so that `ρ(Δf) = ∫ exp(−i2πΔfτ) dP(τ)`. For `|Δf|D ≤ 1/2`, rotate the interval midpoint to phase zero. Every phasor then has real part at least `cos(π|Δf|D) ≥ 0`, so
+
+    |ρ(Δf)| ≥ cos(π|Δf|D),       |Δf|D ≤ 1/2.
+
+Two equal power masses at the interval endpoints attain the bound. For `|Δf|D ≥ 1/2`, the infimum is **zero**, attained by two equal masses separated by `1/(2|Δf|)` inside the interval. Hence the complete minimum over this class is the cosine bound up to the first zero and zero thereafter; it does **not** oscillate back upward. As a counterexample to calling endpoint rays universally worst: with D = 7 ms and Δf = 150 Hz the endpoints give 0.98769, while rays separated by 3.3333 ms give zero; at 75 Hz a 6.6667 ms separation likewise gives zero.
+
+This proves a scoped mathematical bound and identifies its attaining profiles. It does not extend to arbitrary correlated taps, complex signed cross-power, fixed additional moments, simultaneous optimization at several Δf, or decoder error probability. A continuous delay profile can smooth a two-ray periodic pattern but is not automatically better for every receiver or carrier spacing.
 
 **Coherent-integration loss on a diffusely fading path.** Mean energy collected by a fixed-phase coherent integration of length T on a Rayleigh path with a Gaussian Doppler spectrum of 2σ width B, relative to a static path:
 
@@ -431,6 +540,6 @@ The 3 dB point is at B·T ≈ 1.3, consistent with the "about 3 dB at roughly 1.
 
 - The ground-wave model is smooth and homogeneous. It contains no mixed paths, terrain, buildings, vegetation, ducting or sea roughness, and no sky wave.
 - The antenna model uses assumed capacitance, effective height and losses. It does not include corona, insulator leakage, environmental losses varying with weather, or the waveguide field structure beyond 100 km.
-- The lunar model uses assumed scattering laws, a geometric delay–Doppler mapping and Gaussian beams. It contains no regional albedo variation, no polarisation, no ephemeris-driven rotation vector and no measured 5–6 cm data, which [40](40-eme-lunar-scattering-and-geometry.md) reports do not exist in the sources found.
+- The lunar model uses assumed scattering laws, a geometric delay–Doppler mapping and Gaussian beams. The integrals are now independently reproduced, but contain no regional albedo variation, polarization or ephemeris-driven rotation vector. No measurement was fitted to these illustrative parameters. The available wavelength-specific measurements and public products, including their transfer limits, are assessed separately in [40](40-eme-lunar-scattering-and-geometry.md) and [84](84-scenarios-eme.md); absence of a fit here must not be represented as absence of all relevant lunar data.
 - The skywave delay table uses a mirror model with fixed heights and no group retardation. Its tabulated mode differences do not bound actual multi-hop delays or discriminate discrete modes from scatter. Equal-hop reflection points are imposed geometrically; visibility and ionospheric support must also be checked before treating any row as a physical mode.
-- None of these calculations has been compared with a measurement made for this work. Their value is as an independent check on arithmetic and conventions, and as a statement of what simple physics alone predicts.
+- Numerical reproduction of the displayed ground and lunar quantities, the antenna/power crosswalk, conditional harmonic/Faraday bounds and scoped correlation extremum are completed here. Empirical calibration of those laws, measured temporal statistics, native simulator implementation and communication-success testing are separate work. None of these calculations was compared with a measurement made for this work; their value is arithmetic/convention checking and explicit conditional physical predictions.

@@ -361,7 +361,7 @@ instead of treating a metadata UTC-like field as a surveyed precision epoch.
 | --- | --- |
 | [LoRa receive JSON](https://zenodo.org/records/5832579/files/camras-rx-2021_10_05_14_38_49.sigmf-meta?download=1) | `cf32_le`, SigMF1.0.0, sample rate2000000, frequency433800000 Hz, sample_start0, datetime 2021-10-05T13:38:53.200000; hardware description names LR1110 and Ettus B210; annotations empty |
 | [CW transmit/receive JSON](https://zenodo.org/records/5832579/files/camras-txrx-2021_10_05_13_31_37.sigmf-meta?download=1) | Same complex float format/sample rate/frequency; datetime 2021-10-05T12:31:41.2; CW description; empty annotations |
-| Matching IQ file listings | LoRa receive96.0 MB, displayed MD5`6e525853ef03204e4d42c2756c29a943`; CW80.0 MB, MD5`9372d0232c1b102c4156f1e956fcc7e3`. Checksums were read from the repository listing, **not verified against downloaded sample bytes** |
+| Matching IQ file listings | LoRa receive96.0 MB, displayed MD5`6e525853ef03204e4d42c2756c29a943`; CW80.0 MB, MD5`9372d0232c1b102c4156f1e956fcc7e3`. The complete LoRa file was downloaded and its MD5 independently verified from96,000,000 bytes; CW remains unacquired because the first capture resolves the selected relative-observable question |
 | Metadata license fields | Explicit `https://creativecommons.org/licenses/by/4.0/` in both inspected JSON files; preserve creator attribution on reuse |
 | [Horizontal receiver log](https://zenodo.org/records/5832579/files/lora_log_horizontal.txt?download=1),13:05:22/25 and13:11:06/08 entries | Direct/echo-like pairs report decoded six-byte `PI9CAM`; the first pair’s time difference is about 2.435 s and the later echo-like entry reports SNR−16 dB. Earlier log entries have nonsensical lunar “Distance” values, so labels alone are not calibrated ranges or evidence that every entry is an echo |
 
@@ -373,8 +373,7 @@ polarization response or a denominator of all attempted packets. The dataset
 can support its own-band relative echo delay, frequency shift and packet
 reproduction after aligning actual transmit/receive windows. It cannot by
 itself estimate natural 5.76 GHz success probability, calibrated C/N0 or
-whole-disc short-wavelength scattering. No raw IQ, measured delay–Doppler
-surface or complete packet-denominator analysis was produced in this pass.
+whole-disc short-wavelength scattering. The bounded IQ analysis below reproduces a relative echo observable. A complete packet-denominator analysis remains unsupported by this record.
 The recorded 210 kHz carrier offset must be accounted for before decimation;
 it is not an unexplained lunar Doppler shift.
 
@@ -405,6 +404,118 @@ time, beam and noise metadata. This is a bounded search result, not proof that
 no such measurement exists. The nearest inspected raw-data candidate above is
 433.8 MHz; local 4.2 cm SAR and 13.9 GHz Green Bank images do not fill its role.
 
+### Executed public-record checks
+
+The SigMF result uses the creators' CC BY4.0 LoRa receive file linked above,
+not an inferred timestamp alignment. It contains12,000,000 complex samples
+(6 s); all samples are finite, maximum absolute I/Q component .48289427.
+That value alone cannot establish ADC linearity or absence of analog clipping.
+A Hann8192-bin spectral check locates the direct packet near +210 kHz and
+its occupied interval near .453–2.230 s from sample zero. After mixing by
+−210 kHz and `scipy.signal.resample_poly(x,1,40)`, analysis uses50 ksample/s.
+The direct template is [.50,2.18) s,24 disjoint70-ms blocks. The score is the
+sum of squared complex block correlations over lags2.430–2.443 s and
+**signed** echo-minus-direct frequencies−400…400 Hz, initially5-Hz spacing;
+refinement uses20-µs lag steps and .25-Hz frequency steps.
+
+The maximum is **2.43632 s, −253.0 Hz**. Independently scoring the two
+12-block halves at that frequency gives2.43634 and2.43632 s. Repeating with
+140,280,560 and1680-ms coherent blocks retains−253 Hz and2.43632–2.43634 s.
+Two deliberately displaced correspondences, at the selected lag±.3 s with
+the same blocks/frequency, score17.78 and17.59 dB lower. These are two
+negative controls, not a calibrated false-alarm experiment or independent
+capture holdout. The split halves share one packet and one recording.
+
+The matching14:38:55/57 local logger entries report intervals2.436285 and
+2.436296 s and positive instrument “Doppler”253/254 Hz; logger sign is not
+the complex-signal sign above. Their33–55 µs difference from the IQ maximum
+includes estimator, packet timestamp and instrument latency differences.
+Grid spacing is **not an uncertainty interval**. An initial positive-only
+frequency search found spurious chirp ambiguity ridges near+214 Hz and
+2.43854 s; widening the sign/search interval and changing block length
+resolved that failure. Secondary ridges remain around20-Hz/100-µs spacings,
+so reporting many decimal places as ranging accuracy would be unjustified.
+The direct/echo pair is identifiable within the record. Its unsynchronized
+absolute clock, unknown front-end gain/noise/filters and unknown attempt
+schedule still prevent absolute range calibration, C/N0 or outage probability.
+No LoRa payload was independently decoded here. A second80-MB CW capture
+would add no necessary discriminator to this bounded relative observation.
+
+Reproduction uses Python3.13, NumPy2.5.4 and SciPy1.18.1; download the
+`camras-rx-2021_10_05_14_38_49.sigmf-data` file from the linked record,
+check the MD5 above, and run this analysis recipe. It analyzes an archived
+record; it is not an operating modem implementation. Repeat the final score
+with B=7000,14000,28000,84000 and narrow frequency−280…−220 Hz for the
+block-length checks. Use the same lag grid; no fractional-delay interpolator
+or corrected absolute clock is introduced.
+
+```python
+import hashlib, numpy as np
+from scipy import signal
+path = "camras-rx-2021_10_05_14_38_49.sigmf-data"
+assert hashlib.md5(open(path, "rb").read()).hexdigest() == \
+    "6e525853ef03204e4d42c2756c29a943"
+x = np.fromfile(path, dtype="<c8")
+assert x.size == 12_000_000 and np.isfinite(x).all()
+y = signal.resample_poly(x*np.exp(-2j*np.pi*210000*np.arange(x.size)/2e6),1,40)
+fs, a, B, K = 50000, 25000, 3500, 24
+z = y[a:a+B*K]; t = np.arange(z.size)/fs
+lags = np.arange(round(2.430*fs), round(2.443*fs)+1)
+def score(freq, ll, blocks=range(K)):
+    ref = z*np.exp(2j*np.pi*freq*t)
+    power = np.zeros(len(ll))
+    for k in blocks:
+        part = y[a+k*B+ll[0]:a+k*B+ll[-1]+B]
+        v = signal.correlate(part,ref[k*B:(k+1)*B],"valid",method="fft")
+        power += abs(v)**2
+    return power
+freqs = np.arange(-400,401,5.)
+coarse = np.array([score(f,lags) for f in freqs])
+i,j = np.unravel_index(coarse.argmax(),coarse.shape)
+ff = np.arange(freqs[i]-7,freqs[i]+7.001,.25)
+ll = np.arange(lags[j]-8,lags[j]+9)
+fine = np.array([score(f,ll) for f in ff])
+i,j = np.unravel_index(fine.argmax(),fine.shape)
+print(ll[j]/fs,ff[i])
+```
+
+A different bounded check used the official PDS4 collection
+[`data_derived/2026_164_1`](https://pds-geosciences.wustl.edu/lro/urn-nasa-pds-lro_minirf_bistatic/data_derived/2026_164_1/).
+The matched product stem is `lxt_2026164122812`, location`43n326`, version`v1`;
+S1,S4 andCPR are each93×9623 little-endian float32 pixels (3,579,756 bytes).
+Labels give2026-06-13T12:28:12.680–12:38:12.508Z, orbit76356,
+DSS-13→LRO,7,147 MHz,1.6-MHz chirp,400-µs pulse,525-µs PRI and3-bit BAQ.
+The calibrated H/V labels instead describe469×481190 complex samples per
+channel: these roughly1.8-GB files were not necessary for this discriminator.
+
+The [processing description v1.0,2024-09-19](https://pds-geosciences.wustl.edu/lro/urn-nasa-pds-lro_minirf_bistatic/document/minirf_bistatic_processing_description_v1.pdf),
+§§3,6–7, distinguishes gain/phase and attenuator correction from still-developing
+full radiometric calibration; focused Stokes products are downsampled to100-m
+grids. Labels define `S4=−2 Im(H V*)` and `CPR=(S1−S4)/(S1+S4)`.
+For finite nonsentinel pixels with positive denominator, there are548,573
+usable pixels of894,939. Recomputing CPR from downloadedS1/S4 reproduces the
+publishedCPR with maximum absolute error6.619×10⁻⁸ (99th percentile4.433×10⁻⁸).
+MedianCPR=.397775;10th/90th percentiles=.288080/.555020;maximum1.545540.
+These are one local map's pixel statistics, with spatially dependent looks
+and calibration uncertainty, not independent lunar episodes or whole-disc
+polarization probabilities. The archive equation is reproduced; H/V leakage
+correction is **not** independently rederived from this three-product subset.
+Peters/Chan's correction limits remain in force, and no extra leakage matrix
+is applied twice. Neither this local map nor its “calibrated” filename establishes
+an absolute lunar cross-section or a recoverable Earth-received voltage history.
+
+| Downloaded `.img` suffix under that exact stem | SHA256 |
+| --- | --- |
+| `_s1_43n326_v1.img` | `7911f7832843f3484347044ac230d7dfd57134e284c7a7607e3b7a1053174722` |
+| `_s4_43n326_v1.img` | `c92eea707d61aae80d36b5564c2b0678eaa25daff67e8269957f70f5649aea62` |
+| `_cpr_43n326_v1.img` | `80e5f73dfed263d86c83bbb44ec3081fd20a097aed6d78b9b6db40ebfb0accfb` |
+
+To reproduce, read each with `np.fromfile(path,dtype="<f4").reshape(93,9623)`,
+convert tofloat64, reject values≤−1e30 and nonfinite values, requireS1+S4>0,
+and compare the ratio with the downloadedCPR. The null sentinel is−1e32.
+This11-MB derived-data check closes the useful local-product observability
+question without processing an entire archive. It does not calibrate84.
+
 ### Recovered scintillation source and fixed thermal interpretation
 
 The previously missing [Fang–Pontes1981 original COMSAT paper](https://www.comsat-legacy.org/COMSAT%20Technical%20Review/CTR%20Fall%201981,%20V.11--2.PDF)
@@ -434,6 +545,65 @@ than misrepresented as an independently calibrated disc-integrated 5.76 GHz
 antenna temperature. Exact topographic/thermal maps remain an optional,
 calibration-dependent extension.
 
+### End-to-end reference planes and two-leg environment
+
+At the transmit antenna port, let delivered power bePt; if power is specified
+before a feeder with linear lossLt, replacePt byPt/Lt. Antenna gains refer to
+those antenna ports. At the receiving antenna port, integrate sky/Moon/ground
+brightness against the **full** power beam forTA. A feeder of lossLr atTf
+then gives receiver-input noise
+`Tsys=TA/Lr+(1−1/Lr)Tf+Tr`; attenuate the echo by1/Lr at the same plane.
+Alternatively refer every quantity to the antenna input:
+`Tsys,ant=TA+(Lr−1)Tf+Lr Tr`. Both conventions give identicalC/N0.
+Do not multiply signal efficiency twice or use aperture efficiency as a
+substitute for a measured full noise beam. In84, Pt=40 W is delivered power,
+extra feeder losses are zero, G is the assumed realized gain, and80 K is
+already the total input-plane temperature. The executed3-m budget gives
+−152.714 dBm signal and−179.568 dBm/Hz noise, or26.855 dB-Hz.
+Actual feed losses, spillover, receiver noise, polarization covariance and
+calibration uncertainty at either hypothetical station remain unspecified
+physical properties; no measured equipment claim follows.
+
+The Gaussian main-beam/gain pair in84 implies main-beam efficiency.730580,
+not unity. Its225-K uniform Moon and2.7-K background at the selected epoch
+contribute20.334 K through the offset3-m beam; the remainder59.666 K is a
+fixed comparator term. At7 m the same calculation gives142.490 K total.
+This replaces the earlier unit-main-beam163.95-K example for D-dish while
+retaining that example as an explicitly different beam assumption. A passive
+regional radiometry map, including Yang2019's reported bias, cannot remove
+the missing site noise calibration.
+
+For a concrete two-leg weather sensitivity, take the already sourced circular
+P.838 coefficients k=.000460, α=1.606, uniform50-mm/h rain through a2-km
+vertical layer at both ends, and the selected18.476° elevation. Specific loss
+is.24621 dB/km; each assumed slant layer is6.311 km and loses1.554 dB.
+The two-leg signal loss is3.108 dB. Only the **receive** layer contributes
+local thermal brightness: with50-K internal noise,30-K clear external noise
+and275-K layer temperature, `Tsys=50+30L+275(1−L)=153.69 K`,
+L=10^(−1.554/10). TotalC/N0 degradation is5.943 dB from the80-K clear
+comparator. Uniform rain height/rate and identical-end weather are deliberate
+assumptions. This is a deterministic P.838 arithmetic example, **not** a
+P.618 annual or worst-month exceedance prediction. Gas/cloud/rain losses
+must each be integrated on the actual two paths; receive emission is added
+once, at its own reference plane.
+
+Likewise, if two hypothetical ionospheric log-amplitude fluctuations have
+variancesσA²,σB² and correlationρ, the summed fluctuation variance is
+`σA²+σB²+2ρσAσB`. Equal independent and perfectly correlated legs differ
+by a factor2 in that variance. Fang–Pontes' peak-to-peak satellite records
+supply neither these lunar variances norρ, and a strong-scattering/extended
+source cannot be reduced to that illustrative weak log-amplitude model
+without evidence.84 therefore retains named smooth-loss controls, not an
+invented storm-probability distribution. Refraction, pointing jitter, local
+multipath and blockers similarly need site records before availability can
+be computed.
+
+A targeted two-way literature check also recovered [Caton et al.2009](https://doi.org/10.1029/2008RS004047), selected original methods/results passages (§2¶5–6, §4¶12–14) through indexed article text; direct publisher opening returned403. Their ALTAIR VHF/UHF observations use passive LEO calibration spheres and a one-dimensional TEC-derived phase screen. The model treats outgoing propagation, target scattering and return propagation coherently through an effectively frozen medium; observed fades **and enhancements** are compared through10-s S4. Agreement in fluctuation statistics is not sample-for-sample prediction. This is evidence against modeling every two-way path as independent attenuation-only draws, but its short monostatic LEO round trip, point target and VHF/UHF bands do not calibrate a2.5-s, two-station, extended-Moon C-band path. A future physical phase-screen branch must propagate both fields with actual screen separation and evolution; the fixed smooth-loss branch in84 remains an explicitly different stress control.
+
+A newly inspected operator source, [Peter Blair/G3LTF, *EME Measurements and EMECalc*,2019](https://www.sm2cew.com/Moonbouncers/Orebro2019/EME%20Measurements%20and%20EMECalc_updated.pdf), pp.7,11,16–22,24–30,37–39, supplies useful practical counterchecks. It specifies feed-terminal power and receive level, separates receiver/sky/spillover/mesh noise, and warns that nominal spillover data apply at45° elevation and omit some support/edge effects. The23/6-cm ground/cold-sky examples give measured/predicted7.25/7.3 and4.75/4.9 dB with assumed target-quality factors. Those are local Y-factor comparisons, not a measured lunar fade or an independently calibrated80-K station. The presentation explicitly describes simplifying assumptions; it cannot justify treating an EMECalc default as a universal physical input. Its noise calibration examples help define the future station worksheet without requiring opaque software defaults.
+
+The final targeted queries were `Moon EME C band two way ionospheric scintillation measurements 5.7 GHz`, `lunar radar simultaneous receivers 5.8 GHz speckle correlation dish size measurements`, and `lunar radar C band coherent multifrequency correlation 2024 2025 2026` (2026-11-13). They supplied the two-way phase-screen and operator sources above, plus local/geologic and spacecraft records; no matching calibrated lunar-path fade covariance or simultaneous whole-disc C-band diversity record was identified. This narrows only those routes, not the existence of all possible data.
+
 ### Individual disposition of the historical list
 
 | Original source/topic | Current decision and residual scope |
@@ -443,7 +613,7 @@ calibration-dependent extension.
 | CMR BER/availability | Not established beyond the cited visibility/history; no success probability inferred |
 | Gebhard NRL 8300 / original NRL sources | Prior DTIC refusal retained. NASA history is sufficient for nonnumerical context; inaccessible report supplies no scenario parameter |
 | DUBUS articles / dead links | Accessible author reprints MT13/Echo22/G3WDG retained at their exact scope; missing articles supply no unique threshold or spectrum parameter |
-| EMECalc documentation | Not a selected authority;84 supplies explicit radar/beam/noise equations and assumptions instead of opaque tool defaults |
+| EMECalc documentation | Blair2019 operator presentation now inspected, including feed-terminal/noise/beam limitations; exact executable internals and a version-matched numerical comparison remain unperformed and are not selected authority |
 | RSGB microwave handbook | Not obtained; no selected parameter depends on unseen text |
 | ARRL microwave handbook | Not obtained; existing Hbk10 is identified separately, not represented as this missing book |
 | Fang–Pontes 1981 | Access remedied by full original issue; conditions and transfer limit above |
@@ -451,7 +621,7 @@ calibration-dependent extension.
 | C-band auroral scintillation | No matching lunar-path measurement found; GPS L-band storm scaling remains a sensitivity analogy only |
 | Yang 2019 | Earlier full-text remedy retained, with regional brightness/bias limits; no redundant claim of a new reading |
 | Formal Q65 design paper | Accessible quick-start, user guide and simulator remain actual authorities. A formal paper is not invented; exact 2021 curve/simulator revision remains unverified, so thresholds are not transfer-calibrated to Robust |
-|2021 LoRa analysis/presentation | Actual metadata and receiver log inspected above; promised presentation remains unlocated. Raw-IQ decoding/channel estimation is unexecuted and no success-denominator claim is made |
+|2021 LoRa analysis/presentation | Actual96MB IQ now analyzed and hash verified; relative echo delay/frequency reproduced below. Promised presentation remains unlocated; no independent packet decoding or success-denominator claim |
 | Project Echo preliminary tests recollection | Withdrawn as evidential support; no implementation/design claim depends on it |
 | Circular sense used by all 5,760 MHz stations | Not inferred as universal.84 defines the propagation-direction convention and separate receiver-port controls; cited practical feed reports remain station-specific |
 |5.7 GHz measured spectrum / widths | Visual widths near libration minima remain grey evidence with unspecified detection threshold/window, not a measured full power spectrum |
@@ -467,8 +637,7 @@ in [40](40-eme-lunar-scattering-and-geometry.md), this systems pass used
 `"lunar" "433.8" "delay Doppler" Telkamp` (Zenodo), and direct opens of the
 actual JSON/log links above. PDS/ODE product documents were followed from
 `site.pds-geosciences.wustl.edu lunar radar 4.2 cm Mini RF bistatic data`.
-These are source/contents receipts, not a claim to have processed large binary
-archives. A shell download attempt for the alternative historical ZPC scan
+These receipts are supplemented by the bounded SigMF and PDS analyses above; they do not claim an archive-wide processing campaign. A shell download attempt for the alternative historical ZPC scan
 failed at DNS resolution; web metadata/text routes remained usable. No source
 was upgraded solely because its URL existed.
 
@@ -543,7 +712,7 @@ Access status: "read" means the cited passage was read in full text; page pointe
 - OE2IGL web pages (G. Ihninger, 2022–2026), https://www.wettersat.bplaced.net/ : [OE2IGL-10] eme10ghz.html; [OE2IGL-24] eme24ghz.html; [OE2IGL-LB] emelinkbudget.html.
 - [NL2506], [NL2609], [NL2610] *432 and Above EME News* (founded by K2UYH): issue pages https://eme.radio/432-and-above-newsletter/432-and-above-2025-06 and https://eme.radio/432-and-above-newsletter/432-and-above-2026-09 ; October 2026 (vol. 55 no. 10) PDF https://eme.radio/images/newsletter/pdf/2026-10-vol-55-10.pdf
 - [Lacuna21] Lacuna Space, "First LoRa message bounced off the moon", 24 Nov 2021. https://lacuna.space/lora-moon-bounce/
-- [Zenodo22] T. Telkamp, F. Zeppenfeldt, J. van Muijlwijk and T. J. Dijkema, "SDR moonbounce signals at 433.8 MHz", data set, 29 Jan 2022, doi:10.5281/zenodo.5832579 — record, two actual SigMF metadata JSON files and horizontal receiver log inspected 2026-11-13; raw IQ not analyzed; exact receipts below.
+- [Zenodo22] T. Telkamp, F. Zeppenfeldt, J. van Muijlwijk and T. J. Dijkema, "SDR moonbounce signals at 433.8 MHz", data set, 29 Jan 2022, doi:10.5281/zenodo.5832579 — record, both metadata sidecars and horizontal/vertical receiver logs inspected2026-11-13;96-MB LoRa IQ hash verified and relative-echo analysis reproduced above.
 - [Wiki-TRSSCOMM] Wikipedia, "Technical Research Ship Special COMMunications" (tertiary; used only for the 10 kW figure). https://en.wikipedia.org/wiki/Technical_Research_Ship_Special_COMMunications
 - [EW60] "Revolutionary moon-relay communications system unveiled by Navy", Spot News, *Electronics World*, April 1960 (contemporary trade report). Transcription: https://www.rfcafe.com/references/electronics-world/electronic-industry-news-electronics-world-april-1960.htm — read.
 - [G3WDG10] C. Suckling (G3WDG), "Predicting libration fading on the EME path", 14 June 2010 (the "G3WDG libration paper"). https://bobatkins.com/radio/g3wdg_libration.html — read.
@@ -559,4 +728,4 @@ Access status: "read" means the cited passage was read in full text; page pointe
 
 - [FANG81] Fang, D. J., Pontes, M. S. (1981). *4/6-GHz ionospheric scintillation measurements during the peak of sunspot cycle 21*. COMSAT Technical Review 11(2),293–320. [Original issue](https://www.comsat-legacy.org/COMSAT%20Technical%20Review/CTR%20Fall%201981,%20V.11--2.PDF) — measurement/statistics/conclusion sections inspected 2026-11-13; satellite-link evidence. [P]
 - [MOLLEN88] Mollen, T. A., Liu, C. H., Fang, D. J. (1988). *A study of C band equatorial scintillation in the Asian sector*. Radio Science 23,337–345. https://doi.org/10.1029/RS023i003p00337 — publisher contents record/title confirmed; full text not obtained. [P]
-- [PDS-MRF] NASA PDS Geosciences/ODE. [Mini-RF derived-data documentation](https://ode.rsl.wustl.edu/Moon/pagehelp/Content/Missions_Instruments/Lunar%20Reconnaissance%20Orbiter%20(LRO)/Mini-RF/Derived.htm), [PDS4 archive](https://pds-geosciences.wustl.edu/lro/urn-nasa-pds-lro_minirf_bistatic/) — product/route text inspected 2026-11-13; binary products not analyzed. [T]
+- [PDS-MRF] NASA PDS Geosciences/ODE. [Mini-RF derived-data documentation](https://ode.rsl.wustl.edu/Moon/pagehelp/Content/Missions_Instruments/Lunar%20Reconnaissance%20Orbiter%20(LRO)/Mini-RF/Derived.htm), [PDS4 archive](https://pds-geosciences.wustl.edu/lro/urn-nasa-pds-lro_minirf_bistatic/) — labels and processing description inspected2026-11-13; selected2026S1/S4/CPR binary products analyzed above, with explicit local-observable limits. [T]

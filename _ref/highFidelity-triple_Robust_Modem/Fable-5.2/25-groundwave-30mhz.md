@@ -1,7 +1,7 @@
 # "Groundwave" near 30 MHz
 
 - **Part of.** [High-fidelity weak-signal channels for the triple Robust Modem](README.md). Evidence grades, access-status words and conventions are defined in [00-method-and-modem-context](00-method-and-modem-context.md).
-- **Scope.** Literature review only. Nothing was built or run on the modem, and no repository file outside this directory was changed.
+- **Scope.** Literature, public-data inspection and reference calculations. Nothing was built or run on the modem, and no repository file outside this directory was changed.
 - **Status.** Prepared on 13 November 2026; source attributions and access status for the selected recent groundwave studies were checked against primary full texts on this revision. Calculated budgets and unmeasured competing-mode levels remain estimates.
 - **Related chapters.** groundwave near 1 MHz [20](20-groundwave-1mhz.md); illustrative groundwave scenario specifications [82](82-scenarios-groundwave.md); skywave level [30](30-skywave-signal-level-and-outages.md); noise [50](50-noise-and-interference-mf-hf.md); independent arithmetic [90](90-cross-check-calculations.md).
 
@@ -12,7 +12,7 @@
 Conventions used throughout:
 
 - Grades: [S] standard, [P] research paper or preprint (peer-review status checked separately), [T] technical report, [B] book, [G] grey, [E] this chapter's own estimate. Access status ("read", "abstract", "secondary") is given in the reference list and repeated where it matters.
-- **Two conventions for "basic transmission loss" Lb exist and differ by 6.0 dB for ground-based antennas.** ITU-R P.368 defines Lb = 142.0 + 20 log f(MHz) − E(dBµV/m) (P.368-10 Annex 1 Note 1 [R1]); with it a perfectly conducting plane gives Lb equal to the free-space loss. Barrick, and the plane-earth/ITM/Egli literature, count the field doubling as propagation, so that the same plane gives free space minus 6 dB (Barrick 1970, text introducing Figs 7–8, about pp. 49–51 [R18]: losses over a perfect plane are "essentially 6 dB lower than the loss through free space"). NBS TN101, on which ITM rests, defines basic transmission loss with isotropic antennas "at the same locations" as the real ones, so the ground reflection is part of the propagation ([R28] §2). **Sea and smooth-earth values below are in the P.368 convention; ITM, Longley–Reasoner, Jansky & Bailey and Egli values, and this chapter's estimates for scatter modes, are in the free-space-antenna convention.** To compare smooth-earth values with ITM, plane-earth or Barrick values, subtract 6 dB from the P.368-convention number. Per P.341-7 Annex 3 [R4], two loss-free short monopoles on a perfect plane have a terminal-to-terminal loss of Lbf − 3.5 dB. For the scatter modes of table E the comparison depends on the antenna's elevation pattern: for ground-mounted verticals a P.368-convention groundwave Lb and a free-space-convention Lb for a path arriving near 45° elevation give about the same terminal-to-terminal loss (monopole gain 3cos²θ), so they are compared directly here [E]; that comparison carries about ±6 dB of bookkeeping uncertainty on top of everything else.
+- **The compared basic-loss conventions differ by about 6 dB in the ideal low-terminal, perfectly conducting-plane example; the difference is geometry-dependent more generally.** ITU-R P.368 defines Lb = 142.0 + 20 log f(MHz) − E(dBµV/m) (P.368-10 Annex 1 Note 1 [R1]); with it a perfectly conducting plane gives Lb equal to the free-space loss. Barrick, and the plane-earth/ITM/Egli literature, count the field doubling as propagation, so that the same plane gives free space minus 6 dB (Barrick 1970, text introducing Figs 7–8, about pp. 49–51 [R18]: losses over a perfect plane are "essentially 6 dB lower than the loss through free space"). NBS TN101, on which ITM rests, defines basic transmission loss with isotropic antennas "at the same locations" as the real ones, so the ground reflection is part of the propagation ([R28] §2). **Sea and smooth-earth values below are in the P.368 convention; ITM, Longley–Reasoner, Jansky & Bailey and Egli values, and this chapter's estimates for scatter modes, are in the free-space-antenna convention.** A −6.02 dB adjustment applies only to the corresponding low-terminal, same-field normalization illustrated by the perfectly conducting plane. It is not a universal conversion for arbitrary ITM terrain, antenna height, polarization or scatter paths; compare the actual source field and terminal reference instead. Per P.341-7 Annex 3 [R4], two loss-free short monopoles on a perfect plane have a terminal-to-terminal loss of Lbf − 3.5 dB. For the scatter modes of table E the comparison depends on the antenna's elevation pattern: for ideal ground-mounted verticals with **both** rays at 45°, the product of the two `3cos²θ` gains gives approximately +3.52 dB, matching the ideal grounded-short-monopole net factor. This conditional comparison is valid only if local ground enhancement is absent from the incident-field prediction and has not already been counted. Table E therefore remains a set of geometry/convention-dependent estimates, not a calibrated mode ranking [E].
 
 ## Physical mechanisms
 
@@ -54,7 +54,7 @@ For low antennas the height-gain factor is |1 + jkhΔ| per terminal, so nothing 
 Two consequences at 30 MHz, from the chapter's residue-series runs, confirmed by an independent re-computation [E]:
 
 - **Over land, height is the dominant design variable.** Raising both antennas from the ground to 10 m gains 8.3 dB (σ = 3 mS/m) and to 30 m gains 24 dB; above h0 the loss follows the plane-earth law 40 log d − 20 log(h1h2).
-- **Over sea, modest height loses signal.** Because arg Δ ≈ 44°, |1 + jkhΔ| first falls: both antennas at 30 m lose 3.7 dB and at 100 m lose 4–6 dB, while a single antenna at 300 m gains only 3–7 dB (30–100 km). The flat-earth factor recovers to unity at about 120 m; the spherical-earth series puts the break-even between about 150 and 300 m. A shore station on a 30–100 m cliff is therefore about 2 dB worse per end than one at the water's edge, before any cliff-edge diffraction effect ([R3] §9 cites Furutsu and Pielou et al. for that; not read).
+- **Over sea, modest height loses signal.** Because arg Δ ≈ 44°, |1 + jkhΔ| first falls: both antennas at 30 m lose 3.7 dB and at 100 m lose 4–6 dB, while a single antenna at 300 m gains only 3–7 dB (30–100 km). The flat-earth factor recovers to unity at about 120 m; the spherical-earth series puts the break-even between about 150 and 300 m. These homogeneous-sea height factors do not predict a station on a real cliff: the intervening land, edge diffraction, local antenna pattern and atmospheric profile change the problem ([R3] §9 cites Furutsu and Pielou et al.; originals not read). Heights above 50 m also lie outside the selected public LFMF API, though the historical residue-series calculation can explore them as theory.
 
 ### 5. Polarisation
 
@@ -76,7 +76,7 @@ A slightly rough sea can also give slightly more field than a smooth one at rang
 
 ### 8. Sea motion and Doppler
 
-The sea imposes Doppler only on energy it scatters. First-order backscatter is two discrete lines at ±f_B, with f_B = √(g/(πλ)) = 0.102√f_MHz Hz: 0.56 Hz at 30 MHz, 0.46 Hz at 20 MHz, 0.72 Hz at 50 MHz ([R19] abstract; Crombie [R20]; arithmetic [E]). For a bistatic angle φ the resonant ocean wavenumber is 2k0 cos(φ/2) and the shift is f_B√cos(φ/2), tending to zero for forward scatter. The coherent forward wave is unshifted; roughness only changes its mean attenuation. A diffuse sea-scattered component reaches the receiver from off-path patches. Using Barrick's upper-limit σ⁰ = −17 dB near grazing [R19] and integrating a patch of area about D × D/2 at the midpoint of a 50 km path, this component is estimated at roughly 25–35 dB below the direct wave, spread over 0 to ±0.56 Hz and concentrated near zero [E, order of magnitude only: P_scat/P_dir ≈ σ⁰·(4/π)·(A/D²)·|W(D/2)|⁴/|W(D)|² ≈ −17 + 1 − 3 − 2 dB with A/D² = 0.5 and the smooth-sea attenuation factors at 25 and 50 km (re-computed), reduced by 5–15 dB for partial sea development and antenna-pattern weighting]. That is a Rician K of 25–35 dB: amplitude ripple of a few tenths of a dB and phase ripple of a few degrees at sub-hertz rates. No forward-path measurement of this quantity was found. Bistatic HF radar practice is consistent with a large K but gives no number: on a 12.19 MHz SeaSonde pair the direct signal is so strong that its range-processing sidelobes mask the Bragg echo from cells near the transmitter–receiver baseline ([R53] §3.2, [P] read).
+The sea imposes Doppler only on energy it scatters. First-order backscatter is two discrete lines at ±f_B, with f_B = √(g/(πλ)) = 0.102√f_MHz Hz: 0.56 Hz at 30 MHz, 0.46 Hz at 20 MHz, 0.72 Hz at 50 MHz ([R19] abstract; Crombie [R20]; arithmetic [E]). For a bistatic angle φ the resonant ocean wavenumber is 2k0 cos(φ/2) and the shift is f_B√cos(φ/2), tending to zero for forward scatter. For a stationary ensemble the coherent mean field has no mean Doppler shift; its effective impedance changes complex propagation. That does not assert every realized forward channel has zero phase fluctuation. A diffuse sea-scattered component reaches the receiver from off-path patches. Using Barrick's upper-limit σ⁰ = −17 dB near grazing [R19] and integrating a patch of area about D × D/2 at the midpoint of a 50 km path, this component is estimated at roughly 25–35 dB below the direct wave, spread over 0 to ±0.56 Hz and concentrated near zero [E, order of magnitude only: P_scat/P_dir ≈ σ⁰·(4/π)·(A/D²)·|W(D/2)|⁴/|W(D)|² ≈ −17 + 1 − 3 − 2 dB with A/D² = 0.5 and the smooth-sea attenuation factors at 25 and 50 km (re-computed), reduced by 5–15 dB for partial sea development and antenna-pattern weighting]. The 25–35 dB value is a heuristic sensitivity choice, not a derived or measured forward-path K: importing a backscatter cross-section, a midpoint patch and an assumed 5–15 dB weighting does not establish a bistatic integral or a rigorous bound. Mean-impedance theory cannot supply the missing incoherent power/covariance. No forward-path measurement was found. Bistatic HF radar practice establishes only a geometry-specific strong direct component, not a statistical K: on a 12.19 MHz SeaSonde pair the direct signal is so strong that its range-processing sidelobes mask the Bragg echo from cells near the transmitter–receiver baseline ([R53] §3.2, [P] read).
 
 ### 9. Terrain, forest, buildings
 
@@ -152,7 +152,7 @@ Notes. (1) The two wave-spectrum models differ by up to about 5 dB at 30 MHz for
 | South (rolling) | 103 | 110 | 133 | 138 | 140 | | | |
 | Mountain | 120 | 138 | 139 | 140 | 142 | | | |
 
-Upper-to-lower decile spread within a bin: 1–13 dB on the East path, 3–13 dB North, 11–18 dB Mountain ([R24] Table 3). Path-to-path difference of medians about 20 dB regardless of distance. Multipath ripple up to 20 dB over less than 50 m, with a near-sinusoidal pattern indicating one dominant and one weaker component rather than Rayleigh fading (shown at 7.5 and 11.5 MHz). Snow 0.15–0.3 m deep had no appreciable effect at 28 MHz. Ground constants that bracketed the 28 MHz data: σ = 0.01–0.03 S/m, εr = 10–30; the worked wave-tilt example gave εr = 13.7, σ = 3.2 mS/m, and individual 28 MHz wave-tilt values ranged over about εr 13–36 and σ 2.5–25 mS/m ([R24] Table 5, App. B). Skywave was assumed negligible within 20 km and was not measured. The medians of the three lowland paths at 10 km (110–118 dB) are 10–20 dB lower than zero-height P.368-convention values for the bracketing ground constants (about 128–130 dB at 28 MHz; compare table A). The report's own figures largely explain this [E, curves read by eye to ±2 dB]. Its smooth-earth curves lie 6–10 dB below P.368-convention values for the same ground constants: about 122 against 130 dB at 10 km and 133 against 143 dB at 20 km at 28 MHz for σ = 0.03 S/m, εr = 10 (Fig. 50), and about 95 against 101 dB at 10 km at 5.25 MHz for σ = 5 mS/m, εr = 10 (Fig. 47). That offset matches the 6 dB convention difference plus a few dB of model detail, so the report's "path loss" behaves like the free-space-antenna convention. The rest is terrain: on the East path the 10 km median is about 12 dB below the report's own smooth-earth curve, and the integral-equation prediction reproduces the measured peaks and valleys ([R24] §8.3). Compare the two data sets only after a 6 dB shift and with terrain in mind. The transmitter-site elevation above the path terrain, which P.368 would count as effective antenna height, was not checked.
+Upper-to-lower decile spread within a bin: 1–13 dB on the East path, 3–13 dB North, 11–18 dB Mountain ([R24] Table 3). Path-to-path difference of medians about 20 dB regardless of distance. Multipath ripple up to 20 dB over less than 50 m, with a near-sinusoidal pattern indicating one dominant and one weaker component rather than Rayleigh fading (shown at 7.5 and 11.5 MHz). Snow 0.15–0.3 m deep had no appreciable effect at 28 MHz. Ground constants that bracketed the 28 MHz data: σ = 0.01–0.03 S/m, εr = 10–30; the worked wave-tilt example gave εr = 13.7, σ = 3.2 mS/m, and individual 28 MHz wave-tilt values ranged over about εr 13–36 and σ 2.5–25 mS/m ([R24] Table 5, App. B). Skywave was assumed negligible within 20 km and was not measured. The medians of the three lowland paths at 10 km (110–118 dB) are 10–20 dB lower than zero-height P.368-convention values for the bracketing ground constants (about 128–130 dB at 28 MHz; compare table A). The report's own figures largely explain this [E, curves read by eye to ±2 dB]. Its smooth-earth curves lie 6–10 dB below P.368-convention values for the same ground constants: about 122 against 130 dB at 10 km and 133 against 143 dB at 20 km at 28 MHz for σ = 0.03 S/m, εr = 10 (Fig. 50), and about 95 against 101 dB at 10 km at 5.25 MHz for σ = 5 mS/m, εr = 10 (Fig. 47). That offset matches the 6 dB convention difference plus a few dB of model detail, so the report's "path loss" behaves like the free-space-antenna convention. The rest is terrain: on the East path the 10 km median is about 12 dB below the report's own smooth-earth curve, and the integral-equation prediction reproduces the measured peaks and valleys ([R24] §8.3). A roughly 6 dB adjustment describes the low-height reference comparison only; a full comparison must use the actual antenna heights, fields and loss definitions, with terrain retained. The transmitter-site elevation above the path terrain, which P.368 would count as effective antenna height, was not checked.
 
 **Measured, 20 and 50 MHz, random sites, low antennas** ([R26] §2.5 and Figs 23, 25, 27, [T] read; tabulations in [R27]). CW, vertical polarisation; values are readings from the figures (±2 dB) of median and inter-decile range of basic transmission loss:
 
@@ -259,7 +259,7 @@ All for 30 MHz unless stated. "GW" = groundwave. Worst-case cells that combine e
 | Refractivity effect | ±2 dB at 100 km for k = 1–2 [E] | ±10 dB at 300 km for k = 1–2 [E] | +25 dB ducting enhancement at 32 MHz, 235 km [R15]; no documented deep fade counterpart at HF |
 | Hourly-median variability (beyond horizon, 40–88 MHz statistics) | +11/−8 dB (10 %/90 %) at 100 km [E from R28] | +13/−10 dB at 150–200 km effective distance [R28] | −19 dB (99 %), −25 dB (99.9 %); +27 dB (1 %) [R28] |
 | Short-term fading of the wanted path | none measurable (diffraction "fades slowly if at all") [R28] | Rician ripple of tenths of a dB from sea clutter [E] | Rayleigh, a few fades per minute, when troposcatter dominates (elevated sites, beyond about 100–300 km) [R9] |
-| Doppler shift/spread of the wanted GW | 10⁻⁵–10⁻⁴ Hz equivalent phase drift [E] | sea-clutter pedestal within ±0.56 Hz at −25 to −35 dB [E] | troposcatter fade spectrum of order 0.01–0.1 Hz [R9, qualitative] |
+| Doppler shift/spread of the wanted GW | 10⁻⁵–10⁻⁴ Hz equivalent phase drift [E] | synthetic sea-term sensitivity near first-order ±0.56 Hz with selected −25 to −35 dB power [E], not a measured or universal spectral bound | troposcatter fade spectrum of order 0.01–0.1 Hz [R9, qualitative] |
 | Delay spread of the wanted GW | near-scalar channel and little/no multipath in Dagefu et al.'s 40 MHz, ≤200 m near-ground clutter measurements [R41]; this does not establish long-path 30 MHz behavior | µs-class terrain echoes; ripple 20 dB over < 50 m of travel [R24] | still flat in 3 kHz; no source gives delay spread at 20–50 MHz beyond 200 m |
 | Meteor echoes | absent at high signal levels | bursts 0.07–0.8 s, 0.4–0.7 ms late, 2–20 Hz shift, of order ten to a hundred per hour at the 180 dB level (order-of-magnitude uncertainty) [E from R12, R44] | overdense trails lasting seconds to minutes; kHz head-echo chirps; showers [R12, R32] |
 | Aircraft | none | one component at 171–181 dB, Doppler sweeping through zero, up to ±50 Hz [E] | aircraft component stronger than a 180 dB GW for the duration of a pass [E] |
@@ -302,7 +302,7 @@ This is a list of options with their limits, not a design. Better structures may
 **Structure options**
 
 - *Option A: static scalar channel plus slow level process.* Deterministic median from a smooth-earth or terrain model; log-normal site term; slow log-normal time term (hours) from TN101-type distributions; no Doppler, no delay. Defensible for land paths inside about 50 km and sea paths inside about 150 km when the loss is well below 160 dB. Limit: wrong whenever any row of table E is within about 10 dB of the wanted level.
-- *Option B: A plus a small coherent-plus-diffuse sea term.* Rician component with a sub-hertz spectrum bounded by ±0.102√f_MHz Hz and a K of 25–35 dB. Limit: the K value is this chapter's estimate, with no measurement behind it; bistatic radar practice shows only that the direct signal dominates [R53].
+- *Option B: A plus a small coherent-plus-diffuse sea term.* A synthetic Rician component may use a selected sub-hertz spectrum and K=25–35 dB for sensitivity. The first-order ocean Bragg frequency is not a bound on higher-order, advected or other moving-path spectra. Neither K nor a complete spectrum is measured or derived here; [R53] establishes a strong direct signal in its radar geometry only.
 - *Option C: A or B plus an event layer.* Independent point processes for meteor echoes (Poisson arrivals, exponential decay with the P.843 time constant, 0.4–0.7 ms delay, 2–20 Hz shift, power-law amplitude distribution with exponent 1.1–1.4, diurnal and seasonal modulation), aircraft passes (deterministic Doppler track from a flight geometry, level from the bistatic radar equation), and ionospheric openings (on/off states with P.534 occurrence statistics; when "on", co-channel interferers and, optionally, a backscatter echo at 3.5–20 ms with about 1 Hz spread). Limit: rates and levels for the event layer are mostly derived, not measured, at these link budgets.
 - *Option D: mode-switched long-path model.* Beyond roughly 100 km over land or 300 km over sea, replace the diffraction term by the power sum of diffraction and Rayleigh-fading troposcatter with a ground-lobing factor for the actual antenna heights. Limit: P.617 at 30 MHz is an extrapolation.
 - *Option E: physics-based terrain/refractivity propagation* (integral equation or parabolic equation) for specific paths, with Barrick's impedance for the sea. Limit: 2-D, expensive, and shown to miss off-path multipath by up to 25 dB at 28 MHz.
@@ -357,7 +357,7 @@ Three structural differences matter more than any single preset value. Calculati
 4. *Forest effect at 30 MHz.* Hill's calculation finds forest cover minor at 20–30 MHz on a long irregular path; Jansky & Bailey measure 10–24 dB. Different geometries (antennas outside versus inside the forest), but Hill had no data.
 5. *Smooth-earth versus measurement at 28 MHz.* Adams et al.'s lowland medians are 10–20 dB below zero-height P.368-convention losses at 10 km. Largely resolved: the report's own smooth-earth curves lie 6–10 dB below P.368-convention values for the same ground constants, consistent with the 6 dB convention difference plus model detail, and the remainder is terrain, which the report's integral-equation prediction reproduces (see C). The transmitter-site elevation above the path terrain was not checked.
 6. *P.368 atmosphere.* The 2022 revision changed from an exponential to a linear refractivity profile and from published curves to software. No published comparison of the two at 30 MHz was found.
-7. *Loss conventions.* The 6 dB difference between P.368 and the Barrick, plane-earth, TN101 and ITM definitions is a standing trap; the ITU handbook itself warns that the transmission-loss concept "may lead to confusion" over ground ([R3] §4, p. 10). Adams et al.'s "path loss" falls on the Barrick side in practice (see C), and the GUI's "path loss" at −164 dBm/Hz is a third quantity (see "Comparison with the modem's presets").
+7. *Loss conventions.* The approximately 6 dB difference in the corresponding low-terminal plane example, and its failure as a universal terrain/height correction, is a standing trap; the ITU handbook itself warns that the transmission-loss concept "may lead to confusion" over ground ([R3] §4, p. 10). Adams et al.'s "path loss" falls on the Barrick side in practice (see C), and the GUI's "path loss" at −164 dBm/Hz is a third quantity (see "Comparison with the modem's presets").
 
 **Looked for and not found (gaps, not negatives)**
 
@@ -365,25 +365,245 @@ Three structural differences matter more than any single preset value. Calculati
 - Forget, Broche & de Maistre (1982) and Barrick (1971, parts 1 and 2): publisher abstracts and citations in the retrieved literature were consulted; no full text was obtained. Their result limits are not silently promoted to numerical 30 MHz observations: the rough-sea calculations and abstract-level summaries remain distinguished from the Hansen event record and from this chapter's computed transfer curves.
 - Kirincich & Emery (2023) full text was obtained and read through the publisher's article link listed in [R22]. It reports 16.188 MHz, two receiver geometries at about 7 and 45 km, relative one-way observations, and model comparisons; it is not 30 MHz evidence. Full-text review resolves the former abstract-only description and the exact tone/frequency gap. The Dagefu et al. (2015) TAP and Radio Science papers are distinct publications, both on short-range lower-VHF clutter/near-ground links; neither is an over-horizon 30 MHz test.
 - Halverson et al. (2017), the 25 MHz Westshore CODAR study, was read from the author-hosted full-text PDF. It analyzes 1.6 years of one-station radial-current working-range data, not detailed path-loss/SNR variability. The 300 kHz system uses 0.5 km range cells and a 6 dB first-order Bragg-line SNR threshold, with a maximum configured range of 39.5 km. The authors exclude all records reaching that cap, whether spurious or real, and warn that farthest-bin radial solutions beyond 37 km are often spurious because first- and second-order lines can blend. Thus the reported 19.4–37.4 km conductivity relation is conditioned on valid, sub-cap detections and its upper-range tail is truncated; excluding both real and spurious maximum-range cases may bias the high-conductivity relation downward. Conductivity is based on an instrumented ferry at nominal 2 m depth while the EM skin depth is only centimetres; the authors warn that plume stratification can make the sensed surface conductivity lower. There is no direct wave measurement in the radar footprint; wind at a buoy 50 km away is a proxy, with fetch/direction and wave-spectrum effects unresolved. This is evidence about radar observability and environmental covariates, not a direct one-way 30 MHz modem channel.
-- NTIA/ITS lists 1963–64 Phase 1 irregular-terrain data for Colorado plains, Colorado mountains, and Ohio hills. The official Part 1 report (plains) was fetched by the parent from `https://its.ntia.gov/publications/download/IER_38-ITSA_38.pdf` to `/tmp/fable-IER_38-ITSA_38.pdf` and extracted with `pdftotext` to `/tmp/fable-IER_38-ITSA_38.txt`; I inspected the methods and limitations in that extracted text on this pass. It covers 20.084/49.72 MHz Colorado CW tests (plus 100 MHz), largely 1963–64 with additions to June 1965. For those two frequencies the transmitter was vertical at 3.3/4 m; the receiving vertical whips were 1.3 m at 20 MHz and 0.55/1.7 m at 50 MHz. Principal road sites were selected at 5, 10, 20, 30, 50 and 80 km; ≤50 km readings usually lasted seconds because short-term change was <1 dB, while 80 km values were averaged for minutes because variations reached 5 dB. The report warns that 20/50 MHz antenna gains can only be regarded accurate within ±3 dB: vehicle/ground/nearby surroundings alter antennas, and the 20/50 antenna gain measurement method was difficult. Some 20/50 measurements also reused sites selected for 100 MHz improvement searches, so site selection is not an unbiased random sample of every terrain geometry. These are terrain spot measurements, not a surface-wave-only or path-resolved multipath dataset. The official Phase 1 raw ZIP remains unparsed; the Part 2/3 reports were not obtained in this pass. The reported 20/50 MHz medians and spreads in this chapter still come from the already-read Longley–Reasoner synthesis [R26], not raw-data reanalysis or the Part 1 report's plains-only tables.
+- NTIA/ITS lists 1963–64 Phase 1 irregular-terrain data for Colorado plains, Colorado mountains, and Ohio hills. The official Part 1 report (plains) was fetched by the parent from `https://its.ntia.gov/publications/download/IER_38-ITSA_38.pdf` to `/tmp/fable-IER_38-ITSA_38.pdf` and extracted with `pdftotext` to `/tmp/fable-IER_38-ITSA_38.txt`; I inspected the methods and limitations in that extracted text on this pass. It covers 20.084/49.72 MHz Colorado CW tests (plus 100 MHz), largely 1963–64 with additions to June 1965. For those two frequencies the transmitter was vertical at 3.3/4 m; the receiving vertical whips were 1.3 m at 20 MHz and 0.55/1.7 m at 50 MHz. Principal road sites were selected at 5, 10, 20, 30, 50 and 80 km; ≤50 km readings usually lasted seconds because short-term change was <1 dB, while 80 km values were averaged for minutes because variations reached 5 dB. The report warns that 20/50 MHz antenna gains can only be regarded accurate within ±3 dB: vehicle/ground/nearby surroundings alter antennas, and the 20/50 antenna gain measurement method was difficult. Some 20/50 measurements also reused sites selected for 100 MHz improvement searches, so site selection is not an unbiased random sample of every terrain geometry. These are terrain spot measurements, not a surface-wave-only or path-resolved multipath dataset. The subsequent completion pass downloaded and parsed the official Phase 1 ZIP and read Parts 2/3; the new analysis below supersedes that earlier access gap. The earlier section's 20/50 MHz medians and spreads come from Longley–Reasoner [R26]; the separately labeled completion table below is a fresh archive analysis, retaining its own inclusion/censoring rules.
 - Rogers et al. (2016), *Ground Wave Propagation Measurement in the HF to VHF Frequency Ranges over Non-Line-of-Sight Terrains*, was recovered as a National Academies-hosted two-page proceedings paper/abstract. It describes a 30–100 MHz campaign at hundreds of metres to kilometres, with whip, monopole, folded conical helix and optimized wire antennas; terrain profiles and soil parameters were measured, with received power from a spectrum analyzer. The available proceedings text does not expose tabulated 30 MHz outcomes, complex impulse responses, a demonstrated propagation mechanism, or matched input files. It is evidence that directly relevant measurements exist and a route to pursue the full paper/data, but cannot yet set a loss law or prove that each NLOS result was a surface wave rather than diffraction, reflection, or mixed paths.
 - Rotheram (1981) Part 1 and the GRWAVE documentation; Sevgi's HF surface-wave-radar propagation papers beyond one overview abstract; any parabolic-equation or FDTD validation at 20–50 MHz from 2015–2026 (none found; the newest measurement comparison of a terrain code at these frequencies obtained is the 1979 WAGNER study [R50]).
-- Liao & Sarabandi (2005, 2008), Casciato & Sarabandi, Tamir (1977): not located; not cited.
+- Liao & Sarabandi (2005, 2008) and Tamir (1977) remain unselected alternatives. Casciato, Oveisgharan & Sarabandi (2003) was obtained in full; its idealized 30 MHz coastal geometry and limits are recorded below.
 - Low-VHF urban, suburban and forest delay-spread measurements: Dagefu et al.'s full-text 40 MHz study reports near-scalar transfer and little/no multipath in its specific ≤200 m indoor/outdoor scenarios; further evidence in 30–88 MHz was not located. It does not validate over-horizon groundwave delay. Nothing on building penetration loss at 30 MHz: ITU-R P.2109-2 covers 80 MHz–100 GHz only ([R54], read).
 - Mountain obstacle-gain measurements at low VHF; only the ITM remark.
 - Any measured Doppler spectrum or phase-stability record of a 20–50 MHz groundwave link; any measurement of vegetation-and-wind fading at 30 MHz (P.833's wind data are at much higher frequencies). Bistatic HF radar papers found give Bragg-peak positions and levels relative to the spectral continuum, not to the direct path; an open-archive copy of a bistatic Doppler-spectra simulation-versus-experiment study (HAL hal-00905980) is behind bot protection and was not obtained.
 - Amateur 10 m and 6 m ground-wave or troposcatter records and levels: not found (the records located concern skywave paths or 144 MHz ducting). One-way loss budgets for 25–45 MHz surface-wave-radar paths beyond the 7/45 km 16.188 MHz Kirincich–Emery study: not found; that study is a coastal HF case and does not measure a 30 MHz path.
-- Measured ionospheric ground-backscatter levels at 25–50 MHz: not searched for; only Eshleman's qualitative 1957 remark [R34].
+- Measured ionospheric ground-backscatter at 25–50 MHz: the completion search found and read Huyghebaert et al. 2022 at 32.55 MHz, including its processing/censoring and mode-separation evidence. It does not calibrate a direct-groundwave-relative 30 MHz level; see below. The former “not searched” status is superseded.
 - Meteor-burst rates and levels measured on 100–300 km paths: Weitzen (1987) treats ranges below 400 km [R51], abstract only and without numbers; COMET and SNOTEL records were not obtained.
-- Round-the-world echoes at 28–30 MHz (a delay near 138 ms follows from the circumference at F-region height [E]) and quantitative auroral-scatter Doppler spreads at 28–50 MHz: no source opened.
-- Search/access record checked 2026-11-13 (queries retained to make the search boundary reproducible): (1) `"Dependence of 25-MHz HF Radar Working Range on Near-Surface Conductivity"` — publisher record returned 403, but the author-hosted PDF `2017_Halverson_JAOT.pdf` was retrieved at CODAR and read; (2) `Ground Wave Propagation Measurement in the HF to VHF Frequency Ranges over Non-Line-of-Sight Terrains Rogers` — National Academies-hosted two-page proceedings text retrieved, full supporting paper/data not recovered; (3) `NTIA 1984 path search` — NTIA-84-151 OCR PDF accessible; (4) `Hansen 1977 Measurements of basic transmission loss for HF ground wave propagation over seawater pdf 235 km` — publisher abstract retrieved, and the complete readable text-rendered article copy was subsequently opened/read at Academia.edu; (5) `Forget Broche de Maistre 1982 attenuation distance wind speed HF surface waves ocean pdf` — retrieved citations/abstract-level pointers only; (6) `Rogers Vogel Lacker Ling 2016 NLOS 30-100 MHz propagation measurements full paper` — no full paper beyond the proceedings text. The official NTIA legacy data listing and Part 1 report page were then opened. The web research browser rejected the Phase 1 zip as unsupported `application/x-zip-compressed` and the Part 1 25.8 MB PDF as too large; on the follow-up, the parent retrieved the official report to `/tmp/fable-IER_38-ITSA_38.pdf` and ran `pdftotext` to `/tmp/fable-IER_38-ITSA_38.txt`, which supplied the report methods/limits summarized above. The raw ZIP and Part 2/3 reports remain unparsed. These are route-specific access outcomes, not universal unavailability. Existing focused bibliography and prior source record remain material; this search was a bounded follow-up, not a claim of exhaustive global absence.
-- The above 2015–2026 primary sources include Dagefu et al. (2015, distinct 40 MHz TAP and Radio Science short-range work), Halverson et al. (2017, 25 MHz radar working range), Kirincich & Emery (2023, full text at 16.188 MHz), Rogers et al. (2016 proceedings at 30–100 MHz), and Deacon et al. (2021, 2022). They do not supply a matched 30 MHz long-path modem measurement with path-resolved wanted and competing arrivals. The ITU listing also shows a 2026 revision of P.372 (radio noise), relevant to [50](50-noise-and-interference-mf-hf.md); it was not opened here.
+- Round-the-world echoes at 28–30 MHz (a delay near 138 ms follows from the circumference at F-region height [E]) remain unselected contextual records. Quantitative 32.55 MHz auroral-region propagation evidence is now supplied by Huyghebaert et al. 2022 below, with its distinct radar observable.
+- Search/access record checked 2026-11-13 (queries retained to make the search boundary reproducible): (1) `"Dependence of 25-MHz HF Radar Working Range on Near-Surface Conductivity"` — publisher record returned 403, but the author-hosted PDF `2017_Halverson_JAOT.pdf` was retrieved at CODAR and read; (2) `Ground Wave Propagation Measurement in the HF to VHF Frequency Ranges over Non-Line-of-Sight Terrains Rogers` — National Academies-hosted two-page proceedings text retrieved, full supporting paper/data not recovered; (3) `NTIA 1984 path search` — NTIA-84-151 OCR PDF accessible; (4) `Hansen 1977 Measurements of basic transmission loss for HF ground wave propagation over seawater pdf 235 km` — publisher abstract retrieved, and the complete readable text-rendered article copy was subsequently opened/read at Academia.edu; (5) `Forget Broche de Maistre 1982 attenuation distance wind speed HF surface waves ocean pdf` — retrieved citations/abstract-level pointers only; (6) `Rogers Vogel Lacker Ling 2016 NLOS 30-100 MHz propagation measurements full paper` — no full paper beyond the proceedings text. The official NTIA legacy data listing and Part 1 report page were then opened. The web research browser rejected the Phase 1 zip as unsupported `application/x-zip-compressed` and the Part 1 25.8 MB PDF as too large; on the follow-up, the parent retrieved the official report to `/tmp/fable-IER_38-ITSA_38.pdf` and ran `pdftotext` to `/tmp/fable-IER_38-ITSA_38.txt`, which supplied the report methods/limits summarized above. That initial route limitation was later remedied by public-file downloads and local archive/PDF inspection; see the completion analysis below. These are route-specific access outcomes, not universal unavailability. Existing focused bibliography and prior source record remain material; this search was a bounded follow-up, not a claim of exhaustive global absence.
+- The above 2015–2026 primary sources include Dagefu et al. (2015, distinct 40 MHz TAP and Radio Science short-range work), Halverson et al. (2017, 25 MHz radar working range), Kirincich & Emery (2023, full text at 16.188 MHz), Rogers et al. (2016 proceedings at 30–100 MHz), and Deacon et al. (2021, 2022). They do not supply a matched 30 MHz long-path modem measurement with path-resolved wanted and competing arrivals. The ITU listing also shows a 2026 revision of P.372 (radio noise), relevant to [50](50-noise-and-interference-mf-hf.md); its current P.372-18 text/code status and noise interpretation are owned by chapter 50 and are not a new blanket access gap here.
 
 **Open questions that matter to the modem**
 
 - Is there any real 30 MHz link at 180 dB on which the groundwave is the strongest component most of the time? This chapter's estimates put meteor, aircraft and (when the band is open) backscatter components within about ±10 dB of it. On re-check the meteor level agrees with ITU-R P.843-1 Fig. 3 to 2–3 dB, and meteor-burst connectivity below 400 km is reported to be maintainable [R51]. The aircraft level rests on assumed cross-sections of 100–1,000 m², and the only low-VHF measurement found (2–4 dB flutter at 60.75 MHz [R52]) has no stated geometry. The backscatter level is an unmeasured bound. The balance also depends on the path: on a 280 km sea path an aircraft at 10 km altitude gives about 189–199 dB [E], 10–20 dB below the groundwave, while q = 10¹⁴ m⁻¹ meteor echoes arrive about 12 dB above it [E]. The conclusion remains derived, and it is the single most consequential unverified statement in this chapter.
 - How large is the sea-clutter pedestal on a forward path?
 - How often do HF-trapping ducts occur outside southern California?
+
+## Completion analysis of accessible groundwave evidence
+
+### Official NTIA Phase 1: executed data inspection and bounded analysis
+
+The [official ZIP](https://its.ntia.gov/media/66293/phase_1.zip) was downloaded
+and parsed on 13 November 2026: **683,228 bytes**, SHA-256
+`638d501cc571b21121e608b2ee745bf11b57dc246d4c9e0887581b9e34984d99`.
+It contains 506 entries, 2,703,577 uncompressed bytes: measurement-parameter,
+terminal-coordinate and excess-loss tables, plus mapped terrain profiles.
+[Part II](https://its.ntia.gov/publications/download/IER_38-ITSA_38-2.pdf)
+(5,461,300 bytes; SHA-256
+`18974bbdd2668220fc320934d199b70533618f5a9c25cf299d6dc599c0ebcc56`)
+and [Part III](https://its.ntia.gov/publications/download/IER_38-ITSA_38-3.pdf)
+(24,584,659 bytes; SHA-256
+`c015b3c3b2a17268de185b2857a5dfc7a4e2d50304fdfb380b4ef619798e7278`)
+were read for methods, parameter tables, record format, calibration and sample
+site records. These are actual downloaded primary bodies, not just catalogue
+entries. PDF text was extracted with `pdftotext -layout`; tables were parsed
+from the ASCII ZIP files rather than noisy PDF OCR.
+
+The compact manifest is `phase_1.txt` (method/readme),
+`phase_1/{pl,mt,oh}pars.txt` (system parameters), `*path.txt` (terminal
+coordinates/distances), `*data.txt` (spot observations), `plxdata.txt` and
+`mtxdata.txt` (corrected cross-polarization), and the three `*_pfl/` directories
+(mapped terrain profiles). The README campaigns are plains autumn1963–summer1964,
+mountains summer1963–autumn1964 and Ohio summer1963–summer1964. Individual
+observation dates/comments are in the report site pages, not the ASCII loss
+columns; no environmental time series was inferred from those campaign labels.
+The present analysis is a descriptive observation audit, not a per-site
+atmosphere/soil fit. Those additional inputs would be prerequisites for such a fit.
+
+The archive's README defines attenuation **relative to free space**, in dB.
+A value `500+q` means attenuation exceeds sensitivity threshold q; it is not
+an observed fade depth. Although the README describes missing cells as blank,
+the actual tables contain **999.0**. These are retained as missing, separately
+from `500≤a<999` censored observations: the printed Ohio tables distinguish
+unavailable `**` from unmeasurable-signal indications, and interpreting 999 as
+499 dB observable attenuation would contradict the system's maximum loss.
+Principal `P` sites and 100 MHz-selected alternate `V/H` sites are separate;
+alternates are nearby optimized sites, not independent random terrain samples.
+The corrected cross-polarization files are not pooled into the vertical data.
+
+| Dataset / selected vertical column | Exact frequency; TX/RX height | Principal valid / censored / missing | Valid-only q10 / median / q90 excess loss, dB |
+| --- | --- | --- | --- |
+| Colorado plains A20 | 20.084 MHz; 3.3/1.3 m | 133 / 0 / 52 | 34.46 / 48.60 / 59.78 |
+| Colorado plains A50-1 | 49.72 MHz; 4/.55 m | 133 / 0 / 52 | 38.62 / 56.70 / 66.80 |
+| Colorado mountains A20 | 20.084 MHz; 3.3/1.3 m | 41 / 0 / 7 | 44.40 / 64.70 / 76.60 |
+| Colorado mountains A50-1 | 49.72 MHz; 4/.55 m | 41 / 0 / 7 | 41.70 / 68.40 / 76.00 |
+| Ohio hills A20 | 19.97 MHz; 3.7/1.3 m, with TX exceptions below | 210 / 10 / 26 | 41.38 / 49.60 / 58.90 |
+| Ohio hills A50-1 | 49.72 MHz; 4.2/.6 m, with TX exceptions below | 183 / 63 / 0 | 36.00 / 44.60 / 51.26 |
+
+These are **new descriptive statistics [E from T]**, not the older R26
+Longley–Reasoner summary. Counts across all P/V/H records are 449 plains, 138
+mountains and 598 Ohio, of which 185/48/246 are principal. The quantiles use
+linear interpolation at `(n−1)p` after excluding missing and censored values;
+they describe detected records, not the full attenuation distribution.
+Especially in Ohio, deleting 63 censored A50-1 observations can shift a
+high-loss quantile substantially. No Gaussian tail, confidence interval,
+outage probability or geographic ranking is inferred from this table.
+
+The following checks make the analysis reproducible with standard Python 3
+(no numerical package is required). `archive` is the downloaded ZIP path.
+
+```python
+import zipfile
+z = zipfile.ZipFile(archive)
+def rows(name):
+    return [line.split() for line in z.read(name).decode('latin1').splitlines()
+            if line and line[0].isalnum() and not line.startswith('Path')]
+def quantile(a, p):
+    a = sorted(a); x = (len(a)-1)*p; i = int(x)
+    return a[i] + (a[min(i+1, len(a)-1)]-a[i])*(x-i)
+for region in ('pl', 'mt', 'oh'):
+    r = rows('phase_1/' + region + 'data.txt')
+    principal = [v for v in r if v[0].split('-')[-1].startswith('P')]
+    start = 2 if region == 'oh' else 1  # Ohio has a transmitter column
+    for column in (start, start+1):
+        a = [float(v[column]) for v in principal]
+        valid = [v for v in a if v < 500]
+        print(region, column, len(valid), sum(500 <= v < 999 for v in a),
+              a.count(999.), [quantile(valid, p) for p in (.1, .5, .9)])
+```
+
+A matched-cell unit check uses `PL-05-P1`, distance 4.96 km: A20=33.0 dB and
+A50-1=51.1 dB. The reports' `Lbf=32.45+20log10(f_MHz*d_km)` conversion gives
+**Lb=105.41664 and 131.39026 dB**, respectively. This verifies the observable
+and parsing convention; it is not a smooth-earth prediction. The terrain,
+antenna, environment and branch differ between bands, so interpolating these
+values to 30 MHz would not constitute measurement validation.
+
+Distance stratification exposes why the pooled medians are inadequate. For
+Ohio principal paths of 35–52 km, A20 has **62 detections, 7 censored and 17
+missing**, detected median **52.75 dB**; A50-1 has **34 detections, 52 censored**,
+detected median **45.20 dB**. The apparently smaller 50 MHz detected median
+therefore cannot establish lower 50 MHz total-path loss. Nominal site labels
+are also not exact distances: use the PATH table, retaining its discrepancies.
+`PL-80-P58` has a zero distance placeholder and missing 20/50 measurements;
+`MT-05-P13` has PATH distance 5.08 km but profile extent 4.97 km. Such entries
+must be reconciled with the original site page before a terrain-model fit,
+not silently resized or counted as zero-distance links.
+
+**Methods that materially change a future model comparison:** Part II pp.3–5
+specifies carrier input power, antenna/line corrections and loss definitions.
+Part III Table 1 gives actual Ohio 19.97/49.72 MHz; the ASCII PARS rounds these
+to 20.0/49.7. Its central-transmitter 10 km sites 1–17,22 and 20 km sites
+1–5,7,9,10 used lower TX heights (about 2.62/2.74 m, printed site values), so the
+global PARS heights do not suffice. Part III pp.9–10 says Ohio frequencies were
+measured from one vehicle within a short interval, unlike many Colorado
+20/50 versus 100 MHz comparisons; antenna gains remain about ±3 dB uncertain.
+Part III pp.16–19 ties each site to date, operator comments, photograph and
+profile, and warns that unmatched antenna impedance/environment cannot be
+separated from apparent terrain loss. Profiles were mapped later from older
+maps; they are not modern DEMs or complex temporal recordings.
+
+Consequently this dataset closes the **accessible data inspection** gap and
+supplies numerical terrain spot observables. It does not close exact 30 MHz,
+complex phase, environmental time-history or modem-outcome gaps. A future
+same-geometry terrain comparison should hold out entire principal site groups,
+use per-site report inputs, retain nondetections as inequalities, and compare
+within frequency. No ITM/PE/WAGNER fit or physical validation was executed here.
+
+### Resolved coastline and competing-mode source questions
+
+[Casciato, Oveisgharan and Sarabandi (2003)](https://doi.org/10.1029/2002RS002696),
+§§2.3–3, Figs.3–6, supplies an explicit 30 MHz idealized land/sea boundary
+comparison. A vertical dipole at x=−100λ, observation x=−50…150λ and equal
+heights 1/5/10λ demonstrates differences between direct-plus-reflected and total
+fields. The method combines a perturbation impedance transition with cliff
+UTD; it assumes a locally distant source and has perturbation/boundary limits.
+An abrupt reflected-field discontinuity is an approximation artifact, discussed
+by the authors, not a physical fade to insert into a modem. Their impedance
+choices do not excite the trapped pole they call a surface wave; the Norton
+term remains relevant. This supports a resolved coast/height alternative to
+Millington, not empirical accuracy or a bound on all real coastal fading.
+The adjacent Astra-6 bibliography's author names were incorrect; this is the
+verified DOI identity.
+
+[Huyghebaert et al. (2022)](https://doi.org/10.3389/fspas.2022.886037),
+Experiment/Table1 and Discussion I–IV, directly observes multiple propagation
+modes at **32.55 MHz** in northern Norway on **27 August 2021, 16:30–20:00 UTC**:
+meteor, short direct feedthrough, OTH link, ground/sea scatter and ionospheric
+scatter. It uses 100 kHz coded bandwidth, 10 ms repeated codes, 200 ms
+integrations and 2 s averaged products. Data storage selects SNR above about
+3 dB; later analysis applies 6 dB and other clutter/ambiguity filters.
+Ground/sea scatter is a narrow near-zero-Doppler population; direct feedthrough
+is absent on two of the three examined links. Strong overlapping targets and
+wide spectra compromise clutter subtraction. This is valuable nearby-frequency,
+active-auroral evidence that competitors coexist; it is not a 30 MHz
+surface-path-normalized amplitude law, an uncensored Doppler population, or
+proof that ±1 Hz covers all competitors. “Backscatter not searched” is now obsolete.
+
+The associated [RADAR dataset, DOI10.22000/549](https://doi.org/10.22000/549)
+is public CC BY4.0, published 3 May 2022. Its metadata reports 3,087,899,648-byte
+tar and archive MD5 `26b09023c7cf1479e16278c8aab9403a`. A bounded HTTP range
+inspection actually read the archive metadata and identified the payload
+`data/dataset/simone_norway_eregion_paper_data.zip` (3,087,878,390 bytes).
+The 128 KiB request stalled after 13,230 bytes and timed out at 60 s; a distinct
+40 KiB tail request failed connection. **No radar payload reanalysis is claimed.**
+The repository metadata does not supply raw-voltage calibration or complete
+software details. Published selected radar products cannot be silently treated
+as uncensored weak-signal captures. The source is available; this route's
+payload transfer, and a faithful selected-product reproduction, remain a
+precise external-access/data-processing dependency if that replay is selected.
+
+### Rough sea: what is actually supported
+
+Barrick1970 [R18], §§III–IV and Figs.15/31, is the read primary mathematical
+basis despite the unavailable 1971 journal parts. Its **mean effective complex
+impedance** adds a roughness term derived from a surface-height spectrum to
+the smooth-sea impedance, then uses a spherical-earth field calculation. Its
+Phillips isotropic and Neumann–Pierson directional branches assume developed
+wind seas and a perturbative roughness domain. The coherent mean field is
+separate from the time-varying incoherent scattered field; the report explicitly
+defers the latter's power spectra to later work. Therefore its mean-loss
+curves cannot select a forward-path Rician K, time covariance, or a phase-noise
+PSD. Option B's K=25–35 dB is **only an engineering sensitivity parameter**.
+
+For physically conditioned research, retain three distinct comparisons:
+(1) smooth sea with measured/stated conductivity and antenna height;
+(2) the read mean-impedance theory with its named spectrum, direction, wind-sea
+assumptions and small-roughness qualification; (3) a measured complex channel
+or a separately justified scattering theory for fluctuations. The existing
+16.188 MHz one-way and 25 MHz radar studies constrain transfer and confounders;
+they do not collapse these three into a universal 30 MHz sea-state process.
+Attributions of 32 MHz enhancement to ducting remain episode-specific and must
+not be folded into a positive or negative roughness correction.
+
+### Complete disposition of named upper-HF gaps (GW07–GW16)
+
+| Named source or phenomenon | Disposition and consuming conclusion |
+| --- | --- |
+| NTIA Phase1 ZIP; Parts2/3 | Retrieved, parsed/read and descriptively analyzed above. Exact 30 MHz temporal/complex calibration remains outside their observable. GW07 data inspection completed. |
+| Rogers2016 NLOS campaign | Two-page primary proceedings read; exact-title/author searches again found no fuller numerical report/data. The description establishes a campaign, not a 30 MHz loss/phase distribution. No scenario parameter depends on unavailable data. |
+| Hansen1977; Kirincich–Emery2023; Halverson2017; both Dagefu2015 papers | Full texts already read; geometry, calibration, sensitivity censoring and radar-versus-one-way limitations retained in sections B/C. Do not count repeated access as new literature. |
+| Forget–Broche–de Maistre1982 | Publisher abstract only after DOI/title/author routes. No numerical parameter from its unrecovered body. Nearby-frequency mean-loss discussion remains subordinate to read R18/R22. |
+| Barrick1971 Parts1/2 | Abstracts; historical local files named as PDFs are only 301-byte failed responses, not full texts. Read1970 author report supplies the selected mean-impedance theory. No missing fluctuation statistic is invented. |
+| Rotheram1981 Part1/2; GRWAVE documentation | Original bodies not recovered; current P.368-10/NTIA LFMF supplies the executed baseline. Exponential-atmosphere GRWAVE remains an alternative, not claimed numerical parity. |
+| Sevgi overview and subsequent HF radar PE/FDTD; Apaydın–Sevgi; 2015–2026 20–50 MHz field validation | Bibliographic alternatives, not chosen as a qualified terrain solver. Read NTIA integral-equation reports supply the actual measurement comparisons. Canonical-code agreement is distinct from field accuracy. |
+| Liao–Sarabandi2005/2008; Tamir1977 | Unselected alternatives, no unique coefficient imported. Read Hill82-114 and Jansky–Bailey supply explicit forest theory/measurement limits. |
+| Casciato/Sarabandi coastline family | Specific2003 full paper identified/read above; correct authors and approximation limits replace the former blanket “not located.” |
+| Weitzen1987; COMET; SNOTEL | Weitzen remains abstract-only. Targeted COMET search found official NTIA89-241's 35–40 MHz system-history discussion, not a matched 100–300 km 30 MHz event-rate/level dataset. P.843 and read Haakinson model remain the selected theoretical alternatives; no operational-network availability is transferred to the modem. |
+| Aircraft/flutter and assumed RCS | The60.75MHz abstracts and bistatic-equation estimates retain their frequency/geometry limits. No surveyed flight/RCS-conditioned30MHz capture found; event incidence remains external, not zero. |
+| 25–50MHz ionospheric ground/sea backscatter and auroral modes | New32.55MHz primary evidence above establishes mechanisms and processing limits; direct-path-relative calibration and general probabilities remain unmeasured. |
+| 28–30MHz round-the-world echoes | Search found amateur publications/discussion, not a selected calibrated complex path corpus. Circumference/c delay is geometric context; no long-echo population or delay bound is adopted. |
+| Mountain obstacle gain; 30–88MHz long-path urban/forest delay; 30MHz wind/vegetation fading; building entry | No qualifying applicable field distribution in inspected routes. Terrain/ray controls remain conditional; P.2109's80MHz lower bound prohibits using it as a30MHz building-loss law. |
+| 10m/6m amateur ground/troposcatter; one-way25–45MHz radar budgets; geographic duct incidence | No calibrated matched record recovered. QSO success/radar reach cannot identify a mode, phase PSD or service probability. |
+| HAL00905980 bistatic spectra | Access-limited lead, not a selected numerical input; Bragg/scattered spectra do not by themselves normalize power to a forward direct path. |
+| P.372 old-edition lead | Reconciled to current shared chapter50's P.372-18 review; no independent “unopened radio-noise” blocker. |
+| Classical Sommerfeld/Norton/Bremmer/Wait/Millington/Hufford/Ott | Selected equations use reviewed ITU/NTIA synthesis and pinned implementation; unread originals have no unique unverified implementation obligation. See20's individual disposition. |
+
+The added search strings included `25 50 MHz ground backscatter measured`,
+`Rogers Vogel Lacker 2016 ground wave propagation pdf`,
+`COMET meteor 40 MHz propagation measurements`,
+`28 MHz round the world delay measurements`, exact Casciato/Forget/Hill/Wait
+DOIs and titles, and recent near-band phase/terrain searches. No quota exhaustion
+ended these searches. Coverage now includes US irregular terrain, Japanese MF
+coast, Baltic/navigation context, Canadian plume, northeastern-US coastal sea
+and active northern Norway. It does not establish tropical, southern-hemisphere,
+polar-winter or arid long-path30MHz probabilities.
 
 ## References
 
@@ -415,7 +635,7 @@ Access status: **read** = supporting passage read in the full text (for scanned 
 - [R24] Adams, J. E., Carroll, J. C., Costa, E. A., Ebaugh, D. R., Godwin, J. R., Haakinson, E. J., Layton, D. H., & Smith, D. (1984), *Measurements and Predictions of HF Ground Wave Radio Propagation over Irregular, Inhomogeneous Terrain*, NTIA Report 84-151. https://its.ntia.gov/publications/download/84-151_ocr.pdf — read (OCR text; Figs 47 and 50 from the scan). [T]
 - [R25] Hufford, G. A., Longley, A. G., & Kissick, W. A. (1982), *A Guide to the Use of the ITS Irregular Terrain Model in the Area Prediction Mode*, NTIA Report 82-100. https://its.ntia.gov/publications/details?pub=2091 — read. [T]
 - [R26] Longley, A. G., & Reasoner, R. K. (1970), *Comparison of Propagation Measurements with Predicted Values in the 20 to 10,000 MHz Range*, ESSA Tech. Rep. ERL 148-ITS 97. https://its.ntia.gov/publications/download/ERL148-ITS97.pdf — read (§§2.5–2.6; Figs 23, 25, 27 from the scan). [T]
-- [R27] Johnson, M. E., Miles, M. J., McQuate, P. L., & Barsis, A. P. (1967), *Tabulations of VHF Propagation Data Obtained over Irregular Terrain at 20, 50, and 100 MHz*, ESSA Tech. Rep. IER 38-ITSA 38, Parts 1–3. [Part 1 PDF](https://its.ntia.gov/publications/download/IER_38-ITSA_38.pdf); [NTIA Part 1 record](https://its.ntia.gov/publications/details?pub=2004); [Part 2 record](https://its.ntia.gov/publications/details?pub=2005); [Part 3 record](https://its.ntia.gov/publications/details?pub=2006); [official Phase 1 data listing](https://its.ntia.gov/data/legacy-radio-propagation-data) and [direct Phase 1 ZIP](https://its.ntia.gov/media/66293/phase_1.zip). The official Part 1 report was retrieved by the parent to `/tmp/fable-IER_38-ITSA_38.pdf`, then extracted to `/tmp/fable-IER_38-ITSA_38.txt` with `pdftotext`; Part I methods/limits were read for this chapter. The raw zip, Part 2 and Part 3 reports were not retrieved or parsed. The chapter's numerical 20/50 MHz medians still come from [R26], not from a fresh raw-data analysis or from the plains-only Part I tables. [T]
+- [R27] Johnson, M. E., Miles, M. J., McQuate, P. L., & Barsis, A. P. (1967), *Tabulations of VHF Propagation Data Obtained over Irregular Terrain at 20, 50, and 100 MHz*, ESSA Tech. Rep. IER 38-ITSA 38, Parts 1–3. [Part 1 PDF](https://its.ntia.gov/publications/download/IER_38-ITSA_38.pdf); [NTIA Part 1 record](https://its.ntia.gov/publications/details?pub=2004); [Part 2 record](https://its.ntia.gov/publications/details?pub=2005); [Part 3 record](https://its.ntia.gov/publications/details?pub=2006); [official Phase 1 data listing](https://its.ntia.gov/data/legacy-radio-propagation-data) and [direct Phase 1 ZIP](https://its.ntia.gov/media/66293/phase_1.zip). The official Part 1 report was retrieved by the parent to `/tmp/fable-IER_38-ITSA_38.pdf`, then extracted to `/tmp/fable-IER_38-ITSA_38.txt` with `pdftotext`; Part I methods/limits were read for this chapter. The completion pass retrieved the ZIP and Parts 2/3 and analyzed the principal-site 20/50 MHz columns; exact source hashes, parsing rules, results and calibration limits are below. The earlier section's 20/50 MHz medians come from [R26]; the separately labeled completion table is the fresh ASCII-data analysis. Neither is an exact 30 MHz complex-channel measurement. [T]
 - [R28] Rice, P. L., Longley, A. G., Norton, K. A., & Barsis, A. P. (1967 revision), *Transmission Loss Predictions for Tropospheric Communication Circuits*, NBS Technical Note 101, vol. 1 §§2 and 10. https://nvlpubs.nist.gov/nistpubs/Legacy/TN/nbstechnicalnote101-1.pdf — read (text; Figs 10.2, 10.3 and 10.5 from the scan). [T]
 - [R29] Egli, J. J. (1957), Radio propagation above 40 Mc over irregular terrain, *Proc. IRE* 45(10), 1383–1391. https://doi.org/10.1109/JRPROC.1957.278224 — read (scan at worldradiohistory.com). [P]
 - [R30] Bullington, K. (1957), Radio propagation fundamentals, *Bell Syst. Tech. J.* 36(3), 593–626. https://archive.org/details/bstj36-3-593 — read (OCR). [P]

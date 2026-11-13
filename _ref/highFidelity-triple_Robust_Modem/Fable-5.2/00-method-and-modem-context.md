@@ -1,8 +1,8 @@
 # Method, conventions and modem context
 
 - **Purpose.** Shared foundation for the chapters in this directory: how evidence is graded, which conventions are used, and what the literature is being compared with — the triple Robust Modem's waveform and its present simulated channel.
-- **Scope.** Documentation only. No repository file outside this directory was changed, and nothing was built or run on the modem. Numbers marked [E] are this record's own estimates; the larger ones are collected in [90](90-cross-check-calculations.md).
-- **Source revision.** Original inspection used `0801e5c7`; the completion pass starts from clean `33f6e461fce12f4079870091b6d1aaa9c2f50821`. A Git comparison found no changes in production source, headers, tests, build definitions or maintained guides between the intervening research revision `07bcbc5d` and this baseline. Source-derived contracts were rechecked; the historical planner receipts were not rerun. Section 7 separates exact source geometry from their rounded observation summaries.
+- **Scope.** Research documentation, including bounded independent calculations, official reference-solver runs and analysis of public data described in the owning chapters. No repository file outside this directory was changed, and no modem experiment or receiver benchmark was run. Numbers marked [E] are this record's own estimates or derivations; the larger ones are collected in [90](90-cross-check-calculations.md).
+- **Source revision.** Original inspection used `0801e5c7`; the earlier source review used `33f6e461fce12f4079870091b6d1aaa9c2f50821`. This research execution began at clean `280b32e47af6f2066fcc44a8966d6af0b220d706`. Git comparison of `src/`, `include/`, `tests/`, `cmake/`, `docs/`, `CMakeLists.txt` and `build.sh` finds no changes from the earlier source-review revision to this baseline. This establishes source continuity, not execution of a modem experiment. Historical planner receipts were not rerun; section 7 separates exact source geometry from rounded observation summaries.
 - **Lifecycle.** Remove this directory once its applicable findings have been distilled into the maintained guides ([channel models](../../../docs/channel-models.md), [Robust operating guide](../../../docs/indexes/robust.md)) and into scenario records of the appraisal suite under `_appraisal/highFidelity-triple_Robust_Modem/`. No maintained guide could be edited during this work, so this purpose and trigger are recorded only here.
 
 ## 1. The question
@@ -69,6 +69,43 @@ So a real link reproduces a GUI link of "PathLoss at −164 dBm/Hz" when
 The GUI's 180 dB therefore stands for L_b + F_a ≈ 193.5 dB with an ideal transmitting antenna. At 1 MHz at night, where F_a is of the order of 80 dB, that is a basic transmission loss near 113 dB, not 180 dB. At 30 MHz in a quiet rural place, where F_a is near 18 dB, it is about 175 dB. The scenario chapters give the F_a values and their distributions. This conversion assumes the external noise stays above the receiver's own noise after the antenna loss; the chapters say where that fails.
 
 **At 5.8 GHz** a practical EME budget normally uses the system noise temperature, including antenna and receiver contributions at the declared reference plane: N0 = −198.6 dBm/Hz + 10 log T_sys. A system temperature of 80 K gives −179.6 dBm/Hz, about 16 dB below the GUI default. An equivalent total noise factor can still be defined relative to a reference temperature; it is not the external-noise factor F_a alone when receiver contributions are included.
+
+### 3.1.1 Grounded-monopole reference-plane check
+
+The preceding conversion uses the **total vertical field at the ground**, with
+its ground-reflected contribution already present. In this plane the receive
+capture area is `A = 0.75 λ²/(4π)`, although the transmitting short-monopole
+maximum directivity is 3. Applying the free-space incoming-wave area
+`3 λ²/(4π)` to that total field would count the field enhancement twice and
+introduce 6.02 dB. ITU-R P.341-7 Annex 3 equations (10)–(13) explicitly distinguishes
+these conventions and gives the corresponding short-monopole link gain of
+approximately 3.5 dB relative to basic loss.
+
+Consequently `C/N0 = P_emrp − L_b + 3.5 − (F_a − 174)` gives the stated
+`+177.5` constant and GUI-equivalent `−13.5` offset, to ITU rounding. They are
+consistent for the matched reference monopoles and noise convention. They do
+not convert an arbitrary E/B sensor, polarization, directional noise field,
+antenna pattern or receiver noise floor into the same link. This resolves the
+apparent 6 dB discrepancy without changing the table values by 6 dB.
+[Primary definition: P.341-7, Annex 3](https://www.itu.int/dms_pubrec/itu-r/rec/p/R-REC-P.341-7-201908-I!!PDF-E.pdf).
+
+For a passive receiving loss with power efficiency η at physical temperature
+`T_phys`, refer signal and noise to the same terminal:
+`C_out = η C_in` and
+`N0_out = η N0_external + (1−η) k T_phys + k T_e`.
+The last term is the receiver equivalent input noise at that terminal. A common
+antenna loss cancels only when the external contribution dominates and the
+signal/noise angular and polarization responses actually match. A quoted
+post-feed EME `T_sys` already includes the contributions assigned to that plane;
+do not add the same loss or thermal noise a second time.
+
+P.1147's ground-level, path-aligned vertical-loop skywave observable is also
+not automatically the P.368/P.372 total vertical electric field. P.684 gives
+the component/arrival-angle transformation; the compared P.1321 individual-mode
+curves have other antenna-pattern conventions. Chapters 20 and 82 retain the
+resulting comparison as different observables, not an unexplained universal
+skywave gain correction. Chapter 30 separately uses the native P.533 total
+received power, including its own 0.6 dB per-mode convention and power summation.
 
 ### 3.2 Doppler: shift, drift and spread
 
@@ -261,7 +298,7 @@ configuration-specific. See [native calendar](../../../include/datapump/triad_st
 [physical completion](../../../src/triad_message_receiver.cpp).
 
 For this thirteen-bit message, the first two final quiet slots are 13 and 14.
-The source's declared spectral support includes pulse margins: with 225 Hz
+The source's declared frequency containment includes pulse margins: with 225 Hz
 occupied width and a 0.02 s ramp, `Emission::source()` declares ±362.5 Hz before
 channel offsets. Fs=960 leaves 117.5 Hz to Nyquist, not 367.5 Hz. Use 48,000
 samples/s for any specified branch that exceeds the 960-sample containment
@@ -271,6 +308,20 @@ base branch; positive IF is required even though emitted I/Q is DATA-centered.
 RF oscillator errors use the physical carrier where specified and cannot be
 inferred from the IF. These guards are part of the proposed fixture, not a
 configure/runtime pass performed here.
+
+For the sub-9 kHz, Helper-off case, the corresponding declared half-width is
+`0.0625/2 + 1/0.02 + 200 = 250.03125 Hz`, or **8,019.96875–8,520.03125 Hz**
+around the physical 8,270 Hz carrier. The 240 Hz conversion IF is not added to
+these DATA-centered complex-envelope offsets. The default RRC has finite time
+support and the emission has no ideal brick-wall filter, so these bounds are
+computational allowances, **not compact spectral support**. Successful transfer
+interpolation across the guard does not certify residual spectral tails,
+reconstruction images or complete sampled-channel accuracy. Chapter81 evaluates
+the carrier, nominal occupied edges, guard edges and interval holdouts for its
+selected propagation reference; native source/tail qualification remains later
+work. The exact expressions are in
+[Emission::source](../../../src/triad_stream.cpp) and the scope of the shaping
+certificate is in [triad_shaping.cpp](../../../src/triad_shaping.cpp).
 
 ### Randomness and numerical decisions
 
