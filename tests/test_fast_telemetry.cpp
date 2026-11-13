@@ -1,7 +1,9 @@
 #include "datapump/fast/telemetry.hpp"
 #include "datapump/fast/modem.hpp"
+#include "datapump/fast/preset.hpp"
 #include "datapump/fast/session.hpp"
 #include "datapump/audio.hpp"
+#include "../src/fast/telemetry.hpp"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -13,6 +15,7 @@
 #include <random>
 #include <stdexcept>
 #include <thread>
+#include <vector>
 
 using namespace datapump;
 using namespace datapump::fast;
@@ -109,6 +112,91 @@ void collector() {
     std::array<float,1024> silence{};telemetry.record_samples(silence);
     const auto quiet=telemetry.publish(false,now+300ms);
     require(quiet && !quiet->waveform_rms && !quiet->waveform_peak,"audio meters retained older loud samples");
+}
+void captured_pcm_and_receiver_points() {
+    const auto profile=classic_profile(Channel::wire);
+    const auto stream=next_diagnostics_stream_id();
+    detail::CaptureTelemetry capture(profile,stream);
+    Telemetry receiver(profile,false,stream);
+    const auto now=Telemetry::Clock::time_point{};
+    std::array<float,768> first_pcm,second_pcm;
+    first_pcm.fill(.125f);second_pcm.fill(.375f);
+    capture.record_pcm(first_pcm);
+    const auto first=capture.publish(now);
+    require(first&&first->samples==768&&first->waveform_count==768&&first->spectrum_valid,
+            "First capture window did not describe actual PCM");
+    receiver.record_symbol({1,2});receiver.record_input({3,4});
+    capture.record_receiver(receiver,256,true);
+    capture.record_pcm(second_pcm);
+    require(!capture.publish(now+99ms),"Captured display exceeded its publication cadence");
+    const auto second=capture.publish(now+100ms);
+    require(second&&second->stream_id==stream&&second->revision==2&&second->samples==1536&&
+            second->waveform_count==1024&&second->waveform.front()==.125f&&second->waveform[256]==.375f&&
+            second->waveform.back()==.375f&&second->waveform_peak==.375f&&second->acquired&&
+            second->constellation_count==1&&second->input_count==1&&
+            second->constellation_points.front()==std::complex<float>(1,2)&&
+            second->input_points.front()==std::complex<float>(3,4)&&
+            second->constellation_sample==0&&second->input_sample==0&&first->samples==768,
+            "Receiver points overwrote newer captured waveform or changed their observation coordinates");
+    require(!capture.publish(now+200ms),"Capture display advanced without a new observation");
+}
+void noise_referenced_loopback() {
+    const auto profile=resolve_snr_preset(Channel::acoustic_short,-6).profile;
+    const auto stream=next_diagnostics_stream_id();
+    const auto preroll=profile.sample_rate/4;
+    detail::CaptureTelemetry capture(profile,stream,preroll);
+    Telemetry receiver(profile,false,stream);
+    std::mt19937 generator(813);
+    constexpr double sigma=.003;
+    std::normal_distribution<float> noise(0,sigma);
+    std::uint64_t tick=0;
+    const auto input=[&](std::span<float> pcm,double amplitude) {
+        for(auto& value:pcm) {
+            const auto bias=tick<preroll?.25+tick*2e-6:0.;
+            value=static_cast<float>(bias+noise(generator)+amplitude*std::sin(
+                2*std::numbers::pi*profile.carrier_hz*tick/profile.sample_rate));
+            ++tick;
+        }
+        capture.record_pcm(pcm);
+    };
+    const auto now=Telemetry::Clock::now();
+    std::vector<float> quiet(preroll);
+    input(quiet,0);
+    const auto baseline=capture.publish(now);
+    require(baseline&&!baseline->last_loopback_snr,"Pre-test noise acquired a signal SNR");
+    // Equal signal and reference-noise powers. The explicit DC trend in
+    // preroll must not change the band-integrated measurement.
+    const auto band=expected_snr_reference_band(profile.channel).bandwidth_hz();
+    const auto variance=sigma*sigma*2*band/profile.sample_rate;
+    const auto amplitude=std::sqrt(2*variance);
+    std::vector<float> frame(profile.sample_rate/10);
+    for(unsigned i=1;i<=4;++i) {
+        input(frame,amplitude);
+        const auto active=capture.publish(now+i*100ms);
+        require(active&&!active->last_loopback_snr,"Energy without payload evidence acquired a signal SNR");
+    }
+    const auto signal_tick=tick;
+    for(unsigned i=5;i<=34;++i) {
+        input(frame,0);
+        require(static_cast<bool>(capture.publish(now+i*100ms)),"Fresh capture stopped publishing during receiver backlog");
+    }
+    capture.record_receiver(receiver,signal_tick,false,{},now+3500ms);
+    receiver.record_symbol({1,1});
+    capture.record_receiver(receiver,0,true,ReceivedSignalRange{preroll,signal_tick},now+3600ms);
+    const auto result=capture.publish(now+3600ms);
+    require(result&&result->last_loopback_snr&&result->samples==tick&&result->waveform_rms<.004f,
+        "Delayed payload did not associate with its captured signal window");
+    const auto& measured=*result->last_loopback_snr;
+    require(measured.observation_sample==signal_tick&&measured.reference_bandwidth_hz==17500&&
+        std::abs(measured.db)<.75&&std::abs(measured.reference_noise_dbfs-10*std::log10(variance))<.75,
+        "Loopback estimate did not subtract occupied noise and use the original reference band");
+    receiver.record_symbol({2,2});
+    capture.record_receiver(receiver,tick-signal_tick,true,ReceivedSignalRange{preroll,signal_tick},now+3700ms);
+    receiver.record_symbol({2,2});
+    capture.record_receiver(receiver,0,true,ReceivedSignalRange{preroll,signal_tick},now+3800ms);
+    const auto after=capture.publish(now+3800ms);
+    require(after&&after->last_loopback_snr&&after->last_loopback_snr->observation_sample==signal_tick,
+        "Noise-only tail refreshed the measured signal time");
 }
 void acoustic_batches() {
     const auto p=capacity_profile(Channel::acoustic);
@@ -330,7 +418,10 @@ void sessions() {
     require(fresh && fresh->stream_id!=pending->stream_id && !fresh->transmitting && !fresh->revision
             && !fresh->waveform_count && !fresh->constellation_count && !fresh->input_count,"RX inherited previous TX diagnostic samples");
     fixture::capture_ready=true;
-    await([&]{return session.poll().diagnostics->waveform_count>0;},"RX diagnostic PCM did not publish");
+    await([&]{
+        const auto diagnostics=session.poll().diagnostics;
+        return diagnostics->waveform_count>0&&diagnostics->input_count>0;
+    },"RX diagnostic PCM and input points did not publish");
     const auto listening=session.poll().diagnostics;
     require(listening->spectrum_valid && !listening->transmitting && !listening->acquired && !listening->constellation_count,
             "unacquired RX invented constellation points");
@@ -345,5 +436,5 @@ void sessions() {
     other.close();await([&]{return other.ready_to_close();},"second diagnostic session did not close");
 }
 }
-int main(){try{collector();acoustic_batches();input_observations();observers();sessions();std::cout<<"fast immutable telemetry, waveform/spectrum and observer isolation passed\n";return 0;}
+int main(){try{collector();captured_pcm_and_receiver_points();noise_referenced_loopback();acoustic_batches();input_observations();observers();sessions();std::cout<<"fast immutable telemetry, waveform/spectrum and observer isolation passed\n";return 0;}
 catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

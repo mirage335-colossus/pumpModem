@@ -1,5 +1,6 @@
 #include "alsa_stub.hpp"
 #include <algorithm>
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
@@ -17,8 +18,9 @@ struct HardwareParams {
 struct SoftwareParams {unsigned long avail_min=0,start_threshold=0;};
 }
 extern "C" {
-int snd_pcm_open(void** pcm,const char* name,int direction,int) {
+int snd_pcm_open(void** pcm,const char* name,int direction,int mode) {
     auto& s=alsa_test::state;s.attempts.emplace_back(name);
+    s.open_modes.push_back(mode);
     for(const auto& [device,error]:s.open_errors)if(device==name){if(s.after_open)s.after_open();return error;}
     if(std::find(s.available.begin(),s.available.end(),name)==s.available.end()){if(s.after_open)s.after_open();return -2;}
     *pcm=reinterpret_cast<void*>(1);s.selected=name;s.direction=direction;++s.opens;++s.live;
@@ -146,6 +148,13 @@ int snd_pcm_recover(void*,int error,int){
     auto& s=alsa_test::state;s.recovered_errors.push_back(error);
     if(s.recover_result>=0 && s.after_recover)s.after_recover();
     return s.recover_result;
+}
+int snd_pcm_resume(void*) {
+    auto& s=alsa_test::state;
+    const auto attempt=s.resume_calls++;
+    const auto result=attempt<s.resume_results.size()?s.resume_results[attempt]:-ENOSYS;
+    if(s.after_resume)s.after_resume();
+    return result;
 }
 int snd_pcm_drain(void*){
     auto& s=alsa_test::state;++s.drain_calls;

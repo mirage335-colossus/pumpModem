@@ -34,33 +34,88 @@ once. Numerical oscillator/search information is under the Link planner's
 hideable Model limits and references.
 .PP
 Fast Modem's Simulation page offers Live audio (the default), Simulation,
-and Live loopback test. Ordinary Live uses the selected audio device and
-does not insert a synthetic channel.
-Simulation starts a local Fast transmission through the native Fast sampled
-channel and receiver; results are labeled as simulated. Its controls set
-assumed transmit power in watts, path loss in dB, receiver noise density in
-dBm/Hz or Off, Baseband and Shift oscillator presets (including Off and Same
-Baseband reference), Doppler/delay spread, additional selective AM, search
-margin, and Shift frequency in Hz. These values describe the software model,
-not measurements or physical radio controls. Shift frequency affects the
-oscillator model only and does not change the Fast audio carrier or passband.
+and Live loopback test. Ordinary Live uses the selected audio device and clean
+application PCM. A compact Console row holds Baseband and Shift oscillator
+bounds, Doppler/delay spread, selective AM, receiver search margin, and RF Shift
+coordinate. These declarations always constrain the receiver and inform
+deterministic local Auto profile selection. They are not measurements or radio
+controls. Only Simulation and an explicitly started loopback test inject the
+declared oscillator, spread and selective-AM effects; idle loopback monitoring
+and ordinary Live remain clean. Simulation starts a local Fast transmission
+through the native Fast sampled channel and receiver; results are labeled as
+simulated. Its separate link-budget controls set assumed transmit power in
+watts, path loss in dB, and receiver noise density in dBm/Hz or Off. Shift
+frequency affects oscillator bounds and synthetic test injection only; it does
+not change the Fast audio carrier or passband.
 Simulation preserves channel tails and a scored quiet completion interval
 without opening hardware audio.
+Transmit power, path loss and noise define the simulated ratio in normalized
+receiver-input units: link power and loss set the equivalent received level
+relative to independent receiver noise. Noise is added after propagation at the
+simulated receiver boundary; these settings do not attenuate audio-DAC playback
+or change physical receiver gain.
+Changing profile or waveform settings revalidates receiver declarations. An
+invalid receiver declaration blocks listening and transmission in every mode
+while leaving the fields editable. Invalid synthetic channel or link-budget
+settings disable Simulation and explicit loopback only. Audio-band diagnostics
+show the required frequency range, available sampled band, and oscillator/channel
+allowances.
 .PP
-Run loopback test sends a fixed short diagnostic through the selected channel
-model, physical audio output, connected loopback path, and captured Fast
-receiver. It uses the selected profile, device, output routing and encryption;
-encrypted tests require the selected key. Capture starts before playback,
-using the normal shared-audio handoff. Output gain is fixed at 0.1; the test
-allows at most 75 seconds of audio and 110 seconds of elapsed time. The Console
-message and file drafts are preserved and are not sent. Test status, counters
-and captured receiver plots are labeled LOOPBACK TEST. No diagnostic enters
-Signals history or creates a text/file or Save handle, and the test does not
-start automatic listening. A pass requires exact diagnostic reception,
-integrity verification and scored physical absence. Cancellation, limits and
-audio discontinuities leave the test incomplete. A cable test exercises the
+Run loopback test sends the selected nonempty Console text or file with the
+selected profile, key, device and output routing, copying declared oscillator,
+spread and selective-AM effects into physical playback and capture. Search
+margin affects receiver bounds only; its copied test value is one. Transmit power,
+path loss and receiver noise are software Simulation assumptions; they are
+disabled and retained in Live loopback mode. Selected waveform impairments
+remain before playback, and the physical captured samples feed the receiver
+and plots. Playback uses the selected TX volume, with no mixer change or
+automatic level adjustment. Capture starts before playback using the normal
+shared-audio handoff. The test allows at most 75 seconds of audio and 110
+seconds elapsed overall, including source preparation. Capture must start
+within 5 seconds. After the full source and canonical quiet tail, up to 2
+seconds of captured audio are allowed for receiver completion; this grace can
+declare failure only and cannot manufacture completion. Playback continues
+with silence while reception finishes, avoiding an audio-server drain wait.
+Progress distinguishes audio samples queued for playback from receiver samples
+captured. The queued count includes silence and does not confirm speaker output.
+Shared audio handoff waits at most 2 seconds and remains cancellable.
+The complete source is prepared and its encoded airtime
+checked before opening audio; an oversized source/profile combination is
+rejected without truncation or a substitute fixture. Console text and file
+drafts remain intact after sending. Test status, counters and captured receiver
+plots are labeled LOOPBACK TEST. A result enters Signals or Files only after
+scored physical absence, decoding, integrity and exact comparison with the
+selected source. Rows retain LOOPBACK TEST provenance and use the ordinary
+restricted text view, copy/paste and explicit attachment-save actions. Public
+mode checks integrity but does not authenticate a sender; encrypted mode
+requires successful authentication. Cancellation, limits, mismatches and audio
+discontinuities leave the test incomplete.
+.PP
+When Fast is selected in Live loopback mode, the application also runs its
+ordinary receive-only session while idle. The bounded duplex test takes over
+after that session closes, then monitoring resumes after completion or
+cancellation. Only one Fast session owns audio at a time. The last test outcome
+stays visible alongside current monitor status. Switching tabs does not stop
+capture. Switching to another modem stops idle Fast monitoring for the shared
+audio handoff; an active bounded test can finish. A cable test exercises the
 local audio path with modeled effects; it does not qualify RF propagation or
 a named transceiver.
+.PP
+During Fast Live reception and loopback mode, waveform and waterfall plots
+follow captured PCM independently of receiver acquisition and decoding. Input
+I/Q and equalized constellation points follow receiver progress and may lag
+capture; old points are identified by sample age. Ordinary Live shows current
+input level in dBFS, not SNR. During or after an eligible loopback test, Last
+loopback signal SNR compares a captured payload observation with the pre-playback
+microphone-noise estimate and displays reference bandwidth and age; it is omitted
+without a comparable baseline and payload window. It is not EVM or a reading
+during physical absence. Switching to another modem preserves an active Fast
+transmission or duplex loopback test; receive-only Fast listening stops for the
+audio handoff.
+.PP
+Fast has an 800-logical-pixel default window height and a 720-logical-pixel
+minimum. Its compact layout applies to Console, Simulation and Modem details,
+keeping profile, audio and action controls accessible across tabs.
 .PP
 FLTK and Rev builds provide the same application controls.
 The backend is selected at build time and reported by

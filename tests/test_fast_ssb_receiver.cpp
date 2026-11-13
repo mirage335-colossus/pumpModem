@@ -1,15 +1,19 @@
 #include "fast/ssb_receiver.hpp"
+#include "fast/dense_acoustic_receiver.hpp"
 #include "fast_test_key.hpp"
 #include "datapump/fast/compression.hpp"
 #include "datapump/fast/simulation.hpp"
+#include "datapump/resampler.hpp"
 #include "datapump/tuning.hpp"
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <numbers>
 #include <random>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 
 namespace {
@@ -341,6 +345,595 @@ void check_hf_quiet() {
           "HF quiet control lacked six observed seconds after the propagated waveform");
 }
 
+void check_narrow_acoustic() {
+    auto profile=fast::capacity_profile(fast::Channel::acoustic_short);
+    profile.acoustic_ofdm=false;
+    profile.ofdm_training_blocks=16;
+    profile.ldpc_frame_bits=1944;
+    profile.constellation=4;
+    profile.carrier_hz=1800.;
+    profile.symbol_rate=183.;
+    profile.amplitude*=std::sqrt(2.)/4.5;
+    check(supports_delay_doppler_receiver(profile),"Narrow acoustic waveform lost delay/Doppler admission");
+    auto below=profile;
+    below.symbol_rate=179.;
+    check(!supports_delay_doppler_receiver(below),"Narrow acoustic fit exceeded its bounded rate range");
+
+    constexpr std::uint64_t quota=1ULL<<20;
+    const datapump::Bytes source{'f','o','x'};
+    auto encoded=fast::prepare_xz_source(fast::byte_source(source),quota);
+    auto encoder=fast::testing::deterministic_encoder(profile,std::nullopt,
+        fast::byte_source(std::move(encoded.encoded)),0x439a,fast::SourceEncoding::xz);
+    fast::Transmitter transmitter(profile,[&](auto bits){return encoder.next_interval(bits);});
+    const auto base=datapump::tuning::parse_oscillator_preset("crystal");
+    const auto shift=datapump::tuning::parse_oscillator_preset("ic-7100");
+    constexpr auto radians=std::numbers::pi/180.;
+    fast::SimulationSettings settings;
+    settings.baseband_ppm=base.clock_error_ppm;
+    settings.baseband_phase_rad_sqrt_s=base.phase_noise_degrees_per_sqrt_second*radians;
+    settings.shift_ppm=shift.clock_error_ppm;
+    settings.shift_phase_rad_sqrt_s=shift.phase_noise_degrees_per_sqrt_second*radians;
+    settings.shift_hz=30e6;
+    settings.delay_ms=7.;
+    settings.doppler_hz=30.;
+    settings.selective_slow_depth=.65;
+    settings.selective_fast_depth=.65;
+    settings.seed=419;
+    // A white receive floor referred to the nominal 17.5 kHz acoustic band.
+    // Use a moderate noise holdout in addition to the modeled moving rays.
+    constexpr double cn0_db_hz=40.;
+    settings.noise_dbm_hz=-174.;
+    settings.path_loss_db=30.+10.*std::log10(settings.transmit_watts)-*settings.noise_dbm_hz-cn0_db_hz;
+    fast::SimulationChannel channel(profile,settings,[&](auto pcm){return transmitter.read_analytic(pcm);});
+    fast::StreamDecoder decoder(profile,std::nullopt,quota,fast::SourceEncoding::xz);
+    fast::Receiver receiver(profile,[&](auto bits,bool feedback) {
+        return decoder.push_interval(bits,feedback);
+    },{},{},{});
+    std::array<float,4093> pcm{};
+    while(!receiver.progress().physical_complete) {
+        const auto count=channel.read(pcm);
+        if(!count)break;
+        receiver.push(std::span(pcm).first(count));
+        check(!decoder.result(),"Narrow acoustic decoder published before physical completion");
+    }
+    receiver.finish();
+    const auto completion=receiver.physical_completion_input_tick();
+    const auto quiet=channel.report().quiet_start_sample;
+    decoder.finish(receiver.progress().physical_complete);
+    const auto result=decoder.result();
+    const auto decoded=decoder.snapshot();
+    std::cout<<"narrow_acoustic rate="<<profile.symbol_rate<<" cn0_db_hz="<<cn0_db_hz
+             <<" backend="<<receiver.backend_name()<<" intervals="<<decoded.intervals
+             <<" ldpc_failed="<<decoded.ldpc_failed_frames<<" physical="<<receiver.progress().physical_complete
+             <<" workspace_bytes="<<receiver.workspace_bytes()<<" quiet_start="<<quiet.value_or(0)
+             <<" completion="<<completion.value_or(0)<<" generated="<<channel.report().output_samples<<'\n';
+    if(const auto* sparse=ReceiverDiagnostics::ssb(receiver))print_quiet(*sparse);
+    check(receiver.uses_delay_doppler()&&completion&&quiet&&*completion>=*quiet+6ULL*profile.sample_rate,
+          "Narrow acoustic waveform did not score the actual six-second tail");
+    check(result&&std::ranges::equal(result->bytes(),source)&&decoded.ldpc_frames==2&&!decoded.ldpc_failed_frames,
+          "Narrow acoustic delay/Doppler reception lost the protected source");
+    check(receiver.workspace_bytes()<64U*1024U*1024U,"Narrow acoustic receiver exceeded bounded workspace");
+
+    unsigned intervals=0;
+    fast::Receiver noise_only(profile,[&](auto,bool) -> std::optional<fast::ValidatedCapacityCycle> {
+        ++intervals;return {};
+    },{},{},{});
+    std::mt19937 random(479);
+    std::normal_distribution<float> noise(0.F,static_cast<float>(std::sqrt(channel.report().noise_variance)));
+    for(auto left=10ULL*profile.sample_rate;left;) {
+        const auto count=std::min<std::uint64_t>(left,pcm.size());
+        const auto input=std::span(pcm).first(count);
+        for(auto& sample:input)sample=noise(random);
+        noise_only.push(input);
+        left-=count;
+    }
+    const auto* model=ReceiverDiagnostics::ssb(noise_only);
+    check(model&&model->acquisition_progress().fit_requests==0&&
+          !noise_only.progress().acquired&&!noise_only.progress().physical_complete&&!intervals,
+          "Narrow acoustic noise triggered a full fit or manufactured reception");
+}
+
+void check_narrow_acoustic_acquisition_grace() {
+    auto profile=fast::capacity_profile(fast::Channel::acoustic_short);
+    profile.acoustic_ofdm=false;
+    profile.ofdm_training_blocks=16;
+    profile.ldpc_frame_bits=1944;
+    profile.constellation=4;
+    profile.carrier_hz=1800.;
+    profile.symbol_rate=461.;
+    auto waveform=render(profile,1,477);
+    const auto sps=profile.sample_rate/profile.symbol_rate;
+    // A noisy startup exercises the coherent branch without relying on
+    // sparse model admission. Leave the independent marker and payload
+    // clean so their result diagnoses only selection timing.
+    const auto noisy_samples=static_cast<std::size_t>((fast::preamble_symbols(profile)+
+        single_carrier_pulse_radius(profile)-16.)*sps);
+    constexpr double symbol_snr=7.;
+    const auto noise_sigma=profile.amplitude*std::sqrt(sps/std::pow(10.,symbol_snr/10.))*.5;
+    std::mt19937 noise_random(3149);
+    std::normal_distribution<float> noise(0.F,static_cast<float>(noise_sigma));
+    for(auto& sample:std::span(waveform.pcm).first(noisy_samples))sample+=noise(noise_random);
+    // The matched receive filter and last pilot need real samples beyond
+    // the finite transmit pulse tail before emitting the interval.
+    waveform.pcm.resize(waveform.pcm.size()+profile.sample_rate/4,0.F);
+    const auto pcm=std::span(waveform.pcm);
+    std::vector<Soft> reference_intervals;
+    fast::Receiver coherent(profile,[&](auto soft) {
+        reference_intervals.emplace_back();
+        std::ranges::copy(soft,reference_intervals.back().begin());
+    });
+    std::size_t lock=0;
+    while(lock<pcm.size()&&!coherent.progress().acquired)coherent.push(pcm.subspan(lock++,1));
+    check(coherent.progress().acquired,"Narrow grace fixture could not acquire the coherent marker");
+    const auto switch_at=lock+static_cast<std::size_t>(std::ceil(4.*fast::sync_symbols*sps));
+    check(switch_at<pcm.size(),"Narrow grace boundary lies outside the fixture");
+    coherent.push(pcm.subspan(lock));
+    check(reference_intervals.size()==1,"Narrow grace reference did not emit one interval");
+
+    for(const std::size_t chunk:{1U,4093U}) {
+        std::size_t intervals=0;
+        fast::Receiver competing(profile,[&](auto soft,bool) -> std::optional<fast::ValidatedCapacityCycle> {
+            check(intervals<reference_intervals.size(),"Competing acquisition emitted an extra interval");
+            check(std::ranges::equal(soft,reference_intervals[intervals]),
+                  "Selected coherent receiver changed the acquired interval");
+            ++intervals;
+            return {};
+        },{},{},{});
+        for(std::size_t at=0;at<switch_at-1;) {
+            const auto n=std::min(chunk,switch_at-1-at);
+            competing.push(pcm.subspan(at,n));
+            at+=n;
+        }
+        check(competing.backend_name()=="single-carrier-acquisition"&&!intervals,
+              "Coherent acquisition ended its grace early or emitted before selection");
+        competing.push(pcm.subspan(switch_at-1,1));
+        check(competing.backend_name()=="standard-fast"&&competing.progress().acquired&&!intervals,
+              "Coherent acquisition grace did not expire on the raw capture clock");
+        competing.push(pcm.subspan(switch_at));
+        check(intervals==1,"Competing acquisition dropped the selected coherent interval");
+    }
+}
+
+fast::Profile dense_acoustic_profile() {
+    auto profile=fast::capacity_profile(fast::Channel::acoustic_short);
+    profile.acoustic_ofdm=false;
+    profile.ofdm_training_blocks=16;
+    profile.carrier_hz=1800.;
+    profile.symbol_rate=1000.;
+    profile.rolloff=.20;
+    profile.amplitude*=std::sqrt(2.)/4.5;
+    profile.constellation=4;
+    profile.code_rate=fast::CodeRate::half;
+    profile.ldpc_frame_bits=1944;
+    profile.interleave_depth=1;
+    profile.marker_spacing_intervals=1;
+    profile.pilot_spacing_symbols=4;
+    check(fast::dense_acoustic_framing(profile),"Dense Fast contract requires its fixed wire profile");
+    return profile;
+}
+
+void check_dense_marker_clock() {
+    const auto p=dense_acoustic_profile();
+    constexpr std::uint64_t late_ordinal=100000;
+    const DenseTiming startup{12100.,48.,0.};
+    const auto elapsed=double(fast::preamble_symbols(p))+fast::total_interval_symbols(p,late_ordinal)+
+        single_carrier_pulse_radius(p);
+    const auto old_projection=startup.epoch+elapsed*startup.samples_per_symbol;
+    const DenseTiming previous{old_projection+2.*p.sample_rate-elapsed*48.0048,48.0048,12.};
+    const DenseTiming updated{old_projection+2.*p.sample_rate+6.-elapsed*48.0052,48.0052,12.};
+    const auto cap=.024*p.sample_rate;
+    check(!dense_marker_timing_matches(p,late_ordinal,startup,updated,cap),
+        "Late Fast marker fixture did not leave the immutable startup tolerance");
+    check(dense_marker_timing_matches(p,late_ordinal,previous,updated,cap),
+        "Fast dense recurring timing rejected a local six-tick clock correction");
+    const auto expected=old_projection+2.*p.sample_rate+6.+fast::interval_symbols(p)*updated.samples_per_symbol;
+    check(dense_public_marker_tick(p,late_ordinal+1,updated)==static_cast<std::uint64_t>(std::ceil(expected)),
+        "Fast dense recurring timing changed fixed public ordinal geometry");
+    auto wrong=updated;
+    wrong.epoch+=fast::interval_symbols(p)*updated.samples_per_symbol;
+    check(!dense_marker_timing_matches(p,late_ordinal,previous,wrong,cap),
+        "Fast dense recurring alignment accepted the next wire ordinal at the current slot");
+}
+
+void check_dense_acoustic_carrier_edges() {
+    const auto profile=dense_acoustic_profile();
+    constexpr std::uint64_t quota=1<<20;
+    const datapump::Bytes source{'f','o','x'};
+    const fast::ChannelAssumptions assumptions{};
+    const auto admitted=fast::receiver_assumption_bounds(profile,assumptions).admitted.frequency_hz;
+    for(const auto [seed,shift_hz,sign]:std::array{
+            std::tuple{420U,112000000.,-1.},std::tuple{419U,332000000.,1.}}) {
+        auto encoded=fast::prepare_xz_source(fast::byte_source(source),quota);
+        auto encoder=fast::testing::deterministic_encoder(profile,{},fast::byte_source(std::move(encoded.encoded)),
+            seed^0x4267e23dba723f99ULL,fast::SourceEncoding::xz);
+        fast::Transmitter tx(profile,[&](auto bits){return encoder.next_interval(bits);});
+        fast::SimulationSettings settings;
+        settings.seed=seed;
+        settings.shift_ppm=1.;
+        settings.shift_phase_rad_sqrt_s=std::numbers::pi/3600.;
+        settings.shift_hz=shift_hz;
+        fast::SimulationChannel channel(profile,settings,[&](auto pcm){return tx.read_analytic(pcm);});
+        const auto offset=channel.report().shift_error_hz;
+        check(sign*offset>.99*admitted&&sign*offset<=admitted,
+            "Dense Fast carrier-edge fixture is outside its declared edge region");
+        fast::StreamDecoder decoder(profile,{},quota,fast::SourceEncoding::xz);
+        fast::Receiver receiver(profile,[&](auto llrs,bool feedback)->std::optional<fast::ValidatedCapacityCycle> {
+            check(!feedback,"Dense Fast carrier search consulted source validation");
+            decoder.push_interval(llrs);
+            return {};
+        },{},{},{},assumptions);
+        std::array<float,4096> samples{};
+        while(!receiver.progress().physical_complete) {
+            const auto count=channel.read(samples);
+            if(!count)break;
+            const auto consumed=receiver.consume(std::span(samples).first(count));
+            check(consumed==count||receiver.progress().physical_complete,
+                "Dense Fast carrier-edge receiver abandoned observed audio");
+        }
+        receiver.finish();
+        decoder.finish(receiver.progress().physical_complete);
+        const auto end=receiver.physical_completion_input_tick();
+        const auto tail=channel.report().quiet_start_sample;
+        std::cout<<"dense_carrier_edge_hz="<<offset<<" frames="<<decoder.snapshot().ldpc_frames
+                 <<" tail="<<tail.value_or(0)<<" completion="<<end.value_or(0)<<'\n';
+        check(tail&&end&&*end>=*tail+6ULL*profile.sample_rate&&decoder.result()&&
+              decoder.snapshot().ldpc_frames==2&&std::ranges::equal(decoder.result()->bytes(),source),
+              "Dense Fast carrier-edge receiver lost exact bytes or true physical completion");
+    }
+}
+
+void check_dense_acoustic_contract() {
+    check_dense_marker_clock();
+    const auto profile=dense_acoustic_profile();
+
+    constexpr std::uint64_t quota=1<<20;
+    const datapump::Bytes source{'f','o','x'};
+    auto encoded=fast::prepare_xz_source(fast::byte_source(source),quota);
+    auto encoder=fast::testing::deterministic_encoder(profile,{},fast::byte_source(std::move(encoded.encoded)),
+        421,fast::SourceEncoding::xz);
+    fast::Transmitter tx(profile,[&](auto bits){return encoder.next_interval(bits);});
+    fast::SimulationSettings settings;
+    settings.seed=421;
+    settings.delay_ms=7.;
+    settings.doppler_hz=30.;
+    settings.spread_evolution=fast::SpreadEvolution::gaussian;
+    settings.transmit_watts=40.;
+    settings.path_loss_db=130.;
+    settings.noise_dbm_hz=-174.;
+    fast::SimulationChannel channel(profile,settings,[&](auto pcm){return tx.read_analytic(pcm);});
+    const auto assumptions=fast::channel_assumptions(settings);
+    std::vector<float> samples;
+    std::array<float,2053> chunk{};
+    while(const auto n=channel.read(chunk))samples.insert(samples.end(),chunk.begin(),chunk.begin()+n);
+    check(channel.report().quiet_start_sample.has_value(),"Dense Fast fixture did not produce a real quiet tail");
+    const auto tail_start=*channel.report().quiet_start_sample;
+    for(const auto gain:{1.F,.1F,.01F}) {
+        fast::StreamDecoder decoder(profile,{},quota,fast::SourceEncoding::xz);
+        fast::Receiver receiver(profile,[&](auto llrs,bool)->std::optional<fast::ValidatedCapacityCycle> {
+            decoder.push_interval(llrs);
+            return {};
+        },{},{},{},assumptions);
+        for(std::size_t offset=0;offset<samples.size()&&!receiver.progress().physical_complete;) {
+            const auto n=std::min(chunk.size(),samples.size()-offset);
+            for(std::size_t i=0;i<n;++i)chunk[i]=gain*samples[offset+i];
+            const auto used=receiver.consume(std::span(chunk).first(n));
+            check(used==n||receiver.progress().physical_complete,"Dense Fast abandoned gain-scaled PCM");
+            offset+=used;
+            check(!decoder.result(),"Dense Fast exposed source before delivery of physical completion");
+        }
+        receiver.finish();
+        const auto end=receiver.physical_completion_input_tick();
+        check(receiver.progress().acquired && end && *end>=tail_start+6ULL*profile.sample_rate,
+            "Dense Fast gain scaling changed acquisition or scored physical absence");
+        decoder.finish(receiver.progress().physical_complete);
+        check(decoder.result() && std::ranges::equal(decoder.result()->bytes(),source),
+            "Dense Fast inverse was not invariant to capture gain at equal SNR");
+        check(receiver.workspace_bytes()<16U*1024*1024,"Dense Fast DSP exceeded its local tile workspace");
+    }
+
+    fast::StreamDecoder partial(profile,{},quota,fast::SourceEncoding::xz);
+    fast::Receiver truncated(profile,[&](auto llrs,bool)->std::optional<fast::ValidatedCapacityCycle> {
+        partial.push_interval(llrs);
+        return {};
+    },{},{},{},assumptions);
+    const auto prefix=std::span(samples).first(tail_start+profile.sample_rate*11/2);
+    check(truncated.consume(prefix)==prefix.size()&&truncated.progress().acquired,
+        "Dense Fast truncated control did not exercise acquired reception");
+    truncated.finish();
+    partial.finish(truncated.progress().physical_complete);
+    check(!truncated.physical_completion_input_tick()&&!partial.result(),
+        "Dense Fast EOF or less than six seconds of silence completed a source");
+
+    std::mt19937 random(421);
+    std::normal_distribution<float> noise(0.F,.10F);
+    fast::Receiver absent(profile,[](auto,bool)->std::optional<fast::ValidatedCapacityCycle> {
+        throw std::runtime_error("Dense Fast white noise committed a payload interval");
+    },{},{},{},assumptions);
+    double maximum_burst=0.,backlog=0.,maximum_backlog=0.;
+    for(std::size_t left=12*profile.sample_rate;left;) {
+        const auto count=std::min(left,chunk.size());
+        for(auto& sample:std::span(chunk).first(count))sample=noise(random);
+        const auto start=std::chrono::steady_clock::now();
+        check(absent.consume(std::span(chunk).first(count))==count,"Dense Fast ended on unacquired white noise");
+        const auto service=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();
+        maximum_burst=std::max(maximum_burst,service);
+        backlog=std::max(0.,backlog+service-double(count)/profile.sample_rate);
+        maximum_backlog=std::max(maximum_backlog,backlog);
+        left-=count;
+    }
+    absent.finish();
+    std::cout<<"dense_noise_only_seconds=12 workspace="<<absent.workspace_bytes()
+             <<" max_push_seconds="<<maximum_burst<<" max_backlog_seconds="<<maximum_backlog<<'\n';
+    check(!absent.progress().acquired&&!absent.physical_completion_input_tick(),
+        "Dense Fast admitted noise without independently verified public alignment");
+    check(absent.workspace_bytes()<16U*1024*1024,"Dense Fast rolling acquisition exceeded its fixed workspace");
+
+    auto waveform=render(profile,3,338);
+    const auto boundary=fast::preamble_symbols(profile)+fast::total_interval_symbols(profile,1);
+    const auto radius=single_carrier_pulse_radius(profile);
+    // Remove the whole physical aperture for the missing interval, including
+    // its right RRC support. The following alignment word resumes after its
+    // first 64 symbols, while its payload and later pilot words remain intact.
+    const auto first=static_cast<std::size_t>((boundary+radius)*48.);
+    const auto past=static_cast<std::size_t>((boundary+fast::interval_symbols(profile)+2*radius)*48.);
+    std::ranges::fill(std::span(waveform.pcm).subspan(first,past-first),0.F);
+    std::vector<Soft> received;
+    fast::Receiver resumed(profile,[&](auto llrs,bool)->std::optional<fast::ValidatedCapacityCycle> {
+        std::ranges::copy(llrs,received.emplace_back().begin());
+        return {};
+    },{},{},{},assumptions);
+    check(resumed.consume(waveform.pcm)==waveform.pcm.size()&&!resumed.progress().physical_complete,
+        "Dense Fast completed before a resumed public interval");
+    std::vector<float> quiet(fast::end_silence_samples(profile));
+    (void)resumed.consume(quiet);
+    const auto end=resumed.physical_completion_input_tick();
+    resumed.finish();
+    std::cout<<"dense_resume_intervals="<<received.size()<<" erasures="<<resumed.progress().erased_intervals
+             <<" tail_start="<<waveform.pcm.size()<<" completion="<<end.value_or(0)<<'\n';
+    check(end&&*end>=waveform.pcm.size()+6ULL*profile.sample_rate&&received.size()==3&&
+          resumed.progress().erased_intervals==1&&std::ranges::all_of(received[1],[](float value){return value==0.F;}),
+          "Dense Fast lost a timed interior erasure or the subsequent real physical end");
+    for(std::size_t i=0;i<waveform.bits.back().size();++i)
+        check(received.back()[i]!=0.F && (received.back()[i]>0.F)==bool(waveform.bits.back()[i]),
+            "Dense Fast did not recover the resumed payload at its original wire ordinal");
+}
+
+void check_dense_acoustic_transitions() {
+    const auto profile=dense_acoustic_profile();
+    constexpr std::uint64_t quota=1<<20;
+    const auto key=fast_test::sequence_key();
+    const datapump::Bytes source{'f','o','x'};
+    auto encoded=fast::prepare_xz_source(fast::byte_source(source),quota);
+    auto encoder=fast::testing::deterministic_encoder(profile,key,fast::byte_source(std::move(encoded.encoded)),
+        419,fast::SourceEncoding::xz);
+    fast::Transmitter tx(profile,[&](auto bits){return encoder.next_interval(bits);});
+    const auto start_of_switch=static_cast<std::uint64_t>(profile.sample_rate/profile.symbol_rate*
+        (fast::preamble_symbols(profile)+fast::interval_symbols(profile)/2));
+    const auto end_of_switch=start_of_switch+profile.sample_rate/10;
+    const auto input_samples=fast::transmission_samples(profile,2);
+    std::vector<std::complex<float>> analytic(static_cast<std::size_t>(input_samples));
+    check(tx.read_analytic(analytic)==analytic.size(),"Dense transition fixture did not render two native intervals");
+    fast::SimulationSettings settings;
+    settings.seed=419;
+    settings.delay_ms=7.;
+    settings.doppler_hz=30.;
+    settings.spread_evolution=fast::SpreadEvolution::gaussian;
+    settings.transmit_watts=40.;
+    settings.path_loss_db=130.;
+    settings.noise_dbm_hz.reset();
+    const auto assumptions=fast::channel_assumptions(settings);
+    std::size_t read=0;
+    fast::SimulationChannel channel(profile,settings,[&](auto pcm) {
+        const auto n=std::min(analytic.size()-read,pcm.size());
+        std::ranges::copy(std::span(analytic).subspan(read,n),pcm.begin());
+        read+=n;
+        return n;
+    });
+    std::vector<float> faded;
+    std::array<float,2053> chunk{};
+    while(const auto n=channel.read(chunk))faded.insert(faded.end(),chunk.begin(),chunk.begin()+n);
+    const auto tail_start=channel.report().quiet_start_sample;
+    check(tail_start.has_value(),"Dense transition fixture lacked a real propagation drain");
+    for(bool initially_faded:{false,true}) {
+        fast::StreamDecoder decoder(profile,key,quota,fast::SourceEncoding::xz);
+        std::size_t display_points=0;
+        bool finite_display=true;
+        fast::Receiver receiver(profile,[&](auto llrs,bool feedback)->std::optional<fast::ValidatedCapacityCycle> {
+            check(!feedback,"Dense model arbitration consulted the decoder for candidate selection");
+            decoder.push_interval(llrs);
+            return {};
+        },[&](auto point) {
+            finite_display&=std::isfinite(point.real())&&std::isfinite(point.imag());
+            ++display_points;
+        },{},{},assumptions);
+        std::size_t offset=0;
+        while(offset<faded.size()&&!receiver.progress().physical_complete) {
+            const auto n=std::min(chunk.size(),faded.size()-offset);
+            for(std::size_t i=0;i<n;++i) {
+                const auto tick=offset+i;
+                const auto fraction=std::clamp((double(tick)-start_of_switch)/(end_of_switch-start_of_switch),0.,1.);
+                const auto weight=initially_faded?1.-fraction:fraction;
+                const auto clean=tick<analytic.size()?analytic[tick].real():0.F;
+                chunk[i]=static_cast<float>((1.-weight)*clean+weight*faded[tick]);
+            }
+            const auto used=receiver.consume(std::span(chunk).first(n));
+            check(used==n||receiver.progress().physical_complete,"Dense transition receiver lost input support");
+            offset+=used;
+        }
+        const auto end=receiver.physical_completion_input_tick();
+        receiver.finish();
+        decoder.finish(receiver.progress().physical_complete);
+        std::cout<<"dense_transition_initially_faded="<<initially_faded
+                 <<" intervals="<<receiver.progress().intervals<<" frames="<<decoder.snapshot().ldpc_frames
+                 <<" failed="<<decoder.snapshot().ldpc_failed_frames<<" completion="<<end.value_or(0)<<'\n';
+        check(end&&*end>=*tail_start+6ULL*profile.sample_rate&&decoder.result()&&decoder.snapshot().authenticated&&
+              std::ranges::equal(decoder.result()->bytes(),source)&&decoder.snapshot().intervals==2,
+              "Dense model arbitration lost exact keyed bytes across a channel change within one interval");
+        check(finite_display&&display_points>1024&&display_points<=2*dense_points_per_interval&&
+              receiver.progress().last_present_signal&&receiver.progress().last_present_signal->past_last<*tail_start,
+              "Dense model arbitration displayed missing or non-payload constellation samples");
+    }
+}
+
+void check_dense_marker_reentry() {
+    const auto p=dense_acoustic_profile();
+    const auto waveform=render(p,2,419);
+    std::size_t intervals=0;
+    fast::Transmitter tx(p,[&](auto bits) {
+        if(intervals>=waveform.bits.size())return false;
+        std::ranges::copy(waveform.bits[intervals++],bits.begin());
+        return true;
+    });
+    fast::SimulationSettings s;
+    s.seed=419;
+    s.spread_evolution=fast::SpreadEvolution::gaussian;
+    s.delay_ms=7.;
+    s.doppler_hz=30.;
+    s.noise_dbm_hz.reset();
+    fast::SimulationChannel ch(p,s,[&](auto pcm){return tx.read_analytic(pcm);});
+    const auto first=static_cast<std::uint64_t>(p.sample_rate/p.symbol_rate*
+        (fast::preamble_symbols(p)+fast::interval_symbols(p)));
+    constexpr std::size_t hint_tick=144000;
+    std::size_t emitted=0,known=0,errors=0;
+    bool timing_verified=false;
+    DenseReceiverObservers observers;
+    observers.interval=[&](const DenseIntervalReceipt& receipt) {
+        if(receipt.ordinal!=1)return;
+        const auto usable=std::ranges::any_of(receipt.llrs,[](float bit){return bit!=0.F;});
+        check(timing_verified||!usable,"Adopted dense model emitted usable data before marker authorization");
+        ++emitted;
+        for(std::size_t i=0;i<receipt.llrs.size();++i)if(receipt.llrs[i]!=0.F) {
+            ++known;
+            errors+=(receipt.llrs[i]>0.F)!=bool(waveform.bits[1][i]);
+        }
+    };
+    observers.timing=[&](std::uint64_t ordinal,DenseTiming) {
+        check(ordinal==1,"Adopted dense model fabricated an ordinal-zero marker");
+        timing_verified=true;
+    };
+    DenseAcousticReceiver receiver(p,{}, {},{}, {},fast::ChannelBounds{300.,100.,22.},std::move(observers));
+    std::size_t consumed=0;
+    std::array<float,2053> block{};
+    while(const auto n=ch.read(std::span(block).first(consumed<hint_tick?
+        std::min(hint_tick-consumed,block.size()):block.size()))) {
+        if(consumed<hint_tick&&consumed+n==hint_tick) {
+            std::ranges::fill(std::span(block).first(n),0.F);
+            check(receiver.consume(std::span(block).first(n))==n&&!receiver.progress().acquired,
+                "Reentry fixture unexpectedly acquired before a borrowed marker");
+            consumed+=n;
+            check(receiver.adopt_timing({0.,48.,0.},1,true),"Dense model rejected the bounded future public marker hint");
+            continue;
+        }
+        for(std::size_t i=0;i<n;++i)if(consumed+i+64<first)block[i]=0.F;
+        const auto used=receiver.consume(std::span(block).first(n));
+        consumed+=used;
+        if(emitted)break;
+        check(used==n,"Dense marker reentry stopped before an observed resumed interval");
+    }
+    receiver.finish();
+    std::cout<<"dense_reentry_authorized="<<timing_verified<<" known="<<known<<" errors="<<errors<<'\n';
+    check(timing_verified&&emitted==1&&known>1900&&errors<70,
+        "Dense model did not independently resolve the adopted marker's delayed path and resume evidence");
+
+    DenseReceiverObservers control;
+    control.interval=[](const DenseIntervalReceipt& receipt) {
+        check(std::ranges::all_of(receipt.llrs,[](float bit){return bit==0.F;}),
+            "A borrowed public timetable authorized payload from white noise");
+    };
+    control.timing=[](std::uint64_t,DenseTiming) {
+        throw std::runtime_error("A borrowed public timetable authorized a noise-only marker");
+    };
+    DenseAcousticReceiver absent(p,{}, {},{}, {},fast::ChannelBounds{300.,100.,22.},std::move(control));
+    std::mt19937 rng(418);
+    std::normal_distribution<float> gaussian(0.F,static_cast<float>(p.amplitude/std::sqrt(2.)));
+    constexpr auto preroll=2*48000;
+    std::size_t offset=0;
+    const auto end=first+static_cast<std::uint64_t>((fast::interval_symbols(p)/p.symbol_rate+.2)*p.sample_rate);
+    while(offset<end) {
+        const auto stop=offset<preroll?std::uint64_t(preroll):end;
+        const auto n=std::min<std::uint64_t>(block.size(),stop-offset);
+        for(auto& sample:std::span(block).first(n))sample=gaussian(rng);
+        check(absent.consume(std::span(block).first(n))==n,"Borrowed marker noise control lost actual support");
+        offset+=n;
+        if(offset==preroll)
+            check(absent.adopt_timing({0.,48.,0.},1,true),"Noise-only control did not schedule the borrowed marker");
+    }
+    absent.finish();
+    check(!absent.progress().acquired&&!absent.completion_tick(),
+        "Borrowed cadence or EOF completed the noise-only marker control");
+}
+
+void check_dense_recurring_epoch() {
+    const auto p=dense_acoustic_profile();
+    constexpr std::size_t recovery_ordinal=5;
+    auto original=render(p,recovery_ordinal+2,629);
+    constexpr double relative_source_clock=-55e-6;
+    // Preserve the transmitted payloads while four recurring markers fade.
+    // Later evidence must recover its actual ordinal after the search extent
+    // has saturated, rather than depend on an earlier marker reanchor.
+    const auto pulse_radius=single_carrier_pulse_radius(p);
+    for(std::size_t ordinal=1;ordinal<recovery_ordinal;++ordinal) {
+        const auto marker_start=fast::preamble_symbols(p)+fast::total_interval_symbols(p,ordinal);
+        const auto first=static_cast<std::size_t>((marker_start+pulse_radius-2.)*48.);
+        const auto past=static_cast<std::size_t>((marker_start+pulse_radius+190.)*48.);
+        std::ranges::fill(std::span(original.pcm).subspan(first,past-first),0.F);
+    }
+    datapump::audio::Resampler converter(p.sample_rate,p.sample_rate,true);
+    // Source time is exact at startup and starts drifting after the first
+    // independently verified public marker. The accumulated offset exceeds
+    // the former fixed local cap by the time an informative marker resumes.
+    const auto change=(fast::preamble_symbols(p)+260)*48;
+    std::vector<float> input;
+    std::array<float,2053> block{};
+    std::size_t consumed=0;
+    while(!converter.finished()) {
+        if(consumed==change)converter.set_rate_correction(relative_source_clock,.001);
+        const auto endpoint=consumed<change?change:original.pcm.size();
+        const auto progress=converter.process(std::span(original.pcm).subspan(consumed,endpoint-consumed),
+            block,endpoint==original.pcm.size());
+        check(progress.consumed||progress.produced||converter.finished(),"Dense clock fixture resampler stalled");
+        consumed+=progress.consumed;
+        input.insert(input.end(),block.begin(),block.begin()+progress.produced);
+    }
+    const auto tail_start=input.size();
+    input.resize(tail_start+fast::end_silence_samples(p));
+    std::vector<std::pair<std::uint64_t,DenseTiming>> markers;
+    std::array<std::size_t,recovery_ordinal+2> observed{},errors{};
+    DenseReceiverObservers observations;
+    observations.timing=[&](std::uint64_t ordinal,DenseTiming timing){markers.emplace_back(ordinal,timing);};
+    observations.interval=[&](const DenseIntervalReceipt& receipt) {
+        if(receipt.ordinal>=observed.size())return;
+        for(std::size_t i=0;i<receipt.llrs.size();++i)if(receipt.llrs[i]!=0.F) {
+            ++observed[receipt.ordinal];
+            errors[receipt.ordinal]+=(receipt.llrs[i]>0.F)!=bool(original.bits[receipt.ordinal][i]);
+        }
+    };
+    DenseAcousticReceiver receiver(p,{}, {},{}, {},fast::ChannelBounds{300.,100.,22.},std::move(observations));
+    std::size_t at=0;
+    while(at<input.size()&&!receiver.progress().physical_complete) {
+        const auto count=std::min(block.size(),input.size()-at);
+        const auto used=receiver.consume(std::span(input).subspan(at,count));
+        check(used==count||receiver.progress().physical_complete,"Dense recurring marker dropped actual input");
+        at+=used;
+    }
+    receiver.finish();
+    const auto end=receiver.completion_tick();
+    std::cout<<"dense_recurring_timing";
+    for(const auto& [ordinal,timing]:markers)std::cout<<" ordinal="<<ordinal<<" epoch="<<timing.epoch;
+    std::cout<<" observed="<<observed[recovery_ordinal]<<'/'<<observed[recovery_ordinal+1]
+             <<" errors="<<errors[recovery_ordinal]<<'/'<<errors[recovery_ordinal+1]
+             <<" tail="<<tail_start<<" completion="<<end.value_or(0)<<'\n';
+    check(markers.size()>=3&&markers.front().first==0&&markers[1].first==recovery_ordinal&&
+        markers[2].first==recovery_ordinal+1&&
+        std::abs(markers[1].second.epoch-markers.front().second.epoch)>18.&&
+        markers[1].second.samples_per_symbol==markers.front().second.samples_per_symbol,
+        "Dense later marker did not verify a same-ordinal epoch correction after a missing marker");
+    check(observed[recovery_ordinal]>1900&&observed[recovery_ordinal+1]>1900&&
+        errors[recovery_ordinal]<70&&errors[recovery_ordinal+1]<70,
+        "Dense recurring epoch change did not preserve the later payload positions");
+    check(end&&*end>=tail_start+6ULL*p.sample_rate,"Dense recurring epoch change did not score a real six-second quiet tail");
+}
+
 void check_noisy_tail(bool resume,bool short_echo=false) {
     const auto profile=fast::capacity_profile(fast::Channel::ssb);
     check(profile.constellation==4 && profile.code_rate==fast::CodeRate::half &&
@@ -425,7 +1018,7 @@ void check_weak_terminal_interval() {
     const auto center=boundary+radius-24.;
     const auto fade=static_cast<std::size_t>(center*profile.sample_rate/profile.symbol_rate);
     const auto final_symbol=fast::preamble_symbols(profile)+fast::total_interval_symbols(profile,2);
-    const auto fragment_center=final_symbol-3*(profile.pilot_spacing_symbols+fast::ssb_capacity_pilot_symbols)+radius;
+    const auto fragment_center=final_symbol-3*(profile.pilot_spacing_symbols+fast::capacity_pilot_symbols)+radius;
     const auto fragment=static_cast<std::size_t>(fragment_center*profile.sample_rate/profile.symbol_rate);
     std::ranges::fill(std::span(transmitted).subspan(fade,fragment-fade),0.F);
     for(auto& sample:std::span(transmitted).subspan(fragment))sample*=.01F;
@@ -474,12 +1067,24 @@ int main(int argc,char** argv) {
         if(argc==1) {
             check_encrypted_stream();
             check_interior_hole();
+            check_narrow_acoustic();
+            check_narrow_acoustic_acquisition_grace();
         } else if(argc==2 && std::string_view(argv[1])=="--noise-tail")check_noisy_tail(false);
         else if(argc==2 && std::string_view(argv[1])=="--noise-resume")check_noisy_tail(true);
         else if(argc==2 && std::string_view(argv[1])=="--low-power-tail")check_noisy_tail(false,true);
         else if(argc==2 && std::string_view(argv[1])=="--low-power-resume")check_noisy_tail(true,true);
         else if(argc==2 && std::string_view(argv[1])=="--weak-terminal")check_weak_terminal_interval();
         else if(argc==2 && std::string_view(argv[1])=="--hf-quiet")check_hf_quiet();
+        else if(argc==2 && std::string_view(argv[1])=="--dense-acoustic-contract")check_dense_acoustic_contract();
+        else if(argc==2 && std::string_view(argv[1])=="--dense-carrier-edges")check_dense_acoustic_carrier_edges();
+        else if(argc==2 && std::string_view(argv[1])=="--dense-acoustic-transitions")check_dense_acoustic_transitions();
+        else if(argc==2 && std::string_view(argv[1])=="--dense-marker-clock")check_dense_marker_clock();
+        else if(argc==2 && std::string_view(argv[1])=="--dense-marker-reentry")check_dense_marker_reentry();
+        else if(argc==2 && std::string_view(argv[1])=="--dense-recurring-epoch")check_dense_recurring_epoch();
+        else if(argc==2 && std::string_view(argv[1])=="--narrow-acoustic") {
+            check_narrow_acoustic();
+            check_narrow_acoustic_acquisition_grace();
+        } else if(argc==2 && std::string_view(argv[1])=="--narrow-acoustic-grace")check_narrow_acoustic_acquisition_grace();
         else throw std::invalid_argument("Unknown Fast SSB receiver fixture");
         return 0;
     }catch(const std::exception& error) {

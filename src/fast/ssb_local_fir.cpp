@@ -957,7 +957,7 @@ struct SsbLocalFir::Impl {
 };
 
 bool SsbLocalFir::eligible(const Profile& p, const SsbFrontendGeometry& frontend, const SsbAcquisitionLock& lock) {
-    if (p.channel != Channel::ssb || !p.capacity_mode || p.acoustic_ofdm ||
+    if (!p.capacity_mode || p.acoustic_ofdm ||
         p.sample_rate != frontend.input_rate || !frontend.decimation ||
         single_carrier_low_rate_decimation(p) != 1 || !delay_grid(p, lock)) return false;
     const SingleCarrierSchedule schedule(p);

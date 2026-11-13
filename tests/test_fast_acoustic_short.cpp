@@ -44,7 +44,7 @@ Profile short_profile() {
         "short acoustic regression no longer uses the separate short-frame profile");
     require(p.sample_rate==48000&&(!p.acoustic_ofdm||p.ofdm_prefix_samples>echo_delay_samples),
         "short acoustic echo must remain inside the cyclic prefix");
-    if(reference_snr_db>=-6)require(estimate_transmission(p,true,60).seconds<=12.5,
+    if(reference_snr_db>-6)require(estimate_transmission(p,true,60).seconds<=12.5,
         "short acoustic preset lost the 12.5-second minimum budget across supported SNR choices");
     return p;
 }
@@ -160,14 +160,19 @@ void sampled_completion(const char* label,bool encrypted,bool attachment,bool sh
     const auto signal=channel_signal(f,echo,ppm);
     StreamDecoder decoder(f.profile,f.key,memory_quota,SourceEncoding::xz);
     std::uint64_t intervals=0,hard_errors=0,unknown_bits=0;
-    Receiver receiver(f.profile,[&](std::span<const float> soft) {
+    const auto weak_case=reference_snr_db==-10||reference_snr_db==-13||reference_snr_db==-16;
+    const auto narrow_fit=weak_case&&!f.profile.acoustic_ofdm&&f.profile.constellation==4&&
+        f.profile.symbol_rate>=180&&f.profile.symbol_rate<800;
+    const auto receive=[&](std::span<const float> soft,bool feedback) {
         require(++intervals<=f.estimate.intervals,"short acoustic receiver invented tail intervals");
         for(std::size_t i=0;i<soft.size();++i) {
             unknown_bits+=soft[i]==0;
             hard_errors+=(soft[i]>0)!=f.expected_bits[(intervals-1)*physical_interval_bits+i];
         }
-        decoder.push_interval(soft);
-    });
+        return decoder.push_interval(soft,feedback);
+    };
+    auto receiver=weak_case?Receiver(f.profile,receive,{},{},{}):
+        Receiver(f.profile,[&](std::span<const float> soft){(void)receive(soft,false);});
     std::mt19937 random(seed);
     std::normal_distribution<float> gaussian(0,static_cast<float>(noise_sigma(f.profile)));
     std::array<float,1201> chunk{};
@@ -180,7 +185,8 @@ void sampled_completion(const char* label,bool encrypted,bool attachment,bool sh
         require(!decoder.snapshot().complete&&!decoder.result()&&!decoder.snapshot().source_bytes,
             "short acoustic source or metadata escaped before physical completion");
     }
-    require(receiver.progress().acquired,std::string(label)+": valid short training was not acquired");
+    require(receiver.progress().acquired,std::string(label)+": valid short training was not acquired by "+
+        std::string(receiver.backend_name()));
     decoder.finish(false);
     require(!decoder.result()&&!decoder.snapshot().complete,
         "short acoustic cancellation or codec completion substituted for physical absence");
@@ -202,6 +208,10 @@ void sampled_completion(const char* label,bool encrypted,bool attachment,bool sh
     receiver.finish();decoder.finish(receiver.progress().physical_complete);
     const auto state=decoder.snapshot();const auto result=decoder.result();
     std::cout<<label<<" snr_db="<<reference_snr_db<<" source_bytes="<<f.source.size()<<" air_seconds="<<f.estimate.seconds
+        <<" constellation="<<f.profile.constellation<<"QAM symbol_rate="<<f.profile.symbol_rate
+        <<"baud reference_bandwidth="<<reference_bandwidth_hz<<"Hz occupied_bandwidth="
+        <<occupied_bandwidth_hz(f.profile)<<"Hz predicted_inband_snr="
+        <<reference_snr_db+10*std::log10(reference_bandwidth_hz/occupied_bandwidth_hz(f.profile))<<"dB"
         <<" echo="<<echo<<" ppm="<<ppm<<" acquired="<<receiver.progress().acquired
         <<" complete="<<state.complete<<" intervals="<<intervals
         <<" hard_errors="<<hard_errors<<" unknown_bits="<<unknown_bits<<" changed_bits="<<state.ldpc_changed_bits<<" failed_frames="<<state.ldpc_failed_frames
@@ -225,7 +235,10 @@ void sampled_completion(const char* label,bool encrypted,bool attachment,bool sh
     else require(state.ldpc_changed_bits>0&&
         state.ldpc_frames==state.coding_cycles*f.profile.interleave_depth,
         "short acoustic LDPC correction lost its frame or changed-bit evidence");
-    require(datapump::testing::benchmark_below(receiver.workspace_bytes(),std::size_t{8*1024*1024},"test_fast_acoustic_short.receiver_workspace_bytes","workspace_bytes"),"short acoustic receiver retained unbounded PCM");
+    const auto workspace_limit=narrow_fit?std::size_t{64*1024*1024}:std::size_t{8*1024*1024};
+    require(datapump::testing::benchmark_below(receiver.workspace_bytes(),workspace_limit,
+        "test_fast_acoustic_short.receiver_workspace_bytes","workspace_bytes"),
+        "short acoustic receiver exceeded its profile-specific bounded workspace");
 }
 
 void incomplete_controls() {

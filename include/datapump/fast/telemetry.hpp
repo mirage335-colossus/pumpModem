@@ -7,9 +7,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 
 namespace datapump::fast {
+namespace detail { class CaptureTelemetry; }
+
+struct LoopbackSnrEstimate {
+    double db=0,reference_noise_dbfs=0,reference_bandwidth_hz=0;
+    std::uint64_t observation_sample=0;
+};
 
 // Display-only samples. They never feed carrier/timing loops, admission, FEC,
 // authentication, file interpretation, or physical-completion decisions.
@@ -18,6 +25,8 @@ struct Diagnostics {
     std::uint32_t sample_rate=0;
     unsigned constellation=0;
     bool transmitting=false,acquired=false,spectrum_valid=false,acoustic_ofdm=false;
+    std::optional<LoopbackSnrEstimate> last_loopback_snr;
+    std::chrono::steady_clock::time_point captured_at{};
     // Local PCM coordinates of the last finite observations. These only tell
     // the display when retained points have stopped updating.
     std::uint64_t constellation_sample=0,input_sample=0;
@@ -40,7 +49,7 @@ std::shared_ptr<const Diagnostics> initial_diagnostics(const Profile&,bool trans
 
 // One worker owns the collector; consumers only see immutable frames. Arrays
 // remain fixed for the stream lifetime. Symbol recording is an O(1) modem tap;
-// FFT/publication happens only on the capture consumer/playback producer.
+// FFT/publication happens outside the device capture callback.
 class Telemetry {
 public:
     using Clock=std::chrono::steady_clock;
@@ -53,6 +62,7 @@ public:
     std::shared_ptr<const Diagnostics> publish(bool acquired,Clock::time_point now=Clock::now()) noexcept;
     std::size_t workspace_bytes() const noexcept;
 private:
+    friend class detail::CaptureTelemetry;
     std::uint64_t stream_id_,revision_=0,samples_=0;
     std::uint32_t sample_rate_;
     unsigned constellation_;

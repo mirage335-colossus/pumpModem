@@ -1,6 +1,7 @@
 #pragma once
 
 #include "datapump/fast/codec.hpp"
+#include "datapump/fast/channel_assumptions.hpp"
 #include "datapump/fast/profile.hpp"
 #include <complex>
 #include <cstddef>
@@ -15,7 +16,7 @@
 
 namespace datapump::fast {
 namespace acoustic_ofdm { class Transmitter; class Receiver; }
-namespace detail { class SsbReceiver; struct ReceiverDiagnostics; }
+namespace detail { class SsbReceiver; class DenseAcousticReceiver; struct ReceiverDiagnostics; }
 
 inline constexpr std::size_t sync_symbols = 64;
 inline constexpr std::size_t training_symbols = 128;
@@ -35,6 +36,9 @@ using ValidatedIntervalSink = std::function<std::optional<ValidatedCapacityCycle
 // outputs. Observer exceptions are ignored and cannot change transport results.
 using SymbolObserver = std::function<void(std::complex<float>)>;
 
+struct ReceivedSignalRange {
+    std::uint64_t first,past_last;
+};
 struct ModemProgress {
     bool acquired = false;
     bool physical_complete = false;
@@ -44,6 +48,9 @@ struct ModemProgress {
     double evm = 0;
     double carrier_error_hz = 0;
     double clock_error_ppm = 0;
+    // Display-only support of the last present payload, in input PCM samples.
+    // Filter lookahead and the callback's delivery time are outside this range.
+    std::optional<ReceivedSignalRange> last_present_signal;
 };
 
 // Public wire primitives make independent constellation/filter vectors possible.
@@ -104,7 +111,7 @@ public:
     // The typed path supplies validated coding-cycle feedback to the modeled
     // receiver when the local profile supports it.
     Receiver(Profile profile, ValidatedIntervalSink sink, SymbolObserver observer,SymbolObserver input_observer,
-             std::stop_token stop);
+             std::stop_token stop,std::optional<ChannelAssumptions> assumptions={});
     ~Receiver();
     Receiver(Receiver&&) noexcept;
     Receiver& operator=(Receiver&&) noexcept;
@@ -117,18 +124,26 @@ public:
     void finish();
     const ModemProgress& progress() const;
     std::size_t workspace_bytes() const;
+    bool uses_delay_doppler() const noexcept;
     bool uses_resilient_ssb() const noexcept;
     std::string_view backend_name() const noexcept;
     std::optional<std::uint64_t> physical_completion_input_tick() const noexcept;
 private:
     friend struct detail::ReceiverDiagnostics;
     struct Impl;
+    struct DenseArbiter;
     void initialize_standard(Profile,IntervalSink,SymbolObserver,SymbolObserver);
+    std::size_t acquire_single_carrier(std::span<const float> samples);
     std::unique_ptr<Impl> impl_;
     std::unique_ptr<acoustic_ofdm::Receiver> acoustic_;
     std::unique_ptr<detail::SsbReceiver> ssb_;
+    std::unique_ptr<DenseArbiter> dense_acoustic_;
     std::stop_token stop_;
+    SymbolObserver delayed_input_observer_;
+    std::size_t coherent_acquisition_grace_ = 0;
+    std::size_t acquisition_workspace_ = 0;
     bool standard_ssb_ = false;
+    bool modeled_ssb_ = false;
 };
 
 } // namespace datapump::fast

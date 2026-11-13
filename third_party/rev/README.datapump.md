@@ -52,6 +52,11 @@ Local compiler and Linux compatibility fixes:
   allocation and RTTI operations.
 - Complete the Linux NativeWindow methods already used by the shared Window:
   `nativeFrameless`, EWMH `setIcon`, and root-relative `getClientPos`.
+- Expose `Window::setMinimumSize` through NativeWindow on Linux, macOS and
+  Windows. Runtime minimum changes preserve the existing window size limits and
+  convert logical dimensions to physical pixels with upward rounding.
+  macOS programmatic resizing uses content dimensions, matching creation,
+  resize events and the minimum-size constraint.
 - Linux mouse events now carry physical screen coordinates (`x_root/y_root`),
   matching Win32 and `Window::screenToLocal`; the native layer no longer applies
   a second DPI division. Wheel events refresh their own pointer location before

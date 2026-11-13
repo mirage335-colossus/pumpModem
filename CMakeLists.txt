@@ -58,6 +58,7 @@ include(cmake/VendoredLzma.cmake)
 # The retired single-carrier DSP is deliberately absent from this target.
 add_library(datapump
   src/crypto.cpp src/serpent.cpp src/stream_codec.cpp
+  src/execution_resources.cpp
   src/attachment.cpp src/compression_short.cpp src/compression_lzma.cpp
   src/modem.cpp src/runtime.cpp src/resampler.cpp src/qr.cpp src/transfer.cpp
   src/tuning.cpp src/tuning_presets.cpp third_party/qrcodegen/qrcodegen.cpp)
@@ -161,7 +162,7 @@ add_library(datapump_fft STATIC src/search_fft.cpp)
 target_link_libraries(datapump_fft PRIVATE datapump)
 add_library(datapump_fast STATIC src/fast/profile.cpp src/fast/preset.cpp src/fast/codec.cpp src/fast/compression.cpp src/fast/attachment.cpp
   src/fast/modem.cpp src/fast/acoustic_ofdm.cpp src/fast/simulation.cpp src/fast/session.cpp src/fast/file_transfer.cpp src/fast/telemetry.cpp src/fast/ldpc.cpp
-  src/fast/receive_pcm_queue.cpp src/fast/cable_loopback.cpp
+  src/fast/receive_pcm_queue.cpp src/fast/cable_loopback.cpp src/fast/dense_acoustic_receiver.cpp
   src/fast/ssb_acquisition.cpp src/fast/ssb_candidate_search.cpp src/fast/ssb_channel_model.cpp
   src/fast/ssb_equalizer.cpp src/fast/ssb_folded_preamble.cpp src/fast/ssb_frontend.cpp
   src/fast/ssb_inverse.cpp src/fast/ssb_local_fir.cpp src/fast/ssb_pulse.cpp src/fast/ssb_quiet.cpp
@@ -302,7 +303,7 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   endif()
   add_test(NAME gui_legacy_poll COMMAND test_gui_legacy_poll)
   set_tests_properties(gui_legacy_poll PROPERTIES LABELS "gui")
-  foreach(component codec cycle_feedback compression attachment modem files session transfer telemetry ldpc qam acoustic acoustic_short acoustic_short_weak ofdm_presence radio presets low_rate pilot_presence output_power simulation receive_pcm_queue ssb_acquisition ssb_candidate_search ssb_equalizer ssb_folded_preamble ssb_frontend ssb_inverse ssb_local_fir ssb_pulse ssb_quiet ssb_quiet_low_power ssb_receiver)
+  foreach(component codec cycle_feedback compression attachment modem files session transfer telemetry ldpc qam acoustic acoustic_short acoustic_short_weak ofdm_presence radio presets low_rate pilot_presence output_power simulation receive_pcm_queue ssb_acquisition ssb_candidate_search ssb_parallel ssb_equalizer ssb_folded_preamble ssb_frontend ssb_inverse ssb_local_fir ssb_pulse ssb_quiet ssb_quiet_low_power ssb_receiver)
     add_executable(test_fast_${component} tests/test_fast_${component}.cpp)
     target_link_libraries(test_fast_${component} PRIVATE datapump_fast datapump)
     add_test(NAME fast_${component} COMMAND test_fast_${component})
@@ -312,6 +313,7 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   target_include_directories(test_fast_receive_pcm_queue PRIVATE src)
   target_include_directories(test_fast_ssb_acquisition PRIVATE src)
   target_include_directories(test_fast_ssb_candidate_search PRIVATE src)
+  target_include_directories(test_fast_ssb_parallel PRIVATE src)
   target_include_directories(test_fast_ssb_equalizer PRIVATE src)
   target_include_directories(test_fast_ssb_folded_preamble PRIVATE src)
   target_include_directories(test_fast_ssb_frontend PRIVATE src)
@@ -321,9 +323,24 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   target_include_directories(test_fast_ssb_quiet PRIVATE src)
   target_include_directories(test_fast_ssb_quiet_low_power PRIVATE src)
   target_include_directories(test_fast_ssb_receiver PRIVATE src)
+  add_test(NAME fast_acoustic_dense_contract COMMAND test_fast_ssb_receiver --dense-acoustic-contract)
+  add_test(NAME fast_acoustic_dense_carrier_edges COMMAND test_fast_ssb_receiver --dense-carrier-edges)
+  add_test(NAME fast_acoustic_dense_transitions COMMAND test_fast_ssb_receiver --dense-acoustic-transitions)
+  add_test(NAME fast_acoustic_dense_marker_clock COMMAND test_fast_ssb_receiver --dense-marker-clock)
+  add_test(NAME fast_acoustic_dense_marker_reentry COMMAND test_fast_ssb_receiver --dense-marker-reentry)
+  add_test(NAME fast_acoustic_dense_recurring_epoch COMMAND test_fast_ssb_receiver --dense-recurring-epoch)
+  set_tests_properties(fast_acoustic_dense_contract fast_acoustic_dense_transitions PROPERTIES TIMEOUT 35)
+  set_tests_properties(fast_acoustic_dense_recurring_epoch PROPERTIES TIMEOUT 35)
+  set_tests_properties(fast_acoustic_dense_carrier_edges PROPERTIES TIMEOUT 15)
   add_test(NAME fast_acoustic_short_convolutional COMMAND test_fast_acoustic_short_weak --legacy-convolutional)
   foreach(snr -6 -3 0 6 13)
     foreach(fixture public_text keyed_attachment)
+      add_test(NAME fast_acoustic_short_snr_${snr}_${fixture}
+        COMMAND test_fast_acoustic_short --snr=${snr} ${fixture})
+    endforeach()
+  endforeach()
+  foreach(snr -10 -13 -16)
+    foreach(fixture flat_text public_text)
       add_test(NAME fast_acoustic_short_snr_${snr}_${fixture}
         COMMAND test_fast_acoustic_short --snr=${snr} ${fixture})
     endforeach()
@@ -335,6 +352,25 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_executable(fast_channel_probe EXCLUDE_FROM_ALL tools/fast_channel_probe.cpp)
   target_include_directories(fast_channel_probe PRIVATE src)
   target_link_libraries(fast_channel_probe PRIVATE datapump_fast datapump)
+  foreach(snr -6 -10)
+    # Densities for the full 17.5 kHz reference at 40 W and 130 dB path loss.
+    if(snr EQUAL -6)
+      set(noise_density -120.409780574)
+    else()
+      set(noise_density -116.409780574)
+    endif()
+    foreach(seed 419 420 421)
+      set(fixture --source-bytes 3 --encryption yes)
+      if(seed EQUAL 421)
+        set(fixture --text fox --encryption no)
+      endif()
+      add_test(NAME fast_acoustic_short_joint_${snr}_${seed}
+        COMMAND fast_channel_probe --channel acoustic-short --profile-override --expected-snr ${snr}
+          ${fixture} --seed ${seed} --transmit-watts 40 --path-loss-db 130 --noise-dbm-hz ${noise_density}
+          --base-oscillator crystal --shift-oscillator ic-7100 --shift-hz 30000000 --spread hf-worst
+          --selective-depth .65 --margin 1 --max-audio-seconds 44 --max-wall-seconds 25)
+    endforeach()
+  endforeach()
   add_executable(acoustic_known_symbols EXCLUDE_FROM_ALL tools/acoustic_known_symbols.cpp)
   target_link_libraries(acoustic_known_symbols PRIVATE datapump_fast datapump)
   add_executable(fast_short_ldpc_compare EXCLUDE_FROM_ALL tools/fast_short_ldpc_compare.cpp)
@@ -350,8 +386,10 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_executable(test_gui_fast_live tests/test_gui_fast_live.cpp)
   target_link_libraries(test_gui_fast_live PRIVATE datapump_gui_application datapump)
   add_test(NAME gui_fast_live COMMAND test_gui_fast_live)
+  add_test(NAME gui_fast_loopback COMMAND test_gui_fast_live --loopback)
   add_test(NAME gui_fast_keygen COMMAND test_gui_fast_live --keygen-staging)
   set_tests_properties(gui_fast_live PROPERTIES LABELS "gui")
+  set_tests_properties(gui_fast_loopback PROPERTIES LABELS "gui;fast" TIMEOUT 180)
   set_tests_properties(gui_fast_keygen PROPERTIES LABELS "gui;fast" TIMEOUT 90)
   add_test(NAME gui_robust_live COMMAND test_gui_robust_live)
   set_tests_properties(gui_robust_live PROPERTIES LABELS "gui;triad" TIMEOUT 120)

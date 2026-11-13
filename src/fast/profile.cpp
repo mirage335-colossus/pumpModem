@@ -168,7 +168,8 @@ void validate(const Profile& p) {
             if((k/8)*p.interleave_depth<80)throw Error("Small LDPC cycle cannot hold the fixed bootstrap and source protection");
         }
         if(!p.marker_spacing_intervals||p.marker_spacing_intervals>16)throw Error("Fast marker spacing must be 1..16 intervals");
-        if(p.pilot_spacing_symbols<16||p.pilot_spacing_symbols>1024)throw Error("Fast pilot spacing must be 16..1024 symbols");
+        if((p.pilot_spacing_symbols<16&&!dense_acoustic_framing(p))||p.pilot_spacing_symbols>1024)
+            throw Error("Fast pilot spacing must be 16..1024 symbols or the fixed dense short-acoustic cadence");
     } else if(p.constellation!=4&&p.constellation!=16&&p.constellation!=64&&p.constellation!=256)
         throw Error("Fast constellation must be 4, 16, 64 or 256");
     if(!p.capacity_mode&&p.code_rate!=CodeRate::half&&p.code_rate!=CodeRate::three_quarters&&p.code_rate!=CodeRate::seven_eighths)
@@ -192,7 +193,7 @@ void validate(const Profile& p) {
 Bytes profile_id(const Profile& p) {
     validate(p);
     Bytes out{'d','a','t','a','p','u','m','p','/','f','a','s','t','/','v','1'};
-    if(p.capacity_mode)out.back()=ssb_capacity_framing(p)?'3':'2';
+    if(p.capacity_mode)out.back()=p.acoustic_ofdm?'2':ssb_capacity_framing(p)?'3':'4';
     const auto append=[&](std::uint64_t n) {for(int i=7;i>=0;--i)out.push_back(static_cast<std::uint8_t>(n>>(i*8)));};
     if(p.compact_convolutional)
         out.insert(out.end(),{'/','c','o','m','p','a','c','t','/','v','1'});
@@ -215,10 +216,11 @@ Bytes profile_id(const Profile& p) {
     append(std::bit_cast<std::uint64_t>(p.symbol_rate));
     append(std::bit_cast<std::uint64_t>(p.carrier_hz));
     append(std::bit_cast<std::uint64_t>(p.rolloff));
-    if(p.capacity_mode) {append(p.marker_spacing_intervals);append(p.pilot_spacing_symbols);}
-    // The SSB v3 identity binds the sixteen-symbol sequence defined by
-    // sync_symbol(11 + 13*j), j in [0,16). It keeps the 2048/64 sync words.
-    if(ssb_capacity_framing(p))append(ssb_capacity_pilot_symbols);
+    if(p.capacity_mode) {
+        append(p.marker_spacing_intervals);
+        append(p.pilot_spacing_symbols);
+        append(capacity_pilot_symbols);
+    }
     return out;
 }
 double gross_bitrate(const Profile& p) {validate(p);return p.acoustic_ofdm?acoustic_ofdm::gross_bitrate(p):p.symbol_rate*std::log2(p.constellation);}

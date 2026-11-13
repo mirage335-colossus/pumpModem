@@ -23,6 +23,47 @@ void require(bool condition, const char* failure) {
     if (!condition) throw std::runtime_error(failure);
 }
 
+void check_periodic_pulse(const fast::Profile& profile) {
+    const auto frontend = make_ssb_frontend_geometry(profile.sample_rate, profile.carrier_hz);
+    const SsbPulse pulse(profile, frontend);
+    const SingleCarrierSchedule schedule(profile);
+    constexpr auto grid = SsbPulseCache::samples_per_symbol;
+    std::array<Complex, 64> word{};
+    for (std::size_t i = 0; i < word.size(); ++i) word[i] = schedule.training_symbol(i);
+    const auto prepared = pulse.prepare_periodic(word);
+    SsbPeriodicWave periodic;
+    for (const auto& [clock, frequency] : std::array{
+             std::pair{0., 0.}, std::pair{.001, 279.125}, std::pair{-.001, -279.625}}) {
+        pulse.make_periodic(prepared, clock, frequency, periodic);
+        const auto finite = pulse.make_cache(clock, frequency);
+        const auto support = static_cast<int>(std::floor(finite.support_symbols() * grid));
+        const auto period = word.size() * grid;
+        require(periodic.values.size() == period && periodic.moments.size() == period,
+            "Fast SSB periodic pulse changed the public word grid");
+        std::vector<Complex> values(period), moments(period);
+        for (int i = -support; i <= support; ++i) {
+            const auto kernel = finite.kernel(double(i) / grid);
+            for (std::size_t j = 0; j < word.size(); ++j) {
+                const auto wrapped = (static_cast<std::size_t>(i) + j * grid) & (period - 1);
+                values[wrapped] += word[j] * kernel.value;
+                moments[wrapped] += word[j] * kernel.tap_moment;
+            }
+        }
+        for (std::size_t i = 0; i < period; ++i) {
+            require(std::abs(periodic.values[i] - values[i]) < 2e-10,
+                "Fast SSB periodic pulse changed the finite folded value");
+            require(std::abs(periodic.moments[i] - moments[i]) < 2e-8,
+                "Fast SSB periodic pulse changed the finite folded tap moment");
+        }
+    }
+    std::stop_source stop;
+    stop.request_stop();
+    bool cancelled = false;
+    try { pulse.make_periodic(prepared, 0., 0., periodic, stop.get_token()); }
+    catch (const std::runtime_error&) { cancelled = true; }
+    require(cancelled, "Fast SSB periodic pulse ignored cancellation");
+}
+
 fast::SimulationSettings channel_settings(std::string_view name) {
     fast::SimulationSettings channel;
     if (name == "clean") {
@@ -152,5 +193,15 @@ void run(std::string_view name) {
 } // namespace
 
 int main(int argc, char** argv) {
+    if (argc != 2) {
+        auto ssb = fast::capacity_profile(fast::Channel::ssb);
+        check_periodic_pulse(ssb);
+        // Exercise a narrower pulse and a different native sample grid.
+        ssb.sample_rate = 44100;
+        ssb.rolloff = .25;
+        ssb.symbol_rate = 1900.;
+        ssb.ldpc_frame_bits = 64800;
+        check_periodic_pulse(ssb);
+    }
     run(argc == 2 ? argv[1] : "clean");
 }

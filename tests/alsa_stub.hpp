@@ -9,6 +9,7 @@ struct Hint {std::string name,io;};
 struct State {
     std::vector<Hint> hints;
     std::vector<std::string> available,wrong_format,attempts;
+    std::vector<int> open_modes;
     std::vector<std::pair<std::string,int>> open_errors;
     std::vector<std::int16_t> played;
     std::vector<unsigned> supported_rates;
@@ -58,6 +59,9 @@ struct State {
     long delay_frames=0;
     int recover_result=-1;
     std::function<void()> after_recover;
+    std::vector<int> resume_results;
+    std::size_t resume_calls=0;
+    std::function<void()> after_resume;
 };
 extern State state;
 void reset();

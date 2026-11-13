@@ -2,7 +2,16 @@
 #include "../src/gui/backend_fltk.cpp"
 #include "gui_extension_fixture.hpp"
 #include "overlay_fixture.hpp"
+#include "fixture_keyfile.hpp"
+#include "fast/screen.hpp"
+#include "datapump/fast/session.hpp"
+#include "datapump/fast/preset.hpp"
+#include "datapump/fast/simulation.hpp"
+#include "datapump/tuning.hpp"
+#include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <numbers>
 #include <FL/Fl_Image_Surface.H>
 #include <FL/Fl_Tooltip.H>
 #ifdef __linux__
@@ -49,6 +58,26 @@ NativeWindow* application_window() {
         }
     }
     return result;
+}
+void capture_fast_layout(Fl_Window& window,std::string_view name) {
+    const auto* directory=std::getenv("DATAPUMP_FAST_LAYOUT_CAPTURE_DIR");
+    if(!directory||!*directory)return;
+    Fl_Image_Surface surface(window.w(),window.h());Fl_Surface_Device::push_current(&surface);
+    surface.draw(&window);Fl_Surface_Device::pop_current();std::unique_ptr<Fl_RGB_Image> image(surface.image());
+    require(image&&image->array&&image->d()>=3,"Fast layout capture has no RGB image");
+    const auto path=std::filesystem::u8path(directory);
+    std::filesystem::create_directories(path);
+    const auto filename=path/(std::string(name)+"-"+std::to_string(window.w())+"x"+std::to_string(window.h())+".ppm");
+    std::ofstream output(filename,std::ios::binary);
+    output<<"P6\n"<<image->data_w()<<' '<<image->data_h()<<"\n255\n";
+    const auto stride=image->ld()?image->ld():image->data_w()*image->d();
+    std::vector<char> row(static_cast<std::size_t>(image->data_w())*3);
+    for(int y=0;y<image->data_h();++y) {
+        const auto* pixels=image->array+y*stride;
+        for(int x=0;x<image->data_w();++x)std::memcpy(row.data()+x*3,pixels+x*image->d(),3);
+        output.write(row.data(),static_cast<std::streamsize>(row.size()));
+    }
+    output.close();require(static_cast<bool>(output),"Could not write Fast layout capture");
 }
 void palette_roles() {
     for(bool color:{false,true}) {
@@ -569,6 +598,23 @@ void fast_mode_visibility() {
         require(app.application.field(ui::Field::fast_mode).selected=="fast"&&selector->visible_r()&&selector->active_r()&&choose->visible_r()&&text->visible_r()&&
             transmit->visible_r()&&brightness->visible_r()&&brightness->active_r()&&!encryption->value()&&!regular->visible_r(),
             "Fast Modem selection did not show the default plain-text interface");
+        int minimum_width=0,minimum_height=0;
+        window->get_size_range(&minimum_width,&minimum_height);
+        require(minimum_width==ui::min_width&&minimum_height==ui::fast_min_height,
+            "FLTK did not expose the active Fast minimum-size hint");
+        window->size(window->w(),ui::default_height);refresh();
+        window->size(window->w(),ui::fast_min_height);refresh();
+        require(window->h()==ui::fast_min_height,
+            "FLTK could not resize a large Fast window down to the supported compact height");
+        selector->picked(selector->menu()+1);refresh();
+        window->get_size_range(&minimum_width,&minimum_height);
+        require(minimum_height==ui::min_height&&window->h()>=ui::min_height,
+            "FLTK Robust transition did not restore its minimum hint and enlarge the compact window");
+        selector->picked(selector->menu());refresh();
+        window->get_size_range(&minimum_width,&minimum_height);
+        require(minimum_height==ui::fast_min_height,
+            "FLTK transition back to Fast did not restore its compact minimum hint");
+        window->size(window->w(),ui::fast_min_height);refresh();
         verify_audio(ui::Field::fast_volume,ui::Field::fast_exclusive,ui::Field::fast_device);
         for(int i=0;i<4;++i) {
             brightness->picked(brightness->menu()+i);refresh();
@@ -576,6 +622,41 @@ void fast_mode_visibility() {
                 "Fast native QR choice did not update its independent brightness");
         }
         require(find_button(*window,"Console")->visible_r()&&!find_button(*window,"Modem details")->visible_r(),"Fast console did not hide developer tab by default");
+        const auto verify_fast_page=[&](ui::Page page) {
+            app.application.select_page(page);refresh();
+            const auto viewport=app.application.page_bounds(window->w(),window->h());
+            for(const auto& declaration:ui::console_screen()) {
+                if(declaration.scope!=ui::ScreenScope::fast||declaration.page!=page||declaration.persistent||
+                   !app.application.control(declaration).visible)continue;
+                const auto frame=app.application.control_layout(declaration,window->w(),window->h()).frame;
+                require(frame.x>=viewport.x&&frame.y>=viewport.y&&frame.x+frame.w<=viewport.x+viewport.w&&
+                    frame.y+frame.h<=viewport.y+viewport.h,
+                    "Visible Fast control escaped its actual page viewport at the compact height");
+            }
+        };
+        verify_fast_page(ui::Page::console);
+        capture_fast_layout(*window,"console-qr-off");
+        app.application.select(ui::Field::fast_source,"file");app.application.toggle(ui::Field::fast_encryption,true);
+        app.application.select(ui::Field::fast_qr_brightness,"off");refresh();verify_fast_page(ui::Page::console);
+        capture_fast_layout(*window,"console-file-encrypted");
+        app.application.select(ui::Field::fast_source,"text");app.application.toggle(ui::Field::fast_encryption,false);
+        app.application.select(ui::Field::fast_qr_brightness,"normal");refresh();verify_fast_page(ui::Page::console);
+        capture_fast_layout(*window,"console-text");
+        app.application.toggle(ui::Field::developer_mode,true);refresh();
+        capture_fast_layout(*window,"console-text-developer");
+        verify_fast_page(ui::Page::fast_modem);
+        capture_fast_layout(*window,"modem-details-developer");
+        const auto mode_declaration=std::find_if(ui::console_screen().begin(),ui::console_screen().end(),[](const auto& c){
+            return c.scope==ui::ScreenScope::fast&&c.field==ui::Field::fast_simulation;
+        });
+        require(mode_declaration!=ui::console_screen().end(),"Fast Simulation has no shared Mode declaration");
+        verify_fast_page(ui::Page::fast_simulation);
+        capture_fast_layout(*window,"simulation-developer");
+        const auto mode_frame=app.application.control_layout(*mode_declaration,window->w(),window->h()).frame;
+        require(mode_frame.y==app.application.tabs_bounds(window->w(),window->h()).y+
+                app.application.tabs_bounds(window->w(),window->h()).h+24,
+            "Fast Simulation Mode must begin directly below its tabs");
+        app.application.toggle(ui::Field::developer_mode,false);refresh();verify_fast_page(ui::Page::console);
         app.application.toggle(ui::Field::developer_mode,true);app.application.select_page(ui::Page::fast_modem);refresh();
         require(symbol_rate->visible_r()&&!text->visible_r(),"Fast modem page did not separate details from message controls");
         for(const auto* channel:{"wire","acoustic","ssb","fm","acoustic-short"}) {
@@ -595,17 +676,23 @@ void fast_mode_visibility() {
             const auto nominal=app.application.field(ui::Field::fast_expected_snr).options.at(1).id;
             const auto low=app.application.field(ui::Field::fast_expected_snr).options.back().id;
             for(const auto& target:{nominal,low,std::string(channel==std::string_view("acoustic-short")?"-6":"manual"),std::string("manual")}) {
-                app.application.select(ui::Field::fast_expected_snr,target);refresh();
-                const auto& value=app.application.field(ui::Field::fast_detail).text;
-                auto* detail=find_label(*window,value.c_str());
-                require(detail,"Fast detail did not materialize as a native label");
-                fl_font(detail->labelfont(),detail->labelsize());int width=0,height=0;
-                fl_measure(value.c_str(),width,height,0);
-                if(width>detail->w()||height>detail->h())
-                    throw std::runtime_error("Fast profile detail clips at the native minimum window size: "+
-                        std::to_string(width)+" x "+std::to_string(height)+", available "+
-                        std::to_string(detail->w())+" x "+std::to_string(detail->h())+"; "+value);
+                app.application.select(ui::Field::fast_expected_snr,target);
+                for(const auto& [mode,source]:{std::pair{"live","text"},std::pair{"loopback","text"},std::pair{"loopback","file"}}) {
+                    app.application.select(ui::Field::fast_simulation,mode);
+                    app.application.select(ui::Field::fast_source,source);refresh();
+                    const auto& value=app.application.field(ui::Field::fast_detail).text;
+                    auto* detail=find_label(*window,value.c_str());
+                    require(detail,"Fast detail did not materialize as a native label");
+                    fl_font(detail->labelfont(),detail->labelsize());int width=0,height=0;
+                    fl_measure(value.c_str(),width,height,0);
+                    if(width>detail->w()||height>detail->h())
+                        throw std::runtime_error("Fast profile detail clips at the native minimum window size: "+
+                            std::to_string(width)+" x "+std::to_string(height)+", available "+
+                            std::to_string(detail->w())+" x "+std::to_string(detail->h())+"; "+value);
+                }
             }
+            app.application.select(ui::Field::fast_simulation,"live");
+            app.application.select(ui::Field::fast_source,"text");
             app.application.select(ui::Field::fast_expected_snr,nominal);refresh();
         }
         app.application.select(ui::Field::fast_profile,"wire");
@@ -658,12 +745,15 @@ void fast_mode_visibility() {
             (page.id==ui::Page::console||page.id==ui::Page::fast_simulation),"Fast tab visibility is inconsistent");
         find_button(*window,"Simulation / live testing")->do_callback();refresh();
         auto* simulation=field_widget.template operator()<NativeChoice>("Mode");
-        auto* shift=field_widget.template operator()<NativeInput>("Shift frequency (RF coordinate, Hz)");
-        require(simulation&&shift&&simulation->visible_r()&&shift->visible_r()&&!shift->active_r(),
-            "Fast testing page did not expose its live mode and inactive channel assumptions");
+        auto* shift=field_widget.template operator()<NativeInput>("Shift frequency (Hz)");
+        require(simulation&&shift&&simulation->visible_r()&&!shift->visible_r()&&
+            app.application.field(ui::Field::fast_sim_shift_hz).enabled,
+            "Fast testing page did not keep the enabled receiver declaration on Console");
         simulation->picked(simulation->menu()+1);refresh();
-        require(shift->active_r()&&app.application.field(ui::Field::fast_simulation).selected=="simulation",
-            "Native simulation selector did not enable its channel assumptions");
+        require(!shift->visible_r()&&app.application.field(ui::Field::fast_simulation).selected=="simulation",
+            "Native simulation selector moved the receiver declaration off Console");
+        find_button(*window,"Console")->do_callback();refresh();
+        require(shift->visible_r()&&shift->active_r(),"Console receiver declaration is not editable in Simulation");
         auto* shift_oscillator=field_widget.template operator()<NativeChoice>("Shift oscillator");
         const auto& oscillator_options=app.application.field(ui::Field::fast_sim_shift_oscillator).options;
         const auto gpsdo=std::find_if(oscillator_options.begin(),oscillator_options.end(),[](const auto& option){return option.id=="gpsdo-ocxo";});
@@ -671,11 +761,15 @@ void fast_mode_visibility() {
         shift_oscillator->picked(shift_oscillator->menu()+std::distance(oscillator_options.begin(),gpsdo));refresh();
         const auto before_shift=app.application.field(ui::Field::fast_detail).text;
         shift->value("5800000000");shift->do_callback();refresh();
+        const auto after_shift=app.application.field(ui::Field::fast_detail).text;
         require(app.application.field(ui::Field::fast_sim_shift_hz).text=="5800000000"&&
-            app.application.field(ui::Field::fast_detail).text==before_shift,
+            after_shift.substr(0,after_shift.find('\n'))==before_shift.substr(0,before_shift.find('\n')),
             "Native Shift frequency callback changed the audio waveform");
+        shift->value("0");shift->do_callback();refresh();
+        find_button(*window,"Simulation / live testing")->do_callback();refresh();
         simulation->picked(simulation->menu());refresh();
         find_button(*window,"Console")->do_callback();refresh();
+        require(shift->visible_r()&&shift->active_r(),"Live receiver declaration is not editable on Console");
         require(text->x()+text->w()<=window->w()&&text->y()+text->h()<=window->h(),"Fast native composer escaped the viewport");
         const auto draft=app.application.field(ui::Field::binary).text;
         regular->do_callback();refresh();
@@ -1818,8 +1912,430 @@ void clipboard() {
 #endif
 }
 }
+// Explicit opt-in physical cable check. Never part of unattended CTest: this
+// exercises native callbacks, the shared Application and the real audio route.
+void fast_live_loopback(std::string_view scenario="acoustic-short",std::string_view gain="30") {
+    using F=ui::Field;using C=ui::Command;
+    const auto temporary=std::filesystem::temp_directory_path()/
+        ("datapump-fast-browser-"+std::to_string(Clock::now().time_since_epoch().count()));
+    std::filesystem::create_directory(temporary);
+    struct Cleanup {std::filesystem::path path;~Cleanup(){std::error_code e;std::filesystem::remove_all(path,e);}} cleanup{temporary};
+    Launch launch;NativeApp app(launch);auto* window=application_window();
+    require(window,"Physical Fast check has no native window");
+    auto& application=app.application;
+    application.enable_service_completions(true);
+    const auto wait=[&](auto predicate,std::chrono::seconds timeout,const char* failure) {
+        const auto deadline=Clock::now()+timeout;
+        while(!predicate()) {
+            if(Clock::now()>=deadline)throw std::runtime_error(std::string(failure)+": "+application.field(F::fast_status).text);
+            Fl::wait(.01);
+        }
+    };
+    const auto& controls=fast_ui::screen();
+    const auto& waterfall=*std::find_if(controls.begin(),controls.end(),[](const auto& c){return c.bitmap==ui::Bitmap::fast_waterfall;});
+    const auto& signals=*std::find_if(controls.begin(),controls.end(),[](const auto& c){return c.field==F::fast_history;});
+    const auto monitor=[&](const char* stage) {
+        wait([&]{return application.bitmap(waterfall).title=="Live RX waterfall";},std::chrono::seconds(8),"Capture did not become live");
+        const auto revision=application.bitmap(waterfall).revision;
+        const auto until=Clock::now()+std::chrono::milliseconds(700);
+        while(Clock::now()<until)Fl::wait(.01);
+        require(application.bitmap(waterfall).revision>=revision+3,"Live capture did not advance the waterfall");
+        std::cout<<"monitor "<<stage<<" revisions="<<application.bitmap(waterfall).revision-revision<<'\n';
+    };
+    const auto wire_scenario=scenario=="wire-clean"||scenario=="wire-hf-best"||
+        scenario=="wire-hf-best-shift";
+    const auto weak_acoustic_scenario=scenario=="acoustic-short-minus10"||
+        scenario=="acoustic-short-minus13";
+    const auto scenario_gain=weak_acoustic_scenario?std::string_view("100"):gain;
+    const auto shifted_scenario=scenario=="wire-hf-best-shift";
+    const std::string_view expected_profile=wire_scenario?"wire":"acoustic-short";
+    const std::string_view expected_snr=wire_scenario?"25":
+        scenario=="acoustic-short-minus10"?"-10":
+        scenario=="acoustic-short-minus13"?"-13":"-6";
+    const std::string_view expected_baseband=wire_scenario&&!shifted_scenario?"off":"crystal";
+    const std::string_view expected_shift_oscillator=wire_scenario&&!shifted_scenario?"off":"ic-7100";
+    const std::string_view expected_shift_hz=wire_scenario&&!shifted_scenario?"0":"30000000";
+    const std::string_view expected_spread=wire_scenario?
+        (scenario=="wire-clean"?"none":"hf-best"):"hf-worst";
+    const std::string_view expected_selective=wire_scenario?"off":"each-65";
+    require(scenario=="acoustic-short"||weak_acoustic_scenario||scenario=="wire-clean"||
+            scenario=="wire-hf-best"||scenario=="wire-hf-best-shift",
+            "Unknown physical Fast loopback scenario");
+    require(gain=="10"||gain=="30"||gain=="50"||gain=="75"||gain=="100",
+            "Physical Fast loopback gain must be 10, 30, 50, 75, or 100 percent");
+    application.select(F::fast_volume,std::string(scenario_gain));
+    application.select(F::fast_simulation,"loopback");
+    if(wire_scenario) {
+        application.select(F::fast_profile,"wire");
+        application.select(F::fast_expected_snr,"25");
+        application.select(F::fast_sim_baseband_oscillator,"off");
+        application.select(F::fast_sim_shift_oscillator,"off");
+        application.edit(F::fast_sim_shift_hz,"0");
+        application.select(F::fast_sim_spread,"none");
+        application.select(F::fast_sim_selective,"off");
+        if(scenario=="wire-hf-best"||scenario=="wire-hf-best-shift")
+            application.select(F::fast_sim_spread,"hf-best");
+        if(scenario=="wire-hf-best-shift") {
+            application.select(F::fast_sim_baseband_oscillator,"crystal");
+            application.select(F::fast_sim_shift_oscillator,"ic-7100");
+            application.edit(F::fast_sim_shift_hz,"30000000");
+        }
+    } else {
+        // Preserve the established acoustic short channel case.
+        application.select(F::fast_profile,"acoustic-short");
+        application.select(F::fast_expected_snr,std::string(expected_snr));
+        application.select(F::fast_sim_baseband_oscillator,"crystal");
+        application.select(F::fast_sim_shift_oscillator,"ic-7100");
+        application.edit(F::fast_sim_shift_hz,"30000000");
+        application.select(F::fast_sim_spread,"hf-worst");
+        application.select(F::fast_sim_selective,"each-65");
+    }
+    application.edit(F::fast_text,"fox");
+    const auto& selected_profile=application.field(F::fast_profile).selected;
+    const auto& selected_snr=application.field(F::fast_expected_snr).selected;
+    const auto& selected_volume=application.field(F::fast_volume).selected;
+    const auto& selected_baseband=application.field(F::fast_sim_baseband_oscillator).selected;
+    const auto& selected_shift=application.field(F::fast_sim_shift_oscillator).selected;
+    const auto& selected_spread=application.field(F::fast_sim_spread).selected;
+    const auto& selected_selective=application.field(F::fast_sim_selective).selected;
+    const auto& selected_shift_hz=application.field(F::fast_sim_shift_hz).text;
+    require(application.field(F::fast_simulation).selected=="loopback","Scenario did not select live loopback mode");
+    require(std::string_view(selected_profile)==expected_profile,"Scenario channel profile selection did not take effect");
+    require(std::string_view(selected_snr)==expected_snr,"Scenario Expected SNR selection did not take effect");
+    require(selected_volume==scenario_gain,"Selected loopback transmit gain did not take effect");
+    require(std::string_view(selected_spread)==expected_spread,"Scenario Doppler/delay-spread selection did not take effect");
+    require(std::string_view(selected_baseband)==expected_baseband,"Scenario baseband oscillator selection did not take effect");
+    require(std::string_view(selected_shift)==expected_shift_oscillator,"Scenario shift oscillator selection did not take effect");
+    require(std::string_view(selected_selective)==expected_selective,"Scenario selective-amplitude selection did not take effect");
+    require(selected_shift_hz==expected_shift_hz,"Scenario shift frequency selection did not take effect");
+    std::cout<<"scenario="<<scenario<<" selected_gain="<<selected_volume<<"% profile="
+             <<selected_profile<<" expected_snr="<<selected_snr<<" baseband="
+             <<selected_baseband<<" shift_oscillator="<<selected_shift<<" spread="
+             <<selected_spread<<" selective_am="<<selected_selective<<" shift_hz="
+             <<selected_shift_hz<<"\n";
+    monitor("before");
+    const auto run=[&](bool attachment,std::size_t expected_records) {
+        application.select_page(ui::Page::console);
+        wait([&]{return application.enabled(C::fast_transmit);},std::chrono::seconds(8),"Loopback action stayed disabled");
+        // Use the native button callback, just as the user's Console does.
+        Fl_Button* button=nullptr;
+        const std::function<void(Fl_Group&)> find_visible=[&](Fl_Group& group) {
+            for(int i=0;i<group.children();++i) {
+                auto* widget=group.child(i);
+                if(auto* candidate=dynamic_cast<Fl_Button*>(widget);candidate&&candidate->label()&&
+                    std::string_view(candidate->label())=="Run loopback test"&&candidate->visible_r()&&candidate->active_r())button=candidate;
+                if(auto* nested=dynamic_cast<Fl_Group*>(widget))find_visible(*nested);
+            }
+        };
+        wait([&]{find_visible(*window);return button!=nullptr;},std::chrono::seconds(8),"Native loopback button is unavailable");
+        const auto began=Clock::now();button->do_callback();
+        std::size_t ticks=0;auto revision=application.bitmap(waterfall).revision;
+        unsigned changes=0;bool saw_active=false;std::string active_snr;
+        wait([&]{
+            const auto next=application.bitmap(waterfall).revision;if(next!=revision){++changes;revision=next;}
+            if(++ticks%100==0)application.select_page(application.page()==ui::Page::console?ui::Page::fast_simulation:ui::Page::console);
+            const auto& rows=application.field(F::fast_history).records;
+            saw_active|=application.enabled(C::fast_cancel);
+            if(saw_active) {
+                const auto& current_snr=application.field(F::fast_snr).text;
+                if(current_snr.find("Last loopback signal SNR")!=std::string::npos)
+                    active_snr=current_snr;
+            }
+            const auto& test_status=application.field(F::fast_sim_status).text;
+            if(saw_active&&test_status.find("Cable test incomplete")!=std::string::npos) {
+                std::cerr<<"failed_fast_correction="<<application.field(F::fast_correction).text<<'\n'
+                         <<"failed_fast_detail="<<application.field(F::fast_detail).text<<'\n';
+                throw std::runtime_error("Active physical loopback terminated: "+test_status);
+            }
+            return rows.size()==expected_records&&rows.back().cells.front().text.find("LOOPBACK TEST")!=std::string::npos;
+        },std::chrono::seconds(weak_acoustic_scenario?75:115),
+            "Physical loopback did not deliver a Signals row");
+        const auto row=application.field(F::fast_history).records.back();
+        application.select_page(ui::Page::console);Fl::wait(.15);
+        require(row.cells.front().text.find("3 bytes")!=std::string::npos,"Signals row lost received byte count");
+        require(application.field(F::fast_text).text=="fox","Loopback changed the Console text draft");
+        require(changes>20,"Native waterfall failed to progress during loopback");
+        if(!attachment) {
+            require(row.activatable&&row.cells.front().text.find("fox")!=std::string::npos,"Signals lacks exact received text");
+            application.activate_record(signals,row.id);
+            const auto requests=application.take_services();
+            require(requests.size()==1&&requests.front().kind==ui::ServiceKind::clipboard&&requests.front().value=="fox",
+                "Signals selection did not copy the exact received text");
+            application.complete_service({requests.front().id,false,{},{}});
+        } else {
+            require(!row.activatable&&application.field(F::fast_files).records.size()==1,"Attachment did not enter Files in memory");
+            application.activate(C::fast_save);const auto requests=application.take_services();
+            require(requests.size()==1&&requests.front().kind==ui::ServiceKind::save_file,"Completed attachment cannot be saved");
+            const auto saved=temporary/"saved.bin";
+            application.complete_service({requests.front().id,false,saved.string(),{},true});
+            wait([&]{
+                const auto completed=application.take_service_completions();
+                for(const auto& result:completed)if(result.id==requests.front().id) {
+                    require(result.error.empty(),"Attachment save reported failure");return true;
+                }
+                return false;
+            },std::chrono::seconds(8),"Attachment save did not finish");
+            std::ifstream input(saved,std::ios::binary);const std::string bytes{std::istreambuf_iterator<char>(input),{}};
+            require(bytes==std::string("f\0x",3),"Saved attachment differs from received binary bytes");
+        }
+        std::cout<<"received "<<row.cells.front().text<<" elapsed="<<std::chrono::duration<double>(Clock::now()-began).count()
+                 <<" waterfall_changes="<<changes<<'\n';
+        if(!wire_scenario) {
+            std::cout<<"active_fast_snr="<<(active_snr.empty()?"unavailable":active_snr)<<'\n'
+                     <<"fast_sim_status_after="<<application.field(F::fast_sim_status).text<<'\n';
+        }
+        monitor("after");
+        application.select_page(ui::Page::fast_simulation);monitor("other-tab");
+        require(application.field(F::fast_sim_status).text.find("Cable test passed")!=std::string::npos,"Monitoring erased the last test result");
+        require(application.field(F::fast_history).records.size()==expected_records,"Monitoring duplicated received history");
+        application.select_page(ui::Page::console);
+        wait([&]{auto* label=find_label(*window,row.cells.front().text);return label&&label->visible_r();},
+            std::chrono::seconds(3),"Verified Signals row was not rendered in the native browser");
+    };
+    if(scenario=="wire-clean") {
+        application.select_page(ui::Page::console);
+        wait([&]{return application.enabled(C::fast_transmit);},std::chrono::seconds(8),
+            "Cancelled-restart check could not start from the Console");
+        Fl_Button* button=nullptr;
+        const std::function<void(Fl_Group&)> find_visible=[&](Fl_Group& group) {
+            for(int i=0;i<group.children();++i) {
+                auto* widget=group.child(i);
+                if(auto* candidate=dynamic_cast<Fl_Button*>(widget);candidate&&candidate->label()&&
+                    std::string_view(candidate->label())=="Run loopback test"&&candidate->visible_r()&&candidate->active_r())button=candidate;
+                if(auto* nested=dynamic_cast<Fl_Group*>(widget))find_visible(*nested);
+            }
+        };
+        wait([&]{find_visible(*window);return button!=nullptr;},std::chrono::seconds(8),
+            "Native loopback button is unavailable for cancellation check");
+        button->do_callback();
+        wait([&]{
+            const auto& progress=application.field(F::fast_progress).text;
+            return application.enabled(C::fast_cancel)&&
+                (progress.find("Sending")!=std::string::npos||
+                 progress.find("Waiting for physical completion")!=std::string::npos);
+        },std::chrono::seconds(15),"Loopback never reached cancellable audio transmission");
+        application.activate(C::fast_cancel);
+        wait([&]{
+            const auto& status=application.field(F::fast_sim_status).text;
+            return !application.enabled(C::fast_cancel)&&application.enabled(C::fast_transmit)&&
+                status.find("Cable test cancelled")!=std::string::npos;
+        },std::chrono::seconds(15),"Cancelled loopback did not finish and release the transmit controls");
+        require(application.field(F::fast_history).records.empty()&&application.field(F::fast_files).records.empty(),
+            "Cancelled loopback published an incomplete message or file");
+        const auto& cancel_status=application.field(F::fast_sim_status).text;
+        require(cancel_status.find("Cable test cancelled")!=std::string::npos,
+            "Cancelled loopback did not retain a cancellation result");
+        std::cout<<"cancelled wire-clean loopback; restarting capture\n";
+        monitor("after-cancel");
+    }
+    run(false,1);
+    if(weak_acoustic_scenario) {
+        application.close();wait([&]{return application.finished();},std::chrono::seconds(8),
+            "Native Fast did not release audio on close");
+        std::cout<<"Native Fast weak acoustic loopback check passed\n";
+        return;
+    }
+    if(wire_scenario) {
+        application.close();wait([&]{return application.finished();},std::chrono::seconds(8),
+            "Native Fast did not release audio on close");
+        std::cout<<"Native Fast wire loopback check passed\n";
+        return;
+    }
+    require(application.field(F::fast_history).records.back().cells.front().text.find("LOOPBACK TEST · checksum verified, unauthenticated")!=std::string::npos,
+        "Public loopback claimed authentication");
+    const auto key=temporary/"test-only.key";
+    (void)create_keyring(key,{"Physical test fixture"},std::nullopt,fixture_keyfile::generation());
+    application.toggle(F::fast_encryption,true);application.activate(C::fast_open_key);
+    auto requests=application.take_services();require(requests.size()==1,"Encryption key selection unavailable");
+    application.complete_service({requests.front().id,false,key.string(),{}});
+    wait([&]{return application.enabled(C::fast_transmit);},std::chrono::seconds(15),"Encryption key did not load");
+    run(false,2);
+    require(application.field(F::fast_history).records.back().cells.front().text.find("LOOPBACK TEST · authenticated")!=std::string::npos,
+        "Encrypted loopback lacks authentication result");
+    const auto source=temporary/"source.bin";
+    {std::ofstream output(source,std::ios::binary);output.write("f\0x",3);}
+    application.select(F::fast_source,"file");application.edit(F::fast_file,source.string());
+    run(true,3);
+    capture_fast_layout(*window,"fast-live-loopback-received");
+    application.close();wait([&]{return application.finished();},std::chrono::seconds(8),"Native Fast did not release audio on close");
+    std::cout<<"Native Fast loopback browser checks passed\n";
+}
+// Explicit opt-in ordinary-Live acceptance: an independent native transmitter
+// plays a clean public waveform while the GUI's ordinary microphone receiver
+// remains open. No simulated channel or receiver feedback participates.
+void fast_live_acoustic_peer() {
+    using F=ui::Field;
+    Launch launch;NativeApp app(launch);auto* window=application_window();
+    require(window,"Ordinary Live Fast check has no native window");
+    auto& application=app.application;application.enable_service_completions(true);
+    application.select(F::fast_mode,"fast");
+    application.select(F::fast_profile,"acoustic-short");
+    application.select(F::fast_expected_snr,"-6");
+    application.select(F::fast_simulation,"live");
+    application.select(F::fast_sim_baseband_oscillator,"crystal");
+    application.select(F::fast_sim_shift_oscillator,"ic-7100");
+    application.edit(F::fast_sim_shift_hz,"30000000");
+    application.select(F::fast_sim_spread,"hf-worst");
+    application.select(F::fast_sim_selective,"each-65");
+    application.select(F::fast_sim_margin,"1");
+    application.select(F::fast_volume,"100");
+    require(application.field(F::fast_profile).selected=="acoustic-short"&&
+            application.field(F::fast_expected_snr).selected=="-6"&&
+            application.field(F::fast_simulation).selected=="live"&&
+            application.field(F::fast_sim_baseband_oscillator).selected=="crystal"&&
+            application.field(F::fast_sim_shift_oscillator).selected=="ic-7100"&&
+            application.field(F::fast_sim_shift_hz).text=="30000000"&&
+            application.field(F::fast_sim_spread).selected=="hf-worst"&&
+            application.field(F::fast_sim_selective).selected=="each-65"&&
+            application.field(F::fast_sim_margin).text=="1"&&
+            application.field(F::fast_volume).selected=="100",
+            "Ordinary Live acoustic acceptance settings did not take effect");
+
+    fast::SimulationSettings declarations;
+    const auto baseband=tuning::parse_oscillator_preset("crystal");
+    const auto shift=tuning::parse_oscillator_preset("ic-7100");
+    const auto spread=tuning::parse_spread_preset("hf-worst");
+    declarations.baseband_ppm=baseband.clock_error_ppm;
+    declarations.baseband_phase_rad_sqrt_s=baseband.phase_noise_degrees_per_sqrt_second*std::numbers::pi/180.;
+    declarations.shift_ppm=shift.clock_error_ppm;
+    declarations.shift_phase_rad_sqrt_s=shift.phase_noise_degrees_per_sqrt_second*std::numbers::pi/180.;
+    declarations.shift_hz=30000000;declarations.delay_ms=spread.delay_ms;
+    declarations.doppler_hz=spread.doppler_hz;
+    declarations.selective_slow_depth=.65;declarations.selective_fast_depth=.65;
+    declarations.margin=1;
+    fast::Settings peer_settings;
+    peer_settings.profile=fast::resolve_snr_preset(fast::Channel::acoustic_short,-6,
+        fast::channel_assumptions(declarations)).profile;
+    peer_settings.device=application.field(F::fast_device).selected;
+    peer_settings.transmit_gain=1.;peer_settings.mono=true;
+    peer_settings.channel_mode=audio::ChannelMode::left_mono;
+    fast::Session peer;peer.configure(peer_settings);
+    struct Cleanup {fast::Session& peer;Application& app;~Cleanup(){peer.cancel();peer.close();app.close();}} cleanup{peer,application};
+
+    const auto& controls=fast_ui::screen();
+    const auto& waveform=*std::find_if(controls.begin(),controls.end(),[](const auto& c){return c.bitmap==ui::Bitmap::fast_waveform;});
+    const auto& waterfall=*std::find_if(controls.begin(),controls.end(),[](const auto& c){return c.bitmap==ui::Bitmap::fast_waterfall;});
+    const auto& signals=*std::find_if(controls.begin(),controls.end(),[](const auto& c){return c.field==F::fast_history;});
+    const auto wait=[&](auto predicate,std::chrono::steady_clock::time_point deadline,const char* failure) {
+        while(!predicate()) {
+            if(Clock::now()>=deadline)throw std::runtime_error(std::string(failure)+": "+application.field(F::fast_status).text);
+            Fl::wait(.01);
+        }
+    };
+    const auto revisions=[&]{return std::pair{application.bitmap(waveform).revision,application.bitmap(waterfall).revision};};
+    const auto started=Clock::now();
+    application.select_page(ui::Page::console);
+    wait([&]{return application.bitmap(waveform).title=="Live RX waveform"&&
+                    application.bitmap(waterfall).title=="Live RX waterfall";},
+        started+std::chrono::seconds(8),"Ordinary Live microphone capture did not become visible");
+    const auto before=revisions();
+    auto page=ui::Page::console;
+    const auto before_deadline=Clock::now()+std::chrono::milliseconds(1200);
+    while(Clock::now()<before_deadline) {
+        Fl::wait(.01);
+        if(Clock::now()+std::chrono::milliseconds(400)>=before_deadline) {
+            page=page==ui::Page::console?ui::Page::fast_simulation:ui::Page::console;
+            application.select_page(page);
+        }
+    }
+    const auto before_after=revisions();
+    require(before_after.first>before.first&&before_after.second>before.second,
+        "Ordinary Live waveform or waterfall did not advance before peer playback");
+
+    peer.transmit_text("fox");
+    auto last_switch=Clock::now();page=ui::Page::console;
+    std::size_t peak_waveform=application.bitmap(waveform).revision;
+    std::size_t peak_waterfall=application.bitmap(waterfall).revision;
+    const auto deadline=started+std::chrono::seconds(52);
+    bool received=false;
+    while(Clock::now()<deadline) {
+        Fl::wait(.01);
+        const auto current=revisions();peak_waveform=std::max(peak_waveform,static_cast<std::size_t>(current.first));
+        peak_waterfall=std::max(peak_waterfall,static_cast<std::size_t>(current.second));
+        if(Clock::now()-last_switch>=std::chrono::seconds(2)) {
+            page=page==ui::Page::console?ui::Page::fast_simulation:ui::Page::console;
+            application.select_page(page);last_switch=Clock::now();
+        }
+        const auto& rows=application.field(F::fast_history).records;
+        if(!rows.empty()&&rows.back().cells.front().text.find("RECEIVED · checksum verified, unauthenticated")!=std::string::npos&&
+            rows.back().cells.front().text.find(" · fox")!=std::string::npos) {
+            received=true;break;
+        }
+    }
+    if(!received) {
+        peer.cancel();peer.close();application.close();
+        const auto close_deadline=Clock::now()+std::chrono::seconds(4);
+        while((peer.active()||!application.finished())&&Clock::now()<close_deadline)Fl::wait(.01);
+        throw std::runtime_error("Ordinary Live receiver did not physically complete clean fox within 52 seconds: "+
+            application.field(F::fast_status).text);
+    }
+    while(peer.active()&&Clock::now()<deadline) {
+        Fl::wait(.01);
+        if(Clock::now()-last_switch>=std::chrono::seconds(2)) {
+            page=page==ui::Page::console?ui::Page::fast_simulation:ui::Page::console;
+            application.select_page(page);last_switch=Clock::now();
+        }
+    }
+    if(peer.active()) {
+        peer.cancel();peer.close();
+        const auto peer_close_deadline=Clock::now()+std::chrono::seconds(4);
+        while(peer.active()&&Clock::now()<peer_close_deadline)Fl::wait(.01);
+        throw std::runtime_error("Independent native acoustic peer did not finish before the 52-second deadline");
+    }
+    const auto row=application.field(F::fast_history).records.back();
+    require(row.activatable&&row.cells.front().text.find(" · fox")!=std::string::npos,
+        "Ordinary Live Signals row did not expose the exact public fox text");
+    application.select_page(ui::Page::console);page=ui::Page::console;
+    wait([&]{const auto* native_row=find_label(*window,row.cells.front().text);
+        return native_row&&native_row->visible_r();},Clock::now()+std::chrono::seconds(3),
+        "Ordinary Live received Signals row was not rendered in the native browser");
+    application.activate_record(signals,row.id);
+    auto requests=application.take_services();
+    require(requests.size()==1&&requests.front().kind==ui::ServiceKind::clipboard&&requests.front().value=="fox",
+        "Ordinary Live Signals copy did not preserve exact received text");
+    application.complete_service({requests.front().id,false,{},{}});
+    const auto sent=peer.poll();
+    require(!peer.active()&&sent.error.empty()&&sent.source_bytes==3&&sent.transmit_fraction==1,
+        "Independent native acoustic peer did not finish its clean three-byte transmission");
+    require(application.field(F::fast_simulation).selected=="live"&&
+            application.field(F::fast_sim_status).text.find("Cable test")==std::string::npos,
+        "Ordinary Live acceptance unexpectedly used cable loopback mode");
+    require(row.cells.front().text.find("RECEIVED · checksum verified, unauthenticated")!=std::string::npos,
+        "Ordinary Live Signals row did not prove physical completion and public integrity");
+    const auto after=revisions();
+    const auto after_deadline=Clock::now()+std::chrono::milliseconds(1200);
+    while(Clock::now()<after_deadline) {
+        Fl::wait(.01);
+        if(Clock::now()+std::chrono::milliseconds(400)>=after_deadline) {
+            page=page==ui::Page::console?ui::Page::fast_simulation:ui::Page::console;
+            application.select_page(page);
+        }
+    }
+    const auto after_after=revisions();
+    require(after_after.first>after.first&&after_after.second>after.second&&
+            after_after.first>peak_waveform&&after_after.second>peak_waterfall,
+        "Ordinary Live waveform or waterfall did not advance after physical completion and tab changes");
+    const auto elapsed=std::chrono::duration<double>(Clock::now()-started).count();
+    require(elapsed<=55,"Ordinary Live acoustic acceptance exceeded its 55-second receive-and-monitor budget");
+    std::cout<<"ordinary-live acoustic fox received, copied and physically completed in "<<elapsed
+             <<" s; waveform="<<after_after.first<<" waterfall="<<after_after.second<<'\n';
+    peer.close();application.close();
+    wait([&]{return application.finished();},Clock::now()+std::chrono::seconds(4),
+        "Ordinary Live Fast receiver did not close within four seconds");
+}
 int main(int argc,char** argv) {
     try {
+        if(argc>=2&&argc<=4&&std::string_view(argv[1])=="--fast-live-loopback") {
+            theme::apply_palette();
+            fast_live_loopback(argc>=3?std::string_view(argv[2]):std::string_view("acoustic-short"),
+                argc>=4?std::string_view(argv[3]):std::string_view("30"));return 0;
+        }
+        if(argc==2&&std::string_view(argv[1])=="--fast-live-acoustic-peer") {
+            theme::apply_palette();fast_live_acoustic_peer();return 0;
+        }
+        if(argc==2&&std::string_view(argv[1])=="--fast-mode") {
+            theme::apply_palette();fast_mode_visibility();return 0;
+        }
         if(argc==2&&std::string_view(argv[1])=="--choice-presentation") {
             theme::apply_palette();menus();developer_mode_visibility();return 0;
         }

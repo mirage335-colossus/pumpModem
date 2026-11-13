@@ -393,7 +393,7 @@ ui::KeyStroke native_key_stroke() {
 }
 class NativeWindow : public Fl_Double_Window {
 public:
-    NativeWindow():Fl_Double_Window(ui::default_width,ui::default_height,ui::window_title()) {
+    NativeWindow(int width,int height):Fl_Double_Window(width,height,ui::window_title()) {
         if(instances_++==0) {previous_dispatch_=Fl::event_dispatch();Fl::event_dispatch(dispatch_event);}
     }
     ~NativeWindow() override {if(--instances_==0)Fl::event_dispatch(previous_dispatch_);}
@@ -673,7 +673,9 @@ public:
     explicit NativeApp(Launch launch,std::span<const ui::Control> controls=ui::console_screen()):application(std::move(launch)),controls_(controls) {
         // File chooser preview/favorites otherwise flush preferences to disk.
         Fl_Preferences::file_access(Fl_Preferences::ALL_READ_OK);
-        window=std::make_unique<NativeWindow>();window->size_range(ui::min_width,ui::min_height);window->begin();
+        const auto sizing=application.window_sizing();
+        window=std::make_unique<NativeWindow>(sizing.width,sizing.height);
+        window->size_range(sizing.min_width,sizing.min_height);applied_window_sizing=sizing;window->begin();
         background=new Fl_Group(0,0,window->w(),window->h());background->begin();
         for(const auto& definition:ui::pages()) {
             auto* button=new theme::Widget<Fl_Button>(0,0,1,1,definition.title);
@@ -737,6 +739,7 @@ private:
     std::vector<std::unique_ptr<std::function<void()>>> callbacks;
     NativeServices services;
     DesktopLayoutState desktop_layout;
+    std::optional<WindowSizing> applied_window_sizing;
     ui::Page shown_page=ui::Page::count;
     std::exception_ptr failure_;
 
@@ -1011,6 +1014,7 @@ private:
         window->redraw();
     }
     void apply() {
+        apply_window_sizing();
         auto* previous_group=Fl_Group::current();
         bool relayout=update_overlay();
         relayout=desktop_layout.needs_layout(application.page_bounds(window->w(),window->h()),
@@ -1024,6 +1028,16 @@ private:
         }
         if(relayout)layout();else update_documents();
         update_bitmaps();show_page();apply_layers();apply_focus();Fl_Group::current(previous_group);
+    }
+    void apply_window_sizing() {
+        const auto sizing=application.window_sizing();
+        if(!applied_window_sizing||*applied_window_sizing!=sizing) {
+            window->size_range(sizing.min_width,sizing.min_height);
+            applied_window_sizing=sizing;
+        }
+        if(window->w()<sizing.min_width||window->h()<sizing.min_height)
+            window->resize(window->x(),window->y(),std::max(window->w(),sizing.min_width),
+                std::max(window->h(),sizing.min_height));
     }
     bool update_overlay() {
         const auto definition=application.overlay();

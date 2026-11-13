@@ -43,6 +43,614 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Fast acoustic acquisition and noise-reference follow-up — 12 November 2026
+
+The cable was disconnected for this follow-up. Actual playback used the ALC257
+Speakers port and capture used Internal Microphone through PipeWire's default
+48 kHz analog devices, with left-mono output at the application's 100% setting.
+No mixer settings were changed. The host is a Ryzen 5 PRO 5650U with approximately
+15 GiB RAM; these are native CPU results, not GPU or other-host qualification.
+
+The original [−9 dB diagnostic capture](../local-evidence/fast-acoustic-live/stress-minus9-419.json)
+failed before training acquisition. That diagnostic value is between menu
+choices. The former modeled receiver excluded rates below 800 baud, leaving
+this slow waveform to a coherent fit that could not handle the selected
+frequency-varying channel. The bounded extension admits compact acoustic-short
+QPSK at 48 kHz, 180–<800 baud and ±100 Hz. Public startup geometry bounds its
+epoch search. Smooth RRC modeling matches the transmitter's low-rate cubic
+reconstruction: the 183-baud, eightfold-grid pulse check measured NMSE
+`4.35e-12`. Canonical [replay of the identical failed PCM](../local-evidence/fast-acoustic-live/stress-minus9-repaired-replay.json)
+now recovers exact bytes and scored physical completion, with no reapplied
+channel effects. Replay rejects malformed/nonfinite PCM and retains EOF as an
+incomplete outcome. A low-rate silence-tail defect was also fixed: emitted
+silence now includes the full public observation aperture needed to score
+six seconds of absence. EOF and decoded source lengths remain irrelevant to
+physical completion.
+
+Calibrated noise found a separate acquisition failure in both the original
+coherent path and the production receiver: −10 and −13 dB reference-SNR fixtures
+failed with or without a 30% echo at +100 ppm clock error. The long-preamble
+frequency fit could select the wrong phase-turn alias at these slow symbol
+rates. A scoped 64-symbol public-repeat estimate resolves that ambiguity;
+independent marker checks are unchanged. The repaired [five focused checks](../local-evidence/fast-acoustic-live/weak-preset-fixed-tests.log)
+pass preset selection and both flat/echo noise fixtures at both actual menu
+settings. These use fixed white noise density over the original 17.5 kHz
+reference band, exact source recovery and scored physical absence. The preset
+solver already jointly selected constellation, coding and symbol rate; the
+repair makes the corresponding receiver operate at its selected lower rates.
+These deterministic examples are not a statistical reliability measurement or
+qualification of simultaneous weak noise and HF-worst fading.
+
+The subsequent native GUI runs uncovered a separate payload failure at the
+default −6 dB profile despite acquisition and approximately 28–30 dB measured
+reference-band signal power. The [seed-420 attachment capture](../local-evidence/fast-acoustic-live/stress-minus6-420.json)
+reproduced a failed source frame after verified bootstrap. A bounded inverse
+regularization adjustment based on the protected cycle's independently held-out
+prediction residual recovered this same PCM and preserved seeds 417/419. It is
+a prediction-mismatch correction, not a calibrated noise estimate. It changes
+payload inversion, predictive presence and tracking; separate quiet projections
+retain their original regularization and absence criteria.
+
+The [exact `fox` seed-421 capture](../local-evidence/fast-acoustic-live/fox-minus6-421.json)
+then exposed bootstrap failure, before protected feedback exists: 140 of 1,944
+hard signs were wrong. Half/double initial regularization, applying the current
+interval's pilot-tracker proposal, and a more permissive resolved-path split
+did not recover it. Those exploratory implementations were removed. At the
+same bandwidth and symbol rate, [rate-2/3 coding recovered `fox`](../local-evidence/fast-acoustic-live/fox-minus6-rate23-421.json)
+in 12.525 seconds with both frames passing, and the [encrypted seed-420 attachment](../local-evidence/fast-acoustic-live/keyed-minus6-rate23-420.json)
+completed authentically in 14.4 seconds with all three frames passing.
+The former rate-3/4 failures remain relevant to explicit manual selections.
+
+The short single-carrier QC/QPSK preset now selects rate 2/3 when the fixed
+60-byte keyed fixture retains its interval count. Symbol rate, bandwidth and
+short-text airtime stay unchanged. For the 1,944-bit case, steady public source
+capacity decreases about 13.7% and keyed capacity 25%; a larger attachment can
+need another interval. This is an explicit resilience preference, not a claim
+of optimal throughput. Both endpoints need matching updated coding settings.
+The [final focused batch](../local-evidence/fast-acoustic-live/stronger-short-focused-tests.log)
+passed 8/8: preset and pulse checks plus actual reference-noise flat/echo
+fixtures at −10, −13 and −16 dB. The −16 dB correction extends coherent
+64-symbol offset unwrapping to 90 baud; it does not extend the sparse path
+below 180 baud. [Raw-clock selection](../local-evidence/fast-acoustic-live/narrow-grace-fixed.log)
+also passes one-sample and 4,093-sample chunks without duplicate intervals.
+
+Before the coding update, physical probes passed the −6 dB profile with effects Off and with the
+screenshot's crystal/IC-7100-at-30-MHz, HF-worst and each-65% AM effects. Additional
+held-out [−10 dB](../local-evidence/fast-acoustic-live/stress-minus10-419.json) and
+[−13 dB](../local-evidence/fast-acoustic-live/stress-minus13-420.json) profile tests
+recovered exact three-byte sources and physical completion in 22.525 and
+40.025 seconds of input. Receiver work took 3.146 and 3.283 seconds, maximum
+single pushes 0.724 and 0.782 seconds, and bounded DSP workspace 58.18 and
+57.66 MB. Neither capture clipped. Those menu values are waveform assumptions,
+not measured acoustic SNR. The stronger `C/N0=40 dB-Hz` synthetic stress check
+corresponds to −2.43 dB in 17.5 kHz and must not be described as −13 dB noise
+qualification. No numerical CPU ceiling or arbitrary-room guarantee follows.
+
+After the coding update, before the later baud cap, the actual native GUI button passed [public `fox`,
+encrypted `fox`, and an encrypted binary attachment](../local-evidence/fast-acoustic-live/native-acoustic-stronger.log)
+under the screenshot's selected impairments, in 12.65–12.67 seconds each.
+The received Signals row, exact text copying and saved binary (including its NUL
+byte) were checked. Actual capture and waterfall revisions advanced before,
+during and after testing, including tab switches. The then-current rate-2/3
+[−10 dB](../local-evidence/fast-acoustic-live/native-acoustic-minus10.log) and
+[−13 dB](../local-evidence/fast-acoustic-live/native-acoustic-minus13.log) GUI
+presets also delivered exact `fox`, in 22.67 and 40.22 seconds. Measured
+reference-band SNR was approximately 28–34 dB in these room tests; these are
+physical waveform/resilience checks, distinct from the calibrated weak-noise
+fixtures. No physical −16 dB profile or combined −16 dB noise/HF-worst claim
+is made. The original GUI failures remain in `native-acoustic-default.log` and
+`native-acoustic-residual.log`.
+
+The combined-noise review found a remaining gap: at −6 dB over 17.5 kHz,
+with the selected oscillator, HF-worst and selective-AM effects together,
+the 920-baud profile failed acquisition. An identical-noise effects-Off control
+passed. Fixed-density `C/N0=36.430380487 dB-Hz` was used, not per-window
+normalization of the fading waveform. An 8 dB selected-band margin at about
+580 baud still failed; 9 dB at 461 baud passed only the original case, failing
+independent cases. Diagnostic relaxed acquisition with rate-1/2 coding and
+depth-two interleaving at 920 baud also failed a holdout, including the original
+±280 Hz frontend. No relaxed acquisition threshold, altered decoy rule or
+exploratory tracker implementation was retained.
+
+The resulting automatic short QC/QPSK policy caps single-carrier baud at
+231.13026: approximately 12 dB selected-band margin at expected −6 dB. Where
+the resulting modeled margin is below 9 dB, rate 1/2 is preferred if the fixed
+60-byte keyed fixture keeps the same interval count. Thus −10 dB uses the same
+baud with stronger coding, while −13 and −16 dB narrow further. Higher-SNR OFDM,
+manual overrides and radio presets are unchanged. Default baud decreases about
+74.9%, on top of the coding tradeoff above; the short-text estimate grows from
+12.30 to 32.67 seconds. This is a measured sensitivity/resilience tradeoff,
+not a computational ceiling. The default now uses the narrow receiver's
+±100 Hz coverage; the former 920-baud geometry used the wider path.
+
+All six actual resolved-preset joint cases pass: −6 and −10 dB each use seeds
+419/420 for encrypted attachments and 421 for public `fox`, requiring exact
+recovery and physical completion. The −10 dB cases keep
+`C/N0=32.430380487 dB-Hz`. The [focused batch](../local-evidence/fast-acoustic-live/joint-final-focused-tests.log)
+also passed preset, recurring-transfer and flat/echo checks; its sole failure
+was an outdated GUI band-edge fixture. The narrower default legitimately fits
+the old 15 MHz crystal shift. A 16.7 MHz fixture preserves the intended
+reject/accept/reject transaction, and [the rebuilt GUI test passed](../local-evidence/fast-acoustic-live/final-gui-test.log).
+Combined HF-worst qualification below −10 dB is not implied by the separate
+−13/−16 dB flat-noise/echo fixtures.
+
+At that capped geometry, the [native GUI default check](../local-evidence/fast-acoustic-live/native-acoustic-final.log)
+passed public text, encrypted text and an encrypted binary attachment in
+32.06–32.09 seconds each, with 321–322 waterfall updates and continuing capture
+across tab changes. The subsequent [−10 dB GUI check](../local-evidence/fast-acoustic-live/native-acoustic-minus10-final.log)
+failed protected LDPC alignment. Two later captured GUI trials passed exact
+`fox` in about 32 seconds, but do not causally repair that original intermittent
+failure. Retain the failure and matched positive captures until the current
+receiver investigation resolves their purpose. Expected −10 dB is still a
+waveform assumption, not the measured room SNR.
+
+The later Console-controls change separates declared receiver assumptions,
+resolved wire geometry and injected test effects. Six fields share one compact
+Console row. Mode switches preserve the declaration and wire format; ordinary
+Live audio remains canonical, while Simulation and explicit loopback inject
+effects. GUI Search margin expands receiver bounds only. Explicit adverse
+acoustic-short declarations select the bounded QPSK single-carrier family;
+explicit clean declarations recover the former throughput choices. Invalid
+declarations block starts in every mode. The [focused checks](../local-evidence/fast-acoustic-live/assumptions-focused-tests.log)
+passed presets, simulation and GUI behavior; expanded declaration and layout
+checks also passed. Independent review restricted fixed SSB search admission to
+its established ±280 Hz frontend envelope. Native compact-window testing caught
+a one-pixel page overflow, then a separate detail-text overflow; these failures
+remain recorded. The repaired [native GUI fixture](../local-evidence/fast-acoustic-live/declared-gui-console-contract.log)
+passes with declarations editable on Console in both Live and Simulation,
+channel drafts preserved, and correct mode/tab transitions. Captures at
+1194×720 and 1244×720 confirm the complete compact row and footer fit. The
+fixture also required updating its old expectation that Live disables these
+controls; that was a stale assertion, not a production failure.
+
+The broader GUI run exposed a separate monitoring defect: invalid declaration
+or waveform drafts canceled a valid listener, including a valid restart already
+queued by a preceding edit. Admitted listens now retain a validated settings
+snapshot; invalid drafts preserve it while blocking new starts and displaying
+the validation error. Valid edits still perform the normal serial handoff, and
+device/key/mode/cancellation ownership changes retain their existing behavior.
+The regression covers rapid valid-to-invalid edits, a declared unsupported
+125-baud waveform, continuing PCM/waterfall updates and valid Auto recovery.
+An initial rerun also exposed an inconsistent error-text assertion, which was
+corrected without relaxing its exact capture-open or continuity requirements.
+
+These fixed-ray results do **not** establish tolerance of randomly changing
+atmospheric Doppler. A new explicit native Gaussian diagnostic uses independent
+equal-mean-power rays at 0/7 ms, each with Doppler width 30 Hz = 2σ, without
+adding the old inter-ray frequency separation or normalizing fades. With the
+same declared limits, profile and strong fixed noise density, the
+[fixed control](../local-evidence/fast-acoustic-live/declared-minus6-421-fixed.json)
+received exact `fox`, while [Gaussian evolution](../local-evidence/fast-acoustic-live/declared-minus6-421-gaussian.json)
+produced no acquisition proposals. Its ±90 Hz engineering spectral allowance
+fits the admitted ±100 Hz search; this is a time-model failure, not an audio-band
+or noise-level rejection. Local public-training holdouts show useful prediction
+over roughly 4–8 ms, with substantial degradation across longer gaps. A native
+blind timing/delay diagnostic at 1000 baud subsequently separated two Gaussian
+cases from wrong public sequences and noise. A dense-pilot feasibility check
+recovered public and authenticated protected cycles without payload truth, but
+did not fabricate physical completion. Production streaming, oscillator/AM
+coverage, weak-noise behavior and scored quiet were separate outstanding gates
+at that component checkpoint.
+
+The subsequent explicit 1000-baud QPSK candidate uses four data symbols between
+sixteen-symbol public pilot words, rate-1/2 QC coding and one fixed carrier.
+Its native receiver combines coherent and locally varying channel estimates
+using independent public pilot evidence. Each physical ordinal enters one
+codec once; integrity results do not select or retry a receiver model. A
+filtered frontend, gain-scaled inverse regularization, recurring verified
+marker timing and actual selected-symbol receipts repaired identified channel,
+capture-level and display errors. This candidate is **not selected by Auto**.
+
+Strong full-channel digital cases 419 and 421 recovered authenticated and public
+content respectively, including six seconds of scored physical absence. The
+retained clean speaker/microphone capture also recovered exact `fox` on replay.
+Checks cover both directions of a clean/Gaussian transition within a coding
+interval, gain factors 1/0.1/0.01, an interior erasure followed by resumed data,
+EOF without enough observed absence, and a late public marker ordinal. A
+12-second white-noise check stayed unacquired. After extending the early
+frequency proposals, its maximum processing burst is 147.8 ms, modeled backlog
+105.0 ms and workspace 4.18 MB. These are scoped functional and service checks,
+not a maximum CPU-throughput measurement.
+
+The current combined receiver's [clean reference-noise control](../local-evidence/fast-acoustic-live/dense-final-weak-clean.json)
+passes at −6 dB in 17.5 kHz (`C/N0=36.43038 dB-Hz`), with exact two-frame
+recovery and 6.275 seconds of physical quiet. Calibrated weak Gaussian reception
+remains unresolved. The [full-stress physical case](../local-evidence/fast-acoustic-live/dense-acoustic-full-421.json)
+does not acquire: capture peak is 0.911, with no clipped/nonfinite samples or
+reported discontinuity. Its [matched digital seed/configuration](../local-evidence/fast-acoustic-live/dense-digital-full-421.json)
+passes exact two-frame reception and 6.264 seconds of quiet, implicating the
+additional physical path rather than that fading realization alone. Receiver
+work was 6.742 seconds for the failed 21.886-second physical capture and 2.440
+seconds for 19.211 seconds of digital input. Neither high-SNR digital success
+nor a clean-room replay qualifies live combined stress. A separate cadence-only
+reentry check exposed two issues: provisional data was assembled before the
+model verified its own marker, and selecting only the first tied delay proposal
+could discard the independently verifiable path. Data assembly now waits for
+own-marker authorization; a fixed four-candidate proposal shortlist preserves
+ties for the unchanged independent holdout. The targeted reentry check recovers
+the subsequent interval without any pre-authorization data evidence. This
+does not repair the separate full-stress physical acquisition failure.
+
+An additional control exposed start-time dependence: prepending 15,505 zero
+samples to the same passing strong digital waveform, without filtering,
+resampling or new channel effects, loses acquisition. Its receiver service was
+4.774 seconds for 19.959 seconds of input. The former strong acquisition ranked
+phases on one short snapshot-relative training window, so moving the launch
+changed the sampled fade. Pooled public proposals repaired that early rejection,
+but initially exposed biased startup clock estimates during payload. A failed
+startup-only timing refinement was removed. A scalar public-pilot correction
+now adjusts demapping on fixed raw rows with separate proposal and held-out
+pilots; it does not change physical cadence or earlier receipt ranges. Exact
+public reception passes at zero, 15,505 and 24,193 samples of leading silence;
+keyed case 419, clean −6 dB reference noise and the noise/erasure/EOF controls
+also pass. A verified recurring public marker can now correct the epoch without
+altering the clock slope or earlier receipts. The bounded search continues at
+later markers after missing markers; a seven-interval check recovers after four
+absent markers. A separate encrypted 128-byte attachment under full Gaussian
+case 419 recovers all five coding frames, exact authenticated content and
+6.2645 seconds of physical quiet. It uses 4.968 seconds of receiver work for
+35.147 seconds of input and 13.09 MB DSP workspace. This qualifies that sampled
+longer transfer, not arbitrary message length.
+
+A flat-channel frequency-edge check exposed a different early ranking defect:
+the true training phase was discarded before its carrier offset was tested.
+A bounded coarse frequency bank now ranks phases before the unchanged marker
+verification. Both −99.822 Hz and +99.661 Hz edge checks receive exact `fox` and
+score physical completion. The same fixed onset, keyed, weak-clean and negative
+controls still pass; no marker threshold was relaxed.
+
+A weak-marker prior now derives its gain/slope variance from disjoint public
+training, measured sideband noise and declared channel variation. It treats
+the candidate and decoys identically and preserves the verification gates.
+The explicit 1 kbaud Gaussian −6 dB case now acquires and observes physical
+quiet, but one of its two LDPC frames still fails: this is an acquisition
+improvement, not a successful weak transfer. Clean −6 dB and the strong keyed
+five-frame controls remain exact. Two further bounded diagnostics pooled the
+existing public pilot witnesses, then applied the same prior to their local
+fits. They retained more units but still failed complete decoding, with about
+10–11% hard errors among non-erased bits in the final diagnostic. Neither pilot
+change is adopted. The experimental dense profile remains separate from Auto;
+these results do not establish a default for weak, randomly varying propagation.
+An evaluation-only matched replay then supplied the exact simulated geometry
+to the payload inverse. Its identical PCM and pilot masks still failed the
+same protected frame; first-interval sign errors fell from 181 to 164, with
+the second unchanged at 195. This rules out timing correction alone as a
+repair for that realization, without proving that recovery is impossible.
+
+The original full-stress physical capture still does not acquire. A frozen
+room-FIR replay initially had a failed identity control and was inconclusive.
+After the onset/tile repairs, the same retained identity reconstruction passes
+exact reception and physical completion, while its matched 25-tap, 10 ms FIR
+counterpart still fails acquisition. Both use the same additional frontend,
+onset and hardware-clock mapping. This now isolates static coloration as
+sufficient to reproduce acquisition failure. A public-only factorized fit of
+a shared 25-tap room response and two varying ray gains then reduced the
+frozen control's marker error from 0.609 after two fixed updates to 0.0233
+after eight. Its independent decoys remained above 13.7; an identity control
+also passed. That result uses supplied timing and the exact reconstruction
+operator. On the actual microphone recording, the corresponding eight-update
+physical-operator fit plateaus in training and leaves marker error 0.517,
+above the unchanged 0.14 admission limit. It therefore is not adopted in
+production. The frozen-control success does not qualify actual acquisition,
+and no private learned hardware transfer or channel seed is supplied to the
+production receiver.
+
+Both current `_tests_FastModem.md` rows were also run through the native
+declaration-aware manual runner with the agreed −174 dBm/Hz noise density and
+384-byte encrypted attachments. The original row margin is a receiver bound;
+injected effects use margin one, matching the GUI. The [first combined run](../local-evidence/fast-acoustic-live/manual-declarations-simulation.json)
+passed the HF row but stopped the EME row at the deliberately short 25-second
+wall limit after both frames had validated. A [single EME rerun](../local-evidence/fast-acoustic-live/manual-declarations-case2-completion.json)
+with a 40-second wall limit recovered exact authenticated content and physical
+completion. These are two sampled simulation passes, with 6.122/6.129 seconds
+of scored quiet. EME receiver service was 24.266 seconds for 22.272 seconds of
+input, with 4.239 seconds of modeled backlog; this is not a sustained real-time
+capacity pass. Actual acoustic manual-row checks are separate below.
+
+The subsequent short actual speaker/microphone checks of both manual rows
+failed before synchronization with capture-FIFO overflow. The [HF capture](../local-evidence/fast-acoustic-live/manual-declarations-acoustic-hf.json)
+needed 9.852 seconds of receiver work for 1.889 seconds of consumed input;
+the [EME capture](../local-evidence/fast-acoustic-live/manual-declarations-acoustic-eme.json)
+needed 8.872 seconds for 1.718 seconds. Both filled the existing eight-second
+FIFO. HF had 108 clipped samples in the consumed prefix and 429 in the complete
+retained capture; EME had none in the consumed prefix but 107 in the retained
+backlog capture. Both modeled playback waveforms briefly exceeded the DAC range,
+where playback clamps them. These failures establish an
+unsuccessful-acquisition service problem on the physical input, not successful
+live manual-case qualification. Search cost and physical-path mismatch require
+separate diagnosis; increasing storage alone is not a sustained-service repair.
+
+A bounded exact-input profile found that repeated pulse and periodic-template
+construction used 48.5% of SSB model-learning time. Direct periodic convolution
+now shares the immutable transmit/word spectrum and explicitly preserves the
+finite clipped endpoint cells and tap-time moments. Pulse, acquisition and
+candidate-search checks pass 3/3. The same two-second HF prefix retains all
+19 fits, 15 projections, eight gates and recorded marker decisions; the maximum
+training-NMSE difference is `2.63e-14`. Receiver time fell from 11.203 to 6.506
+seconds (1.72×), with essentially unchanged 60.70 MB workspace. This alone still
+exceeds real time on unsuccessful acquisition. The timing control included
+small diagnostic timer/trace overhead and is not a complete-transfer capacity result.
+
+The subsequent bounded native acquisition pool preserves ordered decisions,
+the full `2*H` worker budget and explicit memory admission. An earliest-public-
+interval fence settles pending fits before the first interval can be lost.
+The identical two-second prefix now takes 1.789 seconds, with all 19 fits
+committed, no pending/discarded work, 15 helpers under the 24-worker budget,
+815 MB peak reservation and 193,024 KiB measured process high-water RSS.
+The increased 15.553 CPU-seconds represents productive same-stream overlap;
+this short burst alone is not a real-time capacity qualification. Acquisition,
+ordering/cancellation, pulse, low-power-tail/resumption and weak-terminal
+checks pass, and the encrypted HF simulation still receives exact content
+with 6.122 seconds of scored physical quiet.
+
+Native paced replay of the complete original 9.900/9.725-second HF/EME
+recordings finishes with no pending fits. Maximum scheduled-input backlog
+is 4,220/10,884 samples against the 384,000-sample live FIFO; final lag is
+4.55/3.40 ms. These recordings still fail acquisition. Fresh actual acoustic
+tests at the selected 100% gain also finish normally without audio errors or
+lost input: HF/EME peak FIFO occupancy is 6,000/26,400 samples. Both remain
+unacquired and contain 914/75 clipped samples. A separate explicit 50% HF
+control removes clipping (capture peak 0.768, requested playback peak 0.628),
+but still does not acquire; its FIFO peaks at 7,904 samples. This separates
+the repaired input-service failure from the unresolved acoustic acquisition
+failure, and shows that clipping is not its sole cause. The diagnostic gain
+does not change the GUI selection or system mixer. An exact-input trace
+finds the correct raw epoch in the unclipped capture's proposals, but the
+independent late-training prediction errors are 0.217/0.252 against the
+unchanged 0.20 gate. The matched digital prediction error is 0.0159 and its
+marker error 0.0228. Thus the true onset is present; the additional physical
+channel defeats the current model before marker verification. See
+[the scoped capacity record](fast-radio-capacity.md) for timing and resource limits.
+
+Loopback SNR now uses an actual pre-transmission microphone baseline and
+complete capture-spectrum windows within native observed-payload ranges.
+Display-only timestamps exclude receiver lookahead and delivery latency.
+The GUI labels the last loopback signal estimate and its capture age; quiet
+input does not invent or refresh a signal SNR. Missing comparable baseline,
+clipping, insufficient spectral resolution or observation support makes the
+estimate unavailable. This is separate from EVM and never adjusts transmission.
+Synthetic telemetry checks establish reference-band normalization and delayed
+history association; physical GUI observations establish integration, not an
+independent calibrated accuracy bound for a changing room.
+
+The latest aggregate Fast run passed 69/72 checks. Two failures were stale
+full-rate/weak-noise fixtures after Auto narrowed: their explicit clean-link
+presets now preserve the original full-rate convolution oracle and 6 dB
+selected-band FEC conditions, with all strict assertions retained. The corrected
+filter, weak-QC and convolutional checks pass 3/3. The third failure exposed the
+monitor handoff defect described above. The final shared GUI group passes
+30/30, including its corrected rapid-edit and invalid-waveform regression.
+The six focused dense-receiver checks also pass after the marker-prior change,
+covering declared noise rejection, erasures, physical quiet, frequency edges,
+transitions and recurring re-entry. These are combined rerun coverage, not a
+claim that the original full run passed unchanged.
+
+The [ordinary Live native acoustic check](../local-evidence/fast-acoustic-live/final-native-peer-rerun.log)
+keeps the GUI's adverse receiver declarations while a separate native Session
+plays canonical clean `fox` through the actual speakers. The normal receive
+path produces the physically complete public Signals row and exact clipboard
+text in 35.498 seconds; waveform/waterfall updates continue across Console and
+Simulation tabs. Its first preflight failed before transmission because the
+fixture read the margin's selection field instead of its text field; that
+setup failure remains recorded separately.
+
+The [latest actual acoustic loopback GUI check](../local-evidence/fast-acoustic-live/final-native-loopback.log)
+then passes public `fox`, keyed `fox` and a keyed three-byte binary attachment
+under crystal/IC-7100 at 30 MHz, fixed HF-worst spread and each-65% AM, at the
+selected 100% application gain without mixer changes or synthetic loss/noise.
+Exact Signals/copy/explicit Save (including the binary NUL byte), physical
+completion and continuous before/during/after/tab plots pass. Durations are
+32.060/32.049/32.151 seconds, with 321/321/322 in-test waterfall updates.
+Measured signal SNRs are 29.5/37.4/34.5 dB in the 17.5 kHz reference band;
+the selected −6 dB preset is not an actual weak acoustic qualification.
+The latest native compact-window/mode fixture also passes; rendered Console
+captures confirm the six-field row and footer fit at 1194×720.
+
+The final [EME manual simulation refresh](../local-evidence/fast-acoustic-live/final-manual-case2-simulation.json)
+also receives the exact authenticated 384-byte source over two LDPC frames,
+with 6.128875 seconds of physical quiet. Receiver work is 23.213 seconds for
+22.272 seconds of input (24.001 seconds whole-process elapsed and 34.660 CPU
+seconds). This finite success is explicitly not a real-time capacity pass.
+Together with the parallel-receiver HF simulation above, both current manual
+rows have a complete native simulation result; their acoustic failures remain.
+
+Both rebuilt GUI binaries pass their self-check. The Rev shared Fast check
+passes 1/1. Its native Fast/developer visibility fixture first reaches the
+chosen 90-second cap while making progress; a rerun within the repository's
+330-second native allowance passes in 155.77 seconds, with 525 painted frames
+and no failed frames. This uses software rendering and makes no GPU claim.
+
+The [final development identity record](../local-evidence/fast-acoustic-live/final-identities.json)
+hashes 92 source/configuration files, 11 final binaries and 33 evidence files.
+It distinguishes the dirty worktree and combined rerun coverage from release
+certification. Successful final native-capture PCM and rendered PPM
+intermediates were retired after verification; compact logs, hashes and the
+two inspected PNGs remain. Obsolete copied onset/layout diagnostics and the
+rejected FIR/pilot experiment executables were also removed. Unresolved-failure
+PCM remains available for the specific channel-model questions recorded here.
+
+Temporary captures and receipts in `local-evidence/fast-acoustic-live/` support
+the original-failure comparison and current acoustic acceptance. Retain them
+through review of these changes, then preserve the findings here and remove
+redundant recordings, diagnostic executables and copied source. This is a dirty
+development-worktree checkpoint, not release certification.
+
+## Fast live-channel and cable receiver follow-up — 12 November 2026
+
+This follow-up supersedes the fixed 10% loopback gain and synthetic live noise
+in the preceding checkpoint. Simulation retains the normalized receiver-input
+link budget: increasing path loss lowers C/N0 and increases receiver noise
+relative to the normalized signal. Live loopback ignores power, path loss and
+noise settings entirely, including invalid retained drafts, and uses the chosen
+TX volume. Explicit oscillator, spread and selective-AM effects remain enabled.
+The three simulation-only fields are disabled in live modes.
+
+Loopback now reports preparation, input/output opening, sending, physical
+completion waiting and closing. TX queued and RX captured counts have distinct
+meanings. Source EOF continues quiet playback until receiver completion or a
+bounded failed trial, avoiding shared ALSA server drain waits. Stoppable ALSA
+playback and suspended-stream recovery check cancellation. Capture startup,
+post-source failure and pending audio handoff have explicit bounds; the complete
+transaction retains its 75-second audio and 110-second elapsed limits. Foreign
+driver open/configure/close calls still depend on the provider returning, so
+these are application cancellation bounds, not a universal hard join guarantee.
+
+A subsequent physical negative control exposed a second failure mechanism:
+four failed full-size LDPC frames could block the consumer for 1.96 seconds,
+overflowing wire's one-second capture FIFO. It reproduced without concurrent
+build work. Full-size wire capacity profiles now reserve one second plus half
+a second per locally selected frame (three seconds at depth four, at most nine
+seconds). Existing modeled, OFDM and classic budgets remain unchanged. This is
+bounded burst absorption, not sustained decode-capacity qualification; actual
+overflow still fails closed. Cancellation also holds GUI controls until its
+terminal snapshot has been published, closing a brief stale-status race.
+The [repaired physical negative control](../local-evidence/fast-live-channel/live-wire-36-negative-buffered.json)
+returns `decode_failed` after scored physical completion in 9.72 seconds, with
+no published source or audio error. Its peak backlog is 92,400 of 144,000
+samples. The [subsequent native cancellation/restart check](../local-evidence/fast-live-channel/native-cancel-restart-fixed-30.log)
+publishes no content on cancellation, resumes capture, then receives exact
+`fox` through the native button in 10.64 seconds. This also verifies that the
+failed probe released audio. Original overflowing probes and the premature
+GUI-status assertion remain in the same evidence directory.
+
+The wire profile had two separate receiver defects. Long-window CFO estimation
+aliased offsets outside approximately ±5.6 Hz; a public 64-symbol repeat now
+unwraps it. HF Best could fail raw marker acquisition before equalization. A
+bounded public-training decision-feedback candidate now handles that multipath
+case, with independent marker signs and measured-input presence checks. Neither
+fix changes transmitted geometry or selects a waveform using private channel
+knowledge. See the [operating details](fast-mode.md).
+
+Matched `fox` PCM that previously failed at Auto 25 dB/HF Best now decodes
+exactly, including a held-out crystal-clock/IC-7100 30 MHz case with a 173-sample
+leading offset. The [native regression](../local-evidence/fast-live-channel/wire-regression.txt)
+also passes two input chunk sizes, a missing interior interval, noisy physical
+quiet and repeated-training rejection. Measured complete decode takes about
+1.12–1.15 seconds for 10.38 seconds of input on this Ryzen 5 PRO 5650U; reported
+DSP workspace is 200,104 bytes, including fixed acquisition scratch. Training
+without a marker rejects 1.89 seconds of input in 0.163 seconds. These bounded
+checks establish neither a maximum throughput nor a reception probability.
+
+The native GUI button, visible Signals row, exact text copy and continuing
+waterfall were exercised through the connected analog headphone-to-microphone
+route (PipeWire, 48 kHz, default analog input, left mono). Audio cable/Auto 25 dB
+with HF Best passed at 30% in
+[10.64 seconds](../local-evidence/fast-live-channel/native-wire-hf-best-30.log).
+Adding crystal baseband and IC-7100 shift at 30 MHz passed at 100% in
+[10.58 seconds](../local-evidence/fast-live-channel/native-wire-hf-best-shift-100.log).
+The screenshot configuration—Speakers/mic short, Auto −6 dB, HF worst, each
+65% selective AM and 30 MHz IC-7100 shift—passed public `fox`, encrypted `fox`
+and an encrypted binary attachment at 30%, each in about 12.66 seconds. The
+explicitly saved attachment preserved its NUL byte. The
+[native receipt](../local-evidence/fast-live-channel/native-acoustic-30.log) and
+[reviewed screenshot](../local-evidence/fast-live-channel/fast-live-loopback-received.png)
+show actual received content and resumed live monitoring. No mixer settings
+were changed. A separate clean-cable 30% probe recorded capture peak 0.174 with
+zero clipped samples and confirmed synthetic link-budget application was off.
+
+Auto 36 dB/4096-QAM with HF Best remains a negative result: acquisition succeeds,
+but decision-feedback errors prevent verified payload recovery. The
+[bounded discriminator](../local-evidence/fast-live-channel/wire-4096-diagnostics.txt)
+isolated feedback error propagation; a small soft-decision alternative also
+failed. Correct-symbol feedback was a diagnostic oracle only, never a receiver
+implementation or passing qualification. Bidirectional or pilot-anchored
+sequence equalization remains a conditional alternative, not an implemented
+feature. The passing Auto 25 dB case does not qualify this higher constellation.
+
+The [full Fast group](../local-evidence/fast-live-channel/fast-suite.log) passed
+53/53 in 369.67 seconds before the final queue/cancellation-latch adjustments.
+The rebuilt [affected queue, Session and GUI checks](../local-evidence/fast-live-channel/final-affected-tests.log)
+then passed 5/5 in 154.94 seconds after those adjustments.
+The ALSA contract passed 1/1 in 14.75 seconds, and its remaining interleave and
+continuous-clock checks passed 2/2 in 15.73 seconds. The initial focused
+Session mismatch failure was a fixture clock error: prerecorded input was
+consumed in real time while post-EOF playback ran accelerated. Its corrected
+audio-paced fixture retains the exact-source mismatch assertion. The original
+failure, native test compile error and premature cancellation-status assertion
+remain available alongside their repairs.
+
+Both final desktop executables pass their shared self-check; the Rev/Clang
+build also passes its focused Fast GUI check 1/1. The
+[source/binary identity receipt](../local-evidence/fast-live-channel/source-binary-identity.json)
+binds 70 changed source/test/build files over `8f725cc2` and 13 binaries,
+including the earlier dirty Fast work. No commit or release was made.
+
+Temporary receipts under `local-evidence/fast-live-channel/` support these
+current failure/repair and physical-audio claims; retire them when superseded.
+The sole retained synthetic capture, `wire36-417-hf-best.f32`, preserves the
+unresolved 4096-QAM feedback-propagation comparison; remove it once a replacement
+receiver or a durable reproducer resolves that question. Redundant positive
+captures, copied headers and standalone experimental implementations were
+removed after their findings were distilled here.
+This is local application and audio validation, not RF propagation or release
+certification. Earlier checkpoints below retain their original source scope.
+
+## Fast end-user loopback reception — 12 November 2026
+
+The later end-user report supersedes the quarantine/idle-stop behavior recorded
+in the earlier Fast checkpoints below. A successful Session decode previously
+discarded its received file, and separate GUI history, outgoing-direction and
+preview gates excluded loopback results. Selecting loopback also stopped idle
+listening. These policies explained a passed `fox` test with an empty Signals
+browser and retained plots.
+
+Completed exact-source loopback reception now uses the ordinary bounded received
+history, restricted text, copy/paste and explicit attachment Save path, with
+`LOOPBACK TEST` provenance. Public checksums remain unauthenticated. The
+controller serially hands audio from idle monitoring to the bounded test and
+back; last-test status is separate from current capture. Tab/model changes do
+not stop monitoring. Stalled detection follows actual PCM progress, and old
+single-carrier constellation points are identified separately. At this earlier
+checkpoint the fixed test gain was displayed as 10%; the later live-channel
+follow-up above replaces it with the selected TX volume.
+
+The opt-in native FLTK test exercised the actual Console button and visible
+Signals widget on this Ryzen 5 PRO 5650U Linux host, through the connected analog
+headphone-to-microphone route (PipeWire, 48 kHz, left mono, default analog input,
+not the monitor source). The screenshot configuration was used: Speakers/mic
+short, Auto −6 dB, 40 W/130 dB/−174 dBm/Hz, crystal baseband, IC-7100 shift at
+30 MHz, HF worst 30 Hz/7 ms, each 65% AM and margin 1. Public `fox`, authenticated
+encrypted `fox`, and an encrypted three-byte binary attachment all passed in
+12.6911, 12.6923 and 12.7157 seconds. Text copied exactly; the explicitly saved
+attachment preserved its NUL byte. Each test produced one visible completed
+row. Waterfall revisions advanced 127 times per test and 6–8 times in each
+0.7-second monitoring window afterward, including on the other tab. No mixer
+settings were changed. See the [native receipt](../local-evidence/fast-end-user/native-cable-widget-wait.log)
+and [reviewed native screenshot](../local-evidence/fast-end-user/fast-live-loopback-received.png).
+
+The focused Session cable check and `gui_fast` passed. The first broader GUI
+run passed 28/30: one old fixture incorrectly required a Live plot before
+supplying PCM; the new mock could insert an idle-tone block between playback
+blocks when its independent threads drifted. The fixes check actual capture
+ownership and preserve the emitted virtual PCM timeline with stop-aware waiting.
+The [corrected focused rerun](../local-evidence/fast-end-user/targeted-rerun.log)
+passed all three tests: full `fast_session`, ordinary `gui_fast_live`, and the
+new Application `gui_fast_loopback` regression (208.34 seconds total). Together
+with the first run's 28 unaffected passes this covers the current GUI group;
+it is not a single 30/30 run. The separate [native FLTK group](../local-evidence/fast-end-user/native-suite.log)
+passed 3/3 in 109.67 seconds, including adapter and document conformance.
+Original [GUI failures](../local-evidence/fast-end-user/gui-suite.log), build
+setup failures and the two native-driver failures remain retained: the driver
+first activated a hidden Console control, then assumed `Fl::wait` had completed
+a presentation update. Neither failure qualified the full acceptance path;
+the final native run waits for the actual visible, enabled button and row.
+
+Both desktop executables were rebuilt. The alternate Rev/Clang build passed its
+[self-check](../local-evidence/fast-end-user/rev-self-check.log) and
+[focused shared Fast GUI check](../local-evidence/fast-end-user/rev-fast-check.log)
+1/1; the physical native-button check above used FLTK. The previous Rev native
+adapter qualification remains separately scoped; it was not repeated here.
+The [source/binary identity receipt](../local-evidence/fast-end-user/source-binary-identity.json)
+binds the changed source/test/build inputs over `8f725cc2` and the seven tested
+or rebuilt executables, including the earlier dirty Fast work.
+
+These are bounded local application/audio checks, not RF propagation, other
+platform runtime or sustained receiver-capacity qualification. Temporary logs,
+the screenshot and final identity receipt under `local-evidence/fast-end-user/`
+support this current validation claim; retire them when superseded. The obsolete
+Session-only cable helper source/binary were removed after this replacement;
+their historical receipts and waveform findings remain separately scoped.
+
 ## Fast simulation and manual-channel investigation — 12 November 2026
 
 The Fast testing page now uses the native analytic transmitter, sampled channel,
@@ -94,12 +702,12 @@ validation. Correcting the first GUI assertion exposed another stale expectation
 that an empty Console draft should block loopback or bypass device acquisition.
 The final test now checks active loopback status and `Waiting for device`;
 direct GUI testing passed and independent review accepted the test-only changes.
-No production source changed for these three corrections. The final GUI CTest
-group passed 29/29, but its wrapper exited 1 after sandbox Xvfb could not bind
-local sockets and cleanup reported a missing process. That wrapper result is
-an environment failure, not a GUI test failure
+No production source changed for these three corrections. In that earlier
+checkpoint, the GUI CTest group passed 29/29, but its wrapper exited 1 after
+sandbox Xvfb could not bind local sockets and cleanup reported a missing
+process. That wrapper result was an environment failure, not a GUI test failure
 ([log](../local-evidence/fast-channel/ssb-v3-final-gui-group.log)). A
-separate final native run outside the sandbox passed all three GUI workflow,
+separate native run outside the sandbox passed all three GUI workflow,
 adapter and document checks under private Xvfb ([log](../local-evidence/fast-channel/ssb-v3-final-native-group.log)).
 The software display emitted AMDGPU permission warnings; this was not GPU
 execution or a GUI-button hardware run. The original 52-case batch had 49
@@ -115,6 +723,98 @@ baseline recovered, and an independent flat 35 dB software case recovered
 80 KiB at 10.58 kbit/s including startup and quiet. The −28 dB one-baud prefix
 failed its first full acquisition opportunity. These original results do not
 qualify complete sensitivity.
+
+Separate acoustic-short checks used unencrypted QPSK/LDPC 1,944-bit, rate-3/4,
+depth-1 software messages. The original FOX/long-source exploration used an
+intermediate `datapump/fast/v2`, `short/v1`, `sc-training/v2` wire identity.
+Its initial baseline `fox` and 1,024-symbol/16-pilot-per-16-data candidate
+failed, while a 2,048-symbol preamble with 16 pilots per 32 data recovered the
+three-byte `fox` on seeds 417/418. Its seed-418 640-byte six-interval run first
+failed three LDPC frames; receiver-only protected feedback with three disjoint
+FIR fits and 104-bit alignment fill excluded then passed. These exploratory
+results are not current-format qualification; the truncated candidate JSON and
+initial failure remain preserved.
+
+Current v4 software receipts recovered the public three-byte `fox` on seeds
+417 and 418, with two LDPC frames, no frame failures and physical-quiet
+completion. On seed 418, a 640-byte adverse fixture passed all six physical
+intervals with identical outcome hash across 1,201-, 257- and 4,096-sample
+input chunks; each run had zero frame failures and about 5.43–5.46 s receiver
+time for 19.82 s audio. A weak-AWGN v4 `fox` also recovered exactly in two
+intervals for all three chunk sizes on the selected coherent `standard-fast`
+path. This was not a separate full sparse-only run, so it does not establish a
+current-v4 sparse-route failure. These matched results verify
+only the stated deterministic fixtures and chunk invariance, not sensitivity,
+population reliability, long-bulk service or capacity. See the
+[current simulation receipts](fast-radio-capacity.md#acoustic-short-manual-row-follow-up)
+and [binary hashes](../local-evidence/fast-followup/final-core-binaries.sha256).
+
+The Live loopback action sends the selected nonempty Console message/file
+through Session, publishes captured input, applies fixed native gain/time bounds
+and does not truncate the source. Current-v4 selected-source cable checks passed
+for both public and encrypted three-byte `fox` at the acoustic-short −6 dB
+preset (not a measured cable SNR): two of two LDPC frames, zero
+failures and physical completion, with encrypted authentication. No file was
+exposed. Captured queues peaked at 150,128 and 141,728 samples respectively;
+the actual input diagnostics retained the final 512 points. Both used the
+default analog 48 kHz left-mono route at gain 0.1. Input polling observed 125
+capture-progress updates per run, with maximum gaps about 100.4 ms; this does
+not bound GUI paint/scheduling cadence. ALSA slave-open warnings
+preceded the working PipeWire path and no Session error occurred. Input-clock
+completion ticks are not comparable to the transmit-side quiet-start timestamp,
+so do not infer cable quiet latency from those fields. This confirms a short
+same-host Session loopback, not full acoustic/manual-row performance. See the
+[parsed evidence](../local-evidence/fast-followup/fox-cable-evidence.json),
+[public](../local-evidence/fast-followup/fox-cable-public.jsonl) and
+[encrypted](../local-evidence/fast-followup/fox-cable-encrypted.jsonl) receipts
+and their retained stderr files.
+
+The initial GUI run passed 28/29; the stale `gui_fast` assertion then passed in
+a corrected 1/1 focused rerun. Separate native FLTK checks first measured the
+common SNR line at 1,267 px against a 1,212 px limit, then passed 3/3 after it
+was shortened. Console,
+Simulation and Modem Details screenshots were reviewed at 1,194×720 and
+1,244×720. These are separate test and display checks, not one combined suite
+or hardware-button qualification ([GUI runs](../local-evidence/fast-followup/gui-final.log),
+[corrected assertion](../local-evidence/fast-followup/gui-assertion-test.log),
+[initial FLTK](../local-evidence/fast-followup/native-fltk-final.log),
+[repaired FLTK](../local-evidence/fast-followup/native-fltk-repaired.log)).
+The Fast core CTest group later passed 49/49 in 267.24 s, including typed
+controls ([log](../local-evidence/fast-followup/fast-final-ctest.log)); three
+GUI-focused checks ran separately, not as one 52-test passing run. A subsequent
+source review identified a text-fit risk in a long Loopback Details note that
+the earlier width checks did not cover; this was not an observed overflow. The
+note was split across two lines and the FLTK fit loop extended to cover all
+profiles, live SNR and Loopback text/file states. The narrow `--fast-mode`
+native fit check passed at 720 px height and 1,194/1,244 px widths, and its
+focused GUI test passed 1/1 after the final wording change. See [fit receipt](../local-evidence/fast-followup/native-loopback-fit-receipt.json),
+[native log](../local-evidence/fast-followup/native-loopback-fit.log) and
+[GUI rerun](../local-evidence/fast-followup/gui-loopback-fit-test.log). These
+close the Fast GUI width checks; the separate Rev runtime results follow.
+
+The Rev adapter's initial native group passed 4/5 but failed the Robust→Fast→
+Robust minimum-size transition. A pump-only reproducer confirmed the mismatch:
+the physical client height and minimum-size hint were both 1,134 px, while at
+scale 1.04205 the logical height remained 720 px against its 1,088 px minimum.
+Source review traced
+the notification gap to `NativeWindow::setSize` updating its cache before the
+matching `ConfigureNotify`, which then omits the resize callback. The narrow
+`RevApp::apply_window_sizing` fix invokes the existing `onResize`
+handler only after its own enlargement, preserving native API semantics. Source
+review accepted the change. The first fix build failed before assertions because
+Xlib's `Cursor` name conflicted with the Rev style enum; the corrected build
+succeeded ([setup failure](../local-evidence/fast-followup/rev-minimum-fixed-build.log),
+[corrected build](../local-evidence/fast-followup/rev-minimum-fixed-build-2.log)).
+The full Rev adapter run then passed with 994 frames in 320.83 s, within its
+unchanged 330 s limit, and the separate native GUI group passed 4/4 in 20.24 s.
+Together these are five checks across two runs, not one aggregate test group.
+Runtime evidence is Linux with private Xvfb and software GL/LP2 only; macOS and
+Windows remain unqualified ([initial 4/5](../local-evidence/fast-followup/native-rev-final.log),
+[full adapter pass](../local-evidence/fast-followup/rev-minimum-visibility-fixed-test.log),
+[native GUI 4/4](../local-evidence/fast-followup/rev-native-remaining-fixed-test.log),
+[pump reproducer](../local-evidence/fast-followup/rev-minimum-pump-test.log)). The
+current source/binary binding is recorded in the
+[follow-up identity receipt](../local-evidence/fast-followup/final-source-binary-identity.json).
 
 The canonical fixed 16/16-pilot v3 HF417 full run decoded both LDPC frames but
 failed physical-end completion at EOF, withholding the file (208.534 s

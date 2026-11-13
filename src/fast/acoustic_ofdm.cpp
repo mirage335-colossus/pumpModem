@@ -448,6 +448,11 @@ struct Receiver::Impl {
                 cycle_soft[offset]=present?static_cast<float>(std::clamp(metrics[j]/std::max(nv,1e-8),-24.,24.)):0.F;
         }
         if(present) {
+            const auto start=std::max(0.,next_window);
+            const auto end=next_window+g.n*period;
+            if(end>start)
+                state.last_present_signal=ReceivedSignalRange{static_cast<std::uint64_t>(std::ceil(start)),
+                    static_cast<std::uint64_t>(std::floor(end))};
             state.evm=std::sqrt(error/std::max<std::size_t>(count,1));
             // Track slow relative ADC/DAC clock motion using independent pilots.
             next_window+=delay*.8;period=std::clamp(period+.03*delay/g.length,.999,1.001);

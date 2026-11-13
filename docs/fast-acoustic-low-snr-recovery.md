@@ -5,12 +5,22 @@ coding geometry” while transmission continued was a receiver defect. It was
 reproduced on the default physical speaker/microphone devices on 2026-09-21.
 The narrow acoustic preset also had an unintended output-power increase.
 
+The geometry, recordings and numerical results below belong to that
+2026-09-21 investigation. Current non-SSB capacity single carriers use the v4
+profile context, 2,048 public training symbols and sixteen-symbol pilot words.
+Obtain current marker spacing and complete airtime from the native estimate
+for the selected profile, for example
+`pump fast-info --profile acoustic --expected-snr -10 --estimate-bytes 60`.
+The historical captures establish the defect and correction for their original
+wire format; they do not qualify the revised waveform or receiver. See
+[current SNR guidance](fast-snr-presets.md) and the [validation record](validation.md).
+
 ## Why the receiver stopped
 
-The acoustic −10 dB preset uses 16-QAM, LDPC 3/4, depth 1, 73.089804649 baud,
+The acoustic −10 dB preset tested on 2026-09-21 used 16-QAM, LDPC 3/4, depth 1, 73.089804649 baud,
 an 87.708 Hz band around 1.8 kHz, four-symbol pilots after each 64 data symbols,
-and a full marker every four intervals. Full markers are about 30.65 seconds
-apart. A short source needs two 32-interval coding cycles, including the
+and a full marker every four intervals. Full markers were about 30.65 seconds
+apart. A short source needed two 32-interval coding cycles, including the
 protected bootstrap, before physical completion.
 
 Previously, one poor pilot set `marker_good=false`. Following good pilots
@@ -20,7 +30,7 @@ flag, and declared physical completion after six seconds. The next full
 marker was too far away to prevent this. The codec correctly reported its
 truncated input; zero source bytes were a consequence of that premature end.
 
-Capacity single-carrier reception now separates established interval cadence,
+The correction separated established interval cadence,
 current pilot/marker presence, and whether a group can be demapped reliably.
 A damaged pilot erases its own group while later valid pilots can resume
 reception. A coherent phase jump re-anchors phase for the next group without
@@ -36,7 +46,9 @@ timing. Damaged-marker intervals remain erased until a later valid full marker
 restores decoding; a regression verifies those positions and true silence/noise
 completion independently.
 
-On the first failed pilot only its four observed symbols count toward absence.
+On the first failed pilot only the actually observed pilot word counts toward
+absence: four symbols in that historical waveform, sixteen in the current
+capacity single-carrier format.
 A later fully observed failed group can add its duration; a valid observation
 resets the count. This prevents one brief pilot disturbance from declaring a
 whole long payload group absent at very low baud. Low-rate transmitted silence
@@ -57,7 +69,7 @@ This leaves the nominal OFDM preset unchanged. Actual received acoustic power
 can still vary with frequency response and the room; equal PCM power is not
 a measured SNR guarantee. Explicit local amplitude overrides remain available.
 
-## Physical evidence
+## Physical evidence from 2026-09-21
 
 The default physical output and input were a 48 kHz analog stereo sink and
 microphone source, with speaker volume 100% and microphone volume 27%.
@@ -89,7 +101,7 @@ The constellation became noisier late in the trial (maximum polled EVM 0.455),
 but reception continued and error correction recovered the exact source.
 There was no audio overrun, reported device error or PCM clipping. The maximum
 queued audio was 42.7 ms and maximum DSP chunk time 45.3 ms.
-Replay through the final build recovered the same source and correction count,
+Replay through that investigation's final build recovered the same source and correction count,
 with physical completion at 526.9 seconds within replay chunk resolution.
 
 The [test records](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/acoustic-low-snr-recovery-20260921/README.md)

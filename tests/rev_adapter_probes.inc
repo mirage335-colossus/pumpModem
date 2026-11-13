@@ -2,6 +2,7 @@
     void verify_fast_mode_visibility() {
         const auto require=[](bool value,const char* message) {if(!value)throw std::runtime_error(message);};
         const auto settle=[&] {apply();for(unsigned frame=0;frame<3;++frame)native_frame();};
+        bool reported_page_visibility=false;
         const auto by_field=[&](ui::Field field) -> Binding& {
             const auto found=std::find_if(bindings.begin(),bindings.end(),[&](const auto& b){return b.control.field==field;});
             if(found==bindings.end())throw std::runtime_error("Rev Fast field was not materialized");
@@ -32,6 +33,51 @@
             require(details.size.width==width&&details.size.height==height,"Rev modem fixture did not reach the requested viewport");
             settle();
         };
+        require(window->size.minW==static_cast<int>(std::ceil(ui::min_width*details.scale))&&
+                window->size.minH==static_cast<int>(std::ceil(ui::min_height*details.scale))&&
+                details.size.min.height==ui::min_height,
+            "Rev Robust native minimum hint did not preserve the logical minimum with scaled physical rounding");
+        application.select(ui::Field::fast_mode,"fast");settle();
+        require(window->size.minW==static_cast<int>(std::ceil(ui::min_width*details.scale))&&
+                window->size.minH==static_cast<int>(std::ceil(ui::fast_min_height*details.scale))&&
+                details.size.min.height==ui::fast_min_height,
+            "Rev Fast mode did not update the native minimum hint using scaled physical rounding");
+        resize(ui::min_width,ui::fast_min_height);
+        require(details.size.height==ui::fast_min_height,"Rev Fast did not reach its compact native minimum");
+#ifdef __linux__
+        const auto fast_native=rev_adapter_native::geometry(window->xDisplay,window->xWindow);
+        require(fast_native.valid&&fast_native.width==static_cast<unsigned>(window->size.w)&&
+                fast_native.height==static_cast<unsigned>(window->size.h)&&
+                fast_native.min_width==window->size.minW&&fast_native.min_height==window->size.minH,
+            "Rev compact Fast geometry or minimum hint did not reach the X server");
+#endif
+        application.select(ui::Field::fast_mode,"robust");settle();
+        const auto restored_minimum=[&] {
+            const int minimum_width=static_cast<int>(std::ceil(ui::min_width*details.scale));
+            const int minimum_height=static_cast<int>(std::ceil(ui::min_height*details.scale));
+            bool native=true;
+#ifdef __linux__
+            const auto actual=rev_adapter_native::geometry(window->xDisplay,window->xWindow);
+            native=actual.valid&&actual.width==static_cast<unsigned>(window->size.w)&&
+                actual.height==static_cast<unsigned>(window->size.h)&&
+                actual.min_width==minimum_width&&actual.min_height==minimum_height;
+#endif
+            return native&&window->size.minW==minimum_width&&window->size.minH==minimum_height&&
+                details.size.min.width==ui::min_width&&details.size.min.height==ui::min_height&&
+                window->size.w>=minimum_width&&window->size.h>=minimum_height&&
+                details.size.width>=ui::min_width&&details.size.height>=ui::min_height;
+        };
+        const auto restored_deadline=Clock::now()+std::chrono::seconds(2);
+        while(!restored_minimum()&&Clock::now()<restored_deadline) {
+            Rev::NativeWindow::pumpEvents();
+            if(!restored_minimum())std::this_thread::sleep_for(std::chrono::milliseconds(4));
+        }
+        std::cerr<<"Rev restored minimum: native_verified="<<restored_minimum()<<" native_hint="<<window->size.minH
+            <<" physical_height="<<window->size.h<<" logical_min="<<details.size.min.height
+            <<" logical_height="<<details.size.height<<" scale="<<details.scale<<'\n';
+        require(restored_minimum(),
+            "Rev Robust mode did not restore its native minimum hint and enlarge the compact Fast window");
+        resize(ui::default_width,ui::default_height);
         const auto verify_audio=[&](ui::Field volume_field,ui::Field exclusive_field,ui::Field device_field=ui::Field::count) {
             auto* volume=by_field(volume_field).choice;
             auto* exclusive=by_field(exclusive_field).toggle;
@@ -124,6 +170,18 @@
                     }
                     application.select(ui::Field::fast_profile,"wire");application.toggle(ui::Field::developer_mode,false);settle();
                     require(application.page()==ui::Page::console,"Rev hiding details did not return to Console");
+                    application.select_page(ui::Page::fast_simulation);settle();
+                    require(application.page()==ui::Page::fast_simulation&&
+                            !by_field(ui::Field::fast_simulation).element->resolved.hidden&&
+                            allows_input(by_field(ui::Field::fast_simulation).choice),
+                        "Rev Fast Simulation page did not expose its active Mode control");
+                    for(const auto& binding:bindings)if(binding.control.scope==ui::ScreenScope::fast) {
+                        const bool visible=application.control(binding.control).visible&&
+                            (binding.control.persistent||binding.control.page==ui::Page::fast_simulation);
+                        require(binding.element->resolved.hidden==!visible,
+                            "Rev Fast Simulation selection lost page or persistent-control visibility");
+                    }
+                    application.select_page(ui::Page::console);settle();
                     unsigned plot_count=0;
                     for(const auto& binding:bindings)if(binding.control.scope==ui::ScreenScope::fast&&binding.control.kind==ui::Kind::bitmap&&binding.control.bitmap!=ui::Bitmap::fast_qr) {
                         ++plot_count;
@@ -159,7 +217,20 @@
                 }
                 for(auto& b:bindings) {
                     if(b.control.scope==ui::ScreenScope::fast) {
-                        require(b.element->resolved.hidden==!application.control(b.control).visible,"Rev Fast surface did not reconcile conditional control visibility");
+                        const bool conditional_visible=application.control(b.control).visible;
+                        const bool active_page=b.control.persistent||b.control.page==application.page();
+                        if(!reported_page_visibility&&b.element->resolved.hidden==conditional_visible) {
+                            std::cerr<<"Rev page visibility: field="<<static_cast<int>(b.control.field)
+                                <<" control_page="<<static_cast<int>(b.control.page)
+                                <<" selected_page="<<static_cast<int>(application.page())
+                                <<" conditional_visible="<<conditional_visible
+                                <<" resolved_hidden="<<b.element->resolved.hidden<<'\n';
+                            reported_page_visibility=true;
+                        }
+                        require((b.element->style->visibility!=Visibility::Hidden)==conditional_visible,
+                            "Rev Fast surface did not reconcile conditional control visibility");
+                        require(b.element->resolved.hidden==!(conditional_visible&&active_page),
+                            "Rev Fast surface did not reconcile selected-page visibility");
                         if(fast&&!b.element->resolved.hidden)require(b.element->rect.x>=0&&b.element->rect.y>=0&&
                             b.element->rect.x+b.element->rect.w<=details.size.width&&b.element->rect.y+b.element->rect.h<=details.size.height,
                             "Rev Fast native control escaped its viewport");

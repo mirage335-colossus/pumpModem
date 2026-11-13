@@ -1,5 +1,6 @@
 #pragma once
 
+#include "search_fft.hpp"
 #include "single_carrier_waveform.hpp"
 #include "ssb_frontend.hpp"
 
@@ -12,6 +13,15 @@
 #include <vector>
 
 namespace datapump::fast::detail {
+
+// The bounded narrow acoustic fit uses the continuous RRC approximation for
+// the existing oversampled, cubic-interpolated transmit pulse.
+inline bool supports_narrow_acoustic_fit(const Profile& p) noexcept {
+    return p.channel == Channel::acoustic_short && p.sample_rate == 48000 &&
+        p.capacity_mode && !p.acoustic_ofdm && compact_acoustic_framing(p) &&
+        p.constellation == 4 && p.symbol_rate >= 180. && p.symbol_rate < 800. &&
+        p.rolloff >= .10 && p.pilot_spacing_symbols <= 64;
+}
 
 struct SsbPulseEvaluation {
     std::complex<double> value{};
@@ -94,6 +104,25 @@ private:
     std::vector<std::complex<double>> values_, moments_;
 };
 
+// Immutable preparation for applying the finite pulse to a repeating symbol word.
+class SsbPeriodicPulse {
+public:
+    std::size_t workspace_bytes() const noexcept;
+
+private:
+    friend class SsbPulse;
+    explicit SsbPeriodicPulse(std::span<const std::complex<double>> word);
+
+    modem::detail::search_fft::DoublePlan plan_;
+    std::vector<std::complex<double>> word_;
+    std::vector<std::complex<double>> spectrum_;
+};
+
+struct SsbPeriodicWave {
+    std::vector<std::complex<double>> values;
+    std::vector<std::complex<double>> moments;
+};
+
 // Direct reference for a single analytic transmit symbol after residual
 // Doppler and the receive frontend's centered full-input-rate FIR. The
 // returned atom includes transmit amplitude. Its channel gain is applied by
@@ -121,6 +150,11 @@ public:
     // Interpolated approximation of the finite FIR at this clock/frequency.
     SsbPulseCache make_cache(double clock_ratio_error, double frequency_hz,
                              std::stop_token stop = {}) const;
+    SsbPeriodicPulse prepare_periodic(std::span<const std::complex<double>> word) const;
+    void make_periodic(const SsbPeriodicPulse&, double clock_ratio_error, double frequency_hz,
+                       SsbPeriodicWave&, std::stop_token stop = {}) const;
+    struct CacheStorage { std::size_t retained, temporary; };
+    CacheStorage cache_storage_bound(double max_abs_clock_ratio) const;
     std::size_t workspace_bytes() const noexcept;
 
 private:

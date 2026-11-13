@@ -103,10 +103,15 @@ public:
     }
     double proposal_sample_rate() const noexcept { return profile_.symbol_rate * 5.5; }
     std::size_t workspace_bytes() const noexcept {
-        return sizeof(*this) - sizeof(pulse_) + pulse_.workspace_bytes();
+        return sizeof(*this) - sizeof(pulse_) - sizeof(periodic_) +
+            pulse_.workspace_bytes() + periodic_.workspace_bytes();
     }
 
     SsbAcquisitionTiming timing(const SsbAcquisitionRequest&) const;
+    std::size_t training_centers(const SsbAcquisitionRequest&) const;
+    // Full private dynamic storage for any fit at the admitted public geometry.
+    // Shared fitter preparation and copied observations are charged separately.
+    std::size_t fit_workspace_bound(const SsbAcquisitionRequest&) const;
 
     std::optional<SsbAcquisitionLock> fit(SsbAcquisitionView, const SsbAcquisitionRequest&,
         std::stop_token stop = {}, SsbAcquisitionDiagnostics* diagnostics = nullptr) const;
@@ -115,6 +120,7 @@ private:
     Profile profile_;
     std::size_t stride_;
     SsbPulse pulse_;
+    SsbPeriodicPulse periodic_;
     std::array<std::complex<double>, ssb_proposal_word_samples> proposal_word_{};
 };
 

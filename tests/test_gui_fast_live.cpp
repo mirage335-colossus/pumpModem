@@ -1,13 +1,17 @@
 #include "fast/controller.hpp"
+#include "application.hpp"
 #include "bitmap.hpp"
 #include "datapump/audio.hpp"
 #include "datapump/audio_entropy.hpp"
 #include "fixture_keyfile.hpp"
 #include "datapump/types.hpp"
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
+#include <cstdint>
 #include <iostream>
 #include <fstream>
 #include <filesystem>
@@ -20,11 +24,17 @@ using namespace datapump::gui;
 using namespace std::chrono_literals;
 namespace fixture {
 std::mutex mutex;
+std::condition_variable_any input_ready;
 std::vector<float> transmitted,input;
 std::size_t position=0;
+bool loopback_playing=false;
 audio::ChannelMode last_channels=audio::ChannelMode::stereo;
 std::atomic<unsigned> capture_opens=0,capture_active=0,capture_registered=0;
+std::atomic<std::uint64_t> capture_samples=0;
 std::atomic<bool> capture_overlap=false;
+std::atomic<bool> loopback_audio=false;
+std::atomic<bool> hold_capture_close=false;
+std::atomic<double> playback_gain=1.;
 std::string last_device;
 std::string capture_error;
 // Enabled only in the key-generation regression; never linked into the app.
@@ -34,25 +44,49 @@ audio::Options last_options;
 // Only hardware is replaced. The real Fast encoder, sampled modem, receiver,
 // telemetry worker and shared GUI controller process all samples and symbols.
 namespace datapump::audio {
+std::vector<Device> devices() {return {{"fixture","Fast fixture"}};}
+
 void playback(std::uint32_t rate,const std::string&,const PlaybackCallback& source,
-              std::stop_token stop,StreamFormatCallback format,ChannelMode channels) {
-    {std::lock_guard lock(fixture::mutex);fixture::last_channels=channels;}
+              std::stop_token stop,StreamFormatCallback format,ChannelMode channels,Options options) {
+    const bool loopback=fixture::loopback_audio;
+    fixture::playback_gain=options.transmit_gain;
+    {
+        std::lock_guard lock(fixture::mutex);
+        fixture::last_channels=channels;
+        if(loopback)fixture::loopback_playing=true;
+    }
+    struct PlaybackEnded {
+        bool loopback;
+        ~PlaybackEnded() {
+            if(!loopback)return;
+            {std::lock_guard lock(fixture::mutex);fixture::loopback_playing=false;}
+            fixture::input_ready.notify_all();
+        }
+    } ended{loopback};
     if(format)format({rate,rate,rate*.49,4096});
     std::vector<float> block(rate/20);
     while(!stop.stop_requested()) {
         const auto count=source(block);if(!count)break;
         {std::lock_guard lock(fixture::mutex);
-            fixture::transmitted.insert(fixture::transmitted.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(count));}
-        std::this_thread::sleep_for(6ms);
+            fixture::transmitted.insert(fixture::transmitted.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(count));
+            if(loopback)for(std::size_t i=0;i<count;++i)
+                fixture::input.push_back(static_cast<float>(std::clamp(block[i]*options.transmit_gain,-1.,1.)));
+        }
+        if(loopback)fixture::input_ready.notify_one();
+        // The opt-in end-to-end fixture preserves audio time and feeds the
+        // actual captured stream at the same rate as the receiver. Existing
+        // plot/codec fixtures keep their faster historical playback pacing.
+        std::this_thread::sleep_for(loopback?50ms:6ms);
     }
 }
 void capture(std::uint32_t rate,const std::string&,const CaptureCallback& consume,
              std::stop_token stop,StreamFormatCallback format) {
     if(format)format({rate,rate,rate*.49,4096});
     std::uint32_t sample_state=0x6d2b79f5U;
+    std::uint64_t idle_sample=0;
     while(!stop.stop_requested()) {
         std::vector<float> block;
-        {std::lock_guard lock(fixture::mutex);
+        {std::unique_lock lock(fixture::mutex);
             if(!fixture::capture_error.empty()) {
                 auto error=std::move(fixture::capture_error);fixture::capture_error.clear();
                 throw Error(error);
@@ -64,20 +98,35 @@ void capture(std::uint32_t rate,const std::string&,const CaptureCallback& consum
                     sample=static_cast<float>(static_cast<std::int32_t>(sample_state))/2147483648.0F*.01F;
                 }
             } else {
+                // The mock DAC and ADC use separate threads. Preserve the
+                // emitted sample timeline if waveform generation takes longer
+                // than a tick, instead of splicing idle tone into a burst.
+                if(fixture::loopback_audio&&!fixture::input_ready.wait(lock,stop,[]{
+                    return !fixture::loopback_playing||fixture::position<fixture::input.size();
+                }))break;
                 const auto count=std::min<std::size_t>(rate/20,fixture::input.size()-fixture::position);
                 block.assign(fixture::input.begin()+static_cast<std::ptrdiff_t>(fixture::position),
                              fixture::input.begin()+static_cast<std::ptrdiff_t>(fixture::position+count));
                 fixture::position+=count;
+                if(!count&&fixture::loopback_audio) {
+                    block.resize(rate/20);
+                    for(auto& sample:block) {
+                        sample=.006F*std::sin(2*std::numbers::pi*137.0*static_cast<double>(idle_sample++)/rate);
+                    }
+                }
             }}
-        if(!block.empty()&&!consume(block))break;
+        if(!block.empty()) {
+            if(!consume(block))break;
+            fixture::capture_samples+=block.size();
+        }
         // Preserve real capture pacing: injecting eight times real-time audio
         // can overflow the production FIFO for reasons unrelated to the GUI.
         std::this_thread::sleep_for(50ms);
     }
 }
 void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& source,
-              std::stop_token stop,StreamFormatCallback format,ChannelMode channels,Options) {
-    playback(rate,device,source,stop,std::move(format),channels);
+              std::stop_token stop,StreamFormatCallback format,ChannelMode channels) {
+    playback(rate,device,source,stop,std::move(format),channels,{});
 }
 void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& consume,
              std::stop_token stop,StreamFormatCallback format,Options options) {
@@ -94,6 +143,7 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
             if(monitor)monitor(samples,rate);
             return consume(samples);
         },stop,std::move(format));
+        while(fixture::hold_capture_close)std::this_thread::sleep_for(5ms);
     } catch(...) {registration.failed(std::current_exception());throw;}
 }
 }
@@ -277,6 +327,7 @@ void continuous_console() {
     }
     fast_ui::Controller controller([] {return true;});
     controller.select(F::fast_profile,"wire");
+    const auto initial_opens=fixture::capture_opens.load();
     controller.edit(F::fast_device,"fixture");controller.set_selected(true);controller.poll();
     check(controller.active()&&controller.field(F::fast_text).enabled,"Selected Fast mode did not automatically listen with an editable draft");
     const auto empty_qr=render(controller.bitmap(ui::Bitmap::fast_qr));
@@ -292,7 +343,6 @@ void continuous_console() {
     check(normal!=dark&&dim!=normal&&off!=dim&&controller.bitmap_revision(ui::Bitmap::fast_qr)>qr_revision&&controller.active(),
         "QR brightness changes did not repaint independent levels while listening");
     controller.select(F::fast_qr_brightness,"dark");
-    controller.activate(C::fast_transmit);
     const auto observation_started=std::chrono::steady_clock::now();
     std::vector<std::pair<double,std::string>> status_changes;
     const auto observe_status=[&] {
@@ -334,11 +384,20 @@ void continuous_console() {
             throw;
         }
     };
-    wait([&] {return controller.active()&&controller.bitmap_title(ui::Bitmap::fast_waveform)=="Live RX waveform"&&
+    wait([&] {return fixture::capture_active==1&&fixture::capture_opens>initial_opens;},
+        "Selected Fast console did not open its initial capture");
+    const auto opens_before_tx=fixture::capture_opens.load();
+    controller.activate(C::fast_transmit);
+    // This fixture supplies no PCM until the receiver has reopened. Observe
+    // the actual audio owner rather than requiring a live plot of absent PCM.
+    wait([&] {return controller.active()&&fixture::capture_active==1&&fixture::capture_opens>opens_before_tx&&
         controller.field(F::fast_text).enabled&&!controller.enabled(C::fast_cancel);},
         "Simplex transmit did not finish and automatically resume reception");
+    check(controller.bitmap_title(ui::Bitmap::fast_waveform)!="Live RX waveform",
+        "The restarted capture plotted live audio before the fixture supplied PCM");
     check(controller.field(F::fast_history).records.empty()&&controller.field(F::fast_files).records.empty(),
         "Continuous relistening added its own transmission to received content");
+    const auto opens_before_rx=fixture::capture_opens.load();
     {
         std::lock_guard lock(fixture::mutex);
         fixture::input=fixture::transmitted;fixture::position=0;
@@ -355,7 +414,7 @@ void continuous_console() {
     check(!pending_id.empty()&&controller.field(F::fast_history).records.front().id==pending_id&&
         controller.field(F::fast_files).records.empty(),
         "Physical completion replaced the pending signal identity or populated Files with text");
-    wait([&] {return controller.active()&&controller.bitmap_title(ui::Bitmap::fast_waveform)=="Live RX waveform";},
+    wait([&] {return controller.active()&&fixture::capture_active==1&&fixture::capture_opens>opens_before_rx;},
         "Completed reception did not restart continuous listening");
     controller.select(F::fast_history,pending_id);
     check(controller.enabled(C::fast_copy_signal)&&controller.enabled(C::fast_paste_signal)&&!controller.enabled(C::fast_save),
@@ -528,6 +587,286 @@ void generated_key_preserves_capture() {
     wait([&]{return controller.ready_to_close();},"Fast keygen fixture did not close");
 }
 
+void application_loopback() {
+    using F=ui::Field;using C=ui::Command;using B=ui::Bitmap;
+    {
+        std::lock_guard lock(fixture::mutex);
+        fixture::transmitted.clear();fixture::input.clear();fixture::position=0;fixture::capture_error.clear();
+    }
+    fixture::loopback_audio=true;fixture::capture_overlap=false;fixture::capture_samples=0;
+    struct Reset {~Reset(){fixture::loopback_audio=false;}} reset;
+    Application app(Launch{});
+    app.enable_service_completions(true);
+    app.edit(F::fast_device,"fixture");
+    app.start();
+    const auto pump=[&] {app.tick();std::this_thread::sleep_for(5ms);};
+    const auto wait=[&](auto predicate,const char* message,std::chrono::seconds timeout=60s) {
+        const auto deadline=std::chrono::steady_clock::now()+timeout;
+        do {
+            pump();if(predicate())return;
+            if(std::chrono::steady_clock::now()>=deadline) {
+                std::lock_guard lock(fixture::mutex);
+                throw Error(std::string(message)+"; "+app.field(F::fast_status).text+"; "+
+                    app.field(F::fast_sim_status).text+"; captured "+std::to_string(fixture::capture_samples.load())+
+                    " samples; played "+std::to_string(fixture::transmitted.size())+
+                    " samples; capture opens "+std::to_string(fixture::capture_opens.load())+
+                    "; capture active "+std::to_string(fixture::capture_active.load())+
+                    "; capture overlap "+std::to_string(fixture::capture_overlap.load())+
+                    "; transmit enabled "+std::to_string(app.enabled(C::fast_transmit))+
+                    "; listen enabled "+std::to_string(app.enabled(C::fast_listen)));
+            }
+        }while(true);
+    };
+    const auto check_monitor=[&](bool condition,const char* message,unsigned expected_opens) {
+        if(condition)return;
+        throw Error(std::string(message)+"; active "+std::to_string(fixture::capture_active.load())+
+            "; opens "+std::to_string(fixture::capture_opens.load())+
+            "; expected opens "+std::to_string(expected_opens)+
+            "; overlap "+std::to_string(fixture::capture_overlap.load())+
+            "; captured "+std::to_string(fixture::capture_samples.load())+
+            "; transmit enabled "+std::to_string(app.enabled(C::fast_transmit))+
+            "; listen enabled "+std::to_string(app.enabled(C::fast_listen))+
+            "; status "+app.field(F::fast_status).text+
+            "; test status "+app.field(F::fast_sim_status).text);
+    };
+    wait([&]{return fixture::capture_active==1&&fixture::capture_samples>0;},
+         "Application did not begin capturing live PCM before its loopback test",10s);
+
+    const auto find_bitmap=[](B id)->const ui::Control& {
+        const auto& controls=ui::console_screen();
+        const auto found=std::find_if(controls.begin(),controls.end(),[&](const auto& c){return c.bitmap==id;});
+        if(found==controls.end())throw Error("Application fixture could not find the Fast plot control");
+        return *found;
+    };
+    const auto& waterfall=find_bitmap(B::fast_waterfall);
+    wait([&]{return fixture::capture_active==1&&fixture::capture_samples>0&&
+                    app.bitmap(waterfall).title.find("Live RX")!=std::string::npos;},
+         "Application did not publish and label its pre-test captured PCM",5s);
+    auto frame=app.bitmap(waterfall);
+    const auto before=frame.revision;
+
+    app.edit(F::fast_text,"fox");
+    app.select_page(ui::Page::fast_simulation);
+    app.select(F::fast_simulation,"loopback");
+    app.select_page(ui::Page::console);
+    app.select(F::fast_volume,"30");
+    check(app.enabled(C::fast_transmit),"Application did not enable the selected nonempty loopback source");
+
+    // Delay the previous device owner's release beyond the handoff budget.
+    // The queued test must fail without opening a second capture or starting TX.
+    const auto opens_before_hold=fixture::capture_opens.load();
+    {
+        struct ReleaseCapture {~ReleaseCapture(){fixture::hold_capture_close=false;}} release;
+        fixture::hold_capture_close=true;
+        app.activate(C::fast_transmit);
+        wait([&]{return app.field(F::fast_sim_status).text.find("Timed out waiting for the previous audio capture to stop")!=std::string::npos;},
+             "A delayed monitor close left the queued loopback test waiting indefinitely",5s);
+        check(fixture::capture_active==1&&fixture::capture_opens==opens_before_hold&&!fixture::capture_overlap&&
+              !app.enabled(C::fast_cancel)&&app.field(F::fast_history).records.empty(),
+              "A failed handoff opened a new owner or published received content");
+        std::lock_guard lock(fixture::mutex);
+        check(fixture::transmitted.empty(),"Timed out loopback started playback before the monitor released audio");
+    }
+    wait([&]{return fixture::capture_active==1&&fixture::capture_opens>opens_before_hold&&
+                    app.bitmap(waterfall).title=="Live RX waterfall";},
+         "Application did not recover monitoring after the previous device released audio",8s);
+    app.activate(C::fast_transmit);
+    bool saw_sending=false,saw_completion_wait=false;
+    wait([&]{
+        const auto& airtime=app.field(F::fast_airtime).text;
+        const bool sending=airtime.starts_with("Sending");
+        const bool waiting=airtime.starts_with("Waiting for physical completion");
+        if(sending||waiting) {
+            const auto& progress=app.field(F::fast_progress).text;
+            check(airtime.find("s elapsed")!=std::string::npos&&airtime.find("left")==std::string::npos&&
+                  progress.find("TX queued")!=std::string::npos&&progress.find("RX captured")!=std::string::npos,
+                  "Active loopback progress confused queued playback and capture with an estimated finish");
+            saw_sending|=sending;saw_completion_wait|=waiting;
+        }
+        return app.field(F::fast_status).text.find("Cable test passed")!=std::string::npos;
+    },"Application loopback did not report the exact captured fox source");
+    check(saw_sending&&saw_completion_wait,"Application did not show both playback and physical completion phases");
+    wait([&]{return fixture::capture_active==1&&app.bitmap(waterfall).title=="Live RX waterfall";},
+         "Application did not resume live monitoring after the loopback handoff",20s);
+    auto after=app.bitmap(waterfall);
+    check(after.revision>before&&fixture::capture_samples>0&&!fixture::capture_overlap&&fixture::playback_gain==.3,
+          "Application loopback lost captured PCM, serial audio ownership or the selected TX volume");
+
+    const auto& rows=app.field(F::fast_history).records;
+    check(rows.size()==1&&rows.front().activatable&&
+          rows.front().cells.front().text.find("LOOPBACK TEST")!=std::string::npos&&
+          rows.front().cells.front().text.find("fox")!=std::string::npos,
+          "Verified loopback text did not appear once in Application Signals with its provenance");
+    const auto first_id=rows.front().id;
+    check(app.field(F::fast_text).text=="fox","Loopback reception changed the Console draft");
+    app.select(F::fast_history,first_id);
+    check(app.enabled(C::fast_copy_signal)&&app.enabled(C::fast_paste_signal)&&!app.enabled(C::fast_save),
+          "Application Signals did not expose safe text actions for verified loopback text");
+    app.activate(C::fast_copy_signal);
+    auto copied=app.take_services();
+    check(copied.size()==1&&copied.front().kind==ui::ServiceKind::clipboard&&copied.front().value=="fox",
+          "Application copy did not expose the received, restricted fox text");
+    app.complete_service({copied.front().id,false,{},{}});
+    app.activate(C::fast_paste_signal);
+    check(app.field(F::fast_text).text=="fox","Application paste did not restore the verified received text");
+
+    // A valid receiver edit queues a serial monitor restart. Rapid invalid
+    // drafts must preserve that admitted handoff and keep live PCM flowing,
+    // while blocking new transfers and receiver starts with the invalid draft.
+    app.select_page(ui::Page::fast_simulation);
+    check(app.field(F::fast_sim_status).text.find("LOOPBACK TEST")!=std::string::npos&&
+          app.field(F::fast_sim_status).text.find("Cable test passed")!=std::string::npos,
+          "Switching to Simulation hid the last loopback outcome");
+    const auto capture_opens=fixture::capture_opens.load();
+    const auto samples_before_model=fixture::capture_samples.load();
+    app.select(F::fast_sim_shift_hz,"30000000");
+    check(app.field(F::fast_sim_shift_hz).text=="30000000"&&app.enabled(C::fast_transmit),
+          "A valid receiver declaration did not admit its monitor handoff");
+    app.select(F::fast_sim_margin,"3");
+    app.select(F::fast_sim_shift_hz,"5800000000");
+    const auto rejected_audio_band=[&] {
+        const auto& error=app.field(F::fast_sim_status).text;
+        return error.starts_with("Fast receiver assumptions exceed the sampled audio band");
+    };
+    wait([&]{return fixture::capture_active==1&&fixture::capture_opens==capture_opens+1&&
+                    fixture::capture_samples>samples_before_model&&rejected_audio_band();},
+         "Invalid draft stranded the admitted monitor handoff or lost its bound error",5s);
+    check_monitor(fixture::capture_active==1&&fixture::capture_opens==capture_opens+1&&!fixture::capture_overlap&&
+          rejected_audio_band()&&
+          !app.enabled(C::fast_transmit)&&!app.enabled(C::fast_listen),
+          "Invalid receiver bounds stopped the admitted monitor or left new starts enabled",capture_opens+1);
+    const auto stable_opens=fixture::capture_opens.load();
+    const auto stable_samples=fixture::capture_samples.load();
+    app.select_page(ui::Page::console);
+    const auto stable_plot=app.bitmap(waterfall).revision;
+    app.edit(F::fast_sim_shift_hz,"unfinished frequency");
+    wait([&]{return fixture::capture_samples>stable_samples&&app.bitmap(waterfall).revision>stable_plot;},
+         "An invalid numeric receiver draft stopped the existing monitor or waterfall",3s);
+    check_monitor(fixture::capture_active==1&&fixture::capture_opens==stable_opens&&!fixture::capture_overlap&&
+          app.field(F::fast_sim_status).text.find("Shift frequency must be a finite number")!=std::string::npos&&
+          !app.enabled(C::fast_transmit)&&!app.enabled(C::fast_listen),
+          "Invalid numeric receiver draft reopened capture or hid its validation error",stable_opens);
+    app.select(F::fast_sim_shift_hz,"0");
+    app.select(F::fast_sim_margin,"1");
+    check(app.enabled(C::fast_transmit),"Restoring valid model bounds did not re-enable loopback testing");
+    app.select_page(ui::Page::console);
+    wait([&]{return fixture::capture_active==1&&fixture::capture_opens==stable_opens+1&&
+                    app.bitmap(waterfall).revision>after.revision&&
+                    app.bitmap(waterfall).title.find("Live RX")!=std::string::npos;},
+         "Fast plots stopped advancing when switching Application tabs",10s);
+
+    // An offered manual waveform may be individually valid but unsupported
+    // by the current receiver declaration. It must not discard valid capture.
+    const auto valid_snr=app.field(F::fast_expected_snr).selected;
+    const auto waveform_opens=fixture::capture_opens.load();
+    const auto waveform_samples=fixture::capture_samples.load();
+    const auto waveform_plot=app.bitmap(waterfall).revision;
+    app.toggle(F::developer_mode,true);
+    app.select_page(ui::Page::fast_modem);
+    app.select(F::fast_symbol_rate,"sc:125");
+    check_monitor(app.field(F::fast_symbol_rate).selected=="sc:125"&&
+          app.field(F::fast_expected_snr).selected=="manual"&&
+          app.field(F::fast_status).text.starts_with("Fast receiver assumptions exceed ")&&
+          !app.enabled(C::fast_transmit)&&!app.enabled(C::fast_listen),
+          "Unsupported manual timing did not retain its draft and block new starts",waveform_opens);
+    app.select_page(ui::Page::console);
+    wait([&]{return fixture::capture_samples>waveform_samples&&app.bitmap(waterfall).revision>waveform_plot;},
+         "Unsupported manual timing stopped existing PCM or waterfall updates",3s);
+    check_monitor(fixture::capture_active==1&&fixture::capture_opens==waveform_opens&&!fixture::capture_overlap,
+          "Unsupported manual timing discarded or reopened the valid monitor",waveform_opens);
+    app.select(F::fast_expected_snr,valid_snr);
+    check(app.enabled(C::fast_transmit)&&app.field(F::fast_symbol_rate).selected=="auto",
+          "Restoring automatic timing did not re-enable transfers");
+    wait([&]{return fixture::capture_active==1&&fixture::capture_opens==waveform_opens+1&&
+                    app.bitmap(waterfall).title.find("Live RX")!=std::string::npos;},
+         "Restoring automatic timing did not restart the validated receiver",5s);
+    app.toggle(F::developer_mode,false);
+
+    // A second transmission gets its own unique row, without replaying the
+    // terminal snapshot or replacing the previous received selection.
+    app.select_page(ui::Page::fast_simulation);
+    app.select(F::fast_simulation,"loopback");
+    app.select_page(ui::Page::console);
+    app.activate(C::fast_transmit);
+    wait([&]{return app.field(F::fast_status).text.find("Cable test passed")!=std::string::npos&&
+                    app.field(F::fast_history).records.size()==2;},
+         "Second Application loopback did not create exactly one additional received signal");
+    check(app.field(F::fast_history).records[0].id!=app.field(F::fast_history).records[1].id&&
+          app.field(F::fast_history).records[0].cells.front().text.find("LOOPBACK TEST")!=std::string::npos&&
+          app.field(F::fast_history).records[1].cells.front().text.find("LOOPBACK TEST")!=std::string::npos,
+          "Repeated Application loopback duplicated or lost result provenance");
+
+    // Cancellation is explicitly incomplete and must never add a successful
+    // Signals row, even though the ordinary listener resumes afterward.
+    app.edit(F::fast_text,"cancel this loopback");
+    std::size_t sent_before=0;
+    {std::lock_guard lock(fixture::mutex);sent_before=fixture::transmitted.size();}
+    app.activate(C::fast_transmit);
+    wait([&]{std::lock_guard lock(fixture::mutex);return fixture::transmitted.size()>sent_before;},
+         "Cancellation fixture never began sending audio",10s);
+    app.activate(C::fast_cancel);
+    check(app.field(F::fast_status).text.find("Stopping loopback test")!=std::string::npos&&
+          !app.enabled(C::fast_cancel)&&!app.enabled(C::fast_transmit),
+          "Application did not acknowledge cancellation while waiting for audio release");
+    wait([&]{return app.field(F::fast_status).text.find("cancelled")!=std::string::npos||
+                    app.field(F::fast_status).text.find("incomplete")!=std::string::npos;},
+         "Cancelled Application loopback did not report an incomplete result",20s);
+    const auto successful_rows=[&] {
+        const auto& records=app.field(F::fast_history).records;
+        return std::count_if(records.begin(),records.end(),[](const auto& row) {
+            if(row.cells.empty())return false;
+            const auto& text=row.cells.front().text;
+            return text.find("LOOPBACK TEST")!=std::string::npos&&
+                text.find("INCOMPLETE")==std::string::npos&&text.find("CANCELLED")==std::string::npos;
+        });
+    };
+    check(successful_rows()==2,"Cancelled loopback was published as a completed received signal");
+    wait([&]{return fixture::capture_active==1&&app.bitmap(waterfall).title=="Live RX waterfall";},
+         "Application did not return to its live monitor after cancellation",20s);
+
+    // Verify a completed attachment follows the shared Files and explicit
+    // Save workflow, with original bytes preserved until the chosen path.
+    const auto source=std::filesystem::temp_directory_path()/
+        ("datapump-fast-loopback-source-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".bin");
+    const std::string payload="small loopback file\n";
+    {std::ofstream out(source,std::ios::binary);out.write(payload.data(),static_cast<std::streamsize>(payload.size()));}
+    struct RemoveSource {std::filesystem::path path;~RemoveSource(){std::error_code ec;std::filesystem::remove(path,ec);}} remove_source{source};
+    app.activate(C::fast_choose_file);
+    const auto choose=app.take_services();
+    check(choose.size()==1,"Application did not request a selected file source");
+    app.complete_service({choose.front().id,false,path_text(source),{}});
+    check(app.field(F::fast_source).selected=="file","Application did not select the requested file source");
+    app.select_page(ui::Page::fast_simulation);app.select(F::fast_simulation,"loopback");app.select_page(ui::Page::console);
+    app.activate(C::fast_transmit);
+    wait([&]{return app.field(F::fast_files).records.size()==1&&
+                    app.field(F::fast_sim_status).text.find("Cable test passed")!=std::string::npos;},
+         "Application did not publish the verified loopback attachment");
+    check(app.enabled(C::fast_save)&&!app.enabled(C::fast_copy_signal),
+          "Application attachment did not use the Files/Save actions");
+    const auto destination=std::filesystem::temp_directory_path()/
+        ("datapump-fast-loopback-saved-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".bin");
+    struct RemoveSaved {std::filesystem::path path;~RemoveSaved(){std::error_code ec;std::filesystem::remove(path,ec);}} remove_saved{destination};
+    app.activate(C::fast_save);
+    const auto save=app.take_services();
+    check(save.size()==1&&save.front().kind==ui::ServiceKind::save_file&&
+          !std::filesystem::exists(destination),"Application saved a loopback attachment before explicit destination choice");
+    app.complete_service({save.front().id,false,path_text(destination),{},true});
+    std::optional<ui::ServiceCompletion> saved_completion;
+    wait([&]{
+        for(const auto& completion:app.take_service_completions())
+            if(completion.id==save.front().id)saved_completion=completion;
+        return saved_completion.has_value();
+    },"Application did not report explicit loopback attachment save completion",5s);
+    check(saved_completion->error.empty(),"Application explicit loopback attachment save failed");
+    std::ifstream saved(destination,std::ios::binary);
+    const std::string received((std::istreambuf_iterator<char>(saved)),std::istreambuf_iterator<char>());
+    check(received==payload,"Application Save changed verified loopback attachment bytes");
+    check(!fixture::capture_overlap,"Application opened simultaneous capture owners during loopback handoffs");
+    app.close();
+    wait([&]{return app.finished();},"Application did not release its live loopback monitor on close",10s);
+    std::cout<<"Fast Application loopback Signals, Files, monitoring, tab and cancellation checks passed\n";
+}
+
 void completion_between_polls() {
     using F=ui::Field;using C=ui::Command;
     // Reuse the independent complete waveform produced and received by the
@@ -597,6 +936,7 @@ int main(int argc,char** argv) {
     try {
         if(argc==2&&std::string_view(argv[1])=="--incomplete-history") {incomplete_history_reason();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--keygen-staging") {generated_key_preserves_capture();return 0;}
+        if(argc==2&&std::string_view(argv[1])=="--loopback") {application_loopback();return 0;}
         check(argc==1,"Unknown Fast GUI live test selector");
         audio_reconfiguration();continuous_console();completion_between_polls();
         incomplete_history_reason();

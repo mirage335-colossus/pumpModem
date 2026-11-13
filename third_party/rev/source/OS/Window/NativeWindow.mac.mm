@@ -327,9 +327,8 @@ void rev_mac_window_set_size(RevMacWindowHandle handle, int w, int h) {
     NSObject* obj = (__bridge NSObject*)handle;
     if ([obj isKindOfClass:[NSWindow class]]) {
         NSWindow* window = (NSWindow*)obj;
-        NSRect frame = [window frame];
-        frame.size = NSMakeSize(w,h);
-        [window setFrame:frame display:YES];
+        // NativeWindow sizes and minimums describe the drawable client area.
+        [window setContentSize:NSMakeSize(w,h)];
     }
     
     // Resize view
@@ -338,6 +337,16 @@ void rev_mac_window_set_size(RevMacWindowHandle handle, int w, int h) {
         NSRect frame = [view frame];
         frame.size = NSMakeSize(w,h);
         [view setFrame:frame];
+    }
+}
+
+void rev_mac_window_set_min_size(RevMacWindowHandle handle, int minWidth, int minHeight) {
+    if (!handle) return;
+
+    NSObject* obj = (__bridge NSObject*)handle;
+    if ([obj isKindOfClass:[NSWindow class]]) {
+        NSWindow* window = (NSWindow*)obj;
+        [window setContentMinSize:NSMakeSize(minWidth, minHeight)];
     }
 }
 

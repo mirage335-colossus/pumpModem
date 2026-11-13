@@ -24,7 +24,7 @@ public:
 private:
     struct Frame;
     std::shared_ptr<const Frame> frame_;
-    Clock::time_point last_update_{};
+    Clock::time_point last_pcm_{};
     std::uint64_t revision_=1,ignored_stream_=0;
 };
 bool owns(ui::Bitmap);

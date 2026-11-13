@@ -8,6 +8,8 @@ Control placed(Kind kind,Field field,Command command,const char* label,Slot slot
     c.byte_limit=32768;
     switch(slot) {
     case Slot::fast_profile:case Slot::fast_expected_snr:case Slot::fast_volume:
+    case Slot::fast_baseband_oscillator:case Slot::fast_shift_oscillator:case Slot::fast_spread:
+    case Slot::fast_selective:case Slot::fast_margin:case Slot::fast_shift_hz:
         c.purpose=ControlPurpose::operating_parameter;break;
     case Slot::clear:case Slot::fast_transmit:case Slot::fast_cancel:
         c.purpose=ControlPurpose::operation;break;
@@ -30,7 +32,9 @@ Control placed(Kind kind,Field field,Command command,const char* label,Slot slot
     default:break;
     }
     c.open_upward=slot==Slot::fast_device||slot==Slot::fast_profile||slot==Slot::fast_expected_snr||
-        slot==Slot::fast_mono||slot==Slot::fast_volume;
+        slot==Slot::fast_mono||slot==Slot::fast_volume||slot==Slot::fast_baseband_oscillator||
+        slot==Slot::fast_shift_oscillator||slot==Slot::fast_spread||slot==Slot::fast_selective||
+        slot==Slot::fast_margin||slot==Slot::fast_shift_hz;
     return c;
 }
 Control plot(Bitmap bitmap,const char* label,Slot slot,const char* help) {
@@ -44,7 +48,7 @@ const std::vector<Control>& screen() {
         placed(Kind::action,Field::count,Command::fast_clear_received,"Clear received",Slot::clear),
         placed(Kind::label,Field::fast_airtime,Command::none,"",Slot::fast_airtime),
         placed(Kind::choice,Field::fast_profile,Command::none,"Channel profile",Slot::fast_profile,"Both ends must use identical local profile, constellation and coding selections."),
-        placed(Kind::choice,Field::fast_expected_snr,Command::none,"Expected SNR",Slot::fast_expected_snr,"Auto selects local modulation, coding and symbol timing for an assumed SNR. It does not measure the link or negotiate with the receiver. Both peers must match. SNR refers to the original channel bandwidth; narrower presets assume unchanged total received signal power and flat noise density. Lower-SNR presets are model-based and require link testing. Manual rate or coding changes switch this choice to Manual."),
+        placed(Kind::choice,Field::fast_expected_snr,Command::none,"Expected SNR",Slot::fast_expected_snr,"Auto selects local modulation, coding and symbol timing for an assumed SNR. It does not measure the link or negotiate with the receiver. Both peers must match. SNR refers to the original channel bandwidth; narrower presets assume unchanged total received signal power and flat noise density. Fast uses resilient public training and recurring pilots for SC and OFDM; estimated rates do not qualify receiver performance, which requires link testing. Manual rate or coding changes switch this choice to Manual."),
         placed(Kind::choice,Field::fast_symbol_rate,Command::none,"Symbol rate",Slot::fast_symbol_rate,"Auto uses the expected-SNR preset's timing, or the channel default when SNR is Manual. OFDM values are symbols per second per tone, including the echo guard; a block carries many tones simultaneously. An explicit rate switches expected SNR to Manual. Both peers must match."),
         placed(Kind::choice,Field::fast_constellation,Command::none,"Constellation",Slot::fast_constellation,"Denser constellations require a cleaner, more linear audio path."),
         placed(Kind::choice,Field::fast_coding,Command::none,"Inner error correction",Slot::fast_coding),
@@ -76,7 +80,7 @@ const std::vector<Control>& screen() {
         [] {auto c=placed(Kind::label,Field::fast_detail,Command::none,"",Slot::fast_detail);c.font_size=12;return c;}(),
         [] {auto c=placed(Kind::list,Field::fast_history,Command::none,"Signals",Slot::fast_history);
             c.help="Received bytes outside the restricted ASCII set appear as underscores, including Copy and Paste as message. Newlines are allowed in both modes. Developer Shellcode mode permits additional printable ASCII text.";
-            c.list_row_height=54;c.follow_tail=true;c.activate_record=Command::fast_copy_signal;c.activate_on_select=true;c.empty_text="Listening for signals…";return c;}(),
+            c.list_row_height=54;c.follow_tail=true;c.activate_record=Command::fast_copy_signal;c.activate_on_select=true;c.empty_text="No received signals";return c;}(),
         [] {auto c=placed(Kind::list,Field::fast_files,Command::none,"Files in memory",Slot::fast_files);c.list_row_height=36;c.activate_record=Command::fast_save;c.empty_text="No received files";return c;}(),
         placed(Kind::action,Field::count,Command::fast_copy_signal,"Copy selected",Slot::fast_copy_signal),
         placed(Kind::action,Field::count,Command::fast_paste_signal,"Paste as message",Slot::fast_paste_signal),
@@ -87,39 +91,35 @@ const std::vector<Control>& screen() {
         placed(Kind::label,Field::fast_status,Command::none,"",Slot::fast_status),
         [] {auto c=placed(Kind::choice,Field::fast_simulation,Command::none,"Mode",Slot::none);
             c.page=Page::fast_simulation;c.row=0;c.stretch=3;c.purpose=ControlPurpose::setup;
-            c.help="Live audio uses the selected audio device. Simulation sends this modem's emitted waveform through the native sampled channel without acquiring hardware. Live loopback test runs the fixed local diagnostic described in the details note; it does not start continuous listening.";return c;}(),
+            c.help="Live audio uses the selected audio device. Simulation uses the modeled receive link in software. Live loopback uses TX volume and the physical input, with the selected oscillator, spread and fading effects. It monitors live input between tests.";return c;}(),
         [] {auto c=placed(Kind::text,Field::fast_sim_tx_power,Command::none,"Transmit power (W)",Slot::none);
             c.page=Page::fast_simulation;c.row=1;c.stretch=1;c.purpose=ControlPurpose::planning;
-            c.help="Average transmitted power assumed by the synthetic link budget; it does not set a radio's output.";return c;}(),
+            c.help="Simulation only. Average transmit power assumed in the modeled receive link budget.";return c;}(),
         [] {auto c=placed(Kind::text,Field::fast_sim_path_loss,Command::none,"Path loss (dB)",Slot::none);
             c.page=Page::fast_simulation;c.row=1;c.stretch=1;c.purpose=ControlPurpose::planning;
-            c.help="Total synthetic path loss between the modeled endpoints; it does not measure propagation.";return c;}(),
+            c.help="Simulation only. Total path loss assumed in the modeled receive link budget.";return c;}(),
         [] {auto c=placed(Kind::text,Field::fast_sim_noise,Command::none,"Noise (dBm/Hz or off)",Slot::none);
             c.page=Page::fast_simulation;c.row=1;c.stretch=1;c.purpose=ControlPurpose::planning;
-            c.help="Receiver noise density in dBm/Hz. Enter off to disable it. This is a sampled-channel assumption, not a measured physical noise level.";return c;}(),
-        [] {auto c=placed(Kind::choice,Field::fast_sim_baseband_oscillator,Command::none,"Baseband oscillator",Slot::none);
-            c.page=Page::fast_simulation;c.row=2;c.stretch=1;c.purpose=ControlPurpose::planning;
-            c.help="Uses the shared oscillator tuning registry. Values are illustrative relative two-end bounds, not device measurements or hardware control.";return c;}(),
-        [] {auto c=placed(Kind::choice,Field::fast_sim_shift_oscillator,Command::none,"Shift oscillator",Slot::none);
-            c.page=Page::fast_simulation;c.row=2;c.stretch=1;c.purpose=ControlPurpose::planning;
-            c.help="Choose an independent RF translation oscillator from the shared tuning registry or the same Baseband reference. This does not tune a radio.";return c;}(),
-        [] {auto c=placed(Kind::choice,Field::fast_sim_spread,Command::none,"Doppler / delay spread",Slot::none);
-            c.page=Page::fast_simulation;c.row=2;c.stretch=1;c.purpose=ControlPurpose::planning;return c;}(),
-        [] {auto c=placed(Kind::choice,Field::fast_sim_selective,Command::none,"Additional selective AM",Slot::none);
-            c.page=Page::fast_simulation;c.row=3;c.stretch=1;c.purpose=ControlPurpose::planning;return c;}(),
-        [] {auto c=placed(Kind::text,Field::fast_sim_margin,Command::none,"Search margin (x)",Slot::none);
-            c.page=Page::fast_simulation;c.row=3;c.stretch=1;c.purpose=ControlPurpose::planning;
-            c.help="Expands modeled oscillator and spread bounds by this factor. One leaves the selected bounds unchanged.";return c;}(),
-        [] {auto c=placed(Kind::text,Field::fast_sim_shift_hz,Command::none,"Shift frequency (RF coordinate, Hz)",Slot::none);
-            c.page=Page::fast_simulation;c.row=3;c.stretch=1;c.purpose=ControlPurpose::planning;
-            c.help="Shift is an RF frequency coordinate for the oscillator model only. It does not change the Fast audio carrier or passband.";return c;}(),
+            c.help="Simulation only. Assumed receiver noise density in dBm/Hz. Enter off to disable modeled noise.";return c;}(),
+        placed(Kind::choice,Field::fast_sim_baseband_oscillator,Command::none,"Baseband oscillator",Slot::fast_baseband_oscillator,
+            "Declared relative oscillator bound for receiver search and automatic transmission settings. Values describe both ends, not measured device performance or hardware control. Simulation and explicit loopback tests also inject the selected model; ordinary Live transmission stays clean."),
+        placed(Kind::choice,Field::fast_sim_shift_oscillator,Command::none,"Shift oscillator",Slot::fast_shift_oscillator,
+            "Declared RF translation oscillator bound, using an independent reference or the Baseband reference. This informs receiver search and automatic transmission settings. Test modes can inject the model; it does not tune a radio."),
+        placed(Kind::choice,Field::fast_sim_spread,Command::none,"Doppler / delay",Slot::fast_spread,
+            "Worst-case Doppler and delay spread the receiver is expected to tolerate. Automatic transmission settings use this declaration. Only Simulation and explicit loopback testing add the selected effects to the test signal."),
+        placed(Kind::choice,Field::fast_sim_selective,Command::none,"Selective AM",Slot::fast_selective,
+            "Worst-case additional frequency-selective amplitude modulation. Automatic transmission settings use this declaration. Only Simulation and explicit loopback testing inject the selected fading; ordinary Live transmission does not."),
+        placed(Kind::text,Field::fast_sim_margin,Command::none,"Search margin (x)",Slot::fast_margin,
+            "Expands the declared oscillator and spread bounds for receiver search only. One leaves the selected bounds unchanged. Larger bounds can require more receiver processing; the margin does not change the transmitted waveform or injected test severity."),
+        placed(Kind::text,Field::fast_sim_shift_hz,Command::none,"Shift frequency (Hz)",Slot::fast_shift_hz,
+            "RF frequency coordinate used only to convert the declared shift oscillator error to a frequency bound. It does not change the Fast audio carrier or passband, and does not tune a radio."),
         [] {auto c=placed(Kind::label,Field::fast_sim_status,Command::none,"",Slot::none);
-            c.page=Page::fast_simulation;c.row=4;c.stretch=3;c.purpose=ControlPurpose::presentation;return c;}(),
+            c.page=Page::fast_simulation;c.row=2;c.stretch=3;c.purpose=ControlPurpose::presentation;return c;}(),
         [] {auto c=placed(Kind::action,Field::count,Command::fast_transmit,"Transmit",Slot::none);
-            c.page=Page::fast_simulation;c.row=5;c.instance=1;c.purpose=ControlPurpose::operation;
-            c.help="Simulation uses the message or file from Console. Live loopback test uses the selected profile and encryption settings, and validates the locally captured result without changing the Console draft.";return c;}(),
+            c.page=Page::fast_simulation;c.row=3;c.instance=1;c.purpose=ControlPurpose::operation;
+            c.help="Simulation uses the message or file from Console. Live loopback sends the selected source through the audio device at TX volume. Exact verified reception appears in Signals, and the draft is preserved.";return c;}(),
         [] {auto c=placed(Kind::action,Field::count,Command::fast_cancel,"Cancel",Slot::none);
-            c.page=Page::fast_simulation;c.row=5;c.instance=1;c.purpose=ControlPurpose::operation;return c;}()
+            c.page=Page::fast_simulation;c.row=3;c.instance=1;c.purpose=ControlPurpose::operation;return c;}()
     };
     return controls;
 }

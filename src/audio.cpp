@@ -359,6 +359,7 @@ struct Alsa {
     long (*read)(PCM*,void*,unsigned long)=nullptr;
     long (*write)(PCM*,const void*,unsigned long)=nullptr;
     int (*recover)(PCM*,int,int)=nullptr;
+    int (*resume)(PCM*)=nullptr;
     int (*drain)(PCM*)=nullptr;
     int (*drop)(PCM*)=nullptr;
     int (*prepare)(PCM*)=nullptr;
@@ -411,6 +412,7 @@ struct Alsa {
             get_params=reinterpret_cast<decltype(get_params)>(dlsym(library,"snd_pcm_get_params"));
             drop=reinterpret_cast<decltype(drop)>(dlsym(library,"snd_pcm_drop"));
             prepare=reinterpret_cast<decltype(prepare)>(dlsym(library,"snd_pcm_prepare"));
+            resume=reinterpret_cast<decltype(resume)>(dlsym(library,"snd_pcm_resume"));
             release_hw=reinterpret_cast<decltype(release_hw)>(dlsym(library,"snd_pcm_hw_free"));
             hw_malloc=reinterpret_cast<decltype(hw_malloc)>(dlsym(library,"snd_pcm_hw_params_malloc"));
             hw_free=reinterpret_cast<decltype(hw_free)>(dlsym(library,"snd_pcm_hw_params_free"));
@@ -577,6 +579,7 @@ void configure_capture_start(Alsa& api,Alsa::PCM* pcm,std::stop_token stop) {
 bool shared_server_endpoint(std::string_view endpoint) {
     return endpoint=="pulse" || endpoint=="pipewire";
 }
+constexpr int alsa_io_wait_ms=20;
 struct Stream {
     Alsa& api; Alsa::PCM* pcm=nullptr;
     std::uint32_t hardware_rate=0;
@@ -605,7 +608,8 @@ struct Stream {
                     check_cancelled(stop);
                     if(!attempted.empty())attempted+=", ";
                     attempted+=name+"@"+std::to_string(candidate)+"Hz/"+std::to_string(candidate_channels)+"ch";
-                    last_error=api.open(&pcm,name.c_str(),direction,nonblocking?1:0);
+                    constexpr int nonblock_flag=1; // SND_PCM_NONBLOCK ABI
+                    last_error=api.open(&pcm,name.c_str(),direction,nonblocking?nonblock_flag:0);
                     if(last_error<0)pcm=nullptr;
                     check_cancelled(stop);
                     if(last_error<0) {
@@ -647,6 +651,32 @@ struct Stream {
             message+=". Configure the system's shared audio route (PipeWire/PulseAudio or ALSA dmix/dsnoop), or select an explicit Audio device";
         }
         throw Error(message+" (tried "+attempted+")");
+    }
+    int recover(int error,std::stop_token stop) {
+        check_cancelled(stop);
+        if(error!=-ESTRPIPE || !stop.stop_possible()) {
+            const auto result=api.recover(pcm,error,1);
+            check_cancelled(stop);
+            return result;
+        }
+        // snd_pcm_recover retries suspend recovery internally, with no stop
+        // token. Keep that resume/prepare policy in the owning thread and
+        // check cancellation between retries.
+        int resumed=-ENOSYS;
+        if(api.resume) {
+            while(true) {
+                check_cancelled(stop);
+                resumed=api.resume(pcm);
+                check_cancelled(stop);
+                if(resumed!=-EAGAIN)break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(alsa_io_wait_ms));
+            }
+        }
+        check_cancelled(stop);
+        if(resumed>=0 || !api.prepare)return resumed;
+        const auto result=api.prepare(pcm);
+        check_cancelled(stop);
+        return result;
     }
     ~Stream(){if(pcm) api.close(pcm);}
 };
@@ -934,7 +964,8 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
     if(!next_samples)throw Error("playback callback is required");
     const bool timed=options && options->follow_system_clock;
     const bool continuous=options && options->continuous_clock.has_value();
-    Alsa api; Stream stream(api,device,0,rate,stop,timed || continuous,options);
+    const bool nonblocking=timed || continuous || stop.stop_possible();
+    Alsa api; Stream stream(api,device,0,rate,stop,nonblocking,options);
     std::unique_ptr<detail::PipeWirePlayback> graph;
 #ifndef DATAPUMP_ALSA_STUB
     if((timed || continuous) && !options->frame_timestamp && shared_server_endpoint(stream.endpoint)) {
@@ -1376,16 +1407,18 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
             catch(const Error& e){if(graph && !reported)throw TimingPreflightUnavailable(timing->allowance(),
                 std::string("native PipeWire silence preparation failed: ")+e.what());throw;}
             check_cancelled(stop);
-            if((timed || continuous) && (n==-EAGAIN || n==-EINTR)) {
-                if(n==-EAGAIN) {
-                    const auto ready=wait(20);
-                    if(ready<0 && ready!=-EINTR)throw Error("UTC audio playback wait failed");
-                }
-                continue;
+            if(n==-EINTR)continue;
+            if(nonblocking && n==-EAGAIN) {
+                const auto ready=wait(alsa_io_wait_ms);
+                check_cancelled(stop);
+                if(ready>=0 || ready==-EINTR)continue;
+                if(timed || continuous)throw Error("UTC audio playback wait failed");
+                n=ready;
             }
             if(n<0) {
-                if(timed || continuous || ++failures>8 || api.recover(stream.pcm,static_cast<int>(n),1)<0)
-                    throw Error("audio playback failed; UTC continuity lost");
+                if(timed || continuous)throw Error("audio playback failed; UTC continuity lost");
+                if(++failures>8 || stream.recover(static_cast<int>(n),stop)<0)throw Error("audio playback recovery failed");
+                check_cancelled(stop);
                 if(options && options->playback_discontinuity && (n==-EPIPE || n==-ESTRPIPE))
                     options->playback_discontinuity(n==-EPIPE?
                         "Audio output underrun; transmitted PCM continuity lost":
@@ -1427,8 +1460,9 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
         if(state_error)throw Error("audio playback drain failed (ALSA "+std::to_string(state_error)+
             ", state="+std::to_string(before)+")");
         const auto drained=api.drain(stream.pcm);
+        check_cancelled(stop);
         if(drained==0)break;
-        if(!(timed || continuous) || (drained!=-EAGAIN && drained!=-EINTR)) {
+        if(!nonblocking || (drained!=-EAGAIN && drained!=-EINTR)) {
             const auto state=api.state?api.state(stream.pcm):-1;
             throw Error("audio playback drain failed (ALSA "+std::to_string(drained)+
                 ", state="+std::to_string(state)+")");
@@ -1436,9 +1470,9 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
         // Nonblocking drain reports EAGAIN while already queued samples are
         // still playing. Closing here would truncate the finite pulse tail.
         // Keep cancellation responsive without recovering or replaying PCM.
-        const auto ready=wait(20);
+        const auto ready=wait(alsa_io_wait_ms);
+        check_cancelled(stop);
         if(ready<0 && ready!=-EINTR) {
-            check_cancelled(stop);
             const auto state=api.state?api.state(stream.pcm):-1;
             constexpr int setup_state=1; // SND_PCM_STATE_SETUP ABI
             // Playback can finish between drain(EAGAIN) and poll. ALSA maps
@@ -1532,7 +1566,7 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
         check_cancelled(stop);
         if(error==-EINTR)return; // Interrupted syscall does not lose the stream.
         if(sink.strict_timing())throw Error("audio capture UTC continuity lost; restart reception");
-        if(++failures>8 || api.recover(stream.pcm,error,1)<0)throw Error("audio capture recovery failed");
+        if(++failures>8 || stream.recover(error,stop)<0)throw Error("audio capture recovery failed");
         check_cancelled(stop);
         if(error==-EPIPE || error==-ESTRPIPE) {
             // EPIPE is an overrun. Suspend recovery may resume losslessly or
@@ -1569,7 +1603,7 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
         auto n=api.read(stream.pcm,block.data(),chunk_limit);
         check_cancelled(stop);
         if(n==-EAGAIN) {
-            const auto waited=api.wait(stream.pcm,20);
+            const auto waited=api.wait(stream.pcm,alsa_io_wait_ms);
             if(waited<0)recover(waited);
             continue;
         }

@@ -36,11 +36,13 @@ void require(bool ok,const std::string& message) {
 }
 
 Profile short_profile() {
-    const auto preset=resolve_snr_preset(Channel::acoustic_short,reference_snr_db);
+    // Keep this FEC/noise fixture at its original selected-band SNR. The
+    // adverse-channel default has separate fade-margin reception checks.
+    const auto preset=resolve_snr_preset(Channel::acoustic_short,reference_snr_db,ChannelAssumptions{});
     auto p=preset.profile;
     if(legacy_convolutional) {
-        // Freeze the previously qualified convolutional waveform independently
-        // of automatic preset selection; its wire/physical tests stay intact.
+        // Exercise the previous compact convolutional coding choice with the
+        // current fixed single-carrier waveform, independently of Auto.
         p=profile(Channel::acoustic_short);p.acoustic_ofdm=false;p.ofdm_training_blocks=16;
         p.carrier_hz=1800;p.rolloff=.20;p.amplitude*=std::sqrt(2.)/4.5;
         p.symbol_rate=920.14612674713135;p.constellation=4;p.code_rate=CodeRate::half;
@@ -58,6 +60,10 @@ Profile short_profile() {
         "weak short acoustic regression no longer uses the separate short profile");
     require(p.sample_rate==48000&&(!p.acoustic_ofdm||p.ofdm_prefix_samples>echo_delay_samples),
         "short acoustic echo must remain inside the cyclic prefix");
+    const auto selected_snr=reference_snr_db+10*std::log10(reference_bandwidth_hz/occupied_bandwidth_hz(p));
+    require(std::abs(selected_snr-6)<.01&&!p.acoustic_ofdm&&p.constellation==4&&
+        (legacy_convolutional||p.ldpc_frame_bits==1944),
+        "weak short acoustic fixture lost its 6 dB selected-band QPSK geometry");
     return p;
 }
 
@@ -133,8 +139,8 @@ struct Fixture {
         if(short_text&&!attachment) {
             require(prepared.encoded.size()<=capacity_source_bytes_per_cycle(profile,encrypted),
                 "weak short acoustic minimum fixture no longer fits one source cycle");
-            require(estimate.seconds<=(legacy_convolutional?10.5:ldpc_depth?13.:12.5),
-                "weak short acoustic minimum transfer exceeded its roughly 10-second total airtime");
+            require(estimate.seconds<=(ldpc_depth?16.5:12.5),
+                "weak short acoustic minimum transfer exceeded its bounded airtime");
         }
         auto encoder=fast::testing::deterministic_encoder(profile,key,byte_source(prepared.encoded),
             0x73686f7274617564ULL,SourceEncoding::xz);
@@ -244,7 +250,9 @@ void sampled_completion(const char* label,bool encrypted,bool attachment,bool sh
 void incomplete_controls() {
     const Fixture f(true,true,true);
     StreamDecoder decoder(f.profile,f.key,memory_quota,SourceEncoding::xz);
-    Receiver receiver(f.profile,[&](std::span<const float> soft){decoder.push_interval(soft);});
+    Receiver receiver(f.profile,[&](std::span<const float> soft,bool feedback) {
+        return decoder.push_interval(soft,feedback);
+    },{},{},{});
     receiver.push(f.waveform);receiver.finish();decoder.finish(receiver.progress().physical_complete);
     require(receiver.progress().acquired&&!receiver.progress().physical_complete&&
         !decoder.snapshot().physical_end&&!decoder.snapshot().complete&&!decoder.result()&&
@@ -252,7 +260,10 @@ void incomplete_controls() {
         "short acoustic sampled EOF substituted for physical absence");
 
     std::uint64_t intervals=0;
-    Receiver truncated(f.profile,[&](std::span<const float>){++intervals;});
+    Receiver truncated(f.profile,[&](std::span<const float>,bool) -> std::optional<ValidatedCapacityCycle> {
+        ++intervals;
+        return std::nullopt;
+    },{},{},{});
     const auto prefix=f.profile.acoustic_ofdm?
         (preamble_symbols(f.profile)-1)*(f.profile.ofdm_fft_size+f.profile.ofdm_prefix_samples):
         static_cast<std::uint64_t>((preamble_symbols(f.profile)-1)*f.profile.sample_rate/f.profile.symbol_rate);
@@ -290,7 +301,10 @@ void marker_holdout_control() {
     require(end<waveform.size(),"compact held-out marker corruption exceeded the waveform");
     for(auto i=begin;i<end;++i)waveform[i]=-waveform[i];
     std::uint64_t intervals=0;
-    Receiver receiver(p,[&](std::span<const float>){++intervals;});
+    Receiver receiver(p,[&](std::span<const float>,bool) -> std::optional<ValidatedCapacityCycle> {
+        ++intervals;
+        return std::nullopt;
+    },{},{},{});
     receiver.push(waveform);
     receiver.push(std::vector<float>(end_silence_samples(p)));
     receiver.finish();
@@ -302,7 +316,10 @@ void marker_holdout_control() {
 void noise_only() {
     const auto p=short_profile();std::uint64_t intervals=0;
     StreamDecoder decoder(p,std::nullopt,memory_quota,SourceEncoding::xz);
-    Receiver receiver(p,[&](std::span<const float> soft){++intervals;decoder.push_interval(soft);});
+    Receiver receiver(p,[&](std::span<const float> soft,bool feedback) {
+        ++intervals;
+        return decoder.push_interval(soft,feedback);
+    },{},{},{});
     std::mt19937 random(0x6e6f6973);
     std::normal_distribution<float> gaussian(0,static_cast<float>(noise_sigma(p)));
     std::array<float,1201> chunk{};

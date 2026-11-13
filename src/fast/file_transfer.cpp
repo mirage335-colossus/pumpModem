@@ -170,7 +170,6 @@ Snapshot receive_wave(const Settings& settings,const std::filesystem::path& wave
     result.decoding_stopped=c.decoding_stopped;result.coding_cycles=c.coding_cycles;
     result.failed_cycles=c.failed_cycles;result.verified_bytes=c.verified_bytes;
     result.cancelled=stop.stop_requested();result.status=c.status;result.listening=false;
-    if(result.receiver_backend=="standard-ssb")result.status+=" · Standard SSB receiver for this profile";
     if(result.cancelled) {
         result.complete=false;result.authenticated=false;result.file.reset();
         result.status="Cancelled; transfer incomplete";

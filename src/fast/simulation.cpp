@@ -7,9 +7,12 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <iomanip>
 #include <limits>
+#include <locale>
 #include <numbers>
 #include <random>
+#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -19,6 +22,7 @@ namespace {
 using Complex = std::complex<double>;
 using modem::detail::DispersiveSelectivePerturbation;
 using modem::detail::SpreadRay;
+using triad::v3::detail::FixedGaussianRay;
 constexpr double tau = 2 * std::numbers::pi;
 constexpr std::size_t chunk_samples = 1024;
 
@@ -26,17 +30,22 @@ bool in_range(double value, double lo, double hi) {
     return std::isfinite(value) && value >= lo && value <= hi;
 }
 
-double relative_shift_ppm(const SimulationSettings& settings) {
+double relative_shift_ppm(const ChannelAssumptions& settings) {
     if (settings.shift_hz == 0) return 0;
     return settings.shared_reference ? settings.baseband_ppm : settings.shift_ppm;
 }
 
-double selective_rate(const SimulationSettings& settings) {
+double selective_rate(const ChannelAssumptions& settings) {
     if (settings.selective_slow_depth == 0 && settings.selective_fast_depth == 0) return 0;
     return settings.doppler_hz > 0 ? settings.doppler_hz * settings.margin : .1;
 }
 
-double relative_clock_bound(const SimulationSettings& settings) {
+double propagation_frequency_allowance(const SimulationSettings& settings) {
+    const double spread_factor = settings.spread_evolution == SpreadEvolution::gaussian ? 3. : 1.;
+    return spread_factor * settings.doppler_hz * settings.margin + selective_rate(channel_assumptions(settings));
+}
+
+double relative_clock_bound(const ChannelAssumptions& settings) {
     return settings.baseband_ppm / (1 - settings.baseband_ppm * .5e-6);
 }
 
@@ -49,14 +58,16 @@ std::uint64_t random_seed() {
 
 } // namespace
 
-void validate(const Profile& profile, const SimulationSettings& settings) {
-    validate(profile);
+ChannelAssumptions channel_assumptions(const SimulationSettings& settings) noexcept {
+    return {settings.baseband_ppm, settings.baseband_phase_rad_sqrt_s, settings.shift_ppm,
+        settings.shift_phase_rad_sqrt_s, settings.shared_reference, settings.shift_hz, settings.delay_ms,
+        settings.doppler_hz, settings.selective_slow_depth, settings.selective_fast_depth, settings.margin};
+}
+
+void validate(const ChannelAssumptions& settings) {
     // The shared adjustable resampler supports at most 1000 ppm of relative
     // rate error. The per-end ratio remains within that bound at 999 ppm.
-    if (!in_range(settings.transmit_watts, 1e-9, 1e9) ||
-        !in_range(settings.path_loss_db, 0, 300) ||
-        (settings.noise_dbm_hz && !in_range(*settings.noise_dbm_hz, -250, 0)) ||
-        !in_range(settings.baseband_ppm, 0, 999) ||
+    if (!in_range(settings.baseband_ppm, 0, 999) ||
         !in_range(settings.shift_ppm, 0, 1000) ||
         !in_range(settings.baseband_phase_rad_sqrt_s, 0, 100) ||
         !in_range(settings.shift_phase_rad_sqrt_s, 0, 100) ||
@@ -66,16 +77,36 @@ void validate(const Profile& profile, const SimulationSettings& settings) {
         !in_range(settings.selective_slow_depth, 0, 1) ||
         !in_range(settings.selective_fast_depth, 0, 1) ||
         !in_range(settings.margin, 1, 3))
-        throw Error("Fast simulation settings are outside the supported ranges");
+        throw Error("Fast channel assumptions are outside the supported ranges");
+}
 
-    const double clock = relative_clock_bound(settings) * 1e-6;
-    const double shift = settings.shift_hz * relative_shift_ppm(settings) * 1e-6 /
+void validate(const Profile& profile, const SimulationSettings& settings, ChannelPurpose purpose) {
+    validate(profile);
+    const auto assumptions=channel_assumptions(settings);
+    validate(assumptions);
+    if (settings.spread_evolution != SpreadEvolution::fixed && settings.spread_evolution != SpreadEvolution::gaussian)
+        throw Error("Unknown Fast spread evolution model");
+    if (purpose == ChannelPurpose::receiver_simulation &&
+        (!in_range(settings.transmit_watts, 1e-9, 1e9) ||
+         !in_range(settings.path_loss_db, 0, 300) ||
+         (settings.noise_dbm_hz && !in_range(*settings.noise_dbm_hz, -250, 0))))
+        throw Error("Fast simulated link budget is outside the supported ranges");
+
+    const double clock = relative_clock_bound(assumptions) * 1e-6;
+    const double shift = settings.shift_hz * relative_shift_ppm(assumptions) * 1e-6 /
         (1 - settings.baseband_ppm * .5e-6);
-    const double spread = settings.doppler_hz * settings.margin + selective_rate(settings);
+    const double spread = propagation_frequency_allowance(settings);
     const auto low = occupied_lower_hz(profile) * (1 - clock);
     const auto high = occupied_upper_hz(profile) * (1 + clock);
-    if (low <= shift + spread || high + shift + spread >= profile.sample_rate / 2.)
-        throw Error("Fast simulation oscillator and channel offsets exceed the audio band");
+    if (low <= shift + spread || high + shift + spread >= profile.sample_rate / 2.) {
+        std::ostringstream message;
+        message.imbue(std::locale::classic());
+        message << std::fixed << std::setprecision(1)
+            << "Fast simulation bounds need " << low - shift - spread << ".." << high + shift + spread
+            << " Hz; sampled audio allows 0.." << profile.sample_rate / 2.
+            << " Hz (RF oscillator +/-" << shift << " Hz; channel allowance +/-" << spread << " Hz)";
+        throw Error(message.str());
+    }
 }
 
 struct SimulationChannel::Impl {
@@ -89,6 +120,8 @@ struct SimulationChannel::Impl {
     bool source_ended = false;
 
     std::optional<SpreadRay> ray;
+    std::optional<FixedGaussianRay> gaussian_direct, gaussian_delayed;
+    double physical_sample_rate = 1;
     std::optional<DispersiveSelectivePerturbation> selective;
     std::vector<Complex> delay_history;
     std::array<std::size_t, 4> delay_lags{};
@@ -102,20 +135,28 @@ struct SimulationChannel::Impl {
     double phase_sigma = 0, noise_sigma = 0;
     bool rotate = false;
 
-    Impl(const Profile& profile, const SimulationSettings& settings, Source read)
+    Impl(const Profile& profile, const SimulationSettings& settings, Source read, ChannelPurpose purpose)
         : source(std::move(read)) {
-        validate(profile, settings);
+        validate(profile, settings, purpose);
+        const auto assumptions=channel_assumptions(settings);
         if (!source) throw Error("Fast simulation requires an emitted source");
 
         const auto sample_rate = profile.sample_rate;
+        report.link_budget_applied = purpose == ChannelPurpose::receiver_simulation;
         report.seed = settings.seed ? *settings.seed : random_seed();
-        report.received_power_dbm = 30 + 10 * std::log10(settings.transmit_watts) - settings.path_loss_db;
+        report.spread_evolution = settings.spread_evolution;
+        report.propagation_frequency_allowance_hz = propagation_frequency_allowance(settings);
         // These are the emitted PCM power references for unit-energy mapper
-        // symbols. Short source/marker mixes can have different actual RMS.
+        // symbols. Receiver noise is normalized to this reference; link loss
+        // and TX watts determine the receiver C/N0, not a pre-playback PCM gain.
+        // Short source/marker mixes can have different actual RMS.
         report.nominal_signal_power = profile.acoustic_ofdm
             ? std::pow(profile.amplitude / 4.5, 2)
             : .5 * profile.amplitude * profile.amplitude;
-        if (settings.noise_dbm_hz) {
+        if (report.link_budget_applied) {
+            report.received_power_dbm = 30 + 10 * std::log10(settings.transmit_watts) - settings.path_loss_db;
+        }
+        if (report.link_budget_applied && settings.noise_dbm_hz) {
             report.cn0_db_hz = report.received_power_dbm - *settings.noise_dbm_hz;
             report.noise_variance = report.nominal_signal_power * (.5 * sample_rate) *
                 std::pow(10., -*report.cn0_db_hz / 10);
@@ -134,7 +175,7 @@ struct SimulationChannel::Impl {
         const auto rx_scale = 1 + rx_clock * 1e-6;
         const auto clock = (tx_clock - rx_clock) / rx_scale;
         report.sample_clock_error_ppm = clock;
-        report.clock_bound_ppm = relative_clock_bound(settings) * settings.margin;
+        report.clock_bound_ppm = relative_clock_bound(assumptions) * settings.margin;
         if (clock != 0) {
             real_resampler.emplace(sample_rate, sample_rate, true);
             imag_resampler.emplace(sample_rate, sample_rate, true);
@@ -144,7 +185,7 @@ struct SimulationChannel::Impl {
                 std::ceil(real_resampler->source_lookahead_seconds() * sample_rate));
         }
 
-        const double shift_ppm = relative_shift_ppm(settings);
+        const double shift_ppm = relative_shift_ppm(assumptions);
         if (settings.shift_hz != 0) {
             double relative = tx_clock - rx_clock;
             if (!settings.shared_reference) {
@@ -160,7 +201,7 @@ struct SimulationChannel::Impl {
         const auto shift_diffusion = settings.shift_hz == 0 || settings.shared_reference
             ? 0. : settings.shift_phase_rad_sqrt_s;
         const auto phase_diffusion = std::hypot(settings.baseband_phase_rad_sqrt_s, shift_diffusion);
-        const double physical_sample_rate = sample_rate * rx_scale;
+        physical_sample_rate = sample_rate * rx_scale;
         phase_sigma = phase_diffusion / std::sqrt(physical_sample_rate);
         rotate = phase_sigma != 0 || report.shift_error_hz != 0;
         rotation_step = std::polar(1., tau * report.shift_error_hz / sample_rate);
@@ -168,7 +209,13 @@ struct SimulationChannel::Impl {
         report.spread_delay_ms = settings.delay_ms * settings.margin;
         report.spread_doppler_hz = settings.doppler_hz * settings.margin;
         if (report.spread_delay_ms > 0 || report.spread_doppler_hz > 0) {
-            ray.emplace(physical_sample_rate, report.spread_doppler_hz, report.seed ^ 0x325449415443484eULL);
+            if (settings.spread_evolution == SpreadEvolution::gaussian && report.spread_doppler_hz > 0) {
+                report.gaussian_doppler_width_hz = report.spread_doppler_hz;
+                gaussian_direct.emplace(report.gaussian_doppler_width_hz, report.seed ^ 0x4741555353444952ULL);
+                gaussian_delayed.emplace(report.gaussian_doppler_width_hz, report.seed ^ 0x474155535344454cULL);
+            } else {
+                ray.emplace(physical_sample_rate, report.spread_doppler_hz, report.seed ^ 0x325449415443484eULL);
+            }
             const auto samples = report.spread_delay_ms * .001 * physical_sample_rate;
             const auto integral = static_cast<std::size_t>(std::floor(samples));
             if (samples == std::round(samples)) {
@@ -197,7 +244,7 @@ struct SimulationChannel::Impl {
             tail_remaining = last_lag;
         }
 
-        const double am_rate = selective_rate(settings);
+        const double am_rate = selective_rate(assumptions);
         if (am_rate > 0) {
             // Keep the same synthetic frequency correlation when selecting a
             // narrower symbol rate or constellation inside this channel.
@@ -262,7 +309,7 @@ struct SimulationChannel::Impl {
     }
 
     Complex propagate(Complex value) {
-        if (ray) {
+        if (ray || gaussian_direct) {
             delay_history[delay_cursor] = value;
             Complex delayed{};
             for (std::size_t tap = 0; tap < delay_taps; ++tap) {
@@ -271,7 +318,14 @@ struct SimulationChannel::Impl {
                 delayed += delay_coefficients[tap] * delay_history[index];
             }
             if (++delay_cursor == delay_history.size()) delay_cursor = 0;
-            value = ray->process(value, delayed);
+            if (gaussian_direct) {
+                // Physical-time random fields remain continuous across caller
+                // chunks and delayed/quiet tails. No window-wise gain or SNR
+                // normalization removes their actual fades.
+                const auto seconds = static_cast<long double>(report.output_samples) / physical_sample_rate;
+                constexpr double gain = .7071067811865475244;
+                value = gain * (gaussian_direct->value(seconds) * value + gaussian_delayed->value(seconds) * delayed);
+            } else value = ray->process(value, delayed);
         }
         if (selective) value = selective->process(value);
         if (rotate) {
@@ -319,8 +373,9 @@ struct SimulationChannel::Impl {
     }
 };
 
-SimulationChannel::SimulationChannel(const Profile& profile, const SimulationSettings& settings, Source source)
-    : impl_(std::make_unique<Impl>(profile, settings, std::move(source))) {}
+SimulationChannel::SimulationChannel(const Profile& profile, const SimulationSettings& settings, Source source,
+                                     ChannelPurpose purpose)
+    : impl_(std::make_unique<Impl>(profile, settings, std::move(source), purpose)) {}
 SimulationChannel::~SimulationChannel() = default;
 SimulationChannel::SimulationChannel(SimulationChannel&&) noexcept = default;
 SimulationChannel& SimulationChannel::operator=(SimulationChannel&&) noexcept = default;

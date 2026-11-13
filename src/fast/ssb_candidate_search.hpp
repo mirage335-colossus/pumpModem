@@ -28,6 +28,18 @@ public:
                        SsbAcquisitionRequest limits,double minimum_coherence,
                        CandidateSink);
 
+    using CommitFits = std::function<bool(bool wait)>;
+    struct FitFrontiers {
+        std::uint64_t first_center, first_payload;
+    };
+    using OldestFit = std::function<std::optional<FitFrontiers>()>;
+    // Add bounded lookahead for independently scored candidates. Gate and
+    // fit views still use the original serial retention at each offer tick.
+    unsigned maximum_fit_owners() const noexcept;
+    std::size_t fit_view_capacity() const noexcept { return fit_view_capacity_; }
+    void allow_pending_fits(unsigned owners,CommitFits,OldestFit);
+    void drain_fits(std::stop_token);
+
     // Returns the number of appended centers, possibly short on cancellation.
     std::size_t push(const SsbFrontendOutput&,std::stop_token stop={});
     // After lock, admit the local payload window before replacing history.
@@ -41,6 +53,8 @@ private:
     using Complex = std::complex<double>;
 
     std::uint64_t center(std::uint64_t sample_index) const noexcept;
+    SsbAcquisitionView fit_view() const noexcept;
+    void settle_payload_due(std::stop_token);
     void service_ready(std::stop_token);
     void project_window(std::stop_token);
     void offer_fit(std::stop_token);
@@ -51,8 +65,10 @@ private:
     double input_rate_, proposal_rate_, minimum_coherence_;
     SsbFoldedPreamble projection_;
     CandidateSink sink_;
-    std::size_t history_capacity_, gate_step_, gate_wait_, fit_step_, fit_wait_,
+    std::size_t history_capacity_, fit_view_capacity_, gate_step_, gate_wait_, fit_step_, fit_wait_,
         training_length_, minimum_overlap_;
+    CommitFits commit_fits_;
+    OldestFit oldest_fit_;
     std::vector<Complex> history_;
     std::vector<std::uint64_t> positive_gates_;
     std::size_t write_at_ = 0, retained_count_ = 0;

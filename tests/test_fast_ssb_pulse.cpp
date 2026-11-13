@@ -110,6 +110,48 @@ void check_native_analytic_waveform() {
     }
 }
 
+void check_narrow_acoustic_pulse() {
+    auto p = fast::capacity_profile(fast::Channel::acoustic_short);
+    p.acoustic_ofdm = false;
+    p.ofdm_training_blocks = 16;
+    p.ldpc_frame_bits = 1944;
+    p.constellation = 4;
+    p.carrier_hz = 1800.;
+    p.symbol_rate = 183.;
+    const auto g = make_ssb_frontend_geometry(p.sample_rate,p.carrier_hz,210.,47);
+    require(single_carrier_low_rate_decimation(p) == 8, "Narrow pulse test missed the interpolated transmitter");
+    const SsbPulse pulse(p,g);
+    const SingleCarrierSchedule schedule(p);
+    constexpr double frequency = 69.;
+    const auto cache = pulse.make_cache(0.,frequency);
+    const auto beta = p.symbol_rate/p.sample_rate;
+    const auto radius = single_carrier_pulse_radius(p);
+    fast::Transmitter tx(p,[](std::span<std::uint8_t>){return false;});
+    std::array<std::complex<float>,16384> analytic{};
+    require(tx.read_analytic(analytic) == analytic.size(), "Narrow pulse test lost its native preamble");
+
+    double reference_power=0.,error_power=0.;
+    for (int center=static_cast<int>(g.radius());center+g.radius()<analytic.size();center+=g.decimation) {
+        Complex reference{};
+        for (int k=-static_cast<int>(g.radius());k<=static_cast<int>(g.radius());++k) {
+            const auto tick=center+k;
+            reference+=g.taps[k+g.radius()]*static_cast<Complex>(analytic[tick])*
+                phase(frequency-p.carrier_hz,tick,p.sample_rate);
+        }
+        const auto symbol_time=center*beta-radius;
+        const auto first=std::max(0,int(std::ceil(symbol_time-cache.support_symbols())));
+        const auto last=int(std::floor(symbol_time+cache.support_symbols()));
+        Complex predicted{};
+        for (int symbol=first;symbol<=last;++symbol)
+            predicted+=schedule.training_symbol(symbol)*cache.evaluate(symbol_time-symbol,center).value;
+        reference_power+=std::norm(reference);
+        error_power+=std::norm(reference-predicted);
+    }
+    require(reference_power > 0. && error_power/reference_power < 1e-6,
+        "Continuous RRC exceeded the measured error allowance for the interpolated acoustic preamble");
+    std::cout << "Narrow acoustic filtered pulse NMSE " << error_power/reference_power << '\n';
+}
+
 void check_derivatives() {
     auto p = fast::capacity_profile(fast::Channel::ssb);
     p.sample_rate = 44100;
@@ -270,6 +312,7 @@ void check_cache_against_direct() {
 
 int main() {
     check_native_analytic_waveform();
+    check_narrow_acoustic_pulse();
     check_derivatives();
     check_support_and_geometry();
     check_cache_against_direct();

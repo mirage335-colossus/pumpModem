@@ -59,6 +59,13 @@ struct SsbAcquisitionAttempt {
     double marker_row_seconds, marker_gram_seconds, marker_factor_seconds;
 };
 
+struct SsbAcquisitionWorkerProgress {
+    unsigned hardware_threads = 1, worker_budget = 1, owner_limit = 1, started_helpers = 0;
+    std::size_t fit_lease_bytes = 0, peak_reserved_bytes = 0, peak_pending_fits = 0, pending_fits = 0;
+    std::size_t peak_active_fits = 0;
+    std::uint64_t committed_fits = 0, discarded_fits = 0;
+};
+
 // Continuous single-carrier SSB receive path for a locally matched profile.
 class SsbReceiver {
 public:
@@ -74,11 +81,13 @@ public:
     SsbReceiver& operator=(SsbReceiver&&) noexcept;
 
     std::size_t push(std::span<const float>);
-    void finish() noexcept;
+    void finish();
+    void set_input_observer(SymbolObserver) noexcept;
     // Local diagnostics only. Set before feeding PCM.
     void set_cycle_observer(CycleObserver);
     const ModemProgress& progress() const noexcept;
     const SsbCandidateSearchProgress& acquisition_progress() const noexcept;
+    const SsbAcquisitionWorkerProgress& acquisition_worker_progress() const noexcept;
     const SsbAcquisitionDiagnostics& last_acquisition_diagnostics() const noexcept;
     std::span<const SsbAcquisitionAttempt> first_acquisition_attempts() const noexcept;
     const SsbCycleRefinementProgress& refinement_progress() const noexcept;
@@ -95,8 +104,10 @@ private:
 };
 
 bool supports_modeled_ssb_receiver(const Profile&) noexcept;
-SsbReceiver make_ssb_model_receiver(const Profile&,ValidatedIntervalSink,std::stop_token stop={},
-                                   SymbolObserver symbol_observer={},SymbolObserver input_observer={});
+bool supports_delay_doppler_receiver(const Profile&) noexcept;
+SsbReceiver make_delay_doppler_receiver(const Profile&,ValidatedIntervalSink,std::stop_token stop={},
+                                       SymbolObserver symbol_observer={},SymbolObserver input_observer={},
+                                       std::optional<ChannelBounds> bounds={});
 
 // Internal measurements use the operating receiver without changing dispatch.
 struct ReceiverDiagnostics {

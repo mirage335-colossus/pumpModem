@@ -25,7 +25,7 @@ struct SsbFrontendGeometry {
 };
 
 SsbFrontendGeometry make_ssb_frontend_geometry(std::uint32_t input_rate,
-    double carrier_hz = 1500, double cutoff_hz = 1200);
+    double carrier_hz = 1500, double cutoff_hz = 1200, std::size_t decimation = 0);
 
 struct SsbFrontendOutput {
     std::uint64_t first_center_input_sample;

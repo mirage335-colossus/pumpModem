@@ -11,21 +11,69 @@ does not qualify physical hardware or all receiver configurations; see
 [current validation](validation.md#native-gui-integration).
 
 Fast Modem has a separate native sampled channel in
-[`fast/simulation.cpp`](../src/fast/simulation.cpp). Its Simulation page starts
-from a local Fast transmission and sends the resulting waveform through that
-channel and the Fast receiver. It models link power/path loss and noise,
-oscillator offsets and phase, selected delay/Doppler spread, and optional
-selective AM. It reuses the neutral spread-ray and selective-perturbation
-kernels, but does not instantiate the Robust receiver or Robust DATA/Helper
-waveform. The channel preserves delayed and filter-decay tails and supplies a
-quiet interval for Fast completion. **Simulation** runs entirely in software.
-The explicit **Live loopback test** instead sends this channel's PCM through
-physical playback and capture before the same Fast receiver. It uses a fixed
-diagnostic, output gain 0.1 and bounded audio/time budgets; its captured result
-is labeled separately. These effects still describe a synthetic propagation
-path, even when the audio cable is physical. Ordinary **Live audio** continues
-through the selected audio device without the synthetic channel. Channel
-reports never select receiver geometry or establish physical completion.
+[`fast/simulation.cpp`](../src/fast/simulation.cpp). `ChannelAssumptions` are
+the local receiver declarations: they are validated in every mode and help
+deterministically resolve Auto, independently of test-effect injection.
+Simulation starts from a local Fast transmission and sends its resulting
+waveform through the Fast receiver. Transmit power, path loss and
+noise controls define the simulated link ratio in normalized receiver-input
+units: transmit power and loss set the equivalent received level relative to
+independent receiver noise. The samples remain normalized rather than being
+scaled to a physical DAC voltage; noise is added after propagation at the
+simulated receiver boundary. Common receive gain therefore does not change the
+modeled ratio. Other effects include oscillator offset and phase, selected
+delay/Doppler spread, and optional selective AM. The channel reuses the neutral
+spread-ray and selective-perturbation kernels, but does not instantiate the
+Robust receiver or Robust DATA/Helper waveform. It preserves delayed and
+filter-decay tails and supplies a quiet interval for Fast completion. Simulation
+runs entirely in software.
+
+**Live loopback test** uses physical audio capture and playback with the Fast
+receiver. Transmit power, path loss and modeled receiver noise are Simulation
+assumptions: in Live loopback they are disabled and retained and do not alter the
+playback signal or captured input. Only an explicitly started test copies the
+declared oscillator, delay/Doppler-spread and selective-AM effects into the
+waveform before the DAC as synthetic stress; the copied search margin is one
+because margin affects receiver bounds only. Idle loopback monitoring and
+ordinary Live use clean input. Playback uses the selected TX
+volume and does not change the system mixer or apply an automatic gain change.
+The selected nonempty Console text or file is preflighted before audio opens;
+it is neither truncated nor replaced by a fixture. Capture must start within
+5 seconds. The existing maxima remain 75 seconds of audio and 110 seconds
+elapsed overall. After the full emitted source and canonical quiet tail, at
+most 2 seconds of captured samples are allowed for receiver completion. This
+grace can only report failure; it cannot synthesize physical completion.
+Silence is maintained during this wait to avoid waiting indefinitely for audio
+server playback drain. Progress distinguishes audio samples queued for playback
+from samples captured at the receiver. The queued count includes silence and
+does not confirm speaker output. A verified result becomes an ordinary Signals
+or Files record with LOOPBACK TEST provenance only after physical completion,
+integrity checks and exact comparison with the selected source. Public checksums
+do not authenticate a sender; encrypted mode requires authentication. Live
+loopback's synthetic effects describe a modeled stress overlaid on an acoustic
+path, not RF propagation performance.
+
+While Live loopback mode is selected and idle, the GUI runs ordinary receive-only
+monitoring. Before a test, that session closes so the bounded duplex test can
+own the device; monitoring restarts afterward. Tab switches do not stop it, and
+switching to another modem releases an idle Fast capture for the shared audio
+handoff. Ordinary **Live audio** also uses the selected device without the
+synthetic propagation or noise model. Realized channel reports never select
+receiver geometry or establish physical completion; declared assumptions can
+select the deterministic local Auto profile. Profile and waveform changes
+revalidate the declarations. An invalid receiver declaration reports the
+required frequency range, available sampled band and oscillator/channel
+allowances, and blocks listening and transmission in every mode while leaving
+fields editable. Invalid injected test effects disable Simulation and explicit
+loopback, but not ordinary Live. On the current automatic 231-baud profile, a
+CLI-only strong-signal Gaussian-ray diagnostic (30 Hz bandwidth per ray,
+2σ; 0/7 ms delay) fails acquisition while its fixed-channel control passes.
+An explicit experimental 1,000-baud dense-pilot candidate passes strong digital
+Gaussian, oscillator and selective-AM checks, plus a clean −6 dB reference-noise
+check; Auto does not select this candidate. The matched full-stress physical
+speaker/microphone trial failed acquisition. Weak Gaussian reception and full
+physical stress remain unqualified. See the [scoped acoustic results](fast-acoustic-short.md#validation-scope)
+and [validation record](validation.md).
 See [Fast mode](fast-mode.md#fast-simulation) for the test workflow and limits.
 
 ## Baseline and channel stages

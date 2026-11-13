@@ -1,4 +1,5 @@
 #include "fast/receive_pcm_queue.hpp"
+#include <algorithm>
 #include <array>
 #include <iostream>
 #include <stdexcept>
@@ -16,7 +17,7 @@ void check_profile_caps() {
     require(receive_pcm_capacity(ssb)==8*ssb.sample_rate,"Dense-pilot SSB capture lost its bounded backlog budget");
     ssb.ldpc_frame_bits=64800;
     require(receive_pcm_capacity(ssb)==8*ssb.sample_rate,"The full-frame SSB capture budget changed");
-    ssb.pilot_spacing_symbols=64;
+    ssb.pilot_spacing_symbols=128;
     require(receive_pcm_capacity(ssb)==ssb.sample_rate,"A different SSB geometry inherited an unqualified capture budget");
     auto dense=capacity_profile(Channel::ssb);
     dense.ldpc_frame_bits=64800;dense.constellation=4096;dense.code_rate=CodeRate::eight_ninths;
@@ -25,8 +26,60 @@ void check_profile_caps() {
     require(receive_pcm_capacity(dense)==dense.sample_rate,"Unsupported SSB input rate inherited a modeled capture budget");
     const auto ofdm=capacity_profile(Channel::acoustic);
     require(receive_pcm_capacity(ofdm)==4*ofdm.sample_rate,"OFDM capture queue changed its existing limit");
+    auto wire=capacity_profile(Channel::wire);
+    require(receive_pcm_capacity(wire)==3*wire.sample_rate,"Wire capture lost its four-frame burst reserve");
+    wire.interleave_depth=16;
+    require(receive_pcm_capacity(wire)==9*wire.sample_rate,"Wire capture lost its maximum-depth bound");
+    wire.sample_rate=48001;
+    wire.interleave_depth=3;
+    require(receive_pcm_capacity(wire)==120003,"Wire capture rounded an odd frame reserve down");
+    for(const unsigned depth:{0U,17U}) {
+        wire.interleave_depth=depth;
+        bool rejected=false;
+        try { (void)receive_pcm_capacity(wire); }
+        catch(const std::invalid_argument&) { rejected=true; }
+        require(rejected,"Wire capture accepted an invalid local coding depth");
+    }
+    const auto classic=classic_profile(Channel::wire);
+    require(receive_pcm_capacity(classic)==classic.sample_rate,"Classic capture queue changed its existing limit");
+}
+
+void check_wire_coding_burst() {
     const auto wire=capacity_profile(Channel::wire);
-    require(receive_pcm_capacity(wire)==wire.sample_rate,"Other single-carrier capture queue changed its existing limit");
+    const auto rate=static_cast<std::size_t>(wire.sample_rate);
+    ReceivePcmQueue queue(receive_pcm_capacity(wire));
+    std::array<float,1200> block{};
+    std::size_t written=0,read=0;
+    const auto capture=[&](std::size_t count) {
+        while(count) {
+            auto input=std::span(block).first(std::min(count,block.size()));
+            for(auto& sample:input)sample=static_cast<float>(written++);
+            require(queue.push(input),"Wire coding burst dropped capture samples");
+            count-=input.size();
+        }
+    };
+    const auto consume=[&](std::size_t count) {
+        while(count) {
+            auto output=std::span(block).first(std::min(count,block.size()));
+            require(queue.pop(output)==output.size(),"Wire coding burst lost a PCM block");
+            for(auto sample:output)
+                require(sample==static_cast<float>(read++),"Wire coding burst changed capture time or order");
+            count-=output.size();
+        }
+    };
+
+    // Capture continues while the receiver spends two seconds on the fixed
+    // LDPC cycle. The consumer then resumes while later samples keep arriving.
+    capture(2*rate);
+    require(queue.status().queued_samples==2*rate,"Wire capture did not retain the coding burst");
+    consume(rate);
+    capture(2*rate);
+    require(queue.status().queued_samples==3*rate&&queue.status().peak_samples==3*rate,
+        "Wire capture did not reach its exact bounded extent");
+    queue.close();
+    consume(3*rate);
+    require(read==written&&!queue.status().overflow&&!queue.status().queued_samples,
+        "Wire capture did not drain the continuous burst and wrapped tail");
 }
 
 void check_wrap_and_close() {
@@ -79,6 +132,7 @@ void check_faults_and_stop() {
 int main() {
     try {
         check_profile_caps();
+        check_wire_coding_burst();
         check_wrap_and_close();
         check_faults_and_stop();
         return 0;

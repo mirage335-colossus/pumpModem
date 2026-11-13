@@ -411,6 +411,19 @@ export namespace Rev {
             XResizeWindow(xDisplay, xWindow, static_cast<unsigned int>(w), static_cast<unsigned int>(h));
         }
 
+        void setMinimumSize(int w, int h) {
+            size.minW = w;
+            size.minH = h;
+            XSizeHints hints{};
+            long supplied = 0;
+            if (!XGetWMNormalHints(xDisplay, xWindow, &hints, &supplied)) hints = {};
+            hints.flags |= PMinSize;
+            hints.min_width = w;
+            hints.min_height = h;
+            XSetWMNormalHints(xDisplay, xWindow, &hints);
+            XFlush(xDisplay);
+        }
+
         void setCursor(Appearance::Cursor newCursor) {
             cursor = newCursor;
             if (!xDisplay || !xWindow) return;

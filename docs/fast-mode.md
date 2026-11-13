@@ -1,14 +1,16 @@
 # Fast text and file transfer
 
 Fast Modem is a separate streaming QAM/LDPC and classic APSK modem. Ordinary
-desktop launches select it with Speakers / mic · short and listen continuously. The modem dropdown
-lists Fast Modem, Robust Modem and Legacy Modem. Explicit Robust simulation or
+desktop launches select it with Speakers / mic · short and listen continuously.
+The modem dropdown lists Fast Modem, Robust Modem and Legacy Modem. Explicit Robust simulation or
 settings launches retain their workflow. Console opens first; Developer mode
 reveals Modem details with manual symbol rate, constellation and coding controls.
 Channel profile and Expected SNR sit below the diagnostic plots. Cable defaults
 to an expected 36 dB SNR; speakers/microphone defaults to 3 dB and its short
 profile to −6 dB. Switching channel
 profiles reapplies that profile's default SNR and waveform settings.
+The six receiver-assumption fields appear together in the compact Console row.
+Their drafts are retained independently for each channel profile.
 
 In ordinary **Live audio**, enter a Message or Attach file, then transmit. Use
 text restores the retained draft. Sending pauses listening and resumes it
@@ -48,7 +50,8 @@ interrupt an active Robust transmission. Switching away requests suspension
 of Robust reception; an active transmission can continue while its interface
 is hidden.
 
-An active Fast transmission continues when switching back; Fast listening stops.
+An active Fast transmission or duplex loopback test continues when switching
+to another modem; receive-only Fast listening stops and releases its audio path.
 Regular controls remain disabled until Fast releases the audio device; idle
 regular capture resumes when Fast is inactive and the regular view is selected.
 Starting Fast allows up to two seconds for asynchronous device release, then
@@ -64,39 +67,115 @@ training, markers, pilots, occupied spectrum and transmission duration are publi
 
 The Fast **Simulation** page offers **Live audio**, **Simulation**, and
 **Live loopback test**. Live audio is the default and uses the selected audio
-device for ordinary transmission and reception without a synthetic channel.
+device for ordinary transmission and reception with clean application PCM.
+Receiver declarations still determine the local search bounds and automatic
+profile in Live mode; they do not inject synthetic effects into the audio.
 Simulation sends the Console message or file through the native Fast sampled
 channel and receiver entirely in software, without opening hardware audio.
 Its results are labeled separately from live audio.
 
-**Run loopback test** sends a fixed short diagnostic through the selected
-channel model, physical audio output, connected loopback path, and captured
-Fast receiver. It uses the selected profile, device, channel routing and
-encryption choice; encryption requires the selected key. Capture starts before
-playback, through the normal shared-audio handoff. The test uses output gain
-**0.1**, with limits of **75 seconds of audio** and **110 seconds of elapsed
-time**. A profile whose diagnostic exceeds the audio budget is rejected. The
-Console message and attachment drafts are preserved and are not transmitted.
-Test status, counters and captured receiver plots are labeled **LOOPBACK TEST**;
-the test adds no Signals history entry, exposes no diagnostic text or file,
-and creates no Save handle. It does not start automatic listening afterward.
-Cancel stops the test without manufacturing a completed reception.
+The compact Console row declares baseband and shift oscillators, Doppler and
+delay spread, selective AM, receiver search margin, and RF shift coordinate.
+The declarations are always validated against the receiver's supported bounds.
+For **Speakers / mic · short** and **IC-7100 SSB**, the initial declaration uses
+HF-worst spread and 65% selective AM; other profiles start with clean spread
+and AM declarations. Each profile retains its own declaration draft. Invalid
+receiver declarations block new Live listening/transmission, Simulation, and
+explicit loopback starts. An existing monitor or already-admitted restart keeps
+its last validated settings and live plots while the draft error remains visible.
 
-The GUI exposes assumed transmit power, path loss, noise density (or off),
-Baseband and Shift oscillator presets
-(including Off and a shared reference), Doppler/delay spread, selective AM,
-search margin, and Shift frequency. Presets are declared assumptions, not
-measurements or radio controls. Shift frequency affects only oscillator error
-in the model; it does not change the Fast audio carrier or passband. These
-controls apply to Simulation and Live loopback test; ordinary Live audio leaves
-them inactive. The channel preserves modeled delayed tails and runs a scored
-quiet interval for completion.
+Auto resolves a deterministic local waveform from Expected SNR and the declared
+receiver assumptions. Manual timing/modulation/coding retains explicit waveform
+settings. Switching between Live, Simulation, and Live loopback changes effect
+injection and audio ownership, not the transmitted format. No measured channel
+result feeds back into this selection; both peers need matching waveform
+settings.
+
+When Fast is selected in **Live loopback test** mode, ordinary reception stays
+active while idle. Starting a bounded test closes that receive session before
+opening the duplex test; after completion or cancellation, receive-only
+monitoring resumes. Only one session owns the audio device at a time. Switching
+tabs does not stop capture. Switching to another modem stops idle Fast
+monitoring for the shared audio handoff, while an active bounded test can finish.
+
+**Run loopback test** sends the selected nonempty Console text or file through
+the selected profile, device, output routing and encryption. Encrypted tests
+require the selected key. The explicitly started test injects the declared
+oscillator, spread and selective-AM effects into the waveform before physical
+playback and capture. Idle receive-only monitoring in Live loopback mode remains
+clean, like ordinary Live. The complete source is prepared and its encoded
+airtime checked before audio opens.
+The test uses the selected TX volume and keeps the existing **75-second audio**
+and **110-second elapsed-time** maxima, including source preparation. Capture
+must start within **5 seconds**. A source/profile
+combination exceeding the audio budget is rejected, never truncated or replaced
+with a fixture. After the complete emitted source and its canonical quiet tail,
+the receiver has up to **2 seconds of captured audio** to establish physical
+completion. This is a failure deadline, not a synthetic completion signal.
+Playback continues with silence while the receiver finishes, avoiding an audio
+server drain wait. Progress separates audio samples queued for playback from
+samples captured at the receiver; the playback count includes silence and does
+not confirm speaker output. If the shared audio service is still busy,
+handoff waits at most **2 seconds**; cancellation remains available and is
+acknowledged after owned audio work closes. Capture starts before playback once
+the handoff succeeds. Console text and attachment drafts remain intact after
+sending.
+Test status, counters and captured receiver plots are labeled **LOOPBACK TEST**.
+A result enters Signals or Files only after scored physical absence, decoding,
+integrity and exact comparison with the selected source all pass. These rows
+retain **LOOPBACK TEST** provenance and use the ordinary restricted text
+presentation, copy, paste and explicit attachment-save actions. A failed,
+cancelled, timed-out or mismatched test does not publish a completed result.
+Public mode checks integrity but does not authenticate a sender; encrypted mode
+requires successful authentication. The Console drafts remain intact. The last
+test outcome stays visible while idle monitoring resumes, alongside the status
+of the current audio capture. Cancel stops the bounded test without manufacturing
+a completed reception; loopback-mode monitoring then resumes if Fast remains
+selected.
+
+Transmit power, path loss, and receiver noise density (or Off) remain Simulation
+link-budget controls. They are separate from the Console receiver declarations.
+Shift frequency is an RF coordinate used for oscillator bounds and test
+injection; it never changes the Fast audio carrier or passband. The declarations
+and injection have different jobs:
+
+- Transmit power, path loss and receiver noise apply only in software
+  Simulation. Signal samples use normalized PCM units: transmit power and path
+  loss determine the equivalent received level relative to separately added
+  receiver noise. They do not turn down playback at the DAC. Simulation noise
+  is added at the modeled receiver input, so common receive gain does not change
+  the modeled link ratio.
+- In Live loopback mode, transmit power, path loss and noise are disabled and
+  retained. They do not change physical transmit audio or captured receiver
+  input. An explicitly started loopback test copies the selected oscillator,
+  spread and selective-AM effects into the test waveform before playback; the
+  copied search margin is fixed at one and is not an injected impairment. Plots
+  continue to show actual captured audio.
+- Live loopback uses the selected TX volume, like ordinary transmission. It
+  does not change the system mixer or apply an automatic gain adjustment.
+
+Simulation preserves modeled delayed tails and runs a scored quiet interval for
+completion.
+Changing a channel profile or declaration revalidates the receiver envelope and
+deterministic Auto profile. Unsupported receiver bounds disable new listening
+and transmit actions while keeping declarations editable. Separately invalid
+test-channel or link-budget settings disable Simulation and explicit loopback;
+they do not insert effects into ordinary Live PCM. Diagnostics report the
+required frequency range, available sampled band, and oscillator/channel
+allowances.
 It reuses native spread and selective-AM kernels without using the Robust
 receiver. A loopback pass requires physical absence, integrity verification and
-an exact diagnostic-message comparison. An audio/time limit, capture gap or
+exact reception of the selected text bytes or file bytes and filename. An audio/time limit, capture gap or
 early receiver end is incomplete. A cable test exercises that local audio path
 with synthetic propagation effects; it does not establish RF propagation or
 transceiver qualification. See the [current measured outcomes and limits](fast-radio-capacity.md#propagation-and-differential-carrier-qualification).
+
+The opt-in native FLTK check `build/dev/test_fltk_adapter --fast-live-loopback`
+requires the connected physical cable and an available display. It exercises
+the actual button, received Signals, copy, encrypted text, attachment saving,
+and live plots across tab changes. It is not part of unattended CTest. The
+`gui_fast_loopback` regression exercises the shared Application with mocked
+audio hardware and the production modem; it is not physical-cable evidence.
 
 The bounded native probe runs the ordered editable manual cases, including
 encryption, exact attachment comparison and scored physical completion:
@@ -107,7 +186,7 @@ cmake --build build/dev --target fast_channel_probe --parallel 4
 python3 tools/fast_manual_cases.py --list
 python3 tools/fast_manual_cases.py --output local-evidence/fast-channel/manual-simulation.json
 # Physical cable only; select the actual connected playback/capture route:
-python3 tools/fast_manual_cases.py --live --device default --tx-gain 0.1 \
+python3 tools/fast_manual_cases.py --live --device default --tx-gain 1.0 \
   --output local-evidence/fast-channel/manual-live.json
 ```
 
@@ -121,7 +200,7 @@ See the [current measured outcomes and limits](fast-radio-capacity.md#propagatio
 ## Live signal plots
 
 The Fast interface shows waveform, waterfall and constellation plots while
-**Listen** or **Transmit** is active. Each plot identifies TX or RX. The waveform
+receiving, transmitting or testing. Each plot identifies TX or RX. The waveform
 uses the latest 1,024 actual PCM samples with a fixed ±1 scale; its caption gives
 the visible time span and RMS audio level in dBFS, with the sample rate on wider
 plots. **CLIPPING** indicates recent samples reaching full scale. While waiting
@@ -129,6 +208,20 @@ for synchronization, the tracking readout also shows input RMS and peak levels.
 The waterfall uses a 512-point Hann-window
 FFT of recent audio, with frequency increasing left to right, newest rows at the
 top, and amplitude in dBFS. These are audio measurements, not RF power or SNR.
+During ordinary Live reception and Live loopback mode, the waveform and
+waterfall follow captured PCM independently of receiver acquisition and decoding,
+including before and after a bounded test. Constellation age follows the sample
+time of its receiver observations; **Last** means new audio is arriving while
+the displayed points are older. During ordinary Live reception, the readout is
+the current input level in dBFS, not SNR. During and after an eligible loopback
+test, it can show the last loopback signal-SNR estimate, with its reference-band
+width and capture age. That estimate compares received payload energy near
+decoded receiver progress with a valid microphone-noise baseline recorded
+before playback; quiet post-test input does not produce a low or negative SNR.
+These displays are measurements, not a guarantee of successful reception.
+Loopback plots show the captured input, including the physical audio path, rather
+than the generated playback waveform. Input I/Q and equalized constellation
+points remain receiver observations and can lag while receiver work is pending.
 
 Before the first received payload symbols, the constellation panel shows
 **RX input I/Q**, labeled **Unsynchronized**. These are up to 512 actual
@@ -143,8 +236,8 @@ transmitted mapper values. Training and pilots are excluded from these payload
 plots. No ideal constellation or hard decisions are substituted for RX samples.
 
 For two-instance speaker/microphone checks, select **Speakers / microphone** at
-both ends, start **Listen** before transmitting, and use matching constellation,
-coding and encryption settings. An elevated waterfall with an **Unsynchronized**
+both ends, leave **Live audio** selected and verify **Live RX** before transmitting.
+Use matching constellation, coding and encryption settings. An elevated waterfall with an **Unsynchronized**
 input cloud means audio is being captured but Fast has not acquired it. Check
 the selected input, audio levels and matching settings; the waterfall alone
 cannot establish that the channel preserves the waveform well enough to decode.
@@ -152,10 +245,14 @@ cannot establish that the channel preserves the waveform well enough to decode.
 Display snapshots publish at most ten times a second, and the waterfall retains
 at most 96 rows. A new transfer resets the plots; stopping retains the last
 capture, labelled **Retained**. **Stalled** marks an active session with no new
-display frame for more than two seconds. Switching modem interfaces preserves
+captured PCM for more than two seconds, even if decoder diagnostics keep changing. Switching modem interfaces preserves
 an active transfer and its plots. Plotting uses independent bounded storage;
 samples, display failures and GUI timing never feed modem decisions or physical
 completion. Both native backends render the same immutable plot snapshots.
+
+Fast uses an 800-logical-pixel default window height and a 720-logical-pixel
+minimum. Console, Simulation and Modem details share the compact layout at
+smaller heights; profile, audio and action controls remain accessible across tabs.
 
 ## Channel profiles
 
@@ -172,7 +269,8 @@ and one full marker every 16 intervals**. It sends 17,647.0588 symbols/s with
 output amplitude is 0.30. The historical trial below used both headphone
 outputs; current routing defaults to left mono.
 
-This clean-cable operating point completed an exact live **50,000,000-byte
+On 20 September 2026, the earlier four-pilot version of this clean-cable
+operating point completed an exact live **50,000,000-byte
 transfer in 1,290.664 seconds (21m 30.664s)**, including device startup and an
 eight-second real silence tail. The signal occupied 1,281.087 seconds; all
 6,980 LDPC frames converged and the complete source SHA-256 matched. The output
@@ -181,8 +279,9 @@ maximum capture backlog of 0.304 seconds, below that cable profile's one-second 
 **One successful whole-file trial does not establish an 80% success rate.**
 Earlier 1,048,576-QAM / LDPC 9/10 development trials also transferred 5 MB
 exactly; one used 139.043 seconds of signal with all 696 LDPC frames converged.
-Those earlier trials used a shorter preamble. Current estimates include the
-2,048-symbol preamble described below. The
+Those earlier 5 MB trials used a shorter preamble. Current capacity single-carrier
+estimates include 2,048 training symbols and sixteen-symbol pilot words; the
+historical timings do not qualify this revised geometry. The
 [capacity cable study](fast-capacity-live-study.md) records wire revisions,
 measured trials, failures and limits.
 
@@ -208,12 +307,19 @@ to reproduce the earlier preset; matching QAM is required at both peers.
 The GUI channel selector offers **Audio cable · QAM / LDPC**, **IC-7100 SSB ·
 2.4 kHz**, **IC-7100 FM · voice band**, **Speakers / microphone**, and
 **Speakers / mic · short**. The separate [short acoustic profile](fast-acoustic-short.md)
-uses smaller coding blocks and less training, taking about 11.8 seconds for the
-tested 2.5 KiB attachment at an explicitly selected 3 dB expected SNR. Its general
-preset search targets approximately ten-second minimum transfers, allowing 12.5 seconds
-for a substantial throughput gain. Small LDPC gives about 9.8 seconds at −6 dB
-and 12.3 seconds at 0 dB; larger messages take longer. The short profile is the
-initial GUI selection at −6 dB expected SNR.
+uses smaller fixed coding blocks. Its historical preset search compared 10.5-
+and 12.5-second transfer targets; these remain family-selection heuristics,
+not latency bounds. The current compact single-carrier preset applies a
+selected-band fade cap and can take substantially longer. Single-carrier
+choices retain the full 2,048-symbol
+capacity training and sixteen pilots after each group of up to 32 payload
+symbols. The short profile is the initial GUI selection at −6 dB expected SNR.
+Its current single-carrier preset is QPSK at about 231 baud, with a 1,944-bit
+rate-2/3 LDPC frame and depth one; it targets a 12 dB selected-band margin. The
+FEC rate is part of the matching peer configuration. Use the actual-source
+airtime estimate; the short `fox` estimate is about 32.67 seconds. Older
+short-transfer timings used different training, pilot and fade-margin geometry.
+See the [short-profile tradeoff and test limits](fast-acoustic-short.md).
 All four classic presets remain available through the CLI with
 `--format classic`.
 
@@ -222,7 +328,7 @@ cycle, depth 1, and 16 known pilots per 16 payload symbols**. The selected
 DVB-S2 short-table code is labeled **1/2**, but its actual information size is
 **7,200 bits**: the information fraction is 4/9 before outer coding and source
 protection. The FM default uses 64-QAM and four rate-3/4 frames per cycle,
-with four pilots per 64 payload
+with sixteen pilots per 64 payload
 symbols. Both use 10% RRC rolloff, amplitude 0.30, and a 64-symbol marker
 every four intervals, after a 2,048-symbol preamble. SSB capacity uses the v3
 profile identity for its sixteen-symbol pilot sequence. This is a matching
@@ -230,23 +336,69 @@ one-way transmission format; receiver-local channel fitting does not negotiate
 or change the transmitted format. The [radio study](fast-radio-capacity.md)
 records throughput, spectrum, sampled tests and the limits of qualification.
 
-The native receiver facade with validated codec feedback selects the
-**resilient-ssb** backend for the exact 48 kHz standard geometry above and for
-the explicit 48 kHz, 4,096-QAM, 64,800-bit LDPC 8/9, depth-1 variant with the
-same carrier, baud, rolloff and marker/pilot cadence. Other valid SSB settings
-use the **standard-ssb** receiver and are labeled accordingly. Receiver
-selection is local; it is not another wire format. This dispatch description
-does not qualify all manual settings or imply that the high-order variant is
-the resilient default.
+Every capacity single-carrier profile transmits the same length of public
+training and sixteen-symbol pilot words, while baud, constellation, coding,
+marker geometry and pilot spacing remain matching local settings. The native
+receiver facade with validated codec feedback uses the **resilient-ssb** model
+directly for the exact 48 kHz standard geometry above and the explicit 48 kHz,
+4,096-QAM, 64,800-bit LDPC 8/9, depth-1 variant with the same carrier, baud,
+rolloff and marker/pilot cadence.
+
+Other representable capacity single-carrier profiles admit competing local
+delay/Doppler-model and coherent startup fits when they use **48 kHz audio,
+800–2,500 symbols/s, QPSK or 16-QAM, rolloff at least 0.10, and at most 64 data
+symbols between pilot words**, with room for the translated band and acquisition
+offset allowance. Startup reports **single-carrier-acquisition**; acquisition
+evidence selects one continuing receiver. The model reports **resilient-ssb**
+for SSB or **delay-doppler-sc** otherwise. The coherent path retains independent
+public-marker or fresh-pilot evidence before continuing alone.
+
+Wideband, extremely slow, high-order and other settings outside that bounded
+model domain use the trained, pilot-supervised coherent receiver, reported as
+**standard-ssb** or **standard-fast**. OFDM retains its separate receiver.
+Receiver selection does not negotiate, alter the transmitted waveform, or
+require a return channel. Shared training is not a claim that every profile
+supports the manual HF propagation conditions; neither this dispatch policy
+nor the explicit high-order variant qualifies all manual settings.
+
+For the wide **wire** profile, bounded receiver-local recovery can run after
+ordinary acquisition fails. A 64-symbol public short carrier-frequency-offset
+(CFO) unwrap resolves the long-fit ±5.6 Hz ambiguity. A candidate fits 21
+feedforward and 24 feedback taps from the public preamble, then continues only
+when independent 128-marker sign prediction and measured feedforward
+presence/quiet checks pass. Feedback energy cannot prove its own signal presence.
+This is a local receiver choice, with no waveform or profile adaptation and no
+transmitter negotiation.
+
+An actual-button physical cable run at **Auto 25 dB** used the wire profile's
+256-QAM, LDPC 7/9, depth 4, 17,647.0588 baud, and nominal 300–18,300 Hz band.
+With HF Best (0.5 ms / 0.1 Hz), crystal baseband and IC-7100 shift at 30 MHz, it
+received exact public `fox` at 100% selected TX volume in about 10.58 seconds
+overall. The result used the receiver-only fallback above; it did not alter the
+waveform or supply channel truth to the receiver. The streaming path passed chunk-boundary
+and single-erasure regressions, and rejected twelve preamble-only
+repetitions. These checks bound self-acquisition and guard behavior for this
+case, not communication reliability.
+
+The corresponding **Auto 36 dB**, 4096-QAM HF Best case still failed all four
+bootstrap LDPC frames after lock. A bounded diagnostic localized this failure to
+error propagation through feedback decisions; correct-symbol feedback recovered
+the frame only as a diagnostic control, not as a usable receiver method. Keep
+this higher-order case unqualified. A dense SSB inverse at wire's 0.02 rolloff
+needs about ±320 symbols of support, exceeding the 384-row bound, and was
+rejected. See [current Fast validation](validation.md#fast-live-channel-and-cable-receiver-follow-up--12-november-2026)
+for the evidence and its limits.
 
 **Expected SNR** uses original-band assumptions: cable 65 dB over 18 kHz,
 acoustic 13 dB over 17.5 kHz, and radio 20 dB over 2.4 kHz. Each menu extends
 40 dB downward, with notable 3/10 dB steps. Weak settings narrow bandwidth
 and reduce rate; the lowest acoustic settings switch from OFDM to a narrow
 single carrier. The menu neither measures nor negotiates SNR. Both ends need
-the same settings. The SSB nominal 20 dB entry is labeled **Resilient standard**;
-other SSB entries are **Modeled** alternatives using long LDPC frames. They do
-not automatically adapt the standard transmission to receiver feedback.
+the same settings. SSB's nominal 20 dB choice retains the short QPSK standard;
+other SSB choices use long LDPC frames. Every capacity single-carrier choice
+retains public training and recurring pilot words. Estimated rates are not
+measured throughput or receiver qualification, and presets do not adapt the
+transmission to receiver feedback.
 See [SNR presets](fast-snr-presets.md) for the noise model,
 synchronization limits and qualification status.
 
@@ -263,7 +415,7 @@ in powers of four, with LDPC rates 1/2, 2/3, 3/4, 7/9, 8/9 and 9/10. This includ
 1, 4, 8 and 16; the CLI accepts every depth from 1 through 16. A depth is the
 number of LDPC frames in one locally fixed cycle. Marker spacing and pilot
 spacing are additional matching CLI settings. There is no over-air negotiation,
-automatic fallback, or adaptive bit loading.
+automatic transmitted-format fallback, or adaptive bit loading.
 
 The CLI's `--profile wire --format classic` preserves the earlier cable preset: 256-APSK,
 convolutional 7/8, RS(128,120), depth 62, amplitude 0.35, and 20% rolloff.
@@ -319,18 +471,10 @@ percentage counts generated samples and stays below 100% until playback drains.
 Device queues can make audible playback lag the producer. A file changed after
 inspection can invalidate its estimate.
 
-Calculated public-source airtimes for the current cable default, including its
-2,048-symbol preamble and 6.25-second silence, are:
-
-| Source size | Airtime | File-byte throughput |
-| --- | ---: | ---: |
-| 60 bytes | 7.871 s | Startup/end dominated |
-| 100,000 bytes | 10.074 s | 79.41 kbit/s |
-| 5,000,000 bytes | 135.597 s | 294.99 kbit/s |
-| 50,000,000 bytes | 1,287.337 s, or 21m 27.337s | 310.72 kbit/s |
-
-The encrypted 50 MB estimate is 1,288.071 seconds. These are duration estimates,
-not reliability measurements. At the preserved classic cable preset, the
+Use `fast-info --profile wire --estimate-bytes N` for the selected build's
+cable estimate. The sixteen-symbol pilot words change recurring airtime from
+the earlier four-pilot format; earlier cable estimates are not current-format
+throughput measurements. At the preserved classic cable preset, the
 public 50 MB estimate remains 7,275.599 seconds, about 2h 01m; encryption raises
 it to 7,882.072 seconds. Classic throughput is retained as a reference, rather
 than a physical capacity limit.
@@ -369,28 +513,33 @@ profiles. Allocation and boundaries follow matching local settings. Attachment
 filenames belong to the post-completion source interpretation, never modem
 framing. Source completion flags never choose a modem boundary.
 
-The cable capacity reference starts with **2,048 known QPSK training symbols**.
-A full 64-symbol public QPSK marker precedes interval zero and every 16th interval
+All capacity single-carrier profiles start with **2,048 known QPSK training symbols**
+and use **sixteen-symbol known QPSK pilot words**. The cable reference's
+full 64-symbol public QPSK marker precedes interval zero and every 16th interval
 thereafter by default. Its length is preserved; the frequency of insertion is
-reduced. Four known QPSK pilots follow every group of up to 256 data symbols.
+reduced. Sixteen known QPSK pilots follow every group of up to 256 data symbols.
 At the default 22-bit QAM order, each interval has 94 data symbols and one
-four-symbol pilot group; the last mapper symbol has 20 fixed fill bits outside
-the 2,048-bit codec span. An interval therefore uses 98 symbols without a
-marker or 162 with one. The 2% RRC pulse has a 640-symbol finite span to reduce
+sixteen-symbol pilot group; the last mapper symbol has 20 fixed fill bits outside
+the 2,048-bit codec span. An interval therefore uses 110 symbols without a
+marker or 174 with one. The 2% RRC pulse has a 640-symbol finite span to reduce
 filter truncation error in dense QAM.
 
 The SSB standard keeps that 2,048-symbol preamble and the 64-symbol marker,
 inserting the marker every four intervals and sixteen known pilots after each
-group of up to sixteen data symbols. Short acoustic formats have their own
-training geometry; see [short acoustic transfers](fast-acoustic-short.md).
+group of up to sixteen data symbols. Compact single-carrier acoustic formats
+use the same capacity training and sixteen pilots after groups of up to 32
+payload symbols; their 192-symbol marker retains 64 fit symbols and 128 held-out
+verification symbols. Short OFDM retains its separate training geometry; see
+[short acoustic transfers](fast-acoustic-short.md).
 
 Square QAM uses independent Gray-labelled amplitude axes and unit mean symbol
 energy. Demapping computes bit likelihoods from nearest alternative axis levels,
-without scanning millions of constellation points. Standard single-carrier
+without scanning millions of constellation points. Coherent single-carrier
 reception uses longer fractional interpolation, a 21-tap fractionally spaced equalizer,
 training-based timing/phase/frequency fits and pilot/decision tracking. The
-resilient SSB backend instead uses the native learned-channel forward model
-and bounded interval inversion. These SSB LDPC matrices are from DVB-S2;
+bounded delay/Doppler backend uses the native learned-channel forward model
+and interval inversion within the admission limits described above. These SSB
+LDPC matrices are from DVB-S2;
 this application is not a DVB wire protocol.
 
 ## Capacity coding and source bytes
@@ -484,11 +633,14 @@ the application does not execute them.
 
 Encrypted capacity uses `DataPump/fast/capacity/v2/serpent-aes-v4/...`
 domains. SSB capacity binds the `datapump/fast/v3` profile context; other
-capacity formats retain `datapump/fast/v2`. The SSB context also binds its
-sixteen-symbol pilot count and, for the short default, its 16,200-bit frame
-geometry. The v3 profile change does not rename the capacity cipher domains.
+capacity single-carrier formats bind `datapump/fast/v4`, including the explicit
+sixteen-symbol pilot count. SSB v3 already binds that count and, for its short
+default, the 16,200-bit frame geometry. OFDM retains `datapump/fast/v2` with its
+`/ofdm/v3` subdomain and separate training geometry. These profile contexts do
+not rename the capacity cipher domains. Both peers need the updated v4
+single-carrier format; SSB v3, OFDM and classic identities are unchanged.
 Encrypted classic uses `DataPump/fast/v1/serpent-aes-v4/...` and its classic
-profile context. Public
+`datapump/fast/v1` profile context. Public
 checksum domains remain separate. The cipher layers derive their keys from
 separate Serpent and AES roots. Bootstrap authentication XORs the full
 HMAC-SHA256 outputs under independently derived lane keys. The same two-lane
@@ -522,9 +674,13 @@ Failed marker groups retain their timed positions as erasures. Trailing absent
 intervals are held as a bounded count and delivered only if a later marker
 resumes the stream, avoiding fictitious source data during end silence.
 A capture overrun with unknown missing time fails the transfer. Capture runs
-separately from DSP/FEC with a bounded queue: eight seconds for the selected
-48 kHz dense-pilot SSB geometries, four seconds for acoustic OFDM, and one
-second for other single-carrier profiles. The GUI and cable probe share this
+separately from DSP/FEC with a bounded queue: eight seconds for profiles
+admitted to the delay/Doppler model, including competing startup acquisition,
+four seconds for acoustic OFDM, and one second for other single-carrier
+profiles. Full-size wire LDPC adds half a second per locally selected frame:
+three seconds at depth four, bounded at nine seconds for depth sixteen. This
+absorbs the observed approximately two-second four-frame decode burst on a
+damaged cable signal. The GUI and cable probe share this
 queue policy. Decoding near its iteration limit requires measured scheduling
 headroom; a larger queue does not establish sustained real-time capacity.
 There is no automatic retransmission, arbitrary mid-file join or recovery

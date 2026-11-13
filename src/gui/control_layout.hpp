@@ -73,7 +73,8 @@ inline Rect overlay_control_rect(const OverlayPlacement& p,int width,int height)
 // meaning of a slot or independently reserves space for application controls.
 inline ControlLayout control_layout(const Control& c,const FieldState& state,int width,int height,
                                     std::span<const Control> controls=console_screen(),
-                                    bool transmit_scope_visible=true,bool force_transmit_visible=false) {
+                                    bool transmit_scope_visible=true,bool force_transmit_visible=false,
+                                    Rect page_viewport={}) {
     if(c.surface)return control_content_layout(c,state,overlay_control_rect(c.placement,width,height));
     const DesktopLayout desktop(width,height,transmit_scope_visible,force_transmit_visible);
     ControlLayout out;
@@ -100,7 +101,7 @@ inline ControlLayout control_layout(const Control& c,const FieldState& state,int
             if(matches(sibling))found=true;
             else if(!found)before+=sibling.stretch;
         }
-        const auto page=desktop[Slot::page];
+        const auto page=page_viewport.w>0&&page_viewport.h>0?page_viewport:desktop[Slot::page];
         if(!total){total=c.stretch;before=0;}
         const int available=std::max(0,page.w-16);
         // A zero stretch reserves no width, including an entirely empty row.

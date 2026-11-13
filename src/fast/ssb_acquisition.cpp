@@ -15,7 +15,6 @@ namespace datapump::fast::detail {
 namespace {
 
 using Complex = std::complex<double>;
-namespace fft = modem::detail::search_fft;
 constexpr std::size_t word_symbols = 64;
 constexpr std::size_t periodic_size = word_symbols * SsbPulseCache::samples_per_symbol;
 constexpr unsigned maximum_training_words = 26;
@@ -55,16 +54,15 @@ Complex inner(std::span<const Complex> left, std::span<const Complex> right) {
 // A cached filtered pulse folded against the exactly repeating public word.
 // The tick moment carries the filter's effect on clock and frequency slopes.
 struct PeriodicWave {
-    std::vector<Complex> values;
-    std::vector<Complex> moments;
+    SsbPeriodicWave grid;
 
     std::pair<Complex, Complex> sample(double symbol) const {
         const auto p = wrap(symbol, word_symbols) * SsbPulseCache::samples_per_symbol;
         const auto i = static_cast<std::size_t>(p) % periodic_size;
         const auto f = p - std::floor(p);
         const auto j = (i + 1) % periodic_size;
-        return {values[i] + f * (values[j] - values[i]),
-                moments[i] + f * (moments[j] - moments[i])};
+        return {grid.values[i] + f * (grid.values[j] - grid.values[i]),
+                grid.moments[i] + f * (grid.moments[j] - grid.moments[i])};
     }
 
     std::pair<Complex, Complex> slope(double symbol) const {
@@ -76,39 +74,18 @@ struct PeriodicWave {
     }
 
     std::size_t workspace_bytes() const {
-        return (values.capacity() + moments.capacity()) * sizeof(Complex);
+        return (grid.values.capacity() + grid.moments.capacity()) * sizeof(Complex);
     }
 };
 
-struct PeriodicBuilder {
-    fft::DoublePlan plan;
-    std::vector<Complex> word_spectrum;
-    std::stop_token stop;
-
-    explicit PeriodicBuilder(const SingleCarrierSchedule& schedule, std::stop_token token)
-        : plan(periodic_size, token), word_spectrum(periodic_size), stop(token) {
-        for (std::size_t i = 0; i < word_symbols; ++i)
-            word_spectrum[i * SsbPulseCache::samples_per_symbol] = schedule.training_symbol(i);
-        fft::fft(word_spectrum, false, plan, stop);
-    }
-
-    PeriodicWave build(const SsbPulseCache& cache) const {
-        PeriodicWave result{std::vector<Complex>(periodic_size), std::vector<Complex>(periodic_size)};
-        const auto half = static_cast<int>(std::floor(cache.support_symbols() * SsbPulseCache::samples_per_symbol));
-        for (int i = -half; i <= half; ++i) {
-            const auto k = cache.kernel(double(i) / SsbPulseCache::samples_per_symbol);
-            const auto index = static_cast<std::size_t>((i % int(periodic_size) + int(periodic_size)) % int(periodic_size));
-            result.values[index] += k.value;
-            result.moments[index] += k.tap_moment;
-        }
-        for (auto* grid : {&result.values, &result.moments}) {
-            fft::fft(*grid, false, plan, stop);
-            for (std::size_t i = 0; i < grid->size(); ++i) (*grid)[i] *= word_spectrum[i];
-            fft::fft(*grid, true, plan, stop);
-        }
-        return result;
-    }
-};
+std::array<Complex, word_symbols> public_training_word(const Profile& profile) {
+    const SingleCarrierSchedule schedule(profile);
+    if (!profile.capacity_mode || schedule.training_count != 2048)
+        throw std::invalid_argument("Fast SSB acquisition requires the capacity preamble and marker");
+    std::array<Complex, word_symbols> result{};
+    for (std::size_t i = 0; i < word_symbols; ++i) result[i] = schedule.training_symbol(i);
+    return result;
+}
 
 struct Atom {
     double delay;
@@ -121,6 +98,7 @@ struct Atom {
 struct FitSession {
     const Profile& profile;
     const SsbPulse& pulse;
+    const SsbPeriodicPulse& periodic;
     const SsbAcquisitionRequest& bounds;
     const SsbAcquisitionView view;
     const std::size_t train_index;
@@ -132,22 +110,22 @@ struct FitSession {
     const double word_ticks;
     const double train_energy;
     std::stop_token stop;
-    PeriodicBuilder builder;
     SsbFoldedPreamble proposal;
     double clock = 0.;
     std::vector<Complex> residual, work;
     std::vector<Atom> atoms;
 
-    FitSession(const Profile& p, const SsbPulse& pulse, const SsbAcquisitionRequest& request,
+    FitSession(const Profile& p, const SsbPulse& pulse, const SsbPeriodicPulse& periodic,
+               const SsbAcquisitionRequest& request,
                SsbAcquisitionView input, std::size_t first, std::size_t count,
                std::span<const Complex> reference, std::stop_token token)
-        : profile(p), pulse(pulse), bounds(request), view(input), train_index(first),
+        : profile(p), pulse(pulse), periodic(periodic), bounds(request), view(input), train_index(first),
           observed(input.samples.subspan(first, count)),
           reference_tick(input.first_center_input_tick + (first + count / 2) * input.stride),
           first_relative(tick_difference(request.training_first_center_tick, reference_tick)),
           beta(p.symbol_rate / p.sample_rate), radius(single_carrier_pulse_radius(p)),
           word_ticks(word_symbols / beta), train_energy(energy(observed)), stop(token),
-          builder(SingleCarrierSchedule(p), token), proposal(reference, p.symbol_rate * 5.5, request.max_abs_doppler_hz),
+          proposal(reference, p.symbol_rate * 5.5, request.max_abs_doppler_hz),
           residual(observed.begin(), observed.end()), work(count) {
         atoms.reserve(DelayDopplerFit::maximum_atoms);
     }
@@ -184,8 +162,7 @@ struct FitSession {
     }
 
     void refresh(Atom& a) {
-        const auto cache = pulse.make_cache(clock, a.frequency, stop);
-        a.periodic = builder.build(cache);
+        pulse.make_periodic(periodic, clock, a.frequency, a.periodic.grid, stop);
         a.column.resize(observed.size());
         generate(a, a.delay, a.frequency, clock, a.column);
     }
@@ -444,8 +421,8 @@ struct FitSession {
     }
 
     std::size_t workspace_bytes() const {
-        auto bytes = pulse.workspace_bytes() + proposal.workspace_bytes() + builder.plan.working_bytes() +
-            (builder.word_spectrum.capacity() + residual.capacity() + work.capacity()) * sizeof(Complex) +
+        auto bytes = pulse.workspace_bytes() + proposal.workspace_bytes() +
+            (residual.capacity() + work.capacity()) * sizeof(Complex) +
             atoms.capacity() * sizeof(Atom);
         for (const auto& a : atoms) bytes += a.periodic.workspace_bytes() + a.column.capacity() * sizeof(Complex);
         return bytes;
@@ -680,12 +657,12 @@ std::optional<std::vector<Complex>> regrid_ssb_preamble(SsbAcquisitionView view,
 }
 
 DelayDopplerFit::DelayDopplerFit(const Profile& profile, const SsbFrontendGeometry& frontend)
-    : profile_(profile), stride_(frontend.decimation), pulse_(profile, frontend) {
-    const SingleCarrierSchedule schedule(profile);
-    if (!profile.capacity_mode || schedule.training_count != 2048 || schedule.marker_span != word_symbols || !stride_)
+    : profile_(profile), stride_(frontend.decimation), pulse_(profile, frontend),
+      periodic_(pulse_.prepare_periodic(public_training_word(profile))) {
+    if (!stride_)
         throw std::invalid_argument("Fast SSB acquisition requires the capacity preamble and marker");
-    const PeriodicBuilder builder(schedule, {});
-    const auto wave = builder.build(pulse_.make_cache(0., 0.));
+    PeriodicWave wave;
+    pulse_.make_periodic(periodic_, 0., 0., wave.grid);
     const auto radius = single_carrier_pulse_radius(profile);
     for (std::size_t i = 0; i < proposal_word_.size(); ++i)
         proposal_word_[i] = wave.sample(double(i) / 5.5 - radius).first;
@@ -701,13 +678,43 @@ SsbAcquisitionTiming DelayDopplerFit::timing(const SsbAcquisitionRequest& bounds
     const auto ticks_per_symbol = profile_.sample_rate / profile_.symbol_rate;
     const auto radius = single_carrier_pulse_radius(profile_);
     const auto support = pulse_.support_symbols(bounds.max_abs_clock_ratio);
-    const auto drift = (schedule.training_count + radius + word_symbols + 20.) * ticks_per_symbol *
+    const auto drift = (schedule.training_count + radius + schedule.marker_span + 20.) * ticks_per_symbol *
         bounds.max_abs_clock_ratio;
     const auto first = (radius + support) * ticks_per_symbol + bounds.max_excess_delay_ticks + drift;
     const auto last = (schedule.training_count - 3 * word_symbols + radius -
         bounds.training_words * word_symbols) * ticks_per_symbol - drift - stride_;
-    const auto end = (schedule.training_count + radius + word_symbols + 20.) * ticks_per_symbol + drift + stride_;
+    const auto end = (schedule.training_count + radius + schedule.marker_span + 20.) * ticks_per_symbol + drift + stride_;
     return {first, last, end};
+}
+
+std::size_t DelayDopplerFit::training_centers(const SsbAcquisitionRequest& bounds) const {
+    const auto word_ticks = word_symbols * profile_.sample_rate / profile_.symbol_rate;
+    const auto centers = static_cast<std::size_t>(std::ceil(bounds.training_words * word_ticks / stride_)) + 1;
+    if (centers > maximum_training_centers)
+        throw std::invalid_argument("Fast SSB acquisition exceeds its native center budget");
+    return centers;
+}
+
+std::size_t DelayDopplerFit::fit_workspace_bound(const SsbAcquisitionRequest& bounds) const {
+    (void)timing(bounds);
+    const auto centers = training_centers(bounds);
+    constexpr auto complex_bytes = sizeof(Complex);
+    constexpr auto directions = 3 * maximum_atoms;
+    constexpr auto max_epochs = 6 * 33; // Six anchors, at most 32 complete word periods per anchor.
+    const auto cache = pulse_.cache_storage_bound(bounds.max_abs_clock_ratio);
+    const auto marker = SingleCarrierSchedule(profile_).marker_span;
+    const auto marker_arrays = maximum_marker_rows * (marker + maximum_marker_guard) +
+        maximum_marker_guard * maximum_marker_guard + 8 * (maximum_marker_rows + maximum_marker_guard);
+    const auto atom_arrays = 2 * maximum_atoms * (2 * periodic_size + centers);
+    const auto recent_arrays = directions * (centers + directions + 2);
+    const auto train_arrays = 4 * centers + bounds.training_words * ssb_proposal_word_samples;
+    const auto epoch_bytes = 2 * max_epochs * (sizeof(PhysicalEpoch) +
+        2 * maximum_atoms * (sizeof(SsbAcquisitionAtom) + sizeof(std::size_t)) + 4 * sizeof(double));
+    // Include both model banks and verification storage together. The small
+    // separate allowance covers proposal plans, per-fit object state and
+    // bounded vector/deque metadata, rather than assuming easy-path reuse.
+    return complex_bytes * (atom_arrays + recent_arrays + train_arrays + marker_arrays) +
+        maximum_atoms * cache.retained + cache.temporary + epoch_bytes + 256 * 1024;
 }
 
 std::optional<SsbAcquisitionLock> DelayDopplerFit::fit(SsbAcquisitionView view, const SsbAcquisitionRequest& request,
@@ -732,13 +739,11 @@ std::optional<SsbAcquisitionLock> DelayDopplerFit::fit(SsbAcquisitionView view, 
     if (offset % view.stride) throw std::invalid_argument("Fast SSB training start is not a frontend center");
     if (stop.stop_requested()) return decline(SsbAcquisitionDiagnostics::Status::cancelled);
     const auto first = offset / view.stride;
-    const auto count = static_cast<std::size_t>(std::ceil(request.training_words * word_ticks / view.stride)) + 1;
-    if (count > maximum_training_centers)
-        throw std::invalid_argument("Fast SSB acquisition exceeds its native center budget");
+    const auto count = training_centers(request);
     if (first >= view.samples.size() || count > view.samples.size() - first)
         return decline(SsbAcquisitionDiagnostics::Status::insufficient_support);
     try {
-        FitSession fit(profile_, pulse_, request, view, first, count, proposal_word_, stop);
+        FitSession fit(profile_, pulse_, periodic_, request, view, first, count, proposal_word_, stop);
         if (!(fit.train_energy > 0. && std::isfinite(fit.train_energy)) || !fit.learn())
             return decline(stop.stop_requested() ? SsbAcquisitionDiagnostics::Status::cancelled :
                 SsbAcquisitionDiagnostics::Status::no_periodic_model);

@@ -1,14 +1,19 @@
+#include "datapump/fast/compression.hpp"
 #include "datapump/fast/modem.hpp"
 #include "datapump/fast/preset.hpp"
+#include "datapump/fast/simulation.hpp"
 #include "../src/fast/filter_history.hpp"
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <numbers>
+#include <optional>
 #include <random>
 #include <stdexcept>
+#include <string_view>
 
 using namespace datapump::fast;
 namespace {
@@ -106,7 +111,7 @@ void cubic_history_reference() {
 }
 void matched_filter_reference(Profile p) {
     // An independent linear convolution checks startup and three history
-    // wraps, including the default Fast profile used by continuous browser RX.
+    // wraps on the classic and clean compact full-rate paths.
     // Reference only the public RRC primitive; do not reuse receiver indexing.
     using Complex=std::complex<double>;
     const auto sps=static_cast<double>(p.sample_rate)/p.symbol_rate;
@@ -151,8 +156,123 @@ void matched_filter_reference(Profile p) {
         require(rx.workspace_bytes()==workspace,"FIR history grows with stream");
     }
 }
+
+constexpr std::array<std::uint8_t,3> wire_text{'f','o','x'};
+struct WireFixture {
+    std::vector<float> pcm;
+    std::size_t quiet_start=0;
+    std::size_t intervals=0;
+};
+WireFixture wire_fixture(const Profile& profile,const SimulationSettings& settings,bool payload) {
+    std::optional<StreamEncoder> encoder;
+    if(payload) {
+        auto xz=prepare_xz_source(byte_source(datapump::Bytes(wire_text.begin(),wire_text.end())));
+        encoder.emplace(testing::deterministic_encoder(profile,std::nullopt,
+            byte_source(std::move(xz.encoded)),123,SourceEncoding::xz));
+    }
+    Transmitter tx(profile,[&](auto bits){return encoder&&encoder->next_interval(bits);});
+    SimulationChannel channel(profile,settings,[&](auto out){return tx.read_analytic(out);},ChannelPurpose::live_playback);
+    constexpr std::size_t lead=173;
+    WireFixture fixture;
+    fixture.pcm.resize(lead,0);
+    std::array<float,4096> block{};
+    while(const auto size=channel.read(block)) {
+        fixture.pcm.insert(fixture.pcm.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(size));
+        require(fixture.pcm.size()<20*profile.sample_rate,"wire fixture exceeds its observation bound");
+    }
+    require(channel.report().quiet_start_sample.has_value(),"wire fixture did not retain the channel tail");
+    fixture.quiet_start=lead+static_cast<std::size_t>(*channel.report().quiet_start_sample);
+    fixture.intervals=encoder?encoder->intervals_emitted():0;
+    // Physical receive noise is distinct from the noise-free modeled playback.
+    // Use a nonzero quiet tail to test absence scoring after feedback lock.
+    std::mt19937 noise(0x572a51u);
+    for(std::size_t i=fixture.quiet_start;i<fixture.pcm.size();++i)
+        fixture.pcm[i]=.004F*static_cast<float>(static_cast<int>(noise()&65535)-32768)/32768.F;
+    return fixture;
 }
-int main() {try {
+void receive_wire_fixture(const Profile& profile,const WireFixture& fixture,std::size_t chunk,
+                          bool feedback,bool interrupted=false) {
+    StreamDecoder decoder(profile,std::nullopt,1U<<20,SourceEncoding::xz);
+    Receiver receiver(profile,[&](auto bits,bool request){return decoder.push_interval(bits,request);},{},{},{});
+    const auto workspace=receiver.workspace_bytes();
+    const auto began=std::chrono::steady_clock::now();
+    std::size_t at=0;
+    const auto push_to=[&](std::size_t limit) {
+        while(at<limit) {
+            const auto count=std::min(chunk,limit-at);
+            const auto consumed=receiver.consume(std::span(fixture.pcm).subspan(at,count));
+            require(consumed>0&&consumed<=count,"wire fixture receiver stopped processing");
+            at+=consumed;
+        }
+    };
+    push_to(fixture.quiet_start+profile.sample_rate*11/2);
+    require(receiver.progress().acquired&&!receiver.progress().physical_complete&&!decoder.result(),
+            "wire feedback published before six seconds of scored absence");
+    push_to(fixture.pcm.size());
+    receiver.finish();
+    decoder.finish(receiver.progress().physical_complete);
+    const auto state=decoder.snapshot();
+    const auto file=decoder.result();
+    require(receiver.backend_name()==(feedback?"wire-decision-feedback":"standard-fast"),
+            "wire training selected the wrong equalizer");
+    require(state.complete&&file&&!file->is_attachment()&&std::ranges::equal(file->bytes(),wire_text),
+            "wire impairment fixture did not recover exact fox text");
+    require(state.intervals==fixture.intervals&&state.ldpc_frames==8&&state.ldpc_failed_frames==0,
+            "wire impairment fixture changed fixed geometry or lost coding frames");
+    require(receiver.workspace_bytes()==workspace,"wire receiver workspace grew with observation length");
+    std::cout<<"wire mode="<<receiver.backend_name()<<" chunk="<<chunk
+             <<" interrupted="<<interrupted<<" input_seconds="<<double(at)/profile.sample_rate
+             <<" receive_seconds="<<std::chrono::duration<double>(std::chrono::steady_clock::now()-began).count()
+             <<" workspace="<<workspace<<" EVM="<<receiver.progress().evm<<'\n';
+}
+void wire_impairments() {
+    const auto profile=resolve_snr_preset(Channel::wire,25.).profile;
+    SimulationSettings settings;
+    settings.seed=419;
+    settings.baseband_ppm=100.;
+    settings.baseband_phase_rad_sqrt_s=.5*std::numbers::pi/180.;
+    settings.shift_hz=30e6;
+    settings.shift_ppm=1.;
+    settings.shift_phase_rad_sqrt_s=.05*std::numbers::pi/180.;
+    receive_wire_fixture(profile,wire_fixture(profile,settings,true),257,false);
+
+    settings.delay_ms=.5;
+    settings.doppler_hz=.1;
+    auto echo=wire_fixture(profile,settings,true);
+    receive_wire_fixture(profile,echo,257,true);
+    receive_wire_fixture(profile,echo,4093,true);
+
+    // Remove one timed interval between marker words. The receive path must
+    // retain its position and recover the continuing payload.
+    const auto sps=profile.sample_rate/profile.symbol_rate;
+    const auto first=preamble_symbols(profile)+std::ceil(6.4/profile.rolloff);
+    const auto tick=[&](std::size_t ordinal) {
+        return 173+static_cast<std::size_t>((first+total_interval_symbols(profile,ordinal))*sps);
+    };
+    std::fill(echo.pcm.begin()+static_cast<std::ptrdiff_t>(tick(20)),
+              echo.pcm.begin()+static_cast<std::ptrdiff_t>(tick(21)),0);
+    receive_wire_fixture(profile,echo,503,true,true);
+
+    // Repeated public training and no marker must remain a cheap rejection.
+    const auto training=wire_fixture(profile,settings,false);
+    std::size_t intervals=0;
+    Receiver reject(profile,[&](auto){++intervals;});
+    const auto began=std::chrono::steady_clock::now();
+    for(unsigned repeat=0;repeat<12;++repeat)
+        reject.push(std::span(training.pcm).first(training.quiet_start));
+    reject.finish();
+    require(!reject.progress().acquired&&!reject.progress().physical_complete&&!intervals,
+            "wire training alone bypassed independent marker admission");
+    std::cout<<"wire rejected_training_seconds="<<12.*training.quiet_start/profile.sample_rate
+             <<" receive_seconds="<<std::chrono::duration<double>(std::chrono::steady_clock::now()-began).count()
+             <<" workspace="<<reject.workspace_bytes()<<'\n';
+}
+}
+int main(int argc,char** argv) {try {
+    if(argc==2&&std::string_view(argv[1])=="--wire-impairments") {
+        wire_impairments();
+        return 0;
+    }
     // Independent numerical filter and wire mapping vectors, not a shared
     // encoder/decoder round-trip assertion.
     require(std::abs(root_raised_cosine(0,.2)-1.0546479089470325)<1e-12,"RRC origin vector");
@@ -161,7 +281,9 @@ int main() {try {
     require(std::abs(qpsk[0]-std::complex<double>(.7071067811865476,.7071067811865476))<1e-12,"QPSK label zero vector");
     require(std::abs(qpsk[2]-std::complex<double>(.7071067811865476,-.7071067811865476))<1e-12,"QPSK Gray label vector");
     require(sync_symbol(0)==std::complex<double>(.7071067811865475244,.7071067811865475244),"fixed marker vector");
-    for(const auto rate:{44100u,48000u})for(auto profile:{classic_profile(Channel::wire),resolve_snr_preset(Channel::acoustic_short,-6).profile}) {
+    // Exercise the classic and clean compact full-rate paths; the narrow
+    // default's decimation stages are covered separately.
+    for(const auto rate:{44100u,48000u})for(auto profile:{classic_profile(Channel::wire),resolve_snr_preset(Channel::acoustic_short,-6,ChannelAssumptions{}).profile}) {
         profile.sample_rate=rate;matched_filter_reference(profile);
     }
     cubic_history_reference();
@@ -318,6 +440,7 @@ int main() {try {
     Receiver acoustic_presence(acoustic,[](std::span<const float>){});
     acoustic_presence.push(transmit(acoustic,input,503));acoustic_presence.push(acoustic_noise);
     require(acoustic_presence.progress().physical_complete,"acoustic interference kept a reception alive");
+    wire_impairments();
     std::cout<<"fast sampled modem tests passed\n";
     return 0;
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}}

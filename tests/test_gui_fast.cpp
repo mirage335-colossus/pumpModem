@@ -26,19 +26,27 @@ void rate_and_spectrum_presentation() {
         "Displayed expected rate omitted outer parity, integrity or modem framing");
     check(fast_ui::expected_modem_bitrate(profile,true)<payload,
         "Encryption overhead did not reduce expected payload bitrate");
-    fast::Diagnostics d;d.sample_rate=48000;d.spectrum_valid=true;d.spectrum_db.fill(-60);
-    const double low=fast::occupied_lower_hz(profile),high=fast::occupied_upper_hz(profile);
-    for(std::size_t k=0;k<d.spectrum_db.size();++k)if(k*d.sample_rate/512.>=low&&k*d.sample_rate/512.<=high)
-        d.spectrum_db[k]=static_cast<float>(10*std::log10(11e-6));
-    const auto snr=fast_ui::waterfall_snr(d,profile);
-    check(snr&&std::abs(*snr-10)<1e-4,"Waterfall SNR did not subtract matched in-band noise power");
-    d.transmitting=true;check(!fast_ui::waterfall_snr(d,profile),"TX spectrum was labeled receiver SNR");
-    d.transmitting=false;
+    using Clock=fast::Telemetry::Clock;
+    const auto now=Clock::now();
+    auto d=std::make_shared<fast::Diagnostics>();
+    d->sample_rate=48000;d->samples=48000;d->waveform_count=1024;d->captured_at=now;
+    d->spectrum_valid=true;d->spectrum_db.fill(-60);
     fast::Snapshot simultaneous;simultaneous.loopback_test=simultaneous.transmitting=simultaneous.active=true;
-    check(simultaneous.transmitting&&!d.transmitting&&fast_ui::waterfall_snr(d,profile).has_value(),
+    simultaneous.diagnostics=d;
+    check(fast_ui::fresh_input(*d,now)&&!fast_ui::loopback_signal_snr(simultaneous,now),
+        "Unacquired noise spectrum fabricated a signal SNR");
+    d->acquired=true;d->last_loopback_snr=fast::LoopbackSnrEstimate{-3,-42,17500,40000};
+    check(fast_ui::loopback_signal_snr(simultaneous,now).has_value(),
         "Captured RX telemetry could not expose SNR while a loopback snapshot also reports transmission");
-    d.spectrum_db.fill(-120);
-    check(!fast_ui::waterfall_snr(d,profile),"Silent input fabricated a measured SNR");
+    check(!fast_ui::loopback_signal_snr(simultaneous,now+std::chrono::seconds(3)),
+        "Stalled capture displayed a current loopback SNR");
+    d->transmitting=true;
+    check(!fast_ui::loopback_signal_snr(simultaneous,now),"TX spectrum was labeled receiver SNR");
+    d->transmitting=false;simultaneous.active=false;
+    check(fast_ui::loopback_signal_snr(simultaneous,now+std::chrono::seconds(3)).has_value(),
+        "Completed loopback lost its retained signal estimate");
+    simultaneous.cancelled=true;
+    check(!fast_ui::loopback_signal_snr(simultaneous,now),"Cancelled test retained a signal estimate");
     Application app({});
     check(app.field(ui::Field::fast_mode).selected=="fast","Ordinary launch did not default to Fast Modem");
     app.close();
@@ -102,9 +110,13 @@ void fast_simulation_controls() {
     const auto& mode=control(F::fast_simulation);
     check(app.control(mode).visible&&app.field(F::fast_simulation).selected=="live",
           "Fast page did not default to live audio with a visible mode selector");
-    for(const auto field:{F::fast_sim_tx_power,F::fast_sim_path_loss,F::fast_sim_noise,F::fast_sim_baseband_oscillator,
-         F::fast_sim_shift_oscillator,F::fast_sim_spread,F::fast_sim_selective,F::fast_sim_margin,F::fast_sim_shift_hz})
-        check(!app.field(field).enabled,"Simulation-only assumptions remained editable in live mode");
+    for(const auto field:{F::fast_sim_tx_power,F::fast_sim_path_loss,F::fast_sim_noise})
+        check(!app.field(field).enabled,"Simulation-only link budget remained editable in live mode");
+    const std::array declarations{F::fast_sim_baseband_oscillator,F::fast_sim_shift_oscillator,F::fast_sim_spread,
+        F::fast_sim_selective,F::fast_sim_margin,F::fast_sim_shift_hz};
+    for(const auto field:declarations)
+        check(app.field(field).enabled&&control(field).page==ui::Page::console,
+            "Live receiver declaration was disabled or declared on the testing page");
     app.select(mode,"simulation");
     check(app.field(F::fast_sim_noise).text=="-174"&&app.field(F::fast_sim_tx_power).enabled,
           "Simulation did not expose its independent channel assumptions and normal noise default");
@@ -119,15 +131,22 @@ void fast_simulation_controls() {
     app.preset(control(F::fast_sim_path_loss),"180");
     check(app.field(F::fast_sim_path_loss).text=="180","Path-loss dropdown did not update the editable value");
     app.preset(control(F::fast_sim_path_loss),"130");
+    app.select_page(ui::Page::console);
+    for(const auto field:declarations)
+        check(app.control(control(field)).visible&&app.field(field).enabled,
+            "Receiver declaration was missing from the Console during Simulation");
     app.preset(control(F::fast_sim_shift_hz),"5800000000");
     check(app.field(F::fast_sim_shift_hz).text=="5800000000","RF Shift frequency preset was not applied");
-    const auto old_detail=app.field(F::fast_detail).text;
+    const auto old_rate=app.field(F::fast_diagnostics).text;
     app.edit(control(F::fast_sim_shift_hz),"14000000");
-    check(app.field(F::fast_sim_shift_hz).text=="14000000"&&app.field(F::fast_detail).text==old_detail,
-          "RF Shift frequency changed the Fast audio carrier/passband");
+    check(app.field(F::fast_sim_shift_hz).text=="14000000"&&app.field(F::fast_diagnostics).text==old_rate,
+          "An RF shift within the selected preset's bounds changed its audio carrier/passband");
+    app.select_page(ui::Page::fast_simulation);
     app.select(mode,"live");
-    check(app.field(F::fast_sim_shift_hz).text=="14000000"&&app.field(F::fast_sim_tx_power).enabled==false,
-          "Switching to live discarded simulation settings or left them active");
+    check(app.field(F::fast_sim_shift_hz).text=="14000000"&&!app.field(F::fast_sim_tx_power).enabled&&
+          app.field(F::fast_diagnostics).text==old_rate&&
+          app.field(F::fast_detail).text.find("Live audio · Uses declared receiver bounds")!=std::string::npos,
+          "Switching to live changed the declaration, applied the link budget, or changed the selected waveform");
     app.select(F::fast_mode,"robust");app.select(F::fast_mode,"fast");
     check(app.field(F::fast_simulation).selected=="live"&&app.field(F::fast_sim_shift_hz).text=="14000000",
           "Switching modem modes did not preserve Fast simulation choices independently");
@@ -138,6 +157,7 @@ void fast_simulation_controls() {
     controller.activate(C::fast_listen);
     check(acquisitions==0&&!controller.enabled(C::fast_listen),
           "Simulation mode attempted live audio acquisition or exposed hardware listening");
+    controller.edit(F::fast_text,"Simulation source");
     controller.edit(F::fast_text,"Repair an invalid simulation draft");
     controller.edit(F::fast_sim_noise,"invalid");
     controller.select(F::fast_simulation,"live");controller.select(F::fast_simulation,"simulation");controller.poll();
@@ -149,34 +169,123 @@ void fast_simulation_controls() {
     controller.close();
 
     acquisitions=0;fast_ui::Controller loopback([&] {++acquisitions;return false;});
+    loopback.select(F::fast_simulation,"simulation");
+    loopback.edit(F::fast_sim_path_loss,"unfinished draft");
     loopback.select(F::fast_simulation,"loopback");loopback.set_selected(true);loopback.poll();
-    check(!loopback.enabled(C::fast_listen)&&loopback.enabled(C::fast_transmit)&&acquisitions==0&&
+    check(!loopback.enabled(C::fast_listen)&&!loopback.enabled(C::fast_transmit)&&acquisitions==1&&loopback.active()&&
+          loopback.field(F::fast_volume).enabled&&
           loopback.command_label(C::fast_transmit)=="Run loopback test"&&
-          loopback.field(F::fast_detail).text.find("fixed short diagnostic message")!=std::string::npos,
-          "Loopback test did not expose its fixed diagnostic action or incorrectly auto-listened");
+          loopback.field(F::fast_detail).text.find("selected Console text")!=std::string::npos,
+          "Loopback mode did not request monitoring independently of an empty test source");
+    for(const auto field:{F::fast_sim_tx_power,F::fast_sim_path_loss,F::fast_sim_noise})
+        check(!loopback.field(field).enabled&&loopback.field(field).disabled_text=="Simulation only",
+              "Live loopback presented a synthetic link-budget field as active");
+    check(loopback.field(F::fast_sim_shift_hz).enabled&&loopback.field(F::fast_sim_spread).enabled,
+          "Live loopback disabled oscillator or spread settings along with the link budget");
+    loopback.select(F::fast_volume,"30");
+    check(loopback.field(F::fast_volume).selected=="30","Live loopback did not accept the selected output volume");
     const auto history_size=loopback.field(F::fast_history).records.size();
     const auto history_selection=loopback.field(F::fast_history).selected;
     loopback.activate(C::fast_transmit);
-    check(acquisitions==1&&loopback.active()&&
+    check(acquisitions==1,"Loopback accepted an empty Console source");
+    loopback.edit(F::fast_text,"fox");
+    check(loopback.enabled(C::fast_transmit),"A retained Simulation link-budget draft blocked live loopback");
+    loopback.activate(C::fast_transmit);
+    check(acquisitions==2&&loopback.active()&&
           loopback.field(F::fast_status).text.find("Waiting for the audio device")!=std::string::npos&&
           loopback.field(F::fast_history).records.size()==history_size&&
           loopback.field(F::fast_history).selected==history_selection&&!loopback.enabled(C::fast_save),
-          "Empty Console draft blocked loopback or pending audio acquisition changed received history");
+          "Loopback did not acquire audio for the selected text or pending start changed received history");
     loopback.activate(C::fast_cancel);
-    loopback.select(F::fast_source,"text");loopback.edit(F::fast_text,"Console text draft stays here");
+    check(loopback.field(F::fast_sim_status).text.find("cancelled before audio")!=std::string::npos&&
+          loopback.enabled(C::fast_listen)&&!loopback.enabled(C::fast_cancel),
+          "Cancelling a queued loopback test did not retain its outcome or allow monitoring");
+    loopback.edit(F::fast_text,"Console text draft stays here");
     loopback.select(F::fast_source,"file");loopback.edit(F::fast_file,"unopened-source.bin");
+    check(loopback.enabled(C::fast_transmit)&&
+          loopback.field(F::fast_detail).text.find("selected Console file")!=std::string::npos,
+          "Selected Console file was not presented as the loopback source");
     loopback.activate(C::fast_transmit);
     check(loopback.field(F::fast_text).text=="Console text draft stays here"&&
           loopback.field(F::fast_file).text=="unopened-source.bin"&&
           loopback.field(F::fast_history).records.size()==history_size&&
           loopback.field(F::fast_history).selected==history_selection&&!loopback.enabled(C::fast_save),
           "Loopback test consumed a Console draft or altered received history/file selection");
-    loopback.activate(C::fast_cancel);loopback.close();
+    loopback.activate(C::fast_cancel);
+    loopback.select(F::fast_simulation,"simulation");
+    check(loopback.field(F::fast_sim_path_loss).enabled&&loopback.field(F::fast_sim_path_loss).text=="unfinished draft"&&
+          !loopback.enabled(C::fast_transmit),
+          "Live loopback discarded the Simulation draft or bypassed Simulation validation");
+    loopback.select(F::fast_simulation,"live");
+    check(loopback.field(F::fast_volume).enabled&&loopback.field(F::fast_volume).display_text.empty()&&
+          loopback.field(F::fast_volume).selected=="30",
+          "Live audio lost its configured TX volume after loopback");
+    loopback.set_selected(false);
+    const auto stopped_acquisitions=acquisitions;
+    loopback.poll();
+    check(!loopback.active()&&acquisitions==stopped_acquisitions,"Hidden Fast mode tried to acquire audio");
+    loopback.close();
 
     fast_ui::FastPlots plots;
     check(plots.title(ui::Bitmap::fast_waveform,true).find("LOOPBACK TEST · ")==0&&
           plots.title(ui::Bitmap::fast_waveform).find("LOOPBACK TEST")==std::string::npos,
           "Loopback plot titles were not distinct or changed ordinary plot labels");
+}
+void simulation_profile_revalidation() {
+    using F=ui::Field;using C=ui::Command;
+    unsigned acquisitions=0;
+    fast_ui::Controller controller([&] {++acquisitions;return false;});
+    controller.edit(F::fast_text,"fox");
+    check(controller.field(F::fast_sim_spread).selected=="hf-worst"&&
+          controller.field(F::fast_sim_selective).selected=="each-65"&&controller.enabled(C::fast_transmit),
+          "Acoustic-short did not begin with an admitted conservative receiver declaration");
+    const auto adverse_rate=controller.field(F::fast_diagnostics).text;
+    controller.select(F::fast_sim_spread,"none");
+    controller.select(F::fast_sim_selective,"off");
+    controller.select(F::fast_sim_baseband_oscillator,"off");
+    const auto clean_rate=controller.field(F::fast_diagnostics).text;
+    check(controller.enabled(C::fast_transmit)&&adverse_rate!=clean_rate,
+          "Editing receiver assumptions in Live retained the previous Auto preset");
+    for(const auto* mode:{"simulation","loopback","live"}) {
+        controller.select(F::fast_simulation,mode);
+        check(controller.enabled(C::fast_transmit)&&controller.field(F::fast_diagnostics).text==clean_rate&&
+              controller.field(F::fast_sim_spread).selected=="none"&&controller.field(F::fast_text).text=="fox",
+              "Changing test mode changed receiver assumptions, selected waveform or text draft");
+    }
+    controller.select(F::fast_sim_spread,"hf-worst");
+    controller.select(F::fast_sim_selective,"each-65");
+    controller.select(F::fast_sim_baseband_oscillator,"crystal");
+    check(controller.field(F::fast_diagnostics).text==adverse_rate,
+          "Restoring the declared channel did not restore the Auto preset");
+    controller.edit(F::fast_sim_shift_hz,"5800000000");
+    const auto error=controller.field(F::fast_status).text;
+    check(error.starts_with("Fast receiver assumptions exceed "),
+          "Receiver bounds did not report an actionable out-of-range diagnostic");
+    for(const auto* mode:{"simulation","loopback","live"}) {
+        controller.select(F::fast_simulation,mode);
+        check(!controller.enabled(C::fast_transmit)&&!controller.enabled(C::fast_listen)&&
+              controller.field(F::fast_status).text==error&&controller.field(F::fast_sim_shift_hz).text=="5800000000",
+              "Changing mode bypassed the invalid receiver declaration or discarded its draft");
+    }
+    controller.report_error("Unrelated diagnostic");
+    controller.edit(F::fast_sim_shift_hz,"0");
+    check(controller.enabled(C::fast_transmit)&&controller.enabled(C::fast_listen)&&
+          controller.field(F::fast_status).text=="Unrelated diagnostic"&&acquisitions==0,
+          "Repairing receiver assumptions failed to restore start actions or cleared an unrelated diagnostic");
+    controller.edit(F::fast_sim_margin,"0.5");
+    check(!controller.enabled(C::fast_transmit)&&!controller.enabled(C::fast_listen),
+          "Live accepted an invalid numeric receiver declaration");
+    controller.select(F::fast_profile,"wire");
+    check(controller.enabled(C::fast_transmit)&&controller.field(F::fast_sim_spread).selected=="none"&&
+          controller.field(F::fast_sim_margin).text=="1",
+          "A different channel inherited an invalid declaration");
+    controller.select(F::fast_profile,"acoustic-short");
+    check(!controller.enabled(C::fast_transmit)&&controller.field(F::fast_sim_margin).text=="0.5",
+          "Switching channels discarded the previous declaration draft");
+    controller.edit(F::fast_sim_margin,"1");
+    check(controller.enabled(C::fast_transmit)&&controller.field(F::fast_diagnostics).text==adverse_rate,
+          "Repairing a retained receiver declaration left a stale Auto profile");
+    controller.close();
 }
 const ui::Control& control(ui::Field field) {
     for(const auto& c:ui::console_screen())if(c.field==field)return c;
@@ -307,8 +416,10 @@ void snr_and_symbol_rate_controls() {
         controller.field(F::fast_constellation).selected==std::to_string(p.constellation),
         "Expected-SNR selection did not apply the resolved modem settings");
     const auto detail=controller.field(F::fast_detail).text;
-    check(detail.find("reference bandwidth")!=std::string::npos&&detail.find("model-based")!=std::string::npos&&
-        detail.find("does not measure or negotiate")!=std::string::npos,
+    check(detail.find("reference bandwidth")!=std::string::npos&&
+        detail.find("Resilient transmission · 10 dB SNR (assumed)")!=std::string::npos&&
+        detail.find("does not measure or negotiate")!=std::string::npos&&
+        detail.find("not measured throughput or receiver qualification")!=std::string::npos,
         "Automatic preset was presented as measured or negotiated SNR");
     const auto options=fast::symbol_rate_options(p);
     const auto current=fast::symbol_rate_option_id(p);
@@ -373,21 +484,28 @@ void snr_and_symbol_rate_controls() {
     check(controller.field(F::fast_coding).selected==short_coding,
         "Unsupported normal-frame LDPC rate was accepted for short-transfer acoustic");
     controller.select(F::fast_expected_snr,"-6");
-    check(controller.field(F::fast_coding).selected=="three-quarters"&&
+    check(controller.field(F::fast_coding).selected=="two-thirds"&&
         controller.field(F::fast_coding).options.size()==3&&
         controller.field(F::fast_coding).options[0].label=="LDPC 1/2"&&
         controller.field(F::fast_depth).options.size()==16&&
         controller.field(F::fast_constellation).options.size()==1,
         "Weak short profile did not expose its small LDPC coding geometry");
-    controller.select(F::fast_coding,"two-thirds");
-    check(controller.field(F::fast_coding).selected=="two-thirds"&&
+    controller.select(F::fast_coding,"half");
+    check(controller.field(F::fast_coding).selected=="half"&&
         controller.field(F::fast_expected_snr).selected=="manual",
         "Weak short profile rejected the supported stronger LDPC selection");
     controller.select(F::fast_expected_snr,"3");
-    check(controller.field(F::fast_coding).options.size()==(short_acoustic.compact_convolutional?2U:3U)&&
+    controller.edit(F::fast_text,"Check declared-channel selection");
+    check(controller.enabled(C::fast_transmit)&&controller.field(F::fast_constellation).options.size()==1&&
+        controller.field(F::fast_detail).text.find("symbols/s")!=std::string::npos,
+        "Higher SNR with declared fading did not select a supported short single carrier");
+    controller.select(F::fast_sim_spread,"none");
+    controller.select(F::fast_sim_selective,"off");
+    check(controller.enabled(C::fast_transmit)&&controller.field(F::fast_expected_snr).selected=="3"&&
+        controller.field(F::fast_coding).options.size()==3&&
         controller.field(F::fast_constellation).options.size()==11&&
         controller.field(F::fast_depth).options.size()==16,
-        "Returning to 3 dB did not restore short OFDM controls");
+        "Removing declared fading at 3 dB did not restore short OFDM controls");
     controller.select(F::fast_mono,"right");controller.select(F::fast_expected_snr,"0");
     controller.select(F::fast_profile,"acoustic");
     check(controller.field(F::fast_expected_snr).selected=="3"&&
@@ -468,17 +586,21 @@ void presentation_and_retention() {
     app.select(control(F::fast_profile),"ssb");
     check(app.field(F::fast_constellation).selected=="4"&&app.field(F::fast_detail).text.find("LDPC frame: 16200 bits")!=std::string::npos,
           "Nominal SSB did not expose its short QPSK frame geometry");
+    check(app.field(F::fast_expected_snr).selected=="20",
+          "SSB relabeling changed the nominal expected-SNR choice");
     check(std::any_of(app.field(F::fast_expected_snr).options.begin(),app.field(F::fast_expected_snr).options.end(),
-        [](const auto& option){return option.id=="20"&&option.label=="Resilient standard · 20 dB SNR";})&&
+        [](const auto& option){return option.id=="20"&&option.label=="Resilient · 20 dB SNR · ref 2.4 kHz";})&&
           std::any_of(app.field(F::fast_expected_snr).options.begin(),app.field(F::fast_expected_snr).options.end(),
-        [](const auto& option){return option.id=="10"&&option.label=="Modeled · 10 dB SNR";}),
-          "SSB expected-SNR options did not distinguish the resilient default from modeled presets");
+        [](const auto& option){return option.id=="10"&&option.label=="Resilient · 10 dB SNR · ref 2.4 kHz";}),
+          "SSB SNR options did not present the common resilient transmission training");
     app.select(F::fast_expected_snr,"10");
-    check(app.field(F::fast_detail).text.find("Modeled SSB · 10 dB SNR")!=std::string::npos,
-          "Modeled SSB selection was not labeled in details");
+    check(app.field(F::fast_detail).text.find("Resilient transmission · 10 dB SNR (assumed)")!=std::string::npos&&
+          app.field(F::fast_detail).text.find("public training and recurring pilots support SC and OFDM acquisition")!=std::string::npos&&
+          app.field(F::fast_detail).text.find("not measured throughput or receiver qualification")!=std::string::npos,
+          "SSB expected SNR did not distinguish resilient transmission from estimated rate and receiver qualification");
     app.select(F::fast_expected_snr,"20");
-    check(app.field(F::fast_detail).text.find("Resilient standard · 20 dB SNR")!=std::string::npos,
-          "Nominal SSB reset was not labeled as the resilient standard");
+    check(app.field(F::fast_detail).text.find("Resilient transmission · 20 dB SNR (assumed)")!=std::string::npos,
+          "Nominal SSB reset did not keep the common resilient-transmission label");
     check(std::any_of(app.field(F::fast_coding).options.begin(),app.field(F::fast_coding).options.end(),
         [](const auto& option){return option.id=="eight-ninths";}),
         "Short SSB hid standard-frame rates needed for manual normalization");
@@ -487,7 +609,12 @@ void presentation_and_retention() {
           app.field(F::fast_constellation).selected=="4096"&&app.field(F::fast_coding).selected=="eight-ninths"&&
           app.field(F::fast_depth).selected=="8",
           "Manual SSB high-rate choices did not normalize transactionally to the standard frame");
-    app.select(F::fast_profile,"wire");app.select(F::fast_profile,"ssb");
+    app.select(F::fast_profile,"wire");
+    check(app.field(F::fast_detail).text.find("Resilient transmission")!=std::string::npos&&
+          app.field(F::fast_detail).text.find("public training and recurring pilots support SC and OFDM acquisition")!=std::string::npos&&
+          app.field(F::fast_detail).text.find("not measured throughput or receiver qualification")!=std::string::npos,
+          "Non-SSB SNR details omitted common training or confused estimates with receiver qualification");
+    app.select(F::fast_profile,"ssb");
     check(app.field(F::fast_detail).text.find("LDPC frame: 16200 bits")!=std::string::npos&&
           app.field(F::fast_constellation).selected=="4"&&app.field(F::fast_coding).selected=="half"&&
           app.field(F::fast_depth).selected=="1",
@@ -646,9 +773,11 @@ void live_plot_presentation() {
     const auto old_revision=plots.revision();
     check(!plots.update(data,true,start+std::chrono::milliseconds(100))&&plots.revision()==old_revision&&plots.history_size()==1,
         "Polling an unchanged frame duplicated waterfall rows or invalidated native images");
-    check(plots.update(data,true,start+std::chrono::seconds(3))&&plots.title(B::fast_waveform).find("Stalled")!=std::string::npos,
-        "Stalled telemetry was still labeled live");
-    check(plots.update(data,false,start+std::chrono::seconds(4))&&plots.title(B::fast_waterfall).find("Retained")!=std::string::npos,
+    auto decoder_only=std::make_shared<fast::Diagnostics>(*data);++decoder_only->revision;
+    check(plots.update(decoder_only,true,start+std::chrono::seconds(3))&&plots.title(B::fast_waveform).find("Stalled")!=std::string::npos&&
+          plots.history_size()==1,
+        "Receiver progress without fresh PCM falsely marked capture live or advanced the waterfall");
+    check(plots.update(decoder_only,false,start+std::chrono::seconds(4))&&plots.title(B::fast_waterfall).find("Retained")!=std::string::npos,
         "Stopped telemetry was still labeled live");
     for(std::size_t i=0;i<P::history_capacity+10;++i) {
         auto next=std::make_shared<fast::Diagnostics>(*data);next->revision=i+2;next->samples=(i+2)*1024;
@@ -668,6 +797,12 @@ void live_plot_presentation() {
         "Unacquired new session fabricated spectrum or constellation observations");
     next=std::make_shared<fast::Diagnostics>(*data);next->stream_id=18;next->revision=1;
     plots.update(next,true,start+std::chrono::seconds(22));check(plots.history_size()==1,"New stream failed to start fresh waterfall history");
+    auto resumed=std::make_shared<fast::Diagnostics>(*next);resumed->revision=2;resumed->samples+=512;
+    const auto hidden_revision=plots.revision();
+    check(plots.update(resumed,true,start+std::chrono::seconds(22)+std::chrono::milliseconds(100))&&
+          plots.revision()>hidden_revision&&plots.history_size()==2&&
+          plots.title(B::fast_waterfall)=="Live RX waterfall",
+          "New telemetry after a hidden display interval did not refresh the retained waterfall");
     next=std::make_shared<fast::Diagnostics>(*next);next->stream_id=19;
     plots.update(next,true,start+std::chrono::seconds(23));check(plots.history_size()==1,"Stream identity change mixed distinct waterfall histories");
 
@@ -696,6 +831,15 @@ void live_plot_presentation() {
     check(acoustic_plots.title(B::fast_constellation)=="Last RX input I/Q"&&
           acoustic_plots.caption(B::fast_constellation).find("sampled")!=std::string::npos,
           "OFDM unsynchronized input history lacks sampling or freshness labels");
+
+    P single_carrier_plots;
+    single_carrier_plots.update(data,true,start);
+    auto quiet_tail=std::make_shared<fast::Diagnostics>(*data);
+    ++quiet_tail->revision;quiet_tail->samples+=3*quiet_tail->sample_rate;
+    single_carrier_plots.update(quiet_tail,true,start+std::chrono::seconds(3));
+    check(single_carrier_plots.title(B::fast_constellation)=="Last RX equalized constellation"&&
+          single_carrier_plots.title(B::fast_waterfall)=="Live RX waterfall"&&single_carrier_plots.history_size()==2,
+          "New single-carrier quiet-tail audio falsely refreshed the constellation or stalled the waterfall");
 }
 void service_generations() {
     using F=ui::Field;using C=ui::Command;
@@ -907,6 +1051,6 @@ void robust_native_settings() {
 }
 }
 int main() {
-    try {audio_settings();rate_and_spectrum_presentation();damaged_reception_presentation();fast_simulation_controls();snr_and_symbol_rate_controls();message_submit_shortcut();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();robust_keyfile_menu_label();robust_public_key_warning();robust_boundary_keeps_polling();robust_native_settings();std::cout<<"Fast GUI isolation tests passed\n";}
+    try {audio_settings();rate_and_spectrum_presentation();damaged_reception_presentation();fast_simulation_controls();simulation_profile_revalidation();snr_and_symbol_rate_controls();message_submit_shortcut();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();robust_keyfile_menu_label();robust_public_key_warning();robust_boundary_keeps_polling();robust_native_settings();std::cout<<"Fast GUI isolation tests passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

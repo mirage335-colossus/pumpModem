@@ -17,7 +17,6 @@ std::string number(double value,int precision=1) {
 double finite_sample(float value) {return std::isfinite(value)?std::clamp(static_cast<double>(value),-1.,1.):0.;}
 bool input_view(const fast::Diagnostics& d) {return !d.transmitting&&!d.constellation_count;}
 bool older_points(const fast::Diagnostics& d) {
-    if(!d.acoustic_ofdm)return false;
     const bool input=input_view(d);
     if(!(input?d.input_count:d.constellation_count))return false;
     const auto last=input?d.input_sample:d.constellation_sample;
@@ -67,9 +66,11 @@ void FastPlots::reset() {
 bool FastPlots::update(std::shared_ptr<const fast::Diagnostics> diagnostics,bool active,Clock::time_point now) {
     if(diagnostics&&diagnostics->stream_id==ignored_stream_)diagnostics.reset();
     const auto previous=frame_->diagnostics;
-    const bool received=diagnostics&&(!previous||diagnostics->stream_id!=previous->stream_id||diagnostics->revision!=previous->revision);
-    if(received)last_update_=now;
-    const bool stale=active&&(diagnostics||previous)&&!received&&now-last_update_>std::chrono::seconds(2);
+    const bool new_stream=diagnostics&&(!previous||diagnostics->stream_id!=previous->stream_id);
+    const bool received=diagnostics&&(new_stream||diagnostics->revision!=previous->revision);
+    const bool new_pcm=received&&diagnostics->waveform_count&&(new_stream||diagnostics->samples!=previous->samples);
+    if(new_stream||new_pcm||(active&&!frame_->active))last_pcm_=now;
+    const bool stale=active&&(diagnostics||previous)&&now-last_pcm_>std::chrono::seconds(2);
     if(!received&&frame_->active==active&&frame_->stale==stale)return false;
     auto next=std::make_shared<Frame>(*frame_);next->active=active;next->stale=stale;
     if(received) {
@@ -93,7 +94,7 @@ bool FastPlots::update(std::shared_ptr<const fast::Diagnostics> diagnostics,bool
 std::size_t FastPlots::history_size() const {return frame_->history.size();}
 std::string FastPlots::title(B id,bool loopback_test) const {
     const auto& d=frame_->diagnostics;
-    const auto prefix=!d?"":!frame_->active?"Retained ":frame_->stale?"Stalled ":
+    const auto prefix=!d?"":frame_->stale?"Stalled ":!d->waveform_count?"":!frame_->active?"Retained ":
         id==B::fast_constellation&&older_points(*d)?"Last ":"Live ";
     const auto direction=d?(d->transmitting?"TX ":"RX "):"";
     const std::string test=loopback_test?"LOOPBACK TEST · ":"";

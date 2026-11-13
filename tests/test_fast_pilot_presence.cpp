@@ -38,7 +38,7 @@ void interrupted_pilot(Profile p,bool noisy_tail,bool phase_step=false) {
     // longer payload-plus-pilot group into six seconds of observed absence.
     const double pulse_delay=std::ceil(6.4/p.rolloff);
     const auto pilot=preamble_symbols(p)+sync_symbols+p.pilot_spacing_symbols;
-    const auto midpoint=(pilot+2+pulse_delay)*p.sample_rate/p.symbol_rate;
+    const auto midpoint=(pilot+capacity_pilot_symbols*.5+pulse_delay)*p.sample_rate/p.symbol_rate;
     const auto half_width=5*p.sample_rate/p.symbol_rate;
     require(2*half_width/p.sample_rate<6,"pilot fixture disturbance exceeded physical-end threshold");
     std::array<float,4093> block{};std::uint64_t at=0;
@@ -55,7 +55,7 @@ void interrupted_pilot(Profile p,bool noisy_tail,bool phase_step=false) {
         if(eof_probe) {
             eof_probe->push(std::span<const float>(block).first(n));
             if(eof_probe->progress().acquired&&double(at)/p.sample_rate>
-                (pilot+2*(p.pilot_spacing_symbols+pilot_symbols))/p.symbol_rate) {
+                (pilot+2*(p.pilot_spacing_symbols+capacity_pilot_symbols))/p.symbol_rate) {
                 eof_probe->finish();
                 require(!eof_probe->progress().physical_complete,"input EOF manufactured pilot-stream completion");
                 eof_probe.reset();eof_checked=true;

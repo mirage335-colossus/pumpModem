@@ -1,4 +1,5 @@
 #include "datapump/execution.hpp"
+#include "datapump/execution_resources.hpp"
 #include <atomic>
 #include <array>
 #include <chrono>
@@ -150,9 +151,23 @@ void suspended_cpp_frames() {
     for(auto& task:tasks)task.join();
     check(finished==8,"all independent suspended C++ frames must finish");
 }
+#ifndef DATAPUMP_EXECUTION_FIBERS
+void host_resource_observations() {
+    const auto cpu_only = ex::host_resources(false);
+    const auto with_memory = ex::host_resources();
+    check(cpu_only.hardware_threads>0 && cpu_only.hardware_threads==with_memory.hardware_threads,
+          "memory discovery changed effective CPU availability");
+    check(!cpu_only.available_memory_bytes, "CPU-only discovery unexpectedly queried memory");
+    check(ex::worker_stack_bytes()>0, "native worker stack charge is unavailable");
+    check(ex::process_footprint_bytes()>0, "native process footprint is unavailable");
+}
+#endif
 }
 int main() {
     try {
+#ifndef DATAPUMP_EXECUTION_FIBERS
+        host_resource_observations();
+#endif
         // Reused heap positions exercise the fiber ABI's independent C-stack
         // alignment requirement; one isolated task can happen to be aligned.
         for(unsigned repetition=0;repetition<8;++repetition) {

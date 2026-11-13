@@ -199,7 +199,7 @@ void independent_vectors() {
     Bytes capacity_plain(ciphertext_bytes(capacity));
     for(std::size_t i=0;i<capacity_plain.size();++i)capacity_plain[i]=static_cast<std::uint8_t>(i);
     const auto capacity_group=fast::testing::seal_group(capacity,crypto,salt,7,iv,capacity_plain);
-    check(sha256(capacity_group)==unhex("0f14d41d2c7a51cad0720c7cf2c758135da38e715c10d0c84559bca317b03d9f"),
+    check(sha256(capacity_group)==unhex("7c04297e59a0042cf1385118ddece384a73381a07d6439ac5a3f5066e47c1108"),
           "independent capacity Serpent/AES CBC group vector");
     check(fast::testing::open_group(capacity,crypto,salt,7,capacity_group)==capacity_plain,
           "independent capacity vector decryption");
@@ -207,13 +207,13 @@ void independent_vectors() {
     // for the old capacity group domain, and must fail before v4 decrypts it.
     Bytes v3_capacity(capacity_group.size(),0);
     std::copy(iv.begin(),iv.end(),v3_capacity.begin());
-    const auto v3_capacity_tag=unhex("01b4a98261981b2a57c20b0deedbc7b710ef02d03bb94f949f5560ccefb208b8");
+    const auto v3_capacity_tag=unhex("e467eabbc41067fa14e7e46edd60b1f868944f5bdf1a90b0b9b52242a510f7af");
     std::copy(v3_capacity_tag.begin(),v3_capacity_tag.end(),
               v3_capacity.begin()+static_cast<std::ptrdiff_t>(16+ciphertext_bytes(capacity)));
     rejects([&]{fast::testing::open_group(capacity,crypto,salt,7,v3_capacity);},
             "previous capacity cascade group rejected before decryption");
     Bytes v3_capacity_bootstrap=salt;
-    const auto v3_capacity_bootstrap_tag=unhex("a2426858c805f794f7ce08508431f442c69d04e430a8dea4d36c5ee4dee37c80");
+    const auto v3_capacity_bootstrap_tag=unhex("91c1258b2fb3a28797abaf1b312aa5bd0b514e554b70f17ac2ef74e6b494bb29");
     v3_capacity_bootstrap.insert(v3_capacity_bootstrap.end(),v3_capacity_bootstrap_tag.begin(),v3_capacity_bootstrap_tag.end());
     v3_capacity_bootstrap.resize(capacity_group.size());
     StreamDecoder v3_capacity_rx(capacity,crypto);
@@ -1066,11 +1066,11 @@ void compact_capacity_contracts() {
         check(capacity_information_bytes(p)==(rate==CodeRate::half?126U:190U),"compact fixed information byte geometry");
         check(capacity_coded_bits(p)==(rate==CodeRate::half?2028U:2035U),"compact terminated punctured trellis bit endpoint");
         check(cycle_intervals(p)==1 && capacity_parity_symbols(p)==2,"compact cycle occupies one fixed interval with two outer RS symbols");
-        // Independent Python GF(65536), K=7/puncture, SplitMix64 and hashlib
-        // construction, including local profile domain and full physical fill.
+        // Independent GF(65536), K=7/puncture, SplitMix64 and SHA-256 oracle;
+        // the fixture script rechecks v2 controls and applies the v4 profile.
         const auto expected=rate==CodeRate::half?
-            "a0825e08d739449dea3b1d27a5c4b8a391ebb1b8f25f08371a8a2f20f97c1614":
-            "36fda4c62bc75bb013a44e8de5bca8c9f8ebd1e7072f67183792d154e0a4c820";
+            "f48e62d7e5ebe8e8e462e30a5164ba66ffdfeec7934cab17e1dc658523562e53":
+            "28e218349eb149c8bfab04b76d99a53d5742bd94ae62c21325ba3d7718c77b10";
         auto vector_encoder=fast::testing::deterministic_encoder(p,std::nullopt,byte_source(Bytes{0,0x80,0xff,0}),
             0x636f6d7061637421ULL,SourceEncoding::raw);
         Bytes vector_wire;std::array<std::uint8_t,physical_interval_bits> interval{};

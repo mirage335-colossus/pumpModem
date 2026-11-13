@@ -48,6 +48,67 @@ void below_minimum_1080_geometry() {
           layout[Slot::spread_preset].x>layout[Slot::rf_oscillator].x,
           "Below-minimum 1080 geometry must retain ordered controls and a nonempty plot");
 }
+void fast_responsive_geometry() {
+    check(fast_default_height==800&&fast_min_height==720,
+        "Fast sizing defaults must remain compact while retaining the regular modem dimensions");
+    Control mode{Kind::choice};mode.page=Page::fast_simulation;mode.row=0;mode.stretch=3;
+    const std::array controls{mode};
+    const Rect fast_viewport=fast_page_rect(default_width,fast_min_height);
+    const auto actual=control_layout(controls.front(),{},default_width,fast_min_height,controls,
+        true,false,fast_viewport).frame;
+    const auto fallback=control_layout(controls.front(),{},default_width,fast_min_height,controls).frame;
+    check(actual.y==110&&fallback.y==337,
+        "Fast row controls must use the actual page viewport while legacy callers retain regular geometry");
+    for(const int width:{min_width,default_width})
+    for(const int height:{fast_min_height,760,fast_default_height,878,879,919,920}) {
+        const DesktopLayout layout(width,height);
+        const auto history=layout[Slot::fast_history];
+        const auto plot=layout[Slot::fast_waveform];
+        check(history.y+history.h<=plot.y&&plot.y+plot.h<=layout[Slot::fast_snr].y&&
+              layout[Slot::fast_status].y+layout[Slot::fast_status].h<=height-104,
+            "Compact Fast Console lists, plots, and status must fit without crossing adjacent sections");
+        if(height<920) {
+            const auto text=layout[Slot::fast_text],choose=layout[Slot::fast_choose_file];
+            const auto key=layout[Slot::fast_key],list=layout[Slot::fast_history];
+            const auto copy=layout[Slot::fast_copy_signal],plot_label=plot.label_above();
+            const auto qr=layout[Slot::fast_qr],generate=layout[Slot::fast_generate_key];
+            check(text.h>=64&&choose.y>=text.y+text.h+8&&
+                  choose.y+choose.h+5<=key.y-label_height&&
+                  qr.y+qr.h+7<=generate.y&&layout[Slot::fast_open_key].y==key.y&&
+                  generate.y==key.y&&list.y+list.h+4<=copy.y&&copy.y+copy.h+6<=plot_label.y,
+                "Compact Fast Console composer, QR, source/key actions, list actions, or plot labels overlap");
+        }
+        const auto viewport=fast_page_rect(width,height);
+        const auto page_bottom=viewport.y+viewport.h;
+        const auto detail=layout[Slot::fast_detail];
+        check(detail.y+detail.h<=page_bottom&&
+              layout[Slot::fast_auth].y+layout[Slot::fast_auth].h<=detail.y,
+            "Fast developer details must remain inside the actual page viewport at compact heights");
+        check(layout[Slot::fast_waterfall].h>=100&&layout[Slot::fast_constellation_plot].h>=100,
+            "Compact Fast plots must retain a visible minimum height");
+        const auto status=layout[Slot::fast_status],device=layout[Slot::fast_device];
+        Rect previous{};
+        for(const auto slot:{Slot::fast_baseband_oscillator,Slot::fast_shift_oscillator,Slot::fast_spread,
+                            Slot::fast_selective,Slot::fast_margin,Slot::fast_shift_hz}) {
+            const auto assumption=layout[slot];
+            check(assumption.w>=185&&assumption.h==field_height&&!persistent_slot(slot)&&
+                  assumption.y-label_height>=status.y+status.h+4&&
+                  assumption.y+assumption.h+7<=device.y-label_height&&
+                  contains(viewport,assumption)&&contains(viewport,assumption.label_above()),
+                "Fast receiver assumptions must fit on Console between full-width status and persistent device controls");
+            if(previous.w)check(assumption.x==previous.x+previous.w+8&&assumption.y==previous.y,
+                "Fast receiver assumptions must share one ordered six-column row");
+            else check(assumption.x==margin,"Fast receiver assumptions must start at the shared margin");
+            previous=assumption;
+        }
+        check(previous.x+previous.w==width-margin,
+            "Fast receiver assumptions must use the available Console width");
+        check(page_bottom+4==device.y-label_height,
+            "Fast page clipping must leave a clear gap above persistent audio labels");
+    }
+    check(DesktopLayout(default_width,default_height)[Slot::fast_detail]==Rect{16,530,1212,170},
+        "Fast developer geometry at the established regular height changed");
+}
 void document_widths() {
     for(const auto viewport:{480,1000,1400}) {
         const auto full=document_content_width(viewport);
@@ -502,7 +563,7 @@ void expanded_bitmaps() {
 }
 int main() {
     try {
-        established_default();below_minimum_1080_geometry();
+        established_default();below_minimum_1080_geometry();fast_responsive_geometry();
         document_widths();
         supported_sizes();
         hidden_scope_reclaims_space();

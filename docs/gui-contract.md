@@ -27,31 +27,101 @@ See [current architecture](robust-current.md) and
 
 Fast Modem's **Simulation** page offers **Live audio** (the default),
 **Simulation**, and **Live loopback test**. Ordinary Live uses the selected audio
-device; the synthetic link controls are disabled and no synthetic channel is
-inserted. In Simulation, the locally emitted Fast waveform passes through the Fast native
-sampled channel and Fast receiver. The page configures assumed transmit power
-(W), path loss (dB), receiver noise density (dBm/Hz or off), Baseband and Shift
-oscillator presets (including Off and a shared Baseband reference), Doppler /
-delay spread, additional selective AM, search margin, and Shift frequency in Hz.
-These are simulation assumptions, not radio controls or physical measurements;
-the Shift frequency affects the oscillator model only and leaves the Fast audio
-carrier and passband fixed. Simulation results are labeled separately from live
-audio results. A simulation begins from a local transmission and retains the
-channel's delayed tail and scored quiet completion without opening hardware audio.
+device and clean application PCM. The compact Console row declares Baseband and
+Shift oscillator bounds, Doppler/delay spread, selective AM, receiver search
+margin, and RF Shift coordinate. These declarations always bound the receiver
+and inform deterministic Auto profile selection, regardless of mode. They are
+not physical measurements or radio controls. The Simulation page configures
+assumed transmit power (W), path loss (dB), and receiver noise density (dBm/Hz
+or Off); only software Simulation injects those link-budget effects. In
+Simulation, the locally emitted Fast waveform passes through the Fast native
+sampled channel and Fast receiver. The six Console declarations are injected
+as waveform effects only for Simulation or an explicitly started loopback test;
+ordinary Live and idle loopback monitoring remain clean.
+The Shift frequency is an RF coordinate for the oscillator model; it leaves the
+Fast audio carrier and passband fixed. Simulation results are labeled separately
+from live audio results. A simulation begins from a local transmission and
+retains the channel's delayed tail and scored quiet completion without opening
+hardware audio. Mode changes alter effect injection and audio ownership, not the
+transmitted format; peers must match the resolved local waveform settings.
+Power, path loss and noise define the modeled signal-to-noise ratio in normalized
+receiver-input units: link power and path loss set the equivalent received level
+relative to independent receiver noise. Noise is added at the simulated receiver
+boundary after propagation. These values do not attenuate audio-DAC playback or
+change a physical receiver's gain.
+Profile and waveform changes revalidate the retained receiver declarations.
+Invalid receiver declarations keep their fields editable but block new listening,
+transmission, Simulation, and loopback start in every mode. Separately, invalid
+synthetic channel or link-budget settings disable Simulation and explicit
+loopback only. Audio-band diagnostics state the required frequency range,
+available sampled band, and oscillator/channel allowances.
+An invalid declaration or waveform draft preserves the current monitor and
+any already-admitted restart using its last validated settings. Its PCM and
+plots continue while the draft error remains visible. Valid edits update that
+snapshot through the normal serial handoff; device, key, mode and cancellation
+changes retain their explicit audio-ownership behavior.
 
-**Run loopback test** uses a fixed short diagnostic with the selected profile,
-key/encryption, channel assumptions, device and output routing. It acquires the
-shared audio service, starts capture before playback, and sends the modeled
-waveform through the physical loopback path into the native Fast receiver.
-Output gain is fixed at 0.1, with limits of 75 seconds of audio and 110 seconds
-of elapsed time. Draft text/file selections remain intact and are not sent.
-The explicit test does not start automatic listening. Status, counters and
-captured receiver plots show **LOOPBACK TEST**. The diagnostic never enters
-Signals history, changes its selection or eviction, or exposes a text/file or
-Save handle. A pass requires exact diagnostic reception, integrity and scored
-physical absence; cancellation, limits and audio discontinuities remain
-incomplete. Both native frontends use this same in-process workflow.
+**Run loopback test** sends the selected nonempty Console text or file with the
+selected profile, key/encryption, device, and output routing. It copies the
+declared oscillator, spread and selective-AM effects into the test waveform;
+the copied search margin is fixed at one because margin is receiver-only.
+It prepares the complete source and checks encoded airtime before opening audio;
+an oversized source/profile combination is rejected without truncating or
+replacing the source. It acquires the shared audio service, starts capture before
+playback, and sends the selected waveform impairments through the physical
+loopback path into the native Fast receiver. Transmit power, path loss and noise
+apply only to software Simulation; they are disabled and retained in Live
+loopback mode. Oscillator, spread and selective-AM effects remain available as
+synthetic waveform stress before playback. Playback uses the selected TX volume,
+with no mixer change or automatic level adjustment. The test retains its
+75-second audio and 110-second overall elapsed maxima, including source
+preparation. Capture must begin within 5 seconds. After the complete source and
+canonical quiet tail are produced, up to 2 seconds of captured audio are allowed
+for receiver completion; this grace can declare failure only and cannot
+manufacture successful completion. Silence continues while the receiver
+finishes to avoid an audio-server drain wait. Progress distinguishes audio
+samples queued for playback from receiver samples captured. The queued count
+includes silence and does not confirm speaker output. Shared audio handoff waits
+at most 2 seconds and remains cancellable. Draft text/file selections remain
+intact after sending.
+A pass requires exact selected text bytes or file bytes and filename, integrity
+and scored physical absence; cancellation, limits and audio discontinuities
+remain incomplete. A verified result is added once to the ordinary Signals or
+Files list with **LOOPBACK TEST** provenance. It uses the shared restricted text
+view and copy/paste behavior; completed attachments remain available only by an
+explicit Save action. Public mode checks integrity but does not authenticate a
+sender. Encrypted mode requires successful authentication. Failed, cancelled or
+mismatched tests do not publish a completed result.
+
+When Fast is selected, **Live loopback test** also runs the normal receive-only
+session while idle. The bounded duplex test takes over only after that session
+closes, then receive-only monitoring resumes when the test completes or is
+cancelled. Only one Fast session owns audio at a time. Status retains the last
+test outcome alongside current monitor state. Tab changes do not stop capture;
+hiding Fast for another modem stops idle monitoring for the shared audio
+handoff, while an active bounded test can finish. Both native frontends use this
+same in-process workflow.
 See [Fast mode](fast-mode.md#fast-simulation) for operation and qualification limits.
+
+Fast Live and loopback waveform/waterfall snapshots follow captured PCM on a
+bounded display path independent of receiver acquisition and decoding. Loopback
+never substitutes generated playback samples for received plots. Input I/Q and
+equalized constellation points come from receiver progress and may lag capture;
+old constellation points are identified by their receiver-sample age. During or
+after an eligible loopback test, **Last loopback signal SNR** compares a payload
+signal estimate near decoded receiver progress with microphone noise captured during the 250 ms
+before playback. The baseline uses detrended 2,048-sample Hann windows and is
+reported with its reference bandwidth and observation age. A bounded history
+matches completed captured-audio windows against native receiver payload sample
+ticks. The estimate is omitted when the baseline is unstable, clipped, too quiet, lacks
+frequency resolution or has no comparable payload observation. It measures
+signal-to-noise power, not EVM, and is never measured during physical absence.
+Ordinary Live and software Simulation do not show a calibrated physical SNR;
+Live input level and plots remain available. Expected SNR is a fixed local
+preset assumption that selects waveform settings, including the fade-capped
+acoustic symbol rate and coding rate; both peers must use matching updated
+geometry. It is not a measured value or automatic transmit-feedback control.
+Display timing never controls receiver decisions or completion.
 
 | Shared control | Native meaning |
 | --- | --- |
@@ -59,8 +129,8 @@ See [Fast mode](fast-mode.md#fast-simulation) for operation and qualification li
 | Helper power, ratio limit, callsign | Requested Helper watts, native power allocation/ratio clamp and Helper metadata. Zero power disables Helper; these settings do not control radio hardware. |
 | Transmit power, path loss | DATA power and simulated link attenuation, separate from playback volume. |
 | Clock sync, region, offset, audio error | Public arrival bounds and sampled timing model; live capture also needs actual provider timestamps and uncertainty. |
-| Base/Shift oscillator, Margin | Declared oscillator errors/phase noise and public search-bound multiplier. |
-| Doppler/delay spread, selective amplitude | Selected canonical sampled-channel effects and corresponding declared receiver assumptions. Off remains explicit. |
+| Base/Shift oscillator, Margin | Always-active declared oscillator bounds and public receiver search multiplier; synthetic effects are injected only in Simulation and explicit loopback. |
+| Doppler/delay spread, selective amplitude | Declared receiver assumptions in every mode; synthetic effects are injected only in Simulation and explicit loopback. Off remains explicit. |
 | Rate, Shift | Rate is native inner rate; audio IF is Carrier minus Shift. Shift also contributes to the oscillator error model. |
 | Additional Symbols, Spreading | Off uses one lane; Interleave with `N×` selects `N` native added-symbol lanes. Nominal occupied DATA bandwidth is `0.625 × Rate × N`. |
 | Symbol burst, Random extra | Shared whole-bit calendar waits; see [burst scheduling](symbol-burst.md). |
@@ -190,6 +260,11 @@ work to another. Cancellation and close operations stop only the work owned by
 the active application generation; delayed replies from an earlier generation
 are ignored.
 
+Hiding Fast preserves an active transmission or duplex loopback test and its
+audio ownership until it finishes or is cancelled. Receive-only Fast listening,
+including idle monitoring in loopback mode, stops when another modem is
+selected, allowing the shared device handoff.
+
 ## Presentation and native adapters
 
 Pages declare controls and actions once. Adapters present the same text, values,
@@ -197,6 +272,12 @@ availability, and state, subject to native glyph metrics, popup placement, and
 platform dialogs. Shared colors and application chrome preferences come from
 the shared theme/layout declarations. Full-window plots and bitmap content are
 produced by shared code; native adapters do not compute modem or receive state.
+
+Fast uses an 800-logical-pixel default height and a 720-logical-pixel minimum.
+Its compact layout places the six receiver-declaration fields together in the
+Console row and covers Console, Simulation and Modem details, with profile,
+audio and action controls accessible across tabs. Both adapters apply the same
+content-size limits through their native window sizing APIs.
 
 Features using existing controls should change shared declarations and
 application mapping only. Preserve selection and draft state when changing tabs

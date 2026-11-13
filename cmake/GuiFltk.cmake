@@ -48,7 +48,16 @@ target_link_libraries(datapump-gui PRIVATE fltk::fltk)
 if(BUILD_TESTING)
   add_executable(test_fltk_adapter EXCLUDE_FROM_ALL tests/test_fltk_adapter.cpp)
   target_include_directories(test_fltk_adapter PRIVATE src/gui)
-  target_link_libraries(test_fltk_adapter PRIVATE datapump_gui_application fltk::fltk)
+  # The opt-in physical loopback fixture creates a temporary test keyfile.
+  target_link_libraries(test_fltk_adapter PRIVATE datapump_gui_application datapump fltk::fltk)
+  # Test-only capture of the exact native receive PCM, opt-in by environment.
+  # The linker alias below is the 64-bit little-endian GNU/libstdc++ ABI.
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+      AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND CMAKE_CXX_BYTE_ORDER STREQUAL "LITTLE_ENDIAN")
+    target_sources(test_fltk_adapter PRIVATE tests/fltk_audio_capture.cpp)
+    target_link_options(test_fltk_adapter PRIVATE
+      "LINKER:--wrap=_ZN8datapump5audio7captureEjRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERKSt8functionIFbSt4spanIKfLm18446744073709551615EEEESt10stop_tokenS9_IFvRKNS0_12StreamFormatEEENS0_7OptionsE")
+  endif()
   add_executable(test_fltk_document EXCLUDE_FROM_ALL tests/test_fltk_document.cpp)
   target_include_directories(test_fltk_document PRIVATE src/gui)
   target_link_libraries(test_fltk_document PRIVATE datapump_gui_application fltk::fltk)

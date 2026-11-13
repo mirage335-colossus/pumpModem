@@ -84,6 +84,93 @@ def coded_cycle(systematic):
         state=((state<<1)|bit)&127
         bits.extend((state&g).bit_count()&1 for g in (0o171,0o133))
     bits.extend([0]*((-len(bits))%2048));return bytes(bits)
+
+MASK64=(1<<64)-1
+def u64(n): return struct.pack('>Q',n)
+def f64(value): return struct.pack('>d',value)
+def compact_profile(rate,version=2):
+    # Acoustic-short single-carrier compact coding. V4 binds the shared
+    # 16-symbol recurring pilot-word length after ordinary profile fields.
+    code_rate=0 if rate=='half' else 1
+    p=b'datapump/fast/v'+str(version).encode('ascii')
+    p+=b'/compact/v1'+b''.join(u64(x) for x in (4,4,code_rate,0,1))
+    p+=b'/short/v1'+u64(16200)+u64(16)
+    p+=f64(2000.)+f64(4000.)+f64(.20)+u64(1)+u64(32)
+    if version==4:p+=u64(16)
+    return p
+def splitmix_bytes(seed,count):
+    state=seed;word=0;result=bytearray()
+    for i in range(count):
+        if i%8==0:
+            state=(state+0x9e3779b97f4a7c15)&MASK64
+            z=state
+            z=((z^(z>>30))*0xbf58476d1ce4e5b9)&MASK64
+            z=((z^(z>>27))*0x94d049bb133111eb)&MASK64
+            word=z^(z>>31)
+        result.append((word>>(8*(i%8)))&255)
+    return bytes(result)
+def gf16(a,b):
+    product=0
+    while b:
+        if b&1:product^=a
+        a<<=1
+        if a&0x10000:a^=0x1100b
+        b>>=1
+    return product
+def rs16(data,parity):
+    assert len(data)%2==0 and parity>0
+    symbols=[int.from_bytes(data[i:i+2],'big') for i in range(0,len(data),2)]
+    generator=[1];root=1
+    for _ in range(parity):
+        next_poly=[0]*(len(generator)+1)
+        for i,coefficient in enumerate(generator):
+            next_poly[i]^=coefficient
+            next_poly[i+1]^=gf16(coefficient,root)
+        generator=next_poly;root=gf16(root,2)
+    work=symbols+[0]*parity
+    for i in range(len(symbols)):
+        coefficient=work[i]
+        for j in range(1,len(generator)):work[i+j]^=gf16(generator[j],coefficient)
+    word=symbols+work[-parity:]
+    return b''.join(value.to_bytes(2,'big') for value in word)
+def compact_encode_cycle(systematic,rate,cycle):
+    mask=([1,1] if rate=='half' else [1,1,1,0,0,1])
+    state=0;phase=0;coded=bytearray()
+    for bit_index in range(len(systematic)*8+6):
+        bit=(systematic[bit_index//8]>>(7-bit_index%8))&1 if bit_index<len(systematic)*8 else 0
+        register=(state<<1)|bit
+        for polynomial in (0o171,0o133):
+            if mask[phase]:coded.append((register&polynomial).bit_count()&1)
+            phase=(phase+1)%len(mask)
+        state=register&63
+    wire=bytearray(coded);wire.extend([0]*(2048-len(wire)))
+    whitening_state=(0x44504d2f76322f77+cycle*0xd1342543de82ef95)&MASK64;word=0
+    for i in range(len(wire)):
+        if i%64==0:
+            whitening_state=(whitening_state+0x9e3779b97f4a7c15)&MASK64
+            z=whitening_state;z=((z^(z>>30))*0xbf58476d1ce4e5b9)&MASK64
+            z=((z^(z>>27))*0x94d049bb133111eb)&MASK64;word=z^(z>>31)
+        wire[i]^=(word>>(i%64))&1
+    return bytes(wire)
+def compact_cycle(rate,version,source,seed):
+    profile=compact_profile(rate,version)
+    info_bytes=126 if rate=='half' else 190
+    parity=2*((3*(info_bytes//2)+2005)//2006)
+    data_bytes=info_bytes-2*parity
+    salt=splitmix_bytes(seed,32)
+    boot_tag=hashlib.sha256(b'DataPump/fast/capacity/v2/public/bootstrap'+profile+salt).digest()
+    bootstrap=(salt+boot_tag).ljust(data_bytes,b'\0')
+    area=bytearray(data_bytes-32)
+    position=1
+    for byte in source:
+        if position==len(area):break
+        area[position]=byte;position+=1
+    area[0]=1
+    if position<len(area):area[position]=0x80
+    group_tag=hashlib.sha256(b'DataPump/fast/capacity/v2/public/group'+profile+salt+u64(0)+bytes(area)).digest()
+    group=bytes(area)+group_tag
+    return (compact_encode_cycle(rs16(bootstrap,parity),rate,0)+
+            compact_encode_cycle(rs16(group,parity),rate,1))
 salt=bytes(range(32,64));iv=bytes(range(16)); p16=profile(16); p1=profile(1);plain=bytes(range(176))
 # Cross-check independent oracle with pre-upgrade group frozen in test.
 old=seal(p16,salt,7,iv,plain,True)
@@ -143,6 +230,7 @@ captag=h(capauth,b'DataPump/fast/capacity/v2/serpent-aes-v4/group'+p2+salt+U64(7
 capgroup=(capbody+captag).ljust(caparea,b'\0')
 print('CAPACITY_INFO',capinfo,'PARITY_SYMBOLS',capparity,'AREA',caparea,'PLAINTEXT',capsiz,'FILL',len(capgroup)-len(capbody)-len(captag))
 print('CAPACITY_GROUP_SHA256',hashlib.sha256(capgroup).hexdigest())
+assert hashlib.sha256(capgroup).hexdigest()=='0f14d41d2c7a51cad0720c7cf2c758135da38e715c10d0c84559bca317b03d9f', 'legacy independent capacity group control failed'
 # Synthetic pre-v4 capacity failures: correctly authenticated old suite
 # records must not pass v4's new group/bootstrap domain verification.
 old_capacity_auth=h(h(salt,h(mac,b'DataPump/fast/capacity/v2/serpent-aes/root')),b'DataPump/fast/capacity/v2/HMAC-SHA256'+p2+b'\x01')
@@ -151,6 +239,41 @@ old_capacity_tag=h(old_capacity_auth,b'DataPump/fast/capacity/v2/serpent-aes/gro
 old_capacity_bootstrap=h(mac,b'DataPump/fast/capacity/v2/serpent-aes/bootstrap'+p2+salt)
 print('OLD_CAPACITY_GROUP_TAG',old_capacity_tag.hex())
 print('OLD_CAPACITY_BOOTSTRAP_TAG',old_capacity_bootstrap.hex())
+
+# Reconstruct the compact public physical wire vectors independently. This
+# includes SplitMix64 entropy, public bootstrap/group digests, shortened GF(2^16)
+# RS, terminated/punctured K=7 coding, fixed physical fill, and whitening.
+compact_source=bytes([0,0x80,0xff,0])
+compact_seed=0x636f6d7061637421
+for rate,expected in [('half','a0825e08d739449dea3b1d27a5c4b8a391ebb1b8f25f08371a8a2f20f97c1614'),
+                      ('three-quarters','36fda4c62bc75bb013a44e8de5bca8c9f8ebd1e7072f67183792d154e0a4c820')]:
+    previous=hashlib.sha256(compact_cycle(rate,2,compact_source,compact_seed)).hexdigest()
+    assert previous==expected, f'previous compact vector control failed ({rate}: {previous})'
+    print('PREVIOUS_COMPACT_'+rate.upper().replace('-','_')+'_SHA256',previous)
+    updated=hashlib.sha256(compact_cycle(rate,4,compact_source,compact_seed)).hexdigest()
+    print('COMPACT_V4_'+rate.upper().replace('-','_')+'_SHA256',updated)
+
+# Shared non-SSB single-carrier v4 context adds the 16-symbol recurring pilot-word
+# count after marker and pilot spacing. OFDM v2 and SSB v3 contexts are left
+# untouched; this p4 is the wire-capacity single-carrier profile.
+p4=b'datapump/fast/v4'+b''.join(U64(x) for x in (0,4194304,4,0,4))+struct.pack('>ddd',18000/1.02,9300.,.02)+U64(16)+U64(256)+U64(16)
+capcontext4=b'DataPump/fast/capacity/v2/serpent-aes-v4/cbc'+p4
+capsuffix4=U64(len(capcontext4))+capcontext4+U64(len(salt))+salt
+capsk4=hkdf(serpent_root,S512,b'datapump/cascade/v2/serpent/cbc/'+capsuffix4,32,'sha512')
+capak4=hkdf(aes_root,S512,b'datapump/cascade/v2/aes/cbc/'+capsuffix4,32,'sha512')
+capsiv4=hkdf(capsk4,S512,b'datapump/cascade/v2/cbc/serpent-iv/'+iv,16,'sha512')
+capcipher4=aes_cbc(capak4,iv,gcrypt_serpent(capsk4,capsiv4,capplain))
+capbody4=iv+capcipher4
+capauth4=h(h(salt,confidentiality_mac(b'DataPump/fast/capacity/v2/serpent-aes-v4/root')),b'DataPump/fast/capacity/v2/HMAC-SHA256'+p4+b'\x01')
+captag4=h(capauth4,b'DataPump/fast/capacity/v2/serpent-aes-v4/group'+p4+salt+U64(7)+capbody4)
+capgroup4=(capbody4+captag4).ljust(caparea,b'\0')
+print('CAPACITY_V4_GROUP_SHA256',hashlib.sha256(capgroup4).hexdigest())
+old_capacity_auth4=h(h(salt,h(mac,b'DataPump/fast/capacity/v2/serpent-aes/root')),b'DataPump/fast/capacity/v2/HMAC-SHA256'+p4+b'\x01')
+old_capacity_body4=iv+bytes(capsiz)
+old_capacity_tag4=h(old_capacity_auth4,b'DataPump/fast/capacity/v2/serpent-aes/group'+p4+salt+U64(7)+old_capacity_body4)
+old_capacity_bootstrap4=h(mac,b'DataPump/fast/capacity/v2/serpent-aes/bootstrap'+p4+salt)
+print('OLD_CAPACITY_V4_GROUP_TAG',old_capacity_tag4.hex())
+print('OLD_CAPACITY_V4_BOOTSTRAP_TAG',old_capacity_bootstrap4.hex())
 # One-lane forgeries: a party that knows only either auth lane cannot replace
 # the XOR-of-two-lane bootstrap or derive its group key alone.
 root_label=b'DataPump/fast/v1/serpent-aes-v4/root'

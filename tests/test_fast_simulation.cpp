@@ -1,5 +1,7 @@
 #include "datapump/fast/codec.hpp"
+#include "datapump/fast/compression.hpp"
 #include "datapump/fast/modem.hpp"
+#include "datapump/fast/preset.hpp"
 #include "datapump/fast/session.hpp"
 #include "datapump/fast/simulation.hpp"
 #include "fast_test_key.hpp"
@@ -10,8 +12,10 @@
 #include <cmath>
 #include <complex>
 #include <iostream>
+#include <limits>
 #include <numbers>
 #include <numeric>
+#include <random>
 #include <string>
 #include <thread>
 #include <vector>
@@ -32,6 +36,47 @@ IntervalReader intervals(std::size_t count) {
         ++n;
         return true;
     };
+}
+
+void simulation_audio_bounds() {
+    auto p = resolve_snr_preset(Channel::acoustic_short, -6).profile;
+    SimulationSettings config;
+    config.baseband_ppm = 100;
+    config.shift_ppm = 1;
+    config.shift_hz = 30e6;
+    config.delay_ms = 7;
+    config.doppler_hz = 30;
+    config.selective_slow_depth = config.selective_fast_depth = .65;
+    validate(p, config); // The reported screenshot: RF uncertainty is about 30 Hz.
+    config.shift_hz = 200e6;
+    validate(p, config); // Modeled energy may extend beyond the nominal occupied band.
+
+    config.shift_hz = 30e6;
+    config.shift_ppm = 100;
+    const auto rejected = [&](const Profile& profile, std::string_view shift) {
+        try { validate(profile, config); }
+        catch (const Error& error) {
+            const std::string_view message = error.what();
+            require(message.find("sampled audio allows 0..24000.0 Hz") != message.npos &&
+                    message.find("RF oscillator +/-" + std::string(shift)) != message.npos,
+                    "Fast invalid channel did not explain its actual Hz and sampled-audio bounds");
+            return;
+        }
+        throw Error("Fast accepted oscillator bounds crossing DC or Nyquist");
+    };
+    rejected(p, "3000.");
+    config.shared_reference = true;
+    config.shift_ppm = 1;
+    rejected(p, "3000."); // A shared crystal remains a 100 ppm RF reference.
+    config.shift_hz = 0;
+    validate(p, config); // An unused shift oscillator contributes no offset.
+
+    p.carrier_hz = 21000;
+    config.shared_reference = false;
+    config.shift_ppm = 100;
+    config.shift_hz = 40e6;
+    validate(p); // Nominal waveform fits; only the modeled upper bound aliases.
+    rejected(p, "4000.");
 }
 
 void analytic_parity(Profile p) {
@@ -106,6 +151,103 @@ void channel_tails() {
             "Selected Fast amplitude modulation did not change the signal and emit its dispersive tail");
 }
 
+void gaussian_spread_continuity() {
+    const auto p = profile(Channel::ssb);
+    SimulationSettings config;
+    config.seed = 712;
+    config.noise_dbm_hz.reset();
+    SimulationChannel off_fixed(p, config, impulse());
+    config.spread_evolution = SpreadEvolution::gaussian;
+    SimulationChannel off_gaussian(p, config, impulse());
+    require(collect(off_fixed, 509) == collect(off_gaussian, 37),
+        "Gaussian evolution changed the explicit spread-Off identity");
+
+    config.delay_ms = 7;
+    config.doppler_hz = 30;
+    const auto source = [] {
+        return [left=std::size_t{24000}](std::span<std::complex<float>> output) mutable {
+            const auto count = std::min(left, output.size());
+            std::fill_n(output.begin(), count, std::complex<float>{1, 0});
+            left -= count;
+            return count;
+        };
+    };
+    SimulationChannel whole(p, config, source());
+    SimulationChannel fragments(p, config, source());
+    const auto reference = collect(whole, 4096);
+    require(reference == collect(fragments, 137),
+        "Gaussian diffuse channel depends on caller chunk boundaries");
+    const auto& report = whole.report();
+    require(report.spread_evolution == SpreadEvolution::gaussian &&
+            report.gaussian_doppler_width_hz == 30 && report.propagation_frequency_allowance_hz == 90 &&
+            report.propagation_tail_samples == 336 && report.quiet_start_sample == 24336,
+        "Gaussian diffuse channel lost its width convention, engineering allowance or delayed tail");
+    require(std::all_of(reference.begin() + *report.quiet_start_sample, reference.end(),
+                [](float sample) { return sample == 0; }),
+        "Gaussian channel fabricated signal after its complete finite propagation tail");
+    const auto signal = std::span(reference).subspan(336, 23664);
+    const auto extremes = std::minmax_element(signal.begin(), signal.end());
+    require(*extremes.second - *extremes.first > .1f,
+        "Gaussian diffuse gain did not evolve through physical time");
+
+    auto different_seed = config;
+    different_seed.seed = 713;
+    SimulationChannel independent(p, different_seed, source());
+    require(reference != collect(independent, 137), "Gaussian ray seed did not select an independent realization");
+    config.spread_evolution = SpreadEvolution::fixed;
+    SimulationChannel fixed(p, config, source());
+    require(reference != collect(fixed, 137) && fixed.report().gaussian_doppler_width_hz == 0 &&
+            fixed.report().propagation_frequency_allowance_hz == 30,
+        "Fixed-ray diagnostic was replaced by or mislabeled as diffuse fading");
+}
+
+void live_playback_excludes_synthetic_link_budget() {
+    const auto p = profile(Channel::ssb);
+    SimulationSettings config;
+    config.seed = 711;
+    config.delay_ms = .5;
+    config.doppler_hz = 6;
+
+    auto varied = config;
+    varied.transmit_watts = std::numeric_limits<double>::quiet_NaN();
+    varied.path_loss_db = std::numeric_limits<double>::infinity();
+    varied.noise_dbm_hz = std::numeric_limits<double>::infinity();
+    validate(p, varied, ChannelPurpose::live_playback);
+
+    SimulationChannel ordinary(p, config, impulse(), ChannelPurpose::live_playback);
+    SimulationChannel ignored(p, varied, impulse(), ChannelPurpose::live_playback);
+    const auto clean_playback = collect(ordinary, 73);
+    require(clean_playback == collect(ignored, 127),
+        "Live waveform depended on ignored transmit power, synthetic path loss or receiver noise");
+    for (const auto* channel : {&ordinary, &ignored}) {
+        const auto& report = channel->report();
+        require(!report.link_budget_applied && !report.cn0_db_hz && report.noise_variance == 0 &&
+                report.received_power_dbm == 0,
+            "Live playback published a synthetic receiver link budget");
+    }
+    require(ordinary.report().propagation_tail_samples > 0 &&
+            ordinary.report().quiet_start_sample == ignored.report().quiet_start_sample &&
+            ordinary.report().spread_delay_ms == .5 && ordinary.report().spread_doppler_hz == 6,
+        "Live playback bypassed explicit propagation effects, tails or quiet timing");
+
+    auto off = config;
+    off.delay_ms = 0;
+    off.doppler_hz = 0;
+    auto physical = off;
+    physical.transmit_watts = 1e12;
+    physical.path_loss_db = -1000;
+    physical.noise_dbm_hz.reset();
+    SimulationChannel baseline(p, off, impulse(), ChannelPurpose::live_playback);
+    SimulationChannel no_link_budget(p, physical, impulse(), ChannelPurpose::live_playback);
+    require(collect(baseline, 89) == collect(no_link_budget, 89),
+        "Live effects-Off PCM changed with irrelevant physical-link fields");
+
+    SimulationChannel software_noise(p, config, impulse());
+    require(software_noise.report().link_budget_applied && software_noise.report().cn0_db_hz &&
+            software_noise.report().noise_variance > 0,
+        "Receiver simulation stopped applying its declared receiver noise");
+}
+
 void continuous_noise_and_oscillators() {
     const auto p = profile(Channel::ssb);
     SimulationSettings config;
@@ -126,6 +268,13 @@ void continuous_noise_and_oscillators() {
     const auto& report = first.report();
     require(report.cn0_db_hz && std::abs(*report.cn0_db_hz - 90.0205999132796) < 1e-10,
             "Fast link budget changed its watts/path loss/noise density convention");
+    auto higher_loss = config;
+    higher_loss.path_loss_db += 10;
+    SimulationChannel receiver_noise(p, higher_loss, impulse());
+    require(receiver_noise.report().cn0_db_hz &&
+            std::abs(*receiver_noise.report().cn0_db_hz - (*report.cn0_db_hz - 10)) < 1e-10 &&
+            std::abs(receiver_noise.report().noise_variance / report.noise_variance - 10) < 1e-10,
+        "Simulation path loss did not raise normalized receiver noise independently at the receive boundary");
     require(report.shift_error_hz != 0 &&
             std::abs(report.shift_error_hz - config.shift_hz * report.sample_clock_error_ppm * 1e-6) < 1e-12,
             "Fast shared oscillator must use the same fractional reference at RF and baseband");
@@ -273,11 +422,79 @@ void public_receiver_dispatch() {
     p.pilot_spacing_symbols=64;
     Receiver custom(p,sink,{},{},{});
     require(custom.backend_name()=="standard-ssb","An unqualified high-rate variant inherited modeled dispatch");
+
+    std::stop_source compact_stop;
+    const auto compact=resolve_snr_preset(Channel::acoustic_short,-6).profile;
+    Receiver compact_startup(compact,sink,{},[&](std::complex<float>) {compact_stop.request_stop();},
+        compact_stop.get_token());
+    require(compact_startup.backend_name()=="single-carrier-acquisition" && !compact_startup.uses_delay_doppler(),
+        "Compact Fast reported an acquisition candidate as already selected");
+    const auto consumed=compact_startup.consume(pcm);
+    require(consumed>0 && consumed<pcm.size() && compact_startup.consume(pcm)==0,
+        "Stopped competing Fast startup reported unconsumed capture samples");
+    compact_startup.finish();
+    require(!compact_startup.progress().acquired && !compact_startup.progress().physical_complete &&
+            !compact_startup.physical_completion_input_tick(),
+        "Cancelled compact startup or EOF fabricated acquisition or physical end");
+}
+
+void compact_fading_stream() {
+    const auto p = resolve_snr_preset(Channel::acoustic_short, -6).profile;
+    constexpr auto quota = 1024 * 1024;
+    std::mt19937 generator(0x66617374);
+    Bytes source(640);
+    for (auto& byte : source) byte = static_cast<std::uint8_t>(' ' + generator() % 95);
+    const auto prepared = prepare_xz_source(byte_source(source), quota);
+    const auto expected_intervals = estimate_transmission(p, false, prepared.encoded.size()).intervals;
+    require(cycle_intervals(p) == 1 && expected_intervals >= 6,
+        "Compact recurring channel fixture no longer exercises multiple fixed one-interval cycles");
+    auto encoder = fast::testing::deterministic_encoder(p, std::nullopt, byte_source(prepared.encoded), 417,
+        SourceEncoding::xz);
+    Transmitter tx(p, [&](std::span<std::uint8_t> bits) { return encoder.next_interval(bits); });
+    SimulationSettings config;
+    config.seed = 418;
+    config.transmit_watts = 40;
+    config.path_loss_db = 130;
+    config.noise_dbm_hz = -174;
+    config.baseband_ppm = 100;
+    config.baseband_phase_rad_sqrt_s = .5 * std::numbers::pi / 180.;
+    config.shift_ppm = 1;
+    config.shift_phase_rad_sqrt_s = .05 * std::numbers::pi / 180.;
+    config.shift_hz = 30e6;
+    config.delay_ms = 7;
+    config.doppler_hz = 30;
+    config.selective_slow_depth = config.selective_fast_depth = .65;
+    SimulationChannel channel(p, config, [&](std::span<std::complex<float>> out) { return tx.read_analytic(out); });
+    StreamDecoder decoder(p, std::nullopt, quota, SourceEncoding::xz);
+    std::size_t intervals = 0;
+    Receiver receiver(p, [&](std::span<const float> soft, bool feedback) {
+        ++intervals;
+        return decoder.push_interval(soft, feedback);
+    }, {}, {}, {});
+    std::array<float,1201> chunk{};
+    while (!receiver.progress().physical_complete) {
+        const auto count = channel.read(chunk);
+        if (!count) break;
+        receiver.push(std::span(chunk).first(count));
+        require(!decoder.result(), "Compact Fast source escaped before scored physical quiet");
+    }
+    receiver.finish();
+    const auto quiet = channel.report().quiet_start_sample;
+    const auto complete = receiver.physical_completion_input_tick();
+    require(quiet && complete && *complete >= *quiet + 6ULL * p.sample_rate && receiver.uses_delay_doppler(),
+        "Compact fading receiver failed its modeled acquisition or full quiet requirement");
+    decoder.finish(receiver.progress().physical_complete);
+    const auto stats = decoder.snapshot();
+    const auto output = decoder.result();
+    require(intervals == expected_intervals && stats.ldpc_frames == intervals && !stats.ldpc_failed_frames &&
+        !stats.failed_cycles && output && std::ranges::equal(output->bytes(), source),
+        "Compact recurring channel tracking lost exact source bytes or a fixed interval");
 }
 
 } // namespace
 
 int main() try {
+    simulation_audio_bounds();
     analytic_parity(profile(Channel::ssb));
     auto low_rate = profile(Channel::ssb);
     low_rate.ldpc_frame_bits = 64800;
@@ -285,10 +502,13 @@ int main() try {
     analytic_parity(low_rate);
     analytic_parity(profile(Channel::acoustic_short));
     channel_tails();
+    gaussian_spread_continuity();
+    live_playback_excludes_synthetic_link_budget();
     continuous_noise_and_oscillators();
     measured_clock_and_shift();
     encrypted_session();
     cancel_simulation();
+    compact_fading_stream();
     public_receiver_dispatch();
     std::cout << "Fast simulation tests passed\n";
 } catch (const std::exception& error) {

@@ -27,6 +27,19 @@ struct Frame {
     std::size_t end;
 };
 
+Frame protected_frame(Frame frame, const SingleCarrierSchedule& schedule,
+                      std::uint64_t ordinal, std::size_t protected_bits) {
+    if (protected_bits >= physical_interval_bits) return frame;
+    for (auto symbol = frame.start; symbol < frame.end; ++symbol) {
+        const auto position = schedule.position(ordinal, symbol - frame.start);
+        if (position.kind == SymbolKind::data && position.bit_offset + position.bit_count > protected_bits) {
+            frame.end = symbol;
+            break;
+        }
+    }
+    return frame;
+}
+
 std::optional<std::span<const Complex>> observed(SsbAcquisitionView view, SsbCenterRange range,
                                                 std::size_t stride) {
     if (view.stride != stride || !stride || range.first < view.first_center_input_tick ||
@@ -283,17 +296,20 @@ struct SsbEqualizer::Impl {
     std::optional<std::uint64_t> last_present;
     double signal_power = 0.;
     double ridge = 0.;
+    double startup_nmse = 0.;
+    double payload_ridge_scale = 1.;
     double tracker_calibration = .02;
     double soft_calibration = .02;
     std::size_t observation_bound = 0;
     std::size_t intervals_per_cycle = 0;
     std::size_t protected_bits = 0;
+    std::size_t frontend_radius = 0;
     std::array<std::optional<FeedbackSlice>, feedback_context_count> feedback;
     std::optional<std::uint64_t> retained_cycle;
 
     Impl(const Profile& p, const SsbFrontendGeometry& g, const SsbAcquisitionLock& lock, std::stop_token stop)
         : profile(p), schedule(p), model(p, g, lock, stop), intervals_per_cycle(cycle_intervals(p)),
-          protected_bits(capacity_coded_bits(p)) {
+          protected_bits(capacity_coded_bits(p)), frontend_radius(g.radius()) {
         if (!p.capacity_mode || schedule.training_count != 2048 || !intervals_per_cycle ||
             protected_bits / physical_interval_bits > intervals_per_cycle)
             throw std::invalid_argument("Fast SSB equalizer requires the fixed capacity schedule");
@@ -302,7 +318,8 @@ struct SsbEqualizer::Impl {
             !std::isfinite(lock.diagnostics.public_holdout_nmse) || lock.diagnostics.public_holdout_nmse < 0.)
             throw std::invalid_argument("Invalid Fast SSB acquisition calibration");
         const auto centers_per_symbol = 1. / (model.symbols_per_tick() * model.stride());
-        ridge = signal_power * std::max(1e-3, centers_per_symbol * lock.diagnostics.public_holdout_nmse);
+        startup_nmse = lock.diagnostics.public_holdout_nmse;
+        ridge = signal_power * std::max(1e-3, centers_per_symbol * startup_nmse);
         const auto bound = std::ceil((schedule.interval_symbols(0) + pre_roll_symbols + lookahead_symbols) *
             centers_per_symbol / (1. - .001)) + 2.;
         if (!std::isfinite(bound) || bound > maximum_interval_centers)
@@ -384,16 +401,45 @@ struct SsbEqualizer::Impl {
         return {};
     }
 
-    std::optional<FeedbackSlice> retain_slice(std::uint64_t ordinal, SsbAcquisitionView view) const {
-        const auto f = frame(ordinal);
+    bool compact_feedback() const noexcept {
+        return intervals_per_cycle == 1 && compact_acoustic_framing(profile);
+    }
+
+    std::optional<FeedbackSlice> retain_slice(std::uint64_t ordinal, SsbAcquisitionView view,
+                                              Frame f, SsbCenterRange range) const {
         const auto stride = model.stride();
-        auto begin = model.center_at_or_after_symbol(f.start + pre_roll_symbols);
-        auto end = model.center_at_or_after_symbol(f.end - pre_roll_symbols);
+        auto [begin, end] = range;
         while (begin < end && model.covered_symbols(begin).first < f.start) begin += stride;
         while (end > begin && model.covered_symbols(end - stride).second > f.end) end -= stride;
         if (const auto samples = observed(view, {begin, end}, stride))
             return FeedbackSlice{ordinal, begin, {samples->begin(), samples->end()}};
         return {};
+    }
+
+    std::optional<FeedbackSlice> retain_slice(std::uint64_t ordinal, SsbAcquisitionView view) const {
+        const auto f = frame(ordinal);
+        return retain_slice(ordinal, view, f, {model.center_at_or_after_symbol(f.start + pre_roll_symbols),
+            model.center_at_or_after_symbol(f.end - pre_roll_symbols)});
+    }
+
+    std::array<std::optional<FeedbackSlice>, feedback_context_count> retain_compact_slices(
+            std::uint64_t ordinal, SsbAcquisitionView view) const {
+        const auto f = protected_frame(frame(ordinal), schedule, ordinal, protected_bits);
+        const auto stride = model.stride();
+        const auto aperture = (2 * frontend_radius + stride - 1) / stride * stride;
+        const auto span = f.end - f.start;
+        std::array<std::optional<FeedbackSlice>, feedback_context_count> slices;
+        for (std::size_t i = 0; i < slices.size(); ++i) {
+            const auto begin = model.center_at_or_after_symbol(f.start + span * i / slices.size());
+            auto end = model.center_at_or_after_symbol(f.start + span * (i + 1) / slices.size());
+            if (end <= begin || end - begin <= aperture) return {};
+            // The later holdout's centered FIR must share no raw input
+            // samples with the preceding fit windows.
+            if (i + 1 < slices.size()) end -= aperture;
+            slices[i] = retain_slice(ordinal, view, f, {begin, end});
+            if (!slices[i]) return {};
+        }
+        return slices;
     }
 };
 
@@ -436,7 +482,8 @@ std::optional<SsbIntervalEvidence> SsbEqualizer::estimate(SsbAcquisitionView vie
     const auto input = observed(view, range, stride);
     if (!input || input->size() > impl.observation_bound) return {};
     const auto window = impl.make_window(f, range, ordinal, true);
-    auto projection = project(impl.model, window, *input, range.first, impl.ridge, stop);
+    const auto payload_ridge = impl.ridge * impl.payload_ridge_scale;
+    auto projection = project(impl.model, window, *input, range.first, payload_ridge, stop);
     if (!projection) return {};
     auto& normal = projection->factor;
     const auto& rhs = projection->mean;
@@ -460,7 +507,7 @@ std::optional<SsbIntervalEvidence> SsbEqualizer::estimate(SsbAcquisitionView vie
 
     std::vector<double> posterior(window.columns);
     if (!normal.inverse_diagonal(posterior, stop)) return {};
-    for (auto& variance : posterior) variance *= impl.ridge;
+    for (auto& variance : posterior) variance *= payload_ridge;
     std::array<double, 22> metrics{};
     for (const auto& d : window.data) {
         const auto [symbol, variance] = extrinsic(rhs, posterior, d.column);
@@ -569,12 +616,15 @@ bool SsbEqualizer::commit_present(const SsbIntervalEvidence& estimate, SsbAcquis
     const auto cycle = estimate.ordinal / impl.intervals_per_cycle;
     const auto index = impl.feedback_position(estimate.ordinal);
     auto slice = index ? impl.retain_slice(estimate.ordinal, view) : std::nullopt;
+    const auto compact = impl.compact_feedback();
+    auto compact_slices = compact ? impl.retain_compact_slices(estimate.ordinal, view) : decltype(impl.feedback){};
     if (estimate.tracker_proposed && !impl.model.commit_adjustment(estimate.proposed_, stop)) return false;
     if (impl.retained_cycle != cycle) {
         impl.feedback = {};
         impl.retained_cycle = cycle;
     }
     if (index) impl.feedback[*index] = std::move(slice);
+    if (compact) impl.feedback = std::move(compact_slices);
     impl.tracker_calibration = estimate.proposed_tracker_calibration_;
     impl.soft_calibration = estimate.proposed_soft_calibration_;
     impl.last_present = estimate.ordinal;
@@ -607,8 +657,9 @@ std::optional<VerifiedWindow> verified_window(const Profile& profile, const Sing
         Frame frame, const FeedbackSlice& slice, std::size_t cycle_intervals, std::span<const std::uint8_t> bits) {
     const auto slot = slice.ordinal % cycle_intervals;
     const auto offset = slot * physical_interval_bits;
-    if (offset > bits.size() || physical_interval_bits > bits.size() - offset) return {};
-    const auto slot_bits = bits.subspan(offset, physical_interval_bits);
+    if (offset >= bits.size()) return {};
+    const auto slot_bits = bits.subspan(offset, std::min(physical_interval_bits, bits.size() - offset));
+    frame = protected_frame(frame, schedule, slice.ordinal, slot_bits.size());
     VerifiedWindow result{frame, &slice, {}};
     result.symbols.reserve(frame.end - frame.start);
     for (std::size_t k = 0; k < frame.end - frame.start; ++k) {
@@ -622,8 +673,8 @@ std::optional<VerifiedWindow> verified_window(const Profile& profile, const Sing
             if (bit > 1) return {};
             label = (label << 1) | bit;
         }
-        // This is the canonical within-symbol zero suffix, inside a wholly
-        // protected interval. Physical interval alignment fill is excluded.
+        // Only canonical zero suffix within a protected symbol is known.
+        // Physical interval alignment fill is excluded from the window.
         label <<= schedule.bits_per_symbol - position.bit_count;
         result.symbols.push_back(square_qam_point(profile.constellation, label));
     }
@@ -814,7 +865,8 @@ SsbCycleRefinement SsbEqualizer::finish_coding_cycle(std::uint64_t wire_ordinal,
     std::array<VerifiedWindow, feedback_context_count> windows;
     for (std::size_t i = 0; i < slices.size(); ++i) {
         const auto& slice = *slices[i];
-        if (slice.ordinal / impl.intervals_per_cycle != wire_ordinal || impl.feedback_position(slice.ordinal) != i)
+        if (slice.ordinal / impl.intervals_per_cycle != wire_ordinal ||
+            (!impl.compact_feedback() && impl.feedback_position(slice.ordinal) != i))
             return receipt;
         auto window = verified_window(impl.profile, impl.schedule, impl.frame(slice.ordinal),
             slice, impl.intervals_per_cycle, cycle->protected_bits);
@@ -843,6 +895,15 @@ SsbCycleRefinement SsbEqualizer::finish_coding_cycle(std::uint64_t wire_ordinal,
         const auto gain_score = score_known(*holdout, fitted->gains);
         auto gain_control = fitted->gains;
         receipt.baseline_holdout_nmse = baseline.nmse;
+        // A validated compact acoustic cycle gives an independent estimate
+        // of how well the startup channel model predicts continuing audio.
+        // Reserve more inverse regularization when that error rises so deep
+        // fades cannot yield overconfident payload bits. Quiet scoring keeps
+        // its original ridge and the following interval keeps its geometry.
+        if (impl.profile.channel == Channel::acoustic_short && impl.compact_feedback() &&
+            baseline.coherence > .9 && std::isfinite(baseline.nmse)) {
+            impl.payload_ridge_scale = std::clamp(baseline.nmse / std::max(.001, impl.startup_nmse), 1., 2.);
+        }
         const auto groups = rate_groups(original);
         auto atoms = std::vector<SsbAcquisitionAtom>(original.begin(), original.end());
         std::vector<SsbPulseCache> trial_caches;

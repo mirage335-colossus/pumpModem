@@ -117,10 +117,19 @@ void geometry_and_continuity() {
         make_ssb_frontend_geometry(48000).output_rate() == 12000 &&
         make_ssb_frontend_geometry(96000).output_rate() == 12000,
         "Fast SSB treated 44.1 kHz as an integer path to 12 kHz");
+    const auto narrow=make_ssb_frontend_geometry(48000,1800,832,9);
+    check(narrow.decimation==9 && narrow.radius()==256 && response(narrow,612.)>.99 &&
+        std::abs(response(narrow,2600.))<.001,
+        "Compact Fast frontend lost translated-band coverage or anti-alias rejection");
+    std::vector<float> tone(6091);
+    for(std::size_t i=0;i<tone.size();++i)tone[i]=static_cast<float>(phase(i,2350.,48000.).real());
+    check(collect(narrow,tone,whole)==collect(narrow,tone,chunks,7),
+        "Compact Fast frontend changed its exact center sequence across chunks");
     for (const auto rate : {0u, 44099u, 192001u}) invalid([&] { make_ssb_frontend_geometry(rate); });
     invalid([] { make_ssb_frontend_geometry(48000, 0); });
     invalid([] { make_ssb_frontend_geometry(48000, 24000); });
     invalid([] { make_ssb_frontend_geometry(48000, 1500, 6000); });
+    invalid([] { make_ssb_frontend_geometry(48000, 1800, 832, 30); });
     invalid([] { make_ssb_frontend_geometry(48000, std::numeric_limits<double>::quiet_NaN()); });
     invalid([] { SsbFrontend f(make_ssb_frontend_geometry(48000), {}); });
     invalid([] { SsbFrontend f(make_ssb_frontend_geometry(48000), [](const auto&) {}, 4097); });

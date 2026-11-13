@@ -46,8 +46,12 @@ SsbChannelModel::SsbChannelModel(const Profile& p, const SsbFrontendGeometry& g,
       input_rate_(p.sample_rate), beta_(p.symbol_rate / input_rate_), radius_(single_carrier_pulse_radius(p)),
       epoch_(lock.epoch_from_reference_ticks), clock_(lock.clock_ratio_error), minimum_delay_(0.),
       maximum_delay_(0.), pulse_(p, g), atoms_(lock.atoms) {
+    // The fit's reference is inside the public preamble. Below 800 baud its
+    // distance from the waveform origin can exceed the original two seconds.
+    const auto maximum_epoch_ticks = supports_narrow_acoustic_fit(p) ?
+        (SingleCarrierSchedule(p).training_count + radius_) / beta_ / (1. - maximum_clock) : 2. * input_rate_;
     if (!stride_ || reference_tick_ < g.radius() || (reference_tick_ - g.radius()) % stride_ ||
-        !std::isfinite(epoch_) || std::abs(epoch_) > 2. * input_rate_ ||
+        !std::isfinite(epoch_) || std::abs(epoch_) > maximum_epoch_ticks ||
         !std::isfinite(clock_) || std::abs(clock_) > maximum_clock || atoms_.empty() ||
         atoms_.size() > DelayDopplerFit::maximum_atoms)
         throw std::invalid_argument("Invalid Fast SSB acquired channel coordinates");

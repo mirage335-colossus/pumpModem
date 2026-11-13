@@ -1,21 +1,44 @@
 #include "ssb_receiver.hpp"
+#include "ssb_acquisition_workers.hpp"
 #include "ssb_display_points.hpp"
 #include "ssb_equalizer.hpp"
 #include "ssb_local_fir.hpp"
 #include "ssb_quiet.hpp"
 #include "ssb_quiet_low_power.hpp"
 #include "datapump/execution.hpp"
+#include "datapump/execution_resources.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
+#include <system_error>
 #include <utility>
 #include <variant>
 
 namespace datapump::fast::detail {
 namespace {
 constexpr std::size_t frontend_chunk=256;
+constexpr double narrow_acoustic_offset_hz=100.;
+constexpr double baseline_delay_ms=22.;
+constexpr double baseline_clock_ppm=300.;
+constexpr auto mib=std::size_t{1024}*1024;
+
+double acquisition_offset_hz(const Profile& profile) noexcept {
+    return supports_narrow_acoustic_fit(profile) ? narrow_acoustic_offset_hz :
+        SsbAcquisitionRequest{}.max_abs_doppler_hz;
+}
+
+SsbFrontendGeometry receiver_geometry(const Profile& profile,double offset_hz) {
+    if(supports_modeled_ssb_receiver(profile))
+        return make_ssb_frontend_geometry(profile.sample_rate,profile.carrier_hz);
+    // Bound the inverse by keeping the actual frontend grid close to the
+    // periodic proposal grid. Preserve the translated audio band.
+    const auto decimation=static_cast<std::size_t>(profile.sample_rate/(5.5*profile.symbol_rate));
+    const auto cutoff=occupied_bandwidth_hz(profile)*.5+offset_hz;
+    return make_ssb_frontend_geometry(profile.sample_rate,profile.carrier_hz,cutoff,decimation);
+}
 
 std::uint64_t quiet_guard_ticks(const Profile& profile,const SsbFrontendGeometry& geometry,
                                 const SsbAcquisitionRequest& limits) {
@@ -73,6 +96,9 @@ struct SsbReceiver::Impl {
     std::unique_ptr<SsbDisplayPoints> display_points;
     DelayDopplerFit fitter;
     SsbCandidateSearch search;
+    std::unique_ptr<SsbFitWorkers> fit_workers;
+    SsbAcquisitionWorkerProgress worker_progress;
+    std::size_t fit_stack_bytes=0;
     SsbFrontend frontend;
     SsbQuietRun quiet;
     std::optional<SsbLowPowerQuiet> low_power;
@@ -113,6 +139,60 @@ struct SsbReceiver::Impl {
         if(!sink)throw std::invalid_argument("Fast SSB receiver requires an interval sink");
         if(symbol_observer)display_points=std::make_unique<SsbDisplayPoints>(schedule.data_symbols);
         measure_workspace();
+        if(supports_modeled_ssb_receiver(profile) && model_policy==SsbReceiverModelPolicy::validate_local_fir)
+            configure_workers(limits);
+    }
+
+    void configure_workers(const SsbAcquisitionRequest& limits) {
+#ifndef DATAPUMP_EXECUTION_FIBERS
+        execution::HostResources host{};
+        try { host=execution::host_resources(); }
+        catch(const Error&) {return;} // Unverified resources only admit the existing serial path.
+        if(!host.hardware_threads || host.hardware_threads>std::numeric_limits<unsigned>::max()/2)
+            throw std::length_error("Fast SSB worker budget overflow");
+        worker_progress.hardware_threads=host.hardware_threads;
+        worker_progress.worker_budget=2*host.hardware_threads;
+        if(!host.available_memory_bytes)return;
+        // Observed available memory already excludes the process's current
+        // footprint. Reserve operating headroom and every new owner's full
+        // fit, immutable observations, retained result and helper stack.
+        const auto available=*host.available_memory_bytes;
+        const auto headroom=std::clamp(available/10,std::uint64_t{512}*mib,std::uint64_t{2048}*mib);
+        if(available<=headroom)return;
+        fit_stack_bytes=execution::worker_stack_bytes();
+        const auto snapshot=search.fit_view_capacity()*sizeof(std::complex<double>);
+        const auto fit=fitter.fit_workspace_bound(limits)+snapshot;
+        const auto owner_bytes=fit+SsbFitWorkers::result_lease_bytes()+fit_stack_bytes+2*snapshot;
+        const auto owners=static_cast<unsigned>(std::min<std::uint64_t>(
+            std::min(worker_progress.worker_budget,search.maximum_fit_owners()),(available-headroom)/owner_bytes));
+        if(owners<2)return;
+        worker_progress.owner_limit=owners;
+        worker_progress.fit_lease_bytes=fit;
+        fit_workers=std::make_unique<SsbFitWorkers>(owners,
+            [this](SsbAcquisitionView view,const SsbAcquisitionRequest& request,std::stop_token token) {
+                return score_fit(view,request,token);
+            },stop);
+        search.allow_pending_fits(owners,[this](bool wait) { return commit_fits(wait); },
+            [this]() -> std::optional<SsbCandidateSearch::FitFrontiers> {
+                if(const auto* oldest=fit_workers ? fit_workers->oldest() : nullptr)
+                    return SsbCandidateSearch::FitFrontiers{oldest->first_center,oldest->first_payload_frontier};
+                return {};
+            });
+        note_fit_workers();
+#else
+        (void)limits;
+#endif
+    }
+
+    void note_fit_workers() {
+        if(!fit_workers)return;
+        const auto pending=fit_workers->pending();
+        worker_progress.pending_fits=pending;
+        worker_progress.peak_pending_fits=std::max(worker_progress.peak_pending_fits,pending);
+        worker_progress.started_helpers=std::max(worker_progress.started_helpers,fit_workers->started_helpers());
+        const auto bytes=fit_workers->reserved_bytes(worker_progress.fit_lease_bytes,fit_stack_bytes);
+        worker_progress.peak_reserved_bytes=std::max(worker_progress.peak_reserved_bytes,bytes);
+        measure_workspace(bytes);
     }
 
     void measure_workspace(std::size_t temporary=0) {
@@ -124,22 +204,101 @@ struct SsbReceiver::Impl {
         peak_workspace=std::max(peak_workspace,retained+temporary);
     }
 
-    bool acquire(SsbAcquisitionView view,const SsbAcquisitionRequest& request,std::stop_token token) {
-        SsbAcquisitionDiagnostics diagnostics;
+    SsbFitResult score_fit(SsbAcquisitionView view,const SsbAcquisitionRequest& request,std::stop_token token) const {
+        SsbFitResult result;
         const auto started=std::chrono::steady_clock::now();
-        const auto lock=fitter.fit(view,request,token,&diagnostics);
+        result.lock=fitter.fit(view,request,token,&result.diagnostics);
+        result.wall_seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();
+        return result;
+    }
+
+    void discard_fits() noexcept {
+        if(!fit_workers)return;
+        worker_progress.discarded_fits+=fit_workers->pending();
+        fit_workers->close();
+        worker_progress.peak_active_fits=std::max(worker_progress.peak_active_fits,fit_workers->peak_active_fits());
+        fit_workers.reset();
+        worker_progress.pending_fits=0;
+    }
+
+    bool commit_fits(bool wait) {
+        if(!fit_workers)return false;
+        while(auto receipt=fit_workers->take(wait)) {
+            note_fit_workers();
+            if(receipt->failure) {
+                discard_fits();
+                std::rethrow_exception(receipt->failure);
+            }
+            if(commit_fit(receipt->request,receipt->past_last_center,receipt->result,stop))return true;
+            // A full owner ring needs only its oldest result to retire.
+            // Drain any other ready results, but leave later work running.
+            wait=false;
+        }
+        return false;
+    }
+
+    std::uint64_t first_payload_frontier(SsbAcquisitionView view,const SsbAcquisitionRequest& request) const {
+        const auto ticks_per_symbol=profile.sample_rate/profile.symbol_rate;
+        const auto reference_offset=double((fitter.training_centers(request)/2)*view.stride);
+        const auto payload_end=double(schedule.training_count+schedule.interval_symbols(0))+
+            single_carrier_pulse_radius(profile);
+        // Use the earliest supported epoch and fastest clock relative to the
+        // fit's exact midpoint. Settle by the first complete public interval,
+        // keeping all earlier pilot observations for model selection.
+        const auto end_offset=reference_offset+(request.earliest_epoch_from_training_ticks-
+            reference_offset+payload_end*ticks_per_symbol)/(1.+request.max_abs_clock_ratio);
+        const auto past_last=view.first_center_input_tick+view.stride*view.samples.size();
+        // The current fit is already ripe when its model deadline precedes
+        // the offer. Use an offset from observed time to avoid epoch rounding.
+        if(!std::isfinite(end_offset) || request.training_first_center_tick>past_last)
+            throw std::length_error("Invalid Fast SSB payload frontier");
+        if(end_offset<=0.)return past_last;
+        const auto centers=static_cast<std::uint64_t>(std::floor(end_offset/view.stride));
+        if(centers>(std::numeric_limits<std::uint64_t>::max()-request.training_first_center_tick)/view.stride)
+            throw std::length_error("Fast SSB payload frontier exceeds its sample clock");
+        return std::max(past_last,request.training_first_center_tick+centers*view.stride);
+    }
+
+    bool acquire(SsbAcquisitionView view,const SsbAcquisitionRequest& request,std::stop_token token) {
+        if(fit_workers) {
+            if(fit_workers->pending()>=worker_progress.owner_limit && commit_fits(true))return true;
+            if(!fit_workers || token.stop_requested())return false;
+            try {
+                if(fit_workers->submit(view,request,first_payload_frontier(view,request)))note_fit_workers();
+                return false;
+            } catch(const std::system_error&) {
+                // Native task creation can fail after earlier fits started.
+                // Settle their results in order before retrying this unchanged
+                // snapshot on the caller, or honoring an earlier lock.
+                while(fit_workers && fit_workers->pending() && !token.stop_requested())
+                    if(commit_fits(true))return true;
+                discard_fits();
+                if(token.stop_requested())return false;
+            }
+        }
+        const auto result=score_fit(view,request,token);
+        return commit_fit(request,view.first_center_input_tick+view.stride*view.samples.size(),result,token);
+    }
+
+    bool commit_fit(const SsbAcquisitionRequest& request,std::uint64_t past_last,
+                    const SsbFitResult& result,std::stop_token token) {
+        if(token.stop_requested())return false;
+        const auto& diagnostics=result.diagnostics;
         acquisition_diagnostics=diagnostics;
+        ++worker_progress.committed_fits;
         if(acquisition_attempt_count<acquisition_attempts.size()) {
-            const auto wall=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();
             acquisition_attempts[acquisition_attempt_count++]={request.training_first_center_tick,
-                view.first_center_input_tick+view.stride*view.samples.size(),request.earliest_epoch_from_training_ticks,
-                request.latest_epoch_from_training_ticks,wall,diagnostics.training_nmse,diagnostics.status,
+                past_last,request.earliest_epoch_from_training_ticks,
+                request.latest_epoch_from_training_ticks,result.wall_seconds,diagnostics.training_nmse,diagnostics.status,
                 diagnostics.marker_evaluations,diagnostics.marker_primary_rejections,diagnostics.marker_decoy_banks,
                 diagnostics.marker_primary_seconds,diagnostics.marker_decoy_seconds,diagnostics.marker_row_seconds,
                 diagnostics.marker_gram_seconds,diagnostics.marker_factor_seconds};
         }
-        measure_workspace(diagnostics.workspace_bound_bytes);
-        if(!lock || token.stop_requested())return false;
+        if(!fit_workers)measure_workspace(diagnostics.workspace_bound_bytes);
+        const auto& lock=result.lock;
+        if(!lock)return false;
+        discard_fits();
+        if(token.stop_requested())return false;
         equalizer.emplace(std::in_place_type<SsbEqualizer>,profile,geometry,*lock,token);
         if(token.stop_requested())return false;
         if(model_policy==SsbReceiverModelPolicy::validate_local_fir &&
@@ -157,6 +316,31 @@ struct SsbReceiver::Impl {
         return true;
     }
 
+    void admit_payload_history() {
+        const auto previous=search.workspace_bytes();
+        const auto selected_centers=std::visit([](const auto& model){return model.maximum_observation_centers();},*equalizer);
+        const auto candidate_centers=local_candidate?local_candidate->maximum_observation_centers():0;
+        search.reserve_history(std::max(selected_centers,candidate_centers)+frontend_chunk);
+        if(search.workspace_bytes()>previous)measure_workspace(previous);
+    }
+
+    void finish() {
+        frontend.finish();
+        try {
+            if(fit_workers && !stop.stop_requested()) {
+                while(fit_workers && fit_workers->pending() && !stop.stop_requested())search.drain_fits(stop);
+                if(state.acquired && !stop.stop_requested()) {
+                    admit_payload_history();
+                    process_ready();
+                }
+            }
+        } catch(...) {
+            discard_fits();
+            throw;
+        }
+        discard_fits();
+    }
+
     void observe(const SsbFrontendOutput& block) {
         if(stop.stop_requested() || state.physical_complete)return;
         if(input_observer) {
@@ -168,14 +352,7 @@ struct SsbReceiver::Impl {
         const auto was_acquired=state.acquired;
         search.push(block,stop);
         if(!state.acquired || stop.stop_requested())return;
-        if(!was_acquired) {
-            const auto previous=search.workspace_bytes();
-            const auto selected_centers=std::visit([](const auto& model){return model.maximum_observation_centers();},
-                *equalizer);
-            const auto candidate_centers=local_candidate?local_candidate->maximum_observation_centers():0;
-            search.reserve_history(std::max(selected_centers,candidate_centers)+frontend_chunk);
-            if(search.workspace_bytes()>previous)measure_workspace(previous);
-        }
+        if(!was_acquired)admit_payload_history();
         process_ready();
         measure_workspace();
     }
@@ -329,6 +506,7 @@ struct SsbReceiver::Impl {
                         if(stop.stop_requested())return;
                         throw Error("Fast SSB present interval failed to commit");
                     }
+                    state.last_present_signal=ReceivedSignalRange{groups.front().first,groups.back().past_last};
                     if(display_points)for(const auto point:display_points->samples())
                         publish_observation(symbol_observer,point);
                     state.evm=std::sqrt(std::max(0.,estimate->pilot_error_power));
@@ -401,10 +579,16 @@ std::size_t SsbReceiver::push(std::span<const float> pcm) {
     if(impl_->state.physical_complete)return 0;
     return impl_->frontend.push(pcm,impl_->stop);
 }
-void SsbReceiver::finish() noexcept { impl_->frontend.finish(); }
+void SsbReceiver::finish() { impl_->finish(); }
+void SsbReceiver::set_input_observer(SymbolObserver observer) noexcept {
+    impl_->input_observer=std::move(observer);
+}
 void SsbReceiver::set_cycle_observer(CycleObserver observer) { impl_->cycle_observer=std::move(observer); }
 const ModemProgress& SsbReceiver::progress() const noexcept { return impl_->state; }
 const SsbCandidateSearchProgress& SsbReceiver::acquisition_progress() const noexcept { return impl_->search.progress(); }
+const SsbAcquisitionWorkerProgress& SsbReceiver::acquisition_worker_progress() const noexcept {
+    return impl_->worker_progress;
+}
 const SsbAcquisitionDiagnostics& SsbReceiver::last_acquisition_diagnostics() const noexcept {
     return impl_->acquisition_diagnostics;
 }
@@ -427,13 +611,99 @@ bool supports_modeled_ssb_receiver(const Profile& profile) noexcept {
         profile.code_rate==CodeRate::eight_ninths && profile.interleave_depth==1 && standard_ssb_capacity_timing(profile);
 }
 
-SsbReceiver make_ssb_model_receiver(const Profile& profile,ValidatedIntervalSink sink,std::stop_token stop,
-                                    SymbolObserver symbol_observer,SymbolObserver input_observer) {
+bool supports_delay_doppler_receiver(const Profile& p) noexcept {
+    if(dense_acoustic_framing(p))return true;
+    if(supports_modeled_ssb_receiver(p))return true;
+    if(p.sample_rate!=48000 || !p.capacity_mode || p.acoustic_ofdm || p.constellation>16 ||
+       p.pilot_spacing_symbols>64 || p.rolloff<.10 || p.symbol_rate>2500.)return false;
+    if(p.symbol_rate<800. && !supports_narrow_acoustic_fit(p))return false;
+    // The frontend needs room for the translated complex baseband.
+    const auto half_band=p.symbol_rate*(1+p.rolloff)*.5+acquisition_offset_hz(p);
+    return half_band<std::min(p.carrier_hz,p.sample_rate*.5-p.carrier_hz);
+}
+
+SsbReceiver make_delay_doppler_receiver(const Profile& profile,ValidatedIntervalSink sink,std::stop_token stop,
+                                       SymbolObserver symbol_observer,SymbolObserver input_observer,
+                                       std::optional<ChannelBounds> admitted) {
     SsbAcquisitionRequest bounds{};
-    bounds.max_excess_delay_ticks=.022*profile.sample_rate;
-    return SsbReceiver(profile,make_ssb_frontend_geometry(profile.sample_rate,profile.carrier_hz),
+    const auto extent=admitted.value_or(ChannelBounds{baseline_clock_ppm,acquisition_offset_hz(profile),baseline_delay_ms});
+    bounds.max_excess_delay_ticks=extent.delay_ms*.001*profile.sample_rate;
+    bounds.max_abs_doppler_hz=extent.frequency_hz;
+    bounds.max_abs_clock_ratio=extent.clock_ppm*1e-6;
+    auto geometry=receiver_geometry(profile,bounds.max_abs_doppler_hz);
+    return SsbReceiver(profile,std::move(geometry),
         bounds,.10,std::move(sink),stop,SsbReceiverModelPolicy::validate_local_fir,
         std::move(symbol_observer),std::move(input_observer));
 }
 
 } // namespace datapump::fast::detail
+
+namespace datapump::fast {
+ReceiverAssumptionBounds receiver_assumption_bounds(const Profile& p,const ChannelAssumptions& a) {
+    validate(p);
+    validate(a);
+    const auto center=(occupied_lower_hz(p)+occupied_upper_hz(p))*.5;
+    const auto clock_scale=1.-a.baseband_ppm*.5e-6;
+    const auto clock_ppm=a.baseband_ppm*a.margin/clock_scale;
+    const auto shift_ppm=a.shared_reference?a.baseband_ppm:a.shift_ppm;
+    const auto rf_offset=a.shift_hz*shift_ppm*a.margin*1e-6/clock_scale;
+    const auto doppler=a.doppler_hz*a.margin;
+    const bool selective=a.selective_slow_depth>0||a.selective_fast_depth>0;
+    const auto am_offset=selective?std::max(.1,doppler):0.;
+    const ChannelBounds requested{clock_ppm,rf_offset+center*clock_ppm*1e-6+doppler+am_offset,a.delay_ms*a.margin};
+    const auto reject=[&](std::string_view backend,std::string_view adjustment) {
+        std::ostringstream message;
+        message << "Fast receiver assumptions exceed " << backend << " ("
+            << requested.clock_ppm << " ppm, ±" << requested.frequency_hz << " Hz, "
+            << requested.delay_ms << " ms). " << adjustment;
+        throw Error(message.str());
+    };
+    if(occupied_lower_hz(p)<=requested.frequency_hz||
+       occupied_upper_hz(p)+requested.frequency_hz>=p.sample_rate*.5)
+        reject("the sampled audio band","Reduce shift frequency, oscillator error or spread.");
+    if(dense_acoustic_framing(p)) {
+        if(clock_ppm>300.||requested.delay_ms>22.||requested.frequency_hz>160.)
+            reject("the dense acoustic search","Reduce the oscillator, spread or search margin.");
+        return {requested,{300.,std::max(100.,requested.frequency_hz),22.},true};
+    }
+    if(detail::supports_delay_doppler_receiver(p)) {
+        const ChannelBounds admitted{std::max(detail::baseline_clock_ppm,clock_ppm),
+            std::max(detail::acquisition_offset_hz(p),requested.frequency_hz+2.),
+            std::max(detail::baseline_delay_ms,requested.delay_ms)};
+        // Use the same 24 public words and grid as the real bounded fit.
+        const auto fit_bins=std::floor(admitted.frequency_hz*24.*sync_symbols/p.symbol_rate);
+        const auto half_band=occupied_bandwidth_hz(p)*.5+admitted.frequency_hz;
+        const bool fixed_frontend=detail::supports_modeled_ssb_receiver(p);
+        if(fixed_frontend&&admitted.frequency_hz>detail::acquisition_offset_hz(p))
+            reject("the fixed SSB frontend","Reduce the oscillator, spread or search margin.");
+        if(admitted.clock_ppm>1000.||admitted.delay_ms>24.||admitted.frequency_hz>500.||
+           fit_bins>1024.||(!fixed_frontend&&half_band>=std::min(p.carrier_hz,p.sample_rate*.5-p.carrier_hz)))
+            reject("the bounded delay/Doppler search","Reduce the oscillator, spread or search margin, or choose a faster supported symbol rate.");
+        return {requested,admitted,true};
+    }
+    // Other backends retain their established fixed acquisition geometry.
+    // Permit only the declared ranges their current implementations cover.
+    if(p.acoustic_ofdm) {
+        // Convert the tested nominal relative clocks to the same two-end
+        // ratio convention used for requests.
+        constexpr double clock_limit=100./(1.-100.*.5e-6);
+        const auto prefix_ms=1000.*p.ofdm_prefix_samples/p.sample_rate;
+        if(clock_ppm>clock_limit||rf_offset>0.||doppler>0.||selective||requested.delay_ms>=prefix_ms)
+            reject("the acoustic OFDM receiver","Choose a supported single-carrier profile for oscillator shift or dynamic spread.");
+        return {requested,{clock_limit,center*clock_limit*1e-6,prefix_ms},false};
+    }
+    constexpr double clock_limit=300./(1.-300.*.5e-6);
+    const bool tracked_wire=p.channel==Channel::wire&&p.capacity_mode&&p.constellation<=256&&p.symbol_rate>=4000.;
+    const auto maximum_delay=tracked_wire?.5:0.;
+    const auto maximum_doppler=tracked_wire?.1:0.;
+    const auto maximum_rf=tracked_wire?30.01:0.;
+    if(clock_ppm>clock_limit||requested.delay_ms>maximum_delay||doppler>maximum_doppler||
+       rf_offset>maximum_rf||selective)
+        reject("the coherent receiver","Choose a supported delay/Doppler profile, or reduce the declared channel effects.");
+    return {requested,{clock_limit,maximum_rf+center*clock_limit*1e-6+maximum_doppler,maximum_delay},false};
+}
+
+void validate_receiver_assumptions(const Profile& p,const ChannelAssumptions& a) {
+    (void)receiver_assumption_bounds(p,a);
+}
+} // namespace datapump::fast

@@ -21,8 +21,13 @@ set(_aliases
   "alsa_interleave_playback=test_alsa_audio"
   "alsa_continuous_clock=test_alsa_audio"
   "windows_audio_contract=test_windows_audio"
+  "gui_fast_loopback=test_gui_fast_live"
   "gui_fast_keygen=test_gui_fast_live"
   "fast_acoustic_short_convolutional=test_fast_acoustic_short_weak"
+  "fast_acoustic_dense_contract=test_fast_ssb_receiver" "fast_acoustic_dense_transitions=test_fast_ssb_receiver"
+  "fast_acoustic_dense_carrier_edges=test_fast_ssb_receiver"
+  "fast_acoustic_dense_marker_clock=test_fast_ssb_receiver" "fast_acoustic_dense_marker_reentry=test_fast_ssb_receiver"
+  "fast_acoustic_dense_recurring_epoch=test_fast_ssb_receiver"
   "gui_self_check=datapump-gui" "gui_workflow=datapump-gui"
   "tui_self_check=datapump-tui" "tui_terminal=datapump_tui_adapter_test"
   "tui_paste_boundaries=datapump_tui_adapter_test" "tui_winconsole=test_winconsole"
@@ -80,6 +85,8 @@ foreach(_test IN LISTS _tests)
     set(_dependencies test_${_test})
   elseif(_test MATCHES "^fast_acoustic_short_snr_")
     set(_dependencies test_fast_acoustic_short)
+  elseif(_test MATCHES "^fast_acoustic_short_joint_")
+    set(_dependencies fast_channel_probe)
   elseif(_test MATCHES "^build_" OR
       _test MATCHES "^(legacy_boundary|fast_boundary|vendored_lzma_source|gui_adapter_boundary|gui_boundary_regression|packaging_support|packaging_cxx_runtime|sdk_packaging|web_renderer|browser_audio|web_preview_client)$")
     set(_dependencies "")

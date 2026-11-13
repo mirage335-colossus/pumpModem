@@ -114,6 +114,13 @@ Application::Application(Launch options):launch(std::move(options)),impl_(std::m
     select_page(launch.page);
 }
 Application::~Application()=default;
+WindowSizing initial_window_sizing(const Launch& options) {
+    const bool fast=!(options.simulation||options.smoke||options.settings||options.page!=ui::Page::console);
+    return fast?WindowSizing{ui::default_width,ui::fast_default_height,ui::min_width,ui::fast_min_height}:WindowSizing{};
+}
+WindowSizing Application::window_sizing() const {
+    return impl_->fast_selected()?WindowSizing{ui::default_width,ui::fast_default_height,ui::min_width,ui::fast_min_height}:WindowSizing{};
+}
 void Application::start() {
     if(impl_->started_session)return;
     if(launch.verbose) {
@@ -318,10 +325,11 @@ void Application::navigate(ui::Page page) {if(accepts_surface(0))select_page(pag
 ui::ControlLayout Application::control_layout(const ui::Control& declaration,int width,int height,
         std::span<const ui::Control> declarations) const {
     return ui::control_layout(declaration,control(declaration).state,width,height,declarations,
-                              field(ui::Field::transmit_scope).visible,field(ui::Field::force_transmit).visible);
+                              field(ui::Field::transmit_scope).visible,field(ui::Field::force_transmit).visible,
+                              page_bounds(width,height));
 }
 ui::Rect Application::page_bounds(int width,int height) const {
-    if(impl_->fast_selected())return {ui::margin,86,width-2*ui::margin,height-190};
+    if(impl_->fast_selected())return ui::fast_page_rect(width,height);
     return ui::page_rect(width,height);
 }
 ui::Rect Application::tabs_bounds(int width,int height) const {

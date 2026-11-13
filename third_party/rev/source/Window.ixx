@@ -3,6 +3,7 @@ module;
 #include <vector>
 #include <queue>
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <codecvt>
 #include <locale>
@@ -715,6 +716,16 @@ export namespace Rev {
 
         void setSize(int width, int height) {
             this->window->setSize(width, height);
+        }
+
+        void setMinimumSize(int width, int height) {
+            details.size.min = { width, height };
+            if (window) {
+                window->setMinimumSize(
+                    static_cast<int>(std::ceil(width * window->scale)),
+                    static_cast<int>(std::ceil(height * window->scale))
+                );
+            }
         }
 
         void setPos(int x, int y) {

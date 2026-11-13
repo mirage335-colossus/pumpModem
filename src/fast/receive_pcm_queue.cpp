@@ -1,4 +1,5 @@
 #include "receive_pcm_queue.hpp"
+#include "datapump/fast/ldpc.hpp"
 #include "ssb_receiver.hpp"
 #include <algorithm>
 #include <mutex>
@@ -15,9 +16,21 @@ bool expected_audio_cancellation(const std::exception& error,std::stop_token sto
 }
 
 std::size_t receive_pcm_capacity(const Profile& profile) {
-    const bool dense_ssb=supports_modeled_ssb_receiver(profile) ||
-        (profile.sample_rate==48000 && profile.ldpc_frame_bits==64800 && supports_short_ssb_frame(profile));
-    return static_cast<std::size_t>(profile.sample_rate)*(dense_ssb?8:profile.acoustic_ofdm?4:1);
+    const auto rate=static_cast<std::size_t>(profile.sample_rate);
+    if(supports_delay_doppler_receiver(profile))return 8*rate;
+    if(profile.acoustic_ofdm)return 4*rate;
+    if(profile.channel==Channel::wire && profile.capacity_mode &&
+       !profile.compact_convolutional && profile.ldpc_frame_bits==ldpc::coded_bits) {
+        const auto frames=profile.interleave_depth;
+        if(!frames || frames>16)
+            throw std::invalid_argument("Fast wire capture requires 1..16 local LDPC frames");
+        // A failed four-frame cycle blocked the capture consumer for nearly
+        // two seconds in a physical cable test. Allow half a second per
+        // full-size frame on top of the existing one-second ingress reserve.
+        // This absorbs a bounded burst, without assuming sustained capacity.
+        return rate+(rate*frames+1)/2;
+    }
+    return rate;
 }
 
 ReceivePcmQueue::ReceivePcmQueue(std::size_t capacity):samples_(capacity) {

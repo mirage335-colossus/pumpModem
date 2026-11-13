@@ -20,28 +20,17 @@ inline double expected_modem_bitrate(const fast::Profile& p,bool encrypted) {
     const auto samples=fast::transmission_samples(p,period*2)-fast::transmission_samples(p,period);
     return samples?bytes*8.*cycles*p.sample_rate/samples:0.;
 }
-// Spectrum-only display estimate. Equal-width PSD averages compare occupied
-// receive bins against surrounding unoccupied bins; subtract the estimated
-// in-band noise before taking S/N. No value feeds receiver decisions.
-inline std::optional<double> waterfall_snr(const fast::Diagnostics& d,const fast::Profile& p) {
-    if(d.transmitting||!d.spectrum_valid||!d.sample_rate)return std::nullopt;
-    const double bin_hz=d.sample_rate/512.;
-    const double low=fast::occupied_lower_hz(p),high=fast::occupied_upper_hz(p);
-    const double guard=2*bin_hz,adjacent=std::max((high-low)*.25,4*bin_hz);
-    double signal_noise=0,noise=0;unsigned occupied_count=0,noise_count=0;
-    for(std::size_t k=1;k<d.spectrum_db.size();++k) {
-        const double hz=k*bin_hz,db=d.spectrum_db[k];
-        if(!std::isfinite(db))continue;
-        const auto power=std::pow(10.,db/10.);
-        if(hz>=low&&hz<=high) {signal_noise+=power;++occupied_count;}
-        else if((hz>=low-guard-adjacent&&hz<=low-guard)||(hz>=high+guard&&hz<=high+guard+adjacent)) {
-            noise+=power;++noise_count;
-        }
-    }
-    if(!occupied_count||noise_count<2)return std::nullopt;
-    noise/=noise_count;signal_noise/=occupied_count;
-    if(noise<=1.01e-12&&signal_noise<=1.01e-12)return std::nullopt;
-    return 10*std::log10(std::max(1e-4,(signal_noise-noise)/std::max(1e-12,noise)));
+inline bool fresh_input(const fast::Diagnostics& d,fast::Telemetry::Clock::time_point now) {
+    return !d.transmitting && d.waveform_count && d.captured_at!=fast::Telemetry::Clock::time_point{} &&
+        now>=d.captured_at && now-d.captured_at<=std::chrono::seconds(2);
+}
+inline std::optional<fast::LoopbackSnrEstimate> loopback_signal_snr(const fast::Snapshot& snapshot,
+    fast::Telemetry::Clock::time_point now=fast::Telemetry::Clock::now()) {
+    const auto& d=snapshot.diagnostics;
+    if(!snapshot.loopback_test || snapshot.cancelled || !d || d->transmitting || !d->acquired ||
+       !d->sample_rate || !d->last_loopback_snr || d->last_loopback_snr->observation_sample>d->samples ||
+       (snapshot.active && !fresh_input(*d,now)))return std::nullopt;
+    return d->last_loopback_snr;
 }
 // Reception labels describe the captured result, never a later settings edit.
 inline std::string transfer_stage(const fast::Snapshot& snapshot) {

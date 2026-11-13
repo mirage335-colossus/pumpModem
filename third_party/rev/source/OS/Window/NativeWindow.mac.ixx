@@ -72,6 +72,12 @@ export namespace Rev {
             rev_mac_window_set_size(handle, w, h);
         };
 
+        void setMinimumSize(int w, int h) {
+            size.minW = w;
+            size.minH = h;
+            rev_mac_window_set_min_size(handle, w, h);
+        };
+
         void setCursor(Appearance::Cursor newCursor) {
 
         }

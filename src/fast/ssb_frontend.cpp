@@ -11,10 +11,10 @@
 namespace datapump::fast::detail {
 namespace {
 
-void check_parameters(std::uint32_t rate, double carrier, double cutoff) {
+void check_parameters(std::uint32_t rate, double carrier, double cutoff, std::size_t decimation) {
     if (rate < 44100 || rate > 192000 || !std::isfinite(carrier) || carrier <= 0 ||
         carrier >= rate / 2. || !std::isfinite(cutoff) || cutoff <= 0 ||
-        cutoff >= double(rate) / double(rate / 12000) / 2.)
+        !decimation || decimation > rate || cutoff >= double(rate) / double(decimation) / 2.)
         throw std::invalid_argument("Invalid Fast SSB frontend rate, carrier or cutoff");
 }
 
@@ -24,9 +24,11 @@ std::size_t filter_radius(std::uint32_t rate) {
 
 } // namespace
 
-SsbFrontendGeometry make_ssb_frontend_geometry(std::uint32_t rate, double carrier, double cutoff) {
-    check_parameters(rate, carrier, cutoff);
-    SsbFrontendGeometry g{rate, carrier, cutoff, rate / 12000, {}};
+SsbFrontendGeometry make_ssb_frontend_geometry(std::uint32_t rate, double carrier, double cutoff,
+                                                std::size_t decimation) {
+    if (!decimation) decimation = rate / 12000;
+    check_parameters(rate, carrier, cutoff, decimation);
+    SsbFrontendGeometry g{rate, carrier, cutoff, decimation, {}};
     const auto radius = filter_radius(rate);
     g.taps.resize(2 * radius + 1);
     for (std::size_t offset = 0; offset <= radius; ++offset) {
@@ -54,9 +56,9 @@ SsbFrontendGeometry make_ssb_frontend_geometry(std::uint32_t rate, double carrie
 
 SsbFrontend::SsbFrontend(SsbFrontendGeometry geometry, Sink sink, std::size_t chunk)
     : geometry_(std::move(geometry)), sink_(std::move(sink)) {
-    check_parameters(geometry_.input_rate, geometry_.carrier_hz, geometry_.cutoff_hz);
+    check_parameters(geometry_.input_rate, geometry_.carrier_hz, geometry_.cutoff_hz, geometry_.decimation);
     const auto radius = filter_radius(geometry_.input_rate);
-    if (!sink_ || !chunk || chunk > 4096 || geometry_.decimation != geometry_.input_rate / 12000 ||
+    if (!sink_ || !chunk || chunk > 4096 ||
         geometry_.taps.size() != 2 * radius + 1)
         throw std::invalid_argument("Invalid Fast SSB frontend geometry or sink");
     for (std::size_t i = 0; i < geometry_.taps.size(); ++i)

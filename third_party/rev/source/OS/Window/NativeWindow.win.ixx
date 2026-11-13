@@ -829,6 +829,11 @@ export namespace Rev {
             SetWindowPos(handle, nullptr, 0, 0, outer.x, outer.y, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
         }
 
+        void setMinimumSize(int w, int h) {
+            size.minW = w;
+            size.minH = h;
+        }
+
         void setPos(int x, int y) {
 
             posX = x;

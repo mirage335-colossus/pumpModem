@@ -34,7 +34,7 @@ void defaults_and_codec() {
         require(schedule.training_count==2048 && schedule.marker_symbols(0)==64 &&
                 schedule.marker_symbols(1)==0 && schedule.marker_symbols(4)==64,
                 "radio preamble or marker geometry changed");
-        require(schedule.pilot_count==(ssb?16U:4U),"radio pilot count changed");
+        require(schedule.pilot_count==capacity_pilot_symbols,"radio profile lost its common capacity pilot word");
         for(std::size_t j=0;j<schedule.pilot_count;++j) {
             const auto pilot=schedule.position(0,64+schedule.pilot_stride+j);
             require(pilot.kind==fast::detail::SingleCarrierSchedule::Kind::pilot &&
@@ -42,8 +42,8 @@ void defaults_and_codec() {
         }
         const auto id=profile_id(p);
         const std::string_view domain(reinterpret_cast<const char*>(id.data()),16);
-        require(domain==(ssb?"datapump/fast/v3":"datapump/fast/v2") &&
-                id.size()==(ssb?129U:96U) && (!ssb || id.back()==16),
+        require(domain==(ssb?"datapump/fast/v3":"datapump/fast/v4") &&
+                id.size()==(ssb?129U:104U) && id.back()==capacity_pilot_symbols,
                 "radio wire identity omitted its pilot revision");
         const auto parity=2*capacity_parity_symbols(p);
         const auto data=capacity_information_bytes(p)-parity;

@@ -68,7 +68,13 @@ class FastCLI(unittest.TestCase):
         self.assertAlmostEqual(info["occupied_bandwidth_hz"], 18000, delta=1)
         self.assertEqual(info["symbol_rate"], 18000 / 1.02)
         self.assertLess(info["rs_parity_data_ratio"], 0.0031)
-        self.assertGreater(info["estimated_source_bps"], 310000)
+        intervals = 127 * (2 + 50_000_000 // 28_679)
+        # 94 data symbols and the full 16-symbol public pilot per interval.
+        symbols = 2048 + intervals * 110 + ((intervals + 15) // 16) * 64 + 640 - 1
+        samples = int(symbols * (48_000 / (18_000 / 1.02))) + 1 + 300_000
+        self.assertEqual(info["estimated_intervals"], intervals)
+        self.assertEqual(info["estimated_samples"], samples)
+        self.assertAlmostEqual(info["estimated_source_bps"], 8 * 50_000_000 * 48_000 / samples)
 
     def test_local_output_routing(self):
         for profile in ("wire", "ssb", "fm", "acoustic", "acoustic-short"):
@@ -111,18 +117,25 @@ class FastCLI(unittest.TestCase):
         args = ("--profile", "acoustic-short", "--expected-snr", "-6")
         info = json.loads(self.run_pump("fast-info", *args, "--estimate-bytes", "60").stdout)
         self.assertEqual(info["waveform"], "single-carrier")
-        self.assertEqual(info["code_rate"], "3/4")
+        self.assertEqual(info["constellation"], 4)
+        self.assertEqual(info["code_rate"], "2/3")
         self.assertEqual(info["ldpc_blocks_per_cycle"], 1)
         self.assertEqual(info["ldpc_frame_bits"], 1944)
-        self.assertEqual(info["source_bytes_per_cycle"], 145)
+        self.assertEqual(info["source_bytes_per_cycle"], 125)
         self.assertEqual(info["cycle_intervals"], 1)
         self.assertEqual(info["estimated_intervals"], 2)
-        self.assertLessEqual(info["estimated_seconds"], 10.5)
-        self.assertGreater(info["estimated_seconds"], 6)
+        self.assertEqual(info["pilot_spacing_symbols"], 32)
+        self.assertAlmostEqual(info["symbol_rate"], 231.130257, places=5)
+        self.assertAlmostEqual(info["selected_band_snr_db_assumed"], 12, places=5)
+        # Two fixed QPSK intervals, public training and the pulse tail
+        # precede at least six seconds of physical-end observation.
+        signal_symbols = 2048 + 2 * (192 + 1024 + 32 * 16) + 63
+        self.assertGreaterEqual(info["estimated_seconds"], signal_symbols / info["symbol_rate"] + 6)
+        self.assertLessEqual(info["estimated_seconds"], 33)
         self.assertNotIn("inner_code", info)
         self.assertTrue(info["snr_preset_unmodified"])
-        stronger = json.loads(self.run_pump("fast-info", *args, "--code-rate", "2/3").stdout)
-        self.assertEqual(stronger["code_rate"], "2/3")
+        stronger = json.loads(self.run_pump("fast-info", *args, "--code-rate", "1/2").stdout)
+        self.assertEqual(stronger["code_rate"], "1/2")
         self.assertEqual(stronger["ldpc_frame_bits"], 1944)
         self.assertFalse(stronger["snr_preset_unmodified"])
         for rate in ("7/9", "8/9", "9/10"):
@@ -201,7 +214,13 @@ class FastCLI(unittest.TestCase):
                 self.assertEqual(info["estimated_samples"], samples)
                 self.assertAlmostEqual(info["estimated_source_bps"], 8 * source_bytes * 48000 / samples)
             else:
-                self.assertGreater(info["estimated_source_bps"], 8600)
+                intervals = 127 * (2 + source_bytes // 24_191)
+                # 342 data symbols and six full known pilot groups per interval.
+                last_symbol = 2048 + intervals * 438 + ((intervals + 3) // 4) * 64 + 128 - 1
+                samples = 22 * last_symbol + 1 + 300_000
+                self.assertEqual(info["estimated_intervals"], intervals)
+                self.assertEqual(info["estimated_samples"], samples)
+                self.assertAlmostEqual(info["estimated_source_bps"], 8 * source_bytes * 48000 / samples)
             self.assertEqual(info["snr_reference_bandwidth_hz"], 2400)
             self.assertEqual(info["expected_snr_db"], 20)
 

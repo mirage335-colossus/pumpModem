@@ -6,6 +6,7 @@
 namespace datapump::gui::ui {
 inline constexpr int default_width = 1244, default_height = 1168;
 inline constexpr int min_width = 1194, min_height = 1088;
+inline constexpr int fast_default_height = 800, fast_min_height = 720;
 // Preserve established body sizing when the header requires a wider minimum.
 inline constexpr int body_growth_width = 1030;
 inline constexpr int oscillator_row_height = 96;
@@ -33,6 +34,7 @@ enum class Slot {
     fast_transmit, fast_cancel, fast_save, fast_progress, fast_rate, fast_tracking,
     fast_correction, fast_auth, fast_detail, fast_history, fast_status, fast_volume, fast_exclusive,
     fast_waveform, fast_waterfall, fast_constellation_plot, fast_airtime, fast_diagnostics, fast_snr, fast_files, fast_use_text, fast_copy_signal, fast_paste_signal, fast_qr, fast_qr_brightness,
+    fast_baseband_oscillator, fast_shift_oscillator, fast_spread, fast_selective, fast_margin, fast_shift_hz,
     legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_transmit, legacy_waterfall, legacy_status, legacy_device, legacy_volume, legacy_exclusive, legacy_mono,
     symbol_burst, symbol_burst_random, count
 };
@@ -88,30 +90,56 @@ struct DesktopLayout {
         const int volume_x=width-margin-exclusive_width-audio_gap-volume_width;
         const int exclusive_x=width-margin-exclusive_width;
         out[Slot::fast_airtime]={352,13,std::max(0,width-889),28};
-        out[Slot::fast_text]={margin,114,fast_width-190,128};
+        constexpr int fast_compact_reference_height=920;
+        const bool compact_fast_console=height<fast_compact_reference_height;
+        const int compact_source_y=compact_fast_console?186+(height-fast_min_height)*72/(fast_compact_reference_height-fast_min_height):258;
+        const int compact_key_y=compact_fast_console?236+(height-fast_min_height)*78/(fast_compact_reference_height-fast_min_height):314;
+        const int compact_history_y=compact_fast_console?compact_key_y+53:376;
+        out[Slot::fast_text]={margin,114,fast_width-190,compact_fast_console?64+(height-fast_min_height)*64/(fast_compact_reference_height-fast_min_height):128};
         out[Slot::fast_file]={margin,114,fast_width-190,field_height};
         out[Slot::fast_qr_brightness]={width-margin-170,92,170,22};
-        out[Slot::fast_qr]={width-margin-170,123,170,170};
-        out[Slot::fast_choose_file]={margin,258,124,action_height};
-        out[Slot::fast_use_text]={margin+134,258,106,action_height};
-        out[Slot::fast_transmit]={margin+250,258,144,action_height};
-        out[Slot::fast_cancel]={margin+404,258,144,action_height};
-        out[Slot::fast_encryption]={margin,314,130,28};
-        out[Slot::fast_key]={margin+145,314,fast_width-455,field_height};
-        out[Slot::fast_open_key]={width-margin-292,313,140,action_height};
-        out[Slot::fast_generate_key]={width-margin-140,313,140,action_height};
+        const int fast_qr_size=compact_fast_console?100+(height-fast_min_height)*70/(fast_compact_reference_height-fast_min_height):170;
+        out[Slot::fast_qr]={width-margin-fast_qr_size,123,fast_qr_size,fast_qr_size};
+        out[Slot::fast_choose_file]={margin,compact_source_y,124,action_height};
+        out[Slot::fast_use_text]={margin+134,compact_source_y,106,action_height};
+        out[Slot::fast_transmit]={margin+250,compact_source_y,144,action_height};
+        out[Slot::fast_cancel]={margin+404,compact_source_y,144,action_height};
+        out[Slot::fast_encryption]={margin,compact_key_y,130,28};
+        out[Slot::fast_key]={margin+145,compact_key_y,fast_width-455,field_height};
+        out[Slot::fast_open_key]={width-margin-292,compact_key_y,140,action_height};
+        out[Slot::fast_generate_key]={width-margin-140,compact_key_y,140,action_height};
         const int signals_width=(fast_width-fast_gap)*2/3;
-        out[Slot::fast_history]={margin,376,signals_width,std::max(100,height-791)};
-        out[Slot::fast_files]={margin+signals_width+fast_gap,376,fast_width-signals_width-fast_gap,std::max(100,height-791)};
-        out[Slot::fast_copy_signal]={margin,height-403,124,action_height};
-        out[Slot::fast_paste_signal]={margin+134,height-403,140,action_height};
-        out[Slot::fast_save]={margin+signals_width+fast_gap,height-403,160,action_height};
+        int fast_plot_y=height-400,fast_plot_height=195;
+        if(compact_fast_console) {
+            // Preserve the lists, their actions and plot labels at the minimum
+            // height; extra height grows the plots before the lists.
+            fast_plot_y=std::max(compact_history_y+116,height-400);
+            fast_plot_height=std::min(195,std::max(100,height-203-fast_plot_y));
+        }
+        const int fast_history_height=std::max(54,fast_plot_y-compact_history_y-62);
+        const int fast_result_actions_y=compact_history_y+fast_history_height+4;
+        out[Slot::fast_history]={margin,compact_history_y,signals_width,fast_history_height};
+        out[Slot::fast_files]={margin+signals_width+fast_gap,compact_history_y,fast_width-signals_width-fast_gap,fast_history_height};
+        out[Slot::fast_copy_signal]={margin,fast_result_actions_y,124,action_height};
+        out[Slot::fast_paste_signal]={margin+134,fast_result_actions_y,140,action_height};
+        out[Slot::fast_save]={margin+signals_width+fast_gap,fast_result_actions_y,160,action_height};
         const int plot_width=(fast_width-2*fast_gap)/3;
-        out[Slot::fast_waveform]={margin,height-352,plot_width,195};
-        out[Slot::fast_waterfall]={margin+plot_width+fast_gap,height-352,plot_width,195};
-        out[Slot::fast_constellation_plot]={margin+2*(plot_width+fast_gap),height-352,fast_width-2*(plot_width+fast_gap),195};
-        out[Slot::fast_snr]={margin,height-150,fast_width,22};
-        out[Slot::fast_status]={margin,height-126,fast_width,22};
+        out[Slot::fast_waveform]={margin,fast_plot_y,plot_width,fast_plot_height};
+        out[Slot::fast_waterfall]={margin+plot_width+fast_gap,fast_plot_y,plot_width,fast_plot_height};
+        out[Slot::fast_constellation_plot]={margin+2*(plot_width+fast_gap),fast_plot_y,fast_width-2*(plot_width+fast_gap),fast_plot_height};
+        out[Slot::fast_snr]={margin,height-196,fast_width,22};
+        out[Slot::fast_status]={margin,height-172,fast_width,22};
+        // Receiver assumptions belong to Console, independently of whether a
+        // simulation or a duplex loopback test injects their selected effects.
+        constexpr std::array fast_assumptions{Slot::fast_baseband_oscillator,Slot::fast_shift_oscillator,
+            Slot::fast_spread,Slot::fast_selective,Slot::fast_margin,Slot::fast_shift_hz};
+        constexpr int fast_assumption_gap=8;
+        const int fast_assumption_width=(fast_width-5*fast_assumption_gap)/6;
+        for(std::size_t i=0;i<fast_assumptions.size();++i) {
+            const int x=margin+static_cast<int>(i)*(fast_assumption_width+fast_assumption_gap);
+            out[fast_assumptions[i]]={x,height-130,
+                i+1==fast_assumptions.size()?width-margin-x:fast_assumption_width,field_height};
+        }
         out[Slot::fast_device]={margin,height-80,fast_wide_column,field_height};
         out[Slot::fast_profile]={margin+fast_wide_column+fast_gap,height-80,fast_wide_column,field_height};
         out[Slot::fast_expected_snr]={margin+2*(fast_wide_column+fast_gap),height-80,fast_width-2*(fast_wide_column+fast_gap),field_height};
@@ -120,17 +148,18 @@ struct DesktopLayout {
         out[Slot::fast_volume]={volume_x,height-31,volume_width,field_height};
         out[Slot::fast_exclusive]={exclusive_x,height-31,exclusive_width,field_height};
         // Developer modem page, with no console-only source or history widgets.
+        const bool compact_fast_page=height<804;
         out[Slot::fast_symbol_rate]={margin,118,fast_wide_column,field_height};
         out[Slot::fast_constellation]={margin+fast_wide_column+fast_gap,118,fast_wide_column,field_height};
         out[Slot::fast_coding]={margin+2*(fast_wide_column+fast_gap),118,fast_width-2*(fast_wide_column+fast_gap),field_height};
         out[Slot::fast_depth]={margin,172,fast_wide_column,field_height};
         out[Slot::fast_fec]={margin+fast_wide_column+fast_gap,172,fast_width-fast_wide_column-fast_gap,field_height};
         out[Slot::fast_progress]={margin,218,fast_width,48};
-        out[Slot::fast_rate]={margin,280,fast_width,48};
-        out[Slot::fast_tracking]={margin,342,fast_width,48};
-        out[Slot::fast_correction]={margin,404,fast_width,48};
-        out[Slot::fast_auth]={margin,466,fast_width,48};
-        out[Slot::fast_detail]={margin,530,fast_width,170};
+        out[Slot::fast_rate]={margin,compact_fast_page?268:280,fast_width,48};
+        out[Slot::fast_tracking]={margin,compact_fast_page?318:342,fast_width,48};
+        out[Slot::fast_correction]={margin,compact_fast_page?368:404,fast_width,48};
+        out[Slot::fast_auth]={margin,compact_fast_page?418:466,fast_width,48};
+        out[Slot::fast_detail]={margin,compact_fast_page?468:530,fast_width,compact_fast_page?std::min(170,std::max(120,height-580)):170};
         // Legacy is a separate text terminal; regular/Fast slots stay unchanged.
         out[Slot::legacy_profile]={margin,76,240,field_height};
         out[Slot::legacy_carrier]={276,76,170,field_height};
@@ -339,4 +368,11 @@ struct DesktopLayout {
             slots[index].y+=header_rows;
     }
 };
+inline Rect fast_page_rect(int width,int height) {
+    constexpr int top=86;
+    // Keep Console controls inside the actual native page, including the
+    // receiver-assumption row, without covering the persistent audio labels.
+    const int bottom=DesktopLayout(width,height)[Slot::fast_device].label_above().y-4;
+    return {margin,top,width-2*margin,std::max(0,bottom-top)};
+}
 }

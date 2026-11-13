@@ -773,16 +773,19 @@ public:
     std::optional<ui::ServiceResult> dialog_result;
     bool service_probe=false;
     bool smoke_layout_pending=false;
+    std::optional<WindowSizing> applied_window_sizing;
     DesktopLayoutState desktop_layout;
     RevApp(std::vector<void*>& windows,Launch options,std::span<const ui::Control> controls=ui::console_screen())
-        :Rev::Window(windows,{.name=ui::window_title(),.size={ui::default_width,ui::default_height,{ui::min_width,ui::min_height},{0,0}}}),
+        :Rev::Window(windows,{.name=ui::window_title(),.size={initial_window_sizing(options).width,initial_window_sizing(options).height,
+            {initial_window_sizing(options).min_width,initial_window_sizing(options).min_height},{0,0}}}),
          application(options),launch(application.launch),declarations(controls),group(&windows) {
         // Native sizes are physical pixels; the shared desktop dimensions are
         // logical units, just as in FLTK at a scaled display setting.
         if(details.scale!=1) {
             int x=0,y=0;window->getClientPos(x,y);
             const int center_x=x+window->size.w/2,center_y=y+window->size.h/2;
-            window->setSize(static_cast<int>(std::ceil(ui::default_width*details.scale)),static_cast<int>(std::ceil(ui::default_height*details.scale)));
+            const auto sizing=application.window_sizing();
+            window->setSize(static_cast<int>(std::ceil(sizing.width*details.scale)),static_cast<int>(std::ceil(sizing.height*details.scale)));
             // Native creation centered the unscaled size. Center the final
             // physical size on that same display before showing the window.
             for(const auto& display:Rev::NativeWindow::getDisplays())
@@ -791,6 +794,7 @@ public:
                 }
             Rev::Window::onResize(window->size.w,window->size.h);
         }
+        apply_window_sizing();
         style->layout={Axis::Vertical,Align::Start,Align::Start,Wrap::False};
         surface=new theme::RevBox(this,{&column});surface->style->size={100_pct,100_pct};
         surface->style->background.color=theme::rev_color(theme::WidgetRole::surface_fill);
@@ -839,14 +843,18 @@ public:
     }
     void onClose(bool& reject) override {reject=true;hide_help(true);application.close();}
     void onResize(int width,int height) override {
-        const int minimum_width=static_cast<int>(std::ceil(ui::min_width*window->scale));
-        const int minimum_height=static_cast<int>(std::ceil(ui::min_height*window->scale));
+        const auto sizing=application.window_sizing();
+        const int minimum_width=static_cast<int>(std::ceil(sizing.min_width*window->scale));
+        const int minimum_height=static_cast<int>(std::ceil(sizing.min_height*window->scale));
         if(width<minimum_width || height<minimum_height) {
             width=std::max(width,minimum_width);height=std::max(height,minimum_height);window->setSize(width,height);
         }
         Rev::Window::onResize(width,height);if(surface)layout_desktop();
     }
-    void onScale(float scale) override {Rev::Window::onScale(scale);if(surface)layout_desktop();}
+    void onScale(float scale) override {
+        Rev::Window::onScale(scale);applied_window_sizing.reset();apply_window_sizing();
+        if(surface)layout_desktop();
+    }
     bool allows_input(re::Element* target) const {
         for(auto* element=target;element;element=element->parent) {
             if(element->targetFlags.disabled || element->resolved.hidden || element->style->visibility==Visibility::Hidden)return false;
@@ -1251,6 +1259,7 @@ public:
         if(auto* focused=focused_control();focused&&!allows_input(focused))focus_control(nullptr);
     }
     void apply() {
+        apply_window_sizing();
         application.set_service_active(dialog!=nullptr);sync_overlay();apply_layers();
         select_page(application.page());
         for(const auto& tab:application.tab_layout(details.size.width,details.size.height)) {
@@ -1267,6 +1276,21 @@ public:
         if(relayout)layout_desktop();
         update_plots();update_documents();services.synchronize(application.take_services(),application.closing());process_services();
         application.set_service_active(dialog!=nullptr);apply_layers();refresh(event);
+    }
+    void apply_window_sizing() {
+        const auto sizing=application.window_sizing();
+        if(!applied_window_sizing||*applied_window_sizing!=sizing) {
+            Rev::Window::setMinimumSize(sizing.min_width,sizing.min_height);
+            applied_window_sizing=sizing;
+        }
+        const int minimum_width=static_cast<int>(std::ceil(sizing.min_width*window->scale));
+        const int minimum_height=static_cast<int>(std::ceil(sizing.min_height*window->scale));
+        if(window->size.w<minimum_width||window->size.h<minimum_height) {
+            window->setSize(std::max(window->size.w,minimum_width),std::max(window->size.h,minimum_height));
+            // Native setters cache the requested size before the OS event;
+            // a matching ConfigureNotify can therefore omit its Resize callback.
+            onResize(window->size.w,window->size.h);
+        }
     }
     bool apply_controls(std::vector<Binding>& target,std::span<const ui::Control> controls,
             const ui::ControlLayout* document_geometry=nullptr) {

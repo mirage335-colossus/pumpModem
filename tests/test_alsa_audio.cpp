@@ -1857,6 +1857,83 @@ void capture_uncertainty_downgrade_preserves_filter() {
     const auto ordinary=run(false),downgraded=run(true);
     check(ordinary==downgraded,"capture qualification loss reset FIR state or changed logical PCM");
 }
+void cancellable_ordinary_io() {
+    constexpr unsigned rate=48000;
+    const auto setup=[] {
+        f::reset();
+        f::state.available={"default"};
+        f::state.supported_rates={rate};
+    };
+    std::vector<float> input(701);
+    for(std::size_t i=0;i<input.size();++i)input[i]=static_cast<float>(i)/1000.f;
+    setup();
+    a::play(input,rate,"default");
+    const auto reference=f::state.played;
+
+    // This is the ordinary path Fast uses, with no device-clock discipline.
+    // Simulate backpressure, interrupted writes and a pending finite tail.
+    enum class StopAt { none, write_wait, drain_wait };
+    for(const auto stop_at:{StopAt::none,StopAt::write_wait,StopAt::drain_wait}) {
+        setup();
+        auto& state=f::state;
+        state.write_results={-EAGAIN,-EINTR,37};
+        state.wait_results={0,1};
+        state.drain_results={-EAGAIN,0};
+        std::stop_source stop;
+        unsigned waits=0,reports=0;
+        state.before_wait=[&](int timeout) {
+            check(timeout==20,"ordinary ALSA wait was not bounded");
+            ++waits;
+            if((stop_at==StopAt::write_wait && !state.drain_calls) ||
+               (stop_at==StopAt::drain_wait && state.drain_calls))stop.request_stop();
+        };
+        a::Options options;
+        options.background_noise_report=[&](const auto&){++reports;};
+        std::string error;
+        try {a::play(input,rate,"default",stop.get_token(),{},a::ChannelMode::left_mono,options);}
+        catch(const datapump::Error& e){error=e.what();}
+        check(std::all_of(state.open_modes.begin(),state.open_modes.end(),[](int mode){return (mode&1)!=0;}) &&
+              state.configured_streams==1 && state.live==0 && state.opens==state.closes && state.recovered_errors.empty(),
+              "ordinary cancellable playback used a blocking open, recovered backpressure or leaked its stream");
+        if(stop_at==StopAt::none) {
+            check(error.empty() && state.played==reference && state.drain_calls==2 && waits==2 && reports==1,
+                  "backpressure altered PCM order or acknowledged an unfinished finite tail");
+        } else {
+            check(error=="audio operation cancelled" && reports==0,"ordinary playback wait ignored cancellation");
+            if(stop_at==StopAt::write_wait)
+                check(state.write_frames.size()==1 && state.played.empty() && state.drain_calls==0 && waits==1,
+                      "cancelled backpressure still wrote or drained PCM");
+            else
+                check(state.played==reference && state.drain_calls==1 && waits==2,
+                      "cancelled finite-tail wait still retried drain or rewrote PCM");
+        }
+    }
+
+    // ALSA's synchronous suspend recovery can wait indefinitely for resume.
+    // Both loopback directions must yield to cancellation before recovery.
+    for(const bool capture:{false,true}) {
+        setup();
+        auto& state=f::state;
+        state.write_results={-ESTRPIPE};
+        state.read_results={-ESTRPIPE};
+        state.resume_results={-EAGAIN};
+        std::stop_source stop;
+        state.after_resume=[&]{stop.request_stop();};
+        unsigned delivered=0,gaps=0;
+        a::Options options;
+        options.capture_discontinuity=[&]{++gaps;};
+        options.playback_discontinuity=[&](const auto&){++gaps;};
+        std::string error;
+        try {
+            if(capture)a::capture(rate,"default",[&](auto){++delivered;return false;},stop.get_token(),{},options);
+            else a::play(input,rate,"default",stop.get_token(),{},a::ChannelMode::left_mono,options);
+        }catch(const datapump::Error& e){error=e.what();}
+        check(error=="audio operation cancelled" && state.resume_calls==1 && !state.prepares &&
+              state.recovered_errors.empty() && !gaps && !delivered && state.played.empty() &&
+              state.drain_calls==0 && !state.live && state.opens==state.closes,
+              "suspended ordinary audio did not stop before retry, recovery or PCM delivery");
+    }
+}
 void timed_drain() {
     for(const auto scenario:{0,1,2,3}) {
         f::reset();f::state.available={"default"};f::state.supported_rates={48000};
@@ -2934,6 +3011,10 @@ void full_rate_background_noise_output() {
     check(first!=second,"separate native transmissions reused one background-noise stream");
 }
 int main(int argc,char** argv){try{
+    if(argc==2 && std::string(argv[1])=="--cancellable-io") {
+        cancellable_ordinary_io();
+        std::cout<<"Ordinary ALSA cancellation and finite playback checks passed\n";return 0;
+    }
     if(argc==2 && std::string(argv[1])=="--drain") {
         timed_drain();terminal_nonblocking_drain();
         std::cout<<"Nonblocking drain completion and failure checks passed\n";return 0;
@@ -3083,7 +3164,7 @@ int main(int argc,char** argv){try{
     continuous_clock_runtime();capture_sample_map_runtime();continuous_clock_invalid_and_discontinuous();
     capture_timing_fallback_preserves_pcm();
     capture_uncertainty_downgrade_preserves_filter();
-    timed_drain();terminal_nonblocking_drain();
+    cancellable_ordinary_io();timed_drain();terminal_nonblocking_drain();
     bounded_clock_provider();
     zero_audio_error_requests();
     playback_discontinuity_observer();

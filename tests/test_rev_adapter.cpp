@@ -6,10 +6,30 @@
 #include <iostream>
 #include <string_view>
 #include <glew/glew.h>
+#ifdef __linux__
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+// Xlib's boolean/style macros must not rewrite scoped GUI enum values.
+#undef Bool
+#undef Status
+#undef True
+#undef False
+#undef None
+#undef Always
+#undef Success
+#undef Complex
+#endif
 #include "gui_extension_fixture.hpp"
 #include "document_geometry_fixture.hpp"
 #include "overlay_fixture.hpp"
 import Rev.Graphics.FrameBuffer;
+
+#ifdef __linux__
+namespace rev_adapter_native {
+struct Geometry { unsigned width=0,height=0;int min_width=0,min_height=0;bool valid=false; };
+Geometry geometry(void* display,unsigned long window);
+}
+#endif
 
 // Test-only timing: production backend_rev.cpp never includes these helpers.
 namespace rev_adapter_timing {
@@ -107,10 +127,11 @@ int run_native_probes(std::string_view selected={}) {
         auto controls=test::layout_lifecycle_controls();
         rev_adapter_timing::FixtureTiming fixture_timing{"fixture-4"};RevApp probe(windows,launch,controls);fixture_timing.constructed();rev_adapter_timing::BeforeDestroy destruction_timing{fixture_timing};rev_adapter_timing::step("verify_layout_lifecycle",[&]{probe.verify_layout_lifecycle(controls);});return 0;
     }
-    if(!selected.empty())throw std::runtime_error("Unknown Rev adapter probe");
+    if(!selected.empty()&&selected!="--fast-mode")throw std::runtime_error("Unknown Rev adapter probe");
     {
         rev_adapter_timing::FixtureTiming fixture_timing{"fixture-6"};RevApp probe(windows,launch);fixture_timing.constructed();rev_adapter_timing::BeforeDestroy destruction_timing{fixture_timing};rev_adapter_timing::step("verify_fast_mode_visibility",[&]{probe.verify_fast_mode_visibility();});rev_adapter_timing::step("verify_developer_mode_visibility",[&]{probe.verify_developer_mode_visibility();});
     }
+    if(selected=="--fast-mode")return 0;
     {
         rev_adapter_timing::FixtureTiming fixture_timing{"fixture-7"};RevApp probe(windows,launch);fixture_timing.constructed();rev_adapter_timing::BeforeDestroy destruction_timing{fixture_timing};rev_adapter_timing::step("verify_document_editor_scrolling",[&]{probe.verify_document_editor_scrolling();});rev_adapter_timing::step("verify_launch_command_editor",[&]{probe.verify_launch_command_editor();});
     }
@@ -152,3 +173,19 @@ int main(int argc,char** argv) {
     }
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }
+
+#ifdef __linux__
+rev_adapter_native::Geometry rev_adapter_native::geometry(void* display,unsigned long window) {
+    Geometry result;
+    ::Window root=0;
+    int x=0,y=0;
+    unsigned border=0,depth=0;
+    XSizeHints hints{};
+    long supplied=0;
+    auto* connection=static_cast<Display*>(display);
+    result.valid=XGetGeometry(connection,window,&root,&x,&y,&result.width,&result.height,&border,&depth)&&
+        XGetWMNormalHints(connection,window,&hints,&supplied)&&(hints.flags&PMinSize);
+    result.min_width=hints.min_width;result.min_height=hints.min_height;
+    return result;
+}
+#endif

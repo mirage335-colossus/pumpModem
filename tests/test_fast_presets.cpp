@@ -2,6 +2,7 @@
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/modem.hpp"
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -11,6 +12,15 @@ using namespace datapump;
 using namespace datapump::fast;
 namespace {
 void require(bool value,const char* message) {if(!value)throw std::runtime_error(message);}
+void check_single_carrier_training(const Profile& p) {
+    if(p.acoustic_ofdm)return;
+    const auto bits=std::countr_zero(p.constellation);
+    const auto data=(physical_interval_bits+bits-1)/bits;
+    const auto groups=(data+p.pilot_spacing_symbols-1)/p.pilot_spacing_symbols;
+    const auto marker=compact_acoustic_framing(p)?192:sync_symbols;
+    require(preamble_symbols(p)==2048 && interval_symbols(p)==marker+data+groups*capacity_pilot_symbols,
+        "Capacity preset dropped common single-carrier training or tracking");
+}
 template<class F> void rejects(F f) {
     bool rejected=false;try {f();}catch(const Error&){rejected=true;}
     require(rejected,"invalid preset/rate was accepted");
@@ -33,6 +43,7 @@ int main() {try {
             const auto preset=resolve_snr_preset(channel,snr);const auto& p=preset.profile;
             validate(p);
             require(p.capacity_mode&&!p.robust&&p.channel==channel,"preset lost channel/LDPC/sparseRS");
+            check_single_carrier_training(p);
             require(p.code_rate!=CodeRate::half||p.constellation<=16,"Auto selected unqualified dense rate-1/2 QAM");
             const auto bandwidth=occupied_bandwidth_hz(p);
             if(snr<top) {
@@ -117,11 +128,15 @@ int main() {try {
     require(default_expected_snr(Channel::acoustic_short)==-6,"short profile must default to -6 dB");
     const auto short_options=expected_snr_options(Channel::acoustic_short);
     require(short_options==expected_snr_options(Channel::acoustic),"short acoustic SNR choices differ");
+    for(const auto required_snr:{-10.,-13.,-16.})
+        require(std::find(short_options.begin(),short_options.end(),required_snr)!=short_options.end(),
+            "weak acoustic-short test SNR is missing from the expected-SNR menu");
     for(const auto snr:short_options) {
         const auto selection=resolve_snr_preset(Channel::acoustic_short,snr);
         const auto& p=selection.profile;validate(p);
         require(p.channel==Channel::acoustic_short&&p.capacity_mode&&
             p.interleave_depth>=1&&p.interleave_depth<=16,"short preset lost fixed short coding geometry");
+        check_single_carrier_training(p);
         require(p.code_rate==CodeRate::half||p.code_rate==CodeRate::three_quarters||
             (!p.compact_convolutional&&p.code_rate==CodeRate::two_thirds),
             "short preset selected an unsupported coding rate");
@@ -130,28 +145,53 @@ int main() {try {
         if(snr<13&&!p.acoustic_ofdm)
             require(snr+10*std::log10(17500/occupied_bandwidth_hz(p))>=(compact_acoustic_framing(p)?5.99:12.99),
                 "short SC fallback ignores marker SNR requirement");
+        const auto in_band_snr=snr+10*std::log10(selection.reference_bandwidth_hz/occupied_bandwidth_hz(p));
+        if(snr==-10||snr==-13||snr==-16) {
+            const auto expected_in_band=snr==-10?8.:6.;
+            const auto expected_rate=17500*std::pow(10.,(snr-expected_in_band)/10.)/1.2;
+            require(!p.acoustic_ofdm&&p.constellation==4&&
+                std::abs(p.symbol_rate-expected_rate)<1e-5&&p.code_rate==CodeRate::half,
+                "weak acoustic-short preset changed its resilient QPSK baud or coding");
+            require(std::abs(in_band_snr-expected_in_band)<.01,
+                "weak acoustic-short QPSK preset no longer meets its selected-band noise budget");
+        }
         const auto rate=symbol_rate_option_id(p);
         require(profile_id(apply_symbol_rate_option(p,rate))==profile_id(p),"short rate roundtrip changed identity");
         const auto automatic=apply_symbol_rate_option(p,"auto");validate(automatic);
         require(automatic.code_rate==p.code_rate&&automatic.compact_convolutional==p.compact_convolutional&&
             automatic.interleave_depth==p.interleave_depth,"short Auto rate discarded fixed coding choices");
         require(estimate_transmission(p,false,2800).seconds>=6,"short estimate omitted physical absence");
-        if(snr>=-6)require(estimate_transmission(p,true,60).seconds<=12.5,
+        if(snr>-6)require(estimate_transmission(p,true,60).seconds<=12.5,
             "short preset failed its minimum-airtime target at a supported SNR");
         if(p.compact_convolutional)require(capacity_information_bytes(p)==p.interleave_depth*(p.code_rate==CodeRate::half?126U:190U),
             "compact preset source geometry is not locally fixed");
         if(compact_acoustic_framing(p)&&!p.acoustic_ofdm)require(p.symbol_rate<=1000,
             "short acoustic single carrier exceeds its qualified echo span");
+        std::cout<<"acoustic-short "<<snr<<"dB "<<p.constellation<<"QAM "
+            <<(p.acoustic_ofdm?double(p.sample_rate)/(p.ofdm_fft_size+p.ofdm_prefix_samples):p.symbol_rate)
+            <<"baud reference="<<selection.reference_bandwidth_hz<<"Hz occupied="
+            <<occupied_bandwidth_hz(p)<<"Hz predicted_inband="<<in_band_snr<<"dB\n";
     }
     const auto weak_short=resolve_snr_preset(Channel::acoustic_short,-6).profile;
     require(!weak_short.compact_convolutional&&weak_short.ldpc_frame_bits==1944&&!weak_short.acoustic_ofdm&&
-        weak_short.constellation==4&&weak_short.code_rate==CodeRate::three_quarters&&
+        weak_short.constellation==4&&weak_short.code_rate==CodeRate::two_thirds&&
         weak_short.interleave_depth==1&&cycle_intervals(weak_short)==1,
         "weak short preset lost its compact fixed-cycle format");
-    require(preamble_symbols(weak_short)==256&&
-        estimate_transmission(weak_short,true,60).seconds<=10.5&&
+    const auto weak_estimate=estimate_transmission(weak_short,true,60);
+    require(preamble_symbols(weak_short)==2048&&weak_short.pilot_spacing_symbols==32&&
+        std::abs(weak_short.symbol_rate-231.130257)<1e-5&&
+        weak_estimate.intervals==2&&std::abs(weak_estimate.seconds-32.671)<.01&&
         end_silence_samples(weak_short)>=6ULL*weak_short.sample_rate,
-        "weak short minimum airtime omitted absence or exceeded about ten seconds");
+        "weak short preset lost its extended training, tracking cadence or bounded airtime");
+    auto weak_previous=weak_short;weak_previous.code_rate=CodeRate::three_quarters;
+    require(estimate_transmission(weak_short,true,60).samples==
+            estimate_transmission(weak_previous,true,60).samples&&
+            profile_id(weak_short)!=profile_id(weak_previous),
+        "stronger weak short coding lost short keyed airtime or integrity binding");
+    const auto lower=resolve_snr_preset(Channel::acoustic_short,-10).profile;
+    require(estimate_transmission(lower,true,60).samples==weak_estimate.samples&&
+            profile_id(lower)!=profile_id(weak_short),
+        "lower short preset did not retain short keyed airtime with stronger coding");
     auto weak_altered=weak_short;weak_altered.ldpc_frame_bits=1296;
     require(profile_id(weak_short)!=profile_id(weak_altered),"small LDPC size missing from profile identity");
     for(const auto channel:{Channel::wire,Channel::ssb,Channel::fm,Channel::acoustic}) {
@@ -168,6 +208,49 @@ int main() {try {
     require(weak_restored.symbol_rate==weak_short.symbol_rate&&weak_restored.ldpc_frame_bits==1944&&
         weak_restored.code_rate==CodeRate::two_thirds,"compact Auto timing discarded manual coding");
     const auto short_default=resolve_snr_preset(Channel::acoustic_short,3).profile;
+    ChannelAssumptions clean;
+    clean.baseband_ppm=100.;
+    auto adverse=clean;
+    adverse.shift_ppm=1.;
+    adverse.shift_hz=30e6;
+    adverse.delay_ms=7.;
+    adverse.doppler_hz=30.;
+    adverse.selective_slow_depth=adverse.selective_fast_depth=.65;
+    const auto clear_short=resolve_snr_preset(Channel::acoustic_short,-6,clean).profile;
+    require(clear_short.symbol_rate>900.&&clear_short.constellation==4&&
+            clear_short.code_rate==CodeRate::two_thirds&&
+            receiver_assumption_bounds(clear_short,clean).sparse_search,
+        "Clean short declaration discarded its qualified faster waveform");
+    for(const auto snr:{13.,3.,-6.,-10.,-13.}) {
+        const auto p=resolve_snr_preset(Channel::acoustic_short,snr,adverse).profile;
+        const auto bounds=receiver_assumption_bounds(p,adverse);
+        require(!p.acoustic_ofdm&&p.constellation==4&&p.ldpc_frame_bits==1944&&
+                p.symbol_rate<=weak_short.symbol_rate&&bounds.sparse_search&&
+                bounds.requested.frequency_hz>90.&&bounds.admitted.frequency_hz==100.&&
+                bounds.requested.delay_ms==7.&&bounds.admitted.delay_ms==22.&&
+                bounds.requested.clock_ppm>100.&&bounds.admitted.clock_ppm==300.,
+            "Adverse short declaration escaped the bounded QPSK receiver");
+    }
+    require(profile_id(resolve_snr_preset(Channel::acoustic_short,3,clean).profile)==profile_id(short_default)&&
+            profile_id(resolve_snr_preset(Channel::ssb,20,adverse).profile)==profile_id(capacity_profile(Channel::ssb)),
+        "Channel assumptions changed clean OFDM or nominal resilient SSB geometry");
+    auto widened=adverse;widened.margin=1.5;
+    const auto admitted=receiver_assumption_bounds(weak_short,widened);
+    require(profile_id(resolve_snr_preset(Channel::acoustic_short,-6,widened).profile)==profile_id(weak_short)&&
+            admitted.admitted.frequency_hz>admitted.requested.frequency_hz&&admitted.admitted.frequency_hz>135.,
+        "Search margin changed the fixed waveform or failed to expand the admitted frequency range");
+    widened.margin=3.;
+    rejects([&]{validate_receiver_assumptions(weak_short,widened);});
+    auto fixed_ssb_excess=adverse;
+    fixed_ssb_excess.shift_hz=230e6;
+    bool fixed_rejected=false;
+    try {validate_receiver_assumptions(capacity_profile(Channel::ssb),fixed_ssb_excess);}
+    catch(const Error& error) {fixed_rejected=std::string_view(error.what()).find("fixed SSB frontend")!=std::string_view::npos;}
+    require(fixed_rejected,"Fixed SSB frontend admitted an unqualified search expansion");
+    auto excessive=adverse;excessive.shift_hz=5.8e9;
+    rejects([&]{validate_receiver_assumptions(weak_short,excessive);});
+    rejects([&]{validate_receiver_assumptions(short_default,adverse);});
+
     const auto long_default=resolve_snr_preset(Channel::acoustic,3).profile;
     require(short_default.acoustic_ofdm&&short_default.ofdm_training_blocks==6,
         "default short profile is not OFDM with compact training");

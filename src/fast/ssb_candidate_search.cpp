@@ -58,6 +58,7 @@ SsbCandidateSearch::SsbCandidateSearch(const DelayDopplerFit& fit,
     if(fit_wait_<=training_length_ || request_.training_words<gate_words)
         throw std::invalid_argument("Fast SSB acquisition has no independent marker context");
     history_capacity_=std::max(gate_wait_+2,checked_count(std::ceil(last+latest-earliest+2*word)+4));
+    fit_view_capacity_=history_capacity_;
     history_.resize(2*history_capacity_);
     positive_gates_.reserve((history_capacity_+gate_wait_)/gate_step_+2);
 }
@@ -69,6 +70,41 @@ std::uint64_t SsbCandidateSearch::center(std::uint64_t sample_index) const noexc
 SsbAcquisitionView SsbCandidateSearch::retained() const noexcept {
     const auto first=(write_at_+history_capacity_-retained_count_)%history_capacity_;
     return {center(received_-retained_count_),stride_,std::span(history_).subspan(first,retained_count_)};
+}
+
+SsbAcquisitionView SsbCandidateSearch::fit_view() const noexcept {
+    auto result=retained();
+    const auto count=std::min(result.samples.size(),fit_view_capacity_);
+    result.first_center_input_tick+=(result.samples.size()-count)*stride_;
+    result.samples=result.samples.last(count);
+    return result;
+}
+
+unsigned SsbCandidateSearch::maximum_fit_owners() const noexcept {
+    return static_cast<unsigned>(1+(max_retained_centers-fit_view_capacity_)/fit_step_);
+}
+
+void SsbCandidateSearch::allow_pending_fits(unsigned owners,CommitFits commit,OldestFit oldest) {
+    if(received_ || owners<2 || owners>maximum_fit_owners() || !commit || !oldest)
+        throw std::invalid_argument("Invalid Fast SSB concurrent fit retention");
+    history_capacity_=fit_view_capacity_+(owners-1)*fit_step_;
+    history_.resize(2*history_capacity_);
+    commit_fits_=std::move(commit);
+    oldest_fit_=std::move(oldest);
+}
+
+void SsbCandidateSearch::drain_fits(std::stop_token stop) {
+    if(!commit_fits_ || stop.stop_requested() || progress_.locked)return;
+    progress_.locked=commit_fits_(true);
+}
+
+void SsbCandidateSearch::settle_payload_due(std::stop_token stop) {
+    if(!oldest_fit_)return;
+    while(!progress_.locked && !stop.stop_requested()) {
+        const auto oldest=oldest_fit_();
+        if(!oldest || center(received_)<oldest->first_payload)break;
+        drain_fits(stop);
+    }
 }
 
 void SsbCandidateSearch::reserve_history(std::size_t minimum_centers) {
@@ -85,7 +121,7 @@ void SsbCandidateSearch::reserve_history(std::size_t minimum_centers) {
 }
 
 void SsbCandidateSearch::project_window(std::stop_token stop) {
-    const auto view=retained();
+    const auto view=fit_view();
     const auto uniform=regrid_ssb_preamble(view,center(next_gate_),gate_words,proposal_rate_,input_rate_);
     ++progress_.projected_windows;
     const auto first_retained=received_-view.samples.size();
@@ -105,7 +141,7 @@ void SsbCandidateSearch::project_window(std::stop_token stop) {
 
 void SsbCandidateSearch::offer_fit(std::stop_token stop) {
     const auto fit_start=next_fit_;
-    const auto view=retained();
+    const auto view=fit_view();
     const auto first_retained=received_-view.samples.size();
     const auto fit_end=fit_start+training_length_;
     const auto evidence=fit_start>=first_retained && std::ranges::any_of(positive_gates_,[&](auto gate_start) {
@@ -144,9 +180,19 @@ std::size_t SsbCandidateSearch::push(const SsbFrontendOutput& block,std::stop_to
         throw std::length_error("Fast SSB acquisition input extent overflow");
     if(!received_)first_center_=block.first_center_input_sample;
     std::size_t consumed=0;
+    if(commit_fits_ && !progress_.locked && !stop.stop_requested())progress_.locked=commit_fits_(false);
     service_ready(stop);
     for(const auto value:block.samples) {
         if(stop.stop_requested())break;
+        if(!progress_.locked && oldest_fit_ && retained_count_==history_capacity_) {
+            const auto retired=center(received_-retained_count_);
+            auto oldest=oldest_fit_();
+            while(!progress_.locked && oldest && retired>=oldest->first_center && !stop.stop_requested()) {
+                drain_fits(stop);
+                oldest=oldest_fit_();
+            }
+            if(stop.stop_requested())break;
+        }
         history_[write_at_]=history_[write_at_+history_capacity_]=value;
         if(++write_at_==history_capacity_)write_at_=0;
         if(retained_count_<history_capacity_)++retained_count_;
@@ -154,6 +200,8 @@ std::size_t SsbCandidateSearch::push(const SsbFrontendOutput& block,std::stop_to
         ++consumed;
         service_ready(stop);
     }
+    settle_payload_due(stop);
+    if(commit_fits_ && !progress_.locked && !stop.stop_requested())progress_.locked=commit_fits_(false);
     return consumed;
 }
 

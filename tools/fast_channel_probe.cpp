@@ -8,6 +8,7 @@
 #include "datapump/fast/simulation.hpp"
 #include "datapump/tuning.hpp"
 #include "fast/cable_loopback.hpp"
+#include "fast/receive_pcm_queue.hpp"
 #include "fast/ssb_receiver.hpp"
 
 #include <algorithm>
@@ -22,6 +23,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -52,19 +54,24 @@ constexpr auto decoder_quota = 256ULL * 1024 * 1024;
 constexpr auto large_estimate_bytes = 50'000'000ULL;
 constexpr std::string_view filename = "fast-test.bin";
 constexpr std::size_t block_samples = 4096;
-constexpr std::size_t retained_capture_samples = 36*48000;
+constexpr std::size_t retained_capture_samples = 75*48000;
 
 struct Options {
     Profile profile = capacity_profile(Channel::ssb);
     SimulationSettings channel;
+    std::optional<ChannelAssumptions> assumptions;
     std::string base_oscillator = "crystal", shift_oscillator = "ic-7100", spread = "hf-worst";
     std::string capture_device, playback_device;
     std::filesystem::path retain_capture;
+    std::filesystem::path replay_capture;
+    std::string text;
     std::uint64_t seed = 417;
     unsigned source_bytes = 384;
     double max_audio_seconds = 75, max_wall_seconds = 90, tx_gain = 1;
-    bool encryption = true, live = false, profile_override = false;
+    bool encryption = true, live = false, profile_override = false, tx_gain_specified = false;
+    bool text_specified = false, source_bytes_specified = false;
     bool bootstrap_gate = false, bootstrap_only = false;
+    bool replay_paced = false;
 };
 
 struct Metrics {
@@ -94,6 +101,29 @@ Bytes payload(unsigned count, std::uint64_t seed) {
     for (std::size_t i = 0; i < bytes.size(); ++i)
         bytes[i] = static_cast<std::uint8_t>(splitmix(seed + i) >> 56);
     return bytes;
+}
+
+bool valid_utf8(std::string_view text) {
+    for(std::size_t i=0;i<text.size();) {
+        const auto lead=static_cast<unsigned char>(text[i]);
+        if(lead<0x80) {++i;continue;}
+        std::size_t length=0;
+        std::uint32_t codepoint=0;
+        if(lead>=0xc2 && lead<=0xdf) {length=2;codepoint=lead&0x1f;}
+        else if(lead>=0xe0 && lead<=0xef) {length=3;codepoint=lead&0x0f;}
+        else if(lead>=0xf0 && lead<=0xf4) {length=4;codepoint=lead&0x07;}
+        else return false;
+        if(i+length>text.size())return false;
+        for(std::size_t j=1;j<length;++j) {
+            const auto continuation=static_cast<unsigned char>(text[i+j]);
+            if((continuation&0xc0)!=0x80)return false;
+            codepoint=(codepoint<<6)|(continuation&0x3f);
+        }
+        if((length==3 && codepoint<0x800) || (length==4 && codepoint<0x10000) ||
+           (codepoint>=0xd800 && codepoint<=0xdfff) || codepoint>0x10ffff)return false;
+        i+=length;
+    }
+    return true;
 }
 
 std::optional<Crypto> test_key(const Options& options) {
@@ -179,13 +209,19 @@ void usage() {
     std::cout << "fast_channel_probe --channel ssb --encryption yes --transmit-watts W --path-loss-db dB\n"
         "  --base-oscillator ID|off --shift-oscillator ID|off|baseband-clock --spread ID\n"
         "  --selective-depth D --margin N --shift-hz Hz [--noise-dbm-hz dBm/Hz|off]\n"
-        "  [--seed N] [--source-bytes N] [--max-audio-seconds S] [--max-wall-seconds S]\n"
+        "  [--spread-evolution fixed|gaussian]\n"
+        "  [--assume-base-oscillator ID|off --assume-shift-oscillator ID|off|baseband-clock\n"
+        "   --assume-spread ID --assume-selective-depth D --assume-shift-hz Hz --assume-margin N]\n"
+        "  [--assume-selective-slow-depth D --assume-selective-fast-depth D]\n"
+        "  [--seed N] [--source-bytes N] [--text UTF8] [--max-audio-seconds S] [--max-wall-seconds S]\n"
         "  [--bootstrap-gate]                Continue the short SSB trial only after a verified bootstrap\n"
         "  [--bootstrap-only]                Stop an offline gated trial at the first coding cycle\n"
         "  [--profile-override [--expected-snr dB] [--constellation N] [--code-rate R] [--depth N]\n"
         "     [--symbol-rate baud] [--pilot-spacing N] [--marker-spacing N] [--rolloff R] [--ldpc-bits 16200|64800]]\n"
         "  [--live (--device NAME | --capture-device NAME --playback-device NAME) [--tx-gain G]\n"
-        "     [--retain-capture NEW_F32LE_PATH]]\n";
+        "     [--retain-capture NEW_F32LE_PATH]]\n"
+        "  --replay-capture F32LE_PATH          Replay retained mono PCM through the canonical receiver\n"
+        "    [--replay-paced]                  Deliver replay blocks on the original sample clock\n";
 }
 
 double number(const std::string& value, const char* name) {
@@ -210,6 +246,11 @@ Options parse(int argc, char** argv) {
     std::optional<double> expected_snr, symbol_rate, rolloff;
     std::optional<unsigned> constellation, depth, pilot_spacing, marker_spacing, ldpc_bits;
     std::optional<std::string> code_rate;
+    std::string assume_base = "off", assume_shift = "off", assume_spread = "none";
+    const auto declared = [&]() -> ChannelAssumptions& {
+        if(!o.assumptions)o.assumptions.emplace();
+        return *o.assumptions;
+    };
     for (int i = 1; i < argc; ++i) {
         const std::string option = argv[i];
         if (option == "--help" || option == "-h") { usage(); std::exit(0); }
@@ -227,6 +268,26 @@ Options parse(int argc, char** argv) {
         else if (option == "--base-oscillator") o.base_oscillator = value();
         else if (option == "--shift-oscillator") o.shift_oscillator = value();
         else if (option == "--spread") o.spread = value();
+        else if (option == "--spread-evolution") {
+            const auto law=value();
+            if(law=="fixed")o.channel.spread_evolution=SpreadEvolution::fixed;
+            else if(law=="gaussian")o.channel.spread_evolution=SpreadEvolution::gaussian;
+            else throw Error("spread evolution must be fixed or gaussian");
+        } else if(option=="--assume-base-oscillator") {
+            declared();assume_base=value();
+        } else if(option=="--assume-shift-oscillator") {
+            declared();assume_shift=value();
+        } else if(option=="--assume-spread") {
+            declared();assume_spread=value();
+        } else if(option=="--assume-selective-depth") {
+            const auto depth=number(value(),"declared selective depth");
+            declared().selective_slow_depth=declared().selective_fast_depth=depth;
+        } else if(option=="--assume-selective-slow-depth")
+            declared().selective_slow_depth=number(value(),"declared slow selective depth");
+        else if(option=="--assume-selective-fast-depth")
+            declared().selective_fast_depth=number(value(),"declared fast selective depth");
+        else if(option=="--assume-shift-hz") declared().shift_hz=number(value(),"declared shift frequency");
+        else if(option=="--assume-margin") declared().margin=number(value(),"declared search margin");
         else if (option == "--selective-depth") {
             o.channel.selective_slow_depth = number(value(), "selective depth");
             o.channel.selective_fast_depth = o.channel.selective_slow_depth;
@@ -239,7 +300,13 @@ Options parse(int argc, char** argv) {
             if (noise == "off") o.channel.noise_dbm_hz.reset();
             else o.channel.noise_dbm_hz = number(noise, "noise density");
         } else if (option == "--seed") o.seed = integer<std::uint64_t>(value(), "seed");
-        else if (option == "--source-bytes") o.source_bytes = integer<unsigned>(value(), "source byte count");
+        else if (option == "--source-bytes") {
+            o.source_bytes = integer<unsigned>(value(), "source byte count");
+            o.source_bytes_specified = true;
+        } else if (option == "--text") {
+            o.text = value();
+            o.text_specified = true;
+        }
         else if (option == "--max-audio-seconds") o.max_audio_seconds = number(value(), "audio limit");
         else if (option == "--max-wall-seconds") o.max_wall_seconds = number(value(), "wall limit");
         else if (option == "--bootstrap-gate") o.bootstrap_gate = true;
@@ -261,19 +328,51 @@ Options parse(int argc, char** argv) {
         else if (option == "--retain-capture") {
             o.retain_capture = value();
             if(o.retain_capture.empty())throw Error("capture retention requires a new output path");
+        } else if (option == "--replay-capture") {
+            o.replay_capture = value();
+            if(o.replay_capture.empty())throw Error("capture replay requires an input path");
+        } else if (option == "--replay-paced") {
+            if(o.replay_paced)throw Error("--replay-paced may be specified only once");
+            o.replay_paced = true;
+        } else if (option == "--tx-gain") {
+            o.tx_gain = number(value(), "transmit gain");
+            o.tx_gain_specified = true;
         }
-        else if (option == "--tx-gain") o.tx_gain = number(value(), "transmit gain");
         else throw Error("unknown option: " + option);
     }
     const bool has_override = expected_snr || constellation || code_rate || depth ||
         symbol_rate || pilot_spacing || marker_spacing || rolloff || ldpc_bits;
+    if(o.text_specified && o.source_bytes_specified)
+        throw Error("--text and --source-bytes are mutually exclusive");
+    if(o.text_specified && (o.text.empty() || o.text.size()>512*1024 || !valid_utf8(o.text)))
+        throw Error("text must be nonempty valid UTF-8 no larger than 524288 bytes");
     if (has_override != o.profile_override) throw Error("use --profile-override together with an explicit profile control");
     if (ldpc_bits && (channel != Channel::ssb || (*ldpc_bits != 16200 && *ldpc_bits != 64800)))
         throw Error("Fast SSB LDPC frame override must be 16200 or 64800 bits");
-    if (o.bootstrap_only && (!o.bootstrap_gate || o.live))
+    if (o.bootstrap_only && (!o.bootstrap_gate || o.live || !o.replay_capture.empty()))
         throw Error("bootstrap-only requires an offline bootstrap-gated trial");
+    if(o.replay_paced && o.replay_capture.empty())
+        throw Error("--replay-paced requires --replay-capture");
+    constexpr double radians = std::numbers::pi / 180;
+    if(auto& a=o.assumptions) {
+        if(assume_base!="off") {
+            const auto base=tuning::parse_oscillator_preset(assume_base);
+            if(!base.baseband_supported)throw Error("the declared baseband oscillator only describes an RF reference");
+            a->baseband_ppm=base.clock_error_ppm;
+            a->baseband_phase_rad_sqrt_s=base.phase_noise_degrees_per_sqrt_second*radians;
+        }
+        a->shared_reference=assume_shift=="baseband-clock";
+        if(!a->shared_reference&&assume_shift!="off") {
+            const auto shift=tuning::parse_oscillator_preset(assume_shift);
+            a->shift_ppm=shift.clock_error_ppm;
+            a->shift_phase_rad_sqrt_s=shift.phase_noise_degrees_per_sqrt_second*radians;
+        }
+        const auto spread=tuning::parse_spread_preset(assume_spread);
+        a->delay_ms=spread.delay_ms;
+        a->doppler_hz=spread.doppler_hz;
+    }
     const auto snr = expected_snr.value_or(default_expected_snr(channel));
-    o.profile = resolve_snr_preset(channel, snr).profile;
+    o.profile = (o.assumptions?resolve_snr_preset(channel,snr,*o.assumptions):resolve_snr_preset(channel,snr)).profile;
     if (constellation) o.profile.constellation = *constellation;
     if (code_rate) o.profile.code_rate = parse_code_rate(*code_rate);
     if (depth) o.profile.interleave_depth = *depth;
@@ -296,7 +395,10 @@ Options parse(int argc, char** argv) {
     } else if (!o.capture_device.empty() || !o.playback_device.empty() || o.tx_gain != 1 || !o.retain_capture.empty()) {
         throw Error("audio devices, transmit gain and capture retention apply only to a live cable test");
     }
-    constexpr double radians = std::numbers::pi / 180;
+    if(!o.replay_capture.empty() && (o.live || !o.capture_device.empty() || !o.playback_device.empty() ||
+       o.tx_gain_specified || !o.retain_capture.empty() || o.bootstrap_gate || o.bootstrap_only))
+        throw Error("capture replay cannot open audio, apply a TX gain, retain another capture or use bootstrap gating");
+    if(o.assumptions)validate_receiver_assumptions(o.profile,*o.assumptions);
     if (o.base_oscillator != "off") {
         const auto base = tuning::parse_oscillator_preset(o.base_oscillator);
         if (!base.baseband_supported) throw Error("the selected oscillator only describes an RF reference");
@@ -316,7 +418,11 @@ Options parse(int argc, char** argv) {
     o.channel.doppler_hz = spread.doppler_hz;
     o.channel.delay_ms = spread.delay_ms;
     o.channel.seed = o.seed;
-    validate(o.profile, o.channel);
+    // Captured PCM already includes the actual audio environment and any
+    // selected TX-side stress. The report must not imply a second modeled
+    // receive link budget/noise stage was applied during replay.
+    validate(o.profile, o.channel,(o.live||!o.replay_capture.empty())?
+        ChannelPurpose::live_playback:ChannelPurpose::receiver_simulation);
     if(o.bootstrap_gate && (o.profile.ldpc_frame_bits!=16200 ||
        !datapump::fast::detail::supports_modeled_ssb_receiver(o.profile)))
         throw Error("the bootstrap gate requires the standard short Fast SSB profile");
@@ -378,7 +484,8 @@ struct Probe {
                   std::ranges::copy(bits,transmitted_prefix[prefix_sent++].begin());
               return true;
           }),
-          channel(o.profile, o.channel, [&](std::span<std::complex<float>> out) { return tx.read_analytic(out); }),
+          channel(o.profile, o.channel, [&](std::span<std::complex<float>> out) { return tx.read_analytic(out); },
+              (o.live||!o.replay_capture.empty())?ChannelPurpose::live_playback:ChannelPurpose::receiver_simulation),
           decoder(o.profile, key, decoder_quota, SourceEncoding::xz),
           receiver(make_receiver(o,stop.get_token())),intervals_per_cycle(o.profile.capacity_mode?cycle_intervals(o.profile):0),
           // Allow public pilot lookahead and, for cable, the actual capture
@@ -420,7 +527,8 @@ struct Probe {
             receiver_stage="codec";
             // Offline receipt only. The receiver and decoder never consume
             // the transmitter's protected bits or the comparison result.
-            if (!options.live && prefix_compared<prefix_sent && soft.size()==physical_interval_bits) {
+            if (!options.live && options.replay_capture.empty() &&
+                prefix_compared<prefix_sent && soft.size()==physical_interval_bits) {
                 const auto& expected=transmitted_prefix[prefix_compared];
                 auto& receipt=compared_prefix[prefix_compared++];
                 receipt.evm=progress().evm;
@@ -455,7 +563,7 @@ struct Probe {
             receiver_stage="receiver_dsp";
             return feedback?std::move(event):std::nullopt;
         };
-        return Receiver(o.profile,submit,{},{},stop);
+        return Receiver(o.profile,submit,{},{},stop,o.assumptions);
     }
 
     const ModemProgress& progress() const {
@@ -501,9 +609,10 @@ struct Probe {
             receiver_wall+=duration;
             receiver_work_started.reset();
             max_push_wall=std::max(max_push_wall,duration);
-            if(!options.live) {
+            if(!options.live && !options.replay_paced) {
                 // Replay measured block service against ideal arrivals. This
-                // estimate is separate from the physical hardware FIFO.
+                // estimate applies to unpaced input, where no real inter-block
+                // arrivals can be observed.
                 const auto arrival=static_cast<double>(samples+pcm.size())/options.profile.sample_rate;
                 ideal_finish_seconds=std::max(ideal_finish_seconds,arrival)+duration;
                 modeled_backlog_seconds=std::max(modeled_backlog_seconds,ideal_finish_seconds-arrival);
@@ -522,8 +631,9 @@ struct Probe {
     }
     bool exact() const {
         const auto result = decoder.result();
-        return result && result->is_attachment() && result->filename() == filename &&
-            std::ranges::equal(result->bytes(), source);
+        if(!result || !std::ranges::equal(result->bytes(), source))return false;
+        return options.text_specified ? !result->is_attachment() :
+            result->is_attachment() && result->filename()==filename;
     }
 };
 
@@ -562,6 +672,11 @@ std::string save_capture(const std::filesystem::path& path,std::span<float> samp
 }
 
 struct Run {
+    struct ReplayPacing {
+        Clock::time_point origin;
+        std::uint64_t maximum_waiting_samples = 0;
+        double maximum_block_lag_seconds = 0.;
+    };
     std::string end_reason, error, audio_error;
     std::optional<audio::StreamFormat> capture_format, playback_format;
     std::optional<ProcessMemory> audio_ready_memory;
@@ -570,6 +685,9 @@ struct Run {
     std::optional<std::uint64_t> failed_input_first_sample;
     std::size_t failed_input_samples = 0;
     std::optional<RetainedCapture> retained_capture;
+    std::filesystem::path replay_capture_path;
+    std::uint64_t replay_capture_samples = 0;
+    std::optional<ReplayPacing> replay_pacing;
     std::string_view failed_receiver_stage;
 };
 
@@ -599,7 +717,7 @@ Run offline(Probe& probe, Clock::time_point deadline, std::uint64_t limit) {
         if (probe.progress().physical_complete) {
             if(probe.bootstrap_pending()) { run.end_reason="bootstrap_missing"; return run; }
             bool after_tail=before_quiet;
-            if (probe.resilient()) {
+            if (probe.completion_tick()) {
                 const auto complete=probe.completion_tick();
                 const auto quiet=probe.channel.report().quiet_start_sample;
                 after_tail=complete && quiet && *complete>=*quiet &&
@@ -610,6 +728,116 @@ Run offline(Probe& probe, Clock::time_point deadline, std::uint64_t limit) {
         }
     }
     run.end_reason = probe.input_limit_reason(limit);
+    return run;
+}
+
+Run replay_capture(Probe& probe, Clock::time_point deadline, std::uint64_t limit) {
+    Run run;
+    const auto& o=probe.options;
+    static_assert(sizeof(float)==4 && std::numeric_limits<float>::is_iec559);
+    run.replay_capture_path=o.replay_capture;
+    std::ifstream input(o.replay_capture,std::ios::binary|std::ios::ate);
+    if(!input)throw Error("cannot open retained Fast PCM capture");
+    const auto bytes=input.tellg();
+    if(bytes<=0)throw Error("retained Fast PCM capture is empty");
+    if(static_cast<std::uint64_t>(bytes)%sizeof(float))
+        throw Error("retained Fast PCM capture ends with a partial float sample");
+    const std::uint64_t samples=static_cast<std::uint64_t>(bytes)/sizeof(float);
+    if(samples>limit)throw Error("retained Fast PCM capture exceeds the selected audio limit");
+    run.replay_capture_samples=samples;
+    input.seekg(0);
+    if(o.replay_paced)run.replay_pacing.emplace(Clock::now());
+    const auto rate=o.profile.sample_rate;
+    const auto duration=[&](std::uint64_t count) {
+        return std::chrono::duration<double>(static_cast<double>(count)/rate);
+    };
+    const auto arrived=[&](Clock::time_point now) {
+        const auto elapsed=std::chrono::duration<double>(now-run.replay_pacing->origin).count();
+        const auto count=std::clamp(elapsed*rate,0.,static_cast<double>(samples));
+        return static_cast<std::uint64_t>(count);
+    };
+    const auto record_waiting=[&](Clock::time_point now,std::uint64_t dispatched) {
+        const auto due=arrived(now);
+        auto& peak=run.replay_pacing->maximum_waiting_samples;
+        if(due>dispatched)peak=std::max(peak,due-dispatched);
+    };
+
+    // Decode bounded little-endian float32 blocks. The captured stream is the
+    // receiver input: do not regenerate, reshape, attenuate or add model noise.
+    std::array<std::uint8_t,block_samples*sizeof(float)> raw{};
+    std::array<float,block_samples> pcm{};
+    std::uint64_t read_samples=0;
+    const auto stop_at_deadline=[&] {
+        const auto now=Clock::now();
+        if(now<deadline)return false;
+        if(run.replay_pacing)record_waiting(now,probe.samples);
+        run.end_reason="wall_limit";
+        probe.receiver_stop.request_stop();
+        return true;
+    };
+    run.end_reason="capture_eof";
+    while(input && read_samples<samples) {
+        if(stop_at_deadline())break;
+        const auto request=static_cast<std::streamsize>(std::min<std::uint64_t>(
+            raw.size(),(samples-read_samples)*sizeof(float)));
+        input.read(reinterpret_cast<char*>(raw.data()),request);
+        const auto read_bytes=input.gcount();
+        if(read_bytes<=0 || read_bytes%sizeof(float))
+            throw Error("retained Fast PCM capture changed or was truncated during replay");
+        const auto count=static_cast<std::size_t>(read_bytes/sizeof(float));
+        for(std::size_t i=0;i<count;++i) {
+            const auto at=i*sizeof(float);
+            const std::uint32_t word=std::uint32_t(raw[at])|
+                (std::uint32_t(raw[at+1])<<8)|(std::uint32_t(raw[at+2])<<16)|
+                (std::uint32_t(raw[at+3])<<24);
+            pcm[i]=std::bit_cast<float>(word);
+            if(!std::isfinite(pcm[i]))
+                throw Error("retained Fast PCM capture contains a non-finite sample");
+        }
+
+        std::size_t offset=0;
+        const auto block_end=read_samples+count;
+        if(run.replay_pacing) {
+            const auto ready=run.replay_pacing->origin+std::chrono::ceil<Clock::duration>(duration(block_end));
+            // A fixed monotonic origin preserves the original cadence after a
+            // slow push. If late, consume overdue samples without sleeping.
+            if(Clock::now()<ready)std::this_thread::sleep_until(std::min(ready,deadline));
+        }
+        while(offset<count && !probe.progress().physical_complete) {
+            if(stop_at_deadline())return run;
+            const auto before=probe.samples;
+            if(run.replay_pacing)record_waiting(Clock::now(),before);
+            const bool received=receive_block(probe,std::span<const float>(pcm).subspan(offset,count-offset),run);
+            if(run.replay_pacing) {
+                const auto now=Clock::now();
+                // As with a real queue, exclude the PCM already handed to
+                // this push while counting samples that arrived behind it.
+                record_waiting(now,block_end);
+                const auto lag=std::chrono::duration<double>(now-run.replay_pacing->origin)-duration(probe.samples);
+                auto& peak=run.replay_pacing->maximum_block_lag_seconds;
+                peak=std::max(peak,lag.count());
+            }
+            if(!received)
+                return run;
+            if(run.replay_pacing && stop_at_deadline())return run;
+            const auto consumed=probe.samples-before;
+            if(!consumed) {
+                if(probe.progress().physical_complete)break;
+                run.end_reason="receiver_stopped";
+                probe.receiver_stop.request_stop();
+                return run;
+            }
+            offset+=static_cast<std::size_t>(consumed);
+            read_samples+=consumed;
+        }
+        if(probe.progress().physical_complete) {
+            run.end_reason="physical_completion";
+            break;
+        }
+        if(!input && !input.eof())throw Error("cannot read retained Fast PCM capture");
+    }
+    if(read_samples<samples && run.end_reason!="physical_completion" && run.end_reason!="wall_limit")
+        throw Error("retained Fast PCM capture stopped before its declared length");
     return run;
 }
 
@@ -702,11 +930,19 @@ int finish(Probe& probe, const Run& run, Clock::time_point start, std::clock_t c
     const auto& p = o.profile;
     const auto& c = o.channel;
     const auto& cr = probe.channel.report();
+    const auto transport_finished=Clock::now();
     probe.record_memory("transport_stopped");
     const bool physical = run.end_reason == "physical_completion" && !probe.bootstrap_pending();
+    std::optional<std::size_t> pending_before_finish;
+    if(run.replay_pacing) {
+        if(const auto* modem=probe.resilient())pending_before_finish=modem->acquisition_worker_progress().pending_fits;
+    }
     const auto finish_started = Clock::now();
     probe.receiver_work_started=finish_started;
     probe.receiver.finish();
+    const auto receiver_finished=Clock::now();
+    const auto end_reason=run.replay_pacing && run.end_reason=="capture_eof" && probe.receiver_stop.stop_requested()
+        ? std::string_view("wall_limit") : std::string_view(run.end_reason);
     probe.decoder.finish(physical);
     probe.record_memory("after_decoder_finish");
     probe.receiver_wall += elapsed(finish_started);
@@ -718,19 +954,24 @@ int finish(Probe& probe, const Run& run, Clock::time_point start, std::clock_t c
     const bool success = physical && d.complete && exact && (!o.encryption || d.authenticated);
     const bool bootstrap_success=o.bootstrap_only && run.end_reason=="bootstrap_verified" &&
         probe.bootstrap_passed() && !probe.digital.nonfinite && !probe.captured.nonfinite;
-    std::string status = run.end_reason;
+    std::string status(end_reason);
     if (success) status = "complete";
     else if(run.end_reason=="bootstrap_verified" && !bootstrap_success)status="bootstrap_invalid_samples";
     else if (physical) status = d.complete && !exact ? "payload_mismatch" : "decode_failed";
-    else if (run.end_reason == "simulated_channel_eof")
+    else if (end_reason == "simulated_channel_eof")
         status = progress.acquired ? "physical_end_missing" : "no_acquisition";
+    else if (end_reason == "capture_eof")
+        status = progress.acquired ? "capture_eof_before_physical_completion" : "no_acquisition";
     const double wall = elapsed(start);
     const double cpu = static_cast<double>(std::clock() - cpu_start) / CLOCKS_PER_SEC;
     const double sampled = static_cast<double>(probe.samples) / p.sample_rate;
     const auto bulk = estimate_transmission(p, o.encryption, large_estimate_bytes);
     std::cout << std::setprecision(16) << std::boolalpha
         << "{\"schema\":\"fast_channel_probe.v1\",\"status\":" << json_string(status)
-        << ",\"end_reason\":" << json_string(run.end_reason) << ",\"live\":" << o.live
+        << ",\"end_reason\":" << json_string(end_reason) << ",\"live\":" << o.live
+        << ",\"input_mode\":" << json_string(o.live ? "physical_live_audio" :
+            (o.replay_capture.empty() ? "simulated_channel" : "retained_capture_replay"))
+        << ",\"model_channel_effects_applied\":" << o.replay_capture.empty()
         << ",\"receiver_backend\":" << json_string(probe.receiver.backend_name())
         << ",\"encrypted\":" << o.encryption << ",\"authenticated\":" << d.authenticated
         << ",\"complete\":" << d.complete << ",\"physical_complete\":" << progress.physical_complete
@@ -744,15 +985,16 @@ int finish(Probe& probe, const Run& run, Clock::time_point start, std::clock_t c
         << ",\"source_hash\":" << json_string(digest(probe.source))
         << ",\"received_hash\":" << json_string(result ? digest(result->bytes()) : "")
         << ",\"encoded_source_bytes\":" << probe.encoded_bytes << ",\"encoded_source_hash\":" << json_string(probe.encoded_hash)
-        << ",\"source_encoding\":\"xz-attachment\",\"seed\":" << cr.seed
+        << ",\"source_encoding\":" << json_string(o.text_specified ? "xz-text" : "xz-attachment")
+        << ",\"seed\":" << cr.seed
         << ",\"source_samples\":" << cr.source_samples << ",\"output_samples\":" << cr.output_samples
         << ",\"quiet_start_sample\":";
-    optional_json(cr.quiet_start_sample);
+    if(o.replay_capture.empty())optional_json(cr.quiet_start_sample);else std::cout << "null";
     std::cout << ",\"physical_completion_input_tick\":";
     optional_json(probe.completion_tick());
     std::cout << ",\"observed_quiet_after_tail_seconds\":";
     std::optional<double> quiet_seconds;
-    if (!o.live && probe.completion_tick() && cr.quiet_start_sample &&
+    if (!o.live && o.replay_capture.empty() && probe.completion_tick() && cr.quiet_start_sample &&
         *probe.completion_tick()>=*cr.quiet_start_sample)
         quiet_seconds=static_cast<double>(*probe.completion_tick()-*cr.quiet_start_sample)/p.sample_rate;
     optional_json(quiet_seconds);
@@ -770,6 +1012,7 @@ int finish(Probe& probe, const Run& run, Clock::time_point start, std::clock_t c
     std::cout << ']';
     if (const auto* modem=probe.resilient()) {
         const auto& acquisition=modem->acquisition_progress();
+        const auto& workers=modem->acquisition_worker_progress();
         const auto& fit=modem->last_acquisition_diagnostics();
         using FitStatus=datapump::fast::detail::SsbAcquisitionDiagnostics::Status;
         const auto fit_status=[](FitStatus status) -> std::string_view {
@@ -785,6 +1028,17 @@ int finish(Probe& probe, const Run& run, Clock::time_point start, std::clock_t c
         std::cout << ",\"acquisition_projected_windows\":" << acquisition.projected_windows
                   << ",\"acquisition_training_proposals\":" << acquisition.training_proposals
                   << ",\"acquisition_fit_requests\":" << acquisition.fit_requests
+                  << ",\"acquisition_workers\":{\"hardware_threads\":" << workers.hardware_threads
+                  << ",\"worker_budget\":" << workers.worker_budget
+                  << ",\"owner_limit\":" << workers.owner_limit
+                  << ",\"started_helpers\":" << workers.started_helpers
+                  << ",\"fit_lease_bytes\":" << workers.fit_lease_bytes
+                  << ",\"peak_reserved_bytes\":" << workers.peak_reserved_bytes
+                  << ",\"peak_pending_fits\":" << workers.peak_pending_fits
+                  << ",\"peak_active_fits\":" << workers.peak_active_fits
+                  << ",\"pending_fits\":" << workers.pending_fits
+                  << ",\"committed_fits\":" << workers.committed_fits
+                  << ",\"discarded_fits\":" << workers.discarded_fits << '}'
                   << ",\"acquisition_last_fit_status\":";
         if(acquisition.fit_requests)std::cout << json_string(fit_status(fit.status));
         else std::cout << "null";
@@ -874,8 +1128,10 @@ int finish(Probe& probe, const Run& run, Clock::time_point start, std::clock_t c
     std::cout << ",\"sampled_seconds\":" << sampled << ",\"wall_seconds\":" << wall
         << ",\"process_cpu_seconds\":" << cpu << ",\"receiver_wall_seconds\":" << probe.receiver_wall
         << ",\"maximum_receiver_push_wall_seconds\":" << probe.max_push_wall
-        << ",\"modeled_realtime_backlog_seconds\":" << probe.modeled_backlog_seconds
-        << ",\"receiver_realtime_ratio\":" << (sampled ? probe.receiver_wall / sampled : 0)
+        << ",\"modeled_realtime_backlog_seconds\":";
+    if(run.replay_pacing)std::cout << "null";
+    else std::cout << probe.modeled_backlog_seconds;
+    std::cout << ",\"receiver_realtime_ratio\":" << (sampled ? probe.receiver_wall / sampled : 0)
         << ",\"source_goodput_bps\":" << (success && sampled ? 8 * probe.source.size() / sampled : 0)
         << ",\"fixture_estimated_airtime_seconds\":" << probe.estimate.seconds
         << ",\"bulk_estimated_encoded_bytes\":" << large_estimate_bytes
@@ -897,9 +1153,15 @@ int finish(Probe& probe, const Run& run, Clock::time_point start, std::clock_t c
         << ",\"maximum_capture_backlog_samples\":" << run.maximum_backlog_samples
         << ",\"capture_fifo_capacity_samples\":" << run.fifo_capacity_samples
         << ",\"capture_pending_samples_at_stop\":" << run.capture_pending_at_stop
-        << ",\"digital_peak\":" << probe.digital.peak << ",\"digital_rms\":" << probe.digital.rms()
+        << ",\"digital_statistics_scope\":\"channel_output_before_live_tx_gain\""
+        << ",\"requested_playback_peak_before_clamp\":";
+    if (o.live) std::cout << probe.digital.peak * o.tx_gain;
+    else std::cout << "null";
+    std::cout << ",\"digital_peak\":" << probe.digital.peak << ",\"digital_rms\":" << probe.digital.rms()
         << ",\"digital_clipped_samples\":" << probe.digital.clipped
         << ",\"digital_nonfinite_samples\":" << probe.digital.nonfinite
+        << ",\"capture_statistics_scope\":\"receiver_input\""
+        << ",\"capture_statistics_samples\":" << probe.captured.count
         << ",\"capture_peak\":" << probe.captured.peak << ",\"capture_rms\":" << probe.captured.rms()
         << ",\"capture_clipped_samples\":" << probe.captured.clipped
         << ",\"capture_nonfinite_samples\":" << probe.captured.nonfinite
@@ -918,6 +1180,35 @@ int finish(Probe& probe, const Run& run, Clock::time_point start, std::clock_t c
             << ",\"clipped_samples\":" << capture->levels.clipped
             << ",\"sha256\":" << json_string(capture->sha256)
             << ",\"error\":" << json_string(capture->error) << '}';
+    } else std::cout << "null";
+    std::cout << ",\"replay_capture\":";
+    if(!run.replay_capture_path.empty()) {
+        std::cout << "{\"path\":" << json_string(run.replay_capture_path.string())
+                  << ",\"format\":\"mono-f32le\",\"sample_rate\":" << p.sample_rate
+                  << ",\"declared_samples\":" << run.replay_capture_samples
+                  << ",\"processed_samples\":" << probe.samples
+                  << ",\"paced\":" << run.replay_pacing.has_value();
+        if(const auto& pacing=run.replay_pacing) {
+            const auto transport=std::chrono::duration<double>(transport_finished-pacing->origin).count();
+            const auto finished=std::chrono::duration<double>(receiver_finished-pacing->origin).count();
+            const auto live_capacity=datapump::fast::detail::receive_pcm_capacity(p);
+            std::cout << ",\"paced_metrics\":{\"block_samples\":" << block_samples
+                      << ",\"transport_wall_seconds\":" << transport
+                      << ",\"receiver_end_to_end_wall_seconds\":" << finished
+                      << ",\"transport_lag_seconds\":" << std::max(0.,transport-sampled)
+                      << ",\"receiver_end_to_end_lag_seconds\":" << std::max(0.,finished-sampled)
+                      << ",\"receiver_finish_wall_seconds\":" <<
+                            std::chrono::duration<double>(receiver_finished-finish_started).count()
+                      << ",\"maximum_block_completion_lag_seconds\":" << pacing->maximum_block_lag_seconds
+                      << ",\"maximum_arrival_queue_equivalent_samples\":" << pacing->maximum_waiting_samples
+                      << ",\"comparison_live_fifo_capacity_samples\":" << live_capacity
+                      << ",\"arrival_queue_exceeds_comparison_capacity\":" <<
+                            (pacing->maximum_waiting_samples>live_capacity)
+                      << ",\"pending_fits_before_finish\":";
+            optional_json(pending_before_finish);
+            std::cout << '}';
+        }
+        std::cout << '}';
     } else std::cout << "null";
     std::cout << ",\"receiver_failure_first_sample\":";
     optional_json(run.failed_input_first_sample);
@@ -971,15 +1262,33 @@ int finish(Probe& probe, const Run& run, Clock::time_point start, std::clock_t c
         << ",\"shared_reference\":" << c.shared_reference << ",\"shift_hz\":" << c.shift_hz
         << ",\"spread\":" << json_string(o.spread) << ",\"delay_ms\":" << c.delay_ms << ",\"doppler_hz\":" << c.doppler_hz
         << ",\"margin\":" << c.margin << ",\"selective_slow_depth\":" << c.selective_slow_depth
-        << ",\"selective_fast_depth\":" << c.selective_fast_depth << ",\"received_power_dbm\":" << cr.received_power_dbm
-        << ",\"cn0_db_hz\":";
+        << ",\"selective_fast_depth\":" << c.selective_fast_depth
+        << ",\"link_budget_applied\":" << cr.link_budget_applied << ",\"received_power_dbm\":";
+    if(cr.link_budget_applied)std::cout << cr.received_power_dbm;else std::cout << "null";
+    std::cout << ",\"cn0_db_hz\":";
     optional_json(cr.cn0_db_hz);
     std::cout << ",\"spread_delay_ms\":" << cr.spread_delay_ms << ",\"spread_doppler_hz\":" << cr.spread_doppler_hz
+        << ",\"spread_evolution\":" << json_string(cr.spread_evolution==SpreadEvolution::gaussian?"gaussian":"fixed")
+        << ",\"gaussian_doppler_width_hz\":" << cr.gaussian_doppler_width_hz
+        << ",\"propagation_frequency_allowance_hz\":" << cr.propagation_frequency_allowance_hz
         << ",\"selective_spacing_hz\":" << cr.selective_spacing_hz << ",\"noise_variance\":" << cr.noise_variance
         << ",\"nominal_signal_power\":" << cr.nominal_signal_power << ",\"sample_clock_error_ppm\":" << cr.sample_clock_error_ppm
         << ",\"shift_error_hz\":" << cr.shift_error_hz << ",\"clock_bound_ppm\":" << cr.clock_bound_ppm
         << ",\"frequency_bound_hz\":" << cr.frequency_bound_hz << ",\"propagation_tail_samples\":" << cr.propagation_tail_samples << '}'
-        << ",\"max_audio_seconds\":" << o.max_audio_seconds << ",\"max_wall_seconds\":" << o.max_wall_seconds
+        << ",\"receiver_assumptions\":";
+    if(o.assumptions) {
+        const auto bounds=receiver_assumption_bounds(p,*o.assumptions);
+        const auto write_bounds=[](const ChannelBounds& b) {
+            std::cout << "{\"clock_ppm\":" << b.clock_ppm << ",\"frequency_hz\":" << b.frequency_hz
+                << ",\"delay_ms\":" << b.delay_ms << '}';
+        };
+        std::cout << "{\"requested\":";
+        write_bounds(bounds.requested);
+        std::cout << ",\"admitted\":";
+        write_bounds(bounds.admitted);
+        std::cout << ",\"sparse_search\":" << bounds.sparse_search << '}';
+    } else std::cout << "null";
+    std::cout << ",\"max_audio_seconds\":" << o.max_audio_seconds << ",\"max_wall_seconds\":" << o.max_wall_seconds
         << ",\"capture_device\":" << json_string(o.capture_device) << ",\"playback_device\":" << json_string(o.playback_device)
         << ",\"tx_gain\":" << o.tx_gain << ",\"capture_format\":";
     write_audio_format(run.capture_format);
@@ -994,14 +1303,17 @@ int main(int argc, char** argv) try {
     const auto options = parse(argc, argv);
     const auto start = Clock::now();
     const auto cpu_start = std::clock();
-    const auto source = payload(options.source_bytes, options.seed);
+    const auto source = options.text_specified ? Bytes(options.text.begin(),options.text.end()) :
+        payload(options.source_bytes, options.seed);
     const auto key = test_key(options);
     const auto deadline = start + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(options.max_wall_seconds));
     std::stop_source receiver_stop;
-    Probe probe(options, source, key, prepare_xz_attachment(byte_source(source), filename, source_quota),
+    const auto prepared=options.text_specified ? prepare_xz_source(byte_source(source),source_quota) :
+        prepare_xz_attachment(byte_source(source),filename,source_quota);
+    Probe probe(options, source, key, prepared,
                 receiver_stop);
     std::jthread watchdog;
-    if (!options.live && probe.resilient()) watchdog=std::jthread([&](std::stop_token stop) {
+    if (!options.live && (probe.resilient() || options.replay_paced)) watchdog=std::jthread([&](std::stop_token stop) {
         std::mutex mutex;
         std::condition_variable_any condition;
         std::unique_lock lock(mutex);
@@ -1009,7 +1321,8 @@ int main(int argc, char** argv) try {
         if (!stop.stop_requested()) receiver_stop.request_stop();
     });
     const auto limit = static_cast<std::uint64_t>(options.max_audio_seconds * options.profile.sample_rate);
-    const auto run = options.live ? live(probe, deadline, limit) : offline(probe, deadline, limit);
+    const auto run = options.live ? live(probe, deadline, limit) :
+        (!options.replay_capture.empty() ? replay_capture(probe, deadline, limit) : offline(probe, deadline, limit));
     return finish(probe, run, start, cpu_start);
 } catch (const std::exception& error) {
     std::cout << "{\"schema\":\"fast_channel_probe.v1\",\"status\":\"error\",\"reason\":" << json_string(error.what())

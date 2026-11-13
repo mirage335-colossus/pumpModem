@@ -63,6 +63,13 @@ PROFILE_OVERRIDES = (
     "expected_snr", "constellation", "code_rate", "depth", "symbol_rate",
     "pilot_spacing", "marker_spacing", "rolloff", "ldpc_bits",
 )
+RECEIVER_ASSUMPTION_FIELDS = (
+    "base_oscillator", "shift_oscillator", "spread", "selective_slow_depth",
+    "selective_fast_depth", "margin", "shift_hz",
+)
+CHANNEL_EFFECT_FIELDS = (
+    "transmit_watts", "path_loss_db", "noise_dbm_hz", *RECEIVER_ASSUMPTION_FIELDS,
+)
 
 
 class CaseParseError(ValueError):
@@ -220,7 +227,7 @@ def _native_args(case: dict[str, Any], seed: int, source_bytes: int,
         "--spread", case["spread"],
         "--selective-slow-depth", str(case["selective_slow_depth"]),
         "--selective-fast-depth", str(case["selective_fast_depth"]),
-        "--margin", str(case["margin"]),
+        "--margin", "1",
         "--shift-hz", str(case["shift_hz"]),
         "--noise-dbm-hz", str(noise) if noise is not None else "off",
         "--seed", str(seed),
@@ -228,6 +235,11 @@ def _native_args(case: dict[str, Any], seed: int, source_bytes: int,
         "--max-audio-seconds", str(max_audio_seconds),
         "--max-wall-seconds", str(max_wall_seconds),
     ]
+    # Match GUI Search margin: it expands receiver bounds, not injected effects.
+    # Other manual conditions initially describe both the receiver declaration
+    # and generated channel, through their separate native inputs.
+    for name in RECEIVER_ASSUMPTION_FIELDS:
+        args.extend(("--assume-" + name.replace("_", "-"), str(case[name])))
     if overrides:
         if overrides.keys() - set(PROFILE_OVERRIDES):
             raise CaseParseError("unknown profile override")
@@ -296,7 +308,7 @@ def run_cases(*, probe: Path = DEFAULT_PROBE, case_list: Path = DEFAULT_CASES,
         capture_device = playback_device = live_device
     live = capture_device is not None or playback_device is not None
     if live and not (capture_device and playback_device):
-        raise CaseParseError("a live cable test requires both audio endpoints")
+        raise CaseParseError("a live audio test requires both audio endpoints")
     _validate_limits(seed, source_bytes, max_audio_seconds, max_wall_seconds, tx_gain, live)
     _validate_ldpc_trial(cases, selected, profile_overrides or {}, bootstrap_gate,
                          bootstrap_only, live)
@@ -341,6 +353,18 @@ def run_cases(*, probe: Path = DEFAULT_PROBE, case_list: Path = DEFAULT_CASES,
         report["argv"] = args
         report["case_index"] = index
         report["requested_case"] = case
+        report["requested_receiver_assumptions"] = {
+            name: case[name] for name in RECEIVER_ASSUMPTION_FIELDS
+        }
+        report["requested_channel_effects"] = {
+            name: case[name] for name in CHANNEL_EFFECT_FIELDS
+        }
+        report["requested_channel_effects"]["margin"] = 1
+        if case["margin"] != 1:
+            report["margin_semantics"] = (
+                "Margin is receiver-only, matching GUI Search margin; injected effects use "
+                "margin 1. Historical reports retain their recorded effect settings."
+            )
         results.append(report)
     passes = [row.get("status") == "complete" for row in results]
     bootstraps = bootstrap_only and all(row.get("status") == "bootstrap_verified" for row in results)
@@ -361,7 +385,7 @@ def run_cases(*, probe: Path = DEFAULT_PROBE, case_list: Path = DEFAULT_CASES,
         "bootstrap_only": bootstrap_only,
         "selected_bootstraps_validated": bootstraps,
         "retain_capture": str(retain_capture.resolve()) if retain_capture is not None else None,
-        "mode": "cable" if live else "simulation",
+        "mode": "live_audio" if live else "simulation",
         "results": results,
     }
     if probe_hash_error is not None:
@@ -404,7 +428,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="continue the short SSB trial only after a verified bootstrap")
     parser.add_argument("--bootstrap-only", action="store_true",
                         help="stop an offline gated trial after the first coding cycle")
-    parser.add_argument("--live", action="store_true", help="send the modeled waveform through a connected audio cable")
+    parser.add_argument("--live", action="store_true",
+                        help="send the modeled waveform through a physical audio path (cable or speakers/microphone) with explicit capture/playback devices")
     parser.add_argument("--device", help="shared audio device ID for both endpoints")
     parser.add_argument("--capture-device")
     parser.add_argument("--playback-device")
@@ -449,7 +474,7 @@ def main(argv: list[str] | None = None) -> int:
                 "bootstrap_gate": args.bootstrap_gate,
                 "bootstrap_only": args.bootstrap_only,
                 "retain_capture": str(args.retain_capture.resolve()) if args.retain_capture is not None else None,
-                "mode": "cable" if args.live else "simulation",
+                "mode": "live_audio" if args.live else "simulation",
                 "capture_device": capture_device, "playback_device": playback_device,
                 "tx_gain": args.tx_gain if args.live else None,
                 "selected_cases": [parsed[index - 1] for index in selected],

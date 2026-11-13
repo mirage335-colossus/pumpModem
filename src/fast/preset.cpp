@@ -11,6 +11,14 @@
 #include <sstream>
 
 namespace datapump::fast {
+SnrReferenceBand expected_snr_reference_band(Channel channel) {
+    switch(channel) {
+    case Channel::wire:return {300,18300};
+    case Channel::acoustic:case Channel::acoustic_short:return {500,18000};
+    case Channel::ssb:case Channel::fm:return {300,2700};
+    }
+    throw Error("Unknown Fast SNR channel");
+}
 namespace {
 double maximum_expected_snr(Channel c) {
     switch(c) {
@@ -21,12 +29,7 @@ double maximum_expected_snr(Channel c) {
     throw Error("Unknown Fast SNR channel");
 }
 double reference_bandwidth(Channel c) {
-    switch(c) {
-    case Channel::wire:return 18000;
-    case Channel::acoustic:case Channel::acoustic_short:return 17500;
-    case Channel::ssb:case Channel::fm:return 2400;
-    }
-    throw Error("Unknown Fast SNR channel");
+    return expected_snr_reference_band(c).bandwidth_hz();
 }
 std::string number(double value,int precision=6) {
     std::ostringstream out;out<<std::setprecision(precision)<<value;return out.str();
@@ -115,7 +118,7 @@ Profile search_short_acoustic(double expected,double minimum_target_seconds,bool
         // The small QPSK 3/4 code passed the ideal sweep at 5 dB Es/N0.
         // Retain the sampled compact link's stronger 6 dB in-band target.
         const auto target_snr=small&&order==4?6.:selected_snr;
-        const auto band=17500*std::min(1.,std::pow(10.,(expected-target_snr)/10.));
+        const auto band=reference_bandwidth(Channel::acoustic_short)*std::min(1.,std::pow(10.,(expected-target_snr)/10.));
         auto base=ofdm?profile(Channel::acoustic_short):single_carrier_base(Channel::acoustic_short);
         base.compact_convolutional=compact;base.constellation=order;base.code_rate=rate;
         if(frame)base.ldpc_frame_bits=frame;
@@ -126,7 +129,7 @@ Profile search_short_acoustic(double expected,double minimum_target_seconds,bool
         } else {
             // Keep a 5 ms acoustic echo inside the compact equalizer's span.
             // Faster choices use OFDM's cyclic prefix and channel fitting.
-            if(small)base.pilot_spacing_symbols=128;
+            base.pilot_spacing_symbols=32;
             base.symbol_rate=canonical_frequency(std::min({1000.,maximum_baud(base),band/(1+base.rolloff)}));
         }
         for(const unsigned fft:{2048U,4096U,8192U,16384U,32768U}) {
@@ -153,18 +156,52 @@ Profile search_short_acoustic(double expected,double minimum_target_seconds,bool
     if(best_rate<0)throw Error("No short acoustic waveform fits the requested SNR");
     return best;
 }
-Profile short_acoustic_preset(double expected) {
-    const auto previous=search_short_acoustic(expected,10.5,false);
-    auto quick=search_short_acoustic(expected,10.5);
-    // Avoid changing a qualified OFDM format for a marginal modeled gain.
-    if(estimate_transmission(quick,false,50000000).source_bps<
-       1.10*estimate_transmission(previous,false,50000000).source_bps)quick=previous;
-    const auto extended=search_short_acoustic(expected,12.5);
-    // Spend the extra startup time only for a material steady-throughput gain.
-    // Small LDPC already improves weak presets within the original budget.
-    const auto quick_rate=estimate_transmission(quick,false,50000000).source_bps;
-    const auto extended_rate=estimate_transmission(extended,false,50000000).source_bps;
-    return extended_rate>=1.20*quick_rate?extended:quick;
+Profile short_acoustic_preset(double expected,bool reserve_for_fades,bool require_single_carrier) {
+    Profile selected;
+    if(require_single_carrier) {
+        // The adverse declaration requires a backend that searches the
+        // received delay and frequency envelope. The compact SC waveform
+        // stays usable where a clean-link OFDM candidate would win.
+        selected=single_carrier_base(Channel::acoustic_short);
+        selected.constellation=4;selected.ldpc_frame_bits=1944;
+        selected.code_rate=CodeRate::three_quarters;selected.interleave_depth=1;
+        selected.marker_spacing_intervals=1;selected.pilot_spacing_symbols=32;
+        const auto band=reference_bandwidth(Channel::acoustic_short)*std::pow(10.,(expected-6.)/10.);
+        selected.symbol_rate=canonical_frequency(std::min(1000.,band/(1.+selected.rolloff)));
+    } else {
+        const auto previous=search_short_acoustic(expected,10.5,false);
+        auto quick=search_short_acoustic(expected,10.5);
+        // Avoid changing a qualified OFDM format for a marginal modeled gain.
+        if(estimate_transmission(quick,false,50000000).source_bps<
+           1.10*estimate_transmission(previous,false,50000000).source_bps)quick=previous;
+        const auto extended=search_short_acoustic(expected,12.5);
+        // Spend the extra startup time only for a material steady-throughput gain.
+        const auto quick_rate=estimate_transmission(quick,false,50000000).source_bps;
+        const auto extended_rate=estimate_transmission(extended,false,50000000).source_bps;
+        selected=extended_rate>=1.20*quick_rate?extended:quick;
+    }
+    if(!selected.acoustic_ofdm&&small_ldpc_frame(selected.ldpc_frame_bits)&&selected.constellation==4) {
+        // Joint acoustic noise and moving fades need more bandwidth
+        // headroom than the flat-noise candidate selection assumes.
+        const auto reference_band = reference_bandwidth(Channel::acoustic_short);
+        if(reserve_for_fades) {
+            constexpr double default_selected_snr = 12.;
+            const auto band = reference_band *
+                std::pow(10., (default_expected_snr(Channel::acoustic_short) - default_selected_snr) / 10.);
+            selected.symbol_rate = std::min(selected.symbol_rate, canonical_frequency(band / (1. + selected.rolloff)));
+        }
+
+        // Favor fade tolerance when the stronger code keeps the short keyed
+        // fixture in the same number of fixed transmit intervals.
+        const auto selected_snr = expected + 10. * std::log10(reference_band / occupied_bandwidth_hz(selected));
+        const auto resilient_rate = reserve_for_fades && selected_snr < 9. ? CodeRate::half : CodeRate::two_thirds;
+        auto resilient=selected;
+        resilient.code_rate=resilient_rate;
+        if(code_rate_value(resilient_rate)<code_rate_value(selected.code_rate)&&valid(resilient)&&
+            estimate_transmission(resilient,true,60).intervals==
+            estimate_transmission(selected,true,60).intervals)selected=resilient;
+    }
+    return selected;
 }
 
 }
@@ -187,22 +224,19 @@ std::vector<double> expected_snr_options(Channel c) {
     std::sort(values.begin(),values.end(),std::greater<>());
     values.erase(std::unique(values.begin(),values.end()),values.end());return values;
 }
-SnrPreset resolve_snr_preset(Channel c,double expected) {
+namespace {
+SnrPreset resolve_snr_preset_impl(Channel c,double expected,bool reserve_for_fades,bool require_single_carrier) {
     const auto nominal=maximum_expected_snr(c),band=reference_bandwidth(c);
     if(!std::isfinite(expected)||expected>nominal||expected<nominal-40)
         throw Error("Expected Fast SNR must be within the channel's supported 40 dB range");
     SnrPreset result{profile(c),expected,band,
         "Assumed SNR in the original channel bandwidth; local settings must match at both ends. "
         "Narrowing assumes unchanged total received signal power and flat noise density. "
-        "Modeled presets require link testing; they are not measured margins."};
-    if(c==Channel::ssb) {
-        if(expected==nominal)
-            result.note+=" The resilient SSB standard uses QPSK and 16,200-bit LDPC to verify tracking earlier.";
-        else result.note+=" Modeled SSB presets use 64,800-bit LDPC and can have a higher estimated bulk rate than the resilient standard.";
-    }
+        "All capacity presets transmit public training and recurring pilots."};
     if(c==Channel::acoustic_short) {
-        result.profile=short_acoustic_preset(expected);
-        result.note+=" Coding-block selection limits minimum transfer overhead; weaker presets may still exceed the 12.5-second target.";
+        result.profile=short_acoustic_preset(expected,reserve_for_fades,require_single_carrier);
+        if(reserve_for_fades)
+            result.note+=" Short single-carrier presets reserve bandwidth margin for fades, which can extend minimum transfer time.";
         return result;
     }
     // The nominal point uses each channel's standard waveform.
@@ -261,6 +295,21 @@ SnrPreset resolve_snr_preset(Channel c,double expected) {
         result.note+=" Narrow single-carrier presets retain about 13 dB selected-band SNR for marker acquisition.";
     return result;
 }
+}
+
+SnrPreset resolve_snr_preset(Channel c,double expected) {
+    return resolve_snr_preset_impl(c,expected,true,false);
+}
+
+SnrPreset resolve_snr_preset(Channel c,double expected,const ChannelAssumptions& assumptions) {
+    validate(assumptions);
+    const bool reserve_for_fades=assumptions.delay_ms>0.||assumptions.doppler_hz>0.||
+        assumptions.selective_slow_depth>0.||assumptions.selective_fast_depth>0.;
+    const bool shifted_rf=assumptions.shift_hz>0.&&
+        (assumptions.shared_reference?assumptions.baseband_ppm:assumptions.shift_ppm)>0.;
+    return resolve_snr_preset_impl(c,expected,reserve_for_fades,reserve_for_fades||shifted_rf);
+}
+
 Profile normalize_ssb_frame_size(Profile p) noexcept {
     if(ssb_capacity_framing(p) && p.ldpc_frame_bits==16200 && !supports_short_ssb_frame(p))
         p.ldpc_frame_bits=64800;

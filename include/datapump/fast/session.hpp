@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace datapump::fast {
@@ -26,12 +27,15 @@ struct Settings {
     double transmit_gain=1.0;
     bool exclusive=false;
     std::optional<SimulationSettings> simulation;
+    std::optional<ChannelAssumptions> receiver_assumptions;
 };
 struct Snapshot {
     bool active=false,transmitting=false,listening=false;
     bool physical_complete=false,complete=false,cancelled=false;
     bool encrypted=false,authenticated=false,simulated=false;
     bool loopback_test=false;
+    std::string loopback_stage;
+    std::uint64_t transmitted_samples=0,captured_samples=0;
     bool decoding_stopped=false;
     std::uint64_t revision=0,source_bytes=0,intervals=0,authenticated_groups=0;
     std::uint64_t checksum_groups=0;
@@ -60,9 +64,13 @@ public:
     // Exact UTF-8 bytes use the same source stream as files, with no type header.
     void transmit_text(const std::string& text);
     void listen();
-    // Uses the configured device in both directions with a short diagnostic
-    // message. The channel model is applied before hardware playback.
-    void test_loopback(const SimulationSettings& channel);
+    // Tests the selected source on the configured device in both directions.
+    // Selected waveform impairments are applied before playback; physical
+    // loss/noise and selected audio gain replace the simulated link budget.
+    // Only exact, physically
+    // complete reception is reported and exposed in Snapshot::file.
+    void test_loopback_text(const SimulationSettings& channel,const std::string& text);
+    void test_loopback_file(const SimulationSettings& channel,const std::filesystem::path& source);
     void cancel();
     Snapshot poll() const;
     void save(const std::filesystem::path& destination) const;

@@ -51,13 +51,59 @@ Interpolated interpolate(const std::vector<Complex>& values, double coordinate) 
 
 // The largest centered FIR produced by the SSB frontend at 192 kHz.
 constexpr std::size_t maximum_frontend_taps = 2049;
+constexpr auto pulse_resolution = SsbPulseCache::samples_per_symbol;
+
+struct PulseGrid {
+    std::size_t pulse_half, fir_half;
+    std::size_t half() const noexcept { return pulse_half + fir_half; }
+};
+
+PulseGrid pulse_grid(double radius, int fir_radius, double advance) {
+    constexpr auto maximum = SsbPulseCache::maximum_fft_size;
+    const auto pulse_half = static_cast<std::size_t>(std::ceil(radius * pulse_resolution));
+    const auto fir_extent = std::ceil(fir_radius * advance * pulse_resolution);
+    if (!std::isfinite(fir_extent) || fir_extent + pulse_half + 2 >= maximum / 2)
+        throw std::length_error("Fast SSB pulse cache exceeds bounded FFT size");
+    return {pulse_half, static_cast<std::size_t>(fir_extent) + 2};
+}
+
+// Keep both consumers on the same fractional tap lattice and weights.
+template<class Add>
+void deposit_fir(std::span<const double> taps, double advance, std::size_t fir_half,
+                 double frequency_hz, double input_rate, Add add) {
+    const auto radius = static_cast<int>(taps.size() / 2);
+    for (int k = -radius; k <= radius; ++k) {
+        const auto shifted = fir_half + k * advance * pulse_resolution;
+        const auto base = static_cast<std::size_t>(std::floor(shifted));
+        const auto f = shifted - double(base);
+        const std::array<double, 4> weights{
+            -f * (f - 1.) * (f - 2.) / 6.,
+            (f + 1.) * (f - 1.) * (f - 2.) / 2.,
+            -(f + 1.) * f * (f - 2.) / 2.,
+            (f + 1.) * f * (f - 1.) / 6.};
+        const auto tap = taps[k + radius] * rotation(frequency_hz, -k, input_rate);
+        for (std::size_t j = 0; j < weights.size(); ++j) {
+            const auto weighted = tap * weights[j];
+            add(base - 1 + j, weighted, double(k) * weighted);
+        }
+    }
+}
+
+std::size_t periodic_size(std::size_t word_symbols) {
+    if (word_symbols < 2 || word_symbols > 64 || !std::has_single_bit(word_symbols))
+        throw std::invalid_argument("Fast SSB periodic pulse requires a bounded power-of-two word");
+    return word_symbols * pulse_resolution;
+}
 
 double checked_transmit_radius(const Profile& p, const SsbFrontendGeometry& g) {
     validate(p);
-    if (p.channel != Channel::ssb || p.acoustic_ofdm || p.sample_rate != g.input_rate)
+    if (!p.capacity_mode || p.acoustic_ofdm || p.sample_rate != g.input_rate)
         throw std::invalid_argument("Fast SSB pulse requires matching single-carrier input geometry");
-    if (single_carrier_low_rate_decimation(p) != 1)
-        throw std::invalid_argument("Fast SSB pulse requires direct RRC transmit shaping");
+    // The admitted narrow acoustic waveforms still evaluate the same RRC
+    // at 32 or more points per symbol before cubic interpolation. Model the
+    // smooth pulse directly and verify its fit on the independent marker.
+    if (single_carrier_low_rate_decimation(p) != 1 && !supports_narrow_acoustic_fit(p))
+        throw std::invalid_argument("Fast SSB pulse requires direct or admitted narrow acoustic RRC shaping");
     if (g.taps.empty() || g.taps.size() % 2 == 0 || g.taps.size() > maximum_frontend_taps)
         throw std::invalid_argument("Fast SSB pulse requires a bounded centered frontend FIR");
     for (std::size_t i = 0; i < g.taps.size(); ++i) {
@@ -130,44 +176,26 @@ SsbPulseCache SsbPulse::make_cache(double clock_ratio_error, double frequency_hz
     if (!std::isfinite(frequency_hz) || std::abs(frequency_hz) > input_rate_ / 2.)
         throw std::invalid_argument("Invalid Fast SSB pulse cache frequency");
     const auto advance = step(clock_ratio_error);
-    constexpr auto resolution = double(SsbPulseCache::samples_per_symbol);
-    constexpr auto maximum = SsbPulseCache::maximum_fft_size;
     const auto radius = static_cast<int>(taps_.size() / 2);
-    const auto pulse_half = static_cast<std::size_t>(std::ceil(transmit_.radius() * resolution));
-    const auto fir_extent = std::ceil(radius * advance * resolution);
-    if (!std::isfinite(fir_extent) || fir_extent + pulse_half + 2 >= maximum / 2)
-        throw std::length_error("Fast SSB pulse cache exceeds bounded FFT size");
-    const auto fir_half = static_cast<std::size_t>(fir_extent) + 2;
-    const auto half = pulse_half + fir_half;
+    const auto grid = pulse_grid(transmit_.radius(), radius, advance);
+    const auto half = grid.half();
     const auto count = 2 * half + 1;
     const auto fft_size = std::bit_ceil(count);
     const fft::DoublePlan plan(fft_size, stop);
     std::vector<Complex> transmit(fft_size), filter(fft_size), moment(fft_size);
-    for (std::size_t i = 0; i <= 2 * pulse_half; ++i) {
+    for (std::size_t i = 0; i <= 2 * grid.pulse_half; ++i) {
         if (i % 4096 == 0 && stop.stop_requested()) throw std::runtime_error("Fast SSB pulse cache cancelled");
-        transmit[i] = amplitude_ * transmit_((double(i) - double(pulse_half)) / resolution);
+        transmit[i] = amplitude_ * transmit_((double(i) - double(grid.pulse_half)) / pulse_resolution);
     }
 
     // Deposit the fractional tap shift onto four adjacent symbol-grid
     // positions. Convolving this grid preserves the filter phase and its
     // first tap-time moment without a full FIR sum at every lookup.
-    for (int k = -radius; k <= radius; ++k) {
-        const auto shifted = fir_half + k * advance * resolution;
-        const auto base = static_cast<std::size_t>(std::floor(shifted));
-        const auto f = shifted - double(base);
-        const std::array<double, 4> weights{
-            -f * (f - 1.) * (f - 2.) / 6.,
-            (f + 1.) * (f - 1.) * (f - 2.) / 2.,
-            -(f + 1.) * f * (f - 2.) / 2.,
-            (f + 1.) * f * (f - 1.) / 6.};
-        const auto tap = taps_[k + radius] * rotation(frequency_hz, -k, input_rate_);
-        for (std::size_t j = 0; j < weights.size(); ++j) {
-            const auto index = base - 1 + j;
-            const auto weighted = tap * weights[j];
-            filter[index] += weighted;
-            moment[index] += double(k) * weighted;
-        }
-    }
+    deposit_fir(taps_, advance, grid.fir_half, frequency_hz, input_rate_,
+        [&](std::size_t index, Complex value, Complex first_moment) {
+            filter[index] += value;
+            moment[index] += first_moment;
+        });
     fft::fft(transmit, false, plan, stop);
     fft::fft(filter, false, plan, stop);
     fft::fft(moment, false, plan, stop);
@@ -180,6 +208,92 @@ SsbPulseCache SsbPulse::make_cache(double clock_ratio_error, double frequency_hz
     return SsbPulseCache(input_rate_, symbols_per_tick_, clock_ratio_error, frequency_hz,
         support_symbols(clock_ratio_error), half, {filter.begin(), filter.begin() + count},
         {moment.begin(), moment.begin() + count});
+}
+
+SsbPulse::CacheStorage SsbPulse::cache_storage_bound(double max_abs_clock_ratio) const {
+    const auto grid = pulse_grid(transmit_.radius(), static_cast<int>(taps_.size() / 2), step(max_abs_clock_ratio));
+    const auto count = 2 * grid.half() + 1;
+    // Two returned kernel arrays, a plan, and three temporary FFT arrays.
+    return {sizeof(SsbPulseCache) + 2 * count * sizeof(Complex),
+            4 * std::bit_ceil(count) * sizeof(Complex)};
+}
+
+SsbPeriodicPulse::SsbPeriodicPulse(std::span<const Complex> word)
+    : plan_(periodic_size(word.size())), word_(word.begin(), word.end()), spectrum_(plan_.maximum) {}
+
+std::size_t SsbPeriodicPulse::workspace_bytes() const noexcept {
+    return sizeof(*this) + plan_.working_bytes() + (word_.capacity() + spectrum_.capacity()) * sizeof(Complex);
+}
+
+SsbPeriodicPulse SsbPulse::prepare_periodic(std::span<const Complex> word) const {
+    SsbPeriodicPulse result(word);
+    const auto period = result.plan_.maximum;
+    const auto half = static_cast<std::ptrdiff_t>(std::ceil(transmit_.radius() * pulse_resolution));
+    for (auto i = -half; i <= half; ++i)
+        result.spectrum_[static_cast<std::size_t>(i) & (period - 1)] += amplitude_ * transmit_(double(i) / pulse_resolution);
+    fft::fft(result.spectrum_, false, result.plan_);
+    std::vector<Complex> word_spectrum(period);
+    for (std::size_t j = 0; j < word.size(); ++j) word_spectrum[j * pulse_resolution] = word[j];
+    fft::fft(word_spectrum, false, result.plan_);
+    for (std::size_t i = 0; i < period; ++i) result.spectrum_[i] *= word_spectrum[i];
+    return result;
+}
+
+void SsbPulse::make_periodic(const SsbPeriodicPulse& prepared, double clock_ratio_error,
+                             double frequency_hz, SsbPeriodicWave& output, std::stop_token stop) const {
+    if (!std::isfinite(frequency_hz) || std::abs(frequency_hz) > input_rate_ / 2.)
+        throw std::invalid_argument("Invalid Fast SSB periodic pulse frequency");
+    if (stop.stop_requested()) throw std::runtime_error("Fast SSB periodic pulse cancelled");
+    const auto advance = step(clock_ratio_error);
+    const auto grid = pulse_grid(transmit_.radius(), static_cast<int>(taps_.size() / 2), advance);
+    const auto period = prepared.plan_.maximum;
+    const auto mask = period - 1;
+    output.values.assign(period, {});
+    output.moments.assign(period, {});
+    const auto support = static_cast<std::ptrdiff_t>(std::floor(support_symbols(clock_ratio_error) * pulse_resolution));
+    const auto pulse_half = static_cast<std::ptrdiff_t>(grid.pulse_half);
+    const auto fir_half = static_cast<std::ptrdiff_t>(grid.fir_half);
+    const auto half = static_cast<std::ptrdiff_t>(grid.half());
+    // Folding commutes with convolution. The linear cache clips its last few
+    // interpolated cells at the finite support boundary, so accumulate those
+    // contributions separately and subtract them after applying the word.
+    constexpr std::size_t edge_cells = 4;
+    std::array<std::array<SsbPulseKernelValue, edge_cells>, 2> edges{};
+    if (half - support > static_cast<std::ptrdiff_t>(edge_cells))
+        throw std::logic_error("Fast SSB periodic pulse clipping exceeds its endpoint budget");
+    deposit_fir(taps_, advance, grid.fir_half, frequency_hz, input_rate_,
+        [&](std::size_t index, Complex value, Complex moment) {
+            const auto displacement = static_cast<std::ptrdiff_t>(index) - fir_half;
+            const auto folded = static_cast<std::size_t>(displacement) & mask;
+            output.values[folded] += value;
+            output.moments[folded] += moment;
+            for (std::ptrdiff_t i = support + 1; i <= half; ++i) {
+                for (std::size_t side = 0; side < edges.size(); ++side) {
+                    const auto position = (side == 0 ? -i : i) - displacement;
+                    if (std::abs(position) > pulse_half) continue;
+                    const auto pulse = amplitude_ * transmit_(double(position) / pulse_resolution);
+                    auto& edge = edges[side][static_cast<std::size_t>(i - support - 1)];
+                    edge.value += pulse * value;
+                    edge.moment += pulse * moment;
+                }
+            }
+        });
+    for (auto* samples : {&output.values, &output.moments}) {
+        fft::fft(*samples, false, prepared.plan_, stop);
+        for (std::size_t i = 0; i < period; ++i) (*samples)[i] *= prepared.spectrum_[i];
+        fft::fft(*samples, true, prepared.plan_, stop);
+    }
+    for (std::size_t j = 0; j < prepared.word_.size(); ++j) {
+        const auto shift = static_cast<std::ptrdiff_t>(j * pulse_resolution);
+        for (std::ptrdiff_t i = support + 1; i <= half; ++i) {
+            for (std::size_t side = 0; side < edges.size(); ++side) {
+                const auto folded = static_cast<std::size_t>(shift + (side == 0 ? -i : i)) & mask;
+                const auto& edge = edges[side][static_cast<std::size_t>(i - support - 1)];
+                output.values[folded] -= prepared.word_[j] * edge.value;
+                output.moments[folded] -= prepared.word_[j] * edge.moment;
+            }
+        }
+    }
 }
 
 SsbPulseCache::SsbPulseCache(double input_rate, double symbols_per_tick, double clock, double frequency,

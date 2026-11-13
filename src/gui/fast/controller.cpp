@@ -31,6 +31,11 @@
 namespace datapump::gui::fast_ui {
 using F=ui::Field;using C=ui::Command;
 namespace {
+constexpr std::array declaration_choices{F::fast_sim_baseband_oscillator,F::fast_sim_shift_oscillator,
+    F::fast_sim_spread,F::fast_sim_selective};
+constexpr std::array declaration_numbers{F::fast_sim_margin,F::fast_sim_shift_hz};
+constexpr std::array simulation_budget_fields{F::fast_sim_tx_power,F::fast_sim_path_loss,F::fast_sim_noise};
+
 std::string number(double value,int precision=1) {
     std::ostringstream out;out<<std::fixed<<std::setprecision(precision)<<value;return out.str();
 }
@@ -63,12 +68,21 @@ struct Controller::Impl {
     std::array<ui::FieldState,static_cast<std::size_t>(F::count)> fields;
     fast::Session session;
     fast::Settings settings;
-    fast::SimulationSettings simulation_settings;
-    bool simulation_valid=true;
+    fast::SimulationSettings declared_effects,simulation_settings;
+    std::string declaration_error,simulation_validation_error;
+    struct DeclarationDraft {
+        std::array<std::string,declaration_choices.size()> choices;
+        std::array<std::string,declaration_numbers.size()> numbers;
+    };
+    std::map<fast::Channel,DeclarationDraft> declarations;
     std::map<fast::Channel,audio::ChannelMode> profile_routing;
     std::map<std::pair<fast::Channel,double>,fast::SnrPreset> resolved_presets;
     std::optional<fast::Channel> selected_channel;
     fast::Snapshot snapshot;
+    std::string status_message="Choose matching settings at both ends.";
+    std::string last_loopback_status;
+    std::optional<fast::LoopbackSnrEstimate> last_loopback_snr;
+    bool stopping_loopback=false;
     std::optional<std::uint64_t> file_size;
     FastPlots plots;
     plots::PlotSnapshot qr;
@@ -84,8 +98,17 @@ struct Controller::Impl {
     std::string estimate_key;
     std::optional<fast::TransmitEstimate> source_estimate;
     std::function<bool()> acquire_audio;
-    struct PendingLoopback {fast::Settings settings;fast::SimulationSettings channel;};
+    struct PendingLoopback {
+        fast::Settings settings;
+        fast::SimulationSettings channel;
+        bool text_source=false;
+        std::string text;
+        std::filesystem::path path;
+    };
     std::optional<PendingLoopback> pending_loopback;
+    // An admitted receive handoff retains the validated settings that caused
+    // it. A later invalid editor draft must not replace them or strand capture.
+    std::optional<fast::Settings> pending_monitor_settings;
     std::vector<KeyEntry> keys;
     std::filesystem::path key_path;
     std::uint64_t revision=0,service_id=0,history_id=0;
@@ -113,9 +136,7 @@ struct Controller::Impl {
         f(F::fast_sim_path_loss).options={{"130","130 dB"},{"180","180 dB"}};
         f(F::fast_sim_noise).text="-174";
         f(F::fast_sim_noise).options={{"-174","−174 dBm/Hz"},{"off","Off"}};
-        f(F::fast_sim_margin).text="1";
         f(F::fast_sim_margin).options={{"1","1×"},{"3","3×"}};
-        f(F::fast_sim_shift_hz).text="0";
         f(F::fast_sim_shift_hz).options={{"0","0 Hz"},{"30000000","30 MHz"},{"5800000000","5.8 GHz"}};
         for(const auto& preset:tuning::oscillator_presets()) {
             if(preset.baseband_supported)
@@ -126,20 +147,16 @@ struct Controller::Impl {
             {"off","Off · no oscillator error"});
         f(F::fast_sim_shift_oscillator).options.insert(f(F::fast_sim_shift_oscillator).options.begin(),
             {"off","Off · no oscillator error"});
-        f(F::fast_sim_baseband_oscillator).selected="crystal";
         f(F::fast_sim_shift_oscillator).options.insert(f(F::fast_sim_shift_oscillator).options.begin(),
             {"baseband-clock","Same Baseband reference"});
-        f(F::fast_sim_shift_oscillator).selected="crystal";
         for(const auto& preset:tuning::spread_presets())
             f(F::fast_sim_spread).options.push_back({std::string(preset.id),std::string(preset.name)});
-        f(F::fast_sim_spread).selected="none";
         f(F::fast_sim_selective).options.push_back({"off","Off"});
         for(const auto* kind:{"slow","fast","each"}) for(const auto depth:{1,5,10,25,65}) {
             const std::string prefix=kind;
             f(F::fast_sim_selective).options.push_back({prefix+"-"+std::to_string(depth),
                 std::string(prefix=="slow"?"Slow":prefix=="fast"?"Fast":"Each")+" — "+std::to_string(depth)+"%"});
         }
-        f(F::fast_sim_selective).selected="off";
         f(F::fast_profile).options={{"wire","Audio cable · QAM / LDPC"},{"ssb","IC-7100 SSB · 2.4 kHz"},{"fm","IC-7100 FM · voice band"},{"acoustic","Speakers / microphone"},{"acoustic-short","Speakers / mic · short"}};
         f(F::fast_profile).selected="acoustic-short";
         f(F::fast_constellation).options={{"4","QPSK (4 points)"},{"16","16-APSK"},{"64","64-APSK"},{"256","256-APSK"}};
@@ -159,7 +176,6 @@ struct Controller::Impl {
         f(F::fast_source).options={{"text","Text"},{"file","File"}};f(F::fast_source).selected="text";
         f(F::fast_key).options={{"none","Choose an encryption key"}};f(F::fast_key).selected="none";
         f(F::fast_key_path).text="No fast key loaded";
-        f(F::fast_status).text="Choose matching settings at both ends.";
         set_profile(fast::Channel::acoustic_short);refresh();
     }
     ~Impl() {session.close();if(worker.joinable())worker.join();}
@@ -211,7 +227,10 @@ struct Controller::Impl {
     const fast::SnrPreset& resolved_preset(fast::Channel channel,double snr) {
         const auto key=std::pair{channel,snr};const auto found=resolved_presets.find(key);
         if(found!=resolved_presets.end())return found->second;
-        return resolved_presets.emplace(key,fast::resolve_snr_preset(channel,snr)).first->second;
+        auto preset=settings.receiver_assumptions?
+            fast::resolve_snr_preset(channel,snr,*settings.receiver_assumptions):
+            fast::resolve_snr_preset(channel,snr);
+        return resolved_presets.emplace(key,std::move(preset)).first->second;
     }
     void commit_profile(fast::Profile candidate) {
         candidate=fast::normalize_ssb_frame_size(std::move(candidate));
@@ -228,9 +247,8 @@ struct Controller::Impl {
             rate.options.push_back({option.id,option.label});
         // The Auto label follows the SNR preset, but Manual uses the selected
         // waveform's channel-default timing. Explicit IDs retain actual timing.
-        auto timing=automatic_profile();
-        if(f(F::fast_expected_snr).selected=="manual")
-            timing=fast::apply_symbol_rate_option(settings.profile,"auto");
+        const auto timing=f(F::fast_expected_snr).selected=="manual"?
+            fast::apply_symbol_rate_option(settings.profile,"auto"):settings.profile;
         for(const auto& option:fast::symbol_rate_options(timing))if(option.id=="auto")
             for(auto& existing:rate.options)if(existing.id=="auto")existing.label=option.label;
     }
@@ -239,8 +257,28 @@ struct Controller::Impl {
         f(F::fast_symbol_rate).selected=fast::symbol_rate_option_id(settings.profile);
     }
     void set_profile(fast::Channel channel) {
-        remember_routing();selected_channel=channel;
+        remember_routing();
+        if(selected_channel) {
+            auto& saved=declarations[*selected_channel];
+            for(std::size_t i=0;i<declaration_choices.size();++i)
+                saved.choices[i]=f(declaration_choices[i]).selected;
+            for(std::size_t i=0;i<declaration_numbers.size();++i)
+                saved.numbers[i]=f(declaration_numbers[i]).text;
+        }
+        const auto retained=declarations.find(channel);
+        const bool adverse=channel==fast::Channel::acoustic_short||channel==fast::Channel::ssb;
+        const DeclarationDraft initial{{"crystal",adverse?"ic-7100":"crystal",
+            adverse?"hf-worst":"none",adverse?"each-65":"off"},{"1","0"}};
+        const auto& draft=retained==declarations.end()?initial:retained->second;
+        for(std::size_t i=0;i<declaration_choices.size();++i)
+            f(declaration_choices[i]).selected=draft.choices[i];
+        for(std::size_t i=0;i<declaration_numbers.size();++i)
+            f(declaration_numbers[i]).text=draft.numbers[i];
+        selected_channel=channel;
         const auto snr=fast::default_expected_snr(channel);
+        // Profile selection and receiver declarations change independently of
+        // whether the current mode injects those effects into a test.
+        read_declaration();
         commit_profile(resolved_preset(channel,snr).profile);
         f(F::fast_expected_snr).selected=number(snr,0);
         f(F::fast_symbol_rate).selected="auto";
@@ -248,21 +286,27 @@ struct Controller::Impl {
         settings.channel_mode=saved==profile_routing.end()?audio::ChannelMode::left_mono:saved->second;
         settings.mono=settings.channel_mode!=audio::ChannelMode::stereo;
         f(F::fast_expected_snr).options={{"manual","Manual"}};
+        const auto reference=" · ref "+number(fast::expected_snr_reference_band(channel).bandwidth_hz()/1000)+" kHz";
         for(const auto snr:fast::expected_snr_options(channel)) {
             const auto id=number(snr,0);
             const auto label=channel==fast::Channel::ssb?
-                (snr==fast::default_expected_snr(channel)?"Resilient standard · ":"Modeled · ")+id+" dB SNR":
+                "Resilient · "+id+" dB SNR":
                 "Auto: "+id+" dB SNR";
-            f(F::fast_expected_snr).options.push_back({id,label});
+            f(F::fast_expected_snr).options.push_back({id,label+reference});
         }
         f(F::fast_mono).checked=settings.mono;
         f(F::fast_mono).selected=settings.channel_mode==audio::ChannelMode::left_mono?"left":
             settings.channel_mode==audio::ChannelMode::right_mono?"right":"stereo";
-        sync_profile_fields();sync_rate_options();
+        sync_profile_fields();sync_rate_options();revalidate_channel_settings();
     }
     bool editable() const {
-        return !closing&&!key_loading&&pending_start!=C::fast_transmit&&!session.poll().transmitting;
+        // The worker can release audio between UI polls. Keep controls locked
+        // until the cancelled loopback's terminal result has been observed.
+        return !closing&&!key_loading&&!stopping_loopback&&pending_start!=C::fast_transmit&&!session.poll().transmitting;
     }
+    bool live_audio_mode() const {return f(F::fast_simulation).selected!="simulation";}
+    bool receiver_ready() const {return declaration_error.empty()&&settings.receiver_assumptions.has_value();}
+    bool key_ready() const {return !f(F::fast_encryption).checked||settings.key.has_value();}
     std::shared_ptr<const fast::ReceivedFile> selected_file() const {
         const auto id=!f(F::fast_files).selected.empty()?f(F::fast_files).selected:f(F::fast_history).selected;
         const auto found=std::find_if(history.begin(),history.end(),[&](const auto& entry){return entry.id==id;});
@@ -276,10 +320,10 @@ struct Controller::Impl {
     bool enabled(C command) const {
         if(closing)return false;
         const bool edit=editable();
-        const bool key_ready=!f(F::fast_encryption).checked||settings.key.has_value();
         switch(command) {
         case C::fast_cancel: {
-            const auto current=session.poll();return pending_start==C::fast_transmit||(current.active&&current.transmitting);
+            const auto current=session.poll();
+            return pending_start==C::fast_transmit||(current.active&&current.transmitting&&!stopping_loopback);
         }
         case C::fast_save:return bool(selected_file())&&!key_loading;
         case C::fast_copy_signal:case C::fast_paste_signal: {
@@ -288,11 +332,10 @@ struct Controller::Impl {
         }
         case C::fast_clear_received:case C::fast_toggle_qr_expanded:return true;
         case C::fast_use_text:case C::fast_choose_file:return edit;
-        case C::fast_transmit:return edit&&key_ready&&
-            (f(F::fast_simulation).selected=="live"||simulation_valid)&&
-            (f(F::fast_simulation).selected=="loopback"||
-             !f(f(F::fast_source).selected=="text"?F::fast_text:F::fast_file).text.empty());
-        case C::fast_listen:return f(F::fast_simulation).selected=="live"&&edit&&key_ready&&pending_start==C::none&&!session.active();
+        case C::fast_transmit:return edit&&key_ready()&&receiver_ready()&&simulation_validation_error.empty()&&
+            !f(f(F::fast_source).selected=="text"?F::fast_text:F::fast_file).text.empty();
+        case C::fast_listen:return live_audio_mode()&&edit&&key_ready()&&receiver_ready()&&
+            pending_start==C::none&&!session.active();
         case C::fast_open_key:case C::fast_generate_key:return edit&&f(F::fast_encryption).checked;
         default:return false;
         }
@@ -322,7 +365,7 @@ struct Controller::Impl {
                 label+=" · "+received_text(std::string_view(capture.error).substr(0,error_limit));
                 if(capture.error.size()>error_limit)label+="…";
             }
-            if(capture.file&&!capture.loopback_test) {
+            if(capture.file) {
                 const auto bytes=capture.file->bytes();
                 if(!capture.file->is_attachment()&&bytes.size()<=fast::text_byte_limit) {
                     // Filter before any native text processing. Every source
@@ -342,13 +385,16 @@ struct Controller::Impl {
         }
     }
     void record_snapshot() {
-        // Cable tests are visible in current status/counters/plots only. They
-        // never enter the ordinary received Signals history or acquire a file handle.
-        if(snapshot.loopback_test)return;
-        // Session clears its active TX flag on teardown; keep local direction
-        // through that terminal update so sent content never enters Signals.
-        if((current_transmitting||snapshot.transmitting||(snapshot.diagnostics&&snapshot.diagnostics->transmitting))&&
-           !snapshot.simulated)return;
+        if(snapshot.loopback_test) {
+            // Session exposes the decoded file only after exact-source
+            // comparison. A failed or still-running test has no received row.
+            if(snapshot.active||!snapshot.physical_complete||!snapshot.complete||!snapshot.file)return;
+        } else {
+            // Session clears its active TX flag on teardown; keep local
+            // direction through that terminal update.
+            if((current_transmitting||snapshot.transmitting||(snapshot.diagnostics&&snapshot.diagnostics->transmitting))&&
+               !snapshot.simulated)return;
+        }
         const bool observed=snapshot.intervals||(snapshot.diagnostics&&snapshot.diagnostics->acquired);
         if(current_history.empty()&&!observed&&!snapshot.file)return;
         if(current_history.empty()) {
@@ -375,47 +421,51 @@ struct Controller::Impl {
     void observe_snapshot(const fast::Snapshot& next) {
         if(plots.update(next.diagnostics,next.active))++revision;
         if(next.revision==snapshot.revision)return;
+        const auto& message=next.error.empty()||next.cancelled?next.status:next.error;
+        if(next.status!=snapshot.status||next.error!=snapshot.error||next.active!=snapshot.active)
+            status_message=message;
+        if(next.loopback_test&&!next.active) {
+            last_loopback_status=message;
+            last_loopback_snr=loopback_signal_snr(next);
+            stopping_loopback=false;
+        }
+        if(!next.loopback_test&&!next.active&&!next.error.empty())
+            retry_after=std::chrono::steady_clock::now()+std::chrono::seconds(2);
         snapshot=next;
-        if(!next.error.empty()) {
-            f(F::fast_status).text=next.error;
-            if(!next.active)retry_after=std::chrono::steady_clock::now()+std::chrono::seconds(2);
-        } else if(!next.status.empty())f(F::fast_status).text=next.status;
         record_snapshot();++revision;
     }
     fast::Settings effective_settings(bool include_simulation) const {
-        fast::validate(settings.profile);
+        if(!receiver_ready())throw Error(declaration_error.empty()?"Select receiver channel assumptions":declaration_error);
         auto effective=settings;effective.device=f(F::fast_device).selected;
         effective.simulation=include_simulation?std::optional<fast::SimulationSettings>(simulation_settings):std::nullopt;
-        if(effective.simulation)fast::validate(effective.profile,*effective.simulation);
+        if(effective.simulation&&!simulation_validation_error.empty())throw Error(simulation_validation_error);
         if(!f(F::fast_encryption).checked)effective.key.reset();
         return effective;
     }
     PendingLoopback loopback_request() const {
-        if(!simulation_valid)throw Error("Correct the channel assumptions before running the loopback test");
+        if(!simulation_validation_error.empty())throw Error(simulation_validation_error);
         auto effective=effective_settings(false);
-        fast::validate(effective.profile,simulation_settings);
-        return {std::move(effective),simulation_settings};
+        fast::validate(effective.profile,simulation_settings,fast::ChannelPurpose::live_playback);
+        const bool text_source=f(F::fast_source).selected=="text";
+        const auto& source=f(text_source?F::fast_text:F::fast_file).text;
+        if(source.empty())throw Error("Loopback test requires nonempty Console text or a selected file");
+        return {std::move(effective),simulation_settings,text_source,
+            text_source?source:std::string(),text_source?std::filesystem::path{}:path_from_text(source)};
     }
     void configure_session(const fast::Settings* captured=nullptr) {
-        auto effective=captured?*captured:effective_settings(f(F::fast_simulation).selected=="simulation");
-        if(!f(F::fast_encryption).checked)effective.key.reset();
-        session.configure(effective);
+        session.configure(captured?*captured:effective_settings(!live_audio_mode()));
     }
     double simulation_number(F field,const char* name) const {
-        const auto& text=f(field).text;std::size_t used=0;const double value=std::stod(text,&used);
-        if(used!=text.size()||!std::isfinite(value))throw Error(std::string(name)+" must be a finite number");
-        return value;
+        const auto& text=f(field).text;
+        try {
+            std::size_t used=0;
+            const double value=std::stod(text,&used);
+            if(used==text.size()&&std::isfinite(value))return value;
+        } catch(const std::invalid_argument&) {} catch(const std::out_of_range&) {}
+        throw Error(std::string(name)+" must be a finite number");
     }
-    void sync_simulation_settings() {
-        simulation_valid=false;
-        auto value=simulation_settings;
-        value.transmit_watts=simulation_number(F::fast_sim_tx_power,"Transmit power");
-        value.path_loss_db=simulation_number(F::fast_sim_path_loss,"Path loss");
-        const auto& noise=f(F::fast_sim_noise).text;
-        if(noise=="off"||noise=="Off")value.noise_dbm_hz.reset();
-        else {std::size_t used=0;const auto parsed=std::stod(noise,&used);
-            if(used!=noise.size()||!std::isfinite(parsed))throw Error("Noise must be a finite dBm/Hz value or off");
-            value.noise_dbm_hz=parsed;}
+    fast::SimulationSettings read_effects() const {
+        fast::SimulationSettings value;
         const auto baseband_off=f(F::fast_sim_baseband_oscillator).selected=="off";
         const auto baseband=baseband_off?tuning::OscillatorPreset{"off","Off",0,0,true}:
             tuning::parse_oscillator_preset(f(F::fast_sim_baseband_oscillator).selected);
@@ -441,18 +491,138 @@ struct Controller::Impl {
         }
         value.margin=simulation_number(F::fast_sim_margin,"Search margin");
         value.shift_hz=simulation_number(F::fast_sim_shift_hz,"Shift frequency");
-        fast::validate(settings.profile,value);simulation_settings=std::move(value);simulation_valid=true;
+        return value;
+    }
+    void read_declaration() {
+        resolved_presets.clear();
+        settings.receiver_assumptions.reset();
+        declaration_error.clear();
+        try {
+            auto value=read_effects();
+            auto assumptions=fast::channel_assumptions(value);
+            fast::validate(assumptions);
+            declared_effects=std::move(value);
+            settings.receiver_assumptions=std::move(assumptions);
+        } catch(const std::exception& e) {
+            declaration_error=e.what();
+        }
+    }
+    void revalidate_channel_settings() {
+        simulation_validation_error.clear();
+        if(settings.receiver_assumptions) {
+            declaration_error.clear();
+            try {
+                fast::validate_receiver_assumptions(settings.profile,*settings.receiver_assumptions);
+            } catch(const std::exception& e) {
+                declaration_error=e.what();
+            }
+        }
+        if(!receiver_ready()||f(F::fast_simulation).selected=="live")return;
+        try {
+            auto value=declared_effects;
+            // Search margin expands receiver coverage, without adding
+            // stronger impairments to the explicit test channel.
+            value.margin=1;
+            const bool simulated=!live_audio_mode();
+            if(simulated) {
+                value.transmit_watts=simulation_number(F::fast_sim_tx_power,"Transmit power");
+                value.path_loss_db=simulation_number(F::fast_sim_path_loss,"Path loss");
+                const auto& noise=f(F::fast_sim_noise).text;
+                if(noise=="off"||noise=="Off")value.noise_dbm_hz.reset();
+                else value.noise_dbm_hz=simulation_number(F::fast_sim_noise,"Noise density");
+            }
+            fast::validate(settings.profile,value,simulated?
+                fast::ChannelPurpose::receiver_simulation:fast::ChannelPurpose::live_playback);
+            simulation_settings=std::move(value);
+        } catch(const std::exception& e) {
+            simulation_validation_error=e.what();
+        }
+    }
+    void declaration_changed() {
+        read_declaration();
+        if(settings.receiver_assumptions&&f(F::fast_expected_snr).selected!="manual") {
+            commit_profile(automatic_profile());
+            sync_profile_fields();sync_rate_options();
+        }
+        revalidate_channel_settings();
+        if(receiver_ready())settings_changed();
+        else estimate_key.clear();
     }
     void settings_changed() {
         estimate_key.clear();retry_after={};
-        if(f(F::fast_simulation).selected!="live"&&pending_start==C::fast_listen)pending_start=C::none;
+        const bool monitor=selected&&live_audio_mode()&&key_ready()&&receiver_ready();
+        if(pending_start==C::fast_listen) {
+            if(monitor)pending_monitor_settings=effective_settings(false);
+            else {pending_start=C::none;pending_monitor_settings.reset();}
+        }
         const auto active=session.poll();
-        if(active.active&&active.listening) {
-            session.cancel();pending_start=(!f(F::fast_encryption).checked||settings.key)&&
-                f(F::fast_simulation).selected=="live"?C::fast_listen:C::none;
+        if(active.active&&active.listening&&!active.transmitting&&pending_start!=C::fast_transmit) {
+            if(monitor)pending_monitor_settings=effective_settings(false);
+            session.cancel();pending_start=monitor?C::fast_listen:C::none;
             acquire_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
         }
-        if(f(F::fast_encryption).checked&&!settings.key&&pending_start==C::fast_listen)pending_start=C::none;
+    }
+    bool loopback_start() const {
+        return pending_start==C::fast_transmit&&pending_loopback.has_value();
+    }
+    void discard_pending_start() {
+        pending_start=C::none;
+        pending_loopback.reset();
+        pending_monitor_settings.reset();
+    }
+    void cancel_pending_start() {
+        if(pending_start==C::fast_transmit) {
+            status_message=loopback_start()?"Cable test cancelled before audio was acquired.":"Cancelled before audio was acquired.";
+            if(loopback_start()) {
+                last_loopback_status=status_message;
+                last_loopback_snr.reset();
+            }
+        }
+        discard_pending_start();
+    }
+    void fail_start(C command,std::string error) {
+        if(command==C::fast_transmit&&f(F::fast_simulation).selected=="loopback") {
+            last_loopback_status="Cable test incomplete · "+error;
+            last_loopback_snr.reset();
+            error=last_loopback_status;
+        }
+        discard_pending_start();
+        retry_after=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+        status_message=std::move(error);
+        ++revision;
+    }
+    void refresh_status() {
+        const auto& mode=f(F::fast_simulation).selected;
+        auto& status=f(F::fast_status).text;
+        const auto& validation_error=declaration_error.empty()?simulation_validation_error:declaration_error;
+        status=validation_error.empty()?status_message:validation_error;
+        if(pending_start==C::fast_transmit)
+            status=snapshot.active&&snapshot.listening&&!snapshot.transmitting?
+                "Pausing reception for transmission…":"Waiting for the audio device…";
+        else if(stopping_loopback)status="Stopping loopback test…";
+        else if(validation_error.empty()&&mode=="loopback"&&(!snapshot.loopback_test||!snapshot.active)&&
+                !last_loopback_status.empty()&&status!=last_loopback_status) {
+            if(!status.empty())status+=" · ";
+            status+="Last loopback: "+last_loopback_status;
+        }
+        auto& test=f(F::fast_sim_status).text;
+        if(loopback_start())test="LOOPBACK TEST · "+status;
+        else if(snapshot.loopback_test&&snapshot.active)test="LOOPBACK TEST · "+status;
+        else if(!validation_error.empty())test=validation_error;
+        else if(mode=="loopback") {
+            test=last_loopback_status.empty()?"No loopback test result yet.":"LOOPBACK TEST · "+last_loopback_status;
+            if(last_loopback_snr) {
+                const auto& measured=*last_loopback_snr;
+                test+="\nLast signal SNR ≈ "+number(measured.db)+" dB · pre-test noise "+
+                    number(measured.reference_noise_dbfs)+" dBFS over "+number(measured.reference_bandwidth_hz,0)+" Hz";
+            }
+        }
+        else if(mode=="simulation")
+            test=snapshot.simulated?"SIMULATION · "+(snapshot.error.empty()?snapshot.status:snapshot.error):
+                "No simulation result yet.";
+        else if(snapshot.active&&!snapshot.simulated)
+            test=std::string("LIVE AUDIO · ")+(snapshot.error.empty()?snapshot.status:snapshot.error);
+        else test="LIVE AUDIO · no active audio session.";
     }
     void refresh() {
         const bool edit=editable();
@@ -460,18 +630,14 @@ struct Controller::Impl {
         f(F::fast_exclusive).enabled=edit&&audio::exclusive_supported();
         const auto mode=f(F::fast_simulation).selected;
         const bool simulated=mode=="simulation";
-        const bool channel_test=simulated||mode=="loopback";
         f(F::fast_simulation).enabled=edit;
-        for(const auto field:{F::fast_sim_tx_power,F::fast_sim_path_loss,F::fast_sim_noise,F::fast_sim_baseband_oscillator,
-            F::fast_sim_shift_oscillator,F::fast_sim_spread,F::fast_sim_selective,F::fast_sim_margin,F::fast_sim_shift_hz})
-            f(field).enabled=edit&&channel_test;
-        if(snapshot.loopback_test)f(F::fast_sim_status).text="LOOPBACK TEST · "+(snapshot.error.empty()?snapshot.status:snapshot.error);
-        else if(snapshot.simulated)f(F::fast_sim_status).text="SIMULATION · "+(snapshot.error.empty()?snapshot.status:snapshot.error);
-        else if(mode=="loopback")f(F::fast_sim_status).text="LOOPBACK TEST selected · no test result yet.";
-        else if(simulated)f(F::fast_sim_status).text="Simulation selected · no simulation result yet. Live audio results are not shown here.";
-        else if(snapshot.active)f(F::fast_sim_status).text=std::string("LIVE AUDIO · ")+
-            (snapshot.transmitting?"transmitting through":"receiving from")+" the selected audio device.";
-        else f(F::fast_sim_status).text="LIVE AUDIO · no live result recorded yet.";
+        for(const auto field:simulation_budget_fields) {
+            f(field).enabled=edit&&simulated;
+            f(field).disabled_text=simulated?"":"Simulation only";
+        }
+        for(const auto field:declaration_choices)f(field).enabled=edit;
+        for(const auto field:declaration_numbers)f(field).enabled=edit;
+        refresh_status();
         f(F::fast_key).enabled=edit&&f(F::fast_encryption).checked;
         f(F::fast_key_path).enabled=f(F::fast_encryption).checked;
         f(F::fast_text).visible=f(F::fast_source).selected=="text";
@@ -486,11 +652,25 @@ struct Controller::Impl {
             number(p.symbol_rate,p.symbol_rate<10?4:p.symbol_rate<1000?2:0)+" symbols/s · "+number(p.carrier_hz,0)+" Hz carrier";
         f(F::fast_detail).text="Next: "+std::string(fast::channel_name(p.channel))+" · "+waveform+" · "+number(p.sample_rate,0)+" Hz audio · "
             +(f(F::fast_encryption).checked?"Serpent + AES-CBC + HMAC":"public checksum");
-        if(mode=="loopback")f(F::fast_detail).text+="\nLOOPBACK TEST · fixed short diagnostic message · output gain 0.1 · up to 75 s audio / 110 s wall time. The Console draft is preserved and is not sent.";
+        if(!declaration_error.empty()&&mode!="loopback")f(F::fast_detail).text+="\nReceiver assumptions need correction before starting.";
+        else if(mode=="live")f(F::fast_detail).text+="\nLive audio · Uses declared receiver bounds with captured audio.";
+        else if(mode=="simulation")f(F::fast_detail).text+="\nSimulation applies the declared channel effects.";
+        if(mode=="loopback")f(F::fast_detail).text+=std::string("\nLOOPBACK TEST")+
+            (declaration_error.empty()?"":" blocked")+" · sends the selected Console "+
+            std::string(f(F::fast_source).selected=="text"?"text":"file")+
+            " exactly with declared effects; a nonempty source is required; draft preserved."
+            "\nUses TX volume · limits: 75 s audio / 110 s wall time · oversized sources are rejected without truncation.";
         if(p.capacity_mode)f(F::fast_detail).text+="\nLDPC frame: "+std::to_string(p.ldpc_frame_bits)+" bits · Expected modem payload: "+
             number(expected_modem_bitrate(p,f(F::fast_encryption).checked)/1000,2)+" kbit/s";
-        f(F::fast_progress).text=pending_start!=C::none?"WAITING FOR AUDIO":transfer_stage(snapshot);
+        const bool active_loopback=snapshot.active&&snapshot.loopback_test;
+        const auto loopback_stage=stopping_loopback?"Stopping loopback test":
+            snapshot.loopback_stage.empty()?"Loopback test":snapshot.loopback_stage;
+        f(F::fast_progress).text=pending_start!=C::none?"WAITING FOR AUDIO":
+            active_loopback?loopback_stage:transfer_stage(snapshot);
         f(F::fast_progress).text+=" · "+std::to_string(snapshot.source_bytes)+" source bytes · "+std::to_string(snapshot.intervals)+" intervals · "+number(snapshot.elapsed_seconds)+" s";
+        if(active_loopback&&receiving_profile.sample_rate)f(F::fast_progress).text+="\nTX queued "+
+            number(static_cast<double>(snapshot.transmitted_samples)/receiving_profile.sample_rate)+" s · RX captured "+
+            number(static_cast<double>(snapshot.captured_samples)/receiving_profile.sample_rate)+" s";
         f(F::fast_rate).text="Gross: "+number(gross/1000)+" kbit/s\n"+
             (snapshot.simulated||snapshot.loopback_test?"Replay processing: ":"Measured source: ")+
             number(snapshot.goodput_bps/1000)+" kbit/s";
@@ -507,43 +687,52 @@ struct Controller::Impl {
                 }
             }catch(const Error&) {} // A draft estimate cannot interrupt reception.
         }
-        f(F::fast_airtime).text=mode=="loopback"?"Loopback test · fixed diagnostic":source_estimate?
+        f(F::fast_airtime).text=mode=="loopback"?"Loopback test · selected source":source_estimate?
             std::string(f(F::fast_text).visible?"Transmit ≈ ":"Transmit ≤ ")+number(source_estimate->seconds)+" s":"Transmit time —";
         if(source_estimate&&mode!="loopback")f(F::fast_rate).text+=" · Estimated source: "+number(source_estimate->source_bps/1000)+" kbit/s";
-        if(snapshot.active&&snapshot.transmitting&&snapshot.estimated_seconds>0)f(F::fast_airtime).text=
-            std::string(snapshot.loopback_test?"Running loopback test ":snapshot.simulated?"Simulating ":"Transmitting ")+
+        if(active_loopback)f(F::fast_airtime).text=loopback_stage+" · "+number(snapshot.elapsed_seconds,0)+" s elapsed";
+        else if(snapshot.active&&snapshot.transmitting&&snapshot.estimated_seconds>0)f(F::fast_airtime).text=
+            std::string(snapshot.simulated?"Simulating ":"Transmitting ")+
             number(snapshot.transmit_fraction*100,0)+"% · ≈ "+
             number(snapshot.estimated_seconds*(1-snapshot.transmit_fraction))+
-            (snapshot.loopback_test?" s test left":snapshot.simulated?" s audio left":" s left");
-        if(snapshot.estimated_seconds>0)f(F::fast_progress).text+=" · "+number(snapshot.transmit_fraction*100,1)+"% · "+number(snapshot.estimated_seconds)+" s estimated total";
+            (snapshot.simulated?" s audio left":" s left");
+        if(snapshot.estimated_seconds>0&&!snapshot.loopback_test)
+            f(F::fast_progress).text+=" · "+number(snapshot.transmit_fraction*100,1)+"% · "+number(snapshot.estimated_seconds)+" s estimated total";
         const auto bandwidth=fast::occupied_bandwidth_hz(p);
         f(F::fast_diagnostics).text="Expected "+number(expected_modem_bitrate(p,f(F::fast_encryption).checked)/1000,2)+" kbit/s · Shannon–Hartley ";
         if(f(F::fast_expected_snr).selected=="manual")f(F::fast_diagnostics).text+="—";
         else {
-            const auto& preset=resolved_preset(p.channel,std::stod(f(F::fast_expected_snr).selected));
-            const auto limit=preset.reference_bandwidth_hz*std::log2(1+std::pow(10.,preset.expected_snr_db/10.));
+            const auto snr=std::stod(f(F::fast_expected_snr).selected);
+            const auto reference=fast::expected_snr_reference_band(p.channel).bandwidth_hz();
+            const auto limit=reference*std::log2(1+std::pow(10.,snr/10.));
             f(F::fast_diagnostics).text+=number(limit/1000,2)+" kbit/s";
         }
         f(F::fast_diagnostics).text+=" · "+number(fast::occupied_lower_hz(p),0)+"–"+number(fast::occupied_upper_hz(p),0)+" Hz · BW "+number(bandwidth,0)+" Hz";
-        const auto measured=snapshot.diagnostics?waterfall_snr(*snapshot.diagnostics,receiving_profile):std::nullopt;
-        f(F::fast_snr).text="SNR "+(measured?(*measured<=-40?std::string("< −40"):number(*measured,1))+" dB":std::string("—"));
+        const auto now=fast::Telemetry::Clock::now();
+        const auto& input=snapshot.diagnostics;
+        if(const auto measured=loopback_signal_snr(snapshot,now)) {
+            const auto age=static_cast<double>(input->samples-measured->observation_sample)/input->sample_rate;
+            f(F::fast_snr).text="Last loopback signal SNR ≈ "+number(measured->db)+" dB · "+
+                number(measured->reference_bandwidth_hz/1000)+" kHz ref · "+number(age)+" s of capture ago";
+        } else if(input && snapshot.active && fresh_input(*input,now)) {
+            f(F::fast_snr).text="Input RMS "+number(20*std::log10(std::max(1e-6,static_cast<double>(input->waveform_rms))))+" dBFS";
+            if(!input->acquired)f(F::fast_snr).text+=" · No Fast signal acquired";
+        } else f(F::fast_snr).text="Receive level —";
         if(f(F::fast_expected_snr).selected=="manual") {
             f(F::fast_detail).text+="\nManual settings · occupied bandwidth "+number(bandwidth,1)+" Hz · no expected-SNR target.";
             f(F::fast_detail).text+="\nBoth peers must match profile, symbol rate, constellation, coding and encryption.";
             f(F::fast_detail).text+="\nShannon-Hartley: C = B log2(1 + S/N). Manual settings have no measured or guaranteed SNR margin.";
         } else {
-            const auto& preset=resolved_preset(p.channel,std::stod(f(F::fast_expected_snr).selected));
-            const auto snr_heading=p.channel==fast::Channel::ssb?
-                (preset.expected_snr_db==fast::default_expected_snr(p.channel)?"\nResilient standard · ":"\nModeled SSB · "):
-                "\nExpected ";
-            const auto snr_qualifier=p.channel==fast::Channel::ssb?
-                (preset.expected_snr_db==fast::default_expected_snr(p.channel)?"resilient receiver profile.":"model-based target."):
-                "model-based target.";
-            f(F::fast_detail).text+=snr_heading+number(preset.expected_snr_db,0)+" dB SNR over "+number(preset.reference_bandwidth_hz,0)+
-                " Hz reference bandwidth · occupied "+number(bandwidth,1)+" Hz · "+snr_qualifier;
+            const auto snr=std::stod(f(F::fast_expected_snr).selected);
+            const auto reference=fast::expected_snr_reference_band(p.channel).bandwidth_hz();
+            f(F::fast_detail).text+="\nResilient transmission · "+
+                number(snr,0)+" dB SNR (assumed) over "+number(reference,0)+
+                " Hz reference bandwidth · occupied "+number(bandwidth,1)+" Hz";
+            f(F::fast_detail).text+="\nResilient public training and recurring pilots support SC and OFDM acquisition.";
             f(F::fast_detail).text+="\nBoth peers must match all settings. Auto uses assumed SNR; it does not measure or negotiate the link.";
-            const auto capacity=preset.reference_bandwidth_hz*std::log2(1+std::pow(10.,preset.expected_snr_db/10.));
-            f(F::fast_detail).text+="\nShannon-Hartley ideal in reference band: "+number(capacity/1000,3)+" kbit/s. Actual reliability requires link testing.";
+            const auto capacity=reference*std::log2(1+std::pow(10.,snr/10.));
+            f(F::fast_detail).text+="\nShannon-Hartley ideal in reference band: "+number(capacity/1000,3)+" kbit/s.";
+            f(F::fast_detail).text+="\nEstimated rate is not measured throughput or receiver qualification. Actual reliability requires link testing.";
         }
         f(F::fast_tracking).text=snapshot.intervals&&(!snapshot.transmitting||snapshot.simulated||snapshot.loopback_test)?
             "RX EVM "+number(snapshot.evm*100,2)+"% · carrier "+number(snapshot.carrier_error_hz,2)+" Hz\nClock error "+number(snapshot.clock_error_ppm,2)+" ppm":
@@ -573,14 +762,26 @@ struct Controller::Impl {
         if(command==C::fast_transmit&&pending_loopback) {
             loopback=std::move(pending_loopback);pending_loopback.reset();
         } else if(command==C::fast_transmit&&f(F::fast_simulation).selected=="loopback")loopback=loopback_request();
-        configure_session(loopback?&loopback->settings:nullptr);plots.reset();current_history.clear();current_transmitting=command==C::fast_transmit;
-        receiving_profile=loopback?loopback->settings.profile:settings.profile;
+        std::optional<fast::Settings> monitor;
+        if(command==C::fast_listen) {
+            monitor=std::move(pending_monitor_settings);pending_monitor_settings.reset();
+            if(!monitor)throw Error("Fast receive start has no validated settings");
+        }
+        const auto* captured=loopback?&loopback->settings:monitor?&*monitor:nullptr;
+        configure_session(captured);plots.reset();current_history.clear();current_transmitting=command==C::fast_transmit;
+        stopping_loopback=false;
+        receiving_profile=captured?captured->profile:settings.profile;
         if(command==C::fast_transmit) {
-            if(loopback)session.test_loopback(loopback->channel);
+            if(loopback) {
+                last_loopback_snr.reset();
+                if(loopback->text_source)session.test_loopback_text(loopback->channel,loopback->text);
+                else session.test_loopback_file(loopback->channel,loopback->path);
+            }
             else if(f(F::fast_source).selected=="text")session.transmit_text(f(F::fast_text).text);
             else session.transmit(path_from_text(f(F::fast_file).text));
         }
         else session.listen();
+        observe_snapshot(session.poll());
     }
     void request(C command,ui::ServiceKind kind,std::string title,std::string value={}) {
         const auto id=++service_id;pending.emplace(id,Pending{command,command==C::fast_save?selected_file():nullptr});
@@ -596,7 +797,7 @@ struct Controller::Impl {
         settings.key.reset();
         if(!keys.empty()) {key.selected="0";settings.key=keys.front().key;}
         settings_changed();show_key_path(key_path,result.warning);
-        f(F::fast_status).text=result.warning.empty()?"Fast key ready. Enter text, select a file, or listen.":"WARNING: "+result.warning;
+        status_message=result.warning.empty()?"Fast key ready. Enter text or select a file.":"WARNING: "+result.warning;
     }
     void discard_pending_key() {
         if(!pending_generated)return;
@@ -605,7 +806,7 @@ struct Controller::Impl {
     }
     void load(std::filesystem::path path,bool generate,std::uint64_t completion_id=0) {
         discard_pending_key();
-        key_loading=true;f(F::fast_status).text=generate?"Collecting microphone input and generating fast keyfile…":"Loading fast keyfile…";
+        key_loading=true;status_message=generate?"Collecting microphone input and generating fast keyfile…":"Loading fast keyfile…";
         const auto input_device=f(F::fast_device).selected.empty()?std::string("default"):f(F::fast_device).selected;
         const bool exclusive=f(F::fast_exclusive).checked;
         worker=execution::Task([this,path=std::move(path),generate,completion_id,input_device,exclusive](std::stop_token stop) {
@@ -658,13 +859,13 @@ void Controller::poll() {
                 }
                 report_error(loaded->error);
             }
-            else if(loaded->saved)p.f(F::fast_status).text="Saved complete received bytes.";
+            else if(loaded->saved)p.status_message="Saved complete received bytes.";
             else {
                 const auto current=p.session.poll();
                 if(loaded->generated&&current.active&&current.listening) {
                     p.pending_generated=std::move(*loaded);
                     p.show_key_path(p.pending_generated->path,p.pending_generated->warning," (saved; selection pending)");
-                    p.f(F::fast_status).text="Keyfile saved; selection pending until reception ends. Open the saved keyfile to switch now.";
+                    p.status_message="Keyfile saved; selection pending until reception ends. Open the saved keyfile to switch now.";
                 } else p.apply_loaded_key(std::move(*loaded));
             }
         }
@@ -676,33 +877,37 @@ void Controller::poll() {
         auto ready=std::move(*p.pending_generated);p.pending_generated.reset();
         p.apply_loaded_key(std::move(ready));++p.revision;
     } else if(!p.closing&&p.pending_generated&&snapshot.error.empty()) {
-        p.f(F::fast_status).text="Keyfile saved; selection pending until reception ends. Open the saved keyfile to switch now.";
+        p.status_message="Keyfile saved; selection pending until reception ends. Open the saved keyfile to switch now.";
     }
     if(key_progress&&!loaded&&!p.closing&&p.key_loading) {
-        p.f(F::fast_status).text=*key_progress+"…";++p.revision;
+        p.status_message=*key_progress+"…";++p.revision;
     }
-    if(!p.closing&&p.pending_start!=C::none&&!snapshot.active&&!p.key_loading) {
+    const auto now=std::chrono::steady_clock::now();
+    if(!p.closing&&p.loopback_start()&&now>=p.acquire_deadline) {
+        p.fail_start(C::fast_transmit,snapshot.active?
+            "Timed out waiting for the previous audio capture to stop.":
+            "Timed out waiting for the audio device.");
+    } else if(!p.closing&&p.pending_start!=C::none&&!snapshot.active&&!p.key_loading) {
+        const auto command=p.pending_start;
         try {
-            if(p.settings.simulation) {
-                const auto command=p.pending_start;
+            if(!p.live_audio_mode()) {
                 p.pending_start=C::none;
+                p.pending_monitor_settings.reset();
                 // Simulation uses a local source and sampled channel. A pending
                 // transmit may have been queued while cancelling Live audio;
                 // do not reacquire or hand off the shared hardware for it.
                 if(command==C::fast_transmit)p.start_transfer(command);
                 ++p.revision;
             } else if(p.acquire_audio()) {
-                const auto command=p.pending_start;p.pending_start=C::none;p.start_transfer(command);++p.revision;
-            } else if(std::chrono::steady_clock::now()>=p.acquire_deadline) {
-                p.pending_start=C::none;p.retry_after=std::chrono::steady_clock::now()+std::chrono::seconds(2);
-                report_error("Waiting for the audio device to become available.");
+                p.pending_start=C::none;p.start_transfer(command);++p.revision;
+            } else if(now>=p.acquire_deadline) {
+                p.fail_start(command,"Waiting for the audio device to become available.");
             }
         }catch(const std::exception& e) {
-            p.pending_start=C::none;p.retry_after=std::chrono::steady_clock::now()+std::chrono::seconds(2);report_error(e.what());
+            p.fail_start(command,e.what());
         }
     }
-    if(!p.closing&&p.selected&&p.f(F::fast_simulation).selected=="live"&&!snapshot.active&&!p.session.active()&&p.pending_start==C::none&&
-        !p.key_loading&&(!p.f(F::fast_encryption).checked||p.settings.key)&&std::chrono::steady_clock::now()>=p.retry_after) {
+    if(p.selected&&std::chrono::steady_clock::now()>=p.retry_after&&p.enabled(C::fast_listen)) {
         activate(C::fast_listen);
     }
     p.refresh();
@@ -710,7 +915,14 @@ void Controller::poll() {
 void Controller::set_selected(bool selected) {
     auto& p=*impl_;if(p.closing||p.selected==selected)return;
     p.selected=selected;p.retry_after={};
-    if(!selected) {p.pending_start=C::none;p.pending_loopback.reset();if(p.session.poll().listening)p.session.cancel();}
+    if(!selected) {
+        p.cancel_pending_start();
+        const auto current=p.session.poll();
+        // Ordinary background reception releases the shared audio path when
+        // Fast is hidden. A loopback test is duplex (both flags are true), so
+        // retain it until its own bounded capture/playback finishes.
+        if(current.listening&&!current.transmitting)p.session.cancel();
+    }
 
     ++p.revision;p.refresh();
 }
@@ -728,7 +940,7 @@ void Controller::set_shellcode_mode(bool enabled) {
     }
     p.refresh_history();++p.revision;p.refresh();
 }
-void Controller::close() {auto& p=*impl_;if(p.closing)return;p.closing=true;p.pending_start=C::none;p.worker.request_stop();p.session.close();p.pending_generated.reset();p.pending.clear();p.services.clear();p.refresh();}
+void Controller::close() {auto& p=*impl_;if(p.closing)return;p.closing=true;p.discard_pending_start();p.worker.request_stop();p.session.close();p.pending_generated.reset();p.pending.clear();p.services.clear();p.refresh();}
 bool Controller::ready_to_close() const {return impl_->closing&&!impl_->key_loading&&impl_->session.ready_to_close();}
 bool Controller::active() const {return impl_->session.active()||impl_->pending_start!=C::none;}
 void Controller::set_devices(const std::vector<audio::Device>& devices) {
@@ -750,9 +962,8 @@ void Controller::edit(F field,std::string text) {
     if(field==F::fast_sim_tx_power||field==F::fast_sim_path_loss||field==F::fast_sim_noise||
        field==F::fast_sim_margin||field==F::fast_sim_shift_hz) {
         p.f(field).text=std::move(text);
-        try {p.sync_simulation_settings();p.settings.simulation=p.f(F::fast_simulation).selected=="simulation"?
-                std::optional<fast::SimulationSettings>(p.simulation_settings):std::nullopt;}
-        catch(const std::exception& e) {p.simulation_valid=false;report_error(e.what());}
+        if(std::ranges::find(declaration_numbers,field)!=declaration_numbers.end())p.declaration_changed();
+        else p.revalidate_channel_settings();
         ++p.revision;p.refresh();return;
     }
     if(field==F::fast_device||field==F::fast_file||field==F::fast_text) {
@@ -782,18 +993,14 @@ void Controller::select(F field,std::string id) {
     if(std::none_of(options.begin(),options.end(),[&](const auto& option){return option.id==id&&option.enabled;}))return;
     try {
         if(field==F::fast_simulation) {
+            if(id==p.f(field).selected)return;
+            const bool was_live=p.live_audio_mode();
             p.f(field).selected=std::move(id);
-            p.settings.simulation=p.f(field).selected=="simulation"?
-                std::optional<fast::SimulationSettings>(p.simulation_settings):std::nullopt;
-            if(p.f(field).selected!="live") {
-                // Invalid drafts must remain editable after returning from
-                // Live. Keep simulation selected (and hardware capture off)
-                // while validation disables its start action.
-                try {p.sync_simulation_settings();p.settings.simulation=p.f(field).selected=="simulation"?
-                        std::optional<fast::SimulationSettings>(p.simulation_settings):std::nullopt;}
-                catch(const std::exception& e) {p.simulation_valid=false;report_error(e.what());}
-            }
-            p.settings_changed();++p.revision;p.refresh();return;
+            // Mode changes affect only test injection and hardware ownership.
+            p.revalidate_channel_settings();
+            if(was_live!=p.live_audio_mode())p.settings_changed();
+            else p.estimate_key.clear();
+            ++p.revision;p.refresh();return;
         }
         if(field==F::fast_volume) {
             p.settings.transmit_gain=audio_controls::volume_gain(id);
@@ -848,21 +1055,29 @@ void Controller::select(F field,std::string id) {
         else if(field==F::fast_key) {p.discard_pending_key();p.settings.key=p.keys.at(std::stoul(id)).key;}
         else if(field==F::fast_sim_baseband_oscillator||field==F::fast_sim_shift_oscillator||
                 field==F::fast_sim_spread||field==F::fast_sim_selective) {
-            p.f(field).selected=std::move(id);p.sync_simulation_settings();
-            p.settings.simulation=p.f(F::fast_simulation).selected=="simulation"?
-                std::optional<fast::SimulationSettings>(p.simulation_settings):std::nullopt;
-            p.settings_changed();++p.revision;p.refresh();return;
+            p.f(field).selected=std::move(id);p.declaration_changed();
+            ++p.revision;p.refresh();return;
         }
         else if(field==F::fast_sim_tx_power||field==F::fast_sim_path_loss||field==F::fast_sim_noise||
                 field==F::fast_sim_margin||field==F::fast_sim_shift_hz) {
-            p.f(field).text=std::move(id);p.sync_simulation_settings();
-            p.settings.simulation=p.f(F::fast_simulation).selected=="simulation"?
-                std::optional<fast::SimulationSettings>(p.simulation_settings):std::nullopt;
-            p.settings_changed();++p.revision;p.refresh();return;
+            p.f(field).text=std::move(id);
+            if(std::ranges::find(declaration_numbers,field)!=declaration_numbers.end())p.declaration_changed();
+            else p.revalidate_channel_settings();
+            ++p.revision;p.refresh();return;
         }
         else if(field==F::fast_source||field==F::fast_qr_brightness) {} // Independent local presentation fields.
         else return;
-        p.f(field).selected=std::move(id);p.sync_profile_fields();p.estimate_key.clear();if(field!=F::fast_source&&field!=F::fast_mono&&field!=F::fast_qr_brightness)p.settings_changed();++p.revision;p.refresh();
+        p.f(field).selected=std::move(id);p.sync_profile_fields();p.estimate_key.clear();
+        const bool waveform_edit=field==F::fast_profile||field==F::fast_expected_snr||field==F::fast_symbol_rate||
+            field==F::fast_constellation||field==F::fast_coding||field==F::fast_depth||field==F::fast_fec;
+        if(waveform_edit)p.revalidate_channel_settings();
+        // A valid waveform can still exceed the declared receiver's bounds.
+        // Keep the prior admitted monitor until that draft is corrected, just
+        // as for an invalid oscillator or spread edit. Device/key changes
+        // continue to invalidate the previous capture ownership normally.
+        if(field!=F::fast_source&&field!=F::fast_mono&&field!=F::fast_qr_brightness&&
+           (!waveform_edit||p.receiver_ready()))p.settings_changed();
+        ++p.revision;p.refresh();
     }catch(const std::exception& e) {report_error(e.what());}
 }
 void Controller::toggle(F field,bool value) {
@@ -899,33 +1114,34 @@ void Controller::activate(C command) {
             // clearing, so the next poll cannot recreate that cleared row.
             p.observe_snapshot(p.session.poll());
             p.session.clear_received();p.snapshot.file.reset();p.history.clear();p.current_history.clear();p.f(F::fast_history).selected.clear();p.f(F::fast_files).selected.clear();
-            p.refresh_history();p.f(F::fast_status).text="Received content cleared from memory.";break;
+            p.refresh_history();p.status_message="Received content cleared from memory.";break;
         case C::fast_save:p.request(command,ui::ServiceKind::save_file,"Save received attachment",received_text(p.selected_file()->filename()));break;
-        case C::fast_cancel:
-            if(p.pending_start!=C::none)p.f(F::fast_status).text="Cancelled before audio was acquired.";
-            p.pending_start=C::none;p.pending_loopback.reset();p.session.cancel();break;
+        case C::fast_cancel: {
+            const auto current=p.session.poll();
+            p.stopping_loopback=current.active&&current.loopback_test&&!current.complete;
+            p.cancel_pending_start();p.session.cancel();break;
+        }
         case C::fast_transmit:case C::fast_listen:
             fast::validate(p.settings.profile);
-            if(command==C::fast_listen&&p.f(F::fast_simulation).selected!="live")return;
+            if(command==C::fast_listen)p.pending_monitor_settings=p.effective_settings(false);
+            else p.pending_monitor_settings.reset();
             if(command==C::fast_transmit&&p.f(F::fast_simulation).selected=="loopback")
                 p.pending_loopback=p.loopback_request();
             p.acquire_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+            p.pending_start=command;
             if(p.session.active()) {
-                p.pending_start=command;p.session.cancel();
-                p.f(F::fast_status).text="Pausing reception for transmission…";
-            } else if(p.f(F::fast_simulation).selected=="simulation")p.start_transfer(command);
-            else if(p.acquire_audio())p.start_transfer(command);
-            else {
-                p.pending_start=command;p.f(F::fast_status).text="Waiting for the audio device…";
-            }
+                p.session.cancel();
+            } else if(!p.live_audio_mode()||p.acquire_audio()) {
+                p.pending_start=C::none;p.start_transfer(command);
+            } else p.status_message="Waiting for the audio device…";
             break;
         default:return;
         }
         ++p.revision;p.refresh();
     }catch(const std::exception& e) {
-        if(command==C::fast_listen)p.retry_after=std::chrono::steady_clock::now()+std::chrono::seconds(2);
-        if(command==C::fast_transmit&&p.f(F::fast_simulation).selected=="loopback")p.pending_loopback.reset();
-        report_error(e.what());
+        if(command==C::fast_listen||command==C::fast_transmit) {
+            p.fail_start(command,e.what());p.refresh();
+        } else report_error(e.what());
     }
 }
 bool Controller::enabled(C command) const {return impl_->enabled(command);}
@@ -949,9 +1165,9 @@ void Controller::complete_service(ui::ServiceResult result) {
         case C::fast_open_key:case C::fast_generate_key:p.load(path_from_text(result.value),pending.command==C::fast_generate_key,result.track_completion?result.id:0);break;
         case C::fast_choose_file:
             p.f(F::fast_file).text=std::move(result.value);p.f(F::fast_source).selected="file";p.inspect_file();break;
-        case C::fast_copy_signal:p.f(F::fast_status).text="Received text copied to the clipboard.";break;
+        case C::fast_copy_signal:p.status_message="Received text copied to the clipboard.";break;
         case C::fast_save:if(pending.file) {
-            p.key_loading=true;p.f(F::fast_status).text="Saving complete received bytes…";
+            p.key_loading=true;p.status_message="Saving complete received bytes…";
             p.worker=execution::Task([&p,file=pending.file,path=path_from_text(result.value),completion_id=result.track_completion?result.id:0] {
                 Impl::Loaded saved;saved.saved=true;saved.completion_id=completion_id;
                 try {file->save(path);}catch(const std::exception& e) {saved.error=e.what();}
@@ -965,7 +1181,7 @@ void Controller::complete_service(ui::ServiceResult result) {
 }
 std::vector<ui::ServiceRequest> Controller::take_services() {std::vector<ui::ServiceRequest> result;result.swap(impl_->services);return result;}
 std::vector<ui::ServiceCompletion> Controller::take_service_completions() {std::vector<ui::ServiceCompletion> result;result.swap(impl_->service_completions);return result;}
-void Controller::report_error(std::string message) {impl_->f(F::fast_status).text=std::move(message);++impl_->revision;}
+void Controller::report_error(std::string message) {impl_->status_message=std::move(message);impl_->refresh_status();++impl_->revision;}
 std::uint64_t Controller::revision() const {return impl_->revision;}
 BitmapSource Controller::bitmap(ui::Bitmap id) const {return id==ui::Bitmap::fast_qr?BitmapSource(impl_->qr):impl_->plots.source(id);}
 std::uint64_t Controller::bitmap_revision(ui::Bitmap id) const {return id==ui::Bitmap::fast_qr?impl_->qr_revision:owns(id)?impl_->plots.revision():0;}

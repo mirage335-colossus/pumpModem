@@ -1,4 +1,5 @@
 #pragma once
+#include "datapump/fast/channel_assumptions.hpp"
 #include "datapump/fast/profile.hpp"
 #include <string>
 #include <vector>
@@ -12,9 +13,15 @@ struct SnrPreset {
     double reference_bandwidth_hz;
     std::string note;
 };
+struct SnrReferenceBand {
+    double lower_hz,upper_hz;
+    double bandwidth_hz() const noexcept {return upper_hz-lower_hz;}
+};
+SnrReferenceBand expected_snr_reference_band(Channel channel);
 double default_expected_snr(Channel channel);
 std::vector<double> expected_snr_options(Channel channel);
 SnrPreset resolve_snr_preset(Channel channel,double expected_snr_db);
+SnrPreset resolve_snr_preset(Channel channel,double expected_snr_db,const ChannelAssumptions&);
 // An explicit wire edit outside the fixed short SSB geometry selects the
 // ordinary capacity frame. Matching edits retain the current frame size.
 Profile normalize_ssb_frame_size(Profile profile) noexcept;

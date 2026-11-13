@@ -28,9 +28,10 @@ SSB profile. The omitted noise density is explicitly set to **−174 dBm/Hz** by
 the operator. With the stated transmit power and path loss, the nominal SNRs
 over 2400 Hz are about 56.22 dB (HF) and 41.96 dB (EME). These link-budget
 values precede the synthetic fading operator; they are not measured receiver
-SNRs. The selected margin multiplies the declared delay and Doppler spread,
-so the HF row's 3× setting exercises 21 ms and 90 Hz. Shift frequency is an
-oscillator-model coordinate only and must not retune the Fast audio waveform.
+SNRs. The current runner uses the row's margin as a receiver search bound, so
+the HF row declares 21 ms and 90 Hz while injecting the selected 7 ms and 30 Hz.
+Earlier receipts used margin in the injected channel as well. Shift frequency
+is an oscillator-model coordinate only and does not retune the Fast audio waveform.
 
 Qualification starts with deterministic analytic/real waveform parity,
 chunk-invariant channel state, explicit Off baselines, delayed tails, and
@@ -112,6 +113,75 @@ repaired runs ([receipt](../local-evidence/fast-channel/canonical-ssb-hf417-nati
 A paired row-reuse change cut preparation 5.336→0.949 s and payload work
 5.860→1.477 s with all 4096 LLRs bit-identical, but only on a frozen two-slot
 prefix; it does not establish transfer service ([pair](../local-evidence/fast-channel/hf-dsp-profile/pair-sha256.log)).
+
+The current physical speaker/microphone HF and EME manual trials overflowed
+the eight-second capture FIFO before acquisition. On a two-second retained
+HF prefix, repeated finite pulse and periodic-template construction accounted
+for 48.5% of model learning. The receiver now prepares the folded transmit and
+public word spectrum once per fitter, then applies the clocked filter on the
+public period. It subtracts the original finite support exclusions from both
+the pulse and tap-time moment. The same 19-fit rejection took 6.506 seconds
+after the change versus 11.203 seconds before, with identical recorded
+candidate and marker decisions. The recorded early marker still fails its
+prediction and coherence checks. These results preserve the physical failures
+and do not establish acoustic reception or sustained capacity. See the
+[current validation](validation.md#fast-acoustic-acquisition-and-noise-reference-follow-up--12-november-2026).
+
+For the fixed native SSB geometry, independent fit workers now score those same
+public windows from immutable observations. The receiver commits results in
+order and cancels younger fits before allocating the winning equalizer. Each
+worker's complete fit and snapshot has a bounded memory lease, and the caller
+and helpers share twice the effective logical CPU budget. An early version
+left acquisition pending at the end of the existing one-interval test. The
+receiver now settles overdue fits by the first complete public interval,
+checking at each frontend callback and retaining the earlier pilot evidence.
+The original short test, resumed transmission, and weak-terminal checks pass
+with scored physical quiet.
+
+The same two-second HF rejection replay preserved all 19 ordered fit outcomes.
+Total elapsed time fell from 6.518 to 1.789 seconds, while total CPU time
+increased from 6.517 to 15.553 seconds. On the 12-logical-CPU host, 15 fits ran
+concurrently under the 24-worker allowance. The peak reservation was 815 MB
+including worker stacks, with 193,024 KiB of resident high-water in the probe.
+The replay submitted a burst faster than live audio arrives and still rejected
+the public marker. Separately, the current HF manual simulation recovered its
+384-byte encrypted attachment exactly and scored 6.122 seconds of quiet. It
+accepted the third fit, canceled 12 younger fits, and took 18.230 seconds of
+elapsed time for 22.272 seconds of input. Sustained acquisition service and
+live acoustic reception need separate checks.
+
+A final refresh of the EME row also receives the exact encrypted 384-byte
+attachment and scores 6.128875 seconds of quiet. Its 23.213 seconds of receiver
+work exceed the 22.272 seconds of input; whole elapsed time is 24.001 seconds
+and process CPU time 34.660 seconds. This is a finite simulation success,
+not a real-time capacity pass. The parallel acquisition repair does not by
+itself qualify the complete payload service on this row.
+
+The native probe's `--replay-paced` option then replayed each full retained
+physical failure at 48 kHz with the original source, profile and receiver
+assumptions. It dispatched the unchanged PCM on a monotonic 4,096-sample
+block cadence. Both original captures reached EOF without acquisition after
+21 ordered fits each. The HF and EME captures contained 475,200 and 466,800
+samples. Peak scheduled arrival backlog was 4,220 and 10,884 samples against
+the live FIFO's 384,000-sample capacity, and receiver completion of the replay
+was 4.55 and 3.40 ms behind the respective sample timelines. Aggregate CPU was
+12.99 and 14.27 seconds, while elapsed time was 9.92 and 9.74 seconds. The
+backlog measure reflects scheduled sample arrivals through the probe and
+excludes fresh audio-device work. This establishes service on those two
+retained captures and leaves their marker rejection unresolved.
+
+Fresh physical HF and EME manual trials ran through the available speakers and
+microphone without a capture error. Their actual capture backlogs peaked at
+6,000 and 26,400 samples against the 384,000-sample FIFO. Both still failed to
+acquire. The original selected 100% HF setting clipped 914 of 1,183,200 captured
+samples. A separate explicit 50% diagnostic kept the requested playback peak
+below full scale and recorded no input clipping, yet all 21 ordered fits still
+failed to lock. A diagnostic using the canonical emitted public preamble
+estimated the arrival at sample 15,512. Two eligible fits proposed epochs
+within about one sample of that arrival, with independent public-word NMSE of
+0.217 and 0.252 against the 0.20 gate. The matched digital HF fit passed with
+0.0159 public-word and 0.0228 marker NMSE. This isolates the physical failure
+before marker verification even when clipping is absent.
 
 The fixed-8 HF417 native simulation later recovered the exact encrypted
 367-byte source over 64 intervals, passed both LDPC frames in four iterations,
@@ -228,6 +298,105 @@ ADC captures support physical-input and bit-exact replay claims that synthetic
 channel runs cannot reproduce. Keep those captures only while these claims are
 current; retire them when superseded. Obsolete copied sources, executables,
 archives and dumps from the scratch campaigns have been removed.
+
+### Acoustic-short manual-row follow-up
+
+The initial FOX/long-source exploration below used an intermediate
+`datapump/fast/v2`, `short/v1`, `sc-training/v2` wire identity; retain it as
+historical evidence of the failure and receiver-only feedback approach. The
+current v4 profile was rechecked with matched chunks. The focused receiver group
+passed 7/7, including its six-interval regression
+([log](../local-evidence/fast-followup/resilient-capacity-focused.log)); final
+v4 results and their limits follow.
+
+Additional bounded Session simulations used the unencrypted 48 kHz acoustic-
+short QPSK profile: 1,944 coded bits, rate 3/4, depth 1, nominal −6 dB SNR.
+For the HF row (40 W,
+130 dB path loss, −174 dBm/Hz, crystal base oscillator, IC-7100 shift at
+30 MHz, independent reference, 30 Hz Doppler, 7 ms delay, both selective depths
+0.65, margin 1), the original seed-417 three-byte `fox` baseline failed before
+acquisition. A 1,024-symbol training/16-pilot-per-16-data candidate also failed.
+Its wrapper JSON is truncated; the initial partial outputs are retained only as
+failure evidence ([baseline](../local-evidence/fast-followup/baseline.json),
+[candidate](../local-evidence/fast-followup/compact-candidate.json)).
+
+Changing the preamble to 2,048 symbols and spacing 16 pilots per 32 data
+symbols recovered the exact three-byte `fox` in two coding cycles for seeds 417
+and 418, including physical-quiet completion ([seed 417](../local-evidence/fast-followup/fox-session-417.json),
+[seed 418](../local-evidence/fast-followup/fox-session-418.json)). On seed 418,
+a 640-byte, six-interval source first failed three of six LDPC frames. The
+receiver-only protected-feedback version, using three disjoint FIR fits and
+excluding the 104-bit alignment fill, passed all six physical intervals/frames
+and recovered the exact
+source after physical quiet ([before](../local-evidence/fast-followup/long-session-418.json),
+[updated](../local-evidence/fast-followup/long-session-feedback-418.json)). These
+are a few unencrypted software realizations, not encrypted/manual-row reliability
+or throughput qualification.
+
+Current v4 full-core receipts recovered the same three-byte public `fox` with
+seeds 417 and 418: each completed two LDPC frames with no failed frame and
+physical quiet, in 3.795 s and 3.696 s respectively (12.181 s simulated audio).
+For seed 418, the 640-byte adverse fixture then passed all six physical
+intervals with no failed frames under three input chunk sizes (1,201, 257 and
+4,096 samples). The matched runs reported the same result hash, 58,899,880-byte
+peak workspace, 5.43–5.46 s receiver time for 19.82 s audio, and a 6.114 s quiet
+tail. A same-seed weak-AWGN v4 `fox` also completed exactly in two intervals for
+all three chunk sizes using the selected coherent `standard-fast` receiver.
+This was not a separate full sparse-only run, so it does not establish a current
+v4 sparse-route failure. The weak case reported 31,361,984-byte peak workspace
+and 1.76–1.81 s receiver time. These matched v4
+simulations confirm chunk-invariant outcomes for these fixtures, not a manual
+channel sensitivity threshold, population reliability or sustained capacity.
+Receipts: [seed 417](../local-evidence/fast-followup/fox-final-417.json),
+[seed 418](../local-evidence/fast-followup/fox-final-418.json),
+[adverse chunk replay](../local-evidence/fast-followup/paired-adverse-418.log),
+[weak-AWGN chunk replay](../local-evidence/fast-followup/paired-weak-418.log),
+[binary hashes](../local-evidence/fast-followup/final-core-binaries.sha256).
+
+An intermediate-format weak-AWGN seed-418 comparison also separates
+acquisition choices. At 40 W,
+−174 dBm/Hz, 183.5902 dB path loss and with oscillator/spread/AM effects Off,
+the sparse delay-Doppler path did not acquire; the competing standard-fast
+coherent path recovered the exact three-byte file in two LDPC frames. This
+intermediate-format result does not establish a sensitivity threshold or
+long-bulk performance; the current v4 same-waveform chunk replay is reported
+above ([intermediate sparse](../local-evidence/fast-followup/weak-session-feedback-418.json),
+[intermediate coherent](../local-evidence/fast-followup/weak-session-dual-418.json)).
+
+The Live loopback UI forwards the selected nonempty Console message or file
+through Session, publishes captured input, and uses fixed native gain/time bounds
+without truncating the source.
+The selected-source cable check now passed with the current v4 profile in both
+public and encrypted modes. These used the acoustic-short −6 dB preset; this is
+not a measured cable SNR. Each transmitted the exact three-byte Console
+`fox`, completed two of two LDPC frames with no failures, and reached scored
+physical completion; the encrypted case authenticated. Neither exposed a file.
+Peak captured backlog was 150,128 samples (public) and 141,728 (encrypted).
+Both checks used the default analog 48 kHz left-mono path at gain 0.1 and
+retained 512 actual input points in the final diagnostic. Input polling
+observed 125 capture-progress updates per run, with maximum gaps of about
+100.4 ms; this is polling cadence, not a GUI paint or scheduling bound. ALSA slave-open
+warnings occurred before the working PipeWire path and produced no Session
+error. The Session completion tick is input-clock based; it cannot be subtracted
+from the transmit-side quiet-start clock to claim a six-second cable tail.
+These are two short same-host cable checks, not a physical manual-row,
+sensitivity or sustained-capacity qualification ([public](../local-evidence/fast-followup/fox-cable-public.jsonl),
+[encrypted](../local-evidence/fast-followup/fox-cable-encrypted.jsonl),
+[parsed evidence](../local-evidence/fast-followup/fox-cable-evidence.json),
+[public stderr](../local-evidence/fast-followup/fox-cable-public.stderr),
+[encrypted stderr](../local-evidence/fast-followup/fox-cable-encrypted.stderr)).
+
+The receipts, thin native proof wrappers, independent fixture output and three
+final tab images in `local-evidence/fast-followup/` support these current local
+claims. Retire them when replacement validation supersedes those claims, keeping
+the findings and failure boundaries here. Superseded probe implementations,
+binaries and redundant screenshots have been removed.
+The Loopback Details note was shortened after source review identified an
+uncovered text-fit risk. The expanded native fit check and focused GUI test now
+pass for all profiles, SNR modes, Live/Loopback text and file states at 720 px
+height and both 1,194/1,244 px widths ([fit receipt](../local-evidence/fast-followup/native-loopback-fit-receipt.json),
+[native log](../local-evidence/fast-followup/native-loopback-fit.log),
+[GUI test](../local-evidence/fast-followup/gui-loopback-fit-test.log)).
 
 The generated digital SSB PCM spectrum was measured on a 2–18 s excerpt with a
 65,536-sample Hann window, 50% overlap and 0.7324 Hz bins (22 periodograms).

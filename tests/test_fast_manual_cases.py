@@ -107,9 +107,65 @@ class FastManualCaseParserTests(unittest.TestCase):
             self.assertTrue(all("--resilient-receiver" not in row["argv"] for row in report["results"]))
             for row in report["results"]:
                 self.assertEqual(row["argv"][row["argv"].index("--max-audio-seconds") + 1], "75.0")
+                requested = row["requested_case"]
+                declaration = row["requested_receiver_assumptions"]
+                effects = row["requested_channel_effects"]
+                self.assertNotIn("noise_dbm_hz", declaration)
+                self.assertEqual(effects["noise_dbm_hz"], -174)
+                self.assertNotIn("--expected-snr", row["argv"])
+                for name in ("base_oscillator", "shift_oscillator", "spread", "selective_slow_depth",
+                             "selective_fast_depth", "margin", "shift_hz"):
+                    self.assertEqual(declaration[name], requested[name])
+                    self.assertEqual(effects[name], 1 if name == "margin" else requested[name])
+                    actual_option = "--" + name.replace("_", "-")
+                    assumed_option = "--assume-" + name.replace("_", "-")
+                    self.assertEqual(row["argv"].count(assumed_option), 1)
+                    self.assertEqual(row["argv"][row["argv"].index(assumed_option) + 1], str(declaration[name]))
+                    self.assertEqual(row["argv"][row["argv"].index(actual_option) + 1], str(effects[name]))
+            self.assertIn("receiver-only", report["results"][0]["margin_semantics"])
+            self.assertNotIn("margin_semantics", report["results"][1])
         self.assertEqual(report["status"], "partial")
         self.assertFalse(report["selected_cases_complete"])
         self.assertEqual([row["status"] for row in report["results"]], ["process_timeout", "complete"])
+
+    def test_independent_selective_depths_are_declared_without_changing_effects(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "cases.md"
+            path.write_text(HF.replace("Each - 65%", "Slow - 65%") + "\n" +
+                            EME.replace("Each - 65%", "Fast - 65%"), encoding="utf-8")
+            with patch.object(cases, "_run_probe", side_effect=lambda *args: {"status": "incomplete"}):
+                report = cases.run_cases(probe=Path(sys.executable), case_list=path,
+                                         output=Path(temp) / "report.json")
+        for row, slow, fast in zip(report["results"], (.65, 0), (0, .65)):
+            declaration = row["requested_receiver_assumptions"]
+            self.assertEqual(declaration["selective_slow_depth"], slow)
+            self.assertEqual(declaration["selective_fast_depth"], fast)
+            for prefix in ("--", "--assume-"):
+                argv = row["argv"]
+                self.assertEqual(float(argv[argv.index(prefix + "selective-slow-depth") + 1]), slow)
+                self.assertEqual(float(argv[argv.index(prefix + "selective-fast-depth") + 1]), fast)
+
+    def test_receiver_bound_rejection_is_preserved_without_legacy_retry(self):
+        rejected = {"schema": "fast_channel_probe.v1", "status": "error",
+                    "reason": "Fast receiver assumptions exceed the fixed frontend envelope"}
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "cases.md"
+            path.write_text(HF, encoding="utf-8")
+            with patch.object(subprocess, "run", return_value=
+                              subprocess.CompletedProcess("probe", 2, json.dumps(rejected), "")) as run:
+                report = cases.run_cases(probe=Path(sys.executable), case_list=path,
+                                         output=Path(temp) / "report.json")
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(report["status"], "incomplete")
+        self.assertFalse(report["selected_cases_complete"])
+        row = report["results"][0]
+        self.assertEqual((row["status"], row["returncode"], row["reason"]),
+                         ("error", 2, rejected["reason"]))
+        self.assertEqual(row["requested_receiver_assumptions"]["margin"], 3)
+        self.assertEqual(row["requested_case"]["margin"], 3)
+        self.assertEqual(row["requested_channel_effects"]["margin"], 1)
+        self.assertEqual(row["argv"][row["argv"].index("--assume-margin") + 1], "3")
+        self.assertEqual(row["argv"][row["argv"].index("--margin") + 1], "1")
 
     def test_missing_probe_preserves_case_error_and_argv(self):
         with tempfile.TemporaryDirectory() as temp:

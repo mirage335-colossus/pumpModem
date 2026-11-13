@@ -20,6 +20,12 @@ struct Launch {
     std::filesystem::path smoke_directory;
     std::optional<launch_command::Patch> settings;
 };
+struct WindowSizing {
+    int width=ui::default_width,height=ui::default_height;
+    int min_width=ui::min_width,min_height=ui::min_height;
+    bool operator==(const WindowSizing&) const = default;
+};
+WindowSizing initial_window_sizing(const Launch& options);
 struct BitmapPresentation {
     BitmapSource source;
     std::uint64_t revision=0;
@@ -73,6 +79,7 @@ public:
     void navigate(ui::Page page);
     ui::ControlLayout control_layout(const ui::Control& control,int width,int height,
         std::span<const ui::Control> declarations=ui::console_screen()) const;
+    WindowSizing window_sizing() const;
     ui::Rect page_bounds(int width,int height) const;
     ui::Rect tabs_bounds(int width,int height) const;
     std::vector<ui::TabLayout> tab_layout(int width,int height) const;
