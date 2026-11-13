@@ -208,13 +208,21 @@ unbounded precomputation outside its memory report.
 The literal EME reference is 256×512 cells at 48 ksample/s: over 1800 s
 that is 11,324,620,800,000 cell-sample products before receiver work. Fifteen
 sub-9 kHz complete messages already span at least 421.875 physical hours.
-Neither is an automatically admitted campaign. Start with 86's short component
-calibration and independent holdout; only an applicable complete-cost upper
-forecast within the declared thirty-minute campaign budget permits the
-corresponding full-message work. A reduced delay–Doppler or low-rate latent
-representation can change cost substantially, but needs a small exact-reference
-comparison before its results stand in for the literal model. These operation
-counts are not processor timing estimates or permission to rent hardware.
+Neither is an automatically admitted campaign. Chapter 86 proposes a short
+component calibration and independent holdout, a ten-minute pilot limit and a
+thirty-minute upper budget for a particular complete-message campaign. These
+are proposed bounds for that design, not project or user mandates. Before any
+campaign, set a geometry-appropriate, predeclared budget from the scientific
+question, minimum required endpoints, resource forecast and stopping rule. A
+budget that cannot admit required work leaves that work unrun or the design
+unadmitted; it does not waive endpoints. Reconcile the proposed pilot with the
+separate 12+6 failure-finding pilot in the adjacent appraisal protocol, keeping
+diagnostic failure finding distinct from conditional probability inference.
+A reduced delay–Doppler or low-rate latent representation can change cost
+substantially, but needs a small exact-reference comparison before its results
+stand in for the literal model. These operation counts are not processor
+timing estimates or permission to rent hardware. See the research-plan audit
+items [C13](87-evidence-remediation-audit.md#c13).
 
 Choose bulk arithmetic by the
 [automatic capacity contract](../../../docs/gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling).

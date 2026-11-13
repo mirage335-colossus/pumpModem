@@ -5,7 +5,7 @@
 - **How it was made.** Pure-Python scripts using only the standard library, written for this work and run on 13 November 2026 in the session's scratch directory. They are not part of the repository. Each section states the formulas and assumptions needed to reproduce its numbers.
 - **Related chapters.** groundwave [20](20-groundwave-1mhz.md) and [25](25-groundwave-30mhz.md); sub-9 kHz [10](10-sub9khz-propagation.md), [11](11-sub9khz-antennas-links-and-practice.md) and [12](12-sub9khz-noise.md); Earth–Moon–Earth [40](40-eme-lunar-scattering-and-geometry.md) and [41](41-eme-systems-practice-and-environment.md); skywave [31](31-skywave-dispersion-midlatitude-nvis-longhaul.md) and [33](33-hf-channel-models-and-simulators.md); noise [12](12-sub9khz-noise.md) and [50](50-noise-and-interference-mf-hf.md).
 
-**Current numerical evidence (13 November 2026).** [86](86-statistics-and-calculation-checks.md) independently reproduces the scalar antenna, field/noise, EME range/gain, mirror-path, width and integration calculations and selected lunar integrals. The original ground-wave residue-series implementation is absent: checking 144 field-to-loss conversions does **not** independently reproduce its fields, threshold distances, height effects or complex phase. Those historical solver outputs remain illustrative, not acceptance targets or calibrated scenario inputs. The Fable scenario chapters specify their own selected laws; in particular the selected eleven-node lunar law in [84](84-scenarios-eme.md) is different from this chapter's illustrative Hagfors/diffuse table. The numerical coverage table in 86 states exactly which quantities were checked.
+**Current numerical evidence (13 November 2026).** [86](86-statistics-and-calculation-checks.md) independently reproduces the scalar antenna, field/noise, EME range/gain, mirror-path, width and integration calculations and selected lunar integrals. The original ground-wave residue-series implementation is absent: checking 144 field-to-loss conversions does **not** independently reproduce its fields, threshold distances, height effects or complex phase. Those historical solver outputs remain illustrative, not acceptance targets or calibrated scenario inputs; the material checks and their propagation into claims are tracked in [C09](87-evidence-remediation-audit.md#c09). The Fable scenario chapters specify their own selected laws; in particular the selected eleven-node lunar law in [84](84-scenarios-eme.md) is different from this chapter's illustrative Hagfors/diffuse table. The numerical coverage table in 86 states exactly which quantities were checked.
 
 ## 1. Smooth-earth ground wave
 
@@ -138,7 +138,7 @@ Distances in km; ground-level antennas; 4/3 earth radius.
 | 100 km | −18.9 dB, 0 | −32.1 dB, +0.07 | −35.6 dB, +0.20 | −40.2 dB, +0.52 | −42.7 dB, +0.86 | −43.5 dB, +1.05 |
 | 300 km | −36.8 dB, 0 | −49.4 dB, +0.26 | −52.9 dB, +0.42 | −57.6 dB, +0.77 | −60.1 dB, +1.13 | −60.9 dB, +1.33 |
 
-A halving of conductivity between 10⁻³ and 5×10⁻⁴ S/m, of the kind freezing or drying can produce, changes the 100 km field by 2.5 dB and its phase by 0.34 rad. Spread over hours, such a phase change is a frequency offset of a few microhertz: far below the 1.7 mHz resolution of a 576 s bit. The amplitude change is the part that matters ([20](20-groundwave-1mhz.md) gives measured seasonal ranges).
+A halving of conductivity between 10⁻³ and 5×10⁻⁴ S/m changes this calculated 100 km field by 2.5 dB and its phase by 0.34 rad. The few-microhertz figure follows only if that phase difference evolves smoothly over hours; it is not an observed phase trajectory or a demonstrated bound on within-message frequency error. The calculation also does not establish that amplitude is the receiver-relevant effect: that depends on the temporal law, path, reference phase, and modem response. Chapter 20's seasonal amplitude observations have their own frequency, path, and estimator limits. Do not select amplitude-only variation for a time-varying scenario until [C09](87-evidence-remediation-audit.md#c09) closes the solver/phase applicability question.
 
 **Antenna height at 30 MHz.** L_b in dB with both antennas at the stated height.
 
@@ -154,9 +154,9 @@ A halving of conductivity between 10⁻³ and 5×10⁻⁴ S/m, of the kind freez
 | Dry ground, 3×10⁻⁴ S/m | 10 m | 145.3 | 156.3 | 175.5 | 207.0 | 237.2 |
 | Dry ground, 3×10⁻⁴ S/m | 30 m | 127.7 | 138.6 | 157.8 | 189.3 | 219.4 |
 
-Over land at 30 MHz, raising both antennas from the ground to 30 m reduces the loss by 24–33 dB. Over sea, height slightly increases the loss: the sea already behaves as a good conductor, and the surface-wave term dominates there.
+In this smooth-earth calculation over land at 30 MHz, raising both antennas from ground level to 30 m reduces the computed loss by 24–33 dB. The calculation gives a small loss increase over seawater. Its attribution to seawater conductivity and surface-wave dominance is not independently established by these height tables; retain it as a solver interpretation pending the field, height, and mechanism checks in [C09](87-evidence-remediation-audit.md#c09).
 
-**Frequency selectivity across a 3 kHz channel.** Over 3×10⁻³ S/m land, W changes by less than 0.07 dB in amplitude and less than 0.03 µs in group delay across 3 kHz at 1 MHz (100 and 300 km), and by less than 0.002 dB and 0.003 µs at 30 MHz (30 and 100 km). The smooth-earth ground wave is a flat, non-dispersive channel for this modem; any selectivity on a ground-wave path comes from other mechanisms.
+**Frequency selectivity across a 3 kHz channel.** Over 3×10⁻³ S/m land, W changes by less than 0.07 dB in amplitude and less than 0.03 µs in group delay across 3 kHz at 1 MHz (100 and 300 km), and by less than 0.002 dB and 0.003 µs at 30 MHz (30 and 100 km). Within this selected smooth, homogeneous-earth calculation and listed frequencies/distances, the computed response changes little across 3 kHz. These cells do not establish that all real ground-wave paths are flat or that any observed selectivity must come from other mechanisms: mixed media, terrain, roughness, layering, skywave, antenna and receiver effects are outside this comparison. The numerical result also depends on the unrecertified field solver noted in [C09](87-evidence-remediation-audit.md#c09).
 
 ### 1.5 What the GUI's "180 dB at −164 dBm/Hz" corresponds to on a ground-wave path
 
@@ -242,7 +242,7 @@ The nearest power-line harmonic to 8.27 kHz is the 165th of 50 Hz (8,250 Hz) or 
 | 50 Hz grid, n = 165 | 1.7 Hz | 3.3 Hz | 8.2 Hz | 16.5 Hz | 33.0 Hz |
 | 60 Hz grid, n = 138 | 1.4 Hz | 2.8 Hz | 6.9 Hz | 13.8 Hz | 27.6 Hz |
 
-A grid deviation of a few tens of millihertz moves the harmonic by several hertz, more than fifty times the modem's 0.06 Hz occupied bandwidth. A harmonic line can therefore sweep through the signal band within minutes, and a fixed comb notch cannot follow it. [12](12-sub9khz-noise.md) gives the measured grid statistics.
+A grid deviation of a few tens of millihertz corresponds to a several-hertz harmonic-frequency offset under the stated multiplication. That is much wider than the modem's 0.06 Hz occupied bandwidth. The table gives frequency offsets, not a measured line trajectory or its starting separation from a selected signal; it therefore does not establish a crossing within minutes or show that a fixed comb notch fails to follow a particular line. Those claims require a measured time series with line presence, initial offset and crossing rate, or should remain conditional controls. See [C12](87-evidence-remediation-audit.md#c12).
 
 ## 3. Earth–Moon–Earth
 
@@ -286,7 +286,7 @@ The 160 Hz value at 1.2 µrad/s agrees with the 164–165 Hz maximum reported fo
 
 ### 3.3 Doppler spectrum and delay profile from assumed scattering laws
 
-The echo is integrated over the visible hemisphere with σ⁰(φ) = (1 − f_d)·k_q · (C/2)(cos⁴φ + C sin²φ)^(−3/2) + f_d·k_d · cosⁿφ. This is a Hagfors quasi-specular term plus a diffuse term, normalised so that the diffuse share of whole-disc power is f_d. A surface point at fractional radius r contributes at excess delay (2a/c)(1 − cos φ) and at a Doppler offset proportional to its projected distance from the apparent rotation axis. Widths are fractions of the limb-to-limb width LL (multiply by LL from section 3.2 to get hertz). The parameter values are illustrative spans, not fits: [40](40-eme-lunar-scattering-and-geometry.md) gives the measured parameters and the reasons a value near C ≈ 40–45 with a diffuse share of about 30 % applies near 5 cm.
+The echo is integrated over the visible hemisphere with σ⁰(φ) = (1 − f_d)·k_q · (C/2)(cos⁴φ + C sin²φ)^(−3/2) + f_d·k_d · cosⁿφ. This is a Hagfors quasi-specular term plus a diffuse term, normalised so that the diffuse share of whole-disc power is f_d. A surface point at fractional radius r contributes at excess delay (2a/c)(1 − cos φ) and at a Doppler offset proportional to its projected distance from the apparent rotation axis. Widths are fractions of the limb-to-limb width LL (multiply by LL from section 3.2 to get hertz). The parameter values are illustrative spans, not fits: [40](40-eme-lunar-scattering-and-geometry.md) discusses measured parameters and transfer limits near 5 cm. Widths in the tables below are this chapter's model outputs; [86](86-statistics-and-calculation-checks.md) independently checks selected delay integrals but not every FWHM, −10 dB, rms or percentile Doppler-width column. Those columns, and the resulting dish-size/6 Hz interpretations, remain conditional until the width calculations and convergence are independently reproduced. See [C10](87-evidence-remediation-audit.md#c10).
 
 **Whole-disc illumination**
 
@@ -316,8 +316,8 @@ What these show:
 
 - The spectrum is peaked and heavy-tailed, not Gaussian. Its half-power width is only 8–37 % of the limb-to-limb width, while 90 % of the power needs 46–76 %. A single quoted "spread" is therefore ambiguous by a factor of three to five unless its definition is stated.
 - The delay profile is continuous from 0 to 11.6 ms, with between a quarter and two thirds of the power within 0.5 ms and 7–24 % beyond 5 ms for whole-disc illumination. It is not a pair of discrete rays.
-- A beam narrower than the Moon shortens the delay profile and narrows the spectrum, at the cost of echo power. Only dishes of about 25 m and more confine the echo to within about 0.5 ms at 5,760 MHz.
-- **The "EME focused 6 Hz 0.5 ms" preset.** For 6 Hz to be the half-power width at the median limb-to-limb width of about 86 Hz reported in [41](41-eme-systems-practice-and-environment.md), the ratio would have to be 0.07. Under these laws that needs a dish of the order of 60 m, or a time near a libration minimum when the limb-to-limb width itself is small. The preset's 0.5 ms is close to the delay holding about half the whole-disc power under the more specular laws (C ≥ 65), not to a discrete echo delay. These statements depend on the assumed laws; [40](40-eme-lunar-scattering-and-geometry.md) reaches a similar conclusion from measured scattering tables.
+- Under these assumed illumination laws, a beam narrower than the Moon shortens the computed delay profile and Doppler spectrum while reducing relative echo power. The listed 25 m result places about half the modeled power within 0.5 ms. These table outputs need the independent width and convergence checks in [C10](87-evidence-remediation-audit.md#c10) before they support a dish-size conclusion.
+- **The "EME focused 6 Hz 0.5 ms" preset.** The ratio calculation compares 6 Hz with the median limb-to-limb width of about 86 Hz reported in [41](41-eme-systems-practice-and-environment.md). The dish-size estimate (about 60 m under these laws) depends on the unverified modeled Doppler-width columns, beam assumptions, and applicable libration geometry. The 0.5 ms comparison is likewise model-derived and depends on the selected delay law. Treat both as hypotheses for further check, not an established preset equivalence. The distinction between a modeled result and the measured scattering evidence in [40](40-eme-lunar-scattering-and-geometry.md) is tracked in [C10](87-evidence-remediation-audit.md#c10).
 
 ### 3.4 Station figures at 5,760 MHz
 
@@ -345,7 +345,7 @@ One-way rotation Ω = 2.36×10⁴ · B∥ · TEC / f² rad, with B∥ = 40 µT, 
 | 1,296 MHz | 0.056 rad (3.2°) | 0.56 rad (32°) |
 | 5,760 MHz | 0.0029 rad (0.16°) | 0.029 rad (1.6°) |
 
-At 5,760 MHz Faraday rotation is negligible for polarisation matching. Its frequency derivative is also negligible across 225 Hz.
+For the tabulated TEC examples, the single-leg Faraday rotation at 5,760 MHz is small; the frequency change across 225 Hz is smaller still under the same formula. This does not by itself establish negligible polarization impact for every two-leg EME geometry, magnetic-field direction, polarization convention, or receiver calibration. Check the full path and basis before using that conclusion; see [C12](87-evidence-remediation-audit.md#c12) and [C11](87-evidence-remediation-audit.md#c11).
 
 ## 4. Noise conversions
 
@@ -407,7 +407,7 @@ In this fixed-height mirror construction, the displayed 7 ms separation occurs o
 | 7 ms | 48 Hz | 71 Hz | 143 Hz | 0.08 / 0.99 / 0.23 |
 | 11 ms | 30 Hz | 45 Hz | 91 Hz | 0.85 / 0.45 / 0.08 |
 
-The correlation between carriers 75 Hz apart, the modem's spacing in the 225 Hz rows, oscillates with τ: it is high at 0.5–2 ms, nearly zero at 7 ms, and high again at about 13 ms. Two discrete paths are the worst case for this periodicity. A continuous delay profile smooths it.
+For the listed carriers and delay profiles, the calculated correlation oscillates with τ: it is high at 0.5–2 ms, nearly zero at 7 ms, and high again at about 13 ms. This comparison does not prove that two discrete paths are a worst case across admissible channels; no extremum over a defined channel class has been established. A continuous delay profile can smooth this particular periodic pattern. Keep the two-path result scoped to the shown example until [C12](87-evidence-remediation-audit.md#c12) records the applicable bound or narrower conclusion.
 
 **Coherent-integration loss on a diffusely fading path.** Mean energy collected by a fixed-phase coherent integration of length T on a Rayleigh path with a Gaussian Doppler spectrum of 2σ width B, relative to a static path:
 
