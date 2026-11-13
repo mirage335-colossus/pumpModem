@@ -17,7 +17,7 @@
 
 **Coverage.** Most sources were obtained by direct retrieval of known documents (ITU-R, NTIA, NOAA, Crossref records, open-access PDFs) rather than by open searching. Coverage of 2020–2026 work is therefore thinner than for earlier work; see the last section.
 
-**Evidence tags.** Grade: [S] ITU-R Recommendation or Report, [P] peer-reviewed, [T] government/laboratory report or documentation, [B] handbook or book, [G] grey literature, [E] this record's own estimate. Access: *read* (passage read in full text), *abstract* (abstract or record only), *secondary* (through the named source).
+**Evidence tags.** Grade: [S] ITU-R Recommendation or Report, [P] research paper or preprint (peer-review status checked separately), [T] government/laboratory report or documentation, [B] handbook or book, [G] grey literature, [E] this record's own estimate. Access: *read* (passage read in full text), *abstract* (abstract or record only), *secondary* (through the named source).
 
 ## Physical mechanisms
 
@@ -363,6 +363,7 @@ The oblique column applies 1/sin α to the 10° take-off angle, a factor of 5.8.
 - September 2017 (Kp 8+, SYM-H −146 nT): 14 MHz and then 7 MHz were wiped out from about 1200 UT on 8 September; effective bands stayed suppressed for 12–15 days [P, read: Frissell et al. 2019].
 - May 2024 (Dst −412 nT): foF2 and vertical TEC over Italy fell to about 2 MHz and 4 TECu, about 70 % below quiet values, for two whole days (11 and 13 May). Ionograms were also lost to flare absorption [P, read: Spogli et al. 2024].
 - At high latitudes the F2 layer was completely absent on 11 May 2024 [P, abstract: Themens et al. 2024].
+- The May 10–13 Asian-sector continuous-chirp study supplies direct *oblique-sounding* evidence for route changes and outages, not a modem fading distribution. On the Novosibirsk–Irkutsk, Magadan–Irkutsk and Magadan–Novosibirsk paths, storm main/recovery phases brought lower maximum observed frequencies and increased absorption; the authors report long blackout intervals, loss of regular 1F2/2F2 returns, intermittent F1/Es returns and diffuse/scattered returns near the shifted main ionospheric trough. On Novosibirsk–Irkutsk the initial 1F2/2F2 spread-F and diffuse returns were observed from 17:50 UT May 10; on Magadan–Novosibirsk the path crossed auroral and trough regions. These observations support a route-availability/transition scenario with missing detections retained. They do not give received modem C/N0, BER, a calibrated outage probability, or a joint delay–Doppler distribution [P; read: Ponomarchuk et al. 2025, May 2024 storm study].
 - In both the May 2024 and 10 October 2024 (Dst −335 nT) storms, ionisation stayed very low for more than a full day [P, abstract: Pierrard et al. 2025].
 - The empirical STORM correction (75 stations, 43 storms) works at mid-latitudes in summer and equinox, but adds little in winter and near the equator [P, abstract: Araujo-Pradere et al. 2002].
 
@@ -371,7 +372,7 @@ The oblique column applies 1/sin α to the 10° take-off angle, a factor of 5.8.
 - *Mid-latitude trough.* Near 57° magnetic latitude at midnight for moderate Kp, about 10° wide, moving equatorward 1.8° ± 0.4° per unit Kp. Density inside is from under 0.1 to almost 1 times that outside (Handbook §2.3.2.7) [B, read].
 - *Pre-dawn minimum.* See Table 1.
 - *LUF above MUF.* See the Table 2 cases.
-- *Sporadic-E blanketing.* P.1239 maps fbEs deciles, but no HF outage statistics were found. Blanketing Es and "G conditions" (foF2 at or below foF1) both appeared in the May 2024 ionograms [P, read: Spogli et al. 2024].
+- *Sporadic-E blanketing.* P.1239 maps fbEs deciles, but no HF outage statistics were found. The May 2024 oblique-sounding study reports Es and F1/F2 mode changes during the storm; Spogli et al. 2024 is a separate Italian ionosonde study and should not be used as the source for those Asian oblique-path observations [P; read: Ponomarchuk et al. 2025; Spogli et al. 2024].
 
 **Occurrence over a solar cycle.**
 
@@ -618,6 +619,7 @@ ITU-R texts were downloaded from itu.int and read unless stated.
 - Frissell, N. A. et al. (2018), Geophys. Res. Lett. 45, 4665–4674. doi:10.1029/2018GL077324. Abstract.
 - Frissell, N. A. et al. (2019), Space Weather 17, 118–132. doi:10.1029/2018SW002008. Read (author copy, hamsci.org).
 - Frissell, N. A. et al. (2022), Geophys. Res. Lett. 49, e2022GL097879. doi:10.1029/2022GL097879. Abstract.
+- Ponomarchuk, S. N. et al. (2025), “Effects of the May 10–13, 2024 magnetic storm in the Asian region of Russia from ionospheric sounding with a continuous chirp signal.” Full paper read: https://naukaru.ru/en/storage/download/242871. The observations cited above are mode/MOF and blackout evidence, not communications-channel fading statistics.
 - Frissell, N. A. et al. (2023), Front. Astron. Space Sci. 10, 1184171. doi:10.3389/fspas.2023.1184171. Read in part (publisher full text).
 - Hayakawa, H. et al. (2025), Astrophys. J. 979, 49. doi:10.3847/1538-4357/ad9335. Read in part (arXiv:2407.07665).
 - Heino, E. et al. (2019), JGR Space Phys. 124, 1361–1376. doi:10.1029/2018JA026192. Abstract.

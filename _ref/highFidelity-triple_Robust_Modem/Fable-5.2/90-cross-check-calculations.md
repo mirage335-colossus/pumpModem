@@ -69,7 +69,7 @@ Each cell gives E in dB(µV/m) for 1 kW e.m.r.p., then L_b in dB. Both antennas 
 | Very dry ground, 10⁻⁴ S/m, ε 3 | 66.6 / 104.9 | 47.5 / 124.0 | 26.3 / 145.2 | 5.7 / 165.8 | −24.5 / 196.0 | −86.3 / 257.8 |
 | Fresh-water ice, 10⁻⁵ S/m, ε 3 | 66.6 / 104.9 | 47.5 / 124.0 | 26.3 / 145.2 | 5.7 / 165.8 | −24.5 / 196.0 | −86.3 / 257.8 |
 
-At 30 MHz the land classes differ by only a few decibels from one another at a given distance, and very dry ground and ice coincide: above about 20 MHz the result over land is governed by the earth's curvature and the near-grazing reflection rather than by conductivity. Real land paths at 30 MHz are further dominated by terrain, vegetation and buildings, which this model does not contain ([25](25-groundwave-30mhz.md)).
+At 30 MHz the land classes are not generally within a few decibels: at 100 km the listed land values span 175.6–196.0 dB, a 20.4 dB range, and at 300 km they span 236.5–257.8 dB. The very-dry-ground and ice rows coincide at the displayed precision, but that does not generalize to the other classes. These are the smooth-earth results for the stated electrical constants; real land paths at 30 MHz are further affected by terrain, vegetation and buildings, which this model does not contain ([25](25-groundwave-30mhz.md)).
 
 ### 1.3 Distance at which a given basic transmission loss is reached
 
@@ -329,7 +329,7 @@ What these show:
 | 10 m | 53.0 dBi | 0.36° | 0.70 |
 | 25 m | 61.0 dBi | 0.15° | 0.28 |
 
-**The manual EME row.** Two 3 m dishes give a net loss of 284.1 − 2 × 42.6 = 199.0 dB at mean geocentric distance; 200 dB corresponds to two 2.8 m dishes. The GUI's "40 W, 200 dB" at −164 dBm/Hz gives 10.0 dB-Hz. With two 3 m dishes and a realistic system temperature the same transmitter gives 29.0 dB-Hz at 50 K (N0 = −181.6 dBm/Hz), 26.6 dB-Hz at 80 K and 24.2 dB-Hz at 150 K, before Moon noise, pointing, polarisation and narrow-beam corrections. The GUI default noise density corresponds to a system temperature of about 2,900 K. The 15 kW Helper pilot through the same path at 80 K would be at 52 dB-Hz. [41](41-eme-systems-practice-and-environment.md) gives the full station budgets and noise contributions.
+**The manual EME row.** Two 3 m dishes give a net loss of 284.1 − 2 × 42.6 = 199.0 dB at mean geocentric distance; 200 dB corresponds to two 2.8 m dishes. The GUI's "40 W, 200 dB" at −164 dBm/Hz gives 10.0 dB-Hz. With two 3 m dishes and a 40 W transmitter, the scalar radar-equation result is `C/N₀ = 28.6, 26.6 and 23.9 dB-Hz` at system temperatures 50, 80 and 150 K respectively (N₀ = −181.6, −179.6 and −176.9 dBm/Hz), before Moon noise, pointing, polarisation and narrow-beam corrections. The GUI default noise density corresponds to a system temperature of about 2,900 K. The 15 kW Helper pilot through the same path at 80 K would be about 52.3 dB-Hz. [41](41-eme-systems-practice-and-environment.md) gives the full station budgets and noise contributions.
 
 ### 3.5 Faraday rotation
 
@@ -377,7 +377,7 @@ Mirror model: reflection heights of 110 km for E and 300 km for F (and 250 and 4
 | 2,000 km | 0.44 | 0.35 | 0.80 | 1.98 | 3.41 | 5.01 | 0.37 |
 | 3,000 km | 0.40 | 0.31 | 0.58 | 1.46 | 2.59 | 3.91 | 0.32 |
 
-A 7 ms separation between discrete modes needs a fourth or fifth hop on a short path, or a ground wave and several sky-wave hops together. On paths of a few thousand kilometres, mode separations stay below about 3–4 ms in this model. Larger delay spreads are produced by scatter rather than by discrete modes ([31](31-skywave-dispersion-midlatitude-nvis-longhaul.md), [32](32-skywave-dispersion-highlatitude-equatorial.md)).
+In this fixed-height mirror construction, the displayed 7 ms separation occurs only in the short-path higher-order cases; the displayed paths of a few thousand kilometres have separations below about 3–4 ms. This is a result of the selected geometry, not a bound on real skywave modes: variable ionospheric profiles, group retardation, tilted/irregular layers and mixed propagation can change mode delays. Nor does this calculation show that larger observed delay spreads must be scatter; that attribution requires measurement or a richer path model ([31](31-skywave-dispersion-midlatitude-nvis-longhaul.md), [32](32-skywave-dispersion-highlatitude-equatorial.md)).
 
 ## 6. Width, coherence and integration conversions
 
@@ -413,7 +413,7 @@ The correlation between carriers 75 Hz apart, the modem's spacing in the 225 Hz 
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Loss | 0.04 dB | 0.31 | 0.78 | 1.66 | 2.25 | 2.81 | 3.55 | 4.58 | 6.14 | 8.20 | 11.09 |
 
-The 3 dB point is at B·T ≈ 1.3, consistent with the "about 3 dB at roughly 1.2/T" rule used in [00](00-method-and-modem-context.md) section 4.1. These are mean values: the coherent statistic of a Rayleigh path is itself exponentially distributed, so a detection probability near 90 % needs roughly 10 dB more than the mean suggests.
+The 3 dB point is at B·T ≈ 1.3, consistent with the "about 3 dB at roughly 1.2/T" rule used in [00](00-method-and-modem-context.md) section 4.1. These are mean-energy values for the stated Rayleigh model. Its instantaneous energy is exponential: the 10th percentile is −9.77 dB relative to the mean, so a mean about 9.77 dB above a fixed energy threshold gives 90% exceedance in this energy-only model. This is a fade-quantile illustration, not a universal detection probability; actual detection also depends on noise, false-alarm criterion and receiver statistic.
 
 **Time scales of the manual rows.**
 
@@ -430,5 +430,5 @@ The 3 dB point is at B·T ≈ 1.3, consistent with the "about 3 dB at roughly 1.
 - The ground-wave model is smooth and homogeneous. It contains no mixed paths, terrain, buildings, vegetation, ducting or sea roughness, and no sky wave.
 - The antenna model uses assumed capacitance, effective height and losses. It does not include corona, insulator leakage, environmental losses varying with weather, or the waveguide field structure beyond 100 km.
 - The lunar model uses assumed scattering laws, a geometric delay–Doppler mapping and Gaussian beams. It contains no regional albedo variation, no polarisation, no ephemeris-driven rotation vector and no measured 5–6 cm data, which [40](40-eme-lunar-scattering-and-geometry.md) reports do not exist in the sources found.
-- The skywave delays use a mirror model with fixed heights.
+- The skywave delay table uses a mirror model with fixed heights and no group retardation. Its tabulated mode differences do not bound actual multi-hop delays or discriminate discrete modes from scatter.
 - None of these calculations has been compared with a measurement made for this work. Their value is as an independent check on arithmetic and conventions, and as a statement of what simple physics alone predicts.

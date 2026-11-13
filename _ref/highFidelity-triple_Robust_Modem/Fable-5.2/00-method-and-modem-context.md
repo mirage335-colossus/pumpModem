@@ -21,12 +21,12 @@ It does not answer whether the modem works in those conditions. That needs exper
 
 ## 2. Evidence grades and access status
 
-Every quantitative statement in the chapters carries a grade.
+The chapters use the following source-type labels. A label alone does not establish peer review, access to full text, or applicability; those are separate attributes.
 
 | Grade | Meaning |
 | --- | --- |
 | **[S]** | Standard or recommendation (ITU-R, MIL-STD, STANAG, ETSI). |
-| **[P]** | Peer-reviewed paper. |
+| **[P]** | Research paper or preprint. Publication and peer-review status must be checked separately; entries explicitly marked preprint are not thereby established as peer reviewed. |
 | **[T]** | Government or laboratory technical report. |
 | **[B]** | Textbook or monograph. |
 | **[G]** | Grey literature: amateur-radio articles, conference slides, websites, mailing lists, software documentation, manufacturer data. |
@@ -54,7 +54,7 @@ These differences in convention are large enough to change conclusions, so they 
 - *Radar loss* for Earth–Moon–Earth follows the radar equation with the Moon's cross-section.
 - *External noise* is given as the factor F_a in decibels above kT0 at the terminals of a lossless reference antenna, so that N0 = −174 dBm/Hz + F_a [S, ITU-R P.372]. The −164 dBm/Hz default corresponds to F_a = 10 dB.
 
-**Why "path loss against −164 dBm/Hz" misleads below 30 MHz.** When external noise dominates, a lossy or short receiving antenna attenuates the wanted signal and the external noise by the same factor. C/N0 is then set by the wanted field strength against the noise field strength, and the receiving antenna drops out:
+**Why "path loss against −164 dBm/Hz" misleads below 30 MHz.** When external noise dominates and the receiving antenna applies the same effective attenuation to the wanted field and the external-noise reference, that common attenuation cancels in C/N0. This requires compatible reference planes, polarization and directional response. A changed antenna pattern or polarization, spatially distributed noise, mismatch, or receiver noise can break the cancellation:
 
     C/N0 = E_s − E_n,   E_n = F_a + 20 log f_MHz − 95.5  dB(µV/m) in 1 Hz   [S, ITU-R P.372, short vertical monopole]
 
@@ -68,7 +68,7 @@ So a real link reproduces a GUI link of "PathLoss at −164 dBm/Hz" when
 
 The GUI's 180 dB therefore stands for L_b + F_a ≈ 193.5 dB with an ideal transmitting antenna. At 1 MHz at night, where F_a is of the order of 80 dB, that is a basic transmission loss near 113 dB, not 180 dB. At 30 MHz in a quiet rural place, where F_a is near 18 dB, it is about 175 dB. The scenario chapters give the F_a values and their distributions. This conversion assumes the external noise stays above the receiver's own noise after the antenna loss; the chapters say where that fails.
 
-**At 5.8 GHz** external noise is not described by F_a. The receiver noise is set by the system temperature: N0 = −198.6 dBm/Hz + 10 log T_sys. A system temperature of 80 K gives −179.6 dBm/Hz, about 16 dB below the GUI default.
+**At 5.8 GHz** a practical EME budget normally uses the system noise temperature, including antenna and receiver contributions at the declared reference plane: N0 = −198.6 dBm/Hz + 10 log T_sys. A system temperature of 80 K gives −179.6 dBm/Hz, about 16 dB below the GUI default. An equivalent total noise factor can still be defined relative to a reference temperature; it is not the external-noise factor F_a alone when receiver contributions are included.
 
 ### 3.2 Doppler: shift, drift and spread
 
@@ -89,13 +89,13 @@ The fading correlation falls to 1/e after about 0.45/B for a Gaussian spectrum o
 
 ### 3.4 Moderate, adverse, worst case
 
-Each chapter gives a table with three columns. **Moderate** is what a link meets on most days. **Adverse** is a condition that recurs and has measured statistics. **Worst case** is the most severe value found in a measurement or standard, or an outage. A worst case assembled from the maxima of different sources is labelled as a combination that nobody has reported observing together. Where a source gives percentiles they are quoted, because a maximum from one event and a 95th percentile are different things.
+Each chapter uses **moderate**, **adverse**, and **worst-case** as comparative labels within its stated conditions, not unconditional probabilities. Only call a condition typical or recurring when the source defines an applicable population and supports that frequency. A severe observed episode, a standard test, an extrapolation and a deliberate adversarial combination are different categories. Combining maxima from separate sources does not show they occurred together. Where a source gives percentiles they are quoted with the population and estimator, because a maximum from one event and a 95th percentile are different things. An outage can be arbitrarily severe, so no finite universal worst channel is implied.
 
 ## 4. The modem as the channel sees it
 
 ### 4.1 Geometry and time scales
 
-DATA is three adjacent carriers. The inner chip rate is Rate/6; the fine chip rate is that times the Spreading factor when Added Symbols is set to Interleave; carrier spacing is 1.25 × the fine chip rate; occupied bandwidth is three spacings (`src/triad_modem_v3.cpp:138-140`). Each pulse is a root-raised-cosine with roll-off 0.25 and a support of ±8 cells (`include/datapump/triad_modem_v3.hpp:49-52`). One bit is one tile of at least 64 inner coefficients. A slot carries one bit or nothing; two scored quiet slots end a message.
+DATA is three adjacent carriers. The inner chip rate is Rate/6; the fine chip rate is that times the Spreading factor when Added Symbols is set to Interleave; carrier spacing is 1.25 × the fine chip rate; occupied bandwidth is three spacings (`src/triad_modem_v3.cpp:138-140`). The default pulse is a root-raised-cosine with roll-off 0.25 and a support of ±8 cells; the implementation also offers a tapered RRC (`include/datapump/triad_modem_v3.hpp:17,49-52`). One bit comprises one or more active tiles, each with at least 64 inner coefficients, with burst waits where configured. A slot carries one bit or nothing; two scored quiet slots end a message.
 
 The eight rows of the [manual test list](../../../_tests-RobustModem.md) give the following. Bit lengths, windows and slot spacings are from planner receipts of 2026-11-12, as recorded in section 7.1 of the earlier [resilience record](../../resilience-triple_Robust_Modem/Fable-5.2/robust-nonstationary-channel-research.md) [H]. The waveform geometry source is unchanged since then; the receipts were not regenerated.
 
@@ -122,7 +122,7 @@ The eight rows of the [manual test list](../../../_tests-RobustModem.md) give th
 | 8 | 16.7 ms | 0.27 s | 26.4 s | 38 mHz | 225 Hz |
 
 - A statistic that is coherent over a whole bit loses about 1 dB to a drift of 2/T² Hz/s and about 3 dB to a diffuse spread of roughly 1.2/T [E, derived in the resilience record, section 4.3]. For row 1 those are 60 nHz/s and 0.2 mHz. For rows 4, 5 and 7 they are 15 mHz/s and 0.1 Hz. This is a property of whole-bit coherence, not a statement about the present receiver, which adds shorter-coherence, common-frequency and drift alternatives when changing-channel settings are selected ([current architecture](../../../docs/robust-current.md#configured-calendar-reception)).
-- Delay matters through frequency selectivity across the occupied band and between DATA and the Helper pilots. For two independently fading paths of equal power separated by τ, the complex channel gains at frequencies Δf apart have correlation of magnitude |cos(πΔfτ)|: 0.5 at Δf = 1/(3τ) and zero at 1/(2τ) [E]. For 7 ms that is 48 Hz and 71 Hz, inside the 225 Hz rows (a fixed two-ray channel instead has notches every 1/τ = 143 Hz). For 12 ms it is 28 Hz and 42 Hz, still far wider than the 0.6 Hz and 0.06 Hz rows. For rows 1 to 3 delay therefore acts only as a phase and timing term, unless it changes with time.
+- Delay matters through frequency selectivity across the occupied band and between DATA and the Helper pilots. For two independently fading paths of equal power separated by τ, the complex channel gains at frequencies Δf apart have correlation of magnitude |cos(πΔfτ)|: 0.5 at Δf = 1/(3τ) and zero at 1/(2τ) [E]. For 7 ms that is 48 Hz and 71 Hz, inside the 225 Hz rows (a fixed two-ray channel instead has notches every 1/τ = 143 Hz). For 12 ms it is 28 Hz and 42 Hz, still far wider than the 0.6 Hz and 0.06 Hz rows. For rows 1 to 3 these delays generally cause little selectivity across each narrow DATA band, but their combined complex gain can still produce amplitude fading or cancellation as well as phase and timing changes. Widely separated Helper frequencies may see different gains.
 - Rows 1 to 3 have cells of 6 s and 60 s, so a "fast" channel for them is one that changes in seconds to minutes: day–night transitions, travelling disturbances, weather, tuning drift of a resonant antenna.
 
 ### 4.2 What the receiver is told
@@ -157,12 +157,12 @@ Four of these carry the numbers of ITU-R F.1487 test conditions: HF best is its 
 - *Oscillators.* Constant offsets, Wiener phase diffusion, optional white, flicker and random-walk frequency noise, a deterministic transmit frequency slope, and a static Doppler offset.
 - *Front end.* Optional converter quantisation and clipping, a one-pole low-pass, one gain step, an overload-recovery gain, one receiver-coordinate tone, and single-sample impulses at a Bernoulli rate.
 - *Noise.* White complex Gaussian of fixed variance.
-- *Level.* One constant gain from transmit power and path loss.
+- *Level.* Profile preparation represents the declared transmit power, path loss and noise density through a normalized C/N0 and streaming complex-noise variance; an independent lower-level signal gain is also available. This is a link-ratio convention, not a calibrated physical input voltage.
 
 **What it does not contain.** These are the items the scenario chapters compare with the literature:
 
 - more than two paths, or a path with a specular and a diffuse part;
-- Doppler spectra that are Lorentzian, asymmetric or bimodal, and scattering functions in which delay and Doppler are coupled;
+- general asymmetric or bimodal Doppler spectra, and scattering functions in which delay and Doppler are coupled. The optional proper-complex Ornstein–Uhlenbeck ray gains already have exponential covariance: the corresponding ideal continuous-time spectrum is Lorentzian, while the sampled process has a discrete, aliased spectrum. That mathematical form is not itself calibration to an observed path;
 - a received level that follows a physical trajectory (absorption onset and recovery, day–night transition, slow fading with measured statistics, pointing), beyond one ramped interval;
 - noise that is impulsive with a measured amplitude distribution, coloured, mains-synchronous or non-stationary; atmospherics with their real waveforms; narrowband and swept interferers other than one tone;
 - a deterministic transfer function such as a high-Q antenna system or a ground-wave attenuation function;
