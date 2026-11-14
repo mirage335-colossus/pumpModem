@@ -277,7 +277,9 @@ int main() {
             const auto s = appraisal::make_scenario(id);
             require(s.id == id && !s.family.empty() && !s.evidence.empty() &&
                     !s.provenance.empty() && !s.assumptions.empty(), "scenario provenance missing");
-            require(std::isfinite(s.reference_cn0_db_hz) && (s.channel.lunar.has_value() == s.channel.paths.empty()),
+            const auto spectral_models = s.channel.lunar.has_value() + s.channel.fullwave_reflection.has_value();
+            require(std::isfinite(s.reference_cn0_db_hz) && spectral_models <= 1 &&
+                    (spectral_models == 1) == s.channel.paths.empty(),
                     "invalid scenario level or propagation mode");
             require(s.waveform.sample_rate_hz == 1920, "reference numerical sample rate unexpected");
             require(std::isfinite(s.numerical_horizon_seconds) && s.numerical_horizon_seconds >= 0,

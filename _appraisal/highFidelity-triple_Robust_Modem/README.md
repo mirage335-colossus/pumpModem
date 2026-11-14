@@ -26,6 +26,17 @@ rare-error probabilities or complete-receiver real-time capacity. The
 and [protocol](experiment-protocol.md) preserve those distinctions and the
 source limits in [`_ref`](../../_ref/highFidelity-triple_Robust_Modem).
 
+The [inference and propagation follow-up](hf-inference-and-propagation.md)
+adds 32 bounded observations, including 15 complete receivers. It separates
+phase-reachability from rate-support failures and retains GUI errors on clean
+IQ. The fixed smooth-frequency candidate recovers individual bits but no
+additional complete long message. A numerically admitted coupled
+cutoff/absorption waveform now runs through the canonical receiver: the fixed
+one-ray configuration recovers `A` at incident C/N0 = 40 dB-Hz, fails at 30,
+20 and 0 dB-Hz, and stays quiet on its matched noise control. This is a scoped
+sensitivity bracket, not qualification of an optimal receiver or most unusual
+real HF conditions.
+
 The [physical and operating coverage expansion](hf-coverage-expansion.md)
 adds a frozen parameter design independent of the receiver bank, canonical GUI
 preparation with actual sample/RF clock errors, and a separately validated
@@ -46,12 +57,16 @@ the complete native receiver. A fixed second transition prior also recovers
 the previously failed long weak message, while a new long trajectory still
 fails. Ordinary receiver defaults are unchanged.
 
-The new [waveform-kernel admission tests](hf-fullwave.md) also reject a physical
+The earlier [waveform-kernel admission tests](hf-fullwave.md) also rejected a physical
 model approximation: interpolation between accurate frozen ionospheric
 responses can be highly inaccurate between them. A numerically converged
 static solver therefore does not automatically supply a validated dynamic
 channel. The suite preserves these failed approximation checks alongside
-failed communications.
+failed communications. Subsequent phase-factored interpolation passes the
+declared sampled full-band, causal-FIR and finite-retardation gates and feeds
+the contained coupled reflection scenario. Its complete-receiver results are
+recorded [separately](hf-inference-and-propagation.md); neither numerical
+admission nor modem success would establish evolving-Maxwell or field validity.
 
 The earlier [independent HF ensemble](hf-ensemble.md) adds multiscale and
 nonperiodic density trajectories, separate trajectory/noise seeds, independent

@@ -485,3 +485,24 @@ cannot supply failed-link denominators or long, calibrated complex channel
 records. This is useful propagation evidence, with a different role from
 receiver waveform validation. It does not close the measured disturbed-day
 coverage gap or establish an orders-of-magnitude modem advantage.
+
+The [inference-structure continuation](hf-inference-and-propagation.md) now
+finds a concrete discretization cost: high-coherence grid paths repeatedly
+reverse frequency while the analytic carrier remains smooth. Private
+max-plus certificates distinguish a near-best witness from a lower bound on
+necessary grid jumps. The resulting four-second edge experiment is a fixed
+normalized waveform prior, not an estimate of the natural ionosphere's prior.
+Recent continuous-phase expectation-propagation literature and particle
+likelihood theory offer alternatives, with multimodality, variance and bounded
+work caveats recorded in that continuation. Neither a finer grid nor a
+continuous state removes the cost of genuinely unknown channel histories.
+
+The same work finds that phase-factoring the D-layer response repairs the
+previous five-frequency interpolation failure without shrinking the physical
+trajectory or restoring absorbed energy. Its separate sampled full-band checks
+and bound between output-time and retarded finite-FIR conventions pass for the
+fixed 120-second transition; the one-second control fails. These checks admit
+the constructed channel to modem testing, not a distributed evolving-plasma
+error bound. Literature that distinguishes propagation time from slow
+ionospheric time motivates those checks; small Doppler relative to RF alone
+does not establish a negligible phase error during propagation.

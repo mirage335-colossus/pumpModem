@@ -71,6 +71,12 @@ struct HfPublicPhaseFilterResult {
     HfPhaseFilterPlan plan;
     std::array<double, 2> walk_bit_log_e{};
     std::optional<std::array<double, 2>> sticky_bit_log_e;
+    struct BridgeResult {
+        std::array<double,2> bit_log_e{};
+        std::size_t workspace_reserved_bytes=0;
+        double wall_seconds=0, summed_worker_wall_seconds=0;
+    };
+    std::optional<BridgeResult> bridge;
     std::size_t workspace_reserved_bytes = 0;
     double wall_seconds = 0, summed_worker_wall_seconds = 0;
 };
@@ -131,7 +137,7 @@ HfPublicSearchResult score_hf_public_search(
     std::size_t workspace_limit_bytes, bool full_timing, bool close_small_arrival_grid, bool include_affine,
     std::stop_token, datapump::triad::v3::receiver_detail::ReceiverExecutor&,
     bool use_native_pair_render = true, bool phase_refinement = false, bool phase_filter = false,
-    bool phase_filter_sticky = false);
+    bool phase_filter_sticky = false, bool phase_bridge = false);
 
 // Shadow detector only: no native bit, quiet, codec or completion decision.
 // The caller admits a complete, valid raw-IQ slot and verifies the simulator
@@ -149,6 +155,6 @@ datapump::triad::probe::Json diagnose_hf_public_search(
     std::span<const datapump::triad::v3::Complex>, unsigned workers,
     std::size_t total_memory_limit_bytes, bool full_timing, std::stop_token,
     HfPublicSearchResult* search_result = nullptr, bool phase_refinement = false, bool phase_filter = false,
-    bool phase_filter_sticky = false);
+    bool phase_filter_sticky = false, bool phase_bridge = false);
 
 } // namespace appraisal

@@ -47,4 +47,10 @@ struct HfVerticalColumn {
 HfFullwaveResponse solve_hf_vertical_column(double frequency_hz, const HfVerticalColumn&,
                                            double maximum_step_m);
 
+// One-way WKB phase of the constructed D layer relative to vacuum, in the
+// solver's exp(-i omega t) convention. This is a scalar phase coordinate for
+// snapshot interpolation. Loss and scattering remain in the full-wave solve.
+double hf_fullwave_d_carrier_phase_radians(double frequency_hz, double peak_electron_density_per_m3,
+                                         std::size_t midpoint_cells = 400);
+
 } // namespace appraisal

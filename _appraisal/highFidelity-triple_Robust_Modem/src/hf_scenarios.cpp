@@ -521,9 +521,33 @@ Scenario ding_measured(const std::string& id) {
     return s;
 }
 
+Scenario fullwave_reflection() {
+    auto scenario = base_hf("hf-fullwave-reflection");
+    scenario.channel.rf_hz = HfFullwaveKernelTable::carrier_hz;
+    scenario.channel.fullwave_reflection.emplace();
+    scenario.waveform.requested_bit_seconds = 64.;
+    using Table = HfFullwaveKernelTable;
+    const auto first_lag = Table::planned_first_lag_samples(HfFullwavePort::reflection);
+    scenario.bounds.arrival_low_seconds = first_lag / Table::sample_rate_hz;
+    scenario.bounds.arrival_high_seconds = (first_lag + Table::taps_per_port - 1) / Table::sample_rate_hz;
+    scenario.bounds.atmospheric_hz = 1.;
+    scenario.reference_cn0_db_hz = 20.;
+    scenario.evidence = "qualified sampled scalar full-wave reflected-port kernels along one constructed coupled D/F path";
+    scenario.provenance = "hf-inference-and-propagation.md; bounded frozen responses, independent profile/frequency witnesses and finite-FIR retarded check";
+    scenario.assumptions = "Unmagnetized normal-incidence collisionally lossy column; one reflection port. "
+        "Its causal sampled kernels use a fixed 32-sample modelling delay and a 120-second half-cosine profile transition. "
+        "The waveform sees output-time interpolated frozen coefficients, without restoring lost gain. "
+        "The public arrival prior spans all retained lags rather than centering on a selected reflection maximum. "
+        "C/N0 is referred to the normalized incident waveform, with a fixed additive white receiver noise density. "
+        "The public 1 Hz allowance is a receiver assumption, not a strict bandwidth limit for the evolving reflection. "
+        "This is not a time-domain evolving-plasma solution, an observed ionospheric event, or a calibrated link budget.";
+    return scenario;
+}
+
 } // namespace
 
 std::optional<Scenario> make_additional_hf_scenario(const std::string& id) {
+    if (id == "hf-fullwave-reflection") return fullwave_reflection();
     if (id == "hf-nvis-disturbed") return nvis_disturbed();
     if (id == "hf-drm6") return drm6();
     if (id == "hf-watterson-i1" || id == "hf-watterson-i3") return watterson_summary(id);

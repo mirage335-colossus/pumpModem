@@ -74,7 +74,7 @@ def fake_unavailable_refinement_trace(*, full: bool) -> dict:
     return trace
 
 
-def fake_phase_filter(search: dict, samples: int, *, sticky=False) -> dict:
+def fake_phase_filter(search: dict, samples: int, *, sticky=False, bridge=False) -> dict:
     def branch(values):
         high = max(values)
         presence = high + math.log(sum(math.exp(value - high) for value in values)) - math.log(2) + math.log(.25)
@@ -87,6 +87,9 @@ def fake_phase_filter(search: dict, samples: int, *, sticky=False) -> dict:
     walk = [5., 5.]  # A tie is a legitimate component result and favors bit zero.
     held = [-2., 12.]
     correlated = [max(a, b) + math.log1p(math.exp(-abs(a - b))) - math.log(2) for a, b in zip(walk, held)] if sticky else walk
+    legacy, edge = correlated, [11., -3.]
+    if bridge:
+        correlated = [max(a, b) + math.log1p(math.exp(-abs(a - b))) - math.log(2) for a, b in zip(legacy, edge)]
     combined = [max(a, b) + math.log1p(math.exp(-abs(a - b))) - math.log(2) for a, b in zip(baseline, correlated)]
     groups, blocks = (samples + 1919) // 1920, (samples + 127) // 128
     result = {"enabled": True, "executed": True, "phase_bins": 32, "frequency_bins": 33,
@@ -103,6 +106,15 @@ def fake_phase_filter(search: dict, samples: int, *, sticky=False) -> dict:
                                       "sticky": {"stay": .96875, "step_each": .015625, "edge_stay": .984375}})
         for field in ("correlation_products", "emission_states", "transition_edges"):
             result["work"][field] *= 2
+    if bridge:
+        bridge_groups = (blocks + 59) // 60
+        result.update(bridge_enabled=True, bridge=branch(edge), legacy_correlated=branch(legacy), bridge_prior_weights=[.5, .5],
+            bridge_work={"group_seconds": 4, "groups": bridge_groups, "correlation_products": 39 * 2 * 97 * blocks,
+                "edge_emissions": 39 * 4 * 97 * 32 * bridge_groups, "forward_terms": 39 * 4 * 97 * 32 * bridge_groups,
+                "shared_rotator_values": 97 * 60, "lane_workspace_bytes": 131072, "shared_workspace_bytes": 98304,
+                "workspace_reserved_bytes": search.get("stage_workers", 1) * 131072 + 98304,
+                "transition_probabilities": {"stay": .5, "step_each": .25, "edge_stay": .75},
+                "stage_wall_seconds": .15, "summed_worker_wall_seconds": .25})
     return result
 
 
@@ -153,7 +165,7 @@ def fake_gui_varying_diagnostic(selected: int, bounds: dict, *, drift_reserved=T
     for raw in ([1., 3.], [-1., 5.]):
         corrected = [value - math.log(4) + math.log(weight * ordinary_weight) for value in raw]
         stages.append({"raw_bit_log_evidence": raw, "prior_corrected_bit_log_evidence": corrected,
-            "selected_log_prior_mass": -math.log(4), "public_grid_log_count": math.log(4),
+            "selected_log_prior_mass": -math.log(4), "public_grid_log_count": math.log(4), "public_frequency_cells": 3,
             "candidates": 1, "basis_rows": 80, "workspace_bytes": 64, "seconds": .01,
             "log_presence": presence(corrected)})
     stages[1].update(blocks=2, block_rows=40, frequency_states=1, status="short_block_partial_bandwidth",
@@ -179,6 +191,145 @@ def fake_gui_varying_diagnostic(selected: int, bounds: dict, *, drift_reserved=T
             "segmented_timing_coordinates": [], "epoch_timing_coordinates": []},
         "resources": {"workers": 2, "scratch_bound_bytes": 256, "worker_stack_bound_bytes": 64,
             "metadata_bound_bytes": 32, "render_row_bound": 1024}}
+
+
+def fake_gui_clean_comparison(receipt: dict, chunk: int = 4096) -> dict:
+    diagnostic = receipt["hf_gui_varying_diagnostic"]
+    scores = {key: json.loads(json.dumps(diagnostic[key])) for key in ("affine", "varying", "combined")}
+    keys = [{"role": "receiver", "coarse": None, "clean": scores, "noisy": None}]
+    if receipt["control"] == "wrong-key":
+        coarse = json.loads(json.dumps(diagnostic["coarse"]))
+        # A different key is permitted to select different noisy coordinates.
+        coarse["affine_coordinates"][0]["frequency_hz"] = .125
+        coarse["varying_coordinates"][0]["frequency_hz"] = .125
+        keys.append({"role": "transmitter", "coarse": coarse,
+                     "clean": json.loads(json.dumps(scores)), "noisy": json.loads(json.dumps(scores))})
+    count = len(keys)
+    quiet = receipt["control"] == "noise"
+    return {"schema_version": 1, "used_for_receiver_decisions": False,
+        "transmitter_key_evaluator_only": True, "public_acquisition_input": "noisy_observation",
+        "within_key_same_coordinates_for_clean_noisy": True, "coarse_searches": count,
+        "clean_input_sha256": "a" * 64, "clean_observation_sha256": "b" * 64,
+        "clean_hashed_samples": receipt["plan"]["horizon_samples"],
+        "clean_observation_hashed_samples": diagnostic["observation_samples"],
+        "clean_channel_noise_enabled": False, "noisy_clean_validity_equal": True,
+        "quiet_control_clean_is_zero": True if quiet else None,
+        "clean_energy_sample_sum": 0. if quiet else 2., "difference_energy_sample_sum": 80.,
+        "wanted_bit": None if quiet else 1, "keys": keys,
+        "resources": {"coarse_workspace_bound_bytes": 128, "fine_pair_count": 2 * count,
+            "key_render_row_bounds": [1024] * count, "varying_render_row_bound": 2048 * count,
+            "varying_render_rows": 2 * count * diagnostic["varying"]["basis_rows"],
+            "selected_capture_bytes": 16 * diagnostic["observation_samples"], "extra_chunk_bytes": 17 * chunk,
+            "clean_source_working_bytes": 1024, "native_source_channel_bound_bytes": 65 * 2**20}}
+
+
+def fake_private_clean_trace(result: dict, physical: dict, search: dict, samples: int, frequency: list[int]) -> dict:
+    """Small certificate fixture; this summarizes supplied states and performs no channel/DSP search."""
+    groups, blocks = len(frequency), (samples + 127) // 128
+    search["coordinates"][result["timing_index"]]["template_energy"] = [10., 10.]
+    normalization = math.sqrt(physical["physical_templates"]["noise_free_energy"]) * math.sqrt(10.)
+    real = result["optimal_clean_correlation_real"]
+    phase = [0]
+    for k in frequency[:-1]:
+        phase.append((phase[-1] + 2 * k) % 32)
+    steps = [b - a for a, b in zip(frequency, frequency[1:])]
+    jumps = [x for x in steps if x]
+    dwell = longest = 1
+    for step in steps:
+        dwell = 1 if step else dwell + 1
+        longest = max(dwell, longest)
+    row = {"real_correlation": real, "clean_coherence_power": min(1., (real / normalization) ** 2),
+        "frequency_bins": frequency, "phase_bins": phase, "jumps": len(jumps), "up_jumps": steps.count(1),
+        "down_jumps": steps.count(-1), "adjacent_reversals": sum(a * b == -1 for a, b in zip(steps, steps[1:])),
+        "successive_jump_reversals": sum(a * b == -1 for a, b in zip(jumps, jumps[1:])),
+        "edge_stays": sum(step == 0 and abs(k) == 16 for k, step in zip(frequency, steps)),
+        "longest_dwell_groups": longest, "reversals_below_half_bin_carrier_change": 0,
+        "effective_phase_rms_radians": .5, "effective_aligned_phase_rms_radians": .25,
+        "carrier_phase_rms_radians": .5, "carrier_aligned_phase_rms_radians": .25,
+        "carrier_frequency_rms_hz": .1, "carrier_frequency_4_group_rms_hz": .05 if samples // 1920 >= 4 else None}
+    for prefix, stay, jump, edge in (("walk", .5, .25, .75), ("sticky", .96875, .015625, .984375)):
+        row[prefix + "_log_prior"] = -math.log(1056) + sum(math.log(jump if step else edge if abs(k) == 16 else stay)
+                                                           for k, step in zip(frequency, steps))
+    penalty = normalization / (64 * groups)
+    tolerance = 128 * sys.float_info.epsilon * (groups + 1) * normalization
+    target, objective = math.sqrt(.99) * real, real - penalty * len(jumps)
+    return {"schema_version": 1, "workspace_reserved_bytes": 2 * 1056 * (groups - 1) + 262144,
+        "analytic_carrier_points": blocks + groups + 1, "extra_state_evaluations": 1056 * groups,
+        "extra_transition_edges": 32 * 97 * (groups - 1), "predecessor_labels": 2 * 1056 * (groups - 1),
+        "penalty_correlation_units": penalty, "certificate_tolerance_correlation": tolerance,
+        "target_projection_power_fraction_of_best_real": .99, "target_real_correlation": target,
+        "penalized_objective_correlation": objective,
+        "minimum_jumps_lower_bound": max(0, math.ceil((target - objective - tolerance) / penalty)),
+        "target_reached": True, "carrier_frequency_total_variation_hz": 0., "carrier_frequency_rms_step_hz": 0.,
+        "carrier_reversal_count": 0, "carrier_reference_scope": "analytic simulator carrier; no envelope delay or noise",
+        "maximum_projection": json.loads(json.dumps(row)), "penalized_projection": json.loads(json.dumps(row))}
+
+
+def fake_private_bridge_support(blocks: int, correlations=(6., 8., 7.)) -> dict:
+    groups = (blocks + 59) // 60
+    return {"schema_version": 1, "used_for_receiver_decisions": False, "phase_invariant": "p-4*k modulo 8",
+        "group_seconds": 4, "groups": groups, "workspace_reserved_bytes": 262144,
+        "correlation_products": 159 * blocks, "max_plus_terms": (97 + 291 + 159) * 32 * groups,
+        **{name: {"edge_terms_per_phase": edges, "real_correlation": value, "clean_coherence_power": min(1., value * value / 100)}
+           for (name, edges), value in zip((("original", 97), ("phase_relaxed", 291), ("rate_relaxed", 159)), correlations)}}
+
+
+def add_fake_fullwave_receipt(receipt: dict) -> None:
+    """Native-shaped qualification metadata, with no electromagnetic or modem computation."""
+    model = {"port": "reflection", "carrier_hz": 3400000, "sample_rate_hz": 1920, "occupied_half_band_hz": 768,
+        "transition_first_seconds": 60, "transition_seconds": 120, "minimum_source_seconds": 540,
+        "interpolation": "phase_factored_output_time_half_cosine", "modelling_delay_samples": 32,
+        "taps": 129, "first_lag_samples": 1, "last_lag_samples": 129, "filter_halo_samples": 128,
+        "maximum_rf_solves": 32070, "preparation_workspace_bound_bytes": 1048576}
+    plan = receipt["plan"]
+    source_stop = 480 + 13 * 64 * 1920
+    first_quiet = source_stop + 129
+    horizon = first_quiet + 2 * 64 * 1920
+    slots = [{"index": i, "evaluator_transmitting": i < 13,
+              "observation": {"first": 480 + i * 122880 if i < 13 else first_quiet + (i - 13) * 122880,
+                              "stop": 480 + (i + 1) * 122880 if i < 13 else first_quiet + (i - 12) * 122880}}
+             for i in range(15)]
+    executed = receipt["mode"] != "plan"
+    plan.update(channel_renderer="hf_fullwave_reflection", fullwave_reflection=dict(model),
+        source_stop_sample=source_stop, horizon_samples=horizon, represented_seconds=horizon / 1920,
+        channel_tail_seconds=129 / 1920, wire_bits=13, first_uncontaminated_quiet_slot=13,
+        scored_slot_horizon=15, planned_uncontaminated_quiet_slots=2, public_slots=slots,
+        public_bounds={"arrival_low_seconds": 1 / 1920, "arrival_high_seconds": 129 / 1920,
+                       "receiver_filter_halo_samples": 128},
+        cn0_reference_plane="normalized incident DATA before reflected-port loss and fixed additive receiver noise",
+        noise_variance=1920 / 10 ** (plan["cn0_db_hz"] / 10),
+        fullwave_reflection_source_band_checked=executed, fullwave_reflection_table_built=executed)
+    receipt["scenario"] = {"channel": {"renderer": "hf_fullwave_reflection", "fullwave_reflection": dict(model)}}
+    if not executed:
+        return
+    full = {**model, "table_sha256": "e" * 64,
+        "table_digest_scope": "both ports in reflection/transmission order, ascending profile knots and integer lags, little-endian complex binary64 taps",
+        "table_qualified": True, "witnesses_qualified": True, "rf_solves": 32070,
+        "knot_profiles_checked": 65, "holdout_profiles_checked": 128,
+        "maximum_profile_holdout_absolute_error": [.001, .002],
+        "maximum_witness_frequency_absolute_error": [.001, .002],
+        "maximum_witness_mesh_absolute_error": [.001, .002], "maximum_discarded_energy_fraction": [1e-8, 2e-8],
+        "maximum_frozen_flux_excess": .001, "retarded_peak_error_bound": .003,
+        "carrier_flight_phase_bound_radians": .15, "table_workspace_bytes": 300000,
+        "stream_workspace_bytes": 4096, "preparation_seconds": 1.2,
+        "source_minimum_frequency_hz": -384., "source_maximum_frequency_hz": 384.,
+        "regions": [{"name": name, "samples": samples, "incident_energy_sample_sum": incident,
+                     "reflected_energy_sample_sum": incident / 10}
+                    for name, samples, incident in (("before", 115232, 10.), ("transition", 230400, 20.),
+                                                    ("after", horizon - 345632, 70.))]}
+    receipt.setdefault("channel", {}).update(samples=horizon, hashed_samples=horizon, source_samples=source_stop,
+        contains_signal_energy=True, contains_source_energy=True, input_sha256="f" * 64,
+        tail_seconds=129 / 1920, maximum_delay_seconds=1 / 1920, fullwave_reflection=full,
+        workspace_bytes=1048576 + 500, input_energy_sample_sum=100., signal_energy_sample_sum=10.)
+    receipt["timing"] = {"channel_preparation_seconds": 1.3, "wall_seconds": 2.,
+                         "isolated_receiver_service_measured": False, "capacity_qualified": False}
+    if receipt["control"] == "noise":
+        for slot in slots:
+            slot["evaluator_transmitting"] = False
+        for region in full["regions"]:
+            region.update(incident_energy_sample_sum=0., reflected_energy_sample_sum=0.)
+        receipt["channel"].update(contains_source_energy=False, contains_signal_energy=False,
+                                  input_energy_sample_sum=0., signal_energy_sample_sum=0.)
 
 
 def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None) -> dict:
@@ -303,6 +454,11 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
             "accepted_messages": 0, "premature_completions": 0, "wrong_bits": 0, "false_data": 0}
         receipt["slots"], receipt["messages"] = [], []
         receipt["channel"] = {"samples": 1000, "hashed_samples": 1000, "input_sha256": "f" * 64}
+        if "--hf-gui-clean-diagnostic" in command:
+            receipt["plan"].update(hf_gui_clean_diagnostic_requested=True,
+                                   native_source_channel_preflight_bound_bytes=2 * 65 * 2**20)
+            receipt["hf_gui_varying_diagnostic"]["clean_comparison"] = fake_gui_clean_comparison(
+                receipt, int(argument("--chunk", "4096")))
     if mode == "channel" or channel is not None:
         receipt["channel"] = channel or {"contains_signal_energy": True, "samples": 100}
     if mode == "oracle":
@@ -388,13 +544,16 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
             receipt.setdefault("receiver", {})["evidence_policy"] = policy
     if "--hf-phase-filter-sticky" in command:
         receipt["plan"]["hf_phase_filter_sticky_requested"] = True
+    if "--hf-phase-bridge" in command:
+        receipt["plan"]["hf_phase_bridge_requested"] = True
     if "--hf-phase-filter" in command:
         receipt["plan"]["hf_phase_filter_requested"] = True
         receipt["plan"].setdefault("public_bounds", {}).update(frequency_bound_hz=1, atmospheric_hz=0)
         search = receipt["hf_public_search"]
         search.update(evaluated_timing_atoms=39, block_rows=128, blocks=1, configured_frequency_bound_hz=1, stage_workers=1,
                       presence_reference_threshold=21.49337868826, bit_separation_reference=5.29330482472)
-        search["phase_filter"] = fake_phase_filter(search, 80, sticky="--hf-phase-filter-sticky" in command)
+        search["phase_filter"] = fake_phase_filter(search, 80, sticky="--hf-phase-filter-sticky" in command,
+                                                  bridge="--hf-phase-bridge" in command)
     if "--hf-phase-filter-paths" in command:
         receipt["plan"]["hf_phase_filter_paths_requested"] = True
         receipt["plan"]["public_bounds"].update(arrival_low_seconds=.001, arrival_high_seconds=.003, clock_bound_ppm=0)
@@ -423,10 +582,13 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
         phase.update(phase_filter_enabled=True, model_family="equal_prior_refined_baseline_and_correlated_phase_filter")
         if "--hf-phase-filter-sticky" in command:
             phase["phase_filter_sticky_enabled"] = True
+        if "--hf-phase-bridge" in command:
+            phase["phase_bridge_enabled"] = True
         callback = phase["slots"][0]
         callback.update(evaluated_timing_atoms=39, block_rows=128, blocks=32, configured_frequency_bound_hz=1, stage_workers=1,
                         presence_reference_threshold=21.49337868826, bit_separation_reference=5.29330482472)
-        callback["phase_filter"] = fake_phase_filter(callback, 4001, sticky="--hf-phase-filter-sticky" in command)
+        callback["phase_filter"] = fake_phase_filter(callback, 4001, sticky="--hf-phase-filter-sticky" in command,
+                                                     bridge="--hf-phase-bridge" in command)
         callback["bit_log_e"] = list(callback["phase_filter"]["combined"]["bit_log_e"])
     if "--service-replay" in command:
         plan = receipt["plan"]
@@ -488,6 +650,8 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
                     "service_seconds_per_baseband_second": wall / represented, "commits": end - begin,
                     "initial_uncommitted_slots": 1, "busy_hardware_fraction": .5}
             receipt["service_replay"] = replay
+    if receipt["requested_scenario"] == "hf-fullwave-reflection":
+        add_fake_fullwave_receipt(receipt)
     return receipt
 
 
@@ -846,6 +1010,254 @@ class CampaignValidationTests(unittest.TestCase):
             episode.update(override)
             with self.subTest(override=override), self.assertRaises(runner.CampaignError):
                 runner._validate_episode(episode, 0, set(), 10, 1000000)
+
+    def test_phase_bridge_is_opt_in_for_shadow_or_receiver_and_preserves_legacy(self) -> None:
+        shadow = {"id": "bridge", "scenario": "hf-ensemble-tid", "mode": "hf-search", "waveform": "reference", "seed": 1,
+                  "search_timing": "full", "hf_phase_refinement": True, "hf_phase_filter": True}
+        receiver = {"id": "bridge-receiver", "scenario": "hf-ensemble-tid", "mode": "receive", "waveform": "reference", "seed": 1,
+                    "hf_phase_refinement": True, "hf_public_phase_receiver": True, "hf_phase_filter_receiver": True}
+        for base in (shadow, receiver):
+            for sticky in (False, True):
+                episode = dict(base, hf_phase_filter_sticky=sticky, hf_phase_bridge=True)
+                runner._validate_episode(episode, 0, set(), 10, 1000000)
+                command = runner._command(Path("/native/probe"), episode, 1000000, 2)
+                self.assertIn("--hf-phase-bridge", command)
+                receipt = fake_completed_receipt(command)
+                runner._validate_completed_receipt(receipt, episode)
+                parent = receipt["hf_public_search"] if base is shadow else receipt["hf_public_phase_receiver"]["slots"][0]
+                result = parent["phase_filter"]
+                old = fake_phase_filter(parent, result["input_samples"], sticky=sticky)
+                self.assertEqual(result["work"], old["work"])
+                self.assertEqual(result["legacy_correlated"], old["correlated"])
+                for bit in (0, 1):
+                    expected = math.log(.5 * math.exp(result["baseline"]["bit_log_e"][bit]) +
+                                        .25 * math.exp(result["legacy_correlated"]["bit_log_e"][bit]) +
+                                        .25 * math.exp(result["bridge"]["bit_log_e"][bit]))
+                    self.assertAlmostEqual(result["combined"]["bit_log_e"][bit], expected)
+                bad = json.loads(json.dumps(receipt))
+                del bad["plan"]["hf_phase_bridge_requested"]
+                with self.assertRaisesRegex(runner.CampaignError, "phase bridge request"):
+                    runner._validate_completed_receipt(bad, episode)
+                if base is receiver:
+                    bad = json.loads(json.dumps(receipt))
+                    del bad["hf_public_phase_receiver"]["phase_bridge_enabled"]
+                    with self.assertRaises(runner.CampaignError):
+                        runner._validate_completed_receipt(bad, episode)
+                    self.assertEqual(parent["bit_log_e"], result["combined"]["bit_log_e"])
+                disabled = dict(episode, hf_phase_bridge=False)
+                old_command = runner._command(Path("/native/probe"), disabled, 1000000, 2)
+                self.assertNotIn("--hf-phase-bridge", old_command)
+                old_receipt = fake_completed_receipt(old_command)
+                runner._validate_completed_receipt(old_receipt, disabled)
+                target = old_receipt["hf_public_search"] if base is shadow else old_receipt["hf_public_phase_receiver"]["slots"][0]
+                self.assertNotIn("bridge", target["phase_filter"])
+                target["phase_filter"]["bridge_work"] = result["bridge_work"]
+                with self.assertRaisesRegex(runner.CampaignError, "unrequested phase bridge"):
+                    runner._validate_completed_receipt(old_receipt, disabled)
+        for override in ({"hf_phase_filter": False}, {"hf_phase_bridge": 1},
+                         {"hf_phase_filter_paths": True, "hf_physical_diagnostic": True}):
+            episode = dict(shadow, hf_phase_bridge=True)
+            episode.update(override)
+            with self.subTest(override=override), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(episode, 0, set(), 10, 1000000)
+
+    def test_phase_bridge_partial_groups_workspace_and_work_are_exact(self) -> None:
+        episode = {"id": "bridge", "scenario": "hf-ensemble-tid", "mode": "hf-search", "waveform": "reference", "seed": 1,
+                   "search_timing": "full", "hf_phase_refinement": True, "hf_phase_filter": True, "hf_phase_bridge": True}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 2000000, 2))
+        parent, plan = receipt["hf_public_search"], receipt["plan"]
+        for samples, expected_groups in ((1, 1), (7679, 1), (7680, 1), (7681, 2), (600 * 1920, 150)):
+            for workers in (1, 39):
+                parent.update(blocks=(samples + 127) // 128, stage_workers=workers)
+                plan.update(horizon_samples=samples, search_observation={"first": 0, "stop": samples})
+                parent["phase_filter"] = fake_phase_filter(parent, samples, bridge=True)
+                work = parent["phase_filter"]["bridge_work"]
+                self.assertEqual(work["groups"], expected_groups)
+                self.assertEqual(work["workspace_reserved_bytes"], workers * 131072 + 98304)
+                self.assertGreater(work["forward_terms"], 0)  # The final endpoint is retained even for one partial group.
+                runner._validate_phase_filter_result(parent, plan, plan["search_observation"])
+        changes = ((("bridge_enabled",), False), (("bridge_prior_weights",), [.25, .75]),
+            (("bridge_work", "group_seconds"), 1), (("bridge_work", "groups"), 149),
+            (("bridge_work", "correlation_products"), 1), (("bridge_work", "edge_emissions"), 1),
+            (("bridge_work", "forward_terms"), 39 * 4 * 97 * 32 * 149),
+            (("bridge_work", "shared_rotator_values"), 5821), (("bridge_work", "lane_workspace_bytes"), 65536),
+            (("bridge_work", "shared_workspace_bytes"), 0),
+            (("bridge_work", "workspace_reserved_bytes"), 39 * 131072),
+            (("bridge_work", "transition_probabilities", "edge_stay"), .5),
+            (("bridge_work", "stage_wall_seconds"), -1), (("bridge_work", "summed_worker_wall_seconds"), math.nan),
+            (("bridge", "favored_bit"), 1), (("legacy_correlated", "bit_log_e"), [1., 2.]))
+        for path, value in changes:
+            bad = json.loads(json.dumps(parent))
+            target = bad["phase_filter"]
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            with self.subTest(path=path), self.assertRaises(runner.CampaignError):
+                runner._validate_phase_filter_result(bad, plan, plan["search_observation"])
+
+    def test_phase_bridge_rejects_missing_half_weight_with_consistent_summaries(self) -> None:
+        episode = {"id": "bridge", "scenario": "hf-ensemble-tid", "mode": "hf-search", "waveform": "reference", "seed": 1,
+                   "search_timing": "full", "hf_phase_refinement": True, "hf_phase_filter": True,
+                   "hf_phase_filter_sticky": True, "hf_phase_bridge": True}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 1000000, 2))
+        parent = receipt["hf_public_search"]
+        result = parent["phase_filter"]
+
+        def rewrite_summary(name, values):
+            presence = math.log(sum(math.exp(value) for value in values) * .125)
+            separation = abs(values[0] - values[1])
+            result[name].update(bit_log_e=values, weighted_presence_log_e=presence,
+                favored_bit=int(values[1] > values[0]), bit_log_separation=separation,
+                passes_presence_reference=presence >= parent["presence_reference_threshold"],
+                passes_bit_separation_reference=separation >= parent["bit_separation_reference"])
+
+        rewrite_summary("correlated", [value + math.log(2) for value in result["correlated"]["bit_log_e"]])
+        rewrite_summary("combined", [math.log((math.exp(a) + math.exp(b)) * .5)
+                                    for a, b in zip(result["baseline"]["bit_log_e"], result["correlated"]["bit_log_e"])])
+        with self.assertRaisesRegex(runner.CampaignError, "equal bridge/legacy mixture"):
+            runner._validate_completed_receipt(receipt, episode)
+
+    def test_private_bridge_support_is_additive_and_charges_both_new_workspaces(self) -> None:
+        episode = {"id": "paths", "scenario": "hf-ensemble-tid", "mode": "hf-search", "waveform": "reference", "seed": 1,
+                   "search_timing": "full", "hf_phase_refinement": True, "hf_phase_filter": True,
+                   "hf_physical_diagnostic": True, "hf_phase_filter_paths": True}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 10000, 2))
+        runner._validate_completed_receipt(receipt, episode)  # Both new diagnostic objects are optional for legacy receipts.
+        physical, search = receipt["hf_physical_diagnostic"], receipt["hf_public_search"]
+        result = physical["phase_filter_paths"]
+        search["coordinates"][result["timing_index"]]["template_energy"] = [10., 10.]
+        result["bridge_support"] = fake_private_bridge_support(1)
+        physical["admission"].update(future_reserved_bytes=400000, total_memory_limit_bytes=500000)
+        runner._validate_completed_receipt(receipt, episode)
+        result["clean_trace"] = fake_private_clean_trace(result, physical, search, 80, [0])
+        with self.assertRaisesRegex(runner.CampaignError, "buffers must fit"):
+            runner._validate_completed_receipt(receipt, episode)
+        physical["admission"].update(future_reserved_bytes=700000, total_memory_limit_bytes=800000)
+        runner._validate_completed_receipt(receipt, episode)
+        self.assertNotIn("hf_phase_bridge_requested", receipt["plan"])
+        self.assertFalse(receipt["outcomes"]["receiver_executed"])
+
+    def test_private_bridge_support_rejects_wrong_geometry_normalization_and_scope(self) -> None:
+        result = {"timing_index": 0, "wanted_bit": 1, "bridge_support": fake_private_bridge_support(61)}
+        physical, search = {"physical_templates": {"noise_free_energy": 10.}}, {"coordinates": [{"template_energy": [10., 10.]}]}
+        runner._validate_private_bridge_support(result, physical, search, 61)
+        changes = ((("schema_version",), True), (("schema_version",), 2), (("used_for_receiver_decisions",), True),
+            (("phase_invariant",), "none"), (("group_seconds",), 1), (("groups",), 1),
+            (("workspace_reserved_bytes",), 131072), (("correlation_products",), 97 * 61),
+            (("max_plus_terms",), (97 + 291 + 159) * 32),
+            (("original", "edge_terms_per_phase"), 159), (("phase_relaxed", "edge_terms_per_phase"), 97),
+            (("rate_relaxed", "edge_terms_per_phase"), 291), (("original", "real_correlation"), math.nan),
+            (("phase_relaxed", "clean_coherence_power"), .1), (("rate_relaxed", "clean_coherence_power"), 1.01))
+        for path, value in changes:
+            bad = json.loads(json.dumps(result))
+            target = bad["bridge_support"]
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            with self.subTest(path=path), self.assertRaises(runner.CampaignError):
+                runner._validate_private_bridge_support(bad, physical, search, 61)
+        for correlations in ((6., 5., 7.), (6., 8., 5.)):
+            result["bridge_support"] = fake_private_bridge_support(61, correlations)
+            with self.assertRaisesRegex(runner.CampaignError, "contain the original"):
+                runner._validate_private_bridge_support(result, physical, search, 61)
+        result["bridge_support"] = fake_private_bridge_support(61, (6., 11., 7.))
+        with self.assertRaisesRegex(runner.CampaignError, "energy normalization"):
+            runner._validate_private_bridge_support(result, physical, search, 61)
+
+    def test_private_bridge_support_partial_groups_fixed_caps_and_zero_projection(self) -> None:
+        physical, search = {"physical_templates": {"noise_free_energy": 10.}}, {"coordinates": [{"template_energy": [10., 10.]}]}
+        result = {"timing_index": 0, "wanted_bit": 1}
+        for blocks, groups in ((1, 1), (59, 1), (60, 1), (61, 2), (9000, 150)):
+            for correlations in ((0., 0., 0.), (6., 6., 6.), (6., 8., 7.)):
+                result["bridge_support"] = fake_private_bridge_support(blocks, correlations)
+                self.assertEqual(result["bridge_support"]["groups"], groups)
+                self.assertEqual(runner._validate_private_bridge_support(result, physical, search, blocks), 262144)
+                self.assertLessEqual(result["bridge_support"]["correlation_products"], 1431000)
+                self.assertLessEqual(result["bridge_support"]["max_plus_terms"], 2625600)
+        # Keep harmless final arithmetic roundoff distinct from a support loss.
+        result["bridge_support"] = fake_private_bridge_support(1, (6., 6. - 1e-10, 6.))
+        runner._validate_private_bridge_support(result, physical, search, 1)
+        for blocks in (0, 9001):
+            result["bridge_support"] = fake_private_bridge_support(blocks)
+            with self.subTest(blocks=blocks), self.assertRaisesRegex(runner.CampaignError, "aperture cap"):
+                runner._validate_private_bridge_support(result, physical, search, blocks)
+
+    def test_private_clean_trace_is_versioned_additive_and_charges_extra_workspace(self) -> None:
+        episode = {"id": "paths", "scenario": "hf-ensemble-tid", "mode": "hf-search", "waveform": "reference", "seed": 1,
+                   "search_timing": "full", "hf_phase_refinement": True, "hf_phase_filter": True,
+                   "hf_physical_diagnostic": True, "hf_phase_filter_paths": True}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 10000, 2))
+        runner._validate_completed_receipt(receipt, episode)  # Legacy receipts have no additive trace.
+        physical, search = receipt["hf_physical_diagnostic"], receipt["hf_public_search"]
+        result = physical["phase_filter_paths"]
+        result["clean_trace"] = fake_private_clean_trace(result, physical, search, 80, [0])
+        with self.assertRaisesRegex(runner.CampaignError, "buffers must fit"):
+            runner._validate_completed_receipt(receipt, episode)
+        physical["admission"].update(future_reserved_bytes=400000, total_memory_limit_bytes=500000)
+        runner._validate_completed_receipt(receipt, episode)
+        for version in (None, True, 0, 2):
+            result["clean_trace"]["schema_version"] = version
+            with self.subTest(version=version), self.assertRaisesRegex(runner.CampaignError, "schema version"):
+                runner._validate_completed_receipt(receipt, episode)
+
+    def test_private_clean_trace_checks_state_priors_certificate_and_partial_groups(self) -> None:
+        result = {"timing_index": 0, "wanted_bit": 1, "optimal_clean_correlation_real": math.sqrt(50),
+                  "clean_coherence_power_lower_bound": .5}
+        physical = {"physical_templates": {"noise_free_energy": 10.}}
+        search = {"coordinates": [{}]}
+        samples, groups = 7 * 1920 + 1000, 8
+        blocks = (samples + 127) // 128
+        trace = fake_private_clean_trace(result, physical, search, samples, [15, 16, 16, 15, 15, 16, 15, 15])
+        result["clean_trace"] = trace
+        self.assertEqual(trace["maximum_projection"]["jumps"], 4)
+        self.assertEqual(trace["maximum_projection"]["adjacent_reversals"], 1)
+        self.assertEqual(trace["maximum_projection"]["successive_jump_reversals"], 3)
+        self.assertEqual(trace["maximum_projection"]["edge_stays"], 1)
+        self.assertEqual(trace["minimum_jumps_lower_bound"], 3)
+        self.assertEqual(runner._validate_private_clean_trace(result, physical, search, groups, blocks, samples),
+                         trace["workspace_reserved_bytes"])
+        changes = ((("workspace_reserved_bytes",), 262144), (("analytic_carrier_points",), blocks + groups),
+            (("predecessor_labels",), 0), (("extra_state_evaluations",), 1056), (("extra_transition_edges",), 0),
+            (("penalty_correlation_units",), .5), (("certificate_tolerance_correlation",), 1.),
+            (("target_projection_power_fraction_of_best_real",), 1.), (("target_real_correlation",), 1.),
+            (("minimum_jumps_lower_bound",), 0), (("target_reached",), False),
+            (("penalized_objective_correlation",), 0.), (("carrier_reversal_count",), groups),
+            (("carrier_frequency_total_variation_hz",), -1.), (("carrier_reference_scope",), ""),
+            (("maximum_projection", "frequency_bins"), [15, 17, 16, 15, 15, 16, 15, 15]),
+            (("maximum_projection", "phase_bins"), [0] * groups), (("maximum_projection", "jumps"), 3),
+            (("maximum_projection", "adjacent_reversals"), 3), (("maximum_projection", "longest_dwell_groups"), 1),
+            (("maximum_projection", "walk_log_prior"), 0.), (("maximum_projection", "sticky_log_prior"), 0.),
+            (("maximum_projection", "real_correlation"), 1.), (("maximum_projection", "clean_coherence_power"), .75),
+            (("maximum_projection", "effective_phase_rms_radians"), 4.),
+            (("maximum_projection", "carrier_frequency_4_group_rms_hz"), None),
+            (("maximum_projection", "reversals_below_half_bin_carrier_change"), 4))
+        for path, value in changes:
+            bad = json.loads(json.dumps(result))
+            target = bad["clean_trace"]
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            with self.subTest(path=path), self.assertRaises(runner.CampaignError):
+                runner._validate_private_clean_trace(bad, physical, search, groups, blocks, samples)
+        # A smoother penalized path may miss the near-maximum target; the lower
+        # certificate still applies, without calling that path a successful witness.
+        smoother = fake_private_clean_trace(result, physical, search, samples, [16] * groups)["penalized_projection"]
+        smoother["real_correlation"] -= .05
+        smoother["clean_coherence_power"] = smoother["real_correlation"] ** 2 / 100
+        trace.update(penalized_projection=smoother, penalized_objective_correlation=smoother["real_correlation"], target_reached=False)
+        trace["minimum_jumps_lower_bound"] = math.ceil((trace["target_real_correlation"] - smoother["real_correlation"] -
+            trace["certificate_tolerance_correlation"]) / trace["penalty_correlation_units"])
+        runner._validate_private_clean_trace(result, physical, search, groups, blocks, samples)
+        self.assertEqual(trace["minimum_jumps_lower_bound"], 1)
+        # A nominal value inside the certificate's tolerance is not a certified
+        # target-reaching witness. Preserve the conservative C - tolerance rule.
+        smoother["real_correlation"] = trace["target_real_correlation"] + trace["certificate_tolerance_correlation"] / 2
+        smoother["clean_coherence_power"] = smoother["real_correlation"] ** 2 / 100
+        trace.update(penalized_objective_correlation=smoother["real_correlation"], minimum_jumps_lower_bound=0)
+        runner._validate_private_clean_trace(result, physical, search, groups, blocks, samples)
+        trace["target_reached"] = True
+        with self.assertRaisesRegex(runner.CampaignError, "jump certificate"):
+            runner._validate_private_clean_trace(result, physical, search, groups, blocks, samples)
 
     def test_sticky_phase_filter_fixed_prior_work_and_shared_scratch(self) -> None:
         episode = {"id": "sticky-receiver", "scenario": "hf-ensemble-tid", "mode": "receive", "waveform": "reference", "seed": 1,
@@ -1490,6 +1902,127 @@ class CampaignValidationTests(unittest.TestCase):
             with self.subTest(override=override), self.assertRaises(runner.CampaignError):
                 runner._validate_episode(dict(episode, **override), 0, set(), 10, 1000)
 
+    def test_fullwave_inputs_preserve_physical_scope_without_fixing_payload(self) -> None:
+        base = {"id": "fullwave", "scenario": "hf-fullwave-reflection", "waveform": "reference", "seed": 64001,
+                "noise_seed": 74001, "bit_seconds": 64, "message": "A"}
+        for mode in ("plan", "channel", "receive"):
+            episode = dict(base, mode=mode)
+            runner._validate_episode(episode, 0, set(), 300, 12000000)
+            receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 12000000, 300))
+            runner._validate_completed_receipt(receipt, episode)
+        for message, duration in (("B", 80), ("e", 250)):
+            # Admission uses native source span/band, not content-specific A64 rules.
+            runner._validate_episode(dict(base, mode="receive", message=message, bit_seconds=duration), 0, set(), 300, 12000000)
+        runner._validate_episode(dict(base, mode="receive", control="noise", helper=False, service_replay=False), 0, set(), 300, 12000000)
+        for override in ({"mode": "slot"}, {"mode": "oracle"}, {"mode": "hf-search"}, {"mode": "gui-varying"},
+                {"backend": "cuda"}, {"waveform": "smoke"}, {"pulse": "tapered-rrc"}, {"helper": True},
+                {"control": "wrong-key"}, {"control": "wrong-ordinal"}, {"control": "eof"}, {"fec": "rs20"},
+                {"service_replay": True}, {"hf_public_phase_receiver": True}, {"hf_compare_admitted_models": True},
+                {"duration_seconds": 1}, {"capture_lead_seconds": .25}, {"hf_trajectory_seed": 64001},
+                {"hf_trajectory_offset_seconds": 0}):
+            episode = dict(base, mode="receive")
+            episode.update(override)
+            with self.subTest(override=override), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(episode, 0, set(), 300, 12000000)
+        with self.assertRaisesRegex(runner.CampaignError, "control is valid only"):
+            runner._validate_episode(dict(base, mode="channel", control="wanted"), 0, set(), 300, 12000000)
+
+    def test_fullwave_receipt_binds_fixed_model_complete_span_and_public_tail(self) -> None:
+        episode = {"id": "fullwave", "scenario": "hf-fullwave-reflection", "mode": "receive", "waveform": "reference",
+                   "seed": 64001, "noise_seed": 74001, "bit_seconds": 64, "message": "A", "cn0_db_hz": 20}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 12000000, 300))
+        runner._validate_completed_receipt(receipt, episode)
+        changes = ((("plan", "channel_renderer"), "analytic_rays"),
+            (("scenario", "channel", "renderer"), "analytic_rays"),
+            (("scenario", "channel", "fullwave_reflection", "carrier_hz"), 3401000),
+            (("plan", "fullwave_reflection", "transition_seconds"), 480),
+            (("plan", "fullwave_reflection", "filter_halo_samples"), 127),
+            (("plan", "fullwave_reflection", "first_lag_samples"), True),
+            (("plan", "source_stop_sample"), math.ceil(540.25 * 1920) - 1),
+            (("plan", "horizon_samples"), receipt["plan"]["source_stop_sample"] + 128),
+            (("plan", "represented_seconds"), 1.), (("plan", "channel_tail_seconds"), 128 / 1920),
+            (("plan", "public_bounds", "arrival_high_seconds"), 128 / 1920),
+            (("plan", "public_bounds", "receiver_filter_halo_samples"), 16),
+            (("plan", "public_slots", 13, "observation", "first"), receipt["plan"]["source_stop_sample"] + 128),
+            (("plan", "public_slots", 14, "observation", "stop"), receipt["plan"]["horizon_samples"] - 1),
+            (("plan", "fullwave_reflection_source_band_checked"), False),
+            (("plan", "fullwave_reflection_table_built"), False), (("plan", "noise_variance"), .1),
+            (("plan", "cn0_reference_plane"), "renormalized reflected signal"),
+            (("channel", "samples"), receipt["plan"]["horizon_samples"] - 1),
+            (("channel", "hashed_samples"), 1), (("channel", "source_samples"), 1),
+            (("channel", "input_sha256"), "bad"), (("channel", "tail_seconds"), 128 / 1920),
+            (("channel", "maximum_delay_seconds"), 129 / 1920),
+            (("channel", "fullwave_reflection", "regions", 0, "samples"), 115200),
+            (("channel", "fullwave_reflection", "regions", 1, "name"), "after"),
+            (("channel", "fullwave_reflection", "regions", 2, "reflected_energy_sample_sum"), 70.))
+        for path, value in changes:
+            bad = json.loads(json.dumps(receipt))
+            target = bad
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            with self.subTest(path=path), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad, episode)
+
+    def test_fullwave_qualification_never_treats_unknown_or_failed_errors_as_passes(self) -> None:
+        episode = {"id": "fullwave", "scenario": "hf-fullwave-reflection", "mode": "channel", "waveform": "reference",
+                   "seed": 1, "bit_seconds": 64, "message": "A"}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 12000000, 300))
+        changes = ((("table_qualified",), False), (("witnesses_qualified",), False), (("table_sha256",), "bad"),
+            (("table_digest_scope",), "one selected profile"), (("rf_solves",), 32069),
+            (("knot_profiles_checked",), 64), (("holdout_profiles_checked",), 0),
+            (("maximum_profile_holdout_absolute_error",), [-1, .001]),
+            (("maximum_profile_holdout_absolute_error",), [None, .001]),
+            (("maximum_witness_frequency_absolute_error",), [.0051, .001]),
+            (("maximum_witness_mesh_absolute_error",), [math.nan, .001]),
+            (("maximum_discarded_energy_fraction",), [2e-6, 1e-8]),
+            (("maximum_frozen_flux_excess",), .02), (("retarded_peak_error_bound",), .0051),
+            (("carrier_flight_phase_bound_radians",), math.nan), (("preparation_seconds",), -1),
+            (("table_workspace_bytes",), 1048576), (("stream_workspace_bytes",), 0),
+            (("source_minimum_frequency_hz",), -769), (("source_maximum_frequency_hz",), 769))
+        for path, value in changes:
+            bad = json.loads(json.dumps(receipt))
+            target = bad["channel"]["fullwave_reflection"]
+            target[path[-1]] = value
+            with self.subTest(path=path), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad, episode)
+        # The carrier-flight figure is explicitly a proxy, not a separate gate.
+        receipt["channel"]["fullwave_reflection"]["carrier_flight_phase_bound_radians"] = 100.
+        runner._validate_completed_receipt(receipt, episode)
+        for field, value in (("channel_preparation_seconds", 1.), ("wall_seconds", 1.),
+                             ("isolated_receiver_service_measured", True), ("capacity_qualified", True)):
+            bad = json.loads(json.dumps(receipt))
+            bad["timing"][field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(runner.CampaignError, "total wall time"):
+                runner._validate_completed_receipt(bad, episode)
+
+    def test_fullwave_plan_and_noise_control_keep_unexecuted_and_zero_signal_scopes(self) -> None:
+        episode = {"id": "fullwave", "scenario": "hf-fullwave-reflection", "mode": "plan", "waveform": "reference",
+                   "seed": 1, "bit_seconds": 64, "message": "A"}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 12000000, 300))
+        runner._validate_completed_receipt(receipt, episode)
+        self.assertNotIn("channel", receipt)
+        for field in ("fullwave_reflection_source_band_checked", "fullwave_reflection_table_built"):
+            bad = json.loads(json.dumps(receipt))
+            bad["plan"][field] = True
+            with self.assertRaisesRegex(runner.CampaignError, "unexecuted planning"):
+                runner._validate_completed_receipt(bad, episode)
+        noise = dict(episode, mode="receive", control="noise", cn0_db_hz=40)
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), noise, 12000000, 300))
+        runner._validate_completed_receipt(receipt, noise)
+        self.assertEqual(receipt["channel"]["signal_energy_sample_sum"], 0.)
+        self.assertGreater(receipt["channel"]["source_samples"], 540 * 1920)
+        bad = json.loads(json.dumps(receipt))
+        bad["channel"]["fullwave_reflection"]["regions"][0]["incident_energy_sample_sum"] = .1
+        bad["channel"]["input_energy_sample_sum"] = .1
+        with self.assertRaisesRegex(runner.CampaignError, "exactly zero"):
+            runner._validate_completed_receipt(bad, noise)
+        old_episode = {"id": "old", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 1}
+        old = fake_completed_receipt(runner._command(Path("/native/probe"), old_episode, 12000000, 300))
+        old["plan"]["fullwave_reflection"] = receipt["plan"]["fullwave_reflection"]
+        with self.assertRaisesRegex(runner.CampaignError, "unrequested full-wave"):
+            runner._validate_completed_receipt(old, old_episode)
+
     def test_gui_varying_inputs_require_explicit_cpu_component_scope(self) -> None:
         episode = gui_varying_episode()
         for control in ("wanted", "noise", "wrong-key"):
@@ -1510,6 +2043,98 @@ class CampaignValidationTests(unittest.TestCase):
                 {"hf_public_phase_receiver": False}, {"hf_phase_refinement": False}, {"pulse": "tapered-rrc"})]:
             with self.subTest(invalid=invalid), self.assertRaises(runner.CampaignError):
                 runner._validate_episode(invalid, 0, set(), 10, 1000)
+
+    def test_gui_clean_diagnostic_flag_scope_and_legacy_receipts(self) -> None:
+        for control in ("wanted", "noise", "wrong-key"):
+            episode = gui_varying_episode(control=control, hf_gui_clean_diagnostic=True, chunk=17)
+            runner._validate_episode(episode, 0, set(), 10, 1000)
+            command = runner._command(Path("/native/probe"), episode, 1000, 2)
+            self.assertIn("--hf-gui-clean-diagnostic", command)
+            receipt = fake_completed_receipt(command)
+            runner._validate_completed_receipt(receipt, episode)
+            clean = receipt["hf_gui_varying_diagnostic"]["clean_comparison"]
+            self.assertEqual(clean["resources"]["extra_chunk_bytes"], 17 * 17)
+            self.assertEqual(clean["coarse_searches"], 2 if control == "wrong-key" else 1)
+            self.assertEqual(receipt["outcomes"]["actual_scored_slots"], 0)
+            self.assertFalse(receipt["outcomes"]["correct_complete"])
+            disabled = dict(episode, hf_gui_clean_diagnostic=False)
+            old_command = runner._command(Path("/native/probe"), disabled, 1000, 2)
+            self.assertNotIn("--hf-gui-clean-diagnostic", old_command)
+            old = fake_completed_receipt(old_command)
+            runner._validate_completed_receipt(old, disabled)
+            self.assertNotIn("clean_comparison", old["hf_gui_varying_diagnostic"])
+            old["hf_gui_varying_diagnostic"]["clean_comparison"] = clean
+            with self.assertRaisesRegex(runner.CampaignError, "unrequested clean"):
+                runner._validate_completed_receipt(old, disabled)
+            del receipt["plan"]["hf_gui_clean_diagnostic_requested"]
+            with self.assertRaisesRegex(runner.CampaignError, "clean GUI diagnostic request"):
+                runner._validate_completed_receipt(receipt, episode)
+        base = gui_varying_episode(hf_gui_clean_diagnostic=True)
+        for override in ({"mode": "receive"}, {"mode": "plan"}, {"mode": "hf-search"}, {"scenario": "awgn"},
+                         {"helper": True}, {"backend": "cuda"}, {"control": "wrong-ordinal"},
+                         {"hf_gui_clean_diagnostic": 1}):
+            with self.subTest(override=override), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(base, **override), 0, set(), 10, 1000)
+
+    def test_gui_clean_comparison_validates_capture_scope_and_resource_quotes(self) -> None:
+        episode = gui_varying_episode(control="wrong-key", hf_gui_clean_diagnostic=True)
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 1000, 2))
+        clean = receipt["hf_gui_varying_diagnostic"]["clean_comparison"]
+        self.assertNotEqual(clean["keys"][1]["coarse"]["varying_coordinates"],
+                            receipt["hf_gui_varying_diagnostic"]["coarse"]["varying_coordinates"])
+        runner._validate_completed_receipt(receipt, episode)  # Per-key noisy banks need not match each other.
+        changes = ((("schema_version",), 2), (("used_for_receiver_decisions",), True),
+            (("transmitter_key_evaluator_only",), False), (("public_acquisition_input",), "clean_observation"),
+            (("within_key_same_coordinates_for_clean_noisy",), False), (("coarse_searches",), 1),
+            (("clean_input_sha256",), "bad"), (("clean_observation_sha256",), "bad"),
+            (("clean_hashed_samples",), 999), (("clean_observation_hashed_samples",), 79),
+            (("clean_channel_noise_enabled",), True), (("noisy_clean_validity_equal",), False),
+            (("quiet_control_clean_is_zero",), True), (("wanted_bit",), None),
+            (("clean_energy_sample_sum",), math.nan), (("difference_energy_sample_sum",), -1),
+            (("resources", "fine_pair_count"), 2), (("resources", "key_render_row_bounds"), [1024]),
+            (("resources", "varying_render_row_bound"), 2048), (("resources", "varying_render_rows"), 160),
+            (("resources", "selected_capture_bytes"), 80), (("resources", "extra_chunk_bytes"), 4096),
+            (("resources", "clean_source_working_bytes"), 66 * 2**20),
+            (("resources", "native_source_channel_bound_bytes"), 64 * 2**20),
+            (("resources", "coarse_workspace_bound_bytes"), 257),
+            (("keys", 0, "role"), "transmitter"), (("keys", 0, "noisy"), {}),
+            (("keys", 1, "coarse", "frequency_points"), 3),
+            (("keys", 1, "coarse", "workspaces"), True),
+            (("keys", 1, "coarse", "varying_coordinates", 0, "arrival_seconds"), math.inf),
+            (("keys", 1, "clean", "varying", "frequency_states"), 0),
+            (("keys", 1, "clean", "varying", "public_frequency_cells"), 1),
+            (("keys", 1, "clean", "affine", "candidates"), 2),
+            (("keys", 1, "clean", "affine", "prior_corrected_bit_log_evidence"), [1., 3.]))
+        for path, value in changes:
+            bad = json.loads(json.dumps(receipt))
+            target = bad["hf_gui_varying_diagnostic"]["clean_comparison"]
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            with self.subTest(path=path), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad, episode)
+        receipt["plan"]["native_source_channel_preflight_bound_bytes"] //= 2
+        with self.assertRaisesRegex(runner.CampaignError, "reservations"):
+            runner._validate_completed_receipt(receipt, episode)
+
+    def test_gui_clean_comparison_zero_controls_and_evaluator_only_score_variation(self) -> None:
+        episode = gui_varying_episode(control="noise", hf_gui_clean_diagnostic=True)
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 1000, 2))
+        clean = receipt["hf_gui_varying_diagnostic"]["clean_comparison"]
+        runner._validate_completed_receipt(receipt, episode)
+        for field, value in (("clean_energy_sample_sum", .1), ("quiet_control_clean_is_zero", False), ("wanted_bit", 0)):
+            bad = json.loads(json.dumps(receipt))
+            bad["hf_gui_varying_diagnostic"]["clean_comparison"][field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(runner.CampaignError, "zero-signal"):
+                runner._validate_completed_receipt(bad, episode)
+        episode = gui_varying_episode(hf_gui_clean_diagnostic=True)
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 1000, 2))
+        clean = receipt["hf_gui_varying_diagnostic"]["clean_comparison"]
+        clean["clean_energy_sample_sum"] = 0.  # A complete lost signal is not a validator failure.
+        clean["keys"][0]["clean"]["affine"]["basis_rows"] = 79
+        runner._validate_completed_receipt(receipt, episode)
+        self.assertFalse(receipt["outcomes"]["receiver_executed"])
+        self.assertEqual(runner._negative_control_summary([{"status": "completed", "episode": episode, "receipt": receipt}])["completed_trials"], 0)
 
     def test_gui_varying_wrong_key_preserves_transmission_and_component_scope(self) -> None:
         episode = gui_varying_episode(control="wrong-key")

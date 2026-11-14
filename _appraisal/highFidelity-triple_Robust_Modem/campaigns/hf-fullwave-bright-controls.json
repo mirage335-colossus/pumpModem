@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "name": "hf-fullwave-bright-controls",
+  "purpose": "Frozen before any fullwave modem outcomes following independent review: final reflected power~4.1e-4 makes original20/0dBHz latebits energy limited. Add a bright40dBHz complete wanted and matched noise-only control to distinguish attenuation from receiver mismatch without fitting thresholds.",
+  "max_wall_seconds": 600,
+  "per_trial_wall_seconds": 300,
+  "max_trials": 2,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "scenario": "hf-fullwave-reflection",
+      "waveform": "reference",
+      "seed": 64001,
+      "noise_seed": 74001,
+      "bit_seconds": 64,
+      "message": "A",
+      "control": "wanted",
+      "id": "fullwave-reflection-CN0-40",
+      "mode": "receive",
+      "cn0_db_hz": 40
+    },
+    {
+      "scenario": "hf-fullwave-reflection",
+      "waveform": "reference",
+      "seed": 64001,
+      "noise_seed": 74001,
+      "bit_seconds": 64,
+      "message": "A",
+      "control": "noise",
+      "id": "fullwave-reflection-CN0-40-noise",
+      "mode": "receive",
+      "cn0_db_hz": 40
+    }
+  ]
+}

@@ -39,6 +39,10 @@ constexpr std::array<std::size_t, 5> profile_interval_counts{16, 32, 64, 128, 25
 constexpr std::array profile_rf_offsets{-864., -768., 0., 768., 864.};
 constexpr std::size_t max_profile_q_index = 2 * profile_interval_counts.back();
 constexpr std::size_t profile_solve_cap = 10300;
+constexpr std::array<std::size_t, 3> phase_factored_interval_counts{16, 32, 64};
+constexpr std::size_t phase_cells = 400, phase_check_cells = 800, phase_holdouts = 33;
+constexpr double phase_quadrature_tolerance = 1e-6;
+constexpr double phase_endpoint_tolerance = 1e-12;
 
 struct ProfilePath {
     const char* name;
@@ -52,11 +56,16 @@ constexpr double f_collision = 60.;
 constexpr std::size_t path_count = paths.size();
 constexpr std::size_t declared_max_solves = path_count * profiles * (max_grid_size + mesh_grid_size + 2 * holdouts);
 constexpr std::size_t profile_max_solves = path_count * (max_profile_q_index + 1) * profile_rf_offsets.size() * 2;
+constexpr std::size_t phase_factored_max_solves = path_count * (2 * phase_factored_interval_counts.back() + 1) *
+    profile_rf_offsets.size() * 2;
 static_assert(declared_max_solves <= solve_cap);
 static_assert(profile_max_solves <= profile_solve_cap);
 static_assert(std::ranges::all_of(profile_interval_counts, [](auto n) { return max_profile_q_index % (2 * n) == 0; }));
+static_assert(std::ranges::all_of(phase_factored_interval_counts,
+    [](auto n) { return max_profile_q_index % (2 * n) == 0; }));
 constexpr std::array profile_labels{"start", "independent_midpoint", "end"};
 constexpr std::array port_labels{"reflection", "transmission"};
+constexpr std::array phase_path_traversals{2., 1.};
 constexpr double d_bottom = HfVerticalColumn::d_center_m - HfVerticalColumn::d_half_width_m;
 constexpr std::array minimum_lag{2. * d_bottom / c * fs_hz, HfVerticalColumn::top_m / c * fs_hz};
 
@@ -311,6 +320,66 @@ struct MeshResponses {
 
 using ProfileResponses = std::array<MeshResponses, profile_rf_offsets.size()>;
 
+struct PhaseCheck {
+    double max_change_rad = -1.;
+    double worst_q = 0.;
+
+    void observe(double q, double change_rad) {
+        if (change_rad > max_change_rad) {
+            max_change_rad = change_rad;
+            worst_q = q;
+        }
+    }
+
+    bool pass() const { return max_change_rad >= 0. && max_change_rad <= phase_quadrature_tolerance; }
+    Json json() const {
+        return object({{"max_400_to_800_cell_phase_change_rad", max_change_rad}, {"worst_q", worst_q}, {"pass", pass()}});
+    }
+};
+
+double d_phase(double q, std::size_t cells) {
+    return hf_fullwave_d_carrier_phase_radians(rf_hz, profile_at(paths.front(), q).d_peak_electron_density_per_m3, cells);
+}
+
+// Both frozen paths have exactly the same D profile coordinate. Evaluate it
+// once per q across the two paths and retain full analytic phase winding.
+class DCarrierPhaseCache {
+public:
+    DCarrierPhaseCache() : initial_phase_(d_phase(0., phase_cells)), initial_check_phase_(d_phase(0., phase_check_cells)) {
+        values_.front() = 0.;
+        grid_check_.observe(0., 0.);
+        const double shift = std::sqrt(2.) / 3.;
+        for (std::size_t i = 0; i < phase_holdouts; ++i) {
+            const double q = (i + shift) / phase_holdouts;
+            const double nominal = d_phase(q, phase_cells) - initial_phase_;
+            offgrid_check_.observe(q, std::abs(d_phase(q, phase_check_cells) - initial_check_phase_ - nominal));
+        }
+    }
+
+    double get(std::size_t index) {
+        auto& value = values_[index];
+        if (!value) {
+            const double q = profile_q(index);
+            value = d_phase(q, phase_cells) - initial_phase_;
+            grid_check_.observe(q, std::abs(d_phase(q, phase_check_cells) - initial_check_phase_ - *value));
+        }
+        return *value;
+    }
+
+    bool pass() const { return grid_check_.pass() && offgrid_check_.pass(); }
+    Json json() const {
+        return object({{"shared_q_grid", grid_check_.json()}, {"independent_offgrid_q", offgrid_check_.json()},
+                       {"pass", pass()}});
+    }
+
+private:
+    double initial_phase_;
+    double initial_check_phase_;
+    PhaseCheck grid_check_;
+    PhaseCheck offgrid_check_;
+    std::array<std::optional<double>, max_profile_q_index + 1> values_{};
+};
+
 class ProfileRefinementCache {
 public:
     ProfileRefinementCache() : samples_(max_profile_q_index + 1) {}
@@ -352,23 +421,30 @@ struct ProfileError {
         }
     }
 
-    bool pass() const { return max_error >= 0. && max_error <= complex_tolerance; }
-    Json json() const {
-        return object({{"max_absolute_complex_error", max_error}, {"q", q}, {"rf_offset_hz", offset_hz}, {"pass", pass()}});
+    bool pass(double tolerance = complex_tolerance) const { return max_error >= 0. && max_error <= tolerance; }
+    Json json(double tolerance = complex_tolerance) const {
+        return object({{"max_absolute_complex_error", max_error}, {"q", q}, {"rf_offset_hz", offset_hz},
+                       {"pass", pass(tolerance)}});
     }
 };
 
 struct ProfilePortChecks {
     ProfileError fine_interpolation;
     ProfileError coarse_interpolation;
+    ProfileError direct_fine;
+    ProfileError direct_coarse;
+    ProfileError endpoint_reconstruction;
     ProfileError knot_mesh;
     ProfileError midpoint_mesh;
 
-    bool pass() const { return fine_interpolation.pass() && knot_mesh.pass() && midpoint_mesh.pass(); }
+    bool pass(bool factored) const {
+        return fine_interpolation.pass() && knot_mesh.pass() && midpoint_mesh.pass() &&
+            (!factored || endpoint_reconstruction.pass(phase_endpoint_tolerance));
+    }
 };
 
 Json profile_refinement_path(const ProfilePath& path, ProfileRefinementCache& cache, std::size_t intervals,
-                             Solver& solver, bool& all_pass) {
+                             Solver& solver, bool& all_pass, DCarrierPhaseCache* phases) {
     const auto stride = max_profile_q_index / (2 * intervals);
     const auto calls_before = solver.calls;
     cache.prepare(path, stride, solver);
@@ -377,6 +453,25 @@ Json profile_refinement_path(const ProfilePath& path, ProfileRefinementCache& ca
     for (std::size_t i = 0; i <= 2 * intervals; ++i) {
         const bool midpoint = (i % 2) != 0;
         const auto index = i * stride;
+        struct IntervalBlends {
+            HfFullwavePhaseBlend lower, middle, upper;
+        };
+        std::array<IntervalBlends, port_labels.size()> blends{};
+        if (phases) {
+            // Phase quadrature is checked at the midpoint independently. The
+            // prediction uses only endpoint phases and endpoint responses.
+            phases->get(index);
+            if (midpoint) {
+                const double lower = phases->get(index - stride), upper = phases->get(index + stride);
+                for (std::size_t p = 0; p < port_labels.size(); ++p) {
+                    const double left_phase = phase_path_traversals[p] * lower;
+                    const double right_phase = phase_path_traversals[p] * upper;
+                    blends[p] = {hf_fullwave_phase_blend(left_phase, right_phase, 0.),
+                                 hf_fullwave_phase_blend(left_phase, right_phase, .5),
+                                 hf_fullwave_phase_blend(left_phase, right_phase, 1.)};
+                }
+            }
+        }
         for (std::size_t f = 0; f < profile_rf_offsets.size(); ++f) {
             const auto& samples = cache.at(index, f);
             const double offset = profile_rf_offsets[f];
@@ -387,8 +482,20 @@ Json profile_refinement_path(const ProfilePath& path, ProfileRefinementCache& ca
                 if (midpoint) {
                     const auto& lower = cache.at(index - stride, f);
                     const auto& upper = cache.at(index + stride, f);
-                    const auto fine = .5 * (port(lower.fine, p) + port(upper.fine, p));
-                    const auto coarse = .5 * (port(lower.coarse, p) + port(upper.coarse, p));
+                    const auto lower_fine = port(lower.fine, p), upper_fine = port(upper.fine, p);
+                    const auto lower_coarse = port(lower.coarse, p), upper_coarse = port(upper.coarse, p);
+                    auto fine = .5 * (lower_fine + upper_fine);
+                    auto coarse = .5 * (lower_coarse + upper_coarse);
+                    if (phases) {
+                        row.direct_fine.observe(std::abs(fine - port(samples.fine, p)), index, offset);
+                        row.direct_coarse.observe(std::abs(coarse - port(samples.coarse, p)), index, offset);
+                        fine = blends[p].middle.apply(lower_fine, upper_fine);
+                        coarse = blends[p].middle.apply(lower_coarse, upper_coarse);
+                        const auto restored_lower = blends[p].lower.apply(lower_fine, upper_fine);
+                        const auto restored_upper = blends[p].upper.apply(lower_fine, upper_fine);
+                        row.endpoint_reconstruction.observe(std::abs(restored_lower - lower_fine), index - stride, offset);
+                        row.endpoint_reconstruction.observe(std::abs(restored_upper - upper_fine), index + stride, offset);
+                    }
                     row.fine_interpolation.observe(std::abs(fine - port(samples.fine, p)), index, offset);
                     row.coarse_interpolation.observe(std::abs(coarse - port(samples.coarse, p)), index, offset);
                 }
@@ -400,11 +507,18 @@ Json profile_refinement_path(const ProfilePath& path, ProfileRefinementCache& ca
     Json::Array ports;
     for (std::size_t p = 0; p < port_labels.size(); ++p) {
         const auto& row = checks[p];
-        path_pass &= row.pass();
-        ports.push_back(object({{"port", port_labels[p]}, {"pass", row.pass()},
+        const bool passes = row.pass(phases != nullptr);
+        path_pass &= passes;
+        auto receipt = object({{"port", port_labels[p]}, {"pass", passes},
             {"midpoint_interpolation_5m", row.fine_interpolation.json()},
             {"midpoint_interpolation_10m_diagnostic", row.coarse_interpolation.json()},
-            {"knot_mesh_10m_to_5m", row.knot_mesh.json()}, {"midpoint_mesh_10m_to_5m", row.midpoint_mesh.json()}}));
+            {"knot_mesh_10m_to_5m", row.knot_mesh.json()}, {"midpoint_mesh_10m_to_5m", row.midpoint_mesh.json()}});
+        if (phases) {
+            receipt["direct_complex_control_5m"] = row.direct_fine.json();
+            receipt["direct_complex_control_10m_diagnostic"] = row.direct_coarse.json();
+            receipt["endpoint_reconstruction_5m"] = row.endpoint_reconstruction.json(phase_endpoint_tolerance);
+        }
+        ports.push_back(std::move(receipt));
     }
     all_pass &= path_pass;
     return object({{"path", path.name}, {"pass", path_pass}, {"checked_knot_profiles", intervals + 1},
@@ -412,10 +526,14 @@ Json profile_refinement_path(const ProfilePath& path, ProfileRefinementCache& ca
                    {"new_rf_solves", solver.calls - calls_before}, {"ports", std::move(ports)}});
 }
 
-int run_profile_refinement(Solver& solver, std::chrono::steady_clock::time_point start) {
+int run_profile_refinement(Solver& solver, std::chrono::steady_clock::time_point start, bool phase_factored) {
     std::array<ProfileRefinementCache, path_count> caches;
+    std::optional<DCarrierPhaseCache> phases;
+    if (phase_factored) phases.emplace();
+    const auto interval_counts = phase_factored ? std::span<const std::size_t>{phase_factored_interval_counts} :
+        std::span<const std::size_t>{profile_interval_counts};
     Json::Array looks, intervals_json, offsets_json, path_inventory;
-    for (const auto n : profile_interval_counts) intervals_json.push_back(n);
+    for (const auto n : interval_counts) intervals_json.push_back(n);
     for (const auto f : profile_rf_offsets) offsets_json.push_back(f);
     for (const auto& path : paths) {
         path_inventory.push_back(object({{"path", path.name}, {"f_peak_plasma_over_center_rf_at_q0", path.initial_ratio},
@@ -423,13 +541,17 @@ int run_profile_refinement(Solver& solver, std::chrono::steady_clock::time_point
     }
     bool all_pass = false;
     Json first_passing_interval_count;
-    for (const auto intervals : profile_interval_counts) {
+    for (const auto intervals : interval_counts) {
         all_pass = true;
         Json::Array path_rows;
         for (std::size_t p = 0; p < paths.size(); ++p)
-            path_rows.push_back(profile_refinement_path(paths[p], caches[p], intervals, solver, all_pass));
-        looks.push_back(object({{"intervals", intervals}, {"cumulative_rf_solves", solver.calls},
-                                {"all_paths_and_ports_pass", all_pass}, {"paths", std::move(path_rows)}}));
+            path_rows.push_back(profile_refinement_path(paths[p], caches[p], intervals, solver, all_pass,
+                                                       phases ? &*phases : nullptr));
+        if (phases) all_pass &= phases->pass();
+        auto look = object({{"intervals", intervals}, {"cumulative_rf_solves", solver.calls},
+                            {"all_paths_and_ports_pass", all_pass}, {"paths", std::move(path_rows)}});
+        if (phases) look["carrier_phase_quadrature"] = phases->json();
+        looks.push_back(std::move(look));
         if (all_pass) {
             first_passing_interval_count = intervals;
             break;
@@ -437,8 +559,9 @@ int run_profile_refinement(Solver& solver, std::chrono::steady_clock::time_point
     }
 
     using G = HfVerticalColumn;
-    const auto report = object({
-        {"schema_version", 1}, {"experiment", "frozen-vertical-plasma-profile-refinement"},
+    auto report = object({
+        {"schema_version", 1}, {"experiment", phase_factored ? "frozen-vertical-plasma-phase-factored-profile-refinement" :
+                                                                "frozen-vertical-plasma-profile-refinement"},
         {"scope", "scalar B=0 normal incidence, five discrete RF offsets and one midpoint per profile interval"},
         {"source_identity", source_identity()}, {"rf_hz", rf_hz}, {"rf_offsets_hz", std::move(offsets_json)},
         {"occupied_half_band_hz", occupied_hz}, {"reference_ports_m", Json::Array{0., G::top_m}},
@@ -450,43 +573,216 @@ int run_profile_refinement(Solver& solver, std::chrono::steady_clock::time_point
         {"d_peak_electron_density_at_q0_per_m3", d_density_initial},
         {"d_peak_electron_density_at_q1_per_m3", d_density_final}, {"path_inventory", std::move(path_inventory)},
         {"parameter_path", "q in [0,1]; linearly vary peak F plasma frequency and peak D electron density"},
-        {"interpolation", "linear complex interpolation in q of the original untapered static solver response, exp(-i omega t)"},
+        {"interpolation", phase_factored ? "linear interpolation of phase-factored complex responses with carrier-phase restoration" :
+                                 "linear complex interpolation in q of the original untapered static solver response, exp(-i omega t)"},
         {"midpoints", "static solutions at q=(j+0.5)/N are excluded from interpolation at that look and cached for finer looks"},
         {"spatial_mesh_m", Json::Array{mesh_check_step_m, fine_step_m}},
         {"declared_interval_counts", std::move(intervals_json)}, {"q_cache_denominator", max_profile_q_index},
         {"engineering_max_absolute_complex_error", complex_tolerance},
-        {"stop_rule", "stop at the first look where every port and path passes 5 m midpoint interpolation and 10 m to 5 m mesh at every knot and midpoint across all five offsets; otherwise withhold at 256 intervals"},
-        {"rf_solve_cap", profile_solve_cap}, {"declared_max_rf_solves", profile_max_solves}, {"actual_rf_solves", solver.calls},
+        {"stop_rule", phase_factored ? "stop at the first look where every port and path passes 5 m midpoint interpolation, endpoint reconstruction, phase quadrature, and 10 m to 5 m mesh at every knot and midpoint across all five offsets; otherwise withhold at 64 intervals" :
+                         "stop at the first look where every port and path passes 5 m midpoint interpolation and 10 m to 5 m mesh at every knot and midpoint across all five offsets; otherwise withhold at 256 intervals"},
+        {"rf_solve_cap", phase_factored ? phase_factored_max_solves : profile_solve_cap},
+        {"declared_max_rf_solves", phase_factored ? phase_factored_max_solves : profile_max_solves},
+        {"actual_rf_solves", solver.calls},
         {"first_passing_interval_count", first_passing_interval_count}, {"all_paths_and_ports_pass_at_final_look", all_pass},
         {"full_band_qualified", false}, {"causal_operator_qualified", false}, {"slowness_qualified", false},
         {"communications_qualified", false}, {"receiver_executed", false}, {"evolving_plasma_solved", false},
         {"wall_seconds", std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count()},
         {"looks", std::move(looks)}});
+    if (phase_factored)
+        report["carrier_phase_factoring"] = object({
+            {"definition", "relative to q=0: k0 times the integral of Re(n-1) across the D layer at RF center, in the solver's exp(-i omega t) sign"},
+            {"reflection_traversals", phase_path_traversals[0]}, {"transmission_traversals", phase_path_traversals[1]},
+            {"algorithm", "remove phase at each knot, interpolate complex residuals and analytic phase linearly between knots, and restore the interpolated phase at q; retain the static solver amplitudes at the knots"},
+            {"midpoint_cells", phase_cells}, {"quadrature_check_cells", phase_check_cells},
+            {"quadrature_offgrid_q_count", phase_holdouts}, {"quadrature_offgrid_q_rule", "(j+sqrt(2)/3)/33, j=0..32"},
+            {"max_one_way_quadrature_change_rad", phase_quadrature_tolerance},
+            {"max_endpoint_reconstruction_error", phase_endpoint_tolerance},
+            {"phase_quadrature", phases->json()}});
     write_json(std::cout, report);
     std::cout << '\n';
     return all_pass ? 0 : 1;
+}
+
+using KernelTable = HfFullwaveKernelTable;
+constexpr std::array kernel_ports{HfFullwavePort::reflection, HfFullwavePort::transmission};
+
+Json table_error_json(const HfFullwaveBandError& result) {
+    return result.maximum < 0. ? Json{} : object({{"absolute_complex_error", result.maximum},
+        {"q", result.profile_q}, {"rf_offset_hz", result.offset_hz}, {"pass", result.maximum <= KernelTable::complex_tolerance}});
+}
+
+Json table_waveform_check(std::shared_ptr<const KernelTable> table, HfFullwavePort port, double duration, bool& all_pass) {
+    constexpr std::size_t transition_first = 0, input_count = 2048;
+    const auto start_sample = static_cast<std::size_t>(duration * KernelTable::sample_rate_hz / 2.) - input_count / 2;
+    const auto first_lag = table->first_lag_samples(port), last_lag = table->last_lag_samples(port);
+    HfFullwaveProfileStream whole(table, port, transition_first, duration, start_sample);
+    HfFullwaveProfileStream split(table, port, transition_first, duration, start_sample);
+    std::array<Complex, input_count> input{};
+    double peak_input = 0.;
+    for (std::size_t n = 0; n < input.size(); ++n) {
+        // A known occupied-band complex mixture followed by a finite abrupt
+        // source stop. Compare the whole physical finite-FIR tail as well.
+        input[n] = std::polar(.54, .3 + two_pi * n * 171.53 / KernelTable::sample_rate_hz) +
+            std::polar(.38, -.6 - two_pi * n * 433.21 / KernelTable::sample_rate_hz);
+        peak_input = std::max(peak_input, std::abs(input[n]));
+    }
+    std::vector<Complex> output(input.size() + last_lag), chunked(output.size());
+    whole.process(input, std::span{output}.first(input.size()));
+    bool all_drained = whole.drain(std::span{output}.subspan(input.size())) == last_lag;
+    const auto chunks = std::span{chunked};
+    for (std::size_t first = 0; first < input.size();) {
+        const auto n = std::min<std::size_t>(127, input.size() - first);
+        split.process(std::span{input}.subspan(first, n), chunks.subspan(first, n));
+        first += n;
+    }
+    const auto drained = split.drain(chunks.subspan(input.size(), 17));
+    all_drained &= drained == 17 && split.drain(chunks.subspan(input.size() + drained)) == last_lag - drained &&
+        split.drain(chunks.first(1)) == 0;
+    const double phase_scale = std::numbers::pi / (duration * KernelTable::sample_rate_hz);
+    const auto q_at = [&](double absolute) { return std::pow(std::sin(.5 * std::clamp(phase_scale * absolute, 0., std::numbers::pi)), 2); };
+    double output_difference = 0., retarded_difference = 0., tail_energy = 0.;
+    for (std::size_t n = 0; n < output.size(); ++n) {
+        const double clock = static_cast<double>(start_sample + n);
+        const double q = q_at(clock - KernelTable::modelling_delay_samples);
+        Complex common_time{}, retarded{};
+        for (std::size_t lag = first_lag; lag <= last_lag; ++lag) {
+            if (lag > n || n - lag >= input.size()) continue;
+            const auto x = input[n - lag];
+            common_time += table->coefficient_at_q(port, lag, q) * x;
+            retarded += table->coefficient_at_q(port, lag, q_at(clock - lag)) * x;
+        }
+        output_difference = std::max(output_difference, std::abs(output[n] - common_time));
+        retarded_difference = std::max(retarded_difference, std::abs(output[n] - retarded));
+        if (n >= input.size()) tail_energy += std::norm(output[n]);
+    }
+    const double limit = peak_input * table->retarded_peak_error_bound(port, duration);
+    const bool chunks_identical = output == chunked;
+    const bool earliest_causal = std::ranges::all_of(std::span{output}.first(first_lag), [](const Complex x) { return x == Complex{}; });
+    const bool pass = all_drained && chunks_identical && earliest_causal && tail_energy > 0. &&
+        output_difference <= 2e-12 && retarded_difference <= limit + 2e-12;
+    all_pass &= pass;
+    return object({{"input_samples", input.size()}, {"first_sample", start_sample}, {"tail_samples", last_lag},
+        {"tail_energy", tail_energy}, {"no_prearrival_output", earliest_causal}, {"all_tail_samples_drained", all_drained},
+        {"chunk_identical", chunks_identical}, {"direct_output_convolution_max_abs_error", output_difference},
+        {"retarded_tap_convolution_max_abs_difference", retarded_difference}, {"retarded_tap_difference_bound", limit}, {"pass", pass}});
+}
+
+int run_kernel_table(std::chrono::steady_clock::time_point start) {
+    const auto built = build_hf_fullwave_kernel_table();
+    const auto& checks = built.checks;
+    Json::Array durations, offsets, profile_witnesses, duration_rows, ports;
+    for (auto duration : KernelTable::transition_durations_seconds) durations.push_back(duration);
+    for (double f : hf_fullwave_table_holdout_offsets_hz()) offsets.push_back(f);
+    for (const double q : {0., .25, .5, .75, 1.}) profile_witnesses.push_back(q);
+    double selected_duration = 0.;
+    bool fast_control_rejected = false;
+    bool waveform_pass = false;
+    if (built.table) {
+        constexpr std::array<double, 4> test_durations{120., 240., 480., 1.};
+        for (const auto duration : test_durations) {
+            bool both_ports_pass = true;
+            Json::Array rate_rows;
+            for (std::size_t p = 0; p < kernel_ports.size(); ++p) {
+                const auto port = kernel_ports[p];
+                const double difference = built.table->retarded_peak_error_bound(port, duration);
+                const double carrier_phase = built.table->carrier_flight_phase_bound(port, duration);
+                const double flight_seconds = std::max(std::abs(static_cast<double>(built.table->first_lag_samples(port)) -
+                    KernelTable::modelling_delay_samples), static_cast<double>(built.table->last_lag_samples(port) -
+                    KernelTable::modelling_delay_samples)) / KernelTable::sample_rate_hz;
+                const double observed_phase = checks.worst_profile_phase_rate_rad_per_q[p] * std::numbers::pi /
+                    (2. * duration) * flight_seconds;
+                const bool pass = difference <= KernelTable::rate_peak_tolerance;
+                both_ports_pass &= pass;
+                rate_rows.push_back(object({{"port", port_labels[p]}, {"retarded_output_peak_error_bound", difference},
+                    {"max_physical_relative_retained_lag_seconds", flight_seconds}, {"carrier_coordinate_flight_phase_bound_rad", carrier_phase},
+                    {"carrier_phase_below_diagnostic_reference", carrier_phase <= KernelTable::phase_flight_reference_radians},
+                    {"sampled_solver_flight_phase_proxy_rad", checks.observed_phase_pairs[p] ? Json(observed_phase) : Json{}}, {"pass", pass}}));
+            }
+            if (duration == 1.) fast_control_rejected = !both_ports_pass;
+            else if (both_ports_pass && selected_duration == 0.) selected_duration = duration;
+            duration_rows.push_back(object({{"duration_seconds", duration}, {"fast_control", duration == 1.},
+                                            {"both_ports_pass_absolute_rate", both_ports_pass}, {"ports", std::move(rate_rows)}}));
+        }
+    }
+    waveform_pass = selected_duration > 0.;
+    for (std::size_t p = 0; p < kernel_ports.size(); ++p) {
+        const auto port = kernel_ports[p];
+        auto waveform = selected_duration > 0. ? table_waveform_check(built.table, port, selected_duration, waveform_pass) : Json{};
+        const auto first_lag = KernelTable::planned_first_lag_samples(port);
+        ports.push_back(object({{"port", port_labels[p]}, {"first_lag_samples", first_lag},
+            {"last_lag_samples", first_lag + KernelTable::taps_per_port - 1}, {"knot_grid", table_error_json(checks.knot_grid[p])},
+            {"knot_offgrid", table_error_json(checks.knot_offgrid[p])}, {"profile_holdout", table_error_json(checks.profile_holdout[p])},
+            {"witness_frequency_refinement", table_error_json(checks.witness_frequency_refinement[p])},
+            {"witness_spatial_mesh", table_error_json(checks.witness_mesh[p])},
+            {"max_discarded_energy_fraction", checks.maximum_discarded_energy[p]},
+            {"max_raw_finite_band_prearrival_energy_fraction", checks.maximum_prearrival_energy[p]},
+            {"d1_peak_error_seconds_per_q", checks.qualified ? Json(checks.peak_error_seconds_per_q[p]) : Json{}},
+            {"phase_secants_resolved_count", checks.observed_phase_pairs[p]}, {"phase_secants_weak_count", checks.weak_phase_pairs[p]},
+            {"phase_secants_ambiguous_count", checks.ambiguous_phase_pairs[p]}, {"largest_conditioned_phase_step_rad", checks.largest_observed_phase_step_rad[p]},
+            {"worst_sampled_phase_rate_rad_per_q", checks.observed_phase_pairs[p] ? Json(checks.worst_profile_phase_rate_rad_per_q[p]) : Json{}},
+            {"waveform_check", std::move(waveform)}}));
+    }
+    const bool pass = checks.qualified && selected_duration > 0. && waveform_pass && fast_control_rejected;
+    const auto report = object({
+        {"schema_version", 1}, {"experiment", "frozen-vertical-plasma-full-band-kernel-table"}, {"source_identity", source_identity()},
+        {"scope", "constructed full coupled D/F trajectory and scalar B=0 normal incidence; finite-band causal surrogate"},
+        {"rf_hz", KernelTable::carrier_hz}, {"sample_rate_hz", KernelTable::sample_rate_hz}, {"occupied_half_band_hz", KernelTable::occupied_half_band_hz},
+        {"reference_ports_m", Json::Array{0., HfVerticalColumn::top_m}}, {"path", paths.front().name},
+        {"f_peak_over_rf_endpoints", Json::Array{paths.front().initial_ratio, paths.front().final_ratio}},
+        {"d_peak_electron_density_endpoints_per_m3", Json::Array{d_density_initial, d_density_final}},
+        {"f_collision_per_second", f_collision}, {"profile_intervals", KernelTable::intervals}, {"knot_grid_bins", KernelTable::frequency_bins},
+        {"frequency_holdout_offsets_hz", std::move(offsets)}, {"witness_q", std::move(profile_witnesses)},
+        {"profile_holdout_rule", "q=(j+sqrt(2)/5)/64 or (j+sqrt(3)/2)/64, j=0..63"},
+        {"witness_inventory", "5 m N=512 with 256 cached even bins; 10 m N=256 plus 65 frequency holdouts"},
+        {"rf_solve_cap", KernelTable::maximum_rf_solves}, {"actual_rf_solves", checks.rf_solves},
+        {"knot_profiles_checked", checks.knot_profiles_checked}, {"holdout_profiles_checked", checks.holdout_profiles_checked},
+        {"witnesses_qualified", checks.witnesses_qualified}, {"table_qualified", checks.qualified},
+        {"table_resident_bytes", built.table ? Json(built.table->workspace_bytes()) : Json{}},
+        {"preparation_workspace_bound_bytes", KernelTable::preparation_workspace_bound_bytes},
+        {"max_absolute_complex_error", KernelTable::complex_tolerance}, {"max_discarded_energy_fraction", KernelTable::discarded_energy_tolerance},
+        {"frozen_flux_excess_above_one", checks.maximum_frozen_flux_excess}, {"frozen_flux_excess_allowance", hf_fullwave_frozen_flux_tolerance()},
+        {"taps_per_port", KernelTable::taps_per_port}, {"modeling_delay_samples", KernelTable::modelling_delay_samples},
+        {"retarded_comparison", "output-time q((n-32)/Fs) versus q((n-lag)/Fs) separately for each tap; peak difference divided by peak input"},
+        {"clock", "absolute physical output clock before explicit numerical delay; clamped half-cosine profile with constant endpoints"},
+        {"absolute_rate_peak_tolerance", KernelTable::rate_peak_tolerance}, {"phase_flight_diagnostic_reference_rad", KernelTable::phase_flight_reference_radians},
+        {"conditioned_solver_phase_min_amplitude", KernelTable::phase_observation_min_amplitude},
+        {"conditioned_solver_phase_secant_rule", "adjacent knot/holdout exact RF solutions; endpoint amplitudes >=0.05 and principal step <pi/2; sampled diagnostic only"},
+        {"frozen_duration_candidates_seconds", std::move(durations)}, {"duration_checks", std::move(duration_rows)},
+        {"selected_first_passing_duration_seconds", selected_duration > 0. ? Json(selected_duration) : Json{}},
+        {"fast_control_rejected_by_absolute_rate", fast_control_rejected}, {"sampled_full_band_and_waveform_gates_pass", pass},
+        {"ports", std::move(ports)}, {"receiver_executed", false}, {"communications_qualified", false}, {"evolving_plasma_solved", false},
+        {"wall_seconds", std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count()}});
+    write_json(std::cout, report);
+    std::cout << '\n';
+    return pass ? 0 : 1;
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--help") {
-        std::cout << "Usage: high_fidelity_fullwave_kernel_probe [--profile-refinement]\n"
+        std::cout << "Usage: high_fidelity_fullwave_kernel_probe [--profile-refinement|--phase-factored-profile-refinement|--kernel-table]\n"
                      "Evaluate the bounded 3.4 MHz frozen-profile FIR feasibility inventory and emit JSON.\n"
-                     "With --profile-refinement, measure static complex interpolation over nested profile grids.\n";
+                     "With --profile-refinement, measure static complex interpolation over nested profile grids.\n"
+                     "With --phase-factored-profile-refinement, test D carrier-phase factoring against direct interpolation.\n"
+                     "With --kernel-table, qualify the coupled path's finite-band kernel table and causal rendering.\n";
         return 0;
     }
-    const bool profile_refinement = argc == 2 && std::string_view(argv[1]) == "--profile-refinement";
-    if (argc != 1 && !profile_refinement) {
-        std::cerr << "The full-wave kernel probe accepts only --help or --profile-refinement.\n";
+    const bool phase_factored = argc == 2 && std::string_view(argv[1]) == "--phase-factored-profile-refinement";
+    const bool profile_refinement = phase_factored || (argc == 2 && std::string_view(argv[1]) == "--profile-refinement");
+    const bool kernel_table = argc == 2 && std::string_view(argv[1]) == "--kernel-table";
+    if (argc != 1 && !profile_refinement && !kernel_table) {
+        std::cerr << "Unknown full-wave kernel probe option; see --help.\n";
         return 2;
     }
     std::cout.imbue(std::locale::classic());
     std::cout << std::setprecision(std::numeric_limits<double>::max_digits10);
     const auto start = std::chrono::steady_clock::now();
-    Solver solver(profile_refinement ? profile_solve_cap : solve_cap);
+    Solver solver(phase_factored ? phase_factored_max_solves : profile_refinement ? profile_solve_cap : solve_cap);
     try {
-        if (profile_refinement) return run_profile_refinement(solver, start);
+        if (kernel_table) return run_kernel_table(start);
+        if (profile_refinement) return run_profile_refinement(solver, start, phase_factored);
         bool all_admitted = true;
         Json::Array rows, offgrid;
         for (const double f : holdout_offsets()) offgrid.push_back(f);
@@ -527,7 +823,9 @@ int main(int argc, char** argv) {
         std::cout << '\n';
         return all_admitted ? 0 : 1;
     } catch (const std::exception& error) {
-        std::cerr << "Full-wave kernel probe aborted after " << solver.calls << " RF solves: " << error.what() << '\n';
+        std::cerr << "Full-wave kernel probe aborted";
+        if (!kernel_table) std::cerr << " after " << solver.calls << " RF solves";
+        std::cerr << ": " << error.what() << '\n';
         return 2;
     }
 }

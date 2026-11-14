@@ -542,6 +542,27 @@ void long_period_phase_wander() {
     spec.paths[0].phase_wander_amplitude_radians = std::numeric_limits<double>::quiet_NaN();
     rejects([&] { Channel c(tone(fs, 10, 0), spec, 1, 10); }, "nonfinite phase amplitude accepted");
 }
+
+void fullwave_reflection_admission() {
+    const auto scenario = appraisal::make_scenario("hf-fullwave-reflection");
+    auto spec = scenario.channel;
+    constexpr unsigned fs = 1920;
+    constexpr auto source_rows = 540u * fs;
+    check(spec.fullwave_reflection.has_value() && spec.paths.empty(), "full-wave scenario mixed propagation paths");
+    const auto tail = appraisal::channel_tail_seconds(spec, 900.) + appraisal::channel_interpolation_tail_seconds(spec, fs);
+    check(std::abs(tail - 129. / fs) < 1e-15, "full-wave tail did not preserve every lag");
+    rejects([&] { Channel c(tone(fs, source_rows - 1, 100.), spec, 1, 1); },
+            "short incident source reached the full-wave table build");
+    rejects([&] { Channel c(tone(fs, source_rows, 769.), spec, 1, 1); },
+            "wide incident source reached the full-wave table build");
+    spec.paths.emplace_back();
+    rejects([&] { Channel c(tone(fs, source_rows, 100.), spec, 1, 1); },
+            "full-wave reflection accepted a second path");
+    spec.paths.clear();
+    spec.maximum_workspace_bytes = appraisal::HfFullwaveKernelTable::preparation_workspace_bound_bytes - 1;
+    rejects([&] { Channel c(tone(fs, source_rows, 100.), spec, 1, 1); },
+            "full-wave table reached construction without its workspace");
+}
 }
 
 int main() {
@@ -556,6 +577,7 @@ int main() {
         guards();
         cancellation();
         long_period_phase_wander();
+        fullwave_reflection_admission();
         std::cout << "channel checks passed: " << checks << "\n";
         return 0;
     } catch (const std::exception& error) {

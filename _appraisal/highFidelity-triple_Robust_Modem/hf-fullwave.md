@@ -10,6 +10,20 @@ explains why magnetic mode conversion, strong scattering and measured long
 histories remain separate requirements. The existing eikonal cutoff guard
 remains intact.
 
+There is also a precise limiting interpretation with nonzero magnetic field.
+For exactly perpendicular propagation through one-dimensional layers, with a
+fixed magnetic-field direction and electric polarization parallel to it, the
+ordinary mode decouples. Its parallel dielectric response is the same scalar
+expression below for a cold local electron fluid, immobile ions and scalar,
+velocity-independent collisions. This is a derived model equivalence, not an
+implemented general magnetoionic channel. The perpendicular O branch and its
+distinction from oblique propagation are discussed by
+[Keppens and Goedbloed (2019)](https://doi.org/10.3389/fspas.2019.00011).
+Obliquity, a rotating field direction, polarization coupling and the X branch
+are absent here. More general collision physics also matters; the constant
+collision-rate assumption is not supplied by the O-mode identity
+([Sen and Wyller, 1960](https://doi.org/10.1029/JZ065i012p03931)).
+
 ## Physical convention
 
 Use electric fields `Re{E(z,omega) exp(-i*omega*t)}`, a nonmagnetic medium and
@@ -315,3 +329,35 @@ profile interpolation error from a spatial-solver floor, without granting an
 unexecuted finer grid a pass. The experiment stops at its declared cap with
 exit 1 and preserves the remaining full-band, causal and slow-evolution gates.
 No parameter span, frequency set or tolerance was reduced to obtain admission.
+
+## Phase-factored causal operator
+
+The [subsequent frozen investigation](hf-inference-and-propagation.md) repairs
+profile interpolation by removing the calculated D-layer carrier phase before
+interpolating complex residuals, then restoring interpolated knot phase. It
+preserves amplitude, zeros and both complete physical paths. At 64 intervals
+the five-frequency preflight passes, while its direct-interpolation control
+still fails. Full-band qualification then checks 65 knots, 128 independent
+profile positions, 65 off-grid frequencies and 512-bin/10m witnesses, using
+32,070 RF solves in 167.505 s. Largest independent reflection/transmission
+errors are .001357/.001549 against .005; all discarded-energy gates pass.
+These are sampled static checks, not a uniform error proof between witnesses.
+
+The immutable 129-tap native operator retains history and the entire tail,
+with an explicit 32-sample modelling delay. The 120-second transition passes a
+separate bound comparing output-time and per-tap-retarded FIR coefficients;
+the 1-second control fails it. Both ports pass independent direct-convolution,
+chunking and drain checks. The obsolete endpoint-only streaming implementation
+and its exclusive tests have been removed; the numerical negative controls and
+their failed evidence remain.
+
+The contained `hf-fullwave-reflection` modem scenario uses the qualified
+reflected port over the complete coupled path. It preserves incident C/N0,
+physical loss and canonical source/receiver state. Its arrival hypotheses cover
+all retained lags 1..129; the observation halo alone is not treated as arrival
+coverage. Its fixed zero-spread, varying receiver prior is one ray facing a
+dispersive channel, not a matched 129-tap model. Complete `A` reception at
+incident C/N0 = 40 dB-Hz, failures at 30/20/0, a quiet matched noise control,
+resource limits and remaining physical limitations are recorded in the linked
+investigation. A successful finite operator does not establish fidelity
+for dynamic mode coupling, strong scattering, caustics or measured storm days.

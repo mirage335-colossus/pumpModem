@@ -17,6 +17,7 @@ target_link_libraries(high_fidelity_gui_profile PUBLIC datapump_robust_session)
 add_library(high_fidelity_fullwave STATIC "${_hf_root}/src/hf_fullwave.cpp" "${_hf_root}/src/hf_fullwave_kernel.cpp")
 target_include_directories(high_fidelity_fullwave PUBLIC "${_hf_root}/include")
 target_compile_features(high_fidelity_fullwave PUBLIC cxx_std_20)
+target_link_libraries(high_fidelity_channel PRIVATE high_fidelity_fullwave)
 add_library(high_fidelity_public_receiver STATIC "${_hf_root}/src/hf_public_diagnostic.cpp"
   "${_hf_root}/src/hf_gui_diagnostic.cpp" "${_hf_root}/src/hf_phase_filter.cpp")
 target_include_directories(high_fidelity_public_receiver PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/tools")

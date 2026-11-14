@@ -66,12 +66,19 @@ HF_DESIGN_BOUNDS = {
     "knot_amplitude_hz": (0, 20000), "knot_seconds": (70, 200),
 }
 HF_DESIGN_FIELDS = {"hf_" + field for field in HF_DESIGN_BOUNDS}
+FULLWAVE_REFLECTION = {
+    "port": "reflection", "carrier_hz": 3400000, "sample_rate_hz": 1920, "occupied_half_band_hz": 768,
+    "transition_first_seconds": 60, "transition_seconds": 120, "minimum_source_seconds": 540,
+    "interpolation": "phase_factored_output_time_half_cosine", "modelling_delay_samples": 32,
+    "taps": 129, "first_lag_samples": 1, "last_lag_samples": 129, "filter_halo_samples": 128,
+    "maximum_rf_solves": 32070, "preparation_workspace_bound_bytes": 1048576,
+}
 SERVICE_FIELDS = {"service_replay", "service_episodes", "service_spool_byte_limit", "owners",
                   "service_backlog_begin_slot", "service_backlog_end_slot"}
 EPISODE_KEYS = {"id", "scenario", "mode", "waveform", "seed", "cn0_db_hz", "control",
                 "helper", "backend", "bit_seconds", "duration_seconds", "pulse", "stratum",
                 "oracle_slot", "search_slot", "search_timing", "capture_digest_slot", "chunk", "message", "max_wall_seconds", "max_samples",
-                "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_compare_admitted_models", "fec", "fade_slots", "capture_lead_seconds",
+                "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "fec", "fade_slots", "capture_lead_seconds",
                 "hf_trajectory_seed", "hf_trajectory_offset_seconds", "noise_seed"} | GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS
 MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose", "hf-search", "gui-varying"}
 CONTROLS = {"wanted", "noise", "wrong-key", "wrong-ordinal", "interior-fade", "capture-gap", "eof"}
@@ -140,7 +147,7 @@ def _read_campaign(path: Path) -> dict[str, Any]:
             raise CampaignError(f"stratum {name!r} must contain exactly {count} wanted receive episodes with distinct seeds")
         invariant_fields = ("scenario", "mode", "waveform", "cn0_db_hz", "control", "helper",
                             "backend", "bit_seconds", "duration_seconds", "pulse", "oracle_slot", "search_slot", "search_timing", "capture_digest_slot", "chunk",
-                            "message", "max_wall_seconds", "max_samples", "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_compare_admitted_models", "fec", "fade_slots", "capture_lead_seconds",
+                            "message", "max_wall_seconds", "max_samples", "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "fec", "fade_slots", "capture_lead_seconds",
                             "hf_trajectory_seed", "hf_trajectory_offset_seconds") + tuple(sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS))
         reference = matched[0]
         heterogeneous = [field for field in invariant_fields
@@ -239,7 +246,7 @@ def _validate_episode(item: Any, index: int, ids: set[str],
     if "history_reference_delay_seconds" in item:
         _bounded_number(item["history_reference_delay_seconds"],
                         f"episodes[{index}].history_reference_delay_seconds", 0, sys.float_info.max)
-    for field in ("hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_compare_admitted_models"):
+    for field in ("hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic"):
         if field in item and not isinstance(item[field], bool):
             raise CampaignError(f"episodes[{index}].{field} must be boolean")
     if "chunk" in item:
@@ -303,9 +310,19 @@ def _validate_episode(item: Any, index: int, ids: set[str],
             raise CampaignError(f"episodes[{index}]: native GUI requires reference RRC plan/slot/receive/gui-varying and a supported control")
         forbidden = {"hf_trajectory_seed", "hf_trajectory_offset_seconds", "capture_lead_seconds",
                      "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver",
-                     "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "duration_seconds"} & item.keys()
+                     "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "duration_seconds"} & item.keys()
         if forbidden:
             raise CampaignError(f"episodes[{index}]: native GUI does not accept custom channel or phase controls: {', '.join(sorted(forbidden))}")
+    if item["scenario"] == "hf-fullwave-reflection":
+        if (mode not in {"plan", "channel", "receive"} or item["waveform"] != "reference" or
+                item.get("backend", "cpu") != "cpu" or item.get("pulse", "rrc") != "rrc" or
+                item.get("helper", False) or control not in {"wanted", "noise"} or item.get("fec", "off") != "off" or
+                any(item.get(field, False) for field in ("service_replay", "hf_phase_bank", "hf_public_phase_receiver",
+                    "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver",
+                    "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models",
+                    "hf_gui_clean_diagnostic")) or
+                {"duration_seconds", "capture_lead_seconds", "hf_trajectory_seed", "hf_trajectory_offset_seconds"} & item.keys()):
+            raise CampaignError(f"episodes[{index}]: full-wave reflection requires reference RRC CPU plan/channel/receive, wanted/noise Helper/FEC off and default capture geometry")
     if "fade_slots" in item and control != "interior-fade":
         raise CampaignError(f"episodes[{index}]: fade_slots is valid only for interior-fade control")
     if mode not in {"receive", "slot", "diagnose", "hf-search", "gui-varying"} and "control" in item and not service_requested:
@@ -331,6 +348,8 @@ def _validate_episode(item: Any, index: int, ids: set[str],
                 item.get("helper", False) or item.get("backend", "cpu") != "cpu" or
                 "capture_digest_slot" not in item):
             raise CampaignError(f"episodes[{index}]: gui-varying requires native GUI, wanted/noise/wrong-key, Helper-off CPU and explicit capture_digest_slot")
+    if "hf_gui_clean_diagnostic" in item and mode != "gui-varying":
+        raise CampaignError(f"episodes[{index}]: clean GUI diagnostic requires gui-varying component mode")
     if item.get("hf_phase_refinement", False) and not (mode == "hf-search" or
             (mode in {"receive", "slot"} and item.get("hf_public_phase_receiver", False))):
         raise CampaignError(f"episodes[{index}]: phase refinement requires hf-search or the public phase receiver")
@@ -346,6 +365,9 @@ def _validate_episode(item: Any, index: int, ids: set[str],
     if "hf_phase_filter_sticky" in item and (not (item.get("hf_phase_filter", False) or item.get("hf_phase_filter_receiver", False)) or
             (item["hf_phase_filter_sticky"] and item.get("hf_phase_filter_paths", False))):
         raise CampaignError(f"episodes[{index}]: sticky phase prior requires a shadow/receiver phase filter and excludes private path diagnostics")
+    if "hf_phase_bridge" in item and (not (item.get("hf_phase_filter", False) or item.get("hf_phase_filter_receiver", False)) or
+            (item["hf_phase_bridge"] and item.get("hf_phase_filter_paths", False))):
+        raise CampaignError(f"episodes[{index}]: phase bridge requires a shadow/receiver phase filter and excludes private path diagnostics")
     if "hf_compare_admitted_models" in item and (mode not in {"receive", "plan"} or
             item.get("backend", "cpu") != "cpu" or item.get("hf_public_phase_receiver", False)):
         raise CampaignError(f"episodes[{index}]: admitted-model comparison requires CPU receive/plan without the public phase supplement")
@@ -393,11 +415,13 @@ def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_se
                         ("hf_phase_filter_receiver", "--hf-phase-filter-receiver"),
                         ("hf_phase_filter_paths", "--hf-phase-filter-paths"),
                         ("hf_phase_filter_sticky", "--hf-phase-filter-sticky"),
+                        ("hf_phase_bridge", "--hf-phase-bridge"),
+                        ("hf_gui_clean_diagnostic", "--hf-gui-clean-diagnostic"),
                         ("hf_compare_admitted_models", "--hf-compare-admitted-models")) + tuple(
                             (key, "--" + key.replace("_", "-")) for key in sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS)):
         if key in episode:
             value = episode[key]
-            if key in {"helper", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_compare_admitted_models", "gui_clock_edge", "service_replay"}:
+            if key in {"helper", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "gui_clock_edge", "service_replay"}:
                 if value:
                     command.append(option)
             else:
@@ -604,6 +628,7 @@ def _validate_phase_filter_result(search: dict[str, Any], plan: dict[str, Any], 
             plan.get("sample_rate_hz") != 1920 or search.get("evaluated_timing_atoms") != 39):
         raise CampaignError("HF phase filter requires its supported full-timing geometry and executed receipt")
     sticky = plan.get("hf_phase_filter_sticky_requested", False)
+    bridge = plan.get("hf_phase_bridge_requested", False)
     sticky_fields = {"sticky_enabled", "walk", "sticky", "correlated_prior_weights", "transition_probabilities"}
     if sticky:
         transitions = result.get("transition_probabilities")
@@ -619,6 +644,12 @@ def _validate_phase_filter_result(search: dict[str, Any], plan: dict[str, Any], 
                 raise CampaignError("sticky phase filter transition probabilities must match the frozen normalized priors")
     elif sticky_fields & result.keys():
         raise CampaignError("unrequested sticky phase filter telemetry")
+    bridge_fields = {"bridge_enabled", "bridge", "legacy_correlated", "bridge_prior_weights", "bridge_work"}
+    if bridge:
+        if result.get("bridge_enabled") is not True or result.get("bridge_prior_weights") != [.5, .5]:
+            raise CampaignError("phase bridge must retain its fixed equal bridge/legacy correlated prior")
+    elif bridge_fields & result.keys():
+        raise CampaignError("unrequested phase bridge telemetry")
     if (not isinstance(observation, dict) or any(not _is_nonnegative_int(observation.get(field)) for field in ("first", "stop")) or
             observation["stop"] <= observation["first"] or not _is_nonnegative_int(plan.get("horizon_samples")) or
             observation["stop"] > plan["horizon_samples"]):
@@ -652,11 +683,12 @@ def _validate_phase_filter_result(search: dict[str, Any], plan: dict[str, Any], 
     def log_add(a: float, b: float) -> float:
         return max(a, b) + math.log1p(math.exp(-abs(a - b)))
 
-    evidence = []
-    for name in ("baseline", "correlated", "combined") + (("walk", "sticky") if sticky else ()):
+    evidence = {}
+    for name in (("baseline", "correlated", "combined") + (("walk", "sticky") if sticky else ()) +
+                 (("legacy_correlated", "bridge") if bridge else ())):
         branch = result.get(name)
         if not isinstance(branch, dict):
-            raise CampaignError("HF phase filter requires all three separately reported branches")
+            raise CampaignError("HF phase filter requires every separately reported branch")
         values = branch.get("bit_log_e")
         if not isinstance(values, list) or len(values) != 2 or any(not _is_finite_number(value) for value in values):
             raise CampaignError("HF phase filter requires finite paired bit evidence")
@@ -669,15 +701,19 @@ def _validate_phase_filter_result(search: dict[str, Any], plan: dict[str, Any], 
                 branch.get("passes_presence_reference") is not (presence >= thresholds[0]) or
                 branch.get("passes_bit_separation_reference") is not (separation >= thresholds[1])):
             raise CampaignError("HF phase filter diagnostics must retain weighted evidence and public references")
-        evidence.append(values)
-    if evidence[0] != search["phase_refinement"]["combined_bit_log_e"]:
+        evidence[name] = values
+    if evidence["baseline"] != search["phase_refinement"]["combined_bit_log_e"]:
         raise CampaignError("HF phase filter must preserve the separately reported refinement baseline")
     if any(not math.isclose(combined, log_add(old, new) - math.log(2), rel_tol=1e-10, abs_tol=1e-9)
-           for old, new, combined in zip(*evidence[:3])):
+           for old, new, combined in zip(evidence["baseline"], evidence["correlated"], evidence["combined"])):
         raise CampaignError("HF phase filter must preserve the fixed equal branch mixture")
+    legacy = evidence["legacy_correlated"] if bridge else evidence["correlated"]
     if sticky and any(not math.isclose(correlated, log_add(walk, held) - math.log(2), rel_tol=1e-10, abs_tol=1e-9)
-                      for correlated, walk, held in zip(evidence[1], evidence[3], evidence[4])):
+                      for correlated, walk, held in zip(legacy, evidence["walk"], evidence["sticky"])):
         raise CampaignError("sticky phase filter must preserve the fixed equal walk/sticky mixture")
+    if bridge and any(not math.isclose(correlated, log_add(old, new) - math.log(2), rel_tol=1e-10, abs_tol=1e-9)
+                      for correlated, old, new in zip(evidence["correlated"], legacy, evidence["bridge"])):
+        raise CampaignError("phase bridge must preserve the fixed equal bridge/legacy mixture")
     work = result.get("work")
     expected_work = {"correlation_products": 39 * 2 * 33 * blocks,
                      "emission_states": 39 * 4 * 33 * 32 * groups,
@@ -690,9 +726,32 @@ def _validate_phase_filter_result(search: dict[str, Any], plan: dict[str, Any], 
     if (not _is_nonnegative_int(work.get("workspace_reserved_bytes")) or work["workspace_reserved_bytes"] == 0 or
             not _is_finite_number(work.get("summed_worker_wall_seconds")) or work["summed_worker_wall_seconds"] < 0):
         raise CampaignError("HF phase filter requires actual bounded workspace and worker timing")
-    if sticky and (not _is_nonnegative_int(search.get("stage_workers")) or not 1 <= search["stage_workers"] <= 39 or
+    if (sticky or bridge) and (not _is_nonnegative_int(search.get("stage_workers")) or not 1 <= search["stage_workers"] <= 39 or
             work["workspace_reserved_bytes"] != search["stage_workers"] * 131072):
         raise CampaignError("sticky phase passes must share the unchanged bounded per-worker workspace")
+    if bridge:
+        bridge_work = result.get("bridge_work")
+        bridge_groups = (blocks + 59) // 60
+        expected_bridge = {"group_seconds": 4, "groups": bridge_groups,
+                           "correlation_products": 39 * 2 * 97 * blocks,
+                           "edge_emissions": 39 * 4 * 97 * 32 * bridge_groups,
+                           "forward_terms": 39 * 4 * 97 * 32 * bridge_groups,
+                           "shared_rotator_values": 97 * 60,
+                           "lane_workspace_bytes": 131072, "shared_workspace_bytes": 98304,
+                           "workspace_reserved_bytes": search["stage_workers"] * 131072 + 98304}
+        if (not isinstance(bridge_work, dict) or any(
+                not (_is_finite_number(bridge_work.get(field)) if field == "group_seconds" else _is_nonnegative_int(bridge_work.get(field))) or
+                bridge_work[field] != value for field, value in expected_bridge.items())):
+            raise CampaignError("phase bridge work must retain every timing atom and final-group endpoint within its admitted buffers")
+        transitions = bridge_work.get("transition_probabilities")
+        expected_transitions = {"stay": .5, "step_each": .25, "edge_stay": .75}
+        if (not isinstance(transitions, dict) or set(transitions) != set(expected_transitions) or
+                any(not _is_finite_number(transitions[field]) or transitions[field] != value
+                    for field, value in expected_transitions.items())):
+            raise CampaignError("phase bridge transitions must retain the fixed normalized edge prior")
+        for field in ("stage_wall_seconds", "summed_worker_wall_seconds"):
+            if not _is_finite_number(bridge_work.get(field)) or bridge_work[field] < 0:
+                raise CampaignError("phase bridge requires separate finite nonnegative stage and worker timing")
 
 
 def _validate_private_phase_paths(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
@@ -760,8 +819,157 @@ def _validate_private_phase_paths(receipt: dict[str, Any], episode: dict[str, An
                 "public_pair_reserved_bytes": physical["admission"].get("pair_workspace_bytes")}
     if not isinstance(work, dict) or any(not _is_nonnegative_int(work.get(field)) or work[field] != value for field, value in expected.items()):
         raise CampaignError("private phase path work must match its finite lattice and reserved native buffers")
-    if sum(work[field] for field in ("workspace_reserved_bytes", "block_statistics_reserved_bytes", "public_pair_reserved_bytes")) > physical["admission"]["future_reserved_bytes"]:
+    trace_bytes = 0
+    if "clean_trace" in result:
+        trace_bytes = _validate_private_clean_trace(result, physical, search, groups, blocks, public_filter["input_samples"])
+    if "bridge_support" in result:
+        trace_bytes += _validate_private_bridge_support(result, physical, search, blocks)
+    if trace_bytes + sum(work[field] for field in ("workspace_reserved_bytes", "block_statistics_reserved_bytes", "public_pair_reserved_bytes")) > physical["admission"]["future_reserved_bytes"]:
         raise CampaignError("private phase path buffers must fit the physical diagnostic reservation")
+
+
+def _validate_private_bridge_support(result: dict[str, Any], physical: dict[str, Any], search: dict[str, Any], blocks: int) -> int:
+    """Validate additive evaluator-only support geometry, never public likelihood evidence."""
+    if not _is_nonnegative_int(blocks) or not 0 < blocks <= 9000:
+        raise CampaignError("private bridge support exceeds its fixed public aperture cap")
+    support = result["bridge_support"]
+    if (not isinstance(support, dict) or not _is_nonnegative_int(support.get("schema_version")) or support["schema_version"] != 1 or
+            support.get("used_for_receiver_decisions") is not False or support.get("phase_invariant") != "p-4*k modulo 8"):
+        raise CampaignError("private bridge support must retain versioned evaluator-only phase-lattice scope")
+    groups = (blocks + 59) // 60
+    expected = {"workspace_reserved_bytes": 262144, "groups": groups,
+                "correlation_products": 159 * blocks, "max_plus_terms": (97 + 291 + 159) * 32 * groups}
+    if (not _is_finite_number(support.get("group_seconds")) or support["group_seconds"] != 4 or
+            any(not _is_nonnegative_int(support.get(field)) or support[field] != value for field, value in expected.items())):
+        raise CampaignError("private bridge support must preserve its fixed cache, edge counts and workspace")
+    clean_energy = physical["physical_templates"].get("noise_free_energy")
+    energies = search["coordinates"][result["timing_index"]].get("template_energy")
+    if (not _is_finite_number(clean_energy) or clean_energy <= 0 or not isinstance(energies, list) or len(energies) != 2 or
+            any(not _is_finite_number(value) or value <= 0 for value in energies)):
+        raise CampaignError("private bridge support must bind positive clean and public-template energies")
+    normalization = math.sqrt(clean_energy) * math.sqrt(energies[result["wanted_bit"]])
+    correlations = []
+    for name, edges in (("original", 97), ("phase_relaxed", 291), ("rate_relaxed", 159)):
+        variant = support.get(name)
+        if (not isinstance(variant, dict) or not _is_nonnegative_int(variant.get("edge_terms_per_phase")) or
+                variant["edge_terms_per_phase"] != edges or
+                not _is_finite_number(variant.get("real_correlation")) or variant["real_correlation"] < 0 or
+                not _is_finite_number(variant.get("clean_coherence_power")) or not 0 <= variant["clean_coherence_power"] <= 1):
+            raise CampaignError("private bridge support variants require finite bounded projection and fixed edge geometry")
+        fraction = variant["real_correlation"] / normalization
+        if fraction > 1 + 1e-8 or not math.isclose(variant["clean_coherence_power"], min(1., fraction * fraction), rel_tol=2e-9, abs_tol=1e-12):
+            raise CampaignError("private bridge support coherence must match its clean projection and energy normalization")
+        correlations.append(variant["real_correlation"])
+    if any(value + 2e-9 * max(1., abs(value), abs(correlations[0])) < correlations[0] for value in correlations[1:]):
+        raise CampaignError("private bridge support relaxations must contain the original model support")
+    return support["workspace_reserved_bytes"]
+
+
+def _validate_private_clean_trace(result: dict[str, Any], physical: dict[str, Any], search: dict[str, Any],
+                                  groups: int, blocks: int, samples: int) -> int:
+    """Validate additive v1 evaluator paths; old receipts without a trace remain valid."""
+    trace = result["clean_trace"]
+    if not isinstance(trace, dict) or not _is_nonnegative_int(trace.get("schema_version")) or trace["schema_version"] != 1:
+        raise CampaignError("private clean trace requires supported schema version 1")
+    expected_work = {"workspace_reserved_bytes": 2 * 1056 * (groups - 1) + 262144,
+                     "analytic_carrier_points": blocks + groups + 1,
+                     "extra_state_evaluations": 1056 * groups,
+                     "extra_transition_edges": 32 * 97 * (groups - 1),
+                     "predecessor_labels": 2 * 1056 * (groups - 1)}
+    if any(not _is_nonnegative_int(trace.get(field)) or trace[field] != value for field, value in expected_work.items()):
+        raise CampaignError("private clean trace work must match its bounded discrete state and analytic carrier geometry")
+    for field in ("penalty_correlation_units", "target_projection_power_fraction_of_best_real", "target_real_correlation",
+                  "penalized_objective_correlation", "certificate_tolerance_correlation",
+                  "carrier_frequency_total_variation_hz", "carrier_frequency_rms_step_hz"):
+        if not _is_finite_number(trace.get(field)):
+            raise CampaignError("private clean trace certificate and carrier diagnostics must be finite")
+    if (trace["target_projection_power_fraction_of_best_real"] != .99 or
+            trace["carrier_frequency_total_variation_hz"] < 0 or trace["carrier_frequency_rms_step_hz"] < 0 or
+            not _is_nonnegative_int(trace.get("carrier_reversal_count")) or trace["carrier_reversal_count"] > max(0, groups - 2) or
+            not isinstance(trace.get("carrier_reference_scope"), str) or not trace["carrier_reference_scope"].strip()):
+        raise CampaignError("private clean trace must retain its fixed real-projection target and analytic carrier scope")
+    clean_energy = physical["physical_templates"].get("noise_free_energy")
+    energies = search["coordinates"][result["timing_index"]].get("template_energy")
+    if (not _is_finite_number(clean_energy) or clean_energy <= 0 or not isinstance(energies, list) or len(energies) != 2 or
+            any(not _is_finite_number(value) or value <= 0 for value in energies)):
+        raise CampaignError("private clean trace must bind positive clean and public-template energy")
+    normalization = math.sqrt(clean_energy) * math.sqrt(energies[result["wanted_bit"]])
+    expected_penalty = normalization / (64 * groups)
+    expected_tolerance = 128 * sys.float_info.epsilon * (groups + 1) * normalization
+    target = math.sqrt(.99) * result["optimal_clean_correlation_real"]
+    if (not math.isclose(trace["penalty_correlation_units"], expected_penalty, rel_tol=2e-9, abs_tol=1e-12) or
+            not math.isclose(trace["certificate_tolerance_correlation"], expected_tolerance, rel_tol=2e-9, abs_tol=1e-15) or
+            not math.isclose(trace["target_real_correlation"], target, rel_tol=2e-9, abs_tol=1e-12)):
+        raise CampaignError("private clean trace target, penalty and certificate tolerance must bind declared energies")
+    projection_rows = []
+    for name in ("maximum_projection", "penalized_projection"):
+        row = trace.get(name)
+        if not isinstance(row, dict):
+            raise CampaignError("private clean trace requires both reconstructed paths")
+        frequency, phase = row.get("frequency_bins"), row.get("phase_bins")
+        if (not isinstance(frequency, list) or not isinstance(phase, list) or len(frequency) != groups or len(phase) != groups or
+                any(isinstance(value, bool) or not isinstance(value, int) or not -16 <= value <= 16 for value in frequency) or
+                any(not _is_nonnegative_int(value) or value >= 32 for value in phase)):
+            raise CampaignError("private clean paths must retain one bounded frequency/phase state per group")
+        steps = [b - a for a, b in zip(frequency, frequency[1:])]
+        if any(abs(step) > 1 for step in steps) or any(b != (a + 2 * k) % 32 for a, b, k in zip(phase, phase[1:], frequency)):
+            raise CampaignError("private clean paths must follow the frozen frequency and phase transition graph")
+        jumps = [step for step in steps if step]
+        longest = dwell = 1
+        for step in steps:
+            dwell = 1 if step else dwell + 1
+            longest = max(longest, dwell)
+        counts = {"jumps": len(jumps), "up_jumps": steps.count(1), "down_jumps": steps.count(-1),
+                  "adjacent_reversals": sum(a * b == -1 for a, b in zip(steps, steps[1:])),
+                  "successive_jump_reversals": sum(a * b == -1 for a, b in zip(jumps, jumps[1:])),
+                  "edge_stays": sum(step == 0 and abs(k) == 16 for k, step in zip(frequency, steps)),
+                  "longest_dwell_groups": longest}
+        if any(not _is_nonnegative_int(row.get(field)) or row[field] != value for field, value in counts.items()):
+            raise CampaignError("private clean path counts must match the reconstructed state trace")
+        if (not _is_nonnegative_int(row.get("reversals_below_half_bin_carrier_change")) or
+                row["reversals_below_half_bin_carrier_change"] > counts["successive_jump_reversals"]):
+            raise CampaignError("private carrier comparison cannot exceed reconstructed jump reversals")
+        for prefix, stay, jump, edge in (("walk", .5, .25, .75), ("sticky", .96875, .015625, .984375)):
+            log_prior = -math.log(1056) + sum(math.log(jump if step else edge if abs(k) == 16 else stay)
+                                              for k, step in zip(frequency, steps))
+            if not _is_finite_number(row.get(prefix + "_log_prior")) or not math.isclose(
+                    row[prefix + "_log_prior"], log_prior, rel_tol=2e-9, abs_tol=1e-9):
+                raise CampaignError("private clean path priors must include the initial-state and transition masses")
+        for field in ("real_correlation", "clean_coherence_power", "effective_phase_rms_radians",
+                      "effective_aligned_phase_rms_radians", "carrier_phase_rms_radians",
+                      "carrier_aligned_phase_rms_radians", "carrier_frequency_rms_hz"):
+            if not _is_finite_number(row.get(field)) or row[field] < 0:
+                raise CampaignError("private clean projection and mismatch diagnostics must be finite and nonnegative")
+        if any(row[field] > math.pi + 1e-12 for field in ("effective_phase_rms_radians", "effective_aligned_phase_rms_radians",
+                                                       "carrier_phase_rms_radians", "carrier_aligned_phase_rms_radians")):
+            raise CampaignError("private clean phase RMS diagnostics must use wrapped radians")
+        rms_four = row.get("carrier_frequency_4_group_rms_hz")
+        if ("carrier_frequency_4_group_rms_hz" not in row or (samples // 1920 < 4 and rms_four is not None) or
+                (samples // 1920 >= 4 and (not _is_finite_number(rms_four) or rms_four < 0))):
+            raise CampaignError("private four-group carrier comparison must retain its full-group availability")
+        coherence = min(1., (row["real_correlation"] / normalization) ** 2)
+        if row["clean_coherence_power"] > 1 + 2e-9 or not math.isclose(row["clean_coherence_power"], coherence, rel_tol=2e-9, abs_tol=1e-12):
+            raise CampaignError("private clean coherence must match its declared real projection and energy")
+        projection_rows.append(row)
+    maximum, penalized = projection_rows
+    tolerance = trace["certificate_tolerance_correlation"]
+    objective = penalized["real_correlation"] - trace["penalty_correlation_units"] * penalized["jumps"]
+    if (not math.isclose(maximum["real_correlation"], result["optimal_clean_correlation_real"], rel_tol=2e-9, abs_tol=max(tolerance, 1e-12)) or
+            not _is_finite_number(result.get("clean_coherence_power_lower_bound")) or
+            not math.isclose(maximum["clean_coherence_power"], result["clean_coherence_power_lower_bound"], rel_tol=2e-9, abs_tol=1e-12) or
+            penalized["real_correlation"] > maximum["real_correlation"] + max(tolerance, 1e-12) or
+            abs(trace["penalized_objective_correlation"] - objective) > max(tolerance, 1e-12) or
+            objective + max(tolerance, 1e-12) < maximum["real_correlation"] - trace["penalty_correlation_units"] * maximum["jumps"]):
+        raise CampaignError("private clean witnesses must preserve maximum projection and penalized optimality")
+    lower = max(0, math.ceil((trace["target_real_correlation"] - trace["penalized_objective_correlation"] - tolerance) /
+                            trace["penalty_correlation_units"]))
+    if (not _is_nonnegative_int(trace.get("minimum_jumps_lower_bound")) or trace["minimum_jumps_lower_bound"] != lower or
+            lower > maximum["jumps"] or not isinstance(trace.get("target_reached"), bool) or
+            trace["target_reached"] is not (penalized["real_correlation"] - tolerance >= trace["target_real_correlation"])):
+        raise CampaignError("private clean jump certificate must preserve its discrete real-projection target")
+    if trace["target_reached"] and lower > penalized["jumps"]:
+        raise CampaignError("private clean jump certificate contradicts its target-reaching witness")
+    return trace["workspace_reserved_bytes"]
 
 
 def _validate_decoded_success(receipt: dict[str, Any], episode: dict[str, Any], fec: str) -> None:
@@ -1384,6 +1592,13 @@ def _validate_gui_varying(receipt: dict[str, Any], episode: dict[str, Any]) -> N
         for value in coordinates:
             coordinate(value)
 
+    _validate_gui_score_pair(diagnostic, prior, resources, coarse)
+    _validate_gui_clean_comparison(receipt, episode)
+
+
+def _validate_gui_score_pair(diagnostic: dict[str, Any], prior: dict[str, Any],
+                             resources: dict[str, Any], coarse: dict[str, Any]) -> None:
+    branch_weight, ordinary_weight = prior["branch_weight"], prior["ordinary_weight"]
     def evidence(value: Any) -> list[float]:
         if not isinstance(value, list) or len(value) != 2 or any(not _is_finite_number(x) for x in value):
             raise CampaignError("GUI varying diagnostic requires finite paired bit evidence")
@@ -1446,6 +1661,263 @@ def _validate_gui_varying(receipt: dict[str, Any], episode: dict[str, Any]) -> N
         raise CampaignError("GUI varying combined presence must match its paired component evidence")
 
 
+def _validate_gui_clean_comparison(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
+    diagnostic, plan = receipt["hf_gui_varying_diagnostic"], receipt["plan"]
+    if not episode.get("hf_gui_clean_diagnostic", False):
+        if "clean_comparison" in diagnostic:
+            raise CampaignError("unrequested clean GUI comparison")
+        return
+    clean = diagnostic.get("clean_comparison")
+    if (not isinstance(clean, dict) or not _is_nonnegative_int(clean.get("schema_version")) or clean["schema_version"] != 1 or
+            clean.get("used_for_receiver_decisions") is not False or
+            clean.get("transmitter_key_evaluator_only") is not True or
+            clean.get("public_acquisition_input") != "noisy_observation" or
+            clean.get("within_key_same_coordinates_for_clean_noisy") is not True or
+            clean.get("clean_channel_noise_enabled") is not False or clean.get("noisy_clean_validity_equal") is not True):
+        raise CampaignError("clean GUI comparison must retain versioned evaluator-only noisy-acquisition scope")
+    control = episode.get("control", "wanted")
+    key_count = 2 if control == "wrong-key" else 1
+    if "quiet_control_clean_is_zero" not in clean or "wanted_bit" not in clean:
+        raise CampaignError("clean GUI comparison must explicitly report nullable evaluator fields")
+    if not _is_nonnegative_int(clean.get("coarse_searches")) or clean["coarse_searches"] != key_count:
+        raise CampaignError("clean GUI comparison must acquire once from noisy IQ for each declared key")
+    for field in ("clean_input_sha256", "clean_observation_sha256"):
+        if not isinstance(clean.get(field), str) or re.fullmatch(r"[0-9a-fA-F]{64}", clean[field]) is None:
+            raise CampaignError("clean GUI comparison must bind full capture and selected-observation hashes")
+    for field, value in (("clean_hashed_samples", plan["horizon_samples"]),
+                         ("clean_observation_hashed_samples", diagnostic["observation_samples"])):
+        if not _is_nonnegative_int(clean.get(field)) or clean[field] != value:
+            raise CampaignError("clean GUI comparison must render the same complete public horizon and observation")
+    for field in ("clean_energy_sample_sum", "difference_energy_sample_sum"):
+        if not _is_finite_number(clean.get(field)) or clean[field] < 0:
+            raise CampaignError("clean GUI comparison energies must be finite nonnegative measurements")
+    if control == "noise":
+        if clean.get("quiet_control_clean_is_zero") is not True or clean["clean_energy_sample_sum"] != 0 or clean.get("wanted_bit") is not None:
+            raise CampaignError("noise-only clean GUI comparison must retain its zero-signal evaluator control")
+    elif (clean.get("quiet_control_clean_is_zero") is not None or not _is_nonnegative_int(clean.get("wanted_bit")) or
+            clean["wanted_bit"] not in (0, 1)):
+        raise CampaignError("active clean GUI comparison must report the evaluator's transmitted bit")
+    resources = clean.get("resources")
+    integer_fields = ("coarse_workspace_bound_bytes", "fine_pair_count", "varying_render_row_bound", "varying_render_rows",
+                      "selected_capture_bytes", "extra_chunk_bytes", "clean_source_working_bytes", "native_source_channel_bound_bytes")
+    if not isinstance(resources, dict) or any(not _is_nonnegative_int(resources.get(field)) for field in integer_fields):
+        raise CampaignError("clean GUI comparison requires explicit bounded work and memory receipts")
+    bounds = resources.get("key_render_row_bounds")
+    source_bound = 65 * 2**20
+    if (not isinstance(bounds, list) or len(bounds) != key_count or
+            any(not _is_nonnegative_int(value) or value == 0 for value in bounds) or
+            bounds[0] != diagnostic["resources"]["render_row_bound"] or
+            resources["fine_pair_count"] != 2 * key_count or
+            resources["varying_render_row_bound"] != 2 * sum(bounds) or
+            not 0 < resources["varying_render_row_bound"] <= 32 * 2**20 or
+            resources["selected_capture_bytes"] != 16 * diagnostic["observation_samples"] or
+            resources["extra_chunk_bytes"] != 17 * episode.get("chunk", 4096) or
+            resources["native_source_channel_bound_bytes"] != source_bound or
+            not 0 < resources["clean_source_working_bytes"] <= source_bound or
+            plan.get("native_source_channel_preflight_bound_bytes") != 2 * source_bound or
+            not diagnostic["coarse"]["workspace_bytes"] <= resources["coarse_workspace_bound_bytes"] <= diagnostic["resources"]["scratch_bound_bytes"]):
+        raise CampaignError("clean GUI comparison must preserve its additional source, capture and aggregate render reservations")
+    keys = clean.get("keys")
+    if not isinstance(keys, list) or len(keys) != key_count:
+        raise CampaignError("clean GUI comparison requires only its declared receiver and counterfactual transmitter keys")
+    rendered = diagnostic["varying"]["basis_rows"]
+    for index, row in enumerate(keys):
+        role = "receiver" if index == 0 else "transmitter"
+        if not isinstance(row, dict) or row.get("role") != role:
+            raise CampaignError("clean GUI comparison key order must preserve receiver and evaluator transmitter roles")
+        coarse = diagnostic["coarse"] if index == 0 else row.get("coarse")
+        if index == 0:
+            if "coarse" not in row or "noisy" not in row or row["coarse"] is not None or row["noisy"] is not None:
+                raise CampaignError("receiver clean comparison must reuse the original noisy coarse and score receipts")
+        else:
+            if not isinstance(coarse, dict):
+                raise CampaignError("transmitter comparison requires its own noisy-input public acquisition receipt")
+            for field in ("frequency_points", "arrival_points", "workspaces", "total_tiles", "completed_tiles", "fft_precision"):
+                if ((field != "fft_precision" and not _is_nonnegative_int(coarse.get(field))) or
+                        coarse.get(field) != diagnostic["coarse"].get(field)):
+                    raise CampaignError("counterfactual acquisition must preserve the full public coarse geometry")
+            if (not _is_nonnegative_int(coarse.get("workspace_bytes")) or
+                    not 0 < coarse["workspace_bytes"] <= resources["coarse_workspace_bound_bytes"]):
+                raise CampaignError("counterfactual coarse workspace must remain inside the common admission bound")
+            if "seconds" in coarse and (not _is_finite_number(coarse["seconds"]) or coarse["seconds"] < 0):
+                raise CampaignError("counterfactual coarse time must be finite and nonnegative")
+            proposals = coarse.get("proposals")
+            if not isinstance(proposals, list) or not proposals:
+                raise CampaignError("counterfactual acquisition requires public noisy proposals")
+            coordinates = []
+            for proposal in proposals:
+                if (not isinstance(proposal, dict) or not _is_finite_number(proposal.get("score")) or
+                        not _is_nonnegative_int(proposal.get("bit")) or proposal["bit"] not in (0, 1) or
+                        not _is_nonnegative_int(proposal.get("rank"))):
+                    raise CampaignError("counterfactual acquisition requires valid public proposal metadata")
+                coordinates.append(proposal.get("coordinate"))
+            for field in ("affine_coordinates", "varying_coordinates", "segmented_timing_coordinates", "epoch_timing_coordinates"):
+                values = coarse.get(field)
+                if not isinstance(values, list):
+                    raise CampaignError("counterfactual acquisition requires each public coordinate bank")
+                coordinates.extend(values)
+            if any(not isinstance(value, dict) or any(not _is_finite_number(value.get(field)) for field in
+                    ("epoch_offset_seconds", "arrival_seconds", "frequency_hz", "clock_ppm")) for value in coordinates):
+                raise CampaignError("counterfactual public coordinates must remain finite")
+        pairs = [row.get("clean")] if index == 0 else [row.get("noisy"), row.get("clean")]
+        noisy = diagnostic if index == 0 else row.get("noisy")
+        for pair in pairs:
+            if not isinstance(pair, dict):
+                raise CampaignError("clean GUI comparison requires every declared fine score pair")
+            _validate_gui_score_pair(pair, diagnostic["prior"], dict(diagnostic["resources"], render_row_bound=bounds[index]), coarse)
+            for name in ("affine", "varying"):
+                for field in ("workspace_bytes", "public_grid_log_count", "public_frequency_cells") + (
+                        ("blocks", "block_rows", "frequency_states", "status") if name == "varying" else ()):
+                    expected = diagnostic[name].get(field)
+                    if field == "public_frequency_cells" and (not _is_nonnegative_int(expected) or expected == 0):
+                        raise CampaignError("clean GUI comparisons require explicit public frequency-cell geometry")
+                    if ((field == "public_frequency_cells" and not _is_nonnegative_int(pair[name].get(field))) or
+                            pair[name].get(field) != expected):
+                        raise CampaignError("clean GUI fine scores must preserve the same native public geometry and admitted workspace")
+                for field in ("candidates", "selected_log_prior_mass"):
+                    if pair[name].get(field) != noisy[name].get(field):
+                        raise CampaignError("clean/noisy scores must share the same noisy-selected within-key coordinates and prior mass")
+            rendered += pair["varying"]["basis_rows"]
+    if resources["varying_render_rows"] != rendered or rendered > resources["varying_render_row_bound"]:
+        raise CampaignError("clean GUI comparison must count all executed fine pairs within its aggregate render bound")
+
+
+def _validate_fullwave_reflection(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
+    plan = receipt["plan"]
+    scenario = receipt.get("scenario", {})
+    configured = scenario.get("channel") if isinstance(scenario, dict) else None
+    channel = receipt.get("channel")
+    if episode["scenario"] != "hf-fullwave-reflection":
+        if ("fullwave_reflection" in plan or plan.get("channel_renderer") == "hf_fullwave_reflection" or
+                isinstance(configured, dict) and ("fullwave_reflection" in configured or configured.get("renderer") == "hf_fullwave_reflection") or
+                isinstance(channel, dict) and "fullwave_reflection" in channel):
+            raise CampaignError("unrequested full-wave reflection descriptor or renderer")
+        return
+    if (plan.get("channel_renderer") != "hf_fullwave_reflection" or not isinstance(configured, dict) or
+            configured.get("renderer") != "hf_fullwave_reflection"):
+        raise CampaignError("full-wave reflection must bind its native renderer in plan and scenario")
+
+    def descriptor(value: Any) -> None:
+        if not isinstance(value, dict):
+            raise CampaignError("full-wave reflection requires its fixed physical descriptor")
+        integer_fields = {"modelling_delay_samples", "taps", "first_lag_samples", "last_lag_samples", "filter_halo_samples",
+                          "maximum_rf_solves", "preparation_workspace_bound_bytes"}
+        for field, expected in FULLWAVE_REFLECTION.items():
+            actual = value.get(field)
+            if (actual != expected or isinstance(expected, (int, float)) and not _is_finite_number(actual) or
+                    field in integer_fields and not _is_nonnegative_int(actual)):
+                raise CampaignError("full-wave reflection descriptor differs from the fixed qualified model")
+
+    descriptor(plan.get("fullwave_reflection"))
+    descriptor(configured.get("fullwave_reflection"))
+    fs, lead = plan.get("sample_rate_hz"), plan.get("capture_preroll_seconds")
+    source_stop, horizon = plan.get("source_stop_sample"), plan.get("horizon_samples")
+    if (not _is_finite_number(fs) or fs != 1920 or not _is_finite_number(lead) or lead != .25 or
+            not _is_nonnegative_int(source_stop) or source_stop < math.ceil((540 + lead) * fs) or
+            not _is_nonnegative_int(horizon) or horizon < source_stop + 129 or
+            not _is_finite_number(plan.get("represented_seconds")) or
+            not math.isclose(plan["represented_seconds"], horizon / fs, rel_tol=1e-12, abs_tol=1e-12) or
+            not _is_finite_number(plan.get("channel_tail_seconds")) or plan["channel_tail_seconds"] != 129 / fs):
+        raise CampaignError("full-wave reflection must preserve the full source span, finite tail and public capture horizon")
+    bounds = plan.get("public_bounds")
+    if (not isinstance(bounds, dict) or not _is_finite_number(bounds.get("arrival_low_seconds")) or
+            bounds["arrival_low_seconds"] != 1 / fs or not _is_finite_number(bounds.get("arrival_high_seconds")) or
+            bounds["arrival_high_seconds"] != 129 / fs or
+            not _is_nonnegative_int(bounds.get("receiver_filter_halo_samples")) or bounds["receiver_filter_halo_samples"] != 128):
+        raise CampaignError("full-wave reflection must retain the public arrival prior and 128-sample filter halo")
+    quiet, count = plan.get("first_uncontaminated_quiet_slot"), plan.get("scored_slot_horizon")
+    slots, wire = plan.get("public_slots"), plan.get("wire_bits")
+    if (not _is_nonnegative_int(wire) or wire == 0 or not _is_nonnegative_int(quiet) or quiet < wire or
+            not _is_nonnegative_int(count) or count != quiet + 2 or plan.get("planned_uncontaminated_quiet_slots") != 2 or
+            not isinstance(slots, list) or len(slots) != count):
+        raise CampaignError("full-wave capture must include the complete public message calendar and two uncontaminated quiet observations")
+    for index, row in enumerate(slots):
+        observation = row.get("observation") if isinstance(row, dict) else None
+        if (not isinstance(observation, dict) or not _is_nonnegative_int(row.get("index")) or row["index"] != index or
+                any(not _is_nonnegative_int(observation.get(field)) for field in ("first", "stop")) or
+                not observation["first"] < observation["stop"] <= horizon or
+                index >= quiet and (observation["first"] < source_stop + 129 or row.get("evaluator_transmitting") is not False)):
+            raise CampaignError("full-wave capture observations must preserve ordered bounds and the complete reflected tail")
+    if slots[-1]["observation"]["stop"] != horizon:
+        raise CampaignError("full-wave capture must end after the last complete public observation")
+    if (not _is_finite_number(plan.get("cn0_db_hz")) or not -200 <= plan["cn0_db_hz"] <= 200 or
+            not _is_finite_number(plan.get("noise_variance")) or
+            not math.isclose(plan["noise_variance"], fs / 10 ** (plan["cn0_db_hz"] / 10), rel_tol=1e-10) or
+            plan.get("cn0_reference_plane") != "normalized incident DATA before reflected-port loss and fixed additive receiver noise"):
+        raise CampaignError("full-wave input CN0 must preserve incident energy and fixed additive receiver noise")
+    executed = episode["mode"] != "plan"
+    if (plan.get("fullwave_reflection_source_band_checked") is not executed or
+            plan.get("fullwave_reflection_table_built") is not executed):
+        raise CampaignError("full-wave plan must distinguish unexecuted planning from actual source and table qualification")
+    if not executed:
+        if isinstance(channel, dict) and "fullwave_reflection" in channel:
+            raise CampaignError("full-wave planning must not claim executed table or channel qualification")
+        return
+    if (not isinstance(channel, dict) or any(not _is_nonnegative_int(channel.get(field)) or channel[field] != horizon
+            for field in ("samples", "hashed_samples")) or
+            not _is_nonnegative_int(channel.get("source_samples")) or channel["source_samples"] != source_stop or
+            not isinstance(channel.get("input_sha256"), str) or re.fullmatch(r"[0-9a-fA-F]{64}", channel["input_sha256"]) is None or
+            not _is_finite_number(channel.get("tail_seconds")) or channel["tail_seconds"] != 129 / fs or
+            not _is_finite_number(channel.get("maximum_delay_seconds")) or channel["maximum_delay_seconds"] != 1 / fs):
+        raise CampaignError("full-wave execution must hash the whole planned capture and report actual source and tail extent")
+    full = channel.get("fullwave_reflection")
+    descriptor(full)
+    if (full.get("table_qualified") is not True or full.get("witnesses_qualified") is not True or
+            not isinstance(full.get("table_sha256"), str) or re.fullmatch(r"[0-9a-fA-F]{64}", full["table_sha256"]) is None or
+            full.get("table_digest_scope") != "both ports in reflection/transmission order, ascending profile knots and integer lags, little-endian complex binary64 taps"):
+        raise CampaignError("full-wave execution requires qualified table witnesses and exact table-hash provenance")
+    for field, expected in (("rf_solves", 32070), ("knot_profiles_checked", 65), ("holdout_profiles_checked", 128)):
+        if not _is_nonnegative_int(full.get(field)) or full[field] != expected:
+            raise CampaignError("full-wave qualification must report every bounded RF solve and profile witness")
+    for field, maximum in (("maximum_profile_holdout_absolute_error", .005),
+                           ("maximum_witness_frequency_absolute_error", .005),
+                           ("maximum_witness_mesh_absolute_error", .005), ("maximum_discarded_energy_fraction", 1e-6)):
+        values = full.get(field)
+        if not isinstance(values, list) or len(values) != 2 or any(not _is_finite_number(value) or not 0 <= value <= maximum for value in values):
+            raise CampaignError("full-wave numerical qualification cannot accept missing, unknown or out-of-bound port errors")
+    flux_limit = (math.sqrt(1 + 1e-8) + math.sqrt(2) * .005) ** 2 - 1
+    for field, maximum in (("maximum_frozen_flux_excess", flux_limit), ("retarded_peak_error_bound", .005)):
+        if not _is_finite_number(full.get(field)) or not 0 <= full[field] <= maximum:
+            raise CampaignError("full-wave frozen-flux and retarded-coefficient error gates must both pass")
+    for field in ("carrier_flight_phase_bound_radians", "preparation_seconds"):
+        if not _is_finite_number(full.get(field)) or full[field] < 0:
+            raise CampaignError("full-wave preparation time and carrier-flight proxy must remain finite explicit diagnostics")
+    timing = receipt.get("timing")
+    if (not isinstance(timing, dict) or any(not _is_finite_number(timing.get(field)) for field in
+            ("channel_preparation_seconds", "wall_seconds")) or
+            not full["preparation_seconds"] <= timing["channel_preparation_seconds"] <= timing["wall_seconds"] or
+            timing.get("isolated_receiver_service_measured") is not False or timing.get("capacity_qualified") is not False):
+        raise CampaignError("full-wave table construction must remain charged to preparation and total wall time, without a receiver service claim")
+    low, high = full.get("source_minimum_frequency_hz"), full.get("source_maximum_frequency_hz")
+    if not _is_finite_number(low) or not _is_finite_number(high) or not -768 <= low <= high <= 768:
+        raise CampaignError("executed full-wave source spectrum must remain within the qualified occupied band")
+    for field in ("table_workspace_bytes", "stream_workspace_bytes"):
+        if not _is_nonnegative_int(full.get(field)) or full[field] == 0:
+            raise CampaignError("full-wave qualification requires actual positive table and stream workspace")
+    if (full["table_workspace_bytes"] + full["stream_workspace_bytes"] > 1048576 or
+            not _is_nonnegative_int(channel.get("workspace_bytes")) or channel["workspace_bytes"] < 1048576):
+        raise CampaignError("full-wave table and stream workspace must fit the admitted preparation bound")
+    regions = full.get("regions")
+    if not isinstance(regions, list) or len(regions) != 3:
+        raise CampaignError("full-wave execution must retain before, transition and after capture accounting")
+    sums = [0., 0.]
+    for region, name, samples in zip(regions, ("before", "transition", "after"), (115232, 230400, horizon - 345632)):
+        if (not isinstance(region, dict) or region.get("name") != name or
+                not _is_nonnegative_int(region.get("samples")) or region["samples"] != samples):
+            raise CampaignError("full-wave regional samples must cover the complete delayed transition and capture")
+        for index, field in enumerate(("incident_energy_sample_sum", "reflected_energy_sample_sum")):
+            if not _is_finite_number(region.get(field)) or region[field] < 0:
+                raise CampaignError("full-wave regional energies must be finite nonnegative measurements")
+            sums[index] += region[field]
+    for value, field in zip(sums, ("input_energy_sample_sum", "signal_energy_sample_sum")):
+        if not _is_finite_number(channel.get(field)) or not math.isclose(value, channel[field], rel_tol=1e-10, abs_tol=1e-9):
+            raise CampaignError("full-wave regional energy accounting must match complete channel totals")
+    if episode.get("control", "wanted") == "noise" and (any(value != 0 for value in sums) or
+            channel["input_energy_sample_sum"] != 0 or channel["signal_energy_sample_sum"] != 0 or
+            channel.get("contains_source_energy") is not False or channel.get("contains_signal_energy") is not False):
+        raise CampaignError("full-wave noise control must contain exactly zero incident and reflected clean energy")
+
+
 def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
     identity_fields = ("requested_scenario", "mode", "waveform", "seed", "control")
     missing_identity = [field for field in identity_fields if field not in receipt]
@@ -1472,6 +1944,7 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     if not isinstance(plan, dict):
         raise CampaignError("completed receipt is missing plan")
     _validate_profile_controls(plan, episode)
+    _validate_fullwave_reflection(receipt, episode)
     if episode["mode"] != "gui-varying" and "hf_gui_varying_diagnostic" in receipt:
         raise CampaignError("unrequested GUI varying diagnostic in native receipt")
     expected_digest_slot = episode.get("capture_digest_slot", episode.get("search_slot", 0) if episode["mode"] == "hf-search" else None)
@@ -1570,6 +2043,11 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     sticky_requested = episode.get("hf_phase_filter_sticky", False)
     if plan.get("hf_phase_filter_sticky_requested", False) is not sticky_requested:
         raise CampaignError("native sticky phase prior request does not match the frozen episode")
+    bridge_requested = episode.get("hf_phase_bridge", False)
+    if plan.get("hf_phase_bridge_requested", False) is not bridge_requested:
+        raise CampaignError("native phase bridge request does not match the frozen episode")
+    if plan.get("hf_gui_clean_diagnostic_requested", False) is not episode.get("hf_gui_clean_diagnostic", False):
+        raise CampaignError("native clean GUI diagnostic request does not match the frozen episode")
     comparison_requested = episode.get("hf_compare_admitted_models", False)
     policy = "compare_admitted" if comparison_requested else "fallback_only"
     if comparison_requested or episode.get("service_replay", False) or "receiver_evidence_policy" in plan:
@@ -1596,6 +2074,7 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
                 phase_receiver.get("refinement_enabled", False) is not refinement_requested or
                 phase_receiver.get("phase_filter_enabled", False) is not receiver_filter_requested or
                 phase_receiver.get("phase_filter_sticky_enabled", False) is not sticky_requested or
+                phase_receiver.get("phase_bridge_enabled", False) is not bridge_requested or
                 phase_receiver.get("model_family") != model_family or
                 not _is_finite_number(phase_receiver.get("fixed_weight")) or phase_receiver["fixed_weight"] != .25):
             raise CampaignError("experimental public phase receiver must report its fixed family/prior and no truth inputs")

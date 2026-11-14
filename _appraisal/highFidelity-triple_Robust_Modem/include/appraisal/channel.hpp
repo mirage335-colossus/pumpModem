@@ -1,5 +1,6 @@
 #pragma once
 
+#include "appraisal/hf_fullwave_kernel.hpp"
 #include "appraisal/hf_ionosphere.hpp"
 #include "datapump/triad_modem_v3.hpp"
 #include <cstdint>
@@ -53,10 +54,15 @@ struct Frontend {
 struct LunarSpectralSpec {
     double limb_width_hz = 88, dish_m = 3, bulk_delay_seconds = 2.4720213723;
 };
+struct HfFullwaveReflectionSpec {
+    static constexpr double transition_first_seconds = 60., transition_seconds = 120.;
+    static constexpr double minimum_source_seconds = 540.;
+};
 struct ChannelSpec {
     double rf_hz = 1e6;
     std::vector<Path> paths{{}};
     std::optional<LunarSpectralSpec> lunar;
+    std::optional<HfFullwaveReflectionSpec> fullwave_reflection;
     Resonator transmitter;
     Noise noise;
     Frontend frontend;
@@ -71,11 +77,25 @@ struct ChannelSpec {
     std::optional<std::uint64_t> noise_seed;
 };
 struct ChannelWorkspaceError : std::invalid_argument { using std::invalid_argument::invalid_argument; };
+struct FullwaveReflectionUnavailable : std::invalid_argument { using std::invalid_argument::invalid_argument; };
+struct HfFullwaveReflectionReport {
+    struct Region {
+        std::uint64_t samples = 0;
+        long double incident_energy = 0, reflected_energy = 0;
+    };
+    HfFullwaveKernelTableChecks checks;
+    std::string table_sha256;
+    std::size_t table_workspace_bytes = 0, stream_workspace_bytes = 0;
+    double preparation_seconds = 0, retarded_peak_error_bound = 0, carrier_flight_phase_bound = 0;
+    double source_minimum_frequency_hz = 0, source_maximum_frequency_hz = 0;
+    std::array<Region, 3> regions;
+};
 struct ChannelReport {
     std::uint64_t samples = 0, source_samples = 0, impulse_events = 0, clipped_samples = 0;
     std::size_t workspace_bytes = 0;
     long double input_energy = 0, signal_energy = 0, output_energy = 0, additive_noise_energy = 0;
     double maximum_delay_seconds = 0, tail_seconds = 0, minimum_agc_gain = 1;
+    std::optional<HfFullwaveReflectionReport> fullwave_reflection;
 };
 // A bounded, single-owner, forward renderer. It never rewinds or reseeds the
 // canonical Emission. Horizon is an evaluator/resource bound, never RX truth.

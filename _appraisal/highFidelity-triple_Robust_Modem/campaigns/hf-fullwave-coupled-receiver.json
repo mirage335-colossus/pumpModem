@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "name": "hf-fullwave-coupled-receiver",
+  "purpose": "Frozen after independent full-band kernel and finite-FIR rate qualification but before any native modem outcomes. Full coupled reflection path at3.4MHz,120s profile transition starting60s, source A13bits requested64seconds. Fixed20/0dBHz input-plane cases preserve physical loss and complete tail/quiet scoring. Component full-span energy accounting, no normalized loss or conditional success claim.",
+  "max_wall_seconds": 900,
+  "per_trial_wall_seconds": 300,
+  "max_trials": 3,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "scenario": "hf-fullwave-reflection",
+      "waveform": "reference",
+      "seed": 64001,
+      "noise_seed": 74001,
+      "bit_seconds": 64,
+      "message": "A",
+      "id": "fullwave-reflection-full-span",
+      "mode": "channel",
+      "cn0_db_hz": 20
+    },
+    {
+      "scenario": "hf-fullwave-reflection",
+      "waveform": "reference",
+      "seed": 64001,
+      "noise_seed": 74001,
+      "bit_seconds": 64,
+      "message": "A",
+      "control": "wanted",
+      "id": "fullwave-reflection-CN0-20",
+      "mode": "receive",
+      "cn0_db_hz": 20
+    },
+    {
+      "scenario": "hf-fullwave-reflection",
+      "waveform": "reference",
+      "seed": 64001,
+      "noise_seed": 74001,
+      "bit_seconds": 64,
+      "message": "A",
+      "control": "wanted",
+      "id": "fullwave-reflection-CN0-0",
+      "mode": "receive",
+      "cn0_db_hz": 0
+    }
+  ]
+}

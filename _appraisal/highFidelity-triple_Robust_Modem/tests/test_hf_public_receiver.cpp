@@ -569,6 +569,49 @@ void phase_filter_callback(const Fixture& fixture) {
           number(sticky_work,"emission_states")==2*number(work,"emission_states")&&
           number(sticky_work,"transition_edges")==2*number(work,"transition_edges"),
           "sticky callback telemetry does not charge both serial passes");
+    rejects([] {const appraisal::HfPublicPhaseReceiver invalid(0,true,false,false,true);},
+            "bridge receiver accepted a missing correlated phase model");
+    const appraisal::HfPublicPhaseReceiver bridge_candidate(40,true,true,true,true);
+    const auto bridge_extension=bridge_candidate.supplement();
+    const auto bridge_quote=bridge_extension.workspace(f.config,f.slot,2);
+    check(bridge_extension.supported(f.config,f.slot)&&!bridge_extension.supported(wrong_layout,f.slot)&&
+          bridge_quote>=valid_quote&&bridge_quote<workspace_limit&&
+          bridge_extension.fixed_weight==sticky_extension.fixed_weight,
+          "bridge receiver changed its support, prior or workspace contract");
+    rejects([&] {bridge_extension.score(f.config,f.slot,f.key,f.iq,prepared,2,bridge_quote-1,{},executor);},
+            "bridge receiver accepted a shorter lease than its public quote");
+    const auto bridged=appraisal::score_hf_public_search(f.config,f.slot,f.key,f.iq,prepared,2,bridge_quote,
+        true,false,false,{},executor,true,true,true,true,true);
+    check(bridged.phase_filter&&bridged.phase_filter->bridge&&
+          bridged.phase_filter->walk_bit_log_e==sticky_shadow.phase_filter->walk_bit_log_e&&
+          bridged.phase_filter->sticky_bit_log_e==sticky_shadow.phase_filter->sticky_bit_log_e&&
+          bridged.combined_phase_bit_log_e==sticky_shadow.combined_phase_bit_log_e&&
+          bridged.basis_pair.bank_calls==sticky_shadow.basis_pair.bank_calls&&
+          bridged.basis_pair.fallback_calls==sticky_shadow.basis_pair.fallback_calls,
+          "bridge changed legacy evidence or rerendered the canonical waveform");
+    const auto bridge_correlated=appraisal::combine_hf_public_phase_evidence(expected_correlated,
+        bridged.phase_filter->bridge->bit_log_e);
+    const auto bridge_combined=appraisal::combine_hf_public_phase_evidence(bridged.combined_phase_bit_log_e,
+        bridge_correlated);
+    const auto bridge_actual=bridge_extension.score(f.config,f.slot,f.key,f.iq,prepared,2,bridge_quote,{},executor);
+    check(bridge_actual==bridge_combined,"bridge native callback used different scores or weights from matched shadow");
+    const auto bridge_report=bridge_candidate.report();
+    const auto& bridge_slots=std::get<Json::Array>(field(bridge_report,"slots").value);
+    check(boolean(bridge_report,"phase_bridge_enabled")&&bridge_slots.size()==1&&
+          !has(sticky_report,"phase_bridge_enabled"),"bridge callback telemetry is missing or leaks into its control");
+    const auto& bridge_filter=field(bridge_slots[0],"phase_filter");
+    check(boolean(bridge_filter,"bridge_enabled")&&
+          bits(field(bridge_filter,"correlated"),"bit_log_e")==bridge_correlated&&
+          bits(field(bridge_filter,"legacy_correlated"),"bit_log_e")==expected_correlated&&
+          bits(field(bridge_filter,"combined"),"bit_log_e")==bridge_combined,
+          "bridge callback omitted fixed model weights");
+    const auto& bridge_work=field(bridge_filter,"bridge_work");
+    const auto bridge_groups=(bridged.phase_filter->plan.blocks+59)/60;
+    check(number(bridge_work,"groups")==bridge_groups&&
+          number(bridge_work,"workspace_reserved_bytes")==2*131072+98304&&
+          number(bridge_work,"edge_emissions")==39*4*97*32*bridge_groups&&
+          number(bridge_work,"forward_terms")==39*4*97*32*bridge_groups,
+          "bridge callback undercounted final edge, priors or workspace");
 }
 } // namespace
 

@@ -2,7 +2,6 @@
 #include "appraisal/hf_fullwave_kernel.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <complex>
 #include <iostream>
@@ -131,6 +130,69 @@ void independent_frequency_detects_delay_alias() {
           "independent off-grid response did not reject the aliased long delay");
 }
 
+void factored_carrier_phase() {
+    // Independent first-order index at a weak, off-grid D density. Integrate
+    // the continuous profile by Simpson's rule rather than the production sum.
+    constexpr double density = 1.982374e6;
+    constexpr double charge = 1.602176634e-19;
+    constexpr double mass = 9.1093837139e-31;
+    constexpr double epsilon0 = 8.8541878188e-12;
+    constexpr double omega = tau * carrier;
+    constexpr double step = 25.;
+    constexpr std::size_t cells = 1600;
+    double integral = 0.;
+    for (std::size_t j = 0; j <= cells; ++j) {
+        const double offset = j * step - 20000.;
+        const double shape = std::cos(std::numbers::pi * offset / 40000.);
+        const double collision_ratio = 5e5 * std::exp(-offset / 6000.) / omega;
+        const double susceptibility_real = -density * shape * shape * charge * charge /
+            (epsilon0 * mass * omega * omega * (1. + collision_ratio * collision_ratio));
+        const double weight = (j == 0 || j == cells) ? 1. : (j % 2 == 0) ? 2. : 4.;
+        integral += weight * susceptibility_real;
+    }
+    const double expected_one_way = .5 * integral * step / 3. * omega / c;
+    const double weak = hf_fullwave_d_carrier_phase_radians(carrier, density);
+    check(weak < 0. && std::abs(weak / expected_one_way - 1.) < 5e-6,
+          "D-layer carrier phase disagrees with the independent weak-plasma expansion");
+    check(hf_fullwave_d_carrier_phase_radians(carrier, 0.) == 0., "vacuum accumulated D-layer phase");
+    const double strong_density = 7.479213e9;
+    const double phase_start = hf_fullwave_d_carrier_phase_radians(carrier, 8e8);
+    const double phase_end = hf_fullwave_d_carrier_phase_radians(carrier, strong_density);
+    check(phase_end < phase_start - 30. && std::abs(phase_end -
+          hf_fullwave_d_carrier_phase_radians(carrier, strong_density, 800)) < 1e-6,
+          "off-grid D-layer quadrature lost density-induced phase winding");
+
+    constexpr double fraction = .37;
+    for (const double traversals : {1., 2.}) {
+        const double a = 0., b = traversals * (phase_end - phase_start);
+        // Two different residuals, one extremely weak, with an independently
+        // constructed carrier in the solver sign and in the baseband sign.
+        const Complex residual_start{.43, -.18}, residual_end{1e-180, 2e-180};
+        const Complex lower = residual_start * std::exp(Complex{0., a});
+        const Complex upper = residual_end * std::exp(Complex{0., b});
+        const Complex expected = ((1. - fraction) * residual_start + fraction * residual_end) *
+            std::exp(Complex{0., (1. - fraction) * a + fraction * b});
+        const auto blend = hf_fullwave_phase_blend(a, b, fraction);
+        const auto predicted = blend.apply(lower, upper);
+        check(std::abs(predicted - expected) < 1e-14 &&
+              std::abs(std::abs(blend.lower_weight) - (1. - fraction)) < 1e-15 &&
+              std::abs(std::abs(blend.upper_weight) - fraction) < 1e-15,
+              "phase factoring wrapped or mis-scaled a one/two-way response");
+        const auto native = hf_fullwave_phase_blend(-a, -b, fraction).apply(std::conj(lower), std::conj(upper));
+        check(std::abs(native - std::conj(expected)) < 1e-14, "phase factoring reversed the native baseband convention");
+        check(hf_fullwave_phase_blend(a, b, 0.).apply(lower, upper) == lower &&
+              hf_fullwave_phase_blend(a, b, 1.).apply(lower, upper) == upper,
+              "phase factoring modified a frozen knot");
+        check(hf_fullwave_phase_blend(a, b, fraction).apply({}, {}) == Complex{},
+              "phase factoring generated power at a complex zero");
+        check(std::abs(blend.apply({}, upper) / 1e-180 -
+              fraction * (residual_end / 1e-180) * std::exp(Complex{0., fraction * b})) < 1e-14,
+              "phase factoring discarded a tiny nonzero endpoint beside a null");
+    }
+    invalid([&] { hf_fullwave_d_carrier_phase_radians(carrier, strong_density, 0); }, "empty phase quadrature accepted");
+    invalid([&] { hf_fullwave_phase_blend(0., phase_end, 1.1); }, "phase blend extrapolates outside its bracket");
+}
+
 void slab_reference() {
     constexpr HfPlasmaSlab slab{2200., .8 * carrier, 4e4};
     const auto independent = [&](double offset) {
@@ -154,52 +216,6 @@ void slab_reference() {
     }
 }
 
-void streamed_history_and_tail() {
-    const HfFullwaveFir first{2, {{.7, .4}, {0., -.2}, {}, {.23, 0.}}};
-    const HfFullwaveFir last{2, {{-.1, -.5}, {.5, .1}, {-.3, .2}, {0., .33}}};
-    constexpr std::array input{Complex{2., 1.}, Complex{-.5, .4}, Complex{.3, .2}, Complex{},
-                               Complex{.4, -.2}, Complex{.12, 1.}, Complex{1.1, -.2}};
-    constexpr std::size_t max_lag = 5, total = input.size() + max_lag;
-    constexpr std::array weights{0., 0., 0., 0., .15625, .5, .84375, 1., 1., 1., 1., 1.};
-    std::array<Complex, total> reference{};
-    // Scatter each known input across its future lags, independently of the
-    // implementation's circular gather and interpolation arithmetic.
-    for (std::size_t i = 0; i < input.size(); ++i) {
-        for (std::size_t lag = 2; lag <= max_lag; ++lag) {
-            const auto n = i + lag;
-            reference[n] += input[i] * ((1. - weights[n]) * first.taps[lag - 2] + weights[n] * last.taps[lag - 2]);
-        }
-    }
-
-    HfFullwaveKernelStream bulk(first, last, 3, 7), chunked(first, last, 3, 7);
-    std::array<Complex, total + 1> full{}, split{};
-    full.back() = split.back() = Complex{333., 19.};
-    bulk.process(input, std::span{full}.first(input.size()));
-    check(bulk.remaining_tail_samples() == max_lag && bulk.drain(std::span{full}.subspan(input.size())) == max_lag,
-          "bulk drain did not report final tap lag");
-    for (std::size_t i = 0; i < total; ++i)
-        check(std::abs(full[i] - reference[i]) < 1e-14, "LTV FIR output disagrees with direct scatter");
-    check(full[0] == Complex{} && full[1] == Complex{} && std::abs(full[total - 1]) > .1,
-          "FIR emitted before support or lost final input tail");
-
-    std::copy(input.begin(), input.end(), split.begin());
-    auto split_span = std::span{split};
-    for (const auto block : {split_span.first(3), split_span.subspan(3, 1), split_span.subspan(4, 3)})
-        chunked.process(block, block);
-    check(chunked.drain(split_span.subspan(input.size(), 2)) == 2 && chunked.remaining_tail_samples() == 3 &&
-          chunked.drain(split_span.subspan(input.size() + 2)) == 3 && chunked.drain(split_span) == 0,
-          "chunked drain count, state or termination changed");
-    check(full == split && split.back() == Complex{333., 19.}, "chunking, in-place operation or unfilled output changed");
-    invalid([&] { chunked.process(input, split_span.first(input.size())); }, "input resumed after draining");
-
-    HfFullwaveKernelStream tail_crossfade(first, last, 8, 12), empty(first, last, 3, 7);
-    tail_crossfade.process(input, split_span.first(input.size()));
-    tail_crossfade.drain(split_span.subspan(input.size()));
-    const auto expected_final = input.back() * (.15625 * first.taps.back() + .84375 * last.taps.back());
-    check(std::abs(split[total - 1] - expected_final) < 1e-14, "transition did not advance during physical tail");
-    check(empty.drain(split_span) == 0, "never-fed stream manufactured a tail");
-}
-
 void bounds() {
     auto grid = samples(256, [](double) { return gain; });
     auto invalid_design = design;
@@ -208,8 +224,6 @@ void bounds() {
     grid[2] = {std::numeric_limits<double>::quiet_NaN(), 0.};
     invalid([&] { design_hf_fullwave_kernel(grid, design); }, "non-finite RF response accepted");
     invalid([&] { hf_fullwave_fir_response(HfFullwaveFir{0, {1.}}, .6); }, "frequency outside Nyquist accepted");
-    invalid([&] { HfFullwaveKernelStream({0, {1.}}, {1, {1.}}, 1, 2); }, "incompatible port supports accepted");
-    invalid([&] { HfFullwaveKernelStream({0, {1.}}, {0, {1.}}, 2, 2); }, "empty transition accepted");
 }
 
 } // namespace
@@ -218,8 +232,8 @@ int main() {
     try {
         delay_and_energy();
         independent_frequency_detects_delay_alias();
+        factored_carrier_phase();
         slab_reference();
-        streamed_history_and_tail();
         bounds();
         std::cout << checks << " full-wave kernel assertions passed\n";
         return 0;

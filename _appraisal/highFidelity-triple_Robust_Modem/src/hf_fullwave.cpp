@@ -29,6 +29,33 @@ double angular_frequency(double frequency_hz) {
     return two_pi * frequency_hz;
 }
 
+double plasma_frequency_hz(double electron_density_per_m3) {
+    return elementary_charge / two_pi * std::sqrt(electron_density_per_m3 / (electron_mass * vacuum_permittivity));
+}
+
+Complex cold_plasma_contrast(double plasma_hz, double frequency_hz, double collision_rate, double omega) {
+    const double ratio = plasma_hz / frequency_hz;
+    return -(ratio * ratio / Complex{1., collision_rate / omega});
+}
+
+Complex passive_index(Complex epsilon) {
+    // Select the decaying root even if lossless negative epsilon reaches
+    // sqrt with a negative signed zero imaginary part.
+    const Complex principal = std::sqrt(epsilon);
+    return principal.imag() < 0. ? -principal : principal;
+}
+
+double cosine_density_frequency_shape(double offset_m, double width_m) {
+    // Density is cos², so the plasma frequency has a single cosine factor.
+    return std::cos(std::numbers::pi * offset_m / width_m);
+}
+
+double d_collision_rate(double altitude_m) {
+    using Geometry = HfVerticalColumn;
+    return Geometry::d_center_collision_per_second *
+        std::exp((Geometry::d_center_m - altitude_m) / Geometry::d_collision_scale_height_m);
+}
+
 struct Scattering {
     Complex r;
     Complex t;
@@ -43,13 +70,9 @@ Scattering homogeneous_slab(const HfPlasmaSlab& slab, double frequency_hz, doubl
     const double k0d = omega / c * slab.thickness_m;
     if (slab.plasma_frequency_hz == 0) return {{}, std::polar(1., k0d)};
 
-    const double ratio = slab.plasma_frequency_hz / frequency_hz;
-    const Complex epsilon = 1. - ratio * ratio / Complex{1., slab.electron_collision_per_second / omega};
-    // The imaginary part of epsilon is nonnegative for this collision sign.
-    // Explicitly select the decaying root even if a lossless negative epsilon
-    // reaches sqrt with a negative signed zero imaginary part.
-    const Complex principal = std::sqrt(epsilon);
-    const Complex n = principal.imag() < 0. ? -principal : principal;
+    const Complex epsilon = 1. + cold_plasma_contrast(slab.plasma_frequency_hz, frequency_hz,
+                                                     slab.electron_collision_per_second, omega);
+    const Complex n = passive_index(epsilon);
     const Complex x = Complex{0., k0d} * n;
     const Complex p = std::exp(x);
     const Complex p2 = p * p;
@@ -123,10 +146,9 @@ void add_profile_below(ColumnScattering& column, double center_m, double half_wi
     }
     const auto cells = static_cast<std::size_t>(std::ceil(width_m / maximum_step_m));
     const double step_m = width_m / cells;
-    // Density is cos², so the plasma frequency has a single cosine factor.
     for (std::size_t i = cells; i > 0; --i) {
         const double offset_m = (static_cast<double>(i) - .5) * step_m - half_width_m;
-        const double shape = std::cos(std::numbers::pi * offset_m / width_m);
+        const double shape = cosine_density_frequency_shape(offset_m, width_m);
         column.add_below({step_m, peak_plasma_hz * shape, collisions_at(center_m + offset_m)});
     }
 }
@@ -150,8 +172,7 @@ HfFullwaveResponse solve_hf_vertical_column(double frequency_hz, const HfVertica
         !finite_between(maximum_step_m, 1., 1000.))
         throw std::invalid_argument("invalid frozen vertical plasma column or grid");
 
-    const double d_peak_plasma_hz = elementary_charge / two_pi *
-        std::sqrt(profile.d_peak_electron_density_per_m3 / (electron_mass * vacuum_permittivity));
+    const double d_peak_plasma_hz = plasma_frequency_hz(profile.d_peak_electron_density_per_m3);
     ColumnScattering column(frequency_hz);
     column.add_below({Geometry::top_m - Geometry::f_center_m - Geometry::f_half_width_m, 0., 0.});
     add_profile_below(column, Geometry::f_center_m, Geometry::f_half_width_m, profile.f_peak_plasma_frequency_hz,
@@ -159,12 +180,35 @@ HfFullwaveResponse solve_hf_vertical_column(double frequency_hz, const HfVertica
     column.add_below({Geometry::f_center_m - Geometry::f_half_width_m -
                       Geometry::d_center_m - Geometry::d_half_width_m, 0., 0.});
     add_profile_below(column, Geometry::d_center_m, Geometry::d_half_width_m, d_peak_plasma_hz,
-                      maximum_step_m, [](double altitude_m) {
-        return Geometry::d_center_collision_per_second *
-            std::exp((Geometry::d_center_m - altitude_m) / Geometry::d_collision_scale_height_m);
-    });
+                      maximum_step_m, d_collision_rate);
     column.add_below({Geometry::d_center_m - Geometry::d_half_width_m, 0., 0.});
     return column.response();
+}
+
+double hf_fullwave_d_carrier_phase_radians(double frequency_hz, double peak_electron_density_per_m3,
+                                         std::size_t midpoint_cells) {
+    using Geometry = HfVerticalColumn;
+    const double omega = angular_frequency(frequency_hz);
+    if (!finite_between(peak_electron_density_per_m3, 0., 1e13) || midpoint_cells == 0 || midpoint_cells > 8192)
+        throw std::invalid_argument("invalid D-layer interpolation phase profile or quadrature budget");
+    const double peak_plasma_hz = plasma_frequency_hz(peak_electron_density_per_m3);
+    if (peak_plasma_hz >= frequency_hz)
+        throw std::invalid_argument("D-layer interpolation phase requires a propagating D profile");
+    if (peak_plasma_hz == 0.) return 0.;
+
+    constexpr double width_m = 2. * Geometry::d_half_width_m;
+    const double step_m = width_m / midpoint_cells;
+    double integral = 0.;
+    for (std::size_t i = 0; i < midpoint_cells; ++i) {
+        const double offset_m = (static_cast<double>(i) + .5) * step_m - Geometry::d_half_width_m;
+        const double shape = cosine_density_frequency_shape(offset_m, width_m);
+        const auto contrast = cold_plasma_contrast(peak_plasma_hz * shape, frequency_hz,
+                                                  d_collision_rate(Geometry::d_center_m + offset_m), omega);
+        const auto index = passive_index(1. + contrast);
+        // n-1 = (epsilon-1)/(n+1), evaluated without cancellation at small density.
+        integral += (contrast / (index + 1.)).real();
+    }
+    return omega / c * step_m * integral;
 }
 
 } // namespace appraisal

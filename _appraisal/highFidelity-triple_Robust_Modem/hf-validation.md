@@ -12,6 +12,21 @@ from a worldwide ionospheric population. See [models and scope](hf-experiments.m
 
 ## Current receiver and physical-approximation investigation
 
+The [inference and propagation continuation](hf-inference-and-propagation.md)
+completes 32 bounded observations, including 15 complete receivers. Private
+path traces and separate support relaxations distinguish phase-reachability
+from rate-support losses. The fixed smooth-frequency experiment recovers one
+additional bit in each of two long cases, but no additional complete message.
+Clean/noisy GUI comparisons retain wrong discrimination on clean IQ. The
+phase-factored full-band operator passes its sampled numerical and finite-FIR
+gates, then drives complete coupled cutoff/absorption reception. With the
+declared one-ray receiver prior, `A` completes at incident C/N0 = 40 dB-Hz;
+30, 20 and 0 dB-Hz recover five, one and zero of 13 bits respectively without
+a complete message. No wanted row accepts wrong content, and the matched
+noise control stays quiet. This is a paired descriptive sensitivity bracket;
+it does not qualify an optimum receiver, a natural error rate or the unresolved
+general time/energy trend. The original failures below remain preserved.
+
 The [repair protocol and results](hf-receiver-repair.md) preserve four distinct
 questions: complete-message recovery, fresh counterexamples, scoped receiver
 service, and physical-model validity. The approved all-admitted native comparison
@@ -42,11 +57,15 @@ times the valid ready-backlog interval. Both policies fail the second message
 of the fresh physical realization. Noise remains quiet. These are scoped
 service comparisons; they do not calibrate default-owner or hardware capacity.
 
-The new [kernel admission probe](hf-fullwave.md) passes the frozen static
+The earlier [kernel admission probe](hf-fullwave.md) passes the frozen static
 FIR checks at N=512 but rejects endpoint profile interpolation, with complex
 midpoint errors up to .814 against .005. These are observed model failures;
 they are not interpreted as actual channel outages or injected into modem
-tests. Full-band evolving-channel qualification remains separate.
+tests. The subsequent phase-factored method passes the declared sampled
+full-band and causal-FIR checks, with a separate finite-retardation bound for
+the admitted slow transition. The linked continuation records its actual
+coupled waveform/receiver outcomes. These gates do not qualify a distributed
+evolving-plasma solution, general magnetoionic propagation or real-world HF.
 
 Original verification failures remain in
 `local-evidence/hf-repair-validation/`. The first canonical Triad run passed

@@ -265,6 +265,10 @@ std::array<double, 2> hf_group_delay_motion_bounds(const HfModeProfile& p, doubl
 
 double channel_interpolation_tail_seconds(const ChannelSpec& spec, double fs) {
     require(std::isfinite(fs) && fs > 0, "invalid sample rate for channel filter tail");
+    if (spec.fullwave_reflection) {
+        require(fs == HfFullwaveKernelTable::sample_rate_hz, "full-wave reflection requires its fixed sample rate");
+        return static_cast<double>(HfFullwaveKernelTable::taps_per_port - 1) / fs;
+    }
     return static_cast<double>(spec.interpolation_half_width + detail::hf_dispersion_halo_samples(spec)) / fs;
 }
 

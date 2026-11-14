@@ -3,8 +3,11 @@
 #include "lunar_spectral_internal.hpp"
 #include "triad_random_process.hpp"
 
+#include <openssl/evp.h>
 #include <algorithm>
 #include <array>
+#include <bit>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -18,6 +21,8 @@ constexpr double pi = std::numbers::pi;
 constexpr std::size_t fractional_intervals = 2048;
 constexpr double tail_relative_amplitude = 1e-6;
 using GaussianRay = datapump::triad::v3::detail::FixedGaussianRay;
+using Fullwave = HfFullwaveKernelTable;
+constexpr auto reflection = HfFullwavePort::reflection;
 
 void require(bool condition, const char* message) {
     if (!condition) throw std::invalid_argument(message);
@@ -81,6 +86,10 @@ double maximum_delay(const ChannelSpec& spec, double horizon) {
                 }), "HF trajectory offset requires analytic HF paths without linear geometric delay rate");
     }
     double maximum = 0;
+    if (spec.fullwave_reflection) {
+        require(!spec.lunar && spec.paths.empty(), "full-wave reflection excludes other propagation paths");
+        maximum = Fullwave::planned_first_lag_samples(reflection) / Fullwave::sample_rate_hz;
+    }
     if (spec.lunar) {
         const auto& lunar = *spec.lunar;
         require(spec.paths.empty(), "lunar spectral propagation and explicit paths are mutually exclusive");
@@ -108,6 +117,38 @@ double maximum_delay(const ChannelSpec& spec, double horizon) {
         maximum = std::max(maximum, std::max(path.delay_seconds, last) + latest_motion);
     }
     return maximum;
+}
+
+std::string fullwave_table_sha256(const Fullwave& table) {
+    std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> context(EVP_MD_CTX_new(), EVP_MD_CTX_free);
+    require(context && EVP_DigestInit_ex(context.get(), EVP_sha256(), nullptr) == 1,
+            "full-wave table digest initialization failed");
+    for (const auto port : {HfFullwavePort::reflection, HfFullwavePort::transmission}) {
+        for (std::size_t k = 0; k <= Fullwave::intervals; ++k) {
+            const double q = static_cast<double>(k) / Fullwave::intervals;
+            for (auto lag = table.first_lag_samples(port); lag <= table.last_lag_samples(port); ++lag) {
+                const auto value = table.coefficient_at_q(port, lag, q);
+                const std::array bits{std::bit_cast<std::uint64_t>(value.real()), std::bit_cast<std::uint64_t>(value.imag())};
+                std::array<unsigned char, 16> encoded{};
+                for (std::size_t i = 0; i < encoded.size(); ++i)
+                    encoded[i] = static_cast<unsigned char>((bits[i / 8] >> (8 * (i % 8))) & 255);
+                require(EVP_DigestUpdate(context.get(), encoded.data(), encoded.size()) == 1,
+                        "full-wave table digest update failed");
+            }
+        }
+    }
+    std::array<unsigned char, 32> value{};
+    unsigned length = 0;
+    require(EVP_DigestFinal_ex(context.get(), value.data(), &length) == 1 && length == value.size(),
+            "full-wave table digest finalization failed");
+    constexpr char digits[] = "0123456789abcdef";
+    std::string digest;
+    digest.reserve(2 * value.size());
+    for (auto byte : value) {
+        digest.push_back(digits[byte >> 4]);
+        digest.push_back(digits[byte & 15]);
+    }
+    return digest;
 }
 
 std::vector<double> interpolation_weights(unsigned half, double fraction) {
@@ -228,6 +269,8 @@ struct Channel::Impl {
     std::vector<double> interpolation_table;
     std::vector<DelayGroup> delay_groups;
     std::unique_ptr<detail::LunarSpectral> lunar;
+    std::optional<HfFullwaveProfileStream> fullwave;
+    std::uint64_t fullwave_transition_first = 0, fullwave_transition_stop = 0;
     Random white, colored, events, marks;
     Complex tx_state{}, colored_state{}, impulse_state{}, lowpass_state{};
     double colored_decay = 0, colored_innovation = 0, impulse_decay = 0;
@@ -249,8 +292,9 @@ struct Channel::Impl {
         require(finite(spec.rf_hz) && spec.rf_hz > 0, "RF carrier must be positive and finite");
         require(spec.interpolation_half_width >= 4 && spec.interpolation_half_width <= 64,
                 "fractional-delay half width must be in [4,64]");
-        require(spec.lunar ? spec.paths.empty() : (!spec.paths.empty() && spec.paths.size() <= 65536),
-                "channel requires lunar spectral propagation or 1..65536 explicit paths");
+        require(spec.lunar || spec.fullwave_reflection ? spec.paths.empty() :
+                (!spec.paths.empty() && spec.paths.size() <= 65536),
+                "channel requires one spectral propagation model or 1..65536 explicit paths");
         require(finite(source.minimum_frequency_hz) && finite(source.maximum_frequency_hz) &&
                 source.minimum_frequency_hz <= source.maximum_frequency_hz, "invalid source spectral guard");
         const double seconds = static_cast<double>(horizon) / fs;
@@ -265,6 +309,19 @@ struct Channel::Impl {
         }
         const double source_band = std::max(std::abs(source.minimum_frequency_hz), std::abs(source.maximum_frequency_hz));
         require(source_band < fs / 2, "source spectral allowance reaches Nyquist");
+        if (spec.fullwave_reflection) {
+            require(!spec.lunar && !spec.transmitter.enabled && spec.hf_trajectory_offset_seconds == 0 &&
+                    spec.noise.colored_variance == 0 && spec.noise.impulse_rate_hz == 0 &&
+                    spec.noise.impulse_rms == 0 && spec.noise.tone_amplitude == 0 &&
+                    spec.frontend.lowpass_hz == 0 && spec.frontend.clip_magnitude == 0 &&
+                    spec.frontend.agc_target == 0 && spec.frontend.adc_bits == 0 &&
+                    spec.fade.first_seconds == -1 && spec.fade.stop_seconds == -1,
+                    "full-wave reflection requires an isolated linear white-noise channel");
+            if (fs != Fullwave::sample_rate_hz || spec.rf_hz != Fullwave::carrier_hz ||
+                source_band > Fullwave::occupied_half_band_hz ||
+                source.geometry.source_samples < HfFullwaveReflectionSpec::minimum_source_seconds * fs)
+                throw FullwaveReflectionUnavailable("full-wave reflection source exceeds the qualified carrier, sample rate, band, or minimum span");
+        }
         std::optional<LunarSpectralPlan> lunar_plan;
         if (spec.lunar) {
             lunar_plan = lunar_spectral_plan(*spec.lunar, spec.rf_hz, fs, spec.interpolation_half_width, horizon);
@@ -373,7 +430,8 @@ struct Channel::Impl {
                  fade.ramp_seconds <= .5 * (fade.stop_seconds - fade.first_seconds)),
                 "fade must be disabled or have ordered bounds and nonoverlapping ramps");
 
-        const auto history_count = count_from_long_double(std::ceil(static_cast<long double>(report.maximum_delay_seconds) * fs) +
+        const auto history_count = spec.fullwave_reflection ? 1 : count_from_long_double(
+            std::ceil(static_cast<long double>(report.maximum_delay_seconds) * fs) +
             2 * spec.interpolation_half_width + detail::hf_dispersion_halo_samples(spec) + 4);
         std::size_t bytes = checked_add(sizeof(Impl), source.working_bytes);
         if (lunar_plan) bytes = checked_add(bytes, lunar_plan->workspace_bytes);
@@ -399,6 +457,7 @@ struct Channel::Impl {
         // full moving envelope delay and carrier phase.
         const auto planning_bytes = checked_multiply(spec.paths.size(), 2 * sizeof(std::size_t));
         bytes = checked_add(bytes, planning_bytes);
+        if (spec.fullwave_reflection) bytes = checked_add(bytes, Fullwave::preparation_workspace_bound_bytes);
         if (bytes > spec.maximum_workspace_bytes) throw ChannelWorkspaceError("channel exceeds explicit workspace limit");
         std::vector<std::size_t> order(spec.paths.size()), membership(spec.paths.size(), std::numeric_limits<std::size_t>::max());
         for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
@@ -432,6 +491,36 @@ struct Channel::Impl {
         if (lunar_plan)
             lunar = std::make_unique<detail::LunarSpectral>(*spec.lunar, spec.rf_hz, fs,
                 spec.interpolation_half_width, *lunar_plan, seed, stop);
+        if (spec.fullwave_reflection) {
+            const auto start = std::chrono::steady_clock::now();
+            const auto built = build_hf_fullwave_kernel_table(stop);
+            if (!built.table || !built.checks.qualified || !built.checks.witnesses_qualified ||
+                built.checks.rf_solves != Fullwave::maximum_rf_solves)
+                throw FullwaveReflectionUnavailable("full-wave table failed its finite frequency, profile or mesh qualification");
+            using Spec = HfFullwaveReflectionSpec;
+            const double rate = built.table->retarded_peak_error_bound(reflection, Spec::transition_seconds);
+            if (rate > Fullwave::rate_peak_tolerance)
+                throw FullwaveReflectionUnavailable("full-wave reflection exceeds its finite-kernel output-time error bound");
+            const auto first = count_from_long_double(Spec::transition_first_seconds * fs);
+            fullwave.emplace(built.table, reflection, first, Spec::transition_seconds);
+            fullwave_transition_first = first + Fullwave::modelling_delay_samples;
+            fullwave_transition_stop = fullwave_transition_first + count_from_long_double(Spec::transition_seconds * fs);
+            require(built.table->first_lag_samples(reflection) == Fullwave::planned_first_lag_samples(reflection) &&
+                    fullwave->tail_samples() == built.table->first_lag_samples(reflection) + Fullwave::taps_per_port - 1,
+                    "full-wave reflection differs from the declared public lag support");
+            auto& receipt = report.fullwave_reflection.emplace();
+            receipt.checks = built.checks;
+            receipt.table_sha256 = fullwave_table_sha256(*built.table);
+            receipt.table_workspace_bytes = built.table->workspace_bytes();
+            receipt.stream_workspace_bytes = fullwave->workspace_bytes();
+            require(checked_add(receipt.table_workspace_bytes, receipt.stream_workspace_bytes) <=
+                    Fullwave::preparation_workspace_bound_bytes, "full-wave reflection workspaces exceeded their admission");
+            receipt.preparation_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+            receipt.retarded_peak_error_bound = rate;
+            receipt.carrier_flight_phase_bound = built.table->carrier_flight_phase_bound(reflection, Spec::transition_seconds);
+            receipt.source_minimum_frequency_hz = source.minimum_frequency_hz;
+            receipt.source_maximum_frequency_hz = source.maximum_frequency_hz;
+        }
         if (any_moving) {
             interpolation_table.reserve(table_count);
             for (std::size_t i = 0; i <= fractional_intervals; ++i) {
@@ -628,8 +717,17 @@ struct Channel::Impl {
     Complex render() {
         const auto n = report.samples;
         const long double time = static_cast<long double>(n) / fs;
-        ensure_source(n + spec.interpolation_half_width);
+        ensure_source(fullwave ? n : n + spec.interpolation_half_width);
         Complex wanted = lunar ? lunar->wanted(n, history, source.geometry.source_samples, spec.transmitter.enabled) : Complex{};
+        if (fullwave) {
+            const auto input = saved(n);
+            wanted = fullwave->step(input);
+            const auto region_index = n < fullwave_transition_first ? 0 : n < fullwave_transition_stop ? 1 : 2;
+            auto& region = report.fullwave_reflection->regions[region_index];
+            ++region.samples;
+            region.incident_energy += std::norm(input);
+            region.reflected_energy += std::norm(wanted);
+        }
         for (auto& path : paths) {
             const auto& spec_path = *path.spec;
             if ((n & 4095) == 0) {

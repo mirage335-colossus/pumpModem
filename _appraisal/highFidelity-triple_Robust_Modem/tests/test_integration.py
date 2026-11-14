@@ -25,6 +25,47 @@ def main() -> None:
     assert len(listing["scenarios"]) >= 6
     scenarios = {scenario["id"]: scenario for scenario in listing["scenarios"]}
     assert scenarios["hf-gui-native"]["channel"]["renderer"] == "canonical_gui_streaming_channel"
+    fullwave_args = ["--scenario", "hf-fullwave-reflection", "--bit-seconds", "64", "--message", "A"]
+    fullwave = invoke("--mode", "plan", *fullwave_args)
+    wave_plan = fullwave["plan"]
+    reflection = wave_plan["fullwave_reflection"]
+    assert reflection == scenarios["hf-fullwave-reflection"]["channel"]["fullwave_reflection"], fullwave
+    assert wave_plan["channel_renderer"] == "hf_fullwave_reflection", fullwave
+    assert wave_plan["fullwave_reflection_source_band_checked"] is False, fullwave
+    assert wave_plan["fullwave_reflection_table_built"] is False, fullwave
+    assert reflection["modelling_delay_samples"] == 32 and reflection["maximum_rf_solves"] == 32070, fullwave
+    assert reflection["first_lag_samples"] == 1 and reflection["last_lag_samples"] == 129, fullwave
+    assert wave_plan["public_bounds"]["receiver_filter_halo_samples"] == 128, fullwave
+    assert wave_plan["public_bounds"]["arrival_low_seconds"] == 1 / 1920, fullwave
+    assert wave_plan["public_bounds"]["arrival_high_seconds"] == 129 / 1920, fullwave
+    assert math.isclose(wave_plan["channel_tail_seconds"], 129 / 1920), fullwave
+    assert wave_plan["wire_bits"] == 13 and wave_plan["source_stop_sample"] >= (540 + .25) * 1920, fullwave
+    first_quiet = wave_plan["first_uncontaminated_quiet_slot"]
+    assert wave_plan["public_slots"][first_quiet]["observation"]["first"] >= wave_plan["source_stop_sample"] + 129, fullwave
+    assert wave_plan["scored_slot_horizon"] == first_quiet + 2, fullwave
+    truncated = invoke("--mode", "channel", *fullwave_args, "--max-samples", "1", code=3)
+    assert truncated["plan"]["horizon_samples"] == wave_plan["horizon_samples"], truncated
+    assert truncated["plan"]["fullwave_reflection_table_built"] is False and "channel" not in truncated, truncated
+    noise = invoke("--mode", "receive", *fullwave_args, "--control", "noise", "--max-samples", "1", code=3)
+    for field in ("horizon_samples", "public_bounds", "source_stop_sample"):
+        assert noise["plan"][field] == wave_plan[field], (field, noise, wave_plan)
+    assert not any(row["evaluator_transmitting"] for row in noise["plan"]["public_slots"]), noise
+    assert noise["plan"]["fullwave_reflection_table_built"] is False and "channel" not in noise, noise
+    # Requested bit duration alone does not determine incident source span.
+    # Thirteen DATA slots still span the profile transition on the public
+    # minute cadence even when each slot's waveform is much shorter.
+    sparse = invoke("--mode", "plan", "--scenario", "hf-fullwave-reflection",
+                    "--bit-seconds", "1", "--message", "A")["plan"]
+    assert sparse["actual_bit_seconds"] < wave_plan["actual_bit_seconds"], sparse
+    assert sparse["wire_bits"] == 13 and sparse["source_stop_sample"] >= (540 + .25) * 1920, sparse
+    short_args = ["--mode", "plan", "--bit-seconds", "1", "--message", "e"]
+    short_plan = invoke(*short_args, "--scenario", "awgn")["plan"]
+    assert short_plan["wire_bits"] == 3 and short_plan["source_stop_sample"] < (540 + .25) * 1920, short_plan
+    short = invoke(*short_args, "--scenario", "hf-fullwave-reflection", code=5)
+    assert short["status"] == "unavailable" and "source must span" in short["reason"], short
+    for extra in (["--helper"], ["--duration-seconds", "600"]):
+        rejected = invoke("--mode", "plan", *fullwave_args, *extra, code=5)
+        assert rejected["status"] == "unavailable", rejected
     gui_args = ["--scenario", "hf-gui-native", "--seed", "41", "--noise-seed", "52",
                 "--gui-spread", "hf-worst", "--gui-selective", "each-65", "--gui-clock-edge",
                 "--bit-seconds", "2", "--cn0", "40", "--gui-target-cn0-db-hz", "32"]
