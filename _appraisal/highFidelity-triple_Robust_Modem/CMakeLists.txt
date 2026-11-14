@@ -8,7 +8,8 @@ add_library(high_fidelity_channel STATIC "${_hf_root}/src/channel.cpp" "${_hf_ro
   "${_hf_root}/src/hf_scenarios.cpp" "${_hf_root}/src/hf_ionosphere.cpp" "${_hf_root}/src/hf_design.cpp"
   "${_hf_root}/src/hf_history.cpp" "${_hf_root}/src/hf_phase_bank.cpp" "${_hf_root}/src/hf_public_statistics.cpp"
   "${_hf_root}/src/hf_phase_refinement.cpp"
-  "${_hf_root}/src/hf_replay.cpp" "${_hf_root}/src/hf_gannon_replay.cpp" "${_hf_root}/src/lunar_spectral.cpp")
+  "${_hf_root}/src/hf_replay.cpp" "${_hf_root}/src/hf_gannon_replay.cpp" "${_hf_root}/src/lunar_spectral.cpp"
+  "${_hf_root}/src/hf_native_chain.cpp")
 target_include_directories(high_fidelity_channel PUBLIC "${_hf_root}/include" PRIVATE "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(high_fidelity_channel PUBLIC datapump_triad)
 target_compile_definitions(high_fidelity_channel PRIVATE APPRAISAL_GANNON_FIXTURE_DIR="${_hf_root}/fixtures/hf-gannon-2024")
@@ -19,7 +20,14 @@ add_library(high_fidelity_fullwave STATIC "${_hf_root}/src/hf_fullwave.cpp" "${_
   "${_hf_root}/src/hf_magnetoionic.cpp" "${_hf_root}/src/hf_magnetoionic_kernel.cpp")
 target_include_directories(high_fidelity_fullwave PUBLIC "${_hf_root}/include")
 target_compile_features(high_fidelity_fullwave PUBLIC cxx_std_20)
-target_link_libraries(high_fidelity_channel PRIVATE high_fidelity_fullwave)
+add_library(high_fidelity_wave_optics STATIC "${_hf_root}/src/hf_wave_optics.cpp")
+target_include_directories(high_fidelity_wave_optics PUBLIC "${_hf_root}/include")
+target_link_libraries(high_fidelity_wave_optics PUBLIC high_fidelity_fullwave)
+add_library(high_fidelity_phase_screens STATIC "${_hf_root}/src/hf_phase_screens.cpp")
+target_include_directories(high_fidelity_phase_screens PUBLIC "${_hf_root}/include" PRIVATE "${PROJECT_SOURCE_DIR}/src")
+target_compile_features(high_fidelity_phase_screens PUBLIC cxx_std_20)
+target_link_libraries(high_fidelity_phase_screens PRIVATE high_fidelity_fullwave datapump_fft datapump)
+target_link_libraries(high_fidelity_channel PRIVATE high_fidelity_fullwave high_fidelity_wave_optics high_fidelity_phase_screens)
 add_library(high_fidelity_public_receiver STATIC "${_hf_root}/src/hf_public_diagnostic.cpp"
   "${_hf_root}/src/hf_gui_diagnostic.cpp" "${_hf_root}/src/hf_phase_filter.cpp")
 target_include_directories(high_fidelity_public_receiver PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/tools")
@@ -61,30 +69,47 @@ target_include_directories(high_fidelity_fullwave_kernel_probe PRIVATE "${PROJEC
 target_link_libraries(high_fidelity_fullwave_kernel_probe PRIVATE high_fidelity_fullwave)
 target_compile_definitions(high_fidelity_fullwave_kernel_probe PRIVATE ${_hf_identity} APPRAISAL_SOURCE_SHA="${_hf_source_sha}")
 set_target_properties(high_fidelity_fullwave_kernel_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+add_executable(high_fidelity_phase_screens_probe "${_hf_root}/src/hf_phase_screens_probe.cpp")
+target_include_directories(high_fidelity_phase_screens_probe PRIVATE "${PROJECT_SOURCE_DIR}/tools")
+target_link_libraries(high_fidelity_phase_screens_probe PRIVATE high_fidelity_phase_screens high_fidelity_wave_optics)
+target_compile_definitions(high_fidelity_phase_screens_probe PRIVATE ${_hf_identity} APPRAISAL_SOURCE_SHA="${_hf_source_sha}")
+set_target_properties(high_fidelity_phase_screens_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 add_executable(high_fidelity_magnetoionic_probe "${_hf_root}/src/hf_magnetoionic_probe.cpp")
 target_include_directories(high_fidelity_magnetoionic_probe PRIVATE "${PROJECT_SOURCE_DIR}/tools")
 target_link_libraries(high_fidelity_magnetoionic_probe PRIVATE high_fidelity_fullwave)
 target_compile_definitions(high_fidelity_magnetoionic_probe PRIVATE ${_hf_identity} APPRAISAL_SOURCE_SHA="${_hf_source_sha}")
 set_target_properties(high_fidelity_magnetoionic_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+add_executable(high_fidelity_wave_optics_probe "${_hf_root}/src/hf_wave_optics_probe.cpp")
+target_include_directories(high_fidelity_wave_optics_probe PRIVATE "${PROJECT_SOURCE_DIR}/tools" "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/include")
+target_link_libraries(high_fidelity_wave_optics_probe PRIVATE high_fidelity_wave_optics datapump_fft)
+target_compile_definitions(high_fidelity_wave_optics_probe PRIVATE ${_hf_identity} APPRAISAL_SOURCE_SHA="${_hf_source_sha}")
+set_target_properties(high_fidelity_wave_optics_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(high_fidelity_phase_screens PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(high_fidelity_channel PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(high_fidelity_public_receiver PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(high_fidelity_appraisal PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(high_fidelity_gui_profile PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(high_fidelity_fullwave PRIVATE -Wall -Wextra -Wpedantic)
+  target_compile_options(high_fidelity_wave_optics PRIVATE -Wall -Wextra -Wpedantic)
+  target_compile_options(high_fidelity_wave_optics_probe PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(high_fidelity_fullwave_probe PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 if(BUILD_TESTING)
-  foreach(_hf_test channel scenarios hf_scenarios hf_ionosphere hf_design hf_history hf_phase_bank hf_public_statistics hf_phase_refinement hf_replay hf_gannon_replay impairment_observables lunar_spectral)
+  add_executable(high_fidelity_test_hf_phase_screens "${_hf_root}/tests/test_hf_phase_screens.cpp")
+  target_link_libraries(high_fidelity_test_hf_phase_screens PRIVATE high_fidelity_phase_screens high_fidelity_wave_optics)
+  add_test(NAME high_fidelity_hf_phase_screens COMMAND high_fidelity_test_hf_phase_screens)
+  set_tests_properties(high_fidelity_hf_phase_screens PROPERTIES LABELS "appraisal" TIMEOUT 45)
+  foreach(_hf_test channel scenarios hf_scenarios hf_ionosphere hf_design hf_history hf_phase_bank hf_public_statistics hf_phase_refinement hf_replay hf_gannon_replay hf_native_chain impairment_observables lunar_spectral)
     add_executable(high_fidelity_test_${_hf_test} "${_hf_root}/tests/test_${_hf_test}.cpp")
     target_include_directories(high_fidelity_test_${_hf_test} PRIVATE "${PROJECT_SOURCE_DIR}/src" "${_hf_root}/src")
     target_link_libraries(high_fidelity_test_${_hf_test} PRIVATE high_fidelity_channel)
     add_test(NAME high_fidelity_${_hf_test} COMMAND high_fidelity_test_${_hf_test})
     set_tests_properties(high_fidelity_${_hf_test} PROPERTIES LABELS "appraisal" TIMEOUT 45)
   endforeach()
-  foreach(_hf_extra gui_profile fullwave fullwave_kernel magnetoionic magnetoionic_kernel)
+  foreach(_hf_extra gui_profile fullwave fullwave_kernel magnetoionic magnetoionic_kernel wave_optics)
     add_executable(high_fidelity_test_hf_${_hf_extra} "${_hf_root}/tests/test_hf_${_hf_extra}.cpp")
     if(_hf_extra STREQUAL "fullwave_kernel" OR _hf_extra MATCHES "^magnetoionic")
       target_link_libraries(high_fidelity_test_hf_${_hf_extra} PRIVATE high_fidelity_fullwave)
@@ -122,21 +147,25 @@ if(BUILD_TESTING)
   add_test(NAME high_fidelity_runner COMMAND "${Python3_EXECUTABLE}"
     "${_hf_root}/tests/test_runner.py")
   set_tests_properties(high_fidelity_runner PROPERTIES LABELS "appraisal" TIMEOUT 45)
+  add_test(NAME high_fidelity_wave_receipts COMMAND "${Python3_EXECUTABLE}"
+    "${_hf_root}/tests/test_wave_receipts.py")
+  set_tests_properties(high_fidelity_wave_receipts PROPERTIES LABELS "appraisal" TIMEOUT 45)
   add_test(NAME high_fidelity_ensemble COMMAND "${Python3_EXECUTABLE}"
     "${_hf_root}/tests/test_ensemble.py")
   set_tests_properties(high_fidelity_ensemble PROPERTIES LABELS "appraisal" TIMEOUT 45)
   add_test(NAME high_fidelity_coverage_design COMMAND "${Python3_EXECUTABLE}"
     "${_hf_root}/tests/test_coverage_design.py")
   set_tests_properties(high_fidelity_coverage_design PROPERTIES LABELS "appraisal" TIMEOUT 45)
-  add_custom_target(high_fidelity_checks DEPENDS high_fidelity_appraisal high_fidelity_fullwave_probe high_fidelity_fullwave_kernel_probe high_fidelity_magnetoionic_probe
+  add_custom_target(high_fidelity_checks DEPENDS high_fidelity_appraisal high_fidelity_fullwave_probe high_fidelity_fullwave_kernel_probe high_fidelity_magnetoionic_probe high_fidelity_wave_optics_probe
+    high_fidelity_phase_screens_probe high_fidelity_test_hf_phase_screens
     high_fidelity_test_channel high_fidelity_test_scenarios
     high_fidelity_test_hf_scenarios high_fidelity_test_hf_ionosphere high_fidelity_test_hf_design high_fidelity_test_hf_history
     high_fidelity_test_hf_gui_profile high_fidelity_test_hf_fullwave high_fidelity_test_hf_fullwave_kernel
-    high_fidelity_test_hf_magnetoionic high_fidelity_test_hf_magnetoionic_kernel
+    high_fidelity_test_hf_magnetoionic high_fidelity_test_hf_magnetoionic_kernel high_fidelity_test_hf_wave_optics
     high_fidelity_test_hf_phase_bank high_fidelity_test_hf_public_statistics high_fidelity_test_hf_native_supplement
     high_fidelity_test_hf_phase_refinement
     high_fidelity_test_hf_admitted_evidence high_fidelity_test_hf_phase_filter
-    high_fidelity_test_hf_public_receiver high_fidelity_test_hf_replay high_fidelity_test_hf_gannon_replay
+    high_fidelity_test_hf_public_receiver high_fidelity_test_hf_replay high_fidelity_test_hf_gannon_replay high_fidelity_test_hf_native_chain
     high_fidelity_test_impairment_observables high_fidelity_test_lunar_spectral)
 endif()
 

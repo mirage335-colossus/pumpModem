@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "name": "hf-gannon-gain-variance",
+  "purpose": "Same archived Gannon recording and slot 2 as the native comparison. Require exact full-prefix IQ and validity SHA-256 f803beb06018876f98d3dce1d4f7051f076256ca9f664ec15dd410774d4fc972 and selected SHA-256 79cb27e6704813b995c9e95cec7231152b880481410ab4bd7070b60e70b11dd2. Evaluate the existing retained fixed and refined cells at six predeclared proper-complex gain variances (1/4096, 1/512, 1/256, 1/64, 1/16 and 1) across the same five partitions and both bits. Compare actual IQ, the private wanted mean and their matched residual at the original additive noise variance. Charge the fixed-cell equal mixture for full timing, CFO and sinusoidal model mass. Continue to a costed full-bank proposal only if that actual fixed-cell contribution reaches the existing presence reference. Stop after this one diagnostic regardless of outcome.",
+  "max_wall_seconds": 45,
+  "per_trial_wall_seconds": 45,
+  "max_trials": 1,
+  "max_samples": 500000,
+  "episodes": [
+    {
+      "id": "gannon-2000-slot2-gain-variance",
+      "scenario": "hf-gannon-2000",
+      "mode": "hf-search",
+      "control": "wanted",
+      "waveform": "reference",
+      "seed": 67001,
+      "noise_seed": 77001,
+      "bit_seconds": 64,
+      "message": "A",
+      "cn0_db_hz": 20,
+      "search_slot": 2,
+      "search_timing": "full",
+      "hf_phase_refinement": true,
+      "hf_physical_diagnostic": true,
+      "hf_gannon_native_diagnostic": true,
+      "hf_gannon_gain_variance_diagnostic": true
+    }
+  ]
+}

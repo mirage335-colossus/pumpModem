@@ -98,6 +98,39 @@ MAGNETOIONIC_DESCRIPTOR = {
     "complex_error_tolerance": .005, "discarded_energy_tolerance": 1e-6,
     "rate_peak_tolerance": .005, "preparation_workspace_bound_bytes": 2097152,
 }
+HF_WAVE_OPTICS = {
+    "renderer": "hf_wave_optics_screen",
+    "carrier_hz": 10_000_000,
+    "sample_rate_hz": 1920,
+    "occupied_half_band_hz": 384,
+    "ambient_tecu": .015,
+    "slab_length_m": 3000.,
+    "incoming_distance_m": 200_000.,
+    "outgoing_distance_m": 400_000.,
+    "sigma_x_m": 1600.,
+    "sigma_y_m": 2400.,
+    "maximum_table_position_m": 12800.,
+    "first_lag_samples": 4,
+    "last_lag_samples": 84,
+    "taps": 81,
+    "maximum_rf_evaluations": 23_000,
+    "preparation_workspace_bound_bytes": 1_048_576,
+}
+HF_WAVE_OPTICS_SCENARIOS = {
+    "hf-wave-lens-off": (0., 0., 120., 128.),
+    "hf-wave-lens": (-.00857, 0., 120., 128.),
+    "hf-wave-lens-holdout": (-.00857, 1200., 87., 219.),
+}
+HF_WAVE_CHAIN_SCENARIOS = {
+    "hf-wave-chain-off": (0., 0., 0., 0., False),
+    "hf-wave-chain-clocks": (1., -1., .01, -.01, False),
+    "hf-wave-chain-clocks-tone": (1., -1., .01, -.01, True),
+}
+HF_PHASE_SCREENS_SCENARIOS = {
+    "hf-phase-screens-off": (False, 0, 0., 42., 600.),
+    "hf-phase-screens": (True, 0, 0., 42., 600.),
+    "hf-phase-screens-holdout": (True, 1, 750., 35., 490.),
+}
 GANNON_REPLAY = {"hf-gannon-1700": (17, 0.), "hf-gannon-2000": (20, 0.),
                  "hf-gannon-2000-late": (20, 1800.)}
 GANNON_RECORDS = {
@@ -112,7 +145,8 @@ EPISODE_KEYS = {"id", "scenario", "mode", "waveform", "seed", "cn0_db_hz", "cont
                 "helper", "backend", "bit_seconds", "duration_seconds", "pulse", "stratum",
                 "oracle_slot", "search_slot", "search_timing", "capture_digest_slot", "chunk", "message", "max_wall_seconds", "max_samples",
                 "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "fec", "fade_slots", "capture_lead_seconds",
-                "hf_trajectory_seed", "hf_trajectory_offset_seconds", "noise_seed"} | GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS
+                "hf_trajectory_seed", "hf_trajectory_offset_seconds", "noise_seed", "hf_gannon_native_diagnostic",
+                "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic"} | GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS
 MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose", "hf-search", "gui-varying"}
 CONTROLS = {"wanted", "noise", "wrong-key", "wrong-ordinal", "interior-fade", "capture-gap", "eof"}
 BACKENDS = {"cpu", "cuda", "vulkan", "gpu"}
@@ -181,7 +215,8 @@ def _read_campaign(path: Path) -> dict[str, Any]:
         invariant_fields = ("scenario", "mode", "waveform", "cn0_db_hz", "control", "helper",
                             "backend", "bit_seconds", "duration_seconds", "pulse", "oracle_slot", "search_slot", "search_timing", "capture_digest_slot", "chunk",
                             "message", "max_wall_seconds", "max_samples", "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "fec", "fade_slots", "capture_lead_seconds",
-                            "hf_trajectory_seed", "hf_trajectory_offset_seconds") + tuple(sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS))
+                            "hf_trajectory_seed", "hf_trajectory_offset_seconds", "hf_gannon_native_diagnostic",
+                            "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic") + tuple(sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS))
         reference = matched[0]
         heterogeneous = [field for field in invariant_fields
                          if any(episode.get(field) != reference.get(field) for episode in matched[1:])]
@@ -367,11 +402,58 @@ def _validate_episode(item: Any, index: int, ids: set[str],
                     "hf_gui_clean_diagnostic")) or
                 {"duration_seconds", "capture_lead_seconds", "hf_trajectory_seed", "hf_trajectory_offset_seconds"} & item.keys()):
             raise CampaignError(f"episodes[{index}]: magnetoionic reflection requires reference RRC CPU plan/channel/receive or wanted-only oracle, wanted or receive-only noise/wrong-key, Helper/FEC off and fixed geometry")
+    if item["scenario"] in HF_WAVE_OPTICS_SCENARIOS:
+        if (mode not in {"plan", "channel", "receive", "hf-search"} or item["waveform"] != "reference" or
+                item.get("backend", "cpu") != "cpu" or item.get("pulse", "rrc") != "rrc" or
+                item.get("helper", False) or item.get("fec", "off") != "off" or
+                (mode in {"plan", "channel"} and control != "wanted") or
+                (mode == "receive" and control not in {"wanted", "noise", "wrong-key"}) or
+                (mode == "hf-search" and (control != "wanted" or item.get("hf_physical_diagnostic") is not True)) or
+                (mode != "hf-search" and item.get("hf_physical_diagnostic", False)) or
+                any(item.get(field, False) for field in ("service_replay", "hf_phase_bank", "hf_public_phase_receiver",
+                    "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths",
+                    "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic")) or
+                {"duration_seconds", "capture_lead_seconds", "hf_trajectory_seed", "hf_trajectory_offset_seconds",
+                 "history_reference_delay_seconds"} & item.keys()):
+            raise CampaignError(f"episodes[{index}]: wave-optics scenarios require reference RRC Helper-off CPU plan/channel/receive, or wanted hf-search with physical diagnostic, FEC off and fixed geometry")
+    if item["scenario"] in HF_WAVE_CHAIN_SCENARIOS:
+        if (mode not in {"plan", "receive"} or item["waveform"] != "reference" or
+                item.get("backend", "cpu") != "cpu" or item.get("pulse", "rrc") != "rrc" or
+                item.get("helper", False) or item.get("fec", "off") != "off" or
+                (mode == "plan" and control != "wanted") or
+                (mode == "receive" and control not in {"wanted", "noise", "wrong-key"}) or
+                ("bit_seconds" in item and item["bit_seconds"] != 64) or
+                ("cn0_db_hz" in item and item["cn0_db_hz"] != 0) or
+                any(item.get(field, False) for field in ("service_replay", "hf_phase_bank", "hf_public_phase_receiver",
+                    "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver",
+                    "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models",
+                    "hf_gui_clean_diagnostic")) or
+                {"duration_seconds", "capture_lead_seconds", "hf_trajectory_seed", "hf_trajectory_offset_seconds",
+                 "history_reference_delay_seconds", "search_slot", "search_timing"} & item.keys()):
+            raise CampaignError(f"episodes[{index}]: native wave-chain cases require the fixed reference RRC 64-second Helper-off CPU plan/receive profile, C/N0 and supported control")
+    if item["scenario"] in HF_PHASE_SCREENS_SCENARIOS:
+        cn0 = item.get("cn0_db_hz", 0)
+        primary_high_bracket = (item["scenario"] == "hf-phase-screens" and mode == "receive" and control == "wanted" and
+                                item.get("bit_seconds", 64) == 64 and cn0 == 20)
+        if (mode not in {"plan", "channel", "receive", "hf-search"} or item["waveform"] != "reference" or
+                item.get("backend", "cpu") != "cpu" or item.get("pulse", "rrc") != "rrc" or
+                item.get("helper", False) or item.get("fec", "off") != "off" or
+                (mode in {"plan", "channel"} and control != "wanted") or
+                (mode == "receive" and control not in {"wanted", "noise", "wrong-key"}) or
+                (mode == "hf-search" and control != "wanted") or
+                ("bit_seconds" in item and item["bit_seconds"] not in {32, 64}) or
+                (cn0 not in {0, 3, 10} and not primary_high_bracket) or
+                any(item.get(field, False) for field in ("service_replay", "hf_phase_bank", "hf_public_phase_receiver",
+                    "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths",
+                    "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic")) or
+                {"duration_seconds", "capture_lead_seconds", "hf_trajectory_seed", "hf_trajectory_offset_seconds",
+                 "history_reference_delay_seconds"} & item.keys()):
+            raise CampaignError(f"episodes[{index}]: phase-screen cases require fixed-geometry reference RRC Helper-off CPU plan/channel/receive or wanted hf-search, with admitted bit/SNR settings")
     if item["scenario"] in GANNON_REPLAY:
-        if (mode not in {"plan", "channel", "receive", "oracle"} or
+        if (mode not in {"plan", "channel", "receive", "oracle", "hf-search"} or
                 control != "wanted" and (mode not in {"channel", "receive"} or control not in {"noise", "wrong-key"}) or
                 any(item.get(field, False) for field in ("service_replay", "hf_public_phase_receiver", "hf_compare_admitted_models"))):
-            raise CampaignError(f"episodes[{index}]: Gannon replay requires plan/channel/receive or wanted-only oracle without service or experimental receiver policies")
+            raise CampaignError(f"episodes[{index}]: Gannon replay requires plan/channel/receive or wanted-only oracle and hf-search without service or experimental receiver policies")
     if "fade_slots" in item and control != "interior-fade":
         raise CampaignError(f"episodes[{index}]: fade_slots is valid only for interior-fade control")
     gannon_control = item["scenario"] in GANNON_REPLAY and mode in {"channel", "oracle"}
@@ -438,6 +520,24 @@ def _validate_episode(item: Any, index: int, ids: set[str],
         raise CampaignError(f"episodes[{index}]: search options are valid only for hf-search mode")
     if "oracle_slot" in item and mode != "oracle":
         raise CampaignError(f"episodes[{index}]: oracle_slot is valid only for oracle mode")
+    if "hf_gannon_native_diagnostic" in item and (
+            not isinstance(item["hf_gannon_native_diagnostic"], bool) or
+            item["scenario"] not in GANNON_REPLAY or mode != "hf-search" or
+            item["waveform"] != "reference" or item.get("search_timing") != "full" or
+            not item.get("hf_physical_diagnostic", False)):
+        raise CampaignError(f"episodes[{index}]: Gannon native diagnostic requires a reference Gannon physical shadow with full timing")
+    if "hf_gannon_gain_variance_diagnostic" in item and (
+            not isinstance(item["hf_gannon_gain_variance_diagnostic"], bool) or
+            not item.get("hf_gannon_native_diagnostic", False) or not item.get("hf_phase_refinement", False)):
+        raise CampaignError(f"episodes[{index}]: Gannon gain variance diagnostic requires the full native comparison and refinement")
+    if "hf_target_presence_diagnostic" in item and (
+            not isinstance(item["hf_target_presence_diagnostic"], bool) or
+            item["scenario"] not in HF_WAVE_OPTICS_SCENARIOS.keys() | HF_PHASE_SCREENS_SCENARIOS.keys() | GANNON_REPLAY.keys() or
+            mode != "receive" or item["waveform"] != "reference" or control != "wanted" or
+            item.get("backend", "cpu") != "cpu" or item.get("helper", False) or
+            "capture_digest_slot" not in item or
+            any(item.get(field, False) for field in ("service_replay", "hf_public_phase_receiver", "hf_compare_admitted_models"))):
+        raise CampaignError(f"episodes[{index}]: target-presence diagnostic requires ordinary wanted Helper-off CPU receive with a selected direct HF aperture")
     if ({"history_reference_delay_seconds", "hf_phase_bank"} & item.keys()) and mode != "oracle":
         raise CampaignError(f"episodes[{index}]: HF history reference delay and phase bank are valid only for oracle mode")
 
@@ -447,6 +547,9 @@ def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_se
                "--waveform", episode["waveform"], "--seed", str(episode["seed"]),
                "--max-samples", str(max_samples), "--max-wall-seconds", str(max_wall_seconds)]
     for key, option in (("cn0_db_hz", "--cn0"), ("control", "--control"), ("helper", "--helper"),
+                        ("hf_gannon_native_diagnostic", "--hf-gannon-native-diagnostic"),
+                        ("hf_gannon_gain_variance_diagnostic", "--hf-gannon-gain-variance-diagnostic"),
+                        ("hf_target_presence_diagnostic", "--hf-target-presence-diagnostic"),
                         ("backend", "--backend"), ("bit_seconds", "--bit-seconds"),
                         ("duration_seconds", "--duration-seconds"), ("oracle_slot", "--oracle-slot"),
                         ("search_slot", "--search-slot"), ("search_timing", "--search-timing"),
@@ -472,7 +575,7 @@ def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_se
                             (key, "--" + key.replace("_", "-")) for key in sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS)):
         if key in episode:
             value = episode[key]
-            if key in {"helper", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "gui_clock_edge", "service_replay"}:
+            if key in {"helper", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "hf_gannon_native_diagnostic", "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic", "gui_clock_edge", "service_replay"}:
                 if value:
                     command.append(option)
             else:
@@ -1996,6 +2099,910 @@ def _gannon_trace_descriptor(hour: int, offset: float) -> dict[str, Any]:
     }
 
 
+def _wave_optics_spec_for(scenario_id: str) -> dict[str, Any]:
+    peak_delta, impact_y, drift, closest = HF_WAVE_OPTICS_SCENARIOS[scenario_id]
+    return {**{key: value for key, value in HF_WAVE_OPTICS.items() if key != "renderer"},
+            "peak_delta_tecu": peak_delta, "impact_y_m": impact_y, "drift_mps": drift,
+            "closest_seconds": closest, "effective_distance_m": 133333.33333333334,
+            "position_step_m": 100., "maximum_table_position_m": 12800.,
+            "interpolation": "complex_cubic_hermite_at_output_time_with_analytic_far_field"}
+
+
+def _validate_wave_optics_descriptor(value: Any, scenario_id: str) -> None:
+    if not isinstance(value, dict):
+        raise CampaignError("wave-optics plan requires its fixed physical descriptor")
+    expected = _wave_optics_spec_for(scenario_id)
+    integer_fields = {"carrier_hz", "sample_rate_hz", "occupied_half_band_hz", "first_lag_samples",
+                      "last_lag_samples", "taps", "maximum_rf_evaluations",
+                      "preparation_workspace_bound_bytes"}
+    for field, wanted in expected.items():
+        actual = value.get(field)
+        if (actual != wanted or isinstance(wanted, (int, float)) and not isinstance(wanted, bool) and
+                not _is_finite_number(actual) or field in integer_fields and not _is_nonnegative_int(actual)):
+            raise CampaignError(f"wave-optics descriptor differs from its fixed physical geometry: {field}")
+
+
+def _validate_wave_optics_report(full: Any, scenario_id: str) -> None:
+    """Validate only the physical operator report, independent of receiver-stage energy."""
+    _validate_wave_optics_descriptor(full, scenario_id)
+    fs = HF_WAVE_OPTICS["sample_rate_hz"]
+    active = HF_WAVE_OPTICS_SCENARIOS[scenario_id][0] != 0
+    digest_scope = ("all 129 displacement knots, each retained lag, complex binary64 coefficient and cubic-Hermite "
+                    "slope per 100 m, little-endian; source identity binds the interpolation implementation")
+    qualification_scope = ("sampled scalar cold-plasma response; occupied-band and off-grid/position witnesses, "
+                           "causal FIR energy accounting and analytic far-field bound; no evolving-Maxwell or field calibration")
+    if (full.get("table_qualified") is not True or full.get("qualification_scope") != qualification_scope or
+            full.get("table_digest_scope") != digest_scope or not isinstance(full.get("table_sha256"), str) or
+            re.fullmatch(r"[0-9a-fA-F]{64}", full["table_sha256"]) is None or
+            not _is_nonnegative_int(full.get("rf_evaluations")) or full["rf_evaluations"] != 21391 or
+            not _is_nonnegative_int(full.get("occupied_witnesses")) or full["occupied_witnesses"] == 0 or
+            not _is_nonnegative_int(full.get("unresolved_witnesses")) or
+            full["unresolved_witnesses"] > full["occupied_witnesses"]):
+        raise CampaignError("wave-optics execution requires its qualified fixed table and bounded witness provenance")
+    for field, limit in (("maximum_discarded_energy_fraction", 1e-6),
+                         ("maximum_series_tail_bound", 1e-13),
+                         ("far_field_error_bound", 1e-8), ("retarded_peak_error_bound", .005)):
+        if not _is_finite_number(full.get(field)) or not 0 <= full[field] <= limit:
+            raise CampaignError(f"wave-optics numerical gate failed: {field}")
+    if (not _is_finite_number(full.get("maximum_raw_precursor_energy_fraction")) or
+            full["maximum_raw_precursor_energy_fraction"] < 0 or
+            not _is_finite_number(full.get("minimum_sampled_carrier_power")) or
+            not _is_finite_number(full.get("maximum_sampled_carrier_power")) or
+            full["minimum_sampled_carrier_power"] < 0 or
+            full["maximum_sampled_carrier_power"] < full["minimum_sampled_carrier_power"] or
+            not _is_nonnegative_int(full.get("maximum_series_terms")) or
+            bool(full["maximum_series_terms"]) is not active):
+        raise CampaignError("wave-optics execution requires finite carrier, precursor and series diagnostics")
+    fields = ("maximum_frequency_witness_error", "maximum_position_witness_error", "minimum_raw_voltage_witness")
+    for field in fields:
+        witness = full.get(field)
+        if (not isinstance(witness, dict) or
+                any(not _is_finite_number(witness.get(key)) for key in
+                    ("absolute_error", "raw_amplitude", "displacement_m", "offset_hz")) or
+                witness["absolute_error"] < 0 or witness["raw_amplitude"] < 0 or
+                abs(witness["displacement_m"]) > 12800 or abs(witness["offset_hz"]) > fs / 2 or
+                witness["absolute_error"] > .0002):
+            raise CampaignError("wave-optics execution requires in-bound frequency, position and voltage witnesses")
+        if (abs(witness["offset_hz"]) <= 384 and witness["raw_amplitude"] >= .0005 and
+                witness["absolute_error"] > .1 * witness["raw_amplitude"]):
+            raise CampaignError("wave-optics occupied-band nonzero response exceeds its relative-error gate")
+    minimum = full["minimum_raw_voltage_witness"]
+    if (abs(minimum["offset_hz"]) > HF_WAVE_OPTICS["occupied_half_band_hz"] or
+            (minimum["raw_amplitude"] < .0005) is not (full["unresolved_witnesses"] > 0)):
+        raise CampaignError("wave-optics unresolved-voltage count is inconsistent with its minimum response")
+    if (not _is_finite_number(full.get("preparation_seconds")) or full["preparation_seconds"] < 0 or
+            any(not _is_nonnegative_int(full.get(field)) or full[field] == 0 for field in
+                ("table_workspace_bytes", "stream_workspace_bytes")) or
+            full["table_workspace_bytes"] + full["stream_workspace_bytes"] > 1_048_576):
+        raise CampaignError("wave-optics table and stream preparation exceed or omit the admitted workspace")
+    low, high = full.get("source_minimum_frequency_hz"), full.get("source_maximum_frequency_hz")
+    if not _is_finite_number(low) or not _is_finite_number(high) or not -384 <= low <= high <= 384:
+        raise CampaignError("wave-optics executed source spectrum exceeds the occupied-band qualification")
+    for field in ("incident_energy_sample_sum", "selected_energy_sample_sum"):
+        if not _is_finite_number(full.get(field)) or full[field] < 0:
+            raise CampaignError("wave-optics operator incident and selected energies must be measured")
+
+
+def _validate_wave_energy_planes(channel: dict[str, Any], operator: dict[str, Any], noise: bool) -> None:
+    for channel_key, operator_key, present in (
+        ("input_energy_sample_sum", "incident_energy_sample_sum", "contains_source_energy"),
+        ("signal_energy_sample_sum", "selected_energy_sample_sum", "contains_signal_energy"),
+    ):
+        channel_energy, operator_energy = channel.get(channel_key), operator[operator_key]
+        if (not _is_finite_number(channel_energy) or channel_energy < 0 or
+                not math.isclose(channel_energy, operator_energy, rel_tol=1e-10, abs_tol=1e-9) or
+                channel.get(present) is not (channel_energy > 0)):
+            raise CampaignError("wave channel incident and selected energies must reconcile with the propagated DATA planes")
+        if noise and (channel_energy != 0 or operator_energy != 0):
+            raise CampaignError("wave noise control must have zero incident and propagated DATA energy")
+
+
+def _validate_wave_public_calendar(plan: dict[str, Any], episode: dict[str, Any],
+                                   horizon: int, first_clean_sample: int) -> None:
+    shadow = episode["mode"] == "hf-search"
+    quiet_slots = 0 if shadow else 2
+    quiet = plan.get("first_uncontaminated_quiet_slot")
+    wire = plan.get("wire_bits")
+    slots = plan.get("public_slots")
+    if (not _is_nonnegative_int(wire) or wire == 0 or not _is_nonnegative_int(quiet) or quiet < wire or
+            not _is_nonnegative_int(plan.get("planned_uncontaminated_quiet_slots")) or
+            plan["planned_uncontaminated_quiet_slots"] != quiet_slots):
+        raise CampaignError("wave calendar must declare its complete framing or diagnostic-only scope")
+    expected_slots = episode.get("search_slot", 0) + 1 if shadow else quiet + quiet_slots
+    if (plan.get("scored_slot_horizon") != expected_slots or
+            not isinstance(slots, list) or len(slots) != expected_slots):
+        raise CampaignError("wave receipt must retain the full expected public slot prefix")
+    source_enabled = episode.get("control", "wanted") != "noise"
+    for index, slot in enumerate(slots):
+        observation = slot.get("observation") if isinstance(slot, dict) else None
+        if (not isinstance(observation, dict) or slot.get("index") != index or
+                not _is_nonnegative_int(observation.get("first")) or
+                not _is_nonnegative_int(observation.get("stop")) or
+                not observation["first"] < observation["stop"] <= horizon or
+                slot.get("evaluator_transmitting") is not (source_enabled and index < wire) or
+                index >= quiet and observation["first"] < first_clean_sample):
+            raise CampaignError("wave public slots must preserve their source map, complete observations and causal quiet tail")
+    if slots[-1]["observation"]["stop"] != horizon or (
+            shadow and plan.get("search_observation") != slots[-1]["observation"]):
+        raise CampaignError("wave capture must end after the last complete expected observation")
+
+
+def _validate_wave_optics(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
+    """Bind the finite translating-screen evidence to its admitted numerical model."""
+    scenario_id = episode["scenario"]
+    plan = receipt["plan"]
+    scenario = receipt.get("scenario", {})
+    configured = scenario.get("channel") if isinstance(scenario, dict) else None
+    channel = receipt.get("channel")
+    if scenario_id not in HF_WAVE_OPTICS_SCENARIOS:
+        if scenario_id in HF_WAVE_CHAIN_SCENARIOS:
+            return  # The chain validator checks its nested propagation operator separately.
+        if ("wave_optics" in plan or plan.get("channel_renderer") == HF_WAVE_OPTICS["renderer"] or
+                isinstance(configured, dict) and ("wave_optics" in configured or
+                    configured.get("renderer") == HF_WAVE_OPTICS["renderer"]) or
+                isinstance(channel, dict) and "wave_optics" in channel):
+            raise CampaignError("unrequested wave-optics descriptor or renderer")
+        return
+
+    peak_delta, _, drift, closest = HF_WAVE_OPTICS_SCENARIOS[scenario_id]
+    fs = HF_WAVE_OPTICS["sample_rate_hz"]
+    tail_samples = HF_WAVE_OPTICS["last_lag_samples"]
+    tail_seconds = tail_samples / fs
+    renderer = HF_WAVE_OPTICS["renderer"]
+
+    if (plan.get("channel_renderer") != renderer or not isinstance(configured, dict) or
+            configured.get("renderer") != renderer):
+        raise CampaignError("wave-optics must bind its native renderer in plan and scenario")
+    planned = plan.get("wave_optics")
+    _validate_wave_optics_descriptor(planned, scenario_id)
+    _validate_wave_optics_descriptor(configured.get("wave_optics"), scenario_id)
+    if planned != configured.get("wave_optics"):
+        raise CampaignError("wave-optics plan and scenario descriptors differ")
+
+    source_stop, horizon = plan.get("source_stop_sample"), plan.get("horizon_samples")
+    active_screen = peak_delta != 0.
+    crossing_end = (closest + HF_WAVE_OPTICS["outgoing_distance_m"] / 299792458. +
+                    32 / fs + HF_WAVE_OPTICS["maximum_table_position_m"] / abs(drift) +
+                    tail_seconds) if active_screen else None
+    reported_crossing_end = plan.get("screen_crossing_stop_seconds")
+    if (plan.get("sample_rate_hz") != fs or not _is_nonnegative_int(source_stop) or
+            active_screen and source_stop < math.ceil(crossing_end * fs) or
+            (active_screen and (not _is_finite_number(reported_crossing_end) or
+                not math.isclose(reported_crossing_end, crossing_end, rel_tol=0,
+                                 abs_tol=4 * math.ulp(crossing_end)))) or
+            (not active_screen and reported_crossing_end is not None) or
+            not _is_nonnegative_int(horizon) or
+            (episode["mode"] != "hf-search" and horizon < source_stop + tail_samples) or
+            not _is_finite_number(plan.get("represented_seconds")) or
+            not math.isclose(plan["represented_seconds"], horizon / fs, rel_tol=1e-12, abs_tol=1e-12) or
+            not _is_finite_number(plan.get("channel_tail_seconds")) or
+            not math.isclose(plan["channel_tail_seconds"], tail_seconds, rel_tol=0,
+                             abs_tol=4 * math.ulp(tail_seconds))):
+        raise CampaignError("wave-optics must cover the complete screen crossing, causal FIR tail and capture horizon")
+    if (plan.get("channel_tail_seconds_scope") !=
+            "complete causal translating-screen FIR support from first input through last retained lag" or
+            plan.get("cn0_reference_plane") !=
+            "normalized incident DATA before scalar screen loss and fixed additive receiver noise" or
+            plan.get("wave_optics_source_band_checked") is not (episode["mode"] != "plan") or
+            plan.get("wave_optics_table_built") is not (episode["mode"] != "plan") or
+            plan.get("physical_kernel_supplied_to_receiver") is not False or
+            plan.get("complete_screen_crossing_required") is not active_screen or
+            plan.get("complete_source_extent_checked") is not True or
+            plan.get("full_crossing_rendered") is not
+                (active_screen and episode["mode"] != "plan" and horizon / fs >= crossing_end) or
+            plan.get("screen_exposure_scope") != (
+                "no_lens_control" if not active_screen else
+                "partial_rendered_observation" if horizon / fs < crossing_end else
+                "complete_declared_lens_support_and_FIR_tail") or
+            plan.get("path_count") is not None or plan.get("path_sample_products") is not None):
+        raise CampaignError("wave-optics plan must distinguish unexecuted work, fixed source plane and receiver scope")
+    bounds = plan.get("public_bounds")
+    if (not isinstance(bounds, dict) or
+            not _is_finite_number(bounds.get("arrival_low_seconds")) or
+            not math.isclose(bounds["arrival_low_seconds"], 4 / fs, rel_tol=0,
+                             abs_tol=4 * math.ulp(4 / fs)) or
+            not _is_finite_number(bounds.get("arrival_high_seconds")) or
+            not math.isclose(bounds["arrival_high_seconds"], 84 / fs, rel_tol=0,
+                             abs_tol=4 * math.ulp(84 / fs)) or
+            bounds.get("receiver_filter_halo_samples") != 80):
+        raise CampaignError("wave-optics receiver prior must cover every retained causal lag")
+    _validate_wave_public_calendar(plan, episode, horizon, source_stop + tail_samples)
+
+    executed = episode["mode"] != "plan"
+    if not executed:
+        if isinstance(channel, dict) and "wave_optics" in channel:
+            raise CampaignError("wave-optics planning cannot claim an executed table or channel")
+        return
+    if (not isinstance(channel, dict) or channel.get("samples") != horizon or
+            channel.get("source_samples") != source_stop or channel.get("hashed_samples") != horizon or
+            not isinstance(channel.get("input_sha256"), str) or
+            re.fullmatch(r"[0-9a-fA-F]{64}", channel["input_sha256"]) is None or
+            not _is_finite_number(channel.get("tail_seconds")) or
+            not math.isclose(channel["tail_seconds"], tail_seconds, rel_tol=0,
+                             abs_tol=4 * math.ulp(tail_seconds)) or
+            not _is_finite_number(channel.get("maximum_delay_seconds")) or
+            not math.isclose(channel["maximum_delay_seconds"], 4 / fs, rel_tol=0,
+                             abs_tol=4 * math.ulp(4 / fs))):
+        raise CampaignError("wave-optics execution must hash the full capture and report its complete source and causal extent")
+    full = channel.get("wave_optics")
+    _validate_wave_optics_report(full, scenario_id)
+    _validate_wave_energy_planes(channel, full, episode.get("control", "wanted") == "noise")
+    timing = receipt.get("timing")
+    if (not isinstance(timing, dict) or not _is_finite_number(timing.get("channel_preparation_seconds")) or
+            not _is_finite_number(timing.get("wall_seconds")) or
+            not full["preparation_seconds"] <= timing["channel_preparation_seconds"] <= timing["wall_seconds"]):
+        raise CampaignError("wave-optics table preparation must be included in total channel and wall costs")
+
+
+def _validate_wave_chain_energy(propagation: dict[str, Any], rx: dict[str, Any],
+                                tone_amplitude: float, noise: bool) -> None:
+    _validate_wave_energy_planes(propagation, propagation["wave_optics"], noise)
+    tone_energy = propagation.get("additive_noise_energy_sample_sum")
+    # The APP channel calls the RF-plane tone additive. Native RX signal
+    # includes the retimed coherent sum of wanted DATA and that tone.
+    if (not _is_finite_number(tone_energy) or tone_energy < 0 or not math.isclose(
+            tone_energy, tone_amplitude ** 2 * propagation["samples"], rel_tol=1e-10, abs_tol=1e-9)):
+        raise CampaignError("native chain APP additive energy must match the configured RF-plane tone")
+    rx_signal = rx.get("signal_energy_sample_sum")
+    if (not _is_finite_number(rx_signal) or rx_signal < 0 or
+            rx.get("contains_signal_energy") is not (rx_signal > 0) or
+            tone_amplitude > 0 and rx_signal == 0 or noise and tone_amplitude == 0 and rx_signal != 0):
+        raise CampaignError("native RX input must retain the continuing tone and keep an unlit noise control at zero")
+
+
+def _validate_wave_chain(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
+    """Bind named native TX/physical/RX cases without mixing stage energy planes."""
+    scenario_id = episode["scenario"]
+    if scenario_id not in HF_WAVE_CHAIN_SCENARIOS:
+        plan, scenario, channel = receipt["plan"], receipt.get("scenario", {}), receipt.get("channel")
+        configured = scenario.get("channel") if isinstance(scenario, dict) else None
+        if (isinstance(plan, dict) and "native_chain" in plan or
+                isinstance(channel, dict) and ("native_chain" in channel or "native_tx_physical_hf_native_rx" == channel.get("renderer")) or
+                isinstance(configured, dict) and configured.get("renderer") == "hf_wave_optics_screen" and
+                isinstance(plan, dict) and plan.get("channel_renderer") == "native_tx_physical_hf_native_rx"):
+            raise CampaignError("unrequested native wave-chain descriptor or renderer")
+        return
+
+    plan = receipt["plan"]
+    scenario = receipt.get("scenario", {})
+    configured = scenario.get("channel") if isinstance(scenario, dict) else None
+    plan_chain = plan.get("native_chain")
+    if (plan.get("channel_renderer") != "native_tx_physical_hf_native_rx" or
+            not isinstance(configured, dict) or configured.get("renderer") != "hf_wave_optics_screen" or
+            not isinstance(plan_chain, dict)):
+        raise CampaignError("native wave chain must bind the named receiver renderer and physical lens in plan and scenario")
+    _validate_wave_optics_descriptor(configured.get("wave_optics"), "hf-wave-lens")
+    _validate_wave_optics_descriptor(plan.get("wave_optics"), "hf-wave-lens")
+    if plan.get("wave_optics") != configured.get("wave_optics"):
+        raise CampaignError("native chain planned lens descriptor differs from the frozen scenario")
+
+    tx_audio, rx_audio, tx_rf, rx_rf, tone = HF_WAVE_CHAIN_SCENARIOS[scenario_id]
+    fs = HF_WAVE_OPTICS["sample_rate_hz"]
+    wanted_tone, wanted_tone_offset = ((.3, 100.) if tone else (0., 0.))
+    expected_plan = {
+        "stages": ["canonical_emission", "native_tx", "app_physical_channel", "native_rx", "canonical_receiver"],
+        "realization_passed_to_receiver": False, "helper_qualified": False,
+        "public_relative_clock_bound_ppm": 4., "public_endpoint_clock_bound_ppm": 2.,
+        "public_oscillator_frequency_bound_hz": 1., "public_physical_frequency_allowance_hz": 5.,
+        "actual_tx_audio_ppm": tx_audio, "actual_rx_audio_ppm": rx_audio,
+        "actual_tx_rf_ppm": tx_rf, "actual_rx_rf_ppm": rx_rf,
+        "rf_hz": 10_000_000., "nominal_conversion_if_hz": 240.,
+        "tx_band_hz": [-384., 384.], "propagation_band_hz": [-389., 389.],
+        "band_scope": "declared engineering allowances; time-varying sideband support is not analytically proved",
+        "native_endpoint_interpolation_allowance_samples": 12,
+        "continuing_rf_interference": tone, "rf_interference_amplitude": wanted_tone,
+        "rf_interference_offset_hz": wanted_tone_offset,
+        "rf_interference_plane": "complex RF carrier-relative offset after physical propagation and before native RX retiming/mixing",
+        "final_receiver_noise_variance": plan.get("noise_variance"),
+        "noise_plane": "native RX after clock interpolation and oscillator mixing",
+        "capture_completion_scope": "bounded evaluator capture; successful completion requires canonical scored physical quiet slots",
+    }
+    for field, expected in expected_plan.items():
+        actual = plan_chain.get(field)
+        if isinstance(expected, float):
+            matches = _is_finite_number(actual) and math.isclose(actual, expected, rel_tol=1e-12, abs_tol=1e-12)
+        else:
+            matches = actual == expected
+        if not matches:
+            raise CampaignError(f"native wave-chain plan metadata differs from its fixed scope: {field}")
+    if (not _is_finite_number(plan_chain.get("final_receiver_noise_variance")) or
+            not _is_finite_number(plan.get("noise_variance")) or
+            not math.isclose(plan_chain["final_receiver_noise_variance"], plan["noise_variance"], rel_tol=1e-12) or
+            not math.isclose(plan_chain["final_receiver_noise_variance"], fs, rel_tol=1e-12)):
+        raise CampaignError("native chain final noise must preserve the fixed post-RX C/N0 plane")
+    noise = configured.get("noise")
+    if (not isinstance(noise, dict) or noise.get("white_variance") != 0 or
+            noise.get("colored_variance") != 0 or noise.get("impulse_rate_hz") != 0 or
+            noise.get("impulse_rms") != 0 or noise.get("tone_amplitude") != wanted_tone or
+            noise.get("tone_hz") != wanted_tone_offset or noise.get("tone_sweep_hz_s") != 0):
+        raise CampaignError("native chain APP channel must preserve its named tone and keep random noise for the final RX plane")
+    if (plan.get("sample_rate_hz") != fs or plan.get("requested_bit_seconds") != 64 or
+            not _is_finite_number(plan.get("actual_bit_seconds")) or plan["actual_bit_seconds"] < 64 or
+            plan.get("data_if_hz") != 240 or
+            plan.get("helper_enabled") is not False or plan.get("cn0_db_hz") != 0 or
+            plan.get("wave_optics_source_band_checked") is not (episode["mode"] != "plan") or
+            plan.get("wave_optics_table_built") is not (episode["mode"] != "plan")):
+        raise CampaignError("native chain must preserve the fixed 1920 Hz lens waveform and distinguish planning from execution")
+    bounds = plan.get("public_bounds")
+    if (not isinstance(bounds, dict) or
+            not _is_finite_number(bounds.get("arrival_low_seconds")) or
+            not math.isclose(bounds["arrival_low_seconds"], 4 / fs, rel_tol=0, abs_tol=4 * math.ulp(4 / fs)) or
+            not _is_finite_number(bounds.get("arrival_high_seconds")) or
+            not math.isclose(bounds["arrival_high_seconds"], 84 / fs, rel_tol=0, abs_tol=4 * math.ulp(84 / fs)) or
+            bounds.get("receiver_filter_halo_samples") != 105 or
+            bounds.get("clock_bound_ppm") != 4 or bounds.get("frequency_bound_hz") != 1 or
+            bounds.get("atmospheric_hz") != 5):
+        raise CampaignError("native chain receiver priors must remain fixed across endpoint cases and cover the causal lens support")
+
+    source_stop, horizon = plan.get("source_stop_sample"), plan.get("horizon_samples")
+    if (not _is_nonnegative_int(source_stop) or not _is_nonnegative_int(horizon) or
+            horizon > episode.get("max_samples", horizon) or
+            not _is_nonnegative_int(plan_chain.get("tx_horizon_samples")) or
+            not _is_nonnegative_int(plan_chain.get("propagation_horizon_samples")) or
+            not _is_nonnegative_int(plan_chain.get("capture_horizon_samples")) or
+            not _is_nonnegative_int(plan_chain.get("propagation_signal_stop_samples"))):
+        raise CampaignError("native chain plan must declare bounded nonnegative stage horizons")
+    tx_horizon = plan_chain["tx_horizon_samples"]
+    propagation_horizon = plan_chain["propagation_horizon_samples"]
+    capture_horizon = plan_chain["capture_horizon_samples"]
+    signal_stop = plan_chain["propagation_signal_stop_samples"]
+    expected_tx = math.ceil(source_stop / (1 - 2e-6)) + 12
+    expected_signal_stop = expected_tx + HF_WAVE_OPTICS["last_lag_samples"]
+    expected_propagation = (math.ceil(horizon / (1 - 2e-6)) + 9 if tone else expected_signal_stop)
+    if (tx_horizon != expected_tx or signal_stop != expected_signal_stop or
+            propagation_horizon != expected_propagation or capture_horizon != horizon or
+            plan_chain.get("tx_band_hz") != [-384., 384.] or
+            plan_chain.get("propagation_band_hz") != [-389., 389.]):
+        raise CampaignError("native chain plan stage extents or engineering frequency allowances differ from the fixed bounds")
+    if (not _is_nonnegative_int(plan.get("planned_uncontaminated_quiet_slots")) or
+            plan["planned_uncontaminated_quiet_slots"] != 2 or
+            not _is_nonnegative_int(plan.get("first_uncontaminated_quiet_slot")) or
+            plan.get("scored_slot_horizon") != plan["first_uncontaminated_quiet_slot"] + 2 or
+            not isinstance(plan.get("public_slots"), list) or
+            len(plan["public_slots"]) != plan["scored_slot_horizon"] or
+            plan["scored_slot_horizon"] < plan.get("wire_bits", 0) + 2):
+        raise CampaignError("native chain must retain a complete public message plus two quiet completion slots")
+    quiet = plan["first_uncontaminated_quiet_slot"]
+    minimum_quiet_sample = math.ceil(signal_stop * (1 + 2e-6)) + 12
+    for index, row in enumerate(plan["public_slots"]):
+        observation = row.get("observation") if isinstance(row, dict) else None
+        if (not isinstance(observation, dict) or row.get("index") != index or
+                not _is_nonnegative_int(observation.get("first")) or
+                not _is_nonnegative_int(observation.get("stop")) or
+                not observation["first"] < observation["stop"] <= horizon or
+                index >= quiet and (observation["first"] < minimum_quiet_sample or
+                                    row.get("evaluator_transmitting") is not False)):
+            raise CampaignError("native chain public quiet slots must follow the full physical and bounded RX-clock tail")
+    if plan["public_slots"][-1]["observation"]["stop"] != horizon:
+        raise CampaignError("native chain capture must end after the last complete public observation")
+
+    if episode["mode"] == "plan":
+        channel = receipt.get("channel")
+        if isinstance(channel, dict) and ("native_chain" in channel or "propagation" in channel):
+            raise CampaignError("native chain planning cannot claim executed endpoint or propagation stages")
+        return
+
+    channel = receipt.get("channel")
+    if (not isinstance(channel, dict) or channel.get("renderer") != "native_tx_physical_hf_native_rx" or
+            channel.get("samples") != horizon or channel.get("hashed_samples") != horizon or
+            not isinstance(channel.get("input_sha256"), str) or
+            re.fullmatch(r"[0-9a-fA-F]{64}", channel["input_sha256"]) is None or
+            not _is_nonnegative_int(channel.get("workspace_bytes")) or channel["workspace_bytes"] == 0 or
+            channel.get("workspace_scope") != "aggregate original source, both native endpoints, physical channel and bridges; nested stage workspace counts are cumulative and must not be summed"):
+        raise CampaignError("native chain execution must hash the whole RX capture and report aggregate ownership")
+    chain = channel.get("native_chain")
+    if not isinstance(chain, dict):
+        raise CampaignError("native chain execution is missing its stage and horizon receipt")
+    shared_fields = ("tx_horizon_samples", "propagation_horizon_samples", "capture_horizon_samples",
+                    "propagation_signal_stop_samples", "tx_band_hz", "propagation_band_hz")
+    if any(chain.get(field) != plan_chain.get(field) for field in shared_fields):
+        raise CampaignError("native chain execution horizons or bands differ from its frozen plan")
+    expected_capture_scope = ("bounded_capture_with_continuing_rf_interference" if tone else
+                              "complete_finite_source_then_observation_padding")
+    if (chain.get("wanted_support_observed") is not True or
+            chain.get("minimum_propagation_horizon_samples") != expected_signal_stop or
+            not _is_nonnegative_int(chain.get("minimum_wanted_capture_samples")) or
+            chain["minimum_wanted_capture_samples"] > horizon or
+            chain.get("public_endpoint_clock_bound_ppm") != 2 or
+            chain.get("continuing_rf_interference_at_capture_end") is not tone or
+            chain.get("capture_scope") != expected_capture_scope or
+            chain.get("propagation_band_declared_not_analytically_proved") is not True or
+            chain.get("bridge_chunk_samples") != 256 or chain.get("workspace_bytes") != channel["workspace_bytes"] or
+            chain.get("receiver_completion_inferred_from_render_end") is not False):
+        raise CampaignError("native chain executed physical support, capture scope or completion declaration is invalid")
+    if (chain["minimum_wanted_capture_samples"] >
+            plan["public_slots"][quiet]["observation"]["first"] or
+            not tone and channel.get("natural_end_observed") is not True):
+        raise CampaignError("native chain capture does not cover the declared wanted support or finite end")
+    if chain.get("render_cost_scope") != (
+            "exclusive wall seconds for completed read calls; TX includes original source callbacks; nested upstream read time is subtracted; no complete-receiver capacity claim"):
+        raise CampaignError("native chain render costs must remain exclusive stage diagnostics, not a capacity claim")
+
+    tx_stage, propagation, rx_stage = channel.get("tx"), channel.get("propagation"), channel.get("rx")
+    if (not isinstance(tx_stage, dict) or not isinstance(propagation, dict) or not isinstance(rx_stage, dict) or
+            tx_stage.get("samples") != tx_horizon or tx_stage.get("source_samples") != source_stop or
+            propagation.get("samples") != propagation_horizon or propagation.get("source_samples") != tx_horizon or
+            rx_stage.get("samples") != horizon or rx_stage.get("source_samples") != propagation_horizon or
+            propagation.get("maximum_delay_seconds") is None or
+            not _is_finite_number(propagation.get("tail_seconds")) or
+            not math.isclose(propagation["tail_seconds"], 84 / fs, rel_tol=0, abs_tol=4 * math.ulp(84 / fs)) or
+            not math.isclose(propagation["maximum_delay_seconds"], 4 / fs, rel_tol=0,
+                             abs_tol=4 * math.ulp(4 / fs))):
+        raise CampaignError("native chain stage receipts do not preserve TX, causal propagation and RX extents")
+    if (not _is_finite_number(rx_stage.get("complex_noise_variance")) or
+            not math.isclose(rx_stage["complex_noise_variance"], plan_chain["final_receiver_noise_variance"],
+                             rel_tol=1e-12) or
+            not _is_finite_number(rx_stage.get("output_energy_sample_sum")) or
+            rx_stage["output_energy_sample_sum"] < 0):
+        raise CampaignError("native chain RX must report the fixed post-interpolation noise plane and output energy")
+    _validate_wave_optics_report(propagation.get("wave_optics"), "hf-wave-lens")
+    _validate_wave_chain_energy(propagation, rx_stage, wanted_tone, episode.get("control", "wanted") == "noise")
+
+    for field in ("tx_preparation_seconds", "propagation_preparation_seconds", "rx_preparation_seconds",
+                  "tx_render_seconds", "propagation_render_seconds", "rx_render_seconds"):
+        if not _is_finite_number(chain.get(field)) or chain[field] < 0:
+            raise CampaignError("native chain must report finite per-stage preparation and exclusive render costs")
+    if chain["propagation_preparation_seconds"] < propagation["wave_optics"]["preparation_seconds"]:
+        raise CampaignError("wave-optics table preparation must be included in propagation-stage preparation cost")
+    timing = receipt.get("timing")
+    stage_preparation = sum(chain[field] for field in
+        ("tx_preparation_seconds", "propagation_preparation_seconds", "rx_preparation_seconds"))
+    if (not isinstance(timing, dict) or not _is_finite_number(timing.get("channel_preparation_seconds")) or
+            not _is_finite_number(timing.get("wall_seconds")) or
+            timing["channel_preparation_seconds"] < stage_preparation or
+            timing["channel_preparation_seconds"] > timing["wall_seconds"]):
+        raise CampaignError("native chain per-stage preparation must be charged in total channel and wall cost")
+
+
+def _phase_screens_spec(scenario_id: str) -> dict[str, Any]:
+    perturbations, field, impact_y, drift, closest = HF_PHASE_SCREENS_SCENARIOS[scenario_id]
+    return {"carrier_hz": 10_000_000, "sample_rate_hz": 1920,
+        "occupied_half_band_hz": 384, "total_distance_m": 600_000., "horizon_seconds": 1600.,
+        "perturbations": perturbations, "field": field,
+        "field_scope": "0=nominal two-layer clump coordinates/amplitudes; 1=second fixed off-axis clump field with signed strengths; neither is a separate observed day",
+        "impact_y_m": impact_y, "drift_mps": drift, "closest_seconds": closest,
+        "position_half_span_m": 45_000., "position_step_m": 62.5,
+        "first_lag_samples": 4, "last_lag_samples": 84, "taps": 81,
+        "preparation_workspace_bound_bytes": 56 * 1024 * 1024}
+
+
+def _validate_phase_screens_descriptor(value: Any, scenario_id: str) -> None:
+    if not isinstance(value, dict):
+        raise CampaignError("phase-screen plan requires its fixed physical descriptor")
+    expected = _phase_screens_spec(scenario_id)
+    integer_fields = {"carrier_hz", "sample_rate_hz", "occupied_half_band_hz", "field",
+                      "first_lag_samples", "last_lag_samples", "taps", "preparation_workspace_bound_bytes"}
+    for field, wanted in expected.items():
+        actual = value.get(field)
+        if (actual != wanted or isinstance(wanted, (int, float)) and not isinstance(wanted, bool) and
+                not _is_finite_number(actual) or field in integer_fields and not _is_nonnegative_int(actual)):
+            raise CampaignError(f"phase-screen descriptor differs from its fixed physical geometry: {field}")
+
+
+def _validate_phase_screens_report(full: Any, scenario_id: str) -> None:
+    """Validate phase-screen numerical admission without imposing a local gain cap."""
+    _validate_phase_screens_descriptor(full, scenario_id)
+    perturbations = HF_PHASE_SCREENS_SCENARIOS[scenario_id][0]
+    digest_scope = ("all 1441 position knots, each retained lag, complex binary64 coefficient and Hermite slope per "
+                    "position interval, little-endian; source identity binds interpolation implementation")
+    qualification_scope = ("four-slice scalar paraxial phase-screen model; independent mesh, box, slice, deep-null "
+                           "slab-convergence, frequency, trajectory and FIR witnesses with plane-flux, angular-spectrum and causal-energy bounds; "
+                           "no evolving-Maxwell or field calibration")
+    if (full.get("table_qualified") is not True or full.get("table_digest_scope") != digest_scope or
+            full.get("qualification_scope") != qualification_scope or
+            not isinstance(full.get("table_sha256"), str) or
+            re.fullmatch(r"[0-9a-fA-F]{64}", full["table_sha256"]) is None):
+        raise CampaignError("phase-screen execution requires the fixed qualified table and exact digest scope")
+    witnesses = {
+        "mesh_error": .001, "box_error": .001, "slice_error_1_vs_2": None,
+        "slice_error_2_vs_4": .012, "frequency_error": 5e-5,
+        "trajectory_error": 5e-4, "fir_error": 5e-4,
+    }
+    parsed = {}
+    for field, limit in witnesses.items():
+        row = full.get(field)
+        if (not isinstance(row, dict) or any(not _is_finite_number(row.get(key)) for key in
+                ("absolute_error", "reference_amplitude", "x_m", "offset_hz")) or
+                row["absolute_error"] < 0 or row["reference_amplitude"] < 0 or
+                abs(row["x_m"]) > 45_000 or abs(row["offset_hz"]) > (960 if field == "frequency_error" else 384) or
+                limit is not None and row["absolute_error"] > limit):
+            raise CampaignError(f"phase-screen numerical witness is missing or out of bounds: {field}")
+        parsed[field] = row
+    slice_coarse = parsed["slice_error_1_vs_2"]["absolute_error"]
+    slice_fine = parsed["slice_error_2_vs_4"]["absolute_error"]
+    if slice_fine > max(.001, .5 * slice_coarse):
+        raise CampaignError("phase-screen slice refinement must show bounded contraction toward the four-slice model")
+    fir = parsed["fir_error"]
+    if fir["reference_amplitude"] >= .002 and fir["absolute_error"] > .1 * fir["reference_amplitude"]:
+        raise CampaignError("phase-screen occupied-band nonzero FIR error exceeds its relative gate")
+
+    for field, maximum in (("maximum_plane_power_error", 5e-11),
+                           ("maximum_edge_spectral_fraction", 1e-8),
+                           ("maximum_large_angle_fraction", 1e-6),
+                           ("maximum_discarded_energy_fraction", 1e-6),
+                           ("retarded_peak_error_bound", .005)):
+        if not _is_finite_number(full.get(field)) or not 0 <= full[field] <= maximum:
+            raise CampaignError(f"phase-screen numerical gate failed: {field}")
+    flux = full.get("minimum_longitudinal_flux")
+    if not _is_finite_number(flux) or not 0 <= flux <= 1 + 5e-11:
+        raise CampaignError("phase-screen full-plane longitudinal flux must remain finite, nonnegative and passive")
+    precursor = full.get("maximum_raw_precursor_energy_fraction")
+    if not _is_finite_number(precursor) or not 0 <= precursor <= 1:
+        raise CampaignError("phase-screen raw precursor energy diagnostic must remain a finite fraction")
+    for field in ("minimum_carrier_power", "maximum_carrier_power", "single_screen_difference"):
+        if not _is_finite_number(full.get(field)) or full[field] < 0:
+            raise CampaignError(f"phase-screen diagnostic is missing or invalid: {field}")
+    if full["maximum_carrier_power"] < full["minimum_carrier_power"]:
+        raise CampaignError("phase-screen carrier power bounds are reversed")
+
+    expected_solves = 40 if perturbations else 21
+    expected_cuts = 3 * 5761 if perturbations else 0
+    expected_deep = 3 if perturbations else 0
+    if (full.get("deep_slab_qualified") is not True or
+            full.get("deep_slab_witnesses") != expected_deep or
+            full.get("slab_cut_points") != expected_cuts or
+            not _is_nonnegative_int(full.get("unresolved_slab_witnesses")) or
+            full["unresolved_slab_witnesses"] > expected_cuts or
+            not _is_nonnegative_int(full.get("field_solves")) or full["field_solves"] != expected_solves or
+            full.get("checked_positions") != 5761 or full.get("checked_frequency_offsets") != 12):
+        raise CampaignError("phase-screen full-cut slab witnesses or bounded physical solve counts are incomplete")
+    minima = full.get("slab_minima")
+    if not isinstance(minima, list) or len(minima) != 3:
+        raise CampaignError("phase-screen receipt requires the three declared deep-slab minima")
+    expected_offsets = [-384., 0., 384.] if perturbations else [0., 0., 0.]
+    slab_fields = ("x_m", "offset_hz", "amplitude_4", "amplitude_8", "amplitude_16",
+                   "difference_2_4", "difference_4_8", "difference_8_16", "relative_allowance")
+    zero_slab = {**dict.fromkeys(slab_fields, 0.), "relative_resolved": False}
+    for row, offset in zip(minima, expected_offsets):
+        if (not isinstance(row, dict) or row.get("offset_hz") != offset or
+                any(not _is_finite_number(row.get(field)) for field in slab_fields) or
+                abs(row["x_m"]) > 45_000 or
+                any(row[field] < 0 for field in ("amplitude_4", "amplitude_8", "amplitude_16",
+                    "difference_2_4", "difference_4_8", "difference_8_16", "relative_allowance")) or
+                not isinstance(row.get("relative_resolved"), bool) or
+                row["relative_resolved"] is not (row["amplitude_16"] >= .002)):
+            raise CampaignError("phase-screen slab minimum is malformed or has inconsistent noise-floor resolution")
+        if not perturbations and row != zero_slab:
+            raise CampaignError("phase-screen Off control must preserve the unmeasured deep-slab placeholders")
+        if row["relative_resolved"]:
+            expected_allowance = (row["difference_4_8"] + row["difference_8_16"]) / row["amplitude_16"]
+            if (not math.isclose(row["relative_allowance"], expected_allowance, rel_tol=1e-10, abs_tol=1e-12) or
+                    row["relative_allowance"] > .10 or
+                    row["difference_4_8"] > max(1e-6, .5 * row["difference_2_4"]) or
+                    row["difference_8_16"] > max(1e-6, .5 * row["difference_4_8"])):
+                raise CampaignError("phase-screen deep minimum fails full-cut relative accuracy or refinement contraction")
+    worst = full.get("worst_slab_relative")
+    if not isinstance(worst, dict):
+        raise CampaignError("phase-screen receipt requires the worst resolved full-cut slab witness")
+    if perturbations:
+        if (worst.get("relative_resolved") is not True or
+                any(not _is_finite_number(worst.get(field)) for field in
+                    ("x_m", "offset_hz", "amplitude_4", "amplitude_8", "amplitude_16",
+                     "difference_2_4", "difference_4_8", "difference_8_16", "relative_allowance")) or
+                abs(worst["x_m"]) > 45_000 or worst["offset_hz"] not in expected_offsets or
+                worst["amplitude_16"] < .002 or worst["relative_allowance"] > .10 or
+                not math.isclose(worst["relative_allowance"],
+                    (worst["difference_4_8"] + worst["difference_8_16"]) / worst["amplitude_16"],
+                    rel_tol=1e-10, abs_tol=1e-12)):
+            raise CampaignError("phase-screen worst resolved slab witness exceeds its full-cut error gate")
+    elif (worst != zero_slab or any(not _is_finite_number(worst.get(field)) for field in slab_fields) or
+          worst.get("relative_resolved") is not False):
+        raise CampaignError("phase-screen Off control must preserve the unmeasured deep-slab placeholders")
+
+    _validate_phase_screen_null_windows(full, scenario_id, perturbations, minima)
+
+    preparation_peak = full.get("preparation_peak_workspace_bytes")
+    table_bytes, stream_bytes = full.get("table_workspace_bytes"), full.get("stream_workspace_bytes")
+    if (not _is_nonnegative_int(preparation_peak) or preparation_peak == 0 or preparation_peak > 56 * 1024 * 1024 or
+            not _is_nonnegative_int(table_bytes) or table_bytes == 0 or
+            not _is_nonnegative_int(stream_bytes) or stream_bytes == 0 or
+            table_bytes + stream_bytes > 56 * 1024 * 1024 or
+            not _is_finite_number(full.get("preparation_seconds")) or full["preparation_seconds"] < 0):
+        raise CampaignError("phase-screen table and peak preparation must fit the admitted workspace")
+    low, high = full.get("source_minimum_frequency_hz"), full.get("source_maximum_frequency_hz")
+    if not _is_finite_number(low) or not _is_finite_number(high) or not -384 <= low <= high <= 384:
+        raise CampaignError("phase-screen executed source band exceeds the finite-band qualification")
+    for field in ("incident_energy_sample_sum", "selected_energy_sample_sum"):
+        if not _is_finite_number(full.get(field)) or full[field] < 0:
+            raise CampaignError("phase-screen full-horizon incident and selected energies must be measured")
+
+
+def _validate_phase_screen_null_windows(full: dict[str, Any], scenario_id: str,
+                                        perturbations: bool, slab_minima: list[dict[str, Any]]) -> None:
+    """Check serialized deep-null windows and their noise-floor summaries."""
+    if (full.get("null_windows_qualified") is not True or
+            full.get("null_window_step_m") != .125 or full.get("null_window_radius_m") != 15.625):
+        raise CampaignError("phase-screen receipt must report the fixed qualified null-window refinement")
+    windows = full.get("null_windows")
+    if not isinstance(windows, list) or len(windows) != (3 if perturbations else 0):
+        raise CampaignError("phase-screen null-window witnesses must match the perturbation scope")
+    if not perturbations:
+        return
+
+    offsets = (-384., 0., 384.)
+    step, radius, half_span, floor = .125, 15.625, 45_000., .002
+    for window, offset, coarse in zip(windows, offsets, slab_minima):
+        if not isinstance(window, dict):
+            raise CampaignError("phase-screen null-window witness is malformed")
+        center = window.get("center_x_m")
+        anchor = window.get("anchor_error")
+        if (not _is_finite_number(center) or abs(center) > half_span or
+                center != coarse.get("x_m") or
+                not _is_finite_number(anchor) or not 0 <= anchor <= 1e-11 or
+                window.get("offset_hz") != offset):
+            raise CampaignError("phase-screen null-window anchor or frequency differs from its frozen slab minimum")
+        left, right = max(-half_span, center - radius), min(half_span, center + radius)
+        expected_count = int(round((right - left) / step)) + 1
+        sampled, unresolved = window.get("sampled_points"), window.get("unresolved_points")
+        if (sampled != expected_count or not _is_nonnegative_int(unresolved) or unresolved > sampled):
+            raise CampaignError("phase-screen null-window sample counts do not cover its bounded quarter-grid interval")
+
+        ranges = window.get("unresolved_ranges_m")
+        if not isinstance(ranges, list):
+            raise CampaignError("phase-screen null-window noise-floor runs must be serialized")
+        counted_unresolved = 0
+        previous_end = None
+        for pair in ranges:
+            if (not isinstance(pair, list) or len(pair) != 2 or
+                    any(not _is_finite_number(x) for x in pair)):
+                raise CampaignError("phase-screen unresolved null range is malformed")
+            first, last = pair
+            first_i, last_i = round((first - left) / step), round((last - left) / step)
+            if (first > last or first < left or last > right or
+                    abs(left + first_i * step - first) > 1e-9 or
+                    abs(left + last_i * step - last) > 1e-9 or
+                    previous_end is not None and first - previous_end < 2 * step - 1e-9):
+                raise CampaignError("phase-screen unresolved null ranges must be ordered, disjoint sampled runs")
+            counted_unresolved += last_i - first_i + 1
+            previous_end = last
+        if counted_unresolved != unresolved:
+            raise CampaignError("phase-screen unresolved null ranges disagree with the reported noise-floor count")
+
+        points = []
+        for name in ("minimum_reference", "minimum_fir", "worst_slab_relative", "worst_fir_relative"):
+            point = window.get(name)
+            if not isinstance(point, dict):
+                raise CampaignError(f"phase-screen null-window summary is missing: {name}")
+            numeric = ("x_m", "amplitude_4", "amplitude_8", "amplitude_16", "amplitude_fir",
+                       "difference_4_8", "difference_8_16", "difference_fir_4", "difference_fir_16",
+                       "relative_slab_allowance", "relative_fir_allowance")
+            if (any(not _is_finite_number(point.get(field)) for field in numeric) or
+                    not left - 1e-9 <= point["x_m"] <= right + 1e-9 or
+                    abs(point["x_m"] - (left + round((point["x_m"] - left) / step) * step)) > 1e-9 or
+                    any(point[field] < 0 for field in numeric[1:]) or
+                    not isinstance(point.get("relative_resolved"), bool) or
+                    point["relative_resolved"] is not (point["amplitude_16"] >= floor)):
+                raise CampaignError(f"phase-screen null-window summary is malformed: {name}")
+            expected_slab = ((point["difference_4_8"] + point["difference_8_16"]) /
+                             point["amplitude_16"] if point["relative_resolved"] else 0.)
+            expected_fir = ((point["difference_fir_4"] + point["difference_4_8"] + point["difference_8_16"]) /
+                            point["amplitude_16"] if point["relative_resolved"] else 0.)
+            if (not math.isclose(point["relative_slab_allowance"], expected_slab, rel_tol=1e-10, abs_tol=1e-12) or
+                    not math.isclose(point["relative_fir_allowance"], expected_fir, rel_tol=1e-10, abs_tol=1e-12) or
+                    point["difference_fir_4"] > 5e-4 or
+                    point["relative_resolved"] and (expected_slab > .10 or expected_fir > .10)):
+                raise CampaignError(f"phase-screen null-window numerical gate failed: {name}")
+            points.append(point)
+        resolved = [p for p in points if p["relative_resolved"]]
+        for name, key in (("worst_slab_relative", "relative_slab_allowance"),
+                          ("worst_fir_relative", "relative_fir_allowance")):
+            witness = window[name]
+            if resolved:
+                if not witness["relative_resolved"] or any(
+                        witness[key] + 1e-12 < p[key] for p in resolved):
+                    raise CampaignError(f"phase-screen {name} does not bound resolved null-window samples")
+            elif witness["relative_resolved"]:
+                raise CampaignError(f"phase-screen {name} falsely claims resolved null-window evidence")
+
+
+def _validate_phase_screens(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
+    scenario_id = episode["scenario"]
+    if scenario_id not in HF_PHASE_SCREENS_SCENARIOS:
+        plan, scenario, channel = receipt["plan"], receipt.get("scenario", {}), receipt.get("channel")
+        configured = scenario.get("channel") if isinstance(scenario, dict) else None
+        if (isinstance(plan, dict) and ("phase_screens" in plan or plan.get("channel_renderer") == "hf_phase_screens") or
+                isinstance(configured, dict) and ("phase_screens" in configured or configured.get("renderer") == "hf_phase_screens") or
+                isinstance(channel, dict) and "phase_screens" in channel):
+            raise CampaignError("unrequested phase-screen descriptor or renderer")
+        return
+    plan = receipt["plan"]
+    scenario = receipt.get("scenario", {})
+    configured = scenario.get("channel") if isinstance(scenario, dict) else None
+    fs, lag = 1920, 84
+    if (plan.get("channel_renderer") != "hf_phase_screens" or not isinstance(configured, dict) or
+            configured.get("renderer") != "hf_phase_screens"):
+        raise CampaignError("phase screens must bind their native renderer in plan and scenario")
+    _validate_phase_screens_descriptor(plan.get("phase_screens"), scenario_id)
+    _validate_phase_screens_descriptor(configured.get("phase_screens"), scenario_id)
+    if plan["phase_screens"] != configured["phase_screens"]:
+        raise CampaignError("phase-screen planned descriptor differs from the frozen scenario")
+
+    perturbations, field, impact_y, drift, closest = HF_PHASE_SCREENS_SCENARIOS[scenario_id]
+    source_stop, horizon = plan.get("source_stop_sample"), plan.get("horizon_samples")
+    screen_horizon = plan.get("screen_horizon_seconds")
+    event_end = closest + 32 / fs + lag / fs
+    max_samples = 1600 * fs
+    if (plan.get("sample_rate_hz") != fs or not _is_nonnegative_int(source_stop) or
+            not _is_nonnegative_int(horizon) or horizon == 0 or horizon > max_samples or
+            not _is_finite_number(screen_horizon) or
+            not math.isclose(screen_horizon, horizon / fs, rel_tol=1e-12, abs_tol=1e-12) or
+            perturbations and source_stop < math.ceil(event_end * fs)):
+        raise CampaignError("phase-screen source and rendered horizons must contain the declared event without wrapping past 1600 seconds")
+    endpoint_x = (-drift * ((-lag - 32) / fs - closest),
+                  -drift * ((horizon + lag - 32) / fs - closest))
+    if any(abs(x) > 45_000 for x in endpoint_x):
+        raise CampaignError("phase-screen rendered trajectory reaches beyond its finite nonwrapped position support")
+    if (plan.get("channel_tail_seconds_scope") !=
+            "complete causal four-slice phase-screen FIR support from first input through last retained lag" or
+            plan.get("cn0_reference_plane") !=
+            "normalized incident DATA before phase-screen propagation and fixed additive receiver noise" or
+            plan.get("physical_kernel_supplied_to_receiver") is not False or
+            plan.get("phase_screens_source_band_checked") is not (episode["mode"] != "plan") or
+            plan.get("phase_screens_table_built") is not (episode["mode"] != "plan") or
+            plan.get("path_count") is not None or plan.get("path_sample_products") is not None or
+            plan.get("closest_approach_in_source") is not (not perturbations or source_stop / fs >= event_end) or
+            plan.get("closest_approach_in_rendered_horizon") is not (perturbations and horizon / fs >= event_end)):
+        raise CampaignError("phase-screen plan must distinguish finite source, rendered observation and unexecuted table work")
+    exposure = ("unperturbed_control" if not perturbations else
+                "partial_rendered_observation" if horizon / fs < event_end else
+                "contains_closest_approach_with_bounded_outbound_extent_not_full_1600s_dynamics")
+    if (plan.get("screen_exposure_scope") != exposure or
+            not _is_finite_number(plan.get("channel_tail_seconds")) or
+            not math.isclose(plan["channel_tail_seconds"], lag / fs, rel_tol=0,
+                             abs_tol=4 * math.ulp(lag / fs))):
+        raise CampaignError("phase-screen receipt must report its bounded exposure and complete causal FIR tail")
+    bounds = plan.get("public_bounds")
+    if (not isinstance(bounds, dict) or
+            not _is_finite_number(bounds.get("arrival_low_seconds")) or
+            not math.isclose(bounds["arrival_low_seconds"], 4 / fs, rel_tol=0, abs_tol=4 * math.ulp(4 / fs)) or
+            not _is_finite_number(bounds.get("arrival_high_seconds")) or
+            not math.isclose(bounds["arrival_high_seconds"], 84 / fs, rel_tol=0, abs_tol=4 * math.ulp(84 / fs)) or
+            bounds.get("receiver_filter_halo_samples") != 80):
+        raise CampaignError("phase-screen public arrival prior must cover every retained causal lag")
+    _validate_wave_public_calendar(plan, episode, horizon, source_stop + lag)
+
+    if (plan.get("requested_bit_seconds") != episode.get("bit_seconds", 64) or
+            "cn0_db_hz" in episode and plan.get("cn0_db_hz") != episode["cn0_db_hz"]):
+        raise CampaignError("phase-screen receipt changed the frozen episode duration or C/N0")
+
+    channel = receipt.get("channel")
+    if episode["mode"] == "plan":
+        if isinstance(channel, dict) and "phase_screens" in channel:
+            raise CampaignError("phase-screen planning cannot claim an executed numerical table")
+        return
+    if (not isinstance(channel, dict) or channel.get("samples") != horizon or
+            channel.get("source_samples") != source_stop or channel.get("hashed_samples") != horizon or
+            not isinstance(channel.get("input_sha256"), str) or
+            re.fullmatch(r"[0-9a-fA-F]{64}", channel["input_sha256"]) is None or
+            not _is_finite_number(channel.get("tail_seconds")) or
+            not math.isclose(channel["tail_seconds"], lag / fs, rel_tol=0,
+                             abs_tol=4 * math.ulp(lag / fs)) or
+            not _is_finite_number(channel.get("maximum_delay_seconds")) or
+            not math.isclose(channel["maximum_delay_seconds"], 4 / fs, rel_tol=0,
+                             abs_tol=4 * math.ulp(4 / fs))):
+        raise CampaignError("phase-screen execution must hash the full capture and report complete physical/tail extent")
+    full = channel.get("phase_screens")
+    _validate_phase_screens_report(full, scenario_id)
+    _validate_wave_energy_planes(channel, full, episode.get("control", "wanted") == "noise")
+    timing = receipt.get("timing")
+    if (not isinstance(timing, dict) or not _is_finite_number(timing.get("channel_preparation_seconds")) or
+            not _is_finite_number(timing.get("wall_seconds")) or
+            not full["preparation_seconds"] <= timing["channel_preparation_seconds"] <= timing["wall_seconds"]):
+        raise CampaignError("phase-screen table preparation must be charged to channel preparation and wall time")
+    resources = plan.get("receiver_resources")
+    if (not _is_nonnegative_int(channel.get("workspace_bytes")) or channel["workspace_bytes"] == 0 or
+            isinstance(resources, dict) and _is_nonnegative_int(resources.get("total_memory_limit_bytes")) and
+            channel["workspace_bytes"] > resources["total_memory_limit_bytes"]):
+        raise CampaignError("phase-screen rendering workspace must remain within the declared application allocation")
+
+
+def _validate_gannon_gain_variance(receipt: dict[str, Any], physical: dict[str, Any]) -> None:
+    witness = physical.get("gain_variance_witness")
+    retained_partitions = physical.get("gain_partitions")
+    search = receipt["hf_public_search"]
+    if not isinstance(witness, dict) or not isinstance(retained_partitions, dict):
+        raise CampaignError("Gannon gain variance witness requires the original unit-variance partitions")
+    variances = witness.get("prior_variances")
+    threshold = witness.get("presence_reference_threshold")
+    if (variances != [1/4096, 1/512, 1/256, 1/64, 1/16, 1.] or any(not _is_finite_number(x) for x in variances) or
+            witness.get("observation_sha256") != physical.get("observation_sha256") or
+            not _is_finite_number(threshold) or threshold <= 0 or threshold != search.get("presence_reference_threshold") or
+            any(witness.get(flag) is not False for flag in
+                ("used_for_receiver_decisions", "full_bank_evaluated_at_new_variances", "independent_negative_control"))):
+        raise CampaignError("Gannon gain variance witness must bind the actual selected aperture and fixed private scope")
+    prior = witness.get("fixed_coordinate_prior")
+    expected = {"timings": search.get("public_timing_atoms"), "frequencies": search.get("frequency_cells"),
+                "sinusoidal_models": search["families"][2].get("phase_models")}
+    if (not isinstance(prior, dict) or search.get("evaluated_timing_atoms") != expected["timings"] or
+            any(not _is_nonnegative_int(count) or not _is_nonnegative_int(prior.get(field)) or prior[field] == 0 or prior[field] != count
+                for field, count in expected.items())):
+        raise CampaignError("Gannon gain variance witness must retain the full timing/CFO/sinusoid prior denominator")
+    log_mass = -math.log(math.prod(expected.values()))
+    if not _is_finite_number(prior.get("log_mass")) or not math.isclose(prior["log_mass"], log_mass, abs_tol=1e-12):
+        raise CampaignError("Gannon gain variance fixed-cell log mass disagrees with the public denominator")
+
+    fields = ("noisy", "clean", "same_noise_residual")
+    for name in ("winning_public_cell", "refined_public_cell"):
+        cell = witness.get(name)
+        retained = retained_partitions[name]
+        if not isinstance(cell, dict) or not isinstance(cell.get("partitions"), list) or len(cell["partitions"]) != 5:
+            raise CampaignError("Gannon gain variance witness requires the existing five partitions at both retained cells")
+        values: dict[str, list[float]] = {field: [] for field in fields}
+        for row, original in zip(cell["partitions"], retained):
+            if (not isinstance(row, dict) or not isinstance(row.get("hypotheses"), list) or len(row["hypotheses"]) != 2 or
+                    any(row.get(field) != original[field] for field in ("requested_block_seconds", "block_samples", "block_count"))):
+                raise CampaignError("Gannon gain variance witness changed the retained partition geometry")
+            for hypothesis, unit in zip(row["hypotheses"], original["hypotheses"]):
+                if (not isinstance(hypothesis, dict) or any(not isinstance(hypothesis.get(field), list) or
+                        len(hypothesis[field]) != 6 or any(not _is_finite_number(x) for x in hypothesis[field]) for field in fields)):
+                    raise CampaignError("Gannon gain variance witness requires six finite scores per bit and observation")
+                if hypothesis["noisy"][-1] != unit["noisy_log_likelihood_ratio"]:
+                    raise CampaignError("Gannon gain variance witness changed the original unit-variance likelihood")
+                for field in fields:
+                    values[field].extend(hypothesis[field])
+        summaries = [("equal_weight_log_mixture", 0.)]
+        if name == "winning_public_cell":
+            summaries.append(("charged_log_contribution", log_mass))
+        elif "charged_log_contribution" in cell:
+            raise CampaignError("Gannon gain variance refined-cell mass remains unavailable")
+        for summary, charge in summaries:
+            scores = cell.get(summary, {})
+            for field, components in values.items():
+                peak = max(components)
+                target = peak + math.log(math.fsum(math.exp(x - peak) for x in components) / len(components)) + charge
+                if (not isinstance(scores, dict) or not _is_finite_number(scores.get(field)) or
+                        not math.isclose(scores[field], target, rel_tol=1e-12, abs_tol=1e-10)):
+                    raise CampaignError("Gannon gain variance witness must average likelihoods with the frozen masses")
+
+
+def _validate_gannon_native_comparison(physical: dict[str, Any], plan: dict[str, Any]) -> None:
+    presence = physical.get("known_target_presence")
+    if (not isinstance(presence, dict) or presence.get("fixed_known_context") is not True or
+            presence.get("used_for_receiver_decisions") is not False or presence.get("field_sensitivity_bound") is not False or
+            presence.get("transmit_range_excludes_preroll") is not True or
+            presence.get("pre_aperture_matches_wanted") is not True or
+            presence.get("prefix_samples_rendered") != physical.get("prefix_samples_rendered_per_twin") or
+            not isinstance(presence.get("absent_template_sha256"), str) or
+            re.fullmatch(r"[0-9a-fA-F]{64}", presence["absent_template_sha256"]) is None):
+        raise CampaignError("Gannon target-absent reference must preserve the complete prefix and private scope")
+    muted = presence.get("muted_transmit_samples")
+    if (not isinstance(muted, dict) or any(not _is_nonnegative_int(muted.get(key)) for key in ("first", "stop")) or
+            not muted["first"] < muted["stop"] <= plan["source_stop_sample"]):
+        raise CampaignError("Gannon target-absent source interval is invalid")
+    variance = plan["noise_variance"]
+    if (any(not _is_finite_number(presence.get(field)) or presence[field] < 0 for field in
+            ("absent_aperture_energy", "absent_received_prefix_energy", "signal_difference_energy",
+             "distance_over_noise_variance")) or
+            not _is_finite_number(presence.get("observed_wanted_vs_absent_log_likelihood_ratio")) or
+            not math.isclose(presence["distance_over_noise_variance"], presence["signal_difference_energy"] / variance,
+                             rel_tol=1e-10, abs_tol=1e-12)):
+        raise CampaignError("Gannon target-absent comparison has invalid Gaussian distance or likelihood")
+    comparison = physical.get("native_coherent_gain_comparison")
+    if (not isinstance(comparison, dict) or comparison.get("same_noisy_selected_coordinate_bank") is not True or
+            any(comparison.get(flag) is not False for flag in ("private_clean_used_for_coordinate_selection",
+                "used_for_receiver_decisions", "independent_and_persistent_likelihoods_reported_separately")) or
+            comparison.get("score_noise_variance") != variance or
+            any(not _is_nonnegative_int(comparison.get(field)) or comparison[field] == 0
+                for field in ("block_rows", "bounded_scratch_bytes", "workers"))):
+        raise CampaignError("Gannon coherent-gain comparison must reuse one noisy-selected native coordinate bank")
+    for key in ("noisy", "private_wanted_template"):
+        scores = comparison.get(key)
+        if (not isinstance(scores, dict) or any(not _is_nonnegative_int(scores.get(field)) or scores[field] == 0 for field in
+                ("candidates", "blocks", "frequency_states", "basis_rows")) or
+                not _is_finite_number(scores.get("coordinate_log_prior_mass")) or scores["coordinate_log_prior_mass"] > 0 or
+                not _is_finite_number(scores.get("seconds")) or scores["seconds"] < 0):
+            raise CampaignError("Gannon coherent-gain comparison has invalid reported public work or prior mass")
+        raw, corrected = (scores.get(f"bit_log_e_{kind}_coordinate_mass") for kind in ("before", "after"))
+        if any(not isinstance(row, list) or len(row) != 2 or
+               not all(_is_finite_number(value) for value in row) for row in (raw, corrected)) or any(
+                not math.isclose(after, before + scores["coordinate_log_prior_mass"], rel_tol=1e-10, abs_tol=1e-10)
+                for before, after in zip(raw, corrected)):
+            raise CampaignError("Gannon coherent-gain comparison must apply its selected public coordinate mass")
+    if any(comparison["noisy"][field] != comparison["private_wanted_template"][field] for field in
+           ("coordinate_log_prior_mass", "candidates", "blocks", "frequency_states", "basis_rows")):
+        raise CampaignError("Gannon coherent-gain comparison changed its native bank or work geometry")
+
+
 def _validate_gannon_replay(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
     if episode["scenario"] not in GANNON_REPLAY:
         return
@@ -2058,6 +3065,17 @@ def _validate_gannon_replay(receipt: dict[str, Any], episode: dict[str, Any]) ->
                 channel.get("input_energy_sample_sum") != 0 or channel.get("signal_energy_sample_sum") != 0 or
                 channel.get("contains_source_energy") is not False or channel.get("contains_signal_energy") is not False):
             raise CampaignError("Gannon synthetic noise control requires exactly zero modem source and multiplicative signal")
+        if episode["mode"] == "hf-search" and episode.get("hf_physical_diagnostic", False):
+            physical = receipt.get("hf_physical_diagnostic")
+            binary = physical.get("known_binary") if isinstance(physical, dict) else None
+            if (not isinstance(binary, dict) or binary.get("recording_noise_in_multiplier") is not True or
+                    any(binary.get(flag) is not False for flag in
+                        ("physical_noise_free_channel_known", "field_sensitivity_bound"))):
+                raise CampaignError("Gannon matched templates must preserve the observed-voltage noise confound and conditional scope")
+            if episode.get("hf_gannon_native_diagnostic", False):
+                _validate_gannon_native_comparison(physical, plan)
+            elif "known_target_presence" in physical or "native_coherent_gain_comparison" in physical:
+                raise CampaignError("unrequested Gannon native comparison")
     if not _is_nonnegative_int(samples) or samples == 0 or (samples-1)/fs > 3599.9-offset:
         raise CampaignError("Gannon replay exceeds the finite selected record; looping or extrapolation is not admitted")
 
@@ -2428,6 +3446,95 @@ def _validate_magnetoionic_reflection(receipt: dict[str, Any], episode: dict[str
         raise CampaignError("magnetoionic oracle cannot claim receiver execution or message completion")
 
 
+def _validate_known_target(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
+    plan = receipt["plan"]
+    requested = episode.get("hf_target_presence_diagnostic", False)
+    if plan.get("hf_target_presence_diagnostic_requested", False) is not requested:
+        raise CampaignError("native target-presence diagnostic does not match the frozen request")
+    if not requested:
+        if "hf_target_presence_diagnostic" in receipt:
+            raise CampaignError("unrequested target-presence diagnostic")
+        return
+    target = episode["capture_digest_slot"]
+    diagnostic = receipt.get("hf_target_presence_diagnostic")
+    channel, outcomes, slots = (receipt.get(key) for key in ("channel", "outcomes", "slots"))
+    if (not isinstance(diagnostic, dict) or diagnostic.get("component_complete") is not True or
+            not isinstance(channel, dict) or not isinstance(outcomes, dict) or
+            outcomes.get("receiver_executed") is not True or outcomes.get("completion_evaluated") is not True or
+            outcomes.get("public_search_executed") is not False or
+            not isinstance(slots, list) or target >= len(slots) or not isinstance(slots[target], dict) or
+            slots[target].get("index") != target or slots[target].get("complete") is not True or
+            slots[target].get("all_valid") is not True):
+        raise CampaignError("target-presence diagnostic requires a completed ordinary receiver and all-valid scored aperture")
+    first, stop = plan.get("capture_digest_first_sample"), plan.get("capture_digest_stop_sample")
+    if (not _is_nonnegative_int(first) or not _is_nonnegative_int(stop) or not first < stop or
+            slots[target].get("first_sample") != first or slots[target].get("stop_sample") != stop or
+            diagnostic.get("slot_index") != target or diagnostic.get("observation") != {"first": first, "stop": stop} or
+            diagnostic.get("observation_sha256") != channel.get("selected_observation_sha256") or
+            diagnostic.get("source_samples_per_twin") != plan.get("source_stop_sample") or
+            diagnostic.get("prefix_samples_rendered_per_twin") != stop or
+            channel.get("hashed_samples") != plan.get("horizon_samples") or
+            diagnostic.get("pre_aperture_matches_wanted") is not True or
+            diagnostic.get("transmit_range_excludes_preroll") is not True or
+            not _is_nonnegative_int(diagnostic.get("wanted_bit")) or diagnostic["wanted_bit"] > 1):
+        raise CampaignError("target-presence diagnostic must preserve the full prefix and original observed aperture")
+    recorded = episode["scenario"] in GANNON_REPLAY
+    if (any(diagnostic.get(flag) is not False for flag in
+            ("used_for_receiver_decisions", "field_sensitivity_bound", "public_phase_search_executed")) or
+            diagnostic.get("recording_noise_in_multiplier") is not recorded):
+        raise CampaignError("target-presence diagnostic must retain its private conditional evidence scope")
+    mute = diagnostic.get("muted_transmit_samples")
+    if (not isinstance(mute, dict) or
+            any(not _is_nonnegative_int(mute.get(key)) for key in ("first", "stop")) or
+            not mute["first"] < mute["stop"] <= diagnostic["source_samples_per_twin"]):
+        raise CampaignError("target-presence diagnostic must report the exact muted source interval")
+    digests = diagnostic.get("template_sha256_bit0_bit1_absent")
+    if (not isinstance(digests, list) or len(digests) != 3 or
+            any(not isinstance(value, str) or re.fullmatch(r"[0-9a-fA-F]{64}", value) is None for value in digests)):
+        raise CampaignError("target-presence diagnostic requires three private template digests")
+    physical = channel.get("wave_optics") or channel.get("phase_screens")
+    if not recorded and (not isinstance(physical, dict) or not isinstance(physical.get("table_sha256"), str)):
+        raise CampaignError("target-presence diagnostic has no qualified observed-input physical table")
+    table = None if recorded else physical["table_sha256"]
+    if diagnostic.get("table_sha256_bit0_bit1_absent") != [table]*3:
+        raise CampaignError("target-presence templates must use the original qualified physical table")
+    variance = diagnostic.get("noise_variance")
+    if not _is_finite_number(variance) or variance <= 0 or variance != plan.get("noise_variance"):
+        raise CampaignError("target-presence diagnostic must preserve the original synthetic added noise variance")
+    for key in ("binary_correct_vs_wrong", "target_wanted_vs_absent"):
+        score = diagnostic.get(key)
+        if (not isinstance(score, dict) or any(not _is_finite_number(score.get(field)) for field in
+                ("distance_squared", "distance_over_noise_variance", "observed_log_likelihood_ratio")) or
+                score["distance_squared"] < 0 or not math.isclose(
+                    score["distance_over_noise_variance"], score["distance_squared"]/variance,
+                    rel_tol=1e-10, abs_tol=1e-12)):
+            raise CampaignError("target-presence comparison must preserve distinct finite Gaussian distances and log likelihood ratios")
+    prefix_energy, aperture_energy = (diagnostic.get(key) for key in
+        ("absent_received_prefix_energy", "absent_aperture_energy"))
+    if not _is_finite_number(prefix_energy) or not _is_finite_number(aperture_energy) or not 0 <= aperture_energy <= prefix_energy + 1e-9:
+        raise CampaignError("target-absent template must report finite received energies on the prefix and aperture")
+    limit, baseline, reserved, channel_limit = (diagnostic.get(key) for key in
+        ("total_memory_limit_bytes", "process_baseline_bytes", "future_reserved_bytes", "per_channel_limit_bytes"))
+    workspaces = diagnostic.get("channel_workspace_bytes")
+    resources = plan.get("receiver_resources")
+    if (any(not _is_nonnegative_int(value) for value in (limit, baseline, reserved, channel_limit)) or
+            not isinstance(resources, dict) or resources.get("total_memory_limit_bytes") != limit or
+            channel_limit == 0 or baseline + reserved > limit or reserved < 3*channel_limit or
+            diagnostic.get("channel_instances") != 3 or not isinstance(workspaces, list) or len(workspaces) != 3 or
+            any(not _is_nonnegative_int(value) or not 0 < value <= channel_limit for value in workspaces) or
+            plan.get("diagnostic_capture_bytes") != 16*(stop-first) or
+            not _is_nonnegative_int(plan.get("outside_receiver_future_reserved_bytes")) or
+            plan["outside_receiver_future_reserved_bytes"] < plan["diagnostic_capture_bytes"]):
+        raise CampaignError("target-presence diagnostic must reserve the selected IQ buffer and three bounded channel twins")
+    prep, render, wall = (diagnostic.get(key) for key in ("preparation_seconds", "render_seconds", "wall_seconds"))
+    timing = receipt.get("timing")
+    if (any(not _is_finite_number(value) or value < 0 for value in (prep, render, wall)) or
+            not math.isclose(prep + render, wall, rel_tol=1e-10, abs_tol=1e-9) or
+            not isinstance(timing, dict) or not _is_finite_number(timing.get("wall_seconds")) or
+            wall > timing["wall_seconds"]):
+        raise CampaignError("target-presence preparation and rendering must be included in total wall time")
+
+
 def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
     identity_fields = ("requested_scenario", "mode", "waveform", "seed", "control")
     missing_identity = [field for field in identity_fields if field not in receipt]
@@ -2456,7 +3563,11 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     _validate_profile_controls(plan, episode)
     _validate_fullwave_reflection(receipt, episode)
     _validate_magnetoionic_reflection(receipt, episode)
+    _validate_wave_optics(receipt, episode)
+    _validate_wave_chain(receipt, episode)
+    _validate_phase_screens(receipt, episode)
     _validate_gannon_replay(receipt, episode)
+    _validate_known_target(receipt, episode)
     if episode["mode"] != "gui-varying" and "hf_gui_varying_diagnostic" in receipt:
         raise CampaignError("unrequested GUI varying diagnostic in native receipt")
     expected_digest_slot = episode.get("capture_digest_slot", episode.get("search_slot", 0) if episode["mode"] == "hf-search" else None)
@@ -2544,6 +3655,9 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     refinement_requested = episode.get("hf_phase_refinement", False)
     if plan.get("hf_phase_refinement_requested", False) is not refinement_requested:
         raise CampaignError("native phase refinement request does not match the frozen episode")
+    variance_requested = episode.get("hf_gannon_gain_variance_diagnostic", False)
+    if plan.get("hf_gannon_gain_variance_diagnostic_requested", False) is not variance_requested:
+        raise CampaignError("Gannon gain variance request does not match the frozen episode")
     filter_requested = episode.get("hf_phase_filter", False)
     if plan.get("hf_phase_filter_requested", False) is not filter_requested:
         raise CampaignError("native phase filter request does not match the frozen episode")
@@ -2946,13 +4060,20 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
                         abs(difference) > 2e-9 * max(1, abs(reference))):
                     raise CampaignError("physical evaluator must reproduce the selected public-cell likelihood")
             admission = physical.get("admission")
-            if (not isinstance(admission, dict) or admission.get("channel_instances") != 2 or
-                    admission.get("clean_capture_buffers") != 0 or
+            gannon_native = episode.get("hf_gannon_native_diagnostic", False)
+            if (not isinstance(admission, dict) or admission.get("channel_instances") != (3 if gannon_native else 2) or
+                    admission.get("clean_capture_buffers") != (1 if gannon_native else 0) or
                     admission.get("retained_public_result_in_process_baseline") is not True or
                     any(not _is_nonnegative_int(admission.get(field)) for field in
                         ("process_baseline_bytes", "total_memory_limit_bytes", "future_reserved_bytes")) or
                     admission["process_baseline_bytes"] + admission["future_reserved_bytes"] > admission["total_memory_limit_bytes"]):
                 raise CampaignError("physical diagnostic must reserve bounded twin rendering and evaluator storage")
+            if variance_requested:
+                if physical.get("refinement_replay_available") is not True:
+                    raise CampaignError("Gannon gain variance witness requires the retained refined public cell")
+                _validate_gannon_gain_variance(receipt, physical)
+            elif "gain_variance_witness" in physical:
+                raise CampaignError("unrequested Gannon gain variance witness")
             _validate_private_phase_paths(receipt, episode)
     elif episode["mode"] == "oracle":
         oracle = receipt.get("oracle")
@@ -3223,6 +4344,69 @@ def _statistical_summary(campaign: dict[str, Any], results: list[dict[str, Any]]
 NEGATIVE_RECEIVE_CONTROLS = ("noise", "wrong-key", "wrong-ordinal")
 
 
+def _wanted_outcome_counts(trial: dict[str, Any]) -> dict[str, int | None] | None:
+    episode, receipt = trial.get("episode", {}), trial.get("receipt", {})
+    if (trial.get("status") != "completed" or receipt.get("status") != "completed" or
+            episode.get("mode") != "receive" or episode.get("control", "wanted") != "wanted"):
+        return None
+    if episode.get("service_replay", False):
+        service = receipt.get("service_replay", {})
+        if (not isinstance(service, dict) or service.get("work_complete") is not True or
+                not _is_nonnegative_int(service.get("expected_message_count")) or service["expected_message_count"] == 0):
+            return None
+
+    outcomes = receipt.get("outcomes")
+    if not isinstance(outcomes, dict):
+        outcomes = {}
+    accepted, premature, ambiguous, quiet = (
+        outcomes[field] if _is_nonnegative_int(outcomes.get(field)) else None
+        for field in ("accepted_messages", "premature_completions", "ambiguous_active_slots", "quiet_active_slots"))
+    incorrect = 0 if accepted == 0 else None
+    messages = receipt.get("messages")
+    if accepted and isinstance(messages, list) and all(isinstance(message, dict) and
+            isinstance(message.get("decoded"), bool) for message in messages):
+        decoded = [message for message in messages if message["decoded"]]
+        if len(decoded) == accepted and all(isinstance(message.get("matches_transmitted_message"), bool)
+                                             for message in decoded):
+            incorrect = sum(not message["matches_transmitted_message"] for message in decoded)
+    return {"accepted_messages": accepted, "accepted_incorrect_messages": incorrect,
+            "premature_completions": premature,
+            "active_slot_erasures": ambiguous + quiet if ambiguous is not None and quiet is not None else None}
+
+
+def _wanted_outcome_summary(trials: list[dict[str, Any]]) -> dict[str, Any]:
+    observations = [counts for trial in trials if (counts := _wanted_outcome_counts(trial)) is not None]
+    scope = ("Descriptive counts for completed validated receive trials with wanted control. "
+             "Premature completions and active-slot erasures may overlap a delivery outcome.")
+    summary: dict[str, Any] = {
+        "scope": scope, "completed_trials": len(observations),
+        "trials_without_delivery": sum(counts["accepted_messages"] == 0 for counts in observations)}
+    for field in ("accepted_messages", "accepted_incorrect_messages", "premature_completions", "active_slot_erasures"):
+        values = [counts[field] for counts in observations if counts[field] is not None]
+        summary[field] = {"total": sum(values), "trials_with_any": sum(value > 0 for value in values),
+                          "trials_unavailable": len(observations) - len(values)}
+    return summary
+
+
+def _wanted_outcome_label(counts: dict[str, int | None], completed: Any) -> str:
+    accepted, incorrect = counts["accepted_messages"], counts["accepted_incorrect_messages"]
+    if accepted == 0:
+        delivery = "no accepted message"
+    elif incorrect:
+        delivery = f"accepted incorrect payloads={incorrect} of {accepted}"
+    elif incorrect == 0 and completed is False:
+        delivery = f"accepted matching payloads={accepted} with incomplete endpoint"
+    elif incorrect == 0:
+        delivery = f"accepted matching payloads={accepted}"
+    elif accepted is None:
+        delivery = "accepted message count unavailable"
+    else:
+        delivery = f"accepted messages={accepted}, payload match unavailable"
+    premature, erasures = counts["premature_completions"], counts["active_slot_erasures"]
+    return (f"{delivery}, premature completions={premature if premature is not None else 'unavailable'}, "
+            f"active-slot erasures={erasures if erasures is not None else 'unavailable'}")
+
+
 def _negative_control_counts(receipt: dict[str, Any]) -> tuple[int | None, int | None]:
     """Count accepted messages once from the native aggregate, not again from events."""
     outcomes = receipt.get("outcomes", {})
@@ -3336,6 +4520,9 @@ def _markdown(campaign: dict[str, Any], run: dict[str, Any]) -> str:
             else:
                 outcome = ("physical message complete" if outcomes.get("correct_complete") is True else
                            "no correct physical message completion")
+            wanted_counts = _wanted_outcome_counts(trial)
+            if wanted_counts is not None:
+                outcome += " · " + _wanted_outcome_label(wanted_counts, _communication_outcome(receipt, episode))
         elif episode["mode"] == "channel":
             outcome = "signal present" if receipt.get("channel", {}).get("contains_signal_energy") else "signal absent"
         elif episode["mode"] == "oracle":
@@ -3353,6 +4540,16 @@ def _markdown(campaign: dict[str, Any], run: dict[str, Any]) -> str:
                     f"{episode.get('control', '—')} | {trial.get('status')} | {native_status} | {outcome} | "
                     f"{slot_decision} | {correct_data} | {receive_counts} | "
                     f"{trial.get('elapsed_seconds', 0):.3f} |")
+    wanted = _wanted_outcome_summary(run["trials"])
+    rows.extend(["", "## Completed wanted reception", "", wanted["scope"],
+                 f"Completed wanted trials {wanted['completed_trials']}. Trials without an accepted message "
+                 f"{wanted['trials_without_delivery']}.", "",
+                 "| Observation | Total observed | Trials with any | Count unavailable |", "|---|---:|---:|---:|"])
+    for label, field in (("Accepted messages", "accepted_messages"),
+                         ("Accepted incorrect payloads", "accepted_incorrect_messages"),
+                         ("Premature completions", "premature_completions"), ("Active-slot erasures", "active_slot_erasures")):
+        counts = wanted[field]
+        rows.append(f"| {label} | {counts['total']} | {counts['trials_with_any']} | {counts['trials_unavailable']} |")
     negative = _negative_control_summary(run["trials"])
     rows.extend(["", "## Completed negative controls", "", negative["scope"],
                  "Counts exclude censored, invalid and execution-failed trials. Accepted messages are counted once from the native aggregate; false DATA decisions are a separate outcome.", "",
@@ -3473,7 +4670,8 @@ def run_campaign(probe: Path, campaign_path: Path, output_dir: Path) -> dict[str
                for trial in trials),
            "retained_output_bytes": sum(path.stat().st_size for path in output_dir.iterdir() if path.is_file()),
            "retained_output_limit_bytes": MAX_CAMPAIGN_OUTPUT_BYTES,
-           "statistics": stats, "negative_controls": _negative_control_summary(trials), "trials": trials}
+           "statistics": stats, "wanted_outcomes": _wanted_outcome_summary(trials),
+           "negative_controls": _negative_control_summary(trials), "trials": trials}
     # The full native receipt remains in its raw stdout file. Keep run.json
     # compact so campaign metadata does not duplicate large native receipts.
     persisted = dict(run)
@@ -3485,6 +4683,9 @@ def run_campaign(probe: Path, campaign_path: Path, output_dir: Path) -> dict[str
         if isinstance(receipt, dict):
             item["receipt_status"] = receipt.get("status")
             item["outcomes"] = receipt.get("outcomes")
+        wanted_counts = _wanted_outcome_counts(trial)
+        if wanted_counts is not None:
+            item["wanted_outcomes"] = wanted_counts
         persisted["trials"].append(item)
     (output_dir / "run.json").write_bytes(_json_bytes(persisted))
     (output_dir / "report.md").write_text(_markdown(campaign, run), encoding="utf-8")
@@ -3507,7 +4708,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     print(json.dumps({key: result[key] for key in
                       ("status", "executed_trials", "planned_trials", "execution_failures",
-                       "valid_communication_failures", "stop_reason", "elapsed_seconds", "statistics", "negative_controls")},
+                       "valid_communication_failures", "stop_reason", "elapsed_seconds", "statistics",
+                       "wanted_outcomes", "negative_controls")},
                      sort_keys=True))
     return 0 if result["status"] == "completed" else 1
 

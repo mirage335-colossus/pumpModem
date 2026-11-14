@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "name": "hf-wave-lens-receiver",
+  "purpose": "Frozen before numerical admission or decoder outcomes. A constructed scalar transverse plasma lens adds diffraction and focusing, separately from the magnetic cutoff model. Fixed incident C/N0 brackets, actual-duration energy comparison, fresh impact/velocity/placement/payload and noise/wrong-key controls. Every row requires numerical admission; no gain normalization or outcome-dependent retries.",
+  "max_wall_seconds": 1440,
+  "per_trial_wall_seconds": 180,
+  "max_trials": 8,
+  "max_samples": 12000000,
+  "episodes": [
+    {"id": "ambient-0", "scenario": "hf-wave-lens-off", "waveform": "reference", "seed": 69001, "noise_seed": 79001, "bit_seconds": 64, "message": "A", "mode": "receive", "control": "wanted", "cn0_db_hz": 0},
+    {"id": "lens-0", "scenario": "hf-wave-lens", "waveform": "reference", "seed": 69001, "noise_seed": 79001, "bit_seconds": 64, "message": "A", "mode": "receive", "control": "wanted", "cn0_db_hz": 0},
+    {"id": "lens-10", "scenario": "hf-wave-lens", "waveform": "reference", "seed": 69001, "noise_seed": 79001, "bit_seconds": 64, "message": "A", "mode": "receive", "control": "wanted", "cn0_db_hz": 10},
+    {"id": "lens-minus3", "scenario": "hf-wave-lens", "waveform": "reference", "seed": 69001, "noise_seed": 79001, "bit_seconds": 64, "message": "A", "mode": "receive", "control": "wanted", "cn0_db_hz": -3},
+    {"id": "lens-long-equal-incident-energy", "scenario": "hf-wave-lens", "waveform": "reference", "seed": 69001, "noise_seed": 79001, "bit_seconds": 128, "message": "A", "mode": "receive", "control": "wanted", "cn0_db_hz": -3},
+    {"id": "lens-physical-payload-holdout", "scenario": "hf-wave-lens-holdout", "waveform": "reference", "seed": 69002, "noise_seed": 79002, "bit_seconds": 64, "message": "B", "mode": "receive", "control": "wanted", "cn0_db_hz": 0},
+    {"id": "lens-noise", "scenario": "hf-wave-lens", "waveform": "reference", "seed": 69001, "noise_seed": 79001, "bit_seconds": 64, "message": "A", "mode": "receive", "control": "noise", "cn0_db_hz": 10},
+    {"id": "lens-wrong-key", "scenario": "hf-wave-lens", "waveform": "reference", "seed": 69001, "noise_seed": 79001, "bit_seconds": 64, "message": "A", "mode": "receive", "control": "wrong-key", "cn0_db_hz": 10}
+  ]
+}

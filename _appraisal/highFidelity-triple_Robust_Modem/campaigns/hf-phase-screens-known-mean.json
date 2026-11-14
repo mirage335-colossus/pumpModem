@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "name": "hf-phase-screens-known-mean",
+  "purpose": "Frozen after inspecting the native failure slots and before private template outcomes. Match the original +10 dB-Hz primary single erased active slot 10 and the fresh B holdout slot 11 that supplied the second active quiet decision ending an accepted fragment prematurely. Require original full capture hashes and qualified table digests. Compare private bit and target-presence likelihoods on the exact selected apertures after ordinary receive. Slot 10 of the holdout remains outside this fixed two-row comparison. No new sensitivity point or receiver policy change.",
+  "max_wall_seconds": 180,
+  "per_trial_wall_seconds": 90,
+  "max_trials": 2,
+  "max_samples": 3072000,
+  "episodes": [
+    {
+      "id": "screens-10",
+      "scenario": "hf-phase-screens",
+      "waveform": "reference",
+      "seed": 70001,
+      "noise_seed": 80001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 10,
+      "capture_digest_slot": 10,
+      "hf_target_presence_diagnostic": true
+    },
+    {
+      "id": "screens-physical-payload-holdout",
+      "scenario": "hf-phase-screens-holdout",
+      "waveform": "reference",
+      "seed": 70002,
+      "noise_seed": 80002,
+      "bit_seconds": 64,
+      "message": "B",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 0,
+      "capture_digest_slot": 11,
+      "hf_target_presence_diagnostic": true
+    }
+  ]
+}

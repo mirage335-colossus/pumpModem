@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "name": "hf-wave-chain-receiver",
+  "purpose": "Frozen before endpoint-chain numerical qualification or receiver outcomes. Same public clock/frequency/tail priors across native endpoint-off, actual native sample/RF-clock errors, and those errors with a continuous RF-plane tone. Noise and wrong-key controls retain that tone through both final quiet opportunities. No receiver policy changes, normalization, retries or hardware-capacity claim.",
+  "max_wall_seconds": 900,
+  "per_trial_wall_seconds": 180,
+  "max_trials": 5,
+  "max_samples": 12000000,
+  "episodes": [
+    {"id": "chain-endpoints-off", "scenario": "hf-wave-chain-off", "waveform": "reference", "seed": 69501, "noise_seed": 79501, "bit_seconds": 64, "message": "A", "mode": "receive", "control": "wanted", "cn0_db_hz": 0},
+    {"id": "chain-clocks", "scenario": "hf-wave-chain-clocks", "waveform": "reference", "seed": 69501, "noise_seed": 79501, "bit_seconds": 64, "message": "A", "mode": "receive", "control": "wanted", "cn0_db_hz": 0},
+    {"id": "chain-clocks-rf-tone", "scenario": "hf-wave-chain-clocks-tone", "waveform": "reference", "seed": 69501, "noise_seed": 79501, "bit_seconds": 64, "message": "A", "mode": "receive", "control": "wanted", "cn0_db_hz": 0},
+    {"id": "chain-noise-rf-tone", "scenario": "hf-wave-chain-clocks-tone", "waveform": "reference", "seed": 69501, "noise_seed": 79501, "bit_seconds": 64, "message": "A", "mode": "receive", "control": "noise", "cn0_db_hz": 0},
+    {"id": "chain-wrong-key-rf-tone", "scenario": "hf-wave-chain-clocks-tone", "waveform": "reference", "seed": 69501, "noise_seed": 79501, "bit_seconds": 64, "message": "A", "mode": "receive", "control": "wrong-key", "cn0_db_hz": 0}
+  ]
+}

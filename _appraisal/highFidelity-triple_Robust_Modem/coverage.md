@@ -7,6 +7,58 @@ different questions and are reported separately. No natural-condition
 probability, field calibration, or universal sensitivity floor follows from
 these deterministic cases or small fixed-seed holdouts.
 
+The [transverse lens](hf-wave-optics.md) and
+[separated plasma regions](hf-phase-screens.md) now test focusing, diffraction
+and deep destructive interference from prescribed density fields. Independent
+quadrature, spatial and frequency refinement, finite-thickness comparisons and
+off-grid null witnesses check the actual causal waveform before receiver
+admission. The refined multiple-screen holdout contains a sampled fade of
+about 45 dB; the finite-thickness comparison also demonstrates that physical
+approximation error can exceed numerical error. These are scalar forward-wave
+models on an ideal unfolded path, not calibrated oblique, vector, multiple-hop
+or general evolving-Maxwell solutions.
+
+These additions expose an accepted incorrect message with FEC off and without
+any incorrect DATA-bit decision: the fresh multiple-screen field interrupts `B`, and the
+receiver accepts a space from a surviving fragment after mistaking interior
+fades for terminating silence. The primary field still loses an active slot
+at +10 dB-Hz. The single-lens primary instead has a positive near-equal-energy
+duration example, while its fresh off-center holdout loses a bit. Complete
+payloads, physical completion, negative controls and conditional known-mean
+diagnostics are therefore separate gates; aggregate correct-bit counts cannot
+establish message integrity or graceful sensitivity.
+
+The [native endpoint sandwich](hf-wave-optics.md#complete-receiver-and-endpoint-interaction-protocol)
+combines the lens with actual TX/RX clocks, oscillators and a continuing RF
+interferer. Its wanted cases succeed, but public uncertainty substantially
+increases receiver work and its original noise control is time-censored.
+The original censor and interrupted parent command remain recorded alongside
+the fixed-budget continuations, which complete both noise and wrong-key
+captures with all fifteen slots quiet and no accepted message. These are
+service observations, not a local
+CPU-capacity qualification. The
+[recorded-failure diagnosis](hf-recorded-diagnosis.md) separately preserves
+exact input identity and locates evidence losses on the archived Gannon miss;
+private known-channel information is not an implemented receiver repair.
+
+This extension completed **29 receiver observations and three standalone
+Gannon diagnostics**. The receiver observations include matched replications:
+eleven wanted observations deliver correctly, twelve fail their complete
+endpoint, and six negative controls remain quiet. The one incorrect-space
+case is observed twice on exactly matched input, not on two independent
+fields. One original native noise deadline and one interrupted attempt remain
+separate. These heterogeneous, deliberately selected observations are not a
+failure-rate estimate. The current 32-group software check passes without
+reclassifying any communication failure.
+
+The fixed additional brackets recover the primary multiple-screen message at
++20 dB-Hz after a +10 dB-Hz miss. The fresh field still fails at +10 dB-Hz,
+with two active erasures and no accepted message; its earlier 0 dB-Hz
+incorrect acceptance remains an unresolved defect. An exact gain-variance
+witness closes a separate recorded-input diagnostic gap: its selected fixed
+cell scores 5.203 after public coordinate weighting against a 21.493 presence
+reference. This does not justify a repair and does not exclude untested cells.
+
 The [magnetic/long-record expansion](hf-magnetoionic.md) directly addresses two
 previously absent mechanisms. A vector cold-plasma operator couples reflection,
 absorption, dispersion and fixed-antenna polarization loss; independent mesh

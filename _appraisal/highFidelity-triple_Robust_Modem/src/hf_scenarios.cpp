@@ -605,12 +605,110 @@ Scenario magnetoionic_reflection(const std::string& id) {
     return scenario;
 }
 
+Scenario wave_optics_screen(const std::string& id) {
+    auto scenario = base_hf(id);
+    scenario.channel.rf_hz = HfWaveOpticsTable::carrier_hz;
+    auto& wave = scenario.channel.wave_optics.emplace();
+    if (id == "hf-wave-lens-off") {
+        wave.peak_delta_tecu = 0.;
+    } else if (id == "hf-wave-lens-holdout") {
+        wave.impact_y_m = 1200.;
+        wave.drift_mps = 87.;
+        wave.closest_seconds = 219.;
+    }
+    scenario.waveform.sample_rate_hz = HfWaveOpticsTable::sample_rate_hz;
+    scenario.waveform.requested_bit_seconds = 64.;
+    scenario.bounds.arrival_low_seconds = HfWaveOpticsTable::first_lag_samples() /
+        HfWaveOpticsTable::sample_rate_hz;
+    scenario.bounds.arrival_high_seconds = HfWaveOpticsTable::last_lag_samples() /
+        HfWaveOpticsTable::sample_rate_hz;
+    scenario.bounds.atmospheric_hz = 5.;
+    scenario.reference_cn0_db_hz = 20.;
+    scenario.evidence = id == "hf-wave-lens-off"
+        ? "fixed no-lens control on the same ambient plasma and causal sampled path"
+        : id == "hf-wave-lens-holdout"
+            ? "fresh-impact translating screen on an independently placed trajectory"
+            : "centered translating Gaussian TEC screen with a full causal sampled path";
+    scenario.provenance = "hf-wave-optics numerical admission and continuous finite-band retarded screen model";
+    scenario.assumptions = "Constructed scalar cold-plasma eikonal through a 3 km uniform column, with ambient TEC and a "
+        "single Gaussian translating TEC screen. The incident waveform is rendered continuously through one causal "
+        "4..84-sample FIR; no per-window gain normalization is applied. The finite table is checked over the occupied "
+        "±384 Hz band and uses its independently bounded analytic far-field continuation outside ±12.8 km. The public "
+        "arrival prior covers every retained lag and the 5 Hz atmospheric allowance is a receiver assumption. The no-lens "
+        "case sets only the screen perturbation to zero. The holdout changes screen impact, drift, closest approach and "
+        "trajectory/noise roots in the frozen cohort. These are constructed numerical channel hypotheses, not measured "
+        "ionospheric events, evolving-Maxwell propagation, calibrated link budgets, or field performance; no Helper is used.";
+    return scenario;
+}
+
+Scenario native_wave_chain(const std::string& id) {
+    auto scenario = wave_optics_screen(id);
+    scenario.bounds.frequency_bound_hz = 1.;
+    scenario.reference_cn0_db_hz = 0.;
+    if (id == "hf-wave-chain-clocks-tone") {
+        scenario.channel.noise.tone_amplitude = .3;
+        scenario.channel.noise.tone_hz = 100.;
+    }
+    scenario.evidence = "continuous wave lens between canonical native TX and RX clocks/oscillators";
+    scenario.provenance += "; HfNativeChain reuses canonical StreamingChannel endpoint DSP";
+    scenario.assumptions += " All three native-chain cases retain this lens and one public 4 ppm relative/2 ppm endpoint "
+        "clock prior plus 1 Hz oscillator and 5 Hz physical frequency allowances. The off case disables only actual "
+        "endpoint errors. Clock cases use TX/RX audio +1/-1 ppm and RF +0.01/-0.01 ppm at 10 MHz. The tone case adds "
+        "a persistent 0.3-amplitude RF-plane interferer at +100 Hz relative to the complex RF carrier, before RX "
+        "retiming/mixing. Fixed-variance white noise is added only in native RX. Receiver geometry never uses seeded "
+        "channel truth; these interactions remain constructed hypotheses and do not qualify physical hardware.";
+    return scenario;
+}
+
+Scenario phase_screens(const std::string& id) {
+    auto scenario = base_hf(id);
+    scenario.channel.rf_hz = HfPhaseScreensTable::carrier_hz;
+    auto& screens = scenario.channel.phase_screens.emplace();
+    if (id == "hf-phase-screens-off") {
+        screens.perturbations = false;
+    } else if (id == "hf-phase-screens-holdout") {
+        screens.field = 1;
+        screens.impact_y_m = 750.;
+        screens.drift_mps = 35.;
+        screens.closest_seconds = 490.;
+    }
+    scenario.waveform.sample_rate_hz = HfPhaseScreensTable::sample_rate_hz;
+    scenario.waveform.requested_bit_seconds = 64.;
+    scenario.bounds.arrival_low_seconds = HfPhaseScreensTable::first_lag_samples() /
+        HfPhaseScreensTable::sample_rate_hz;
+    scenario.bounds.arrival_high_seconds = HfPhaseScreensTable::last_lag_samples() /
+        HfPhaseScreensTable::sample_rate_hz;
+    scenario.bounds.atmospheric_hz = 5.;
+    scenario.reference_cn0_db_hz = 20.;
+    scenario.evidence = id == "hf-phase-screens-off"
+        ? "fixed unperturbed-plasma control using the same four-slice causal sampled geometry"
+        : id == "hf-phase-screens-holdout"
+            ? "fresh field-cut clump realization with independent screen placement and drift"
+            : "coupled four-slice transverse phase screens with continuous translating placement";
+    scenario.provenance = "hf-research.md transverse phase-screen feasibility; bounded four-slice Fresnel propagation";
+    scenario.assumptions = "Constructed quasi-static scalar paraxial propagation through one uniform 600 km ground-to-ground "
+        "slab with four transverse density phase screens. The nominal and holdout use two different fixed clump fields, "
+        "not separate observed days; the holdout also changes cross-track impact, drift, closest approach and frozen "
+        "cohort roots. One causal 4..84-sample FIR processes the complete source and physical quiet horizon with no "
+        "per-window gain normalization. The finite table covers the declared 1600 s horizon and is rejected rather than "
+        "wrapped outside its position support. The arrival prior covers every retained lag and 5 Hz atmospheric allowance "
+        "is a receiver assumption. This is not full-wave evolving-Maxwell propagation, calibrated field data, a 3D "
+        "strong-scattering guarantee, or a natural-occurrence distribution; no Helper is used.";
+    return scenario;
+}
+
 } // namespace
 
 std::optional<Scenario> make_additional_hf_scenario(const std::string& id) {
     if (id == "hf-gannon-1700" || id == "hf-gannon-2000" || id == "hf-gannon-2000-late")
         return gannon_observed_voltage(id);
     if (id == "hf-fullwave-reflection") return fullwave_reflection();
+    if (id == "hf-wave-lens-off" || id == "hf-wave-lens" || id == "hf-wave-lens-holdout")
+        return wave_optics_screen(id);
+    if (id == "hf-wave-chain-off" || id == "hf-wave-chain-clocks" || id == "hf-wave-chain-clocks-tone")
+        return native_wave_chain(id);
+    if (id == "hf-phase-screens-off" || id == "hf-phase-screens" || id == "hf-phase-screens-holdout")
+        return phase_screens(id);
     if (id == "hf-magnetoionic-x" || id == "hf-magnetoionic-y" || id == "hf-magnetoionic-x-holdout" ||
         id == "hf-magnetoionic-x-spread" || id == "hf-magnetoionic-parallel-x" ||
         id == "hf-magnetoionic-parallel-y" || id == "hf-magnetoionic-parallel-x-holdout")

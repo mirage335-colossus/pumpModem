@@ -32,6 +32,8 @@ struct Totals {
     long double reference_energy = 0, signal_projection = 0;
     long double noisy_projection = 0, noise_projection = 0;
     long double noisy_log_lr = 0, noise_log_lr = 0;
+    struct VarianceScore { long double noisy = 0, clean = 0, residual = 0; };
+    std::array<VarianceScore, hf_history_gain_variances.size()> variance_scores;
 };
 struct Partition {
     std::uint64_t samples_per_block = 0, in_block = 0, block_count = 0;
@@ -39,9 +41,10 @@ struct Partition {
     std::array<Totals, 2> totals;
 };
 long double likelihood(long double projected_energy, long double reference_energy,
-                       long double noise_variance) {
-    // rho=1 is predeclared. Expressing the quadratic term through projected
-    // energy avoids squaring tiny or large noise variances in the denominator.
+                       long double noise_variance, double gain_variance = 1.) {
+    // The scaled reference energy sets the rank-one covariance increment.
+    // Projected energy keeps the quadratic term in sample-energy units.
+    reference_energy *= gain_variance;
     const auto ratio = reference_energy / noise_variance;
     const auto shrinkage = reference_energy / (noise_variance + reference_energy);
     return -std::log1p(ratio) + shrinkage * (projected_energy / noise_variance);
@@ -55,12 +58,27 @@ void flush(Partition& partition, const HfHistoryConfig& config) {
         sum.reference_energy += block.reference_energy;
         if (block.reference_energy > 0) {
             ++sum.rank;
-            sum.signal_projection += std::norm(block.signal_dot) / block.reference_energy;
+            const auto clean_projection = std::norm(block.signal_dot) / block.reference_energy;
+            sum.signal_projection += clean_projection;
             if (config.include_noisy) {
                 const auto projection = std::norm(block.noisy_dot) / block.reference_energy;
                 sum.noisy_projection += projection;
                 sum.noisy_log_lr += likelihood(projection, block.reference_energy,
                                                config.white_noise_variance);
+                if (config.include_fixed_gain_variances) {
+                    // Linearity gives the projection of observed minus clean
+                    // from the same accumulated samples and reference.
+                    const auto residual_projection = std::norm(block.noisy_dot - block.signal_dot) / block.reference_energy;
+                    for (std::size_t i = 0; i < hf_history_gain_variances.size(); ++i) {
+                        const auto gain_variance = hf_history_gain_variances[i];
+                        const auto score = [&](long double value) {
+                            return likelihood(value, block.reference_energy, config.white_noise_variance, gain_variance);
+                        };
+                        sum.variance_scores[i].noisy += score(projection);
+                        sum.variance_scores[i].clean += score(clean_projection);
+                        sum.variance_scores[i].residual += score(residual_projection);
+                    }
+                }
             }
             if (config.include_noise_only) {
                 const auto projection = std::norm(block.noise_dot) / block.reference_energy;
@@ -86,6 +104,8 @@ struct HfHistoryDiagnostic::Impl {
                 "history diagnostic noise variance must be finite and nonnegative");
         require(!(config.include_noisy || config.include_noise_only) || config.white_noise_variance > 0,
                 "history diagnostic likelihood needs positive white-noise variance");
+        require(!config.include_fixed_gain_variances || config.include_noisy,
+                "fixed gain variance diagnostics require an actual noisy observation");
         const std::array<double, 4> lengths{.25, 1, 4, 16};
         for (std::size_t i = 0; i < lengths.size(); ++i) {
             const auto samples = std::round(static_cast<long double>(lengths[i]) * config.sample_rate_hz);
@@ -195,6 +215,14 @@ HfHistoryReport HfHistoryDiagnostic::finish() {
             if (state.config.include_noise_only) {
                 hypothesis.noise_only_projected_energy = static_cast<double>(sum.noise_projection);
                 hypothesis.noise_only_log_likelihood_ratio = static_cast<double>(sum.noise_log_lr);
+            }
+            if (state.config.include_fixed_gain_variances) {
+                auto& scores = hypothesis.fixed_gain_variance_scores.emplace();
+                for (std::size_t i = 0; i < scores.size(); ++i) {
+                    const auto& score = sum.variance_scores[i];
+                    scores[i] = {static_cast<double>(score.noisy), static_cast<double>(score.clean),
+                                 static_cast<double>(score.residual)};
+                }
             }
         }
         const auto& correct = partition.totals[state.config.wanted_bit];

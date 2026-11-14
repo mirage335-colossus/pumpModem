@@ -186,6 +186,66 @@ listed in [Fable 33](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/33-hf
 Neither a decoded Doppler residual distribution nor an ionogram supplies all
 missing joint amplitude, phase, delay and mode-transition information.
 
+## Transverse diffraction and usable measurement audit
+
+The [Ding et al. (2021) primary paper](https://doi.org/10.1029/2020RS007239)
+is a useful HF MPS construction reference: thin screens apply electron-column
+phase and free propagation between screens produces diffraction and amplitude
+variation. Its observation is one 12.7 MHz shipborne radar direct-wave
+complex-envelope record, 20 August 2019, 11:44:49–11:45:30 (41 s), at range
+cell 280: 763 km ground range, 891 km group range, strong-scintillation
+selection, measured phase standard deviation 1.02 rad and phase-PSD slope
+1.96. The associated [Zenodo record](https://doi.org/10.5281/zenodo.4698276)
+contains one 2,048-sample complex vector, not a swept broadband transfer
+function; its sample clock and absolute voltage calibration are not supplied.
+The simulated MPS used a 2-D Shkarofsky irregularity spectrum (15 m inner,
+2.5 km outer scale), ten screens in a 30 km transverse window sampled at 15 m,
+and fitted the fluctuation-strength parameter to 0.3 and equivalent drift to
+750 m/s. It reproduced the measured amplitude index/PSD and gave simulated
+phase standard deviation 0.88 rad and phase-PSD slope 1.98. These are fitted
+simulation inputs and summary-statistic agreement, not measured irregularity
+truth or independent screen validation: the authors lacked contemporaneous
+path plasma measurements, note multiple fitted parameters are coupled, omit
+slow background-density modulation, and attribute missing simulated
+high-frequency amplitude content to low-pass filtering of the recorded data.
+The paper's scalar forward MPS does not establish validity at HF cutoff,
+magnetoionic coupling, reflection caustics, backscatter, or arbitrary oblique
+angles. The [fixture audit](fixtures/hf-ding-2021/README.md) also records the
+unresolved sample-time convention and our phase-detrending-statistic mismatch.
+
+[Rino et al. (2025)](https://doi.org/10.1029/2024RS008204) sharpen the use of
+phase screens as a *diagnostic* model, not a field-channel truth set. They
+derive expected S4, phase-index and ROTI statistics for a 2-D screen with a
+two-piece inverse-power phase spectrum (`C_p`, `p_1`, `p_2`, break wavenumber
+`κ_0`; plus Fresnel scale for propagation), and show parameter estimation
+reconciles predictions with screen simulations. Their article says real-data
+validation of the diagnostic procedure is planned; the model excludes
+multipath and interference and is framed around GNSS scintillation. Those
+indices constrain selected marginal/structure statistics, not a broadband HF
+complex response, a joint disturbed-event population, or caustic occurrence.
+The paraxial approximation requires transverse wavenumber `|κ|/k << 1`; a
+forward phase-screen result must be checked against nonparaxial/reflection
+physics before use near a turning point or cutoff.
+
+The focused audit found no qualifying publicly downloadable, calibrated,
+multi-event broadband complex HF channel capture. This is an evidence gap, not
+a claim that no such files exist. Four useful leads, ordered by what they can
+actually validate, are:
+
+| Lead | Public observable and availability | Barrier to the target validation |
+| --- | --- | --- |
+| [ION-FAST Cyprus–Vasilsursk tests, Zenodo 10.5281/zenodo.7861107](https://zenodo.org/records/7861107); [instrument paper](https://doi.org/10.3390/atmos15020188) | Record page lists a 499.6 MB ZIP with three chirp-mode IQ captures on 15 April 2023 at 11:05:20, 11:20:20 and 11:35:20 UT, plus commercial-ionosonde WAVs and an ionogram notebook. This is the clearest public raw-IQ lead. | Same path/site/day, not independent storm events. Page has no license field. Public metadata/paper do not establish capture encoding, sample clock, volts/phase calibration, or an end-to-end calibrated channel; chirp sounding is not proof of broadband modem transfer recovery. No archive download was made. |
+| [McMurdo–South Pole oblique sounder, Zenodo 10.5281/zenodo.3478267](https://zenodo.org/records/3478267); [Chartier et al. (2020)](https://doi.org/10.5194/amt-13-3023-2020) | The public deposit lists `oblique_hf_data.zip` (30.2 MB). The paper documents the measured link and sounding: 12 frequency hops/min, 50 kHz baseband, 1,000-baud PRBS, GPS-timed transmissions. | Paper says raw IQ was stored on-site in DigitalRF for future retrieval; the deposit is used as figure/data products and raw complex IQ was not verified in it. License field blank. One pilot link/population, no calibrated broadband channel package established. |
+| [Ponomarchuk et al. (2026) storm study](https://doi.org/10.1016/j.asr.2026.03.068) | Publisher abstract identifies observations on Magadan–Irkutsk (3,034 km) and Norilsk–Irkutsk (2,030 km) across ten 2023–25 storms. Oblique sounding supports event-level changes in observed modes/MOF, off-great-circle propagation, additional diffuse delayed returns and outages. | The abstract/full-page result exposes event/ionogram observables, not raw complex IQ, sample timing, channel calibration or a downloadable capture package. It validates path/mode phenomena, not the complex waveform response needed for broadband replay. |
+| [DORS/DOTS oblique ionosonde, Ayliffe et al. (2019)](https://doi.org/10.1029/2018RS006681) | The instrument paper describes downconverted/decimated I/Q soundings, with 2–45 MHz sweeps; raw files contain sampled channel data, while processed ionograms are much smaller. It is the most direct identified route to request oblique raw sounder data. | Raw files are Commonwealth of Australia property and access is case-by-case; the paper does not provide an open raw-IQ archive or license. Instrument IQ is not itself evidence of end-to-end voltage/phase calibration, and a particular disturbed multi-event cohort was not verified as obtainable. |
+
+Use the storm study to check whether constructed cases can produce plausible
+mode/MOF changes, delayed diffuse returns, path deviation and outage; it does
+not validate the screen realization or waveform statistics. A useful next
+evidence step is an authorized raw-IQ request for a named event/path, including
+calibration and excitation metadata. Until that succeeds, keep MPS/scintillation
+cases labeled as physical constructions and retain measured-observable limits.
+
 ## Trajectory diversity independent of receiver templates
 
 A fresh full-text check of [Olugbon et al. (2021)](https://doi.org/10.1029/2020SW002676)
@@ -529,3 +589,31 @@ the constructed channel to modem testing, not a distributed evolving-plasma
 error bound. Literature that distinguishes propagation time from slow
 ionospheric time motivates those checks; small Doppler relative to RF alone
 does not establish a negligible phase error during propagation.
+
+## Interpreting the new known-mean comparisons
+
+The lens and multiple-screen failures retain substantial conditional
+known-channel information. This diagnoses information that the current
+receiver leaves unused; it does not make the known-channel detection curve
+an attainable blind-receiver sensitivity target. Durisi, Schuster, Bölcskei
+and Shamai explicitly account for channel memory, unknown realizations and
+peak constraints. Their noncoherent capacity bounds can change with bandwidth
+and the kind of peak constraint. The transmitter waveform, uncertainty model
+and bandwidth must therefore accompany any proposed theoretical benchmark.
+[Noncoherent Capacity of Underspread Fading Channels, 2010](https://www.mins.ee.ethz.ch/pubs/files/dsbsIT08.pdf).
+
+There is also useful contrary evidence to a blanket pessimistic inference:
+Durisi, Morgenshtern and Bölcskei derive near-AWGN behavior for a specified
+class of continuous-time, underspread WSSUS Rayleigh channels over a stated
+SNR range, despite sensitivity of high-SNR asymptotics to spectral support.
+The constructed nonstationary caustic trajectories here have not been shown
+to meet those stochastic assumptions. The result motivates checking useful
+finite operating ranges rather than treating an asymptotic pathology as an
+established practical floor.
+[On the Sensitivity of Continuous-Time Noncoherent Fading Channel Capacity, 2012](https://publications.lib.chalmers.se/records/fulltext/164370/local_164370.pdf).
+
+The practical follow-through is to preserve exact noisy apertures and charge
+public selection priors, investigate gain/phase assumptions with bounded
+discriminators, then require complete-message and negative-control evidence
+before promoting a receiver change. Neither raising energy nor increasing
+the historical search size alone establishes efficient use of that evidence.

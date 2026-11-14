@@ -57,7 +57,7 @@ struct Reference {
     double reference_energy = 0, projection = 0, log_lr = 0;
 };
 Reference direct(std::span<const Complex> basis, std::span<const Complex> values,
-                 std::size_t block, double variance) {
+                 std::size_t block, double variance, double gain_variance = 1.) {
     Reference result;
     for (std::size_t start = 0; start < basis.size(); start += block) {
         const auto count = std::min(block, basis.size() - start);
@@ -72,8 +72,8 @@ Reference direct(std::span<const Complex> basis, std::span<const Complex> values
         const auto projection = std::norm(dot);
         result.projection += projection;
         if (variance > 0)
-            result.log_lr += std::log(variance / (variance + energy)) +
-                             projection * (1 / variance - 1 / (variance + energy));
+            result.log_lr += std::log(variance / (variance + gain_variance * energy)) +
+                             projection * (1 / variance - 1 / (variance + gain_variance * energy));
     }
     return result;
 }
@@ -89,7 +89,7 @@ void constant_phase_and_partial_blocks() {
         input.noise[i] = {.13 * std::sin(.33 * i), .19 * std::cos(.71 * i)};
         input.noisy[i] = input.signal[i] + input.noise[i];
     }
-    HfHistoryConfig config{64, 43, 43 + count, 0, .3, true, true};
+    HfHistoryConfig config{64, 43, 43 + count, 0, .3, true, true, true};
     const auto whole = evaluate(config, input, count);
     const auto chunked = evaluate(config, input, 17);
     check(whole.samples == count && whole.config.first_sample == 43, "physical public aperture identity retained");
@@ -123,6 +123,21 @@ void constant_phase_and_partial_blocks() {
                  "fixed-prior complex-Gaussian likelihood agrees with covariance determinant");
             near(*hypothesis.noise_only_log_likelihood_ratio, noise.log_lr, 2e-9,
                  "noise-only likelihood uses same fixed prior and variance");
+            check(hypothesis.fixed_gain_variance_scores.has_value(), "enabled variance scores are present");
+            const auto& scores = *hypothesis.fixed_gain_variance_scores;
+            near(scores.back().noisy, *hypothesis.noisy_log_likelihood_ratio, 0.,
+                 "unit variance exactly preserves the original noisy likelihood");
+            for (std::size_t i = 0; i < scores.size(); ++i) {
+                const auto prior = hf_history_gain_variances[i];
+                near(scores[i].noisy, direct(basis, input.noisy, row.block_samples, .3, prior).log_lr, 2e-9,
+                     "actual-sample likelihood matches the independent covariance calculation");
+                near(scores[i].clean, direct(basis, input.signal, row.block_samples, .3, prior).log_lr, 2e-9,
+                     "conditional clean likelihood uses the actual noise variance");
+                near(scores[i].same_noise_residual, direct(basis, input.noise, row.block_samples, .3, prior).log_lr, 2e-9,
+                     "matched residual projection agrees with supplied noise");
+                near(scores[i].same_noise_residual, (*other.hypotheses[bit].fixed_gain_variance_scores)[i].same_noise_residual,
+                     0., "caller chunking leaves matched residual scoring unchanged");
+            }
             check(hypothesis.projected_signal_energy == other.hypotheses[bit].projected_signal_energy &&
                   hypothesis.noisy_log_likelihood_ratio == other.hypotheses[bit].noisy_log_likelihood_ratio &&
                   hypothesis.noise_only_log_likelihood_ratio == other.hypotheses[bit].noise_only_log_likelihood_ratio,
@@ -155,6 +170,7 @@ void phase_history_loss() {
              "quadratic-phase projection agrees with independent direct integration");
         check(!row.hypotheses[0].noisy_log_likelihood_ratio && !row.hypotheses[0].noise_only_log_likelihood_ratio,
               "absent noisy observations do not become fabricated likelihoods");
+        check(!row.hypotheses[0].fixed_gain_variance_scores, "fixed gain variance scores are opt-in");
     }
     // An exact controlled counterexample: no energy is lost, but each quarter
     // second changes sign. Long coherent sums cancel; local gains absorb it.
@@ -196,6 +212,8 @@ void validation() {
     rejects([] { HfHistoryDiagnostic diagnostic({0, 0, 2}); }, "zero sample rate rejected");
     rejects([] { HfHistoryDiagnostic diagnostic({64, 0, 2, 2}); }, "nonbinary wanted label rejected");
     rejects([] { HfHistoryDiagnostic diagnostic({64, 0, 2, 0, 0, true}); }, "likelihood without variance rejected");
+    rejects([] { HfHistoryDiagnostic diagnostic({64, 0, 2, 0, .3, false, false, true}); },
+            "matched variance witness needs actual noisy samples");
     HfHistoryDiagnostic diagnostic({64, 4, 6});
     const std::array<Complex, 2> samples{Complex{1, 0}, Complex{2, 0}};
     rejects([&] { diagnostic.append(3, samples, samples, samples); }, "unobserved initial sample rejected");

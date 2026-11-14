@@ -7,6 +7,33 @@ groundwave, 1–30 MHz skywave, and Earth–Moon–Earth**. All appraisal code,
 fixtures, documentation and generated evidence remain in this directory.
 Python launches native executables and analyzes receipts; it implements no DSP.
 
+The [transverse wave-optics extension](hf-wave-optics.md) adds a plasma lens
+whose focusing, cancellation, phase and frequency response share one density
+model. The [separated-screen extension](hf-phase-screens.md) propagates the
+field through two finite plasma regions, with an independently constructed
+holdout. Mesh, extent, slab thickness, frequency, continuous interpolation and
+deep-fade witnesses precede receiver admission. A finer local check finds a
+deeper sampled fade than the original spatial grid; numerical qualification
+therefore includes the actual FIR at those refined positions. These are
+constructed scalar forward-propagation tests, not measured disturbed-day
+channels or a general three-dimensional Maxwell calculation.
+
+The [recorded-failure investigation](hf-recorded-diagnosis.md) reproduces the
+archived Gannon message miss on the exact received IQ and compares native
+evidence with full-prefix, target-absent and alternate-bit references. It
+separates projection loss, gain assumptions and public-prior costs, and rules
+out a gain-variance-only repair on the evaluated unpartitioned banks. Those
+private references retain the recording-noise limitation and do not establish
+an implementable receiver repair.
+
+Wave and endpoint campaigns use the native CPU receiver on the local Ryzen 5
+PRO 5650U with 12 available logical CPUs and the unchanged 24-worker budget.
+The [host receipt](local-evidence/hf-wave-host.json) records the actual Linux
+and GNU 14.2 environment. No RunPod instance was needed for these bounded
+runs. Their elapsed costs and workspace observations are not a real-time
+capacity qualification or a GPU measurement. Keep this receipt with the
+associated current cost comparisons until those findings are superseded.
+
 The expanded tests now include complete physical-calendar EME episodes and a
 complete VLF message representing more than nine hours of transmission. They
 also expose failures: compound noise can produce false DATA, broad lunar
@@ -102,6 +129,18 @@ From the repository root:
 ```
 
 This configures an ignored `.build/` and links the production C++ modem.
+The current wave/scattering and matched-diagnostic extension passed
+**32/32 CTest groups in 83.06 s**, including 129 runner and wave-receipt
+checks ([final log](local-evidence/hf-wave-final-tests.log)). The final
+appraisal source digest is
+`178d4ea3eee441faa9301086ac7337749394d3ee62c742bc76b118a8c17b0e5c`;
+canonical native source remains
+`dd2c9e267ae030db4393f815275ec615e8d6425732545bbdaf5d0705243e8e26`.
+These checks passed while the communication cohort deliberately retains
+failed delivery and accepted incorrect content. Its observations and earlier
+setup/numerical failures are recorded in the linked model guides and
+[coverage record](coverage.md).
+
 The magnetic/long-record extension passed **28/28 CTest groups in 83.59 s**,
 including 113 runner cases. Its [validation log](local-evidence/hf-magnetoionic/final-build-and-tests.log)
 and [source-bound communications results](hf-magnetoionic.md) keep software
@@ -138,6 +177,9 @@ Current group coverage is:
 | `hf_fullwave_kernel` | Causal support, continuous-history interpolation, finite-band error gates and independent off-grid rejection of a frequency-sampling delay alias |
 | `hf_magnetoionic` | Cold vector-plasma scattering, independent Maxwell/analytic reductions, passivity, field reversal and singular rejection |
 | `hf_magnetoionic_kernel` | Fixed-basis interpolation, path-specific numerical inventories, hard local-null admission, finite memory and retained tails |
+| `hf_wave_optics` | Exact scalar phase, analytic/quadrature agreement, causal FIR and continuous lens traversal, independent deep-fade witnesses |
+| `hf_phase_screens` | Separated-screen propagation, scalar analytic limits, depth/mesh/extent refinement, continuous finite support and resolved off-grid nulls |
+| `hf_native_chain` | Canonical TX/physical-channel/RX composition, clock and oscillator order, DAC/ADC, bounded buffers, complete tails and continuing RF interference |
 | `hf_history` | 175 matched public-aperture block-history, projection, nuisance-rank and conditional-oracle checks |
 | `hf_phase_bank` | Frozen phase dictionary, matched projection, uncertainty and boundary regression checks |
 | `hf_public_statistics` | Exact effective-template FFT/direct-sum agreement, shared phase/FFT preparation parity, full priors, phase bounds and resource guards |
@@ -152,6 +194,7 @@ Current group coverage is:
 | `lunar_spectral` | Joint delay–Doppler covariance through 360 s, independent refinement, long integration and waveform parity |
 | `integration` | Actual native source/receiver, physical completion, noise/EOF, recovery, HF history and numerical-admission boundaries |
 | `runner` | Immutable identity, GUI and trajectory controls, known-binary/gain diagnostics, censoring and statistical reporting |
+| `wave_receipts` | Digest-bound native fixtures, Off versus active numerical inventories, strict wave/endpoint admission and rejected provenance mutations |
 | `ensemble` | Five checks for signed evidence, outer priors, null controls, canonical hashes, fixed brackets and censoring |
 | `coverage_design` | Frozen physical sampling, independent holdout, sparse pair coverage and complete status accounting |
 | `competitor_calibration` | Compiled calibration for the native channel bridge into upstream FLDigi/WSJT-X modes |

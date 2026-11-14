@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "name": "hf-gannon-native-comparison",
+  "purpose": "Private target-absent full-prefix reference and matched clean/noisy native coherent-gain branch comparison on archived 20:00 Gannon slot 2. Require selected IQ and validity SHA-256 79cb27e6704813b995c9e95cec7231152b880481410ab4bd7070b60e70b11dd2 before interpretation. No receiver or candidate policy change.",
+  "max_wall_seconds": 45,
+  "per_trial_wall_seconds": 45,
+  "max_trials": 1,
+  "max_samples": 500000,
+  "episodes": [
+    {
+      "id": "gannon-2000-slot2-native-comparison",
+      "scenario": "hf-gannon-2000",
+      "mode": "hf-search",
+      "control": "wanted",
+      "waveform": "reference",
+      "seed": 67001,
+      "noise_seed": 77001,
+      "bit_seconds": 64,
+      "message": "A",
+      "cn0_db_hz": 20,
+      "search_slot": 2,
+      "search_timing": "full",
+      "hf_phase_refinement": true,
+      "hf_physical_diagnostic": true,
+      "hf_gannon_native_diagnostic": true
+    }
+  ]
+}

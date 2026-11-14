@@ -1,8 +1,9 @@
 # Native high-fidelity appraisal protocol
 
 Updated 14 November 2026. The contained appraisal has a native renderer,
-scenario catalog, executable, bounded campaign runner and 22 CTest groups.
-The physical/operating extension passed in 81.52 seconds
+scenario catalog, executable and bounded campaign runner. Current software
+checks are recorded in the [README](README.md#build-and-quick-correctness-checks).
+The earlier 22-group physical/operating extension passed in 81.52 seconds
 ([log](.build/hf-coverage-checks.log)); the affected reporting checks passed
 again in 52.13 seconds. The [coverage expansion](hf-coverage-expansion.md)
 records the current parameter design, GUI operating strata, static full-wave
@@ -17,6 +18,25 @@ defines its additional acquisition priors, branch policy and bounded campaigns.
 This protocol governs runs and the claims that their results can support.
 Passing source tests verifies selected
 software behavior only.
+
+For completed wanted receive trials, the runner also reports accepted
+incorrect payloads, no accepted message, premature completion and active-slot
+erasures. It derives payload correctness from decoded message events only
+when their count agrees with the native accepted-message aggregate. Missing
+legacy detail stays unavailable. A correct detected-bit count cannot certify
+the payload: fading can split a transmission into a different valid short
+message. Negative controls, censored trials and private diagnostics remain
+separate from those wanted-message counts.
+
+The [wave-optics](hf-wave-optics.md) and
+[multiple-screen](hf-phase-screens.md) protocols add transverse diffraction,
+finite-depth propagation, independent numerical witnesses and complete-message
+tests. Native endpoint processing tests selected combinations of those fields
+with clocks and a continuing RF interferer. The
+[recorded-input diagnosis](hf-recorded-diagnosis.md) and post-receive private
+target-presence comparison distinguish known-mean information from evidence
+available to the implemented receiver. These additions keep the physical
+approximation, numerical, communications and resource gates separate.
 
 ## Questions and evidence layers
 
@@ -56,6 +76,9 @@ uses shorter integration geometry for fast wiring checks.
 | 1–30 MHz skywave baseline | Original `hf-quiet`, `hf-disturbed`, `hf-transition`, `hf-nvis-disturbed`, `hf-drm6`; 14 expansion presets and the later off-grid vertical-eikonal holdout | Continuous finite Gaussian-tap approximations, scalar fitted comparisons, vector mode projections, coupled analytic phase/group delay, constructed mode/fade schedules, and the finite Ding complex-envelope record | Not a worldwide or long-episode population; the NVIS fixture is skywave-only and omits the optional groundwave component; Ding has no sample clock and cannot support a broadband impulse-response or full-message claim |
 | Coupled magnetic HF | Tilted and parallel `hf-magnetoionic-*` paths; [protocol](hf-magnetoionic.md) | Cold collisional Jones reflection, coupled cutoff/absorption/dispersion and fixed-antenna cancellation; sampled numerical gates before complete reception | Layered normal incidence and finite-memory slow-time approximation; no 3-D strong scattering or evolving-Maxwell qualification; local null precision is not a uniform relative-error guarantee |
 | Long observed HF voltages | `hf-gannon-1700`, `hf-gannon-2000`, `hf-gannon-2000-late`; [provenance](fixtures/hf-gannon-2024/README.md) | Two exact hourly 10 Hz records and bounded nonwrapped full-message stress | Recorded receiver noise becomes signal-proportional; no calibrated broadband CIR, physical blackout availability or field sensitivity; stored UTC grid does not establish independent clock metrology |
+| Transverse plasma lens | `hf-wave-lens-*`; [protocol](hf-wave-optics.md) | Exact scalar uniform-column phase, analytic Gaussian Fresnel expansion, independently checked focusing/cancellation and causal finite-band stream | Prescribed ideal unfolded single hop; scalar thin screen, no magnetoionic reflection or full oblique geometry; finite thickness changes the checked fade more than numerical error |
+| Separated finite plasma regions | `hf-phase-screens-*`; [protocol](hf-phase-screens.md) | Two 2D transverse irregularity fields with finite slab slices and forward angular-spectrum propagation; full-band, fine-null and thickness witnesses | Frozen common advection, scalar forward-wave approximation, limited fixed fields; not general 3D, independent evolving layers, backward scattering or a calibrated disturbed-event population |
+| Detailed HF plus endpoints | `hf-wave-chain-*`; [protocol](hf-wave-optics.md#complete-receiver-and-endpoint-interaction-protocol) | Continuous native TX/physical-channel/native RX composition with actual clocks, oscillators and a continuing RF-plane tone | Selected fixed combinations, Helper off, fixed 1,920 Hz physical band; no all-GUI, broad receiver-hardware or real-time capacity qualification |
 | EME at 5.76 GHz | `eme-disk-episode`, `eme-patch-episode`, `eme-severe-episode` | Joint spectral approximation of the frozen beam-weighted monostatic delay–Doppler kernel, numerically checked through 360 s | Helper-off 1,920 Hz source only; not full retarded bistatic DE440 geometry or measured whole-disk IQ; legacy finite-grid and first-slot cases retain their narrower limits |
 | Noise/equipment controls | `noise-bursts`, `frontend-overload` | Constructed colored/impulse and blocker/AGC/clipping/quantization paths | Not a site capture, lightning law or named radio's RF nonlinearity |
 
@@ -93,11 +116,12 @@ the appraisal subtree and reads any shared compiler cache in read-only mode:
 ./_appraisal/highFidelity-triple_Robust_Modem/build.sh test
 ```
 
-The 22-group check includes native receiver/phase-search checks, multiscale
+The checks include native receiver/phase-search checks, multiscale
 and knot-trajectory bounds, signed physical placement, fixed physical-domain
 coverage, canonical GUI preparation, independent full-wave references,
 noise/path seed isolation, gain-partition receipts and bounded follow-up
-selection. The earlier canonical `./build.sh test triad` passed 32/32 in
+selection, transverse wave optics, multiple-screen propagation and native
+endpoint composition. The earlier canonical `./build.sh test triad` passed 32/32 in
 62.22 seconds ([log](.build/hf-native-triad-checks.log)); its native source hash
 is unchanged here. The approved generic two-file native hook leaves ordinary
 receiver defaults unchanged. See [HF validation](hf-validation.md) and the

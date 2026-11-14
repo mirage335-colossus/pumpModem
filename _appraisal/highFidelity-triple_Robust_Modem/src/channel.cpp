@@ -23,6 +23,8 @@ constexpr double tail_relative_amplitude = 1e-6;
 using GaussianRay = datapump::triad::v3::detail::FixedGaussianRay;
 using Fullwave = HfFullwaveKernelTable;
 using Magnetic = HfMagnetoionicKernelTable;
+using WaveOptics = HfWaveOpticsTable;
+using PhaseScreens = HfPhaseScreensTable;
 constexpr auto reflection = HfFullwavePort::reflection;
 
 void require(bool condition, const char* message) {
@@ -95,6 +97,17 @@ double maximum_delay(const ChannelSpec& spec, double horizon) {
         require(!spec.lunar && !spec.fullwave_reflection && spec.paths.empty(),
                 "magnetoionic reflection excludes other propagation paths");
         maximum = Magnetic::first_lag_samples() / Magnetic::sample_rate_hz;
+    }
+    if (spec.wave_optics) {
+        require(!spec.lunar && !spec.fullwave_reflection && !spec.magnetoionic_reflection && spec.paths.empty(),
+                "wave-optics propagation excludes other propagation paths");
+        maximum = WaveOptics::first_lag_samples() / WaveOptics::sample_rate_hz;
+    }
+    if (spec.phase_screens) {
+        require(!spec.lunar && !spec.fullwave_reflection && !spec.magnetoionic_reflection &&
+                !spec.wave_optics && spec.paths.empty(),
+                "multiple phase-screen propagation excludes other propagation paths");
+        maximum = PhaseScreens::first_lag_samples() / PhaseScreens::sample_rate_hz;
     }
     if (spec.lunar) {
         const auto& lunar = *spec.lunar;
@@ -180,6 +193,71 @@ std::string magnetoionic_table_sha256(const Magnetic& table) {
     unsigned length = 0;
     require(EVP_DigestFinal_ex(context.get(), value.data(), &length) == 1 && length == value.size(),
             "magnetoionic table digest finalization failed");
+    constexpr char digits[] = "0123456789abcdef";
+    std::string digest;
+    digest.reserve(2 * value.size());
+    for (auto byte : value) {
+        digest.push_back(digits[byte >> 4]);
+        digest.push_back(digits[byte & 15]);
+    }
+    return digest;
+}
+
+std::string wave_optics_table_sha256(const WaveOptics& table) {
+    std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> context(EVP_MD_CTX_new(), EVP_MD_CTX_free);
+    require(context && EVP_DigestInit_ex(context.get(), EVP_sha256(), nullptr) == 1,
+            "wave-optics table digest initialization failed");
+    for (std::size_t k = 0; k <= WaveOptics::position_intervals; ++k) {
+        const double position = k * WaveOptics::position_step_m;
+        for (auto lag = WaveOptics::first_lag_samples(); lag <= WaveOptics::last_lag_samples(); ++lag) {
+            const auto value = table.coefficient_at_position(lag, position);
+            const auto slope = table.coefficient_knot_slope(lag, k);
+            const std::array bits{std::bit_cast<std::uint64_t>(value.real()), std::bit_cast<std::uint64_t>(value.imag()),
+                                  std::bit_cast<std::uint64_t>(slope.real()), std::bit_cast<std::uint64_t>(slope.imag())};
+            std::array<unsigned char, 32> encoded{};
+            for (std::size_t i = 0; i < encoded.size(); ++i)
+                encoded[i] = static_cast<unsigned char>((bits[i / 8] >> (8 * (i % 8))) & 255);
+            require(EVP_DigestUpdate(context.get(), encoded.data(), encoded.size()) == 1,
+                    "wave-optics table digest update failed");
+        }
+    }
+    std::array<unsigned char, 32> value{};
+    unsigned length = 0;
+    require(EVP_DigestFinal_ex(context.get(), value.data(), &length) == 1 && length == value.size(),
+            "wave-optics table digest finalization failed");
+    constexpr char digits[] = "0123456789abcdef";
+    std::string digest;
+    digest.reserve(2 * value.size());
+    for (auto byte : value) {
+        digest.push_back(digits[byte >> 4]);
+        digest.push_back(digits[byte & 15]);
+    }
+    return digest;
+}
+
+std::string phase_screens_table_sha256(const PhaseScreens& table) {
+    std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> context(EVP_MD_CTX_new(), EVP_MD_CTX_free);
+    require(context && EVP_DigestInit_ex(context.get(), EVP_sha256(), nullptr) == 1,
+            "phase-screens table digest initialization failed");
+    for (std::size_t k = 0; k <= PhaseScreens::position_intervals; ++k) {
+        const double position = -PhaseScreens::position_half_span_m +
+            static_cast<double>(k) * PhaseScreens::position_step_m;
+        for (auto lag = PhaseScreens::first_lag_samples(); lag <= PhaseScreens::last_lag_samples(); ++lag) {
+            const auto value = table.coefficient_at_position(lag, position);
+            const auto slope = table.coefficient_knot_slope(lag, k);
+            const std::array bits{std::bit_cast<std::uint64_t>(value.real()), std::bit_cast<std::uint64_t>(value.imag()),
+                                  std::bit_cast<std::uint64_t>(slope.real()), std::bit_cast<std::uint64_t>(slope.imag())};
+            std::array<unsigned char, 32> encoded{};
+            for (std::size_t i = 0; i < encoded.size(); ++i)
+                encoded[i] = static_cast<unsigned char>((bits[i / 8] >> (8 * (i % 8))) & 255);
+            require(EVP_DigestUpdate(context.get(), encoded.data(), encoded.size()) == 1,
+                    "phase-screens table digest update failed");
+        }
+    }
+    std::array<unsigned char, 32> value{};
+    unsigned length = 0;
+    require(EVP_DigestFinal_ex(context.get(), value.data(), &length) == 1 && length == value.size(),
+            "phase-screens table digest finalization failed");
     constexpr char digits[] = "0123456789abcdef";
     std::string digest;
     digest.reserve(2 * value.size());
@@ -312,6 +390,8 @@ struct Channel::Impl {
     std::uint64_t fullwave_transition_first = 0, fullwave_transition_stop = 0;
     std::optional<HfMagnetoionicProfileStream> magnetoionic;
     std::uint64_t magnetoionic_transition_first = 0, magnetoionic_transition_stop = 0;
+    std::optional<HfWaveOpticsStream> wave_optics;
+    std::optional<HfPhaseScreensStream> phase_screens;
     Random white, colored, events, marks;
     Complex tx_state{}, colored_state{}, impulse_state{}, lowpass_state{};
     double colored_decay = 0, colored_innovation = 0, impulse_decay = 0;
@@ -333,7 +413,7 @@ struct Channel::Impl {
         require(finite(spec.rf_hz) && spec.rf_hz > 0, "RF carrier must be positive and finite");
         require(spec.interpolation_half_width >= 4 && spec.interpolation_half_width <= 64,
                 "fractional-delay half width must be in [4,64]");
-        require(spec.lunar || spec.fullwave_reflection || spec.magnetoionic_reflection ? spec.paths.empty() :
+        require(spec.lunar || spec.fullwave_reflection || spec.magnetoionic_reflection || spec.wave_optics || spec.phase_screens ? spec.paths.empty() :
                 (!spec.paths.empty() && spec.paths.size() <= 65536),
                 "channel requires one spectral propagation model or 1..65536 explicit paths");
         require(finite(source.minimum_frequency_hz) && finite(source.maximum_frequency_hz) &&
@@ -350,6 +430,37 @@ struct Channel::Impl {
         }
         const double source_band = std::max(std::abs(source.minimum_frequency_hz), std::abs(source.maximum_frequency_hz));
         require(source_band < fs / 2, "source spectral allowance reaches Nyquist");
+        if (spec.wave_optics) {
+            const auto& wave = *spec.wave_optics;
+            require(!spec.lunar && !spec.fullwave_reflection && !spec.magnetoionic_reflection &&
+                    !spec.transmitter.enabled && spec.hf_trajectory_offset_seconds == 0 &&
+                    spec.noise.colored_variance == 0 && spec.noise.impulse_rate_hz == 0 &&
+                    spec.noise.impulse_rms == 0 &&
+                    spec.frontend.lowpass_hz == 0 && spec.frontend.clip_magnitude == 0 &&
+                    spec.frontend.agc_target == 0 && spec.frontend.adc_bits == 0 &&
+                    spec.fade.first_seconds == -1 && spec.fade.stop_seconds == -1,
+                    "wave-optics propagation requires an isolated linear white-noise channel");
+            if (fs != WaveOptics::sample_rate_hz || spec.rf_hz != WaveOptics::carrier_hz ||
+                source_band > WaveOptics::occupied_half_band_hz)
+                throw HfWaveOpticsUnavailable("wave-optics source exceeds the qualified carrier, sample rate, or occupied band");
+            try { validate_hf_wave_optics_spec(wave); }
+            catch (const std::exception& error) { throw HfWaveOpticsUnavailable(error.what()); }
+        }
+        if (spec.phase_screens) {
+            require(!spec.lunar && !spec.fullwave_reflection && !spec.magnetoionic_reflection &&
+                    !spec.wave_optics && !spec.transmitter.enabled && spec.hf_trajectory_offset_seconds == 0 &&
+                    spec.noise.colored_variance == 0 && spec.noise.impulse_rate_hz == 0 &&
+                    spec.noise.impulse_rms == 0 && spec.noise.tone_amplitude == 0 &&
+                    spec.frontend.lowpass_hz == 0 && spec.frontend.clip_magnitude == 0 &&
+                    spec.frontend.agc_target == 0 && spec.frontend.adc_bits == 0 &&
+                    spec.fade.first_seconds == -1 && spec.fade.stop_seconds == -1,
+                    "multiple phase screens require an isolated linear white-noise channel");
+            if (fs != PhaseScreens::sample_rate_hz || spec.rf_hz != PhaseScreens::carrier_hz ||
+                source_band > PhaseScreens::occupied_half_band_hz)
+                throw HfPhaseScreensUnavailable("phase-screens source exceeds the qualified carrier, sample rate, or occupied band");
+            try { validate_hf_phase_screens_spec(*spec.phase_screens, horizon); }
+            catch (const std::exception& error) { throw HfPhaseScreensUnavailable(error.what()); }
+        }
         if (spec.fullwave_reflection) {
             require(!spec.lunar && !spec.transmitter.enabled && spec.hf_trajectory_offset_seconds == 0 &&
                     spec.noise.colored_variance == 0 && spec.noise.impulse_rate_hz == 0 &&
@@ -489,7 +600,7 @@ struct Channel::Impl {
                  fade.ramp_seconds <= .5 * (fade.stop_seconds - fade.first_seconds)),
                 "fade must be disabled or have ordered bounds and nonoverlapping ramps");
 
-        const auto history_count = spec.fullwave_reflection || spec.magnetoionic_reflection ? 1 : count_from_long_double(
+        const auto history_count = spec.fullwave_reflection || spec.magnetoionic_reflection || spec.wave_optics || spec.phase_screens ? 1 : count_from_long_double(
             std::ceil(static_cast<long double>(report.maximum_delay_seconds) * fs) +
             2 * spec.interpolation_half_width + detail::hf_dispersion_halo_samples(spec) + 4);
         std::size_t bytes = checked_add(sizeof(Impl), source.working_bytes);
@@ -518,6 +629,8 @@ struct Channel::Impl {
         bytes = checked_add(bytes, planning_bytes);
         if (spec.fullwave_reflection) bytes = checked_add(bytes, Fullwave::preparation_workspace_bound_bytes);
         if (spec.magnetoionic_reflection) bytes = checked_add(bytes, Magnetic::preparation_workspace_bound_bytes);
+        if (spec.wave_optics) bytes = checked_add(bytes, WaveOptics::preparation_workspace_bound_bytes);
+        if (spec.phase_screens) bytes = checked_add(bytes, PhaseScreens::preparation_workspace_bound_bytes);
         if (bytes > spec.maximum_workspace_bytes) throw ChannelWorkspaceError("channel exceeds explicit workspace limit");
         std::vector<std::size_t> order(spec.paths.size()), membership(spec.paths.size(), std::numeric_limits<std::size_t>::max());
         for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
@@ -609,6 +722,53 @@ struct Channel::Impl {
                     Magnetic::preparation_workspace_bound_bytes, "magnetoionic reflection workspaces exceeded their admission");
             receipt.preparation_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             receipt.retarded_peak_error_bound = rate;
+            receipt.source_minimum_frequency_hz = source.minimum_frequency_hz;
+            receipt.source_maximum_frequency_hz = source.maximum_frequency_hz;
+        }
+        if (spec.wave_optics) {
+            const auto start = std::chrono::steady_clock::now();
+            const auto& selected = *spec.wave_optics;
+            const auto built = build_hf_wave_optics_table(selected, stop);
+            if (!built.table || !built.checks.qualified)
+                throw HfWaveOpticsUnavailable("wave-optics table failed its finite-band or retarded-path qualification");
+            const double peak_bound = built.table->retarded_peak_error_bound(selected.drift_mps);
+            if (!finite(peak_bound) || peak_bound > WaveOptics::retarded_peak_tolerance)
+                throw HfWaveOpticsUnavailable("wave-optics retarded-peak error exceeds its admitted tolerance");
+            wave_optics.emplace(built.table, selected);
+            require(wave_optics->tail_samples() == WaveOptics::last_lag_samples(),
+                    "wave-optics tail differs from its public geometry");
+            auto& receipt = report.wave_optics.emplace();
+            receipt.checks = built.checks;
+            receipt.spec = selected;
+            receipt.table_sha256 = wave_optics_table_sha256(*built.table);
+            receipt.table_workspace_bytes = built.table->workspace_bytes();
+            receipt.stream_workspace_bytes = wave_optics->workspace_bytes();
+            require(checked_add(receipt.table_workspace_bytes, receipt.stream_workspace_bytes) <=
+                    WaveOptics::preparation_workspace_bound_bytes, "wave-optics table and stream exceed their admission");
+            receipt.preparation_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+            receipt.retarded_peak_error_bound = peak_bound;
+            receipt.source_minimum_frequency_hz = source.minimum_frequency_hz;
+            receipt.source_maximum_frequency_hz = source.maximum_frequency_hz;
+        }
+        if (spec.phase_screens) {
+            const auto start = std::chrono::steady_clock::now();
+            const auto& selected = *spec.phase_screens;
+            const auto built = build_hf_phase_screens_table(selected, stop);
+            if (!built.table || !built.checks.qualified)
+                throw HfPhaseScreensUnavailable("multiple phase-screen table failed its independent numerical qualification");
+            phase_screens.emplace(built.table, selected);
+            require(phase_screens->tail_samples() == PhaseScreens::last_lag_samples(),
+                    "phase-screens tail differs from its public geometry");
+            auto& receipt = report.phase_screens.emplace();
+            receipt.checks = built.checks;
+            receipt.spec = selected;
+            receipt.table_sha256 = phase_screens_table_sha256(*built.table);
+            receipt.table_workspace_bytes = built.table->workspace_bytes();
+            receipt.stream_workspace_bytes = phase_screens->workspace_bytes();
+            require(built.checks.preparation_peak_workspace_bytes <= PhaseScreens::preparation_workspace_bound_bytes,
+                    "phase-screens preparation exceeded its workspace admission");
+            receipt.preparation_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+            receipt.retarded_peak_error_bound = built.checks.retarded_peak_error_bound;
             receipt.source_minimum_frequency_hz = source.minimum_frequency_hz;
             receipt.source_maximum_frequency_hz = source.maximum_frequency_hz;
         }
@@ -808,7 +968,7 @@ struct Channel::Impl {
     Complex render() {
         const auto n = report.samples;
         const long double time = static_cast<long double>(n) / fs;
-        ensure_source(fullwave || magnetoionic ? n : n + spec.interpolation_half_width);
+        ensure_source(fullwave || magnetoionic || wave_optics || phase_screens ? n : n + spec.interpolation_half_width);
         Complex wanted = lunar ? lunar->wanted(n, history, source.geometry.source_samples, spec.transmitter.enabled) : Complex{};
         if (fullwave) {
             const auto input = saved(n);
@@ -829,6 +989,20 @@ struct Channel::Impl {
             region.incident_energy += std::norm(input);
             for (std::size_t i = 0; i < field.size(); ++i)
                 region.reflected_component_energy[i] += std::norm(field[i]);
+        }
+        if (wave_optics) {
+            const auto input = saved(n);
+            wanted = wave_optics->step(input);
+            auto& receipt = *report.wave_optics;
+            receipt.incident_energy += std::norm(input);
+            receipt.selected_energy += std::norm(wanted);
+        }
+        if (phase_screens) {
+            const auto input = saved(n);
+            wanted = phase_screens->step(input);
+            auto& receipt = *report.phase_screens;
+            receipt.incident_energy += std::norm(input);
+            receipt.selected_energy += std::norm(wanted);
         }
         for (auto& path : paths) {
             const auto& spec_path = *path.spec;

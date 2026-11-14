@@ -274,6 +274,18 @@ double channel_interpolation_tail_seconds(const ChannelSpec& spec, double fs) {
                 "magnetoionic reflection requires its fixed sample rate");
         return static_cast<double>(HfMagnetoionicKernelTable::taps_per_output - 1) / fs;
     }
+    if (spec.wave_optics) {
+        require(fs == HfWaveOpticsTable::sample_rate_hz,
+                "wave optics requires its fixed sample rate");
+        return static_cast<double>(HfWaveOpticsTable::last_lag_samples() -
+            HfWaveOpticsTable::first_lag_samples()) / fs;
+    }
+    if (spec.phase_screens) {
+        require(fs == HfPhaseScreensTable::sample_rate_hz,
+                "phase screens require their fixed sample rate");
+        return static_cast<double>(HfPhaseScreensTable::last_lag_samples() -
+            HfPhaseScreensTable::first_lag_samples()) / fs;
+    }
     return static_cast<double>(spec.interpolation_half_width + detail::hf_dispersion_halo_samples(spec)) / fs;
 }
 

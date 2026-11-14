@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "name": "hf-wave-chain-noise-continuation",
+  "purpose": "Frozen bounded continuation of the original noise-plus-RF-tone row after its 180-second receiver censor. Preserve the original raw and require the full capture SHA-256 528b117adca8f1551902cc30194aff17bd60e6ea50f3049c66dbac9435956fb6 and physical table SHA-256 e1cd0a8b7b6ce295d4b6798c2cea3bf8ea22cd506002cd1438e212a8f8b12399 for a matched comparison. Increase only the wall allowance. Execute once even if censored.",
+  "max_wall_seconds": 540,
+  "per_trial_wall_seconds": 540,
+  "max_trials": 1,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "id": "chain-noise-rf-tone",
+      "scenario": "hf-wave-chain-clocks-tone",
+      "waveform": "reference",
+      "seed": 69501,
+      "noise_seed": 79501,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "noise",
+      "cn0_db_hz": 0
+    }
+  ]
+}

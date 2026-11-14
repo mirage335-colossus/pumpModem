@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "name": "hf-phase-screens-bracket",
+  "purpose": "Two fixed higher-C/N0 observations after the original primary missed one DATA slot at +10 dB-Hz and the independent B holdout accepted an incorrect fragment at 0 dB-Hz. Preserve the physical placements, source/payload, noise seeds, requested duration, public search and native receiver. Compare the complete endpoint, incorrect acceptance and active erasures on each input and stop after these two points regardless of outcomes. Descriptive fixed-input brackets only.",
+  "max_wall_seconds": 180,
+  "per_trial_wall_seconds": 90,
+  "max_trials": 2,
+  "max_samples": 3072000,
+  "episodes": [
+    {
+      "id": "screens-20",
+      "scenario": "hf-phase-screens",
+      "waveform": "reference",
+      "seed": 70001,
+      "noise_seed": 80001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 20
+    },
+    {
+      "id": "screens-physical-payload-holdout-10",
+      "scenario": "hf-phase-screens-holdout",
+      "waveform": "reference",
+      "seed": 70002,
+      "noise_seed": 80002,
+      "bit_seconds": 64,
+      "message": "B",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 10
+    }
+  ]
+}

@@ -85,6 +85,44 @@ def main() -> None:
     assert magnetic["magnetoionic_reflection_source_band_checked"] is False, magnetic
     assert magnetic["magnetoionic_reflection_table_built"] is False, magnetic
     assert magnetic["physical_kernel_supplied_to_receiver"] is False, magnetic
+    for name, renderer in (("hf-wave-lens", "hf_wave_optics_screen"),
+                           ("hf-phase-screens", "hf_phase_screens")):
+        case_args = ["--scenario", name, "--bit-seconds", "64", "--message", "A"]
+        planned = invoke("--mode", "plan", *case_args)["plan"]
+        assert planned["channel_renderer"] == renderer, planned
+        assert planned["source_stop_sample"] < planned["horizon_samples"], planned
+        assert math.isclose(planned["channel_tail_seconds"], 84 / 1920), planned
+        assert planned["physical_kernel_supplied_to_receiver"] is False, planned
+        if name == "hf-wave-lens":
+            assert planned["complete_source_extent_checked"] is True, planned
+            assert planned["full_crossing_rendered"] is False, planned
+        else:
+            assert planned["closest_approach_in_source"] is True, planned
+            assert "not_full_1600s_dynamics" in planned["screen_exposure_scope"], planned
+        # Noise controls must pass setup admission and reach the ordinary
+        # resource preflight before any expensive table or channel is built.
+        noise_preflight = invoke("--mode", "receive", *case_args, "--control", "noise",
+                                 "--max-samples", "1", code=3)
+        assert noise_preflight["status"] == "resource_limit", noise_preflight
+        assert "channel" not in noise_preflight, noise_preflight
+        assert noise_preflight["plan"]["channel_renderer"] == renderer, noise_preflight
+        built_key = "wave_optics_table_built" if name == "hf-wave-lens" else "phase_screens_table_built"
+        assert noise_preflight["plan"][built_key] is False, noise_preflight
+        target_preflight = invoke("--mode", "receive", *case_args, "--capture-digest-slot", "2",
+                                  "--hf-target-presence-diagnostic", "--max-samples", "1", code=3)
+        assert target_preflight["status"] == "resource_limit" and "channel" not in target_preflight, target_preflight
+        assert target_preflight["plan"]["hf_target_presence_diagnostic_requested"] is True, target_preflight
+        assert target_preflight["plan"]["capture_digest_slot"] == 2, target_preflight
+        assert target_preflight["plan"][built_key] is False, target_preflight
+    target_args = ["--mode", "receive", "--waveform", "reference", "--message", "A",
+                   "--hf-target-presence-diagnostic", "--max-samples", "1"]
+    for scenario in ("frontend-overload", "hf-wave-chain-off"):
+        rejected = invoke(*target_args, "--scenario", scenario, "--capture-digest-slot", "2", code=5)
+        assert "target-presence diagnostic requires" in rejected["reason"], rejected
+    for extra in ([], ["--capture-digest-slot", "2", "--control", "noise"],
+                  ["--capture-digest-slot", "13"]):
+        rejected = invoke(*target_args, "--scenario", "hf-wave-lens", *extra, code=2)
+        assert "target-presence" in rejected["reason"], rejected
     for control in ("noise", "wrong-key"):
         limited = invoke("--mode", "receive", *magnetic_args, "--control", control, "--max-samples", "1", code=3)
         assert limited["status"] == "resource_limit" and "channel" not in limited, limited
@@ -286,6 +324,14 @@ def main() -> None:
     gannon_oracle = invoke("--mode", "oracle", "--scenario", "hf-gannon-1700", "--message", "A",
                           "--max-samples", "1", code=3)
     assert gannon_oracle["oracle_protocol_eligible"], gannon_oracle
+    gannon_search_args = ["--mode", "hf-search", "--scenario", "hf-gannon-2000", "--message", "A",
+                          "--search-slot", "2", "--search-timing", "full", "--hf-physical-diagnostic",
+                          "--hf-phase-refinement", "--max-samples", "1"]
+    gannon_search = invoke(*gannon_search_args, code=3)
+    assert gannon_search["status"] == "resource_limit" and "channel" not in gannon_search, gannon_search
+    assert gannon_search["plan"]["search_observation"] == {"first": 345584, "stop": 480302}, gannon_search
+    unavailable_filter = invoke(*gannon_search_args, "--hf-phase-filter", code=5)
+    assert "phase filter does not support" in unavailable_filter["reason"], unavailable_filter
     gannon_helper = invoke("--mode", "plan", "--scenario", "hf-gannon-1700", "--helper", code=5)
     assert gannon_helper["status"] == "unavailable" and "Helper-off" in gannon_helper["reason"], gannon_helper
     for name in ("hf-gannon-1700", "hf-gannon-2000-late"):

@@ -1,0 +1,45 @@
+{
+  "source_sha256": "7aa1dc381be58b62758e9746821ab086a57909c06b5a9cb045141c440b929b8f",
+  "status": "completed",
+  "transmitted_message": "B",
+  "outcomes": {
+    "correct_complete": false,
+    "correct_decoded_complete": false,
+    "accepted_messages": 1,
+    "physical_completions": 3,
+    "premature_completions": 2,
+    "wrong_bits": 0,
+    "ambiguous_active_slots": 0,
+    "quiet_active_slots": 8,
+    "false_data": 0,
+    "resumed_data_slots": 0
+  },
+  "messages": [
+    {
+      "decoded": false,
+      "matches_transmitted_message": false,
+      "decoded_payload_bytes": [],
+      "first_public_slot": 4,
+      "stop_public_slot": 7,
+      "premature": true
+    },
+    {
+      "decoded": true,
+      "matches_transmitted_message": false,
+      "decoded_payload_bytes": [
+        32
+      ],
+      "first_public_slot": 7,
+      "stop_public_slot": 12,
+      "premature": true
+    },
+    {
+      "decoded": false,
+      "matches_transmitted_message": false,
+      "decoded_payload_bytes": [],
+      "first_public_slot": 12,
+      "stop_public_slot": 15,
+      "premature": false
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "name": "hf-gannon-recorded-failure",
+  "purpose": "Reproduce the archived 20:00 Gannon DATA presence miss with a selected-aperture IQ/validity digest, then diagnose the same samples with the fixed full-timing public search and private full-context templates. Keep observed-voltage measurement noise in the multiplier and preserve the original receiver policy and geometry.",
+  "max_wall_seconds": 180,
+  "per_trial_wall_seconds": 90,
+  "max_trials": 2,
+  "max_samples": 3000000,
+  "episodes": [
+    {
+      "id": "gannon-2000-slot2-native",
+      "scenario": "hf-gannon-2000",
+      "mode": "receive",
+      "control": "wanted",
+      "waveform": "reference",
+      "seed": 67001,
+      "noise_seed": 77001,
+      "bit_seconds": 64,
+      "message": "A",
+      "cn0_db_hz": 20,
+      "capture_digest_slot": 2
+    },
+    {
+      "id": "gannon-2000-slot2-shadow",
+      "scenario": "hf-gannon-2000",
+      "mode": "hf-search",
+      "control": "wanted",
+      "waveform": "reference",
+      "seed": 67001,
+      "noise_seed": 77001,
+      "bit_seconds": 64,
+      "message": "A",
+      "cn0_db_hz": 20,
+      "search_slot": 2,
+      "search_timing": "full",
+      "hf_phase_refinement": true,
+      "hf_physical_diagnostic": true
+    }
+  ]
+}

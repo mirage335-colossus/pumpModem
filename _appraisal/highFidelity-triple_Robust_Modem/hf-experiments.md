@@ -31,6 +31,20 @@ Helper/nonwhite-noise combinations. Its generator is independent of the
 receiver phase bank. Frozen screens, full messages, private bit-distance
 diagnostics and operational SNR/time brackets have separate endpoints.
 
+The [transverse lens](hf-wave-optics.md) and
+[separated plasma regions](hf-phase-screens.md) add diffraction, focusing and
+deep cancellation from density fields independent of the receiver bank.
+Numerical admission checks the actual interpolated causal operator at refined
+null locations, not just bright grid points. Complete messages expose both
+erasures and an accepted incorrect fragment; private matched-input references
+and fixed signal-level/duration comparisons investigate the resulting gaps.
+The native endpoint cohort adds actual clocks and a continuing RF interferer.
+The [recorded-channel diagnosis](hf-recorded-diagnosis.md) separately compares
+the archived Gannon input with native evidence and fixed gain assumptions.
+These additions retain scalar, geometry, recording and statistical limits;
+they do not imply that the remaining vector/oblique or measured-population
+questions have been solved.
+
 ## Mechanisms and independent checks
 
 | Cases | What changes | Evidence and numerical boundary |

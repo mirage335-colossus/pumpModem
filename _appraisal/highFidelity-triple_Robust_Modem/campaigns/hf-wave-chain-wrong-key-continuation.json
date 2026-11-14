@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "name": "hf-wave-chain-wrong-key-continuation",
+  "purpose": "Frozen bounded continuation of the original wrong-key-plus-RF-tone row after the command session ended without a native receipt. Preserve the empty original outputs. Fix the same original input, hypotheses and numerical geometry, with the enlarged 540-second control cap. Execute once even if censored.",
+  "max_wall_seconds": 540,
+  "per_trial_wall_seconds": 540,
+  "max_trials": 1,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "id": "chain-wrong-key-rf-tone",
+      "scenario": "hf-wave-chain-clocks-tone",
+      "waveform": "reference",
+      "seed": 69501,
+      "noise_seed": 79501,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wrong-key",
+      "cn0_db_hz": 0
+    }
+  ]
+}

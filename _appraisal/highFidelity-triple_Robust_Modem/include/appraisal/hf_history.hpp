@@ -19,9 +19,17 @@ struct HfHistoryConfig {
     std::uint64_t first_sample = 0, stop_sample = 0;
     unsigned wanted_bit = 0;
     // E|n|^2 for proper complex white Gaussian noise. Required only when one of
-    // the noisy observations is enabled. The fixed block-gain prior is CN(0,1).
+    // the noisy observations is enabled. Default scores use CN(0,1) block
+    // gains. The optional witness adds the fixed alternatives below.
     double white_noise_variance = 0;
     bool include_noisy = false, include_noise_only = false;
+    bool include_fixed_gain_variances = false;
+};
+
+inline constexpr std::array<double, 6> hf_history_gain_variances{1./4096, 1./512, 1./256, 1./64, 1./16, 1.};
+
+struct HfHistoryGainVarianceScore {
+    double noisy, clean, same_noise_residual;
 };
 
 struct HfHistoryHypothesis {
@@ -34,6 +42,7 @@ struct HfHistoryHypothesis {
     std::optional<double> retained_signal_fraction;
     std::optional<double> noisy_projected_energy, noise_only_projected_energy;
     std::optional<double> noisy_log_likelihood_ratio, noise_only_log_likelihood_ratio;
+    std::optional<std::array<HfHistoryGainVarianceScore, hf_history_gain_variances.size()>> fixed_gain_variance_scores;
 };
 
 struct HfHistoryBlockReport {

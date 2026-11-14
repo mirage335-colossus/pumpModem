@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import math
 import os
@@ -501,8 +502,12 @@ def add_fake_gannon_receipt(receipt: dict) -> None:
             "conditioning_scope":"the recorded beacon/noise/interference are inseparable; no same-input full-message or physical noise-free channel claim"}
     elif receipt["mode"]!="plan":
         noise=receipt["control"]=="noise"
-        receipt["channel"]={"samples":100,"contains_signal_energy":not noise,"contains_source_energy":not noise,
-            "input_energy_sample_sum":0. if noise else 10.,"signal_energy_sample_sum":0. if noise else 1.}
+        receipt.setdefault("channel",{}).update(samples=100,contains_signal_energy=not noise,contains_source_energy=not noise,
+            input_energy_sample_sum=0. if noise else 10.,signal_energy_sample_sum=0. if noise else 1.)
+        physical=receipt.get("hf_physical_diagnostic")
+        if physical:
+            physical["known_binary"].update(recording_noise_in_multiplier=True,physical_noise_free_channel_known=False,
+                field_sensitivity_bound=False)
 
 
 def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None) -> dict:
@@ -2431,6 +2436,109 @@ class CampaignValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(runner.CampaignError,"finite selected record"):
             runner._validate_completed_receipt(bad,episode)
 
+    def test_gannon_full_prefix_shadow_remains_conditional(self) -> None:
+        campaign=runner._read_campaign(RUNNER.parent/"campaigns"/"hf-gannon-recorded-failure.json")
+        self.assertEqual(len(campaign["episodes"]),2)
+        baseline,episode=campaign["episodes"]
+        self.assertEqual(baseline["capture_digest_slot"],episode["search_slot"])
+        for field in ("scenario","waveform","seed","noise_seed","bit_seconds","message","cn0_db_hz","control"):
+            self.assertEqual(baseline[field],episode[field])
+        for override in ({"control":"noise"},{"control":"wrong-key"},{"control":"wrong-ordinal"}):
+            with self.subTest(override=override),self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(episode,**override),0,set(),90,3_000_000)
+        receipt=fake_completed_receipt(runner._command(Path("/native/probe"),episode,3_000_000,90))
+        runner._validate_completed_receipt(receipt,episode)
+        for field in ("recording_noise_in_multiplier","physical_noise_free_channel_known","field_sensitivity_bound"):
+            bad=json.loads(json.dumps(receipt))
+            binary=bad["hf_physical_diagnostic"]["known_binary"]
+            binary[field]=not binary[field]
+            with self.subTest(field=field),self.assertRaisesRegex(runner.CampaignError,"observed-voltage noise"):
+                runner._validate_completed_receipt(bad,episode)
+
+    def test_gannon_target_absence_and_native_coherent_gain_receipt(self) -> None:
+        campaign = runner._read_campaign(RUNNER.parent / "campaigns" / "hf-gannon-native-comparison.json")
+        episode, = campaign["episodes"]
+        command = runner._command(Path("/native/probe"), episode, 500_000, 45)
+        self.assertIn("--hf-gannon-native-diagnostic", command)
+        for override in ({"hf_gannon_native_diagnostic": 1}, {"hf_physical_diagnostic": False},
+                         {"search_timing": "selected"}, {"scenario": "awgn"}):
+            with self.subTest(override=override), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(episode, **override), 0, set(), 45, 500_000)
+        scores = {"coordinate_log_prior_mass": -4., "candidates": 2, "blocks": 3,
+                  "frequency_states": 7, "basis_rows": 240, "seconds": .1,
+                  "bit_log_e_before_coordinate_mass": [0., 7.], "bit_log_e_after_coordinate_mass": [-4., 3.]}
+        physical = {
+            "prefix_samples_rendered_per_twin": 100,
+            "known_target_presence": {"fixed_known_context": True, "field_sensitivity_bound": False,
+                "used_for_receiver_decisions": False, "transmit_range_excludes_preroll": True,
+                "pre_aperture_matches_wanted": True,
+                "prefix_samples_rendered": 100, "absent_template_sha256": "a" * 64,
+                "muted_transmit_samples": {"first": 20, "stop": 80}, "absent_aperture_energy": 0.,
+                "absent_received_prefix_energy": 4., "signal_difference_energy": 20.,
+                "distance_over_noise_variance": 10., "observed_wanted_vs_absent_log_likelihood_ratio": 9.},
+            "native_coherent_gain_comparison": {"same_noisy_selected_coordinate_bank": True,
+                "private_clean_used_for_coordinate_selection": False, "used_for_receiver_decisions": False,
+                "independent_and_persistent_likelihoods_reported_separately": False, "score_noise_variance": 2.,
+                "block_rows": 24, "bounded_scratch_bytes": 20000, "workers": 2,
+                "noisy": scores, "private_wanted_template": dict(scores)},
+        }
+        plan = {"source_stop_sample": 120, "noise_variance": 2.}
+        runner._validate_gannon_native_comparison(physical, plan)
+        for section, field, bad_value in (
+            ("known_target_presence", "prefix_samples_rendered", 90),
+            ("known_target_presence", "pre_aperture_matches_wanted", False),
+            ("known_target_presence", "distance_over_noise_variance", 12.),
+            ("native_coherent_gain_comparison", "same_noisy_selected_coordinate_bank", False),
+            ("native_coherent_gain_comparison", "private_wanted_template", dict(scores, frequency_states=3)),
+            ("native_coherent_gain_comparison", "noisy", dict(scores, bit_log_e_after_coordinate_mass=[0., 7.])),
+        ):
+            with self.subTest(field=field), self.assertRaises(runner.CampaignError):
+                altered = json.loads(json.dumps(physical))
+                altered[section][field] = bad_value
+                runner._validate_gannon_native_comparison(altered, plan)
+
+    def test_gannon_gain_variance_witness_keeps_fixed_cells_and_likelihood_masses(self) -> None:
+        campaign = runner._read_campaign(RUNNER.parent / "campaigns" / "hf-gannon-gain-variance.json")
+        baseline = runner._read_campaign(RUNNER.parent / "campaigns" / "hf-gannon-native-comparison.json")
+        episode, = campaign["episodes"]
+        self.assertEqual(episode, dict(baseline["episodes"][0], id=episode["id"], hf_gannon_gain_variance_diagnostic=True))
+        self.assertIn("--hf-gannon-gain-variance-diagnostic", runner._command(Path("/native/probe"), episode, 500_000, 45))
+        for override in ({"hf_gannon_gain_variance_diagnostic": 1}, {"hf_gannon_native_diagnostic": False},
+                         {"hf_phase_refinement": False}):
+            with self.subTest(override=override), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(episode, **override), 0, set(), 45, 500_000)
+
+        fields = ("noisy", "clean", "same_noise_residual")
+        scores = list(range(-5, 1))
+        mixture = math.log(sum(map(math.exp, scores)) / len(scores))
+        log_mass = -math.log(52 * 4951 * 97)
+        digest = "a" * 64
+        search = {"public_timing_atoms": 52, "evaluated_timing_atoms": 52, "frequency_cells": 4951,
+                  "presence_reference_threshold": 21.493, "families": [{}, {}, {"phase_models": 97}]}
+        partition = {"requested_block_seconds": .25, "block_samples": 480, "block_count": 281}
+        partitions = [dict(partition, hypotheses=[dict.fromkeys(fields, scores)] * 2)] * 5
+        retained = [dict(partition, hypotheses=[{"noisy_log_likelihood_ratio": 0.}] * 2)] * 5
+        cell = {"partitions": partitions, "equal_weight_log_mixture": dict.fromkeys(fields, mixture)}
+        witness = {"observation_sha256": digest, "prior_variances": [1/4096, 1/512, 1/256, 1/64, 1/16, 1.],
+                   "used_for_receiver_decisions": False, "full_bank_evaluated_at_new_variances": False,
+                   "independent_negative_control": False, "presence_reference_threshold": 21.493,
+                   "fixed_coordinate_prior": {"timings": 52, "frequencies": 4951, "sinusoidal_models": 97, "log_mass": log_mass},
+                   "winning_public_cell": dict(cell, charged_log_contribution=dict.fromkeys(fields, mixture + log_mass)),
+                   "refined_public_cell": cell}
+        physical = {"observation_sha256": digest, "gain_variance_witness": witness,
+                    "gain_partitions": dict.fromkeys(("winning_public_cell", "refined_public_cell"), retained)}
+        runner._validate_gannon_gain_variance({"hf_public_search": search}, physical)
+        for section, field, value in (
+            ("fixed_coordinate_prior", "timings", 51),
+            ("winning_public_cell", "charged_log_contribution", dict.fromkeys(fields, mixture)),
+            ("refined_public_cell", "charged_log_contribution", dict.fromkeys(fields, mixture + log_mass)),
+            ("winning_public_cell", "equal_weight_log_mixture", dict.fromkeys(fields, sum(scores) / len(scores))),
+        ):
+            with self.subTest(section=section, field=field), self.assertRaises(runner.CampaignError):
+                bad = json.loads(json.dumps(physical))
+                bad["gain_variance_witness"][section][field] = value
+                runner._validate_gannon_gain_variance({"hf_public_search": search}, bad)
+
     def test_gannon_noise_and_oracle_remain_conditional(self) -> None:
         base={"id":"gannon","scenario":"hf-gannon-1700","mode":"receive","waveform":"reference",
               "seed":1,"bit_seconds":64,"message":"A","control":"noise"}
@@ -3539,6 +3647,71 @@ class CampaignExecutionTests(unittest.TestCase):
         self.assertEqual(run["negative_controls"]["counted_trials"], 4)
         self.assertEqual(run["negative_controls"]["false_data_decisions"], 1)
         self.assertEqual(run["negative_controls"]["accepted_false_messages"], 0)
+        self.assertEqual(run["wanted_outcomes"]["completed_trials"], 2)
+        self.assertEqual(run["wanted_outcomes"]["trials_without_delivery"], 1)
+        self.assertEqual(run["wanted_outcomes"]["accepted_messages"]["total"], 2)
+
+    def test_wanted_report_counts_actual_incorrect_fragment_with_zero_wrong_bits(self) -> None:
+        # The compact projection preserves the native MPS holdout's delivery counters and events.
+        fixture = (RUNNER.parent / "tests/fixtures/hf_phase_screens_incorrect_delivery.json").read_bytes()
+        self.assertEqual(hashlib.sha256(fixture).hexdigest(),
+                         "b5bfe3ef01b95bcd3ffd54c7645909c2635c4e915377931423d53e4d5ef08a7c")
+        recorded = json.loads(fixture)
+        self.assertEqual(recorded["source_sha256"], "7aa1dc381be58b62758e9746821ab086a57909c06b5a9cb045141c440b929b8f")
+        self.assertEqual(recorded["outcomes"]["wrong_bits"], 0)
+        self.assertEqual([event["decoded_payload_bytes"] for event in recorded["messages"] if event["decoded"]], [[32]])
+        names = ("fragment", "no-delivery", "matching-incomplete", "legacy", "mismatched-count", "censored")
+        episodes = [{"id": name, "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": i,
+                     "message": recorded["transmitted_message"]} for i, name in enumerate(names, 1)]
+        campaign = {"schema_version": 1, "name": "wanted-report", "max_wall_seconds": 10,
+                    "per_trial_wall_seconds": 2, "max_trials": len(episodes), "max_samples": 10000, "episodes": episodes}
+        self.campaign_file.write_text(json.dumps(campaign))
+        output = self.work / "wanted-report-output"
+
+        def native(command, **kwargs):
+            receipt = fake_completed_receipt(command)
+            name = names[receipt["seed"] - 1]
+            if name in {"fragment", "censored", "mismatched-count"}:
+                receipt["outcomes"].update(recorded["outcomes"])
+                receipt["messages"] = recorded["messages"]
+                if name == "mismatched-count":
+                    receipt["outcomes"]["accepted_messages"] = 2
+            elif name == "no-delivery":
+                receipt["outcomes"].update(accepted_messages=0, ambiguous_active_slots=1)
+            elif name == "matching-incomplete":
+                receipt["outcomes"].update(accepted_messages=1)
+                receipt["messages"] = [{"decoded": True, "matches_transmitted_message": True}]
+            if name == "censored":
+                receipt["status"] = "time_limit"
+            kwargs["stdout"].write((json.dumps(receipt) + "\n").encode())
+            return subprocess.CompletedProcess(command, 4 if name == "censored" else 0)
+
+        with patch.object(runner.subprocess, "run", side_effect=native):
+            run = runner.run_campaign(self.probe, self.campaign_file, output)
+        self.assertEqual(run["valid_communication_failures"], 5)
+        self.assertEqual(run["execution_failures"], 1)
+        wanted = run["wanted_outcomes"]
+        self.assertEqual(wanted["completed_trials"], 5)
+        self.assertEqual(wanted["trials_without_delivery"], 1)
+        self.assertEqual(wanted["accepted_incorrect_messages"], {"total": 1, "trials_with_any": 1, "trials_unavailable": 2})
+        self.assertEqual(wanted["premature_completions"]["total"], 4)
+        self.assertEqual(wanted["active_slot_erasures"]["total"], 17)
+        persisted = json.loads((output / "run.json").read_text())
+        self.assertEqual(persisted["wanted_outcomes"], wanted)
+        self.assertEqual(persisted["trials"][0]["wanted_outcomes"],
+                         {"accepted_messages": 1, "accepted_incorrect_messages": 1,
+                          "premature_completions": 2, "active_slot_erasures": 8})
+        self.assertNotIn("wanted_outcomes", persisted["trials"][-1])
+        report = (output / "report.md").read_text()
+        lines = {name: next(line for line in report.splitlines() if line.startswith(f"| {name} |")) for name in names}
+        self.assertIn("accepted incorrect payloads=1 of 1, premature completions=2, active-slot erasures=8", lines["fragment"])
+        self.assertIn("no accepted message", lines["no-delivery"])
+        self.assertIn("accepted matching payloads=1 with incomplete endpoint", lines["matching-incomplete"])
+        self.assertIn("accepted message count unavailable", lines["legacy"])
+        self.assertIn("accepted messages=2, payload match unavailable", lines["mismatched-count"])
+        self.assertNotIn("accepted incorrect payloads", lines["censored"])
+        del run["wanted_outcomes"]
+        self.assertEqual(report, runner._markdown(campaign, run))
 
     def test_ordinary_negative_report_separates_false_data_from_accepted_messages(self) -> None:
         episodes = [{"id": control, "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": i,

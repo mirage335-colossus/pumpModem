@@ -278,7 +278,8 @@ int main() {
             require(s.id == id && !s.family.empty() && !s.evidence.empty() &&
                     !s.provenance.empty() && !s.assumptions.empty(), "scenario provenance missing");
             const auto spectral_models = s.channel.lunar.has_value() + s.channel.fullwave_reflection.has_value() +
-                s.channel.magnetoionic_reflection.has_value();
+                s.channel.magnetoionic_reflection.has_value() + s.channel.wave_optics.has_value() +
+                s.channel.phase_screens.has_value();
             require(std::isfinite(s.reference_cn0_db_hz) && spectral_models <= 1 &&
                     (spectral_models == 1) == s.channel.paths.empty(),
                     "invalid scenario level or propagation mode");
@@ -300,6 +301,55 @@ int main() {
             for (const auto& p : s.channel.paths)
                 require(p.power >= 0 && std::isfinite(p.power) && p.delay_seconds >= 0,
                         "invalid scenario power/delay");
+        }
+        for (const auto& id : {"hf-wave-lens-off", "hf-wave-lens", "hf-wave-lens-holdout",
+                               "hf-wave-chain-off", "hf-wave-chain-clocks", "hf-wave-chain-clocks-tone"}) {
+            const auto s = appraisal::make_scenario(id);
+            require(s.channel.wave_optics && !s.channel.phase_screens && s.channel.paths.empty() &&
+                    s.channel.rf_hz == appraisal::HfWaveOpticsTable::carrier_hz &&
+                    s.waveform.sample_rate_hz == appraisal::HfWaveOpticsTable::sample_rate_hz,
+                    "wave-optics scenario is not an exclusive qualified spectral model");
+            const auto& wave = *s.channel.wave_optics;
+            if (id == std::string_view("hf-wave-lens-off")) near(wave.peak_delta_tecu, 0., 0., "wave no-lens control changed");
+            else if (id == std::string_view("hf-wave-lens-holdout")) {
+                near(wave.peak_delta_tecu, -.00857, 0., "wave holdout perturbation changed");
+                near(wave.impact_y_m, 1200., 0., "wave holdout impact changed");
+                near(wave.drift_mps, 87., 0., "wave holdout drift changed");
+                near(wave.closest_seconds, 219., 0., "wave holdout closest approach changed");
+            } else near(wave.peak_delta_tecu, -.00857, 0., "wave nominal perturbation changed");
+            near(s.bounds.arrival_low_seconds, 4. / 1920., 0., "wave FIR arrival start changed");
+            near(s.bounds.arrival_high_seconds, 84. / 1920., 0., "wave FIR arrival end changed");
+            near(s.bounds.atmospheric_hz, 5., 0., "wave public frequency bound changed");
+        }
+        for (const auto& id : {"hf-phase-screens-off", "hf-phase-screens", "hf-phase-screens-holdout"}) {
+            const auto s = appraisal::make_scenario(id);
+            require(s.channel.phase_screens && !s.channel.wave_optics && s.channel.paths.empty() &&
+                    s.channel.rf_hz == appraisal::HfPhaseScreensTable::carrier_hz &&
+                    s.waveform.sample_rate_hz == appraisal::HfPhaseScreensTable::sample_rate_hz,
+                    "phase-screen scenario is not an exclusive qualified spectral model");
+            const auto& screens = *s.channel.phase_screens;
+            if (id == std::string_view("hf-phase-screens-off")) {
+                require(!screens.perturbations, "phase-screen off control enables clumps");
+                near(screens.field, 0., 0., "phase-screen off field changed");
+                near(screens.impact_y_m, 0., 0., "phase-screen off impact changed");
+                near(screens.drift_mps, 42., 0., "phase-screen off drift changed");
+                near(screens.closest_seconds, 600., 0., "phase-screen off closest approach changed");
+            } else if (id == std::string_view("hf-phase-screens-holdout")) {
+                require(screens.perturbations, "phase-screen holdout disables clumps");
+                near(screens.field, 1., 0., "phase-screen holdout field changed");
+                near(screens.impact_y_m, 750., 0., "phase-screen holdout impact changed");
+                near(screens.drift_mps, 35., 0., "phase-screen holdout drift changed");
+                near(screens.closest_seconds, 490., 0., "phase-screen holdout closest approach changed");
+            } else {
+                require(screens.perturbations, "phase-screen nominal disables clumps");
+                near(screens.field, 0., 0., "phase-screen nominal field changed");
+                near(screens.impact_y_m, 0., 0., "phase-screen nominal impact changed");
+                near(screens.drift_mps, 42., 0., "phase-screen nominal drift changed");
+                near(screens.closest_seconds, 600., 0., "phase-screen nominal closest approach changed");
+            }
+            near(s.bounds.arrival_low_seconds, 4. / 1920., 0., "phase-screen FIR arrival start changed");
+            near(s.bounds.arrival_high_seconds, 84. / 1920., 0., "phase-screen FIR arrival end changed");
+            near(s.bounds.atmospheric_hz, 5., 0., "phase-screen public frequency bound changed");
         }
         bool rejected = false;
         try { (void)appraisal::make_scenario("not-a-model"); }

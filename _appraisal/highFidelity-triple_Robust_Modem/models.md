@@ -9,6 +9,15 @@ connects these choices to recent and contrary evidence. The larger
 [reference collection](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/README.md)
 remains the source for alternatives and unresolved measurement needs.
 
+The detailed [transverse-lens](hf-wave-optics.md) and
+[multiple-screen](hf-phase-screens.md) guides define the new scalar wave
+operators, numerical admission gates and physical limits. Their causal FIRs
+replace the generic ray sum below; they do not add an independent arbitrary
+fade to it. [Native endpoint composition](hf-wave-optics.md#complete-receiver-and-endpoint-interaction-protocol)
+places those operators between canonical TX and RX processing, with one
+declared thermal-noise plane. Each guide preserves its actual receiver
+outcomes separately from numerical validation.
+
 All reference waveforms use the canonical native source and physical time.
 The default complex sample rate is **1920 samples/s**, twice the proposed
 960-sample/s reference, to provide more fractional-delay interpolation margin.
@@ -26,6 +35,9 @@ approximation and can be heavily suppressed by the antenna.
 | `groundwave-1mhz`, `groundwave-1mhz-sea`, `groundwave-1mhz-night` | Rate1, added1, requested16s | Fixed LFMF magnitude reference and synthetic vacuum phase; optional competing ray |
 | `groundwave-30mhz`, `groundwave-30mhz-land` | Rate36, added10, requested16s | Fixed LFMF magnitude at the upper model endpoint; synthetic phase |
 | `hf-quiet`, `hf-disturbed`, `hf-transition`, `hf-nvis-disturbed`, `hf-drm6` | Rate36, added10, requested16s | Standard Gaussian-spectrum taps with distinct delay/centroid/width tuples; separate absorption episode |
+| `hf-wave-lens-off`, `hf-wave-lens`, `hf-wave-lens-holdout` | 10 MHz, 1,920 samples/s, Helper off; requested64/128s comparisons | Analytic scalar Gaussian plasma lens with independent spatial quadrature, frequency and deep-fade witnesses; prescribed unfolded spherical path |
+| `hf-phase-screens-off`, `hf-phase-screens`, `hf-phase-screens-holdout` | 10 MHz, 1,920 samples/s, Helper off; requested32/64s, at most1,600s complete capture | Two separated finite slabs, 2D transverse irregularities, forward angular-spectrum propagation and depth/mesh/fine-null checks; no general vector/oblique-field claim |
+| `hf-wave-chain-off`, `hf-wave-chain-clocks`, `hf-wave-chain-clocks-tone` | Same lens and waveform, public clock4ppm and physical/oscillator bounds5/1Hz | Actual native endpoint processing around the physical channel; continuing RF interference is present through quiet slots and evaluator EOF |
 | `eme-disk-episode`, `eme-patch-episode`, `eme-severe-episode` | Rate360, added1, FHSS, requested26.4s | Joint spectral synthesis for the 3m/30m beams and 164Hz adverse width, through 360s from channel time zero |
 | `noise-bursts`, `noise-white`, `noise-white-ar1`, `noise-white-shot`, `frontend-overload` | Rate36, added10, requested16s | Constructed noise, matched component ablations and swept-blocker/equipment controls |
 

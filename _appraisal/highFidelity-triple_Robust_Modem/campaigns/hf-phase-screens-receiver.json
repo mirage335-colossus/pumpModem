@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "name": "hf-phase-screens-receiver",
+  "purpose": "Frozen before multiple-screen numerical admission or decoder outcomes. Coherent scalar propagation through separated underdense structures, with fixed field/trajectory bounds and no periodic replay or gain normalization. Includes ambient control, a fixed 10 dB bracket, shorter roughly equal-incident-energy comparator, physical/payload holdout and negative controls. A numerically inadmissible model withholds all associated receiver rows; censored work is not a communications failure.",
+  "max_wall_seconds": 2100,
+  "per_trial_wall_seconds": 300,
+  "max_trials": 7,
+  "max_samples": 3072000,
+  "episodes": [
+    {"id": "screens-ambient-0", "scenario": "hf-phase-screens-off", "waveform": "reference", "seed": 70001, "noise_seed": 80001, "bit_seconds": 64, "message": "A", "mode": "receive", "control": "wanted", "cn0_db_hz": 0},
+    {"id": "screens-0", "scenario": "hf-phase-screens", "waveform": "reference", "seed": 70001, "noise_seed": 80001, "bit_seconds": 64, "message": "A", "mode": "receive", "control": "wanted", "cn0_db_hz": 0},
+    {"id": "screens-10", "scenario": "hf-phase-screens", "waveform": "reference", "seed": 70001, "noise_seed": 80001, "bit_seconds": 64, "message": "A", "mode": "receive", "control": "wanted", "cn0_db_hz": 10},
+    {"id": "screens-short-equal-incident-energy", "scenario": "hf-phase-screens", "waveform": "reference", "seed": 70001, "noise_seed": 80001, "bit_seconds": 32, "message": "A", "mode": "receive", "control": "wanted", "cn0_db_hz": 3},
+    {"id": "screens-physical-payload-holdout", "scenario": "hf-phase-screens-holdout", "waveform": "reference", "seed": 70002, "noise_seed": 80002, "bit_seconds": 64, "message": "B", "mode": "receive", "control": "wanted", "cn0_db_hz": 0},
+    {"id": "screens-noise", "scenario": "hf-phase-screens", "waveform": "reference", "seed": 70001, "noise_seed": 80001, "bit_seconds": 64, "message": "A", "mode": "receive", "control": "noise", "cn0_db_hz": 10},
+    {"id": "screens-wrong-key", "scenario": "hf-phase-screens", "waveform": "reference", "seed": 70001, "noise_seed": 80001, "bit_seconds": 64, "message": "A", "mode": "receive", "control": "wrong-key", "cn0_db_hz": 10}
+  ]
+}
