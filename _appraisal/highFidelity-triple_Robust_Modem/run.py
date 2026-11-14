@@ -73,6 +73,39 @@ FULLWAVE_REFLECTION = {
     "taps": 129, "first_lag_samples": 1, "last_lag_samples": 129, "filter_halo_samples": 128,
     "maximum_rf_solves": 32070, "preparation_workspace_bound_bytes": 1048576,
 }
+MAGNETOIONIC_REFLECTION = {
+    "hf-magnetoionic-x": (0, 60, 600, 0.),
+    "hf-magnetoionic-y": (1, 60, 600, 0.),
+    "hf-magnetoionic-x-holdout": (0, 180, 780, 0.),
+    "hf-magnetoionic-x-spread": (0, 60, 600, .007),
+    "hf-magnetoionic-parallel-x": (0, 60, 600, 0.),
+    "hf-magnetoionic-parallel-y": (1, 60, 600, 0.),
+    "hf-magnetoionic-parallel-x-holdout": (0, 180, 780, 0.),
+}
+MAGNETOIONIC_DESCRIPTOR = {
+    "port": "reflection", "carrier_hz": 3400000, "sample_rate_hz": 1920,
+    "occupied_half_band_hz": 384, "normal_incidence": True,
+    "magnetic_field_tesla": [25e-6, 0., 43.30127018922193e-6],
+    "transmit_polarization": "fixed_laboratory_x",
+    "orthogonal_field_supplied_to_receiver": False,
+    "profile_q0": {"f_collision_per_second": 60., "d_peak_electron_density_per_m3": 8e8},
+    "profile_q1": {"f_collision_per_second": 60., "d_peak_electron_density_per_m3": 8e8},
+    "interpolation": "fixed_lab_cubic_hermite_output_time_half_cosine",
+    "modelling_delay_samples": 32, "taps_per_output": 81,
+    "first_lag_samples": 1, "last_lag_samples": 81,
+    "filter_halo_samples": 80, "profile_intervals": 16, "frequency_bins": 128,
+    "maximum_rf_solves": 3444, "production_step_m": 10., "witness_step_m": 20.,
+    "complex_error_tolerance": .005, "discarded_energy_tolerance": 1e-6,
+    "rate_peak_tolerance": .005, "preparation_workspace_bound_bytes": 2097152,
+}
+GANNON_REPLAY = {"hf-gannon-1700": (17, 0.), "hf-gannon-2000": (20, 0.),
+                 "hf-gannon-2000-late": (20, 1800.)}
+GANNON_RECORDS = {
+    17: (1715360400, "8397dc68dcae74222252ddc93162e331a96931d12db9a9e656af031c361dffc5",
+         "2c56dd525dde8e58e3d78add0e8e9e5c08eddb28473748358aa38c42d30af8d0", 165231037),
+    20: (1715371200, "5b9e38b1319cb172d1c6c161b28960e10607d69b951593cd1700df91517173c7",
+         "c23ab7e470eaaeb1b501c397ac3552ea04e13cec13a07e497e1c1b41e7cb098b", 2473256894),
+}
 SERVICE_FIELDS = {"service_replay", "service_episodes", "service_spool_byte_limit", "owners",
                   "service_backlog_begin_slot", "service_backlog_end_slot"}
 EPISODE_KEYS = {"id", "scenario", "mode", "waveform", "seed", "cn0_db_hz", "control",
@@ -323,9 +356,27 @@ def _validate_episode(item: Any, index: int, ids: set[str],
                     "hf_gui_clean_diagnostic")) or
                 {"duration_seconds", "capture_lead_seconds", "hf_trajectory_seed", "hf_trajectory_offset_seconds"} & item.keys()):
             raise CampaignError(f"episodes[{index}]: full-wave reflection requires reference RRC CPU plan/channel/receive, wanted/noise Helper/FEC off and default capture geometry")
+    if item["scenario"] in MAGNETOIONIC_REFLECTION:
+        if (mode not in {"plan", "channel", "receive", "oracle"} or item["waveform"] != "reference" or
+                item.get("backend", "cpu") != "cpu" or item.get("pulse", "rrc") != "rrc" or
+                item.get("helper", False) or control not in {"wanted", "noise", "wrong-key"} or
+                mode != "receive" and control != "wanted" or item.get("fec", "off") != "off" or
+                any(item.get(field, False) for field in ("service_replay", "hf_phase_bank", "hf_public_phase_receiver",
+                    "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver",
+                    "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models",
+                    "hf_gui_clean_diagnostic")) or
+                {"duration_seconds", "capture_lead_seconds", "hf_trajectory_seed", "hf_trajectory_offset_seconds"} & item.keys()):
+            raise CampaignError(f"episodes[{index}]: magnetoionic reflection requires reference RRC CPU plan/channel/receive or wanted-only oracle, wanted or receive-only noise/wrong-key, Helper/FEC off and fixed geometry")
+    if item["scenario"] in GANNON_REPLAY:
+        if (mode not in {"plan", "channel", "receive", "oracle"} or
+                control != "wanted" and (mode not in {"channel", "receive"} or control not in {"noise", "wrong-key"}) or
+                any(item.get(field, False) for field in ("service_replay", "hf_public_phase_receiver", "hf_compare_admitted_models"))):
+            raise CampaignError(f"episodes[{index}]: Gannon replay requires plan/channel/receive or wanted-only oracle without service or experimental receiver policies")
     if "fade_slots" in item and control != "interior-fade":
         raise CampaignError(f"episodes[{index}]: fade_slots is valid only for interior-fade control")
-    if mode not in {"receive", "slot", "diagnose", "hf-search", "gui-varying"} and "control" in item and not service_requested:
+    gannon_control = item["scenario"] in GANNON_REPLAY and mode in {"channel", "oracle"}
+    magnetic_oracle_control = item["scenario"] in MAGNETOIONIC_REFLECTION and mode == "oracle" and control == "wanted"
+    if mode not in {"receive", "slot", "diagnose", "hf-search", "gui-varying"} and "control" in item and not service_requested and not gannon_control and not magnetic_oracle_control:
         raise CampaignError(f"episodes[{index}]: control is valid only for receiver or diagnostic mode")
     if mode in {"receive", "slot", "diagnose", "hf-search", "gui-varying"} and control not in CONTROLS:
         raise CampaignError(f"episodes[{index}]: invalid receiver control")
@@ -1918,6 +1969,465 @@ def _validate_fullwave_reflection(receipt: dict[str, Any], episode: dict[str, An
         raise CampaignError("full-wave noise control must contain exactly zero incident and reflected clean energy")
 
 
+def _gannon_trace_descriptor(hour: int, offset: float) -> dict[str, Any]:
+    epoch, source_hash, iq_hash, _ = GANNON_RECORDS[hour]
+    return {
+        "dataset": "HamSCI PSWS HF Doppler observations of the 2024 Gannon geomagnetic storm",
+        "dataset_doi": "10.5281/zenodo.20466479", "samples": 36000, "sample_rate_hz": 10,
+        "support_seconds": 3599.9, "part": "measured-complex", "record_offset_seconds": offset,
+        "remaining_support_seconds": 3599.9-offset,
+        "record_clock_mapping": "record_time = output_capture_time + record_offset_seconds; no repetition or extrapolation",
+        "source_sha256": source_hash, "source_hdf5_sha256": source_hash, "serialized_iq_sha256": iq_hash,
+        "record_utc_first_sample_epoch_seconds": epoch, "capture_utc_first_sample_epoch_seconds": epoch+offset,
+        "utc_hour": hour, "stream_uuid": "0e51e045ca1d42868f3c9cd483112bd7",
+        "source_archive_member": f"data/psws_grapeDRF/ch0_W2NAF_2024-05-10/2024-05-10T00-00-00/rf@{epoch}.000.h5",
+        "source_subchannels": 9, "zero_based_column": 4, "nominal_center_frequency_hz": 10000000,
+        "timing_assumption": "recorded Digital RF 10/1 sample-rate ratio and contiguous sample indices establish the stored UTC grid; independent clock metrology remains unqualified",
+        "normalization_scope": "one joint RMS across both complete fixed 17 and 20 UTC records (72000 knots); no separate hour or observation normalization",
+        "normalization_cohort_utc_hours": [17, 20], "normalization_cohort_knots": 72000,
+        "normalization_preserves_inter_record_power_ratio": True,
+        "statistics_scope": "selected observed complex voltage record after the shared two-record scale; includes beacon, receiver noise and interference",
+        "observation_model": "recorded voltage = beacon response + receiver noise/interference; the replay multiplies the modem waveform by this voltage",
+        "recorded_noise_becomes_signal_proportional": True,
+        "transmitter_identification": "nominal 10MHz may contain both WWV and WWVH; no transmitter separation",
+        "noise_free_channel_response": False, "wideband_channel_response_qualified": False,
+        "field_false_alarm_or_availability_qualified": False, "absolute_link_level_qualified": False,
+        "receiver_clock_discipline_qualified": False,
+    }
+
+
+def _validate_gannon_replay(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
+    if episode["scenario"] not in GANNON_REPLAY:
+        return
+    hour, offset = GANNON_REPLAY[episode["scenario"]]
+    plan, scenario = receipt["plan"], receipt.get("scenario")
+    configured = scenario.get("channel") if isinstance(scenario, dict) else None
+    paths = configured.get("paths") if isinstance(configured, dict) else None
+    if (not isinstance(paths, list) or len(paths) != 1 or configured.get("path_count") != 1 or
+            configured.get("rf_hz") != 10000000 or not isinstance(paths[0], dict) or
+            paths[0].get("power") != 1 or paths[0].get("delay_seconds") != .001):
+        raise CampaignError("Gannon replay requires the fixed nominal 10MHz observed-voltage path and synthetic 1ms delay")
+    hf = paths[0].get("hf")
+    measured = hf.get("measured_envelope") if isinstance(hf, dict) else None
+    if not isinstance(measured, dict) or hf.get("measured_offset_seconds") != offset:
+        raise CampaignError("Gannon replay is missing its selected measured record and offset")
+    for key, expected in _gannon_trace_descriptor(hour, offset).items():
+        actual = measured.get(key)
+        if (actual != expected or isinstance(expected, bool) and actual is not expected or
+                isinstance(expected, (int, float)) and not isinstance(expected, bool) and not _is_finite_number(actual)):
+            raise CampaignError(f"Gannon measured-voltage provenance or scope differs: {key}")
+    raw_power = GANNON_RECORDS[hour][3]/36000
+    gain = math.sqrt(72000/sum(record[3] for record in GANNON_RECORDS.values()))
+    for key, expected in (("raw_mean_power", raw_power), ("normalization_gain", gain)):
+        if not _is_finite_number(measured.get(key)) or not math.isclose(measured[key], expected, rel_tol=2e-12):
+            raise CampaignError("Gannon replay must preserve the fixed raw power and shared two-hour RMS gain")
+    adequate = scenario.get("numerical_adequacy")
+    if (not isinstance(adequate, dict) or adequate.get("qualification_horizon_seconds") != 3599.9-offset or
+            adequate.get("empirical_validation") is not False or adequate.get("empirical_record_provenance_verified") is not True or
+            adequate.get("empirical_channel_calibration") is not False or
+            adequate.get("scope") != "finite observed-voltage Cartesian interpolation on the verified stored UTC grid; recorded noise becomes signal-proportional" or
+            scenario.get("physical_level_connected") is not False or
+            plan.get("channel_renderer") != "observed_voltage_multiplicative_replay" or
+            plan.get("cn0_reference_plane") != "incident normalized modem waveform before jointly scaled observed-voltage multiplication; independent synthetic white receiver noise" or
+            plan.get("measured_noise_is_multiplicative") is not True or plan.get("field_noise_control_qualified") is not False):
+        raise CampaignError("Gannon replay must distinguish observed voltage from calibrated field-channel or noise evidence")
+    if episode["mode"] == "plan":
+        return
+    fs = plan.get("sample_rate_hz")
+    if not _is_finite_number(fs) or fs <= 0:
+        raise CampaignError("Gannon executed replay requires a finite positive waveform sample rate")
+    if episode["mode"] == "oracle":
+        oracle, presence = receipt.get("oracle"), receipt.get("presence_oracle")
+        if (not isinstance(oracle, dict) or not isinstance(presence, dict) or
+                oracle.get("kind") != "isolated single DATA bit, equal-prior binary known observed-voltage multiplier and synthetic added white Gaussian noise" or
+                oracle.get("conditioning_scope") != "known deterministic observed-voltage multiplier with added synthetic white noise; the recorded beacon/noise/interference are inseparable" or
+                presence.get("kind") != "isolated single DATA bit under a known observed-voltage multiplier versus synthetic added white Gaussian noise" or
+                presence.get("conditioning_scope") != "the recorded beacon/noise/interference are inseparable; no same-input full-message or physical noise-free channel claim"):
+            raise CampaignError("Gannon oracle must retain its conditional observed-voltage and added-noise meaning")
+        for row in (oracle, presence):
+            if any(row.get(key) is not False for key in ("same_input_full_message_replay", "physical_noise_free_channel_known", "field_sensitivity_bound")):
+                raise CampaignError("Gannon isolated oracle cannot claim full-message or physical field sensitivity")
+        if (oracle.get("includes_acquisition_or_completion") is not False or
+                oracle.get("finite_blocklength_capacity_bound") is not False or oracle.get("realization_normalized") is not False):
+            raise CampaignError("Gannon oracle cannot normalize the record or qualify acquisition, completion or capacity")
+        samples = oracle.get("samples")
+    else:
+        channel = receipt.get("channel")
+        samples = channel.get("samples") if isinstance(channel, dict) else None
+        if episode.get("control", "wanted") == "noise" and (not isinstance(channel, dict) or
+                channel.get("input_energy_sample_sum") != 0 or channel.get("signal_energy_sample_sum") != 0 or
+                channel.get("contains_source_energy") is not False or channel.get("contains_signal_energy") is not False):
+            raise CampaignError("Gannon synthetic noise control requires exactly zero modem source and multiplicative signal")
+    if not _is_nonnegative_int(samples) or samples == 0 or (samples-1)/fs > 3599.9-offset:
+        raise CampaignError("Gannon replay exceeds the finite selected record; looping or extrapolation is not admitted")
+
+
+def _validate_magnetoionic_null_witness(value: Any) -> None:
+    if (not isinstance(value, dict) or value.get("q") != (1+math.sqrt(3)/2)/16 or
+            value.get("rf_offset_hz") != -118.7 or value.get("witness_meshes_m") != [10.,5.,2.5] or
+            value.get("x_local_relative_tolerance") != .1 or value.get("x_resolved") is not True or
+            value.get("scope") != "separate original near-null witness; sampled mesh differences and a point-specific practical interpolation guard, not a uniform physical error bound"):
+        raise CampaignError("parallel magnetic table requires the fixed original-null mesh witness and local guard")
+    fields=("fine_amplitude_xy","fir_amplitude_xy","fir_to_10m_absolute_error_xy",
+            "mesh_10m_to_2p5m_absolute_difference_xy","mesh_5m_to_2p5m_absolute_difference_xy",
+            "fir_to_2p5m_absolute_error_xy","x_guarded_power_interval")
+    for field in fields:
+        pair=value.get(field)
+        if not isinstance(pair,list) or len(pair)!=2 or any(not _is_finite_number(x) or x<0 for x in pair):
+            raise CampaignError("parallel magnetic null witness requires finite nonnegative two-component diagnostics")
+    reference=value["fine_amplitude_xy"][0]
+    guarded=value["fir_to_2p5m_absolute_error_xy"][0]+value["mesh_5m_to_2p5m_absolute_difference_xy"][0]
+    if reference<=0 or guarded>.1*reference:
+        raise CampaignError("parallel magnetic original-null error exceeds the fixed local amplitude guard")
+    expected={"fine_vector_power":sum(x*x for x in value["fine_amplitude_xy"]),
+              "x_guarded_absolute_error":guarded,"x_guarded_relative_error":guarded/reference}
+    for field,target in expected.items():
+        if not _is_finite_number(value.get(field)) or not math.isclose(value[field],target,rel_tol=1e-10,abs_tol=1e-20):
+            raise CampaignError("parallel magnetic null witness derived error or power is inconsistent")
+    expected_power=(max(0,reference-guarded)**2,(reference+guarded)**2)
+    if any(not math.isclose(actual,target,rel_tol=1e-10,abs_tol=1e-20)
+           for actual,target in zip(value["x_guarded_power_interval"],expected_power)):
+        raise CampaignError("parallel magnetic null witness power interval is inconsistent")
+
+
+def _validate_magnetoionic_reflection(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
+    """Require the fixed vector-plasma model and its actual numerical gates."""
+    plan = receipt["plan"]
+    scenario = receipt.get("scenario", {})
+    configured = scenario.get("channel") if isinstance(scenario, dict) else None
+    channel = receipt.get("channel")
+    requested = episode["scenario"] in MAGNETOIONIC_REFLECTION
+    if not requested:
+        if ("magnetoionic_reflection" in plan or plan.get("channel_renderer") == "hf_magnetoionic_reflection" or
+                isinstance(configured, dict) and ("magnetoionic_reflection" in configured or
+                    configured.get("renderer") == "hf_magnetoionic_reflection") or
+                isinstance(channel, dict) and "magnetoionic_reflection" in channel):
+            raise CampaignError("unrequested magnetoionic reflection descriptor or renderer")
+        return
+
+    component, transition_first, transition_seconds, spread = MAGNETOIONIC_REFLECTION[episode["scenario"]]
+    parallel = episode["scenario"].startswith("hf-magnetoionic-parallel-")
+    oracle_mode = episode["mode"] == "oracle"
+    intervals, rf_solves = (64, 12039) if parallel else (16, 3444)
+    magnetic_field = [0., 0., 50e-6] if parallel else MAGNETOIONIC_DESCRIPTOR["magnetic_field_tesla"]
+    renderer = "hf_magnetoionic_reflection"
+    if (plan.get("channel_renderer") != renderer or not isinstance(configured, dict) or
+            configured.get("renderer") != renderer):
+        raise CampaignError("magnetoionic reflection must bind its native renderer in plan and scenario")
+
+    def descriptor(value: Any) -> None:
+        if not isinstance(value, dict):
+            raise CampaignError("magnetoionic reflection requires its fixed physical and numerical descriptor")
+        expected = dict(MAGNETOIONIC_DESCRIPTOR)
+        expected.update(magnetic_field_tesla=magnetic_field, profile_intervals=intervals, maximum_rf_solves=rf_solves)
+        if value.get("physical_path", "tilted_lower") != ("parallel_upper" if parallel else "tilted_lower"):
+            raise CampaignError("magnetoionic descriptor differs from the requested physical path")
+        expected.update({"receive_component": component,
+                         "receive_polarization": "fixed_laboratory_x" if component == 0 else "fixed_laboratory_y",
+                         "transition_first_seconds": transition_first,
+                         "transition_seconds": transition_seconds,
+                         "minimum_complete_source_seconds": transition_first + transition_seconds})
+        endpoint_profiles = {name: expected.pop(name) for name in ("profile_q0", "profile_q1")}
+        integer_fields = {"carrier_hz", "sample_rate_hz", "occupied_half_band_hz", "modelling_delay_samples",
+                          "taps_per_output", "first_lag_samples", "last_lag_samples", "filter_halo_samples",
+                          "profile_intervals", "frequency_bins", "maximum_rf_solves", "preparation_workspace_bound_bytes",
+                          "receive_component"}
+        for field, wanted in expected.items():
+            actual = value.get(field)
+            if (actual != wanted or isinstance(wanted, (int, float)) and not isinstance(wanted, bool) and
+                    not _is_finite_number(actual) or
+                    field in integer_fields and not _is_nonnegative_int(actual)):
+                raise CampaignError("magnetoionic descriptor differs from the fixed qualified physical path")
+        b = value.get("magnetic_field_tesla")
+        if not isinstance(b, list) or len(b) != 3 or any(not _is_finite_number(x) for x in b):
+            raise CampaignError("magnetoionic descriptor must retain its fixed geomagnetic vector")
+        if b != magnetic_field:
+            raise CampaignError("magnetoionic descriptor differs from the fixed qualified geomagnetic vector")
+        for name, multiplier in (("profile_q0", .9999), ("profile_q1", 1.0001)):
+            profile = value.get(name)
+            if (not isinstance(profile, dict) or set(profile) !=
+                    {"f_peak_plasma_frequency_hz", "f_collision_per_second", "d_peak_electron_density_per_m3"} or
+                    not _is_finite_number(profile.get("f_peak_plasma_frequency_hz")) or
+                    not _is_finite_number(profile.get("f_collision_per_second")) or
+                    profile.get("f_collision_per_second") != 60. or
+                    profile.get("d_peak_electron_density_per_m3") != 8e8):
+                raise CampaignError("magnetoionic descriptor requires the fixed coupled cold-plasma endpoint profiles")
+            electron_charge, electron_mass = 1.602176634e-19, 9.1093837139e-31
+            b_magnitude = math.sqrt(sum(x*x for x in magnetic_field))
+            gyro_hz = electron_charge*b_magnitude/(2*math.pi*electron_mass)
+            cutoff = math.sqrt(1 + (1 if parallel else -1)*gyro_hz/MAGNETOIONIC_DESCRIPTOR["carrier_hz"])*MAGNETOIONIC_DESCRIPTOR["carrier_hz"]
+            if not math.isclose(profile["f_peak_plasma_frequency_hz"], cutoff*multiplier,
+                                rel_tol=2e-12, abs_tol=1e-7):
+                raise CampaignError("magnetoionic endpoint misses the selected fixed cutoff crossing")
+
+    planned = plan.get("magnetoionic_reflection")
+    descriptor(planned)
+    descriptor(configured.get("magnetoionic_reflection"))
+    if planned != configured.get("magnetoionic_reflection"):
+        raise CampaignError("magnetoionic plan and scenario descriptors differ")
+    fs = MAGNETOIONIC_DESCRIPTOR["sample_rate_hz"]
+    preroll, source_stop, horizon = plan.get("capture_preroll_seconds"), plan.get("source_stop_sample"), plan.get("horizon_samples")
+    if (not _is_finite_number(preroll) or preroll != .25 or not _is_nonnegative_int(source_stop) or
+            not oracle_mode and source_stop < math.ceil((transition_first + transition_seconds + preroll)*fs) or
+            not _is_nonnegative_int(horizon) or horizon < source_stop + 81 or
+            not _is_finite_number(plan.get("represented_seconds")) or
+            not math.isclose(plan["represented_seconds"], horizon/fs, rel_tol=1e-12, abs_tol=1e-12) or
+            not _is_finite_number(plan.get("channel_tail_seconds")) or
+            not math.isclose(plan["channel_tail_seconds"], 81/fs, rel_tol=0, abs_tol=4*math.ulp(81/fs))):
+        raise CampaignError("magnetoionic reflection must retain the full physical transition, causal FIR tail and capture horizon")
+    if (plan.get("channel_tail_seconds_scope") != "complete causal reflected Jones-column FIR support, from first input through the last retained lag" or
+            plan.get("cn0_reference_plane") != "normalized incident DATA before physical reflection and fixed antenna projection; fixed additive receiver noise" or
+            plan.get("magnetoionic_reflection_source_band_checked") is not (episode["mode"] != "plan") or
+            plan.get("magnetoionic_reflection_table_built") is not (episode["mode"] != "plan") or
+            plan.get("receiver_dispersive_model") != ("native_sparse_delay_anchors" if spread else "native_single_ray") or
+            plan.get("physical_kernel_supplied_to_receiver") is not False):
+        raise CampaignError("magnetoionic plan must distinguish incident power, unexecuted work and receiver model scope")
+    if plan.get("complete_transition_span_required", True) is not (not oracle_mode):
+        raise CampaignError("magnetoionic plan must distinguish full-transition reception from the isolated oracle")
+    bounds = plan.get("public_bounds")
+    if (not isinstance(bounds, dict) or bounds.get("arrival_low_seconds") != 1/fs or
+            bounds.get("arrival_high_seconds") != 81/fs or bounds.get("receiver_filter_halo_samples") != 80 or
+            bounds.get("spread_seconds") != spread or bounds.get("time_varying") is not True or
+            bounds.get("frequency_bound_hz") != 0 or bounds.get("atmospheric_hz") != 1):
+        raise CampaignError("magnetoionic receive priors must match the full retained lag support and fixed receiver model")
+    if (plan.get("planned_uncontaminated_quiet_slots") != 2 or
+            not _is_nonnegative_int(plan.get("wire_bits")) or plan["wire_bits"] == 0 or
+            not _is_nonnegative_int(plan.get("first_uncontaminated_quiet_slot")) or
+            plan["first_uncontaminated_quiet_slot"] < plan["wire_bits"] or
+            plan.get("scored_slot_horizon") != plan["first_uncontaminated_quiet_slot"] + 2 or
+            not isinstance(plan.get("public_slots"), list) or
+            len(plan["public_slots"]) != plan["scored_slot_horizon"]):
+        raise CampaignError("magnetoionic message plan must retain its complete calendar and two quiet opportunities")
+    quiet = plan["first_uncontaminated_quiet_slot"]
+    for index, row in enumerate(plan["public_slots"]):
+        obs = row.get("observation") if isinstance(row, dict) else None
+        if (not isinstance(obs, dict) or row.get("index") != index or
+                not _is_nonnegative_int(obs.get("first")) or not _is_nonnegative_int(obs.get("stop")) or
+                not obs["first"] < obs["stop"] <= horizon or
+                index >= quiet and (obs["first"] < source_stop + 81 or row.get("evaluator_transmitting") is not False)):
+            raise CampaignError("magnetoionic public slots must preserve physical tail and ordered quiet completion")
+    if (plan["public_slots"][-1]["observation"]["stop"] != horizon or
+            not _is_finite_number(plan.get("cn0_db_hz")) or not -200 <= plan["cn0_db_hz"] <= 200 or
+            not _is_finite_number(plan.get("noise_variance")) or
+            not math.isclose(plan["noise_variance"], fs/10**(plan["cn0_db_hz"]/10), rel_tol=1e-10) or
+            plan.get("message") != episode.get("message", "e")):
+        raise CampaignError("magnetoionic capture must preserve the declared incident C/N0, message and full calendar")
+
+    if episode["mode"] == "plan":
+        if isinstance(channel, dict) and "magnetoionic_reflection" in channel:
+            raise CampaignError("magnetoionic planning cannot claim executed numerical or channel evidence")
+        return
+    def validate_rendered_channel(channel: Any, horizon: int, source_stop: int) -> dict[str, Any]:
+        if (not isinstance(channel, dict) or channel.get("samples") != horizon or
+                channel.get("source_samples") != source_stop or
+                not _is_finite_number(channel.get("tail_seconds")) or
+                not math.isclose(channel["tail_seconds"], 81/fs, rel_tol=0, abs_tol=4*math.ulp(81/fs)) or
+                channel.get("maximum_delay_seconds") != 1/fs):
+            raise CampaignError("magnetoionic execution must hash the full capture and report its full source and causal extent")
+        if not oracle_mode and (channel.get("hashed_samples") != horizon or
+                not isinstance(channel.get("input_sha256"), str) or re.fullmatch(r"[0-9a-fA-F]{64}", channel["input_sha256"]) is None):
+            raise CampaignError("magnetoionic receiver execution must hash the complete capture")
+        full = channel.get("magnetoionic_reflection")
+        descriptor(full)
+        if (full.get("table_qualified") is not True or full.get("witnesses_qualified") is not True or
+                full.get("qualification_scope") != "sampled frozen vector RF/profile and mesh witnesses; finite-FIR retarded coefficient bound; no evolving-Maxwell, 3D scattering or field calibration" or
+                not isinstance(full.get("table_sha256"), str) or re.fullmatch(r"[0-9a-fA-F]{64}", full["table_sha256"]) is None or
+                full.get("table_digest_scope") != "reflected laboratory x/y coefficients for fixed x launch, ascending component/profile knot/integer lag, little-endian complex binary64 taps; interpolation additionally bound by source identity"):
+            raise CampaignError("magnetoionic execution requires qualified vector-table witnesses and exact digest provenance")
+        for field, expected_value in (("rf_solves", rf_solves), ("knot_profiles_checked", intervals+1), ("holdout_profiles_checked", 2*intervals)):
+            if not _is_nonnegative_int(full.get(field)) or full[field] != expected_value:
+                raise CampaignError("magnetoionic qualification must report its fixed bounded RF solve and profile counts")
+        for field in ("knot_grid_error", "knot_offgrid_error", "profile_holdout_error", "witness_frequency_error", "witness_mesh_error"):
+            values = full.get(field)
+            if (not isinstance(values, list) or len(values) != 2 or any(not isinstance(v, dict) or
+                    not _is_finite_number(v.get("maximum")) or not 0 <= v["maximum"] <= .005 or
+                    not _is_finite_number(v.get("profile_q")) or not 0 <= v["profile_q"] <= 1 or
+                    not _is_finite_number(v.get("offset_hz")) or abs(v["offset_hz"]) > fs/2 for v in values)):
+                raise CampaignError("magnetoionic sampled response errors require finite in-gate two-component witnesses")
+        scale_scopes = {"occupied band raw independent solver amplitude versus approximation; scale diagnostics add no relative-error gate or gain normalization; the separate original-null witness has a point-specific guard"}
+        if not parallel:
+            scale_scopes.add("occupied band raw independent solver amplitude versus approximation; no relative-error gate or gain normalization")
+        if full.get("scale_diagnostic_scope") not in scale_scopes:
+            raise CampaignError("magnetoionic amplitude-scale diagnostics must retain their occupied-band scope")
+
+        def validate_scale_diagnostics(field: str, expected_samples: int) -> None:
+            rows = full.get(field)
+            if not isinstance(rows, list) or len(rows) != 2:
+                raise CampaignError("magnetoionic raw-amplitude diagnostics require both fixed laboratory components")
+            for row in rows:
+                if (not isinstance(row, dict) or not _is_nonnegative_int(row.get("samples")) or
+                        row["samples"] != expected_samples or
+                        not _is_nonnegative_int(row.get("exact_zero_raw")) or
+                        not _is_nonnegative_int(row.get("absolute_error_at_least_raw")) or
+                        row["exact_zero_raw"] > row["samples"] or
+                        row["absolute_error_at_least_raw"] > row["samples"] or
+                        row["absolute_error_at_least_raw"] < row["exact_zero_raw"]):
+                    raise CampaignError("magnetoionic raw-amplitude witness counts are inconsistent with bounded sampling")
+                for witness_name in ("minimum_raw_amplitude", "maximum_relative_error", "raw_at_maximum_absolute_error"):
+                    witness = row.get(witness_name)
+                    if witness_name == "maximum_relative_error" and row["exact_zero_raw"] == row["samples"]:
+                        if witness_name not in row or witness is not None:
+                            raise CampaignError("all-zero magnetoionic samples cannot claim a maximum relative-error witness")
+                        continue
+                    if (not isinstance(witness, dict) or
+                            not _is_finite_number(witness.get("raw_amplitude")) or witness["raw_amplitude"] < 0 or
+                            not _is_finite_number(witness.get("absolute_error")) or witness["absolute_error"] < 0 or
+                            not _is_finite_number(witness.get("q")) or not 0 <= witness["q"] <= 1 or
+                            not _is_finite_number(witness.get("rf_offset_hz")) or
+                            abs(witness["rf_offset_hz"]) > MAGNETOIONIC_DESCRIPTOR["occupied_half_band_hz"]):
+                        raise CampaignError("magnetoionic raw-amplitude witnesses must be finite and within the occupied band")
+                    relative = witness.get("relative_error")
+                    if (witness_name == "minimum_raw_amplitude" and
+                            (witness["raw_amplitude"] == 0) != (row["exact_zero_raw"] > 0) or
+                            witness["raw_amplitude"] == 0 and row["exact_zero_raw"] == 0 or
+                            witness["raw_amplitude"] > 0 and row["exact_zero_raw"] == row["samples"] or
+                            witness_name == "maximum_relative_error" and witness["raw_amplitude"] == 0):
+                        raise CampaignError("magnetoionic zero-amplitude witnesses disagree with their sample counts")
+                    if witness["raw_amplitude"] == 0:
+                        if relative is not None:
+                            raise CampaignError("zero-amplitude magnetoionic witnesses cannot claim a relative error")
+                    elif (not _is_finite_number(relative) or relative < 0 or
+                          not math.isclose(relative, witness["absolute_error"] / witness["raw_amplitude"],
+                                           rel_tol=2e-10, abs_tol=1e-12)):
+                        raise CampaignError("magnetoionic raw-amplitude relative error does not match its absolute error")
+
+        # observe_scale excludes the six guard-band offsets. The eight fixed
+        # occupied anchors and three moving-cutoff offsets stay within ±384 Hz
+        # throughout the frozen profile; all 17 offsets still count as RF solves.
+        # The upper-cutoff path moves three near-cutoff offsets outside the band
+        # at some endpoint profiles; these are the exact frozen 64-interval counts.
+        scale_counts = (703, 1395, 27) if parallel else (187, 352, 33)
+        for field, expected_samples in zip(("knot_offgrid_scale", "profile_holdout_scale", "witness_mesh_scale"), scale_counts):
+            validate_scale_diagnostics(field, expected_samples)
+        if parallel:
+            _validate_magnetoionic_null_witness(full.get("original_null_witness"))
+        elif full.get("original_null_witness") is not None:
+            raise CampaignError("tilted magnetic table cannot claim the parallel original-null witness")
+        for field, maximum in (("maximum_discarded_energy_fraction", 1e-6), ("retarded_peak_error_bound", .005)):
+            values = full.get(field)
+            if not isinstance(values, list) or len(values) != 2 or any(not _is_finite_number(v) or not 0 <= v <= maximum for v in values):
+                raise CampaignError("magnetoionic discarded-energy and retarded-error gates require finite in-bound values")
+        solver_power_tolerance = 1e-8
+        reflected_amplitude_bound = math.sqrt(1 + solver_power_tolerance) + math.sqrt(2)*.005
+        reflected_power_excess_tolerance = reflected_amplitude_bound*reflected_amplitude_bound - 1
+        if (not _is_finite_number(full.get("maximum_frozen_reflected_power_excess")) or
+                not 0 <= full["maximum_frozen_reflected_power_excess"] <= reflected_power_excess_tolerance or
+                not _is_finite_number(full.get("maximum_solver_output_power")) or
+                not 0 <= full["maximum_solver_output_power"] <= 1 + solver_power_tolerance or
+                not _is_finite_number(full.get("minimum_longitudinal_permittivity")) or
+                not (0 if parallel else 1e-8) <= full["minimum_longitudinal_permittivity"] <= 1 or
+                full.get("minimum_carrier_power_xy_total") is None or full.get("maximum_carrier_power_xy_total") is None):
+            raise CampaignError("magnetoionic frozen-passivity and longitudinal-resonance diagnostics are missing or inadmissible")
+        power_min, power_max = full["minimum_carrier_power_xy_total"], full["maximum_carrier_power_xy_total"]
+        if (not isinstance(power_min, list) or not isinstance(power_max, list) or len(power_min) != 3 or len(power_max) != 3 or
+                any(not _is_finite_number(v) or not 0 <= v <= 1+reflected_power_excess_tolerance for v in power_min+power_max) or
+                any(a > b for a, b in zip(power_min, power_max))):
+            raise CampaignError("magnetoionic fixed-basis carrier power diagnostics must be finite passive x/y bounds")
+        for field in ("table_workspace_bytes", "stream_workspace_bytes"):
+            if not _is_nonnegative_int(full.get(field)) or full[field] == 0:
+                raise CampaignError("magnetoionic execution requires measured table and stream workspace")
+        if full["table_workspace_bytes"] + full["stream_workspace_bytes"] > 2097152 or not _is_nonnegative_int(channel.get("workspace_bytes")) or channel["workspace_bytes"] < full["table_workspace_bytes"]+full["stream_workspace_bytes"]:
+            raise CampaignError("magnetoionic table and stream must fit reserved and charged workspace")
+        if not _is_finite_number(full.get("preparation_seconds")) or full["preparation_seconds"] <= 0:
+            raise CampaignError("magnetoionic execution must report actual table preparation time")
+        low, high = full.get("source_minimum_frequency_hz"), full.get("source_maximum_frequency_hz")
+        if not _is_finite_number(low) or not _is_finite_number(high) or not -384 <= low <= high <= 384:
+            raise CampaignError("magnetoionic executed source must remain within its qualified ±384 Hz band")
+        timing = receipt.get("timing")
+        if oracle_mode:
+            if (not isinstance(timing, dict) or not _is_finite_number(timing.get("wall_seconds")) or
+                    not full["preparation_seconds"] <= timing["wall_seconds"] or timing.get("capacity_qualified") is not False):
+                raise CampaignError("magnetoionic oracle table construction must remain within its recorded wall time")
+        elif (not isinstance(timing, dict) or any(not _is_finite_number(timing.get(k)) for k in ("channel_preparation_seconds", "wall_seconds")) or
+                not full["preparation_seconds"] <= timing["channel_preparation_seconds"] <= timing["wall_seconds"] or
+                timing.get("isolated_receiver_service_measured") is not False or timing.get("capacity_qualified") is not False):
+            raise CampaignError("magnetoionic table construction remains charged to preparation and wall time")
+        regions = full.get("regions")
+        if not isinstance(regions, list) or len(regions) != 3:
+            raise CampaignError("magnetoionic capture requires before, transition and after vector energy regions")
+        start = round((transition_first*fs)) + 32
+        finish = start + round(transition_seconds*fs)
+        expected_counts = (min(start,horizon), max(0,min(finish,horizon)-start), max(0,horizon-finish))
+        energy_fields = ("incident_energy_sample_sum", "reflected_x_energy_sample_sum",
+                         "reflected_y_energy_sample_sum", "reflected_vector_energy_sample_sum",
+                         "selected_antenna_energy_sample_sum")
+        for region, name, count in zip(regions, ("before", "transition", "after"), expected_counts):
+            if (not isinstance(region, dict) or region.get("name") != name or region.get("samples") != count):
+                raise CampaignError("magnetoionic regional accounting must cover the complete physical profile transition")
+            names = ("incident_energy_sample_sum", "reflected_x_energy_sample_sum", "reflected_y_energy_sample_sum",
+                     "reflected_vector_energy_sample_sum", "selected_antenna_energy_sample_sum")
+            if any(not _is_finite_number(region.get(name)) or region[name] < 0 for name in names):
+                raise CampaignError("magnetoionic regional energies must be finite and nonnegative")
+            if not math.isclose(region["reflected_vector_energy_sample_sum"],
+                                region["reflected_x_energy_sample_sum"]+region["reflected_y_energy_sample_sum"],
+                                rel_tol=1e-10, abs_tol=1e-9) or not math.isclose(
+                    region["selected_antenna_energy_sample_sum"],
+                    region["reflected_"+("x" if component == 0 else "y")+"_energy_sample_sum"],
+                    rel_tol=1e-10, abs_tol=1e-9):
+                raise CampaignError("magnetoionic vector and fixed antenna projection energies disagree")
+        for key, region_key in zip(("input_energy_sample_sum", "reflected_x_energy_sample_sum",
+                                    "reflected_y_energy_sample_sum", "reflected_vector_energy_sample_sum",
+                                    "signal_energy_sample_sum"), energy_fields):
+            # Native channel totals contain incident and selected-antenna energy.
+            # Both component energies and their vector sum are reported by region;
+            # validate any redundant aggregate claim without requiring one.
+            if key not in channel and key not in ("input_energy_sample_sum", "signal_energy_sample_sum"):
+                continue
+            expected_energy = sum(region[region_key] for region in regions)
+            if not _is_finite_number(channel.get(key)) or not math.isclose(channel[key], expected_energy, rel_tol=1e-10, abs_tol=1e-9):
+                raise CampaignError("magnetoionic component energies must reconcile exactly with complete channel totals")
+        if episode.get("control", "wanted") == "noise" and (
+                any(any(region[field] != 0 for field in ("incident_energy_sample_sum", "reflected_x_energy_sample_sum",
+                    "reflected_y_energy_sample_sum", "reflected_vector_energy_sample_sum", "selected_antenna_energy_sample_sum"))
+                    for region in regions) or channel.get("input_energy_sample_sum") != 0 or
+                channel.get("signal_energy_sample_sum") != 0 or channel.get("contains_source_energy") is not False or
+                channel.get("contains_signal_energy") is not False):
+            raise CampaignError("magnetoionic noise control must preserve exact zero clean incident and projected energy")
+        return full
+
+    if not oracle_mode:
+        validate_rendered_channel(channel, horizon, source_stop)
+        return
+    oracle, presence = receipt.get("oracle"), receipt.get("presence_oracle")
+    if (not isinstance(oracle, dict) or not isinstance(presence, dict) or
+            plan.get("oracle_physical_channel_instances") != 3 or
+            plan.get("magnetoionic_diagnostic_scope") != "isolated single DATA bit under the known vector-FIR operator; neither a same-input full-message replay nor a complete dynamic excursion" or
+            oracle.get("kind") != "isolated single DATA bit, equal-prior binary known vector-FIR operator and synthetic white Gaussian noise" or
+            presence.get("kind") != "isolated single DATA bit under a known vector-FIR operator versus synthetic white Gaussian noise"):
+        raise CampaignError("magnetoionic oracle requires its isolated three-channel physical diagnostic scope")
+    for row in (oracle, presence):
+        if any(row.get(key) is not False for key in
+               ("same_input_full_message_replay", "complete_dynamic_excursion_required", "field_sensitivity_bound")):
+            raise CampaignError("magnetoionic isolated oracle cannot claim full-message or full-excursion field qualification")
+    if any(oracle.get(key) is not False for key in
+           ("includes_acquisition_or_completion", "finite_blocklength_capacity_bound", "realization_normalized")):
+        raise CampaignError("magnetoionic oracle must preserve unnormalized isolated-bit evaluator scope")
+    rendered, source_end = oracle.get("samples"), oracle.get("source_stop_sample")
+    if (not _is_nonnegative_int(rendered) or not _is_nonnegative_int(source_end) or source_end == 0 or
+            rendered < source_end+81 or plan.get("oracle_horizon_samples") != rendered or
+            oracle.get("signal_and_tail_horizon_samples") != source_end+81 or
+            oracle.get("capture_preroll_samples") != round(preroll*fs) or
+            oracle.get("channel_clock_origin_sample") != 0 or oracle.get("hypotheses_share_channel_seed") is not True or
+            not _is_finite_number(oracle.get("channel_tail_seconds")) or
+            not math.isclose(oracle["channel_tail_seconds"],81/fs,rel_tol=0,abs_tol=4*math.ulp(81/fs))):
+        raise CampaignError("magnetoionic oracle requires its actual isolated source, full causal tail and shared capture clock")
+    tables = [validate_rendered_channel(oracle.get(key),rendered,source_end) for key in
+              ("magnetoionic_channel_hypothesis_0", "magnetoionic_channel_hypothesis_1", "magnetoionic_channel_noisy")]
+    if len({table["table_sha256"] for table in tables}) != 1:
+        raise CampaignError("magnetoionic oracle hypotheses must share the same qualified coefficient table")
+    preparation = oracle.get("physical_table_preparation_seconds")
+    if (oracle.get("physical_table_rf_solves") != 3*rf_solves or
+            not _is_finite_number(preparation) or
+            not math.isclose(preparation,sum(table["preparation_seconds"] for table in tables),rel_tol=1e-10,abs_tol=1e-9) or
+            preparation > receipt["timing"]["wall_seconds"]):
+        raise CampaignError("magnetoionic oracle must charge all three physical RF tables and preparation times")
+    outcomes = receipt.get("outcomes")
+    if (not isinstance(outcomes, dict) or outcomes.get("receiver_executed") is not False or
+            outcomes.get("component_only") is not True or outcomes.get("completion_evaluated") is not False or
+            outcomes.get("correct_complete") is not False):
+        raise CampaignError("magnetoionic oracle cannot claim receiver execution or message completion")
+
+
 def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
     identity_fields = ("requested_scenario", "mode", "waveform", "seed", "control")
     missing_identity = [field for field in identity_fields if field not in receipt]
@@ -1945,6 +2455,8 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
         raise CampaignError("completed receipt is missing plan")
     _validate_profile_controls(plan, episode)
     _validate_fullwave_reflection(receipt, episode)
+    _validate_magnetoionic_reflection(receipt, episode)
+    _validate_gannon_replay(receipt, episode)
     if episode["mode"] != "gui-varying" and "hf_gui_varying_diagnostic" in receipt:
         raise CampaignError("unrequested GUI varying diagnostic in native receipt")
     expected_digest_slot = episode.get("capture_digest_slot", episode.get("search_slot", 0) if episode["mode"] == "hf-search" else None)

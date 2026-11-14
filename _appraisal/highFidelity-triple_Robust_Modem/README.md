@@ -26,6 +26,15 @@ rare-error probabilities or complete-receiver real-time capacity. The
 and [protocol](experiment-protocol.md) preserve those distinctions and the
 source limits in [`_ref`](../../_ref/highFidelity-triple_Robust_Modem).
 
+The [magnetic propagation and long-record continuation](hf-magnetoionic.md)
+adds a native two-polarization cold-plasma calculation, antenna cancellation
+derived from the same dielectric response, and two complete hour-long Gannon
+storm-era recordings. The simulator rejects an inadequately resolved deep null
+before admitting a refined waveform. Complete-message trials and conditional
+failure diagnostics remain separate from numerical checks. Recorded-voltage
+replay explicitly retains its measurement-noise confound; it is not a calibrated
+broadband channel or proof of field blackout tolerance.
+
 The [inference and propagation follow-up](hf-inference-and-propagation.md)
 adds 32 bounded observations, including 15 complete receivers. It separates
 phase-reachability from rate-support failures and retains GUI errors on clean
@@ -93,6 +102,10 @@ From the repository root:
 ```
 
 This configures an ignored `.build/` and links the production C++ modem.
+The magnetic/long-record extension passed **28/28 CTest groups in 83.59 s**,
+including 113 runner cases. Its [validation log](local-evidence/hf-magnetoionic/final-build-and-tests.log)
+and [source-bound communications results](hf-magnetoionic.md) keep software
+checks separate from successful messages and preserved failures.
 The physical/operating extension passed all **22 CTest groups in 81.52 s**
 ([log](.build/hf-coverage-checks.log)). A small diagnostic-report addition then
 passed the affected integration/runner groups again in 52.13 s
@@ -123,6 +136,8 @@ Current group coverage is:
 | `hf_gui_profile` | Canonical preset preparation, actual endpoint clock errors, margin semantics, Helper, noise-seed isolation and rejection |
 | `hf_fullwave` | Independent zero-index, Fresnel/slab, Joule-loss and smooth-barrier references; passive opaque layers and unresolved resonances |
 | `hf_fullwave_kernel` | Causal support, continuous-history interpolation, finite-band error gates and independent off-grid rejection of a frequency-sampling delay alias |
+| `hf_magnetoionic` | Cold vector-plasma scattering, independent Maxwell/analytic reductions, passivity, field reversal and singular rejection |
+| `hf_magnetoionic_kernel` | Fixed-basis interpolation, path-specific numerical inventories, hard local-null admission, finite memory and retained tails |
 | `hf_history` | 175 matched public-aperture block-history, projection, nuisance-rank and conditional-oracle checks |
 | `hf_phase_bank` | Frozen phase dictionary, matched projection, uncertainty and boundary regression checks |
 | `hf_public_statistics` | Exact effective-template FFT/direct-sum agreement, shared phase/FFT preparation parity, full priors, phase bounds and resource guards |
@@ -132,6 +147,7 @@ Current group coverage is:
 | `hf_phase_filter` | Normalized log-domain forward sums, exhaustive independent path references, finite phase/frequency support, partial groups and tiny-state recovery |
 | `hf_public_receiver` | Public arrival-grid closure, full prior mass, numerical support, telemetry isolation and memory admission |
 | `hf_replay` | 208 finite measured-record support, interpolation and full-record trace-integrity checks |
+| `hf_gannon_replay` | Exact long-record hashes/UTC grid, shared normalization, finite support, corruption rejection and measurement-noise confound |
 | `impairment_observables` | Independent AR(1)/shot moments and covariance, resonator response, ADC and AGC recovery |
 | `lunar_spectral` | Joint delay–Doppler covariance through 360 s, independent refinement, long integration and waveform parity |
 | `integration` | Actual native source/receiver, physical completion, noise/EOF, recovery, HF history and numerical-admission boundaries |

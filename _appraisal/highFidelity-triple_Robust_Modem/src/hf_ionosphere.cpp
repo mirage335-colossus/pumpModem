@@ -269,6 +269,11 @@ double channel_interpolation_tail_seconds(const ChannelSpec& spec, double fs) {
         require(fs == HfFullwaveKernelTable::sample_rate_hz, "full-wave reflection requires its fixed sample rate");
         return static_cast<double>(HfFullwaveKernelTable::taps_per_port - 1) / fs;
     }
+    if (spec.magnetoionic_reflection) {
+        require(fs == HfMagnetoionicKernelTable::sample_rate_hz,
+                "magnetoionic reflection requires its fixed sample rate");
+        return static_cast<double>(HfMagnetoionicKernelTable::taps_per_output - 1) / fs;
+    }
     return static_cast<double>(spec.interpolation_half_width + detail::hf_dispersion_halo_samples(spec)) / fs;
 }
 

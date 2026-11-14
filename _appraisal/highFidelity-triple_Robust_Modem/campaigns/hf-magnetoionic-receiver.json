@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "name": "hf-magnetoionic-receiver",
+  "purpose": "Frozen before numerical admission and decoder outcomes. Fixed tilted-field coupled reflected Jones path; fixed x/y receiving antennas, incident-plane C/N0 brackets, existing 7ms native spread comparison, fresh B payload/time-history holdout on the same physical manifold, and matched noise/wrong-key controls. Numerical admission precedes execution. No threshold fitting, waveform gain normalization, or inferred population failure rate.",
+  "max_wall_seconds": 4800,
+  "per_trial_wall_seconds": 600,
+  "max_trials": 8,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "waveform": "reference",
+      "seed": 65001,
+      "noise_seed": 75001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "id": "magnetic-x-CN0-40",
+      "scenario": "hf-magnetoionic-x",
+      "cn0_db_hz": 40
+    },
+    {
+      "waveform": "reference",
+      "seed": 65001,
+      "noise_seed": 75001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "id": "magnetic-x-CN0-20",
+      "scenario": "hf-magnetoionic-x",
+      "cn0_db_hz": 20
+    },
+    {
+      "waveform": "reference",
+      "seed": 65001,
+      "noise_seed": 75001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "id": "magnetic-x-CN0-0",
+      "scenario": "hf-magnetoionic-x",
+      "cn0_db_hz": 0
+    },
+    {
+      "waveform": "reference",
+      "seed": 65001,
+      "noise_seed": 75001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "id": "magnetic-y-CN0-40",
+      "scenario": "hf-magnetoionic-y",
+      "cn0_db_hz": 40
+    },
+    {
+      "waveform": "reference",
+      "seed": 65001,
+      "noise_seed": 75001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "id": "magnetic-x-spread-CN0-20",
+      "scenario": "hf-magnetoionic-x-spread",
+      "cn0_db_hz": 20
+    },
+    {
+      "waveform": "reference",
+      "seed": 65002,
+      "noise_seed": 75002,
+      "bit_seconds": 64,
+      "message": "B",
+      "mode": "receive",
+      "control": "wanted",
+      "id": "magnetic-x-time-payload-holdout",
+      "scenario": "hf-magnetoionic-x-holdout",
+      "cn0_db_hz": 20
+    },
+    {
+      "waveform": "reference",
+      "seed": 65001,
+      "noise_seed": 75001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "noise",
+      "id": "magnetic-x-noise",
+      "scenario": "hf-magnetoionic-x",
+      "cn0_db_hz": 40
+    },
+    {
+      "waveform": "reference",
+      "seed": 65001,
+      "noise_seed": 75001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wrong-key",
+      "id": "magnetic-x-wrong-key",
+      "scenario": "hf-magnetoionic-x",
+      "cn0_db_hz": 40
+    }
+  ]
+}

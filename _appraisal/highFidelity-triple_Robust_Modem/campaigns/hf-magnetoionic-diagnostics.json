@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "name": "hf-magnetoionic-diagnostics",
+  "purpose": "Fixed isolated first-bit known-channel diagnostics for tilted20 and numerically admitted parallel20. Neither is same-input full-message IQ or an implementable blind-receiver sensitivity bound. Three physical table preparations per row remain charged. Parallel row withheld if its numerical null qualification fails.",
+  "max_wall_seconds": 1200,
+  "per_trial_wall_seconds": 600,
+  "max_trials": 2,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "id": "magnetic-x-isolated-slot0",
+      "scenario": "hf-magnetoionic-x",
+      "waveform": "reference",
+      "seed": 65001,
+      "noise_seed": 75001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "oracle",
+      "control": "wanted",
+      "cn0_db_hz": 20,
+      "oracle_slot": 0
+    },
+    {
+      "id": "magnetic-parallel-x-isolated-slot0",
+      "scenario": "hf-magnetoionic-parallel-x",
+      "waveform": "reference",
+      "seed": 66001,
+      "noise_seed": 76001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "oracle",
+      "control": "wanted",
+      "cn0_db_hz": 20,
+      "oracle_slot": 0
+    }
+  ]
+}

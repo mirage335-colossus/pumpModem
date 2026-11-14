@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "name": "hf-magnetoionic-midpoint",
+  "purpose": "One frozen follow-up after tilted40 succeeds and tilted20 loses opening bits. The isolated20 first-bit diagnostic has only9.09percent known-signal presence probability at the declared false-alarm target. Test exactly30dB-Hz on the same64s requested calendar/physical path/source/noise roots to narrow the20dB bracket; no further adaptive SNR search.",
+  "max_wall_seconds": 600,
+  "per_trial_wall_seconds": 600,
+  "max_trials": 1,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "id": "magnetic-x-CN0-30-midpoint",
+      "scenario": "hf-magnetoionic-x",
+      "mode": "receive",
+      "control": "wanted",
+      "waveform": "reference",
+      "seed": 65001,
+      "noise_seed": 75001,
+      "bit_seconds": 64,
+      "message": "A",
+      "cn0_db_hz": 30
+    }
+  ]
+}

@@ -7,6 +7,28 @@ different questions and are reported separately. No natural-condition
 probability, field calibration, or universal sensitivity floor follows from
 these deterministic cases or small fixed-seed holdouts.
 
+The [magnetic/long-record expansion](hf-magnetoionic.md) directly addresses two
+previously absent mechanisms. A vector cold-plasma operator couples reflection,
+absorption, dispersion and fixed-antenna polarization loss; independent mesh
+and profile checks expose and then resolve a deep-null interpolation defect.
+Two exact hour-long storm-era voltage records add real temporal structure with
+explicit recording-noise and bandwidth limitations. The tilted-field receiver
+cohort completes two of six wanted messages; all five wanted parallel-field
+messages and three of four recorded-voltage messages complete. The parallel
+duration pair succeeds with essentially equal incident energy and 4.7% less
+received energy at twice the actual bit duration. The three wrong-key controls
+produce seven, thirteen and thirteen false DATA decisions respectively, but
+no accepted messages. A missed recorded
+slot has strong conditional known-waveform information; that private isolated
+diagnostic does not establish a complete-message receiver repair.
+
+The tilted first-slot reference instead has only 9.09% ideal isolated presence
+detection at the declared false-alarm target. One fixed 30 dB-Hz follow-up
+recovers the complete message with identical source/calendar/clean energies,
+narrowing that configuration's bracket to 20 fails / 30 succeeds. This extension
+totals 22 complete-receiver observations and four private diagnostics; numerical
+probes and software checks are separate.
+
 The [inference and propagation follow-up](hf-inference-and-propagation.md)
 adds 32 completed, uncensored observations (15 complete receivers and 17
 component/private/shadow diagnostics). It separates phase-reachability and

@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "name": "hf-gannon-receiver",
+  "purpose": "Frozen before decoder outcomes. Two complete hours recorded at separate times by the same receiver/channel/day, fixed shared two-hour RMS, and fresh half-hour placement/payload. Observed-voltage multiplication includes measurement noise and is not a calibrated noiseless channel, broadband CIR, field availability test or link budget. Synthetic measurement-noise confound check precedes reception.",
+  "max_wall_seconds": 3600,
+  "per_trial_wall_seconds": 600,
+  "max_trials": 6,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "id": "gannon-1700-40",
+      "scenario": "hf-gannon-1700",
+      "waveform": "reference",
+      "seed": 67001,
+      "noise_seed": 77001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 40
+    },
+    {
+      "id": "gannon-1700-20",
+      "scenario": "hf-gannon-1700",
+      "waveform": "reference",
+      "seed": 67001,
+      "noise_seed": 77001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 20
+    },
+    {
+      "id": "gannon-2000-20",
+      "scenario": "hf-gannon-2000",
+      "waveform": "reference",
+      "seed": 67001,
+      "noise_seed": 77001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 20
+    },
+    {
+      "id": "gannon-2000-late-holdout",
+      "scenario": "hf-gannon-2000-late",
+      "waveform": "reference",
+      "seed": 67002,
+      "noise_seed": 77002,
+      "bit_seconds": 64,
+      "message": "B",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 20
+    },
+    {
+      "id": "gannon-1700-noise",
+      "scenario": "hf-gannon-1700",
+      "waveform": "reference",
+      "seed": 67001,
+      "noise_seed": 77001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "noise",
+      "cn0_db_hz": 40
+    },
+    {
+      "id": "gannon-1700-wrong-key",
+      "scenario": "hf-gannon-1700",
+      "waveform": "reference",
+      "seed": 67001,
+      "noise_seed": 77001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wrong-key",
+      "cn0_db_hz": 40
+    }
+  ]
+}

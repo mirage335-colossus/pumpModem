@@ -66,6 +66,66 @@ def main() -> None:
     for extra in (["--helper"], ["--duration-seconds", "600"]):
         rejected = invoke("--mode", "plan", *fullwave_args, *extra, code=5)
         assert rejected["status"] == "unavailable", rejected
+    magnetic_args = ["--scenario", "hf-magnetoionic-x", "--bit-seconds", "64", "--message", "A"]
+    magnetic = invoke("--mode", "plan", *magnetic_args)["plan"]
+    magnetic_spec = magnetic["magnetoionic_reflection"]
+    assert magnetic["channel_renderer"] == "hf_magnetoionic_reflection", magnetic
+    assert magnetic_spec == scenarios["hf-magnetoionic-x"]["channel"]["magnetoionic_reflection"], magnetic
+    assert magnetic_spec["first_lag_samples"] == 1 and magnetic_spec["last_lag_samples"] == 81, magnetic
+    assert magnetic_spec["receive_polarization"] == "fixed_laboratory_x", magnetic
+    assert magnetic_spec["physical_path"] == "tilted_lower", magnetic
+    assert magnetic_spec["profile_intervals"] == 16 and magnetic_spec["maximum_rf_solves"] == 3444, magnetic
+    assert magnetic_spec["orthogonal_field_supplied_to_receiver"] is False, magnetic
+    assert magnetic_spec["minimum_complete_source_seconds"] == 660, magnetic
+    assert magnetic["source_stop_sample"] >= (660 + .25) * 1920, magnetic
+    assert magnetic["public_bounds"]["receiver_filter_halo_samples"] == 80, magnetic
+    assert magnetic["public_bounds"]["arrival_low_seconds"] == 1 / 1920, magnetic
+    assert magnetic["public_bounds"]["arrival_high_seconds"] == 81 / 1920, magnetic
+    assert math.isclose(magnetic["channel_tail_seconds"], 81 / 1920), magnetic
+    assert magnetic["magnetoionic_reflection_source_band_checked"] is False, magnetic
+    assert magnetic["magnetoionic_reflection_table_built"] is False, magnetic
+    assert magnetic["physical_kernel_supplied_to_receiver"] is False, magnetic
+    for control in ("noise", "wrong-key"):
+        limited = invoke("--mode", "receive", *magnetic_args, "--control", control, "--max-samples", "1", code=3)
+        assert limited["status"] == "resource_limit" and "channel" not in limited, limited
+        assert limited["plan"]["magnetoionic_reflection_table_built"] is False, limited
+        assert limited["plan"]["magnetoionic_reflection"] == magnetic_spec, limited
+    for name, component, span in (("hf-magnetoionic-y", 1, 660), ("hf-magnetoionic-x-holdout", 0, 960),
+                                  ("hf-magnetoionic-x-spread", 0, 660), ("hf-magnetoionic-parallel-x", 0, 660),
+                                  ("hf-magnetoionic-parallel-y", 1, 660), ("hf-magnetoionic-parallel-x-holdout", 0, 960)):
+        variant = invoke("--mode", "plan", "--scenario", name, "--bit-seconds", "64", "--message", "A")["plan"]
+        assert variant["magnetoionic_reflection"]["receive_component"] == component, variant
+        assert variant["magnetoionic_reflection"]["minimum_complete_source_seconds"] == span, variant
+        assert variant["public_bounds"]["spread_seconds"] == (.007 if name.endswith("-spread") else 0), variant
+        assert variant["magnetoionic_reflection_table_built"] is False, variant
+        descriptor = variant["magnetoionic_reflection"]
+        if "-parallel-" in name:
+            assert descriptor["physical_path"] == "parallel_upper", variant
+            assert descriptor["profile_intervals"] == 64 and descriptor["maximum_rf_solves"] == 12039, variant
+            assert descriptor["magnetic_field_tesla"] == [0, 0, 50e-6], variant
+            assert descriptor["profile_q0"]["f_peak_plasma_frequency_hz"] > descriptor["carrier_hz"], variant
+        else:
+            assert descriptor["physical_path"] == "tilted_lower", variant
+            assert descriptor["profile_intervals"] == 16 and descriptor["maximum_rf_solves"] == 3444, variant
+            assert descriptor["profile_q0"] == magnetic_spec["profile_q0"], variant
+    for extra in (["--helper"], ["--duration-seconds", "1000"]):
+        rejected = invoke("--mode", "plan", *magnetic_args, *extra, code=5)
+        assert rejected["status"] == "unavailable", rejected
+    short_magnetic = invoke(*short_args, "--scenario", "hf-magnetoionic-x", code=5)
+    assert short_magnetic["status"] == "unavailable" and "source must span" in short_magnetic["reason"], short_magnetic
+    for name in ("hf-magnetoionic-x", "hf-magnetoionic-parallel-x"):
+        limited_oracle = invoke("--mode", "oracle", "--scenario", name, "--message", "e",
+                                "--bit-seconds", "1", "--max-samples", "1", code=3)
+        assert limited_oracle["oracle_protocol_eligible"], limited_oracle
+        assert limited_oracle["plan"]["complete_transition_span_required"] is False, limited_oracle
+        assert limited_oracle["plan"]["magnetoionic_reflection_table_built"] is False, limited_oracle
+        assert limited_oracle["plan"]["oracle_horizon_samples"] < 660 * 1920, limited_oracle
+        assert limited_oracle["plan"]["public_bounds"]["receiver_filter_halo_samples"] == 80, limited_oracle
+        assert "same-input full-message" in limited_oracle["plan"]["magnetoionic_diagnostic_scope"], limited_oracle
+        for extra in (["--control", "noise"], ["--control", "wrong-key"], ["--helper"]):
+            rejected_oracle = invoke("--mode", "oracle", "--scenario", name, "--message", "e",
+                                     "--bit-seconds", "1", *extra, code=5)
+            assert rejected_oracle["status"] == "unavailable", rejected_oracle
     gui_args = ["--scenario", "hf-gui-native", "--seed", "41", "--noise-seed", "52",
                 "--gui-spread", "hf-worst", "--gui-selective", "each-65", "--gui-clock-edge",
                 "--bit-seconds", "2", "--cn0", "40", "--gui-target-cn0-db-hz", "32"]
@@ -192,6 +252,48 @@ def main() -> None:
     clock_trace = scenarios["hf-ding-clock41"]["channel"]["paths"][0]["hf"]["measured_envelope"]
     assert math.isclose(clock_trace["sample_rate_hz"], 2048 / 41, rel_tol=1e-15), clock_trace
     assert clock_trace["source_sha256"] == traces[0]["source_sha256"], clock_trace
+    assert "no time vector" in traces[0]["timing_assumption"], traces[0]
+    assert "one whole-record RMS" in traces[0]["normalization_scope"], traces[0]
+    gannon_traces = {}
+    for name, hour, offset in (("hf-gannon-1700", 17, 0), ("hf-gannon-2000", 20, 0),
+                               ("hf-gannon-2000-late", 20, 1800)):
+        trace = scenarios[name]["channel"]["paths"][0]["hf"]["measured_envelope"]
+        gannon_traces[name] = trace
+        assert trace["samples"] == 36000 and trace["sample_rate_hz"] == 10, trace
+        assert trace["support_seconds"] == 3599.9 and trace["remaining_support_seconds"] == 3599.9 - offset, trace
+        assert trace["utc_hour"] == hour and trace["record_offset_seconds"] == offset, trace
+        assert trace["capture_utc_first_sample_epoch_seconds"] == trace["record_utc_first_sample_epoch_seconds"] + offset, trace
+        assert trace["stream_uuid"] == "0e51e045ca1d42868f3c9cd483112bd7", trace
+        assert trace["source_subchannels"] == 9 and trace["zero_based_column"] == 4, trace
+        assert trace["nominal_center_frequency_hz"] == 10e6, trace
+        assert "/2024-05-10T00-00-00/" in trace["source_archive_member"], trace
+        assert trace["source_hdf5_sha256"] == trace["source_sha256"], trace
+        assert trace["normalization_cohort_utc_hours"] == [17, 20] and trace["normalization_cohort_knots"] == 72000, trace
+        assert trace["recorded_noise_becomes_signal_proportional"] is True, trace
+        assert trace["noise_free_channel_response"] is False and trace["field_false_alarm_or_availability_qualified"] is False, trace
+        assert trace["receiver_clock_discipline_qualified"] is False, trace
+        plan = invoke("--mode", "plan", "--scenario", name, "--message", "A")["plan"]
+        assert plan["fits_numerical_horizon"] and plan["wire_bits"] == 13, plan
+        assert plan["measured_noise_is_multiplicative"] and not plan["field_noise_control_qualified"], plan
+    first_gannon = gannon_traces["hf-gannon-1700"]
+    second_gannon = gannon_traces["hf-gannon-2000"]
+    assert first_gannon["normalization_gain"] == second_gannon["normalization_gain"], gannon_traces
+    assert second_gannon["raw_mean_power"] > 10 * first_gannon["raw_mean_power"], gannon_traces
+    for control in ("noise", "wrong-key"):
+        limited = invoke("--mode", "receive", "--scenario", "hf-gannon-2000-late", "--message", "A",
+                         "--control", control, "--max-samples", "1", code=3)
+        assert limited["status"] == "resource_limit" and "channel" not in limited, limited
+    gannon_oracle = invoke("--mode", "oracle", "--scenario", "hf-gannon-1700", "--message", "A",
+                          "--max-samples", "1", code=3)
+    assert gannon_oracle["oracle_protocol_eligible"], gannon_oracle
+    gannon_helper = invoke("--mode", "plan", "--scenario", "hf-gannon-1700", "--helper", code=5)
+    assert gannon_helper["status"] == "unavailable" and "Helper-off" in gannon_helper["reason"], gannon_helper
+    for name in ("hf-gannon-1700", "hf-gannon-2000-late"):
+        noise_record = invoke("--mode", "channel", "--scenario", name, "--message", "A", "--control", "noise",
+                              "--duration-seconds", "1", "--seed", "73")
+        assert noise_record["status"] == "completed", noise_record
+        assert not noise_record["channel"]["contains_source_energy"] and not noise_record["channel"]["contains_signal_energy"], noise_record
+        assert noise_record["plan"]["field_noise_control_qualified"] is False, noise_record
     measured_helper = invoke("--mode", "plan", "--scenario", "hf-ding-measured", "--helper", code=5)
     assert measured_helper["status"] == "unavailable" and "Helper-off" in measured_helper["reason"], measured_helper
     measured_plan = invoke("--mode", "plan", "--scenario", "hf-ding-measured", "--waveform", "reference")["plan"]

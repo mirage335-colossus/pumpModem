@@ -8,6 +8,7 @@
 #include "appraisal/hf_public_receiver.hpp"
 #include "appraisal/hf_phase_refinement.hpp"
 #include "appraisal/hf_replay.hpp"
+#include "appraisal/hf_gannon_replay.hpp"
 #include "appraisal/lunar_spectral.hpp"
 #include "appraisal/vlf_diagnostic.hpp"
 #include "datapump/triad_acceleration.hpp"
@@ -434,7 +435,34 @@ Json fullwave_reflection_json() {
         {"filter_halo_samples",Table::taps_per_port-1},{"maximum_rf_solves",Table::maximum_rf_solves},
         {"preparation_workspace_bound_bytes",Table::preparation_workspace_bound_bytes}});
 }
-Json channel_parameters(const appraisal::ChannelSpec& c) {
+Json magnetoionic_reflection_json(const appraisal::HfMagnetoionicReflectionSpec& spec) {
+    using Table=appraisal::HfMagnetoionicKernelTable;
+    const auto magnetic_field=Table::field_at_path(spec.path);
+    const auto profile=[](const appraisal::HfVerticalColumn& p) {
+        return object({{"f_peak_plasma_frequency_hz",p.f_peak_plasma_frequency_hz},
+            {"f_collision_per_second",p.f_collision_per_second},
+            {"d_peak_electron_density_per_m3",p.d_peak_electron_density_per_m3}});
+    };
+    return object({{"port","reflection"},{"carrier_hz",Table::carrier_hz},{"sample_rate_hz",Table::sample_rate_hz},
+        {"occupied_half_band_hz",Table::occupied_half_band_hz},{"normal_incidence",true},
+        {"physical_path",spec.path==appraisal::HfMagnetoionicPath::parallel_upper?"parallel_upper":"tilted_lower"},
+        {"magnetic_field_tesla",Json::Array{magnetic_field[0],magnetic_field[1],magnetic_field[2]}},
+        {"transmit_polarization","fixed_laboratory_x"},{"receive_polarization",spec.receive_component==0?"fixed_laboratory_x":"fixed_laboratory_y"},
+        {"receive_component",spec.receive_component},{"orthogonal_field_supplied_to_receiver",false},
+        {"profile_q0",profile(Table::profile_at_q(0,spec.path))},{"profile_q1",profile(Table::profile_at_q(1,spec.path))},
+        {"transition_first_seconds",spec.transition_first_seconds},{"transition_seconds",spec.transition_seconds},
+        {"minimum_complete_source_seconds",spec.transition_first_seconds+spec.transition_seconds},
+        {"interpolation","fixed_lab_cubic_hermite_output_time_half_cosine"},
+        {"modelling_delay_samples",Table::modelling_delay_samples},
+        {"taps_per_output",Table::taps_per_output},{"first_lag_samples",Table::first_lag_samples()},
+        {"last_lag_samples",Table::last_lag_samples()},{"filter_halo_samples",Table::taps_per_output-1},
+        {"profile_intervals",Table::profile_intervals(spec.path)},{"frequency_bins",Table::frequency_bins},
+        {"maximum_rf_solves",Table::rf_solve_limit(spec.path)},{"production_step_m",Table::production_step_m},
+        {"witness_step_m",Table::witness_step_m},{"complex_error_tolerance",Table::complex_tolerance},
+        {"discarded_energy_tolerance",Table::discarded_energy_tolerance},{"rate_peak_tolerance",Table::rate_peak_tolerance},
+        {"preparation_workspace_bound_bytes",Table::preparation_workspace_bound_bytes}});
+}
+Json channel_parameters(const appraisal::ChannelSpec& c,std::string_view scenario_id={}) {
     Json::Array paths;Hash path_hash;double power=0;
     const bool extended=std::any_of(c.paths.begin(),c.paths.end(),[](const auto& p){return p.hf.has_value();});
     const auto hash_bytes=[&](const void* value,std::size_t size){
@@ -559,6 +587,34 @@ Json channel_parameters(const appraisal::ChannelSpec& c) {
                         {"unwrapped_phase_linear_detrended_std_radians",statistics.unwrapped_phase_linear_detrended_std_radians},
                         {"fitted_phase_slope_radians_per_second",statistics.fitted_phase_slope_radians_per_second},
                         {"maximum_principal_phase_increment_radians",statistics.maximum_principal_phase_increment_radians}})}});
+                if(scenario_id.starts_with("hf-gannon-")) {
+                    const auto& info=appraisal::hf_gannon_2024_info(scenario_id=="hf-gannon-1700"?17:20);
+                    measured["dataset"]="HamSCI PSWS HF Doppler observations of the 2024 Gannon geomagnetic storm";
+                    measured["dataset_doi"]="10.5281/zenodo.20466479";
+                    measured["timing_assumption"]="recorded Digital RF 10/1 sample-rate ratio and contiguous sample indices establish the stored UTC grid; independent clock metrology remains unqualified";
+                    measured["record_utc_first_sample_epoch_seconds"]=info.utc_first_sample_epoch_seconds;
+                    measured["capture_utc_first_sample_epoch_seconds"]=static_cast<double>(info.utc_first_sample_epoch_seconds)+h.measured_offset_seconds;
+                    measured["utc_hour"]=info.utc_hour;
+                    measured["stream_uuid"]=info.stream_uuid;
+                    measured["source_archive_member"]=info.source_member;
+                    measured["source_hdf5_sha256"]=info.source_hdf5_sha256;
+                    measured["source_subchannels"]=9;
+                    measured["zero_based_column"]=info.zero_based_column;
+                    measured["nominal_center_frequency_hz"]=info.nominal_center_frequency_hz;
+                    measured["normalization_scope"]="one joint RMS across both complete fixed 17 and 20 UTC records (72000 knots); no separate hour or observation normalization";
+                    measured["normalization_cohort_utc_hours"]=Json::Array{17,20};
+                    measured["normalization_cohort_knots"]=72000;
+                    measured["normalization_preserves_inter_record_power_ratio"]=true;
+                    measured["statistics_scope"]="selected observed complex voltage record after the shared two-record scale; includes beacon, receiver noise and interference";
+                    measured["observation_model"]="recorded voltage = beacon response + receiver noise/interference; the replay multiplies the modem waveform by this voltage";
+                    measured["recorded_noise_becomes_signal_proportional"]=true;
+                    measured["transmitter_identification"]="nominal 10MHz may contain both WWV and WWVH; no transmitter separation";
+                    measured["noise_free_channel_response"]=false;
+                    measured["wideband_channel_response_qualified"]=false;
+                    measured["field_false_alarm_or_availability_qualified"]=false;
+                    measured["absolute_link_level_qualified"]=false;
+                    measured["receiver_clock_discipline_qualified"]=false;
+                }
             }
             hf=object({{"group_delay_motion",object({{"amplitude_seconds",d.amplitude_seconds},{"period_seconds",d.period_seconds},
                     {"phase_radians",d.phase_radians},{"couple_carrier_phase",d.couple_carrier_phase}})},
@@ -604,6 +660,10 @@ Json channel_parameters(const appraisal::ChannelSpec& c) {
         result["renderer"]="hf_fullwave_reflection";
         result["fullwave_reflection"]=fullwave_reflection_json();
     }
+    if(c.magnetoionic_reflection) {
+        result["renderer"]="hf_magnetoionic_reflection";
+        result["magnetoionic_reflection"]=magnetoionic_reflection_json(*c.magnetoionic_reflection);
+    }
     return result;
 }
 Json scenario_json(const appraisal::Scenario& s) {
@@ -613,11 +673,16 @@ Json scenario_json(const appraisal::Scenario& s) {
         {"reference_received_dbm",s.physical_level_connected?Json(s.reference_received_dbm):Json{}},
         {"reference_noise_dbm_hz",s.physical_level_connected?Json(s.reference_noise_dbm_hz):Json{}},
         {"channel",native_gui?object({{"renderer","canonical_gui_streaming_channel"},{"parameters_location","plan.gui_profile"},
-            {"rf_shift_hz",s.channel.rf_hz}}):channel_parameters(s.channel)}});
+            {"rf_shift_hz",s.channel.rf_hz}}):channel_parameters(s.channel,s.id)}});
     if(s.channel.lunar)
         result["numerical_adequacy"]=object({{"qualification_horizon_seconds",s.numerical_horizon_seconds},
             {"scope","joint Doppler-delay spectral approximation; independent whole-horizon covariance and projection checks required"},
             {"empirical_validation",false},{"reference","models.md: full-episode lunar spectral representation"}});
+    else if(s.id.starts_with("hf-gannon-"))
+        result["numerical_adequacy"]=object({{"qualification_horizon_seconds",s.numerical_horizon_seconds},
+            {"scope","finite observed-voltage Cartesian interpolation on the verified stored UTC grid; recorded noise becomes signal-proportional"},
+            {"empirical_validation",false},{"empirical_record_provenance_verified",true},
+            {"empirical_channel_calibration",false},{"reference","fixtures/hf-gannon-2024/README.md"}});
     else if(std::any_of(s.channel.paths.begin(),s.channel.paths.end(),[](const auto& p){return p.hf.has_value();}))
         result["numerical_adequacy"]=object({{"qualification_horizon_seconds",s.numerical_horizon_seconds},
             {"scope","continuous local phase/group-delay, scalar Jones-port projection and mode-transition model; conditional numerical tests are distinct from field calibration"},
@@ -764,6 +829,13 @@ Setup setup_native_gui(const Options& o,std::stop_token stop) {
 Setup setup(const Options& o,std::stop_token stop) {
     if(o.scenario=="hf-gui-native")return setup_native_gui(o,stop);
     auto scenario=appraisal::make_scenario(o.scenario);
+    if(scenario.id.starts_with("hf-gannon-")) {
+        const bool allowed_mode=o.mode=="plan"||o.mode=="channel"||o.mode=="receive"||o.mode=="oracle";
+        const bool allowed_control=o.control=="wanted"||
+            ((o.mode=="receive"||o.mode=="channel")&&(o.control=="noise"||o.control=="wrong-key"));
+        if(!allowed_mode||!allowed_control||o.service_replay||o.hf_public_phase_receiver||o.hf_compare_admitted_models)
+            throw Unavailable("Gannon observed-voltage replay supports plan/channel/receive or wanted-only oracle, without service replay or experimental receiver policies");
+    }
     if(scenario.channel.fullwave_reflection) {
         if((o.mode!="plan"&&o.mode!="channel"&&o.mode!="receive")||o.backend!="cpu"||o.waveform!="reference"||
            o.pulse!="rrc"||o.helper||(o.control!="wanted"&&(o.mode!="receive"||o.control!="noise"))||
@@ -771,6 +843,14 @@ Setup setup(const Options& o,std::stop_token stop) {
            o.service_replay||o.hf_public_phase_receiver||o.hf_compare_admitted_models||o.hf_trajectory_seed||
            o.hf_trajectory_offset_seconds)
             throw Unavailable("full-wave reflection requires reference CPU plan/channel/receive, wanted or receive-only noise, Helper/FEC off, and the default capture geometry");
+    }
+    if(scenario.channel.magnetoionic_reflection) {
+        if((o.mode!="plan"&&o.mode!="channel"&&o.mode!="receive"&&o.mode!="oracle")||o.backend!="cpu"||o.waveform!="reference"||
+           o.pulse!="rrc"||o.helper||(o.control!="wanted"&&(o.mode!="receive"||(o.control!="noise"&&o.control!="wrong-key")))||
+           o.fec!="off"||o.duration_override||o.capture_lead_seconds||o.design_options||
+           o.service_replay||o.hf_public_phase_receiver||o.hf_compare_admitted_models||o.hf_trajectory_seed||
+           o.hf_trajectory_offset_seconds)
+            throw Unavailable("magnetoionic reflection requires reference CPU plan/channel/receive or wanted-only oracle, wanted or receive-only noise/wrong-key, Helper/FEC off, and the fixed capture geometry");
     }
     if(o.design_options)appraisal::apply_hf_trajectory_design(scenario,o.design);
     if(o.hf_trajectory_seed) {
@@ -895,6 +975,12 @@ Setup setup(const Options& o,std::stop_token stop) {
     if(s.scenario.channel.fullwave_reflection&&s.source_stop<
         checked_samples(appraisal::HfFullwaveReflectionSpec::minimum_source_seconds+pc.capture_lead_seconds,rc.sample_rate_hz))
         throw Unavailable("full-wave reflection source must span the complete predeclared 60+480 second profile-test envelope");
+    if(s.scenario.channel.magnetoionic_reflection&&o.mode!="oracle") {
+        const auto& magnetic=*s.scenario.channel.magnetoionic_reflection;
+        if(s.source_stop<checked_samples(magnetic.transition_first_seconds+magnetic.transition_seconds+
+                                        pc.capture_lead_seconds,rc.sample_rate_hz))
+            throw Unavailable("magnetoionic reflection source must span the complete predeclared physical profile transition");
+    }
     // Tail uses a conservative preliminary horizon, then is checked again at
     // the exact fixed point. No channel realization participates in these bounds.
     double guess=static_cast<double>(s.source_stop)/rc.sample_rate_hz+4*60+filter_tail;
@@ -937,7 +1023,8 @@ Setup setup(const Options& o,std::stop_token stop) {
         s.slot_horizon=s.truth.size();
         s.horizon=make_receiver_slot_plan(s.profile,s.receiver,s.slot_horizon-1).stop_sample;
     }
-    if(o.mode=="channel"&&!s.scenario.channel.fullwave_reflection)s.horizon=checked_samples(o.duration_seconds,rc.sample_rate_hz);
+    if(o.mode=="channel"&&!s.scenario.channel.fullwave_reflection&&!s.scenario.channel.magnetoionic_reflection)
+        s.horizon=checked_samples(o.duration_seconds,rc.sample_rate_hz);
     if(o.mode=="slot"||o.mode=="diagnose") {
         // Observe the entire first public aperture at its real duration. The
         // source remains the canonical message; only evaluator input ends here.
@@ -1085,6 +1172,27 @@ Json plan_json(const Setup& s,const Options& o) {
         result["path_sample_products"]=Json{};
         result["channel_tail_seconds_scope"]="complete causal reflected-port FIR support, from first input through the last retained lag";
         result["cn0_reference_plane"]="normalized incident DATA before reflected-port loss and fixed additive receiver noise";
+    }
+    if(s.scenario.channel.magnetoionic_reflection) {
+        result["channel_renderer"]="hf_magnetoionic_reflection";
+        result["magnetoionic_reflection"]=magnetoionic_reflection_json(*s.scenario.channel.magnetoionic_reflection);
+        result["magnetoionic_reflection_source_band_checked"]=false;
+        result["magnetoionic_reflection_table_built"]=false;
+        result["path_count"]=Json{};
+        result["path_sample_products"]=Json{};
+        result["channel_tail_seconds_scope"]="complete causal reflected Jones-column FIR support, from first input through the last retained lag";
+        result["cn0_reference_plane"]="normalized incident DATA before physical reflection and fixed antenna projection; fixed additive receiver noise";
+        result["receiver_dispersive_model"]=s.receiver.spread_delay_seconds==0?"native_single_ray":"native_sparse_delay_anchors";
+        result["physical_kernel_supplied_to_receiver"]=false;
+        result["complete_transition_span_required"]=o.mode!="oracle";
+        if(o.mode=="oracle")
+            result["magnetoionic_diagnostic_scope"]="isolated single DATA bit under the known vector-FIR operator; neither a same-input full-message replay nor a complete dynamic excursion";
+    }
+    if(s.scenario.id.starts_with("hf-gannon-")) {
+        result["channel_renderer"]="observed_voltage_multiplicative_replay";
+        result["cn0_reference_plane"]="incident normalized modem waveform before jointly scaled observed-voltage multiplication; independent synthetic white receiver noise";
+        result["measured_noise_is_multiplicative"]=true;
+        result["field_noise_control_qualified"]=false;
     }
     if(s.native_channel) {
         const auto& channel=*s.native_channel;
@@ -1258,6 +1366,93 @@ Json channel_json(const appraisal::ChannelReport& r,double fs) {
         receipt["source_maximum_frequency_hz"]=full.source_maximum_frequency_hz;
         receipt["regions"]=std::move(regions);
         result["fullwave_reflection"]=std::move(receipt);
+    }
+    if(r.magnetoionic_reflection) {
+        const auto& magnetic=*r.magnetoionic_reflection;
+        const auto& checks=magnetic.checks;
+        const auto errors=[](const std::array<appraisal::HfFullwaveBandError,2>& values) {
+            Json::Array result;
+            for(const auto& value:values)result.push_back(object({{"maximum",value.maximum},
+                {"profile_q",value.profile_q},{"offset_hz",value.offset_hz}}));
+            return result;
+        };
+        const auto pair=[](const std::array<double,2>& values) {
+            return Json::Array{values[0],values[1]};
+        };
+        const auto scales=[](const std::array<appraisal::HfMagnetoionicScaleChecks,2>& values) {
+            const auto witness=[](const appraisal::HfMagnetoionicScaleWitness& value) {
+                return value.raw_amplitude<0?Json{}:object({{"raw_amplitude",value.raw_amplitude},
+                    {"relative_error",value.relative_error<0?Json{}:Json{value.relative_error}},
+                    {"absolute_error",value.absolute_error},{"q",value.profile_q},{"rf_offset_hz",value.offset_hz}});
+            };
+            Json::Array result;
+            for(const auto& value:values)result.push_back(object({{"samples",value.samples},
+                {"exact_zero_raw",value.exact_zero_raw},{"absolute_error_at_least_raw",value.absolute_error_at_least_raw},
+                {"minimum_raw_amplitude",witness(value.minimum_raw_amplitude)},
+                {"maximum_relative_error",witness(value.maximum_relative_error)},
+                {"raw_at_maximum_absolute_error",witness(value.raw_at_maximum_absolute_error)}}));
+            return result;
+        };
+        constexpr std::array names{"before","transition","after"};
+        Json::Array regions;
+        for(std::size_t i=0;i<magnetic.regions.size();++i) {
+            const auto& region=magnetic.regions[i];
+            const auto ex=static_cast<double>(region.reflected_component_energy[0]);
+            const auto ey=static_cast<double>(region.reflected_component_energy[1]);
+            regions.push_back(object({{"name",names[i]},{"samples",region.samples},
+                {"incident_energy_sample_sum",static_cast<double>(region.incident_energy)},
+                {"reflected_x_energy_sample_sum",ex},{"reflected_y_energy_sample_sum",ey},
+                {"reflected_vector_energy_sample_sum",ex+ey},
+                {"selected_antenna_energy_sample_sum",magnetic.spec.receive_component==0?ex:ey}}));
+        }
+        auto receipt=magnetoionic_reflection_json(magnetic.spec);
+        receipt["table_sha256"]=magnetic.table_sha256;
+        receipt["table_digest_scope"]="reflected laboratory x/y coefficients for fixed x launch, ascending component/profile knot/integer lag, little-endian complex binary64 taps; interpolation additionally bound by source identity";
+        receipt["qualification_scope"]="sampled frozen vector RF/profile and mesh witnesses; finite-FIR retarded coefficient bound; no evolving-Maxwell, 3D scattering or field calibration";
+        receipt["table_qualified"]=checks.qualified;
+        receipt["rf_solves"]=checks.rf_solves;
+        receipt["knot_profiles_checked"]=checks.knot_profiles_checked;
+        receipt["holdout_profiles_checked"]=checks.holdout_profiles_checked;
+        receipt["witnesses_qualified"]=checks.witnesses_qualified;
+        receipt["knot_grid_error"]=errors(checks.knot_grid);
+        receipt["knot_offgrid_error"]=errors(checks.knot_offgrid);
+        receipt["profile_holdout_error"]=errors(checks.profile_holdout);
+        receipt["witness_frequency_error"]=errors(checks.witness_frequency_refinement);
+        receipt["witness_mesh_error"]=errors(checks.witness_mesh);
+        receipt["knot_offgrid_scale"]=scales(checks.knot_offgrid_scale);
+        receipt["profile_holdout_scale"]=scales(checks.profile_holdout_scale);
+        receipt["witness_mesh_scale"]=scales(checks.witness_mesh_scale);
+        receipt["scale_diagnostic_scope"]="occupied band raw independent solver amplitude versus approximation; scale diagnostics add no relative-error gate or gain normalization; the separate original-null witness has a point-specific guard";
+        receipt["original_null_witness"]=Json{};
+        if(checks.original_null_witness) {
+            const auto& witness=*checks.original_null_witness;
+            receipt["original_null_witness"]=object({{"q",witness.profile_q},{"rf_offset_hz",witness.offset_hz},
+                {"fine_vector_power",witness.fine_vector_power},{"witness_meshes_m",Json::Array{10.,5.,2.5}},
+                {"fine_amplitude_xy",pair(witness.fine_amplitude)},{"fir_amplitude_xy",pair(witness.fir_amplitude)},
+                {"fir_to_10m_absolute_error_xy",pair(witness.fir_to_production_mesh_error)},
+                {"mesh_10m_to_2p5m_absolute_difference_xy",pair(witness.production_to_fine_mesh_error)},
+                {"mesh_5m_to_2p5m_absolute_difference_xy",pair(witness.intermediate_to_fine_mesh_error)},
+                {"fir_to_2p5m_absolute_error_xy",pair(witness.fir_to_fine_mesh_error)},
+                {"x_guarded_absolute_error",witness.x_guarded_absolute_error},
+                {"x_guarded_power_interval",pair(witness.x_guarded_power_interval)},{"x_resolved",witness.x_resolved},
+                {"x_guarded_relative_error",witness.fine_amplitude[0]>0?Json{witness.x_guarded_absolute_error/witness.fine_amplitude[0]}:Json{}},
+                {"x_local_relative_tolerance",appraisal::HfMagnetoionicKernelTable::original_null_relative_tolerance},
+                {"scope","separate original near-null witness; sampled mesh differences and a point-specific practical interpolation guard, not a uniform physical error bound"}});
+        }
+        receipt["maximum_discarded_energy_fraction"]=pair(checks.maximum_discarded_energy);
+        receipt["maximum_frozen_reflected_power_excess"]=checks.maximum_frozen_reflected_power_excess;
+        receipt["maximum_solver_output_power"]=checks.maximum_solver_output_power;
+        receipt["minimum_longitudinal_permittivity"]=checks.minimum_longitudinal_permittivity;
+        receipt["minimum_carrier_power_xy_total"]=Json::Array{checks.minimum_carrier_power[0],checks.minimum_carrier_power[1],checks.minimum_carrier_power[2]};
+        receipt["maximum_carrier_power_xy_total"]=Json::Array{checks.maximum_carrier_power[0],checks.maximum_carrier_power[1],checks.maximum_carrier_power[2]};
+        receipt["retarded_peak_error_bound"]=pair(magnetic.retarded_peak_error_bound);
+        receipt["table_workspace_bytes"]=magnetic.table_workspace_bytes;
+        receipt["stream_workspace_bytes"]=magnetic.stream_workspace_bytes;
+        receipt["preparation_seconds"]=magnetic.preparation_seconds;
+        receipt["source_minimum_frequency_hz"]=magnetic.source_minimum_frequency_hz;
+        receipt["source_maximum_frequency_hz"]=magnetic.source_maximum_frequency_hz;
+        receipt["regions"]=std::move(regions);
+        result["magnetoionic_reflection"]=std::move(receipt);
     }
     return result;
 }
@@ -1447,6 +1642,13 @@ void oracle(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     result["oracle"]["hypothesis_1_data_gain"]=b.report().data_gain;
     result["oracle"]["includes_acquisition_or_completion"]=false;
     result["oracle"]["finite_blocklength_capacity_bound"]=false;
+    if(s.scenario.id.starts_with("hf-gannon-")) {
+        result["oracle"]["kind"]="isolated single DATA bit, equal-prior binary known observed-voltage multiplier and synthetic added white Gaussian noise";
+        result["oracle"]["conditioning_scope"]="known deterministic observed-voltage multiplier with added synthetic white noise; the recorded beacon/noise/interference are inseparable";
+        result["oracle"]["same_input_full_message_replay"]=false;
+        result["oracle"]["physical_noise_free_channel_known"]=false;
+        result["oracle"]["field_sensitivity_bound"]=false;
+    }
     result["oracle"]["public_observation"]=binary(window_distance,window_ea,window_eb);
     result["oracle"]["public_observation"]["aperture"]=range({aperture.first_sample,aperture.stop_sample});
     result["oracle"]["public_observation"]["outside_rendered_signal_support_is_zero"]=true;
@@ -1477,15 +1679,54 @@ void oracle(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     result["presence_oracle"]["slot_index"]=o.oracle_slot;
     result["presence_oracle"]["public_observation"]=object({{"aperture",range({aperture.first_sample,aperture.stop_sample})},
         {"hypothesis_0",roc(window_ea)},{"hypothesis_1",roc(window_eb)}});
+    if(s.scenario.id.starts_with("hf-gannon-")) {
+        result["presence_oracle"]["kind"]="isolated single DATA bit under a known observed-voltage multiplier versus synthetic added white Gaussian noise";
+        result["presence_oracle"]["conditioning_scope"]="the recorded beacon/noise/interference are inseparable; no same-input full-message or physical noise-free channel claim";
+        result["presence_oracle"]["same_input_full_message_replay"]=false;
+        result["presence_oracle"]["physical_noise_free_channel_known"]=false;
+        result["presence_oracle"]["field_sensitivity_bound"]=false;
+    }
+    if(s.scenario.channel.magnetoionic_reflection) {
+        require(ca.report().magnetoionic_reflection&&cb.report().magnetoionic_reflection&&noisy_channel&&
+                noisy_channel->report().magnetoionic_reflection,"magnetic oracle omitted an independently qualified physical channel");
+        require(ca.report().magnetoionic_reflection->table_sha256==cb.report().magnetoionic_reflection->table_sha256&&
+                ca.report().magnetoionic_reflection->table_sha256==noisy_channel->report().magnetoionic_reflection->table_sha256,
+                "magnetic oracle hypotheses did not use the same physical coefficient table");
+        result["plan"]["magnetoionic_reflection_source_band_checked"]=true;
+        result["plan"]["magnetoionic_reflection_table_built"]=true;
+        result["plan"]["oracle_physical_channel_instances"]=3;
+        result["oracle"]["kind"]="isolated single DATA bit, equal-prior binary known vector-FIR operator and synthetic white Gaussian noise";
+        result["oracle"]["same_input_full_message_replay"]=false;
+        result["oracle"]["complete_dynamic_excursion_required"]=false;
+        result["oracle"]["field_sensitivity_bound"]=false;
+        result["oracle"]["magnetoionic_channel_hypothesis_0"]=channel_json(ca.report(),s.receiver.sample_rate_hz);
+        result["oracle"]["magnetoionic_channel_hypothesis_1"]=channel_json(cb.report(),s.receiver.sample_rate_hz);
+        result["oracle"]["magnetoionic_channel_noisy"]=channel_json(noisy_channel->report(),s.receiver.sample_rate_hz);
+        result["oracle"]["physical_table_preparation_seconds"]=
+            ca.report().magnetoionic_reflection->preparation_seconds+cb.report().magnetoionic_reflection->preparation_seconds+
+            noisy_channel->report().magnetoionic_reflection->preparation_seconds;
+        result["oracle"]["physical_table_rf_solves"]=ca.report().magnetoionic_reflection->checks.rf_solves+
+            cb.report().magnetoionic_reflection->checks.rf_solves+noisy_channel->report().magnetoionic_reflection->checks.rf_solves;
+        result["presence_oracle"]["kind"]="isolated single DATA bit under a known vector-FIR operator versus synthetic white Gaussian noise";
+        result["presence_oracle"]["same_input_full_message_replay"]=false;
+        result["presence_oracle"]["complete_dynamic_excursion_required"]=false;
+        result["presence_oracle"]["field_sensitivity_bound"]=false;
+    }
     result["hf_history_applicable"]=hf;
     if(history) {
         result["hf_history"]=history_json(history->finish(),o.history_reference_delay_seconds.value_or(0));
         result["hf_history"]["noise_only_construction"]="same seeded linear channel's noisy output minus its noise-free output; white receiver noise continues through the entire aperture";
+        if(s.scenario.id.starts_with("hf-gannon-"))
+            result["hf_history"]["noise_only_construction"]="known observed-voltage multiplier output with added synthetic white noise minus output without added synthetic noise; recorded beacon/noise/interference remain inside the multiplier";
         result["hf_history"]["matched_channel_seed"]=o.seed;
     }
     if(phase_bank)result["hf_phase_bank"]=phase_bank_json(phase_bank->finish(),o.history_reference_delay_seconds.value_or(0),s.truth[o.oracle_slot]);
     result["outcomes"]=object({{"receiver_executed",false},{"component_only",true},{"completion_evaluated",false},
         {"correct_complete",false},{"missed_completion",false},{"scope","selected public bit known-channel genie; no receiver or message completion"}});
+    if(s.scenario.id.starts_with("hf-gannon-"))
+        result["outcomes"]["scope"]="isolated DATA-bit diagnostic conditional on the observed-voltage multiplier; no full-message, field-noise or physical noise-free channel bound";
+    if(s.scenario.channel.magnetoionic_reflection)
+        result["outcomes"]["scope"]="isolated DATA-bit diagnostic conditional on the numerically qualified vector-FIR operator; no same-input full-message replay or complete dynamic excursion";
     result["timing"]=object({{"wall_seconds",std::chrono::duration<double>(Clock::now()-begin).count()},
         {"capacity_qualified",false}});
     deadline.check();
@@ -2077,6 +2318,10 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
         if(channel->report().fullwave_reflection) {
             result["plan"]["fullwave_reflection_source_band_checked"]=true;
             result["plan"]["fullwave_reflection_table_built"]=true;
+        }
+        if(channel->report().magnetoionic_reflection) {
+            result["plan"]["magnetoionic_reflection_source_band_checked"]=true;
+            result["plan"]["magnetoionic_reflection_table_built"]=true;
         }
     }
     const double channel_preparation_seconds=std::chrono::duration<double>(Clock::now()-channel_begin).count();
@@ -2719,6 +2964,7 @@ int main(int argc,char** argv) {
      catch(const Unavailable& e){result["status"]="unavailable";result["reason"]=e.what();code=5;}
      catch(const appraisal::HfGuiProfileUnavailable& e){result["status"]="unavailable";result["reason"]=e.what();code=5;}
      catch(const appraisal::FullwaveReflectionUnavailable& e){result["status"]="unavailable";result["reason"]=e.what();code=5;}
+     catch(const appraisal::MagnetoionicReflectionUnavailable& e){result["status"]="unavailable";result["reason"]=e.what();code=5;}
      catch(const ReceiverWorkspaceError& e){result["status"]="resource_limit";result["reason"]=e.what();code=3;}
      catch(const appraisal::ChannelWorkspaceError& e){result["status"]="resource_limit";result["reason"]=e.what();code=3;}
      catch(const std::exception& e){

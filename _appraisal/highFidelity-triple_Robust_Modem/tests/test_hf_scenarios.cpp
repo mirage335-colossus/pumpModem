@@ -1,4 +1,5 @@
 #include "appraisal/hf_scenarios.hpp"
+#include "appraisal/hf_replay.hpp"
 
 #include <algorithm>
 #include <array>
@@ -347,6 +348,89 @@ void independent_ensemble() {
          .125,1e-15,"common oscillator surrogate preserves O/X differential carrier rate");
 }
 
+void magnetoionic_profiles() {
+    using Table = HfMagnetoionicKernelTable;
+    const auto x = make_scenario("hf-magnetoionic-x");
+    const auto y = make_scenario("hf-magnetoionic-y");
+    const auto holdout = make_scenario("hf-magnetoionic-x-holdout");
+    const auto spread = make_scenario("hf-magnetoionic-x-spread");
+    const auto parallel_x = make_scenario("hf-magnetoionic-parallel-x");
+    const auto parallel_y = make_scenario("hf-magnetoionic-parallel-y");
+    const auto parallel_holdout = make_scenario("hf-magnetoionic-parallel-x-holdout");
+    for (const auto* scenario : {&x, &y, &holdout, &spread, &parallel_x, &parallel_y, &parallel_holdout}) {
+        check(scenario->channel.magnetoionic_reflection.has_value() && scenario->channel.paths.empty(),
+              "magnetoionic scenario preserves one reflected Jones-column operator");
+        check(!scenario->channel.fullwave_reflection && !scenario->channel.lunar,
+              "magnetoionic scenario does not mix other physical solvers");
+        near(scenario->channel.rf_hz, Table::carrier_hz, 0., "magnetoionic carrier");
+        near(scenario->waveform.sample_rate_hz, Table::sample_rate_hz, 0., "magnetoionic sample rate");
+        near(scenario->bounds.arrival_low_seconds, Table::first_lag_samples() / Table::sample_rate_hz, 0.,
+             "magnetoionic lower arrival bound includes all retained lags");
+        near(scenario->bounds.arrival_high_seconds, Table::last_lag_samples() / Table::sample_rate_hz, 0.,
+             "magnetoionic upper arrival bound includes all retained lags");
+        check(scenario->bounds.varying && scenario->bounds.atmospheric_hz == 1.,
+              "magnetoionic native varying model has its declared public motion allowance");
+    }
+    check(x.channel.magnetoionic_reflection->receive_component == 0 &&
+          y.channel.magnetoionic_reflection->receive_component == 1,
+          "paired magnetic cases select separate fixed antennas");
+    check(parallel_x.channel.magnetoionic_reflection->receive_component == 0 &&
+          parallel_y.channel.magnetoionic_reflection->receive_component == 1,
+          "parallel magnetic cases select separate fixed antennas");
+    check(x.channel.magnetoionic_reflection->path == HfMagnetoionicPath::tilted_lower &&
+          parallel_x.channel.magnetoionic_reflection->path == HfMagnetoionicPath::parallel_upper &&
+          parallel_y.channel.magnetoionic_reflection->path == HfMagnetoionicPath::parallel_upper &&
+          parallel_holdout.channel.magnetoionic_reflection->path == HfMagnetoionicPath::parallel_upper,
+          "scenario selects its declared magnetic physical path");
+    near(x.channel.magnetoionic_reflection->transition_first_seconds, 60., 0., "primary transition placement");
+    near(x.channel.magnetoionic_reflection->transition_seconds, 600., 0., "primary transition duration");
+    near(y.channel.magnetoionic_reflection->transition_first_seconds, 60., 0., "paired antenna keeps placement");
+    near(y.channel.magnetoionic_reflection->transition_seconds, 600., 0., "paired antenna keeps duration");
+    near(holdout.channel.magnetoionic_reflection->transition_first_seconds, 180., 0., "holdout changes placement");
+    near(holdout.channel.magnetoionic_reflection->transition_seconds, 780., 0., "holdout changes rate");
+    near(parallel_holdout.channel.magnetoionic_reflection->transition_first_seconds, 180., 0., "parallel holdout placement");
+    near(parallel_holdout.channel.magnetoionic_reflection->transition_seconds, 780., 0., "parallel holdout rate");
+    near(x.bounds.spread_seconds, 0., 0., "primary preserves one-ray receiver prior");
+    near(spread.bounds.spread_seconds, .007, 0., "declared comparison uses native 7ms delay anchors");
+    near(spread.channel.magnetoionic_reflection->transition_first_seconds,
+         x.channel.magnetoionic_reflection->transition_first_seconds, 0., "delay-prior comparison keeps physical path");
+    check(holdout.assumptions.find("not an independent physical realization") != std::string::npos &&
+          spread.assumptions.find("not a matched FIR") != std::string::npos,
+          "magnetoionic scenarios retain model and holdout limits");
+}
+
+void gannon_observed_voltage_profiles() {
+    const auto first = make_scenario("hf-gannon-1700");
+    const auto later = make_scenario("hf-gannon-2000");
+    const auto late = make_scenario("hf-gannon-2000-late");
+    for (const auto* scenario : {&first, &later, &late}) {
+        near(scenario->channel.rf_hz, 1e7, 0., "Gannon nominal subchannel frequency");
+        near(scenario->waveform.requested_bit_seconds, 64., 0., "Gannon complete-message duration fixture");
+        check(scenario->waveform.added_symbols == 10 && scenario->channel.paths.size() == 1,
+              "Gannon scenario keeps native reference waveform and one observed-voltage multiplier");
+        near(scenario->bounds.arrival_low_seconds, 0., 0., "Gannon synthetic timing lower bound");
+        near(scenario->bounds.arrival_high_seconds, .003, 0., "Gannon synthetic timing upper bound");
+        near(scenario->bounds.atmospheric_hz, 5., 0., "Gannon declared receiver motion allowance");
+        near(scenario->bounds.spread_seconds, 0., 0., "Gannon does not invent a measured delay profile");
+        const auto& path = scenario->channel.paths.front();
+        near(path.delay_seconds, .001, 0., "Gannon delay remains a synthetic control");
+        check(path.hf && path.hf->measured_envelope && path.hf->measured_envelope->samples.size() == 36000,
+              "Gannon scenario retains the complete measured hour");
+        near(path.hf->measured_envelope->sample_rate_hz, 10., 0., "Gannon stored timing grid");
+        check(scenario->assumptions.find("signal-proportional") != std::string::npos &&
+              scenario->assumptions.find("not a noiseless") != std::string::npos,
+              "Gannon observed-noise interpretation remains explicit");
+    }
+    const auto& a = *first.channel.paths.front().hf->measured_envelope;
+    const auto& b = *later.channel.paths.front().hf->measured_envelope;
+    near(a.normalization_gain, b.normalization_gain, 0., "Gannon hours share one normalization");
+    check(b.raw_mean_power > a.raw_mean_power * 10., "Gannon cross-hour power contrast was normalized away");
+    near(first.numerical_horizon_seconds, 3599.9, 1e-12, "first hour has finite support");
+    near(later.numerical_horizon_seconds, 3599.9, 1e-12, "later hour has finite support");
+    near(late.channel.paths.front().hf->measured_offset_seconds, 1800., 0., "late placement is fixed at half-hour");
+    near(late.numerical_horizon_seconds, 1799.9, 1e-12, "late placement cannot wrap or extend the record");
+}
+
 } // namespace
 
 int main() {
@@ -359,6 +443,8 @@ int main() {
         eikonal_refinement_controls();
         eikonal_compound();
         independent_ensemble();
+        magnetoionic_profiles();
+        gannon_observed_voltage_profiles();
         std::cout << "additional HF profile checks passed: " << checks << '\n';
         return 0;
     } catch (const std::exception& error) {

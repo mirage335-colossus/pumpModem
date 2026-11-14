@@ -22,6 +22,7 @@ constexpr std::size_t fractional_intervals = 2048;
 constexpr double tail_relative_amplitude = 1e-6;
 using GaussianRay = datapump::triad::v3::detail::FixedGaussianRay;
 using Fullwave = HfFullwaveKernelTable;
+using Magnetic = HfMagnetoionicKernelTable;
 constexpr auto reflection = HfFullwavePort::reflection;
 
 void require(bool condition, const char* message) {
@@ -87,8 +88,13 @@ double maximum_delay(const ChannelSpec& spec, double horizon) {
     }
     double maximum = 0;
     if (spec.fullwave_reflection) {
-        require(!spec.lunar && spec.paths.empty(), "full-wave reflection excludes other propagation paths");
+        require(!spec.lunar && !spec.magnetoionic_reflection && spec.paths.empty(), "full-wave reflection excludes other propagation paths");
         maximum = Fullwave::planned_first_lag_samples(reflection) / Fullwave::sample_rate_hz;
+    }
+    if (spec.magnetoionic_reflection) {
+        require(!spec.lunar && !spec.fullwave_reflection && spec.paths.empty(),
+                "magnetoionic reflection excludes other propagation paths");
+        maximum = Magnetic::first_lag_samples() / Magnetic::sample_rate_hz;
     }
     if (spec.lunar) {
         const auto& lunar = *spec.lunar;
@@ -141,6 +147,39 @@ std::string fullwave_table_sha256(const Fullwave& table) {
     unsigned length = 0;
     require(EVP_DigestFinal_ex(context.get(), value.data(), &length) == 1 && length == value.size(),
             "full-wave table digest finalization failed");
+    constexpr char digits[] = "0123456789abcdef";
+    std::string digest;
+    digest.reserve(2 * value.size());
+    for (auto byte : value) {
+        digest.push_back(digits[byte >> 4]);
+        digest.push_back(digits[byte & 15]);
+    }
+    return digest;
+}
+
+std::string magnetoionic_table_sha256(const Magnetic& table) {
+    std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> context(EVP_MD_CTX_new(), EVP_MD_CTX_free);
+    require(context && EVP_DigestInit_ex(context.get(), EVP_sha256(), nullptr) == 1,
+            "magnetoionic table digest initialization failed");
+    const auto intervals = table.profile_intervals();
+    for (std::size_t component = 0; component < 2; ++component) {
+        for (std::size_t k = 0; k <= intervals; ++k) {
+            const double q = static_cast<double>(k) / intervals;
+            for (auto lag = Magnetic::first_lag_samples(); lag <= Magnetic::last_lag_samples(); ++lag) {
+                const auto value = table.coefficient_at_q(component, lag, q);
+                const std::array bits{std::bit_cast<std::uint64_t>(value.real()), std::bit_cast<std::uint64_t>(value.imag())};
+                std::array<unsigned char, 16> encoded{};
+                for (std::size_t i = 0; i < encoded.size(); ++i)
+                    encoded[i] = static_cast<unsigned char>((bits[i / 8] >> (8 * (i % 8))) & 255);
+                require(EVP_DigestUpdate(context.get(), encoded.data(), encoded.size()) == 1,
+                        "magnetoionic table digest update failed");
+            }
+        }
+    }
+    std::array<unsigned char, 32> value{};
+    unsigned length = 0;
+    require(EVP_DigestFinal_ex(context.get(), value.data(), &length) == 1 && length == value.size(),
+            "magnetoionic table digest finalization failed");
     constexpr char digits[] = "0123456789abcdef";
     std::string digest;
     digest.reserve(2 * value.size());
@@ -271,6 +310,8 @@ struct Channel::Impl {
     std::unique_ptr<detail::LunarSpectral> lunar;
     std::optional<HfFullwaveProfileStream> fullwave;
     std::uint64_t fullwave_transition_first = 0, fullwave_transition_stop = 0;
+    std::optional<HfMagnetoionicProfileStream> magnetoionic;
+    std::uint64_t magnetoionic_transition_first = 0, magnetoionic_transition_stop = 0;
     Random white, colored, events, marks;
     Complex tx_state{}, colored_state{}, impulse_state{}, lowpass_state{};
     double colored_decay = 0, colored_innovation = 0, impulse_decay = 0;
@@ -292,7 +333,7 @@ struct Channel::Impl {
         require(finite(spec.rf_hz) && spec.rf_hz > 0, "RF carrier must be positive and finite");
         require(spec.interpolation_half_width >= 4 && spec.interpolation_half_width <= 64,
                 "fractional-delay half width must be in [4,64]");
-        require(spec.lunar || spec.fullwave_reflection ? spec.paths.empty() :
+        require(spec.lunar || spec.fullwave_reflection || spec.magnetoionic_reflection ? spec.paths.empty() :
                 (!spec.paths.empty() && spec.paths.size() <= 65536),
                 "channel requires one spectral propagation model or 1..65536 explicit paths");
         require(finite(source.minimum_frequency_hz) && finite(source.maximum_frequency_hz) &&
@@ -321,6 +362,24 @@ struct Channel::Impl {
                 source_band > Fullwave::occupied_half_band_hz ||
                 source.geometry.source_samples < HfFullwaveReflectionSpec::minimum_source_seconds * fs)
                 throw FullwaveReflectionUnavailable("full-wave reflection source exceeds the qualified carrier, sample rate, band, or minimum span");
+        }
+        if (spec.magnetoionic_reflection) {
+            const auto& magnetic = *spec.magnetoionic_reflection;
+            require(magnetic.receive_component < 2 && finite(magnetic.transition_first_seconds) &&
+                    magnetic.transition_first_seconds >= 0 && finite(magnetic.transition_seconds) &&
+                    magnetic.transition_seconds > 0 &&
+                    (magnetic.path == HfMagnetoionicPath::tilted_lower || magnetic.path == HfMagnetoionicPath::parallel_upper),
+                    "magnetoionic reflection requires a fixed x/y antenna and finite positive transition");
+            require(!spec.lunar && !spec.fullwave_reflection && !spec.transmitter.enabled && spec.hf_trajectory_offset_seconds == 0 &&
+                    spec.noise.colored_variance == 0 && spec.noise.impulse_rate_hz == 0 &&
+                    spec.noise.impulse_rms == 0 && spec.noise.tone_amplitude == 0 &&
+                    spec.frontend.lowpass_hz == 0 && spec.frontend.clip_magnitude == 0 &&
+                    spec.frontend.agc_target == 0 && spec.frontend.adc_bits == 0 &&
+                    spec.fade.first_seconds == -1 && spec.fade.stop_seconds == -1,
+                    "magnetoionic reflection requires an isolated linear white-noise channel");
+            if (fs != Magnetic::sample_rate_hz || spec.rf_hz != Magnetic::carrier_hz ||
+                source_band > Magnetic::occupied_half_band_hz)
+                throw MagnetoionicReflectionUnavailable("magnetoionic reflection source exceeds the qualified carrier, sample rate, or band");
         }
         std::optional<LunarSpectralPlan> lunar_plan;
         if (spec.lunar) {
@@ -430,7 +489,7 @@ struct Channel::Impl {
                  fade.ramp_seconds <= .5 * (fade.stop_seconds - fade.first_seconds)),
                 "fade must be disabled or have ordered bounds and nonoverlapping ramps");
 
-        const auto history_count = spec.fullwave_reflection ? 1 : count_from_long_double(
+        const auto history_count = spec.fullwave_reflection || spec.magnetoionic_reflection ? 1 : count_from_long_double(
             std::ceil(static_cast<long double>(report.maximum_delay_seconds) * fs) +
             2 * spec.interpolation_half_width + detail::hf_dispersion_halo_samples(spec) + 4);
         std::size_t bytes = checked_add(sizeof(Impl), source.working_bytes);
@@ -458,6 +517,7 @@ struct Channel::Impl {
         const auto planning_bytes = checked_multiply(spec.paths.size(), 2 * sizeof(std::size_t));
         bytes = checked_add(bytes, planning_bytes);
         if (spec.fullwave_reflection) bytes = checked_add(bytes, Fullwave::preparation_workspace_bound_bytes);
+        if (spec.magnetoionic_reflection) bytes = checked_add(bytes, Magnetic::preparation_workspace_bound_bytes);
         if (bytes > spec.maximum_workspace_bytes) throw ChannelWorkspaceError("channel exceeds explicit workspace limit");
         std::vector<std::size_t> order(spec.paths.size()), membership(spec.paths.size(), std::numeric_limits<std::size_t>::max());
         for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
@@ -518,6 +578,37 @@ struct Channel::Impl {
             receipt.preparation_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             receipt.retarded_peak_error_bound = rate;
             receipt.carrier_flight_phase_bound = built.table->carrier_flight_phase_bound(reflection, Spec::transition_seconds);
+            receipt.source_minimum_frequency_hz = source.minimum_frequency_hz;
+            receipt.source_maximum_frequency_hz = source.maximum_frequency_hz;
+        }
+        if (spec.magnetoionic_reflection) {
+            const auto start = std::chrono::steady_clock::now();
+            const auto& selected = *spec.magnetoionic_reflection;
+            const auto built = build_hf_magnetoionic_kernel_table(stop, selected.path);
+            if (!built.table || !built.checks.qualified || built.checks.rf_solves != Magnetic::rf_solve_limit(selected.path))
+                throw MagnetoionicReflectionUnavailable("magnetoionic table failed its finite frequency, profile or mesh qualification");
+            require(built.table->path() == selected.path, "magnetoionic table physical path differs from its declaration");
+            const std::array rate{built.table->retarded_peak_error_bound(selected.transition_seconds, 0),
+                                  built.table->retarded_peak_error_bound(selected.transition_seconds, 1)};
+            if (std::any_of(rate.begin(), rate.end(), [](double v) { return !finite(v) || v > Magnetic::rate_peak_tolerance; }))
+                throw MagnetoionicReflectionUnavailable("magnetoionic reflection exceeds its finite-kernel output-time error bound");
+            const auto first = count_from_long_double(selected.transition_first_seconds * fs);
+            magnetoionic.emplace(built.table, first, selected.transition_seconds);
+            magnetoionic_transition_first = checked_add(first, Magnetic::modelling_delay_samples);
+            magnetoionic_transition_stop = checked_add(magnetoionic_transition_first,
+                count_from_long_double(selected.transition_seconds * fs));
+            require(magnetoionic->tail_samples() == Magnetic::last_lag_samples(),
+                    "magnetoionic reflection tail differs from its public geometry");
+            auto& receipt = report.magnetoionic_reflection.emplace();
+            receipt.checks = built.checks;
+            receipt.spec = selected;
+            receipt.table_sha256 = magnetoionic_table_sha256(*built.table);
+            receipt.table_workspace_bytes = built.table->workspace_bytes();
+            receipt.stream_workspace_bytes = magnetoionic->workspace_bytes();
+            require(checked_add(receipt.table_workspace_bytes, receipt.stream_workspace_bytes) <=
+                    Magnetic::preparation_workspace_bound_bytes, "magnetoionic reflection workspaces exceeded their admission");
+            receipt.preparation_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+            receipt.retarded_peak_error_bound = rate;
             receipt.source_minimum_frequency_hz = source.minimum_frequency_hz;
             receipt.source_maximum_frequency_hz = source.maximum_frequency_hz;
         }
@@ -717,7 +808,7 @@ struct Channel::Impl {
     Complex render() {
         const auto n = report.samples;
         const long double time = static_cast<long double>(n) / fs;
-        ensure_source(fullwave ? n : n + spec.interpolation_half_width);
+        ensure_source(fullwave || magnetoionic ? n : n + spec.interpolation_half_width);
         Complex wanted = lunar ? lunar->wanted(n, history, source.geometry.source_samples, spec.transmitter.enabled) : Complex{};
         if (fullwave) {
             const auto input = saved(n);
@@ -727,6 +818,17 @@ struct Channel::Impl {
             ++region.samples;
             region.incident_energy += std::norm(input);
             region.reflected_energy += std::norm(wanted);
+        }
+        if (magnetoionic) {
+            const auto input = saved(n);
+            const auto field = magnetoionic->step(input);
+            wanted = field[spec.magnetoionic_reflection->receive_component];
+            const auto region_index = n < magnetoionic_transition_first ? 0 : n < magnetoionic_transition_stop ? 1 : 2;
+            auto& region = report.magnetoionic_reflection->regions[region_index];
+            ++region.samples;
+            region.incident_energy += std::norm(input);
+            for (std::size_t i = 0; i < field.size(); ++i)
+                region.reflected_component_energy[i] += std::norm(field[i]);
         }
         for (auto& path : paths) {
             const auto& spec_path = *path.spec;

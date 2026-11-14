@@ -1,0 +1,631 @@
+{
+  "purpose": "Regression for the native magnetic receipt schema: preserve computed tail rounding, occupied-band witness counts, and regional component-energy placement. This field projection is not a replay or additional physics qualification.",
+  "retention": "Keep while the frozen magnetoionic receipt contract is supported; replace with a new native-produced fixture when that contract is intentionally superseded.",
+  "provenance": {
+    "native_receipt_path": "local-evidence/hf-magnetoionic-receiver/000-magnetic-x-CN0-40.stdout.json",
+    "native_receipt_sha256": "8b1e1ff871329ddb3684bb322d613c3c1fa9de680e4bbce179de1e37cccb7938",
+    "source_identity": {
+      "appraisal_source_sha256": "01b86480be64488663fc39abd70617c23ce9ddd2ab0ca926eb95deb96fea805d",
+      "build_config": "Release",
+      "build_options_sha256": "3636f58f5e5803a48c78c56be3de84fce810a285a8b7c7222781040e596e6206",
+      "canonical_pattern_revision": "independent-apsk-v2",
+      "compiler": "GNU-14.2.0",
+      "native_source_sha256": "dd2c9e267ae030db4393f815275ec615e8d6425732545bbdaf5d0705243e8e26",
+      "openssl_runtime": "OpenSSL 3.5.7 9 Jun 2026",
+      "source_commit_at_configure": "e0e7b74ff2a69083f952c1ad436bc92d4fe1ec6d"
+    },
+    "projection": "Only fields consumed by _validate_magnetoionic_reflection; all retained values are unchanged."
+  },
+  "episode": {
+    "waveform": "reference",
+    "seed": 65001,
+    "noise_seed": 75001,
+    "bit_seconds": 64,
+    "message": "A",
+    "mode": "receive",
+    "control": "wanted",
+    "id": "magnetic-x-CN0-40",
+    "scenario": "hf-magnetoionic-x",
+    "cn0_db_hz": 40
+  },
+  "receipt": {
+    "plan": {
+      "channel_renderer": "hf_magnetoionic_reflection",
+      "magnetoionic_reflection": {
+        "carrier_hz": 3400000,
+        "complex_error_tolerance": 0.005,
+        "discarded_energy_tolerance": 1e-06,
+        "filter_halo_samples": 80,
+        "first_lag_samples": 1,
+        "frequency_bins": 128,
+        "interpolation": "fixed_lab_cubic_hermite_output_time_half_cosine",
+        "last_lag_samples": 81,
+        "magnetic_field_tesla": [
+          2.5e-05,
+          0,
+          4.330127018922193e-05
+        ],
+        "maximum_rf_solves": 3444,
+        "minimum_complete_source_seconds": 660,
+        "modelling_delay_samples": 32,
+        "normal_incidence": true,
+        "occupied_half_band_hz": 384,
+        "orthogonal_field_supplied_to_receiver": false,
+        "port": "reflection",
+        "preparation_workspace_bound_bytes": 2097152,
+        "production_step_m": 10,
+        "profile_intervals": 16,
+        "profile_q0": {
+          "d_peak_electron_density_per_m3": 800000000,
+          "f_collision_per_second": 60,
+          "f_peak_plasma_frequency_hz": 2607664.9594701095
+        },
+        "profile_q1": {
+          "d_peak_electron_density_per_m3": 800000000,
+          "f_collision_per_second": 60,
+          "f_peak_plasma_frequency_hz": 2608186.544620518
+        },
+        "rate_peak_tolerance": 0.005,
+        "receive_component": 0,
+        "receive_polarization": "fixed_laboratory_x",
+        "sample_rate_hz": 1920,
+        "taps_per_output": 81,
+        "transition_first_seconds": 60,
+        "transition_seconds": 600,
+        "transmit_polarization": "fixed_laboratory_x",
+        "witness_step_m": 20
+      },
+      "capture_preroll_seconds": 0.25,
+      "source_stop_sample": 2208229,
+      "horizon_samples": 2554042,
+      "represented_seconds": 1330.2302083333334,
+      "channel_tail_seconds": 0.042187499999999996,
+      "channel_tail_seconds_scope": "complete causal reflected Jones-column FIR support, from first input through the last retained lag",
+      "cn0_reference_plane": "normalized incident DATA before physical reflection and fixed antenna projection; fixed additive receiver noise",
+      "magnetoionic_reflection_source_band_checked": true,
+      "magnetoionic_reflection_table_built": true,
+      "receiver_dispersive_model": "native_single_ray",
+      "physical_kernel_supplied_to_receiver": false,
+      "public_bounds": {
+        "arrival_high_seconds": 0.0421875,
+        "arrival_low_seconds": 0.0005208333333333333,
+        "atmospheric_hz": 1,
+        "clock_bound_ppm": 0,
+        "delay_excursion_seconds": 0,
+        "doppler_width_2sigma_hz": 0,
+        "frequency_bound_hz": 0,
+        "native_common_frequency_hypothesis_hz": 1,
+        "receiver_filter_halo_samples": 80,
+        "spread_seconds": 0,
+        "time_varying": true
+      },
+      "planned_uncontaminated_quiet_slots": 2,
+      "wire_bits": 13,
+      "first_uncontaminated_quiet_slot": 13,
+      "scored_slot_horizon": 15,
+      "public_slots": [
+        {
+          "index": 0,
+          "observation": {
+            "first": 0,
+            "stop": 134842
+          },
+          "evaluator_transmitting": true
+        },
+        {
+          "index": 1,
+          "observation": {
+            "first": 172721,
+            "stop": 307642
+          },
+          "evaluator_transmitting": true
+        },
+        {
+          "index": 2,
+          "observation": {
+            "first": 345521,
+            "stop": 480442
+          },
+          "evaluator_transmitting": true
+        },
+        {
+          "index": 3,
+          "observation": {
+            "first": 518321,
+            "stop": 653242
+          },
+          "evaluator_transmitting": true
+        },
+        {
+          "index": 4,
+          "observation": {
+            "first": 691121,
+            "stop": 826042
+          },
+          "evaluator_transmitting": true
+        },
+        {
+          "index": 5,
+          "observation": {
+            "first": 863921,
+            "stop": 998842
+          },
+          "evaluator_transmitting": true
+        },
+        {
+          "index": 6,
+          "observation": {
+            "first": 1036721,
+            "stop": 1171642
+          },
+          "evaluator_transmitting": true
+        },
+        {
+          "index": 7,
+          "observation": {
+            "first": 1209521,
+            "stop": 1344442
+          },
+          "evaluator_transmitting": true
+        },
+        {
+          "index": 8,
+          "observation": {
+            "first": 1382321,
+            "stop": 1517242
+          },
+          "evaluator_transmitting": true
+        },
+        {
+          "index": 9,
+          "observation": {
+            "first": 1555121,
+            "stop": 1690042
+          },
+          "evaluator_transmitting": true
+        },
+        {
+          "index": 10,
+          "observation": {
+            "first": 1727921,
+            "stop": 1862842
+          },
+          "evaluator_transmitting": true
+        },
+        {
+          "index": 11,
+          "observation": {
+            "first": 1900721,
+            "stop": 2035642
+          },
+          "evaluator_transmitting": true
+        },
+        {
+          "index": 12,
+          "observation": {
+            "first": 2073521,
+            "stop": 2208442
+          },
+          "evaluator_transmitting": true
+        },
+        {
+          "index": 13,
+          "observation": {
+            "first": 2246321,
+            "stop": 2381242
+          },
+          "evaluator_transmitting": false
+        },
+        {
+          "index": 14,
+          "observation": {
+            "first": 2419121,
+            "stop": 2554042
+          },
+          "evaluator_transmitting": false
+        }
+      ],
+      "cn0_db_hz": 40,
+      "noise_variance": 0.192,
+      "message": "A"
+    },
+    "scenario": {
+      "channel": {
+        "renderer": "hf_magnetoionic_reflection",
+        "magnetoionic_reflection": {
+          "carrier_hz": 3400000,
+          "complex_error_tolerance": 0.005,
+          "discarded_energy_tolerance": 1e-06,
+          "filter_halo_samples": 80,
+          "first_lag_samples": 1,
+          "frequency_bins": 128,
+          "interpolation": "fixed_lab_cubic_hermite_output_time_half_cosine",
+          "last_lag_samples": 81,
+          "magnetic_field_tesla": [
+            2.5e-05,
+            0,
+            4.330127018922193e-05
+          ],
+          "maximum_rf_solves": 3444,
+          "minimum_complete_source_seconds": 660,
+          "modelling_delay_samples": 32,
+          "normal_incidence": true,
+          "occupied_half_band_hz": 384,
+          "orthogonal_field_supplied_to_receiver": false,
+          "port": "reflection",
+          "preparation_workspace_bound_bytes": 2097152,
+          "production_step_m": 10,
+          "profile_intervals": 16,
+          "profile_q0": {
+            "d_peak_electron_density_per_m3": 800000000,
+            "f_collision_per_second": 60,
+            "f_peak_plasma_frequency_hz": 2607664.9594701095
+          },
+          "profile_q1": {
+            "d_peak_electron_density_per_m3": 800000000,
+            "f_collision_per_second": 60,
+            "f_peak_plasma_frequency_hz": 2608186.544620518
+          },
+          "rate_peak_tolerance": 0.005,
+          "receive_component": 0,
+          "receive_polarization": "fixed_laboratory_x",
+          "sample_rate_hz": 1920,
+          "taps_per_output": 81,
+          "transition_first_seconds": 60,
+          "transition_seconds": 600,
+          "transmit_polarization": "fixed_laboratory_x",
+          "witness_step_m": 20
+        }
+      }
+    },
+    "channel": {
+      "samples": 2554042,
+      "hashed_samples": 2554042,
+      "source_samples": 2208229,
+      "input_sha256": "7ca845753d748d0bc35bebfb45a9cd6d133ba63d3a02f79b776090f319f08678",
+      "tail_seconds": 0.042187499999999996,
+      "maximum_delay_seconds": 0.0005208333333333333,
+      "magnetoionic_reflection": {
+        "carrier_hz": 3400000,
+        "complex_error_tolerance": 0.005,
+        "discarded_energy_tolerance": 1e-06,
+        "filter_halo_samples": 80,
+        "first_lag_samples": 1,
+        "frequency_bins": 128,
+        "holdout_profiles_checked": 32,
+        "interpolation": "fixed_lab_cubic_hermite_output_time_half_cosine",
+        "knot_grid_error": [
+          {
+            "maximum": 2.577682498520849e-06,
+            "offset_hz": -384,
+            "profile_q": 0.5
+          },
+          {
+            "maximum": 2.7195670063472477e-06,
+            "offset_hz": -384,
+            "profile_q": 0.5
+          }
+        ],
+        "knot_offgrid_error": [
+          {
+            "maximum": 2.577682498520849e-06,
+            "offset_hz": -384,
+            "profile_q": 0.5
+          },
+          {
+            "maximum": 2.7195670063472477e-06,
+            "offset_hz": -384,
+            "profile_q": 0.5
+          }
+        ],
+        "knot_offgrid_scale": [
+          {
+            "absolute_error_at_least_raw": 0,
+            "exact_zero_raw": 0,
+            "maximum_relative_error": {
+              "absolute_error": 2.4056105141208954e-06,
+              "q": 0,
+              "raw_amplitude": 0.15405559366219657,
+              "relative_error": 1.5615210437575977e-05,
+              "rf_offset_hz": -384
+            },
+            "minimum_raw_amplitude": {
+              "absolute_error": 4.291874982327415e-08,
+              "q": 0,
+              "raw_amplitude": 0.003680702772501561,
+              "relative_error": 1.1660476945848238e-05,
+              "rf_offset_hz": 384
+            },
+            "raw_at_maximum_absolute_error": {
+              "absolute_error": 2.577682498520849e-06,
+              "q": 0.5,
+              "raw_amplitude": 0.17028820507450157,
+              "relative_error": 1.513717580964052e-05,
+              "rf_offset_hz": -384
+            },
+            "samples": 187
+          },
+          {
+            "absolute_error_at_least_raw": 0,
+            "exact_zero_raw": 0,
+            "maximum_relative_error": {
+              "absolute_error": 2.5380240939908813e-06,
+              "q": 0,
+              "raw_amplitude": 0.16253533224265435,
+              "relative_error": 1.5615214605780492e-05,
+              "rf_offset_hz": -384
+            },
+            "minimum_raw_amplitude": {
+              "absolute_error": 4.5282188631068684e-08,
+              "q": 0,
+              "raw_amplitude": 0.0038832573307732566,
+              "relative_error": 1.1660877653465172e-05,
+              "rf_offset_hz": 384
+            },
+            "raw_at_maximum_absolute_error": {
+              "absolute_error": 2.7195670063472477e-06,
+              "q": 0.5,
+              "raw_amplitude": 0.1796614410693633,
+              "relative_error": 1.513717684863322e-05,
+              "rf_offset_hz": -384
+            },
+            "samples": 187
+          }
+        ],
+        "knot_profiles_checked": 17,
+        "last_lag_samples": 81,
+        "magnetic_field_tesla": [
+          2.5e-05,
+          0,
+          4.330127018922193e-05
+        ],
+        "maximum_carrier_power_xy_total": [
+          0.027646216213715442,
+          0.030773101847160027,
+          0.05841931806087547
+        ],
+        "maximum_discarded_energy_fraction": [
+          3.5497534290119207e-11,
+          3.5497921501694046e-11
+        ],
+        "maximum_frozen_reflected_power_excess": 0,
+        "maximum_rf_solves": 3444,
+        "maximum_solver_output_power": 0.8058749206184281,
+        "minimum_carrier_power_xy_total": [
+          0.0013128579465015472,
+          0.0014613468663758375,
+          0.002774204812877385
+        ],
+        "minimum_complete_source_seconds": 660,
+        "minimum_longitudinal_permittivity": 0.3811499961807375,
+        "modelling_delay_samples": 32,
+        "normal_incidence": true,
+        "occupied_half_band_hz": 384,
+        "orthogonal_field_supplied_to_receiver": false,
+        "port": "reflection",
+        "preparation_seconds": 28.240489774,
+        "preparation_workspace_bound_bytes": 2097152,
+        "production_step_m": 10,
+        "profile_holdout_error": [
+          {
+            "maximum": 0.0020339652068511013,
+            "offset_hz": -257.3,
+            "profile_q": 0.017677669529663688
+          },
+          {
+            "maximum": 0.0021459174579220998,
+            "offset_hz": -257.3,
+            "profile_q": 0.017677669529663688
+          }
+        ],
+        "profile_holdout_scale": [
+          {
+            "absolute_error_at_least_raw": 0,
+            "exact_zero_raw": 0,
+            "maximum_relative_error": {
+              "absolute_error": 0.0012075184643147074,
+              "q": 0.017677669529663688,
+              "raw_amplitude": 0.072023736786853,
+              "relative_error": 0.016765562551804784,
+              "rf_offset_hz": -118.7
+            },
+            "minimum_raw_amplitude": {
+              "absolute_error": 3.8786660547048826e-05,
+              "q": 0.017677669529663688,
+              "raw_amplitude": 0.0038836142888054722,
+              "relative_error": 0.009987258688086371,
+              "rf_offset_hz": 384
+            },
+            "raw_at_maximum_absolute_error": {
+              "absolute_error": 0.0020339652068511013,
+              "q": 0.017677669529663688,
+              "raw_amplitude": 0.12390489400592879,
+              "relative_error": 0.016415535666846035,
+              "rf_offset_hz": -257.3
+            },
+            "samples": 352
+          },
+          {
+            "absolute_error_at_least_raw": 0,
+            "exact_zero_raw": 0,
+            "maximum_relative_error": {
+              "absolute_error": 0.0012739792827728583,
+              "q": 0.017677669529663688,
+              "raw_amplitude": 0.07598786444750479,
+              "relative_error": 0.016765562396518854,
+              "rf_offset_hz": -118.7
+            },
+            "minimum_raw_amplitude": {
+              "absolute_error": 4.0921135183106696e-05,
+              "q": 0.017677669529663688,
+              "raw_amplitude": 0.004097335501942079,
+              "relative_error": 0.00998725517197961,
+              "rf_offset_hz": 384
+            },
+            "raw_at_maximum_absolute_error": {
+              "absolute_error": 0.0021459174579220998,
+              "q": 0.017677669529663688,
+              "raw_amplitude": 0.13072478607297283,
+              "relative_error": 0.016415536199265314,
+              "rf_offset_hz": -257.3
+            },
+            "samples": 352
+          }
+        ],
+        "profile_intervals": 16,
+        "profile_q0": {
+          "d_peak_electron_density_per_m3": 800000000,
+          "f_collision_per_second": 60,
+          "f_peak_plasma_frequency_hz": 2607664.9594701095
+        },
+        "profile_q1": {
+          "d_peak_electron_density_per_m3": 800000000,
+          "f_collision_per_second": 60,
+          "f_peak_plasma_frequency_hz": 2608186.544620518
+        },
+        "qualification_scope": "sampled frozen vector RF/profile and mesh witnesses; finite-FIR retarded coefficient bound; no evolving-Maxwell, 3D scattering or field calibration",
+        "rate_peak_tolerance": 0.005,
+        "receive_component": 0,
+        "receive_polarization": "fixed_laboratory_x",
+        "regions": [
+          {
+            "incident_energy_sample_sum": 115250.44304674202,
+            "name": "before",
+            "reflected_vector_energy_sample_sum": 398.83495199269805,
+            "reflected_x_energy_sample_sum": 188.74355759548692,
+            "reflected_y_energy_sample_sum": 210.09139439721116,
+            "samples": 115232,
+            "selected_antenna_energy_sample_sum": 188.74355759548692
+          },
+          {
+            "incident_energy_sample_sum": 882676.4860953505,
+            "name": "transition",
+            "reflected_vector_energy_sample_sum": 26827.142432103843,
+            "reflected_x_energy_sample_sum": 12695.609528084178,
+            "reflected_y_energy_sample_sum": 14131.532904019665,
+            "samples": 1152000,
+            "selected_antenna_energy_sample_sum": 12695.609528084178
+          },
+          {
+            "incident_energy_sample_sum": 749148.2291234852,
+            "name": "after",
+            "reflected_vector_energy_sample_sum": 43207.31369415693,
+            "reflected_x_energy_sample_sum": 20447.323205223827,
+            "reflected_y_energy_sample_sum": 22759.990488933105,
+            "samples": 1286810,
+            "selected_antenna_energy_sample_sum": 20447.323205223827
+          }
+        ],
+        "retarded_peak_error_bound": [
+          3.2321045287767844e-05,
+          3.4100030531132854e-05
+        ],
+        "rf_solves": 3444,
+        "sample_rate_hz": 1920,
+        "scale_diagnostic_scope": "occupied band raw independent solver amplitude versus approximation; no relative-error gate or gain normalization",
+        "source_maximum_frequency_hz": 362.5,
+        "source_minimum_frequency_hz": -362.5,
+        "stream_workspace_bytes": 1376,
+        "table_digest_scope": "reflected laboratory x/y coefficients for fixed x launch, ascending component/profile knot/integer lag, little-endian complex binary64 taps; interpolation additionally bound by source identity",
+        "table_qualified": true,
+        "table_sha256": "5f6c1d7191094f592695080843267c0b0a71a22952cf2c3467a0e8f18ee041e9",
+        "table_workspace_bytes": 88144,
+        "taps_per_output": 81,
+        "transition_first_seconds": 60,
+        "transition_seconds": 600,
+        "transmit_polarization": "fixed_laboratory_x",
+        "witness_frequency_error": [
+          {
+            "maximum": 2.1484037132861422e-07,
+            "offset_hz": -960,
+            "profile_q": 0
+          },
+          {
+            "maximum": 2.2666786454187364e-07,
+            "offset_hz": -960,
+            "profile_q": 0
+          }
+        ],
+        "witness_mesh_error": [
+          {
+            "maximum": 1.8381743431270472e-05,
+            "offset_hz": 47.9,
+            "profile_q": 1
+          },
+          {
+            "maximum": 1.939306940366986e-05,
+            "offset_hz": 47.9,
+            "profile_q": 1
+          }
+        ],
+        "witness_mesh_scale": [
+          {
+            "absolute_error_at_least_raw": 0,
+            "exact_zero_raw": 0,
+            "maximum_relative_error": {
+              "absolute_error": 1.2812161277284905e-05,
+              "q": 0.5,
+              "raw_amplitude": 0.10083241794877114,
+              "relative_error": 0.00012706390997976706,
+              "rf_offset_hz": 47.9
+            },
+            "minimum_raw_amplitude": {
+              "absolute_error": 3.84860412884755e-07,
+              "q": 0,
+              "raw_amplitude": 0.003680702772501561,
+              "relative_error": 0.00010456166571233015,
+              "rf_offset_hz": 384
+            },
+            "raw_at_maximum_absolute_error": {
+              "absolute_error": 1.8381743431270472e-05,
+              "q": 1,
+              "raw_amplitude": 0.16295618713987897,
+              "relative_error": 0.00011280175213900825,
+              "rf_offset_hz": 47.9
+            },
+            "samples": 33
+          },
+          {
+            "absolute_error_at_least_raw": 0,
+            "exact_zero_raw": 0,
+            "maximum_relative_error": {
+              "absolute_error": 1.3517531120987942e-05,
+              "q": 0.5,
+              "raw_amplitude": 0.10638187907003567,
+              "relative_error": 0.00012706610598679858,
+              "rf_offset_hz": 47.9
+            },
+            "minimum_raw_amplitude": {
+              "absolute_error": 4.0580551932095005e-07,
+              "q": 0,
+              "raw_amplitude": 0.0038832573307732566,
+              "relative_error": 0.00010450132060657019,
+              "rf_offset_hz": 384
+            },
+            "raw_at_maximum_absolute_error": {
+              "absolute_error": 1.939306940366986e-05,
+              "q": 1,
+              "raw_amplitude": 0.17192472112787502,
+              "relative_error": 0.00011279977234481355,
+              "rf_offset_hz": 47.9
+            },
+            "samples": 33
+          }
+        ],
+        "witness_step_m": 20,
+        "witnesses_qualified": true
+      },
+      "workspace_bytes": 2368176,
+      "input_energy_sample_sum": 1747075.1582655776,
+      "signal_energy_sample_sum": 33331.676290903495,
+      "contains_source_energy": true,
+      "contains_signal_energy": true
+    },
+    "timing": {
+      "channel_preparation_seconds": 28.240506435,
+      "wall_seconds": 49.603565998,
+      "isolated_receiver_service_measured": false,
+      "capacity_qualified": false
+    }
+  }
+}

@@ -332,6 +332,179 @@ def add_fake_fullwave_receipt(receipt: dict) -> None:
                                   input_energy_sample_sum=0., signal_energy_sample_sum=0.)
 
 
+def add_fake_magnetoionic_receipt(receipt: dict) -> None:
+    """Deterministic native-shaped receipt for strict model/energy gate tests."""
+    scenario_id = receipt["requested_scenario"]
+    component, transition_first, transition_seconds, spread = runner.MAGNETOIONIC_REFLECTION[scenario_id]
+    parallel=scenario_id.startswith("hf-magnetoionic-parallel-")
+    intervals,solves=(64,12039) if parallel else (16,3444)
+    model = json.loads(json.dumps(runner.MAGNETOIONIC_DESCRIPTOR))
+    if parallel:
+        model.update(physical_path="parallel_upper",magnetic_field_tesla=[0.,0.,50e-6],
+                     profile_intervals=intervals,maximum_rf_solves=solves)
+    charge, mass = 1.602176634e-19, 9.1093837139e-31
+    gyro = charge*50e-6/(2*math.pi*mass)
+    cutoff = math.sqrt(1+(1 if parallel else -1)*gyro/3400000)*3400000
+    for q, factor in (("profile_q0", .9999), ("profile_q1", 1.0001)):
+        model[q].update(f_peak_plasma_frequency_hz=cutoff*factor)
+    model.update(receive_component=component,
+                 receive_polarization="fixed_laboratory_x" if component == 0 else "fixed_laboratory_y",
+                 transition_first_seconds=transition_first, transition_seconds=transition_seconds,
+                 minimum_complete_source_seconds=transition_first+transition_seconds)
+    plan = receipt["plan"]
+    fs = 1920
+    bit_samples = 133632
+    source_stop = max(math.ceil((transition_first+transition_seconds+.25)*fs), 17*bit_samples)
+    quiet = max(13, math.ceil((source_stop+81-480)/bit_samples))
+    count = quiet+2
+    horizon = 480+count*bit_samples
+    slots = [{"index": index, "evaluator_transmitting": index < 13,
+              "observation": {"first": 480+index*bit_samples,
+                              "stop": 480+(index+1)*bit_samples}}
+             for index in range(count)]
+    for slot in slots[quiet:]:
+        slot["evaluator_transmitting"] = False
+    executed = receipt["mode"] != "plan"
+    plan.update(channel_renderer="hf_magnetoionic_reflection",
+                magnetoionic_reflection=dict(model),
+                magnetoionic_reflection_source_band_checked=executed,
+                magnetoionic_reflection_table_built=executed,
+                channel_tail_seconds=81/fs,
+                channel_tail_seconds_scope="complete causal reflected Jones-column FIR support, from first input through the last retained lag",
+                cn0_reference_plane="normalized incident DATA before physical reflection and fixed antenna projection; fixed additive receiver noise",
+                receiver_dispersive_model="native_sparse_delay_anchors" if spread else "native_single_ray",
+                physical_kernel_supplied_to_receiver=False,
+                source_stop_sample=source_stop,horizon_samples=horizon,represented_seconds=horizon/fs,
+                wire_bits=13,first_uncontaminated_quiet_slot=quiet,scored_slot_horizon=count,
+                planned_uncontaminated_quiet_slots=2,public_slots=slots,
+                public_bounds={"arrival_low_seconds":1/fs,"arrival_high_seconds":81/fs,
+                               "receiver_filter_halo_samples":80,"spread_seconds":spread,
+                               "time_varying":True,"frequency_bound_hz":0,"atmospheric_hz":1.},
+                noise_variance=fs/10**(plan["cn0_db_hz"]/10))
+    receipt["scenario"]={"channel":{"renderer":"hf_magnetoionic_reflection",
+                                     "magnetoionic_reflection":json.loads(json.dumps(model))}}
+    if not executed:
+        return
+    errors=[{"maximum":.001,"profile_q":.5,"offset_hz":-300.},
+            {"maximum":.002,"profile_q":.75,"offset_hz":300.}]
+    full={**model,
+        "table_sha256":"c"*64,
+        "table_digest_scope":"reflected laboratory x/y coefficients for fixed x launch, ascending component/profile knot/integer lag, little-endian complex binary64 taps; interpolation additionally bound by source identity",
+        "qualification_scope":"sampled frozen vector RF/profile and mesh witnesses; finite-FIR retarded coefficient bound; no evolving-Maxwell, 3D scattering or field calibration",
+        "table_qualified":True,"witnesses_qualified":True,"rf_solves":solves,
+        "knot_profiles_checked":intervals+1,"holdout_profiles_checked":intervals*2,
+        "knot_grid_error":errors,"knot_offgrid_error":errors,"profile_holdout_error":errors,
+        "witness_frequency_error":errors,"witness_mesh_error":errors,
+        "scale_diagnostic_scope":"occupied band raw independent solver amplitude versus approximation; no relative-error gate or gain normalization",
+        "maximum_discarded_energy_fraction":[1e-8,2e-8],
+        "maximum_frozen_reflected_power_excess":.001,"minimum_longitudinal_permittivity":.38,
+        "maximum_solver_output_power":.98,
+        "minimum_carrier_power_xy_total":[.1,.12,.3],
+        "maximum_carrier_power_xy_total":[.4,.45,.8],
+        "retarded_peak_error_bound":[.003,.004],
+        "table_workspace_bytes":1536000,"stream_workspace_bytes":4096,
+        "preparation_seconds":2.,"source_minimum_frequency_hz":-350.,"source_maximum_frequency_hz":350.}
+    scale_row={"samples":40,"exact_zero_raw":1,"absolute_error_at_least_raw":2,
+        "minimum_raw_amplitude":{"raw_amplitude":0.,"relative_error":None,"absolute_error":0.,"q":.5,"rf_offset_hz":-300.},
+        "maximum_relative_error":{"raw_amplitude":.001,"relative_error":3.4,"absolute_error":.0034,"q":.5,"rf_offset_hz":-300.},
+        "raw_at_maximum_absolute_error":{"raw_amplitude":.002,"relative_error":2.,"absolute_error":.004,"q":.5,"rf_offset_hz":-300.}}
+    counts=(703,1395,27) if parallel else (187,352,33)
+    for field,count in zip(("knot_offgrid_scale","profile_holdout_scale","witness_mesh_scale"),counts):
+        scale= dict(scale_row,samples=count)
+        full[field]=[json.loads(json.dumps(scale)),json.loads(json.dumps(scale))]
+    if parallel:
+        full["scale_diagnostic_scope"]="occupied band raw independent solver amplitude versus approximation; scale diagnostics add no relative-error gate or gain normalization; the separate original-null witness has a point-specific guard"
+        guarded=.0001+.00001
+        full["original_null_witness"]={"q":(1+math.sqrt(3)/2)/16,"rf_offset_hz":-118.7,
+            "witness_meshes_m":[10.,5.,2.5],"fine_amplitude_xy":[.002,.2],"fir_amplitude_xy":[.00205,.2],
+            "fine_vector_power":.002**2+.2**2,"fir_to_10m_absolute_error_xy":[.0001,.00001],
+            "mesh_10m_to_2p5m_absolute_difference_xy":[.00002,.000001],
+            "mesh_5m_to_2p5m_absolute_difference_xy":[.00001,.000001],
+            "fir_to_2p5m_absolute_error_xy":[.0001,.00001],"x_guarded_absolute_error":guarded,
+            "x_guarded_relative_error":guarded/.002,"x_guarded_power_interval":[(.002-guarded)**2,(.002+guarded)**2],
+            "x_local_relative_tolerance":.1,"x_resolved":True,
+            "scope":"separate original near-null witness; sampled mesh differences and a point-specific practical interpolation guard, not a uniform physical error bound"}
+    first=transition_first*fs+32
+    finish=first+transition_seconds*fs
+    names=("before","transition","after")
+    counts=(first,finish-first,horizon-finish)
+    incident=(10.,20.,70.)
+    x=(2.,3.,4.); y=(2.,3.,4.)
+    full["regions"]=[]
+    for i,name in enumerate(names):
+        ex,ey=(x[i],y[i]) if receipt["control"]!="noise" else (0.,0.)
+        en=incident[i] if receipt["control"]!="noise" else 0.
+        full["regions"].append({"name":name,"samples":counts[i],
+            "incident_energy_sample_sum":en,"reflected_x_energy_sample_sum":ex,
+            "reflected_y_energy_sample_sum":ey,"reflected_vector_energy_sample_sum":ex+ey,
+            "selected_antenna_energy_sample_sum":ex if component==0 else ey})
+    signal=0. if receipt["control"]=="noise" else (sum(x) if component==0 else sum(y))
+    input_energy=0. if receipt["control"]=="noise" else sum(incident)
+    report={"samples":horizon,"hashed_samples":horizon,"source_samples":source_stop,
+        "workspace_bytes":2097152+1,"contains_source_energy":input_energy>0,"contains_signal_energy":signal>0,
+        "input_sha256":"d"*64,"input_energy_sample_sum":input_energy,"signal_energy_sample_sum":signal,
+        "tail_seconds":81/fs,"maximum_delay_seconds":1/fs,"magnetoionic_reflection":full}
+    receipt["channel"]=report
+    receipt["timing"]={"channel_preparation_seconds":2.1,"wall_seconds":4.,
+                       "isolated_receiver_service_measured":False,"capacity_qualified":False}
+    if receipt["mode"]=="oracle":
+        end=134112;rendered=end+81
+        plan.update(complete_transition_span_required=False,oracle_physical_channel_instances=3,
+            oracle_horizon_samples=rendered,
+            magnetoionic_diagnostic_scope="isolated single DATA bit under the known vector-FIR operator; neither a same-input full-message replay nor a complete dynamic excursion")
+        report["samples"]=rendered;report["source_samples"]=end
+        del report["hashed_samples"];del report["input_sha256"]
+        full["regions"]=[{"name":name,"samples":count,"incident_energy_sample_sum":en,
+            "reflected_x_energy_sample_sum":ex,"reflected_y_energy_sample_sum":ey,
+            "reflected_vector_energy_sample_sum":ex+ey,"selected_antenna_energy_sample_sum":ex if component==0 else ey}
+            for name,count,en,ex,ey in (("before",min(first,rendered),100.,9.,9.),
+                ("transition",max(0,min(finish,rendered)-first),0.,0.,0.),("after",max(0,rendered-finish),0.,0.,0.))]
+        flags={"same_input_full_message_replay":False,"complete_dynamic_excursion_required":False,"field_sensitivity_bound":False}
+        receipt["oracle"].update(flags,
+            kind="isolated single DATA bit, equal-prior binary known vector-FIR operator and synthetic white Gaussian noise",
+            includes_acquisition_or_completion=False,finite_blocklength_capacity_bound=False,realization_normalized=False,
+            samples=rendered,source_stop_sample=end,signal_and_tail_horizon_samples=rendered,capture_preroll_samples=480,
+            channel_clock_origin_sample=0,hypotheses_share_channel_seed=True,channel_tail_seconds=81/fs,
+            physical_table_preparation_seconds=6.,physical_table_rf_solves=3*solves)
+        for field in ("magnetoionic_channel_hypothesis_0","magnetoionic_channel_hypothesis_1","magnetoionic_channel_noisy"):
+            receipt["oracle"][field]=json.loads(json.dumps(report))
+        receipt["presence_oracle"]={**flags,"kind":"isolated single DATA bit under a known vector-FIR operator versus synthetic white Gaussian noise"}
+        receipt["outcomes"]={"receiver_executed":False,"component_only":True,"completion_evaluated":False,"correct_complete":False}
+        receipt["timing"]={"wall_seconds":7.,"capacity_qualified":False}
+        del receipt["channel"]
+
+
+def add_fake_gannon_receipt(receipt: dict) -> None:
+    hour,offset=runner.GANNON_REPLAY[receipt["requested_scenario"]]
+    measured=runner._gannon_trace_descriptor(hour,offset)
+    measured.update(raw_mean_power=runner.GANNON_RECORDS[hour][3]/36000,
+                    normalization_gain=math.sqrt(72000/sum(record[3] for record in runner.GANNON_RECORDS.values())))
+    receipt["scenario"]={"physical_level_connected":False,
+        "channel":{"rf_hz":10000000,"path_count":1,"paths":[{"power":1.,"delay_seconds":.001,
+            "hf":{"measured_offset_seconds":offset,"measured_envelope":measured}}]},
+        "numerical_adequacy":{"qualification_horizon_seconds":3599.9-offset,
+            "empirical_validation":False,"empirical_record_provenance_verified":True,
+            "empirical_channel_calibration":False,
+            "scope":"finite observed-voltage Cartesian interpolation on the verified stored UTC grid; recorded noise becomes signal-proportional"}}
+    receipt["plan"].update(channel_renderer="observed_voltage_multiplicative_replay",
+        cn0_reference_plane="incident normalized modem waveform before jointly scaled observed-voltage multiplication; independent synthetic white receiver noise",
+        measured_noise_is_multiplicative=True,field_noise_control_qualified=False)
+    if receipt["mode"]=="oracle":
+        flags={"same_input_full_message_replay":False,"physical_noise_free_channel_known":False,"field_sensitivity_bound":False}
+        receipt["oracle"].update(flags,
+            kind="isolated single DATA bit, equal-prior binary known observed-voltage multiplier and synthetic added white Gaussian noise",
+            conditioning_scope="known deterministic observed-voltage multiplier with added synthetic white noise; the recorded beacon/noise/interference are inseparable",
+            includes_acquisition_or_completion=False,finite_blocklength_capacity_bound=False,
+            realization_normalized=False,samples=100)
+        receipt["presence_oracle"]={**flags,
+            "kind":"isolated single DATA bit under a known observed-voltage multiplier versus synthetic added white Gaussian noise",
+            "conditioning_scope":"the recorded beacon/noise/interference are inseparable; no same-input full-message or physical noise-free channel claim"}
+    elif receipt["mode"]!="plan":
+        noise=receipt["control"]=="noise"
+        receipt["channel"]={"samples":100,"contains_signal_energy":not noise,"contains_source_energy":not noise,
+            "input_energy_sample_sum":0. if noise else 10.,"signal_energy_sample_sum":0. if noise else 1.}
+
+
 def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None) -> dict:
     def argument(option, default=None):
         try:
@@ -652,6 +825,10 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
             receipt["service_replay"] = replay
     if receipt["requested_scenario"] == "hf-fullwave-reflection":
         add_fake_fullwave_receipt(receipt)
+    if receipt["requested_scenario"] in runner.MAGNETOIONIC_REFLECTION:
+        add_fake_magnetoionic_receipt(receipt)
+    if receipt["requested_scenario"] in runner.GANNON_REPLAY:
+        add_fake_gannon_receipt(receipt)
     return receipt
 
 
@@ -2022,6 +2199,336 @@ class CampaignValidationTests(unittest.TestCase):
         old["plan"]["fullwave_reflection"] = receipt["plan"]["fullwave_reflection"]
         with self.assertRaisesRegex(runner.CampaignError, "unrequested full-wave"):
             runner._validate_completed_receipt(old, old_episode)
+
+    def test_magnetoionic_scenarios_require_fixed_native_reception_scope(self) -> None:
+        for scenario in runner.MAGNETOIONIC_REFLECTION:
+            component, _, _, spread = runner.MAGNETOIONIC_REFLECTION[scenario]
+            for mode, controls in (("plan", ("wanted",)), ("channel", ("wanted",)),
+                                   ("receive", ("wanted", "noise", "wrong-key"))):
+                for control in controls:
+                    episode={"id":"magnetic","scenario":scenario,"mode":mode,"waveform":"reference",
+                             "seed":64001,"bit_seconds":64,"message":"A","cn0_db_hz":40}
+                    if mode == "receive": episode["control"]=control
+                    runner._validate_episode(episode,0,set(),300,12_000_000)
+                    receipt=fake_completed_receipt(runner._command(Path("/native/probe"),episode,12_000_000,300))
+                    self.assertEqual(receipt["scenario"]["channel"]["magnetoionic_reflection"]["receive_component"],component)
+                    self.assertEqual(receipt["plan"]["public_bounds"]["spread_seconds"],spread)
+                    runner._validate_completed_receipt(receipt,episode)
+        base={"id":"magnetic","scenario":"hf-magnetoionic-x","mode":"receive","waveform":"reference",
+              "seed":1,"bit_seconds":64,"message":"A"}
+        invalid=({"helper":True},{"backend":"cuda"},{"pulse":"gaussian"},{"fec":"rs20"},
+                 {"mode":"plan","control":"wrong-key"},{"mode":"channel","control":"noise"},
+                 {"duration_seconds":10},{"capture_lead_seconds":.5},{"hf_trajectory_seed":1})
+        for override in invalid:
+            with self.subTest(override=override), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(base,**override),0,set(),300,12_000_000)
+
+    def test_magnetoionic_tail_allows_roundoff_but_not_missing_samples(self) -> None:
+        episode={"id":"magnetic","scenario":"hf-magnetoionic-x","mode":"receive",
+                 "waveform":"reference","seed":1,"bit_seconds":64,"message":"A","cn0_db_hz":40}
+        receipt=fake_completed_receipt(runner._command(Path("/native/probe"),episode,12_000_000,300))
+        # The native tail is computed as first-lag/Fs + remaining-support/Fs.
+        receipt["plan"]["channel_tail_seconds"]=1/1920+80/1920
+        receipt["channel"]["tail_seconds"]=1/1920+80/1920
+        runner._validate_completed_receipt(receipt,episode)
+        for section, field in (("plan","channel_tail_seconds"),("channel","tail_seconds")):
+            bad=json.loads(json.dumps(receipt));bad[section][field]=80/1920
+            with self.subTest(section=section), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad,episode)
+
+    def test_magnetoionic_scale_counts_cover_only_occupied_witnesses(self) -> None:
+        episode={"id":"magnetic","scenario":"hf-magnetoionic-x","mode":"receive",
+                 "waveform":"reference","seed":1,"bit_seconds":64,"message":"A","cn0_db_hz":40}
+        receipt=fake_completed_receipt(runner._command(Path("/native/probe"),episode,12_000_000,300))
+        # Native observe_scale keeps 11 of the 17 RF offsets: both occupied
+        # edges, six inner anchors and the three moving-cutoff neighbors.
+        counts=(("knot_offgrid_scale",187,289),("profile_holdout_scale",352,544),
+                ("witness_mesh_scale",33,51))
+        for field,occupied,all_offsets in counts:
+            self.assertEqual([row["samples"] for row in receipt["channel"]["magnetoionic_reflection"][field]],
+                             [occupied,occupied])
+            for invalid_count in (occupied-1,occupied+1,all_offsets):
+                bad=json.loads(json.dumps(receipt))
+                bad["channel"]["magnetoionic_reflection"][field][0]["samples"]=invalid_count
+                with self.subTest(field=field,count=invalid_count), self.assertRaisesRegex(runner.CampaignError,"witness counts"):
+                    runner._validate_completed_receipt(bad,episode)
+        self.assertEqual(receipt["channel"]["magnetoionic_reflection"]["rf_solves"],3444)
+        runner._validate_completed_receipt(receipt,episode)
+
+    def test_magnetoionic_zero_field_has_no_maximum_relative_witness(self) -> None:
+        episode={"id":"magnetic","scenario":"hf-magnetoionic-x","mode":"receive",
+                 "waveform":"reference","seed":1,"bit_seconds":64,"message":"A","cn0_db_hz":40}
+        receipt=fake_completed_receipt(runner._command(Path("/native/probe"),episode,12_000_000,300))
+        zero={"raw_amplitude":0.,"absolute_error":0.,"relative_error":None,"q":.5,"rf_offset_hz":-384.}
+        fields=("knot_offgrid_scale","profile_holdout_scale","witness_mesh_scale")
+        for field in fields:
+            row=receipt["channel"]["magnetoionic_reflection"][field][0]
+            row.update(exact_zero_raw=row["samples"],absolute_error_at_least_raw=row["samples"],
+                       minimum_raw_amplitude=dict(zero),raw_at_maximum_absolute_error=dict(zero),
+                       maximum_relative_error=None)
+        runner._validate_completed_receipt(receipt,episode)
+        for field in fields:
+            for key,value in (("maximum_relative_error",dict(zero)),("exact_zero_raw",0),
+                              ("absolute_error_at_least_raw",0)):
+                bad=json.loads(json.dumps(receipt))
+                bad["channel"]["magnetoionic_reflection"][field][0][key]=value
+                with self.subTest(field=field,key=key), self.assertRaises(runner.CampaignError):
+                    runner._validate_completed_receipt(bad,episode)
+            bad=json.loads(json.dumps(receipt))
+            bad["channel"]["magnetoionic_reflection"][field][1]["maximum_relative_error"]=None
+            with self.subTest(field=field,case="nonzero witness omitted"), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad,episode)
+            bad=json.loads(json.dumps(receipt))
+            del bad["channel"]["magnetoionic_reflection"][field][0]["maximum_relative_error"]
+            with self.subTest(field=field,case="zero-field null omitted"), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad,episode)
+
+    def test_magnetoionic_passivity_uses_the_frozen_native_bounds(self) -> None:
+        episode={"id":"magnetic","scenario":"hf-magnetoionic-x","mode":"receive",
+                 "waveform":"reference","seed":1,"bit_seconds":64,"message":"A","cn0_db_hz":40}
+        receipt=fake_completed_receipt(runner._command(Path("/native/probe"),episode,12_000_000,300))
+        amplitude_bound=math.sqrt(1+1e-8)+math.sqrt(2)*.005
+        reflected_limit=amplitude_bound*amplitude_bound-1
+        full=receipt["channel"]["magnetoionic_reflection"]
+        full["maximum_solver_output_power"]=1+1e-8
+        full["maximum_frozen_reflected_power_excess"]=reflected_limit
+        runner._validate_completed_receipt(receipt,episode)
+        for field,limit in (("maximum_solver_output_power",1+1e-8),
+                            ("maximum_frozen_reflected_power_excess",reflected_limit)):
+            bad=json.loads(json.dumps(receipt))
+            bad["channel"]["magnetoionic_reflection"][field]=math.nextafter(limit,math.inf)
+            with self.subTest(field=field), self.assertRaisesRegex(runner.CampaignError,"frozen-passivity"):
+                runner._validate_completed_receipt(bad,episode)
+
+    def test_magnetoionic_native_energy_totals_match_regional_components(self) -> None:
+        episode={"id":"magnetic","scenario":"hf-magnetoionic-x","mode":"receive",
+                 "waveform":"reference","seed":1,"bit_seconds":64,"message":"A","cn0_db_hz":40}
+        receipt=fake_completed_receipt(runner._command(Path("/native/probe"),episode,12_000_000,300))
+        component_totals=("reflected_x_energy_sample_sum","reflected_y_energy_sample_sum",
+                          "reflected_vector_energy_sample_sum")
+        for field in component_totals:
+            self.assertNotIn(field,receipt["channel"])
+        runner._validate_completed_receipt(receipt,episode)
+        for field in component_totals:
+            redundant=json.loads(json.dumps(receipt))
+            total=sum(region[field] for region in redundant["channel"]["magnetoionic_reflection"]["regions"])
+            redundant["channel"][field]=total
+            runner._validate_completed_receipt(redundant,episode)
+            redundant["channel"][field]=total+1.
+            with self.subTest(field=field), self.assertRaisesRegex(runner.CampaignError,"component energies"):
+                runner._validate_completed_receipt(redundant,episode)
+        for field in ("input_energy_sample_sum","signal_energy_sample_sum"):
+            bad=json.loads(json.dumps(receipt));del bad["channel"][field]
+            with self.subTest(field=field,case="required total missing"), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad,episode)
+
+    def test_magnetoionic_actual_native_receipt_schema(self) -> None:
+        fixture=json.loads((Path(__file__).parent/"fixtures"/"hf_magnetoionic_native_schema.json").read_text())
+        # This unmodified field projection of the first native receipt catches
+        # schema drift that a hand-written completed-receipt fixture can hide.
+        # It validates the magnetic contract only, without replaying DSP work.
+        receipt=fixture["receipt"]
+        runner._validate_magnetoionic_reflection(receipt,fixture["episode"])
+        self.assertEqual(receipt["plan"]["channel_tail_seconds"],1/1920+80/1920)
+        self.assertNotEqual(receipt["plan"]["channel_tail_seconds"],81/1920)
+        self.assertEqual([receipt["channel"]["magnetoionic_reflection"][field][0]["samples"]
+                          for field in ("knot_offgrid_scale","profile_holdout_scale","witness_mesh_scale")],
+                         [187,352,33])
+        self.assertNotIn("reflected_vector_energy_sample_sum",receipt["channel"])
+
+    def test_parallel_magnetic_path_requires_refinement_and_original_null_guard(self) -> None:
+        episode={"id":"parallel","scenario":"hf-magnetoionic-parallel-x","mode":"receive",
+                 "waveform":"reference","seed":66001,"bit_seconds":64,"message":"A"}
+        receipt=fake_completed_receipt(runner._command(Path("/native/probe"),episode,12_000_000,600))
+        runner._validate_completed_receipt(receipt,episode)
+        full=receipt["channel"]["magnetoionic_reflection"]
+        self.assertEqual((full["profile_intervals"],full["rf_solves"],full["knot_profiles_checked"],full["holdout_profiles_checked"]),
+                         (64,12039,65,128))
+        # Exact B-parallel symmetry decouples Ez, including epsilon_zz=0.
+        full["minimum_longitudinal_permittivity"]=0.
+        runner._validate_completed_receipt(receipt,episode)
+        changes=((('plan','magnetoionic_reflection','physical_path'),'tilted_lower'),
+                 (('plan','magnetoionic_reflection','magnetic_field_tesla'),[25e-6,0.,43.30127018922193e-6]),
+                 (('plan','magnetoionic_reflection','profile_intervals'),32),
+                 (('channel','magnetoionic_reflection','rf_solves'),12036),
+                 (('channel','magnetoionic_reflection','knot_offgrid_scale',0,'samples'),357),
+                 (('channel','magnetoionic_reflection','profile_holdout_scale',0,'samples'),698),
+                 (('channel','magnetoionic_reflection','witness_mesh_scale',0,'samples'),33),
+                 (('channel','magnetoionic_reflection','original_null_witness'),None),
+                 (('channel','magnetoionic_reflection','original_null_witness','x_resolved'),False),
+                 (('channel','magnetoionic_reflection','original_null_witness','x_local_relative_tolerance'),.3),
+                 (('channel','magnetoionic_reflection','original_null_witness','q'),.5),
+                 (('channel','magnetoionic_reflection','original_null_witness','witness_meshes_m'),[10.,5.,1.]),
+                 (('channel','magnetoionic_reflection','original_null_witness','fir_to_2p5m_absolute_error_xy',0),.001),
+                 (('channel','magnetoionic_reflection','original_null_witness','x_guarded_absolute_error'),0.),
+                 (('channel','magnetoionic_reflection','original_null_witness','x_guarded_power_interval'),[0.,1.]))
+        for path,value in changes:
+            bad=json.loads(json.dumps(receipt));target=bad
+            for key in path[:-1]:target=target[key]
+            target[path[-1]]=value
+            with self.subTest(path=path),self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad,episode)
+
+    def test_magnetic_oracle_requires_three_qualified_matching_tables(self) -> None:
+        for scenario in ('hf-magnetoionic-x','hf-magnetoionic-parallel-x'):
+            episode={"id":"oracle","scenario":scenario,"mode":"oracle","control":"wanted",
+                     "waveform":"reference","seed":65001,"bit_seconds":64,"message":"A","oracle_slot":0}
+            runner._validate_episode(episode,0,set(),600,12_000_000)
+            receipt=fake_completed_receipt(runner._command(Path('/native/probe'),episode,12_000_000,600))
+            runner._validate_completed_receipt(receipt,episode)
+            self.assertNotIn('channel',receipt)
+            changes=((('plan','complete_transition_span_required'),True),
+                     (('plan','oracle_physical_channel_instances'),2),
+                     (('oracle','same_input_full_message_replay'),True),
+                     (('presence_oracle','field_sensitivity_bound'),True),
+                     (('oracle','physical_table_rf_solves'),3444),
+                     (('oracle','physical_table_preparation_seconds'),2.),
+                     (('oracle','signal_and_tail_horizon_samples'),134112),
+                     (('oracle','magnetoionic_channel_hypothesis_1','magnetoionic_reflection','table_sha256'),'d'*64),
+                     (('oracle','magnetoionic_channel_noisy','magnetoionic_reflection','witness_mesh_error',0,'maximum'),.006),
+                     (('oracle','magnetoionic_channel_hypothesis_0','magnetoionic_reflection','regions',2,'samples'),1),
+                     (('outcomes','receiver_executed'),True))
+            for path,value in changes:
+                bad=json.loads(json.dumps(receipt));target=bad
+                for key in path[:-1]:target=target[key]
+                target[path[-1]]=value
+                with self.subTest(scenario=scenario,path=path),self.assertRaises(runner.CampaignError):
+                    runner._validate_completed_receipt(bad,episode)
+
+    def test_gannon_fixed_records_and_supported_modes(self) -> None:
+        for scenario in runner.GANNON_REPLAY:
+            for mode in ("plan","channel","receive","oracle"):
+                controls=("wanted","noise","wrong-key") if mode in {"channel","receive"} else ("wanted",)
+                for control in controls:
+                    episode={"id":"gannon","scenario":scenario,"mode":mode,"waveform":"reference",
+                             "seed":67002,"bit_seconds":64,"message":"B","cn0_db_hz":20}
+                    if mode!="plan":episode["control"]=control
+                    runner._validate_episode(episode,0,set(),600,12_000_000)
+                    receipt=fake_completed_receipt(runner._command(Path("/native/probe"),episode,12_000_000,600))
+                    runner._validate_completed_receipt(receipt,episode)
+        campaign=runner._read_campaign(RUNNER.parent/"campaigns"/"hf-gannon-receiver.json")
+        self.assertEqual(len(campaign["episodes"]),6)
+
+    def test_gannon_rejects_changed_provenance_scale_or_physical_claims(self) -> None:
+        episode={"id":"gannon","scenario":"hf-gannon-2000-late","mode":"receive","waveform":"reference",
+                 "seed":67002,"bit_seconds":64,"message":"B"}
+        receipt=fake_completed_receipt(runner._command(Path("/native/probe"),episode,12_000_000,600))
+        changes={"samples":35999,"sample_rate_hz":50,"part":"constructed-amplitude-only",
+            "record_offset_seconds":0.,"source_sha256":"0"*64,"serialized_iq_sha256":"f"*64,
+            "source_archive_member":"different/hour/same-name.h5","stream_uuid":"another-stream",
+            "source_subchannels":1,"zero_based_column":0,"nominal_center_frequency_hz":5000000,
+            "capture_utc_first_sample_epoch_seconds":1715371200,"normalization_cohort_knots":36000,
+            "normalization_cohort_utc_hours":[20],"normalization_gain":1.,"raw_mean_power":1.,
+            "noise_free_channel_response":True,"wideband_channel_response_qualified":True,
+            "field_false_alarm_or_availability_qualified":True,"absolute_link_level_qualified":True,
+            "receiver_clock_discipline_qualified":True,"recorded_noise_becomes_signal_proportional":False}
+        for key,value in changes.items():
+            bad=json.loads(json.dumps(receipt))
+            bad["scenario"]["channel"]["paths"][0]["hf"]["measured_envelope"][key]=value
+            with self.subTest(field=key),self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad,episode)
+        bad=json.loads(json.dumps(receipt));bad["channel"]["samples"]=int(1800*1920)+1
+        with self.assertRaisesRegex(runner.CampaignError,"finite selected record"):
+            runner._validate_completed_receipt(bad,episode)
+
+    def test_gannon_noise_and_oracle_remain_conditional(self) -> None:
+        base={"id":"gannon","scenario":"hf-gannon-1700","mode":"receive","waveform":"reference",
+              "seed":1,"bit_seconds":64,"message":"A","control":"noise"}
+        receipt=fake_completed_receipt(runner._command(Path("/native/probe"),base,12_000_000,600))
+        receipt["channel"]["signal_energy_sample_sum"]=.1
+        with self.assertRaisesRegex(runner.CampaignError,"exactly zero"):
+            runner._validate_completed_receipt(receipt,base)
+        oracle=dict(base,mode="oracle",control="wanted")
+        receipt=fake_completed_receipt(runner._command(Path("/native/probe"),oracle,12_000_000,600))
+        for section in ("oracle","presence_oracle"):
+            for field in ("same_input_full_message_replay","physical_noise_free_channel_known","field_sensitivity_bound"):
+                bad=json.loads(json.dumps(receipt));bad[section][field]=True
+                with self.subTest(section=section,field=field),self.assertRaises(runner.CampaignError):
+                    runner._validate_completed_receipt(bad,oracle)
+        for override in ({"mode":"slot"},{"mode":"oracle","control":"noise"},{"service_replay":True},
+                         {"hf_public_phase_receiver":True},{"hf_compare_admitted_models":True}):
+            with self.subTest(override=override),self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(base,**override),0,set(),600,12_000_000)
+
+    def test_magnetoionic_plan_does_not_claim_table_execution(self) -> None:
+        episode={"id":"magnetic","scenario":"hf-magnetoionic-x-holdout","mode":"plan",
+                 "waveform":"reference","seed":1,"bit_seconds":64,"message":"B"}
+        receipt=fake_completed_receipt(runner._command(Path("/native/probe"),episode,12_000_000,300))
+        runner._validate_completed_receipt(receipt,episode)
+        for field in ("magnetoionic_reflection_source_band_checked","magnetoionic_reflection_table_built"):
+            bad=json.loads(json.dumps(receipt));bad["plan"][field]=True
+            with self.subTest(field=field), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad,episode)
+        bad=json.loads(json.dumps(receipt));bad["channel"]={"magnetoionic_reflection":{}}
+        with self.assertRaisesRegex(runner.CampaignError,"planning cannot claim"):
+            runner._validate_completed_receipt(bad,episode)
+
+    def test_magnetoionic_execution_rejects_forged_physics_numerics_and_energy(self) -> None:
+        episode={"id":"magnetic","scenario":"hf-magnetoionic-y","mode":"receive",
+                 "waveform":"reference","seed":1,"bit_seconds":64,"message":"A","cn0_db_hz":40}
+        receipt=fake_completed_receipt(runner._command(Path("/native/probe"),episode,12_000_000,300))
+        runner._validate_completed_receipt(receipt,episode)
+        changes=(
+            (("plan","channel_renderer"),"hf_fullwave_reflection"),
+            (("scenario","channel","magnetoionic_reflection","magnetic_field_tesla",0),1e-3),
+            (("plan","magnetoionic_reflection","profile_q1","f_peak_plasma_frequency_hz"),1.),
+            (("plan","source_stop_sample"),1),
+            (("plan","public_bounds","arrival_high_seconds"),80/1920),
+            (("plan","magnetoionic_reflection_table_built"),False),
+            (("channel","magnetoionic_reflection","rf_solves"),3443),
+            (("channel","magnetoionic_reflection","table_sha256"),"bad"),
+            (("channel","magnetoionic_reflection","witness_mesh_error",0,"maximum"),.0051),
+            (("channel","magnetoionic_reflection","profile_holdout_error",1,"profile_q"),2.),
+            (("channel","magnetoionic_reflection","maximum_discarded_energy_fraction"),[1e-6,1.1e-6]),
+            (("channel","magnetoionic_reflection","knot_offgrid_scale",0,"samples"),3445),
+            (("channel","magnetoionic_reflection","profile_holdout_scale",1,"exact_zero_raw"),41),
+            (("channel","magnetoionic_reflection","witness_mesh_scale",0,"maximum_relative_error","relative_error"),.01),
+            (("channel","magnetoionic_reflection","witness_mesh_scale",1,"raw_at_maximum_absolute_error","rf_offset_hz"),385.),
+            (("channel","magnetoionic_reflection","retarded_peak_error_bound"),[.0051,.001]),
+            (("channel","magnetoionic_reflection","minimum_longitudinal_permittivity"),0.),
+            (("channel","magnetoionic_reflection","maximum_frozen_reflected_power_excess"),.1),
+            (("channel","magnetoionic_reflection","maximum_carrier_power_xy_total"),[.1,.2,1.1]),
+            (("channel","magnetoionic_reflection","source_maximum_frequency_hz"),385.),
+            (("channel","magnetoionic_reflection","table_workspace_bytes"),2_097_153),
+            (("channel","magnetoionic_reflection","retarded_peak_error_bound",0),.006),
+            (("channel","magnetoionic_reflection","regions",1,"reflected_y_energy_sample_sum"),4.),
+            (("channel","magnetoionic_reflection","regions",0,"selected_antenna_energy_sample_sum"),2.5),
+            (("channel","signal_energy_sample_sum"),11.),
+            (("timing","isolated_receiver_service_measured"),True),
+        )
+        for path,value in changes:
+            bad=json.loads(json.dumps(receipt));target=bad
+            for key in path[:-1]: target=target[key]
+            target[path[-1]]=value
+            with self.subTest(path=path),self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad,episode)
+        # A wrong-key acceptance is a communications failure to report, not
+        # an invalid receipt to discard.
+        wrong=dict(episode,control="wrong-key")
+        bad=fake_completed_receipt(runner._command(Path("/native/probe"),wrong,12_000_000,300),
+            outcomes={"receiver_executed":True,"component_only":False,"completion_evaluated":True,
+                      "correct_complete":False,"physical_completions":1,"actual_scored_slots":15,
+                      "premature_completions":0,"wrong_bits":0,"false_data":0,
+                      "ambiguous_active_slots":0,"quiet_active_slots":0,"missed_completion":False})
+        runner._validate_completed_receipt(bad,wrong)
+
+    def test_magnetoionic_noise_control_requires_zero_vector_signal_each_region(self) -> None:
+        episode={"id":"magnetic-noise","scenario":"hf-magnetoionic-x","mode":"receive",
+                 "waveform":"reference","seed":1,"bit_seconds":64,"message":"A","cn0_db_hz":40,
+                 "control":"noise"}
+        receipt=fake_completed_receipt(runner._command(Path("/native/probe"),episode,12_000_000,300))
+        runner._validate_completed_receipt(receipt,episode)
+        self.assertFalse(receipt["channel"]["contains_source_energy"])
+        self.assertEqual(receipt["channel"]["signal_energy_sample_sum"],0.)
+        for path,value in ((("channel","magnetoionic_reflection","regions",2,"reflected_x_energy_sample_sum"),.1),
+                           (("channel","magnetoionic_reflection","regions",0,"incident_energy_sample_sum"),1.),
+                           (("channel","contains_source_energy"),True),
+                           (("channel","reflected_vector_energy_sample_sum"),.1)):
+            bad=json.loads(json.dumps(receipt));target=bad
+            for key in path[:-1]: target=target[key]
+            target[path[-1]]=value
+            with self.subTest(path=path),self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad,episode)
 
     def test_gui_varying_inputs_require_explicit_cpu_component_scope(self) -> None:
         episode = gui_varying_episode()

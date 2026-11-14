@@ -10,7 +10,9 @@ namespace appraisal {
 enum class HfReplayPart { full, amplitude_only, phase_only };
 
 // A fixed measured receiver-terminal voltage record. Samples retain the
-// original coupled amplitude/phase after ONE full-record RMS normalization.
+// original coupled amplitude/phase after the declared full-record or fixed
+// cohort normalization. The loader records that scale; no observation-local
+// normalization belongs in the replay operator.
 // It is not a broadband impulse response or an absolute propagation gain.
 struct HfMeasuredTrace {
     std::vector<std::complex<double>> samples;

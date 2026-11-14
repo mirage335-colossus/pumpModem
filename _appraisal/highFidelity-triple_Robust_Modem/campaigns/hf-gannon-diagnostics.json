@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "name": "hf-gannon-diagnostics",
+  "purpose": "Predeclared failure followup rule selects first missed active slot2 of2000/20 and first later correct slot3. Isolated-bit conditional observed-voltage reference, not same-input full-message IQ, measured noise-free channel or field sensitivity. No receiver change or tuning.",
+  "max_wall_seconds": 1200,
+  "per_trial_wall_seconds": 600,
+  "max_trials": 2,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "id": "gannon-2000-isolated-slot2",
+      "scenario": "hf-gannon-2000",
+      "mode": "oracle",
+      "control": "wanted",
+      "waveform": "reference",
+      "seed": 67001,
+      "noise_seed": 77001,
+      "bit_seconds": 64,
+      "message": "A",
+      "cn0_db_hz": 20,
+      "oracle_slot": 2
+    },
+    {
+      "id": "gannon-2000-isolated-slot3",
+      "scenario": "hf-gannon-2000",
+      "mode": "oracle",
+      "control": "wanted",
+      "waveform": "reference",
+      "seed": 67001,
+      "noise_seed": 77001,
+      "bit_seconds": 64,
+      "message": "A",
+      "cn0_db_hz": 20,
+      "oracle_slot": 3
+    }
+  ]
+}

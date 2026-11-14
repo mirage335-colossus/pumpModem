@@ -17,6 +17,29 @@ make this receiver look artificially good if it preserves phase longer than the
 physical path does. Conversely, arbitrarily increasing every impairment can
 produce a channel with no demonstrated physical counterpart.
 
+## Magnetic propagation and long observed-voltage records
+
+The [magnetic/recorded-voltage continuation](hf-magnetoionic.md) reconciles the
+reference collection's O/X polarization requirements with a native cold-plasma
+vector scattering calculation. It keeps mode interference, antenna projection,
+absorption and phase in the same dielectric model, and separately checks
+numerical resolution at a deep field null. Its layered normal-incidence and
+slow-time assumptions do not cover three-dimensional strong scattering or
+caustics. Newer O/X absorption work motivates the test while retaining its
+profile, detection and geometry limits; group-path agreement alone does not
+validate a complex waveform.
+
+The same continuation imports two exact hour-long records from the
+[Gannon dataset](https://zenodo.org/records/20466479), published in 2026.
+Independent metadata reconciliation excludes a different interleaved receiver
+stream and ambiguous duplicate basenames. These are long recorded voltages,
+not calibrated broadband channel responses: replay also multiplies their
+measurement noise by the modem signal. A native synthetic control demonstrates
+the resulting blackout confound. The [fixture account](fixtures/hf-gannon-2024/README.md)
+preserves the limits of UTC metadata, joint normalization, Cartesian
+interpolation, transmitter identity and clock calibration. The source supports
+additional realistic temporal stress without a field-availability claim.
+
 ## Evidence levels and the reference baseline
 
 Keep these labels attached to individual inputs and outcomes:

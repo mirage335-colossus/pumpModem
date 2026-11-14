@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "name": "hf-magnetoionic-parallel",
+  "purpose": "Frozen before parallel-channel numerical admission or decoder outcomes; parallel B upper cutoff with changing fixed-antenna projection. Same absolute numerical gates as tilted path. Includes fixed incident-energy/time comparator, orthogonal receiving antenna, fresh temporal placement/payload and negative controls. No receiver tuning.",
+  "max_wall_seconds": 4200,
+  "per_trial_wall_seconds": 600,
+  "max_trials": 7,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "id": "parallel-x-40",
+      "scenario": "hf-magnetoionic-parallel-x",
+      "waveform": "reference",
+      "seed": 66001,
+      "noise_seed": 76001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 40
+    },
+    {
+      "id": "parallel-x-20",
+      "scenario": "hf-magnetoionic-parallel-x",
+      "waveform": "reference",
+      "seed": 66001,
+      "noise_seed": 76001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 20
+    },
+    {
+      "id": "parallel-x-long-equal-energy",
+      "scenario": "hf-magnetoionic-parallel-x",
+      "waveform": "reference",
+      "seed": 66001,
+      "noise_seed": 76001,
+      "bit_seconds": 128,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 17
+    },
+    {
+      "id": "parallel-y-20",
+      "scenario": "hf-magnetoionic-parallel-y",
+      "waveform": "reference",
+      "seed": 66001,
+      "noise_seed": 76001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 20
+    },
+    {
+      "id": "parallel-time-payload-holdout",
+      "scenario": "hf-magnetoionic-parallel-x-holdout",
+      "waveform": "reference",
+      "seed": 66002,
+      "noise_seed": 76002,
+      "bit_seconds": 64,
+      "message": "B",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 20
+    },
+    {
+      "id": "parallel-noise",
+      "scenario": "hf-magnetoionic-parallel-x",
+      "waveform": "reference",
+      "seed": 66001,
+      "noise_seed": 76001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "noise",
+      "cn0_db_hz": 40
+    },
+    {
+      "id": "parallel-wrong-key",
+      "scenario": "hf-magnetoionic-parallel-x",
+      "waveform": "reference",
+      "seed": 66001,
+      "noise_seed": 76001,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wrong-key",
+      "cn0_db_hz": 40
+    }
+  ]
+}

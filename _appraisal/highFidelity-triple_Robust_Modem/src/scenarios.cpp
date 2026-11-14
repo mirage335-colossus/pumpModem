@@ -199,8 +199,11 @@ std::vector<std::string> scenario_names() {
             "hf-mode-transition", "hf-vertical-eikonal-static", "hf-vertical-eikonal-motion", "hf-vertical-eikonal-holdout",
             "hf-eikonal-holdout-a", "hf-eikonal-holdout-b", "hf-eikonal-compound", "hf-eikonal-cfo-edge",
             "hf-ensemble-tid", "hf-ensemble-changing-rate", "hf-ensemble-modes", "hf-ensemble-modes-noisy", "hf-ensemble-ox-helper", "hf-ensemble-design",
-            "hf-fullwave-reflection", "hf-ding-measured", "hf-ding-amplitude",
+            "hf-fullwave-reflection", "hf-magnetoionic-x", "hf-magnetoionic-y", "hf-magnetoionic-x-holdout", "hf-magnetoionic-x-spread",
+            "hf-magnetoionic-parallel-x", "hf-magnetoionic-parallel-y", "hf-magnetoionic-parallel-x-holdout",
+            "hf-ding-measured", "hf-ding-amplitude",
             "hf-ding-phase", "hf-ding-measured-late", "hf-ding-clock41",
+            "hf-gannon-1700", "hf-gannon-2000", "hf-gannon-2000-late",
             "eme-disk-episode", "eme-patch-episode", "eme-severe-episode",
             "noise-bursts", "noise-white", "noise-white-ar1", "noise-white-shot", "frontend-overload"};
 }

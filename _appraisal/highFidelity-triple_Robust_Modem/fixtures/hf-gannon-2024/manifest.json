@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "dataset_doi": "10.5281/zenodo.20466479",
+  "dataset_url": "https://zenodo.org/records/20466479",
+  "license": "CC-BY-4.0",
+  "station": "W2NAF",
+  "stream_uuid": "0e51e045ca1d42868f3c9cd483112bd7",
+  "receiver_name": "KA9Q_0_WWV",
+  "nominal_center_frequency_hz": 10000000,
+  "zero_based_column": 4,
+  "sample_rate_hz": 10,
+  "format": "headerless little-endian IEEE-754 binary64 real,imag pairs",
+  "normalization_in_file": "none; raw int16 values converted exactly",
+  "native_normalization": "one joint RMS of both complete selected hours; no per-hour or per-window renormalization",
+  "last_knot_seconds_from_start": 3599.9,
+  "metadata_sha256": {
+    "drf_properties.h5": "bd1b62288f4e3e920bf862a9c100590266baa6fe3d25b738e59b81f982bb8ab7",
+    "metadata@1715299200.h5": "8f2466c794c042c4ab591697666d8dabf267fa848fe955efbe054e5acd4047c3"
+  },
+  "metadata_members": {
+    "drf_properties.h5": "data/psws_grapeDRF/ch0_W2NAF_2024-05-10/drf_properties.h5",
+    "metadata@1715299200.h5": "data/psws_grapeDRF/ch0_W2NAF_2024-05-10/metadata/2024-05-10T00-00-00/metadata@1715299200.h5"
+  },
+  "records": [
+    {
+      "utc_hour": 17,
+      "utc_first_sample_epoch_seconds": 1715360400,
+      "source_member": "data/psws_grapeDRF/ch0_W2NAF_2024-05-10/2024-05-10T00-00-00/rf@1715360400.000.h5",
+      "source_hdf5_sha256": "8397dc68dcae74222252ddc93162e331a96931d12db9a9e656af031c361dffc5",
+      "fixture": "w2naf-20240510-1700-col4.f64iq",
+      "fixture_sha256": "2c56dd525dde8e58e3d78add0e8e9e5c08eddb28473748358aa38c42d30af8d0",
+      "fixture_bytes": 576000,
+      "knots": 36000,
+      "integer_iq_energy_sum": 165231037,
+      "exact_zero_pairs": 4,
+      "int16_rail_components": 0
+    },
+    {
+      "utc_hour": 20,
+      "utc_first_sample_epoch_seconds": 1715371200,
+      "source_member": "data/psws_grapeDRF/ch0_W2NAF_2024-05-10/2024-05-10T00-00-00/rf@1715371200.000.h5",
+      "source_hdf5_sha256": "5b9e38b1319cb172d1c6c161b28960e10607d69b951593cd1700df91517173c7",
+      "fixture": "w2naf-20240510-2000-col4.f64iq",
+      "fixture_sha256": "c23ab7e470eaaeb1b501c397ac3552ea04e13cec13a07e497e1c1b41e7cb098b",
+      "fixture_bytes": 576000,
+      "knots": 36000,
+      "integer_iq_energy_sum": 2473256894,
+      "exact_zero_pairs": 1,
+      "int16_rail_components": 0
+    }
+  ],
+  "limits": [
+    "Observed narrowband receiver voltage, not a noise-free or broadband channel impulse response.",
+    "WWV and WWVH share 10 MHz; transmitter/path contributions are not separated.",
+    "No specific receiver clock, gain, noise floor or absolute propagation calibration is established.",
+    "The interleaved one-channel grape19 minute records and their metadata are excluded.",
+    "Recorded receiver noise/interference becomes signal-proportional under multiplication replay."
+  ]
+}

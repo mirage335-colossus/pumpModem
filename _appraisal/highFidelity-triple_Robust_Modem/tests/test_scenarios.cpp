@@ -277,7 +277,8 @@ int main() {
             const auto s = appraisal::make_scenario(id);
             require(s.id == id && !s.family.empty() && !s.evidence.empty() &&
                     !s.provenance.empty() && !s.assumptions.empty(), "scenario provenance missing");
-            const auto spectral_models = s.channel.lunar.has_value() + s.channel.fullwave_reflection.has_value();
+            const auto spectral_models = s.channel.lunar.has_value() + s.channel.fullwave_reflection.has_value() +
+                s.channel.magnetoionic_reflection.has_value();
             require(std::isfinite(s.reference_cn0_db_hz) && spectral_models <= 1 &&
                     (spectral_models == 1) == s.channel.paths.empty(),
                     "invalid scenario level or propagation mode");
@@ -291,6 +292,9 @@ int main() {
                     id == "hf-ding-clock41" ? 2047 * 41. / 2048 : 40.94;
                 near(s.numerical_horizon_seconds, expected, 1e-12, "measured HF support changed");
             }
+            else if (id.starts_with("hf-gannon-"))
+                near(s.numerical_horizon_seconds, id == "hf-gannon-2000-late" ? 1799.9 : 3599.9,
+                     1e-12, "long observed-voltage support changed");
             else
                 near(s.numerical_horizon_seconds, 0., 0., "unqualified finite-horizon flag changed");
             for (const auto& p : s.channel.paths)

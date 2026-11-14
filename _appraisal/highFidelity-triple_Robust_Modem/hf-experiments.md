@@ -8,7 +8,7 @@ answer or turn a completed experiment into successful communication.
 
 The [research reconciliation](hf-research.md) connects the model choices to
 the existing `_ref` collection and newly inspected primary literature. Four
-evidence classes remain separate: a deposited measured envelope, historical
+evidence classes remain separate: deposited measured envelopes, historical
 statistical fits, analytic propagation models, and constructed sensitivity
 controls. None is a calibrated worldwide disturbed-day distribution.
 Actual positive, negative and conditional outcomes are preserved in the
@@ -65,7 +65,7 @@ trace, noiseless waveform, channel inverse or evaluator decision.
 
 ## Measured replay has a real endpoint
 
-The deposit has no sample clock. Nominal 50 Hz gives a last knot at **40.94 s**;
+The original Ding deposit has no sample clock. Nominal 50 Hz gives a last knot at **40.94 s**;
 the separate `2048/41 Hz` convention interprets the paper's rounded duration.
 Neither is asserted to be the missing clock metadata. The replay rejects
 out-of-support requests and the frequency-separated Helper composite.
@@ -101,7 +101,7 @@ number. See the [fixture provenance](fixtures/hf-ding-2021/README.md).
 
 ### Measured-record availability audit
 
-The targeted primary-source/data-catalog check on 14 November 2026 found useful
+The earlier targeted primary-source/data-catalog check on 14 November 2026 found useful
 additional observables, but did not establish a second long complex HF channel
 fixture suitable for phase-sensitive modem replay. No new capture was imported
 or counted as communications evidence in this audit.
@@ -112,12 +112,39 @@ or counted as communications evidence in this audit.
 | [Cerwin et al. (2026), HamSCI HF TDOA](https://doi.org/10.3389/fspas.2026.1723511), [v1.0.3 deposit](https://doi.org/10.5281/zenodo.18394461) | Received amateur-radio audio and analysis of 2023/2024 eclipse-era paths. Manual analysis selected a favorable chirp per record; subsequent automated analyses used all chirps and exposed additional modes. The January 2026 versioned archive is 2.1 GB. | Useful for a separately qualified radio/audio-chain delay or mode-observable check. These received waveforms are not a calibrated, arbitrary-waveform complex channel. Inspect a selected file's clock, filtering, station metadata and data license before import; the whole archive is unnecessary for a small fixture. |
 | [Johnk (2026), citizen-science sounder](https://usncursi.org/archive/nrsm/2026/papers/1011.pdf) | The two-page paper constructs a complex impulse-response estimate from KiwiSDR audio using a Hilbert transform and correlation. It describes 60 m tests, then mentions a 50.313 MHz opening before the example capture; that frequency/context linkage needs clarification, given the stated receiver range of 10 kHz–30 MHz. | A methods lead. The inspected paper supplies no capture deposit, data license or complete clock/filter calibration. It does not unambiguously establish that the Kiwi capture itself was at 50.313 MHz; do not turn this ambiguity into either a verified hardware contradiction or an admitted HF fixture. |
 
-The existing Ding envelope remains the only admitted measured complex replay in
-this appraisal. Its duration, clock ambiguity and scalar bandwidth still apply.
+At that audit checkpoint, Ding was the only admitted measured complex replay.
+The later [Gannon import](fixtures/hf-gannon-2024/README.md) adds two exact hourly
+records with stored UTC/sample-grid metadata, after resolving overlapping stream
+metadata and duplicate basenames. Its [complete receiver trials](hf-magnetoionic.md#long-record-outcomes-and-conditional-failure-diagnosis)
+now exercise long observations without wrapping. These are observed-voltage
+stress tests, not calibrated broadband channel measurements. Recorded noise
+becomes signal-proportional under multiplication; a native synthetic control
+exposes that confound rather than treating noise-filled voltage as a proven
+physical channel during a blackout. The same caution applies to unseparated
+measurement noise in any complex-envelope estimate, including Ding.
+
+Ding's duration, clock ambiguity and scalar bandwidth still apply.
 Additional synthetic trajectories, another excerpt, or amplitude/phase ablations
 do not increase the number of measured days; tiling or stretching it is not a
 substitute for a longer record. Public sounding summaries can independently
 constrain scenario observables without being mislabeled as modem replay data.
+
+## Coupled magnetic and long-record extension
+
+The [magnetic protocol](hf-magnetoionic.md) specifies two separate physical
+families: `hf-magnetoionic-x`, `-y`, `-x-holdout`, `-x-spread` for the tilted
+lower-cutoff path, and `hf-magnetoionic-parallel-x`, `-y`, `-x-holdout` for the
+parallel upper-cutoff path. Normal-incidence vector fields, fixed antennas,
+absolute mesh/frequency/profile checks, a separately enforced null-resolution
+check and finite-memory time bounds precede complete native reception.
+These cold layered models do not add three-dimensional scattering or caustics.
+
+`hf-gannon-1700`, `hf-gannon-2000` and `hf-gannon-2000-late` replay the fixed
+long recorded voltages and a nonwrapped late placement. Their joint raw-knot
+normalization, Cartesian interpolation and private diagnostic conditions are
+explicit. The separate campaign manifests retain complete messages, negative
+controls, fresh placement/payload and a near-equal-energy magnetic duration
+comparison; no recorded sample or physical channel truth reaches the receiver.
 
 ## Frozen bounded campaigns
 

@@ -1,5 +1,6 @@
 #include "appraisal/hf_scenarios.hpp"
 #include "appraisal/hf_replay.hpp"
+#include "appraisal/hf_gannon_replay.hpp"
 #include "appraisal/hf_design.hpp"
 
 #include <algorithm>
@@ -521,6 +522,34 @@ Scenario ding_measured(const std::string& id) {
     return s;
 }
 
+Scenario gannon_observed_voltage(const std::string& id) {
+    auto s = base_hf(id);
+    const unsigned hour = id == "hf-gannon-1700" ? 17 : 20;
+    const auto& info = hf_gannon_2024_info(hour);
+    s.channel.rf_hz = info.nominal_center_frequency_hz;
+    s.channel.paths.resize(1);
+    s.waveform.requested_bit_seconds = 64.;
+    s.bounds.arrival_high_seconds = .003;
+    s.bounds.atmospheric_hz = 5.;
+    auto& path = s.channel.paths.front();
+    path.delay_seconds = .001;
+    auto& hf = path.hf.emplace();
+    hf.measured_envelope = load_gannon_2024_trace(hour);
+    hf.measured_offset_seconds = id == "hf-gannon-2000-late" ? 1800. : 0.;
+    s.numerical_horizon_seconds = hf_replay_support_seconds(*hf.measured_envelope) - hf.measured_offset_seconds;
+    s.evidence = "long storm-era observed narrowband complex voltage used as a conditional multiplicative stress";
+    s.provenance = "HamSCI PSWS Gannon dataset doi:10.5281/zenodo.20466479; 2024-05-10 verified 9-channel Digital RF stream, column 4 nominal 10MHz; fixtures/hf-gannon-2024/README.md";
+    s.assumptions = "Replay one predeclared UTC hour or its second half on the deposited 10Hz time grid, without wrapping, "
+        "gap repair, detrending or window normalization. Both hours share one joint two-record RMS scale, preserving their raw mean-power difference. "
+        "The observed record is beacon response plus receiver noise and interference; possible WWV and WWVH contributions are not separated. "
+        "Multiplying the modem waveform by that observed voltage makes recorded noise signal-proportional. "
+        "This is not a noiseless channel impulse response, a measured wideband transfer function or an actual field false-alarm control. "
+        "The 1ms delay is a synthetic timing control. The 5Hz receiver allowance is a declared model bound, not a measured oscillator guarantee. "
+        "Injected C/N0 refers to the incident normalized modem waveform and synthetic white receiver noise; absolute received level, "
+        "field availability, GPS-disciplined receiver phase and an isolated transmitter transfer remain unqualified.";
+    return s;
+}
+
 Scenario fullwave_reflection() {
     auto scenario = base_hf("hf-fullwave-reflection");
     scenario.channel.rf_hz = HfFullwaveKernelTable::carrier_hz;
@@ -544,10 +573,48 @@ Scenario fullwave_reflection() {
     return scenario;
 }
 
+Scenario magnetoionic_reflection(const std::string& id) {
+    auto scenario = base_hf(id);
+    using Table = HfMagnetoionicKernelTable;
+    scenario.channel.rf_hz = Table::carrier_hz;
+    auto& magnetic = scenario.channel.magnetoionic_reflection.emplace();
+    magnetic.receive_component = id == "hf-magnetoionic-y" || id == "hf-magnetoionic-parallel-y" ? 1 : 0;
+    if (id.starts_with("hf-magnetoionic-parallel-")) magnetic.path = HfMagnetoionicPath::parallel_upper;
+    if (id == "hf-magnetoionic-x-holdout" || id == "hf-magnetoionic-parallel-x-holdout") {
+        magnetic.transition_first_seconds = 180.;
+        magnetic.transition_seconds = 780.;
+    }
+    scenario.waveform.requested_bit_seconds = 64.;
+    scenario.bounds.arrival_low_seconds = Table::first_lag_samples() / Table::sample_rate_hz;
+    scenario.bounds.arrival_high_seconds = Table::last_lag_samples() / Table::sample_rate_hz;
+    scenario.bounds.atmospheric_hz = 1.;
+    scenario.reference_cn0_db_hz = 20.;
+    scenario.evidence = "qualified sampled vector cold-plasma reflected Jones column with fixed laboratory antenna projection";
+    if (id == "hf-magnetoionic-x-spread") scenario.bounds.spread_seconds = .007;
+    scenario.provenance = "hf-magnetoionic.md; fixed-field collisional layer scattering, independent physical and numerical controls";
+    scenario.assumptions = "Normal-incidence stratified cold plasma with the declared constant geomagnetic field. "
+        "A fixed laboratory x transmitter excites the vector field; one fixed x or y receive antenna supplies the scalar modem input. "
+        "F-layer density changes along the declared constructed near-cutoff path with a fixed D layer. "
+        "Cubic interpolation acts on fixed laboratory Jones coefficients, without mode-label selection or lost-gain normalization. "
+        "The explicit sampled modelling delay, causal history and full reflected tail are retained. "
+        "C/N0 is referred to the incident waveform; unobserved orthogonal polarization energy is private evaluation only. "
+        "The public arrival prior covers every retained lag; default zero spread gives a one-ray receiver likelihood. "
+        "The named spread comparison adds the existing native 7ms delay anchors, not a matched FIR or all 81 channel taps. "
+        "The timing holdout changes evolution and placement on the same physical manifold; it is not an independent physical realization. "
+        "This is not an evolving-Maxwell solution, three-dimensional strong scattering, or a measured disturbed ionospheric day.";
+    return scenario;
+}
+
 } // namespace
 
 std::optional<Scenario> make_additional_hf_scenario(const std::string& id) {
+    if (id == "hf-gannon-1700" || id == "hf-gannon-2000" || id == "hf-gannon-2000-late")
+        return gannon_observed_voltage(id);
     if (id == "hf-fullwave-reflection") return fullwave_reflection();
+    if (id == "hf-magnetoionic-x" || id == "hf-magnetoionic-y" || id == "hf-magnetoionic-x-holdout" ||
+        id == "hf-magnetoionic-x-spread" || id == "hf-magnetoionic-parallel-x" ||
+        id == "hf-magnetoionic-parallel-y" || id == "hf-magnetoionic-parallel-x-holdout")
+        return magnetoionic_reflection(id);
     if (id == "hf-nvis-disturbed") return nvis_disturbed();
     if (id == "hf-drm6") return drm6();
     if (id == "hf-watterson-i1" || id == "hf-watterson-i3") return watterson_summary(id);

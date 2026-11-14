@@ -1,4 +1,5 @@
 #include "appraisal/hf_fullwave.hpp"
+#include "hf_slab_scattering.hpp"
 
 #include <cmath>
 #include <limits>
@@ -9,11 +10,12 @@ namespace appraisal {
 namespace {
 
 using Complex = std::complex<double>;
-constexpr double c = 299792458.;
-constexpr double two_pi = 2 * std::numbers::pi;
-constexpr double elementary_charge = 1.602176634e-19;
-constexpr double electron_mass = 9.1093837139e-31;
-constexpr double vacuum_permittivity = 8.8541878188e-12;
+using hf_slab_detail::c;
+using hf_slab_detail::two_pi;
+using hf_slab_detail::plasma_frequency_hz;
+using hf_slab_detail::passive_index;
+using hf_slab_detail::cosine_density_frequency_shape;
+using hf_slab_detail::d_collision_rate;
 constexpr std::size_t max_slabs = 250000;
 constexpr double max_extent_m = 2000000.;
 constexpr double flux_tolerance = 1e-8;
@@ -29,64 +31,18 @@ double angular_frequency(double frequency_hz) {
     return two_pi * frequency_hz;
 }
 
-double plasma_frequency_hz(double electron_density_per_m3) {
-    return elementary_charge / two_pi * std::sqrt(electron_density_per_m3 / (electron_mass * vacuum_permittivity));
-}
-
 Complex cold_plasma_contrast(double plasma_hz, double frequency_hz, double collision_rate, double omega) {
     const double ratio = plasma_hz / frequency_hz;
     return -(ratio * ratio / Complex{1., collision_rate / omega});
 }
 
-Complex passive_index(Complex epsilon) {
-    // Select the decaying root even if lossless negative epsilon reaches
-    // sqrt with a negative signed zero imaginary part.
-    const Complex principal = std::sqrt(epsilon);
-    return principal.imag() < 0. ? -principal : principal;
-}
-
-double cosine_density_frequency_shape(double offset_m, double width_m) {
-    // Density is cos², so the plasma frequency has a single cosine factor.
-    return std::cos(std::numbers::pi * offset_m / width_m);
-}
-
-double d_collision_rate(double altitude_m) {
-    using Geometry = HfVerticalColumn;
-    return Geometry::d_center_collision_per_second *
-        std::exp((Geometry::d_center_m - altitude_m) / Geometry::d_collision_scale_height_m);
-}
-
-struct Scattering {
-    Complex r;
-    Complex t;
-};
-
-// Exact homogeneous slab in vacuum wave coordinates at its two faces.
-// For E'' + k0² eps E = 0, E and E' are continuous across the faces.
-// Multiplying the field-matrix expression by p=exp(i k0 n d) gives
-// q=p cos(k0 n d) and w=-i p sin(k0 n d)/n. Both stay bounded for
-// passive n, apart from the finite physical thickness factor in the n=0 limit.
-Scattering homogeneous_slab(const HfPlasmaSlab& slab, double frequency_hz, double omega) {
+hf_slab_detail::Scattering homogeneous_slab(const HfPlasmaSlab& slab, double frequency_hz, double omega) {
     const double k0d = omega / c * slab.thickness_m;
     if (slab.plasma_frequency_hz == 0) return {{}, std::polar(1., k0d)};
 
     const Complex epsilon = 1. + cold_plasma_contrast(slab.plasma_frequency_hz, frequency_hz,
                                                      slab.electron_collision_per_second, omega);
-    const Complex n = passive_index(epsilon);
-    const Complex x = Complex{0., k0d} * n;
-    const Complex p = std::exp(x);
-    const Complex p2 = p * p;
-    const Complex q = (1. + p2) * .5;
-    Complex w;
-    if (std::abs(x) < 1e-3) {
-        // w=-i k0d * expm1(2x)/(2x), including its exact n=0 limit.
-        const auto y = 2. * x;
-        w = Complex{0., -k0d} * (1. + y * (.5 + y * (1. / 6 + y * (1. / 24 + y / 120.))));
-    } else {
-        w = (1. - p2) / (2. * n);
-    }
-    const auto denominator = 2. * q + (1. + epsilon) * w;
-    return {(1. - epsilon) * w / denominator, 2. * p / denominator};
+    return hf_slab_detail::homogeneous_slab(epsilon, k0d);
 }
 
 class ColumnScattering {
@@ -136,23 +92,6 @@ private:
     std::size_t slabs_{};
 };
 
-template<class Profile>
-void add_profile_below(ColumnScattering& column, double center_m, double half_width_m,
-                       double peak_plasma_hz, double maximum_step_m, Profile&& collisions_at) {
-    const double width_m = 2 * half_width_m;
-    if (peak_plasma_hz == 0.) {
-        column.add_below({width_m, 0., 0.});
-        return;
-    }
-    const auto cells = static_cast<std::size_t>(std::ceil(width_m / maximum_step_m));
-    const double step_m = width_m / cells;
-    for (std::size_t i = cells; i > 0; --i) {
-        const double offset_m = (static_cast<double>(i) - .5) * step_m - half_width_m;
-        const double shape = cosine_density_frequency_shape(offset_m, width_m);
-        column.add_below({step_m, peak_plasma_hz * shape, collisions_at(center_m + offset_m)});
-    }
-}
-
 } // namespace
 
 HfFullwaveResponse solve_hf_fullwave(double frequency_hz, std::span<const HfPlasmaSlab> bottom_to_top) {
@@ -165,23 +104,14 @@ HfFullwaveResponse solve_hf_fullwave(double frequency_hz, std::span<const HfPlas
 
 HfFullwaveResponse solve_hf_vertical_column(double frequency_hz, const HfVerticalColumn& profile,
                                            double maximum_step_m) {
-    using Geometry = HfVerticalColumn;
     if (!finite_between(profile.f_peak_plasma_frequency_hz, 0., 1e8) ||
         !finite_between(profile.f_collision_per_second, 0., 1e9) ||
         !finite_between(profile.d_peak_electron_density_per_m3, 0., 1e13) ||
         !finite_between(maximum_step_m, 1., 1000.))
         throw std::invalid_argument("invalid frozen vertical plasma column or grid");
 
-    const double d_peak_plasma_hz = plasma_frequency_hz(profile.d_peak_electron_density_per_m3);
     ColumnScattering column(frequency_hz);
-    column.add_below({Geometry::top_m - Geometry::f_center_m - Geometry::f_half_width_m, 0., 0.});
-    add_profile_below(column, Geometry::f_center_m, Geometry::f_half_width_m, profile.f_peak_plasma_frequency_hz,
-                      maximum_step_m, [&](double) { return profile.f_collision_per_second; });
-    column.add_below({Geometry::f_center_m - Geometry::f_half_width_m -
-                      Geometry::d_center_m - Geometry::d_half_width_m, 0., 0.});
-    add_profile_below(column, Geometry::d_center_m, Geometry::d_half_width_m, d_peak_plasma_hz,
-                      maximum_step_m, d_collision_rate);
-    column.add_below({Geometry::d_center_m - Geometry::d_half_width_m, 0., 0.});
+    hf_slab_detail::add_vertical_slabs_below(column, profile, maximum_step_m);
     return column.response();
 }
 

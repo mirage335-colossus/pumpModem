@@ -12,6 +12,30 @@ from a worldwide ionospheric population. See [models and scope](hf-experiments.m
 
 ## Current receiver and physical-approximation investigation
 
+The [magnetic propagation and long-record investigation](hf-magnetoionic.md)
+adds coupled two-polarization physical propagation and two exact hour-long
+recorded-voltage fixtures. It preserves an absolute-error pass that failed
+near a deep null, a subsequent failed refinement, and the separately admitted
+final numerical table. Eight tilted-field, seven parallel-field and six
+long-record receiver observations all execute uncensored. All five wanted
+parallel messages succeed, including doubled bit duration with nearly equal
+incident energy and 4.7% lower received energy. Other weak cases lose message
+bits; the new wrong-key controls produce false DATA without accepted messages.
+The two recorded-slot diagnostics distinguish strong conditional information
+from native presence admission and the penalty for short independent gains.
+Their noise/measurement, time-grid, source-identity and whole-message limits
+are recorded explicitly. These tests do not repair the earlier receiver
+failures below or establish natural disturbed-day availability.
+
+Two additional magnetic references distinguish isolated presence from binary
+choice. The tilted 20 dB-Hz first bit has only 9.09% known-presence detection
+at the declared false-alarm target; a single fixed 30 dB-Hz complete-receiver
+midpoint succeeds with exactly matched source/calendar/clean energies. The
+parallel reference has ample conditional information and native completion.
+Including that midpoint, this extension executes 22 complete-receiver trials
+and four private diagnostics, all uncensored. The linked record preserves
+individual failures and source identities, without a pooled success-rate claim.
+
 The [inference and propagation continuation](hf-inference-and-propagation.md)
 completes 32 bounded observations, including 15 complete receivers. Private
 path traces and separate support relaxations distinguish phase-reachability

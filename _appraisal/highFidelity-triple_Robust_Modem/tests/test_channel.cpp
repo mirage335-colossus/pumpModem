@@ -563,6 +563,44 @@ void fullwave_reflection_admission() {
     rejects([&] { Channel c(tone(fs, source_rows, 100.), spec, 1, 1); },
             "full-wave table reached construction without its workspace");
 }
+void magnetoionic_reflection_admission() {
+    const auto scenario = appraisal::make_scenario("hf-magnetoionic-x");
+    auto spec = scenario.channel;
+    using Table = appraisal::HfMagnetoionicKernelTable;
+    constexpr unsigned fs = 1920;
+    check(spec.magnetoionic_reflection.has_value() && spec.paths.empty(),
+          "magnetoionic scenario mixed propagation paths");
+    const auto tail = appraisal::channel_tail_seconds(spec, 1200.) + appraisal::channel_interpolation_tail_seconds(spec, fs);
+    check(std::abs(tail - static_cast<double>(Table::last_lag_samples()) / fs) < 1e-15,
+          "magnetoionic tail did not preserve every reflected lag");
+    rejects([&] { Channel c(tone(fs, 1, Table::occupied_half_band_hz + 1.), spec, 1, 1); },
+            "wide incident source reached the magnetoionic table build");
+    rejects([&] { Channel c(tone(960, 1, 100.), spec, 1, 1); },
+            "unqualified sample rate reached the magnetoionic table build");
+    spec.magnetoionic_reflection->receive_component = 2;
+    rejects([&] { Channel c(tone(fs, 1, 100.), spec, 1, 1); },
+            "magnetoionic reflection accepted an undefined antenna projection");
+    spec.magnetoionic_reflection->receive_component = 0;
+    spec.magnetoionic_reflection->path = static_cast<appraisal::HfMagnetoionicPath>(99);
+    rejects([&] { Channel c(tone(fs, 1, 100.), spec, 1, 1); },
+            "magnetoionic reflection accepted an undefined physical path");
+    spec.magnetoionic_reflection->path = appraisal::HfMagnetoionicPath::tilted_lower;
+    spec.paths.emplace_back();
+    rejects([&] { Channel c(tone(fs, 1, 100.), spec, 1, 1); },
+            "magnetoionic reflection accepted a separate propagation path");
+    spec.paths.clear();
+    spec.fullwave_reflection.emplace();
+    rejects([&] { Channel c(tone(fs, 1, 100.), spec, 1, 1); },
+            "magnetoionic reflection accepted a simultaneous scalar full-wave path");
+    spec.fullwave_reflection.reset();
+    spec.noise.colored_variance = 1.;
+    rejects([&] { Channel c(tone(fs, 1, 100.), spec, 1, 1); },
+            "unqualified colored-noise combination reached the magnetoionic table build");
+    spec.noise.colored_variance = 0;
+    spec.maximum_workspace_bytes = Table::preparation_workspace_bound_bytes - 1;
+    rejects([&] { Channel c(tone(fs, 1, 100.), spec, 1, 1); },
+            "magnetoionic table reached construction without its workspace");
+}
 }
 
 int main() {
@@ -578,6 +616,7 @@ int main() {
         cancellation();
         long_period_phase_wander();
         fullwave_reflection_admission();
+        magnetoionic_reflection_admission();
         std::cout << "channel checks passed: " << checks << "\n";
         return 0;
     } catch (const std::exception& error) {
