@@ -72,6 +72,14 @@ void validate_resonator(const Resonator& r) {
 }
 
 double maximum_delay(const ChannelSpec& spec, double horizon) {
+    require(finite(spec.hf_trajectory_offset_seconds) && std::abs(spec.hf_trajectory_offset_seconds) <= 86400,
+            "analytic HF trajectory offset must be within one day of sample zero");
+    if (spec.hf_trajectory_offset_seconds != 0) {
+        require(!spec.lunar && !spec.paths.empty() &&
+                std::all_of(spec.paths.begin(), spec.paths.end(), [](const Path& path) {
+                    return path.hf && !path.hf->measured_envelope && path.delay_rate == 0;
+                }), "HF trajectory offset requires analytic HF paths without linear geometric delay rate");
+    }
     double maximum = 0;
     if (spec.lunar) {
         const auto& lunar = *spec.lunar;
@@ -92,6 +100,8 @@ double maximum_delay(const ChannelSpec& spec, double horizon) {
             earliest_motion = bounds.front();
             latest_motion = bounds.back();
             maximum_rate += 2 * pi * motion.amplitude_seconds / motion.period_seconds;
+            if (path.hf->parabolic_layer)
+                maximum_rate += hf_parabolic_max_group_delay_rate(*path.hf->parabolic_layer, spec.rf_hz);
         }
         require(finite(last) && std::min(path.delay_seconds, last) + earliest_motion >= 0 && maximum_rate < 1,
                 "moving path delay must remain nonnegative with slope below one over the horizon");
@@ -227,7 +237,8 @@ struct Channel::Impl {
 
     Impl(Source input, ChannelSpec config, std::uint64_t seed, std::uint64_t count, std::stop_token stop)
         : source(std::move(input)), spec(std::move(config)), horizon(count),
-          white(seed, 2), colored(seed, 6), events(seed, 3), marks(seed, 4) {
+          white(spec.noise_seed.value_or(seed), 2), colored(spec.noise_seed.value_or(seed), 6),
+          events(spec.noise_seed.value_or(seed), 3), marks(spec.noise_seed.value_or(seed), 4) {
         require(source.format.sample_rate > 0 && source.format.sample_rate_denominator > 0,
                 "channel source sample rate must be positive");
         fs = static_cast<double>(source.format.sample_rate) / source.format.sample_rate_denominator;
@@ -290,12 +301,11 @@ struct Channel::Impl {
                 double maximum_slope = std::abs(path.hf->group_delay_slope_seconds_per_hz);
                 if (path.hf->parabolic_layer) {
                     const auto& layer = *path.hf->parabolic_layer;
-                    const double minimum_critical = layer.critical_frequency_hz - layer.critical_amplitude_hz;
+                    const double minimum_critical = hf_parabolic_critical_bounds(layer).front();
                     require(spec.rf_hz + source_band < .99 * minimum_critical,
                             "HF source band approaches the parabolic turning-frequency cutoff");
-                    maximum_slope = hf_parabolic_eikonal(layer, spec.rf_hz,
-                        ( .75L - layer.critical_phase_radians / (2 * std::numbers::pi_v<long double>)) *
-                        layer.critical_period_seconds).group_delay_slope_seconds_per_hz;
+                    maximum_slope = hf_parabolic_eikonal_at_critical(layer, spec.rf_hz,
+                        minimum_critical).group_delay_slope_seconds_per_hz;
                 }
                 require(source_band <= .20 * fs &&
                         std::abs(hf_residual_dispersion_phase_radians(maximum_slope, source_band)) <= .002,
@@ -312,7 +322,7 @@ struct Channel::Impl {
             require(finite(guard) && guard < fs / 2, "path spectral allowance reaches Nyquist");
             const double delay_samples = path.delay_seconds * fs;
             const bool moving = path.delay_rate != 0 || (path.hf && (path.hf->group_delay_motion.amplitude_seconds != 0 ||
-                (path.hf->parabolic_layer && path.hf->parabolic_layer->critical_amplitude_hz != 0)));
+                (path.hf->parabolic_layer && hf_parabolic_varies(*path.hf->parabolic_layer))));
             const bool fractional = moving || delay_samples != std::floor(delay_samples);
             any_fractional |= fractional;
             any_moving |= moving;
@@ -372,6 +382,9 @@ struct Channel::Impl {
         for (const auto& path : spec.paths)
             if (path.hf) {
                 bytes = checked_add(bytes, checked_multiply(path.hf->voltage_transitions.capacity(), sizeof(HfVoltageTransition)));
+                if (path.hf->parabolic_layer)
+                    bytes = checked_add(bytes, checked_multiply(path.hf->parabolic_layer->critical_sines.capacity(),
+                                                               sizeof(HfCriticalSine)));
                 if (path.hf->measured_envelope)
                     bytes = checked_add(bytes, checked_multiply(path.hf->measured_envelope->samples.capacity(), sizeof(Complex)));
             }
@@ -451,7 +464,7 @@ struct Channel::Impl {
             }
             const double lag = path.delay_seconds * fs;
             runtime.moving = path.delay_rate != 0 || (path.hf && (path.hf->group_delay_motion.amplitude_seconds != 0 ||
-                (path.hf->parabolic_layer && path.hf->parabolic_layer->critical_amplitude_hz != 0)));
+                (path.hf->parabolic_layer && hf_parabolic_varies(*path.hf->parabolic_layer))));
             if (path.hf && path.hf->parabolic_layer)
                 runtime.eikonal_initial = hf_parabolic_eikonal(*path.hf->parabolic_layer, spec.rf_hz, 0);
             runtime.integer_delay = !runtime.moving && lag == std::floor(lag);
@@ -629,16 +642,17 @@ struct Channel::Impl {
                 path.phase_step = std::polar(1., static_cast<double>(2 * std::numbers::pi_v<long double> * std::remainder(next_cycles, 1.L)));
             }
             if (spec_path.power > 0) {
-                const Complex fading = path.gaussian ? path.gaussian->value(time) : Complex{1, 0};
+                const long double hf_time = time + spec.hf_trajectory_offset_seconds;
+                const Complex fading = path.gaussian ? path.gaussian->value(spec_path.hf ? hf_time : time) : Complex{1, 0};
                 if (spec_path.hf) {
                     const auto& hf = *spec_path.hf;
                     const auto& movement = hf.group_delay_motion;
-                    double motion = hf_group_delay_motion_seconds(movement, time);
-                    double phase = hf_geometric_phase_radians(movement, spec.rf_hz, time);
+                    double motion = hf_group_delay_motion_seconds(movement, hf_time);
+                    double phase = hf_geometric_phase_radians(movement, spec.rf_hz, hf_time);
                     double dispersion = hf.group_delay_slope_seconds_per_hz;
                     if (hf.parabolic_layer) {
-                        const auto next = hf.parabolic_layer->critical_amplitude_hz == 0 ? path.eikonal_initial :
-                            hf_parabolic_eikonal(*hf.parabolic_layer, spec.rf_hz, time);
+                        const auto next = !hf_parabolic_varies(*hf.parabolic_layer) ? path.eikonal_initial :
+                            hf_parabolic_eikonal(*hf.parabolic_layer, spec.rf_hz, hf_time);
                         motion += next.group_delay_seconds - path.eikonal_initial.group_delay_seconds;
                         phase -= 2 * pi * std::remainder(spec.rf_hz *
                             (next.phase_delay_seconds - path.eikonal_initial.phase_delay_seconds), 1.);
@@ -646,11 +660,11 @@ struct Channel::Impl {
                     }
                     const double residual = spec_path.phase_wander_amplitude_radians > 0 ?
                         spec_path.phase_wander_amplitude_radians * static_cast<double>(std::sin(2 * std::numbers::pi_v<long double> *
-                            std::remainder(time / spec_path.phase_wander_period_seconds, 1.L))) : 0;
+                            std::remainder(hf_time / spec_path.phase_wander_period_seconds, 1.L))) : 0;
                     const auto port = hf.measured_envelope ? hf_replay_gain(*hf.measured_envelope, time + hf.measured_offset_seconds) :
-                        hf.polarization ? hf_port_projection(*hf.polarization, time) : Complex{1, 0};
+                        hf.polarization ? hf_port_projection(*hf.polarization, hf_time) : Complex{1, 0};
                     wanted += path.fixed * path.phase * (path.coherent + path.diffuse_scale * fading) *
-                        hf_mode_voltage(hf, time) * port * std::polar(1., phase + residual) *
+                        hf_mode_voltage(hf, hf_time) * port * std::polar(1., phase + residual) *
                         hf_delayed(path, n, motion, dispersion);
                 } else if (spec_path.phase_wander_amplitude_radians > 0) {
                     const long double angle = 2 * std::numbers::pi_v<long double> *

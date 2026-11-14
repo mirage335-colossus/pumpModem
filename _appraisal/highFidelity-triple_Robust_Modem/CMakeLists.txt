@@ -73,6 +73,9 @@ if(BUILD_TESTING)
   add_test(NAME high_fidelity_runner COMMAND "${Python3_EXECUTABLE}"
     "${_hf_root}/tests/test_runner.py")
   set_tests_properties(high_fidelity_runner PROPERTIES LABELS "appraisal" TIMEOUT 45)
+  add_test(NAME high_fidelity_ensemble COMMAND "${Python3_EXECUTABLE}"
+    "${_hf_root}/tests/test_ensemble.py")
+  set_tests_properties(high_fidelity_ensemble PROPERTIES LABELS "appraisal" TIMEOUT 45)
   add_custom_target(high_fidelity_checks DEPENDS high_fidelity_appraisal
     high_fidelity_test_channel high_fidelity_test_scenarios
     high_fidelity_test_hf_scenarios high_fidelity_test_hf_ionosphere high_fidelity_test_hf_history

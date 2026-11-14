@@ -2,6 +2,7 @@
 
 #include <array>
 #include <complex>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -27,12 +28,26 @@ struct HfPolarization {
     bool extraordinary = false;
 };
 
+struct HfCriticalSine {
+    double amplitude_hz = 0, period_seconds = 120, phase_radians = 0;
+};
+
+struct HfCriticalKnots {
+    double amplitude_hz = 0, knot_seconds = 120;
+    std::uint64_t seed = 0;
+};
+
 struct HfParabolicLayer {
     // Cold, collisionless bottomside parabola at vertical incidence.
     double bottom_height_m, semi_thickness_m, critical_frequency_hz;
     double critical_amplitude_hz = 0, critical_period_seconds = 120;
     // Physical phase of the critical-frequency variation at elapsed t=0.
     double critical_phase_radians = 0;
+    // Additional physical density variations, independent of receiver bases.
+    // At most two sinusoids and one bounded C2 random-knot law are admitted.
+    // The latter is constructed stress, not measured ionospheric statistics.
+    std::vector<HfCriticalSine> critical_sines;
+    std::optional<HfCriticalKnots> critical_knots;
 };
 
 struct HfEikonal {
@@ -71,6 +86,14 @@ double hf_mode_voltage(const HfModeProfile&, long double seconds);
 std::complex<double> hf_port_projection(const HfPolarization&, long double seconds);
 double hf_residual_dispersion_phase_radians(double slope_seconds_per_hz, double offset_hz);
 HfEikonal hf_parabolic_eikonal(const HfParabolicLayer&, double rf_hz, long double seconds);
+double hf_parabolic_critical_hz(const HfParabolicLayer&, long double seconds);
+std::array<double, 2> hf_parabolic_critical_bounds(const HfParabolicLayer&);
+double hf_parabolic_max_rate_hz_s(const HfParabolicLayer&);
+// Infinity for a static layer; otherwise the shortest active period/knot scale.
+double hf_parabolic_min_period_seconds(const HfParabolicLayer&);
+bool hf_parabolic_varies(const HfParabolicLayer&);
+HfEikonal hf_parabolic_eikonal_at_critical(const HfParabolicLayer&, double rf_hz, double critical_hz);
+double hf_parabolic_max_group_delay_rate(const HfParabolicLayer&, double rf_hz);
 
 namespace detail {
 inline constexpr unsigned hf_dispersion_half_width = 4;

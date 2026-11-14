@@ -297,6 +297,56 @@ void eikonal_compound() {
     check(whole == chunked, "compound physical path state is continuous across channel-read chunks");
 }
 
+void independent_ensemble() {
+    const auto names=scenario_names();
+    for(const auto* id:{"hf-ensemble-tid","hf-ensemble-changing-rate","hf-ensemble-modes","hf-ensemble-modes-noisy"}) {
+        check(std::ranges::find(names,id)!=names.end(),"independent ensemble scenario is catalogued");
+        const auto scenario=make_scenario(id);
+        check(scenario.assumptions.find("independently of the receiver phase bank")!=std::string::npos,
+              "trajectory construction declares its independence from searched phase templates");
+        check(scenario.assumptions.find("not a measured ionospheric day")!=std::string::npos,
+              "ensemble remains a conditional constructed population");
+        for(const auto& path:scenario.channel.paths) {
+            const auto& layer=*path.hf->parabolic_layer;
+            const auto limits=hf_parabolic_critical_bounds(layer);
+            const auto initial=hf_parabolic_eikonal(layer,scenario.channel.rf_hz,0);
+            near(path.delay_seconds,initial.group_delay_seconds,0.,"ensemble reference is the full initial physical eikonal");
+            const auto low=hf_parabolic_eikonal_at_critical(layer,scenario.channel.rf_hz,limits[1]);
+            const auto high=hf_parabolic_eikonal_at_critical(layer,scenario.channel.rf_hz,limits[0]);
+            check(low.group_delay_seconds>4./scenario.waveform.sample_rate_hz,
+                  "entire declared density trajectory covers the dispersion interpolation halo");
+            check(high.group_delay_seconds-low.group_delay_seconds<=scenario.bounds.delay_excursion_seconds,
+                  "public excursion covers all initial seeds and launch placements, not sampled extrema only");
+            check(low.group_delay_seconds>=scenario.bounds.arrival_low_seconds&&
+                  high.group_delay_seconds<=scenario.bounds.arrival_high_seconds,
+                  "entire density trajectory remains inside the public arrival interval");
+            check(layer.critical_amplitude_hz==0&&!layer.critical_sines.empty(),
+                  "new ensemble does not substitute a receiver-bank single sinusoid");
+        }
+        check(render(scenario,8192)==render(scenario,257),"independent physical trajectories retain chunk invariance");
+    }
+    const auto tid=make_scenario("hf-ensemble-tid");
+    const auto& tid_layer=*tid.channel.paths[0].hf->parabolic_layer;
+    check(tid_layer.critical_sines.size()==2&&!tid_layer.critical_knots,
+          "TID control has two frozen scales and no invented random event seed");
+    near(tid_layer.critical_sines[0].period_seconds,271.,0.,"frozen faster physical scale");
+    near(tid_layer.critical_sines[1].period_seconds,1013.,0.,"frozen slower physical scale");
+    const auto modes=make_scenario("hf-ensemble-modes");
+    check(modes.channel.paths.size()==2&&modes.bounds.spread_seconds==0,
+          "compound native channel is tested against the explicit single-tap public mismatch");
+    near(hf_mode_voltage(*modes.channel.paths[0].hf,300),.05,1e-15,"primary mode remains weak during replacement");
+    near(hf_mode_voltage(*modes.channel.paths[1].hf,300),.25,1e-15,"replacement is weak, without power compensation");
+    near(hf_mode_voltage(*modes.channel.paths[0].hf,550),1.,1e-15,"physical mode recovers without resetting trajectory");
+    const auto helper=make_scenario("hf-ensemble-ox-helper");
+    check(helper.channel.noise.colored_variance>0&&helper.channel.noise.impulse_rate_hz>0,
+          "full-band Helper interaction retains its nonwhite input noise");
+    for(const auto& path:helper.channel.paths)
+        check(path.hf&&path.hf->polarization&&!path.hf->parabolic_layer,
+              "Helper interaction uses the existing full-band Jones operator rather than unsupported eikonal dispersion");
+    near(helper.channel.paths[1].residual_doppler_hz-helper.channel.paths[0].residual_doppler_hz,
+         .125,1e-15,"common oscillator surrogate preserves O/X differential carrier rate");
+}
+
 } // namespace
 
 int main() {
@@ -308,6 +358,7 @@ int main() {
         eikonal_holdout();
         eikonal_refinement_controls();
         eikonal_compound();
+        independent_ensemble();
         std::cout << "additional HF profile checks passed: " << checks << '\n';
         return 0;
     } catch (const std::exception& error) {

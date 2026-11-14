@@ -10,6 +10,39 @@ from a worldwide ionospheric population. See [models and scope](hf-experiments.m
 [primary research reconciliation](hf-research.md), and the
 [actual upstream codec comparison](competitor/README.md).
 
+## Independent trajectory and boundary continuation
+
+The [independent ensemble](hf-ensemble.md#executed-evidence-and-findings)
+executed 31 native rows uncensored in 433.631 s, including 12 end-to-end
+receiver trials, under appraisal source `606d0da325808d648a7b186c686034166ef2687e29300793d7e2e1dd4d27d438`.
+Its source/binary identities, frozen budgets, three separately declared causal
+amendments, exact receipts and remaining gates are recorded there. No canonical
+receiver source changed. All 18 correctness groups passed; corrected analyzer
+and runner checks passed again on the final build.
+
+This extension catches a new near-equal-energy time failure: the two-timescale
+TID message passes at 139.2 s/bit and 0 dB-Hz, but fails at 522 s/bit and
+−6 dB-Hz with two active quiet decisions and premature completion. Normalized
+whole-message energy/noise falls only .262 dB. The native receiver rescues the
+slot-1 shadow miss; the first actual native missed slot is slot 0. Its full-grid
+supplement score reproduces the separate diagnostic, despite known-context
+binary distance/noise 260.057 and conditional error `2.02e−30`. This identifies
+a public-search/known-context information gap without claiming an achievable
+blind-receiver optimum or uniquely attributing model versus proposal failure.
+
+The 13-bit competing-mode `A` episode exposes three premature completions and
+only four correct post-recovery DATA slots among nine eligible slots. Fixed
+SNR/time brackets distinguish a high-information mode-search miss from a
+deeper fade whose known-context binary error is .01894. Both new canonical
+nonwhite-noise controls produce five false DATA decisions, while the proper-
+white phase and wrong-key controls remain quiet. No failed case accepted a
+message. These heterogeneous outcomes are not pooled into a reliability rate.
+
+Future receiver work should investigate bounded broader phase models and
+calibrated nonwhite-null decisions while retaining full public priors, physical
+completion and complete-work admission. No all-GUI, strong-scattering,
+measured disturbed-day, sample-clock or modem-superiority qualification follows.
+
 ## Physical-template diagnosis and phase-refinement implementation repair
 
 The [frozen diagnostic protocol](hf-phase-refinement.md) first ran the public

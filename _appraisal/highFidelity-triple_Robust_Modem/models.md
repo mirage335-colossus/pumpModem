@@ -227,6 +227,25 @@ point substitution; tests also check frequency and time derivatives and actual
 rendered off-center tones. Public delay and frequency allowances remain fixed
 and are shared by each static/moving pair.
 
+The [independent ensemble](hf-ensemble.md) extends `fo(t)` with at most two
+additional sinusoids and one immutable native C2 quintic-knot field. For summed
+amplitudes `A`, it admits the entire range `fo0 ± A` (at most five percent),
+with `|fo'| ≤ Σ 2π A_i/P_i + 3.75 A_k/T_k`. Periods and knot spacing are at
+least 30 s. The same eikonal supplies all phase/delay/dispersion values;
+`|tau_g'| ≤ (f/fo_min) D(f,fo_min) |fo'|` also enters the monotone retarded-time
+check. Occupied-band admission evaluates worst dispersion at the declared
+minimum critical frequency, not a guessed sinusoidal minimum time.
+Native tests cover negative-time and knot joins, frequency/time derivatives,
+global bounds, chunk equivalence, and seed-domain isolation.
+
+Signed analytic-HF placement is limited to ±86400 s. It shifts HF evolution
+while keeping source/capture/additive-noise clocks and the physical-zero path
+reference fixed. Capture-clock residual CFO/drift remain separate. Nonzero
+generic linear path-delay rate, measured traces and non-HF paths cannot use
+this shift. The explicit additive-noise seed changes no path realization.
+These bounded controls permit independent placement and noise holdouts; they
+are not an empirically calibrated ionospheric stochastic process.
+
 The tiny dispersive correction is represented by an eighth-order centered
 second-derivative stencil implementing the first-order expansion of
 `exp(-i*pi*D*nu^2)`. Admission bounds its approximation on the stated source

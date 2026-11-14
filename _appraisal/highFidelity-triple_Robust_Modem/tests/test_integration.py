@@ -34,6 +34,50 @@ def main() -> None:
                scenarios["hf-mode-transition"]["channel"]["paths"]), scenarios["hf-mode-transition"]
     eikonal = scenarios["hf-vertical-eikonal-motion"]["channel"]["paths"][0]["hf"]["parabolic_layer"]
     assert eikonal["critical_amplitude_hz"] > 0, eikonal
+    # New physical laws have a separate hash version; unchanged old controls
+    # retain their original hash versions and parameter encoding.
+    assert scenarios["hf-vertical-eikonal-motion"]["channel"]["path_hash_version"] == 2
+    assert scenarios["hf-vertical-eikonal-holdout"]["channel"]["path_hash_version"] == 3
+    ensemble = scenarios["hf-ensemble-changing-rate"]["channel"]
+    assert ensemble["path_hash_version"] == 4, ensemble
+    law = ensemble["paths"][0]["hf"]["parabolic_layer"]
+    assert law["critical_law_version"] == 1 and len(law["critical_sines"]) == 1, law
+    assert law["critical_knots"]["knot_seconds"] == 113, law
+    ensemble_args = ["--scenario", "hf-ensemble-changing-rate", "--waveform", "smoke", "--seed", "31"]
+    default_ensemble = invoke("--mode", "plan", *ensemble_args)
+    shifted_ensemble = invoke("--mode", "plan", *ensemble_args, "--hf-trajectory-offset-seconds", "83",
+                              "--hf-trajectory-seed", "18446744073709551615", "--noise-seed", "41")
+    ep = shifted_ensemble["plan"]
+    assert ep["hf_trajectory_seed"] == 18446744073709551615 and ep["hf_trajectory_seed_override"], ep
+    assert ep["hf_trajectory_offset_seconds"] == 83 and ep["hf_trajectory_offset_override"], ep
+    assert ep["noise_seed"] == 41 and ep["noise_seed_override"], ep
+    assert default_ensemble["plan"]["noise_seed"] == 31 and not default_ensemble["plan"]["noise_seed_override"], default_ensemble
+    for field in ("public_bounds", "public_slots", "source_stop_sample", "epoch", "initial_ordinal",
+                  "capture_preroll_seconds", "actual_bit_seconds"):
+        assert ep[field] == default_ensemble["plan"][field], (field, ep, default_ensemble["plan"])
+    assert shifted_ensemble["scenario"]["channel"]["path_parameters_sha256"] != ensemble["path_parameters_sha256"], shifted_ensemble
+    for offset in ("-86400", "86400"):
+        boundary = invoke("--mode", "plan", *ensemble_args, "--hf-trajectory-offset-seconds", offset)
+        assert boundary["plan"]["hf_trajectory_offset_seconds"] == float(offset), boundary
+    for args in (["--scenario", "awgn", "--hf-trajectory-seed", "1"],
+                 ["--scenario", "hf-ensemble-tid", "--hf-trajectory-seed", "1"],
+                 ["--scenario", "hf-ding-measured", "--hf-trajectory-offset-seconds", "1"],
+                 ["--scenario", "awgn", "--hf-trajectory-offset-seconds", "0"],
+                 ["--scenario", "hf-ensemble-tid", "--hf-trajectory-offset-seconds", "86401"],
+                 ["--scenario", "hf-ensemble-tid", "--hf-trajectory-offset-seconds", "nan"],
+                 ["--noise-seed", "18446744073709551616"]):
+        rejected = invoke("--mode", "plan", *args, code=2)
+        assert rejected["status"] == "error", rejected
+    unavailable_helper = invoke("--mode", "plan", *ensemble_args, "--helper", code=5)
+    assert "dispersion bandwidth" in unavailable_helper["reason"], unavailable_helper
+    helper_interaction = invoke("--mode", "plan", "--scenario", "hf-ensemble-ox-helper", "--helper")
+    assert helper_interaction["plan"]["helper_enabled"], helper_interaction
+    # Zero-signal samples isolate the additive-noise stream: physical launch,
+    # trajectory and stochastic-path seed changes cannot resample that noise.
+    noise_a = invoke("--mode", "channel", *ensemble_args, "--control", "noise", "--noise-seed", "41", "--duration-seconds", "1")
+    noise_b = invoke("--mode", "channel", *ensemble_args, "--control", "noise", "--noise-seed", "41", "--duration-seconds", "1",
+                     "--seed", "32", "--hf-trajectory-seed", "73", "--hf-trajectory-offset-seconds", "-83")
+    assert noise_a["channel"]["input_sha256"] == noise_b["channel"]["input_sha256"], (noise_a, noise_b)
     traces = [scenarios[name]["channel"]["paths"][0]["hf"]["measured_envelope"]
               for name in ("hf-ding-measured", "hf-ding-amplitude", "hf-ding-phase")]
     assert [trace["part"] for trace in traces] == ["measured-complex", "constructed-amplitude-only", "constructed-phase-only"], traces
@@ -100,6 +144,13 @@ def main() -> None:
     known = physical["physical_templates"]
     assert known["block_count"] == 1 and known["noise_free_energy"] > 0, physical_search
     assert math.isclose(known["hypotheses"][known["wanted_bit"]]["clean_coherence_power"], 1, abs_tol=1e-12), physical_search
+    binary = physical["known_binary"]
+    assert binary["squared_distance"] > 0 and binary["distance_over_noise_variance"] > 0, binary
+    assert binary["observed_correct_vs_wrong_log_likelihood_ratio"] > 0, binary
+    assert math.isclose(binary["distance_over_noise_variance"], binary["squared_distance"] / physical_search["plan"]["noise_variance"], rel_tol=1e-14), binary
+    assert math.isclose(binary["equal_prior_bit_error_probability"], .5 * math.erfc(math.sqrt(binary["distance_over_noise_variance"] / 4)), rel_tol=1e-14), binary
+    assert binary["fixed_known_context"] and not binary["truth_information_passed_to_search"], binary
+    assert not binary["includes_acquisition_presence_or_completion"], binary
     winner = physical["winning_public_cell"]
     assert abs(winner["single_cell_log_lr_replay_difference"]) <= 2e-9 * max(1, abs(winner["search_maximum_single_cell_log_lr"])), physical_search
     refined_search = invoke("--mode", "hf-search", "--scenario", "awgn", "--waveform", "smoke",

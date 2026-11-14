@@ -26,14 +26,21 @@ rare-error probabilities or complete-receiver real-time capacity. The
 and [protocol](experiment-protocol.md) preserve those distinctions and the
 source limits in [`_ref`](../../_ref/highFidelity-triple_Robust_Modem).
 
-The current continuation adds [public phase-history search](hf-public-search.md)
-and [bounded public phase refinement](hf-phase-refinement.md): matched
-CFO/affine/nonlinear likelihoods, an evaluator-only physical-template
-diagnostic, and an opt-in proposal/refinement search with fixed full priors.
-Four constructed holdouts extend phase, CFO-edge and unresolved two-ray tests.
-The user approved a generic hook in two canonical internal receiver files; all
-experimental algorithms, fixtures and documentation remain here. Ordinary
-receiver defaults are unchanged.
+The current [independent HF ensemble](hf-ensemble.md) adds multiscale and
+nonperiodic density trajectories, separate trajectory/noise seeds, independent
+channel placement, competing paths, and selected Helper/noise interactions.
+Its frozen screen, complete-message cohort and conditional SNR/time brackets
+keep receiver mismatches, information loss, null controls and resource limits
+separate. The earlier [public phase search](hf-public-search.md) and
+[phase refinement](hf-phase-refinement.md) remain opt-in experiments with fixed
+public priors. Ordinary receiver defaults are unchanged.
+
+The new [31-trial results](hf-ensemble.md#executed-evidence-and-findings)
+include a near-equal-energy long-message failure, premature completion across
+mode changes, and nonwhite-noise false DATA. Fresh trajectory/placement checks
+also pass, and a native bit rescue contradicts a standalone shadow miss.
+These results separate observed receiver weakness from private known-channel
+information and physical fading; they do not qualify general HF robustness.
 
 ## Build and quick correctness checks
 
@@ -43,35 +50,19 @@ From the repository root:
 ./_appraisal/highFidelity-triple_Robust_Modem/build.sh test
 ```
 
-This configures a separate ignored `.build/`, links the production C++ modem,
-and runs the native CTest groups. The latest previously complete run passed all
-16 CTest groups in 76.71 seconds; see
-[the current log](.build/hf-paired-rendering-checks.log). It includes direct-sum
-phase-search, shared-preparation and native paired-rendering parity checks, native evidence-hook
-boundaries, matched observation hashes, a complete experimental receiver
-control, 44 runner cases, and the
-existing Helper, FEC, channel and competitor checks. The first refinement
-CTest exposed a blind off-grid initialization failure; its original failure
-and repair evidence remain in the protocol. A later full run passed all 17
-CTest groups in 72.43 seconds, including 107 refinement assertions, integration
-and 47 runner cases. The later
-resource-fallback revision passed all 17 groups in 73.54 seconds with 296 core and 121 refinement assertions plus 49 runner cases ([log](.build/hf-phase-final-checks.log)).
-The frozen
-two-case shadow then completed in 19.585 s on the final receipt-metadata
-revision. The 15-episode full-receiver cohort completed uncensored in 560.536 s;
-three of thirteen wanted episodes failed, including premature completion on
-the refined long weak case. The shadow recovered the selected off-grid
-observation but showed a weak long-case loss in the new-only branch. See the
-[validation record](hf-validation.md); these results do not establish a broad
-sensitivity floor. A later six-case staged receiver cohort passed all three
-wanted staged messages, while the matched fresh baseline stayed quiet; the two
-long negative controls remained quiet. Its three shadow inputs and scores were
-reproduced exactly under the final cap-fallback source. The complete-message
-cohort remains tied to the earlier staged source, and no speed or capacity claim
-follows. The earlier canonical `test triad`
-group also passed 32/32 in 62.22 seconds ([log](.build/hf-native-triad-checks.log)).
-Earlier 15-, 13- and seven-group runs remain historical evidence. Current
-group coverage is:
+This configures an ignored `.build/` and links the production C++ modem.
+The independent-trajectory check passed all **18 CTest groups in 74.95 s**
+([log](.build/hf-independent-checks.log)). The follow-up analyzer was then
+corrected for canonical manifest hashes and null-control truth; its five
+focused checks passed before rebuilding the final source identity. The runner
+has 52 checks. These are software checks, not communication successes.
+
+The earlier canonical `test triad` result remains 32/32 in 62.22 s
+([log](.build/hf-native-triad-checks.log)); its native source hash is unchanged
+by this contained continuation. Historical failures, repairs and complete
+message results are retained in [HF validation](hf-validation.md), including
+the failed first phase-refinement initialization and later long-slot recovery.
+Current group coverage is:
 
 | Group | Main coverage |
 | --- | --- |
@@ -82,14 +73,15 @@ group coverage is:
 | `hf_history` | 175 matched public-aperture block-history, projection, nuisance-rank and conditional-oracle checks |
 | `hf_phase_bank` | Frozen phase dictionary, matched projection, uncertainty and boundary regression checks |
 | `hf_public_statistics` | Exact effective-template FFT/direct-sum agreement, shared phase/FFT preparation parity, full priors, phase bounds and resource guards |
-| `hf_phase_refinement` | Direct-DFT proposal/final-score agreement, fixed priors, boundaries and off-grid recovery; 107 assertions passed in the latest full run |
+| `hf_phase_refinement` | Direct-DFT proposal/final-score agreement, fixed priors, boundaries, staged objectives and off-grid recovery |
 | `hf_native_supplement` | Disabled-path parity, reserved mass, shared executor, line/quiet policy and invalidity |
 | `hf_public_receiver` | Public arrival-grid closure, full prior mass, numerical support, telemetry isolation and memory admission |
 | `hf_replay` | 208 finite measured-record support, interpolation and full-record trace-integrity checks |
 | `impairment_observables` | Independent AR(1)/shot moments and covariance, resonator response, ADC and AGC recovery |
 | `lunar_spectral` | Joint delay–Doppler covariance through 360 s, independent refinement, long integration and waveform parity |
 | `integration` | Actual native source/receiver, physical completion, noise/EOF, recovery, HF history and numerical-admission boundaries |
-| `runner` | 44 checks for immutable identity, component scope, time/resource censoring and statistical reporting |
+| `runner` | 52 checks for immutable identity, independent seeds, known-binary diagnostics, censoring and statistical reporting |
+| `ensemble` | Five checks for signed evidence, outer priors, null controls, canonical hashes, fixed brackets and censoring |
 | `competitor_calibration` | Compiled calibration for the native channel bridge into upstream FLDigi/WSJT-X modes |
 | `competitor_runner` | Six external-comparison manifest and receipt parser cases |
 

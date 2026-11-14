@@ -1,5 +1,6 @@
 #include "appraisal/channel.hpp"
 #include "appraisal/hf_replay.hpp"
+#include "triad_random_process.hpp"
 
 #include <algorithm>
 #include <array>
@@ -224,6 +225,110 @@ void dispersion_and_tails() {
     rejected([&] { Channel channel(source(n, 500), s, 0, n); }, "unsupported dispersion band silently admitted");
 }
 
+void independent_density_trajectories() {
+    auto spec = make_scenario("hf-vertical-eikonal-motion").channel;
+    auto& path = spec.paths.front();
+    auto& layer = *path.hf->parabolic_layer;
+    const auto legacy = layer;
+    layer.critical_sines = {{0, 211, .73}, {0, 463, -.27}};
+    layer.critical_knots = HfCriticalKnots{0, 317, 43017};
+    for (const long double t : {-713.L, -.01L, 0.L, 83.7L, 1311.L}) {
+        near(hf_parabolic_critical_hz(layer, t), hf_parabolic_critical_hz(legacy, t), 0,
+             "disabled extra density terms changed legacy critical frequency");
+        near(hf_parabolic_eikonal(layer, rf, t).phase_delay_seconds,
+             hf_parabolic_eikonal(legacy, rf, t).phase_delay_seconds, 0,
+             "disabled extra density terms changed legacy eikonal");
+    }
+    layer.critical_sines = {{2300, 211, .73}, {1700, 463, -.27}};
+    layer.critical_knots = HfCriticalKnots{3100, 317, 43017};
+    const auto bounds = hf_parabolic_critical_bounds(layer);
+    const auto rate = hf_parabolic_max_rate_hz_s(layer);
+    const auto group_rate = hf_parabolic_max_group_delay_rate(layer, rf);
+    require(hf_parabolic_varies(layer) && std::isfinite(hf_parabolic_min_period_seconds(layer)),
+            "multi-timescale density law is considered static");
+    near(bounds.front(), layer.critical_frequency_hz - layer.critical_amplitude_hz - 7100, 0,
+         "density lower bound omits an independent term");
+    constexpr double dt = .001, df = 50;
+    for (int i = -48; i <= 48; ++i) {
+        const long double t = 53.731L * i + .271L;
+        const double critical = hf_parabolic_critical_hz(layer, t);
+        require(critical >= bounds.front() && critical <= bounds.back(), "density exceeds global declared bounds");
+        const double slope = (hf_parabolic_critical_hz(layer, t + dt) -
+                              hf_parabolic_critical_hz(layer, t - dt)) / (2 * dt);
+        require(std::abs(slope) <= rate * (1 + 1e-8), "density derivative exceeds analytic admission bound");
+        const auto e = hf_parabolic_eikonal(layer, rf, t);
+        const auto before = hf_parabolic_eikonal(layer, rf, t - dt);
+        const auto after = hf_parabolic_eikonal(layer, rf, t + dt);
+        require(std::abs((after.group_delay_seconds - before.group_delay_seconds) / (2 * dt)) <=
+                    group_rate * (1 + 1e-7), "group-delay rate exceeds analytic admission bound");
+        const auto high = hf_parabolic_eikonal(layer, rf + df, t);
+        const auto low = hf_parabolic_eikonal(layer, rf - df, t);
+        near(((rf + df) * high.phase_delay_seconds - (rf - df) * low.phase_delay_seconds) / (2 * df),
+             e.group_delay_seconds, 1e-11, "independent density trajectory lost phase/group relation");
+    }
+    // A translated random knot, including at negative physical time. This
+    // probes both sides of C2 joins rather than only arbitrary interior points.
+    auto knots_only = layer;
+    knots_only.critical_amplitude_hz = 0;
+    knots_only.critical_sines.clear();
+    const auto& knots = *knots_only.critical_knots;
+    const double origin = datapump::triad::v3::detail::random_process_uniform(
+        knots.seed ^ 0x44454c41594f5247ULL, 0);
+    constexpr double h = .1;
+    for (const int index : {-2, 0, 3}) {
+        const long double t = (index - static_cast<long double>(origin)) * knots.knot_seconds;
+        const double center = hf_parabolic_critical_hz(knots_only, t);
+        const double left = (center - hf_parabolic_critical_hz(knots_only, t - h)) / h;
+        const double right = (hf_parabolic_critical_hz(knots_only, t + h) - center) / h;
+        require(std::abs(left) < .0001 && std::abs(right) < .0001, "random density knot has nonzero limiting slope");
+        const double left2 = (center - 2 * hf_parabolic_critical_hz(knots_only, t - h) +
+                              hf_parabolic_critical_hz(knots_only, t - 2 * h)) / (h * h);
+        const double right2 = (hf_parabolic_critical_hz(knots_only, t + 2 * h) -
+                               2 * hf_parabolic_critical_hz(knots_only, t + h) + center) / (h * h);
+        require(std::abs(left2) < .002 && std::abs(right2) < .002, "random density knot has nonzero limiting curvature");
+    }
+    auto changed_seed = knots_only;
+    ++changed_seed.critical_knots->seed;
+    require(hf_parabolic_critical_hz(knots_only, -81.3L) != hf_parabolic_critical_hz(changed_seed, -81.3L),
+            "trajectory seed does not change physical density field");
+    require(hf_parabolic_critical_bounds(knots_only) == hf_parabolic_critical_bounds(changed_seed) &&
+            hf_parabolic_max_rate_hz_s(knots_only) == hf_parabolic_max_rate_hz_s(changed_seed),
+            "realized trajectory seed changed global admission bounds");
+    path.delay_seconds = hf_parabolic_eikonal(layer, rf, 0).group_delay_seconds;
+    constexpr std::uint64_t n = 3200;
+    for (const double offset : {-617.3, 0., 372.9}) {
+        spec.hf_trajectory_offset_seconds = offset;
+        const auto a = capture(source(n, 136), spec, n, 71);
+        const auto b = capture(source(n, 136), spec, n, 1024);
+        require(a == b, "nonperiodic density waveform depends on caller chunking");
+        const auto initial = hf_parabolic_eikonal(layer, rf, 0);
+        for (const auto sample : {100, 731, 3160}) {
+            const double t = sample / fs;
+            const auto e = hf_parabolic_eikonal(layer, rf + 136, t + offset);
+            const double cycles = 136 * t - ((rf + 136) * e.phase_delay_seconds - rf * initial.phase_delay_seconds);
+            near(a[sample], std::polar(1., 2 * pi * cycles), 2e-4,
+                 "launch offset rebased phase/group delay or shifted source clock");
+        }
+    }
+    auto invalid = spec;
+    invalid.paths[0].hf->parabolic_layer->critical_sines.push_back({1, 91, 0});
+    rejected([&] { Channel channel(source(n, 10), invalid, 0, n); }, "unbounded density term count accepted");
+    invalid = spec;
+    invalid.paths[0].hf->parabolic_layer->critical_knots->knot_seconds = 29;
+    rejected([&] { Channel channel(source(n, 10), invalid, 0, n); }, "density knot timescale outside declared model accepted");
+    invalid = spec;
+    invalid.paths[0].hf->parabolic_layer->critical_sines[0].amplitude_hz = .05 * layer.critical_frequency_hz;
+    rejected([&] { Channel channel(source(n, 10), invalid, 0, n); }, "aggregate density excursion bypassed admission");
+    invalid = spec;
+    invalid.paths[0].hf->parabolic_layer->critical_knots->amplitude_hz = std::numeric_limits<double>::infinity();
+    rejected([&] { Channel channel(source(n, 10), invalid, 0, n); }, "nonfinite knot amplitude accepted");
+    invalid = spec;
+    invalid.hf_trajectory_offset_seconds = 0;
+    invalid.paths[0].delay_rate = 1 - .5 * group_rate;
+    rejected([&] { (void)channel_tail_seconds(invalid, 0); },
+             "combined geometric/eikonal group-delay slope bypassed admission");
+}
+
 void polarization_and_gates() {
     const auto split = make_scenario("hf-ox-split"), cancellation = make_scenario("hf-ox-cancellation");
     const auto& a = *split.channel.paths[0].hf->polarization;
@@ -256,6 +361,14 @@ void polarization_and_gates() {
     near(pause[1440], .5 * unbroken[1440], 1e-13, "raised-cosine voltage midpoint");
     near(pause[2400], 0, 0, "mode during gated interval still contributes");
     near(pause[5100], unbroken[5100], 0, "revived mode resets its latent fade");
+    for (const double offset : {-.5, .5}) {
+        no_gate.hf_trajectory_offset_seconds = gated.hf_trajectory_offset_seconds = offset;
+        const auto continuous = capture(source(n, 0), no_gate, n, 113);
+        const auto placed_gate = capture(source(n, 0), gated, n, 811);
+        const auto midpoint = static_cast<std::size_t>((.75 - offset) * fs);
+        near(placed_gate[midpoint], .5 * continuous[midpoint], 2e-14,
+             "launch position did not shift mode envelope with its latent fading field");
+    }
     gated.paths.front().hf->voltage_transitions.back().from = .1;
     rejected([&] { Channel channel(source(n, 0), gated, 0, n); }, "discontinuous mode-voltage schedule accepted");
 }
@@ -308,6 +421,7 @@ int main() {
     try {
         coupled_motion();
         eikonal_derivatives();
+        independent_density_trajectories();
         dispersion_and_tails();
         polarization_and_gates();
         summary_modes();

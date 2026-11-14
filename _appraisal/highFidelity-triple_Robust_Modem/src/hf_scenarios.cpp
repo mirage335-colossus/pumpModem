@@ -368,6 +368,103 @@ Scenario eikonal_compound() {
     return s;
 }
 
+void ensemble_visibility(HfModeProfile& first,HfModeProfile& second) {
+    first.voltage_transitions={{210,260,1.,.05},{475,530,.05,1.}};
+    second.voltage_transitions={{210,260,.15,.25},{475,530,.25,.15}};
+}
+
+void ensemble_noise(ChannelSpec& channel) {
+    // A fixed receiver-input noise population; changing --cn0 varies only
+    // the independent white component. This is not an inferred site spectrum.
+    const double reference_variance=1920./std::pow(10.,12./10.);
+    channel.noise.colored_variance=.25*reference_variance;
+    channel.noise.colored_corner_hz=3.;
+    channel.noise.impulse_rate_hz=8.;
+    channel.noise.impulse_decay_seconds=.02;
+    channel.noise.impulse_rms=std::sqrt(2.*reference_variance/(8.*.02));
+}
+
+Scenario eikonal_ensemble(const std::string& id) {
+    auto s=base_hf(id);
+    s.channel.rf_hz=3.4e6;
+    const bool tid=id=="hf-ensemble-tid";
+    const bool modes=id=="hf-ensemble-modes"||id=="hf-ensemble-modes-noisy";
+    const bool noisy=id=="hf-ensemble-modes-noisy";
+    s.channel.paths.resize(modes?2:1);
+    auto& first=s.channel.paths[0];
+    auto& first_hf=first.hf.emplace();
+    auto& layer=first_hf.parabolic_layer.emplace();
+    layer.bottom_height_m=tid?253000.:245000.;
+    layer.semi_thickness_m=tid?50000.:52000.;
+    layer.critical_frequency_hz=tid?3.8e6:3.73e6;
+    if(tid) {
+        layer.critical_sines={{12000.,271.,.57},{13000.,1013.,-1.11}};
+    } else {
+        layer.critical_sines={{11000.,397.,2.19}};
+        layer.critical_knots=HfCriticalKnots{14000.,113.,UINT64_C(0x485446454e53454d)^UINT64_C(0x9e3779b97f4a7c15)};
+    }
+    first.delay_seconds=hf_parabolic_eikonal(layer,s.channel.rf_hz,0).group_delay_seconds;
+    if(modes) {
+        first.power=.5;
+        auto& second=s.channel.paths[1];second.power=.5;second.phase_radians=.91;
+        auto& second_hf=second.hf.emplace();
+        auto& second_layer=second_hf.parabolic_layer.emplace();
+        second_layer.bottom_height_m=305000.;second_layer.semi_thickness_m=65000.;
+        second_layer.critical_frequency_hz=3.72e6;
+        second_layer.critical_sines={{6000.,503.,-.77}};
+        second_layer.critical_knots=HfCriticalKnots{6000.,173.,
+            UINT64_C(0x485446454e53454d)^(UINT64_C(0x9e3779b97f4a7c15)*UINT64_C(2))};
+        second.delay_seconds=hf_parabolic_eikonal(second_layer,s.channel.rf_hz,0).group_delay_seconds;
+        ensemble_visibility(first_hf,second_hf);
+    }
+    s.bounds.arrival_low_seconds=.001;s.bounds.arrival_high_seconds=.003;
+    s.bounds.atmospheric_hz=1.;s.bounds.delay_excursion_seconds=35e-6;
+    s.evidence="constructed independent multiscale density-trajectory ensemble with coupled scalar eikonals";
+    s.provenance="Cold-plasma parabolic-layer operator; Olugbon et al. 2021 doi:10.1029/2020SW002676 multiscale context; Aricoche et al. 2026 doi:10.3389/fspas.2026.1848834 cadence limits; Fable-5.2/31 and /33";
+    s.assumptions="Frozen physical coefficients were chosen independently of the receiver phase bank. "
+        "This is an unfitted constructed stress, not a measured ionospheric day or natural occurrence distribution. "
+        "Density evolves through two separated sinusoidal scales or a sinusoid plus immutable random quintic knots; "
+        "the latter has zero first and second derivatives at every knot and is not a measured turbulence law. "
+        "One scalar collisionless near-vertical parabolic-layer eikonal jointly determines carrier phase, group delay "
+        "and local dispersion; it excludes cutoff crossing, collisions, caustics and geomagnetic splitting. "
+        "The receiver sees only fixed public 1-3ms arrival, +/-1Hz center-frequency and 35us excursion bounds; "
+        "it receives no density coefficients, knot seeds or physical launch offset. No source or fading power is normalized by realization.";
+    if(modes) s.assumptions+=" Two effective branch-local eikonals represent distinct near-vertical reflection regions, "
+        "not two vertically stacked reflecting layers on one vertical ray or a shared full ray solve. Their imposed "
+        "visibility gates are engineering loss/weak-replacement/recovery schedules, not consequences inferred from "
+        "the density law. Unit nominal summed branch power precedes the gates; interference and visibility losses "
+        "remain in the received energy. The public phase search still assumes one tap, so this is explicit signal-model mismatch.";
+    if(noisy) {
+        for(auto& path:s.channel.paths)path.residual_doppler_hz=.72;
+        ensemble_noise(s.channel);
+        s.bounds.frequency_bound_hz=1.;s.bounds.spread_seconds=.001;
+        s.reference_cn0_db_hz=12.;
+        s.assumptions+=" The same two rays additionally carry a common +.72Hz capture-clock carrier offset as a "
+            "limited oscillator surrogate, not a complete oscillator/clock model. Fixed colored variance .25*v0 at "
+            "3Hz corner and shot rate8/s, decay.02s, RMS sqrt(2*v0/(8*.02)), v0=1920/10^1.2, are deliberate receiver-input "
+            "noise stresses; --cn0 changes the white component only. Canonical receiver prior additionally admits 1ms spread "
+            "and +/-1Hz oscillator error. Nonwhite H0 is unsupported by the experimental white-noise phase receiver.";
+    }
+    return s;
+}
+
+Scenario ensemble_ox_helper() {
+    auto s=ordinary_extraordinary("hf-ox-cancellation");
+    s.id="hf-ensemble-ox-helper";
+    ensemble_visibility(*s.channel.paths[0].hf,*s.channel.paths[1].hf);
+    for(auto& path:s.channel.paths)path.residual_doppler_hz+=.72;
+    ensemble_noise(s.channel);
+    s.bounds.frequency_bound_hz=1.;s.reference_cn0_db_hz=12.;
+    s.evidence="constructed full-band O/X visibility, oscillator-offset and nonwhite-noise interaction for native Helper testing";
+    s.assumptions+=" This additional interaction preserves the O/X operator's full-band transfer, with opposing "
+        "primary1->.05 and secondary.15->.25 voltage gates over210-260s, restored over475-530s. Both paths have "
+        "a common +.72Hz capture-clock carrier offset as a limited oscillator surrogate. Fixed colored variance .25*v0 "
+        "at3Hz corner and shot rate8/s, decay.02s, RMS sqrt(2*v0/(8*.02)), v0=1920/10^1.2, remain when --cn0 changes "
+        "the white component. This is an imposed interaction, not an observed joint event. It contains no parabolic "
+        "eikonal. A trajectory offset shifts its gates and Jones law while every residual Doppler term retains its capture-origin beat phase; this is not a translation of a complete measured complex trace. It does not establish phase-refinement or full magnetoionic propagation coverage.";
+    return s;
+}
+
 Scenario ding_measured(const std::string& id) {
     auto s = base_hf(id);
     s.channel.rf_hz = 12.7e6;
@@ -413,6 +510,9 @@ std::optional<Scenario> make_additional_hf_scenario(const std::string& id) {
     if (id == "hf-eikonal-holdout-a" || id == "hf-eikonal-holdout-b" ||
         id == "hf-eikonal-cfo-edge") return eikonal_refinement_control(id);
     if (id == "hf-eikonal-compound") return eikonal_compound();
+    if (id == "hf-ensemble-tid" || id == "hf-ensemble-changing-rate" ||
+        id == "hf-ensemble-modes" || id == "hf-ensemble-modes-noisy") return eikonal_ensemble(id);
+    if (id == "hf-ensemble-ox-helper") return ensemble_ox_helper();
     if (id == "hf-ding-measured" || id == "hf-ding-amplitude" || id == "hf-ding-phase" ||
         id == "hf-ding-measured-late" || id == "hf-ding-clock41") return ding_measured(id);
     return std::nullopt;

@@ -62,8 +62,10 @@ struct Options {
     std::uint64_t seed=5489, max_samples=20'000'000, oracle_slot=0, search_slot=0;
     std::string search_timing="selected";
     std::optional<std::uint64_t> capture_digest_slot;
+    std::optional<std::uint64_t> hf_trajectory_seed, noise_seed;
     double max_wall_seconds=60, duration_seconds=10;
     std::optional<double> cn0, bit_seconds, history_reference_delay_seconds, capture_lead_seconds;
+    std::optional<double> hf_trajectory_offset_seconds;
     std::optional<unsigned> workers, owners, fade_slots;
     std::optional<std::size_t> memory_bytes;
     std::size_t chunk=4096;
@@ -102,6 +104,13 @@ Options parse(int argc,char** argv) {
         else if(key=="--fec") o.fec=value;
         else if(key=="--fade-slots") {auto n=integer(value);require(n==1||n==2,"fade slots must be 1 or 2");o.fade_slots=static_cast<unsigned>(n);}
         else if(key=="--seed") o.seed=integer(value);
+        else if(key=="--hf-trajectory-seed") o.hf_trajectory_seed=integer(value);
+        else if(key=="--noise-seed") o.noise_seed=integer(value);
+        else if(key=="--hf-trajectory-offset-seconds") {
+            o.hf_trajectory_offset_seconds=number(value);
+            require(*o.hf_trajectory_offset_seconds>=-86400&&*o.hf_trajectory_offset_seconds<=86400,
+                "HF trajectory offset must be -86400..86400 seconds");
+        }
         else if(key=="--oracle-slot") o.oracle_slot=integer(value);
         else if(key=="--capture-digest-slot") o.capture_digest_slot=integer(value);
         else if(key=="--search-slot") {o.search_slot=integer(value);o.search_options=true;}
@@ -295,9 +304,15 @@ Json channel_parameters(const appraisal::ChannelSpec& c) {
     const bool phased_layer=std::any_of(c.paths.begin(),c.paths.end(),[](const auto& p){
         return p.hf&&p.hf->parabolic_layer&&p.hf->parabolic_layer->critical_phase_radians!=0;
     });
+    const bool trajectory_law=c.hf_trajectory_offset_seconds!=0||
+        std::any_of(c.paths.begin(),c.paths.end(),[](const auto& p){
+            return p.hf&&p.hf->parabolic_layer&&
+                (!p.hf->parabolic_layer->critical_sines.empty()||p.hf->parabolic_layer->critical_knots.has_value());
+        });
     if(extended) {
-        const char* version=phased_layer?"appraisal-paths-v3":"appraisal-paths-v2";
+        const char* version=trajectory_law?"appraisal-paths-v4":phased_layer?"appraisal-paths-v3":"appraisal-paths-v2";
         hash_bytes(version,19);
+        if(trajectory_law)hash_double(c.hf_trajectory_offset_seconds);
     }
     for(const auto& p:c.paths) {
         const std::array<double,9> values{p.power,p.phase_radians,p.delay_seconds,p.delay_rate,
@@ -341,10 +356,35 @@ Json channel_parameters(const appraisal::ChannelSpec& c) {
                 const auto& layer=*h.parabolic_layer;
                 for(double value:{layer.bottom_height_m,layer.semi_thickness_m,layer.critical_frequency_hz,
                     layer.critical_amplitude_hz,layer.critical_period_seconds})hash_double(value);
-                if(phased_layer)hash_double(layer.critical_phase_radians);
+                if(phased_layer||trajectory_law)hash_double(layer.critical_phase_radians);
                 parabolic=object({{"bottom_height_m",layer.bottom_height_m},{"semi_thickness_m",layer.semi_thickness_m},
                     {"critical_frequency_hz",layer.critical_frequency_hz},{"critical_amplitude_hz",layer.critical_amplitude_hz},
                     {"critical_period_seconds",layer.critical_period_seconds},{"critical_phase_radians",layer.critical_phase_radians}});
+                if(trajectory_law) {
+                    hash_u64(layer.critical_sines.size());
+                    Json::Array sines;
+                    for(const auto& term:layer.critical_sines) {
+                        hash_double(term.amplitude_hz);hash_double(term.period_seconds);hash_double(term.phase_radians);
+                        sines.push_back(object({{"amplitude_hz",term.amplitude_hz},{"period_seconds",term.period_seconds},
+                            {"phase_radians",term.phase_radians}}));
+                    }
+                    hash_bool(layer.critical_knots.has_value());
+                    Json knots;
+                    if(layer.critical_knots) {
+                        const auto& term=*layer.critical_knots;
+                        hash_double(term.amplitude_hz);hash_double(term.knot_seconds);hash_u64(term.seed);
+                        knots=object({{"amplitude_hz",term.amplitude_hz},{"knot_seconds",term.knot_seconds},{"seed",term.seed},
+                            {"law","canonical immutable quintic smooth random knots, normalized to [-1,1]; C2; zero first and second derivatives at knots"}});
+                    }
+                    const auto bounds=appraisal::hf_parabolic_critical_bounds(layer);
+                    parabolic["critical_law_version"]=1;
+                    parabolic["critical_sines"]=std::move(sines);
+                    parabolic["critical_knots"]=std::move(knots);
+                    parabolic["critical_frequency_minimum_hz"]=bounds[0];
+                    parabolic["critical_frequency_maximum_hz"]=bounds[1];
+                    parabolic["critical_maximum_rate_hz_s"]=appraisal::hf_parabolic_max_rate_hz_s(layer);
+                    parabolic["trajectory_scope"]="constructed density law independent of receiver templates; eikonal jointly derives phase, group delay and dispersion; no measured occurrence distribution";
+                }
             }
             hash_bool(static_cast<bool>(h.measured_envelope));
             hash_double(h.measured_offset_seconds);
@@ -390,12 +430,15 @@ Json channel_parameters(const appraisal::ChannelSpec& c) {
     const auto& t=c.transmitter; const auto& n=c.noise;const auto& f=c.frontend;
     auto result=object({{"rf_hz",c.rf_hz},{"paths",std::move(paths)},{"path_count",c.paths.size()},
         {"path_power_sum",power},{"path_parameters_sha256",path_hash.finish()},{"paths_omitted",c.paths.size()>128},
-        {"path_hash_version",phased_layer?3:extended?2:1},
-        {"path_hash_encoding",phased_layer?
+        {"path_hash_version",trajectory_law?4:phased_layer?3:extended?2:1},
+        {"path_hash_encoding",trajectory_law?
+            "As v3 with NUL-terminated appraisal-paths-v4 prefix then trajectory_offset binary64; every parabolic layer includes phase then uint64 extra_sine_count, ordered amplitude,period,phase binary64 triples, uint8 knots_present, and if present amplitude,knot_seconds binary64 plus uint64 knot_seed. All integers and binary64 little-endian; additive noise seed excluded from physical path identity":phased_layer?
             "As v2 with NUL-terminated appraisal-paths-v3 prefix and critical_phase_radians binary64 after every parabolic critical_period field":extended?
             "NUL-terminated appraisal-paths-v2 prefix; each v1 record then uint8 hf_present; if present: motion amplitude,period,phase binary64; uint8 couple; uint64 transition_count; ordered start,stop,from,to binary64; K binary64; uint8 polarization_present; if present: basis_angle,ellipticity_phase,transmit_angle,receive_angle,rotation_amplitude,rotation_period binary64, uint8 extraordinary; dispersion_slope binary64; uint8 parabolic_present; if present: bottom_height,semi_thickness,critical_frequency,critical_amplitude,critical_period binary64; uint8 measured_present; measured_offset binary64; if present: sample_rate,raw_mean_power,normalization_gain binary64; part,source_sha,serialized_iq_sha strings (uint64 length then bytes); uint64 sample_count; ordered real,imag binary64 samples. All integers and binary64 little-endian":
             "ordered records: nine little-endian binary64 values power,phase,delay,delay_rate,residual_doppler,residual_drift,gaussian_width,phase_wander_amplitude,phase_wander_period, then uint8 frozen_gaussian"},
         {"path_regeneration","scenario ID and source identity define deterministic path parameters; seed defines stochastic realization"},
+        {"hf_trajectory_offset_seconds",c.hf_trajectory_offset_seconds},
+        {"noise_seed_override",c.noise_seed?Json(*c.noise_seed):Json{}},
         {"interpolation_half_width",c.interpolation_half_width},
         {"maximum_workspace_bytes",c.maximum_workspace_bytes},
         {"transmitter",object({{"enabled",t.enabled},{"inductance_h",t.inductance_h},{"capacitance_f",t.capacitance_f},
@@ -464,6 +507,33 @@ struct Setup {
 };
 Setup setup(const Options& o) {
     auto scenario=appraisal::make_scenario(o.scenario);
+    if(o.hf_trajectory_seed) {
+        bool applied=false;
+        for(std::size_t index=0;index<scenario.channel.paths.size();++index) {
+            auto& path=scenario.channel.paths[index];
+            if(path.hf&&path.hf->parabolic_layer&&path.hf->parabolic_layer->critical_knots) {
+                auto& layer=*path.hf->parabolic_layer;
+                const double old_reference=appraisal::hf_parabolic_eikonal(layer,scenario.channel.rf_hz,0).group_delay_seconds;
+                const double additional_delay=path.delay_seconds-old_reference;
+                layer.critical_knots->seed=*o.hf_trajectory_seed^
+                    (UINT64_C(0x9e3779b97f4a7c15)*(index+1));
+                // Keep the physical reference at time zero; a launch offset
+                // changes the sampled trajectory, never this initial reference.
+                path.delay_seconds=additional_delay+
+                    appraisal::hf_parabolic_eikonal(layer,scenario.channel.rf_hz,0).group_delay_seconds;
+                applied=true;
+            }
+        }
+        require(applied,"HF trajectory seed requires a scenario with critical-frequency random knots");
+    }
+    if(o.hf_trajectory_offset_seconds) {
+        require(scenario.family=="skywave-1-30MHz"&&
+            std::any_of(scenario.channel.paths.begin(),scenario.channel.paths.end(),[](const auto& path){return path.hf.has_value();})&&
+            std::none_of(scenario.channel.paths.begin(),scenario.channel.paths.end(),[](const auto& path){return path.hf&&path.hf->measured_envelope;}),
+            "HF trajectory offset requires an analytic HF scenario, excluding measured replay");
+        scenario.channel.hf_trajectory_offset_seconds=*o.hf_trajectory_offset_seconds;
+    }
+    scenario.channel.noise_seed=o.noise_seed;
     if(o.mode=="hf-search"||o.hf_public_phase_receiver) {
         const auto& channel=scenario.channel;
         const auto& noise=channel.noise;
@@ -483,6 +553,9 @@ Setup setup(const Options& o) {
     if(o.helper&&std::any_of(scenario.channel.paths.begin(),scenario.channel.paths.end(),
         [](const auto& path){return path.hf&&path.hf->measured_envelope;}))
         throw Unavailable("measured narrowband HF replay supports Helper-off DATA only; its frequency-separated Helper transfer is unqualified");
+    if(o.helper&&std::any_of(scenario.channel.paths.begin(),scenario.channel.paths.end(),
+        [](const auto& path){return path.hf&&path.hf->parabolic_layer;}))
+        throw Unavailable("HF parabolic eikonal Helper source exceeds the qualified 0.20-sample-rate dispersion bandwidth; use the separate full-band O/X Helper interaction");
     if(o.helper&&scenario.channel.lunar)
         throw Unavailable("full-episode lunar numerics support the 1920 Hz Helper-off DATA source only");
     require(!o.helper||scenario.family!="sub-9khz","Helper through the VLF resonant antenna is outside this DATA-only model");
@@ -637,6 +710,14 @@ Json plan_json(const Setup& s,const Options& o) {
         {"capture_preroll_seconds",p.capture_lead_seconds},{"physical_rf_retuning",false},
         {"capture_preroll_override",o.capture_lead_seconds.has_value()},
         {"capture_preroll_scope","source prefixed by declared capture time; transmitter UTC unchanged, but absolute capture-clock channel trajectories are sampled later"},
+        {"hf_trajectory_seed",o.hf_trajectory_seed?Json(*o.hf_trajectory_seed):Json{}},
+        {"hf_trajectory_seed_override",o.hf_trajectory_seed.has_value()},
+        {"hf_trajectory_offset_seconds",s.scenario.channel.hf_trajectory_offset_seconds},
+        {"hf_trajectory_offset_override",o.hf_trajectory_offset_seconds.has_value()},
+        {"noise_seed",s.scenario.channel.noise_seed.value_or(o.seed)},
+        {"noise_seed_override",o.noise_seed.has_value()},
+        {"hf_trajectory_clock_scope","analytic HF physical time = output capture sample/Fs + offset; source/calendar, additive noise and every residual Doppler/drift term retain capture time; eikonal phase/delay reference stays at physical time zero"},
+        {"seed_scope","seed controls stochastic path realization; noise_seed overrides only additive-noise streams; hf_trajectory_seed overrides immutable critical-frequency knot seeds by xor with 0x9e3779b97f4a7c15*(path_index+1), modulo 2^64; resolved per-path seeds are in scenario.channel.paths"},
         {"helper_low_hz",s.profile.helper_plan().low_frequency_hz},{"helper_auxiliary_hz",s.profile.helper_plan().auxiliary_frequency_hz},
         {"carrier_spacing_hz",g.carrier_spacing_hz},{"occupied_bandwidth_hz",g.occupied_bandwidth_hz},{"wire_bits",s.truth.size()},
         {"fec",o.fec},{"short_wire_bit_limit",message_receiver_options(s.message_profile.fec).maximum_data_bits},
@@ -1084,6 +1165,7 @@ void physical_hf_diagnostic(Json& output,const Setup& s,const Options& o,
     std::unique_ptr<appraisal::HfHistoryDiagnostic> refined_effective;
     if(refined_available)refined_effective=std::make_unique<appraisal::HfHistoryDiagnostic>(history_config);
     std::array<Hash,2> clean_hash;
+    long double binary_distance=0,binary_observed_one_vs_zero=0;
     std::uint64_t first=0;std::size_t last_block=SIZE_MAX,last_refined_block=SIZE_MAX;
     Complex rotation{},refined_rotation{};
     while(first<aperture.stop_sample) {
@@ -1100,6 +1182,12 @@ void physical_hf_diagnostic(Json& output,const Setup& s,const Options& o,
             const auto noisy=observation.subspan(local,rows);
             physical.append(begin,zero,one,wanted,noisy);
             clean_hash[0].samples(zero,{});clean_hash[1].samples(one,{});
+            for(std::size_t i=0;i<rows;++i) {
+                const std::complex<long double> z(zero[i]),a(one[i]),y(noisy[i]);
+                const auto difference=a-z;
+                binary_distance+=std::norm(difference);
+                binary_observed_one_vs_zero+=2.*std::real(std::conj(difference)*(y-(a+z)*.5L));
+            }
             auto rendered=std::span(public_templates).first(2*rows);
             pair.render(basis,taps,local,std::span(offsets).first(rows),rendered,deadline.stop.get_token());
             for(std::size_t i=0;i<rows;++i) {
@@ -1147,6 +1235,15 @@ void physical_hf_diagnostic(Json& output,const Setup& s,const Options& o,
     };
     output["physical_templates"]=full_json(physical_report);
     output["physical_templates"]["template_sha256"]=Json::Array{clean_hash[0].finish(),clean_hash[1].finish()};
+    const double binary_normalized_distance=static_cast<double>(binary_distance/s.receiver.noise_variance);
+    const double observed_binary_lr=static_cast<double>(binary_observed_one_vs_zero/s.receiver.noise_variance);
+    output["known_binary"]=object({{"squared_distance",static_cast<double>(binary_distance)},
+        {"distance_over_noise_variance",binary_normalized_distance},
+        {"observed_correct_vs_wrong_log_likelihood_ratio",history_config.wanted_bit?observed_binary_lr:-observed_binary_lr},
+        {"equal_prior_bit_error_probability",.5*std::erfc(std::sqrt(binary_normalized_distance/4.))},
+        {"wanted_bit",history_config.wanted_bit},{"fixed_known_context",true},{"truth_information_passed_to_search",false},
+        {"includes_acquisition_presence_or_completion",false},
+        {"scope","conditional known deterministic binary templates in raw proper-complex white noise with variance E|n|^2; full other-bit context, channel, timing, phase and amplitude are known; only selected wire bit changes; Pe=.5*erfc(sqrt(||s1-s0||^2/(4v))); no blind receiver or message-success claim"}});
     output["winning_public_cell"]=object({{"timing_index",winning_timing},{"selected_bit",winning_bit},
         {"epoch_offset_seconds",coordinate.epoch_offset_seconds},{"arrival_seconds",coordinate.arrival_seconds},
         {"clock_ppm",coordinate.clock_ppm},{"frequency_hz",winning_frequency},{"model_index",winning_model},
@@ -1306,8 +1403,11 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
         for(const auto& path:s.scenario.channel.paths)if(path.hf)
             for(const auto& transition:path.hf->voltage_transitions)
                 last_transition_stop=std::max(last_transition_stop,transition.stop_seconds);
-        resumed_data_boundary_sample=checked_samples(last_transition_stop,s.receiver.sample_rate_hz);
-        resumed_data_boundary_source="scenario_mode_transition_stop";
+        const double capture_transition_stop=last_transition_stop-s.scenario.channel.hf_trajectory_offset_seconds;
+        if(capture_transition_stop>0) {
+            resumed_data_boundary_sample=checked_samples(capture_transition_stop,s.receiver.sample_rate_hz);
+            resumed_data_boundary_source="scenario_mode_transition_stop";
+        }
     }
     StreamReceiverReport final;
     const auto drain=[&]{
@@ -1572,7 +1672,7 @@ int main(int argc,char** argv) {
         const auto o=parse(argc,argv);
         if(o.help) {
             result["status"]="completed";result["mode"]="help";
-            result["usage"]="high_fidelity_appraisal --mode plan|channel|receive|slot|oracle|diagnose|hf-search --scenario NAME --waveform reference|smoke [--cn0 DBHZ] [--bit-seconds S] [--capture-lead-seconds S] [--pulse rrc|tapered-rrc] [--control wanted|noise|wrong-key|wrong-ordinal|interior-fade|capture-gap|eof] [--helper] [--seed N] [--workers N] [--owners N] [--memory-mib N] [--backend cpu|cuda|vulkan|gpu] [--max-samples N] [--max-wall-seconds S] [--duration-seconds S] [--chunk N] [--message TEXT] [--fec off|rs20|rs60] [--fade-slots 1|2] [--oracle-slot N] [--search-slot N] [--search-timing selected|full] [--capture-digest-slot N] [--history-reference-delay-seconds S] [--hf-phase-bank] [--hf-public-phase-receiver] [--hf-physical-diagnostic] [--hf-phase-refinement]; capture lead defaults to .25s and accepts .25..10s to retain more pre-signal noise history; interior-fade defaults to two consecutive complete observation apertures, with --fade-slots 1 selecting a single physical erasure opportunity; slot observes only the complete first public slot; diagnose measures canonical VLF acquisition and short persistent fine phases without bit/message decisions; capture-digest-slot incrementally hashes one complete public observation in receive/slot/hf-search without changing receiver geometry; hf-phase-refinement opts into bounded public phase refinement in hf-search or the experimental public phase receiver; refinement shadow omits affine comparison and uses the operational block geometry; hf-physical-diagnostic adds a post-search finite physical-template and winning-public-cell evaluator for wanted active hf-search slots; hf-public-phase-receiver enables the experimental fixed-prior supplement inside the canonical receive/slot stream with raw white-noise linear HF/AWGN with a single-public-tap model and Helper-off CPU; hf-search runs a shadow public search on complete selected slot N (default 0), without receiver decisions or completion, using raw white-noise linear HF/AWGN with a single-public-tap model and Helper-off CPU; oracle requires linear Helper-off wanted AWGN, HF or EME with white noise and uses public slot N (default 0) within the prepared message; HF oracle additionally reports private clean-template history diagnostics; optional reference delay is independently declared within public arrival bounds (zero keeps the unshifted baseline), and --hf-phase-bank enables the fixed coherent phase-family evaluator";
+            result["usage"]="high_fidelity_appraisal --mode plan|channel|receive|slot|oracle|diagnose|hf-search --scenario NAME --waveform reference|smoke [--cn0 DBHZ] [--bit-seconds S] [--capture-lead-seconds S] [--pulse rrc|tapered-rrc] [--control wanted|noise|wrong-key|wrong-ordinal|interior-fade|capture-gap|eof] [--helper] [--seed N] [--noise-seed N] [--hf-trajectory-seed N] [--hf-trajectory-offset-seconds S] [--workers N] [--owners N] [--memory-mib N] [--backend cpu|cuda|vulkan|gpu] [--max-samples N] [--max-wall-seconds S] [--duration-seconds S] [--chunk N] [--message TEXT] [--fec off|rs20|rs60] [--fade-slots 1|2] [--oracle-slot N] [--search-slot N] [--search-timing selected|full] [--capture-digest-slot N] [--history-reference-delay-seconds S] [--hf-phase-bank] [--hf-public-phase-receiver] [--hf-physical-diagnostic] [--hf-phase-refinement]; noise-seed separates additive-noise realizations from stochastic path seed; hf-trajectory-seed selects immutable critical-frequency knots only in knot-bearing scenarios; hf-trajectory-offset-seconds accepts -86400..86400 and shifts analytic HF physical time without shifting source/calendar or noise; capture lead defaults to .25s and accepts .25..10s to retain more pre-signal noise history; interior-fade defaults to two consecutive complete observation apertures, with --fade-slots 1 selecting a single physical erasure opportunity; slot observes only the complete first public slot; diagnose measures canonical VLF acquisition and short persistent fine phases without bit/message decisions; capture-digest-slot incrementally hashes one complete public observation in receive/slot/hf-search without changing receiver geometry; hf-phase-refinement opts into bounded public phase refinement in hf-search or the experimental public phase receiver; refinement shadow omits affine comparison and uses the operational block geometry; hf-physical-diagnostic adds a post-search finite physical-template and winning-public-cell evaluator for wanted active hf-search slots; hf-public-phase-receiver enables the experimental fixed-prior supplement inside the canonical receive/slot stream with raw white-noise linear HF/AWGN with a single-public-tap model and Helper-off CPU; hf-search runs a shadow public search on complete selected slot N (default 0), without receiver decisions or completion, using raw white-noise linear HF/AWGN with a single-public-tap model and Helper-off CPU; oracle requires linear Helper-off wanted AWGN, HF or EME with white noise and uses public slot N (default 0) within the prepared message; HF oracle additionally reports private clean-template history diagnostics; optional reference delay is independently declared within public arrival bounds (zero keeps the unshifted baseline), and --hf-phase-bank enables the fixed coherent phase-family evaluator";
         } else if(o.list) {
             result["mode"]="list";result["status"]="completed";Json::Array entries;
             for(const auto& name:appraisal::scenario_names())entries.push_back(scenario_json(appraisal::make_scenario(name)));

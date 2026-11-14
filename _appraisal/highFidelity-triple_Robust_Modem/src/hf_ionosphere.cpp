@@ -1,8 +1,10 @@
 #include "appraisal/channel.hpp"
 #include "appraisal/hf_ionosphere.hpp"
+#include "triad_random_process.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <stdexcept>
 
@@ -71,9 +73,75 @@ double hf_residual_dispersion_phase_radians(double slope, double offset_hz) {
 }
 
 HfEikonal hf_parabolic_eikonal(const HfParabolicLayer& layer, double rf_hz, long double seconds) {
-    return eikonal_at_critical(layer, rf_hz, layer.critical_frequency_hz + layer.critical_amplitude_hz *
-                               periodic_sine(seconds, layer.critical_period_seconds,
-                                             layer.critical_phase_radians));
+    return eikonal_at_critical(layer, rf_hz, hf_parabolic_critical_hz(layer, seconds));
+}
+
+double hf_parabolic_critical_hz(const HfParabolicLayer& layer, long double seconds) {
+    // Preserve the legacy expression exactly for the original single sine.
+    double result = layer.critical_frequency_hz;
+    if (layer.critical_amplitude_hz != 0)
+        result += layer.critical_amplitude_hz *
+            periodic_sine(seconds, layer.critical_period_seconds, layer.critical_phase_radians);
+    for (const auto& term : layer.critical_sines)
+        if (term.amplitude_hz != 0)
+            result += term.amplitude_hz * periodic_sine(seconds, term.period_seconds, term.phase_radians);
+    if (layer.critical_knots && layer.critical_knots->amplitude_hz != 0) {
+        const auto& knots = *layer.critical_knots;
+        // The existing immutable native field owns the knot origin and hash.
+        // Unit normalization satisfies its geometric-delay constructor without
+        // imposing its delay-slope units on a density trajectory in Hz.
+        const datapump::triad::v3::detail::SmoothRandomDelay field(1, 1, 4, knots.seed);
+        result += knots.amplitude_hz * (field.value(4 * seconds / knots.knot_seconds) - 1);
+    }
+    return result;
+}
+
+std::array<double, 2> hf_parabolic_critical_bounds(const HfParabolicLayer& layer) {
+    double amplitude = std::abs(layer.critical_amplitude_hz);
+    for (const auto& term : layer.critical_sines) amplitude += std::abs(term.amplitude_hz);
+    if (layer.critical_knots) amplitude += std::abs(layer.critical_knots->amplitude_hz);
+    return {layer.critical_frequency_hz - amplitude, layer.critical_frequency_hz + amplitude};
+}
+
+double hf_parabolic_max_rate_hz_s(const HfParabolicLayer& layer) {
+    double rate = static_cast<double>(two_pi) * std::abs(layer.critical_amplitude_hz) /
+        layer.critical_period_seconds;
+    for (const auto& term : layer.critical_sines)
+        rate += static_cast<double>(two_pi) * std::abs(term.amplitude_hz) / term.period_seconds;
+    if (layer.critical_knots)
+        rate += 3.75 * std::abs(layer.critical_knots->amplitude_hz) / layer.critical_knots->knot_seconds;
+    return rate;
+}
+
+double hf_parabolic_min_period_seconds(const HfParabolicLayer& layer) {
+    double period = layer.critical_amplitude_hz == 0 ? std::numeric_limits<double>::infinity() :
+        layer.critical_period_seconds;
+    for (const auto& term : layer.critical_sines)
+        if (term.amplitude_hz != 0) period = std::min(period, term.period_seconds);
+    if (layer.critical_knots && layer.critical_knots->amplitude_hz != 0)
+        period = std::min(period, layer.critical_knots->knot_seconds);
+    return period;
+}
+
+bool hf_parabolic_varies(const HfParabolicLayer& layer) {
+    return layer.critical_amplitude_hz != 0 ||
+        std::any_of(layer.critical_sines.begin(), layer.critical_sines.end(),
+                    [](const auto& term) { return term.amplitude_hz != 0; }) ||
+        (layer.critical_knots && layer.critical_knots->amplitude_hz != 0);
+}
+
+HfEikonal hf_parabolic_eikonal_at_critical(const HfParabolicLayer& layer, double rf_hz, double critical_hz) {
+    require(std::isfinite(rf_hz) && rf_hz > 0 && std::isfinite(critical_hz) && rf_hz < critical_hz,
+            "parabolic eikonal requires frequency below critical frequency");
+    return eikonal_at_critical(layer, rf_hz, critical_hz);
+}
+
+double hf_parabolic_max_group_delay_rate(const HfParabolicLayer& layer, double rf_hz) {
+    const double lo = hf_parabolic_critical_bounds(layer).front();
+    require(rf_hz > 0 && rf_hz < .99 * lo, "parabolic eikonal requires a propagating guarded band");
+    // G depends on f/fo, so |dG/dt|=(f/fo)*(dG/df)*|dfo/dt|.
+    return (rf_hz / lo) * eikonal_at_critical(layer, rf_hz, lo).group_delay_slope_seconds_per_hz *
+        hf_parabolic_max_rate_hz_s(layer);
 }
 
 namespace detail {
@@ -105,6 +173,20 @@ void validate_hf_mode(const HfModeProfile& p, const Path& path) {
                 finite(layer.critical_phase_radians) &&
                 motion.amplitude_seconds == 0 && p.group_delay_slope_seconds_per_hz == 0,
                 "parabolic eikonal must have a valid layer and exclusive delay/dispersion law");
+        require(layer.critical_sines.size() <= 2, "parabolic eikonal admits at most two extra sine terms");
+        for (const auto& term : layer.critical_sines)
+            require(finite(term.amplitude_hz) && term.amplitude_hz >= 0 &&
+                    finite(term.period_seconds) && term.period_seconds >= 30 && finite(term.phase_radians),
+                    "invalid parabolic critical-frequency sine term");
+        if (layer.critical_knots) {
+            const auto& knots = *layer.critical_knots;
+            require(finite(knots.amplitude_hz) && knots.amplitude_hz >= 0 &&
+                    finite(knots.knot_seconds) && knots.knot_seconds >= 30,
+                    "invalid parabolic critical-frequency knot law");
+        }
+        require(layer.critical_frequency_hz - hf_parabolic_critical_bounds(layer).front() <=
+                    .05 * layer.critical_frequency_hz,
+                "aggregate parabolic critical-frequency excursion exceeds five percent");
     }
     require(finite(p.measured_offset_seconds) && p.measured_offset_seconds >= 0 &&
             (p.measured_envelope || p.measured_offset_seconds == 0), "invalid measured HF time origin");
@@ -142,18 +224,17 @@ double hf_mode_spectral_margin_hz(const HfModeProfile& p, double rf_hz, double s
     const auto effective_frequency = (motion.couple_carrier_phase ? rf_hz : 0) + source_band;
     double margin = motion.amplitude_seconds == 0 ? 0 :
         (static_cast<double>(two_pi) * effective_frequency * motion.amplitude_seconds + 1) / motion.period_seconds;
-    if (p.parabolic_layer && p.parabolic_layer->critical_amplitude_hz != 0) {
+    if (p.parabolic_layer && hf_parabolic_varies(*p.parabolic_layer)) {
         const auto& layer = *p.parabolic_layer;
-        const double minimum_critical = layer.critical_frequency_hz - layer.critical_amplitude_hz;
+        const double minimum_critical = hf_parabolic_critical_bounds(layer).front();
         const double minimum_gap = minimum_critical - rf_hz - source_band;
         require(minimum_gap > .01 * minimum_critical, "parabolic eikonal band approaches the turning-frequency cutoff");
         const auto at_minimum = eikonal_at_critical(layer, rf_hz + source_band, minimum_critical);
         // ∂(f P)/∂fo = f(P-G)/fo with f held fixed. Use upper
         // band frequency and lowest fo for a conservative derivative bound.
-        const double critical_rate = static_cast<double>(two_pi) * layer.critical_amplitude_hz /
-            layer.critical_period_seconds;
+        const double critical_rate = hf_parabolic_max_rate_hz_s(layer);
         margin += (rf_hz + source_band) * (at_minimum.group_delay_seconds - at_minimum.phase_delay_seconds) *
-            critical_rate / minimum_critical + 1 / layer.critical_period_seconds;
+            critical_rate / minimum_critical + 1 / hf_parabolic_min_period_seconds(layer);
     }
     if (p.polarization && p.polarization->rotation_amplitude_radians != 0)
         margin += (2 * std::abs(p.polarization->rotation_amplitude_radians) + 1) /
@@ -167,8 +248,8 @@ double hf_mode_spectral_margin_hz(const HfModeProfile& p, double rf_hz, double s
 std::array<double, 2> hf_group_delay_motion_bounds(const HfModeProfile& p, double rf_hz) {
     if (p.parabolic_layer) {
         const auto& layer = *p.parabolic_layer;
-        const double lo = layer.critical_frequency_hz - layer.critical_amplitude_hz;
-        const double hi = layer.critical_frequency_hz + layer.critical_amplitude_hz;
+        const auto critical_bounds = hf_parabolic_critical_bounds(layer);
+        const double lo = critical_bounds.front(), hi = critical_bounds.back();
         require(rf_hz > 0 && rf_hz < .99 * lo, "parabolic eikonal requires a propagating guarded band");
         const auto initial = hf_parabolic_eikonal(layer, rf_hz, 0);
         const auto earliest = eikonal_at_critical(layer, rf_hz, hi);

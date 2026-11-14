@@ -63,6 +63,12 @@ struct ChannelSpec {
     Fade fade;
     unsigned interpolation_half_width = 16;
     std::size_t maximum_workspace_bytes = 64u * 1024u * 1024u;
+    // Place the capture within the analytic HF trajectory without shifting the
+    // source/calendar or additive-noise clock. Its physical reference remains
+    // t=0; this does not rebase each ray's initial delay or carrier phase.
+    double hf_trajectory_offset_seconds = 0;
+    // Additive-noise RNG root only. Absent preserves the historical seed route.
+    std::optional<std::uint64_t> noise_seed;
 };
 struct ChannelWorkspaceError : std::invalid_argument { using std::invalid_argument::invalid_argument; };
 struct ChannelReport {

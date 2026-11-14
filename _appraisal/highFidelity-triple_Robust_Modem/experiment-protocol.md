@@ -1,9 +1,12 @@
 # Native high-fidelity appraisal protocol
 
 Updated 14 November 2026. The contained appraisal has a native renderer,
-scenario catalog, executable, bounded campaign runner and 16 CTest groups.
-The latest full check passed in 76.71 seconds
-([log](.build/hf-paired-rendering-checks.log)).
+scenario catalog, executable, bounded campaign runner and 18 CTest groups.
+The latest full check passed in 74.95 seconds
+([log](.build/hf-independent-checks.log)); five focused follow-up-analyzer
+checks passed after its hash/null-control repair and before the final rebuild.
+The [independent HF ensemble](hf-ensemble.md) specifies the current frozen
+trajectory, interaction and boundary campaign.
 The [model inventory](models.md) records implemented equations and
 limits; the [research reconciliation](research-reconciliation.md) maps them to
 the literature. The added [HF research synthesis](hf-research.md) reconciles
@@ -87,15 +90,14 @@ the appraisal subtree and reads any shared compiler cache in read-only mode:
 ./_appraisal/highFidelity-triple_Robust_Modem/build.sh test
 ```
 
-The latest full suite passed all 16 CTest groups in 76.71 seconds; see the
-[current log](.build/hf-paired-rendering-checks.log). It includes public
-likelihood/direct-sum and shared phase/FFT preparation checks, native hook and
-complete experimental receiver controls, matched observation hashes, 44 runner
-checks, and the existing channel, Helper, FEC, replay and competitor checks.
-The canonical `./build.sh test triad` also passed 32/32 in 62.22 seconds
-([log](.build/hf-native-triad-checks.log)). The approved generic two-file native
-hook leaves ordinary receiver defaults unchanged; experimental algorithms remain
-contained here. See [HF validation](hf-validation.md) for current source identities.
+The current 18-group check includes the existing native receiver/phase-search
+checks, multiscale and knot-trajectory bounds, signed physical placement,
+noise/path seed isolation, strict known-binary receipts and bounded follow-up
+selection. The earlier canonical `./build.sh test triad` passed 32/32 in
+62.22 seconds ([log](.build/hf-native-triad-checks.log)); its native source hash
+is unchanged here. The approved generic two-file native hook leaves ordinary
+receiver defaults unchanged. See [HF validation](hf-validation.md) and the
+[independent ensemble](hf-ensemble.md) for source identities and outcome scope.
 
 The preceding 13-group/68.01-second and seven-group/35.25-second checks remain
 historical evidence. A still earlier canonical Triad run passed 32/32 in
@@ -172,7 +174,7 @@ Use these test tiers to keep future checks affordable:
 
 | Tier / manifest | Frozen cases | Purpose and maximum budget |
 | --- | ---: | --- |
-| `build.sh test` | 16 CTest groups | All groups passed in 76.71 s, including public-search, shared preparation, native hook and receiver checks; no long VLF reception |
+| `build.sh test` | 18 CTest groups | All groups passed in 74.95 s, plus five focused analyzer checks after repair; no long VLF reception |
 | `integration-smoke.json` | 10 | Short geometry and wiring; 600 s aggregate |
 | `propagation-breadth.json` | 16 | Groundwave land/sea defaults, weak levels, HF profiles and recovery; 120 s per episode, 1,800 s aggregate, 8 million samples per episode |
 | `receiver-controls.json` | 12 | Noise, blockers, Helper, mismatched hypotheses, physical fade, marked gap and EOF; the same 120 s / 1,800 s / 8 million ceilings |

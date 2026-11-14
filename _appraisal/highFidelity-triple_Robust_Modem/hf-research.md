@@ -1,6 +1,6 @@
 # HF skywave: adverse mechanisms and comparison requirements
 
-Reviewed 13 November 2026. This continuation reconciles the existing
+Reviewed 14 November 2026. This continuation reconciles the existing
 [`_ref` HF model review](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/33-hf-channel-models-and-simulators.md),
 [measured midlatitude/NVIS evidence](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/31-skywave-dispersion-midlatitude-nvis-longhaul.md),
 [high-latitude/equatorial evidence](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/32-skywave-dispersion-highlatitude-equatorial.md)
@@ -162,6 +162,57 @@ empirical channel fit. The full methods were not obtained. The three distinct
 listed in [Fable 33](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/33-hf-channel-models-and-simulators.md).
 Neither a decoded Doppler residual distribution nor an ionogram supplies all
 missing joint amplitude, phase, delay and mode-transition information.
+
+## Trajectory diversity independent of receiver templates
+
+A fresh full-text check of [Olugbon et al. (2021)](https://doi.org/10.1029/2020SW002676)
+supports testing several evolving timescales and changing mode structure.
+Their Nigerian 6.957 MHz events occurred at low geomagnetic activity
+(`SYM-H >= -50 nT`), so a storm-only test category would miss the reported
+morphology. One event had approximately 15-minute HF Doppler oscillations and
+30-minute electron-density oscillations; separate GPS records showed roughly
+4- and 13-minute components. These were different observables and reflection
+regions, not a fitted multisine channel. HF samples were 10 s apart, ionograms
+15 minutes apart, and the HF/ionosonde reflection points differed by about
+135 km. Preserve those cadence and geometry limits when selecting a constructed
+trajectory; neither interpolation nor time compression supplies measured faster
+variability.
+
+[Fernandes et al. (2026)](https://doi.org/10.3389/fspas.2026.1713968) reinforce the
+need to preserve temporal regime: their 1 Hz, 10 MHz Fort Collins–Newark
+residuals favored daytime Cauchy and nighttime log-normal/exponential-power
+fits. The article explicitly limits IRI-2020 to large-scale context and excludes
+amplitude/phase analysis. These estimated frequency-residual distributions
+cannot calibrate a tap Doppler spectrum or a joint complex channel law.
+
+For a bounded failure search, freeze critical-frequency trajectories, physical
+launch positions and stochastic channel seeds independently of receiver-bank
+parameters and noise seeds. A sum of distinct slow oscillations plus bounded
+nonperiodic evolution is a physical construction within the declared layer
+approximation. Evaluate carrier phase, group delay and local dispersion through
+the same eikonal. Bound the entire trajectory's critical frequency and rate
+before rendering; reject cutoff crossing, invalid delay slopes and insufficient
+dispersion/interpolation support. A conservative bound is an admission condition,
+not evidence that all extreme values occur simultaneously.
+
+The native C2 quintic knot law is a reproducible constructed alternative to a
+single sinusoid. Its first and second derivatives vanish at every knot; this
+artificial regularity and the chosen knot distribution are not measured plasma
+statistics. Separate knot realizations and offsets test different histories but
+do not sample the natural frequency of disturbed days. The scalar collisionless
+vertical-layer approximation also omits magnetic splitting, collisions,
+horizontal structure, diffraction, caustics and cutoff-induced mode loss.
+Selected multipath/mode envelopes can probe interactions without removing those
+limits or renormalizing physical fades.
+
+Follow failures with the same received history where a diagnostic permits it,
+then fresh trajectories and message positions. Increasing the transmission
+duration generally traverses a different part of a nonstationary channel;
+there is no guaranteed monotone success boundary in time. Keep operational
+fixed-launch SNR/time brackets separate from matched-history diagnostics and
+retain failures, unsupported cases and resource censoring in coverage reports.
+The [measured-record audit](hf-experiments.md#measured-record-availability-audit)
+states why this constructed diversity does not close the long-record gap.
 
 ## Absorption and critical-frequency boundaries
 

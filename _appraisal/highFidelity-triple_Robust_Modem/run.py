@@ -41,7 +41,8 @@ ROOT_KEYS = {"schema_version", "name", "purpose", "max_wall_seconds", "per_trial
 EPISODE_KEYS = {"id", "scenario", "mode", "waveform", "seed", "cn0_db_hz", "control",
                 "helper", "backend", "bit_seconds", "duration_seconds", "pulse", "stratum",
                 "oracle_slot", "search_slot", "search_timing", "capture_digest_slot", "chunk", "message", "max_wall_seconds", "max_samples",
-                "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "fec", "fade_slots", "capture_lead_seconds"}
+                "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "fec", "fade_slots", "capture_lead_seconds",
+                "hf_trajectory_seed", "hf_trajectory_offset_seconds", "noise_seed"}
 MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose", "hf-search"}
 CONTROLS = {"wanted", "noise", "wrong-key", "wrong-ordinal", "interior-fade", "capture-gap", "eof"}
 BACKENDS = {"cpu", "cuda", "vulkan", "gpu"}
@@ -104,11 +105,13 @@ def _read_campaign(path: Path) -> dict[str, Any]:
         matched = [e for e in episodes if e.get("stratum") == name]
         if (len(matched) != count or
                 any(e["mode"] != "receive" or e.get("control", "wanted") != "wanted" for e in matched) or
-                len({e["seed"] for e in matched}) != count):
+                len({e["seed"] for e in matched}) != count or
+                len({e.get("noise_seed", e["seed"]) for e in matched}) != count):
             raise CampaignError(f"stratum {name!r} must contain exactly {count} wanted receive episodes with distinct seeds")
         invariant_fields = ("scenario", "mode", "waveform", "cn0_db_hz", "control", "helper",
                             "backend", "bit_seconds", "duration_seconds", "pulse", "oracle_slot", "search_slot", "search_timing", "capture_digest_slot", "chunk",
-                            "message", "max_wall_seconds", "max_samples", "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "fec", "fade_slots", "capture_lead_seconds")
+                            "message", "max_wall_seconds", "max_samples", "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "fec", "fade_slots", "capture_lead_seconds",
+                            "hf_trajectory_seed", "hf_trajectory_offset_seconds")
         reference = matched[0]
         heterogeneous = [field for field in invariant_fields
                          if any(episode.get(field) != reference.get(field) for episode in matched[1:])]
@@ -157,6 +160,12 @@ def _validate_episode(item: Any, index: int, ids: set[str],
         raise CampaignError(f"episodes[{index}].fec must be off, rs20 or rs60")
     if isinstance(item["seed"], bool) or not isinstance(item["seed"], int) or not 0 <= item["seed"] < 2**64:
         raise CampaignError(f"episodes[{index}].seed must be an unsigned 64-bit integer")
+    for field in ("hf_trajectory_seed", "noise_seed"):
+        if field in item and (not _is_nonnegative_int(item[field]) or item[field] >= 2**64):
+            raise CampaignError(f"episodes[{index}].{field} must be an unsigned 64-bit integer")
+    if "hf_trajectory_offset_seconds" in item:
+        _bounded_number(item["hf_trajectory_offset_seconds"],
+                        f"episodes[{index}].hf_trajectory_offset_seconds", -86400, 86400)
     if "control" in item and (not isinstance(item["control"], str) or item["control"] not in CONTROLS):
         raise CampaignError(f"episodes[{index}].control must be one of {sorted(CONTROLS)}")
     if "backend" in item and (not isinstance(item["backend"], str) or item["backend"] not in BACKENDS):
@@ -267,6 +276,9 @@ def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_se
                         ("chunk", "--chunk"), ("message", "--message"), ("pulse", "--pulse"),
                         ("fec", "--fec"), ("fade_slots", "--fade-slots"),
                         ("capture_lead_seconds", "--capture-lead-seconds"),
+                        ("hf_trajectory_seed", "--hf-trajectory-seed"),
+                        ("hf_trajectory_offset_seconds", "--hf-trajectory-offset-seconds"),
+                        ("noise_seed", "--noise-seed"),
                         ("history_reference_delay_seconds", "--history-reference-delay-seconds"),
                         ("hf_phase_bank", "--hf-phase-bank"),
                         ("hf_public_phase_receiver", "--hf-public-phase-receiver"),
@@ -606,6 +618,16 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
             raise CampaignError("native capture lead does not match the frozen episode")
     if "capture_preroll_override" in plan and plan["capture_preroll_override"] is not ("capture_lead_seconds" in episode):
         raise CampaignError("native capture lead override does not match the frozen episode")
+    for field, default in (("hf_trajectory_seed", None), ("noise_seed", episode["seed"]),
+                           ("hf_trajectory_offset_seconds", 0)):
+        if field in episode or field in plan:
+            actual = plan.get(field)
+            expected = episode.get(field, default)
+            if (actual != expected or isinstance(actual, bool) or
+                    (actual is not None and (not _is_finite_number(actual) or
+                     (field != "hf_trajectory_offset_seconds" and not _is_nonnegative_int(actual)))) or
+                    plan.get(field.replace("_seconds", "") + "_override") is not (field in episode)):
+                raise CampaignError(f"native {field} does not match the frozen episode")
     fec = episode.get("fec", "off")
     if plan.get("fec", "off") != fec:
         raise CampaignError("native FEC mode does not match the frozen episode")
@@ -976,6 +998,25 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
             if not isinstance(hashes, list) or len(hashes) != 2 or any(
                     not isinstance(value, str) or re.fullmatch(r"[0-9a-fA-F]{64}", value) is None for value in hashes):
                 raise CampaignError("physical diagnostic must bind both clean template hashes")
+            known = physical.get("known_binary")
+            if known is None and "noise_seed" in plan:
+                raise CampaignError("current physical diagnostic requires the known binary reference")
+            if known is not None:
+                if (not isinstance(known, dict) or not _is_nonnegative_int(known.get("wanted_bit")) or known.get("wanted_bit") != expected or
+                        known.get("fixed_known_context") is not True or
+                        known.get("truth_information_passed_to_search") is not False or
+                        known.get("includes_acquisition_presence_or_completion") is not False or
+                        any(not _is_finite_number(known.get(field)) for field in
+                            ("squared_distance", "distance_over_noise_variance",
+                             "observed_correct_vs_wrong_log_likelihood_ratio", "equal_prior_bit_error_probability")) or
+                        known["squared_distance"] < 0 or known["distance_over_noise_variance"] < 0 or
+                        not _is_finite_number(plan.get("noise_variance")) or plan["noise_variance"] <= 0 or
+                        not math.isclose(known["distance_over_noise_variance"], known["squared_distance"] / plan["noise_variance"],
+                                         rel_tol=1e-10, abs_tol=1e-12) or
+                        not math.isclose(known["equal_prior_bit_error_probability"],
+                            .5 * math.erfc(math.sqrt(known["distance_over_noise_variance"] / 4)),
+                            rel_tol=1e-10, abs_tol=1e-300)):
+                    raise CampaignError("known binary reference must preserve its fixed private context and Gaussian distance law")
             for cell in replay_cells:
                 reference = cell.get("search_maximum_single_cell_log_lr")
                 difference = cell.get("single_cell_log_lr_replay_difference")

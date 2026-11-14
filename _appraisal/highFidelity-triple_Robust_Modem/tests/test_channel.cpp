@@ -148,6 +148,70 @@ void moving_delay_and_chunks() {
     check(one.report().workspace_bytes == two.report().workspace_bytes, "duration/chunk-dependent workspace");
 }
 
+void independent_noise_seed_and_hf_clock() {
+    constexpr unsigned fs = 1920;
+    constexpr std::size_t count = 2400;
+    auto spec = make_scenario("hf-vertical-eikonal-motion").channel;
+    spec.noise.white_variance = .3;
+    spec.noise.colored_variance = .2;
+    spec.noise.colored_corner_hz = 13;
+    spec.noise.impulse_rate_hz = 17;
+    spec.noise.impulse_rms = .7;
+    spec.noise.impulse_decay_seconds = .02;
+    Channel legacy(silence(fs), spec, 731, count);
+    spec.noise_seed = 731;
+    Channel explicit_root(silence(fs), spec, 731, count);
+    check(run(legacy, count, 397) == run(explicit_root, count, 19),
+          "explicit original noise seed changed historical noise samples");
+    Channel a(silence(fs), spec, 731, count);
+    spec.hf_trajectory_offset_seconds = -671.3;
+    Channel b(silence(fs), spec, 991, count);
+    check(run(a, count, 73) == run(b, count, 599),
+          "channel root or analytic time placement changed independently seeded noise");
+
+    auto clean = spec;
+    clean.noise = {};
+    clean.paths[0].gaussian_width_2sigma_hz = .2;
+    clean.paths[0].hf->coherent_to_diffuse_power = 1;
+    Channel signal_a(tone(fs, count, 0), clean, 1551, count);
+    clean.noise_seed = 9123;
+    Channel signal_b(tone(fs, count, 0), clean, 1551, count);
+    const auto ca = run(signal_a, count, 357), cb = run(signal_b, count, 1600);
+    check(ca == cb, "noise seed changed independent path realization");
+    clean.hf_trajectory_offset_seconds = -137.9;
+    Channel placed(tone(fs, count, 0), clean, 1551, count);
+    const auto cc = run(placed, count, 71);
+    check(ca != cc, "independent trajectory placement had no physical effect");
+    clean.hf_trajectory_offset_seconds = -671.3;
+    Channel other_path(tone(fs, count, 0), clean, 1552, count);
+    check(ca != run(other_path, count, 181), "channel root does not select independent stochastic HF realization");
+
+    // With a fixed random field, shifting its physical clock changes its
+    // selected interval without touching the constant source clock.
+    auto gaussian_only = clean;
+    gaussian_only.paths[0].hf->parabolic_layer.reset();
+    gaussian_only.paths[0].hf->coherent_to_diffuse_power = 0;
+    gaussian_only.paths[0].delay_seconds = .01;
+    gaussian_only.hf_trajectory_offset_seconds = -3;
+    Channel shifted(tone(fs, count, 0), gaussian_only, 1551, count);
+    Channel shifted_chunks(tone(fs, count, 0), gaussian_only, 1551, count);
+    check(run(shifted, count, 1) == run(shifted_chunks, count, 917),
+          "negative physical random-field time is chunk dependent");
+
+    auto invalid = spec;
+    invalid.hf_trajectory_offset_seconds = 86400.1;
+    rejects([&] { Channel c(silence(fs), invalid, 0, count); }, "unbounded physical HF origin accepted");
+    invalid = spec;
+    invalid.paths[0].delay_rate = 1e-8;
+    rejects([&] { Channel c(silence(fs), invalid, 0, count); }, "offset mixed with unreconciled linear delay reference");
+    invalid = spec;
+    invalid.paths[0].hf.reset();
+    rejects([&] { Channel c(silence(fs), invalid, 0, count); }, "HF offset silently ignored on generic path");
+    invalid = make_scenario("hf-ding-measured").channel;
+    invalid.hf_trajectory_offset_seconds = 1;
+    rejects([&] { Channel c(silence(fs), invalid, 0, count); }, "analytic HF origin applied to measured replay");
+}
+
 void finite_extent_fast_paths() {
     constexpr unsigned fs = 2000, half = 16;
     constexpr double delay_samples = 32.375;
@@ -484,6 +548,7 @@ int main() {
     try {
         identity_and_delays();
         moving_delay_and_chunks();
+        independent_noise_seed_and_hf_clock();
         finite_extent_fast_paths();
         random_processes();
         shared_interpolation_endpoint_cache();

@@ -19,14 +19,24 @@ an explicit option, inside the same native complete receiver.
 The [bounded refinement continuation](hf-phase-refinement.md) adds an
 evaluator-only known-physical-template comparison and a predeclared,
 fixed-prior proposal/refinement candidate. Its native focused test initially
-failed the noiseless blind off-grid recovery assertion; no candidate campaign
-has run yet. That implementation counterexample is preserved in
-[HF validation](hf-validation.md), and is not evidence of ionospheric infeasibility.
+failed the noiseless blind off-grid recovery assertion; subsequent bounded
+repairs and message campaigns are recorded in
+[HF validation](hf-validation.md). That implementation counterexample is not
+evidence of ionospheric infeasibility.
+
+The [independent trajectory ensemble](hf-ensemble.md) now extends this with
+two-scale critical-frequency motion, reproducible C2 random knots, independent
+channel placement, fading/recovering effective rays, and canonical-only
+Helper/nonwhite-noise combinations. Its generator is independent of the
+receiver phase bank. Frozen screens, full messages, private bit-distance
+diagnostics and operational SNR/time brackets have separate endpoints.
 
 ## Mechanisms and independent checks
 
 | Cases | What changes | Evidence and numerical boundary |
 | --- | --- | --- |
+| `hf-ensemble-tid`, `hf-ensemble-changing-rate`, `hf-ensemble-modes` | Multiscale/nonperiodic density, independent launch position and competing effective rays | Shared native eikonal with global rate/cutoff/delay admission; constructed cases, not measured events. Full definitions and fixed selection rules are in [the ensemble protocol](hf-ensemble.md). |
+| `hf-ensemble-modes-noisy`, `hf-ensemble-ox-helper` | Actual multipath plus colored/shot noise, or Jones O/X with Helper and common frequency offset | Canonical receiver interactions. They do not bypass the experimental phase supplement's proper-white-noise and Helper-off restrictions. |
 | `hf-watterson-i1`, `hf-watterson-i3` | Unequal component powers, O/X spectral splitting, mode delays and different Doppler widths | Literal historical fitted scalar components; received-terminal powers already include the original antennas. They are quiet selected intervals, not a storm limit. |
 | `hf-ox-split`, `hf-ox-cancellation` | Relative phase of characteristic modes after one transmit and one receive polarization projection | Constructed coherent Jones comparison with lossless vector closure and single-port cancellation checks. It is not an ionogram reconstruction or a critical-frequency ray solver. |
 | `hf-trough-static`, `hf-trough-phase` | Slow common phase on coherent and diffuse contributions | Matched source-conditioned sensitivity construction. The coherent contribution is not exempt from the changing phase; identical latent fading is retained in the pair. |
@@ -88,6 +98,26 @@ Native least-squares linear detrending gives phase standard deviation
 reproduces the paper's **1.02 rad**. The deposited filename/readme and exact
 sample hashes are preserved; no estimator was fitted to obtain the published
 number. See the [fixture provenance](fixtures/hf-ding-2021/README.md).
+
+### Measured-record availability audit
+
+The targeted primary-source/data-catalog check on 14 November 2026 found useful
+additional observables, but did not establish a second long complex HF channel
+fixture suitable for phase-sensitive modem replay. No new capture was imported
+or counted as communications evidence in this audit.
+
+| Source | Available observable and scope | Admissible use and remaining prerequisite |
+| --- | --- | --- |
+| [Chartier et al. (2020), McMurdo–South Pole](https://doi.org/10.5194/amt-13-3023-2020), [public data](https://doi.org/10.5281/zenodo.3478267) | Two weeks in March 2019 on a 1,356 km polar path; 12 frequencies per minute with 5 s dwell. The instrument returned sparse range–Doppler–intensity detections above 6 dB while retaining raw DigitalRF I/Q on site. The catalog lists 31.9 MB, including 30.2 MB of oblique-sounding data. | A promising independent check of event durations, delays, mode changes and detection censoring. Nondetection is not an observed channel zero. The public summary matrices do not supply complex phase/noise for waveform replay; a curated raw-I/Q subset and its clocks/calibration would be required for that use. |
+| [Cerwin et al. (2026), HamSCI HF TDOA](https://doi.org/10.3389/fspas.2026.1723511), [v1.0.3 deposit](https://doi.org/10.5281/zenodo.18394461) | Received amateur-radio audio and analysis of 2023/2024 eclipse-era paths. Manual analysis selected a favorable chirp per record; subsequent automated analyses used all chirps and exposed additional modes. The January 2026 versioned archive is 2.1 GB. | Useful for a separately qualified radio/audio-chain delay or mode-observable check. These received waveforms are not a calibrated, arbitrary-waveform complex channel. Inspect a selected file's clock, filtering, station metadata and data license before import; the whole archive is unnecessary for a small fixture. |
+| [Johnk (2026), citizen-science sounder](https://usncursi.org/archive/nrsm/2026/papers/1011.pdf) | The two-page paper constructs a complex impulse-response estimate from KiwiSDR audio using a Hilbert transform and correlation. It describes 60 m tests, then mentions a 50.313 MHz opening before the example capture; that frequency/context linkage needs clarification, given the stated receiver range of 10 kHz–30 MHz. | A methods lead. The inspected paper supplies no capture deposit, data license or complete clock/filter calibration. It does not unambiguously establish that the Kiwi capture itself was at 50.313 MHz; do not turn this ambiguity into either a verified hardware contradiction or an admitted HF fixture. |
+
+The existing Ding envelope remains the only admitted measured complex replay in
+this appraisal. Its duration, clock ambiguity and scalar bandwidth still apply.
+Additional synthetic trajectories, another excerpt, or amplitude/phase ablations
+do not increase the number of measured days; tiling or stretching it is not a
+substitute for a longer record. Public sounding summaries can independently
+constrain scenario observables without being mislabeled as modem replay data.
 
 ## Frozen bounded campaigns
 

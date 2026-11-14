@@ -85,12 +85,18 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
         "seed": int(argument("--seed", "1")),
         "control": control or argument("--control", "wanted"),
         "source_identity": {"appraisal_source_sha256": "a" * 64, "native_source_sha256": "b" * 64},
-        "plan": {"cn0_db_hz": cn0, "requested_bit_seconds": requested_bit_seconds,
+        "plan": {"cn0_db_hz": cn0, "requested_bit_seconds": requested_bit_seconds, "noise_variance": 5.,
                  "fec": fec,
                  "fade_slots": int(argument("--fade-slots", "2")) if argument("--control", "wanted") == "interior-fade" else None,
                  "helper_enabled": "--helper" in command, "sample_rate_hz": 1920,
                  "capture_preroll_seconds": float(argument("--capture-lead-seconds", ".25")),
                  "capture_preroll_override": "--capture-lead-seconds" in command,
+                 "hf_trajectory_seed": int(argument("--hf-trajectory-seed")) if "--hf-trajectory-seed" in command else None,
+                 "hf_trajectory_seed_override": "--hf-trajectory-seed" in command,
+                 "hf_trajectory_offset_seconds": float(argument("--hf-trajectory-offset-seconds", "0")),
+                 "hf_trajectory_offset_override": "--hf-trajectory-offset-seconds" in command,
+                 "noise_seed": int(argument("--noise-seed", argument("--seed", "1"))),
+                 "noise_seed_override": "--noise-seed" in command,
                  "history_reference_delay_seconds": float(argument("--history-reference-delay-seconds", "0")),
                  "hf_phase_bank_requested": "--hf-phase-bank" in command,
                  "hf_public_phase_receiver_requested": "--hf-public-phase-receiver" in command,
@@ -173,6 +179,11 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
             "capacity_qualified": False, "is_theoretical_upper_bound": False, "gain_prior_variance": 1,
             "prefix_samples_rendered_per_twin": 100,
             "physical_templates": {**projection, "template_sha256": ["d" * 64, "e" * 64]},
+            "known_binary": {"wanted_bit": 1, "fixed_known_context": True,
+                "truth_information_passed_to_search": False, "includes_acquisition_presence_or_completion": False,
+                "squared_distance": 20., "distance_over_noise_variance": 4.,
+                "observed_correct_vs_wrong_log_likelihood_ratio": 3.,
+                "equal_prior_bit_error_probability": .5 * math.erfc(1)},
             "winning_public_cell": {"projection": json.loads(json.dumps(projection)),
                 "search_maximum_single_cell_log_lr": 4, "single_cell_log_lr_replay_difference": 0},
             "admission": {"channel_instances": 2, "clean_capture_buffers": 0,
@@ -274,6 +285,8 @@ class CampaignValidationTests(unittest.TestCase):
         for field, first, second in (("chunk", 256, 512), ("message", "A", "B"),
                                      ("pulse", "rrc", "tapered-rrc"),
                                      ("capture_lead_seconds", .25, 2),
+                                     ("hf_trajectory_seed", 101, 102),
+                                     ("hf_trajectory_offset_seconds", 0, 137),
                                      ("max_samples", 800, 900),
                                      ("max_wall_seconds", .5, .6)):
             with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
@@ -695,6 +708,62 @@ class CampaignValidationTests(unittest.TestCase):
         receipt["plan"]["capture_preroll_override"] = True
         with self.assertRaisesRegex(runner.CampaignError, "capture lead override"):
             runner._validate_completed_receipt(receipt, implicit)
+
+    def test_trajectory_and_noise_controls_are_separate_and_receipt_bound(self) -> None:
+        episode = {"id": "independent", "scenario": "hf-ensemble-knots", "mode": "receive",
+                   "waveform": "reference", "seed": 3, "hf_trajectory_seed": 2**64 - 1,
+                   "hf_trajectory_offset_seconds": -137.25, "noise_seed": 0}
+        runner._validate_episode(episode, 0, set(), 10, 1000)
+        command = runner._command(Path("/native/probe"), episode, 1000, 2)
+        receipt = fake_completed_receipt(command)
+        runner._validate_completed_receipt(receipt, episode)
+        for field in ("hf_trajectory_seed", "hf_trajectory_offset_seconds", "noise_seed"):
+            self.assertEqual(command[command.index("--" + field.replace("_", "-")) + 1], str(episode[field]))
+            for wrong in (None, True, episode[field] + 1):
+                bad = json.loads(json.dumps(receipt))
+                bad["plan"][field] = wrong
+                with self.assertRaisesRegex(runner.CampaignError, field):
+                    runner._validate_completed_receipt(bad, episode)
+            bad = json.loads(json.dumps(receipt))
+            bad["plan"][field.replace("_seconds", "") + "_override"] = False
+            with self.assertRaisesRegex(runner.CampaignError, field):
+                runner._validate_completed_receipt(bad, episode)
+        for field, bad_values in (("hf_trajectory_seed", (-1, 2**64, True, 1.5)),
+                                  ("noise_seed", (-1, 2**64, True, "3")),
+                                  ("hf_trajectory_offset_seconds", (-86401, 86401, True, float("nan")))):
+            for bad_value in bad_values:
+                bad = dict(episode, **{field: bad_value})
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_episode(bad, 0, set(), 10, 1000)
+
+    def test_known_binary_reference_keeps_distance_law_and_private_scope(self) -> None:
+        episode = {"id": "binary", "scenario": "hf-quiet", "mode": "hf-search",
+                   "waveform": "reference", "seed": 3, "hf_physical_diagnostic": True}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 1000, 2))
+        runner._validate_completed_receipt(receipt, episode)
+        for field, value in (("truth_information_passed_to_search", True),
+                             ("includes_acquisition_presence_or_completion", True),
+                             ("fixed_known_context", False), ("squared_distance", -1),
+                             ("distance_over_noise_variance", -1),
+                             ("equal_prior_bit_error_probability", .5), ("wanted_bit", 0)):
+            bad = json.loads(json.dumps(receipt))
+            bad["hf_physical_diagnostic"]["known_binary"][field] = value
+            with self.assertRaisesRegex(runner.CampaignError, "known binary"):
+                runner._validate_completed_receipt(bad, episode)
+
+    def test_fixed_sample_rejects_reused_effective_noise(self) -> None:
+        campaign = valid_campaign()
+        for episode in campaign["episodes"]:
+            episode["noise_seed"] = 99
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "campaign.json"
+            path.write_text(json.dumps(campaign))
+            with self.assertRaisesRegex(runner.CampaignError, "distinct seeds"):
+                runner._read_campaign(path)
+            for index, episode in enumerate(campaign["episodes"]):
+                episode["noise_seed"] = 99 + index
+            path.write_text(json.dumps(campaign))
+            runner._read_campaign(path)
 
     def test_private_hf_diagnostic_options_are_strict_and_recorded(self) -> None:
         campaign = valid_campaign()
