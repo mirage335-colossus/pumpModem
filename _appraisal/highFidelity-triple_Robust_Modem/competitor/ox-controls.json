@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "name": "upstream-ox-bright-and-expected-power-controls",
+  "purpose": "Two brighter PSK controls distinguish its ordinary C/N0 floor from evolving O/X loss; Olivia static17 versus pre-existing dynamic20 is a predeclared3dB expected-port-power discriminator, never fitted to realized faded energy.",
+  "max_wall_seconds": 300,
+  "episodes": [
+    {"id":"psk31-ox-static-bright","mode":"psk31","scenario":"hf-ox-split","cn0_db_hz":30,"seed":12901},
+    {"id":"psk31-ox-cancel-bright","mode":"psk31","scenario":"hf-ox-cancellation","cn0_db_hz":30,"seed":12901},
+    {"id":"olivia-ox-static-power-control","mode":"olivia8-250","scenario":"hf-ox-split","cn0_db_hz":17,"seed":12901}
+  ]
+}

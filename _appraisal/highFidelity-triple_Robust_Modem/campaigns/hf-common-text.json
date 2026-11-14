@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "name": "hf-common-text-operating-points",
+  "purpose": "Same HELLO application content as upstream PSK31, Olivia and FT8; WSPR remains a separate structured service. Each mode retains its ordinary supported waveform and receiver scope. Robust reference uses65wirebits and a roughly3984-second public calendar, so equal C/N0 is explicitly NOT equal energy or latency. These five fixed cases measure whole-message behavior and source energy before any equal-energy comparison is selected; no result-conditioned waveform/threshold change. Preserve all65bits, public search, worker budget and quiet completion.",
+  "max_wall_seconds": 3000,
+  "per_trial_wall_seconds": 600,
+  "max_trials": 5,
+  "max_samples": 10000000,
+  "episodes": [
+    {
+      "id": "awgn-hello",
+      "scenario": "awgn",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 12801,
+      "cn0_db_hz": 40,
+      "message": "HELLO"
+    },
+    {
+      "id": "hf-quiet-hello",
+      "scenario": "hf-quiet",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 12802,
+      "cn0_db_hz": 8,
+      "message": "HELLO"
+    },
+    {
+      "id": "hf-disturbed-hello",
+      "scenario": "hf-disturbed",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 12803,
+      "cn0_db_hz": 20,
+      "message": "HELLO"
+    },
+    {
+      "id": "hf-ox-split-hello",
+      "scenario": "hf-ox-split",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 12901,
+      "cn0_db_hz": 20,
+      "message": "HELLO"
+    },
+    {
+      "id": "hf-ox-cancellation-hello",
+      "scenario": "hf-ox-cancellation",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 12901,
+      "cn0_db_hz": 20,
+      "message": "HELLO"
+    }
+  ]
+}

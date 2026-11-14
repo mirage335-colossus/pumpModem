@@ -1,5 +1,6 @@
 #pragma once
 
+#include "appraisal/hf_ionosphere.hpp"
 #include "datapump/triad_modem_v3.hpp"
 #include <cstdint>
 #include <memory>
@@ -27,6 +28,7 @@ struct Path {
     // amplitude*sin(2*pi*t/period), with t continuing through source silence.
     double phase_wander_amplitude_radians = 0;
     double phase_wander_period_seconds = 7200;
+    std::optional<HfModeProfile> hf;
 };
 struct Fade {
     double first_seconds = -1, stop_seconds = -1, ramp_seconds = 0;
@@ -102,6 +104,7 @@ struct PublicBounds {
     double frequency_bound_hz = 0, atmospheric_hz = 0;
     double spread_seconds = 0, doppler_width_hz = 0;
     bool varying = false;
+    double delay_excursion_seconds = 0;
 };
 struct Scenario {
     std::string id, family, evidence, provenance, assumptions;

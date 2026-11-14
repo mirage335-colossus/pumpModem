@@ -2,7 +2,10 @@
 """Bounded actual native source/channel/complete-receiver integration checks."""
 from __future__ import annotations
 
+import importlib.util
 import json
+import math
+from pathlib import Path
 import subprocess
 import sys
 
@@ -10,9 +13,9 @@ import sys
 def main() -> None:
     probe = sys.argv[1]
 
-    def invoke(*args: str, code: int = 0) -> dict:
+    def invoke(*args: str, code: int = 0, timeout: float = 35) -> dict:
         command = [probe, *args]
-        run = subprocess.run(command, capture_output=True, text=True, timeout=35)
+        run = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
         assert run.returncode == code, (command, run.returncode, run.stdout, run.stderr)
         result = json.loads(run.stdout)
         assert result["schema_version"] == 1, result
@@ -20,6 +23,51 @@ def main() -> None:
 
     listing = invoke("--list")
     assert len(listing["scenarios"]) >= 6
+    scenarios = {scenario["id"]: scenario for scenario in listing["scenarios"]}
+    assert scenarios["awgn"]["channel"]["path_hash_version"] == 1, scenarios["awgn"]
+    ox = scenarios["hf-ox-cancellation"]["channel"]
+    assert ox["path_hash_version"] == 2, ox
+    assert all(path["hf"]["polarization"] is not None for path in ox["paths"]), ox
+    assert ox["paths"][0]["hf"]["polarization"]["extraordinary"] is False, ox
+    assert ox["paths"][1]["hf"]["polarization"]["extraordinary"] is True, ox
+    assert any(path["hf"]["voltage_transitions"] for path in
+               scenarios["hf-mode-transition"]["channel"]["paths"]), scenarios["hf-mode-transition"]
+    eikonal = scenarios["hf-vertical-eikonal-motion"]["channel"]["paths"][0]["hf"]["parabolic_layer"]
+    assert eikonal["critical_amplitude_hz"] > 0, eikonal
+    traces = [scenarios[name]["channel"]["paths"][0]["hf"]["measured_envelope"]
+              for name in ("hf-ding-measured", "hf-ding-amplitude", "hf-ding-phase")]
+    assert [trace["part"] for trace in traces] == ["measured-complex", "constructed-amplitude-only", "constructed-phase-only"], traces
+    for trace in traces:
+        assert trace["samples"] == 2048 and trace["sample_rate_hz"] == 50, trace
+        assert trace["support_seconds"] == (trace["samples"] - 1) / trace["sample_rate_hz"], trace
+        assert len(trace["source_sha256"]) == len(trace["serialized_iq_sha256"]) == 64, trace
+    assert len({scenarios[name]["channel"]["path_parameters_sha256"] for name in
+                ("hf-ding-measured", "hf-ding-amplitude", "hf-ding-phase")}) == 3, traces
+    late_trace = scenarios["hf-ding-measured-late"]["channel"]["paths"][0]["hf"]["measured_envelope"]
+    assert late_trace["record_offset_seconds"] == 20, late_trace
+    assert late_trace["remaining_support_seconds"] == late_trace["support_seconds"] - 20, late_trace
+    clock_trace = scenarios["hf-ding-clock41"]["channel"]["paths"][0]["hf"]["measured_envelope"]
+    assert math.isclose(clock_trace["sample_rate_hz"], 2048 / 41, rel_tol=1e-15), clock_trace
+    assert clock_trace["source_sha256"] == traces[0]["source_sha256"], clock_trace
+    measured_helper = invoke("--mode", "plan", "--scenario", "hf-ding-measured", "--helper", code=5)
+    assert measured_helper["status"] == "unavailable" and "Helper-off" in measured_helper["reason"], measured_helper
+    measured_plan = invoke("--mode", "plan", "--scenario", "hf-ding-measured", "--waveform", "reference")["plan"]
+    first_stop = measured_plan["public_slots"][0]["observation"]["stop"] / measured_plan["sample_rate_hz"]
+    assert first_stop <= measured_plan["numerical_horizon_seconds"], measured_plan
+    assert not measured_plan["fits_numerical_horizon"], measured_plan
+    measured_full = invoke("--mode", "receive", "--scenario", "hf-ding-measured", "--waveform", "reference", code=5)
+    assert measured_full["status"] == "unavailable" and "numerical qualification" in measured_full["reason"], measured_full
+    measured_noise = invoke("--mode", "slot", "--scenario", "hf-ding-measured", "--waveform", "reference",
+                            "--control", "noise", "--seed", "7201", "--cn0", "0", "--max-wall-seconds", "25")
+    noise_outcomes = measured_noise["outcomes"]
+    assert measured_noise["status"] == "completed" and noise_outcomes["first_public_observation_complete"], measured_noise
+    assert not noise_outcomes["first_public_observation_correct_data"], measured_noise
+    assert not noise_outcomes["correct_complete"] and not noise_outcomes["completion_evaluated"], measured_noise
+    assert noise_outcomes["actual_scored_slots"] == 1 and noise_outcomes["physical_completions"] == 0, measured_noise
+    assert noise_outcomes["false_data"] == int(measured_noise["slots"][0]["decision"] == "data"), measured_noise
+    assert not measured_noise["channel"]["contains_source_energy"] and not measured_noise["channel"]["contains_signal_energy"], measured_noise
+    rejected_slot_control = invoke("--mode", "slot", "--control", "eof", code=2)
+    assert "wanted or noise" in rejected_slot_control["reason"], rejected_slot_control
     common = ["--scenario", "awgn", "--waveform", "smoke", "--seed", "5489",
               "--cn0", "40", "--max-wall-seconds", "25"]
     plan = invoke("--mode", "plan", *common)
@@ -27,10 +75,47 @@ def main() -> None:
     assert plan["plan"]["represented_seconds"] >= 120, plan
     assert plan["plan"]["fits_sample_budget"], plan
     assert plan["plan"]["scored_slot_horizon"] == plan["plan"]["first_uncontaminated_quiet_slot"] + 2, plan
+    assert plan["plan"]["fade_slots"] is None, plan
+    assert plan["plan"]["capture_preroll_seconds"] == .25 and not plan["plan"]["capture_preroll_override"], plan
+    helper_plan = invoke("--mode", "plan", *common, "--helper")["plan"]
+    longer_helper_plan = invoke("--mode", "plan", *common, "--helper", "--capture-lead-seconds", "2")["plan"]
+    assert longer_helper_plan["capture_preroll_seconds"] == 2 and longer_helper_plan["capture_preroll_override"], longer_helper_plan
+    for field in ("actual_bit_seconds", "wire_bits", "epoch", "initial_ordinal", "first_data_nominal_seconds",
+                  "scored_slot_horizon", "first_uncontaminated_quiet_slot", "public_bounds"):
+        assert longer_helper_plan[field] == helper_plan[field], (field, helper_plan, longer_helper_plan)
+    assert longer_helper_plan["first_data_nominal_capture_seconds"] - helper_plan["first_data_nominal_capture_seconds"] == 1.75, longer_helper_plan
+    assert longer_helper_plan["source_stop_sample"] - helper_plan["source_stop_sample"] == int(1.75 * helper_plan["sample_rate_hz"]), longer_helper_plan
+    for lead in (".25", "10"):
+        boundary = invoke("--mode", "plan", *common, "--capture-lead-seconds", lead)["plan"]
+        assert boundary["capture_preroll_seconds"] == float(lead) and boundary["capture_preroll_override"], boundary
+    for lead in ("0", ".249", "10.001", "nan", "inf"):
+        rejected_lead = invoke("--mode", "plan", *common, "--capture-lead-seconds", lead, code=2)
+        assert "capture lead" in rejected_lead["reason"] or "finite number" in rejected_lead["reason"], rejected_lead
+    # Hold only this plan comparison's memory admission fixed: automatic
+    # available-memory estimates may change between independent invocations.
+    fade_plan = ["--mode", "plan", *common, "--control", "interior-fade", "--memory-mib", "1024"]
+    default_fade = invoke(*fade_plan)["plan"]
+    one_fade = invoke(*fade_plan, "--fade-slots", "1")["plan"]
+    two_fade = invoke(*fade_plan, "--fade-slots", "2")["plan"]
+    assert default_fade == two_fade, (default_fade, two_fade)
+    assert one_fade["fade_slots"] == 1 and two_fade["fade_slots"] == 2, (one_fade, two_fade)
+    assert one_fade["public_slots"] == two_fade["public_slots"], (one_fade, two_fade)
+    middle = one_fade["wire_bits"] // 2
+    assert one_fade["capture_gap"] == one_fade["public_slots"][middle]["observation"], one_fade
+    assert two_fade["capture_gap"]["first"] == one_fade["capture_gap"]["first"], two_fade
+    assert two_fade["capture_gap"]["stop"] == two_fade["public_slots"][middle + 1]["observation"]["stop"], two_fade
+    for bad_args in (("--control", "interior-fade", "--fade-slots", "0"),
+                     ("--control", "interior-fade", "--fade-slots", "3"),
+                     ("--control", "interior-fade", "--fade-slots", "1.0"),
+                     ("--control", "capture-gap", "--fade-slots", "1"), ("--fade-slots", "1")):
+        bad_fade = invoke("--mode", "plan", *common, *bad_args, code=2)
+        assert "fade slots" in bad_fade["reason"] or "unsigned integer" in bad_fade["reason"], bad_fade
 
     wanted = invoke("--mode", "receive", *common)
     assert wanted["status"] == "completed", wanted
     assert wanted["outcomes"]["correct_complete"], wanted
+    assert wanted["outcomes"]["correct_decoded_complete"], wanted
+    assert wanted["plan"]["fec"] == "off" and wanted["plan"]["short_wire_bit_limit"] == 208, wanted
     assert wanted["outcomes"]["completion_evaluated"], wanted
     assert wanted["channel"]["hashed_samples"] == wanted["channel"]["samples"], wanted
     assert wanted["outcomes"]["premature_completions"] == 0, wanted
@@ -58,6 +143,63 @@ def main() -> None:
     durations = [invoke("--mode", "plan", "--scenario", "awgn", "--waveform", "reference",
                         "--bit-seconds", duration)["plan"]["actual_bit_seconds"] for duration in ("16", "32")]
     assert durations[1] > durations[0], durations
+    for fec, expected_bits, limit in (("off", 65, 208), ("rs20", 136, 304), ("rs60", 184, 400)):
+        fec_plan = invoke("--mode", "plan", "--scenario", "awgn", "--message", "HELLO", "--fec", fec)["plan"]
+        assert fec_plan["wire_bits"] == expected_bits and fec_plan["short_wire_bit_limit"] == limit, fec_plan
+        assert fec_plan["fec"] == fec and fec_plan["content_limit_bytes"] == 16 and not fec_plan["long_form"], fec_plan
+    invalid_fec = invoke("--mode", "plan", "--fec", "rs40", code=2)
+    assert "FEC" in invalid_fec["reason"], invalid_fec
+    # One fully observed physical quiet slot becomes a located erasure when
+    # DATA resumes. An invalid capture gap instead invalidates the episode.
+    repaired = invoke("--mode", "receive", *common, "--fec", "rs20", "--control", "interior-fade",
+                      "--fade-slots", "1", "--max-samples", "10000000")
+    outcome = repaired["outcomes"]
+    assert repaired["status"] == "completed" and repaired["plan"]["wire_bits"] == 72, repaired
+    assert not outcome["correct_complete"] and outcome["correct_decoded_complete"], repaired
+    assert outcome["physical_completions"] == outcome["accepted_messages"] == 1, repaired
+    assert outcome["actual_scored_slots"] == 74 and outcome["quiet_active_slots"] == 1, repaired
+    assert outcome["wrong_bits"] == outcome["false_data"] == outcome["premature_completions"] == 0, repaired
+    message = repaired["messages"][0]
+    assert message["observed_bits"] == 71 and message["missing_slots"] == 1, message
+    assert message["erasure_slot_indices"] == [36] and message["trailing_quiet_slots"] == [72, 73], message
+    assert message["decoded_payload_bytes"] == [65] and message["decoded_endpoint_matches"], message
+    # The erased bit happens to equal the native zero placeholder, so changed
+    # bytes remain zero while the erased/repaired-byte union must still be one.
+    assert message["corrected_bytes"] == 0, message
+    integrity = message["fec_stats"]["integrity"]
+    assert integrity["received_bits"] == 31 and integrity["missing_bits"] == 1, integrity
+    assert integrity["erased_bytes"] == integrity["repaired_bytes"] == 1, integrity
+    runner_spec = importlib.util.spec_from_file_location("appraisal_run", Path(__file__).resolve().parents[1] / "run.py")
+    assert runner_spec and runner_spec.loader
+    runner = importlib.util.module_from_spec(runner_spec)
+    sys.modules[runner_spec.name] = runner
+    runner_spec.loader.exec_module(runner)
+    runner._validate_completed_receipt(repaired, {
+        "id": "native-rs20-one-fade", "mode": "receive", "scenario": "awgn", "waveform": "smoke",
+        "seed": 5489, "cn0_db_hz": 40, "fec": "rs20", "control": "interior-fade", "fade_slots": 1})
+
+    helper_supported = invoke("--mode", "receive", "--scenario", "awgn", "--waveform", "reference",
+                              "--seed", "5489", "--cn0", "40", "--helper", "--capture-lead-seconds", "2",
+                              "--max-wall-seconds", "25")
+    helper_geometry = helper_supported["plan"]
+    assert helper_supported["status"] == "completed" and helper_supported["outcomes"]["correct_complete"], helper_supported
+    assert helper_geometry["helper_enabled"] and helper_geometry["wire_bits"] == 3, helper_geometry
+    assert helper_geometry["capture_preroll_seconds"] == 2 and helper_geometry["capture_preroll_override"], helper_geometry
+    assert helper_geometry["first_data_nominal_capture_seconds"] - helper_geometry["first_data_nominal_seconds"] == 2, helper_geometry
+    assert helper_supported["source"]["generated_samples"] + 2 * helper_geometry["sample_rate_hz"] == helper_geometry["source_stop_sample"], helper_supported
+    assert helper_supported["source"]["helper_energy_sample_sum"] > 0, helper_supported
+    assert helper_supported["outcomes"]["accepted_samples"] == helper_geometry["horizon_samples"], helper_supported
+    assert helper_supported["messages"][0]["trailing_quiet_slots"] == [3, 4], helper_supported
+    # This zero-width prior deliberately uses the frequency fallback after
+    # successful onset-noise support; it does not demonstrate frequency narrowing.
+    assert helper_geometry["public_bounds"]["frequency_bound_hz"] == 0, helper_geometry
+    assert [slot["helper_status"] for slot in helper_supported["slots"][:3]] == ["onset_branch_frequency_fallback"] * 3, helper_supported
+    assert all(slot["complete"] and slot["all_valid"] and slot["decision"] == "data"
+               for slot in helper_supported["slots"][:3]), helper_supported
+    runner._validate_completed_receipt(helper_supported, {
+        "id": "native-helper-supported-preroll", "mode": "receive", "scenario": "awgn", "waveform": "reference",
+        "seed": 5489, "cn0_db_hz": 40, "helper": True, "capture_lead_seconds": 2})
+
     oracle = invoke("--mode", "oracle", "--scenario", "awgn", "--waveform", "reference",
                     "--bit-seconds", "32", "--cn0", "-4")
     presence = oracle["presence_oracle"]
@@ -67,6 +209,72 @@ def main() -> None:
         point = presence[label]
         assert abs(point["probability_detection"] + point["probability_miss"] - 1) < 1e-14, point
         assert point["probability_miss"] > oracle["oracle"]["probability_error"], oracle
+
+    # The HF history calculation is a private same-aperture diagnostic. It
+    # retains actual white noise throughout that aperture, fixed gain priors,
+    # and both bit templates; it never declares reception or completion.
+    hf_args = ["--mode", "oracle", "--scenario", "hf-quiet", "--waveform", "reference",
+               "--seed", "7201", "--cn0", "0", "--max-wall-seconds", "25"]
+    hf = invoke(*hf_args)
+    assert hf["oracle_protocol_eligible"] and hf["hf_history_applicable"], hf
+    assert not hf["outcomes"]["receiver_executed"] and not hf["outcomes"]["correct_complete"], hf
+    history = hf["hf_history"]
+    aperture = hf["oracle"]["public_observation"]["aperture"]
+    assert history["aperture"] == aperture, history
+    assert history["samples"] == aperture["stop"] - aperture["first"], history
+    assert not history["truth_information_passed_to_receiver"], history
+    assert history["gain_prior_variance"] == 1, history
+    assert history["noise_only_energy"] > 0, history
+    assert [row["requested_block_seconds"] for row in history["blocks"]] == [.25, 1, 4, 16, None], history
+    selected = f"hypothesis_{history['wanted_bit']}_energy_seconds"
+    assert math.isclose(history["noise_free_energy_seconds"], hf["oracle"]["public_observation"][selected],
+                        rel_tol=1e-12), history
+    for row in history["blocks"]:
+        for hypothesis in row["hypotheses"]:
+            assert hypothesis["rank"] >= 1, row
+            assert 0 <= hypothesis["retained_signal_fraction"] <= 1 + 1e-12, row
+            assert math.isfinite(hypothesis["noisy_log_likelihood_ratio"]), row
+            assert math.isfinite(hypothesis["noise_only_log_likelihood_ratio"]), row
+    hf_chunked = invoke(*hf_args, "--chunk", "1021")
+    assert hf_chunked["hf_history"]["blocks"] == history["blocks"], (hf_chunked, hf)
+    assert hf_chunked["oracle"]["public_observation"] == hf["oracle"]["public_observation"], (hf_chunked, hf)
+    # Selected later slots must advance every independent clean source through
+    # the prefix rather than jumping a forward-only Emission cursor.
+    hf_later = invoke(*hf_args, "--oracle-slot", "1")
+    later_history = hf_later["hf_history"]
+    assert hf_later["oracle"]["slot_index"] == 1 and later_history["aperture"]["first"] > 0, hf_later
+    assert later_history["samples"] == later_history["aperture"]["stop"] - later_history["aperture"]["first"], hf_later
+    assert later_history["reference_delay_seconds"] == 0 and not hf_later["outcomes"]["receiver_executed"], hf_later
+    shifted = invoke(*hf_args, "--oracle-slot", "1", "--history-reference-delay-seconds", "0.002", "--hf-phase-bank")
+    assert shifted["plan"]["history_reference_delay_seconds"] == shifted["hf_history"]["reference_delay_seconds"] == .002, shifted
+    # Changing an evaluator template does not alter channel truth or the
+    # exact known-channel distance/energy reference.
+    assert shifted["oracle"]["public_observation"] == hf_later["oracle"]["public_observation"], shifted
+    phase = shifted["hf_phase_bank"]
+    assert shifted["plan"]["hf_phase_bank_requested"] and phase["model_count"] == 97, shifted
+    assert phase["aperture"] == later_history["aperture"] and phase["samples"] == later_history["samples"], phase
+    assert phase["reference_delay_seconds"] == .002 and phase["workspace_bytes"] > 0, phase
+    assert phase["complex_multiply_accumulates"] > 0 and len(phase["models"]) == 97, phase
+    assert phase["arithmetic"]["complex_accumulation"] == "std::complex<long double>", phase
+    assert phase["arithmetic"]["oscillators_and_phase_rotations"] == "std::complex<double>", phase
+    assert phase["arithmetic"]["long_double_significand_bits"] >= 53, phase
+    assert phase["arithmetic"]["long_double_storage_bytes"] >= 8, phase
+    assert not phase["truth_information_passed_to_phase_bank"] and not phase["truth_information_passed_to_receiver"], phase
+    assert not phase["receiver_executed"] and not phase["completion_evaluated"] and not phase["capacity_qualified"], phase
+    for observation in ("wanted_observation", "noise_only_observation"):
+        assert math.isfinite(phase[observation]["mixture_log_likelihood_ratio"]), phase
+        assert 0 <= phase[observation]["bit_one_probability_given_signal"] <= 1, phase
+    for unsupported in (("--history-reference-delay-seconds", "-0.001"),
+                        ("--history-reference-delay-seconds", "nan"),
+                        ("--history-reference-delay-seconds", "1"),
+                        ("--history-reference-delay-seconds", "0.002", "--mode", "receive"),
+                        ("--history-reference-delay-seconds", "0", "--scenario", "awgn"),
+                        ("--hf-phase-bank", "--mode", "channel")):
+        rejected_diagnostic = invoke(*hf_args, *unsupported, code=2)
+        assert rejected_diagnostic["status"] == "error", rejected_diagnostic
+    for unsupported in (("--helper",), ("--control", "noise"), ("--scenario", "frontend-overload")):
+        rejected_oracle = invoke(*hf_args, *unsupported, code=2)
+        assert rejected_oracle["status"] == "error", rejected_oracle
 
     quiet = invoke("--mode", "receive", *common, "--control", "noise")
     assert quiet["status"] == "completed", quiet
@@ -84,6 +292,8 @@ def main() -> None:
     transition_boundary = transition["outcomes"]["resumed_data_boundary_sample"]
     assert transition_boundary == 240 * transition["plan"]["sample_rate_hz"], transition
     assert transition["outcomes"]["resumed_data_boundary_source"] == "scenario_fade_stop", transition
+    assert transition["outcomes"]["configured_outage"], transition
+    assert not transition["outcomes"]["configured_mode_voltage_transitions"], transition
     expected_resumed = sum(
         slot["index"] < transition["plan"]["wire_bits"] and
         slot["first_sample"] >= transition_boundary and slot["decision"] == "data" and
@@ -92,6 +302,27 @@ def main() -> None:
     assert expected_resumed > 0, transition
     assert transition["outcomes"]["resumed_data_slots"] == expected_resumed, transition
     assert any(message.get("reacquisition_count", 0) > 0 for message in transition["messages"]), transition
+
+    # Modal gates have a reporting boundary even without a global Fade. The
+    # boundary identifies the last voltage change; it does not itself prove
+    # recovery. Recount observed DATA and retain premature completion failures.
+    mode_transition = invoke("--mode", "receive", "--scenario", "hf-mode-transition",
+                             "--waveform", "reference", "--seed", "10106", "--cn0", "20",
+                             "--message", "A", "--max-wall-seconds", "25")
+    mode_outcomes = mode_transition["outcomes"]
+    assert mode_transition["status"] == "completed", mode_transition
+    mode_boundary = mode_outcomes["resumed_data_boundary_sample"]
+    assert mode_boundary == 300 * mode_transition["plan"]["sample_rate_hz"], mode_transition
+    assert mode_outcomes["resumed_data_boundary_source"] == "scenario_mode_transition_stop", mode_transition
+    assert mode_outcomes["configured_mode_voltage_transitions"] and not mode_outcomes["configured_outage"], mode_transition
+    expected_mode_resumed = sum(
+        slot["index"] < mode_transition["plan"]["wire_bits"] and
+        slot["first_sample"] >= mode_boundary and slot["decision"] == "data" and
+        slot["complete"] and slot["all_valid"] and slot["bit"] is not None
+        for slot in mode_transition["slots"])
+    assert expected_mode_resumed > 0 and mode_outcomes["resumed_data_slots"] == expected_mode_resumed, mode_transition
+    assert mode_outcomes["premature_completions"] == 1, mode_transition
+    assert mode_outcomes["physical_completions"] == 2 and not mode_outcomes["correct_complete"], mode_transition
 
     # A plan must expose, rather than silently compress, the slow native bit.
     slow = invoke("--mode", "plan", "--scenario", "vlf-resonant",

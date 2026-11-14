@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "name": "hf-native-fec-delivery",
+  "purpose": "Exercise the canonical configured short-message Reed-Solomon modes after FEC-off HELLO lost four isolated bits. Off remains the GUI-default operating-point comparator; coded modes are existing supported alternatives. Freeze RS60 bright AWGN and RS20/RS60 HFquiet8 before outcomes. Report decoded physical delivery separately from raw-clean bits, all CRC/repair/erasure counters, actual full TXenergy and increased calendar length. The multi-hour stationary Gaussian HF channel is a declared integration/comparison assumption beyond the historical short stationary validation intervals, not a realistic whole-day availability or population claim. FEC cannot defeat two consecutive scored quiet slots. No feedback, waveform retuning or receiver-threshold tuning.",
+  "max_wall_seconds": 2100,
+  "per_trial_wall_seconds": 600,
+  "max_trials": 3,
+  "max_samples": 25000000,
+  "episodes": [
+    {
+      "id": "rs60-awgn-bright",
+      "scenario": "awgn",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 12801,
+      "cn0_db_hz": 40,
+      "message": "HELLO",
+      "fec": "rs60"
+    },
+    {
+      "id": "rs20-hf-quiet",
+      "scenario": "hf-quiet",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 12802,
+      "cn0_db_hz": 8,
+      "message": "HELLO",
+      "fec": "rs20"
+    },
+    {
+      "id": "rs60-hf-quiet",
+      "scenario": "hf-quiet",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 12802,
+      "cn0_db_hz": 8,
+      "message": "HELLO",
+      "fec": "rs60"
+    }
+  ]
+}

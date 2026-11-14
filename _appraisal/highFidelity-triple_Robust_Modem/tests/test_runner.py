@@ -45,6 +45,7 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
     backend = argument("--backend", "cpu")
     requested_bit_seconds = float(argument("--bit-seconds", ".001"))
     cn0 = float(argument("--cn0", "32"))
+    fec = argument("--fec", "off")
     receipt = {
         "schema_version": 1, "status": "completed",
         "requested_scenario": argument("--scenario", "awgn"),
@@ -53,7 +54,13 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
         "control": control or argument("--control", "wanted"),
         "source_identity": {"appraisal_source_sha256": "a" * 64, "native_source_sha256": "b" * 64},
         "plan": {"cn0_db_hz": cn0, "requested_bit_seconds": requested_bit_seconds,
+                 "fec": fec,
+                 "fade_slots": int(argument("--fade-slots", "2")) if argument("--control", "wanted") == "interior-fade" else None,
                  "helper_enabled": "--helper" in command, "sample_rate_hz": 1920,
+                 "capture_preroll_seconds": float(argument("--capture-lead-seconds", ".25")),
+                 "capture_preroll_override": "--capture-lead-seconds" in command,
+                 "history_reference_delay_seconds": float(argument("--history-reference-delay-seconds", "0")),
+                 "hf_phase_bank_requested": "--hf-phase-bank" in command,
                  "horizon_samples": 100, "pulse": argument("--pulse", "rrc"),
                  "requested_message": argument("--message", "e"),
                  "message": ("A" if argument("--control", "wanted") in {"interior-fade", "capture-gap"}
@@ -69,11 +76,15 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
             "premature_completions": 0, "wrong_bits": 0, "false_data": 0,
             "ambiguous_active_slots": 0, "quiet_active_slots": 0, "missed_completion": False,
         }
+        if fec != "off":
+            receipt["outcomes"].update({"correct_decoded_complete": False,
+                                       "communication_endpoint": "correct_decoded_complete", "accepted_messages": 0})
+            receipt["messages"] = []
     elif mode == "slot":
         receipt["outcomes"] = outcomes or {
             "receiver_executed": True, "component_only": True, "actual_scored_slots": 1,
             "first_public_observation_complete": True,
-            "first_public_observation_correct_data": True,
+            "first_public_observation_correct_data": receipt["control"] == "wanted",
             "correct_complete": False, "completion_evaluated": False,
         }
         receipt["slots"] = [{"index": 0, "decision": "data", "complete": True, "all_valid": True}]
@@ -90,6 +101,41 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
             receipt["plan"]["oracle_slot"] = int(selected)
         receipt["oracle"] = {"probability_error": .5,
                               **({"slot_index": int(selected)} if selected is not None else {})}
+        if "--history-reference-delay-seconds" in command or "--hf-phase-bank" in command:
+            delay = receipt["plan"]["history_reference_delay_seconds"]
+            receipt["hf_history_applicable"] = True
+            receipt["hf_history"] = {"reference_delay_seconds": delay, "truth_information_passed_to_receiver": False}
+        if "--hf-phase-bank" in command:
+            receipt["hf_phase_bank"] = {"model_count": 97, "samples": 100,
+                "reference_delay_seconds": receipt["plan"]["history_reference_delay_seconds"],
+                "truth_information_passed_to_receiver": False, "truth_information_passed_to_phase_bank": False,
+                "receiver_executed": False, "completion_evaluated": False, "capacity_qualified": False}
+    if fec != "off":
+        receipt["plan"].update({"wire_bits": 64 if fec == "rs20" else 80,
+                                "short_wire_bit_limit": 304 if fec == "rs20" else 400,
+                                "content_limit_bytes": 16, "long_form": False})
+    return receipt
+
+
+def fake_fec_repaired_receipt(command) -> dict:
+    """Framing/statistics fixture, not an encoder or decoder implementation."""
+    receipt = fake_completed_receipt(command)
+    plan = receipt["plan"]
+    wire = plan["wire_bits"]
+    receipt["outcomes"].update({"correct_complete": False, "correct_decoded_complete": True,
+        "physical_completions": 1, "accepted_messages": 1, "actual_scored_slots": wire + 2,
+        "wrong_bits": 1, "ambiguous_active_slots": 1})
+    def area(received, corrected=0, missing=0, corrected_bytes=0, erased_bytes=0, repaired_bytes=0):
+        return dict(received_bits=received, corrected_bits=corrected, missing_bits=missing,
+                    corrected_bytes=corrected_bytes, erased_bytes=erased_bytes, repaired_bytes=repaired_bytes)
+    receipt["messages"] = [{"first_public_slot": 0, "stop_public_slot": wire + 2,
+        "physical_complete": True, "premature": False, "decoded": True, "matches_transmitted_message": True,
+        "slots_consumed": wire + 2, "observed_bits": wire - 1, "missing_slots": 1,
+        "erasure_slot_indices": [5], "trailing_quiet_slots": [wire, wire + 1], "quiet_slots": 2,
+        "long_form": False, "message_ready_for_decode": True, "fec": plan["fec"],
+        "decoded_payload_bytes": list(plan["message"].encode("ascii")), "decoded_endpoint_matches": True,
+        "consumed_bytes": wire // 8, "corrected_bytes": 1, "authenticated": False,
+        "fec_stats": {"data": area(15, 1, 1, 1, 1, 1), "integrity": area(32), "parity": area(wire - 48)}}]
     return receipt
 
 
@@ -126,6 +172,7 @@ class CampaignValidationTests(unittest.TestCase):
     def test_confirmatory_stratum_includes_added_episode_inputs(self) -> None:
         for field, first, second in (("chunk", 256, 512), ("message", "A", "B"),
                                      ("pulse", "rrc", "tapered-rrc"),
+                                     ("capture_lead_seconds", .25, 2),
                                      ("max_samples", 800, 900),
                                      ("max_wall_seconds", .5, .6)):
             with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
@@ -148,6 +195,10 @@ class CampaignValidationTests(unittest.TestCase):
             path = Path(directory) / "campaign.json"
             path.write_text(json.dumps(campaign))
             self.assertEqual(runner._read_campaign(path)["episodes"][0]["mode"], "slot")
+            noise = json.loads(json.dumps(campaign))
+            noise["episodes"][0]["control"] = "noise"
+            path.write_text(json.dumps(noise))
+            self.assertEqual(runner._read_campaign(path)["episodes"][0]["control"], "noise")
             invalid_episodes = (
                 {"oracle_slot": -1, "mode": "oracle"},
                 {"oracle_slot": 1, "mode": "receive"},
@@ -156,7 +207,11 @@ class CampaignValidationTests(unittest.TestCase):
                 {"pulse": "unknown"}, {"pulse": []},
                 {"message": ""}, {"message": "x" * 17}, {"message": "a\n"}, {"message": "é"},
                 {"max_wall_seconds": 10.01}, {"max_wall_seconds": 3}, {"max_samples": 1001},
-                {"control": "noise", "mode": "slot"},
+                {"control": "eof", "mode": "slot"},
+                {"control": "wrong-key", "mode": "slot"},
+                {"control": "wrong-ordinal", "mode": "slot"},
+                {"control": "capture-gap", "mode": "slot"},
+                {"control": "interior-fade", "mode": "slot"},
             )
             for overrides in invalid_episodes:
                 with self.subTest(overrides=overrides):
@@ -201,6 +256,240 @@ class CampaignValidationTests(unittest.TestCase):
                               ("--max-samples", "700"), ("--max-wall-seconds", "2")):
             self.assertEqual(command[command.index(option) + 1], value)
         runner._validate_completed_receipt(fake_completed_receipt(command), episode)
+
+    def test_interior_fade_slots_are_scoped_and_bound_to_receipts(self) -> None:
+        campaign = valid_campaign()
+        campaign["confirmatory_strata"] = {}
+        episode = {"id": "one-fade", "scenario": "awgn", "mode": "receive", "waveform": "smoke",
+                   "seed": 3, "control": "interior-fade", "fade_slots": 1}
+        campaign["episodes"] = [episode]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "campaign.json"
+            for slots in (1, 2):
+                episode["fade_slots"] = slots
+                path.write_text(json.dumps(campaign))
+                runner._read_campaign(path)
+                command = runner._command(Path("/native/probe"), episode, 1000, 2)
+                self.assertEqual(command[command.index("--fade-slots") + 1], str(slots))
+                receipt = fake_completed_receipt(command)
+                runner._validate_completed_receipt(receipt, episode)
+                for value in (None, True, 3 - slots):
+                    bad = json.loads(json.dumps(receipt))
+                    bad["plan"]["fade_slots"] = value
+                    with self.assertRaisesRegex(runner.CampaignError, "fade slots"):
+                        runner._validate_completed_receipt(bad, episode)
+                del receipt["plan"]["fade_slots"]
+                with self.assertRaisesRegex(runner.CampaignError, "fade slots"):
+                    runner._validate_completed_receipt(receipt, episode)
+            for overrides in ({"fade_slots": 0}, {"fade_slots": 3}, {"fade_slots": True},
+                              {"fade_slots": "1"}, {"fade_slots": 1.0}, {"control": "capture-gap"},
+                              {"control": "wanted"}, {"control": "noise"}):
+                bad = json.loads(json.dumps(campaign))
+                bad["episodes"][0].update(overrides)
+                path.write_text(json.dumps(bad))
+                with self.assertRaises(runner.CampaignError):
+                    runner._read_campaign(path)
+        implicit = {key: value for key, value in episode.items() if key != "fade_slots"}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), implicit, 1000, 2))
+        self.assertEqual(receipt["plan"]["fade_slots"], 2)
+        runner._validate_completed_receipt(receipt, implicit)
+        receipt["plan"]["fade_slots"] = 1
+        with self.assertRaisesRegex(runner.CampaignError, "fade slots"):
+            runner._validate_completed_receipt(receipt, implicit)
+        del receipt["plan"]["fade_slots"]
+        runner._validate_completed_receipt(receipt, implicit)  # Original two-slot receipts remain valid.
+
+    def test_capture_lead_is_bounded_and_bound_to_receipts(self) -> None:
+        campaign = valid_campaign()
+        campaign["confirmatory_strata"] = {}
+        episode = {"id": "helper-lead", "scenario": "awgn", "mode": "receive", "waveform": "smoke",
+                   "seed": 3, "helper": True, "capture_lead_seconds": 2}
+        campaign["episodes"] = [episode]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "campaign.json"
+            for lead in (.25, 2, 10):
+                episode["capture_lead_seconds"] = lead
+                path.write_text(json.dumps(campaign))
+                runner._read_campaign(path)
+                command = runner._command(Path("/native/probe"), episode, 1000, 2)
+                self.assertEqual(command[command.index("--capture-lead-seconds") + 1], str(lead))
+                receipt = fake_completed_receipt(command)
+                runner._validate_completed_receipt(receipt, episode)
+                for value in (None, True, lead + .01):
+                    bad = json.loads(json.dumps(receipt))
+                    bad["plan"]["capture_preroll_seconds"] = value
+                    with self.assertRaisesRegex(runner.CampaignError, "capture lead"):
+                        runner._validate_completed_receipt(bad, episode)
+                del receipt["plan"]["capture_preroll_seconds"]
+                with self.assertRaisesRegex(runner.CampaignError, "capture lead"):
+                    runner._validate_completed_receipt(receipt, episode)
+            for value in (0, .249, 10.001, True, "2", None, float("nan"), float("inf")):
+                episode["capture_lead_seconds"] = value
+                path.write_text(json.dumps(campaign))
+                with self.assertRaises(runner.CampaignError):
+                    runner._read_campaign(path)
+        implicit = {key: value for key, value in episode.items() if key != "capture_lead_seconds"}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), implicit, 1000, 2))
+        runner._validate_completed_receipt(receipt, implicit)
+        receipt["plan"]["capture_preroll_seconds"] = 2
+        with self.assertRaisesRegex(runner.CampaignError, "capture lead"):
+            runner._validate_completed_receipt(receipt, implicit)
+        receipt["plan"]["capture_preroll_seconds"] = .25
+        receipt["plan"]["capture_preroll_override"] = True
+        with self.assertRaisesRegex(runner.CampaignError, "capture lead override"):
+            runner._validate_completed_receipt(receipt, implicit)
+
+    def test_private_hf_diagnostic_options_are_strict_and_recorded(self) -> None:
+        campaign = valid_campaign()
+        campaign["confirmatory_strata"] = {}
+        episode = {"id": "hf-diagnostic", "scenario": "hf-quiet", "mode": "oracle", "waveform": "reference",
+                   "seed": 3, "history_reference_delay_seconds": .002, "hf_phase_bank": True}
+        campaign["episodes"] = [episode]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "campaign.json"
+            path.write_text(json.dumps(campaign))
+            runner._read_campaign(path)
+            for overrides in ({"history_reference_delay_seconds": -1}, {"history_reference_delay_seconds": True},
+                              {"history_reference_delay_seconds": "0.002"}, {"history_reference_delay_seconds": float("inf")},
+                              {"history_reference_delay_seconds": float("nan")}, {"hf_phase_bank": 1},
+                              {"hf_phase_bank": "yes"}, {"mode": "receive"}, {"mode": "plan"}):
+                with self.subTest(overrides=overrides):
+                    bad = json.loads(json.dumps(campaign))
+                    bad["episodes"][0].update(overrides)
+                    path.write_text(json.dumps(bad))
+                    with self.assertRaises(runner.CampaignError):
+                        runner._read_campaign(path)
+        command = runner._command(Path("/native/probe"), episode, 1000, 2)
+        self.assertEqual(command[command.index("--history-reference-delay-seconds") + 1], "0.002")
+        self.assertIn("--hf-phase-bank", command)
+        receipt = fake_completed_receipt(command)
+        runner._validate_completed_receipt(receipt, episode)
+        for section, field, value in (("plan", "history_reference_delay_seconds", 0),
+                                      ("hf_history", "reference_delay_seconds", 0),
+                                      ("plan", "hf_phase_bank_requested", False),
+                                      ("hf_phase_bank", "samples", 0),
+                                      ("hf_phase_bank", "reference_delay_seconds", 0),
+                                      ("hf_phase_bank", "truth_information_passed_to_phase_bank", True),
+                                      ("hf_phase_bank", "receiver_executed", True)):
+            with self.subTest(section=section, field=field):
+                bad = json.loads(json.dumps(receipt))
+                bad[section][field] = value
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_completed_receipt(bad, episode)
+        disabled = dict(episode, hf_phase_bank=False)
+        command = runner._command(Path("/native/probe"), disabled, 1000, 2)
+        self.assertNotIn("--hf-phase-bank", command)
+        disabled_receipt = fake_completed_receipt(command)
+        runner._validate_completed_receipt(disabled_receipt, disabled)
+        disabled_receipt["hf_phase_bank"] = receipt["hf_phase_bank"]
+        with self.assertRaisesRegex(runner.CampaignError, "unrequested phase-bank"):
+            runner._validate_completed_receipt(disabled_receipt, disabled)
+        undeclared = {key: value for key, value in episode.items() if key not in {"history_reference_delay_seconds", "hf_phase_bank"}}
+        command = runner._command(Path("/native/probe"), undeclared, 1000, 2)
+        undeclared_receipt = fake_completed_receipt(command)
+        undeclared_receipt["plan"]["history_reference_delay_seconds"] = .002
+        with self.assertRaisesRegex(runner.CampaignError, "reference delay"):
+            runner._validate_completed_receipt(undeclared_receipt, undeclared)
+
+    def test_fec_options_and_native_identity_are_strict(self) -> None:
+        campaign = valid_campaign()
+        campaign["confirmatory_strata"] = {}
+        campaign["episodes"] = [dict(campaign["episodes"][0], fec="rs20")]
+        campaign["episodes"][0].pop("stratum")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "campaign.json"
+            for fec in ("off", "rs20", "rs60"):
+                campaign["episodes"][0]["fec"] = fec
+                path.write_text(json.dumps(campaign))
+                runner._read_campaign(path)
+                command = runner._command(Path("/native/probe"), campaign["episodes"][0], 1000, 1)
+                self.assertEqual(command[command.index("--fec") + 1], fec)
+                runner._validate_completed_receipt(fake_completed_receipt(command), campaign["episodes"][0])
+            for fec in ("RS20", "rs40", True, 20, None):
+                campaign["episodes"][0]["fec"] = fec
+                path.write_text(json.dumps(campaign))
+                with self.assertRaises(runner.CampaignError):
+                    runner._read_campaign(path)
+        episode = dict(valid_campaign()["episodes"][0], fec="rs60")
+        command = runner._command(Path("/native/probe"), episode, 1000, 1)
+        for field, value in (("fec", "off"), ("wire_bits", 408), ("wire_bits", 79),
+                             ("short_wire_bit_limit", 208), ("content_limit_bytes", 17), ("long_form", True)):
+            with self.subTest(field=field, value=value):
+                receipt = fake_completed_receipt(command)
+                receipt["plan"][field] = value
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_completed_receipt(receipt, episode)
+
+    def test_fec_decoded_success_requires_exact_frame_payload_and_repair_receipts(self) -> None:
+        episode = dict(valid_campaign()["episodes"][0], fec="rs20")
+        command = runner._command(Path("/native/probe"), episode, 1000, 1)
+        receipt = fake_fec_repaired_receipt(command)
+        runner._validate_completed_receipt(receipt, episode)
+        self.assertFalse(receipt["outcomes"]["correct_complete"])
+        self.assertTrue(receipt["outcomes"]["correct_decoded_complete"])
+        for section, field, value in (
+            ("outcomes", "accepted_messages", 2), ("outcomes", "accepted_messages", True),
+            ("outcomes", "physical_completions", 2), ("outcomes", "premature_completions", 1),
+            ("outcomes", "actual_scored_slots", 1),
+            ("outcomes", "false_data", 1), ("outcomes", "wrong_bits", 0),
+            ("outcomes", "ambiguous_active_slots", 0), ("outcomes", "correct_complete", True),
+            ("outcomes", "communication_endpoint", "correct_complete"),
+            ("message", "first_public_slot", 1), ("message", "stop_public_slot", 65),
+            ("message", "slots_consumed", 65), ("message", "observed_bits", 64),
+            ("message", "trailing_quiet_slots", [63, 64]), ("message", "long_form", True),
+            ("message", "message_ready_for_decode", False), ("message", "consumed_bytes", 7),
+            ("message", "erasure_slot_indices", [64]), ("message", "erasure_slot_indices", []),
+            ("message", "erasure_slot_indices", [21]),
+            ("message", "decoded_payload_bytes", [32]), ("message", "decoded_endpoint_matches", False),
+            ("message", "fec", "rs60"), ("message", "fec_stats", None),
+            ("message", "corrected_bytes", -1), ("message", "corrected_bytes", True),
+            ("message", "corrected_bytes", 0), ("message", "corrected_bytes", 2),
+            ("message", "authenticated", True), ("message", "authenticated", None)):
+            with self.subTest(section=section, field=field):
+                bad = json.loads(json.dumps(receipt))
+                target = bad["messages"][0] if section == "message" else bad[section]
+                target[field] = value
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_completed_receipt(bad, episode)
+        bad = json.loads(json.dumps(receipt))
+        bad["messages"][0]["fec_stats"]["data"]["repaired_bytes"] = 3
+        with self.assertRaisesRegex(runner.CampaignError, "repair statistics"):
+            runner._validate_completed_receipt(bad, episode)
+        bad = json.loads(json.dumps(receipt))
+        bad["messages"][0]["fec_stats"]["data"]["received_bits"] += 8
+        bad["messages"][0]["fec_stats"]["integrity"]["received_bits"] -= 8
+        with self.assertRaisesRegex(runner.CampaignError, "region extent"):
+            runner._validate_completed_receipt(bad, episode)
+        # An erased zero placeholder can already equal its decoded value:
+        # it is repaired coverage without a changed-byte count.
+        zero_erasure = json.loads(json.dumps(receipt))
+        zero_erasure["outcomes"]["wrong_bits"] = 0
+        zero_erasure["messages"][0]["corrected_bytes"] = 0
+        zero_erasure["messages"][0]["fec_stats"]["data"]["corrected_bits"] = 0
+        zero_erasure["messages"][0]["fec_stats"]["data"]["corrected_bytes"] = 0
+        runner._validate_completed_receipt(zero_erasure, episode)
+        for control in ("noise", "wrong-key", "wrong-ordinal", "eof"):
+            negative = dict(episode, control=control)
+            command = runner._command(Path("/native/probe"), negative, 1000, 1)
+            with self.assertRaisesRegex(runner.CampaignError, "target or physical"):
+                runner._validate_completed_receipt(fake_fec_repaired_receipt(command), negative)
+
+    def test_fec_statistics_select_decoded_endpoint_without_relabeling_raw_success(self) -> None:
+        campaign = valid_campaign()
+        trials = []
+        for episode in campaign["episodes"]:
+            episode["fec"] = "rs20"
+            command = runner._command(Path("/native/probe"), episode, 1000, 1)
+            receipt = fake_fec_repaired_receipt(command)
+            trials.append({"episode": episode, "status": "completed", "receipt": receipt})
+        stats = runner._statistical_summary(campaign, trials)["awgn-fixed"]
+        self.assertEqual(stats["successes"], 2)
+        self.assertEqual(stats["communication_endpoint"], "correct_decoded_complete")
+        for episode in campaign["episodes"]:
+            episode.pop("fec")
+        stats = runner._statistical_summary(campaign, trials)["awgn-fixed"]
+        self.assertEqual(stats["successes"], 0)
+        self.assertEqual(stats["communication_endpoint"], "correct_complete")
 
     def test_completed_receive_receipt_requires_identity_and_complete_outcome(self) -> None:
         episode = valid_campaign()["episodes"][0]
@@ -314,6 +603,30 @@ class CampaignValidationTests(unittest.TestCase):
         bad_score["slots"][0]["decision"] = "invalid"
         with self.assertRaisesRegex(runner.CampaignError, "invalid first slot decision"):
             runner._validate_completed_receipt(bad_score, episode)
+
+    def test_noise_slot_receipt_preserves_false_data_without_message_success(self) -> None:
+        episode = {"id": "noise-slot", "scenario": "awgn", "mode": "slot", "waveform": "reference",
+                   "seed": 3, "control": "noise"}
+        command = runner._command(Path("/native/probe"), episode, 1000, 2)
+        for decision in ("quiet", "ambiguous", "data"):
+            with self.subTest(decision=decision):
+                receipt = fake_completed_receipt(command)
+                receipt["slots"][0]["decision"] = decision
+                receipt["outcomes"]["false_data"] = int(decision == "data")
+                runner._validate_completed_receipt(receipt, episode)
+                self.assertFalse(receipt["outcomes"]["first_public_observation_correct_data"])
+                self.assertFalse(receipt["outcomes"]["correct_complete"])
+                self.assertFalse(receipt["outcomes"]["completion_evaluated"])
+        lying = fake_completed_receipt(command)
+        lying["outcomes"]["first_public_observation_correct_data"] = True
+        with self.assertRaisesRegex(runner.CampaignError, "noise-only slot.*correct DATA"):
+            runner._validate_completed_receipt(lying, episode)
+        for field in ("correct_complete", "completion_evaluated"):
+            with self.subTest(field=field):
+                lying = fake_completed_receipt(command)
+                lying["outcomes"][field] = True
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_completed_receipt(lying, episode)
 
     def test_oracle_selected_slot_must_match_requested_index(self) -> None:
         episode = {"id": "oracle-slot", "scenario": "awgn", "mode": "oracle",

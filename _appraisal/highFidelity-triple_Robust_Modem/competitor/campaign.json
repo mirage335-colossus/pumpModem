@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "name": "upstream-four-mode-conditional-hf",
+  "purpose": "Bounded native upstream comparator wiring and selected sensitivity observations; different message services and airtimes are not a superiority ranking.",
+  "max_wall_seconds": 900,
+  "episodes": [
+    {"id":"psk31-awgn-strong","mode":"psk31","scenario":"awgn","cn0_db_hz":40,"seed":12801},
+    {"id":"olivia-awgn-strong","mode":"olivia8-250","scenario":"awgn","cn0_db_hz":40,"seed":12801},
+    {"id":"ft8-awgn-strong","mode":"ft8","scenario":"awgn","cn0_db_hz":40,"seed":12801},
+    {"id":"wspr-awgn-strong","mode":"wspr","scenario":"awgn","cn0_db_hz":40,"seed":12801},
+    {"id":"psk31-hf-weak","mode":"psk31","scenario":"hf-quiet","cn0_db_hz":8,"seed":12802},
+    {"id":"olivia-hf-weak","mode":"olivia8-250","scenario":"hf-quiet","cn0_db_hz":8,"seed":12802},
+    {"id":"ft8-hf-weak","mode":"ft8","scenario":"hf-quiet","cn0_db_hz":8,"seed":12802},
+    {"id":"wspr-hf-weak","mode":"wspr","scenario":"hf-quiet","cn0_db_hz":8,"seed":12802},
+    {"id":"psk31-hf-disturbed","mode":"psk31","scenario":"hf-disturbed","cn0_db_hz":20,"seed":12803},
+    {"id":"olivia-hf-disturbed","mode":"olivia8-250","scenario":"hf-disturbed","cn0_db_hz":20,"seed":12803},
+    {"id":"ft8-hf-disturbed","mode":"ft8","scenario":"hf-disturbed","cn0_db_hz":20,"seed":12803},
+    {"id":"wspr-hf-disturbed","mode":"wspr","scenario":"hf-disturbed","cn0_db_hz":20,"seed":12803},
+    {"id":"psk31-noise","mode":"psk31","scenario":"awgn","cn0_db_hz":20,"seed":12804,"control":"noise"},
+    {"id":"olivia-noise","mode":"olivia8-250","scenario":"awgn","cn0_db_hz":20,"seed":12804,"control":"noise"},
+    {"id":"ft8-noise","mode":"ft8","scenario":"awgn","cn0_db_hz":20,"seed":12804,"control":"noise"},
+    {"id":"wspr-noise","mode":"wspr","scenario":"awgn","cn0_db_hz":20,"seed":12804,"control":"noise"}
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "name": "upstream-ft8-matched-rf-band-center",
+  "purpose": "Re-render the exact frozen clean FT8 source with its fixed8-tone midpoint at the declared RF reference:1500+3.5*6.25=1521.875Hz. The earlier first-tone reference offset+21.875Hz remains historical. No channel-outcome tuning.",
+  "max_wall_seconds": 300,
+  "episodes": [
+    {"id":"ft8-centered-awgn","mode":"ft8","scenario":"awgn","cn0_db_hz":40,"seed":12801},
+    {"id":"ft8-centered-quiet","mode":"ft8","scenario":"hf-quiet","cn0_db_hz":8,"seed":12802},
+    {"id":"ft8-centered-disturbed","mode":"ft8","scenario":"hf-disturbed","cn0_db_hz":20,"seed":12803},
+    {"id":"ft8-centered-ox-static","mode":"ft8","scenario":"hf-ox-split","cn0_db_hz":20,"seed":12901},
+    {"id":"ft8-centered-ox-cancel","mode":"ft8","scenario":"hf-ox-cancellation","cn0_db_hz":20,"seed":12901},
+    {"id":"ft8-centered-noise","mode":"ft8","scenario":"awgn","cn0_db_hz":20,"seed":12804,"control":"noise"}
+  ]
+}

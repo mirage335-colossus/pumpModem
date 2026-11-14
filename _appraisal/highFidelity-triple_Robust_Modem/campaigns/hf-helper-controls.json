@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "name": "hf-helper-separated-mode-controls",
+  "purpose": "Bounded closure for actual triple-Robust Helper plus DATA under new O/X single-port phase cancellation. Use existing unusual-campaign seed10103 and bright20/weak0 C/N0 levels. O/X paths act on the full emitted band without the measured-record or local-dispersion bandwidth restriction. Helper changes native sample rate, geometry and calendar, so these are full supported operating controls, not identical per-sample paired draws against Helper-off. Plan admits 6000samples/s and2662471samples with unchanged full W24 workers. Keep actual noisy Helper acquisition, DATA, physical quiet completion, resource censoring and failures. Two rows only, no tuning or claim of false-alarm probability.",
+  "max_wall_seconds": 420,
+  "per_trial_wall_seconds": 180,
+  "max_trials": 2,
+  "max_samples": 3000000,
+  "episodes": [
+    {
+      "id": "ox-helper-bright",
+      "scenario": "hf-ox-cancellation",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10103,
+      "cn0_db_hz": 20,
+      "helper": true
+    },
+    {
+      "id": "ox-helper-weak",
+      "scenario": "hf-ox-cancellation",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10103,
+      "cn0_db_hz": 0,
+      "helper": true
+    }
+  ]
+}

@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "name": "hf-measured-envelope-bounded-replay",
+  "purpose": "One deposited 2048-sample 12.7MHz event, preserving its coupled complex envelope. Explicit amplitude-only and phase-only counterfactuals; late20s nonwrapped excerpt; clock41 duration-convention control. First complete public aperture only: the native60s cadence cannot fit a complete message and two quiet slots inside this record. Fixed full-record RMS normalization is not an absolute path calibration; no per-excerpt normalization, tiling or time compression. Same event across rows, not independent channel realizations. No thresholds tuned. Compare strong/weak actual receiver results to private same-aperture history/known-channel references; stop at declared bounds.",
+  "max_wall_seconds": 1800,
+  "per_trial_wall_seconds": 120,
+  "max_trials": 15,
+  "max_samples": 1000000,
+  "episodes": [
+    {
+      "id": "complex-cn0-20",
+      "scenario": "hf-ding-measured",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10301,
+      "cn0_db_hz": 20
+    },
+    {
+      "id": "complex-cn0-0",
+      "scenario": "hf-ding-measured",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10301,
+      "cn0_db_hz": 0
+    },
+    {
+      "id": "amplitude-cn0-20",
+      "scenario": "hf-ding-amplitude",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10301,
+      "cn0_db_hz": 20
+    },
+    {
+      "id": "amplitude-cn0-0",
+      "scenario": "hf-ding-amplitude",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10301,
+      "cn0_db_hz": 0
+    },
+    {
+      "id": "phase-cn0-20",
+      "scenario": "hf-ding-phase",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10301,
+      "cn0_db_hz": 20
+    },
+    {
+      "id": "phase-cn0-0",
+      "scenario": "hf-ding-phase",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10301,
+      "cn0_db_hz": 0
+    },
+    {
+      "id": "late-cn0-20",
+      "scenario": "hf-ding-measured-late",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10301,
+      "cn0_db_hz": 20
+    },
+    {
+      "id": "late-cn0-0",
+      "scenario": "hf-ding-measured-late",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10301,
+      "cn0_db_hz": 0
+    },
+    {
+      "id": "clock41-cn0-20",
+      "scenario": "hf-ding-clock41",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10301,
+      "cn0_db_hz": 20
+    },
+    {
+      "id": "clock41-cn0-0",
+      "scenario": "hf-ding-clock41",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10301,
+      "cn0_db_hz": 0
+    },
+    {
+      "id": "complex-noise",
+      "scenario": "hf-ding-measured",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10302,
+      "cn0_db_hz": 20,
+      "control": "noise"
+    },
+    {
+      "id": "complex-history",
+      "scenario": "hf-ding-measured",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10301,
+      "cn0_db_hz": 0
+    },
+    {
+      "id": "amplitude-history",
+      "scenario": "hf-ding-amplitude",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10301,
+      "cn0_db_hz": 0
+    },
+    {
+      "id": "phase-history",
+      "scenario": "hf-ding-phase",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10301,
+      "cn0_db_hz": 0
+    },
+    {
+      "id": "late-history",
+      "scenario": "hf-ding-measured-late",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10301,
+      "cn0_db_hz": 0
+    }
+  ]
+}

@@ -1,0 +1,251 @@
+{
+  "schema_version": 1,
+  "name": "hf-intermediate-sensitivity-brackets",
+  "purpose": "The initial strong20/weak0 endpoints all decoded/missed respectively. Freeze intermediate4/8/12dB-Hz levels before observation for static/moving analytic refraction and measured complex/amplitude/phase ablations; three fresh noise seeds at8dB-Hz test the selected central stratum. These are conditional signal/receiver checks. Eikonal and measured traces are deterministic, so seeds vary receiver noise, not independent ionospheric days. Distinct waveform/observation scopes are not pooled. No thresholds, models, observation clocks or waveforms change after results; retain every row and resource censoring.",
+  "max_wall_seconds": 900,
+  "per_trial_wall_seconds": 60,
+  "max_trials": 30,
+  "max_samples": 1000000,
+  "episodes": [
+    {
+      "id": "static-4-discovery",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 4
+    },
+    {
+      "id": "static-8-discovery",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "static-12-discovery",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 12
+    },
+    {
+      "id": "static-8-noise-10502",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10502,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "static-8-noise-10503",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10503,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "static-8-noise-10504",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10504,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "motion-4-discovery",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 4
+    },
+    {
+      "id": "motion-8-discovery",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "motion-12-discovery",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 12
+    },
+    {
+      "id": "motion-8-noise-10502",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10502,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "motion-8-noise-10503",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10503,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "motion-8-noise-10504",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10504,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "measured-4-discovery",
+      "scenario": "hf-ding-measured",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 4
+    },
+    {
+      "id": "measured-8-discovery",
+      "scenario": "hf-ding-measured",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "measured-12-discovery",
+      "scenario": "hf-ding-measured",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 12
+    },
+    {
+      "id": "measured-8-noise-10502",
+      "scenario": "hf-ding-measured",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10502,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "measured-8-noise-10503",
+      "scenario": "hf-ding-measured",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10503,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "measured-8-noise-10504",
+      "scenario": "hf-ding-measured",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10504,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "amplitude-4-discovery",
+      "scenario": "hf-ding-amplitude",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 4
+    },
+    {
+      "id": "amplitude-8-discovery",
+      "scenario": "hf-ding-amplitude",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "amplitude-12-discovery",
+      "scenario": "hf-ding-amplitude",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 12
+    },
+    {
+      "id": "amplitude-8-noise-10502",
+      "scenario": "hf-ding-amplitude",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10502,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "amplitude-8-noise-10503",
+      "scenario": "hf-ding-amplitude",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10503,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "amplitude-8-noise-10504",
+      "scenario": "hf-ding-amplitude",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10504,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "phase-4-discovery",
+      "scenario": "hf-ding-phase",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 4
+    },
+    {
+      "id": "phase-8-discovery",
+      "scenario": "hf-ding-phase",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "phase-12-discovery",
+      "scenario": "hf-ding-phase",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 12
+    },
+    {
+      "id": "phase-8-noise-10502",
+      "scenario": "hf-ding-phase",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10502,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "phase-8-noise-10503",
+      "scenario": "hf-ding-phase",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10503,
+      "cn0_db_hz": 8
+    },
+    {
+      "id": "phase-8-noise-10504",
+      "scenario": "hf-ding-phase",
+      "mode": "slot",
+      "waveform": "reference",
+      "seed": 10504,
+      "cn0_db_hz": 8
+    }
+  ]
+}

@@ -284,6 +284,11 @@ int main() {
                     "invalid numerical horizon");
             if (s.channel.lunar)
                 near(s.numerical_horizon_seconds, 360., 0., "spectral lunar horizon changed");
+            else if (id.starts_with("hf-ding-")) {
+                const double expected = id == "hf-ding-measured-late" ? 20.94 :
+                    id == "hf-ding-clock41" ? 2047 * 41. / 2048 : 40.94;
+                near(s.numerical_horizon_seconds, expected, 1e-12, "measured HF support changed");
+            }
             else
                 near(s.numerical_horizon_seconds, 0., 0., "unqualified finite-horizon flag changed");
             for (const auto& p : s.channel.paths)

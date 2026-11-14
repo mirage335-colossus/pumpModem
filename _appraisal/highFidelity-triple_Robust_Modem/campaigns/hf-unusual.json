@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "name": "hf-unusual-mechanism-discovery",
+  "purpose": "Predeclared mechanism coverage: literal historical scalar fits, single-port O/X cancellation, slow coherent phase with unchanged diffuse process, coupled parabolic-layer eikonal motion, and constructed mode loss/recovery. Paired roots and public hypotheses are retained. One episode per cell is a failure-finding observation, not a probability or natural occurrence estimate. No receiver thresholds are fitted. Stop at the declared sample/time limits and retain censored observations.",
+  "max_wall_seconds": 2400,
+  "per_trial_wall_seconds": 180,
+  "max_trials": 20,
+  "max_samples": 8000000,
+  "episodes": [
+    {"id":"i1-bright","scenario":"hf-watterson-i1","mode":"receive","waveform":"reference","seed":10101,"cn0_db_hz":20},
+    {"id":"i1-weak","scenario":"hf-watterson-i1","mode":"receive","waveform":"reference","seed":10101,"cn0_db_hz":0},
+    {"id":"i3-bright","scenario":"hf-watterson-i3","mode":"receive","waveform":"reference","seed":10102,"cn0_db_hz":20},
+    {"id":"i3-weak","scenario":"hf-watterson-i3","mode":"receive","waveform":"reference","seed":10102,"cn0_db_hz":0},
+    {"id":"ox-split-bright","scenario":"hf-ox-split","mode":"receive","waveform":"reference","seed":10103,"cn0_db_hz":20},
+    {"id":"ox-split-weak","scenario":"hf-ox-split","mode":"receive","waveform":"reference","seed":10103,"cn0_db_hz":0},
+    {"id":"ox-cancellation-bright","scenario":"hf-ox-cancellation","mode":"receive","waveform":"reference","seed":10103,"cn0_db_hz":20},
+    {"id":"ox-cancellation-weak","scenario":"hf-ox-cancellation","mode":"receive","waveform":"reference","seed":10103,"cn0_db_hz":0},
+    {"id":"trough-static-bright","scenario":"hf-trough-static","mode":"receive","waveform":"reference","seed":10104,"cn0_db_hz":20},
+    {"id":"trough-static-weak","scenario":"hf-trough-static","mode":"receive","waveform":"reference","seed":10104,"cn0_db_hz":0},
+    {"id":"trough-phase-bright","scenario":"hf-trough-phase","mode":"receive","waveform":"reference","seed":10104,"cn0_db_hz":20},
+    {"id":"trough-phase-weak","scenario":"hf-trough-phase","mode":"receive","waveform":"reference","seed":10104,"cn0_db_hz":0},
+    {"id":"eikonal-static-bright","scenario":"hf-vertical-eikonal-static","mode":"receive","waveform":"reference","seed":10105,"cn0_db_hz":20},
+    {"id":"eikonal-static-weak","scenario":"hf-vertical-eikonal-static","mode":"receive","waveform":"reference","seed":10105,"cn0_db_hz":0},
+    {"id":"eikonal-motion-bright","scenario":"hf-vertical-eikonal-motion","mode":"receive","waveform":"reference","seed":10105,"cn0_db_hz":20},
+    {"id":"eikonal-motion-weak","scenario":"hf-vertical-eikonal-motion","mode":"receive","waveform":"reference","seed":10105,"cn0_db_hz":0},
+    {"id":"mode-loss-recovery","scenario":"hf-mode-transition","mode":"receive","waveform":"reference","seed":10106,"cn0_db_hz":20,"message":"A"},
+    {"id":"ox-noise","scenario":"hf-ox-cancellation","mode":"receive","waveform":"reference","seed":10107,"cn0_db_hz":20,"control":"noise"},
+    {"id":"eikonal-noise","scenario":"hf-vertical-eikonal-motion","mode":"receive","waveform":"reference","seed":10108,"cn0_db_hz":20,"control":"noise"},
+    {"id":"eikonal-wrong-ordinal","scenario":"hf-vertical-eikonal-motion","mode":"receive","waveform":"reference","seed":10109,"cn0_db_hz":20,"control":"wrong-ordinal"}
+  ]
+}

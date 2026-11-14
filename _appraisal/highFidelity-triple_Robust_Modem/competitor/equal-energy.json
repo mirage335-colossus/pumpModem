@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "name": "upstream-common-HELLO-equal-total-transmit-energy",
+  "purpose": "Fixed HELLO payload, same hf-quiet seed12802, equal normalized total clean transmitter E/N0 to canonical Robust HELLO at8dBHz. Powers are predeclared from clean TX energies only; no faded-energy normalization or feedback. Different airtimes/search priors/completion and FEC are retained explicitly. WSPR structured service is not pooled.",
+  "max_wall_seconds": 300,
+  "energy_basis": {
+    "robust_message": "HELLO",
+    "robust_wire_bits": 65,
+    "robust_cn0_db_hz": 8,
+    "robust_clean_tx_energy_unit_power_seconds": 1473.6211008978341,
+    "robust_reference": "local-evidence/hf-hello-energy-preflight.json; parent also verified identical TX energy in completed hf-quiet HELLO receipt",
+    "formula": "CNO_mode=8+10*log10(1473.6211008978341/E_mode)",
+    "mode_references": {
+      "psk31": {
+        "source_capture_sha256": "2f50f400422dd122d6a456ea811c54be36d658893d04088af9b7cf8bdbafe060",
+        "clean_tx_energy_unit_power_seconds": 4.10875,
+        "reference_receipt": "hf-competitor-first/psk31-awgn-strong/receipt.json"
+      },
+      "olivia8-250": {
+        "source_capture_sha256": "2aab394757b91788c2c5572bbbeb09f59a8d038f2b70ee8ea52aea943b456d7e",
+        "clean_tx_energy_unit_power_seconds": 8.236625000000002,
+        "reference_receipt": "hf-competitor-first/olivia-awgn-strong/receipt.json"
+      },
+      "ft8": {
+        "source_capture_sha256": "8d976fa7f8dbe7315b14f5d16d712dc125dc9fbddb8ced66ae3508a5e87bc746",
+        "clean_tx_energy_unit_power_seconds": 12.652916666666664,
+        "reference_receipt": "hf-competitor-ft8-centered/ft8-centered-awgn/receipt.json"
+      }
+    }
+  },
+  "episodes": [
+    {
+      "id": "psk31-equal-tx-energy-quiet",
+      "mode": "psk31",
+      "scenario": "hf-quiet",
+      "cn0_db_hz": 33.5467611450487,
+      "seed": 12802
+    },
+    {
+      "id": "olivia8-250-equal-tx-energy-quiet",
+      "mode": "olivia8-250",
+      "scenario": "hf-quiet",
+      "cn0_db_hz": 30.526365378748025,
+      "seed": 12802
+    },
+    {
+      "id": "ft8-equal-tx-energy-quiet",
+      "mode": "ft8",
+      "scenario": "hf-quiet",
+      "cn0_db_hz": 28.661951838508635,
+      "seed": 12802
+    }
+  ]
+}

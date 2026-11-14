@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "name": "hf-helper-onset-noise-support",
+  "purpose": "Default .25s capture pre-roll does not provide the native Helper onset estimator its required .25s filtered noise support after .3s capture-edge and .4s pre-onset exclusions. Preserve original results and default. Use supported public2s capture lead, as canonical positive Helper tests do: one bright AWGN Helper control at40dB-Hz, then original bright O/X20dB-Hz seed10103. Both use canonical native source, actual Helper search, full public DATA fallback, and physical quiet completion; no thresholds or algorithm changes. Report actual Helper status separately from complete DATA. Capture lead changes absolute channel time relative to TX, so O/X comparison is not an exact phase-matched pre-roll ablation. Stop after these two rows regardless of result; no tuning for desired lock.",
+  "max_wall_seconds": 420,
+  "per_trial_wall_seconds": 180,
+  "max_trials": 2,
+  "max_samples": 3000000,
+  "episodes": [
+    {
+      "id": "awgn-helper-supported-preroll",
+      "scenario": "awgn",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 5489,
+      "cn0_db_hz": 40,
+      "helper": true,
+      "capture_lead_seconds": 2
+    },
+    {
+      "id": "ox-helper-supported-preroll",
+      "scenario": "hf-ox-cancellation",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10103,
+      "cn0_db_hz": 20,
+      "helper": true,
+      "capture_lead_seconds": 2
+    }
+  ]
+}

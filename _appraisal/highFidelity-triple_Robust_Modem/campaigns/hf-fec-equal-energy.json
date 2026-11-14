@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "name": "hf-fec-equal-transmitter-energy",
+  "purpose": "Conditional follow-up frozen after RS20 failed and RS60 repaired ten erased bits at HFquiet C/N0 8. Match the full uncoded HELLO clean transmitter energy/noise density 9297.92056592477; existing RS60 unit-power energy is 4171.46931989596, versus Off 1473.62110089783. Choose C/N0=8-10log10(Ers60/Eoff)=3.4809677778927 before this outcome, same seed12802, no realization renormalization, no feedback or receiver change. This is one selected stationary-model comparison, not independent-day reliability or an optimized codec ranking. Stop after one row whether success, failure or censored; do not tune for a desired result.",
+  "max_wall_seconds": 660,
+  "per_trial_wall_seconds": 600,
+  "max_trials": 1,
+  "max_samples": 25000000,
+  "episodes": [
+    {
+      "id": "rs60-hf-quiet-equal-energy",
+      "scenario": "hf-quiet",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 12802,
+      "cn0_db_hz": 3.4809677778926966,
+      "message": "HELLO",
+      "fec": "rs60"
+    }
+  ]
+}

@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "name": "hf-phase-loss-discriminators",
+  "purpose": "Predeclared after observed moving-eikonal nonmonotonicity: inspect the exact missed interior slot1, charge fixed97-model trajectory-prior mass, and use public-prior-center reference delays (2ms eikonal,1.5ms measured) instead of silently treating unshifted-template loss as coherence loss. The phase dictionary is fixed across all rows and never reads channel truth; it is conditional on supplied timing/carrier and does NOT cover operational public acquisition. Native receive holdouts use fresh noise seeds with unchanged deterministic channel; they are not new ionospheric days. Known-channel ceiling, independent-block models, finite phase-family evidence, actual receiver and matched noise are distinct. No tuning after these outcomes.",
+  "max_wall_seconds": 2400,
+  "per_trial_wall_seconds": 240,
+  "max_trials": 16,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "id": "static-long-interior-0",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128,
+      "oracle_slot": 1,
+      "history_reference_delay_seconds": 0.002,
+      "hf_phase_bank": true
+    },
+    {
+      "id": "motion-long-interior-0",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128,
+      "oracle_slot": 1,
+      "history_reference_delay_seconds": 0.002,
+      "hf_phase_bank": true
+    },
+    {
+      "id": "static-long-interior--6",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 128,
+      "oracle_slot": 1,
+      "history_reference_delay_seconds": 0.002,
+      "hf_phase_bank": true
+    },
+    {
+      "id": "motion-long-interior--6",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 128,
+      "oracle_slot": 1,
+      "history_reference_delay_seconds": 0.002,
+      "hf_phase_bank": true
+    },
+    {
+      "id": "static-medium-interior",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "bit_seconds": 64,
+      "oracle_slot": 1,
+      "history_reference_delay_seconds": 0.002,
+      "hf_phase_bank": true
+    },
+    {
+      "id": "motion-medium-interior",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "bit_seconds": 64,
+      "oracle_slot": 1,
+      "history_reference_delay_seconds": 0.002,
+      "hf_phase_bank": true
+    },
+    {
+      "id": "static-long-holdout-10601",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10601,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128
+    },
+    {
+      "id": "motion-long-holdout-10601",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10601,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128
+    },
+    {
+      "id": "motion-medium-holdout-10601",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10601,
+      "cn0_db_hz": 0,
+      "bit_seconds": 64
+    },
+    {
+      "id": "static-long-holdout-10602",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10602,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128
+    },
+    {
+      "id": "motion-long-holdout-10602",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10602,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128
+    },
+    {
+      "id": "motion-medium-holdout-10602",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10602,
+      "cn0_db_hz": 0,
+      "bit_seconds": 64
+    },
+    {
+      "id": "measured-complex-four-dbhz",
+      "scenario": "hf-ding-measured",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 4,
+      "history_reference_delay_seconds": 0.0015,
+      "hf_phase_bank": true
+    },
+    {
+      "id": "measured-amplitude-four-dbhz",
+      "scenario": "hf-ding-amplitude",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 4,
+      "history_reference_delay_seconds": 0.0015,
+      "hf_phase_bank": true
+    },
+    {
+      "id": "measured-phase-four-dbhz",
+      "scenario": "hf-ding-phase",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 4,
+      "history_reference_delay_seconds": 0.0015,
+      "hf_phase_bank": true
+    },
+    {
+      "id": "long-motion-noise",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10603,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128,
+      "control": "noise"
+    }
+  ]
+}

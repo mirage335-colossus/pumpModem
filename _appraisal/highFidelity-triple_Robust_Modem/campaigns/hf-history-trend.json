@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "name": "hf-history-time-energy-trend",
+  "purpose": "Predeclared paired static/moving eikonal comparison at three actual native integration durations and two C/N0 values. Same channel time origin and seed; longer observations are correlated, not independent trials. Full physical calendars and native receiver costs are retained. Matching oracle rows provide known-channel ceilings and clean-template history projections, not an operational optimum. No adaptive threshold changes or stopping on a successful seed. Exact waveform energy, actual durations, nuisance ranks, wrong/quiet decisions and censoring must be reported.",
+  "max_wall_seconds": 2400,
+  "per_trial_wall_seconds": 240,
+  "max_trials": 18,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "id": "static-16s-cn0-0",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "bit_seconds": 16
+    },
+    {
+      "id": "static-16s-cn0--6",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 16
+    },
+    {
+      "id": "static-16s-history",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 16
+    },
+    {
+      "id": "static-64s-cn0-0",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "bit_seconds": 64
+    },
+    {
+      "id": "static-64s-cn0--6",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 64
+    },
+    {
+      "id": "static-64s-history",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 64
+    },
+    {
+      "id": "static-128s-cn0-0",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128
+    },
+    {
+      "id": "static-128s-cn0--6",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 128
+    },
+    {
+      "id": "static-128s-history",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 128
+    },
+    {
+      "id": "motion-16s-cn0-0",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "bit_seconds": 16
+    },
+    {
+      "id": "motion-16s-cn0--6",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 16
+    },
+    {
+      "id": "motion-16s-history",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 16
+    },
+    {
+      "id": "motion-64s-cn0-0",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "bit_seconds": 64
+    },
+    {
+      "id": "motion-64s-cn0--6",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 64
+    },
+    {
+      "id": "motion-64s-history",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 64
+    },
+    {
+      "id": "motion-128s-cn0-0",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128
+    },
+    {
+      "id": "motion-128s-cn0--6",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 128
+    },
+    {
+      "id": "motion-128s-history",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "oracle",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 128
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "name": "upstream-four-mode-ox-pair",
+  "purpose": "Matched frozen-transmitter control versus evolving O/X cancellation at the same power/noise density. Different native message airtimes remain explicitly charged; no worldwide or equal-service ranking.",
+  "max_wall_seconds": 600,
+  "episodes": [
+    {"id":"psk31-ox-static","mode":"psk31","scenario":"hf-ox-split","cn0_db_hz":20,"seed":12901},
+    {"id":"psk31-ox-cancel","mode":"psk31","scenario":"hf-ox-cancellation","cn0_db_hz":20,"seed":12901},
+    {"id":"olivia-ox-static","mode":"olivia8-250","scenario":"hf-ox-split","cn0_db_hz":20,"seed":12901},
+    {"id":"olivia-ox-cancel","mode":"olivia8-250","scenario":"hf-ox-cancellation","cn0_db_hz":20,"seed":12901},
+    {"id":"ft8-ox-static","mode":"ft8","scenario":"hf-ox-split","cn0_db_hz":20,"seed":12901},
+    {"id":"ft8-ox-cancel","mode":"ft8","scenario":"hf-ox-cancellation","cn0_db_hz":20,"seed":12901},
+    {"id":"wspr-ox-static","mode":"wspr","scenario":"hf-ox-split","cn0_db_hz":20,"seed":12901},
+    {"id":"wspr-ox-cancel","mode":"wspr","scenario":"hf-ox-cancellation","cn0_db_hz":20,"seed":12901}
+  ]
+}

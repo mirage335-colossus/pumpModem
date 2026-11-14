@@ -8,6 +8,13 @@ appraisal executable must record the exact references, input tuples, seeds and
 source identity it actually uses. Generator correctness, independent channel
 validation, modem outcomes and receiver capacity remain different claims.
 
+The subsequent [focused HF reconciliation](hf-research.md) extends this map
+with a deposited complex scintillation record, coupled refractive phase/group
+delay, single-port magnetoionic interference, recent contrary evidence, and
+executable upstream modem comparisons. Its [experiment protocol](hf-experiments.md)
+preserves the boundaries between measured data, analytic models and constructed
+adverse controls.
+
 The most useful correction to a too-simple “worse channel” scale is that the
 mechanisms are conditional and can oppose each other. More propagation delay,
 Doppler, noise or antenna loss does not universally mean a worse receiver

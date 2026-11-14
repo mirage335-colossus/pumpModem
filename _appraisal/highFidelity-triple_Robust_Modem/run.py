@@ -39,7 +39,8 @@ ROOT_KEYS = {"schema_version", "name", "purpose", "max_wall_seconds", "per_trial
              "max_trials", "max_samples", "episodes", "confirmatory_strata"}
 EPISODE_KEYS = {"id", "scenario", "mode", "waveform", "seed", "cn0_db_hz", "control",
                 "helper", "backend", "bit_seconds", "duration_seconds", "pulse", "stratum",
-                "oracle_slot", "chunk", "message", "max_wall_seconds", "max_samples"}
+                "oracle_slot", "chunk", "message", "max_wall_seconds", "max_samples",
+                "history_reference_delay_seconds", "hf_phase_bank", "fec", "fade_slots", "capture_lead_seconds"}
 MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose"}
 CONTROLS = {"wanted", "noise", "wrong-key", "wrong-ordinal", "interior-fade", "capture-gap", "eof"}
 BACKENDS = {"cpu", "cuda", "vulkan", "gpu"}
@@ -106,7 +107,7 @@ def _read_campaign(path: Path) -> dict[str, Any]:
             raise CampaignError(f"stratum {name!r} must contain exactly {count} wanted receive episodes with distinct seeds")
         invariant_fields = ("scenario", "mode", "waveform", "cn0_db_hz", "control", "helper",
                             "backend", "bit_seconds", "duration_seconds", "pulse", "oracle_slot", "chunk",
-                            "message", "max_wall_seconds", "max_samples")
+                            "message", "max_wall_seconds", "max_samples", "history_reference_delay_seconds", "hf_phase_bank", "fec", "fade_slots", "capture_lead_seconds")
         reference = matched[0]
         heterogeneous = [field for field in invariant_fields
                          if any(episode.get(field) != reference.get(field) for episode in matched[1:])]
@@ -151,6 +152,8 @@ def _validate_episode(item: Any, index: int, ids: set[str],
     if "pulse" in item and (not isinstance(item["pulse"], str) or
                              item["pulse"] not in {"rrc", "tapered-rrc"}):
         raise CampaignError(f"episodes[{index}].pulse must be rrc or tapered-rrc")
+    if "fec" in item and (not isinstance(item["fec"], str) or item["fec"] not in {"off", "rs20", "rs60"}):
+        raise CampaignError(f"episodes[{index}].fec must be off, rs20 or rs60")
     if isinstance(item["seed"], bool) or not isinstance(item["seed"], int) or not 0 <= item["seed"] < 2**64:
         raise CampaignError(f"episodes[{index}].seed must be an unsigned 64-bit integer")
     if "control" in item and (not isinstance(item["control"], str) or item["control"] not in CONTROLS):
@@ -166,8 +169,17 @@ def _validate_episode(item: Any, index: int, ids: set[str],
     if "oracle_slot" in item:
         if isinstance(item["oracle_slot"], bool) or not isinstance(item["oracle_slot"], int) or not 0 <= item["oracle_slot"] < 2**64:
             raise CampaignError(f"episodes[{index}].oracle_slot must be a nonnegative unsigned 64-bit integer")
+    if "history_reference_delay_seconds" in item:
+        _bounded_number(item["history_reference_delay_seconds"],
+                        f"episodes[{index}].history_reference_delay_seconds", 0, sys.float_info.max)
+    if "hf_phase_bank" in item and not isinstance(item["hf_phase_bank"], bool):
+        raise CampaignError(f"episodes[{index}].hf_phase_bank must be boolean")
     if "chunk" in item:
         _bounded_number(item["chunk"], f"episodes[{index}].chunk", 1, 16384, integer=True)
+    if "fade_slots" in item:
+        _bounded_number(item["fade_slots"], f"episodes[{index}].fade_slots", 1, 2, integer=True)
+    if "capture_lead_seconds" in item:
+        _bounded_number(item["capture_lead_seconds"], f"episodes[{index}].capture_lead_seconds", .25, 10)
     if "message" in item:
         message = item["message"]
         if not isinstance(message, str):
@@ -193,12 +205,14 @@ def _validate_episode(item: Any, index: int, ids: set[str],
             raise CampaignError(f"episodes[{index}].{field} must be a simple identifier")
     mode = item["mode"]
     control = item.get("control", "wanted")
+    if "fade_slots" in item and control != "interior-fade":
+        raise CampaignError(f"episodes[{index}]: fade_slots is valid only for interior-fade control")
     if mode not in {"receive", "slot", "diagnose"} and "control" in item:
         raise CampaignError(f"episodes[{index}]: control is valid only for receiver or diagnostic mode")
     if mode in {"receive", "slot", "diagnose"} and control not in CONTROLS:
         raise CampaignError(f"episodes[{index}]: invalid receiver control")
-    if mode == "slot" and control != "wanted":
-        raise CampaignError(f"episodes[{index}]: slot mode requires wanted control")
+    if mode == "slot" and control not in {"wanted", "noise"}:
+        raise CampaignError(f"episodes[{index}]: slot mode requires wanted or noise control")
     if mode == "diagnose":
         if control != "wanted":
             raise CampaignError(f"episodes[{index}]: diagnose mode requires wanted control")
@@ -208,6 +222,8 @@ def _validate_episode(item: Any, index: int, ids: set[str],
             raise CampaignError(f"episodes[{index}]: diagnose mode requires Helper disabled")
     if "oracle_slot" in item and mode != "oracle":
         raise CampaignError(f"episodes[{index}]: oracle_slot is valid only for oracle mode")
+    if ({"history_reference_delay_seconds", "hf_phase_bank"} & item.keys()) and mode != "oracle":
+        raise CampaignError(f"episodes[{index}]: HF history reference delay and phase bank are valid only for oracle mode")
 
 
 def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_seconds: float) -> list[str]:
@@ -217,10 +233,14 @@ def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_se
     for key, option in (("cn0_db_hz", "--cn0"), ("control", "--control"), ("helper", "--helper"),
                         ("backend", "--backend"), ("bit_seconds", "--bit-seconds"),
                         ("duration_seconds", "--duration-seconds"), ("oracle_slot", "--oracle-slot"),
-                        ("chunk", "--chunk"), ("message", "--message"), ("pulse", "--pulse")):
+                        ("chunk", "--chunk"), ("message", "--message"), ("pulse", "--pulse"),
+                        ("fec", "--fec"), ("fade_slots", "--fade-slots"),
+                        ("capture_lead_seconds", "--capture-lead-seconds"),
+                        ("history_reference_delay_seconds", "--history-reference-delay-seconds"),
+                        ("hf_phase_bank", "--hf-phase-bank")):
         if key in episode:
             value = episode[key]
-            if key == "helper":
+            if key in {"helper", "hf_phase_bank"}:
                 if value:
                     command.append(option)
             else:
@@ -256,6 +276,101 @@ def _is_nonnegative_int(value: Any) -> bool:
     return not isinstance(value, bool) and isinstance(value, int) and value >= 0
 
 
+def _communication_endpoint(episode: dict[str, Any]) -> str:
+    return "correct_decoded_complete" if episode.get("fec", "off") != "off" else "correct_complete"
+
+
+def _validate_decoded_success(receipt: dict[str, Any], episode: dict[str, Any], fec: str) -> None:
+    """Check the decoded endpoint from independent framing and payload fields."""
+    outcomes, plan = receipt["outcomes"], receipt["plan"]
+    wire = plan.get("wire_bits")
+    if not _is_nonnegative_int(wire) or not 0 < wire <= (208 if fec == "off" else 304 if fec == "rs20" else 400):
+        raise CampaignError("decoded success requires bounded wire-bit geometry")
+    if (receipt.get("status") != "completed" or episode.get("control", "wanted") not in
+            {"wanted", "capture-gap", "interior-fade"} or outcomes.get("physical_completions") != 1 or
+            not _is_nonnegative_int(outcomes.get("accepted_messages")) or outcomes["accepted_messages"] != 1 or outcomes.get("premature_completions") != 0 or
+            outcomes.get("false_data") != 0 or outcomes.get("missed_completion") is not False or
+            not _is_nonnegative_int(outcomes.get("actual_scored_slots")) or outcomes["actual_scored_slots"] < wire + 2):
+        raise CampaignError("decoded success conflicts with target or physical completion counts")
+    messages = receipt.get("messages")
+    if not isinstance(messages, list) or not all(isinstance(message, dict) for message in messages):
+        raise CampaignError("decoded success requires native message receipts")
+    if any(not isinstance(message.get(field), bool) for message in messages
+           for field in ("physical_complete", "decoded", "premature")):
+        raise CampaignError("decoded success requires boolean native message states")
+    accepted = [message for message in messages if message["decoded"]]
+    if (len(accepted) != 1 or sum(message["physical_complete"] for message in messages) != 1 or
+            any(message["premature"] for message in messages)):
+        raise CampaignError("decoded success requires exactly one accepted physical message")
+    message = accepted[0]
+    for field in ("first_public_slot", "stop_public_slot", "slots_consumed", "observed_bits", "missing_slots", "consumed_bytes"):
+        if not _is_nonnegative_int(message.get(field)):
+            raise CampaignError("decoded success requires integer native framing fields")
+    if (message["first_public_slot"] != 0 or message["stop_public_slot"] != wire + 2 or
+            message["slots_consumed"] != wire + 2 or message["observed_bits"] + message["missing_slots"] != wire or
+            message.get("trailing_quiet_slots") != [wire, wire + 1] or message.get("quiet_slots") != 2 or
+            message.get("long_form") is not False or message.get("message_ready_for_decode") is not True or
+            message.get("physical_complete") is not True or message.get("matches_transmitted_message") is not True or
+            message.get("decoded_endpoint_matches") is not True or message.get("fec") != fec or
+            message["consumed_bytes"] * (1 if fec == "off" else 8) != wire):
+        raise CampaignError("decoded success conflicts with exact short-frame physical extent")
+    erasures = message.get("erasure_slot_indices")
+    if (not isinstance(erasures, list) or len(erasures) != message["missing_slots"] or
+            any(not _is_nonnegative_int(index) or index >= wire for index in erasures) or
+            erasures != sorted(set(erasures))):
+        raise CampaignError("decoded success requires distinct located erasures inside the frame")
+    payload = message.get("decoded_payload_bytes")
+    if (not isinstance(payload, list) or any(not _is_nonnegative_int(byte) or byte > 255 for byte in payload) or
+            payload != list(plan["message"].encode("ascii"))):
+        raise CampaignError("decoded success raw payload does not match the transmitted message")
+    if fec == "off":
+        return  # Native Off has no accepted-codeword FEC region accounting.
+    if not _is_nonnegative_int(message.get("corrected_bytes")) or message.get("authenticated") is not False:
+        raise CampaignError("short FEC success requires native changed-byte counts and public CRC authentication=false")
+    # Schema-only accounting of the canonical short-frame profile, not an
+    # encoder/decoder: the public wire extent determines body/parity lengths.
+    layouts = []
+    for body_bytes in range(6, 32):
+        parity_bytes = (body_bytes + 4) // 5 if fec == "rs20" else (3 * body_bytes + 4) // 5
+        if (body_bytes + parity_bytes) * 8 == wire:
+            layouts.append({"data": (body_bytes - 4) * 8, "integrity": 32, "parity": parity_bytes * 8})
+    if len(layouts) != 1:
+        raise CampaignError("decoded success wire extent has no unique canonical short FEC layout")
+    stats = message.get("fec_stats")
+    fields = ("received_bits", "corrected_bits", "missing_bits", "corrected_bytes", "erased_bytes", "repaired_bytes")
+    if not isinstance(stats, dict):
+        raise CampaignError("decoded success requires native FEC region statistics")
+    received = missing = corrected = corrected_bytes = repaired_bytes = first_bit = 0
+    for region in ("data", "integrity", "parity"):
+        area = stats.get(region)
+        if not isinstance(area, dict) or any(not _is_nonnegative_int(area.get(field)) for field in fields):
+            raise CampaignError("decoded success requires complete native FEC region statistics")
+        if area["received_bits"] + area["missing_bits"] != layouts[0][region]:
+            raise CampaignError("decoded success FEC region extent disagrees with the public short-frame layout")
+        stop_bit = first_bit + layouts[0][region]
+        region_erasures = [index for index in erasures if first_bit <= index < stop_bit]
+        if (area["missing_bits"] != len(region_erasures) or
+                area["erased_bytes"] != len({index // 8 for index in region_erasures})):
+            raise CampaignError("decoded success FEC erasure regions disagree with located missing slots")
+        first_bit = stop_bit
+        if (area["corrected_bits"] > area["received_bits"] or
+                not area["corrected_bytes"] <= area["corrected_bits"] <= 8 * area["corrected_bytes"] or
+                not area["erased_bytes"] <= area["missing_bits"] <= 8 * area["erased_bytes"] or
+                not max(area["corrected_bytes"], area["erased_bytes"]) <= area["repaired_bytes"] <=
+                area["corrected_bytes"] + area["erased_bytes"]):
+            raise CampaignError("decoded success has inconsistent FEC repair statistics")
+        received += area["received_bits"]
+        missing += area["missing_bits"]
+        corrected += area["corrected_bits"]
+        corrected_bytes += area["corrected_bytes"]
+        repaired_bytes += area["repaired_bytes"]
+    if not corrected_bytes <= message["corrected_bytes"] <= repaired_bytes:
+        raise CampaignError("decoded success changed-byte count conflicts with native FEC repair regions")
+    if (received != message["observed_bits"] or missing != message["missing_slots"] or
+            corrected != outcomes["wrong_bits"] or missing != outcomes["ambiguous_active_slots"] + outcomes["quiet_active_slots"]):
+        raise CampaignError("decoded success FEC statistics conflict with raw slot counts")
+
+
 def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
     identity_fields = ("requested_scenario", "mode", "waveform", "seed", "control")
     missing_identity = [field for field in identity_fields if field not in receipt]
@@ -288,6 +403,28 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
         raise CampaignError("completed receipt plan.requested_bit_seconds must be positive")
     if plan.get("pulse") != episode.get("pulse", "rrc"):
         raise CampaignError("native plan pulse does not match the frozen episode")
+    if "capture_lead_seconds" in episode or "capture_preroll_seconds" in plan:
+        lead = plan.get("capture_preroll_seconds")
+        if not _is_finite_number(lead) or lead != episode.get("capture_lead_seconds", .25):
+            raise CampaignError("native capture lead does not match the frozen episode")
+    if "capture_preroll_override" in plan and plan["capture_preroll_override"] is not ("capture_lead_seconds" in episode):
+        raise CampaignError("native capture lead override does not match the frozen episode")
+    fec = episode.get("fec", "off")
+    if plan.get("fec", "off") != fec:
+        raise CampaignError("native FEC mode does not match the frozen episode")
+    if "fade_slots" in episode or "fade_slots" in plan:
+        expected_fade_slots = episode.get("fade_slots", 2) if episode.get("control", "wanted") == "interior-fade" else None
+        actual_fade_slots = plan.get("fade_slots")
+        if (actual_fade_slots != expected_fade_slots or
+                (expected_fade_slots is not None and not _is_nonnegative_int(actual_fade_slots))):
+            raise CampaignError("native fade slots does not match the frozen episode")
+    if fec != "off":
+        limit = 304 if fec == "rs20" else 400
+        wire = plan.get("wire_bits")
+        if (not _is_nonnegative_int(wire) or not 0 < wire <= limit or wire % 8 or
+                plan.get("short_wire_bit_limit") != limit or plan.get("content_limit_bytes") != 16 or
+                plan.get("long_form") is not False):
+            raise CampaignError("native FEC receipt has invalid bounded short-frame geometry")
     requested_message = episode.get("message", "e")
     if plan.get("requested_message") != requested_message:
         raise CampaignError("native requested message does not match the frozen episode")
@@ -363,6 +500,15 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
                 outcomes["ambiguous_active_slots"] != 0 or outcomes["quiet_active_slots"] != 0 or
                 outcomes["missed_completion"]):
             raise CampaignError("successful receive outcome conflicts with its physical slot/completion counts")
+        if "correct_decoded_complete" in outcomes and not isinstance(outcomes["correct_decoded_complete"], bool):
+            raise CampaignError("receive receipt requires boolean correct_decoded_complete when present")
+        if fec != "off":
+            if not isinstance(outcomes.get("correct_decoded_complete"), bool):
+                raise CampaignError("FEC receive receipt requires boolean correct_decoded_complete")
+            if outcomes.get("communication_endpoint") != "correct_decoded_complete":
+                raise CampaignError("FEC receive receipt requires the decoded-message endpoint")
+        if outcomes.get("correct_decoded_complete") is True:
+            _validate_decoded_success(receipt, episode, fec)
     elif episode["mode"] == "channel":
         channel = receipt.get("channel")
         if not isinstance(channel, dict) or not isinstance(channel.get("contains_signal_energy"), bool):
@@ -383,8 +529,12 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
             raise CampaignError("completed slot receipt must report a complete first public observation")
         if not isinstance(outcomes.get("first_public_observation_correct_data"), bool):
             raise CampaignError("completed slot receipt must report boolean first_public_observation_correct_data")
+        if episode.get("control", "wanted") == "noise" and outcomes["first_public_observation_correct_data"]:
+            raise CampaignError("noise-only slot must never report correct DATA")
         if outcomes.get("correct_complete") is not False:
             raise CampaignError("slot receipt must never report complete-message success")
+        if outcomes.get("correct_decoded_complete", False) is not False:
+            raise CampaignError("slot receipt must never report decoded-message success")
         if outcomes.get("completion_evaluated") is not False:
             raise CampaignError("slot receipt must not evaluate message completion")
         slots = receipt.get("slots")
@@ -430,6 +580,35 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
             if (isinstance(plan_slot, bool) or not isinstance(plan_slot, int) or plan_slot != selected_slot or
                     isinstance(oracle_slot, bool) or not isinstance(oracle_slot, int) or oracle_slot != selected_slot):
                 raise CampaignError("oracle receipt does not match the selected oracle_slot")
+        reference_delay = episode.get("history_reference_delay_seconds", 0)
+        if "history_reference_delay_seconds" in plan:
+            value = plan["history_reference_delay_seconds"]
+            if not _is_finite_number(value) or not math.isclose(float(value), float(reference_delay), rel_tol=1e-12, abs_tol=1e-15):
+                raise CampaignError("HF diagnostic reference delay does not match the frozen episode")
+        if "history_reference_delay_seconds" in episode or episode.get("hf_phase_bank", False):
+            history = receipt.get("hf_history")
+            if (receipt.get("hf_history_applicable") is not True or not isinstance(history, dict) or
+                    history.get("truth_information_passed_to_receiver") is not False):
+                raise CampaignError("HF diagnostic receipt must report a private history evaluator")
+            for value in (plan.get("history_reference_delay_seconds"), history.get("reference_delay_seconds")):
+                if not _is_finite_number(value) or not math.isclose(float(value), float(reference_delay), rel_tol=1e-12, abs_tol=1e-15):
+                    raise CampaignError("HF diagnostic reference delay does not match the frozen episode")
+        if plan.get("hf_phase_bank_requested", False) is not episode.get("hf_phase_bank", False):
+            raise CampaignError("native phase-bank request does not match the frozen episode")
+        if "hf_phase_bank" in receipt and not episode.get("hf_phase_bank", False):
+            raise CampaignError("unrequested phase-bank execution in native receipt")
+        if episode.get("hf_phase_bank", False):
+            phase = receipt.get("hf_phase_bank")
+            if (not isinstance(phase, dict) or not _is_nonnegative_int(phase.get("model_count")) or phase["model_count"] == 0 or
+                    not _is_nonnegative_int(phase.get("samples")) or phase["samples"] == 0):
+                raise CampaignError("requested phase bank must report executed models and samples")
+            for flag in ("truth_information_passed_to_receiver", "truth_information_passed_to_phase_bank",
+                         "receiver_executed", "completion_evaluated", "capacity_qualified"):
+                if phase.get(flag) is not False:
+                    raise CampaignError("phase bank must preserve private evaluator scope")
+            value = phase.get("reference_delay_seconds")
+            if not _is_finite_number(value) or not math.isclose(float(value), float(reference_delay), rel_tol=1e-12, abs_tol=1e-15):
+                raise CampaignError("phase-bank reference delay does not match the frozen episode")
 
 
 def _trial(probe: Path, episode: dict[str, Any], max_samples: int, timeout: float,
@@ -567,7 +746,7 @@ def _statistical_summary(campaign: dict[str, Any], results: list[dict[str, Any]]
                     r.get("receipt", {}).get("status") == "completed" and
                     r["episode"].get("mode") == "receive" and
                     r["episode"].get("control", "wanted") == "wanted"]
-        outcomes = [r.get("receipt", {}).get("outcomes", {}).get("correct_complete") for r in eligible]
+        outcomes = [r.get("receipt", {}).get("outcomes", {}).get(_communication_endpoint(r["episode"])) for r in eligible]
         if len(eligible) != expected or not all(isinstance(x, bool) for x in outcomes):
             summary[stratum] = {"complete_fixed_n": False, "planned_n": expected,
                                 "usable_n": len(eligible), "interval": None,
@@ -577,6 +756,7 @@ def _statistical_summary(campaign: dict[str, Any], results: list[dict[str, Any]]
         low, high = clopper_pearson(successes, expected)
         summary[stratum] = {"complete_fixed_n": True, "population": "the declared synthetic episode generator only",
                             "successes": successes, "trials": expected,
+                            "communication_endpoint": _communication_endpoint(eligible[0]["episode"]),
                             "confidence": .95, "clopper_pearson": [low, high],
                             "iid_assumption": "Episodes must be independently sampled from the declared generator; distinct seeds alone do not establish independence.",
                             "scope_limit": "No natural-condition probability, model validation, acquisition, or capacity claim."}
@@ -592,7 +772,8 @@ def _markdown(campaign: dict[str, Any], run: dict[str, Any]) -> str:
             f"Execution failures: {run['execution_failures']}; valid incomplete communications: {run['valid_communication_failures']}  ",
             f"Run status: **{run['status']}**; stop reason: {run['stop_reason'] or 'all declared episodes completed'}", "",
             "Every native receipt is one declared finite episode. Different physical models and channel strata are not pooled.",
-            "Communication failures are observations, not runner failures. An incomplete fixed sample has no confidence interval.", "",
+            "Communication failures are observations, not runner failures. An incomplete fixed sample has no confidence interval.",
+            "With FEC off, communication success uses the unchanged raw-clean `correct_complete` endpoint. Explicit rs20/rs60 episodes use `correct_decoded_complete`: exact decoded bytes and strict physical framing may include native FEC repairs. Raw slot errors and the raw-clean endpoint remain separate.", "",
             "| Episode | Scenario | Mode | Control | Trial status | Native status | Observation outcome | Slot decision | Correct DATA | Receive physical/premature/false/resumed | Wall (s) |",
             "|---|---|---|---|---|---|---|---|---|---|---:|"]
     for trial in run["trials"]:
@@ -619,8 +800,13 @@ def _markdown(campaign: dict[str, Any], run: dict[str, Any]) -> str:
             correct_data = "yes" if outcomes.get("first_public_observation_correct_data") else "no"
             outcome = "one public slot; message completion not evaluated"
         elif episode["mode"] == "receive":
-            outcome = ("physical message complete" if outcomes.get("correct_complete") is True else
-                       "no correct physical message completion")
+            if episode.get("fec", "off") != "off":
+                outcome = ("decoded physical message complete" if outcomes.get("correct_decoded_complete") is True else
+                           "no correct decoded physical message completion")
+                outcome += f" ({episode['fec']}; raw-clean={'yes' if outcomes.get('correct_complete') else 'no'})"
+            else:
+                outcome = ("physical message complete" if outcomes.get("correct_complete") is True else
+                           "no correct physical message completion")
         elif episode["mode"] == "channel":
             outcome = "signal present" if receipt.get("channel", {}).get("contains_signal_energy") else "signal absent"
         elif episode["mode"] == "oracle":
@@ -743,7 +929,7 @@ def run_campaign(probe: Path, campaign_path: Path, output_dir: Path) -> dict[str
                trial.get("receipt", {}).get("status") == "completed" and
                trial.get("episode", {}).get("mode") == "receive" and
                trial.get("episode", {}).get("control", "wanted") == "wanted" and
-               trial.get("receipt", {}).get("outcomes", {}).get("correct_complete") is False
+               trial.get("receipt", {}).get("outcomes", {}).get(_communication_endpoint(trial.get("episode", {}))) is False
                for trial in trials),
            "retained_output_bytes": sum(path.stat().st_size for path in output_dir.iterdir() if path.is_file()),
            "retained_output_limit_bytes": MAX_CAMPAIGN_OUTPUT_BYTES,

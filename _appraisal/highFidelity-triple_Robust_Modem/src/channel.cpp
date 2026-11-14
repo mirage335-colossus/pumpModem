@@ -1,4 +1,5 @@
 #include "appraisal/channel.hpp"
+#include "appraisal/hf_replay.hpp"
 #include "lunar_spectral_internal.hpp"
 #include "triad_random_process.hpp"
 
@@ -83,9 +84,18 @@ double maximum_delay(const ChannelSpec& spec, double horizon) {
     for (const auto& path : spec.paths) {
         require(finite(path.delay_seconds) && finite(path.delay_rate), "path delay must be finite");
         const double last = path.delay_seconds + path.delay_rate * horizon;
-        require(path.delay_seconds >= 0 && finite(last) && last >= 0 && std::abs(path.delay_rate) < 1,
+        double earliest_motion = 0, latest_motion = 0, maximum_rate = std::abs(path.delay_rate);
+        if (path.hf) {
+            detail::validate_hf_mode(*path.hf, path);
+            const auto& motion = path.hf->group_delay_motion;
+            const auto bounds = detail::hf_group_delay_motion_bounds(*path.hf, spec.rf_hz);
+            earliest_motion = bounds.front();
+            latest_motion = bounds.back();
+            maximum_rate += 2 * pi * motion.amplitude_seconds / motion.period_seconds;
+        }
+        require(finite(last) && std::min(path.delay_seconds, last) + earliest_motion >= 0 && maximum_rate < 1,
                 "moving path delay must remain nonnegative with slope below one over the horizon");
-        maximum = std::max({maximum, path.delay_seconds, last});
+        maximum = std::max(maximum, std::max(path.delay_seconds, last) + latest_motion);
     }
     return maximum;
 }
@@ -155,25 +165,40 @@ Complex resonator_transfer(const Resonator& r, double offset_hz) {
     return alpha / Complex{alpha, 2 * pi * (offset_hz + r.detuning_hz)};
 }
 
-double channel_tail_seconds(const ChannelSpec& spec, double horizon_seconds) {
-    nonnegative(horizon_seconds, "channel horizon must be nonnegative and finite");
+namespace {
+double channel_analog_tail_seconds(const ChannelSpec& spec) {
     nonnegative(spec.frontend.lowpass_hz, "frontend lowpass must be nonnegative and finite");
-    double tail = maximum_delay(spec, horizon_seconds) + resonator_tail_seconds(spec.transmitter);
+    double tail = resonator_tail_seconds(spec.transmitter);
     if (spec.frontend.lowpass_hz > 0)
         tail += -std::log(tail_relative_amplitude) / (2 * pi * spec.frontend.lowpass_hz);
+    return tail;
+}
+}
+
+double channel_filter_tail_seconds(const ChannelSpec& spec, double fs) {
+    return channel_analog_tail_seconds(spec) + channel_interpolation_tail_seconds(spec, fs);
+}
+
+double channel_tail_seconds(const ChannelSpec& spec, double horizon_seconds) {
+    nonnegative(horizon_seconds, "channel horizon must be nonnegative and finite");
+    const double tail = maximum_delay(spec, horizon_seconds) + channel_analog_tail_seconds(spec);
     require(finite(tail), "channel tail overflow");
-    // Interpolation also needs half_width/Fs, added by the renderer and planner.
+    // Finite interpolation/dispersion memory is added separately, at the
+    // caller's actual native sample rate.
     // Random interference and AGC release are not deterministic signal support.
     return tail;
 }
 
 struct Channel::Impl {
     struct RuntimePath {
-        Path spec;
+        const Path* spec = nullptr;
         Complex fixed{1, 0}, phase{1, 0}, phase_step{1, 0}, step_change{1, 0};
+        Complex coherent{};
+        double diffuse_scale = 1;
+        HfEikonal eikonal_initial{};
         std::unique_ptr<GaussianRay> gaussian;
         std::vector<double> static_weights;
-        bool integer_delay = false;
+        bool integer_delay = false, moving = false;
         std::size_t delay_group = std::numeric_limits<std::size_t>::max();
     };
     struct EndpointCache {
@@ -219,7 +244,7 @@ struct Channel::Impl {
                 source.minimum_frequency_hz <= source.maximum_frequency_hz, "invalid source spectral guard");
         const double seconds = static_cast<double>(horizon) / fs;
         report.maximum_delay_seconds = maximum_delay(spec, seconds);
-        report.tail_seconds = channel_tail_seconds(spec, seconds) + spec.interpolation_half_width / fs;
+        report.tail_seconds = report.maximum_delay_seconds + channel_filter_tail_seconds(spec, fs);
         if (spec.transmitter.enabled) {
             require(std::max(std::abs(spec.transmitter.detuning_hz), std::abs(spec.transmitter.detuning_hz +
                     spec.transmitter.detuning_rate_hz_s * seconds)) < fs / 2,
@@ -255,13 +280,41 @@ struct Channel::Impl {
             // Phase modulation adds maximum frequency excursion plus its
             // modulation frequency (Carson-style allowance); its Bessel
             // sidebands likewise do not have strictly compact support.
+            const double hf_margin = path.hf ? detail::hf_mode_spectral_margin_hz(*path.hf, spec.rf_hz, source_band) : 0;
+            if (path.hf && (path.hf->group_delay_slope_seconds_per_hz != 0 || path.hf->parabolic_layer)) {
+                const auto bounds = detail::hf_group_delay_motion_bounds(*path.hf, spec.rf_hz);
+                const double earliest = std::min(path.delay_seconds, path.delay_seconds + path.delay_rate * seconds) -
+                    std::abs(bounds.front());
+                require(earliest >= static_cast<double>(detail::hf_dispersion_half_width) / fs,
+                        "HF dispersion stencil must fit inside the minimum physical delay");
+                double maximum_slope = std::abs(path.hf->group_delay_slope_seconds_per_hz);
+                if (path.hf->parabolic_layer) {
+                    const auto& layer = *path.hf->parabolic_layer;
+                    const double minimum_critical = layer.critical_frequency_hz - layer.critical_amplitude_hz;
+                    require(spec.rf_hz + source_band < .99 * minimum_critical,
+                            "HF source band approaches the parabolic turning-frequency cutoff");
+                    maximum_slope = hf_parabolic_eikonal(layer, spec.rf_hz,
+                        .75L * layer.critical_period_seconds).group_delay_slope_seconds_per_hz;
+                }
+                require(source_band <= .20 * fs &&
+                        std::abs(hf_residual_dispersion_phase_radians(maximum_slope, source_band)) <= .002,
+                        "HF dispersion approximation exceeds its admitted phase or sample-band bound");
+            }
+            if (path.hf && path.hf->measured_envelope) {
+                validate_hf_replay_trace(*path.hf->measured_envelope);
+                const auto available = hf_replay_support_seconds(*path.hf->measured_envelope) - path.hf->measured_offset_seconds;
+                require(available >= 0 && (horizon == 0 || static_cast<double>(horizon - 1) / fs <= available),
+                        "HF render horizon exceeds its measured envelope support");
+            }
             const double guard = source_band * (1 + std::abs(path.delay_rate)) +
-                std::max(std::abs(shift0), std::abs(shift1)) + 3 * path.gaussian_width_2sigma_hz + wander_guard;
+                std::max(std::abs(shift0), std::abs(shift1)) + 3 * path.gaussian_width_2sigma_hz + wander_guard + hf_margin;
             require(finite(guard) && guard < fs / 2, "path spectral allowance reaches Nyquist");
             const double delay_samples = path.delay_seconds * fs;
-            const bool fractional = path.delay_rate != 0 || delay_samples != std::floor(delay_samples);
+            const bool moving = path.delay_rate != 0 || (path.hf && (path.hf->group_delay_motion.amplitude_seconds != 0 ||
+                (path.hf->parabolic_layer && path.hf->parabolic_layer->critical_amplitude_hz != 0)));
+            const bool fractional = moving || delay_samples != std::floor(delay_samples);
             any_fractional |= fractional;
-            any_moving |= path.delay_rate != 0;
+            any_moving |= moving;
             if (path.gaussian_width_2sigma_hz > 0) ++fading_count;
         }
         if (any_fractional) {
@@ -310,11 +363,17 @@ struct Channel::Impl {
                 "fade must be disabled or have ordered bounds and nonoverlapping ramps");
 
         const auto history_count = count_from_long_double(std::ceil(static_cast<long double>(report.maximum_delay_seconds) * fs) +
-            2 * spec.interpolation_half_width + 4);
+            2 * spec.interpolation_half_width + detail::hf_dispersion_halo_samples(spec) + 4);
         std::size_t bytes = checked_add(sizeof(Impl), source.working_bytes);
         if (lunar_plan) bytes = checked_add(bytes, lunar_plan->workspace_bytes);
         bytes = checked_add(bytes, checked_multiply(history_count, sizeof(Complex)));
         bytes = checked_add(bytes, checked_multiply(spec.paths.capacity(), sizeof(Path)));
+        for (const auto& path : spec.paths)
+            if (path.hf) {
+                bytes = checked_add(bytes, checked_multiply(path.hf->voltage_transitions.capacity(), sizeof(HfVoltageTransition)));
+                if (path.hf->measured_envelope)
+                    bytes = checked_add(bytes, checked_multiply(path.hf->measured_envelope->samples.capacity(), sizeof(Complex)));
+            }
         bytes = checked_add(bytes, checked_multiply(spec.paths.size(), sizeof(RuntimePath)));
         bytes = checked_add(bytes, checked_multiply(fading_count, sizeof(GaussianRay)));
         bytes = checked_add(bytes, checked_multiply(checked_multiply(spec.paths.size(), 2 * spec.interpolation_half_width), sizeof(double)));
@@ -371,9 +430,9 @@ struct Channel::Impl {
         Random path_random(seed, 1);
         for (std::size_t i = 0; i < spec.paths.size(); ++i) {
             RuntimePath runtime;
-            runtime.spec = spec.paths[i];
+            runtime.spec = &spec.paths[i];
             runtime.delay_group = membership[i];
-            const auto& path = runtime.spec;
+            const auto& path = *runtime.spec;
             runtime.fixed = std::sqrt(path.power) * (path.frozen_gaussian ? path_random.proper() : Complex{1, 0});
             runtime.phase = std::polar(1., path.phase_radians);
             const long double f0 = path.residual_doppler_hz - static_cast<long double>(spec.rf_hz) * path.delay_rate;
@@ -383,9 +442,19 @@ struct Channel::Impl {
             if (path.gaussian_width_2sigma_hz > 0)
                 runtime.gaussian = std::make_unique<GaussianRay>(path.gaussian_width_2sigma_hz,
                     seed + 104729ULL * (17 + i));
+            if (path.hf && path.hf->coherent_to_diffuse_power > 0) {
+                const auto k = path.hf->coherent_to_diffuse_power;
+                Random coherent_random(seed, 1002 + 32 * i);
+                runtime.coherent = std::polar(std::sqrt(k / (1 + k)), 2 * pi * coherent_random.uniform());
+                runtime.diffuse_scale = 1 / std::sqrt(1 + k);
+            }
             const double lag = path.delay_seconds * fs;
-            runtime.integer_delay = path.delay_rate == 0 && lag == std::floor(lag);
-            if (!runtime.integer_delay && path.delay_rate == 0)
+            runtime.moving = path.delay_rate != 0 || (path.hf && (path.hf->group_delay_motion.amplitude_seconds != 0 ||
+                (path.hf->parabolic_layer && path.hf->parabolic_layer->critical_amplitude_hz != 0)));
+            if (path.hf && path.hf->parabolic_layer)
+                runtime.eikonal_initial = hf_parabolic_eikonal(*path.hf->parabolic_layer, spec.rf_hz, 0);
+            runtime.integer_delay = !runtime.moving && lag == std::floor(lag);
+            if (!runtime.integer_delay && !runtime.moving)
                 runtime.static_weights = interpolation_weights(spec.interpolation_half_width, std::ceil(lag) - lag);
             paths.push_back(std::move(runtime));
         }
@@ -474,14 +543,16 @@ struct Channel::Impl {
         return cached.value;
     }
 
-    Complex delayed(RuntimePath& path, std::uint64_t n) {
+    Complex delayed(RuntimePath& path, std::uint64_t n, double delay_motion_seconds = 0, std::int64_t source_offset = 0) {
         // The static integer fast path and its address must use the same
         // rounded product; otherwise e.g. .2*2000 can be 400 in binary64 yet
         // slightly larger in extended precision, moving floor() back one row.
-        const long double delay_samples = path.spec.delay_rate == 0 ?
-            static_cast<long double>(path.spec.delay_seconds * fs) :
-            static_cast<long double>(path.spec.delay_seconds) * fs;
-        const long double coordinate = static_cast<long double>(n) * (1.L - path.spec.delay_rate) - delay_samples;
+        const auto& spec_path = *path.spec;
+        const long double delay_samples = spec_path.delay_rate == 0 ?
+            static_cast<long double>(spec_path.delay_seconds * fs) :
+            static_cast<long double>(spec_path.delay_seconds) * fs;
+        const long double coordinate = static_cast<long double>(n) * (1.L - spec_path.delay_rate) - delay_samples -
+            static_cast<long double>(delay_motion_seconds) * fs + source_offset;
         const auto floor = std::floor(coordinate);
         const auto base = static_cast<std::int64_t>(floor);
         const double fraction = static_cast<double>(coordinate - floor);
@@ -500,13 +571,13 @@ struct Channel::Impl {
         const double* first_weights = path.static_weights.data();
         const double* second = first_weights;
         double blend = 0;
-        if (path.spec.delay_rate != 0) {
+        if (path.moving) {
             const double u = fraction * fractional_intervals;
             const auto i = std::min(static_cast<std::size_t>(u), fractional_intervals - 1);
             blend = u - static_cast<double>(i);
             if (path.delay_group != std::numeric_limits<std::size_t>::max()) {
-                const auto lower = endpoint(path.delay_group, i, base, n);
-                const auto upper = endpoint(path.delay_group, i + 1, base, n);
+                const auto lower = endpoint(path.delay_group, i, base, static_cast<std::uint64_t>(n));
+                const auto upper = endpoint(path.delay_group, i + 1, base, static_cast<std::uint64_t>(n));
                 // Same two table rows and the same fraction as the direct
                 // weighted sum below. Only floating-point summation order
                 // differs, verified by a many-cell direct comparison.
@@ -523,27 +594,67 @@ struct Channel::Impl {
         return value;
     }
 
+    Complex hf_delayed(RuntimePath& path, std::uint64_t n, double motion, double slope) {
+        const auto center = delayed(path, n, motion);
+        if (slope == 0) return center;
+        // The symmetric stencil differentiates the source coordinate at the
+        // current physical path delay, with the output-time motion held fixed.
+        // The calibrated transfer is 1 + i D/(4π) * d²/dt², i.e. the local
+        // first-order approximation to exp(-iπ D f²).
+        constexpr auto& weights = detail::hf_second_derivative_weights;
+        Complex curvature = weights.front() * center;
+        for (std::size_t offset = 1; offset < weights.size(); ++offset) {
+            const auto sample_offset = static_cast<std::int64_t>(offset);
+            curvature += weights[offset] * (delayed(path, n, motion, sample_offset) +
+                                             delayed(path, n, motion, -sample_offset));
+        }
+        return center + Complex{0, slope * fs * fs / (4 * pi)} * curvature;
+    }
+
     Complex render() {
         const auto n = report.samples;
         const long double time = static_cast<long double>(n) / fs;
         ensure_source(n + spec.interpolation_half_width);
         Complex wanted = lunar ? lunar->wanted(n, history, source.geometry.source_samples, spec.transmitter.enabled) : Complex{};
         for (auto& path : paths) {
+            const auto& spec_path = *path.spec;
             if ((n & 4095) == 0) {
-                const long double cycles = path.spec.phase_radians / (2 * std::numbers::pi_v<long double>) +
-                    time * (path.spec.residual_doppler_hz - static_cast<long double>(spec.rf_hz) * path.spec.delay_rate) +
-                    .5L * path.spec.residual_drift_hz_s * time * time;
+                const long double cycles = spec_path.phase_radians / (2 * std::numbers::pi_v<long double>) +
+                    time * (spec_path.residual_doppler_hz - static_cast<long double>(spec.rf_hz) * spec_path.delay_rate) +
+                    .5L * spec_path.residual_drift_hz_s * time * time;
                 path.phase = std::polar(1., static_cast<double>(2 * std::numbers::pi_v<long double> * std::remainder(cycles, 1.L)));
-                const long double next_cycles = (path.spec.residual_doppler_hz - static_cast<long double>(spec.rf_hz) * path.spec.delay_rate +
-                    path.spec.residual_drift_hz_s * time) / fs + .5L * path.spec.residual_drift_hz_s / (fs * fs);
+                const long double next_cycles = (spec_path.residual_doppler_hz - static_cast<long double>(spec.rf_hz) * spec_path.delay_rate +
+                    spec_path.residual_drift_hz_s * time) / fs + .5L * spec_path.residual_drift_hz_s / (fs * fs);
                 path.phase_step = std::polar(1., static_cast<double>(2 * std::numbers::pi_v<long double> * std::remainder(next_cycles, 1.L)));
             }
-            if (path.spec.power > 0) {
+            if (spec_path.power > 0) {
                 const Complex fading = path.gaussian ? path.gaussian->value(time) : Complex{1, 0};
-                if (path.spec.phase_wander_amplitude_radians > 0) {
+                if (spec_path.hf) {
+                    const auto& hf = *spec_path.hf;
+                    const auto& movement = hf.group_delay_motion;
+                    double motion = hf_group_delay_motion_seconds(movement, time);
+                    double phase = hf_geometric_phase_radians(movement, spec.rf_hz, time);
+                    double dispersion = hf.group_delay_slope_seconds_per_hz;
+                    if (hf.parabolic_layer) {
+                        const auto next = hf.parabolic_layer->critical_amplitude_hz == 0 ? path.eikonal_initial :
+                            hf_parabolic_eikonal(*hf.parabolic_layer, spec.rf_hz, time);
+                        motion += next.group_delay_seconds - path.eikonal_initial.group_delay_seconds;
+                        phase -= 2 * pi * std::remainder(spec.rf_hz *
+                            (next.phase_delay_seconds - path.eikonal_initial.phase_delay_seconds), 1.);
+                        dispersion = next.group_delay_slope_seconds_per_hz;
+                    }
+                    const double residual = spec_path.phase_wander_amplitude_radians > 0 ?
+                        spec_path.phase_wander_amplitude_radians * static_cast<double>(std::sin(2 * std::numbers::pi_v<long double> *
+                            std::remainder(time / spec_path.phase_wander_period_seconds, 1.L))) : 0;
+                    const auto port = hf.measured_envelope ? hf_replay_gain(*hf.measured_envelope, time + hf.measured_offset_seconds) :
+                        hf.polarization ? hf_port_projection(*hf.polarization, time) : Complex{1, 0};
+                    wanted += path.fixed * path.phase * (path.coherent + path.diffuse_scale * fading) *
+                        hf_mode_voltage(hf, time) * port * std::polar(1., phase + residual) *
+                        hf_delayed(path, n, motion, dispersion);
+                } else if (spec_path.phase_wander_amplitude_radians > 0) {
                     const long double angle = 2 * std::numbers::pi_v<long double> *
-                        std::remainder(time / path.spec.phase_wander_period_seconds, 1.L);
-                    const double phase = path.spec.phase_wander_amplitude_radians * static_cast<double>(std::sin(angle));
+                        std::remainder(time / spec_path.phase_wander_period_seconds, 1.L);
+                    const double phase = spec_path.phase_wander_amplitude_radians * static_cast<double>(std::sin(angle));
                     // Evaluate the separate residual phase at physical time.
                     // Do not alter group delay or add a second Doppler law.
                     wanted += path.fixed * path.phase * fading * std::polar(1., phase) * delayed(path, n);

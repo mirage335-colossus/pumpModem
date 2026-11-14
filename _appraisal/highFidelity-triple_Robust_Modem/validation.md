@@ -5,6 +5,12 @@ corrective history and the evidence limits for the contained appraisal. No
 scenario qualifies a real environment, universal receiver sensitivity floor,
 or complete-receiver CPU/GPU capacity.
 
+The subsequent [adverse HF expansion and comparison record](hf-validation.md)
+contains the current HF models, executed campaigns, phase-history and coding
+findings, and updated software checks. The source identities and seven-group
+checks below belong to the preceding broad five-environment appraisal; they
+remain historical evidence with their original scope.
+
 **Legacy observation-horizon scope:** the integration smoke, exploratory
 AWGN receiver trend, 12-episode weak-signal pilot, 4,096-cell full-message EME
 episode, and three-pair RunPod CPU/CUDA campaign used an appraisal horizon with
@@ -15,7 +21,7 @@ change. Keep those older outcomes bound to their original horizon and source
 identity. Separate 0 dB-Hz AWGN episodes below use the corrected five-slot
 horizon. EME one-slot diagnostics do not exercise quiet completion.
 
-## Current source and build identity
+## Pre-HF-expansion source and build identity
 
 The latest post-correction local Release app uses GCC 14.2.0, OpenSSL 3.5.7,
 the canonical `IndependentApskV2` stack, and source commit
@@ -35,7 +41,7 @@ Its raw receipts were not rewritten after the recovery-counter correction,
 noise-ablation addition and retirement of obsolete lunar presets. Those changes
 do not alter the modeled source or receiver for the original 48 cases.
 
-## Current local deterministic checks
+## Pre-HF-expansion local deterministic checks
 
 The recorded command was:
 

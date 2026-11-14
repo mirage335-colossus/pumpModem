@@ -193,6 +193,66 @@ stationarity is a comparator; it does not qualify arbitrary disturbed or
 long-duration skywave behavior. See the more detailed
 [HF scenario evidence](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/83-scenarios-skywave.md).
 
+## Coupled and measured HF extensions
+
+The [adverse HF protocol](hf-experiments.md) and [source reconciliation](hf-research.md)
+describe the additional presets and their evidence classes. The optional native
+`HfModeProfile` leaves the earlier path arithmetic unchanged when absent.
+It adds smooth per-mode voltage transitions, bounded delay motion, a coherent/
+diffuse Rice mixture, single-port Jones projection, local dispersion, a coupled
+parabolic-layer eikonal, and a bounded measured-envelope operator.
+
+With baseband offset `nu`, the local transfer phase is
+`phi(t) - 2*pi*nu*tau_g(t) - pi*D(t)*nu^2`. Its delay and Doppler derivatives
+obey `d(tau_g)/dt = -d(f_D)/d(nu)`. The geometric moving-path control uses
+`phi=-2*pi*rf*delta_tau`; the refractive model derives its carrier phase
+separately from the phase path. Group delay is not substituted into that
+geometric expression. Unmodeled collisions, caustics and cutoff crossing are
+not implied by a passing analytic fixture.
+
+For the vertical parabolic layer, let `b=f/fo<1`, bottom height `h`, and
+semi-thickness `Y`. Round-trip phase and group lengths are
+
+```
+P = 2*h + Y*(1 - (1-b*b)*atanh(b)/b)
+G = 2*h + 2*Y*b*atanh(b)
+tau_g = G/c
+D = 2*Y/(c*fo) * (atanh(b) + b/(1-b*b))
+```
+
+The renderer uses the carrier phase difference from `P(t)-P(0)`, the changing
+envelope delay from `G(t)`, and the local frequency slope `D(t)`. Independent
+quadrature integrates the refractive index and inverse index with a turning-
+point substitution; tests also check frequency and time derivatives and actual
+rendered off-center tones. Public delay and frequency allowances remain fixed
+and are shared by each static/moving pair.
+
+The tiny dispersive correction is represented by an eighth-order centered
+second-derivative stencil implementing the first-order expansion of
+`exp(-i*pi*D*nu^2)`. Admission bounds its approximation on the stated source
+band, requires sufficient physical delay, and charges four additional samples
+of source support and filter halo. Positive/negative slopes, interpolation
+accuracy and finite-source tails have separate checks. This numerical operator
+is not a license to amplify normal intramode dispersion into an invented HF
+failure mechanism.
+
+Jones mode gains are `(p_rx^H e_m)*(e_m^H p_tx)`. Both launch and receive
+projection are charged once; the two orthonormal modes sum before receiver
+noise. Receiver-terminal historical Watterson fits receive no second Jones
+loss. A single linear antenna can observe destructive interference even when
+the full vector field retains energy; compute cannot recover energy absent at
+that port.
+
+The Ding fixture embeds the exact deposited samples and their hashes. It uses
+one full-record RMS normalization, interpolates Cartesian complex voltage,
+and only then applies an optional amplitude/phase ablation. Offset and clock
+controls retain the same normalized record. Admission validates finite data,
+sampling, offset and support; time never wraps. Measurements and model code
+remain distinct: the record lacks a clock, absolute gain and instrument-filter
+calibration. Its observed phase-statistic discrepancy and the complete-slot
+versus complete-message boundary are recorded in
+[the fixture provenance](fixtures/hf-ding-2021/README.md).
+
 ## Noise and equipment controls
 
 These two cases exercise the native renderer's stateful noise and equipment

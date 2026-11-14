@@ -1,11 +1,15 @@
 # Native high-fidelity appraisal protocol
 
 Updated 13 November 2026. The contained appraisal has a native renderer,
-scenario catalog, executable, bounded campaign runner and seven CTest groups.
+scenario catalog, executable, bounded campaign runner and 13 CTest groups.
+The latest full 13-group check passed in 68.01 seconds.
 The [model inventory](models.md) records implemented equations and
 limits; the [research reconciliation](research-reconciliation.md) maps them to
-the literature. This protocol governs runs and the claims that their results
-can support. Passing source tests verifies selected software behavior only.
+the literature. The added [HF research synthesis](hf-research.md) reconciles
+measured, fitted, analytic and contrary evidence; the [HF experiment map](hf-experiments.md)
+states its receiver questions and limits. This protocol governs runs and the
+claims that their results can support. Passing source tests verifies selected
+software behavior only.
 
 ## Questions and evidence layers
 
@@ -42,7 +46,7 @@ uses shorter integration geometry for fast wiring checks.
 | Sub-9 kHz / 200 ft | `vlf-resonant`, `vlf-detuned`, `vlf-phase-wander` | Calculated high-Q antenna envelope, conditional magnetic-noise level, and a separate smooth phase-wander hypothesis | No LWPC/LMP solve; independent electric and magnetic planes; phase law is constructed, not a measured 8.27 kHz record |
 | 1 MHz groundwave | `groundwave-1mhz`, `-sea`, `-night` | Reference-reproduced NTIA LFMF homogeneous magnitude, plus separately synthetic phase and competing ray | No measured local path, terrain or complex phase; night ray is a sensitivity choice |
 | 30 MHz groundwave | `groundwave-30mhz`, `-land` | Fixed LFMF magnitude comparison at model endpoint | Formal model endpoint does not establish actual surface-wave dominance or exclude direct/reflected/sky/duct paths |
-| 1–30 MHz skywave | `hf-quiet`, `hf-disturbed`, `hf-transition`, `hf-nvis-disturbed`, `hf-drm6` | Continuous finite Gaussian-tap approximations to selected F.1487/DRM profiles and a constructed signal-absorption transition | Not a worldwide or long-episode population; the NVIS fixture is skywave-only and omits the optional groundwave component |
+| 1–30 MHz skywave | Original `hf-quiet`, `hf-disturbed`, `hf-transition`, `hf-nvis-disturbed`, `hf-drm6`; 14 additional Watterson, O/X, coherent-trough, vertical-eikonal, mode-transition and measured-replay presets | Continuous finite Gaussian-tap approximations, scalar fitted comparisons, vector mode projections, coupled analytic phase/group delay, constructed mode/fade schedules, and a finite deposited complex-envelope record | Not a worldwide or long-episode population; the NVIS fixture is skywave-only and omits the optional groundwave component; the measured record has no sample clock and cannot support a broadband impulse-response or full-message claim |
 | EME at 5.76 GHz | `eme-disk-episode`, `eme-patch-episode`, `eme-severe-episode` | Joint spectral approximation of the frozen beam-weighted monostatic delay–Doppler kernel, numerically checked through 360 s | Helper-off 1,920 Hz source only; not full retarded bistatic DE440 geometry or measured whole-disk IQ; legacy finite-grid and first-slot cases retain their narrower limits |
 | Noise/equipment controls | `noise-bursts`, `frontend-overload` | Constructed colored/impulse and blocker/AGC/clipping/quantization paths | Not a site capture, lightning law or named radio's RF nonlinearity |
 
@@ -51,6 +55,16 @@ limits are in [models.md](models.md). An “adverse,” “weak,” or “outage
 names the specified conditional model; it does not imply environmental
 probability. Do not combine maxima from unrelated references and call the
 result a measured natural episode.
+
+The 14 added HF preset identifiers, their independent observables and
+limits are listed in [hf-experiments.md](hf-experiments.md). The source review
+in [hf-research.md](hf-research.md) distinguishes measured records, historical
+fits, analytic models, and deliberate counterexamples. The measured replay
+supports a complete first observation of 19.4375 s within its nominal 40.94 s
+last knot, but the 259.4375 s complete message exceeds that record. Its
+20-second offset and alternate clock convention are two views of one event,
+not independent episodes. Interpreting the rounded 41-second record duration gives 2048/41 samples per
+second, approximately 49.9512 Hz.
 
 The HF tuple review checked [F.1487 Annex 3 §3.4](https://www.itu.int/dms_pubrec/itu-r/rec/f/R-REC-F.1487-0-200005-I!!PDF-E.pdf)
 and the newer [ETSI ES 201 980 V4.3.1 Annex B.1](https://www.etsi.org/deliver/etsi_es/201900_201999/201980/04.03.01_60/es_201980v040301p.pdf):
@@ -70,11 +84,15 @@ the appraisal subtree and reads any shared compiler cache in read-only mode:
 ./_appraisal/highFidelity-triple_Robust_Modem/build.sh test
 ```
 
-The expanded appraisal run passed all seven CTest groups (7/7) in 35.25
-seconds: channel primitives, scenario models, additional HF profiles,
-impairment observables, lunar spectral numerics, native receiver integration,
-and the campaign runner. The runner group covers 33 unit cases, including
-message identity and inconsistent-success receipt rejection. A prior separate
+The latest full suite passed all 13 CTest groups in 68.01 seconds; see the
+[final log](.build/hf-expansion-complete-checks.log). The run includes the
+2-second Helper capture-lead and one-faded-slot RS20 integration assertions,
+40 runner checks, and the replay, history, and competitor checks. The former seven-group
+35.25-second run is historical, not a result for the expanded suite. The
+current groups cover renderer primitives and scenario models, HF
+profile/eikonal/history/phase-bank/replay checks, impairment observables, lunar spectral
+numerics, native receiver integration, the campaign runner, compiled competitor
+calibration, and competitor manifest parsing. A prior separate
 canonical Triad run passed 32/32 checks in 64.90 seconds. Its contained test harness
 forced inclusion of a header missing from the pre-existing CPU-only canonical
 probe; the original setup failure is preserved. This was a test-harness
@@ -139,13 +157,47 @@ Use these test tiers to keep future checks affordable:
 
 | Tier / manifest | Frozen cases | Purpose and maximum budget |
 | --- | ---: | --- |
-| `build.sh test` | 7 CTest groups | Default correctness and numerical consistency checks; no long VLF reception |
+| `build.sh test` | 13 CTest groups | All groups passed in 68.01 s, including fade-option and 2 s Helper capture-lead integration assertions; no long VLF reception |
 | `integration-smoke.json` | 10 | Short geometry and wiring; 600 s aggregate |
 | `propagation-breadth.json` | 16 | Groundwave land/sea defaults, weak levels, HF profiles and recovery; 120 s per episode, 1,800 s aggregate, 8 million samples per episode |
 | `receiver-controls.json` | 12 | Noise, blockers, Helper, mismatched hypotheses, physical fade, marked gap and EOF; the same 120 s / 1,800 s / 8 million ceilings |
 | `weak-holdouts.json` | 6 | Three fresh seeds each for two fixed weak conditions; the same ceilings; descriptive only |
 | `eme-episodes.json` | 7 | Disk, patch and severe-width strong/weak full-message pairs plus noise-only; 120 s per episode, 1,000 s aggregate, 1 million samples per episode |
 | `vlf-reference.json` | 7 | Two phase-cost diagnostics, a bright tapered complete message, weak static/wander observations, detuned rendering and the original RRC observation; 1,900 s aggregate with explicit 40–1,200 s episode caps and at most 70 million samples |
+| `hf-unusual.json` | 20 | Fitted/profile/O-X and mode-recovery adverse comparisons; 180 s per episode, 2,400 s aggregate, 8 million samples per episode |
+| `hf-measured-replay.json` | 15 | Finite measured-envelope, ablation, clock and aperture diagnostics; 120 s per episode, 1,800 s aggregate, 1 million samples per episode |
+| `hf-history-trend.json` | 18 | Static/moving ionosphere across integration durations and signal levels; 240 s per episode, 2,400 s aggregate, 12 million samples per episode |
+| `hf-sensitivity-brackets.json` | 30 | Frozen intermediate 4/8/12 dB-Hz brackets for static/moving eikonal and measured complex/amplitude/phase records; 60 s per episode, 900 s aggregate, 1 million samples per episode |
+| `hf-common-text.json` | 5 | Fixed Robust `HELLO` operating points and O/X contrast before energy normalization; 600 s per episode, 3,000 s aggregate, 10 million samples per episode |
+| `hf-phase-followup.json` | 16 | Frozen phase-bank/oracle and fixed-seed receiver follow-ups; 240 s per episode, 2,400 s aggregate, 12 million samples per episode |
+| `hf-native-fec.json` | 3 | RS20/RS60 coded delivery on AWGN/HF; 600 s per episode, 2,100 s aggregate, 25 million samples per episode; compare with raw-clean/FEC-off endpoint |
+| `hf-fec-equal-energy.json` | 1 | Frozen seed-matched RS60/raw-clean energy comparison; 600 s trial, 660 s aggregate, 25 million sample cap; complete |
+| `hf-helper-controls.json` | 2 | Default 0.25 s capture-lead O/X Helper controls; 180 s each, 420 s aggregate, 3 million samples each; complete |
+| `hf-helper-noise-support.json` | 2 | AWGN/OX Helper controls at 2 s capture lead; 180 s each, 420 s aggregate, 3 million samples each; complete |
+| `noise-ablation.json` | 3 | Selected seed-matched noise-only component diagnosis; not independent false-alarm confirmation |
+| `eme-discriminator.json` | 2 | Selected high-energy receiver and known-channel bit diagnostic after a wrong accepted EME bit |
+
+The five added HF campaigns have their own fixed caps and run serially through
+the same native executable:
+
+```sh
+for campaign in hf-unusual hf-measured-replay hf-history-trend hf-sensitivity-brackets hf-common-text; do
+  python3 -B _appraisal/highFidelity-triple_Robust_Modem/run.py \
+    --probe _appraisal/highFidelity-triple_Robust_Modem/.build/bin/high_fidelity_appraisal \
+    --campaign "_appraisal/highFidelity-triple_Robust_Modem/campaigns/$campaign.json" || break
+done
+```
+
+The phase-history, native-FEC, equal-energy, default 0.25 s Helper-enabled O/X,
+and 2 s Helper capture-lead campaigns are complete:
+
+```sh
+for campaign in hf-phase-followup hf-native-fec hf-fec-equal-energy hf-helper-controls hf-helper-noise-support; do
+  python3 -B _appraisal/highFidelity-triple_Robust_Modem/run.py \
+    --probe _appraisal/highFidelity-triple_Robust_Modem/.build/bin/high_fidelity_appraisal \
+    --campaign "_appraisal/highFidelity-triple_Robust_Modem/campaigns/$campaign.json" || break
+done
+```
 
 The broader reference and long VLF tiers are explicit experiments, not part of
 the default correctness command. These manifests are frozen before execution;
@@ -154,6 +206,34 @@ their presence is not a passed result. Consult [coverage](coverage.md) and
 censoring. Do not retry a censored case automatically or expand the sample
 budget after observing its outcome. A repeated phase diagnostic remains a
 component measurement, not an independent communication trial.
+
+All 112 frozen native HF campaign episodes completed uncensored. The 16-case
+phase follow-up contains 9 oracle diagnostics, 6 wanted full-message holdouts
+(4 correct and 2 failed/rejected), and 1 noise-only receive case with no DATA
+or physical completion. The three FEC cases include an RS20 rejection after
+seven erasures and an RS60 exact `HELLO` decode after repairing ten erasures,
+although raw-clean reception was false. The equal-energy RS60 case had 100
+quiet active-bit decisions out of 184 (84 DATA decisions), 26 rejected codec
+fragments, and no accepted message. Both Helper control manifests transmit `e`.
+Neither pair produced a narrowed Helper frequency proposal. The 2 s AWGN case
+passed coarse/onset support but used final frequency fallback because its prior
+has zero width; O/X cases found no coarse pilot. Bright messages completed
+through the public DATA search. The 2 s O/X lead
+changes absolute channel phase and is not a phase-matched ablation. These are
+conditional mechanism observations, not pooled reliability estimates. Detailed
+receipts and interpretation limits are consolidated in [HF validation](hf-validation.md).
+
+The separate one-faded-slot RS20 pilot is not included in the 112 episodes; its
+integration assertion passed in the final 13-group CTest run (68.01 s). Helper
+on the eikonal profile was rejected at numerical preflight and is unsupported
+geometry, not a natural-channel reception failure. The original 53 broad-appraisal
+episodes, competitor channel/capture (36) and replay (15) cases remain distinct
+and are not pooled with the HF campaigns.
+See the [HF experiment map](hf-experiments.md) for frozen questions and
+interpretation limits. The external framework exercises PSK31, Olivia, FT8 and WSPR as distinct
+services. Its ordinary FT8/WSPR deep-standard settings remain the default
+comparison tier; optional stronger settings are separate. The ordinary tier
+is not asserted to be the global best achievable decoder configuration.
 
 The integration manifest has ten episodes and a ten-minute total budget. Five
 short `channel` episodes touch the five requested environment families; the

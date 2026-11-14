@@ -34,6 +34,8 @@ SUBDIRECTORIES = {
     "cmake": {".cmake"},
     "tests": {".cpp", ".hpp", ".py"},
     "campaigns": {".json"},
+    "competitor": {".cpp", ".c", ".hpp", ".py", ".json", ".txt", ".md"},
+    "fixtures": {".hpp", ".json", ".txt", ".md"},
 }
 
 
