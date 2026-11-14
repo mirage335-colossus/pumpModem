@@ -1,0 +1,114 @@
+#pragma once
+
+#include "datapump/triad_modem_v3.hpp"
+#include <cstdint>
+#include <memory>
+#include <span>
+#include <stop_token>
+#include <string>
+#include <vector>
+
+namespace appraisal {
+using Complex = datapump::triad::v3::Complex;
+using Source = datapump::triad::v3::EmittedSource;
+
+// All times are physical seconds from sample zero. Initial path phase includes
+// the carrier phase at t=0. Geometric phase thereafter is -2*pi*RF*(tau(t)-tau(0));
+// residual Doppler is a separate, explicitly non-geometric phase contribution.
+struct Path {
+    double power = 1, phase_radians = 0;
+    double delay_seconds = 0, delay_rate = 0;
+    double residual_doppler_hz = 0, residual_drift_hz_s = 0;
+    double gaussian_width_2sigma_hz = 0;
+    bool frozen_gaussian = false;
+};
+struct Fade {
+    double first_seconds = -1, stop_seconds = -1, ramp_seconds = 0;
+    double voltage_floor = 0;
+};
+struct Resonator {
+    bool enabled = false;
+    double inductance_h = 0, capacitance_f = 0, resistance_ohm = 0;
+    double detuning_hz = 0, detuning_rate_hz_s = 0;
+};
+struct Noise {
+    // E|n|^2 in the declared normalized input plane; no realized-power scaling.
+    double white_variance = 0, colored_variance = 0, colored_corner_hz = 1;
+    double impulse_rate_hz = 0, impulse_rms = 0, impulse_decay_seconds = .01;
+    double tone_amplitude = 0, tone_hz = 0, tone_sweep_hz_s = 0;
+};
+struct Frontend {
+    double lowpass_hz = 0, clip_magnitude = 0;
+    double agc_target = 0, agc_attack_seconds = .01, agc_release_seconds = 1;
+    unsigned adc_bits = 0;
+};
+struct ChannelSpec {
+    double rf_hz = 1e6;
+    std::vector<Path> paths{{}};
+    Resonator transmitter;
+    Noise noise;
+    Frontend frontend;
+    Fade fade;
+    unsigned interpolation_half_width = 16;
+    std::size_t maximum_workspace_bytes = 64u * 1024u * 1024u;
+};
+struct ChannelReport {
+    std::uint64_t samples = 0, source_samples = 0, impulse_events = 0, clipped_samples = 0;
+    std::size_t workspace_bytes = 0;
+    long double input_energy = 0, signal_energy = 0, output_energy = 0, additive_noise_energy = 0;
+    double maximum_delay_seconds = 0, tail_seconds = 0, minimum_agc_gain = 1;
+};
+// A bounded, single-owner, forward renderer. It never rewinds or reseeds the
+// canonical Emission. Horizon is an evaluator/resource bound, never RX truth.
+class Channel {
+public:
+    Channel(Source, ChannelSpec, std::uint64_t seed, std::uint64_t horizon_samples);
+    ~Channel();
+    Channel(Channel&&) noexcept;
+    Channel& operator=(Channel&&) noexcept;
+    Channel(const Channel&) = delete;
+    Channel& operator=(const Channel&) = delete;
+    // Checks cancellation before/after a read and at most every 64 rendered
+    // samples, including source silence. A cancelled read throws; report().samples
+    // identifies the fully rendered prefix, whose state remains consistent.
+    std::size_t read(std::span<Complex>, std::stop_token = {});
+    const ChannelReport& report() const;
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+double resonator_tail_seconds(const Resonator&, double relative_amplitude = 1e-6);
+Complex resonator_transfer(const Resonator&, double offset_hz);
+double channel_tail_seconds(const ChannelSpec&, double horizon_seconds);
+
+struct WaveformSettings {
+    double rate_hz = 36, requested_bit_seconds = 16, sample_rate_hz = 960;
+    unsigned added_symbols = 10;
+    bool fhss = false;
+};
+struct PublicBounds {
+    double arrival_low_seconds = 0, arrival_high_seconds = .02;
+    double frequency_bound_hz = 0, atmospheric_hz = 0;
+    double spread_seconds = 0, doppler_width_hz = 0;
+    bool varying = false;
+};
+struct Scenario {
+    std::string id, family, evidence, provenance, assumptions;
+    ChannelSpec channel;
+    WaveformSettings waveform;
+    PublicBounds bounds;
+    double reference_cn0_db_hz = 32;
+    // Positive values bound the qualified numerical episode, measured from
+    // channel time zero. Zero supplies no finite-horizon qualification.
+    double numerical_horizon_seconds = 0;
+    // Informational physical link coordinates, only present where connected.
+    double reference_received_dbm = 0, reference_noise_dbm_hz = 0;
+    bool physical_level_connected = false;
+};
+std::vector<std::string> scenario_names();
+Scenario make_scenario(const std::string& id);
+// Power weights include the beams, with a fixed wide-beam normalization.
+// This is a frozen rotating-sphere hypothesis, not an ephemeris solver.
+std::vector<Path> lunar_paths(unsigned rings, unsigned azimuths, double limb_width_hz,
+                              double dish_m, double rf_hz, double bulk_delay_seconds);
+}

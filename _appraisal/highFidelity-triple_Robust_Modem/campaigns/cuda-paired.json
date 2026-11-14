@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "name": "cuda-paired-native-2026-11",
+  "purpose": "Bounded same-host CPU/CUDA configured-calendar comparison with identical seeds and public geometry. AWGN integration, disturbed HF reference, and unsuccessful Helper acquisition. Compare exact input hashes, actual stage routing, outcomes and allocation; no hardware capacity or sensitivity probability claim.",
+  "max_wall_seconds": 600,
+  "per_trial_wall_seconds": 90,
+  "max_trials": 6,
+  "max_samples": 5000000,
+  "episodes": [
+    {"id":"awgn-cpu","scenario":"awgn","mode":"receive","waveform":"reference","seed":7201,"cn0_db_hz":20,"backend":"cpu"},
+    {"id":"awgn-cuda","scenario":"awgn","mode":"receive","waveform":"reference","seed":7201,"cn0_db_hz":20,"backend":"cuda"},
+    {"id":"hf-disturbed-cpu","scenario":"hf-disturbed","mode":"receive","waveform":"reference","seed":7202,"cn0_db_hz":20,"backend":"cpu"},
+    {"id":"hf-disturbed-cuda","scenario":"hf-disturbed","mode":"receive","waveform":"reference","seed":7202,"cn0_db_hz":20,"backend":"cuda"},
+    {"id":"helper-noise-cpu","scenario":"hf-quiet","mode":"receive","waveform":"smoke","seed":7203,"cn0_db_hz":20,"backend":"cpu","helper":true,"control":"noise"},
+    {"id":"helper-noise-cuda","scenario":"hf-quiet","mode":"receive","waveform":"smoke","seed":7203,"cn0_db_hz":20,"backend":"cuda","helper":true,"control":"noise"}
+  ]
+}

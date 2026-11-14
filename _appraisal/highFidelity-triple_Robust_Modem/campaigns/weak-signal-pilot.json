@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "name": "weak-signal-pilot-2026-11",
+  "purpose": "Bounded failure-finding reception pilot across five environment families, paired physical outage/resume controls and a modest AWGN integration-duration contrast. The VLF outage episode uses short smoke geometry as a bounded outage-control check, not as a high-fidelity VLF outage result. No rare-event or natural-condition success probability is claimed.",
+  "max_wall_seconds": 900,
+  "per_trial_wall_seconds": 180,
+  "max_trials": 12,
+  "max_samples": 80000000,
+  "episodes": [
+    {"id": "vlf-reference", "scenario": "vlf-resonant", "mode": "receive", "waveform": "reference", "seed": 5489, "cn0_db_hz": 20},
+    {"id": "mf-groundwave", "scenario": "groundwave-1mhz", "mode": "receive", "waveform": "reference", "seed": 5490, "cn0_db_hz": 20},
+    {"id": "hf-groundwave", "scenario": "groundwave-30mhz", "mode": "receive", "waveform": "reference", "seed": 5491, "cn0_db_hz": 20},
+    {"id": "hf-skywave", "scenario": "hf-disturbed", "mode": "receive", "waveform": "reference", "seed": 5492, "cn0_db_hz": 20},
+    {"id": "eme-moon", "scenario": "eme-disk", "mode": "receive", "waveform": "reference", "seed": 5493, "cn0_db_hz": 10},
+    {"id": "vlf-short-outage-control", "scenario": "vlf-resonant", "mode": "receive", "waveform": "smoke", "seed": 5500, "control": "interior-fade", "cn0_db_hz": 20},
+    {"id": "mf-outage", "scenario": "groundwave-1mhz", "mode": "receive", "waveform": "reference", "seed": 5501, "control": "interior-fade", "cn0_db_hz": 20},
+    {"id": "hf-outage", "scenario": "hf-disturbed", "mode": "receive", "waveform": "reference", "seed": 5502, "control": "interior-fade", "cn0_db_hz": 20},
+    {"id": "eme-outage", "scenario": "eme-disk", "mode": "receive", "waveform": "reference", "seed": 5503, "control": "interior-fade", "cn0_db_hz": 10},
+    {"id": "awgn-duration-short", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 5510, "bit_seconds": 16, "cn0_db_hz": 20},
+    {"id": "awgn-duration-long", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 5510, "bit_seconds": 32, "cn0_db_hz": 20},
+    {"id": "awgn-declared-gap", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 5511, "control": "capture-gap", "cn0_db_hz": 20}
+  ]
+}

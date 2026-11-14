@@ -1,308 +1,295 @@
-# Proposed experiment protocol
+# Native high-fidelity appraisal protocol
 
-Prepared 13 November 2026. **Nothing in this protocol has been executed.**
-Numerical budgets below are proposed engineering pilot limits, not literature
-parameters, environmental probabilities or project-wide resource defaults.
-The first phase is research; the
-[literature index](../../_ref/highFidelity-triple_Robust_Modem/Astra-6/README.md)
-and [native options](../../_ref/highFidelity-triple_Robust_Modem/Astra-6/60-native-implementation-options.md)
-record the evidence and unresolved choices.
+Prepared 13 November 2026. The contained appraisal now has a native renderer,
+scenario catalog, executable, bounded campaign runner and four deterministic
+checks. The [model inventory](models.md) records implemented equations and
+limits; the [research reconciliation](research-reconciliation.md) maps them to
+the literature. This protocol governs runs and the claims that their results
+can support. Passing source tests verifies selected software behavior only.
 
-## Observable objectives
+## Questions and evidence layers
 
-The eventual suite should determine how the **existing complete native
-receiver** behaves under a small number of well-supported moderate, adverse
-and outage trajectories. Its initial purposes are to find missing physical
-mechanisms, discriminate channel representations and expose meaningful
-receiver failures. It cannot estimate worldwide availability from a few
-selected events, and it need not demonstrate decoding during a physical outage.
+Keep four claims separate:
 
-Keep four questions separate:
+1. **Implementation correctness:** does the C++ renderer implement its
+   declared transfer, noise and front-end rules with bounded state and resources?
+2. **Model fidelity:** does the selected rule reproduce a source observable or
+   independent measurement using the same estimator, bandwidth and reference
+   plane? Is its domain sufficient for the claim?
+3. **Modem behavior:** does the canonical native complete receiver receive,
+   erase, reject, physically complete and reacquire on the declared episode?
+4. **Computational capacity:** can the complete receiver sustain a configured
+   incoming stream and workspace on an identified processor?
 
-1. Does the generator implement the declared mathematical/physical model?
-2. Does that model reproduce independent measurements in its declared domain?
-3. Does the modem receive, erase, reject, complete and reacquire correctly on
-   those inputs under its public configuration?
-4. Can the complete receiver sustain the required stream and workspace on
-   the measured processor? This is a separate capacity question.
+Evidence for one item does not prove the next. A simulation outcome is
+conditional on its channel model. None of the current implementation's fixed
+references is a local environmental calibration. Unknown epoch, ordinal,
+timing and address acquisition is outside the receiver's current configured
+calendar contract. Capacity is a separate local same-stream measurement under
+the [Robust capacity policy](../../docs/robust-manual-capacity.md).
 
-## Scenario record before execution
+## Implemented model families and fidelity labels
 
-Every new scenario requires the following fields. Missing physical inputs may
-be deliberate design assumptions, but must be named as such. No universal
-default values are implied.
+Scenarios are declared in [`src/scenarios.cpp`](src/scenarios.cpp); each native
+receipt includes scenario provenance, assumptions, public receiver bounds,
+source/build identity, actual geometry, and reported channel/receiver work.
+The `reference` waveform preserves the canonical physical duration; `smoke`
+uses shorter integration geometry for fast wiring checks.
 
-| Group | Required fields |
-| --- | --- |
-| Identity | Stable scenario name/version; environment family; scientific question; measured/standardized/derived/proposed/extrapolated status |
-| Provenance | Source citation and page/table/figure; observation dates; geography; access level; source-data availability and license |
-| Geometry | TX/RX coordinates or explicit hypothetical path; distance; height/elevation; terrain/ground/water; EME station/lunar geometry and time |
-| Antennas | Full geometry/pattern/polarization, effective height or gain, efficiency and reference plane; matching/feed losses; uncertainty |
-| Frequency | RF carrier, occupied DATA and Helper bands, interference bands, all conversion/sample rates and equivalent filter bandwidths |
-| Environmental state | Relevant ionosphere/geomagnetic/solar, ground/sea/weather or lunar surface inputs; coupling and evolution; input model versions |
-| Channel | Transfer representation; bulk versus excess delay; phase/group-delay convention; Doppler center and width definitions; polarization; path birth/death |
-| Noise/interference | PSD/APD/event law, bandwidth and calibration plane; time/frequency/spatial correlations; burst waveform/duration; blocker positions |
-| Front end | Measured or explicitly synthetic filters, clocks, gain/AGC, clipping/compression, converter scale and recovery |
-| Randomness | Independent seed domains and their intentional correlations; generator version; episode-level independence and stationarity assumptions |
-| Receiver | Canonical source/binary fingerprints; waveform/key/ordinal/calendar/FEC; full public hypotheses; thresholds; arithmetic; resource settings |
-| Outcome | Primary endpoint; exact failure definitions; denominator; physical availability; scoring horizon; quiet-slot and reacquisition treatment |
-| Sampling | Strata, finite trial and time/work budgets; decision uncertainty; stopping rule; holdout separation; multiple-look handling |
-| Retention | Output paths, maximum retained data, purpose, cleanup trigger and unresolved failures |
-
-Ground-loop scenarios must specify whether they mean conductive earth
-electrodes or a closed magnetic loop. A “5.8 GHz EME” scenario must specify
-station antenna beams and lunar footprint; a whole-disk and a narrow-patch
-experiment cannot share an unlabeled scattering spectrum. A groundwave
-scenario must declare whether skywave, space wave or ducting is excluded,
-included, or an unresolved interpretation of its measurements.
-
-## Initial strata and minimum counterexamples
-
-The following is a coverage inventory, not a command to run a Cartesian
-product of all parameters. Select one scientifically ready branch first.
-
-| Family | Moderate/control | Supported adverse branch | Outage or discriminating alternative |
+| Family | Current reference case | Claim the current model can support | Critical limit |
 | --- | --- | --- | --- |
-| Sub-9 kHz vertical | Measured/derived antenna response and a specified quiet-path/noise episode | Lossy matching/ground, waveguide transition or observed burst noise, with compatible inputs | Detuning/front-end recovery or absent usable link; separate electrode/loop coupling |
-| 1 MHz groundwave | Homogeneous path with known ground and calibrated level | Mixed land/sea or terrain case; compatible local noise | Surface-only versus surface-plus-skywave; loss below detection |
-| 30 MHz nominal groundwave | Explicit smooth-earth/coastal reference | Measured sea/terrain/atmospheric variation | Competing space-wave/ducted explanation; no supported surface path |
-| HF skywave | Named stationary standard and measured quiet-mode control | One declared NVIS, auroral/polar, equatorial or transition episode | Mode loss/absorption; mismatched diffuse versus discrete generator |
-| 5.8 GHz EME | Declared station geometry, beams and reduced scattering kernel | Broader/asymmetric lunar scattering, pointing or clock error under a supported geometry | Beam-weighted patch versus whole disk; occultation/insufficient C/N0 |
+| Sub-9 kHz / 200 ft | `vlf-resonant`, `vlf-detuned` | Calculated high-Q antenna-envelope and conditional magnetic-noise sensitivity | No LWPC/LMP solve; independent electric and magnetic planes; no installation range or efficiency claim |
+| 1 MHz groundwave | `groundwave-1mhz`, `-sea`, `-night` | Reference-reproduced NTIA LFMF homogeneous magnitude, plus separately synthetic phase and competing ray | No measured local path, terrain or complex phase; night ray is a sensitivity choice |
+| 30 MHz groundwave | `groundwave-30mhz`, `-land` | Fixed LFMF magnitude comparison at model endpoint | Formal model endpoint does not establish actual surface-wave dominance or exclude direct/reflected/sky/duct paths |
+| 1–30 MHz skywave | `hf-quiet`, `hf-disturbed`, `hf-transition` | Finite continuous Gaussian-tap approximation to selected F.1487 statistical profiles and a constructed signal-absorption transition | Not a worldwide or long-episode population; alternatives such as non-Gaussian, slant, measured residual and mode-transition laws remain |
+| EME at 5.76 GHz | `eme-disk`, `eme-patch` | Bounded, beam-weighted, frozen monostatic delay–Doppler kernel with stated finite quadrature | Not the full retarded bistatic DE440 geometry or measured whole-disk 5.8 GHz channel; long-lag quadrature discrepancy remains |
+| Noise/equipment controls | `noise-bursts`, `frontend-overload` | Constructed colored/impulse and blocker/AGC/clipping/quantization paths | Not a site capture, lightning law or named radio's RF nonlinearity |
 
-Do not label an invented combination of each row's maxima a measured natural
-case. Such an adversarial combination can have a separate name and purpose,
-without an occurrence probability.
+The detailed parameters, units, energy conventions and numerical acceptance
+limits are in [models.md](models.md). An “adverse,” “weak,” or “outage” label
+names the specified conditional model; it does not imply environmental
+probability. Do not combine maxima from unrelated references and call the
+result a measured natural episode.
 
-## Stage A: cheap deterministic checks
+## Entry points and bounded campaign files
 
-Before a full receiver run, check the new renderer with bounded inputs:
+Run from the repository root. The standalone wrapper configures/builds under
+the appraisal subtree and reads any shared compiler cache in read-only mode:
 
-- Exact bypass, constant gain and constant delay; explicit no-effect controls.
-- A delayed impulse and tone for interpolation, gain, phase sign and tail
-  extent; distinguish geometric delay-derived Doppler from added residuals.
-- Two known paths for carrier correlation and a frequency-selective notch;
-  summed-carrier output must equal the linear model's composite response.
-- Continuous state under different chunk sizes, source silence, read limits
-  and retries; no reseeding or slot-boundary phase reset.
-- A known moving nondispersive path with consistent envelope delay and carrier
-  phase; a separate dispersive transfer control if that model is used.
-- Calibrated noise power after filtering; finite-band impulse energy and
-  event-duration checks; no accidental per-window signal normalization.
-- Clipping/filter/AGC recovery using the declared order, with wanted signal
-  absent and with a strong blocker.
-- Declared resource rejection and correct ownership/tail bounds.
+```sh
+./_appraisal/highFidelity-triple_Robust_Modem/build.sh test
+```
 
-These are proposed acceptance checks for new code. Existing production source,
-channel and stream tests should be reused where they already test the contract.
-Do not copy their implementation or add redundant tests merely to increase a
-test count. If no new code is written, these checks are not claimed as run.
+The final post-correction appraisal run passed all four CTest groups (4/4) in
+9.35 seconds; the runner group covers 20 unit cases. A separate canonical
+Triad run passed 32/32 checks in 64.90 seconds. Its contained test harness
+forced inclusion of a header missing from the pre-existing CPU-only canonical
+probe; the original setup failure is preserved. This was a test-harness
+workaround, not a modem source change. Smoke, exploratory AWGN, weak-signal,
+RunPod, EME-slot and VLF results are recorded in [validation](validation.md),
+with old three-quiet-opportunity outcomes separated from current
+two-quiet-slot evidence. None implies environmental qualification.
 
-## Stage B: validate the channel independently of the modem
+The executable's supported modes are:
 
-First reproduce one source observable for the selected regime, processed with
-the source's bandwidth, estimator, threshold and averaging. A power-delay
-profile must not be compared to a different RMS/support definition. Treat
-sounder non-detections and saturation as censoring or availability evidence,
-not convenient missing rows.
+- `--mode plan`: prepare canonical source/calendar/receiver settings and print
+  full physical horizon, sample-budget fit, actual geometry, public bounds and
+  provenance. This is the required cheap preflight for long cases.
+- `--mode channel`: render/report a bounded source span without modem scoring.
+- `--mode receive`: run a continuous stream through the canonical native
+  receiver. Transport EOF does not create physical completion.
+- `--mode slot`: receive only the complete first public DATA observation; it
+  cannot establish message completion or scored quiet-slot behavior.
+- `--mode oracle`: compare known binary waveforms for eligible Helper-off AWGN
+  or EME scenarios with white noise, and calculate an ideal known-signal
+  presence probability at the receiver's design false-alarm target. Both
+  calculations assume known signal/channel details and omit blind acquisition,
+  realized false-alarm measurement and complete reception.
 
-Use a measurement episode or geometry held out from calibration. Depending on
-the regime, compare received level, frequency response, delay–Doppler structure,
-polarization, cross-frequency coherence, fade level-crossings/durations,
-noise APD/PSD/burst statistics and outage transitions. Do not demand every
-observable for a model that only claims a limited subproblem; do not extend
-that limited claim to the whole environment.
+Use `--list` to inspect the full scenario records and `--help` for the options
+on the compiled binary:
 
-When raw measurements are unavailable, reproducibility of a published figure
-or standard reference is useful but weaker. Label the model “reference
-reproduction” or “physical/stochastic hypothesis,” not empirically validated.
-If two candidate models fit the available observables but disagree on modem
-outcomes, retain model uncertainty and identify the measurement that would
-distinguish them. Do not select the one that gives better modem performance.
+```sh
+_appraisal/highFidelity-triple_Robust_Modem/.build/bin/high_fidelity_appraisal --list
+_appraisal/highFidelity-triple_Robust_Modem/.build/bin/high_fidelity_appraisal --mode plan --scenario vlf-resonant --waveform reference
+```
 
-## Family-specific validation procedures
+`run.py` accepts a frozen JSON campaign and starts one native process per
+episode. It validates inputs and receipt identity, bounds per-trial and total
+wall time, sample count, each output stream (8 MiB), and total retained
+campaign output (256 MiB). Python does not generate waveforms or perform
+channel/receiver DSP. Example smoke invocation:
 
-These proposed procedures supplement Stages A and B. They are not executed
-results or instructions to run a full campaign. Select only those needed for
-the first declared model and retain the bounded sampling rules below.
+```sh
+python3 -B _appraisal/highFidelity-triple_Robust_Modem/run.py \
+  --probe _appraisal/highFidelity-triple_Robust_Modem/.build/bin/high_fidelity_appraisal \
+  --campaign _appraisal/highFidelity-triple_Robust_Modem/campaigns/integration-smoke.json
+```
 
-### Groundwave validation
+The integration manifest has ten episodes and a ten-minute total budget. Five
+short `channel` episodes touch the five requested environment families; the
+remaining controls compare smoke AWGN, noise-only, input EOF and Helper-on
+reception. It is harness coverage. It cannot be used for reference-waveform
+sensitivity or physical-model calibration.
 
-Scientific basis: [20-groundwave-1-and-30mhz](../../_ref/highFidelity-triple_Robust_Modem/Astra-6/20-groundwave-1-and-30mhz.md).
+The separate 12-episode `weak-signal-pilot.json` uses the reference waveform,
+one wanted episode for each environment family, four selected interior
+fade/resume cases, a paired AWGN duration contrast and a capture-gap control.
+It declares a 15-minute aggregate budget, 180 seconds per trial, and
+80,000,000 samples per trial. These are bounded pilot settings, not universal
+limits or a receiver capacity result. The `cn0_db_hz` episode override changes
+the native white-noise term at the stated normalized DATA reference; it does
+not change the scenario's colored/impulse terms or assert a physical RF power
+budget. All 12 pilot episodes ran: both groundwave wanted cases, disturbed HF,
+and both AWGN duration cases completed; the full-message EME wanted case
+had no physical completion at 10 dB-Hz, while VLF wanted and EME outage hit their wall
+limits. This is failure-finding evidence, not a success probability or current
+receiver qualification. The older appraisal observation horizon included an
+unnecessary third quiet opportunity; this was a driver/horizon correction,
+not a `CompleteStreamReceiver` algorithm change.
 
-Use a minimal validation ladder: (i) reproduce the source’s homogeneous curves and unit conventions; (ii) verify limits against a free-space path, perfect-conductor limit, and frequency/height changes; (iii) compare shoreline recovery with the measured 1.242-MHz case and published mixed-path curves; (iv) compare 30-MHz near-coast and terrain behavior to NTIA/Hansen/Casciato evidence while distinguishing observation from analytic field; (v) measure new local paths using a calibrated transmitter, receiver, antenna patterns, noise floor, GPS/range, surface/meteorological observations, and multiple time windows; (vi) only then map received distributions into modem acquisition, sustained decoding, and physical message completion. Never call an ITU prediction, component parity, simulated fade profile, or one favorable measured link a high-fidelity channel qualification.
+The corrected VLF full-message plan is a material admission limit: at 1,920
+samples/s the three-bit `e` fixture occupies a **64,806,069-sample,
+five-public-slot complete horizon**, including two scored quiet slots. Its
+single DATA bit lasts 5,760.4 seconds. CPU and CUDA one-slot attempts at C/N0=20
+dB-Hz each accepted 12,966,069 samples but timed out before scoring any slot,
+after 120 and 180 seconds respectively. CUDA executed 2,533 FFTs and
+331,415,552 FFT rows without scoring a DATA slot. These are censored compute
+observations, not sensitivity failures or a VLF floor. A previous
+pre-correction CPU full-horizon attempt also timed out, with six slots and
+77,766,069 samples. Preserve old and corrected geometries separately; do not
+shorten the bit, omit silence/quiet slots, or speed up physical time to force a
+pass.
 
-For both frequency families, report the complete configuration, input waveform and channel seed, path geometry, surface layers/properties, antenna type/height/polarization, measured/reference field or received power, noise/interference bandwidth and level, realized fades, decoder outcome, and uncertainty. Preserve a no-propagation-impairment control and a mechanism-isolated control for each added effect. A path-loss result should not be compared with a decoder output unless source power and antenna calibration are matched.
+Any explicit `cuda`, `vulkan` or `gpu` request reports execution/fallback. A
+compatible build flag is not device evidence, and CPU work cannot be called GPU
+work. The local build disables CUDA and Vulkan. A separate RunPod RTX PRO 6000
+Blackwell Server Edition run verified CUDA execution on three matched CPU/CUDA
+episode pairs, but CUDA was slower in all three and sustained utilization was
+not measured. This does not qualify speedup or capacity. Include setup, upload,
+build, execution and retrieval in future cost and turnaround decisions; do not
+rent merely to run cheap deterministic tests.
 
-### Skywave validation
+## Channel validation before receiver interpretation
 
-Scientific basis: [30-skywave-1-to-30mhz](../../_ref/highFidelity-triple_Robust_Modem/Astra-6/30-skywave-1-to-30mhz.md).
+The native tests currently exercise deterministic transfer and state behavior,
+scenario tuples, mathematical bounds, source identity, and a small complete
+receiver path. The lunar endpoint-dot-product cache reuses the exact two
+neighboring interpolation endpoints for cells sharing an initial delay; it
+retains each cell, delay trajectory and phase, differing from direct
+interpolation only by floating-point operation order. For a bounded 4-second,
+1,920-sample/s, 4,096-cell component case, direct rendering took 1.722 seconds
+and cached rendering 0.681 seconds, while workspace rose from 2.61 to 4.81
+MiB. A 16-single-path comparison differed by less than `3e-14`. These timings
+exclude canonical source preparation and receiver work; they support this
+specific exact reuse optimization, not a complete-message or general EME
+performance claim. Extend validation only when a selected question needs it.
+At a minimum, a channel report should address the observable used to justify it:
 
-Validation begins with analytic/unit controls: a single unshifted tap, a
-constant-shift tap with zero spread, a zero-mean Watterson tap with declared
-2σ width, two static delayed rays, and a known deterministic drift. Estimate
-the output channel statistics using the same observables that the empirical
-source used; verify the distinction between the input parameter and measured
-finite-record estimate. Then use matched baseline/candidate channel seeds and
-identical transmit waveform, receiver noise, search bounds and resource limits.
-For nonstationary hypotheses, create a short discriminator where a constant
-shift and a shaped drift have matched mean shift but different within-window
-trajectory; a receiver that succeeds only on the fitted constant is not
-validated for the drift family. For O/X or multipath, preserve actual mode
-delay and power and add a one-path-removal or wrong-polarization control. For
-absorption, reduce the correct path/mode power from a declared path-loss model
-and include a “no surviving skywave” unavailable case; do not call that a
-fading-model pass.
+The current 65,536-cell Doppler-aligned `eme-disk-slot` and `eme-patch-slot`
+also have tested sampled projected-variance/covariance comparisons at 0, ±5,
+and ±15 Hz for the 88 Hz profiles; numerical results and refinement limits are
+in [models](models.md). The 164 Hz severe case remains an inadequately converged
+old finite-grid control, with no qualified severe-width renderer. A bounded CPU episode at
+C/N0=30 dB-Hz received the first 26.4-second DATA observation as bit 0 at
+29.466 seconds physical time. Rendering 56,575 output samples took 301.462
+seconds; receiver control/wait took 2.196 seconds, for 303.713 seconds total.
+This validates a single selected DATA observation, not complete-message
+reception, a sensitivity floor, or receiver throughput. A matched C/N0=10
+episode on the same 65,536-cell path was ambiguous despite high ideal-knowledge
+detectability; see the precise metrics and limits in [validation](validation.md).
+The older 4,096-cell bright EME case at the same nominal
+C/N0 physically completed but decoded bit 1 and message `a` instead of `e`;
+these different quadratures were not a matched comparison, so this result does
+not by itself establish the cause. Its known-channel/known-waveform selected
+slot oracle had squared distance 19,595.898, signal energies about 24.6 seconds
+and noise variance 1.92, yielding an ideal binary error below the floating-point
+representation's range. That oracle omits blind acquisition and receiver false-alarm
+constraints; it is not a complete-reception bound.
 
-For every family, use paired wanted DATA/Helper over the same propagation
-realization where this matches the operating signal chain, plus noise-only,
-incorrect-address, competing-bit, structured-interference and physical quiet
-completion controls. Report reception, erasure, wrong-bit and outage outcomes
-separately. A low SNR or severe impairment can alter admission without proving
-which physical mechanism caused the failure. Where uncertainty is the point,
-use independent realizations or event blocks; repeated processing of one
-capture is not an independent channel trial.
+- Path models: gain/power, phase convention, delay/tail support, frequency
+  response and delay–Doppler joint structure.
+- Stochastic taps: stationary initialization, spectrum-width convention,
+  covariance versus time/frequency lag, finite-record uncertainty, and
+  cross-frequency dependence.
+- Noise/interference: separate signal and noise energies, calibrated PSD and
+  APD, correlation and event intervals, with front-end recovery separately
+  measured.
+- EME quadrature: input surface law, beam and polarization, integrated power,
+  delay and Doppler observables, grid refinement and the declared long-lag
+  discrepancy.
+- VLF antenna envelope: resonance/detuning and turn-on/turn-off limits against
+  the declared circuit; this does not validate propagation or a complete
+  physical antenna installation.
 
-### EME validation
+Where possible, compare a held-out measurement episode or geometry. Keep its
+reference plane, detection threshold, estimator, bandwidth and censoring
+convention. When measurements are unavailable, label the result a mathematical
+check, standard/reference reproduction, or synthetic hypothesis. A published
+power curve does not supply phase; a radar footprint does not supply a
+whole-disk communication channel; and a simulation-to-simulation match is not
+field validation. The [research reconciliation](research-reconciliation.md)
+preserves the relevant contrary findings.
 
-Scientific basis: [40-earth-moon-earth-5p8ghz](../../_ref/highFidelity-triple_Robust_Modem/Astra-6/40-earth-moon-earth-5p8ghz.md).
+## Receiver endpoints and physical truth
 
-1. **Geometry:** compare center delay with ephemeris and 2R/c, disk support with 2a/c, and Doppler with numerical derivative of the full two-leg path. Check self-echo and separated stations at rise/transit/set. This does not validate scattering or receiver performance.
-2. **Radar statistics:** compare published maps and 4/13 cm models qualitatively; for the 7.209 GHz bistatic study, match only its measured region, footprints, albedo, CPR and spectrum width. Do not fit a global 5.8 GHz parameter to one crater or link.
-3. **Target-frequency measurement:** collect timestamped 5.8 GHz I/Q plus TX power, patterns, pointing, station coordinates, noise temperature, polarization, weather, solar separation/activity and noise-only records. Calibrate clocks/oscillators and remove cable/IF offsets. Own-echo trials do not validate interstation EME.
-4. **Matched discrimination:** estimate delay/Doppler, power-delay support, spectrum, coherence/fade duration, frequency correlation, polarization and SNR uncertainty. Compare Candidate A/B on identical sessions/configuration; hold out sessions, not adjacent packets.
-5. **Adverse states and gate:** sample lunar range/elevation/beam coupling and locally measured rain/high-noise conditions. Preserve conditional distributions rather than combining unrelated extremes. Keep the simplest model predicting held-out statistics and adverse tails within uncertainty. A synthetic decode is not field sensitivity, availability or unknown-waveform acquisition evidence.
+Each wanted message is produced by native `Emission` and the canonical bounded
+message interface. The channel transforms the complete composite source,
+including DATA, Helper when enabled, silence and delayed tails. `CompleteStreamReceiver`
+receives only samples and declared validity, plus public profile/calendar,
+receiver noise and resource configuration. The evaluator alone knows the
+transmitted truth and final observation horizon. No source bit, future fade,
+known source endpoint or transport status is disclosed to score or stop the
+receiver.
 
-### Front-end validation
+Keep these outcomes distinct: correct complete message; wrong bits or false
+DATA; erasure/ambiguous evidence; integrity rejection; accepted truncation;
+physical outage; premature completion during a fade; valid quiet-slot
+completion; missed/delayed completion; reacquisition after resumed DATA;
+invalid capture gap; resource/workspace rejection; and runner timeout. The
+production two-scored-quiet-slot rule determines completion. A message ending
+inside a physical fade is not known-complete; if transmission resumes, retain
+the interior slots as erasures as required by the modem contract.
 
-Scientific basis: [50-noise-interference-and-frontends](../../_ref/highFidelity-triple_Robust_Modem/Astra-6/50-noise-interference-and-frontends.md).
+Paired controls should isolate the mechanism: identity/AWGN, noise-only,
+wrong-key or wrong-ordinal, Helper off/on, physical outage while valid noise
+continues, capture invalidity, genuine final quiet and EOF without quiet. Do
+not multiply a Cartesian product of every control. Use the smallest counterexample
+that can distinguish the question under study. Wrong-key and wrong-ordinal
+controls test false acceptance; they do not qualify unknown-identity acquisition.
 
-These are proposed controls, not observed pass criteria for a particular hardware platform.
+## Sensitivity, duration and statistical claims
 
-1. **Calibrate the chain before the site survey.** Measure receiver noise/system temperature and gain versus frequency using calibrated noise or hot/cold references. Record impedance, filters, cable loss, LNA, ADC rate/bit depth/full scale and decimation. Inject known tone/noise at antenna and receiver inputs to locate excess noise/loss.
-2. **Measure linearity with and without blockers.** Use a two-tone intermodulation test plus a strong out-of-band blocker and weak in-band reference. Measure compression, spurious-free dynamic range and in-band desensitization at the actual gain/filters. Repeat at each front-end gain and attenuation setting. Search for products that move when blocker frequency or level changes; this falsifies an additive-noise-only explanation.
-3. **Preserve ADC/AGC evidence.** Save raw samples and log AGC/gain changes, peak/RMS, clipping counts, crest factor and full-scale occupancy. Run fixed-gain repeats. Bursts appearing only after AGC changes, or a baseline tracking gain rather than antenna orientation, indicate an instrument/control effect until resolved.
-4. **Record spectra and tails at matched bandwidth.** Report equivalent noise bandwidth, APD/CCDF thresholds, event rate/inter-arrival, pulse widths, autocorrelation and spectral occupancy. Give uncertainty for tails and account for temporal dependence. A flat averaged PSD alone does not establish white noise.
-5. **Use controls that separate causes.** Rotation/crossed loops test direction; termination tests receiver floor; antenna-port injection tests calibration; choke/distance and local device on/off test coupling; a synchronized reference receiver tests common events. Keep transmitter-off and wrong-address/key controls under matched RF conditions so bursts cannot be scored as the target.
-6. **Keep channel and interference distinct.** For sky wave, estimate path delay/frequency from probes/controls and assess blinded holdouts. For ground wave/EME, match waveform, pointing, filters, gain, calibration, clocks and time window. Separate intended-signal detection, false acceptance on null/wrong-address trials and robustness to measured interference. Higher estimated noise alone is not failure; replaying an unblinded waveform is not independent evidence.
+Declare the sensitivity endpoint before observing outcomes. For example, define
+a target complete-message probability and estimate the conditional required
+input level only when independent episode sampling and a fixed inferential
+design are available. A receiver sensitivity sweep can otherwise report only
+per-case completions and failures. Pair a level curve with a matched ideal or
+reference receiver where possible, and sweep near the observed transition
+rather than insist the real channel follows a smooth AWGN curve. Fading outage,
+identifiability loss and finite-block code thresholds can create real cliffs.
 
-### Band-specific measurement controls
+For a fair energy trend, freeze the transmitted native source, bit/slot
+geometry, channel episode, receiver hypotheses, integration time and noise
+reference plane. Change only the declared wanted-energy or noise variable. Do
+not per-window normalize the realized channel. Report actual transmitted and
+received signal-energy sums, additive-noise energy, normalized reference,
+completion outcome, time-to-completion including failures/timeouts, receiver
+work and resource admission. A hypothetical bound is not delivered modem
+sensitivity.
 
-Scientific basis: [noise, interference and front ends](../../_ref/highFidelity-triple_Robust_Modem/Astra-6/50-noise-interference-and-frontends.md).
+The current campaigns have fixed, intentionally diagnostic seeds. Their cases
+are paired comparisons, not an iid sample of nature. Bits, bursts, quiet slots
+and repeat timing runs within an episode are dependent. The smoke and weak-signal
+manifests define **no confirmatory stratum**, so the campaign runner emits no
+binomial confidence interval for them. If a conditional synthetic success
+probability is needed later, predeclare a homogeneous stratum, independently
+sampled complete episodes and a fixed sample count with the source's exact
+Clopper–Pearson decision rule. Fable 86 describes a proposed fixed 41-episode
+confirmation for one particular 0.8-versus-0.95 question; it is not a default
+requirement. Never extend fixed (n) after looking at outcomes or pool unlike
+families.
 
-**Sub-9 kHz antenna comparisons.** For a fair comparison, define each antenna's transfer function and loss/noise budget, record height and azimuth, and share a receiver calibration path. Orthogonal crossed loops help distinguish an orientation null from a source minimum; rotate the antennas through predeclared azimuths. Measure preamplifier/tuner noise at the antenna terminals with calibrated source impedance. Test active matching stages with realistic blockers. Record common-mode current; treat a feedline choke as a diagnostic. Compare open/capped/terminated states only with known impedance and bandwidth.
+The script's total-wall limit includes every episode in the frozen manifest.
+An execution `time_limit`, `resource_limit`, unavailable backend, invalid
+receipt, incomplete sample or runner timeout remains visible in outputs; none
+is silently counted as a successful communication trial. Preserve failed
+inputs and original output until the current question is resolved.
 
-**MF/HF site characterization.** For each site/band, retain calibrated spectra/APDs, local source inventory, antenna pattern/polarization, UTC/local time, solar/ionospheric state and weather/lightning covariates. Use quiet-band scans and controlled source on/off or distance tests to separate local from distant noise. Repeat across day/night and seasons. A 1 MHz vertical and 30 MHz resonant antenna have different field-to-voltage responses. For ground wave, record ground condition and path geometry; label sky-wave receptions by path/state. Preserve a no-signal series for each condition.
+## Computational-capacity boundary and artifact lifecycle
 
-**5.8 GHz EME noise controls.** Report clear-sky noise and Moon-on-beam change separately. Do not substitute a 3.2 GHz/9.6 cm lunar result for 5.8 GHz. Compare same-night/elevation/gain off-Moon and Moon pointings; use noise injection or hot/cold references to check gain stability. Record terminated input, cold/blank sky, lunar disk, ground and Sun-safe scenes where practical. Keep oscillator, sample-clock and Doppler errors separate from random receiver noise.
+A long simulated episode can be compute-expensive, but its wall time includes
+source generation, propagation rendering and receiver work. It cannot by itself
+establish CPU service. A capacity claim needs identified local hardware and a
+bounded same-stream backlog measurement of complete receiver work, with
+renderer cost accounted separately. Keep `W=2*H`, full memory ownership,
+explicit user limits and the project's staged validation contract. Neither
+multiple independent episodes nor a GPU forecast is local CPU capacity.
 
-## Stage C: a bounded communication pilot
-
-Proposed first pilot for **one selected environmental stratum**:
-
-- Two independently generated or independently selected event trajectories
-  at each of three states: moderate, observed-adverse and outage/transition.
-- At most two predeclared received-level settings per trajectory: a control
-  and a weak setting chosen from existing applicable native evidence or an
-  explicitly labeled feasibility calculation. Total: at most **12 wanted
-  complete-receiver trials** for that stratum.
-- At most six companion negative/control trials chosen to cover noise-only,
-  wrong key/ordinal, structured interference, physical quiet and resumed DATA
-  after a fade. Select the controls that actually exercise the uncertainty;
-  do not automatically multiply every combination.
-- Use the smallest bounded canonical message/stream that includes acquisition,
-  DATA, relevant channel evolution and genuine quiet-slot completion. A case
-  whose physical episode cannot be represented this way remains unqualified;
-  shortening time while keeping only a few favorable samples is not equivalent.
-- Freeze the model, thresholds and held-out episodes before inspecting the
-  pilot outcomes. If a receiver change is later compared, use matched inputs
-  and label the paired nature of the data.
-
-This is a **failure-finding pilot**, not a statistically precise reliability
-claim. It is not enough to establish a small error probability, a tail
-percentile or a broad capacity pass. It may stop immediately on a decisive
-model/implementation inconsistency. Otherwise stop at the predeclared budget,
-report uncertainty, and choose the smallest next experiment that could change
-the conclusion. No automatic trial expansion or prolonged campaign is implied.
-
-Before running, estimate the cost using one cheap applicable native case and
-declare a finite wall-time/work budget appropriate to the selected geometry.
-If even the initial complete trial is too expensive under the project testing
-contract, perform the nearest valid channel/component discriminator and label
-the missing full-receiver outcome. Do not replace it with an unqualified
-abbreviated capacity claim or a multi-day run.
-
-For any later probability study, predeclare a population and an appropriate
-fixed-sample or sequential inference method. Correlated slots, reused noise
-and repeated timings cannot be counted as independent successes. Rare-event
-biasing requires valid weights and support; otherwise it remains adversarial
-stress testing. See the [methodological review](../../_ref/highFidelity-triple_Robust_Modem/Astra-6/00-evidence-and-modeling-method.md).
-
-## Outcomes, especially physical completion
-
-Keep a chronological truth timeline independent of the receiver. Never give
-the receiver the realized path, transmitted bit, stopping point or hidden
-environmental state as an undeclared prior.
-
-Record at least:
-
-| Outcome | Required interpretation |
-| --- | --- |
-| Correct complete message | All selected message content recovered, integrity status recorded, completion from actual scored quiet |
-| Erasure/ambiguous slot | No bit assertion; preserve whether later DATA resumes and how codec state handles the gap |
-| Wrong bit or false DATA | Separate wrong-bit discrimination from admission on noise/interference/wrong address |
-| Premature completion | Receiver completed while physical transmission continued, including an outage hiding the signal |
-| Integrity rejection | Payload was not accepted; not interchangeable with successful communication |
-| Accepted truncation | Shorter accepted message where permitted by the format; compare to original transmitted content |
-| Missed/delayed completion | Real physical quiet was present but completion was absent or delayed |
-| Reacquisition/suffix behavior | State and message outcome when energy returns after a gap or apparent completion |
-| Resource/backlog failure | Actual native admission/backpressure/capacity result, not a channel decoding statistic |
-| Physical outage | No usable wanted signal under the declared geometry/level; report availability and safe receiver behavior separately |
-
-The most important time-placement controls move an otherwise identical deep
-fade across Helper, initial DATA, interior DATA, the final DATA interval and
-the two quiet-scoring apertures. Keep these as a targeted discriminator, not
-an exhaustive grid. A validity-marked capture gap is a separate control from
-a valid noise-only observation during a propagation fade.
-
-Two scored quiet slots remain the production physical-completion contract.
-The experiment must not replace them with packet length, transport EOF,
-timeout, local quota or known simulated TX length. It must also avoid counting
-tail energy as new DATA or truncating tails to make completion easier. Preserve
-the global keyed ordinal across codec resets.
-
-## Stage D: computational claims, only if requested by the investigation
-
-Communication success does not establish real-time capacity. When native
-receiver changes or capacity questions enter scope, follow the maintained
-[testing stages](../../docs/building.md#testing-stages),
-[complete-work contract](../../docs/robust-manual-capacity.md) and
-[CPU allocation](../../docs/development.md#receiver-cpu-allocation).
-Run `./build.sh test triad` before a new manual calibration. Do not edit or
-reuse manual-case outcomes merely because an environmental model is new.
-
-Keep full `W=2*H` receiver software capacity and exact explicit limits.
-Separate channel-renderer cost, source preparation, receiver work and end-to-end
-turnaround. Measure same-stream productive service over declared backlog
-intervals, including unsuccessful Helper, all public hypotheses, fine search,
-tracking, quiet completion, reacquisition and recurring preparation. Report
-actual hardware, executed arithmetic, fallback reasons and memory ownership.
-Simulator slowness and multiple parallel independent simulations are not the
-receiver's hardware ceiling.
-
-No expensive CPU/GPU run, cloud expenditure or physical transmission is part
-of this research deliverable. No communication or capacity trial has passed
-by virtue of this protocol being written.
-
-## Reporting and containment
-
-Future source/configuration manifests, tests and concise results stay under
-this appraisal directory; research interpretation and literature updates stay
-under the requested `_ref/.../Astra-6` directory. Link the canonical production
-code, do not copy it. Add only necessary isolated build integration when an
-implementation is selected and reviewed.
-
-A report should state executed, failed, inconclusive, unavailable and not-run
-coverage separately. Retain negative controls and original failures when a
-repair passes. Model agreement, code correctness, field realism, modem
-reliability and processor capacity are different claims. A more detailed
-implementation or a better algorithm remains possible at every stage.
+All generated build files, native receipts and campaign reports are contained
+under ignored `_appraisal/highFidelity-triple_Robust_Modem/.build/` and
+`local-evidence/`. Keep a raw campaign only for its open sensitivity,
+regression or diagnosis question. When resolved, distill the conclusion,
+source identity, assumptions, failures and unresolved limits into the existing
+appraisal evidence, then remove raw outputs. Retain no solver source copies,
+redundant campaigns or obsolete implementations.
