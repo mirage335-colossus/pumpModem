@@ -1,6 +1,7 @@
 #pragma once
 
 #include "appraisal/hf_public_statistics.hpp"
+#include "appraisal/hf_phase_filter.hpp"
 #include "appraisal/hf_phase_refinement.hpp"
 #include "triad_receiver_driver.hpp"
 #include "triad_probe_json.hpp"
@@ -66,6 +67,14 @@ HfPublicTimingFrontier select_hf_refinement_timing(
 std::array<double,2> combine_hf_public_phase_evidence(
     const std::array<double,2>& old_family,const std::array<double,2>& new_family);
 
+struct HfPublicPhaseFilterResult {
+    HfPhaseFilterPlan plan;
+    std::array<double, 2> walk_bit_log_e{};
+    std::optional<std::array<double, 2>> sticky_bit_log_e;
+    std::size_t workspace_reserved_bytes = 0;
+    double wall_seconds = 0, summed_worker_wall_seconds = 0;
+};
+
 struct HfPublicSearchResult {
     HfPublicStatisticsPlan plan;
     std::vector<datapump::triad::v3::receiver_detail::FineCoordinate> timing;
@@ -85,6 +94,7 @@ struct HfPublicSearchResult {
         -std::numeric_limits<double>::infinity(),-std::numeric_limits<double>::infinity()};
     std::array<double,2> combined_phase_bit_log_e = new_phase_bit_log_e;
     HfPhaseRefinementWork refinement_work_bound, refinement_work;
+    std::optional<HfPublicPhaseFilterResult> phase_filter;
     std::size_t retained_statistics_workspace_bytes=0;
     double refinement_wall_seconds=0, refinement_summed_worker_wall_seconds=0;
     std::size_t workspace_bytes = 0, basis_workspace_bytes = 0;
@@ -104,6 +114,8 @@ struct HfPublicSearchResult {
 // disable the prior. The simulator caller separately verifies the noise model.
 bool hf_public_search_supported(const datapump::triad::v3::ReceiverConfig&,
                                 const datapump::triad::v3::ReceiverSlotPlan&, bool phase_refinement = false);
+bool hf_public_phase_filter_supported(const datapump::triad::v3::ReceiverConfig&,
+                                      const datapump::triad::v3::ReceiverSlotPlan&);
 // Pure worst-case selected-timing quote, excluding input and worker stacks.
 // All persistent cache, lane scratch and temporary result storage are charged.
 std::size_t hf_public_search_workspace(const datapump::triad::v3::ReceiverConfig&,
@@ -118,7 +130,8 @@ HfPublicSearchResult score_hf_public_search(
     const datapump::triad::v3::receiver_detail::FinePreparation&, unsigned workers,
     std::size_t workspace_limit_bytes, bool full_timing, bool close_small_arrival_grid, bool include_affine,
     std::stop_token, datapump::triad::v3::receiver_detail::ReceiverExecutor&,
-    bool use_native_pair_render = true, bool phase_refinement = false);
+    bool use_native_pair_render = true, bool phase_refinement = false, bool phase_filter = false,
+    bool phase_filter_sticky = false);
 
 // Shadow detector only: no native bit, quiet, codec or completion decision.
 // The caller admits a complete, valid raw-IQ slot and verifies the simulator
@@ -135,6 +148,7 @@ datapump::triad::probe::Json diagnose_hf_public_search(
     const datapump::triad::v3::ReceiverSlotPlan&, const datapump::Crypto&,
     std::span<const datapump::triad::v3::Complex>, unsigned workers,
     std::size_t total_memory_limit_bytes, bool full_timing, std::stop_token,
-    HfPublicSearchResult* search_result = nullptr, bool phase_refinement = false);
+    HfPublicSearchResult* search_result = nullptr, bool phase_refinement = false, bool phase_filter = false,
+    bool phase_filter_sticky = false);
 
 } // namespace appraisal

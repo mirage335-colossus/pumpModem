@@ -1,5 +1,6 @@
 #include "appraisal/hf_public_diagnostic.hpp"
 #include "appraisal/hf_public_receiver.hpp"
+#include "datapump/triad_stream_receiver.hpp"
 #include "triad_receiver_coarse.hpp"
 #include "triad_receiver_executor.hpp"
 
@@ -35,6 +36,12 @@ std::uint64_t number(const Json& value,const char* key) {
     return static_cast<std::uint64_t>(signed_value);
 }
 bool boolean(const Json& value,const char* key) {return std::get<bool>(field(value,key).value);}
+bool has(const Json& value,const char* key) {return std::get<Json::Object>(value.value).contains(key);}
+std::array<double,2> bits(const Json& value,const char* key) {
+    const auto& pair=std::get<Json::Array>(field(value,key).value);
+    check(pair.size()==2,"HF public report does not contain paired bit likelihoods");
+    return {std::get<double>(pair[0].value),std::get<double>(pair[1].value)};
+}
 
 struct Fixture {
     ReceiverConfig config;
@@ -446,11 +453,129 @@ void telemetry_cannot_gate_evidence(const Fixture& f) {
     check(number(slots[0],"total_fft_row_stages_including_refinement")==number(slots[0],"actual_fft_row_stages"),
           "disabled refinement added unexecuted FFT work to native telemetry");
 }
+
+void phase_filter_callback(const Fixture& fixture) {
+    auto f=fixture;
+    f.config.sample_rate_hz=1920;
+    f.config.data_if_hz=240;
+    f.config.time_varying_atmospheric_hz=1.;
+    PublicProfileConfig settings;
+    settings.format=f.slot.format;
+    settings.format.sample_rate=1920;
+    settings.data_if_hz=f.config.data_if_hz;
+    settings.capture_lead_seconds=.25;
+    settings.arrival_low_seconds=.001;
+    settings.arrival_high_seconds=.003;
+    settings.cfo_bound_hz=1.;
+    // Even the shortest requested waveform occupies a complete source tile.
+    // The public planner includes that tile and every declared arrival halo.
+    const PublicProfile profile(settings,f.key);
+    f.slot=make_receiver_slot_plan(profile,f.config,fixture.slot.index);
+    const auto samples=f.slot.stop_sample-f.slot.first_sample;
+    check(samples>6*1920&&samples<16*1920&&samples%1920!=0,
+          "filter callback fixture lost its bounded partial-group coverage");
+    f.iq.resize(samples);
+    for (std::size_t i=0;i<f.iq.size();++i) {
+        const auto chirp=.19*i+1.2e-6*i*i;
+        f.iq[i]+=.16*std::polar(1.,chirp);
+    }
+    rejects([] { const appraisal::HfPublicPhaseReceiver invalid(0,false,true); },
+            "filter receiver accepted a missing fixed refinement baseline");
+    rejects([] { const appraisal::HfPublicPhaseReceiver invalid(0,true,false,true); },
+            "sticky receiver accepted a missing walk family");
+    const appraisal::HfPublicPhaseReceiver candidate(40,true,true);
+    const appraisal::HfPublicPhaseReceiver baseline(40,true);
+    const auto extension=candidate.supplement(), original=baseline.supplement();
+    check(extension.fixed_weight==.25&&original.fixed_weight==extension.fixed_weight&&
+          extension.supported(f.config,f.slot)&&original.supported(f.config,f.slot),
+          "filter receiver changed the native branch weight or failed preflight");
+    auto wrong_layout=f.config;
+    wrong_layout.time_varying_atmospheric_hz=.9;
+    check(!extension.supported(wrong_layout,f.slot)&&original.supported(wrong_layout,f.slot),
+          "filter-only geometry condition affected the retained baseline");
+    const auto valid_quote=extension.workspace(f.config,f.slot,2);
+    check(valid_quote>0&&valid_quote<workspace_limit&&
+          original.workspace(f.config,f.slot,2)==appraisal::hf_public_search_workspace(f.config,f.slot,2,false,true,true),
+          "native filter support changed the old workspace or exceeded the component budget");
+    ReceiverExecutor executor(2);
+    const FrequencyInterval frequency{0,0};
+    const auto coarse=score_coarse(f.config,f.slot,f.key,f.iq,{&frequency,1},2,workspace_limit,{},&executor);
+    const auto prepared=prepare_fine_coordinates(f.config,f.slot,coarse);
+    rejects([&] { extension.score(f.config,f.slot,f.key,f.iq,prepared,2,valid_quote-1,{},executor); },
+            "filter receiver silently used a smaller branch than its full quote");
+    std::stop_source cancelled;cancelled.request_stop();
+    rejects([&] { extension.score(f.config,f.slot,f.key,f.iq,prepared,2,valid_quote,cancelled.get_token(),executor); },
+            "filter receiver used cancelled evidence");
+    check(number(candidate.report(),"executed_slots")==0,"failed filter callback published a receipt");
+    const auto shadow=appraisal::score_hf_public_search(f.config,f.slot,f.key,f.iq,prepared,2,valid_quote,
+        true,false,false,{},executor,true,true,true);
+    check(shadow.phase_filter.has_value()&&shadow.timing.size()==39&&shadow.workspace_bytes==valid_quote&&
+          shadow.phase_filter->plan.groups==(samples+1919)/1920,
+          "native filter quote disagrees with the full-timing shadow");
+    const auto prior_mix=appraisal::combine_hf_public_phase_evidence(shadow.combined_phase_bit_log_e,
+        shadow.phase_filter->walk_bit_log_e);
+    const auto actual=extension.score(f.config,f.slot,f.key,f.iq,prepared,2,valid_quote,{},executor);
+    check(actual==prior_mix,"native filter renamed or reweighted the matched shadow result");
+    const auto report=candidate.report();
+    const auto& slots=std::get<Json::Array>(field(report,"slots").value);
+    check(boolean(report,"phase_filter_enabled")&&slots.size()==1,"native filter result was not reported");
+    const auto& slot=slots[0];const auto& filter=field(slot,"phase_filter");
+    check(number(slot,"evaluated_timing_atoms")==39&&number(slot,"search_workspace_bytes")==valid_quote&&
+          boolean(filter,"executed")&&bits(slot,"bit_log_e")==actual&&bits(field(filter,"combined"),"bit_log_e")==actual,
+          "filter callback evidence/report differs from the scored full public geometry");
+    check(bits(field(slot,"phase_refinement"),"combined_bit_log_e")==shadow.combined_phase_bit_log_e&&
+          bits(field(filter,"baseline"),"bit_log_e")==shadow.combined_phase_bit_log_e,
+          "filter callback overwrote the separately reported refinement baseline");
+    const auto& work=field(filter,"work");
+    check(number(work,"workspace_reserved_bytes")==2*appraisal::HfPhaseFilterPlan::lane_workspace_bytes&&
+          number(work,"emission_states")==39*shadow.phase_filter->plan.emission_states,
+          "filter callback changed its fixed lane or work quote");
+    check(!has(baseline.report(),"phase_filter_enabled"),"disabled baseline published a filter policy");
+    check(!has(report,"phase_filter_sticky_enabled")&&!has(filter,"sticky_enabled"),
+          "default walk published an unrequested sticky policy");
+
+    const appraisal::HfPublicPhaseReceiver sticky_candidate(40,true,true,true);
+    const auto sticky_extension=sticky_candidate.supplement();
+    check(sticky_extension.supported(f.config,f.slot)&&!sticky_extension.supported(wrong_layout,f.slot)&&
+          sticky_extension.fixed_weight==extension.fixed_weight&&sticky_extension.workspace(f.config,f.slot,2)==valid_quote,
+          "sticky comparison changed admission or workspace");
+    const auto sticky_shadow=appraisal::score_hf_public_search(f.config,f.slot,f.key,f.iq,prepared,2,valid_quote,
+        true,false,false,{},executor,true,true,true,true);
+    check(sticky_shadow.phase_filter&&sticky_shadow.phase_filter->sticky_bit_log_e&&
+          sticky_shadow.combined_phase_bit_log_e==shadow.combined_phase_bit_log_e&&
+          sticky_shadow.phase_filter->walk_bit_log_e==shadow.phase_filter->walk_bit_log_e&&
+          sticky_shadow.basis_pair.bank_calls==shadow.basis_pair.bank_calls&&
+          sticky_shadow.basis_pair.fallback_calls==shadow.basis_pair.fallback_calls,
+          "sticky comparison changed baseline arithmetic or rendered additional waveform tiles");
+    const auto expected_correlated=appraisal::combine_hf_public_phase_evidence(shadow.phase_filter->walk_bit_log_e,
+        *sticky_shadow.phase_filter->sticky_bit_log_e);
+    const auto expected_combined=appraisal::combine_hf_public_phase_evidence(shadow.combined_phase_bit_log_e,
+        expected_correlated);
+    const auto sticky_actual=sticky_extension.score(f.config,f.slot,f.key,f.iq,prepared,2,valid_quote,{},executor);
+    check(sticky_actual==expected_combined,"sticky callback used different prior weights than its matched shadow");
+    const auto sticky_report=sticky_candidate.report();
+    const auto& sticky_slots=std::get<Json::Array>(field(sticky_report,"slots").value);
+    check(boolean(sticky_report,"phase_filter_sticky_enabled")&&sticky_slots.size()==1,
+          "sticky callback telemetry is missing");
+    const auto& sticky_filter=field(sticky_slots[0],"phase_filter");
+    check(boolean(sticky_filter,"sticky_enabled")&&bits(field(sticky_filter,"correlated"),"bit_log_e")==expected_correlated&&
+          bits(field(sticky_filter,"walk"),"bit_log_e")==shadow.phase_filter->walk_bit_log_e&&
+          bits(field(sticky_filter,"sticky"),"bit_log_e")==*sticky_shadow.phase_filter->sticky_bit_log_e&&
+          bits(field(sticky_filter,"combined"),"bit_log_e")==expected_combined,
+          "sticky callback telemetry misreported family evidence");
+    const auto& sticky_work=field(sticky_filter,"work");
+    check(number(sticky_work,"workspace_reserved_bytes")==number(work,"workspace_reserved_bytes")&&
+          number(sticky_work,"correlation_products")==2*number(work,"correlation_products")&&
+          number(sticky_work,"emission_states")==2*number(work,"emission_states")&&
+          number(sticky_work,"transition_edges")==2*number(work,"transition_edges"),
+          "sticky callback telemetry does not charge both serial passes");
+}
 } // namespace
 
 int main() {
     try {
         const auto f=fixture();public_support(f);small_public_arrival_closure(f);paired_native_renderer(f);refinement_frontier_and_weights(f);telemetry_cannot_gate_evidence(f);
+        phase_filter_callback(f);
         std::cout<<"HF public receiver passed "<<checks<<" checks\n";
         return 0;
     } catch (const std::exception& e) {

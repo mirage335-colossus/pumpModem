@@ -409,3 +409,79 @@ These are acceptance questions, not claims that the associated checks have run.
 Retain contrary outcomes. An unusual-day counterexample is useful evidence even
 when the software checks pass; a model's numerical consistency is not proof that
 all of its joint conditions occur in nature.
+
+## Competing evidence and phase continuity follow-up
+
+The [receiver repair protocol](hf-receiver-repair.md) separates three questions:
+an early native model-selection shortcut, unknown weak-signal phase history,
+and omitted propagation physics. Their evidence is not interchangeable.
+Conservative missing alternative mass under the noise null does not guarantee
+correct bit ordering under a present, mismatched signal. The opt-in native
+comparison therefore evaluates every admitted built-in alternative and the
+retained-line residual alternatives with their original weights. It does not
+use observed SNR or a confidence gap as a proof that competing models can be
+skipped. Whether this repairs complete messages at acceptable complete-service
+cost is an experiment, not a consequence of the noise bound.
+
+For weak phase history, [Suvorova et al. (2018)](https://doi.org/10.1109/TSP.2018.2877176)
+provide a phase-continuous hidden-Markov detector for a slowly varying tone,
+contrasting with frequency tracking that loses phase between blocks. Its
+Ornstein–Uhlenbeck prior and simplified gravitational-wave simulation do not
+calibrate ionospheric dynamics. [Colavolpe, Barbieri and Caire (2004)](https://www.eurasip.org/Proceedings/Eusipco/Eusipco2004/defevent/papers/cr1592.pdf)
+derive sum-product inference under oscillator phase noise; their AWGN,
+Nyquist-pulse and slow-phase assumptions exclude much of the HF channel.
+Together these support a bounded correlated-phase discriminator, not a claim
+that all HF uncertainty can be reduced to one phase process.
+
+The new finite phase/frequency lattice is a declared engineering prior. It
+transports phase while frequency changes, marginalizes histories rather than
+maximizing a data-selected path, and charges the whole initial/timing/radius
+prior. Its transition rate and amplitude support are not measured HF laws.
+Numerical path loss is also a theoretical failure: a probability-domain
+forward recursion can underflow a temporarily unlikely phase class that later
+dominates. The implementation must retain log-domain support and pass an
+independent high-dynamic-range enumeration before interpreting its outputs.
+Neither a calibrated finite-model likelihood nor a known-channel diagnostic
+proves proximity to a general communications limit.
+
+## From static full-wave profiles to waveform tests
+
+The `_ref` distinction between absorption/outage and fading remains essential.
+[Verhulst et al. (2026)](https://doi.org/10.1029/2026RS008688) report HF
+absorption observations, but passive band-power changes do not supply a
+calibrated complex channel kernel. The existing scalar full-wave solver can
+independently couple reflection, transmission and absorption for constructed
+profiles. Turning those responses into a waveform still requires bounded
+frequency interpolation, a declared reference delay, causal memory and tails.
+
+[Gondarenko et al. (2003)](https://doi.org/10.1029/2003JA009985) distinguish
+slow-time field evolution from the fixed-density profiles actually solved in
+their study. [Knepp et al. (2009)](https://doi.org/10.1029/2008RS004054) derive
+wideband impulse responses for a phase-screen scattering geometry; that
+geometry does not validate a near-cutoff reflecting column. These sources
+justify testing a quasi-static kernel approximation against frozen complex
+responses, while withholding a true evolving-plasma error bound. A causal
+finite-memory implementation can still be a poor physical approximation.
+Interpolation error must be checked at independent profiles and frequencies;
+discarding negative-time FFT coefficients, normalizing away loss, or silently
+adding delay cannot establish fidelity. Static passivity alone also does not
+prove energy conservation for an interpolated time-varying operator.
+
+The subsequent tests provide contrary evidence to convenient simplifications.
+The normalized phase lattice represents more than 98.9% of clean coherent
+energy in a failed long observation, yet its marginalized public evidence
+misses admission. This agrees with the need to distinguish physical support
+from usable channel knowledge; it does not prove the lattice prior is optimal
+or a stationary noncoherent bound applies. The separately frozen sticky prior
+tests that distinction without changing thresholds or selecting noisy maxima.
+Likewise, accurate frozen full-wave FIRs fail endpoint profile interpolation
+by as much as .814 complex amplitude. The profile-grid discriminator therefore
+refines physical parameters, not the already converged frequency grid.
+
+[Weber et al. (2026)](https://arxiv.org/html/2609.05811v1) compare modeled HF
+maximum usable frequencies with ionosondes and successful FT8 reports. Their
+climatological modeling and the successful-report operability lower bound
+cannot supply failed-link denominators or long, calibrated complex channel
+records. This is useful propagation evidence, with a different role from
+receiver waveform validation. It does not close the measured disturbed-day
+coverage gap or establish an orders-of-magnitude modem advantage.

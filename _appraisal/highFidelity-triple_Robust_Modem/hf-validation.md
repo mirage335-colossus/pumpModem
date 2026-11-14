@@ -10,6 +10,72 @@ from a worldwide ionospheric population. See [models and scope](hf-experiments.m
 [primary research reconciliation](hf-research.md), and the
 [actual upstream codec comparison](competitor/README.md).
 
+## Current receiver and physical-approximation investigation
+
+The [repair protocol and results](hf-receiver-repair.md) preserve four distinct
+questions: complete-message recovery, fresh counterexamples, scoped receiver
+service, and physical-model validity. The approved all-admitted native comparison
+recovers four archived GUI failures but still fails the fresh longer payload
+and accepts a wrong-key message that the default codec rejected. The separate
+phase filter recovers the maximum-rate edge and fresh trajectory as complete
+messages with two scored quiet slots. Its original walk misses long TID despite
+more than 98.9% representable clean coherence in private diagnostics. A second,
+fixed transition prior raises the normalized evidence and recovers the complete
+historical long message. The frozen fresh long holdout still misses two later
+bits and ends prematurely, although its first-slot shadow passes. This is
+finite complete-message recovery and a retained new failure, not a calibrated
+natural sensitivity or general robustness claim.
+
+The final two historical edge brackets both execute: +3 dB now completes,
+but 266.8 seconds/bit at -3 dB still loses one bit despite received energy
+within .182 dB of the successful 139.2-second case. The desired graceful
+time/energy trend therefore remains unresolved. An additional private
+fresh-long failed-slot diagnostic reproduces its public scores and finds
+98.94% representable clean coherence plus strong known-channel information.
+Neither clean representation nor a selected noisy path maximum establishes
+an implementable sensitivity bound.
+
+Six native service comparisons use identical paired observations, H=12/W=24,
+explicit two-owner operation and eleven global slots covering two messages.
+The wanted comparator costs 1.50–1.52 times the whole service and 2.23–2.41
+times the valid ready-backlog interval. Both policies fail the second message
+of the fresh physical realization. Noise remains quiet. These are scoped
+service comparisons; they do not calibrate default-owner or hardware capacity.
+
+The new [kernel admission probe](hf-fullwave.md) passes the frozen static
+FIR checks at N=512 but rejects endpoint profile interpolation, with complex
+midpoint errors up to .814 against .005. These are observed model failures;
+they are not interpreted as actual channel outages or injected into modem
+tests. Full-band evolving-channel qualification remains separate.
+
+Original verification failures remain in
+`local-evidence/hf-repair-validation/`. The first canonical Triad run passed
+31 groups and timed out on the native receiver at 60 seconds under parallelism
+two; the same isolated receiver then passed in 56.05 seconds. The contained
+appraisal run passed 23 of 24 then failed runner assertions; corrected strict
+metadata/fixture handling received affected reruns. A later public receiver
+fixture wrongly truncated its canonical observation and timed out; its repair
+uses the actual native slot plan and appropriate IF. The kernel, public receiver
+and runner affected rerun passed in 1.82 seconds. Original logs and subsequent
+passes have separate identities. New candidate checks are recorded with their
+campaigns; software-check counts are never communication-success counts.
+
+The six service observations followed one failed attempt: an 8 MiB child
+file-size limit killed the temporary spool before JSON. Service now has its
+declared bounded spool allowance and independent bounded output pipes. The
+original SIGXFSZ result remains a harness failure, not a receiver result.
+The one-episode replay later reproduced the original40 full IQ and incorrect
+default endpoint exactly. A separate predeclared three-second censor accepted
+the complete observation but stopped receiver work after one committed slot;
+its receipt correctly reports `work_complete=false` and no evaluated message
+completion. It covers partial receiver work, not a partial spool-read hash.
+
+All new experiments remain contained here, apart from the two expressly
+approved internal hook files. No production default is changed and no RunPod
+instance was needed for these short native CPU runs. Keep current raw receipts
+while they support these unresolved failures and comparisons; remove redundant
+outputs after a superseding record preserves their findings and provenance.
+
 ## Physical-domain and canonical GUI coverage
 
 The [coverage expansion](hf-coverage-expansion.md#executed-physical-and-operating-cohort)

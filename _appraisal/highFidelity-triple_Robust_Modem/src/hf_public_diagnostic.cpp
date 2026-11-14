@@ -99,15 +99,17 @@ bool public_geometry_supported(const ReceiverConfig& config,const ReceiverSlotPl
 struct SearchPlan {
     HfPublicStatisticsPlan statistics;
     std::optional<HfPhaseRefinementPlan> refinement;
+    std::optional<HfPhaseFilterPlan> phase_filter;
     HfPhaseRefinementWork refinement_work_bound;
     std::string refinement_unavailable_reason;
     std::size_t retained_statistics=0;
+    std::size_t phase_filter_workspace=0;
     std::size_t full_count=0, block_rows=0, tile=0, basis_workspace=0, pair_workspace=0, workspace=0, metadata=0;
     unsigned active=0;
     double phase_error=0;
 };
 SearchPlan numerical_search_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
-                      std::size_t evaluated_timing,bool include_affine,bool phase_refinement) {
+                      std::size_t evaluated_timing,bool include_affine,bool phase_refinement,bool phase_filter=false) {
     geometry_require(!phase_refinement||!include_affine,"refined HF search requires operational block geometry");
     geometry_require(public_geometry_supported(config,slot),
             "HF public search requires supported public geometry");
@@ -190,12 +192,20 @@ SearchPlan numerical_search_plan(const ReceiverConfig& config, const ReceiverSlo
             }
         }
     }
+    if (phase_filter) {
+        geometry_require(result.refinement.has_value() && result.full_count==HfPhaseFilterPlan::maximum_timing_atoms &&
+            evaluated_timing==result.full_count && result.block_rows==HfPhaseFilterPlan::block_rows &&
+            config.sample_rate_hz==HfPhaseFilterPlan::sample_rate && c.frequency_bound_hz==1.,
+            "HF phase filter requires the full 39-atom refinement layout at 1920 samples/s and a ±1 Hz frequency bound");
+        result.phase_filter=hf_phase_filter_plan(rows);
+    }
     return result;
 }
 SearchPlan search_plan(const ReceiverConfig& config,const ReceiverSlotPlan& slot,
-                       unsigned workers,std::size_t evaluated_timing,bool include_affine,bool phase_refinement=false) {
+                       unsigned workers,std::size_t evaluated_timing,bool include_affine,bool phase_refinement=false,
+                       bool phase_filter=false) {
     require(workers>0,"HF public search requires positive workers");
-    auto result=numerical_search_plan(config,slot,evaluated_timing,include_affine,phase_refinement);
+    auto result=numerical_search_plan(config,slot,evaluated_timing,include_affine,phase_refinement,phase_filter);
     const auto rows=static_cast<std::size_t>(slot.stop_sample-slot.first_sample);
     const auto& p=result.statistics;
     const auto& c=p.config;
@@ -212,9 +222,12 @@ SearchPlan search_plan(const ReceiverConfig& config,const ReceiverSlotPlan& slot
     const auto first_stage=checked_multiply(result.active,per_lane);
     const auto second_stage=result.refinement?checked_multiply(
         std::min<std::size_t>({workers,evaluated_timing,maximum_refinement_timings}),result.refinement->refinement_workspace_bytes):0;
+    if (result.phase_filter)
+        result.phase_filter_workspace=checked_multiply(result.active,HfPhaseFilterPlan::lane_workspace_bytes);
     result.metadata=checked_add(65536,checked_multiply(result.full_count,32768));
     result.workspace=checked_add(result.metadata,checked_add(result.basis_workspace,
-        checked_add(p.shared_workspace_bytes,checked_add(result.retained_statistics,std::max(first_stage,second_stage)))));
+        checked_add(p.shared_workspace_bytes,checked_add(result.retained_statistics,
+            std::max({first_stage,second_stage,result.phase_filter_workspace})))));
     return result;
 }
 HfPublicTimingSelection timing_subset(const ReceiverConfig& config,const ReceiverSlotPlan& slot,
@@ -411,6 +424,58 @@ Json summary_json(const HfPublicSearchResult& r) {
         {"basis_cache_peak_bytes",r.cache.peak_cache_bytes},{"basis_cache_evictions",r.cache.evictions},
         {"search_seconds",r.search_seconds},{"public_search_arithmetic",arithmetic}});
 }
+
+std::array<double,2> phase_filter_evidence(const HfPublicPhaseFilterResult& result) {
+    return result.sticky_bit_log_e?
+        combine_hf_public_phase_evidence(result.walk_bit_log_e,*result.sticky_bit_log_e):
+        result.walk_bit_log_e;
+}
+
+Json phase_filter_json(const HfPublicPhaseFilterResult& result,const std::array<double,2>& baseline,
+                       double minimum_bit_separation,bool receiver_callback) {
+    const auto& plan=result.plan;
+    constexpr auto timing_atoms=HfPhaseFilterPlan::maximum_timing_atoms;
+    const auto summarize=[&](const std::array<double,2>& scores) {
+        const auto presence=log_add(scores[0],scores[1])-std::numbers::ln2+std::log(supplement_weight);
+        const auto separation=std::abs(scores[0]-scores[1]);
+        return object({{"bit_log_e",Json::Array{scores[0],scores[1]}},{"weighted_presence_log_e",presence},
+            {"favored_bit",scores[1]>scores[0]?1:0},{"bit_log_separation",separation},
+            {"passes_presence_reference",presence>=receiver_operational_threshold()},
+            {"passes_bit_separation_reference",separation>=minimum_bit_separation}});
+    };
+    const auto correlated=phase_filter_evidence(result);
+    const auto combined=combine_hf_public_phase_evidence(baseline,correlated);
+    const unsigned passes=result.sticky_bit_log_e?2:1;
+    auto report=object({{"enabled",true},{"executed",true},
+        {"scope",receiver_callback?
+            "Raw-IQ fallback supplied to canonical admission. Fixed discrete phase and frequency path marginal under a single-tap block-constant template and known IID proper-complex white noise.":
+            "Shadow only. Fixed discrete phase and frequency path marginal under a single-tap block-constant template and known IID proper-complex white noise."},
+        {"phase_bins",plan.phase_count},{"frequency_bins",plan.frequency_count},{"frequency_step_hz",plan.frequency_step_hz},
+        {"group_seconds",1.},{"groups",plan.groups},{"gain_radii",Json::Array{plan.gain_radii[0],plan.gain_radii[1]}},
+        {"timing_atoms",timing_atoms},{"timing_prior_mass",1.},
+        {"branch_weight_within_supplement",.5},{"supplement_weight",supplement_weight},
+        {"input_samples",plan.samples},{"input_block_rows",plan.block_rows},{"input_blocks",plan.blocks},
+        {"stage_wall_seconds",result.wall_seconds},
+        {"baseline",summarize(baseline)},{"correlated",summarize(correlated)},{"combined",summarize(combined)},
+        {"work",object({{"correlation_products",plan.correlation_products*timing_atoms*passes},
+            {"emission_states",plan.emission_states*timing_atoms*passes},
+            {"transition_edges",plan.transition_edges*timing_atoms*passes},
+            {"workspace_reserved_bytes",result.workspace_reserved_bytes},
+            {"summed_worker_wall_seconds",result.summed_worker_wall_seconds}})}});
+    if (result.sticky_bit_log_e) {
+        const auto transition=[](HfPhaseFilterPrior prior) {
+            const auto p=hf_phase_filter_transition(prior);
+            return object({{"stay",p.stay},{"step_each",p.step_each},{"edge_stay",p.edge_stay}});
+        };
+        report["sticky_enabled"]=true;
+        report["walk"]=summarize(result.walk_bit_log_e);
+        report["sticky"]=summarize(*result.sticky_bit_log_e);
+        report["correlated_prior_weights"]=Json::Array{.5,.5};
+        report["transition_probabilities"]=object({{"walk",transition(HfPhaseFilterPrior::walk)},
+            {"sticky",transition(HfPhaseFilterPrior::sticky)}});
+    }
+    return report;
+}
 } // namespace
 
 struct HfPublicBasisPair::Impl {
@@ -551,6 +616,19 @@ bool hf_public_search_supported(const ReceiverConfig& config,const ReceiverSlotP
     }
 }
 
+bool hf_public_phase_filter_supported(const ReceiverConfig& config,const ReceiverSlotPlan& slot) {
+    if (!public_geometry_supported(config,slot)) return false;
+    try {
+        const auto count=timing_count(timing_grid(config,slot));
+        (void)numerical_search_plan(config,slot,count,false,true,true);
+        return true;
+    } catch (const PublicGeometryError&) {
+        return false;
+    } catch (const std::invalid_argument&) {
+        return false;
+    }
+}
+
 std::size_t hf_public_search_workspace(const ReceiverConfig& config,const ReceiverSlotPlan& slot,
                                       unsigned workers,bool include_affine,bool close_small_arrival_grid,bool phase_refinement) {
     const auto grid=timing_grid(config,slot);
@@ -563,13 +641,16 @@ std::size_t hf_public_search_workspace(const ReceiverConfig& config,const Receiv
 HfPublicSearchResult score_hf_public_search(const ReceiverConfig& config,const ReceiverSlotPlan& slot,
         const datapump::Crypto& key,std::span<const Complex> iq,const FinePreparation& prepared,
         unsigned workers,std::size_t workspace_limit_bytes,bool full_timing,bool close_small_arrival_grid,bool include_affine,
-        std::stop_token stop,ReceiverExecutor& executor,bool use_native_pair_render,bool phase_refinement) {
+        std::stop_token stop,ReceiverExecutor& executor,bool use_native_pair_render,bool phase_refinement,bool phase_filter,
+        bool phase_filter_sticky) {
     const auto start=Clock::now();
     require(hf_public_search_supported(config,slot,phase_refinement)&&workers>0&&iq.size()==slot.stop_sample-slot.first_sample,
             "HF public search requires a complete supported public observation");
     check_cancelled(stop);
     auto selection=timing_subset(config,slot,prepared,full_timing,close_small_arrival_grid);
-    const auto shape=search_plan(config,slot,workers,selection.coordinates.size(),include_affine,phase_refinement);
+    geometry_require(!phase_filter || full_timing, "HF phase filter requires full timing");
+    geometry_require(!phase_filter_sticky || phase_filter, "HF sticky prior requires the phase filter");
+    const auto shape=search_plan(config,slot,workers,selection.coordinates.size(),include_affine,phase_refinement,phase_filter);
     const bool execute_refinement=shape.refinement.has_value();
     if (shape.workspace>workspace_limit_bytes)
         throw ReceiverWorkspaceError("HF public phase bank exceeds the admitted full stage workspace");
@@ -715,13 +796,49 @@ HfPublicSearchResult score_hf_public_search(const ReceiverConfig& config,const R
     }
     if (phase_refinement)
         result.combined_phase_bit_log_e=combine_hf_public_phase_evidence(result.bit_log_e[2],result.new_phase_bit_log_e);
+    if (shape.phase_filter) {
+        const auto began=Clock::now();
+        auto& filtered=result.phase_filter.emplace();
+        filtered.plan=*shape.phase_filter;
+        filtered.workspace_reserved_bytes=shape.phase_filter_workspace;
+        struct TimingFilterResult { std::array<double,2> walk{},sticky{}; double wall_seconds=0; };
+        std::array<TimingFilterResult,HfPhaseFilterPlan::maximum_timing_atoms> per_timing{};
+        executor.parallel(slot.index,result.timing.size(),shape.active,stop,
+            [&](unsigned,std::size_t i,std::stop_token leaf_stop) {
+                const auto lane_start=Clock::now();
+                const auto& saved=retained[i];
+                const HfPhaseBlockCorrelations q{saved.q[0],saved.q[1]};
+                const HfPhaseBlockEnergies energy{saved.energy[0],saved.energy[1]};
+                per_timing[i].walk=hf_phase_filter(filtered.plan,q,energy,config.noise_variance,leaf_stop).bit_log_e;
+                // Both priors consume the same blocks with serial lane scratch.
+                if (phase_filter_sticky)
+                    per_timing[i].sticky=hf_phase_filter(filtered.plan,q,energy,config.noise_variance,
+                        leaf_stop,HfPhaseFilterPrior::sticky).bit_log_e;
+                per_timing[i].wall_seconds=elapsed(lane_start);
+            });
+        filtered.walk_bit_log_e.fill(negative_infinity);
+        if (phase_filter_sticky) filtered.sticky_bit_log_e.emplace().fill(negative_infinity);
+        for (std::size_t i=0;i<result.timing.size();++i) {
+            for (std::size_t bit=0;bit<2;++bit) {
+                auto& walk=filtered.walk_bit_log_e[bit];
+                walk=log_add(walk,per_timing[i].walk[bit]-prior);
+                if (filtered.sticky_bit_log_e) {
+                    auto& sticky=(*filtered.sticky_bit_log_e)[bit];
+                    sticky=log_add(sticky,per_timing[i].sticky[bit]-prior);
+                }
+            }
+            filtered.summed_worker_wall_seconds+=per_timing[i].wall_seconds;
+        }
+        filtered.wall_seconds=elapsed(began);
+    }
     result.cache=basis.report();result.search_seconds=elapsed(start);
     return result;
 }
 
 Json diagnose_hf_public_search(const ReceiverConfig& config,const ReceiverSlotPlan& slot,
         const datapump::Crypto& key,std::span<const Complex> iq,unsigned workers,
-        std::size_t total_memory_limit_bytes,bool full_timing,std::stop_token stop,HfPublicSearchResult* search_result,bool phase_refinement) {
+        std::size_t total_memory_limit_bytes,bool full_timing,std::stop_token stop,HfPublicSearchResult* search_result,
+        bool phase_refinement,bool phase_filter,bool phase_filter_sticky) {
     const auto start=Clock::now();
     const auto cpu_start=detail::stream_process_cpu_seconds();
     require(hf_public_search_supported(config,slot,phase_refinement)&&workers>0&&iq.size()==slot.stop_sample-slot.first_sample,
@@ -735,6 +852,13 @@ Json diagnose_hf_public_search(const ReceiverConfig& config,const ReceiverSlotPl
     if (base>=total_memory_limit_bytes)
         throw ReceiverWorkspaceError("HF public search input, metadata and worker stacks exhaust memory");
     const auto scratch=total_memory_limit_bytes-base;
+    geometry_require(!phase_filter_sticky || phase_filter, "HF sticky prior requires the phase filter");
+    if (phase_filter) {
+        geometry_require(full_timing && phase_refinement, "HF phase filter requires refinement and full timing");
+        const auto quote=search_plan(config,slot,workers,timing_count(timing_grid(config,slot)),false,true,true);
+        if (quote.workspace>scratch)
+            throw ReceiverWorkspaceError("HF phase filter exceeds the admitted full stage workspace");
+    }
     ReceiverExecutor executor(workers);
     const FrequencyInterval prior{-config.frequency_bound_hz,config.frequency_bound_hz};
     const auto coarse_quote=coarse_work_plan(config,slot,{&prior,1},workers);
@@ -744,7 +868,8 @@ Json diagnose_hf_public_search(const ReceiverConfig& config,const ReceiverSlotPl
     const auto coarse=score_coarse(config,slot,key,iq,{&prior,1},workers,scratch,stop,&executor);
     const double coarse_seconds=elapsed(coarse_start);
     const auto prepared=prepare_fine_coordinates(config,slot,coarse);
-    auto search=score_hf_public_search(config,slot,key,iq,prepared,workers,scratch,full_timing,false,!phase_refinement,stop,executor,true,phase_refinement);
+    auto search=score_hf_public_search(config,slot,key,iq,prepared,workers,scratch,full_timing,false,!phase_refinement,
+        stop,executor,true,phase_refinement,phase_filter,phase_filter_sticky);
     const auto& plan=search.plan;
     Json::Array coordinates,proposals,families;
     for (std::size_t index=0;index<search.timing.size();++index) {
@@ -789,6 +914,9 @@ Json diagnose_hf_public_search(const ReceiverConfig& config,const ReceiverSlotPl
     }
     const auto cpu_end=detail::stream_process_cpu_seconds();
     auto report=summary_json(search);
+    if (search.phase_filter)
+        report["phase_filter"]=phase_filter_json(*search.phase_filter,search.combined_phase_bit_log_e,
+            config.time_varying_minimum_bit_log_separation,false);
     report["component_complete"]=true;report["receiver_executed"]=false;report["completion_evaluated"]=false;
     report["capacity_qualified"]=false;report["truth_information_passed_to_search"]=false;report["slot_index"]=slot.index;
     report["scope"]="shadow fixed-prior raw-IQ likelihoods; canonical line/quiet/codec policy is not executed";
@@ -831,8 +959,9 @@ struct HfPublicPhaseReceiver::Impl {
     };
     struct SlotSummary {
         std::uint64_t index=0;
-        std::array<double,2> bit_log_e{};
+        std::array<double,2> bit_log_e{}, baseline_bit_log_e{};
         RefinementSummary refinement;
+        std::optional<HfPublicPhaseFilterResult> phase_filter;
         std::size_t full_count=0, canonical_count=0, evaluated_count=0, frequency_cells=0, block_rows=0, blocks=0, fft_rows=0;
         bool arrival_grid_closed=false;
         HfPublicBasisPairReport basis_pair;
@@ -842,41 +971,57 @@ struct HfPublicPhaseReceiver::Impl {
             statistics_shared_quote=0, statistics_lane_quote=0, basis_cache_peak=0, metadata=0;
         std::uint64_t fft_work=0, phase_work=0, likelihood_cells=0, prepared_phase_values=0;
         unsigned workers=0, stage_workers=0;
-        double frequency_step=0, actual_bound=0, phase_error=0, seconds=0;
+        double frequency_step=0, actual_bound=0, configured_bound=0, phase_error=0, seconds=0;
+        double minimum_bit_separation=0;
         double preparation_seconds=0, statistics_summed_worker_seconds=0, basis_summed_worker_seconds=0;
     };
-    explicit Impl(std::size_t maximum,bool refine):slots(maximum),refinement_enabled(refine) {}
+    explicit Impl(std::size_t maximum,bool refine,bool filter,bool sticky)
+        :slots(maximum),refinement_enabled(refine),filter_enabled(filter),sticky_enabled(sticky) {}
     std::mutex mutex;
     std::vector<std::optional<SlotSummary>> slots;
-    bool refinement_enabled=false;
+    const bool refinement_enabled, filter_enabled, sticky_enabled;
     // Saturation keeps telemetry bounded and cannot reject receiver evidence.
     std::uint64_t overflow_reports=0, duplicate_reports=0;
 };
 
-HfPublicPhaseReceiver::HfPublicPhaseReceiver(std::size_t maximum_slot_reports,bool phase_refinement) {
+HfPublicPhaseReceiver::HfPublicPhaseReceiver(std::size_t maximum_slot_reports,bool phase_refinement,bool phase_filter,
+                                           bool phase_filter_sticky) {
     require(maximum_slot_reports<=65536,"HF phase receiver needs a bounded telemetry slot count");
+    require(!phase_filter||phase_refinement,"HF phase filter receiver requires refinement");
+    require(!phase_filter_sticky||phase_filter,"HF sticky prior requires the phase filter");
     // Persistent summaries and their final JSON are covered by the caller's
     // evaluator reservation (>=16KiB off, >=64KiB refined), not DSP scratch.
     static_assert(sizeof(Impl::SlotSummary)<4096);
-    impl_=std::make_shared<Impl>(maximum_slot_reports,phase_refinement);
+    impl_=std::make_shared<Impl>(maximum_slot_reports,phase_refinement,phase_filter,phase_filter_sticky);
 }
 
 SlotEvidenceSupplement HfPublicPhaseReceiver::supplement() const {
     SlotEvidenceSupplement result;
     result.fixed_weight=supplement_weight;
-    result.supported=[refine=impl_->refinement_enabled](const ReceiverConfig& c,const ReceiverSlotPlan& s) {
-        return hf_public_search_supported(c,s,refine);
+    result.supported=[refine=impl_->refinement_enabled,filter=impl_->filter_enabled](const ReceiverConfig& c,const ReceiverSlotPlan& s) {
+        return filter?hf_public_phase_filter_supported(c,s):hf_public_search_supported(c,s,refine);
     };
-    result.workspace=[refine=impl_->refinement_enabled](const ReceiverConfig& c,const ReceiverSlotPlan& s,unsigned workers) {
+    result.workspace=[refine=impl_->refinement_enabled,filter=impl_->filter_enabled](const ReceiverConfig& c,const ReceiverSlotPlan& s,unsigned workers) {
+        if (filter) {
+            const auto full_count=timing_count(timing_grid(c,s));
+            return search_plan(c,s,workers,full_count,false,true,true).workspace;
+        }
         return hf_public_search_workspace(c,s,workers,false,true,refine);
     };
     result.score=[owner=impl_](const ReceiverConfig& c,const ReceiverSlotPlan& s,const datapump::Crypto& key,
             std::span<const Complex> iq,const FinePreparation& prepared,unsigned workers,std::size_t workspace,
             std::stop_token stop,ReceiverExecutor& executor) {
-        const auto search=score_hf_public_search(c,s,key,iq,prepared,workers,workspace,false,true,false,stop,executor,true,owner->refinement_enabled);
+        const bool filter=owner->filter_enabled;
+        const auto search=score_hf_public_search(c,s,key,iq,prepared,workers,workspace,filter,!filter,false,
+            stop,executor,true,owner->refinement_enabled,filter,owner->sticky_enabled);
         const auto& p=search.plan;
         Impl::SlotSummary summary;
-        summary.index=s.index;summary.bit_log_e=search.combined_phase_bit_log_e;summary.full_count=search.public_timing_atoms;
+        summary.index=s.index;summary.baseline_bit_log_e=search.combined_phase_bit_log_e;
+        summary.phase_filter=search.phase_filter;
+        summary.bit_log_e=summary.phase_filter?
+            combine_hf_public_phase_evidence(summary.baseline_bit_log_e,phase_filter_evidence(*summary.phase_filter)):
+            summary.baseline_bit_log_e;
+        summary.full_count=search.public_timing_atoms;
         summary.canonical_count=search.canonical_selected_timing_atoms;summary.arrival_grid_closed=search.arrival_grid_closed;
         summary.evaluated_count=search.timing.size();summary.frequency_cells=p.frequency_count;summary.block_rows=search.block_rows;
         summary.blocks=p.config.block_count;summary.fft_rows=p.fft_rows;summary.workspace=search.workspace_bytes;
@@ -894,7 +1039,9 @@ SlotEvidenceSupplement HfPublicPhaseReceiver::supplement() const {
         summary.metadata=search.metadata_reserve_bytes;summary.fft_work=p.actual_fft_row_stages*search.timing.size();
         summary.phase_work=p.phase_complex_multiplications*search.timing.size();summary.likelihood_cells=p.likelihood_cells*search.timing.size();
         summary.workers=workers;summary.stage_workers=search.stage_workers;summary.frequency_step=p.frequency_step_hz;
-        summary.actual_bound=p.actual_frequency_bound_hz;summary.phase_error=search.phase_error_bound_radians;summary.seconds=search.search_seconds;
+        summary.actual_bound=p.actual_frequency_bound_hz;summary.configured_bound=p.config.frequency_bound_hz;
+        summary.minimum_bit_separation=c.time_varying_minimum_bit_log_separation;
+        summary.phase_error=search.phase_error_bound_radians;summary.seconds=search.search_seconds;
         if (search.refinement_enabled) {
             auto& r=summary.refinement;
             r.executed=search.refinement_executed;r.unavailable_reason=search.refinement_unavailable_reason;
@@ -947,7 +1094,7 @@ Json HfPublicPhaseReceiver::report() const {
         const auto& s=*entry;
         Json refinement=object({{"enabled",false}});
         if (impl_->refinement_enabled&&!s.refinement.executed)
-            refinement=unavailable_refinement_json(s.refinement.old_bits,s.bit_log_e,
+            refinement=unavailable_refinement_json(s.refinement.old_bits,s.baseline_bit_log_e,
                 s.refinement.unavailable_reason,s.refinement.work_bound);
         if (impl_->refinement_enabled&&s.refinement.executed) {
             const auto& r=s.refinement;Json::Array ranks,counts;
@@ -958,7 +1105,7 @@ Json HfPublicPhaseReceiver::report() const {
             refinement=object({{"enabled",true},{"requested",true},{"executed",true},{"unavailable_reason",""},
                 {"old_family_weight",.5},{"new_family_weight",.5},
                 {"old_bit_log_e",Json::Array{r.old_bits[0],r.old_bits[1]}},{"new_bit_log_e",Json::Array{r.new_bits[0],r.new_bits[1]}},
-                {"combined_bit_log_e",Json::Array{s.bit_log_e[0],s.bit_log_e[1]}},
+                {"combined_bit_log_e",Json::Array{s.baseline_bit_log_e[0],s.baseline_bit_log_e[1]}},
                 {"shape_count",r.shape_count},{"nu_count",r.nu_count},{"nu_step_hz",r.nu_step},
                 {"segment_count",r.segment_count},{"segment_rows",r.segment_rows},{"segment_fft_rows",r.segment_fft_rows},
                 {"intermediate_group_rows",r.intermediate_group_rows},{"intermediate_group_count",r.intermediate_group_count},
@@ -978,7 +1125,7 @@ Json HfPublicPhaseReceiver::report() const {
                 {"work",work_json(r.work)},{"work_bound",work_json(r.work_bound)},
                 {"second_stage_wall_seconds",r.seconds},{"summed_worker_wall_seconds",r.summed_worker_seconds}});
         }
-        slots.push_back(object({{ "slot_index",s.index},{"component_complete",true},{"executed",true},
+        auto item=object({{ "slot_index",s.index},{"component_complete",true},{"executed",true},
             {"phase_refinement",std::move(refinement)},
             {"bit_log_e",Json::Array{s.bit_log_e[0],s.bit_log_e[1]}},
             {"presence_log_e_before_branch_weight",log_add(s.bit_log_e[0],s.bit_log_e[1])-std::numbers::ln2},
@@ -1006,12 +1153,21 @@ Json HfPublicPhaseReceiver::report() const {
             {"actual_fft_row_stages",s.fft_work},
             {"total_fft_row_stages_including_refinement",s.fft_work+s.refinement.work.fft_row_stages},
             {"phase_complex_multiplications",s.phase_work},{"likelihood_cells",s.likelihood_cells},
-            {"workers",s.workers},{"stage_workers",s.stage_workers},{"search_seconds",s.seconds}}));
+            {"workers",s.workers},{"stage_workers",s.stage_workers},{"search_seconds",s.seconds}});
+        if (s.phase_filter) {
+            item["phase_filter"]=phase_filter_json(*s.phase_filter,s.baseline_bit_log_e,s.minimum_bit_separation,true);
+            item["presence_reference_threshold"]=receiver_operational_threshold();
+            item["bit_separation_reference"]=s.minimum_bit_separation;
+            item["configured_frequency_bound_hz"]=s.configured_bound;
+        }
+        slots.push_back(std::move(item));
     }
     const auto count=slots.size();
-    return object({{"experimental",true},{"fixed_weight",supplement_weight},
+    const auto model_family=impl_->filter_enabled?"equal_prior_refined_baseline_and_correlated_phase_filter":
+        impl_->refinement_enabled?"equal_prior_fixed97_and_cartesian_refinement":"sinusoidal_phase_97";
+    auto report=object({{"experimental",true},{"fixed_weight",supplement_weight},
         {"refinement_enabled",impl_->refinement_enabled},
-        {"model_family",impl_->refinement_enabled?"equal_prior_fixed97_and_cartesian_refinement":"sinusoidal_phase_97"},
+        {"model_family",model_family},
         {"assumed_public_taps",1},{"channel_model_scope","actual channel may be mismatched; no calibrated multipath-recovery claim"},
         {"truth_information_passed_to_search",false},{"selected_timing_renormalized",false},
         {"maximum_slot_reports",impl_->slots.size()},{"executed_slots",count},{"slots",std::move(slots)},
@@ -1021,5 +1177,8 @@ Json HfPublicPhaseReceiver::report() const {
         {"admission_scope","raw contribution supplied to canonical classification; a retained coherent line suppresses it without restoring prior mass"},
         {"public_search_arithmetic",arithmetic},{"maximum_total_fft_row_stages",maximum_total_fft_row_stages},
         {"summed_worker_wall_times_scope","overlapping per-timing elapsed intervals; not CPU time or complete service time"}});
+    if (impl_->filter_enabled) report["phase_filter_enabled"]=true;
+    if (impl_->sticky_enabled) report["phase_filter_sticky_enabled"]=true;
+    return report;
 }
 } // namespace appraisal

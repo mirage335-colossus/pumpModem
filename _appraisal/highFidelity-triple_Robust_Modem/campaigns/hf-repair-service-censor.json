@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "name": "hf-repair-service-censor",
+  "purpose": "One predeclared 3-second native service replay cap to check actual partial receipt/capture/replay accounting. No retry if deadline lands during rendering rather than replay.",
+  "max_wall_seconds": 15,
+  "per_trial_wall_seconds": 3,
+  "max_trials": 1,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "scenario": "hf-gui-native",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 62001,
+      "noise_seed": 72001,
+      "cn0_db_hz": 40,
+      "gui_target_cn0_db_hz": 32,
+      "gui_spread": "hf-worst",
+      "gui_selective": "each-65",
+      "gui_margin": 3,
+      "gui_audio_ppm": 100,
+      "gui_rf_ppm": 1,
+      "gui_audio_phase_degrees_sqrt_s": 0.5,
+      "gui_rf_phase_degrees_sqrt_s": 0.05,
+      "gui_clock_edge": true,
+      "gui_arrival": "tight",
+      "bit_seconds": 2,
+      "control": "wanted",
+      "id": "original40-service-cap3s",
+      "capture_digest_slot": 2,
+      "service_replay": true,
+      "service_episodes": 1
+    }
+  ]
+}

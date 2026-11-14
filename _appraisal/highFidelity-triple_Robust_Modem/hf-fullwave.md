@@ -208,3 +208,110 @@ Keep the receipts and initial/final check logs while this numerical
 qualification and its cutoff-related review remain active. Once superseded,
 retain the applicable equations, identities, limits and conclusions here and
 remove redundant generated outputs under the appraisal's retention policy.
+
+## Frozen waveform-kernel feasibility discriminator
+
+The next component is an admission test for a quasi-static waveform operator,
+not yet a modem campaign. Freeze two geometries before execution: a D/F
+trajectory from peak F/RF ratio .9999 to 1.0001 while D-region peak density
+rises from 8e8 to 8e9 m^-3, and the same D change at fixed F/RF ratio 1.03.
+Each has two endpoints and an independently solved midpoint. All other column
+parameters retain the static solver's declared meaning.
+
+Use 1920 complex samples/s, an occupied band of +/-768 Hz and a C2 guard taper
+to Nyquist. Conjugate the solver response to the native baseband convention.
+Report the reference-plane bulk delay and the additional 32-sample numerical
+delay explicitly. That added delay is not an ionospheric measurement and would
+need to be included in public arrival bounds before any communications test.
+Retain a common causal tap support and continuous source history, including
+quiet input and kernel changes. No gain normalization restores reflected loss.
+
+Frequency sampling proceeds through 256, 512, then at most 1024 bins, with
+cached dyadic 5 m spatial solves. Six profiles each permit up to 1024 such
+solves, 256 matching 10 m base-grid solves, and 65 independently placed
+off-grid frequencies at both spatial resolutions: at most 8,460 solves under
+a 9,216-solve ceiling. Stop at a qualified consecutive frequency refinement;
+otherwise report the final unresolved gates. A single probe has a declared
+180-second external wall limit. No adaptive parameter selection follows a
+communications outcome.
+
+Separate outputs must report mesh error, occupied/guard-band reconstruction,
+independent off-grid reconstruction, finite-band pre-arrival energy, discarded
+pre/tail energy, frequency refinement, and exact-midpoint versus interpolated
+profile response. The engineering gates are .005 maximum complex error and
+1e-6 discarded relative energy. Analytic delay/slab references and streaming
+chunk/tail tests precede this inventory. Finite-band precursors alone are not
+proof of physical acausality; deleting them is acceptable only if the resulting
+declared approximation independently meets its response/error gates.
+
+Even a numerically admitted kernel is qualified against frozen scalar profiles,
+not a truly evolving dielectric. Output-time kernel interpolation is causal
+as implemented, but its physical approximation needs slow evolution relative
+to propagation and kernel memory, and independent profile interpolation checks.
+Static passivity does not prove energy conservation during kernel changes.
+Do not turn an unresolved near-cutoff interpolation into an invented deep-fade
+waveform. Keep receipts in `local-evidence/hf-repair-validation/` while this
+feasibility question is active; remove redundant output after its conclusions
+are retained here.
+
+The first waveform-kernel probe completed in 24.822 seconds with 5,388 RF
+solves and exit 1 (a valid unresolved-model result). All twelve frozen
+port/profile kernels passed their static reconstruction, spatial mesh,
+discarded-energy and consecutive-frequency-grid checks at N=512. Increasing
+the frequency grid is not the missing remedy. Interpolating the endpoint
+responses failed at the independently solved physical midpoint:
+
+| Physical trajectory | Reflection max complex error | Transmission max complex error |
+| --- | ---: | ---: |
+| Coupled near-cutoff F and D change | .41270 | .81377 |
+| D change at fixed F/RF=1.03 | .39229 | Below absolute tolerance at numerically minute transmission |
+
+The common modeling-delay phase does not change occupied-band magnitudes of
+these errors. The comparison never extracts a wrapped phase; a phase branch
+cut cannot cause the rejection. Subtracting endpoint reconstruction error
+still leaves .41265, .81363 and .39211 on the three substantial paths.
+The finite-band transmission power in the opaque control underflows to zero
+while its complex amplitudes remain nonzero; do not interpret that as exact
+zero transmission or relative accuracy. No dynamic modem trial uses these
+rejected interpolations.
+
+Freeze a separate global profile-axis discriminator before further results:
+`high_fidelity_fullwave_kernel_probe --profile-refinement`, with a 180-second
+external wall limit. Keep both physical trajectories over their full interval,
+and use exactly five RF offsets (-864, -768, 0, 768, 864 Hz), including occupied
+edges and guard points. At 16, 32, 64, 128 and at most 256 equal profile
+intervals, solve every knot and every independent midpoint at both 5 m and
+10 m spatial resolution. Cache nested exact profile coordinates. The hard
+inventory is 513 profiles × two trajectories × five frequencies × two
+meshes = 10,260 RF solves under a 10,300-solve cap.
+
+Compare direct complex endpoint interpolation with independently solved
+arithmetic physical parameters. Stop at the first look where all path/port
+interpolation and mesh errors pass the unchanged .005 gate, otherwise retain
+the final unresolved result. This identifies required profile spacing at five
+fixed frequencies; even a pass does not qualify full-band FIRs, arbitrary
+inter-profile curvature, temporal slowness, evolving-plasma physics or a
+complete communications channel. Do not silently substitute a shorter local
+trajectory for this full-interval test.
+
+That discriminator completed in 41.404 seconds with the full 10,260 solves.
+Both spatial meshes agreed within 2.009e-5 at every tested knot and midpoint.
+The physical-profile interpolation error converged strongly but did not pass
+both reflection ports at the declared maximum:
+
+| Profile intervals | Coupled cutoff reflection | Coupled cutoff transmission | Fixed-F reflection |
+| --- | ---: | ---: | ---: |
+| 16 | 1.065164 | .591023 | .997472 |
+| 32 | .422733 | .171479 | .363819 |
+| 64 | .119487 | .044761 | .100879 |
+| 128 | .030986 | .011348 | .026038 |
+| 256 | .007842 | .002852 | .006582 |
+
+The largest reflection errors occur at the -864 Hz guard point, near the
+low-D end; that guard is part of the declared test. At 256 intervals the
+coupled transmission port passes, while both reflection errors still exceed
+.005. The observed near-quadratic refinement trend distinguishes a resolvable
+profile interpolation error from a spatial-solver floor, without granting an
+unexecuted finer grid a pass. The experiment stops at its declared cap with
+exit 1 and preserves the remaining full-band, causal and slow-evolution gates.
+No parameter span, frequency set or tolerance was reduced to obtain admission.

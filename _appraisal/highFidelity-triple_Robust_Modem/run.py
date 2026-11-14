@@ -21,6 +21,8 @@ import os
 from pathlib import Path
 import platform
 import re
+import selectors
+import signal
 import subprocess
 import sys
 import tempfile
@@ -64,11 +66,13 @@ HF_DESIGN_BOUNDS = {
     "knot_amplitude_hz": (0, 20000), "knot_seconds": (70, 200),
 }
 HF_DESIGN_FIELDS = {"hf_" + field for field in HF_DESIGN_BOUNDS}
+SERVICE_FIELDS = {"service_replay", "service_episodes", "service_spool_byte_limit", "owners",
+                  "service_backlog_begin_slot", "service_backlog_end_slot"}
 EPISODE_KEYS = {"id", "scenario", "mode", "waveform", "seed", "cn0_db_hz", "control",
                 "helper", "backend", "bit_seconds", "duration_seconds", "pulse", "stratum",
                 "oracle_slot", "search_slot", "search_timing", "capture_digest_slot", "chunk", "message", "max_wall_seconds", "max_samples",
-                "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "fec", "fade_slots", "capture_lead_seconds",
-                "hf_trajectory_seed", "hf_trajectory_offset_seconds", "noise_seed"} | GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS
+                "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_compare_admitted_models", "fec", "fade_slots", "capture_lead_seconds",
+                "hf_trajectory_seed", "hf_trajectory_offset_seconds", "noise_seed"} | GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS
 MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose", "hf-search", "gui-varying"}
 CONTROLS = {"wanted", "noise", "wrong-key", "wrong-ordinal", "interior-fade", "capture-gap", "eof"}
 BACKENDS = {"cpu", "cuda", "vulkan", "gpu"}
@@ -136,8 +140,8 @@ def _read_campaign(path: Path) -> dict[str, Any]:
             raise CampaignError(f"stratum {name!r} must contain exactly {count} wanted receive episodes with distinct seeds")
         invariant_fields = ("scenario", "mode", "waveform", "cn0_db_hz", "control", "helper",
                             "backend", "bit_seconds", "duration_seconds", "pulse", "oracle_slot", "search_slot", "search_timing", "capture_digest_slot", "chunk",
-                            "message", "max_wall_seconds", "max_samples", "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "fec", "fade_slots", "capture_lead_seconds",
-                            "hf_trajectory_seed", "hf_trajectory_offset_seconds") + tuple(sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS))
+                            "message", "max_wall_seconds", "max_samples", "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_compare_admitted_models", "fec", "fade_slots", "capture_lead_seconds",
+                            "hf_trajectory_seed", "hf_trajectory_offset_seconds") + tuple(sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS))
         reference = matched[0]
         heterogeneous = [field for field in invariant_fields
                          if any(episode.get(field) != reference.get(field) for episode in matched[1:])]
@@ -235,7 +239,7 @@ def _validate_episode(item: Any, index: int, ids: set[str],
     if "history_reference_delay_seconds" in item:
         _bounded_number(item["history_reference_delay_seconds"],
                         f"episodes[{index}].history_reference_delay_seconds", 0, sys.float_info.max)
-    for field in ("hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement"):
+    for field in ("hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_compare_admitted_models"):
         if field in item and not isinstance(item[field], bool):
             raise CampaignError(f"episodes[{index}].{field} must be boolean")
     if "chunk" in item:
@@ -262,6 +266,24 @@ def _validate_episode(item: Any, index: int, ids: set[str],
                         campaign_max_samples, integer=True)
     if "helper" in item and not isinstance(item["helper"], bool):
         raise CampaignError(f"episodes[{index}].helper must be boolean")
+    if "service_replay" in item and not isinstance(item["service_replay"], bool):
+        raise CampaignError(f"episodes[{index}].service_replay must be boolean")
+    service_requested = item.get("service_replay", False)
+    if (SERVICE_FIELDS - {"service_replay"}) & item.keys() and not service_requested:
+        raise CampaignError(f"episodes[{index}]: service options require service_replay")
+    if "service_episodes" in item:
+        _bounded_number(item["service_episodes"], f"episodes[{index}].service_episodes", 1, 2, integer=True)
+    if "owners" in item:
+        _bounded_number(item["owners"], f"episodes[{index}].owners", 1, 65536, integer=True)
+    if "service_spool_byte_limit" in item:
+        _bounded_number(item["service_spool_byte_limit"], f"episodes[{index}].service_spool_byte_limit", 1, 2**64 - 1, integer=True)
+    for field in ("service_backlog_begin_slot", "service_backlog_end_slot"):
+        if field in item:
+            _bounded_number(item[field], f"episodes[{index}].{field}", 0, 2**64 - 1, integer=True)
+    backlog_fields = {"service_backlog_begin_slot", "service_backlog_end_slot"} & item.keys()
+    if backlog_fields and (len(backlog_fields) != 2 or
+            item["service_backlog_begin_slot"] >= item["service_backlog_end_slot"]):
+        raise CampaignError(f"episodes[{index}]: service backlog requires paired begin < end slots")
     if "stratum" in item:
         _nonempty_str(item["stratum"], f"episodes[{index}].stratum")
     for field in ("id", "scenario"):
@@ -269,6 +291,11 @@ def _validate_episode(item: Any, index: int, ids: set[str],
             raise CampaignError(f"episodes[{index}].{field} must be a simple identifier")
     mode = item["mode"]
     control = item.get("control", "wanted")
+    if service_requested:
+        if mode not in {"receive", "plan"} or item.get("chunk", 4096) > 4096:
+            raise CampaignError(f"episodes[{index}]: service replay requires receive/plan and chunks no larger than 4096")
+        if item.get("service_episodes", 1) == 2 and control not in {"wanted", "noise", "wrong-key", "wrong-ordinal"}:
+            raise CampaignError(f"episodes[{index}]: two service episodes require wanted/noise/wrong-key/wrong-ordinal")
     if item["scenario"] == "hf-gui-native":
         if (mode not in {"plan", "slot", "receive", "gui-varying"} or item["waveform"] != "reference" or
                 item.get("pulse", "rrc") != "rrc" or
@@ -276,12 +303,12 @@ def _validate_episode(item: Any, index: int, ids: set[str],
             raise CampaignError(f"episodes[{index}]: native GUI requires reference RRC plan/slot/receive/gui-varying and a supported control")
         forbidden = {"hf_trajectory_seed", "hf_trajectory_offset_seconds", "capture_lead_seconds",
                      "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver",
-                     "hf_physical_diagnostic", "hf_phase_refinement", "duration_seconds"} & item.keys()
+                     "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "duration_seconds"} & item.keys()
         if forbidden:
             raise CampaignError(f"episodes[{index}]: native GUI does not accept custom channel or phase controls: {', '.join(sorted(forbidden))}")
     if "fade_slots" in item and control != "interior-fade":
         raise CampaignError(f"episodes[{index}]: fade_slots is valid only for interior-fade control")
-    if mode not in {"receive", "slot", "diagnose", "hf-search", "gui-varying"} and "control" in item:
+    if mode not in {"receive", "slot", "diagnose", "hf-search", "gui-varying"} and "control" in item and not service_requested:
         raise CampaignError(f"episodes[{index}]: control is valid only for receiver or diagnostic mode")
     if mode in {"receive", "slot", "diagnose", "hf-search", "gui-varying"} and control not in CONTROLS:
         raise CampaignError(f"episodes[{index}]: invalid receiver control")
@@ -300,13 +327,28 @@ def _validate_episode(item: Any, index: int, ids: set[str],
         if item.get("helper", False) or item.get("backend", "cpu") != "cpu":
             raise CampaignError(f"episodes[{index}]: hf-search requires Helper-off CPU")
     if mode == "gui-varying":
-        if (item["scenario"] != "hf-gui-native" or control not in {"wanted", "noise"} or
+        if (item["scenario"] != "hf-gui-native" or control not in {"wanted", "noise", "wrong-key"} or
                 item.get("helper", False) or item.get("backend", "cpu") != "cpu" or
                 "capture_digest_slot" not in item):
-            raise CampaignError(f"episodes[{index}]: gui-varying requires native GUI, wanted/noise, Helper-off CPU and explicit capture_digest_slot")
+            raise CampaignError(f"episodes[{index}]: gui-varying requires native GUI, wanted/noise/wrong-key, Helper-off CPU and explicit capture_digest_slot")
     if item.get("hf_phase_refinement", False) and not (mode == "hf-search" or
             (mode in {"receive", "slot"} and item.get("hf_public_phase_receiver", False))):
         raise CampaignError(f"episodes[{index}]: phase refinement requires hf-search or the public phase receiver")
+    if "hf_phase_filter" in item and (mode != "hf-search" or not item.get("hf_phase_refinement", False) or
+            item.get("search_timing", "selected") != "full"):
+        raise CampaignError(f"episodes[{index}]: phase filter requires full-timing hf-search with phase refinement")
+    if "hf_phase_filter_receiver" in item and (mode != "receive" or not item.get("hf_public_phase_receiver", False) or
+            not item.get("hf_phase_refinement", False) or item.get("hf_compare_admitted_models", False)):
+        raise CampaignError(f"episodes[{index}]: receiver phase filter requires receive with public phase refinement and no admitted-model comparison")
+    if "hf_phase_filter_paths" in item and (mode != "hf-search" or not item.get("hf_phase_filter", False) or
+            not item.get("hf_physical_diagnostic", False)):
+        raise CampaignError(f"episodes[{index}]: private phase paths require the phase filter and physical hf-search diagnostic")
+    if "hf_phase_filter_sticky" in item and (not (item.get("hf_phase_filter", False) or item.get("hf_phase_filter_receiver", False)) or
+            (item["hf_phase_filter_sticky"] and item.get("hf_phase_filter_paths", False))):
+        raise CampaignError(f"episodes[{index}]: sticky phase prior requires a shadow/receiver phase filter and excludes private path diagnostics")
+    if "hf_compare_admitted_models" in item and (mode not in {"receive", "plan"} or
+            item.get("backend", "cpu") != "cpu" or item.get("hf_public_phase_receiver", False)):
+        raise CampaignError(f"episodes[{index}]: admitted-model comparison requires CPU receive/plan without the public phase supplement")
     if item.get("hf_physical_diagnostic", False) and (mode != "hf-search" or control != "wanted"):
         raise CampaignError(f"episodes[{index}]: physical diagnostic requires wanted hf-search mode")
     if item.get("hf_public_phase_receiver", False):
@@ -346,11 +388,16 @@ def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_se
                         ("hf_phase_bank", "--hf-phase-bank"),
                         ("hf_public_phase_receiver", "--hf-public-phase-receiver"),
                         ("hf_physical_diagnostic", "--hf-physical-diagnostic"),
-                        ("hf_phase_refinement", "--hf-phase-refinement")) + tuple(
-                            (key, "--" + key.replace("_", "-")) for key in sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS)):
+                        ("hf_phase_refinement", "--hf-phase-refinement"),
+                        ("hf_phase_filter", "--hf-phase-filter"),
+                        ("hf_phase_filter_receiver", "--hf-phase-filter-receiver"),
+                        ("hf_phase_filter_paths", "--hf-phase-filter-paths"),
+                        ("hf_phase_filter_sticky", "--hf-phase-filter-sticky"),
+                        ("hf_compare_admitted_models", "--hf-compare-admitted-models")) + tuple(
+                            (key, "--" + key.replace("_", "-")) for key in sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS)):
         if key in episode:
             value = episode[key]
-            if key in {"helper", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "gui_clock_edge"}:
+            if key in {"helper", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_compare_admitted_models", "gui_clock_edge", "service_replay"}:
                 if value:
                     command.append(option)
             else:
@@ -530,7 +577,191 @@ def _validate_refinement_trace(trace: Any, *, full: bool, timing_count: int,
 
 
 def _communication_endpoint(episode: dict[str, Any]) -> str:
+    if episode.get("service_replay", False) and episode.get("service_episodes", 1) == 2:
+        return "service_replay.communication_complete"
     return "correct_decoded_complete" if episode.get("fec", "off") != "off" else "correct_complete"
+
+
+def _communication_outcome(receipt: dict[str, Any], episode: dict[str, Any]) -> Any:
+    if _communication_endpoint(episode) == "service_replay.communication_complete":
+        return receipt.get("service_replay", {}).get("communication_complete")
+    return receipt.get("outcomes", {}).get(_communication_endpoint(episode))
+
+
+def _validate_phase_filter(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
+    search = receipt["hf_public_search"]
+    result = search.get("phase_filter")
+    if not episode.get("hf_phase_filter", False):
+        if result is not None:
+            raise CampaignError("unrequested HF phase filter result")
+        return
+    _validate_phase_filter_result(search, receipt["plan"], receipt["plan"]["search_observation"])
+
+
+def _validate_phase_filter_result(search: dict[str, Any], plan: dict[str, Any], observation: Any) -> None:
+    result = search.get("phase_filter")
+    if (not isinstance(result, dict) or result.get("enabled") is not True or result.get("executed") is not True or
+            plan.get("sample_rate_hz") != 1920 or search.get("evaluated_timing_atoms") != 39):
+        raise CampaignError("HF phase filter requires its supported full-timing geometry and executed receipt")
+    sticky = plan.get("hf_phase_filter_sticky_requested", False)
+    sticky_fields = {"sticky_enabled", "walk", "sticky", "correlated_prior_weights", "transition_probabilities"}
+    if sticky:
+        transitions = result.get("transition_probabilities")
+        expected_transitions = {"walk": {"stay": .5, "step_each": .25, "edge_stay": .75},
+                                "sticky": {"stay": .96875, "step_each": .015625, "edge_stay": .984375}}
+        if (result.get("sticky_enabled") is not True or result.get("correlated_prior_weights") != [.5, .5] or
+                not isinstance(transitions, dict) or set(transitions) != set(expected_transitions)):
+            raise CampaignError("sticky phase filter must report its fixed equal correlated-family prior")
+        for family, expected_transition in expected_transitions.items():
+            values = transitions[family]
+            if (not isinstance(values, dict) or set(values) != set(expected_transition) or
+                    any(not _is_finite_number(values[field]) or values[field] != value for field, value in expected_transition.items())):
+                raise CampaignError("sticky phase filter transition probabilities must match the frozen normalized priors")
+    elif sticky_fields & result.keys():
+        raise CampaignError("unrequested sticky phase filter telemetry")
+    if (not isinstance(observation, dict) or any(not _is_nonnegative_int(observation.get(field)) for field in ("first", "stop")) or
+            observation["stop"] <= observation["first"] or not _is_nonnegative_int(plan.get("horizon_samples")) or
+            observation["stop"] > plan["horizon_samples"]):
+        raise CampaignError("HF phase filter requires its complete public observation inside the declared horizon")
+    samples = observation["stop"] - observation["first"]
+    groups, blocks = (samples + 1919) // 1920, (samples + 127) // 128
+    bounds = plan.get("public_bounds", {})
+    base_frequency, atmosphere = bounds.get("frequency_bound_hz"), bounds.get("atmospheric_hz")
+    if (search.get("block_rows") != 128 or search.get("blocks") != blocks or
+            not _is_finite_number(base_frequency) or base_frequency < 0 or
+            not _is_finite_number(atmosphere) or atmosphere < 0 or base_frequency + atmosphere != 1 or
+            not _is_finite_number(search.get("configured_frequency_bound_hz")) or search["configured_frequency_bound_hz"] != 1):
+        raise CampaignError("HF phase filter must preserve the supported public block and frequency geometry")
+    expected = {"phase_bins": 32, "frequency_bins": 33, "frequency_step_hz": .0625,
+                "group_seconds": 1, "groups": groups, "timing_atoms": 39, "timing_prior_mass": 1,
+                "branch_weight_within_supplement": .5, "supplement_weight": .25,
+                "input_samples": samples, "input_block_rows": 128, "input_blocks": blocks}
+    if not 0 < samples <= 600 * 1920 or groups > 600 or blocks > 9000 or result.get("gain_radii") != [.5, 1]:
+        raise CampaignError("HF phase filter exceeds its fixed aperture or gain-prior bounds")
+    for field, value in expected.items():
+        if not _is_finite_number(result.get(field)) or result[field] != value:
+            raise CampaignError("HF phase filter geometry and mixture weights must match its fixed public contract")
+        if field in {"phase_bins", "frequency_bins", "groups", "timing_atoms", "input_samples", "input_block_rows", "input_blocks"} and not _is_nonnegative_int(result[field]):
+            raise CampaignError("HF phase filter count fields must be integers")
+    if not _is_finite_number(result.get("stage_wall_seconds")) or result["stage_wall_seconds"] < 0:
+        raise CampaignError("HF phase filter must report finite nonnegative stage time")
+    thresholds = (search.get("presence_reference_threshold"), search.get("bit_separation_reference"))
+    if any(not _is_finite_number(value) or value < 0 for value in thresholds):
+        raise CampaignError("HF phase filter requires finite public decision references")
+
+    def log_add(a: float, b: float) -> float:
+        return max(a, b) + math.log1p(math.exp(-abs(a - b)))
+
+    evidence = []
+    for name in ("baseline", "correlated", "combined") + (("walk", "sticky") if sticky else ()):
+        branch = result.get(name)
+        if not isinstance(branch, dict):
+            raise CampaignError("HF phase filter requires all three separately reported branches")
+        values = branch.get("bit_log_e")
+        if not isinstance(values, list) or len(values) != 2 or any(not _is_finite_number(value) for value in values):
+            raise CampaignError("HF phase filter requires finite paired bit evidence")
+        presence, separation = log_add(*values) - math.log(2) + math.log(.25), abs(values[1] - values[0])
+        if (not _is_finite_number(branch.get("weighted_presence_log_e")) or
+                not math.isclose(branch["weighted_presence_log_e"], presence, rel_tol=1e-10, abs_tol=1e-9) or
+                not _is_finite_number(branch.get("bit_log_separation")) or
+                not math.isclose(branch["bit_log_separation"], separation, rel_tol=1e-10, abs_tol=1e-9) or
+                not _is_nonnegative_int(branch.get("favored_bit")) or branch["favored_bit"] != int(values[1] > values[0]) or
+                branch.get("passes_presence_reference") is not (presence >= thresholds[0]) or
+                branch.get("passes_bit_separation_reference") is not (separation >= thresholds[1])):
+            raise CampaignError("HF phase filter diagnostics must retain weighted evidence and public references")
+        evidence.append(values)
+    if evidence[0] != search["phase_refinement"]["combined_bit_log_e"]:
+        raise CampaignError("HF phase filter must preserve the separately reported refinement baseline")
+    if any(not math.isclose(combined, log_add(old, new) - math.log(2), rel_tol=1e-10, abs_tol=1e-9)
+           for old, new, combined in zip(*evidence[:3])):
+        raise CampaignError("HF phase filter must preserve the fixed equal branch mixture")
+    if sticky and any(not math.isclose(correlated, log_add(walk, held) - math.log(2), rel_tol=1e-10, abs_tol=1e-9)
+                      for correlated, walk, held in zip(evidence[1], evidence[3], evidence[4])):
+        raise CampaignError("sticky phase filter must preserve the fixed equal walk/sticky mixture")
+    work = result.get("work")
+    expected_work = {"correlation_products": 39 * 2 * 33 * blocks,
+                     "emission_states": 39 * 4 * 33 * 32 * groups,
+                     "transition_edges": 39 * 4 * 32 * 97 * (groups - 1)}
+    if not isinstance(work, dict):
+        raise CampaignError("HF phase filter requires bounded native work accounting")
+    for field, value in expected_work.items():
+        if not _is_nonnegative_int(work.get(field)) or work[field] != value * (2 if sticky else 1):
+            raise CampaignError("HF phase filter work must match every full public timing atom")
+    if (not _is_nonnegative_int(work.get("workspace_reserved_bytes")) or work["workspace_reserved_bytes"] == 0 or
+            not _is_finite_number(work.get("summed_worker_wall_seconds")) or work["summed_worker_wall_seconds"] < 0):
+        raise CampaignError("HF phase filter requires actual bounded workspace and worker timing")
+    if sticky and (not _is_nonnegative_int(search.get("stage_workers")) or not 1 <= search["stage_workers"] <= 39 or
+            work["workspace_reserved_bytes"] != search["stage_workers"] * 131072):
+        raise CampaignError("sticky phase passes must share the unchanged bounded per-worker workspace")
+
+
+def _validate_private_phase_paths(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
+    physical, search, plan = receipt["hf_physical_diagnostic"], receipt["hf_public_search"], receipt["plan"]
+    result = physical.get("phase_filter_paths")
+    if not episode.get("hf_phase_filter_paths", False):
+        if result is not None:
+            raise CampaignError("unrequested private phase path diagnostic")
+        return
+    if (not isinstance(result, dict) or result.get("used_for_receiver_decisions") is not False or
+            result.get("uses_physical_truth") is not True or result.get("observation_sha256") != physical["observation_sha256"] or
+            not _is_nonnegative_int(result.get("wanted_bit")) or result["wanted_bit"] != physical["physical_templates"]["wanted_bit"]):
+        raise CampaignError("private phase paths must preserve evaluator-only truth and observation binding")
+    for field in ("epoch_offset_seconds", "clock_ppm", "arrival_seconds", "reference_path_delay_seconds",
+                  "clean_coherence_power_lower_bound", "optimal_clean_correlation_real"):
+        if not _is_finite_number(result.get(field)):
+            raise CampaignError("private phase paths require finite coordinates and clean support diagnostics")
+    bounds = plan.get("public_bounds", {})
+    if (result["epoch_offset_seconds"] != 0 or result["clock_ppm"] != 0 or bounds.get("clock_bound_ppm") != 0 or
+            not 0 <= result["clean_coherence_power_lower_bound"] <= 1 or result["optimal_clean_correlation_real"] < 0 or
+            result.get("gain_radii") != [.5, 1]):
+        raise CampaignError("private phase paths must retain zero-clock scope and bounded finite model support")
+    paths = receipt.get("scenario", {}).get("channel", {}).get("paths")
+    if (not isinstance(paths, list) or len(paths) != 1 or not isinstance(paths[0], dict) or
+            paths[0].get("delay_seconds") != result["reference_path_delay_seconds"] or
+            any(not _is_finite_number(paths[0].get(field)) or paths[0][field] != 0 for field in
+                ("delay_rate", "residual_doppler_hz", "residual_drift_hz_s", "gaussian_width_2sigma_hz"))):
+        raise CampaignError("private phase paths must bind their single analytic ray's declared reference delay")
+    for field in ("arrival_low_seconds", "arrival_high_seconds"):
+        if not _is_finite_number(bounds.get(field)):
+            raise CampaignError("private phase paths require explicit public arrival bounds")
+    reference = result["reference_path_delay_seconds"]
+    if not bounds["arrival_low_seconds"] <= reference <= bounds["arrival_high_seconds"]:
+        raise CampaignError("private phase reference delay must remain inside the public prior")
+    coordinates = search.get("coordinates")
+    if not isinstance(coordinates, list) or len(coordinates) != 39:
+        raise CampaignError("private phase paths require the complete 39-atom public timing bank")
+    for coordinate in coordinates:
+        if not isinstance(coordinate, dict) or any(not _is_finite_number(coordinate.get(field))
+                for field in ("epoch_offset_seconds", "clock_ppm", "arrival_seconds")):
+            raise CampaignError("private phase paths require finite public timing coordinates")
+    eligible = [(i, row) for i, row in enumerate(coordinates) if row["epoch_offset_seconds"] == 0 and row["clock_ppm"] == 0]
+    if not eligible:
+        raise CampaignError("private phase paths require a zero-epoch, zero-clock public atom")
+    selected, coordinate = min(eligible, key=lambda item: abs(item[1]["arrival_seconds"] - reference))
+    if (not _is_nonnegative_int(result.get("timing_index")) or result["timing_index"] != selected or
+            result["arrival_seconds"] != coordinate["arrival_seconds"]):
+        raise CampaignError("private phase paths must use the nearest reference-delay atom without noisy selection")
+    scores = []
+    for field in ("maximum_noisy_log_lr", "maximum_prior_weighted_noisy_path_log_e", "conditional_noisy_log_e"):
+        values = result.get(field)
+        if not isinstance(values, list) or len(values) != 2 or any(not _is_finite_number(value) for value in values):
+            raise CampaignError("private phase paths require finite scores for both declared gain radii")
+        scores.append(values)
+    for maximum, prior_maximum, marginal in zip(*scores):
+        tolerance = 2e-9 * max(1, abs(maximum), abs(prior_maximum), abs(marginal))
+        if prior_maximum > marginal + tolerance or marginal > maximum + tolerance:
+            raise CampaignError("private phase maximum and marginalized scores must preserve normalized path priors")
+    public_filter = search["phase_filter"]
+    blocks, groups = public_filter["input_blocks"], public_filter["groups"]
+    work = result.get("work")
+    expected = {"correlation_products": 2 * 33 * blocks, "emission_states": 7 * 33 * 32 * groups,
+                "transition_edges": 7 * 32 * 97 * (groups - 1), "workspace_reserved_bytes": 128 * 1024,
+                "block_statistics_reserved_bytes": 40 * blocks,
+                "public_pair_reserved_bytes": physical["admission"].get("pair_workspace_bytes")}
+    if not isinstance(work, dict) or any(not _is_nonnegative_int(work.get(field)) or work[field] != value for field, value in expected.items()):
+        raise CampaignError("private phase path work must match its finite lattice and reserved native buffers")
+    if sum(work[field] for field in ("workspace_reserved_bytes", "block_statistics_reserved_bytes", "public_pair_reserved_bytes")) > physical["admission"]["future_reserved_bytes"]:
+        raise CampaignError("private phase path buffers must fit the physical diagnostic reservation")
 
 
 def _validate_decoded_success(receipt: dict[str, Any], episode: dict[str, Any], fec: str) -> None:
@@ -769,6 +1000,264 @@ def _validate_gain_partitions(physical: dict[str, Any], sample_rate: Any, sample
                 raise CampaignError("gain partitions cannot report an unrendered noise-only twin")
 
 
+def _validate_service_plan(receipt: dict[str, Any], episode: dict[str, Any]) -> dict[str, Any] | None:
+    plan = receipt.get("plan")
+    service = plan.get("service_replay") if isinstance(plan, dict) else None
+    if not episode.get("service_replay", False):
+        if service is not None or receipt.get("service_replay") is not None:
+            raise CampaignError("unrequested native service replay receipt")
+        return None
+    if service is None and receipt.get("status") != "completed" and receipt.get("service_replay") is None:
+        return None  # A pre-render failure has no admitted replay or service result.
+    if not isinstance(plan, dict) or not isinstance(service, dict):
+        raise CampaignError("requested service replay requires its native plan")
+    if not _is_nonnegative_int(service.get("schema_version")) or service["schema_version"] != 1:
+        raise CampaignError("service replay requires schema version 1")
+    episodes = episode.get("service_episodes", 1)
+    for field in ("episodes", "wire_bits_per_episode", "expected_message_count", "maximum_spool_bytes",
+                  "planned_spool_bytes", "input_chunk_samples"):
+        if not _is_nonnegative_int(service.get(field)):
+            raise CampaignError("service replay plan requires integer geometry and byte bounds")
+    wire, horizon, slots = service["wire_bits_per_episode"], plan.get("horizon_samples"), plan.get("scored_slot_horizon")
+    if (service["episodes"] != episodes or wire <= 0 or wire != plan.get("wire_bits") or
+            not _is_nonnegative_int(horizon) or horizon == 0 or
+            not _is_nonnegative_int(slots) or slots == 0 or
+            not _is_nonnegative_int(plan.get("max_samples")) or plan["max_samples"] == 0 or
+            not _is_finite_number(plan.get("max_wall_seconds")) or plan["max_wall_seconds"] <= 0):
+        raise CampaignError("service replay plan must bind its episode and complete source geometry")
+    if "max_samples" in episode and plan["max_samples"] != episode["max_samples"]:
+        raise CampaignError("service replay sample limit does not match the episode")
+    if not isinstance(plan.get("public_slots"), list) or len(plan["public_slots"]) != slots:
+        raise CampaignError("service replay requires its complete bounded public calendar")
+    resources = plan.get("receiver_resources")
+    if (not isinstance(resources, dict) or not _is_nonnegative_int(resources.get("hardware_threads")) or resources["hardware_threads"] == 0 or
+            not _is_nonnegative_int(resources.get("workers")) or resources["workers"] != 2 * resources["hardware_threads"] or
+            resources.get("workers_explicit") is not False or resources.get("owners_explicit") is not ("owners" in episode) or
+            not _is_nonnegative_int(resources.get("slot_owners")) or
+            resources["slot_owners"] != episode.get("owners", resources["workers"]) or resources["slot_owners"] > resources["workers"]):
+        raise CampaignError("service replay must preserve full automatic workers and the exact explicit owner cap")
+    target = episode.get("control", "wanted") in {"wanted", "interior-fade", "capture-gap"}
+    intervals = [{"first_public_slot": i * (wire + 2), "stop_public_slot": (i + 1) * (wire + 2)}
+                 for i in range(episodes)]
+    expected_pattern = "".join("D" if episode.get("control", "wanted") != "noise" and
+        any(row["first_public_slot"] <= i < row["stop_public_slot"] - 2 for row in intervals) else "Q"
+        for i in range(slots))
+    if (service["expected_message_count"] != (episodes if target else 0) or
+            service.get("expected_message_intervals") != intervals or service.get("slot_pattern") != expected_pattern or
+            (episodes == 2 and slots != 2 * (wire + 2) + 1)):
+        raise CampaignError("service replay must preserve the declared global message and quiet-slot schedule")
+    if any(not _is_nonnegative_int(row[field]) for row in service["expected_message_intervals"]
+           for field in ("first_public_slot", "stop_public_slot")):
+        raise CampaignError("service replay message interval fields must be integer slots")
+    maximum = episode.get("service_spool_byte_limit", plan["max_samples"] * 17)
+    if (service["maximum_spool_bytes"] != maximum or service["planned_spool_bytes"] != horizon * 17 or
+            service.get("fits_spool_budget") is not (horizon * 17 <= maximum) or
+            service["input_chunk_samples"] != episode.get("chunk", 4096)):
+        raise CampaignError("service replay must bind the complete 17-byte-row spool and chunk limits")
+    for field in ("backlog_begin_slot", "backlog_end_slot"):
+        requested = episode.get("service_" + field)
+        if service.get(field) != requested or (requested is not None and not _is_nonnegative_int(service[field])):
+            raise CampaignError("service replay backlog interval does not match the frozen episode")
+    if service["backlog_end_slot"] is not None and service["backlog_end_slot"] >= slots:
+        raise CampaignError("service replay backlog interval exceeds the scored public horizon")
+    represented = service.get("backlog_unique_baseband_seconds")
+    if ((service["backlog_begin_slot"] is None and represented is not None) or
+            (service["backlog_begin_slot"] is not None and (not _is_finite_number(represented) or represented <= 0))):
+        raise CampaignError("service backlog must bind its exact canonical calendar duration")
+    return service
+
+
+def _validate_service_replay(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
+    service_plan = _validate_service_plan(receipt, episode)
+    replay = receipt.get("service_replay")
+    if replay is None:
+        if episode.get("service_replay", False) and episode["mode"] == "receive" and receipt.get("status") == "completed":
+            raise CampaignError("completed service receive requires its full replay measurement")
+        return
+    if episode["mode"] != "receive" or not isinstance(replay, dict) or service_plan is None:
+        raise CampaignError("service execution measurements require an admitted receive replay")
+    if any(replay.get(field) != value or type(replay.get(field)) is not type(value)
+           for field, value in service_plan.items()):
+        raise CampaignError("service result must repeat the complete frozen native replay plan")
+    plan, channel = receipt["plan"], receipt.get("channel")
+    horizon, fs = plan["horizon_samples"], plan.get("sample_rate_hz")
+    if not _is_finite_number(fs) or fs <= 0:
+        raise CampaignError("service replay requires positive sample-rate geometry")
+    for field in ("wall_seconds", "spool_read_and_verification_seconds", "render_wall_seconds", "spool_write_seconds"):
+        if not _is_finite_number(replay.get(field)) or replay[field] < 0:
+            raise CampaignError("service replay wall timings must be finite and nonnegative")
+    for field in ("process_cpu_seconds", "spool_read_and_verification_process_cpu_seconds",
+                  "render_process_cpu_seconds", "spool_write_process_cpu_seconds"):
+        if field not in replay or (replay[field] is not None and
+                (not _is_finite_number(replay[field]) or replay[field] < 0)):
+            raise CampaignError("service replay CPU timings must be explicit finite values or unavailable")
+    for subset, whole in (("spool_read_and_verification_seconds", "wall_seconds"),
+                          ("spool_write_seconds", "render_wall_seconds"),
+                          ("spool_read_and_verification_process_cpu_seconds", "process_cpu_seconds"),
+                          ("spool_write_process_cpu_seconds", "render_process_cpu_seconds")):
+        if replay[subset] is not None and (replay[whole] is None or replay[subset] > replay[whole] + 1e-6):
+            raise CampaignError("service spool subset timings must remain inside the measured full scope")
+    represented = horizon / fs
+    for field, expected in (("unique_baseband_seconds", represented),
+                            ("service_seconds_per_baseband_second", replay["wall_seconds"] / represented)):
+        if not _is_finite_number(replay.get(field)) or not math.isclose(replay[field], expected, rel_tol=1e-9, abs_tol=1e-9):
+            raise CampaignError("service throughput must use the complete unique baseband horizon")
+    for field in ("captured_input_sha256", "verified_input_sha256"):
+        if not isinstance(replay.get(field), str) or re.fullmatch(r"[0-9a-fA-F]{64}", replay[field]) is None:
+            raise CampaignError("service replay requires capture and verification SHA-256 digests")
+    if (not isinstance(channel, dict) or channel.get("input_sha256") != replay["captured_input_sha256"] or
+            not _is_nonnegative_int(channel.get("samples")) or channel["samples"] != horizon or
+            not _is_nonnegative_int(channel.get("hashed_samples")) or channel["hashed_samples"] != horizon):
+        raise CampaignError("service replay must preserve the complete pre-rendered capture independently of its verified prefix")
+    if not _is_nonnegative_int(replay.get("replayed_samples")) or replay["replayed_samples"] > horizon:
+        raise CampaignError("service replay sample count must stay within the original horizon")
+    digest_match = replay["replayed_samples"] == horizon and replay["captured_input_sha256"] == replay["verified_input_sha256"]
+    if replay.get("digest_match") is not digest_match:
+        raise CampaignError("service digest match requires verified samples for the whole horizon")
+    for field in ("work_complete", "communication_complete"):
+        if not isinstance(replay.get(field), bool):
+            raise CampaignError("service work and communication completion must be separate booleans")
+    if replay.get("capacity_qualified") is not False:
+        raise CampaignError("bounded service replay must not claim hardware capacity qualification")
+    integer_fields = ("peak_active_owners", "receiver_peak_reserved_bytes", "outside_receiver_future_reserved_bytes",
+                      "spool_residency_reserved_bytes", "peak_reserved_bytes", "spool_bytes", "spool_working_bytes",
+                      "total_application_memory_limit_bytes", "receiver_memory_limit_bytes", "max_samples")
+    if any(not _is_nonnegative_int(replay.get(field)) for field in integer_fields):
+        raise CampaignError("service replay requires explicit integer caps and peak reservations")
+    if (replay["spool_bytes"] != service_plan["planned_spool_bytes"] or
+            replay["spool_bytes"] > service_plan["maximum_spool_bytes"] or replay["spool_working_bytes"] <= 0 or
+            replay["peak_reserved_bytes"] != sum(replay[field] for field in
+                ("receiver_peak_reserved_bytes", "outside_receiver_future_reserved_bytes", "spool_residency_reserved_bytes")) or
+            replay["peak_reserved_bytes"] > replay["total_application_memory_limit_bytes"] or
+            not 0 < replay["receiver_memory_limit_bytes"] <= replay["total_application_memory_limit_bytes"] or
+            replay["receiver_peak_reserved_bytes"] > replay["receiver_memory_limit_bytes"] or
+            replay["receiver_memory_limit_bytes"] + replay["outside_receiver_future_reserved_bytes"] +
+                replay["spool_residency_reserved_bytes"] != replay["total_application_memory_limit_bytes"] or
+            replay["max_samples"] != plan["max_samples"] or
+            not _is_finite_number(replay.get("max_wall_seconds")) or replay["max_wall_seconds"] != plan["max_wall_seconds"] or
+            replay.get("spool_backing_kind") not in {"known_disk", "memory_filesystem", "unknown"}):
+        raise CampaignError("service replay reservations and spool must fit the declared application limits")
+    if ((replay["spool_backing_kind"] == "known_disk" and replay["spool_residency_reserved_bytes"] != 0) or
+            (replay["spool_backing_kind"] != "known_disk" and replay["spool_residency_reserved_bytes"] < replay["spool_bytes"])):
+        raise CampaignError("service replay must reserve complete memory-backed or unknown spool residency")
+    resources = plan.get("receiver_resources")
+    if (not isinstance(resources, dict) or not _is_nonnegative_int(resources.get("hardware_threads")) or
+            resources["hardware_threads"] == 0 or not _is_nonnegative_int(resources.get("workers")) or resources["workers"] == 0 or
+            not _is_nonnegative_int(resources.get("slot_owners")) or resources["slot_owners"] == 0 or
+            replay["peak_active_owners"] > min(resources["workers"], resources["slot_owners"]) or
+            replay["total_application_memory_limit_bytes"] != resources.get("total_memory_limit_bytes")):
+        raise CampaignError("service replay owner peaks must respect the declared receiver allocation")
+    for field in ("workers_explicit", "owners_explicit"):
+        if not isinstance(replay.get(field), bool) or replay[field] is not resources.get(field):
+            raise CampaignError("service replay must retain explicit worker and owner controls")
+    busy = replay.get("mean_busy_hardware_fraction")
+    expected_busy = replay["process_cpu_seconds"] / replay["wall_seconds"] / resources["hardware_threads"] if replay["process_cpu_seconds"] is not None and replay["wall_seconds"] > 0 else None
+    if ((expected_busy is None and busy is not None) or (expected_busy is not None and
+            (not _is_finite_number(busy) or not math.isclose(busy, expected_busy, rel_tol=1e-9, abs_tol=1e-9)))):
+        raise CampaignError("service CPU occupancy must use measured process CPU, wall time and hardware threads")
+    slots, receiver, outcomes = receipt.get("slots"), receipt.get("receiver"), receipt.get("outcomes")
+    if not isinstance(slots, list) or not isinstance(outcomes, dict):
+        raise CampaignError("service replay requires native ordered slots and outcomes")
+    if replay["work_complete"]:
+        if (receipt.get("status") != "completed" or not digest_match or not isinstance(receiver, dict) or
+                receiver.get("state") != "input_ended" or receiver.get("next_public_slot") != plan["scored_slot_horizon"] or
+                outcomes.get("accepted_samples") != horizon or len(slots) != plan["scored_slot_horizon"] or
+                outcomes.get("actual_scored_slots") != len(slots)):
+            raise CampaignError("complete service requires input-ended processing of the verified full horizon")
+        for index, (slot, public) in enumerate(zip(slots, plan["public_slots"])):
+            if (not isinstance(slot, dict) or not isinstance(public, dict) or
+                    not _is_nonnegative_int(slot.get("index")) or slot["index"] != index or public.get("index") != index or
+                    slot.get("complete") is not True or slot.get("all_valid") is not True or
+                    slot.get("pattern_epoch") != public.get("pattern_epoch") or slot.get("symbol_ordinal") != public.get("symbol_ordinal") or
+                    not _is_nonnegative_int(slot.get("first_sample")) or not _is_nonnegative_int(slot.get("stop_sample")) or
+                    public.get("observation") != {"first": slot["first_sample"], "stop": slot["stop_sample"]}):
+                raise CampaignError("complete service requires every ordered canonical slot, epoch and ordinal")
+    if service_plan["episodes"] == 2 and (outcomes.get("correct_complete") is not False or outcomes.get("correct_decoded_complete") is not False):
+        raise CampaignError("paired service must not reuse single-message success endpoints")
+    if replay["communication_complete"]:
+        if (not replay["work_complete"] or outcomes.get("false_data") != 0 or outcomes.get("premature_completions") != 0 or
+                outcomes.get("accepted_messages") != service_plan["expected_message_count"]):
+            raise CampaignError("service communication completion requires complete work and every expected accepted message")
+        if service_plan["expected_message_count"]:
+            _validate_service_messages(receipt, episode, service_plan)
+    _validate_service_backlog(receipt, service_plan, replay)
+
+
+def _validate_service_messages(receipt: dict[str, Any], episode: dict[str, Any], service_plan: dict[str, Any]) -> None:
+    messages, outcomes = receipt.get("messages"), receipt["outcomes"]
+    if (not isinstance(messages, list) or not all(isinstance(message, dict) for message in messages) or
+            outcomes.get("physical_completions") != service_plan["expected_message_count"] or outcomes.get("premature_completions") != 0):
+        raise CampaignError("service message success requires exact physical completion counts")
+    accepted = [message for message in messages if message.get("decoded") is True]
+    if (len(accepted) != service_plan["expected_message_count"] or
+            sum(message.get("physical_complete") is True for message in messages) != len(accepted) or
+            any(message.get("premature") is not False for message in messages)):
+        raise CampaignError("service message success requires all expected, nonpremature native messages")
+    for interval in service_plan["expected_message_intervals"]:
+        found = [message for message in accepted if message.get("first_public_slot") == interval["first_public_slot"]]
+        if len(found) != 1 or found[0].get("stop_public_slot") != interval["stop_public_slot"]:
+            raise CampaignError("service messages must preserve both global public frame intervals")
+        message = found[0]
+        raw_fields = ("wrong_bits", "ambiguous_active_slots", "quiet_active_slots")
+        if any(not _is_nonnegative_int(message.get(field)) for field in raw_fields):
+            raise CampaignError("service messages require separate per-frame raw slot counts")
+        active = receipt["slots"][interval["first_public_slot"]:interval["stop_public_slot"] - 2]
+        if (message["ambiguous_active_slots"] != sum(slot.get("decision") == "ambiguous" for slot in active) or
+                message["quiet_active_slots"] != sum(slot.get("decision") == "quiet" for slot in active)):
+            raise CampaignError("service per-frame erasure counts must match its actual global slot decisions")
+        local = dict(message, first_public_slot=0, stop_public_slot=service_plan["wire_bits_per_episode"] + 2)
+        per_frame = dict(outcomes, physical_completions=1, accepted_messages=1, actual_scored_slots=service_plan["wire_bits_per_episode"] + 2,
+                         missed_completion=False, **{field: message[field] for field in raw_fields})
+        _validate_decoded_success(dict(receipt, messages=[local], outcomes=per_frame), episode, episode.get("fec", "off"))
+
+
+def _validate_service_backlog(receipt: dict[str, Any], service_plan: dict[str, Any], replay: dict[str, Any]) -> None:
+    interval = replay.get("backlog_interval")
+    begin, end = service_plan["backlog_begin_slot"], service_plan["backlog_end_slot"]
+    if begin is None:
+        if interval is not None:
+            raise CampaignError("unrequested service backlog interval")
+        return
+    if (not isinstance(interval, dict) or interval.get("start_after_public_slot") != begin or
+            interval.get("stop_after_public_slot") != end or not isinstance(interval.get("complete"), bool) or
+            not isinstance(interval.get("reason"), str) or not interval["reason"].strip()):
+        raise CampaignError("service backlog result must bind its predeclared commit interval")
+    if not interval["complete"]:
+        if interval.get("process_cpu_seconds") is not None or any(field in interval for field in
+                ("wall_seconds", "unique_baseband_seconds", "service_seconds_per_baseband_second", "busy_hardware_fraction")):
+            raise CampaignError("ineligible backlog intervals must not report qualified throughput")
+        return
+    if not replay["work_complete"] or interval["reason"] != "predeclared_ready_input_commit_interval":
+        raise CampaignError("eligible backlog requires complete replay and the native ready-input proof")
+    slots, plan = receipt["slots"], receipt["plan"]
+    if end >= len(slots):
+        raise CampaignError("service backlog commit boundaries were not observed")
+    first, last = slots[begin], slots[end]
+    if (not _is_nonnegative_int(first.get("commit_input_stop")) or first["commit_input_stop"] < last["stop_sample"] or
+            not _is_nonnegative_int(first.get("commit_uncommitted_slots")) or end - begin <= first["commit_uncommitted_slots"] or
+            not _is_finite_number(first.get("commit_wall_seconds")) or not _is_finite_number(last.get("commit_wall_seconds"))):
+        raise CampaignError("service backlog must prove ready input beyond startup carryover")
+    wall = last["commit_wall_seconds"] - first["commit_wall_seconds"]
+    represented = service_plan["backlog_unique_baseband_seconds"]
+    if wall <= 0 or not _is_finite_number(represented) or represented <= 0:
+        raise CampaignError("service backlog requires positive measured and represented duration")
+    for field, expected in (("wall_seconds", wall), ("unique_baseband_seconds", represented),
+                            ("service_seconds_per_baseband_second", wall / represented),
+                            ("commits", end - begin), ("initial_uncommitted_slots", first["commit_uncommitted_slots"])):
+        if not _is_finite_number(interval.get(field)) or not math.isclose(interval[field], expected, rel_tol=1e-9, abs_tol=1e-9):
+            raise CampaignError("service backlog throughput must match its actual commit boundaries")
+    start_cpu, stop_cpu = first.get("commit_process_cpu_seconds"), last.get("commit_process_cpu_seconds")
+    cpu = stop_cpu - start_cpu if _is_finite_number(start_cpu) and _is_finite_number(stop_cpu) and stop_cpu >= start_cpu else None
+    if cpu is None:
+        if interval.get("process_cpu_seconds") is not None or interval.get("busy_hardware_fraction") is not None:
+            raise CampaignError("service backlog must not invent unavailable process CPU")
+    elif (not _is_finite_number(interval.get("process_cpu_seconds")) or
+            not math.isclose(interval["process_cpu_seconds"], cpu, rel_tol=1e-9, abs_tol=1e-9) or
+            not _is_finite_number(interval.get("busy_hardware_fraction")) or
+            not math.isclose(interval["busy_hardware_fraction"], cpu / wall / plan["receiver_resources"]["hardware_threads"], rel_tol=1e-9, abs_tol=1e-9)):
+        raise CampaignError("service backlog CPU occupancy must match measured commit CPU")
+
+
 def _validate_gui_varying(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
     """Validate a bounded same-observation component comparison, never reception."""
     plan = receipt["plan"]
@@ -817,7 +1306,7 @@ def _validate_gui_varying(receipt: dict[str, Any], episode: dict[str, Any]) -> N
     matching = [row for row in public_slots if row.get("index") == selected]
     if (len(matching) != 1 or not _is_nonnegative_int(matching[0].get("index")) or
             matching[0].get("observation") != {"first": first, "stop": stop} or
-            matching[0].get("evaluator_transmitting") is not (episode.get("control", "wanted") == "wanted")):
+            matching[0].get("evaluator_transmitting") is not (episode.get("control", "wanted") != "noise")):
         raise CampaignError("GUI varying observation must match its public slot and control")
     if (any(not _is_nonnegative_int(channel.get(field)) or channel[field] != plan["horizon_samples"]
             for field in ("samples", "hashed_samples")) or
@@ -1070,6 +1559,26 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     refinement_requested = episode.get("hf_phase_refinement", False)
     if plan.get("hf_phase_refinement_requested", False) is not refinement_requested:
         raise CampaignError("native phase refinement request does not match the frozen episode")
+    filter_requested = episode.get("hf_phase_filter", False)
+    if plan.get("hf_phase_filter_requested", False) is not filter_requested:
+        raise CampaignError("native phase filter request does not match the frozen episode")
+    receiver_filter_requested = episode.get("hf_phase_filter_receiver", False)
+    if plan.get("hf_phase_filter_receiver_requested", False) is not receiver_filter_requested:
+        raise CampaignError("native receiver phase filter request does not match the frozen episode")
+    if plan.get("hf_phase_filter_paths_requested", False) is not episode.get("hf_phase_filter_paths", False):
+        raise CampaignError("native private phase path request does not match the frozen episode")
+    sticky_requested = episode.get("hf_phase_filter_sticky", False)
+    if plan.get("hf_phase_filter_sticky_requested", False) is not sticky_requested:
+        raise CampaignError("native sticky phase prior request does not match the frozen episode")
+    comparison_requested = episode.get("hf_compare_admitted_models", False)
+    policy = "compare_admitted" if comparison_requested else "fallback_only"
+    if comparison_requested or episode.get("service_replay", False) or "receiver_evidence_policy" in plan:
+        if (plan.get("hf_compare_admitted_models_requested") is not comparison_requested or
+                plan.get("receiver_evidence_policy") != policy):
+            raise CampaignError("native receiver evidence policy does not match the frozen episode")
+        receiver_policy = receipt.get("receiver")
+        if episode["mode"] == "receive" and (not isinstance(receiver_policy, dict) or receiver_policy.get("evidence_policy") != policy):
+            raise CampaignError("executed receiver must report the requested native evidence policy")
     physical_requested = episode.get("hf_physical_diagnostic", False)
     if plan.get("hf_physical_diagnostic_requested", False) is not physical_requested:
         raise CampaignError("native physical diagnostic request does not match the frozen episode")
@@ -1080,10 +1589,14 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
         raise CampaignError("native public phase receiver request does not match the frozen episode")
     if phase_receiver_requested:
         phase_receiver = receipt.get("hf_public_phase_receiver")
+        model_family = ("equal_prior_refined_baseline_and_correlated_phase_filter" if receiver_filter_requested else
+                        "equal_prior_fixed97_and_cartesian_refinement" if refinement_requested else "sinusoidal_phase_97")
         if (not isinstance(phase_receiver, dict) or phase_receiver.get("experimental") is not True or
                 phase_receiver.get("truth_information_passed_to_search") is not False or
                 phase_receiver.get("refinement_enabled", False) is not refinement_requested or
-                phase_receiver.get("model_family") != ("equal_prior_fixed97_and_cartesian_refinement" if refinement_requested else "sinusoidal_phase_97") or
+                phase_receiver.get("phase_filter_enabled", False) is not receiver_filter_requested or
+                phase_receiver.get("phase_filter_sticky_enabled", False) is not sticky_requested or
+                phase_receiver.get("model_family") != model_family or
                 not _is_finite_number(phase_receiver.get("fixed_weight")) or phase_receiver["fixed_weight"] != .25):
             raise CampaignError("experimental public phase receiver must report its fixed family/prior and no truth inputs")
         maximum = phase_receiver.get("maximum_slot_reports")
@@ -1104,10 +1617,23 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
                     raise CampaignError("operational refinement must report evaluated timing geometry")
                 _validate_refinement_trace(report.get("phase_refinement"), full=False, timing_count=count,
                     block_count=report.get("blocks"), block_rows=report.get("block_rows"), sample_rate=plan.get("sample_rate_hz"))
-                if report.get("bit_log_e") != report["phase_refinement"]["combined_bit_log_e"]:
+                expected_evidence = report["phase_refinement"]["combined_bit_log_e"]
+                if receiver_filter_requested:
+                    public_slots = plan.get("public_slots")
+                    if (not isinstance(public_slots, list) or len(public_slots) != maximum or
+                            not isinstance(public_slots[report["slot_index"]], dict) or
+                            public_slots[report["slot_index"]].get("index") != report["slot_index"]):
+                        raise CampaignError("receiver phase filter must bind each callback to the complete public calendar")
+                    _validate_phase_filter_result(report, plan, public_slots[report["slot_index"]].get("observation"))
+                    expected_evidence = report["phase_filter"]["combined"]["bit_log_e"]
+                elif "phase_filter" in report:
+                    raise CampaignError("unrequested receiver phase filter result")
+                if report.get("bit_log_e") != expected_evidence:
                     raise CampaignError("operational refinement callback must use the reported combined evidence")
             elif report.get("phase_refinement", {"enabled": False}) != {"enabled": False}:
                 raise CampaignError("unrequested operational phase refinement trace")
+            elif "phase_filter" in report:
+                raise CampaignError("unrequested receiver phase filter result")
             indices.append(report["slot_index"])
         if len(set(indices)) != len(indices):
             raise CampaignError("public phase receiver must not duplicate slot callback reports")
@@ -1276,6 +1802,7 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
                 raise CampaignError("refinement must preserve the separately reported fixed97 evidence")
         elif diagnostic.get("phase_refinement", {"enabled": False}) != {"enabled": False}:
             raise CampaignError("unrequested shadow phase refinement trace")
+        _validate_phase_filter(receipt, episode)
         for field in ("receiver_executed", "completion_evaluated", "capacity_qualified", "truth_information_passed_to_search"):
             if diagnostic.get(field) is not False:
                 raise CampaignError("HF public search must preserve shadow-only scope without truth inputs")
@@ -1435,6 +1962,7 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
                         ("process_baseline_bytes", "total_memory_limit_bytes", "future_reserved_bytes")) or
                     admission["process_baseline_bytes"] + admission["future_reserved_bytes"] > admission["total_memory_limit_bytes"]):
                 raise CampaignError("physical diagnostic must reserve bounded twin rendering and evaluator storage")
+            _validate_private_phase_paths(receipt, episode)
     elif episode["mode"] == "oracle":
         oracle = receipt.get("oracle")
         if not isinstance(oracle, dict) or not _is_finite_number(oracle.get("probability_error")):
@@ -1479,6 +2007,56 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
                 raise CampaignError("phase-bank reference delay does not match the frozen episode")
 
 
+    _validate_service_replay(receipt, episode)
+
+
+def _run_service_child(command: list[str], out: Any, err: Any, timeout: float,
+                       options: dict[str, Any]) -> tuple[int, str | None]:
+    """Bound captured streams independently of the child's larger spool-file cap."""
+    deadline = time.monotonic() + timeout
+    overflow = None
+    with subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          shell=False, start_new_session=(os.name == "posix"), **options) as child:
+        def stop() -> None:
+            try:
+                if os.name == "posix":
+                    os.killpg(child.pid, signal.SIGKILL)
+                else:
+                    child.kill()
+            except ProcessLookupError:
+                pass
+
+        try:
+            with selectors.DefaultSelector() as ready:
+                ready.register(child.stdout, selectors.EVENT_READ, ("stdout", out))
+                ready.register(child.stderr, selectors.EVENT_READ, ("stderr", err))
+                retained = {"stdout": 0, "stderr": 0}
+                while ready.get_map():
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired(command, timeout)
+                    for key, _ in ready.select(min(remaining, .1)):
+                        data = os.read(key.fd, 64 * 1024)
+                        if not data:
+                            ready.unregister(key.fileobj)
+                            continue
+                        name, destination = key.data
+                        available = MAX_OUTPUT_BYTES - retained[name]
+                        kept = min(available, len(data))
+                        if kept:
+                            destination.write(data[:kept])
+                            retained[name] += kept
+                        if len(data) > available and overflow is None:
+                            overflow = name
+                            stop()
+                child.wait(timeout=max(.001, deadline - time.monotonic()))
+        except BaseException:
+            stop()
+            child.wait()
+            raise
+    return child.returncode, overflow
+
+
 def _trial(probe: Path, episode: dict[str, Any], max_samples: int, timeout: float,
            directory: Path, index: int) -> dict[str, Any]:
     prefix = f"{index:03d}-{episode['id']}"
@@ -1489,10 +2067,15 @@ def _trial(probe: Path, episode: dict[str, Any], max_samples: int, timeout: floa
     command = _command(probe, episode, max_samples, native_budget)
     started = time.monotonic()
     timed_out = False
+    output_overflow = None
     return_code: int | None = None
+    # The native spool cannot contain more than the declared sample budget,
+    # even if its separately declared byte limit is larger.
+    child_file_limit = max(MAX_OUTPUT_BYTES, min(episode.get("service_spool_byte_limit", max_samples * 17),
+        max_samples * 17)) if episode.get("service_replay", False) else MAX_OUTPUT_BYTES
     def limit_output() -> None:
         if resource is not None:
-            resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_OUTPUT_BYTES, MAX_OUTPUT_BYTES))
+            resource.setrlimit(resource.RLIMIT_FSIZE, (child_file_limit, child_file_limit))
 
     try:
         with stdout_path.open("wb") as out, stderr_path.open("wb") as err:
@@ -1500,10 +2083,13 @@ def _trial(probe: Path, episode: dict[str, Any], max_samples: int, timeout: floa
                 options: dict[str, Any] = {}
                 if os.name == "posix" and resource is not None:
                     options["preexec_fn"] = limit_output
-                result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
-                                        timeout=timeout, check=False, shell=False,
-                                        start_new_session=(os.name == "posix"), **options)
-                return_code = result.returncode
+                if episode.get("service_replay", False):
+                    return_code, output_overflow = _run_service_child(command, out, err, timeout, options)
+                else:
+                    result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
+                                            timeout=timeout, check=False, shell=False,
+                                            start_new_session=(os.name == "posix"), **options)
+                    return_code = result.returncode
             except subprocess.TimeoutExpired:
                 timed_out = True
     except OSError as exc:
@@ -1514,10 +2100,15 @@ def _trial(probe: Path, episode: dict[str, Any], max_samples: int, timeout: floa
     result: dict[str, Any] = {"episode": episode, "command": command,
                               "elapsed_seconds": time.monotonic() - started,
                               "return_code": return_code, "timed_out": timed_out,
+                              "child_file_limit_bytes": child_file_limit,
                               "raw_stdout": stdout_path.name, "raw_stderr": stderr_path.name,
                               "stderr": _stderr(stderr_path)}
     if timed_out:
         result["status"] = "timed_out"
+        return result
+    if output_overflow is not None:
+        result["status"] = "invalid_receipt"
+        result["error"] = f"native {output_overflow} exceeded the {MAX_OUTPUT_BYTES}-byte output cap"
         return result
     try:
         receipt = _parse_receipt(stdout_path)
@@ -1531,6 +2122,13 @@ def _trial(probe: Path, episode: dict[str, Any], max_samples: int, timeout: floa
                 return result
         if receipt["status"] == "completed":
             _validate_completed_receipt(receipt, episode)
+        else:
+            _validate_service_replay(receipt, episode)
+        if episode.get("service_replay", False) and isinstance(receipt.get("plan"), dict) and receipt["plan"].get("service_replay") is not None:
+            if (receipt["plan"].get("max_samples") != max_samples or
+                    not _is_finite_number(receipt["plan"].get("max_wall_seconds")) or
+                    not math.isclose(receipt["plan"]["max_wall_seconds"], native_budget, rel_tol=1e-12, abs_tol=1e-12)):
+                raise CampaignError("service replay limits must match the actual frozen invocation")
         # A completed wanted component-render is expected to contain a signal.
         # Keep explicit native limits/errors intact (they may have no channel
         # report), and do not reject zero-energy negative-control receipts.
@@ -1614,7 +2212,7 @@ def _statistical_summary(campaign: dict[str, Any], results: list[dict[str, Any]]
                     r.get("receipt", {}).get("status") == "completed" and
                     r["episode"].get("mode") == "receive" and
                     r["episode"].get("control", "wanted") == "wanted"]
-        outcomes = [r.get("receipt", {}).get("outcomes", {}).get(_communication_endpoint(r["episode"])) for r in eligible]
+        outcomes = [_communication_outcome(r.get("receipt", {}), r["episode"]) for r in eligible]
         if len(eligible) != expected or not all(isinstance(x, bool) for x in outcomes):
             summary[stratum] = {"complete_fixed_n": False, "planned_n": expected,
                                 "usable_n": len(eligible), "interval": None,
@@ -1631,6 +2229,66 @@ def _statistical_summary(campaign: dict[str, Any], results: list[dict[str, Any]]
     return summary
 
 
+NEGATIVE_RECEIVE_CONTROLS = ("noise", "wrong-key", "wrong-ordinal")
+
+
+def _negative_control_counts(receipt: dict[str, Any]) -> tuple[int | None, int | None]:
+    """Count accepted messages once from the native aggregate, not again from events."""
+    outcomes = receipt.get("outcomes", {})
+    if not isinstance(outcomes, dict):
+        return None, None
+    return tuple(outcomes[field] if _is_nonnegative_int(outcomes.get(field)) else None
+                 for field in ("false_data", "accepted_messages"))
+
+
+def _negative_control_summary(trials: list[dict[str, Any]]) -> dict[str, Any]:
+    """Recompute descriptive counts from validated trials with rehydrated receipts.
+
+    This does not alter trial classifications. Missing or malformed count fields
+    remain unavailable; no slot/message events are added to native aggregates.
+    """
+    fields = ("completed_trials", "counted_trials", "unavailable_count_trials",
+              "trials_with_false_data", "false_data_decisions",
+              "trials_with_accepted_false_messages", "accepted_false_messages")
+    groups = {control: dict.fromkeys(fields, 0) for control in NEGATIVE_RECEIVE_CONTROLS}
+    for trial in trials:
+        episode, receipt = trial.get("episode", {}), trial.get("receipt", {})
+        if (not isinstance(episode, dict) or not isinstance(receipt, dict) or
+                trial.get("status") != "completed" or receipt.get("status") != "completed" or
+                episode.get("mode") != "receive" or episode.get("control") not in groups):
+            continue
+        if episode.get("service_replay", False):
+            service = receipt.get("service_replay")
+            if not isinstance(service, dict) or service.get("work_complete") is not True:
+                continue
+        group = groups[episode["control"]]
+        group["completed_trials"] += 1
+        false_data, accepted = _negative_control_counts(receipt)
+        if false_data is None or accepted is None:
+            group["unavailable_count_trials"] += 1
+            continue
+        group["counted_trials"] += 1
+        group["trials_with_false_data"] += int(false_data > 0)
+        group["false_data_decisions"] += false_data
+        group["trials_with_accepted_false_messages"] += int(accepted > 0)
+        group["accepted_false_messages"] += accepted
+    return {"scope": "Descriptive counts only; completed validated negative receive trials with both native counters. No occurrence-rate or false-alarm probability estimate.",
+            **{field: sum(group[field] for group in groups.values()) for field in fields},
+            "by_control": groups}
+
+
+def _negative_control_label(receipt: dict[str, Any], episode: dict[str, Any]) -> str:
+    false_data, accepted = _negative_control_counts(receipt)
+    counts = f"false DATA={false_data if false_data is not None else 'unavailable'}; accepted false messages={accepted if accepted is not None else 'unavailable'}"
+    if false_data is None or accepted is None:
+        return "negative control counts incomplete; " + counts
+    if false_data or accepted:
+        return "negative control did not pass; " + counts
+    if episode.get("service_replay", False) and receipt.get("service_replay", {}).get("communication_complete") is not True:
+        return "negative control service endpoint did not pass; " + counts
+    return "negative control passed; no accepted messages or false DATA; " + counts
+
+
 def _markdown(campaign: dict[str, Any], run: dict[str, Any]) -> str:
     rows = ["# Bounded appraisal campaign", "", f"Campaign: `{campaign['name']}`  ",
             f"Purpose: {campaign.get('purpose', 'not specified')}  ",
@@ -1642,6 +2300,7 @@ def _markdown(campaign: dict[str, Any], run: dict[str, Any]) -> str:
             "Every native receipt is one declared finite episode. Different physical models and channel strata are not pooled.",
             "Communication failures are observations, not runner failures. An incomplete fixed sample has no confidence interval.",
             "With FEC off, communication success uses the unchanged raw-clean `correct_complete` endpoint. Explicit rs20/rs60 episodes use `correct_decoded_complete`: exact decoded bytes and strict physical framing may include native FEC repairs. Raw slot errors and the raw-clean endpoint remain separate.", "",
+            "Two-episode service replay uses its aggregate endpoint after complete replay work: both expected messages for wanted traffic, or no accepted messages or false DATA for negative controls.", "",
             "| Episode | Scenario | Mode | Control | Trial status | Native status | Observation outcome | Slot decision | Correct DATA | Receive physical/premature/false/resumed | Wall (s) |",
             "|---|---|---|---|---|---|---|---|---|---|---:|"]
     for trial in run["trials"]:
@@ -1668,7 +2327,18 @@ def _markdown(campaign: dict[str, Any], run: dict[str, Any]) -> str:
             correct_data = "yes" if outcomes.get("first_public_observation_correct_data") else "no"
             outcome = "one public slot; message completion not evaluated"
         elif episode["mode"] == "receive":
-            if episode.get("fec", "off") != "off":
+            if episode.get("control") in NEGATIVE_RECEIVE_CONTROLS:
+                outcome = _negative_control_label(receipt, episode)
+            elif _communication_endpoint(episode) == "service_replay.communication_complete":
+                negative = (receipt.get("service_replay", {}).get("expected_message_count") == 0 or
+                            episode.get("control", "wanted") in {"noise", "wrong-key", "wrong-ordinal"})
+                if negative:
+                    outcome = ("negative control passed; no accepted messages or false DATA" if _communication_outcome(receipt, episode) is True else
+                               "negative control did not pass")
+                else:
+                    outcome = ("both physical messages complete" if _communication_outcome(receipt, episode) is True else
+                               "paired physical-message completion failed")
+            elif episode.get("fec", "off") != "off":
                 outcome = ("decoded physical message complete" if outcomes.get("correct_decoded_complete") is True else
                            "no correct decoded physical message completion")
                 outcome += f" ({episode['fec']}; raw-clean={'yes' if outcomes.get('correct_complete') else 'no'})"
@@ -1692,6 +2362,13 @@ def _markdown(campaign: dict[str, Any], run: dict[str, Any]) -> str:
                     f"{episode.get('control', '—')} | {trial.get('status')} | {native_status} | {outcome} | "
                     f"{slot_decision} | {correct_data} | {receive_counts} | "
                     f"{trial.get('elapsed_seconds', 0):.3f} |")
+    negative = _negative_control_summary(run["trials"])
+    rows.extend(["", "## Completed negative controls", "", negative["scope"],
+                 "Counts exclude censored, invalid and execution-failed trials. Accepted messages are counted once from the native aggregate; false DATA decisions are a separate outcome.", "",
+                 "| Control | Completed trials | Trials with both counts | Counts unavailable | Trials with false DATA | False DATA decisions | Trials accepting false messages | Accepted false messages |",
+                 "|---|---:|---:|---:|---:|---:|---:|---:|"])
+    for control, counts in negative["by_control"].items():
+        rows.append("| " + control + " | " + " | ".join(str(value) for value in counts.values()) + " |")
     rows.extend(["", "## Fixed-sample estimates", ""])
     if run["statistics"]:
         for key, value in run["statistics"].items():
@@ -1801,11 +2478,11 @@ def run_campaign(probe: Path, campaign_path: Path, output_dir: Path) -> dict[str
                trial.get("receipt", {}).get("status") == "completed" and
                trial.get("episode", {}).get("mode") == "receive" and
                trial.get("episode", {}).get("control", "wanted") == "wanted" and
-               trial.get("receipt", {}).get("outcomes", {}).get(_communication_endpoint(trial.get("episode", {}))) is False
+               _communication_outcome(trial.get("receipt", {}), trial.get("episode", {})) is False
                for trial in trials),
            "retained_output_bytes": sum(path.stat().st_size for path in output_dir.iterdir() if path.is_file()),
            "retained_output_limit_bytes": MAX_CAMPAIGN_OUTPUT_BYTES,
-           "statistics": stats, "trials": trials}
+           "statistics": stats, "negative_controls": _negative_control_summary(trials), "trials": trials}
     # The full native receipt remains in its raw stdout file. Keep run.json
     # compact so campaign metadata does not duplicate large native receipts.
     persisted = dict(run)
@@ -1839,7 +2516,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     print(json.dumps({key: result[key] for key in
                       ("status", "executed_trials", "planned_trials", "execution_failures",
-                       "valid_communication_failures", "stop_reason", "elapsed_seconds", "statistics")},
+                       "valid_communication_failures", "stop_reason", "elapsed_seconds", "statistics", "negative_controls")},
                      sort_keys=True))
     return 0 if result["status"] == "completed" else 1
 

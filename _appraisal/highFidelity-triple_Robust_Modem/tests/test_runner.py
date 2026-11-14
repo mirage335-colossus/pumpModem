@@ -74,6 +74,38 @@ def fake_unavailable_refinement_trace(*, full: bool) -> dict:
     return trace
 
 
+def fake_phase_filter(search: dict, samples: int, *, sticky=False) -> dict:
+    def branch(values):
+        high = max(values)
+        presence = high + math.log(sum(math.exp(value - high) for value in values)) - math.log(2) + math.log(.25)
+        separation = abs(values[1] - values[0])
+        return {"bit_log_e": list(values), "weighted_presence_log_e": presence,
+                "favored_bit": int(values[1] > values[0]), "bit_log_separation": separation,
+                "passes_presence_reference": presence >= search["presence_reference_threshold"],
+                "passes_bit_separation_reference": separation >= search["bit_separation_reference"]}
+    baseline = search["phase_refinement"]["combined_bit_log_e"]
+    walk = [5., 5.]  # A tie is a legitimate component result and favors bit zero.
+    held = [-2., 12.]
+    correlated = [max(a, b) + math.log1p(math.exp(-abs(a - b))) - math.log(2) for a, b in zip(walk, held)] if sticky else walk
+    combined = [max(a, b) + math.log1p(math.exp(-abs(a - b))) - math.log(2) for a, b in zip(baseline, correlated)]
+    groups, blocks = (samples + 1919) // 1920, (samples + 127) // 128
+    result = {"enabled": True, "executed": True, "phase_bins": 32, "frequency_bins": 33,
+        "frequency_step_hz": .0625, "group_seconds": 1, "groups": groups, "gain_radii": [.5, 1],
+        "timing_atoms": 39, "timing_prior_mass": 1, "branch_weight_within_supplement": .5,
+        "supplement_weight": .25, "input_samples": samples, "input_block_rows": 128, "input_blocks": blocks,
+        "stage_wall_seconds": .1, "baseline": branch(baseline), "correlated": branch(correlated), "combined": branch(combined),
+        "work": {"correlation_products": 39 * 2 * 33 * blocks, "emission_states": 39 * 4 * 33 * 32 * groups,
+                 "transition_edges": 39 * 4 * 32 * 97 * (groups - 1), "workspace_reserved_bytes": search.get("stage_workers", 1) * 131072,
+                 "summed_worker_wall_seconds": .2}}
+    if sticky:
+        result.update(sticky_enabled=True, walk=branch(walk), sticky=branch(held), correlated_prior_weights=[.5, .5],
+            transition_probabilities={"walk": {"stay": .5, "step_each": .25, "edge_stay": .75},
+                                      "sticky": {"stay": .96875, "step_each": .015625, "edge_stay": .984375}})
+        for field in ("correlation_products", "emission_states", "transition_edges"):
+            result["work"][field] *= 2
+    return result
+
+
 def fake_gain_partitions(physical: dict, sample_rate: float, samples: int) -> dict:
     result = {"used_for_receiver_decisions": False, "template_selected_from_noisy_public_search": True,
               "fixed_template_null_law_applies_after_selection": False, "refined_public_cell": None}
@@ -262,7 +294,7 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
         scope = "shadow_canonical_varying_of_selected_complete_observation"
         receipt["plan"].update(observation_scope=scope, planned_uncontaminated_quiet_slots=0,
             wire_bits=3, horizon_samples=1000, public_slots=[{"index": selected,
-                "observation": {"first": 20, "stop": 100}, "evaluator_transmitting": receipt["control"] == "wanted"}])
+                "observation": {"first": 20, "stop": 100}, "evaluator_transmitting": receipt["control"] != "noise"}])
         receipt["plan"]["public_bounds"].update(frequency_bound_hz=20., atmospheric_hz=10., clock_bound_ppm=300.)
         receipt["hf_gui_varying_diagnostic"] = fake_gui_varying_diagnostic(selected, receipt["plan"]["public_bounds"])
         receipt["outcomes"] = {"observation_scope": scope, "receiver_executed": False, "component_only": True,
@@ -348,6 +380,114 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
         receipt["plan"].update({"wire_bits": 64 if fec == "rs20" else 80,
                                 "short_wire_bit_limit": 304 if fec == "rs20" else 400,
                                 "content_limit_bytes": 16, "long_form": False})
+    if "--hf-compare-admitted-models" in command or "--service-replay" in command:
+        policy = "compare_admitted" if "--hf-compare-admitted-models" in command else "fallback_only"
+        receipt["plan"].update(hf_compare_admitted_models_requested="--hf-compare-admitted-models" in command,
+                               receiver_evidence_policy=policy)
+        if mode == "receive":
+            receipt.setdefault("receiver", {})["evidence_policy"] = policy
+    if "--hf-phase-filter-sticky" in command:
+        receipt["plan"]["hf_phase_filter_sticky_requested"] = True
+    if "--hf-phase-filter" in command:
+        receipt["plan"]["hf_phase_filter_requested"] = True
+        receipt["plan"].setdefault("public_bounds", {}).update(frequency_bound_hz=1, atmospheric_hz=0)
+        search = receipt["hf_public_search"]
+        search.update(evaluated_timing_atoms=39, block_rows=128, blocks=1, configured_frequency_bound_hz=1, stage_workers=1,
+                      presence_reference_threshold=21.49337868826, bit_separation_reference=5.29330482472)
+        search["phase_filter"] = fake_phase_filter(search, 80, sticky="--hf-phase-filter-sticky" in command)
+    if "--hf-phase-filter-paths" in command:
+        receipt["plan"]["hf_phase_filter_paths_requested"] = True
+        receipt["plan"]["public_bounds"].update(arrival_low_seconds=.001, arrival_high_seconds=.003, clock_bound_ppm=0)
+        receipt["scenario"] = {"channel": {"paths": [{"delay_seconds": .0021, "delay_rate": 0,
+            "residual_doppler_hz": 0, "residual_drift_hz_s": 0, "gaussian_width_2sigma_hz": 0}]}}
+        receipt["hf_public_search"]["coordinates"] = [{"epoch_offset_seconds": epoch, "arrival_seconds": arrival, "clock_ppm": 0}
+            for epoch in range(-6, 7) for arrival in (.001, .002, .003)]
+        physical = receipt["hf_physical_diagnostic"]
+        physical["admission"].update(pair_workspace_bytes=1024, future_reserved_bytes=200000, total_memory_limit_bytes=300000)
+        physical["phase_filter_paths"] = {"used_for_receiver_decisions": False, "uses_physical_truth": True,
+            "wanted_bit": 1, "timing_index": 19, "epoch_offset_seconds": 0, "clock_ppm": 0,
+            "arrival_seconds": .002, "reference_path_delay_seconds": .0021, "observation_sha256": "c" * 64,
+            "clean_coherence_power_lower_bound": .5, "optimal_clean_correlation_real": math.sqrt(50), "gain_radii": [.5, 1],
+            "maximum_noisy_log_lr": [4., 5.], "maximum_prior_weighted_noisy_path_log_e": [-4., -3.],
+            "conditional_noisy_log_e": [1., 2.], "work": {"correlation_products": 66, "emission_states": 7 * 33 * 32,
+                "transition_edges": 0, "workspace_reserved_bytes": 128 * 1024, "block_statistics_reserved_bytes": 40,
+                "public_pair_reserved_bytes": 1024}}
+    if "--hf-phase-filter-receiver" in command:
+        plan = receipt["plan"]
+        plan["hf_phase_filter_receiver_requested"] = True
+        plan.setdefault("public_bounds", {}).update(frequency_bound_hz=0, atmospheric_hz=1)
+        plan["public_slots"] = [{"index": i, "observation": {"first": i * 5000 + 20, "stop": i * 5000 + 4021}}
+                                for i in range(plan["scored_slot_horizon"])]
+        plan["horizon_samples"] = plan["public_slots"][-1]["observation"]["stop"]
+        phase = receipt["hf_public_phase_receiver"]
+        phase.update(phase_filter_enabled=True, model_family="equal_prior_refined_baseline_and_correlated_phase_filter")
+        if "--hf-phase-filter-sticky" in command:
+            phase["phase_filter_sticky_enabled"] = True
+        callback = phase["slots"][0]
+        callback.update(evaluated_timing_atoms=39, block_rows=128, blocks=32, configured_frequency_bound_hz=1, stage_workers=1,
+                        presence_reference_threshold=21.49337868826, bit_separation_reference=5.29330482472)
+        callback["phase_filter"] = fake_phase_filter(callback, 4001, sticky="--hf-phase-filter-sticky" in command)
+        callback["bit_log_e"] = list(callback["phase_filter"]["combined"]["bit_log_e"])
+    if "--service-replay" in command:
+        plan = receipt["plan"]
+        episodes = int(argument("--service-episodes", "1"))
+        wire = plan.setdefault("wire_bits", 3)
+        count = episodes * (wire + 2) + 1
+        horizon = count * 128
+        intervals = [{"first_public_slot": i * (wire + 2), "stop_public_slot": (i + 1) * (wire + 2)} for i in range(episodes)]
+        pattern = "".join("D" if receipt["control"] != "noise" and
+            any(row["first_public_slot"] <= i < row["stop_public_slot"] - 2 for row in intervals) else "Q" for i in range(count))
+        resources = {"hardware_threads": 2, "workers": 4, "slot_owners": int(argument("--owners", "4")), "total_memory_limit_bytes": 1000000,
+                     "workers_explicit": False, "owners_explicit": "--owners" in command}
+        public_slots = [{"index": i, "pattern_epoch": 100 + i, "symbol_ordinal": 3 * i,
+                         "observation": {"first": i * 128, "stop": (i + 1) * 128}} for i in range(count)]
+        begin = int(argument("--service-backlog-begin-slot")) if "--service-backlog-begin-slot" in command else None
+        end = int(argument("--service-backlog-end-slot")) if "--service-backlog-end-slot" in command else None
+        max_samples = int(argument("--max-samples"))
+        spool_limit = int(argument("--service-spool-byte-limit", str(max_samples * 17)))
+        target = receipt["control"] in {"wanted", "interior-fade", "capture-gap"}
+        service_plan = {"schema_version": 1, "episodes": episodes, "wire_bits_per_episode": wire,
+            "expected_message_count": episodes if target else 0, "expected_message_intervals": intervals,
+            "slot_pattern": pattern, "maximum_spool_bytes": spool_limit, "planned_spool_bytes": horizon * 17,
+            "fits_spool_budget": horizon * 17 <= spool_limit, "input_chunk_samples": int(argument("--chunk", "4096")),
+            "backlog_begin_slot": begin, "backlog_end_slot": end,
+            "backlog_unique_baseband_seconds": (end - begin) * 128 / 1920 if begin is not None else None}
+        plan.update(service_replay=service_plan, max_samples=max_samples,
+            max_wall_seconds=float(argument("--max-wall-seconds")), horizon_samples=horizon, scored_slot_horizon=count,
+            public_slots=public_slots, receiver_resources=resources)
+        if mode == "receive":
+            receipt["receiver"].update(state="input_ended", next_public_slot=count)
+            receipt["outcomes"].update(actual_scored_slots=count, accepted_samples=horizon,
+                correct_decoded_complete=False, accepted_messages=0)
+            receipt["slots"] = [{"index": i, "pattern_epoch": row["pattern_epoch"], "symbol_ordinal": row["symbol_ordinal"],
+                "first_sample": row["observation"]["first"], "stop_sample": row["observation"]["stop"],
+                "complete": True, "all_valid": True, "decision": "data" if pattern[i] == "D" else "quiet", "bit": 1 if pattern[i] == "D" else None,
+                "commit_wall_seconds": .01 + i / 10, "commit_process_cpu_seconds": .02 + i / 10,
+                "commit_input_stop": horizon, "commit_uncommitted_slots": 1, "commit_active_owners": 2,
+                "commit_next_ready": i + 1 < count} for i, row in enumerate(public_slots)]
+            receipt["messages"] = []
+            receipt["channel"] = {"samples": horizon, "hashed_samples": horizon, "input_sha256": "f" * 64}
+            replay = {**service_plan, "wall_seconds": 2., "process_cpu_seconds": 2.,
+                "unique_baseband_seconds": horizon / 1920, "service_seconds_per_baseband_second": 2 * 1920 / horizon,
+                "spool_read_and_verification_seconds": .2, "spool_read_and_verification_process_cpu_seconds": .3,
+                "render_wall_seconds": 1., "render_process_cpu_seconds": .5, "spool_write_seconds": .1, "spool_write_process_cpu_seconds": .1,
+                "captured_input_sha256": "f" * 64, "verified_input_sha256": "f" * 64, "digest_match": True,
+                "replayed_samples": horizon, "work_complete": True, "communication_complete": not target,
+                "peak_active_owners": 2, "mean_busy_hardware_fraction": .5, "receiver_peak_reserved_bytes": 100000,
+                "outside_receiver_future_reserved_bytes": 10000, "spool_residency_reserved_bytes": 0, "peak_reserved_bytes": 110000,
+                "spool_backing_kind": "known_disk", "spool_bytes": horizon * 17, "spool_working_bytes": 100,
+                "total_application_memory_limit_bytes": 1000000, "receiver_memory_limit_bytes": 990000,
+                "max_samples": max_samples, "max_wall_seconds": plan["max_wall_seconds"],
+                "workers_explicit": False, "owners_explicit": "--owners" in command, "capacity_qualified": False, "backlog_interval": None}
+            if begin is not None:
+                wall = (end - begin) / 10
+                represented = service_plan["backlog_unique_baseband_seconds"]
+                replay["backlog_interval"] = {"start_after_public_slot": begin, "stop_after_public_slot": end,
+                    "complete": True, "reason": "predeclared_ready_input_commit_interval", "process_cpu_seconds": wall,
+                    "wall_seconds": wall, "unique_baseband_seconds": represented,
+                    "service_seconds_per_baseband_second": wall / represented, "commits": end - begin,
+                    "initial_uncommitted_slots": 1, "busy_hardware_fraction": .5}
+            receipt["service_replay"] = replay
     return receipt
 
 
@@ -373,12 +513,452 @@ def fake_fec_repaired_receipt(command) -> dict:
     return receipt
 
 
+def complete_service_messages(receipt: dict) -> None:
+    """Populate strict two-message framing in a schema fixture, without a codec."""
+    service, plan = receipt["service_replay"], receipt["plan"]
+    wire = service["wire_bits_per_episode"]
+    receipt["messages"] = [{**interval, "physical_complete": True, "decoded": True, "premature": False,
+        "matches_transmitted_message": True, "decoded_endpoint_matches": True,
+        "slots_consumed": wire + 2, "observed_bits": wire, "missing_slots": 0,
+        "consumed_bytes": wire, "trailing_quiet_slots": [wire, wire + 1], "quiet_slots": 2,
+        "long_form": False, "message_ready_for_decode": True, "fec": "off", "erasure_slot_indices": [],
+        "decoded_payload_bytes": list(plan["message"].encode("ascii")),
+        "wrong_bits": 0, "ambiguous_active_slots": 0, "quiet_active_slots": 0}
+        for interval in service["expected_message_intervals"]]
+    receipt["outcomes"].update(physical_completions=service["episodes"], accepted_messages=service["episodes"])
+    service["communication_complete"] = True
+
+
 class CampaignValidationTests(unittest.TestCase):
     def test_campaigns_are_finite_and_well_formed(self) -> None:
         for path in sorted((RUNNER.parent / "campaigns").glob("*.json")):
             campaign = runner._read_campaign(path)
             self.assertLessEqual(len(campaign["episodes"]), campaign["max_trials"])
             self.assertGreaterEqual(campaign["max_wall_seconds"], 1)
+
+    def test_service_replay_inputs_and_argv_are_explicitly_bounded(self) -> None:
+        episode = {"id": "service", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 1,
+                   "service_replay": True, "service_episodes": 2, "service_spool_byte_limit": 170000,
+                   "service_backlog_begin_slot": 1, "service_backlog_end_slot": 5, "chunk": 1024, "owners": 2}
+        for mode in ("receive", "plan"):
+            for control in ("wanted", "noise", "wrong-key", "wrong-ordinal"):
+                declared = dict(episode, mode=mode, control=control)
+                runner._validate_episode(declared, 0, set(), 10, 10000)
+                command = runner._command(Path("/native/probe"), declared, 10000, 2)
+                for field in runner.SERVICE_FIELDS:
+                    self.assertIn("--" + field.replace("_", "-"), command)
+                runner._validate_completed_receipt(fake_completed_receipt(command), declared)
+        for overrides in ({"service_replay": 1}, {"service_replay": False}, {"service_episodes": 3},
+                {"service_episodes": True}, {"service_spool_byte_limit": 0}, {"service_spool_byte_limit": 2**64},
+                {"service_backlog_begin_slot": -1}, {"service_backlog_end_slot": 1}, {"chunk": 4097}, {"owners": 0}, {"owners": 65537},
+                {"mode": "slot"}, {"mode": "hf-search"}, {"control": "eof"}, {"control": "capture-gap"}):
+            with self.subTest(overrides=overrides), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(episode, **overrides), 0, set(), 10, 10000)
+        unpaired = dict(episode)
+        del unpaired["service_backlog_begin_slot"]
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_episode(unpaired, 0, set(), 10, 10000)
+        ordinary = {key: value for key, value in episode.items() if key not in runner.SERVICE_FIELDS}
+        ordinary["service_episodes"] = 1
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_episode(ordinary, 0, set(), 10, 10000)
+
+    def test_service_receipt_binds_full_work_timing_hashes_and_reservations(self) -> None:
+        episode = {"id": "service", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 1,
+                   "service_replay": True, "service_episodes": 2}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 10000, 2))
+        runner._validate_completed_receipt(receipt, episode)
+        mutations = (
+            (("plan", "service_replay", "episodes"), 1), (("plan", "service_replay", "slot_pattern"), "D" * 11),
+            (("plan", "service_replay", "maximum_spool_bytes"), 169999),
+            (("plan", "service_replay", "expected_message_intervals", 1, "first_public_slot"), 0),
+            (("plan", "receiver_evidence_policy"), "compare_admitted"),
+            (("receiver", "evidence_policy"), "compare_admitted"), (("receiver", "state"), "cancelled"),
+            (("receiver", "next_public_slot"), 10), (("outcomes", "accepted_samples"), 1),
+            (("slots", 1, "symbol_ordinal"), 0), (("slots", 1, "pattern_epoch"), 100),
+            (("slots", 1, "all_valid"), False), (("slots", 1, "index"), 0),
+            (("service_replay", "wall_seconds"), -1), (("service_replay", "process_cpu_seconds"), math.nan),
+            (("service_replay", "spool_read_and_verification_seconds"), 3),
+            (("service_replay", "spool_write_seconds"), 2),
+            (("service_replay", "unique_baseband_seconds"), 1),
+            (("service_replay", "service_seconds_per_baseband_second"), 0),
+            (("service_replay", "verified_input_sha256"), "b" * 64),
+            (("service_replay", "captured_input_sha256"), "b" * 64),
+            (("service_replay", "digest_match"), False), (("service_replay", "replayed_samples"), 1),
+            (("service_replay", "peak_active_owners"), 5), (("service_replay", "peak_reserved_bytes"), 1),
+            (("service_replay", "receiver_memory_limit_bytes"), 1000000),
+            (("service_replay", "spool_backing_kind"), "memory_filesystem"),
+            (("service_replay", "workers_explicit"), True), (("service_replay", "capacity_qualified"), True),
+            (("service_replay", "mean_busy_hardware_fraction"), 1),
+            (("service_replay", "max_samples"), 9999), (("service_replay", "max_wall_seconds"), 1),
+            (("service_replay", "communication_complete"), True), (("outcomes", "correct_complete"), True))
+        for path, value in mutations:
+            with self.subTest(path=path):
+                bad = json.loads(json.dumps(receipt))
+                parent = bad
+                for key in path[:-1]:
+                    parent = parent[key]
+                parent[path[-1]] = value
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_completed_receipt(bad, episode)
+        for kind in ("memory_filesystem", "unknown"):
+            changed = json.loads(json.dumps(receipt))
+            replay = changed["service_replay"]
+            replay.update(spool_backing_kind=kind, spool_residency_reserved_bytes=65536,
+                          receiver_memory_limit_bytes=990000 - 65536, peak_reserved_bytes=110000 + 65536)
+            runner._validate_completed_receipt(changed, episode)
+        unavailable_cpu = json.loads(json.dumps(receipt))
+        for field in ("process_cpu_seconds", "spool_read_and_verification_process_cpu_seconds",
+                      "render_process_cpu_seconds", "spool_write_process_cpu_seconds", "mean_busy_hardware_fraction"):
+            unavailable_cpu["service_replay"][field] = None
+        runner._validate_completed_receipt(unavailable_cpu, episode)
+
+    def test_service_requires_both_global_message_endpoints(self) -> None:
+        episode = {"id": "paired", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 1,
+                   "service_replay": True, "service_episodes": 2}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 10000, 2))
+        complete_service_messages(receipt)
+        runner._validate_completed_receipt(receipt, episode)
+        self.assertTrue(runner._communication_outcome(receipt, episode))
+        self.assertFalse(receipt["outcomes"]["correct_complete"])
+        for path, value in ((("messages",), receipt["messages"][:1]),
+                (("messages", 1, "first_public_slot"), 0), (("messages", 1, "stop_public_slot"), 5),
+                (("messages", 1, "decoded_payload_bytes"), [65]),
+                (("messages", 1, "trailing_quiet_slots"), [8, 9]),
+                (("messages", 1, "ambiguous_active_slots"), 1),
+                (("outcomes", "correct_decoded_complete"), True), (("outcomes", "accepted_messages"), 1)):
+            with self.subTest(path=path):
+                bad = json.loads(json.dumps(receipt))
+                parent = bad
+                for key in path[:-1]:
+                    parent = parent[key]
+                parent[path[-1]] = value
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_completed_receipt(bad, episode)
+
+    def test_service_backlog_requires_whole_replay_and_ready_input(self) -> None:
+        episode = {"id": "backlog", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 1,
+                   "service_replay": True, "service_episodes": 2, "service_backlog_begin_slot": 1, "service_backlog_end_slot": 5}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 10000, 2))
+        runner._validate_completed_receipt(receipt, episode)
+        for section, field, value in (("service_replay", "work_complete", False),
+                ("first", "commit_input_stop", 128), ("first", "commit_uncommitted_slots", 4),
+                ("last", "commit_wall_seconds", .01), ("backlog", "unique_baseband_seconds", 1),
+                ("backlog", "process_cpu_seconds", 9), ("backlog", "busy_hardware_fraction", 1)):
+            bad = json.loads(json.dumps(receipt))
+            target = bad[section] if section == "service_replay" else bad["slots"][1 if section == "first" else 5] if section in {"first", "last"} else bad["service_replay"]["backlog_interval"]
+            target[field] = value
+            with self.subTest(section=section, field=field), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad, episode)
+        partial = json.loads(json.dumps(receipt))
+        partial["status"] = "time_limit"
+        partial["outcomes"]["accepted_samples"] = 64
+        partial["service_replay"].update(work_complete=False, communication_complete=False,
+            replayed_samples=128, verified_input_sha256="b" * 64, digest_match=False,
+            backlog_interval={"start_after_public_slot": 1, "stop_after_public_slot": 5, "complete": False,
+                "reason": "whole_replay_incomplete", "process_cpu_seconds": None})
+        runner._validate_service_replay(partial, episode)
+        partial["service_replay"]["backlog_interval"]["wall_seconds"] = .1
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_service_replay(partial, episode)
+        del partial["service_replay"]["backlog_interval"]["wall_seconds"]
+        partial["service_replay"].update(replayed_samples=0,
+            verified_input_sha256=runner.hashlib.sha256(b"").hexdigest())
+        partial["outcomes"]["accepted_samples"] = 0
+        partial["slots"] = []
+        runner._validate_service_replay(partial, episode)  # Capture remains complete; no replay work is claimed.
+
+    def test_admitted_model_policy_is_explicit_and_receipt_bound(self) -> None:
+        base = {"id": "comparison", "scenario": "hf-gui-native", "mode": "receive", "waveform": "reference", "seed": 1,
+                "hf_compare_admitted_models": True}
+        for mode in ("plan", "receive"):
+            episode = dict(base, mode=mode)
+            runner._validate_episode(episode, 0, set(), 10, 10000)
+            command = runner._command(Path("/native/probe"), episode, 10000, 2)
+            self.assertIn("--hf-compare-admitted-models", command)
+            receipt = fake_completed_receipt(command)
+            runner._validate_completed_receipt(receipt, episode)
+            receipt["plan"]["receiver_evidence_policy"] = "fallback_only"
+            with self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(receipt, episode)
+        for override in ({"mode": "slot"}, {"mode": "gui-varying"}, {"backend": "cuda"},
+                         {"hf_public_phase_receiver": True}, {"hf_compare_admitted_models": 1}):
+            with self.subTest(override=override), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(base, **override), 0, set(), 10, 10000)
+
+    def test_phase_filter_inputs_and_fixed_mixture_receipts_are_strict(self) -> None:
+        episode = {"id": "filter", "scenario": "awgn", "mode": "hf-search", "waveform": "reference", "seed": 1,
+                   "hf_phase_refinement": True, "search_timing": "full", "hf_phase_filter": True}
+        runner._validate_episode(episode, 0, set(), 10, 10000)
+        command = runner._command(Path("/native/probe"), episode, 10000, 2)
+        self.assertIn("--hf-phase-filter", command)
+        receipt = fake_completed_receipt(command)
+        runner._validate_completed_receipt(receipt, episode)
+        for override in ({"mode": "receive"}, {"hf_phase_refinement": False}, {"search_timing": "selected"},
+                         {"backend": "cuda"}, {"helper": True}, {"hf_phase_filter": 1}):
+            with self.subTest(override=override), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(episode, **override), 0, set(), 10, 10000)
+        for path, value in ((("enabled",), False), (("executed",), False), (("timing_atoms",), 1),
+                (("timing_prior_mass",), .5), (("phase_bins",), 64), (("gain_radii",), [1]),
+                (("input_samples",), 79), (("input_blocks",), 2), (("stage_wall_seconds",), -1),
+                (("branch_weight_within_supplement",), 1), (("supplement_weight",), 1),
+                (("correlated", "favored_bit"), 1), (("correlated", "passes_bit_separation_reference"), True),
+                (("baseline", "bit_log_e"), [1., 4.]), (("combined", "bit_log_e"), [5., 5.]),
+                (("combined", "weighted_presence_log_e"), 5.), (("work", "correlation_products"), 1),
+                (("work", "emission_states"), 1), (("work", "transition_edges"), 1),
+                (("work", "workspace_reserved_bytes"), 0), (("work", "summed_worker_wall_seconds"), math.nan)):
+            bad = json.loads(json.dumps(receipt))
+            parent = bad["hf_public_search"]["phase_filter"]
+            for key in path[:-1]:
+                parent = parent[key]
+            parent[path[-1]] = value
+            with self.subTest(path=path), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad, episode)
+        # Cross-check partial last groups/blocks without adding a DSP implementation.
+        samples = 4001
+        longer = json.loads(json.dumps(receipt))
+        longer["plan"].update(horizon_samples=samples + 20, capture_digest_stop_sample=samples + 20,
+                              search_observation={"first": 20, "stop": samples + 20})
+        longer["channel"]["selected_observation_hashed_samples"] = samples
+        longer["hf_public_search"]["blocks"] = (samples + 127) // 128
+        longer["hf_public_search"]["phase_filter"] = fake_phase_filter(longer["hf_public_search"], samples)
+        runner._validate_completed_receipt(longer, episode)
+        unrequested = dict(episode, hf_phase_filter=False)
+        receipt["plan"]["hf_phase_filter_requested"] = False
+        with self.assertRaisesRegex(runner.CampaignError, "unrequested HF phase filter"):
+            runner._validate_completed_receipt(receipt, unrequested)
+
+    def test_phase_filter_uses_combined_public_frequency_prior(self) -> None:
+        episode = {"id": "filter", "scenario": "awgn", "mode": "hf-search", "waveform": "reference", "seed": 1,
+                   "hf_phase_refinement": True, "search_timing": "full", "hf_phase_filter": True}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 1000000, 2))
+        # Sanitized geometry from the completed filter-edge-slot1 receipt:
+        # its zero oscillator bound plus 1 Hz atmospheric allowance is the
+        # native public search bound; FFT rounding is a separate quantity.
+        first, stop, samples = 287981, 556338, 268357
+        receipt["plan"].update(horizon_samples=stop, capture_digest_first_sample=first,
+            capture_digest_stop_sample=stop, search_observation={"first": first, "stop": stop})
+        receipt["channel"]["selected_observation_hashed_samples"] = samples
+        search = receipt["hf_public_search"]
+        search.update(blocks=2097, configured_frequency_bound_hz=1, actual_frequency_bound_hz=1.00067138671875)
+        search["phase_filter"] = fake_phase_filter(search, samples)
+        self.assertEqual(search["phase_filter"]["groups"], 140)
+        for base, atmosphere in ((0, 1), (.25, .75), (1, 0)):
+            receipt["plan"]["public_bounds"].update(frequency_bound_hz=base, atmospheric_hz=atmosphere)
+            runner._validate_completed_receipt(receipt, episode)
+        for base, atmosphere in ((1, 1), (0, 0), (-1, 2), (1, math.nan), (True, 0)):
+            receipt["plan"]["public_bounds"].update(frequency_bound_hz=base, atmospheric_hz=atmosphere)
+            with self.subTest(base=base, atmosphere=atmosphere), self.assertRaisesRegex(runner.CampaignError, "frequency geometry"):
+                runner._validate_completed_receipt(receipt, episode)
+        receipt["plan"]["public_bounds"].update(frequency_bound_hz=0, atmospheric_hz=1)
+        search["configured_frequency_bound_hz"] = .5
+        with self.assertRaisesRegex(runner.CampaignError, "frequency geometry"):
+            runner._validate_completed_receipt(receipt, episode)
+
+    def test_receiver_phase_filter_requires_explicit_compatible_receive_scope(self) -> None:
+        episode = {"id": "filter-receiver", "scenario": "hf-ensemble-multiscale", "mode": "receive",
+                   "waveform": "reference", "seed": 1, "hf_public_phase_receiver": True,
+                   "hf_phase_refinement": True, "hf_phase_filter_receiver": True}
+        runner._validate_episode(episode, 0, set(), 10, 1000000)
+        command = runner._command(Path("/native/probe"), episode, 1000000, 2)
+        self.assertIn("--hf-phase-filter-receiver", command)
+        runner._validate_completed_receipt(fake_completed_receipt(command), episode)
+        for override in ({"mode": "slot"}, {"mode": "plan"}, {"mode": "hf-search"},
+                {"hf_public_phase_receiver": False}, {"hf_phase_refinement": False}, {"helper": True},
+                {"backend": "cuda"}, {"hf_compare_admitted_models": True}, {"hf_phase_filter_receiver": 1}):
+            with self.subTest(override=override), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(episode, **override), 0, set(), 10, 1000000)
+        disabled = dict(episode, hf_phase_filter_receiver=False)
+        old = fake_completed_receipt(runner._command(Path("/native/probe"), disabled, 1000000, 2))
+        runner._validate_completed_receipt(old, disabled)
+        self.assertNotIn("phase_filter_enabled", old["hf_public_phase_receiver"])
+        self.assertNotIn("phase_filter", old["hf_public_phase_receiver"]["slots"][0])
+
+    def test_private_phase_paths_bind_truth_scope_timing_and_finite_lattice(self) -> None:
+        episode = {"id": "paths", "scenario": "hf-ensemble-tid", "mode": "hf-search", "waveform": "reference", "seed": 1,
+                   "search_timing": "full", "hf_phase_refinement": True, "hf_phase_filter": True,
+                   "hf_physical_diagnostic": True, "hf_phase_filter_paths": True}
+        runner._validate_episode(episode, 0, set(), 10, 10000)
+        command = runner._command(Path("/native/probe"), episode, 10000, 2)
+        self.assertIn("--hf-phase-filter-paths", command)
+        receipt = fake_completed_receipt(command)
+        runner._validate_completed_receipt(receipt, episode)
+        for override in ({"hf_phase_filter_paths": 1}, {"hf_phase_filter": False},
+                         {"hf_physical_diagnostic": False}, {"mode": "receive"}, {"control": "noise"}):
+            with self.subTest(override=override), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(episode, **override), 0, set(), 10, 10000)
+        for path, value in ((("used_for_receiver_decisions",), True), (("uses_physical_truth",), False),
+                (("wanted_bit",), 0), (("observation_sha256",), "d" * 64), (("timing_index",), 18),
+                (("epoch_offset_seconds",), 1), (("clock_ppm",), .1), (("arrival_seconds",), .003),
+                (("reference_path_delay_seconds",), .003), (("clean_coherence_power_lower_bound",), 1.1),
+                (("optimal_clean_correlation_real",), -1), (("gain_radii",), [1]),
+                (("maximum_noisy_log_lr",), [0., 0.]), (("maximum_prior_weighted_noisy_path_log_e",), [3., 3.]),
+                (("conditional_noisy_log_e",), [math.nan, 1.]), (("work", "correlation_products"), 1),
+                (("work", "emission_states"), 1), (("work", "transition_edges"), 1),
+                (("work", "workspace_reserved_bytes"), 1024), (("work", "block_statistics_reserved_bytes"), 1),
+                (("work", "public_pair_reserved_bytes"), 1)):
+            bad = json.loads(json.dumps(receipt))
+            parent = bad["hf_physical_diagnostic"]["phase_filter_paths"]
+            for key in path[:-1]:
+                parent = parent[key]
+            parent[path[-1]] = value
+            with self.subTest(path=path), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad, episode)
+        unrequested = dict(episode, hf_phase_filter_paths=False)
+        receipt["plan"]["hf_phase_filter_paths_requested"] = False
+        with self.assertRaisesRegex(runner.CampaignError, "unrequested private phase"):
+            runner._validate_completed_receipt(receipt, unrequested)
+
+    def test_sticky_phase_filter_is_explicit_and_preserves_the_default(self) -> None:
+        shadow = {"id": "sticky", "scenario": "hf-ensemble-tid", "mode": "hf-search", "waveform": "reference", "seed": 1,
+                  "search_timing": "full", "hf_phase_refinement": True, "hf_phase_filter": True}
+        receiver = {"id": "sticky-receiver", "scenario": "hf-ensemble-tid", "mode": "receive", "waveform": "reference", "seed": 1,
+                    "hf_phase_refinement": True, "hf_public_phase_receiver": True, "hf_phase_filter_receiver": True}
+        for base in (shadow, receiver):
+            for requested in (None, False, True):
+                episode = dict(base)
+                if requested is not None:
+                    episode["hf_phase_filter_sticky"] = requested
+                runner._validate_episode(episode, 0, set(), 10, 1000000)
+                command = runner._command(Path("/native/probe"), episode, 1000000, 2)
+                self.assertEqual("--hf-phase-filter-sticky" in command, requested is True)
+                receipt = fake_completed_receipt(command)
+                runner._validate_completed_receipt(receipt, episode)
+                parent = receipt["hf_public_search"] if base is shadow else receipt["hf_public_phase_receiver"]["slots"][0]
+                self.assertEqual("sticky" in parent["phase_filter"], requested is True)
+                if requested is True:
+                    bad = json.loads(json.dumps(receipt))
+                    del bad["plan"]["hf_phase_filter_sticky_requested"]
+                    with self.assertRaisesRegex(runner.CampaignError, "sticky phase prior request"):
+                        runner._validate_completed_receipt(bad, episode)
+                    if base is receiver:
+                        bad = json.loads(json.dumps(receipt))
+                        del bad["hf_public_phase_receiver"]["phase_filter_sticky_enabled"]
+                        with self.assertRaises(runner.CampaignError):
+                            runner._validate_completed_receipt(bad, episode)
+                else:
+                    parent["phase_filter"]["sticky_enabled"] = True
+                    with self.assertRaisesRegex(runner.CampaignError, "unrequested sticky"):
+                        runner._validate_completed_receipt(receipt, episode)
+        for override in ({"hf_phase_filter": False}, {"hf_phase_filter_sticky": 1},
+                         {"hf_phase_filter_paths": True, "hf_physical_diagnostic": True}):
+            episode = dict(shadow, hf_phase_filter_sticky=True)
+            episode.update(override)
+            with self.subTest(override=override), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(episode, 0, set(), 10, 1000000)
+
+    def test_sticky_phase_filter_fixed_prior_work_and_shared_scratch(self) -> None:
+        episode = {"id": "sticky-receiver", "scenario": "hf-ensemble-tid", "mode": "receive", "waveform": "reference", "seed": 1,
+                   "hf_phase_refinement": True, "hf_public_phase_receiver": True, "hf_phase_filter_receiver": True,
+                   "hf_phase_filter_sticky": True}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 1000000, 2))
+        parent = receipt["hf_public_phase_receiver"]["slots"][0]
+        result = parent["phase_filter"]
+        baseline = fake_phase_filter(parent, 4001)
+        for field in ("correlation_products", "emission_states", "transition_edges"):
+            self.assertEqual(result["work"][field], 2 * baseline["work"][field])
+            self.assertGreater(baseline["work"][field], 0)
+        self.assertEqual(result["work"]["workspace_reserved_bytes"], baseline["work"]["workspace_reserved_bytes"])
+        # Independent closed-form accounting: baseline 1/2, each walk 1/4,
+        # followed by the pre-existing 1/4 receiver supplement reservation.
+        for bit in (0, 1):
+            expected = math.log(.5 * math.exp(result["baseline"]["bit_log_e"][bit]) +
+                                .25 * math.exp(result["walk"]["bit_log_e"][bit]) +
+                                .25 * math.exp(result["sticky"]["bit_log_e"][bit]))
+            self.assertAlmostEqual(result["combined"]["bit_log_e"][bit], expected)
+        expected_presence = math.log(sum(math.exp(value) for value in result["combined"]["bit_log_e"]) * .125)
+        self.assertAlmostEqual(result["combined"]["weighted_presence_log_e"], expected_presence)
+        runner._validate_completed_receipt(receipt, episode)
+        changes = ((("sticky_enabled",), False), (("correlated_prior_weights",), [.25, .75]),
+                   (("transition_probabilities", "walk", "stay"), .6),
+                   (("transition_probabilities", "sticky", "step_each"), .25),
+                   (("transition_probabilities", "sticky", "edge_stay"), math.nan),
+                   (("walk", "bit_log_e"), [5., math.inf]), (("sticky", "favored_bit"), 0),
+                   (("correlated", "bit_log_e"), result["walk"]["bit_log_e"]),
+                   (("work", "correlation_products"), baseline["work"]["correlation_products"]),
+                   (("work", "emission_states"), baseline["work"]["emission_states"]),
+                   (("work", "transition_edges"), baseline["work"]["transition_edges"]),
+                   (("work", "workspace_reserved_bytes"), 2 * baseline["work"]["workspace_reserved_bytes"]))
+        for path, value in changes:
+            bad = json.loads(json.dumps(receipt))
+            target = bad["hf_public_phase_receiver"]["slots"][0]["phase_filter"]
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            with self.subTest(path=path), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad, episode)
+        bad = json.loads(json.dumps(receipt))
+        bad["hf_public_phase_receiver"]["slots"][0]["stage_workers"] = 2
+        with self.assertRaisesRegex(runner.CampaignError, "per-worker workspace"):
+            runner._validate_completed_receipt(bad, episode)
+
+    def test_sticky_phase_filter_rejects_missing_inner_half_weight_with_consistent_summaries(self) -> None:
+        episode = {"id": "sticky", "scenario": "hf-ensemble-tid", "mode": "hf-search", "waveform": "reference", "seed": 1,
+                   "search_timing": "full", "hf_phase_refinement": True, "hf_phase_filter": True, "hf_phase_filter_sticky": True}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 1000000, 2))
+        parent = receipt["hf_public_search"]
+        result = parent["phase_filter"]
+
+        def rewrite_summary(name, values):
+            presence = math.log(sum(math.exp(value) for value in values) * .125)
+            separation = abs(values[0] - values[1])
+            result[name].update(bit_log_e=values, weighted_presence_log_e=presence,
+                favored_bit=int(values[1] > values[0]), bit_log_separation=separation,
+                passes_presence_reference=presence >= parent["presence_reference_threshold"],
+                passes_bit_separation_reference=separation >= parent["bit_separation_reference"])
+
+        # Coherently inflate both reported stages, so a check of each summary
+        # alone cannot catch the lost reservation of half the correlated prior.
+        rewrite_summary("correlated", [value + math.log(2) for value in result["correlated"]["bit_log_e"]])
+        rewrite_summary("combined", [math.log((math.exp(a) + math.exp(b)) * .5)
+                                    for a, b in zip(result["baseline"]["bit_log_e"], result["correlated"]["bit_log_e"])])
+        with self.assertRaisesRegex(runner.CampaignError, "equal walk/sticky mixture"):
+            runner._validate_completed_receipt(receipt, episode)
+
+    def test_receiver_phase_filter_binds_callback_aperture_and_both_mixture_layers(self) -> None:
+        episode = {"id": "filter-receiver", "scenario": "hf-ensemble-multiscale", "mode": "receive",
+                   "waveform": "reference", "seed": 1, "hf_public_phase_receiver": True,
+                   "hf_phase_refinement": True, "hf_phase_filter_receiver": True}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 1000000, 2))
+        callback = receipt["hf_public_phase_receiver"]["slots"][0]
+        baseline = callback["phase_refinement"]["combined_bit_log_e"]
+        self.assertEqual(callback["phase_filter"]["baseline"]["bit_log_e"], baseline)
+        self.assertNotEqual(callback["bit_log_e"], baseline)
+        self.assertEqual(callback["phase_filter"]["groups"], 3)
+        self.assertEqual(callback["phase_filter"]["input_blocks"], 32)
+        runner._validate_completed_receipt(receipt, episode)
+        paths = (
+            (("plan", "hf_phase_filter_receiver_requested"), False),
+            (("plan", "public_slots", 0, "observation", "stop"), 4020),
+            (("plan", "public_slots", 0, "index"), 1),
+            (("hf_public_phase_receiver", "phase_filter_enabled"), False),
+            (("hf_public_phase_receiver", "fixed_weight"), .5),
+            (("hf_public_phase_receiver", "model_family"), "equal_prior_fixed97_and_cartesian_refinement"),
+            (("hf_public_phase_receiver", "executed_slots"), 2),
+            (("callback", "bit_log_e"), baseline), (("callback", "slot_index"), 5),
+            (("callback", "configured_frequency_bound_hz"), 0),
+            (("callback", "phase_filter", "baseline", "bit_log_e"), callback["bit_log_e"]),
+            (("callback", "phase_filter", "branch_weight_within_supplement"), 1),
+            (("callback", "phase_filter", "supplement_weight"), 1),
+            (("callback", "phase_filter", "input_samples"), 4000),
+            (("callback", "phase_filter", "groups"), 601),
+            (("callback", "phase_filter", "work", "transition_edges"), 0))
+        for path, value in paths:
+            bad = json.loads(json.dumps(receipt))
+            parent = bad["hf_public_phase_receiver"]["slots"][0] if path[0] == "callback" else bad
+            for key in path[1:-1] if path[0] == "callback" else path[:-1]:
+                parent = parent[key]
+            parent[path[-1]] = value
+            with self.subTest(path=path), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad, episode)
+        no_callbacks = json.loads(json.dumps(receipt))
+        no_callbacks["hf_public_phase_receiver"].update(executed_slots=0, slots=[])
+        runner._validate_completed_receipt(no_callbacks, episode)  # No fallback invocation is not filter evidence.
+        disabled = dict(episode, hf_phase_filter_receiver=False)
+        old = fake_completed_receipt(runner._command(Path("/native/probe"), disabled, 1000000, 2))
+        old["hf_public_phase_receiver"]["slots"][0]["phase_filter"] = callback["phase_filter"]
+        with self.assertRaisesRegex(runner.CampaignError, "unrequested receiver phase filter"):
+            runner._validate_completed_receipt(old, disabled)
 
     def test_unknown_keys_and_duplicate_seeds_in_confirmatory_strata_fail(self) -> None:
         campaign = valid_campaign()
@@ -912,7 +1492,7 @@ class CampaignValidationTests(unittest.TestCase):
 
     def test_gui_varying_inputs_require_explicit_cpu_component_scope(self) -> None:
         episode = gui_varying_episode()
-        for control in ("wanted", "noise"):
+        for control in ("wanted", "noise", "wrong-key"):
             for selected in (0, 2):
                 declared = dict(episode, control=control, capture_digest_slot=selected)
                 runner._validate_episode(declared, 0, set(), 10, 1000)
@@ -924,12 +1504,27 @@ class CampaignValidationTests(unittest.TestCase):
         del missing["capture_digest_slot"]
         for invalid in [missing] + [dict(episode, **override) for override in (
                 {"scenario": "awgn"}, {"waveform": "smoke"}, {"helper": True}, {"backend": "cuda"},
-                {"control": "wrong-key"}, {"control": "wrong-ordinal"}, {"control": "eof"},
+                {"control": "wrong-ordinal"}, {"control": "eof"},
                 {"control": "interior-fade"}, {"capture_digest_slot": True}, {"capture_digest_slot": -1},
                 {"search_slot": 2}, {"search_timing": "full"}, {"oracle_slot": 2}, {"duration_seconds": 1},
                 {"hf_public_phase_receiver": False}, {"hf_phase_refinement": False}, {"pulse": "tapered-rrc"})]:
             with self.subTest(invalid=invalid), self.assertRaises(runner.CampaignError):
                 runner._validate_episode(invalid, 0, set(), 10, 1000)
+
+    def test_gui_varying_wrong_key_preserves_transmission_and_component_scope(self) -> None:
+        episode = gui_varying_episode(control="wrong-key")
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 1000, 2))
+        runner._validate_completed_receipt(receipt, episode)
+        self.assertTrue(receipt["plan"]["public_slots"][0]["evaluator_transmitting"])
+        self.assertFalse(receipt["outcomes"]["receiver_executed"])
+        self.assertFalse(receipt["outcomes"]["correct_complete"])
+        receipt["plan"]["public_slots"][0]["evaluator_transmitting"] = False
+        with self.assertRaisesRegex(runner.CampaignError, "public slot and control"):
+            runner._validate_completed_receipt(receipt, episode)
+        receipt["plan"]["public_slots"][0]["evaluator_transmitting"] = True
+        receipt["control"] = "wanted"
+        with self.assertRaisesRegex(runner.CampaignError, "control does not match"):
+            runner._validate_completed_receipt(receipt, episode)
 
     def test_gui_varying_receipts_bind_capture_priors_work_and_component_scope(self) -> None:
         episode = gui_varying_episode()
@@ -1602,6 +2197,66 @@ class CampaignExecutionTests(unittest.TestCase):
         kwargs["stderr"].write(b"")
         return subprocess.CompletedProcess(command, 0)
 
+    @unittest.skipUnless(os.name == "posix" and runner.resource is not None, "POSIX file-size limit discriminator")
+    def test_service_spool_larger_than_output_limit_has_its_own_bounded_file_cap(self) -> None:
+        episode = {"id": "spool", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 1,
+                   "service_replay": True}
+        probe = self.work / "spool_probe.py"
+        command = runner._command(probe, episode, 1000000, 3.5)
+        receipt = fake_completed_receipt(command)
+        probe.write_text(f"#!{sys.executable}\n" +
+            "import json,pathlib,signal,sys\n"
+            "signal.signal(signal.SIGXFSZ,signal.SIG_DFL)\n"
+            "path=pathlib.Path(__file__).with_suffix('.spool')\n"
+            "with path.open('wb') as target:\n"
+            "    for _ in range(9): target.write(b'x'*(1024*1024))\n"
+            "size=path.stat().st_size\npath.unlink()\n" +
+            f"receipt=json.loads({json.dumps(receipt)!r})\n" +
+            "receipt['fake_spool_bytes']=size\nsys.stdout.write(json.dumps(receipt))\n", encoding="utf-8")
+        probe.chmod(0o700)
+
+        def old_limit():
+            runner.resource.setrlimit(runner.resource.RLIMIT_FSIZE, (runner.MAX_OUTPUT_BYTES, runner.MAX_OUTPUT_BYTES))
+
+        baseline = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=4,
+                                  preexec_fn=old_limit, check=False)
+        self.assertEqual(baseline.returncode, -runner.signal.SIGXFSZ)
+        self.assertEqual(baseline.stdout, b"")
+        repaired = runner._trial(probe, episode, 1000000, 4, self.work, 0)
+        self.assertEqual(repaired["status"], "completed", repaired.get("error"))
+        self.assertEqual(repaired["child_file_limit_bytes"], 17000000)
+        self.assertEqual(repaired["receipt"]["fake_spool_bytes"], 9 * 1024 * 1024)
+        self.assertLess((self.work / repaired["raw_stdout"]).stat().st_size, runner.MAX_OUTPUT_BYTES)
+
+    @unittest.skipUnless(os.name == "posix" and runner.resource is not None, "POSIX bounded pipe capture")
+    def test_service_larger_file_cap_does_not_raise_stdout_or_stderr_caps(self) -> None:
+        episode = {"id": "output", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 1,
+                   "service_replay": True, "service_spool_byte_limit": 12 * 1024 * 1024}
+        for stream in ("stdout", "stderr"):
+            probe = self.work / (stream + "_probe.py")
+            probe.write_text(f"#!{sys.executable}\nimport sys\n" +
+                f"for _ in range(9): sys.{stream}.buffer.write(b'x'*(1024*1024))\n", encoding="utf-8")
+            probe.chmod(0o700)
+            with self.subTest(stream=stream):
+                result = runner._trial(probe, episode, 1000000, 4, self.work, 0)
+                self.assertEqual(result["status"], "invalid_receipt")
+                self.assertIn(f"native {stream} exceeded", result["error"])
+                self.assertEqual(result["child_file_limit_bytes"], 12 * 1024 * 1024)
+                self.assertEqual((self.work / result["raw_" + stream]).stat().st_size, runner.MAX_OUTPUT_BYTES)
+                self.assertLessEqual((self.work / result["raw_stderr" if stream == "stdout" else "raw_stdout"]).stat().st_size,
+                                     runner.MAX_OUTPUT_BYTES)
+
+    @unittest.skipUnless(os.name == "posix" and runner.resource is not None, "POSIX bounded service child")
+    def test_service_file_cap_remains_sample_bounded_and_timeout_is_preserved(self) -> None:
+        episode = {"id": "timeout", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 1,
+                   "service_replay": True, "service_spool_byte_limit": 2**64 - 1}
+        probe = self.work / "waiting_probe.py"
+        probe.write_text(f"#!{sys.executable}\nimport time\ntime.sleep(2)\n", encoding="utf-8")
+        probe.chmod(0o700)
+        result = runner._trial(probe, episode, 1000000, .1, self.work, 0)
+        self.assertEqual(result["status"], "timed_out")
+        self.assertEqual(result["child_file_limit_bytes"], 17000000)
+
     def test_complete_failure_is_data_and_fixed_sample_interval_is_reported(self) -> None:
         campaign = json.loads(self.campaign_file.read_text())
         campaign["confirmatory_strata"] = {}
@@ -1712,6 +2367,134 @@ class CampaignExecutionTests(unittest.TestCase):
         self.assertEqual(run["statistics"], {})
         self.assertIn("canonical varying component complete; no receiver decision or message completion", report)
         self.assertNotIn("physical message complete", report)
+
+    def test_paired_service_report_distinguishes_negative_controls_from_messages(self) -> None:
+        episodes = [{"id": f"{control}-{state}", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": i,
+                     "service_replay": True, "service_episodes": 2, "control": control}
+                    for i, (control, state) in enumerate((
+                        ("wanted", "pass"), ("wanted", "fail"), ("noise", "pass"), ("noise", "fail"),
+                        ("wrong-key", "pass"), ("wrong-ordinal", "pass")), 1)]
+        campaign = {"schema_version": 1, "name": "service-report", "max_wall_seconds": 10,
+                    "per_trial_wall_seconds": 2, "max_trials": len(episodes), "max_samples": 10000,
+                    "episodes": episodes}
+        self.campaign_file.write_text(json.dumps(campaign))
+        output = self.work / "service-report-output"
+
+        def replay(command, out, err, timeout, options):
+            receipt = fake_completed_receipt(command)
+            if receipt["seed"] == 1:
+                complete_service_messages(receipt)
+            elif receipt["seed"] == 4:
+                receipt["service_replay"]["communication_complete"] = False
+                receipt["outcomes"]["false_data"] = 1
+            out.write((json.dumps(receipt) + "\n").encode())
+            return 0, None
+
+        with patch.object(runner, "_run_service_child", side_effect=replay):
+            run = runner.run_campaign(self.probe, self.campaign_file, output)
+        self.assertEqual(run["status"], "completed")
+        self.assertEqual(run["valid_communication_failures"], 1)
+        report = (output / "report.md").read_text()
+        lines = {episode["id"]: next(line for line in report.splitlines() if line.startswith(f"| {episode['id']} |"))
+                 for episode in episodes}
+        self.assertIn("both physical messages complete", lines["wanted-pass"])
+        self.assertIn("paired physical-message completion failed", lines["wanted-fail"])
+        for name in ("noise-pass", "wrong-key-pass", "wrong-ordinal-pass"):
+            self.assertIn("negative control passed; no accepted messages or false DATA", lines[name])
+            self.assertNotIn("physical messages complete", lines[name])
+        self.assertIn("negative control did not pass", lines["noise-fail"])
+        self.assertIn("false DATA=1; accepted false messages=0", lines["noise-fail"])
+        self.assertEqual(run["negative_controls"]["counted_trials"], 4)
+        self.assertEqual(run["negative_controls"]["false_data_decisions"], 1)
+        self.assertEqual(run["negative_controls"]["accepted_false_messages"], 0)
+
+    def test_ordinary_negative_report_separates_false_data_from_accepted_messages(self) -> None:
+        episodes = [{"id": control, "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": i,
+                     "control": control} for i, control in enumerate(("wrong-key", "noise", "wrong-ordinal", "wanted"), 1)]
+        campaign = {"schema_version": 1, "name": "negative-report", "max_wall_seconds": 10,
+                    "per_trial_wall_seconds": 2, "max_trials": len(episodes), "max_samples": 10000, "episodes": episodes}
+        self.campaign_file.write_text(json.dumps(campaign))
+        output = self.work / "negative-report-output"
+
+        def native(command, **kwargs):
+            receipt = fake_completed_receipt(command)
+            receipt["outcomes"].update(accepted_messages=0, resumed_data_slots=0)
+            if receipt["control"] == "wrong-key":
+                # Sanitized counters from the actual wrong-key causal follow-up:
+                # three false DATA decisions, one rejected physical frame, no accepted message.
+                receipt["outcomes"].update(false_data=3, actual_scored_slots=5,
+                    physical_completions=1, integrity_rejections=1)
+                receipt["messages"] = [{"decoded_content": None, "integrity_rejected": True}]
+            elif receipt["control"] == "noise":
+                receipt["outcomes"].update(false_data=6, actual_scored_slots=10,
+                    physical_completions=2, accepted_messages=2)
+                receipt["messages"] = [{"decoded_content": "e"}, {"decoded_content": "e"}]
+            kwargs["stdout"].write((json.dumps(receipt) + "\n").encode())
+            return subprocess.CompletedProcess(command, 0)
+
+        with patch.object(runner.subprocess, "run", side_effect=native):
+            run = runner.run_campaign(self.probe, self.campaign_file, output)
+        self.assertEqual(run["status"], "completed")
+        self.assertEqual(run["valid_communication_failures"], 1)  # Wanted semantics are unchanged.
+        summary = run["negative_controls"]
+        self.assertEqual(summary["completed_trials"], 3)
+        self.assertEqual(summary["false_data_decisions"], 9)
+        self.assertEqual(summary["trials_with_false_data"], 2)
+        self.assertEqual(summary["accepted_false_messages"], 2)  # Do not add messages[] again.
+        self.assertEqual(summary["trials_with_accepted_false_messages"], 1)
+        persisted = json.loads((output / "run.json").read_text())
+        self.assertEqual(persisted["negative_controls"], summary)
+        report = (output / "report.md").read_text()
+        lines = {episode["id"]: next(line for line in report.splitlines() if line.startswith(f"| {episode['id']} | awgn |"))
+                 for episode in episodes}
+        self.assertIn("false DATA=3; accepted false messages=0", lines["wrong-key"])
+        self.assertIn("false DATA=6; accepted false messages=2", lines["noise"])
+        self.assertIn("negative control passed", lines["wrong-ordinal"])
+        self.assertIn("no correct physical message completion", lines["wanted"])
+        self.assertNotIn("no correct physical message completion", lines["wrong-key"])
+        # Old run metadata needs no mutation: rendering recomputes the new table
+        # from its original classifications and rehydrated raw native receipts.
+        del run["negative_controls"]
+        self.assertEqual(report, runner._markdown(campaign, run))
+
+    def test_negative_summary_excludes_censored_work_and_does_not_invent_missing_counts(self) -> None:
+        def trial(control="noise", **changes):
+            row = {"status": "completed", "episode": {"mode": "receive", "control": control},
+                   "receipt": {"status": "completed", "outcomes": {"false_data": 0, "accepted_messages": 0}}}
+            row.update(changes)
+            return row
+
+        rows = [trial()]
+        # Actual service noise schema: a complete negative replay has no target
+        # messages, not a successful wanted-message endpoint.
+        rows.append(trial("wrong-key", episode={"mode": "receive", "control": "wrong-key", "service_replay": True},
+            receipt={"status": "completed", "service_replay": {"work_complete": True, "communication_complete": True,
+                "expected_message_count": 0}, "outcomes": {"false_data": 0, "accepted_messages": 0}}))
+        for value in (None, True, -1, 1.5, math.inf):
+            bad = trial("wrong-ordinal")
+            bad["receipt"]["outcomes"]["accepted_messages"] = value
+            rows.append(bad)
+        missing = trial("wrong-ordinal")
+        del missing["receipt"]["outcomes"]["false_data"]
+        rows.append(missing)
+        for status in ("invalid_receipt", "timed_out", "launch_error", "receipt_input_mismatch"):
+            rows.append(trial(status=status))
+        rows.append(trial(receipt={"status": "time_limit", "outcomes": {"false_data": 100, "accepted_messages": 100}}))
+        rows.append(trial(episode={"mode": "slot", "control": "noise"}))
+        rows.append(trial("wanted"))
+        rows.append(trial(episode={"mode": "receive", "control": "noise", "service_replay": True},
+            receipt={"status": "completed", "service_replay": {"work_complete": False},
+                     "outcomes": {"false_data": 100, "accepted_messages": 100}}))
+        summary = runner._negative_control_summary(rows)
+        self.assertEqual(summary["completed_trials"], 8)
+        self.assertEqual(summary["counted_trials"], 2)
+        self.assertEqual(summary["unavailable_count_trials"], 6)
+        self.assertEqual(summary["false_data_decisions"], 0)
+        self.assertEqual(summary["accepted_false_messages"], 0)
+        self.assertEqual(summary["by_control"]["wrong-ordinal"]["unavailable_count_trials"], 6)
+        self.assertIn("false DATA=0; accepted false messages=unavailable", runner._negative_control_label(
+            rows[2]["receipt"], rows[2]["episode"]))
+        self.assertEqual(rows[-1]["status"], "completed")  # Summary never reclassifies source trials.
 
     def test_channel_episode_requires_nonempty_received_signal(self) -> None:
         campaign = {"schema_version": 1, "name": "channel", "max_wall_seconds": 2,

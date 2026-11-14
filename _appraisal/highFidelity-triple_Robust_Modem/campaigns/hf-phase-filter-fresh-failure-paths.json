@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "name": "hf-phase-filter-fresh-failure-paths",
+  "purpose": "One fixed evaluator-only same-slot discriminator after fresh long native failure: original-walk support and physical information at failed active slot1. Existing flags prohibit sticky; compare raw walk evidence with native callback. No retuning or new sweep.",
+  "max_wall_seconds": 180,
+  "per_trial_wall_seconds": 180,
+  "max_trials": 1,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "id": "paths-fresh-long-failed-slot1",
+      "scenario": "hf-ensemble-design",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 60104,
+      "noise_seed": 70104,
+      "hf_trajectory_seed": 80204,
+      "bit_seconds": 512,
+      "cn0_db_hz": -6,
+      "control": "wanted",
+      "hf_phase_refinement": true,
+      "hf_primary_amplitude_hz": 16000,
+      "hf_primary_period_seconds": 173,
+      "hf_primary_phase_radians": 1.27,
+      "hf_secondary_amplitude_hz": 18000,
+      "hf_secondary_period_seconds": 683,
+      "hf_secondary_phase_radians": 0.43,
+      "hf_knot_amplitude_hz": 15000,
+      "hf_knot_seconds": 97,
+      "hf_trajectory_offset_seconds": 631,
+      "search_slot": 1,
+      "search_timing": "full",
+      "hf_phase_filter": true,
+      "hf_phase_filter_paths": true,
+      "hf_physical_diagnostic": true
+    }
+  ]
+}

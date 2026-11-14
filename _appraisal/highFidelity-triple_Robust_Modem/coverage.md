@@ -7,15 +7,34 @@ different questions and are reported separately. No natural-condition
 probability, field calibration, or universal sensitivity floor follows from
 these deterministic cases or small fixed-seed holdouts.
 
-The latest [physical/operating expansion](hf-coverage-expansion.md) adds a frozen
+The [receiver follow-up](hf-receiver-repair.md) now tests complete-message
+repairs on exactly matched captures, fresh payload/trajectory controls, and
+scoped complete-service costs. Four archived GUI wrong messages recover under
+the opt-in all-admitted comparison, but the fresh payload still fails and a
+wrong-key sequence changes from codec rejection to an accepted false message.
+A separate normalized phase filter recovers the physical-domain edge and a
+fresh trajectory. After diagnosing more than 98.9% representable clean
+coherence in a long weak miss, a fixed additional transition prior recovers
+that complete message. A new long trajectory still fails, even though its
+selected first-slot shadow passes. These are useful, finite causal results; they
+do not qualify a general receiver policy or a natural-condition failure rate.
+
+The fixed receiver also passes the previously failed +3 dB edge bracket, but
+still fails its longer near-equal-energy bracket. The suite now explicitly
+reports completed negative-control failures and accepted false messages,
+separately from wanted-message failures and censored execution. A software
+pass or a selected-slot improvement cannot conceal these message outcomes.
+
+The preceding [physical/operating expansion](hf-coverage-expansion.md) adds a frozen
 physical-parameter design, actual canonical GUI clocks and a static coupled
 cutoff/absorption reference. It finds another failed energy/time boundary and
 wrong accepted GUI content, including a fresh physical realization. Its scope
 separates complete reception, shadow branches, numerical physics and admission;
 passing one layer does not qualify the others. Same-IQ diagnostics find correct-bit
 evidence in the skipped broader branch on the original failed GUI observation
-and a fresh path's first wrong slot. No changed receiver policy or complete-message
-repair is qualified by those component results.
+and a fresh path's first wrong slot. Those component results alone do not
+qualify a changed policy; the subsequent complete results and their
+counterexamples are recorded separately above.
 
 The earlier [independent HF ensemble](hf-ensemble.md#executed-evidence-and-findings)
 adds multiscale/random-knot trajectories, independent placement and noise,

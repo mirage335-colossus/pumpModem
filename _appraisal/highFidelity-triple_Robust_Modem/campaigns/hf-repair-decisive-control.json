@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "name": "hf-repair-decisive-control",
+  "purpose": "Predeclared one ordinary component discriminator for exact wrong-key slot2 which changed default codec rejection to comparator accepted o. No threshold or policy change.",
+  "max_wall_seconds": 120,
+  "per_trial_wall_seconds": 120,
+  "max_trials": 1,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "scenario": "hf-gui-native",
+      "mode": "gui-varying",
+      "waveform": "reference",
+      "seed": 62001,
+      "noise_seed": 72001,
+      "cn0_db_hz": 40,
+      "gui_target_cn0_db_hz": 32,
+      "gui_spread": "hf-worst",
+      "gui_selective": "each-65",
+      "gui_margin": 3,
+      "gui_audio_ppm": 100,
+      "gui_rf_ppm": 1,
+      "gui_audio_phase_degrees_sqrt_s": 0.5,
+      "gui_rf_phase_degrees_sqrt_s": 0.05,
+      "gui_clock_edge": true,
+      "gui_arrival": "tight",
+      "bit_seconds": 2,
+      "control": "wrong-key",
+      "id": "wrong-key-decisive-slot2-ordinary",
+      "capture_digest_slot": 2
+    }
+  ]
+}

@@ -63,4 +63,11 @@ ReceiverSlotScore score_slot_with_supplement(
     std::span<const Complex>, std::span<const std::uint8_t>, unsigned,
     std::size_t, std::stop_token, ReceiverExecutor*, const SlotEvidenceSupplement&);
 
+// Internal comparison for stream fixtures. Uses the normal sequential and
+// overlapped workspace quotes; admitted stages still run one at a time.
+ReceiverSlotScore score_slot_comparing_admitted_evidence(
+    const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
+    std::span<const Complex>, std::span<const std::uint8_t>, unsigned,
+    std::size_t, std::stop_token, ReceiverExecutor*);
+
 } // namespace datapump::triad::v3::receiver_detail

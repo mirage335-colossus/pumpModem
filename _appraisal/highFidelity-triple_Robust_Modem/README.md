@@ -36,8 +36,22 @@ Its [44 modem/planning observations](hf-coverage-expansion.md#same-observation-n
 and fourteen static full-wave profiles expose another failed energy/time
 boundary and wrong accepted GUI content. Same-IQ diagnostics then find correct-bit
 evidence in existing native processing that early affine admission skipped,
-including a fresh physical path. Complete-message recovery under a changed
-decision policy remains untested; ordinary receiver defaults are unchanged.
+including a fresh physical path. The subsequent
+[receiver investigation](hf-receiver-repair.md) now recovers four archived
+wrong messages with an explicitly approved opt-in native comparison. It also
+finds fresh-payload failures and a wrong-key accepted-message regression, so
+that comparison is not a general repair. A separate normalized phase-history
+filter recovers the maximum-rate physical edge and a fresh trajectory through
+the complete native receiver. A fixed second transition prior also recovers
+the previously failed long weak message, while a new long trajectory still
+fails. Ordinary receiver defaults are unchanged.
+
+The new [waveform-kernel admission tests](hf-fullwave.md) also reject a physical
+model approximation: interpolation between accurate frozen ionospheric
+responses can be highly inaccurate between them. A numerically converged
+static solver therefore does not automatically supply a validated dynamic
+channel. The suite preserves these failed approximation checks alongside
+failed communications.
 
 The earlier [independent HF ensemble](hf-ensemble.md) adds multiscale and
 nonperiodic density trajectories, separate trajectory/noise seeds, independent
@@ -74,9 +88,12 @@ design has nine cases. These are software checks, not communication successes.
 Exact build identities, the repaired prior-accounting defect and replay parity
 are recorded in the [coverage expansion](hf-coverage-expansion.md).
 
-The earlier canonical `test triad` result remains 32/32 in 62.22 s
-([log](.build/hf-native-triad-checks.log)); its native source hash is unchanged
-by this contained continuation. Historical failures, repairs and complete
+The historical canonical `test triad` result was 32/32 in 62.22 s
+([log](.build/hf-native-triad-checks.log)). The newly approved native comparison
+hook received fresh checks: 31/32 passed with parallelism two, and the receiver
+test timed out at 60 seconds; the unchanged isolated receiver test then passed
+in 56.05 seconds. This is not reported as an all-green original run.
+Current affected checks, historical failures, repairs and complete
 message results are retained in [HF validation](hf-validation.md), including
 the failed first phase-refinement initialization and later long-slot recovery.
 Current group coverage is:
@@ -90,11 +107,14 @@ Current group coverage is:
 | `hf_design` | Fixed whole-domain phase/group bounds, strict physical coefficients, seed/placement isolation and mutation order |
 | `hf_gui_profile` | Canonical preset preparation, actual endpoint clock errors, margin semantics, Helper, noise-seed isolation and rejection |
 | `hf_fullwave` | Independent zero-index, Fresnel/slab, Joule-loss and smooth-barrier references; passive opaque layers and unresolved resonances |
+| `hf_fullwave_kernel` | Causal support, continuous-history interpolation, finite-band error gates and independent off-grid rejection of a frequency-sampling delay alias |
 | `hf_history` | 175 matched public-aperture block-history, projection, nuisance-rank and conditional-oracle checks |
 | `hf_phase_bank` | Frozen phase dictionary, matched projection, uncertainty and boundary regression checks |
 | `hf_public_statistics` | Exact effective-template FFT/direct-sum agreement, shared phase/FFT preparation parity, full priors, phase bounds and resource guards |
 | `hf_phase_refinement` | Direct-DFT proposal/final-score agreement, fixed priors, boundaries, staged objectives and off-grid recovery |
 | `hf_native_supplement` | Disabled-path parity, reserved mass, shared executor, line/quiet policy and invalidity |
+| `hf_admitted_evidence` | Opt-in complete native model comparison, Off parity, coherent gain, retained line, cancellation and exact memory refusal |
+| `hf_phase_filter` | Normalized log-domain forward sums, exhaustive independent path references, finite phase/frequency support, partial groups and tiny-state recovery |
 | `hf_public_receiver` | Public arrival-grid closure, full prior mass, numerical support, telemetry isolation and memory admission |
 | `hf_replay` | 208 finite measured-record support, interpolation and full-record trace-integrity checks |
 | `impairment_observables` | Independent AR(1)/shot moments and covariance, resonator response, ADC and AGC recovery |
