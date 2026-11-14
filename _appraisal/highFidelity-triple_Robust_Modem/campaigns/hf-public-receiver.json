@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "name": "hf-public-receiver",
+  "purpose": "Conditional fixed-prior phase supplement through complete native receiver; run only after public-search gate in hf-public-search.md.",
+  "max_wall_seconds": 3000,
+  "per_trial_wall_seconds": 600,
+  "max_trials": 10,
+  "max_samples": 8000000,
+  "episodes": [
+    {
+      "id": "motion-original-baseline",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128,
+      "control": "wanted",
+      "hf_public_phase_receiver": false,
+      "capture_digest_slot": 1
+    },
+    {
+      "id": "motion-original-candidate",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128,
+      "control": "wanted",
+      "hf_public_phase_receiver": true,
+      "capture_digest_slot": 1
+    },
+    {
+      "id": "static-control",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128,
+      "control": "wanted",
+      "hf_public_phase_receiver": true,
+      "capture_digest_slot": 1
+    },
+    {
+      "id": "motion-fresh",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 11001,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128,
+      "control": "wanted",
+      "hf_public_phase_receiver": true,
+      "capture_digest_slot": 1
+    },
+    {
+      "id": "motion-off-grid",
+      "scenario": "hf-vertical-eikonal-holdout",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 11001,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128,
+      "control": "wanted",
+      "hf_public_phase_receiver": true,
+      "capture_digest_slot": 1
+    },
+    {
+      "id": "motion-weak-short",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 128,
+      "control": "wanted",
+      "hf_public_phase_receiver": true,
+      "capture_digest_slot": 1
+    },
+    {
+      "id": "motion-weak-long-baseline",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 512,
+      "control": "wanted",
+      "hf_public_phase_receiver": false,
+      "capture_digest_slot": 1
+    },
+    {
+      "id": "motion-weak-long-candidate",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 512,
+      "control": "wanted",
+      "hf_public_phase_receiver": true,
+      "capture_digest_slot": 1
+    },
+    {
+      "id": "noise-control",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 11001,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128,
+      "control": "noise",
+      "hf_public_phase_receiver": true,
+      "capture_digest_slot": 1
+    },
+    {
+      "id": "wrong-key-control",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 11001,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128,
+      "control": "wrong-key",
+      "hf_public_phase_receiver": true,
+      "capture_digest_slot": 1
+    }
+  ]
+}

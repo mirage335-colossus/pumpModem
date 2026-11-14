@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "name": "hf-public-timing-controls",
+  "purpose": "Two originally declared controls plus one explicitly adaptive same-capture holdout timing discriminator; no model tuning or independent confirmation claim.",
+  "max_wall_seconds": 120,
+  "per_trial_wall_seconds": 60,
+  "max_trials": 3,
+  "max_samples": 4000000,
+  "episodes": [
+    {
+      "id": "motion-long-original-full-timing",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "search_slot": 1,
+      "search_timing": "full",
+      "control": "wanted",
+      "bit_seconds": 128
+    },
+    {
+      "id": "motion-off-grid-holdout-full-timing",
+      "scenario": "hf-vertical-eikonal-holdout",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 11001,
+      "cn0_db_hz": 0,
+      "search_slot": 1,
+      "search_timing": "full",
+      "control": "wanted",
+      "bit_seconds": 128
+    },
+    {
+      "id": "ding-measured-eight",
+      "scenario": "hf-ding-measured",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 8,
+      "search_slot": 0,
+      "search_timing": "selected",
+      "control": "wanted"
+    }
+  ]
+}

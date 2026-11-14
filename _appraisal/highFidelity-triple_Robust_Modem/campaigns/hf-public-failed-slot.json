@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "name": "hf-public-failed-slot",
+  "purpose": "Completion-review causal discriminator on the actually failed final slot; unchanged phase bank and input, no confirmation claim.",
+  "max_wall_seconds": 30,
+  "per_trial_wall_seconds": 30,
+  "max_trials": 1,
+  "max_samples": 4000000,
+  "episodes": [
+    {
+      "id": "offgrid-failed-slot2",
+      "scenario": "hf-vertical-eikonal-holdout",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 11001,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128,
+      "search_slot": 2,
+      "search_timing": "full",
+      "control": "wanted"
+    }
+  ]
+}

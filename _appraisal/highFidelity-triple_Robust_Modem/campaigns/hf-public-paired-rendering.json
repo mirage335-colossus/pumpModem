@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "name": "hf-public-paired-rendering",
+  "purpose": "Bounded same-input parity and cost comparison using the existing native two-bit source bank; fixed priors, geometry and decision order.",
+  "max_wall_seconds": 600,
+  "per_trial_wall_seconds": 300,
+  "max_trials": 2,
+  "max_samples": 8000000,
+  "episodes": [
+    {
+      "id": "motion-original-candidate-paired-rendering",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128,
+      "control": "wanted",
+      "hf_public_phase_receiver": true,
+      "capture_digest_slot": 1
+    },
+    {
+      "id": "motion-weak-long-candidate-paired-rendering",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 512,
+      "control": "wanted",
+      "hf_public_phase_receiver": true,
+      "capture_digest_slot": 1
+    }
+  ]
+}

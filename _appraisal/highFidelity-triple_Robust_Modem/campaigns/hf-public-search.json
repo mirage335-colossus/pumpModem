@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "name": "hf-public-search",
+  "purpose": "Fixed-prior shadow evidence under public timing/CFO uncertainty; hf-public-search.md predeclares outcomes and limits.",
+  "max_wall_seconds": 3600,
+  "per_trial_wall_seconds": 600,
+  "max_trials": 11,
+  "max_samples": 4000000,
+  "episodes": [
+    {
+      "id": "motion-long-original",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "search_slot": 1,
+      "search_timing": "selected",
+      "control": "wanted",
+      "bit_seconds": 128
+    },
+    {
+      "id": "static-long-control",
+      "scenario": "hf-vertical-eikonal-static",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "search_slot": 1,
+      "search_timing": "selected",
+      "control": "wanted",
+      "bit_seconds": 128
+    },
+    {
+      "id": "motion-medium-control",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "search_slot": 1,
+      "search_timing": "selected",
+      "control": "wanted",
+      "bit_seconds": 64
+    },
+    {
+      "id": "motion-long-weak",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "search_slot": 1,
+      "search_timing": "selected",
+      "control": "wanted",
+      "bit_seconds": 128
+    },
+    {
+      "id": "ding-measured-four",
+      "scenario": "hf-ding-measured",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 4,
+      "search_slot": 0,
+      "search_timing": "selected",
+      "control": "wanted"
+    },
+    {
+      "id": "ding-amplitude-four",
+      "scenario": "hf-ding-amplitude",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 4,
+      "search_slot": 0,
+      "search_timing": "selected",
+      "control": "wanted"
+    },
+    {
+      "id": "ding-phase-four",
+      "scenario": "hf-ding-phase",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 10501,
+      "cn0_db_hz": 4,
+      "search_slot": 0,
+      "search_timing": "selected",
+      "control": "wanted"
+    },
+    {
+      "id": "motion-fresh-noise",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 11001,
+      "cn0_db_hz": 0,
+      "search_slot": 1,
+      "search_timing": "selected",
+      "control": "noise",
+      "bit_seconds": 128
+    },
+    {
+      "id": "motion-fresh-wrong-key",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 11001,
+      "cn0_db_hz": 0,
+      "search_slot": 1,
+      "search_timing": "selected",
+      "control": "wrong-key",
+      "bit_seconds": 128
+    },
+    {
+      "id": "motion-fresh-wanted",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 11001,
+      "cn0_db_hz": 0,
+      "search_slot": 1,
+      "search_timing": "selected",
+      "control": "wanted",
+      "bit_seconds": 128
+    },
+    {
+      "id": "motion-off-grid-holdout",
+      "scenario": "hf-vertical-eikonal-holdout",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 11001,
+      "cn0_db_hz": 0,
+      "search_slot": 1,
+      "search_timing": "selected",
+      "control": "wanted",
+      "bit_seconds": 128
+    }
+  ]
+}

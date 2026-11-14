@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "name": "hf-public-shared-preparation",
+  "purpose": "Fixed three-case same-input regression/cost comparison after shared immutable phase/FFT preparation; same bank, priors and ordering.",
+  "max_wall_seconds": 900,
+  "per_trial_wall_seconds": 600,
+  "max_trials": 3,
+  "max_samples": 8000000,
+  "episodes": [
+    {
+      "id": "motion-original-candidate-shared-preparation",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128,
+      "control": "wanted",
+      "hf_public_phase_receiver": true,
+      "capture_digest_slot": 1
+    },
+    {
+      "id": "motion-weak-long-candidate-shared-preparation",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": -6,
+      "bit_seconds": 512,
+      "control": "wanted",
+      "hf_public_phase_receiver": true,
+      "capture_digest_slot": 1
+    },
+    {
+      "id": "noise-control-shared-preparation",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 11001,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128,
+      "control": "noise",
+      "hf_public_phase_receiver": true,
+      "capture_digest_slot": 1
+    }
+  ]
+}
