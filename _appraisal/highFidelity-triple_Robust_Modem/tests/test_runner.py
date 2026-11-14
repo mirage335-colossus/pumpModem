@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -34,6 +35,37 @@ def valid_campaign() -> dict:
     }
 
 
+def fake_refinement_trace(*, full: bool) -> dict:
+    work = {field: 0 for field in ("fft_row_stages", "spectrum_cells", "table_lookups", "direct_sweeps", "direct_rows",
+                                   "phase_rotations", "trigonometric_evaluations", "likelihood_cells")}
+    old, new = [1., 4.], [2., 3.]
+    trace = {"enabled": True, "requested": True, "executed": True, "unavailable_reason": "",
+        "old_family_weight": .5, "new_family_weight": .5,
+        "old_bit_log_e": old, "new_bit_log_e": new,
+        "combined_bit_log_e": [max(a, b) + math.log(math.exp(a - max(a, b)) + math.exp(b - max(a, b))) - math.log(2)
+                               for a, b in zip(old, new)],
+        "old_top_timing_indices": [0], "segmented_top_timing_indices": [0], "selected_timing_indices": [0],
+        "shape_count": 100, "nu_count": 2, "nu_step_hz": .001, "work": dict(work), "work_bound": dict(work)}
+    if full:
+        trace["timing_results"] = [{"timing_index": 0, "maximum_shape": [{"a": 1, "b": 0, "nu": 0}] * 2,
+            "maximum_log_lr": [1., 4.], "maximum_frequency_hz": [0., 0.], "proposals": []}]
+    return trace
+
+
+def fake_unavailable_refinement_trace(*, full: bool) -> dict:
+    trace = fake_refinement_trace(full=full)
+    trace.update(executed=False, unavailable_reason="new_phase_direct_row_cap",
+        new_bit_log_e=[None, None], combined_bit_log_e=[value - math.log(2) for value in trace["old_bit_log_e"]],
+        old_top_timing_indices=[], segmented_top_timing_indices=[], selected_timing_indices=[],
+        timing_ranks=[], timing_results=[], selected_shape_counts=[],
+        retained_statistics_workspace_bytes=0, retained_new_prior_mass=0.,
+        work_bound_scope="full public timing preflight; unavailable family was not admitted or executed")
+    trace["work_bound"]["direct_rows"] = 105780000
+    for field in ("shape_count", "nu_count", "nu_step_hz"):
+        del trace[field]
+    return trace
+
+
 def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None) -> dict:
     def argument(option, default=None):
         try:
@@ -62,6 +94,8 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
                  "history_reference_delay_seconds": float(argument("--history-reference-delay-seconds", "0")),
                  "hf_phase_bank_requested": "--hf-phase-bank" in command,
                  "hf_public_phase_receiver_requested": "--hf-public-phase-receiver" in command,
+                 "hf_physical_diagnostic_requested": "--hf-physical-diagnostic" in command,
+                 "hf_phase_refinement_requested": "--hf-phase-refinement" in command,
                  "horizon_samples": 100, "pulse": argument("--pulse", "rrc"),
                  "requested_message": argument("--message", "e"),
                  "message": ("A" if argument("--control", "wanted") in {"interior-fade", "capture-gap"}
@@ -95,7 +129,7 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
             "search_observation": {"first": 20, "stop": 100}, "search_observation_sha256": "c" * 64})
         receipt["hf_public_search"] = {"component_complete": True, "slot_index": selected,
             "receiver_executed": False, "completion_evaluated": False, "capacity_qualified": False,
-            "truth_information_passed_to_search": False}
+            "truth_information_passed_to_search": False, "phase_refinement": {"enabled": False}}
         receipt["outcomes"] = {"receiver_executed": False, "public_search_executed": True,
             "component_only": True, "completion_evaluated": False, "correct_complete": False,
             "correct_decoded_complete": False, "actual_scored_slots": 0,
@@ -126,13 +160,50 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
                 "reference_delay_seconds": receipt["plan"]["history_reference_delay_seconds"],
                 "truth_information_passed_to_receiver": False, "truth_information_passed_to_phase_bank": False,
                 "receiver_executed": False, "completion_evaluated": False, "capacity_qualified": False}
+    if "--hf-physical-diagnostic" in command:
+        projection = {"block_count": 1, "samples": 80, "wanted_bit": 1, "gain_prior_variance": 1,
+            "noise_free_energy": 10, "hypotheses": [
+                {"rank": 1, "template_energy": 10, "clean_projected_energy": 0, "clean_residual_energy": 10,
+                 "clean_coherence_power": 0, "noisy_log_likelihood_ratio": 1},
+                {"rank": 1, "template_energy": 10, "clean_projected_energy": 10, "clean_residual_energy": 0,
+                 "clean_coherence_power": 1, "noisy_log_likelihood_ratio": 4}]}
+        receipt["hf_physical_diagnostic"] = {"component_complete": True, "slot_index": int(argument("--search-slot", "0")),
+            "observation": {"first": 20, "stop": 100}, "observation_sha256": "c" * 64,
+            "truth_information_passed_to_search": False, "receiver_executed": False, "completion_evaluated": False,
+            "capacity_qualified": False, "is_theoretical_upper_bound": False, "gain_prior_variance": 1,
+            "prefix_samples_rendered_per_twin": 100,
+            "physical_templates": {**projection, "template_sha256": ["d" * 64, "e" * 64]},
+            "winning_public_cell": {"projection": json.loads(json.dumps(projection)),
+                "search_maximum_single_cell_log_lr": 4, "single_cell_log_lr_replay_difference": 0},
+            "admission": {"channel_instances": 2, "clean_capture_buffers": 0,
+                "retained_public_result_in_process_baseline": True, "process_baseline_bytes": 100,
+                "total_memory_limit_bytes": 1000, "future_reserved_bytes": 800}}
     if "--hf-public-phase-receiver" in command:
         maximum = 1 if mode == "slot" else 5
         receipt["plan"]["scored_slot_horizon"] = maximum
         receipt["hf_public_phase_receiver"] = {"experimental": True, "fixed_weight": .25,
             "model_family": "sinusoidal_phase_97", "truth_information_passed_to_search": False,
             "maximum_slot_reports": maximum, "executed_slots": 1,
-            "slots": [{"slot_index": 0, "component_complete": True}]}
+            "slots": [{"slot_index": 0, "component_complete": True, "phase_refinement": {"enabled": False}}]}
+    if "--hf-phase-refinement" in command:
+        if mode == "hf-search":
+            receipt["hf_public_search"].update(refinement_enabled=True, affine_comparison_evaluated=False,
+                selected_timing_renormalized=False, evaluated_timing_atoms=1, phase_refinement=fake_refinement_trace(full=True))
+            receipt["hf_public_search"]["families"] = [{}, {}, {"bit_log_e": [1., 4.]}]
+        else:
+            receipt["hf_public_phase_receiver"].update(refinement_enabled=True,
+                model_family="equal_prior_fixed97_and_cartesian_refinement")
+            receipt["hf_public_phase_receiver"]["slots"][0].update(evaluated_timing_atoms=1,
+                phase_refinement=fake_refinement_trace(full=False))
+            receipt["hf_public_phase_receiver"]["slots"][0]["bit_log_e"] = list(
+                receipt["hf_public_phase_receiver"]["slots"][0]["phase_refinement"]["combined_bit_log_e"])
+        if "--hf-physical-diagnostic" in command:
+            physical = receipt["hf_physical_diagnostic"]
+            physical.update(refinement_requested=True, refinement_replay_available=True,
+                refined_public_cell={"shape_id": {"a": 1, "b": 0, "nu": 0}, "selected_bit": 1, "timing_index": 0, "frequency_hz": 0.,
+                    "projection": json.loads(json.dumps(physical["winning_public_cell"]["projection"])),
+                    "search_maximum_single_cell_log_lr": 4, "single_cell_log_lr_replay_difference": 0},
+                public_refinement_proposals={"not_admitted_evidence": True, "uses_physical_truth": False, "timing_index": 0, "proposals": []})
     digest_slot = argument("--capture-digest-slot", argument("--search-slot", "0") if mode == "hf-search" else None)
     if digest_slot is not None:
         receipt["plan"].update({"capture_digest_slot": int(digest_slot),
@@ -289,6 +360,194 @@ class CampaignValidationTests(unittest.TestCase):
                 runner._validate_episode({**episode, **overrides}, 0, set(), 5, 1000)
         for control in ("wanted", "noise", "wrong-key", "wrong-ordinal"):
             runner._validate_episode({**episode, "control": control}, 0, set(), 5, 1000)
+
+    def test_phase_refinement_flag_requires_an_explicit_public_search(self) -> None:
+        episode = {"id": "refinement", "scenario": "awgn", "mode": "hf-search", "waveform": "smoke",
+                   "seed": 1, "search_slot": 1, "hf_phase_refinement": True}
+        runner._validate_episode(episode, 0, set(), 5, 1000)
+        command = runner._command(Path("/native/probe"), episode, 1000, 5)
+        self.assertIn("--hf-phase-refinement", command)
+        for override in ({"hf_phase_refinement": 1}, {"mode": "receive"}, {"mode": "slot"},
+                         {"mode": "oracle"}, {"mode": "plan"}):
+            with self.subTest(override=override), self.assertRaises(runner.CampaignError):
+                runner._validate_episode({**episode, **override}, 0, set(), 5, 1000)
+        for mode in ("receive", "slot"):
+            receiver = {**episode, "mode": mode, "hf_public_phase_receiver": True}
+            del receiver["search_slot"]
+            runner._validate_episode(receiver, 0, set(), 5, 1000)
+
+    def test_refinement_receipts_preserve_family_mass_work_and_truth_separation(self) -> None:
+        episode = {"id": "refinement", "scenario": "awgn", "mode": "hf-search", "waveform": "smoke",
+                   "seed": 1, "hf_phase_refinement": True, "hf_physical_diagnostic": True}
+        command = runner._command(Path("/native/probe"), episode, 1000, 5)
+        runner._validate_completed_receipt(fake_completed_receipt(command), episode)
+        for change in ("flag", "affine", "family_mass", "old_evidence", "weight", "union", "work", "shape", "cell", "truth", "new_replay"):
+            bad = fake_completed_receipt(command)
+            search, physical = bad["hf_public_search"], bad["hf_physical_diagnostic"]
+            trace = search["phase_refinement"]
+            if change == "flag":
+                bad["plan"]["hf_phase_refinement_requested"] = False
+            elif change == "affine":
+                search["affine_comparison_evaluated"] = True
+            elif change == "family_mass":
+                trace["combined_bit_log_e"] = trace["old_bit_log_e"]
+            elif change == "old_evidence":
+                search["families"][2]["bit_log_e"] = [0., 0.]
+            elif change == "weight":
+                trace["new_family_weight"] = 1.
+            elif change == "union":
+                trace["selected_timing_indices"] = []
+            elif change == "work":
+                trace["work"]["direct_rows"] = 1
+            elif change == "shape":
+                physical["refined_public_cell"]["shape_id"] = {"a": 0, "b": 0, "nu": 0}
+            elif change == "cell":
+                physical["refined_public_cell"]["frequency_hz"] = .1
+            elif change == "truth":
+                physical["public_refinement_proposals"]["uses_physical_truth"] = True
+            else:
+                physical["refined_public_cell"]["single_cell_log_lr_replay_difference"] = .01
+            with self.subTest(change=change), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad, episode)
+        for mode in ("receive", "slot"):
+            native_episode = {**episode, "mode": mode, "hf_public_phase_receiver": True}
+            del native_episode["hf_physical_diagnostic"]
+            native_command = runner._command(Path("/native/probe"), native_episode, 1000, 5)
+            runner._validate_completed_receipt(fake_completed_receipt(native_command), native_episode)
+            bad = fake_completed_receipt(native_command)
+            bad["hf_public_phase_receiver"]["slots"][0]["bit_log_e"] = [0., 0.]
+            with self.subTest(mode=mode), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad, native_episode)
+
+    def test_refinement_unavailability_retains_old_prior_and_explicit_public_reason(self) -> None:
+        episode = {"id": "fallback", "scenario": "awgn", "mode": "hf-search", "waveform": "smoke",
+                   "seed": 1, "hf_phase_refinement": True, "hf_physical_diagnostic": True}
+        command = runner._command(Path("/native/probe"), episode, 1000, 5)
+        receipt = fake_completed_receipt(command)
+        admitted = receipt["hf_public_search"]["phase_refinement"]
+        runner._validate_refinement_trace(admitted, full=True, timing_count=1)
+        legacy = json.loads(json.dumps(admitted))
+        for field in ("requested", "executed", "unavailable_reason"):
+            del legacy[field]
+        runner._validate_refinement_trace(legacy, full=True, timing_count=1)
+        partial = json.loads(json.dumps(admitted));del partial["executed"]
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_refinement_trace(partial, full=True, timing_count=1)
+        trace = fake_unavailable_refinement_trace(full=True)
+        receipt["hf_public_search"]["phase_refinement"] = trace
+        physical = receipt["hf_physical_diagnostic"]
+        physical.update(refinement_replay_available=False, refinement_replay_reason=trace["unavailable_reason"])
+        del physical["refined_public_cell"], physical["public_refinement_proposals"]
+        runner._validate_completed_receipt(receipt, episode)
+        for field, value in (("combined_bit_log_e", trace["old_bit_log_e"]), ("new_bit_log_e", [0., None]),
+                ("unavailable_reason", "memory_limit"), ("unavailable_reason", ""), ("requested", False),
+                ("executed", True), ("shape_count", 1), ("selected_timing_indices", [0]),
+                ("timing_results", [{"timing_index": 0}]), ("retained_statistics_workspace_bytes", 1),
+                ("retained_new_prior_mass", .1), ("work_bound_scope", "executed work")):
+            bad = json.loads(json.dumps(receipt));bad["hf_public_search"]["phase_refinement"][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad, episode)
+        bad = json.loads(json.dumps(receipt));bad["hf_public_search"]["phase_refinement"]["work"]["direct_rows"] = 1
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_completed_receipt(bad, episode)
+        for field, value in (("refinement_replay_reason", "new_phase_fft_work_cap"),
+                             ("refinement_replay_available", True), ("refined_public_cell", {})):
+            bad = json.loads(json.dumps(receipt));bad["hf_physical_diagnostic"][field] = value
+            with self.subTest(field=field), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad, episode)
+        # A planner can reject geometry before producing a numerical bound.
+        unavailable = fake_unavailable_refinement_trace(full=True)
+        unavailable["unavailable_reason"] = "new_phase_planner_unsupported"
+        del unavailable["work_bound"], unavailable["work_bound_scope"]
+        runner._validate_refinement_trace(unavailable, full=True, timing_count=1)
+        for mode in ("receive", "slot"):
+            native_episode = {**episode, "mode": mode, "hf_public_phase_receiver": True}
+            del native_episode["hf_physical_diagnostic"]
+            native = fake_completed_receipt(runner._command(Path("/native/probe"), native_episode, 1000, 5))
+            callback = native["hf_public_phase_receiver"]["slots"][0]
+            callback["phase_refinement"] = fake_unavailable_refinement_trace(full=False)
+            callback["bit_log_e"] = callback["phase_refinement"]["combined_bit_log_e"]
+            runner._validate_completed_receipt(native, native_episode)
+
+    def test_staged_refinement_checks_public_geometry_and_separate_objectives(self) -> None:
+        trace = fake_refinement_trace(full=True)
+        trace.update(intermediate_group_rows=128, intermediate_group_count=17,
+                     intermediate_iteration_limit=8, coherent_iteration_limit=8)
+        proposal = {"intermediate_used": True, "intermediate_initial_log_lr": 20.,
+                    "intermediate_final_log_lr": 24., "intermediate_accepted_steps": 3,
+                    "initial_log_lr": -5., "continuous_log_lr": 2., "accepted_steps": 4}
+        trace["timing_results"][0].update(proposal_count=1, proposals=[proposal])
+        geometry = dict(full=True, timing_count=1, block_count=2049, block_rows=480,
+                        sample_rate=1920., aperture_seconds=512.1)
+        # A group objective can exceed the later coherent objective: only
+        # monotonicity within each separately defined stage is meaningful.
+        runner._validate_refinement_trace(trace, **geometry)
+        runner._validate_refinement_trace(trace, **{**geometry, "full": False, "aperture_seconds": None})
+        for field, value in (("intermediate_group_rows", 127), ("intermediate_group_count", 16),
+                             ("intermediate_group_count", True), ("intermediate_iteration_limit", 9),
+                             ("coherent_iteration_limit", 16)):
+            bad = json.loads(json.dumps(trace));bad[field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(runner.CampaignError):
+                runner._validate_refinement_trace(bad, **geometry)
+        bad = json.loads(json.dumps(trace));del bad["intermediate_group_rows"]
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_refinement_trace(bad, **geometry)
+        for field, value in (("intermediate_used", False), ("intermediate_initial_log_lr", math.nan),
+                             ("intermediate_final_log_lr", 19.), ("intermediate_accepted_steps", 9),
+                             ("accepted_steps", 9), ("continuous_log_lr", -6.)):
+            bad = json.loads(json.dumps(trace));bad["timing_results"][0]["proposals"][0][field] = value
+            with self.subTest(field=field), self.assertRaises(runner.CampaignError):
+                runner._validate_refinement_trace(bad, **geometry)
+        bad = json.loads(json.dumps(trace));bad["timing_results"][0]["proposal_count"] = 2
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_refinement_trace(bad, **geometry)
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_refinement_trace(trace, **{**geometry, "aperture_seconds": 179.9})
+
+        short = json.loads(json.dumps(trace))
+        short.update(intermediate_group_rows=0, intermediate_group_count=0,
+                     intermediate_iteration_limit=0, coherent_iteration_limit=16)
+        short["timing_results"][0]["proposals"][0].update(intermediate_used=False,
+            intermediate_initial_log_lr=0., intermediate_final_log_lr=0., intermediate_accepted_steps=0,
+            accepted_steps=16)
+        short_geometry = {**geometry, "block_count": 400, "aperture_seconds": 100.}
+        runner._validate_refinement_trace(short, **short_geometry)
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_refinement_trace(short, **geometry)
+        short["timing_results"][0]["proposals"][0]["intermediate_final_log_lr"] = 1.
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_refinement_trace(short, **short_geometry)
+
+    def test_physical_diagnostic_is_private_full_aperture_and_receipt_bound(self) -> None:
+        episode = {"id": "physical", "scenario": "awgn", "mode": "hf-search", "waveform": "smoke",
+                   "seed": 1, "search_slot": 1, "hf_physical_diagnostic": True}
+        runner._validate_episode(episode, 0, set(), 5, 1000)
+        command = runner._command(Path("/native/probe"), episode, 1000, 5)
+        self.assertIn("--hf-physical-diagnostic", command)
+        runner._validate_completed_receipt(fake_completed_receipt(command), episode)
+        for override in ({"hf_physical_diagnostic": 1}, {"mode": "receive"}, {"control": "noise"},
+                         {"control": "wrong-key"}, {"control": "wrong-ordinal"}):
+            with self.subTest(override=override), self.assertRaises(runner.CampaignError):
+                runner._validate_episode({**episode, **override}, 0, set(), 5, 1000)
+        for field, value in (("component_complete", False), ("truth_information_passed_to_search", True),
+                ("is_theoretical_upper_bound", True), ("observation_sha256", "f" * 64),
+                ("prefix_samples_rendered_per_twin", 80)):
+            bad = fake_completed_receipt(command);bad["hf_physical_diagnostic"][field] = value
+            with self.subTest(field=field), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad, episode)
+        for change in ("self_coherence", "replay", "allocation", "request"):
+            bad = fake_completed_receipt(command)
+            physical = bad["hf_physical_diagnostic"]
+            if change == "self_coherence":
+                physical["physical_templates"]["hypotheses"][1]["clean_coherence_power"] = .9
+            elif change == "replay":
+                physical["winning_public_cell"]["single_cell_log_lr_replay_difference"] = .01
+            elif change == "allocation":
+                physical["admission"]["future_reserved_bytes"] = 1000
+            else:
+                bad["plan"]["hf_physical_diagnostic_requested"] = False
+            with self.subTest(change=change), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(bad, episode)
 
     def test_operational_phase_flag_is_scoped_and_receipt_bound(self) -> None:
         episode = {"id": "phase", "scenario": "awgn", "mode": "receive", "waveform": "smoke",

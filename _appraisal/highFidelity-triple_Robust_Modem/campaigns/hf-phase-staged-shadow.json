@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "name": "hf-phase-staged-shadow",
+  "purpose": "Frozen same-input staged remedy on both failed long slots and exact short-path preservation check.",
+  "max_wall_seconds": 300,
+  "per_trial_wall_seconds": 120,
+  "max_trials": 3,
+  "max_samples": 8000000,
+  "episodes": [
+    {
+      "id": "offgrid-long-failed-slot1",
+      "scenario": "hf-vertical-eikonal-holdout",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 11001,
+      "bit_seconds": 512,
+      "cn0_db_hz": -6,
+      "control": "wanted",
+      "search_slot": 1,
+      "search_timing": "full",
+      "hf_phase_refinement": true,
+      "hf_physical_diagnostic": true
+    },
+    {
+      "id": "offgrid-long-failed-slot2",
+      "scenario": "hf-vertical-eikonal-holdout",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 11001,
+      "bit_seconds": 512,
+      "cn0_db_hz": -6,
+      "control": "wanted",
+      "search_slot": 2,
+      "search_timing": "full",
+      "hf_phase_refinement": true,
+      "hf_physical_diagnostic": true
+    },
+    {
+      "id": "offgrid-failed-slot2",
+      "scenario": "hf-vertical-eikonal-holdout",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 11001,
+      "bit_seconds": 128,
+      "cn0_db_hz": 0,
+      "control": "wanted",
+      "search_slot": 2,
+      "search_timing": "full",
+      "hf_phase_refinement": true,
+      "hf_physical_diagnostic": true
+    }
+  ]
+}

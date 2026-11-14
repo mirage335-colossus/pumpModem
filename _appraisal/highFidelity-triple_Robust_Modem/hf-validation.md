@@ -10,6 +10,183 @@ from a worldwide ionospheric population. See [models and scope](hf-experiments.m
 [primary research reconciliation](hf-research.md), and the
 [actual upstream codec comparison](competitor/README.md).
 
+## Physical-template diagnosis and phase-refinement implementation repair
+
+The [frozen diagnostic protocol](hf-phase-refinement.md) first ran the public
+97-cell scorer on each retained IQ observation, then constructed a noiseless
+native full-prefix template through the same declared channel, changing only
+the selected bit. This is an evaluator-only known-template measurement; the
+template, channel truth and bit do not enter public scoring or receiver logic.
+Both declared runs completed uncensored in 18.849 s total, and selected IQ and
+validity hashes exactly match their earlier receiver observations.
+
+On the failed off-grid 128-request/0 dB-Hz slot 2 (seed 11001), the clean
+physical template gives raw complex-Gaussian gain log LR **150.650**. The
+winning public sinusoid gives **35.170** and retains **0.2054** of clean signal
+energy. On the original moving 128-request/0 dB-Hz slot 1 (seed 10201), the
+corresponding values are **146.210**, **125.365**, and **0.8651**. Replaying the
+winning public cell reproduces its prior calculation within `1.26e-11`. The
+weak failed observation therefore contains substantial information under a
+known physical template; these one-realization matched values neither bound
+blind acquisition nor prove the receiver can exploit that information.
+Detailed raw receipts are in
+[the physical diagnostic report](local-evidence/hf-phase-physical-diagnostic/report.md).
+
+The new Cartesian phase-bank refinement implementation then built successfully.
+Its first focused CTest run passed scenario, shared-statistics and public
+receiver groups but failed `hf_phase_refinement` after **89 assertions**: the
+blind noiseless off-grid, positive-CFO-edge test did not recover the correct
+coherent basin. In that fixture the selected-cell LR was 444.247 against an
+ideal 1029.06; the coarse shape's whole-aperture CFO peak selected a wrong
+sidelobe. An attempted repair that substituted the segment CFO seed alone
+also failed. Both failures are preserved in the [protocol](hf-phase-refinement.md).
+
+The corrected bounded refinement searches the piecewise-linear semicoherent
+score at segment-bin breakpoints and interval endpoints around each retained
+CFO seed, clipped to public support, before coherent ascent. It retains fixed
+priors and adds no evidence mass. The revised module passed **107 focused
+assertions**; the full 17-group suite, including integration (52.17 s) and 47
+runner checks, passed in 72.43 s. These are local software checks on an AMD
+Ryzen 5 PRO 5650U, 6 cores/12 logical CPUs, GNU 14.2 Release, automatic W=24;
+the canonical native-source hash remained
+`1749313fcabbf16527ac687c5cf4947acde3d00dca6bcd364b87d453b6d79a16`. The final
+receipt-metadata revision used by the frozen shadow has appraisal source SHA-256
+`79a9ead9747a87b816802fa51832de74b11f68920e5a5197e7dee48a385bb57c`; the exact
+probe SHA is recorded in the campaign receipt.
+
+The two-case [shadow campaign](local-evidence/hf-phase-refinement-shadow/report.md)
+completed uncensored in 19.585 s with exact historical input hashes. On the
+failed off-grid 128-request/0 dB-Hz slot, old-family evidence was 21.0376,
+new-family evidence 130.0809 and the fixed half/half mixture 129.3878. The
+selected clean physical-template coherence was 0.96832; the operational old
+block approximation retained 0.19460 (the earlier affine diagnostic at 0.2054
+uses a distinct geometry). On the 512-request/−6 dB-Hz weak moving slot, old
+evidence was 94.0398, new-only 15.2060, and combined evidence 93.3467. Timing
+was correct, but the new-only proposal selected a poor local basin; the mixture's
+0.693-nat reduction from the old branch reflects the fixed prior split. Work
+rose 1.94% and 3.14% in FFT row stages; table reads were 8.86 million and
+129.85 million, within the frozen limits. These are shadow scores without
+receiver decisions. They support the repaired proposal on this off-grid
+observation and expose a long-weak proposal limitation, but do not establish
+message completion or a smooth sensitivity floor. The frozen 15-episode
+[complete-receiver cohort](local-evidence/hf-phase-refinement-receiver/report.md)
+then completed uncensored in 560.536 s with zero execution failures and three
+wanted-message failures. The original moving case, its −6 dB-Hz long version,
+the 0 dB-Hz off-grid case, both fresh layer holdouts, the compound two-ray case,
+and the +0.98 Hz CFO-edge case all completed `e` correctly with two scored
+quiet slots. This confirms the earlier failures were specific to cases 003–005,
+not a general breakage from the new branch.
+
+| Frozen episode | Result | Interpretation |
+| --- | --- | --- |
+| Off-grid 128-request/0 refined | Correct `e`, physical completion | Recovers the slot that failed in the prior 97-model receiver. |
+| Off-grid 128-request/−6 dB-Hz | All five observations quiet; no completion | Short weak case remains below useful sensitivity. |
+| Off-grid 512-request/−6 baseline | All five observations quiet; no completion | Existing branch misses this longer same-energy case. |
+| Off-grid 512-request/−6 refined | Slot 0 DATA, slots 1–2 quiet; two quiet slots trigger premature completion and codec rejects | Refinement recovers one active slot, but the complete message still fails; this is the highest-priority unresolved adverse case. |
+| Fresh layer A/B paired baseline/refined | Both members of each pair complete `e` identically | No incremental refinement advantage is shown here; canonical evidence was already sufficient. |
+| Equal-power compound two-ray paired baseline/refined | Both complete `e` identically; actual paths=2, assumed public taps=1 | This selected mismatch realization causes no communication failure at this operating point; it does not qualify general multipath. |
+| CFO-edge +0.98 Hz refined | Correct `e`, physical completion | The frozen near-boundary case passes under the retained ±1 Hz prior. |
+| Noise-only / wrong-key refined | Five quiet slots each; no false DATA, accepted message or completion | Both negative controls behave as intended. |
+
+The long weak pair has identical selected input and received-energy records
+(about 1,570.934 normalized signal-seconds at the fixed noise density). The
+refined episode's DATA in slot 0 is a partial detection, not message success;
+its subsequent quiet decisions produce the canonical premature physical end,
+followed by integrity rejection. Across the wider cohort, adding sensitivity
+in some slots did not erase this failure. The complete-receiver evidence still
+shows no smooth floor at this point. Ten of the thirteen wanted episodes passed;
+the three failed observations remain individually described rather than pooled
+as a sensitivity estimate.
+
+### Long-weak physical discriminator
+
+The frozen [two-slot diagnostic](local-evidence/hf-phase-long-failure-diagnostic/report.md)
+then compared the failing 512-request/−6 dB-Hz episode's public winner with
+same-input, post-search known-physical-template references. Both slots retained
+the same public epoch-0 timing; the selected observation SHA-256 for slot 1 is
+`6866d5b2bd2f0a995808ce9311acf5b4bbcf7c718e490912c7659c53bf7344e9`.
+
+| Slot | Physical-template raw LR | Public-cell raw LR | Public-cell clean coherence² | Public timing index / 39 |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 133.257 | 50.725 | 0.34120 | 19 / 39 |
+| 2 | 115.251 | 30.3869 | 0.22527 | 18 / 39 |
+
+The large known-template evidence establishes that useful structured energy is
+present in this particular failed observation. The winning cell is still
+mismatched, but this metric cannot identify whether public proposal ranking,
+insufficient coherent duration, omitted shape mass, or their combination drives
+the final weighted receiver decision. The indices (19 and 18) are positions in the original public grid, not rank
+orders; they are not themselves failure explanations. A predeclared bounded staged semicoherent proposal was tested on the same
+saved inputs; it did not change the short off-grid control's scores, selected
+timing or work.
+
+### Staged-coherence shadow result
+
+The frozen [three-episode staged shadow](local-evidence/hf-phase-staged-shadow/report.md)
+completed uncensored in 45.473 s. Its appraisal source SHA-256 is
+`9853f9d9248b023e27e5a5feb00bbaf823bfc428b9249cef13e3b612770d2f9b`; native
+source remains unchanged. The same-input long weak slot 1 gained combined
+true-bit log evidence from 24.0931 to 105.7873, with clean coherence
+rising from 0.3411959 to 0.9882147. Slot 2 rose from 4.16367 to 88.65537, with
+coherence from 0.2252712 to 0.9804475. The short off-grid control's old, new and
+combined scores, selected timings and work remained exactly unchanged. These
+same-data shadow results support the mechanism for this captured failure and
+pass the frozen shadow gate; they still contain no receiver bit/null decision.
+The six-episode [complete-receiver cohort](local-evidence/hf-phase-staged-receiver/report.md)
+completed uncensored in 561.865 s with no execution failures and one valid
+incomplete communication. The original moving long case and the previously
+failed off-grid long case both completed `e` with no wrong bits, active quiet
+decisions or premature completion. On the fresh `hf-eikonal-holdout-b` seed,
+the baseline produced five quiet slots and no message; the staged receiver
+completed `e` on the exact same selected IQ. Together, the three predeclared
+staged wanted messages passed, while the one paired baseline failed. This is
+promising fixed-seed matched evidence for the bounded proposal remedy, not a
+population reliability estimate or broad sensitivity guarantee. The long
+noise-only and wrong-key controls produced only quiet slots, with no false DATA
+or accepted message. Received signal energy is unchanged within each pair. The
+512/128 requested-duration ratio is 3.75 in native physical geometry, while
+transmitted signal energy/noise-variance ratio is 0.9415 (about −0.26 dB), close
+to but below equal energy. Campaign wall times are not CPU capacity or a measured
+speedup.
+
+A later edge investigation found a cap-boundary cliff; the deterministic
+fallback is now tested and retains the old branch while omitting the new-family
+contribution at fixed prior weight. The completed six-message receipts remain
+bound to staged source
+`9853f9d9248b023e27e5a5feb00bbaf823bfc428b9249cef13e3b612770d2f9b` and binary
+`be5d276231cfd7e5966fecea9ba68e2f90367ab74a52c886243b5a98519a121c` as
+prior-version evidence.
+
+### Deterministic work-cap fallback
+
+The final review found a fixed-plan boundary where 522.569 s at 1920 samples/s,
+±10 Hz CFO and 13 timing atoms retained an old-family work quote below the
+40-billion FFT row-stage ceiling (25.123 billion), and the combined FFT quote
+also fit (28.115 billion), while new direct work exceeded its separate
+100-million-row cap (105.780 million). Before correction, enabling refinement
+removed the supported old path. The native pre-IQ planner now preserves the
+old family at its fixed half weight and assigns zero evidence to the unavailable
+new family, with an explicit reason and attempted quote. It never restores
+omitted mass or widens workspace beyond old-path admission.
+
+This deterministic fallback passed the final 17-group CTest suite in 73.54 s,
+with 296 core assertions, 121 refinement assertions and 49 runner cases
+([log](.build/hf-phase-final-checks.log)). It applies only to precomputed new-family
+planning/work limits. Allocation failure, cancellation, runtime errors and
+memory pressure remain errors; no changing memory-headroom signal is exposed to
+this hook. The six-receiver cohort above remains bound to its earlier source.
+The final-source [three-shadow replay](local-evidence/hf-phase-final-shadow/report.md)
+completed uncensored in 57.949 s with zero execution failures. All three episodes
+match the prior staged-shadow source on full IQ and selected hashes, old/new/
+combined bit evidence, selected timing, work and work-bound outcomes. This bridges
+those shadow conclusions to final appraisal source
+`27d178dfb23d680b3245d73869b9cbc3288f50ba307f9ef083da53b087fbafa9` and probe
+`b414c696ab4ecafa6b0bfdff0a2bd05be2dab5be0e094d3ab7d798b13181f5f7`.
+The six-episode complete-receiver cohort remains bound to the earlier staged
+source `9853f9d9248b023e27e5a5feb00bbaf823bfc428b9249cef13e3b612770d2f9b` and
+probe `be5d276231cfd7e5966fecea9ba68e2f90367ab74a52c886243b5a98519a121c`; it
+was not rerun under the fallback revision.
+
 ## Public search continuation: acquisition costs and counterexamples
 
 The [frozen protocol](hf-public-search.md) separates shadow likelihoods from

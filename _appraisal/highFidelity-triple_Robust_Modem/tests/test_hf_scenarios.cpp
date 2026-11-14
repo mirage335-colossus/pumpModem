@@ -178,6 +178,125 @@ void eikonal_holdout() {
     near(old.critical_phase_radians, 0., 0., "reference motion phase remains unchanged");
 }
 
+void eikonal_refinement_controls() {
+    struct Expected {
+        const char* id;
+        double amplitude, period, phase;
+        double residual_cfo;
+    };
+    constexpr std::array<Expected, 3> expected{{
+        {"hf-eikonal-holdout-a", 7000., 149., 1.13, 0.},
+        {"hf-eikonal-holdout-b", 8000., 107., -.61, 0.},
+        {"hf-eikonal-cfo-edge", 8500., 137., .37, .98},
+    }};
+    const auto names = scenario_names();
+    const auto original = make_scenario("hf-vertical-eikonal-motion");
+    const auto& original_layer = *original.channel.paths.front().hf->parabolic_layer;
+    near(original_layer.critical_amplitude_hz, 7000., 0., "old motion preset remains unchanged");
+    near(original_layer.critical_period_seconds, 120., 0., "old motion period remains unchanged");
+    near(original_layer.critical_phase_radians, 0., 0., "old motion phase remains unchanged");
+
+    for (const auto& item : expected) {
+        check(std::ranges::find(names, item.id) != names.end(),
+              "new eikonal control is registered in scenario names");
+        const auto scenario = make_scenario(item.id);
+        check(scenario.id == item.id && scenario.family == "skywave-1-30MHz",
+              "eikonal control remains an HF skywave scenario");
+        check(scenario.channel.rf_hz == 3.4e6 && scenario.channel.paths.size() == 1,
+              "individual control keeps the declared RF and single ray");
+        const auto& path = scenario.channel.paths.front();
+        check(path.hf && path.hf->parabolic_layer,
+              "individual control uses the existing analytic layer");
+        const auto& layer = *path.hf->parabolic_layer;
+        near(layer.bottom_height_m, 250000., 0., "refinement control bottom height");
+        near(layer.semi_thickness_m, 50000., 0., "refinement control layer thickness");
+        near(layer.critical_frequency_hz, 3.8e6, 0., "refinement control central critical frequency");
+        near(layer.critical_amplitude_hz, item.amplitude, 0., "frozen critical-frequency amplitude");
+        near(layer.critical_period_seconds, item.period, 0., "frozen critical-frequency period");
+        near(layer.critical_phase_radians, item.phase, 0., "frozen critical-frequency phase");
+        near(path.residual_doppler_hz, item.residual_cfo, 0., "physical residual CFO is declared only in the edge control");
+        near(path.delay_seconds,
+             hf_parabolic_eikonal(layer, scenario.channel.rf_hz, 0).group_delay_seconds, 0.,
+             "public base delay equals initial physical eikonal delay");
+        check(path.delay_seconds > 0., "eikonal group delay remains physical and positive");
+        near(scenario.bounds.arrival_low_seconds, .001, 0., "refinement control arrival minimum");
+        near(scenario.bounds.arrival_high_seconds, .003, 0., "refinement control arrival maximum");
+        near(scenario.bounds.atmospheric_hz, 1., 0., "refinement control public common-frequency bound");
+        near(scenario.bounds.delay_excursion_seconds, 10e-6, 0., "refinement control public delay excursion");
+        check(scenario.assumptions.find("not a measured") != std::string::npos &&
+              scenario.assumptions.find("receiver sees only") != std::string::npos,
+              "physical parameters remain private, explicitly synthetic assumptions");
+        check(scenario.assumptions.find("no calibrated") != std::string::npos ||
+              scenario.assumptions.find("field trajectory") != std::string::npos,
+              "refinement control claims no field calibration");
+
+        const auto phase_radians = [&](long double t) {
+            const auto current = hf_parabolic_eikonal(layer, scenario.channel.rf_hz, t);
+            const auto initial = hf_parabolic_eikonal(layer, scenario.channel.rf_hz, 0);
+            return 2. * std::numbers::pi * path.residual_doppler_hz * static_cast<double>(t) -
+                2. * std::numbers::pi * scenario.channel.rf_hz *
+                    (current.phase_delay_seconds - initial.phase_delay_seconds);
+        };
+        double maximum_offset = 0.;
+        constexpr long double derivative_step = .001L;
+        for (long double t = 0; t <= 600.; t += .25L) {
+            const double offset = (phase_radians(t + derivative_step) - phase_radians(t - derivative_step)) /
+                (4. * std::numbers::pi * static_cast<double>(derivative_step));
+            maximum_offset = std::max(maximum_offset, std::abs(offset));
+        }
+        check(maximum_offset <= scenario.bounds.atmospheric_hz + 16. / 90. + 1e-3,
+              "physical eikonal and residual CFO remain within the declared nonlinear-center support");
+    }
+
+    check(std::ranges::find(names, "hf-vertical-eikonal-holdout") != names.end(),
+          "previous physical holdout is exposed by scenario listing");
+}
+
+void eikonal_compound() {
+    const auto scenario = make_scenario("hf-eikonal-compound");
+    const auto names = scenario_names();
+    check(std::ranges::find(names, scenario.id) != names.end(),
+          "compound eikonal control is registered");
+    check(scenario.channel.rf_hz == 3.4e6 && scenario.channel.paths.size() == 2,
+          "compound control uses two co-arriving RF skywave modes");
+    const auto& refractive = scenario.channel.paths[0];
+    const auto& geometric = scenario.channel.paths[1];
+    near(refractive.power, .5, 0., "refractive mode has fixed equal power");
+    near(geometric.power, .5, 0., "geometric mode has fixed equal power");
+    check(refractive.hf && refractive.hf->parabolic_layer &&
+          geometric.hf && !geometric.hf->parabolic_layer,
+          "the compound keeps one refractive and one geometric path operator");
+    const auto& layer = *refractive.hf->parabolic_layer;
+    near(layer.critical_amplitude_hz, 7000., 0., "compound reuses the frozen eikonal amplitude");
+    near(layer.critical_period_seconds, 149., 0., "compound reuses the frozen eikonal period");
+    near(layer.critical_phase_radians, 1.13, 0., "compound reuses the frozen eikonal phase");
+    near(refractive.delay_seconds, geometric.delay_seconds, 0.,
+         "co-arriving modes start at the same group delay");
+    near(refractive.delay_seconds,
+         hf_parabolic_eikonal(layer, scenario.channel.rf_hz, 0).group_delay_seconds, 0.,
+         "compound delay equals initial analytic group delay");
+    const auto& motion = geometric.hf->group_delay_motion;
+    near(motion.amplitude_seconds, 75e-9, 0., "compound geometric-delay amplitude");
+    near(motion.period_seconds, 43., 0., "compound geometric-delay period");
+    near(motion.phase_radians, .6, 0., "compound geometric-delay phase");
+    check(motion.couple_carrier_phase, "compound geometric delay rotates the carrier coherently");
+    near(hf_group_delay_motion_seconds(motion, 0), 0., 0.,
+         "compound geometric delay starts at the shared physical epoch");
+    check(std::abs(hf_geometric_phase_radians(motion, scenario.channel.rf_hz, 28.)) > 2.4,
+          "compound geometric motion produces its declared nonlinear carrier-phase excursion");
+    near(scenario.bounds.arrival_low_seconds, .001, 0., "compound public arrival minimum");
+    near(scenario.bounds.arrival_high_seconds, .003, 0., "compound public arrival maximum");
+    near(scenario.bounds.delay_excursion_seconds, 10e-6, 0., "compound public delay excursion");
+    check(scenario.bounds.spread_seconds == 0., "unresolved co-arriving paths preserve the one-tap public geometry");
+    check(scenario.assumptions.find("two-mode") != std::string::npos &&
+          scenario.assumptions.find("not a measured") != std::string::npos &&
+          scenario.assumptions.find("not claimed to be an observed") != std::string::npos,
+          "compound scenario accurately labels its constructed two-mode scope");
+    const auto whole = render(scenario, 8192);
+    const auto chunked = render(scenario, 193);
+    check(whole == chunked, "compound physical path state is continuous across channel-read chunks");
+}
+
 } // namespace
 
 int main() {
@@ -187,6 +306,8 @@ int main() {
         nvis();
         drm6();
         eikonal_holdout();
+        eikonal_refinement_controls();
+        eikonal_compound();
         std::cout << "additional HF profile checks passed: " << checks << '\n';
         return 0;
     } catch (const std::exception& error) {

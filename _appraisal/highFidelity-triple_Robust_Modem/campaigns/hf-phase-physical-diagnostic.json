@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "name": "hf-phase-physical-diagnostic",
+  "purpose": "Frozen same-input evaluator-only physical-template versus public-phase diagnostic; no receiver truth feedback.",
+  "max_wall_seconds": 120,
+  "per_trial_wall_seconds": 60,
+  "max_trials": 2,
+  "max_samples": 4000000,
+  "episodes": [
+    {
+      "id": "offgrid-failed-slot2",
+      "scenario": "hf-vertical-eikonal-holdout",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 11001,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128,
+      "control": "wanted",
+      "search_slot": 2,
+      "search_timing": "full",
+      "hf_physical_diagnostic": true
+    },
+    {
+      "id": "original-recovered-slot1",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 10201,
+      "cn0_db_hz": 0,
+      "bit_seconds": 128,
+      "control": "wanted",
+      "search_slot": 1,
+      "search_timing": "full",
+      "hf_physical_diagnostic": true
+    }
+  ]
+}

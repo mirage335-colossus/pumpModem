@@ -94,6 +94,21 @@ void public_support(const Fixture& f) {
     long_slot.arrival_upper_seconds=.030;
     check(!extension.supported(large,long_slot),
           "derived full public FFT work failure was deferred past public support");
+    auto cap_config=f.config;auto cap_slot=f.slot;
+    cap_config.sample_rate_hz=1920;cap_config.frequency_bound_hz=10;
+    cap_slot.stop_sample=cap_slot.first_sample+1003333;cap_slot.format.sample_rate=1920;
+    check(appraisal::hf_public_search_supported(cap_config,cap_slot,false)&&
+          appraisal::hf_public_search_supported(cap_config,cap_slot,true),
+          "new-only direct-work cap disabled the supported old97 family");
+    for (const unsigned workers:{1U,2U})
+        check(appraisal::hf_public_search_workspace(cap_config,cap_slot,workers,false,true,true)==
+              appraisal::hf_public_search_workspace(cap_config,cap_slot,workers,false,true,false),
+              "unavailable refinement retained an unexecutable workspace quote");
+    cap_config.frequency_bound_hz=1;
+    check(appraisal::hf_public_search_supported(cap_config,cap_slot,true)&&
+          appraisal::hf_public_search_workspace(cap_config,cap_slot,2,false,true,true)>
+          appraisal::hf_public_search_workspace(cap_config,cap_slot,2,false,true,false),
+          "admitted long narrow-CFO refinement was accidentally disabled by fallback");
     auto impossible=f.slot;
     impossible.arrival_lower_seconds=-std::numeric_limits<double>::max();
     impossible.arrival_upper_seconds=std::numeric_limits<double>::max();
@@ -302,6 +317,99 @@ void paired_native_renderer(const Fixture& f) {
               "paired rendering changed a scored native template energy");
 }
 
+void refinement_frontier_and_weights(const Fixture& f) {
+    const std::array old{8.,7.,6.,5.,4.,3.,2.,1.};
+    const std::array segmented{1.,2.,3.,4.,5.,6.,7.,8.};
+    const auto frontier=appraisal::select_hf_refinement_timing(old,segmented);
+    check(frontier.old_top==std::vector<std::size_t>{0,1,2}&&frontier.segmented_top==std::vector<std::size_t>{7,6,5}&&
+          frontier.selected==std::vector<std::size_t>{0,1,2,7,6,5},"refinement did not keep the fixed top3/top3 union");
+    const std::array ties{0.,0.,0.,0.,0.};
+    const auto tied=appraisal::select_hf_refinement_timing(ties,ties);
+    check(tied.selected==std::vector<std::size_t>{0,1,2},"refinement timing ties were not stable or deduplicated");
+    auto invalid=old;invalid[0]=std::numeric_limits<double>::quiet_NaN();
+    rejects([&]{appraisal::select_hf_refinement_timing(invalid,segmented);},"invalid proposal rank entered timing selection");
+
+    ReceiverExecutor executor(2);const FrequencyInterval frequency{0,0};
+    const auto coarse=score_coarse(f.config,f.slot,f.key,f.iq,{&frequency,1},2,workspace_limit,{},&executor);
+    const auto prepared=prepare_fine_coordinates(f.config,f.slot,coarse);
+    const auto ordinary_quote=appraisal::hf_public_search_workspace(f.config,f.slot,2,false,true,false);
+    const auto default_score=appraisal::score_hf_public_search(f.config,f.slot,f.key,f.iq,prepared,2,ordinary_quote,
+        false,true,false,{},executor);
+    const auto disabled=appraisal::score_hf_public_search(f.config,f.slot,f.key,f.iq,prepared,2,ordinary_quote,
+        false,true,false,{},executor,true,false);
+    check(default_score.bit_log_e==disabled.bit_log_e&&default_score.combined_phase_bit_log_e==disabled.bit_log_e[2]&&
+          !disabled.refinement_enabled&&disabled.refinement_evidence.empty(),
+          "disabled refinement changed old97 evidence or reserved new family mass");
+    const std::array<double,2> absent{-std::numeric_limits<double>::infinity(),-std::numeric_limits<double>::infinity()};
+    const auto old_only=appraisal::combine_hf_public_phase_evidence(disabled.bit_log_e[2],absent);
+    check(old_only[0]==disabled.bit_log_e[2][0]-std::numbers::ln2&&
+          old_only[1]==disabled.bit_log_e[2][1]-std::numbers::ln2,
+          "unavailable new family restored its prior mass to actual old97 evidence");
+    check(appraisal::combine_hf_public_phase_evidence(absent,absent)==absent,
+          "unavailable phase families fabricated finite evidence");
+    check(appraisal::hf_public_search_supported(f.config,f.slot,true),"compact public refinement fixture unsupported");
+    const auto quote=appraisal::hf_public_search_workspace(f.config,f.slot,2,false,true,true);
+    check(quote<workspace_limit,"compact refinement fixture exceeded bounded test workspace");
+    rejects([&]{appraisal::score_hf_public_search(f.config,f.slot,f.key,f.iq,prepared,2,1,
+        false,true,false,{},executor,true,true);},"refinement resource shortage silently dropped new prior mass");
+    std::stop_source cancelled;cancelled.request_stop();
+    rejects([&]{appraisal::score_hf_public_search(f.config,f.slot,f.key,f.iq,prepared,2,quote,
+        false,true,false,cancelled.get_token(),executor,true,true);},"refinement ignored cancellation");
+    const auto refined=appraisal::score_hf_public_search(f.config,f.slot,f.key,f.iq,prepared,2,quote,
+        false,true,false,{},executor,true,true);
+    check(refined.bit_log_e[2]==disabled.bit_log_e[2]&&refined.timing==disabled.timing&&
+          refined.plan.fft_rows==disabled.plan.fft_rows&&refined.block_rows==disabled.block_rows,
+          "refinement changed old97 statistics, public timing or block geometry");
+    check(refined.refinement_enabled&&refined.refinement_executed&&refined.refinement_unavailable_reason.empty()&&
+          refined.refinement_frontier.selected.size()<=6&&
+          refined.refinement_evidence.size()==refined.refinement_frontier.selected.size()&&
+          refined.refinement_ranks.size()==refined.timing.size(),"refinement omitted rank coverage or exceeded fixed frontier");
+    check(refined.refinement_frontier.selected.size()<refined.public_timing_atoms,
+          "bounded refinement test failed to exercise omitted timing mass");
+    check(refined.retained_statistics_workspace_bytes==refined.timing.size()*2*refined.plan.config.block_count*
+          (sizeof(Complex)+sizeof(double)),"retained refinement block statistics were not fully quoted");
+    const auto log_add=[](double a,double b) {
+        if (a==-std::numeric_limits<double>::infinity()) return b;
+        if (b==-std::numeric_limits<double>::infinity()) return a;
+        return std::max(a,b)+std::log1p(std::exp(-std::abs(a-b)));
+    };
+    for (std::size_t bit=0;bit<2;++bit) {
+        double expected=-std::numeric_limits<double>::infinity();
+        for (const auto& entry:refined.refinement_evidence)
+            expected=log_add(expected,entry.report.bit_log_e[bit]-std::log(static_cast<double>(refined.public_timing_atoms)));
+        check(expected==refined.new_phase_bit_log_e[bit],"new phase evidence renormalized the selected timing subset");
+        const auto combined=log_add(refined.bit_log_e[2][bit],expected)-std::numbers::ln2;
+        check(combined==refined.combined_phase_bit_log_e[bit],"old/new phase evidence lost fixed equal family weights");
+    }
+    double retained_mass=0;
+    for (const auto& entry:refined.refinement_evidence) {
+        const auto& report=entry.report;
+        check(report.retained_shape_prior_mass==static_cast<double>(report.selected_count)/refined.refinement_plan->shape_count,
+              "selected refinement shapes reclaimed omitted shape mass");
+        retained_mass+=report.retained_shape_prior_mass/refined.public_timing_atoms;
+    }
+    check(retained_mass>=0&&retained_mass<=static_cast<double>(refined.refinement_frontier.selected.size())/refined.public_timing_atoms,
+          "new refinement family exceeded full public prior mass");
+    const auto& work=refined.refinement_work;const auto& bound=refined.refinement_work_bound;
+    check(work.fft_row_stages<=bound.fft_row_stages&&work.table_lookups<=bound.table_lookups&&
+          work.direct_rows<=bound.direct_rows&&work.likelihood_cells<=bound.likelihood_cells,
+          "actual refinement work exceeded pre-IQ bound");
+    appraisal::HfPublicPhaseReceiver receiver(40,true);
+    const auto extension=receiver.supplement();
+    check(extension.supported(f.config,f.slot)&&extension.workspace(f.config,f.slot,2)==quote,
+          "refined native fixture did not quote the same public alternative");
+    const auto native_bits=extension.score(f.config,f.slot,f.key,f.iq,prepared,2,quote,{},executor);
+    check(native_bits==refined.combined_phase_bit_log_e,"native supplement did not return fixed mixed refinement evidence");
+    const auto native_report=receiver.report();
+    const auto& slots=std::get<Json::Array>(field(native_report,"slots").value);
+    check(boolean(native_report,"refinement_enabled")&&slots.size()==1&&
+          boolean(field(slots[0],"phase_refinement"),"enabled"),"native supplement omitted actual refinement receipt");
+    const auto refined_fft=number(field(field(slots[0],"phase_refinement"),"work"),"fft_row_stages");
+    check(refined_fft>0&&number(slots[0],"total_fft_row_stages_including_refinement")==
+          number(slots[0],"actual_fft_row_stages")+refined_fft,
+          "native aggregate FFT work omitted refinement or counted it twice");
+}
+
 void telemetry_cannot_gate_evidence(const Fixture& f) {
     ReceiverExecutor executor(2);
     const FrequencyInterval frequency{0,0};
@@ -335,12 +443,14 @@ void telemetry_cannot_gate_evidence(const Fixture& f) {
           "candidate telemetry lost the actual nonzero public slot");
     check(number(slots[0],"actual_fft_row_stages")>0&&number(slots[0],"phase_models")==97,
           "telemetry parity bypassed the actual phase family");
+    check(number(slots[0],"total_fft_row_stages_including_refinement")==number(slots[0],"actual_fft_row_stages"),
+          "disabled refinement added unexecuted FFT work to native telemetry");
 }
 } // namespace
 
 int main() {
     try {
-        const auto f=fixture();public_support(f);small_public_arrival_closure(f);paired_native_renderer(f);telemetry_cannot_gate_evidence(f);
+        const auto f=fixture();public_support(f);small_public_arrival_closure(f);paired_native_renderer(f);refinement_frontier_and_weights(f);telemetry_cannot_gate_evidence(f);
         std::cout<<"HF public receiver passed "<<checks<<" checks\n";
         return 0;
     } catch (const std::exception& e) {

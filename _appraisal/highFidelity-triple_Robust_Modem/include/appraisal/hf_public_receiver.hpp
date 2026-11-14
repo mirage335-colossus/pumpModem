@@ -14,7 +14,7 @@ namespace appraisal {
 // and is reported by saturating counters outside inference.
 class HfPublicPhaseReceiver {
 public:
-    explicit HfPublicPhaseReceiver(std::size_t maximum_slot_reports);
+    explicit HfPublicPhaseReceiver(std::size_t maximum_slot_reports, bool phase_refinement = false);
     datapump::triad::v3::receiver_detail::SlotEvidenceSupplement supplement() const;
     datapump::triad::probe::Json report() const;
 private:

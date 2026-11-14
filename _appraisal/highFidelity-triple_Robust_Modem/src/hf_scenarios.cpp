@@ -7,6 +7,7 @@
 #include <iterator>
 #include <numbers>
 #include <numeric>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -287,6 +288,86 @@ Scenario eikonal_holdout() {
     return s;
 }
 
+Scenario eikonal_refinement_control(const std::string& id) {
+    auto s = base_hf(id);
+    s.channel.rf_hz = 3.4e6;
+    double amplitude = 0, period = 0, phase = 0;
+    bool cfo_edge = false;
+    if (id == "hf-eikonal-holdout-a") {
+        amplitude = 7000.; period = 149.; phase = 1.13;
+    } else if (id == "hf-eikonal-holdout-b") {
+        amplitude = 8000.; period = 107.; phase = -.61;
+    } else if (id == "hf-eikonal-cfo-edge") {
+        amplitude = 8500.; period = 137.; phase = .37; cfo_edge = true;
+    } else {
+        throw std::invalid_argument("unknown eikonal refinement control");
+    }
+
+    s.channel.paths.resize(1);
+    auto& path = s.channel.paths.front();
+    auto& hf = path.hf.emplace();
+    hf.parabolic_layer = HfParabolicLayer{250000, 50000, 3.8e6, amplitude, period, phase};
+    path.delay_seconds = hf_parabolic_eikonal(*hf.parabolic_layer, s.channel.rf_hz, 0).group_delay_seconds;
+    if (cfo_edge) path.residual_doppler_hz = .98;
+    s.bounds.arrival_low_seconds = .001;
+    s.bounds.arrival_high_seconds = .003;
+    s.bounds.atmospheric_hz = 1;
+    s.bounds.delay_excursion_seconds = 10e-6;
+    s.evidence = "constructed analytical phase-refinement control in the existing collisionless vertical eikonal family";
+    s.provenance = "Cold-plasma parabolic-layer eikonal operator; Fable-5.2/31 §C and Fable-5.2/33 context";
+    s.assumptions = "Engineering sensitivity control only, not a measured ionospheric event, field trajectory, "
+        "natural joint distribution or occurrence-rate estimate. It uses the existing vertical 250km/50km "
+        "collisionless parabolic layer with a 3.8MHz critical frequency. Its critical-frequency amplitude, "
+        "period and phase are frozen scenario parameters; the receiver sees only the same public 1-3ms delay "
+        "and +/-1Hz center-frequency prior as the base holdout, with nonlinear phase variation modeled separately. The carrier offset in the CFO-edge variant "
+        "is a physical channel parameter, hidden from receiver inference.";
+    if (cfo_edge)
+        s.assumptions += " A +0.98Hz residual centroid exercises the upper public CFO edge while the "
+            "nonlinear eikonal phase continues to vary.";
+    return s;
+}
+
+Scenario eikonal_compound() {
+    auto s = base_hf("hf-eikonal-compound");
+    s.channel.rf_hz = 3.4e6;
+    s.channel.paths.resize(2);
+    for (auto& path : s.channel.paths) path.power = .5;
+
+    // Keep the existing operators' supported composition: one refractively
+    // evolving eikonal mode and a separate, co-arriving mode with small
+    // geometric group-delay motion. The channel rejects adding those two
+    // operators to a single HfModeProfile.
+    auto& eikonal_path = s.channel.paths[0];
+    auto& eikonal = eikonal_path.hf.emplace();
+    eikonal.parabolic_layer = HfParabolicLayer{250000, 50000, 3.8e6, 7000., 149., 1.13};
+    const double initial_delay = hf_parabolic_eikonal(*eikonal.parabolic_layer, s.channel.rf_hz, 0).group_delay_seconds;
+    eikonal_path.delay_seconds = initial_delay;
+
+    auto& geometric_path = s.channel.paths[1];
+    geometric_path.delay_seconds = initial_delay;
+    auto& geometric = geometric_path.hf.emplace();
+    geometric.group_delay_motion = {.amplitude_seconds = 75e-9, .period_seconds = 43.,
+                                    .phase_radians = .6, .couple_carrier_phase = true};
+
+    s.bounds.arrival_low_seconds = .001;
+    s.bounds.arrival_high_seconds = .003;
+    s.bounds.atmospheric_hz = 1;
+    s.bounds.spread_seconds = 0;
+    s.bounds.delay_excursion_seconds = 10e-6;
+    s.evidence = "constructed two-mode compound phase stress using the existing eikonal and geometric-delay operators";
+    s.provenance = "Existing cold-plasma parabolic-layer and coupled geometric-delay operators; Fable-5.2/31 and /33 context";
+    s.assumptions = "Engineering multi-mode stress only, not a measured or field-calibrated storm. The first of "
+        "two equal-power co-arriving rays uses a vertical 250km/50km geometry and 3.8MHz central layer. It carries the "
+        "existing ±7kHz/149s/1.13rad refractive critical-frequency variation. The other carries only the "
+        "existing 75ns/43s/.6rad coupled geometric-delay motion. Their carrier phase evolves continuously from "
+        "the same initial group delay, with no state reset at public slots. This is a two-mode composition of "
+        "separate operators because the current native model does not allow both motions on one ray. The 75ns "
+        "geometric delay creates a 1.6rad carrier-phase excursion at 3.4MHz; it remains within the public "
+        "1–3ms arrival cells and 10us excursion. The modes, parameter tuples and their joint occurrence are "
+        "not claimed to be an observed natural distribution.";
+    return s;
+}
+
 Scenario ding_measured(const std::string& id) {
     auto s = base_hf(id);
     s.channel.rf_hz = 12.7e6;
@@ -329,6 +410,9 @@ std::optional<Scenario> make_additional_hf_scenario(const std::string& id) {
     if (id == "hf-mode-transition") return mode_transition();
     if (id == "hf-vertical-eikonal-static" || id == "hf-vertical-eikonal-motion") return eikonal(id);
     if (id == "hf-vertical-eikonal-holdout") return eikonal_holdout();
+    if (id == "hf-eikonal-holdout-a" || id == "hf-eikonal-holdout-b" ||
+        id == "hf-eikonal-cfo-edge") return eikonal_refinement_control(id);
+    if (id == "hf-eikonal-compound") return eikonal_compound();
     if (id == "hf-ding-measured" || id == "hf-ding-amplitude" || id == "hf-ding-phase" ||
         id == "hf-ding-measured-late" || id == "hf-ding-clock41") return ding_measured(id);
     return std::nullopt;

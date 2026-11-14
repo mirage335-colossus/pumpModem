@@ -51,32 +51,11 @@ unsigned family_index(HfPublicPhaseFamily family) {
     require(index < 3, "unknown HF public phase family");
     return index;
 }
-bool same_plan(const HfPublicStatisticsPlan& a, const HfPublicStatisticsPlan& b) {
-    return a.fft_rows == b.fft_rows && a.frequency_radius == b.frequency_radius &&
-        a.frequency_count == b.frequency_count && a.affine_slope_radius == b.affine_slope_radius &&
-        a.frequency_step_hz == b.frequency_step_hz &&
-        a.actual_frequency_bound_hz == b.actual_frequency_bound_hz &&
-        a.affine_slope_step_hz_per_second == b.affine_slope_step_hz_per_second &&
-        a.affine_nearest_grid_phase_error_bound_radians == b.affine_nearest_grid_phase_error_bound_radians &&
-        a.family_model_counts == b.family_model_counts &&
-        a.family_fft_row_stages == b.family_fft_row_stages &&
-        a.actual_fft_count == b.actual_fft_count && a.actual_fft_row_stages == b.actual_fft_row_stages &&
-        a.phase_complex_multiplications == b.phase_complex_multiplications &&
-        a.likelihood_cells == b.likelihood_cells && a.unique_phase_models == b.unique_phase_models &&
-        a.prepared_phase_values == b.prepared_phase_values &&
-        a.shared_workspace_bytes == b.shared_workspace_bytes && a.lane_workspace_bytes == b.lane_workspace_bytes &&
-        a.workspace_bytes == b.workspace_bytes;
-}
-
-struct FrequencySummary {
-    long double log_sum = minus_infinity, maximum = minus_infinity;
-    double maximum_frequency = 0;
-};
 struct FamilySummary {
     long double log_sum = minus_infinity, maximum = minus_infinity;
     double maximum_frequency = 0;
     std::size_t maximum_model = 0;
-    void append(const FrequencySummary& value, std::size_t model) {
+    void append(const HfPublicFrequencyEvidence& value, std::size_t model) {
         log_sum = log_add(log_sum, value.log_sum);
         if (value.maximum > maximum) {
             maximum = value.maximum;
@@ -86,6 +65,36 @@ struct FamilySummary {
     }
 };
 } // namespace
+
+HfPublicFrequencyEvidence hf_public_frequency_evidence(const HfPublicStatisticsPlan& p,
+    std::span<const Complex> spectrum, double template_energy, std::stop_token stop) {
+    require(spectrum.size() == p.fft_rows && p.frequency_radius < p.fft_rows / 2 &&
+            p.frequency_count == 2 * p.frequency_radius + 1,
+            "HF public frequency reduction geometry mismatch");
+    require(std::isfinite(template_energy) && template_energy >= 0 &&
+            std::isfinite(p.config.white_noise_variance) && p.config.white_noise_variance > 0,
+            "HF public frequency reduction needs valid template energy and variance");
+    const long double e = template_energy, v = p.config.white_noise_variance;
+    const auto offset = -std::log1p(e / v);
+    const auto scale = 1 / v / (v + e);
+    HfPublicFrequencyEvidence summary;
+    for (std::size_t i = 0; i < p.frequency_count; ++i) {
+        if ((i & 4095U) == 0) cancelled(stop);
+        const bool negative = i < p.frequency_radius;
+        const auto magnitude = negative ? p.frequency_radius - i : i - p.frequency_radius;
+        const auto bin = negative ? p.fft_rows - magnitude : magnitude;
+        const std::complex<long double> dot{spectrum[bin].real(), spectrum[bin].imag()};
+        const auto score = offset + scale * std::norm(dot);
+        finite_double(score);
+        summary.log_sum = log_add(summary.log_sum, score);
+        if (score > summary.maximum) {
+            summary.maximum = score;
+            summary.maximum_frequency = finite_double((negative ? -1.L : 1.L) * magnitude *
+                p.frequency_step_hz);
+        }
+    }
+    return summary;
+}
 
 HfPublicStatisticsPlan hf_public_statistics_plan(const HfPublicStatisticsConfig& c) {
     require(c.block_count > 0, "HF public statistics needs at least one block");
@@ -266,7 +275,7 @@ struct HfPreparedPublicStatistics::Impl {
 HfPreparedPublicStatistics::HfPreparedPublicStatistics(const HfPublicStatisticsPlan& p, std::stop_token stop) {
     const auto begin = Clock::now();
     cancelled(stop);
-    require(same_plan(p, hf_public_statistics_plan(p.config)), "HF public statistics plan was modified");
+    require(p == hf_public_statistics_plan(p.config), "HF public statistics plan was modified");
     impl_ = std::make_unique<Impl>(p, stop);
     impl_->preparation_seconds = std::chrono::duration<double>(Clock::now() - begin).count();
 }
@@ -276,6 +285,10 @@ HfPreparedPublicStatistics& HfPreparedPublicStatistics::operator=(HfPreparedPubl
 const HfPublicStatisticsPlan& HfPreparedPublicStatistics::plan() const {
     require(bool(impl_), "HF public statistics preparation has been moved from");
     return impl_->plan;
+}
+const datapump::modem::detail::search_fft::DoublePlan& HfPreparedPublicStatistics::fft_plan() const {
+    require(bool(impl_), "HF public statistics preparation has been moved from");
+    return impl_->fft;
 }
 std::size_t HfPreparedPublicStatistics::shared_workspace_bytes() const {
     require(bool(impl_), "HF public statistics preparation has been moved from");
@@ -321,7 +334,7 @@ HfPublicStatisticsReport hf_public_statistics(const HfPreparedPublicStatistics& 
     result.actual_workspace_bytes = result.actual_shared_workspace_bytes + result.actual_lane_workspace_bytes;
     require(result.actual_workspace_bytes <= p.workspace_bytes,
             "HF public statistics allocation exceeds admitted workspace");
-    std::array<FrequencySummary, 2> zero;
+    std::array<HfPublicFrequencyEvidence, 2> zero;
     const auto evaluate = [&](HfPublicPhaseFamily family, std::size_t index, std::size_t bit) {
         cancelled(stop);
         const auto unique = prepared.impl_->unique_id(family, index);
@@ -332,26 +345,7 @@ HfPublicStatisticsReport hf_public_statistics(const HfPreparedPublicStatistics& 
             spectrum[j] = q[bit][j] * rotations[j];
         }
         datapump::modem::detail::search_fft::fft(std::span(spectrum), false, prepared.impl_->fft, stop);
-        const long double e = energy[bit], v = p.config.white_noise_variance;
-        const auto offset = -std::log1p(e / v);
-        const auto scale = 1 / v / (v + e);
-        FrequencySummary summary;
-        for (std::size_t i = 0; i < p.frequency_count; ++i) {
-            if ((i & 4095U) == 0) cancelled(stop);
-            const bool negative = i < p.frequency_radius;
-            const auto magnitude = negative ? p.frequency_radius - i : i - p.frequency_radius;
-            const auto bin = negative ? p.fft_rows - magnitude : magnitude;
-            const std::complex<long double> dot{spectrum[bin].real(), spectrum[bin].imag()};
-            const auto score = offset + scale * std::norm(dot);
-            finite_double(score);
-            summary.log_sum = log_add(summary.log_sum, score);
-            if (score > summary.maximum) {
-                summary.maximum = score;
-                summary.maximum_frequency = finite_double((negative ? -1.L : 1.L) * magnitude *
-                    p.frequency_step_hz);
-            }
-        }
-        return summary;
+        return hf_public_frequency_evidence(p, spectrum, energy[bit], stop);
     };
     for (unsigned fi = 0; fi < 3; ++fi) {
         auto& family = result.families[fi];

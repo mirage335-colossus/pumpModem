@@ -3,6 +3,7 @@
 #include "appraisal/hf_phase_bank.hpp"
 #include "appraisal/hf_public_diagnostic.hpp"
 #include "appraisal/hf_public_receiver.hpp"
+#include "appraisal/hf_phase_refinement.hpp"
 #include "appraisal/hf_replay.hpp"
 #include "appraisal/lunar_spectral.hpp"
 #include "appraisal/vlf_diagnostic.hpp"
@@ -66,7 +67,7 @@ struct Options {
     std::optional<unsigned> workers, owners, fade_slots;
     std::optional<std::size_t> memory_bytes;
     std::size_t chunk=4096;
-    bool helper=false, list=false, help=false, hf_phase_bank=false, search_options=false, hf_public_phase_receiver=false;
+    bool helper=false, list=false, help=false, hf_phase_bank=false, search_options=false, hf_public_phase_receiver=false, hf_physical_diagnostic=false, hf_phase_refinement=false;
 };
 void require(bool value, const char* text) { if(!value) throw Error(text); }
 std::uint64_t integer(const std::string& text) {
@@ -84,6 +85,8 @@ Options parse(int argc,char** argv) {
     for(int i=1;i<argc;++i) {
         const std::string key=argv[i];
         if(key=="--helper") {o.helper=true;continue;}
+        if(key=="--hf-phase-refinement") {o.hf_phase_refinement=true;continue;}
+        if(key=="--hf-physical-diagnostic") {o.hf_physical_diagnostic=true;continue;}
         if(key=="--hf-public-phase-receiver") {o.hf_public_phase_receiver=true;continue;}
         if(key=="--hf-phase-bank") {o.hf_phase_bank=true;continue;}
         if(key=="--list") {o.list=true;continue;}
@@ -131,6 +134,10 @@ Options parse(int argc,char** argv) {
     require(o.mode!="hf-search"||(!o.helper&&o.backend=="cpu"&&
         (o.control=="wanted"||o.control=="noise"||o.control=="wrong-key"||o.control=="wrong-ordinal")),
         "hf-search requires Helper-off CPU wanted, noise, wrong-key or wrong-ordinal control");
+    require(!o.hf_phase_refinement||(o.mode=="hf-search"||((o.mode=="receive"||o.mode=="slot")&&o.hf_public_phase_receiver)),
+        "HF phase refinement requires hf-search or the public phase receiver in receive/slot mode");
+    require(!o.hf_physical_diagnostic||(o.mode=="hf-search"&&o.control=="wanted"),
+        "HF physical diagnostic requires wanted hf-search mode");
     require(!o.hf_public_phase_receiver||((o.mode=="receive"||o.mode=="slot")&&!o.helper&&o.backend=="cpu"),
         "HF public phase receiver requires receive/slot mode with Helper-off CPU");
     require(o.waveform=="smoke"||o.waveform=="reference","unknown waveform");
@@ -461,11 +468,11 @@ Setup setup(const Options& o) {
         const auto& channel=scenario.channel;
         const auto& noise=channel.noise;
         const auto& frontend=channel.frontend;
-        if((scenario.family!="skywave-1-30MHz"&&scenario.id!="awgn")||channel.paths.size()!=1||
+        if((scenario.family!="skywave-1-30MHz"&&scenario.id!="awgn")||
            channel.lunar||channel.transmitter.enabled||noise.colored_variance!=0||
            (noise.impulse_rate_hz!=0&&noise.impulse_rms!=0)||noise.tone_amplitude!=0||
            frontend.lowpass_hz!=0||frontend.clip_magnitude!=0||frontend.agc_target!=0||frontend.adc_bits!=0)
-            throw Unavailable("HF public phase search supports one-path HF or AWGN with raw proper-complex white noise and no transmitter resonator or receiver frontend");
+            throw Unavailable("HF public phase search supports linear HF or AWGN with raw proper-complex white noise and no transmitter resonator or receiver frontend");
     }
     if(o.history_reference_delay_seconds||o.hf_phase_bank) {
         require(scenario.family=="skywave-1-30MHz","HF history reference delay and phase bank require an HF oracle scenario");
@@ -594,11 +601,18 @@ Setup setup(const Options& o) {
     }
     if(o.mode=="hf-search") {
         require(o.search_slot<s.truth.size()+2,"search-slot must be within the prepared message and its two following public slots");
+        require(!o.hf_physical_diagnostic||o.search_slot<s.truth.size(),
+            "HF physical diagnostic requires an active transmitted search slot");
         s.slot_horizon=o.search_slot+1;
         s.horizon=make_receiver_slot_plan(s.profile,s.receiver,o.search_slot).stop_sample;
     }
     if(o.capture_digest_slot)
         require(*o.capture_digest_slot<s.slot_horizon,"capture-digest-slot must be within the evaluated public horizon");
+    if(o.mode=="hf-search"||o.hf_public_phase_receiver) {
+        const auto public_slot=make_receiver_slot_plan(s.profile,s.receiver,o.mode=="hf-search"?o.search_slot:0);
+        if(!appraisal::hf_public_search_supported(s.receiver,public_slot,o.hf_phase_refinement))
+            throw Unavailable("HF public phase scorer does not support the configured public geometry; actual linear multipath remains a permitted model-mismatch test");
+    }
     s.stream.workers=o.workers;s.stream.slot_owners=o.owners;s.stream.memory_limit_bytes=o.memory_bytes;
     s.stream.maximum_input_chunk_samples=o.chunk;s.stream.maximum_gap_samples=o.chunk;
     s.stream.record_commit_timing=true;s.stream.recent_slot_receipts=512;
@@ -643,6 +657,9 @@ Json plan_json(const Setup& s,const Options& o) {
         {"cn0_db_hz",s.cn0},{"noise_variance",s.receiver.noise_variance},
         {"history_reference_delay_seconds",o.history_reference_delay_seconds.value_or(0)},
         {"hf_phase_bank_requested",o.hf_phase_bank},{"hf_public_phase_receiver_requested",o.hf_public_phase_receiver},
+        {"hf_physical_diagnostic_requested",o.hf_physical_diagnostic},
+        {"hf_phase_refinement_requested",o.hf_phase_refinement},
+        {"assumed_public_taps",o.mode=="hf-search"||o.hf_public_phase_receiver?Json(1):Json{}},
         {"search_slot",o.search_slot},{"search_timing",o.search_timing},
         {"capture_digest_slot",digest_index?Json(*digest_index):Json{}},
         {"capture_digest_slot_override",o.capture_digest_slot.has_value()},
@@ -932,6 +949,260 @@ void oracle(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     deadline.check();
     result["status"]="completed";
 }
+// Post-search evaluator only. Native public scoring has already returned;
+// transmitted bits, propagation truth and clean twins cannot select its work.
+void physical_hf_diagnostic(Json& output,const Setup& s,const Options& o,
+        const ReceiverSlotPlan& aperture,std::span<const Complex> observation,
+        const appraisal::HfPublicSearchResult& searched,std::size_t original_source_bytes,
+        const std::string& observation_digest,Deadline& deadline) {
+    const auto began=Clock::now();
+    require(o.mode=="hf-search"&&o.control=="wanted"&&o.search_slot<s.truth.size()&&
+        observation.size()==aperture.stop_sample-aperture.first_sample,
+        "physical diagnostic requires one complete wanted active aperture");
+    require(searched.block_rows>0&&!searched.timing.empty()&&searched.timing.size()==searched.evidence.size(),
+        "physical diagnostic requires completed typed public search results");
+    std::size_t winning_timing=0,winning_model=0;unsigned winning_bit=0;
+    double winning_frequency=0,winning_log_lr=-std::numeric_limits<double>::infinity();
+    constexpr auto family=appraisal::HfPublicPhaseFamily::sinusoid;
+    for(std::size_t i=0;i<searched.evidence.size();++i) {
+        const auto& bank=searched.evidence[i].statistics.families[static_cast<unsigned>(family)];
+        require(bank.evaluated,"physical diagnostic requires an evaluated sinusoidal family");
+        for(unsigned bit=0;bit<2;++bit) {
+            const auto& cell=bank.hypotheses[bit];
+            if(cell.maximum_log_likelihood_ratio>winning_log_lr) {
+                winning_timing=i;winning_bit=bit;winning_model=cell.maximum_model_index;
+                winning_frequency=cell.maximum_frequency_hz;winning_log_lr=cell.maximum_log_likelihood_ratio;
+            }
+        }
+    }
+    require(std::isfinite(winning_log_lr),"physical diagnostic has no finite winning public cell");
+    const auto model=appraisal::hf_public_phase_model(searched.plan,family,winning_model);
+    const auto coordinate=searched.timing[winning_timing];
+    std::size_t refined_timing=0,refined_trace_index=0;unsigned refined_bit=0;
+    double refined_frequency=0,refined_log_lr=-std::numeric_limits<double>::infinity();
+    appraisal::HfPhaseShapeId refined_shape;
+    if(o.hf_phase_refinement) {
+        require(searched.refinement_enabled,
+            "physical refinement replay requires the requested public refinement receipt");
+        require(searched.refinement_executed?searched.refinement_plan.has_value():
+            (!searched.refinement_plan.has_value()&&searched.refinement_evidence.empty()&&!searched.refinement_unavailable_reason.empty()),
+            "physical refinement replay has inconsistent public branch availability");
+        for(std::size_t i=0;searched.refinement_executed&&i<searched.refinement_evidence.size();++i) {
+            const auto& candidate=searched.refinement_evidence[i];
+            require(candidate.timing_index<searched.timing.size(),"invalid public refinement timing index");
+            for(unsigned bit=0;bit<2;++bit)if(candidate.report.maximum_log_lr[bit]>refined_log_lr) {
+                refined_trace_index=i;refined_timing=candidate.timing_index;refined_bit=bit;
+                refined_log_lr=candidate.report.maximum_log_lr[bit];
+                refined_shape=candidate.report.maximum_shape[bit];
+                refined_frequency=candidate.report.maximum_frequency_hz[bit];
+            }
+        }
+    }
+    const bool refined_available=std::isfinite(refined_log_lr);
+    const auto tile=std::min<std::size_t>(4096,o.chunk);
+    const auto basis_bytes=receiver_detail::MappedBasis::workspace_bytes(s.receiver,aperture,tile,1);
+    const auto pair_bytes=appraisal::HfPublicBasisPair::workspace_bytes(s.receiver,aperture);
+    const auto baseline=execution::process_footprint_bytes();
+    if(baseline>=s.resources.memory_limit_bytes)throw Limit("physical diagnostic process baseline exceeds total memory limit");
+    const auto available=s.resources.memory_limit_bytes-baseline;
+    std::size_t reserved=0;
+    const auto reserve=[&](std::size_t bytes) {
+        if(bytes>available-reserved)throw Limit("physical diagnostic sources, basis and buffers exceed total memory limit");
+        reserved+=bytes;
+    };
+    require(original_source_bytes<=SIZE_MAX/4,"physical diagnostic source reservation overflow");
+    // Two same-geometry Message sources plus two constructor-reference peaks.
+    // The existing live input, original source/channel and typed search result
+    // are included in baseline RSS. Nothing here reserves another clean capture.
+    const auto source_bytes=4*original_source_bytes;
+    const auto buffer_bytes=tile*(4*sizeof(Complex)+sizeof(double));
+    reserve(source_bytes);reserve(basis_bytes);reserve(pair_bytes);
+    if(refined_available)reserve(pair_bytes);
+    reserve(buffer_bytes);reserve(262144);
+    const auto per_channel_limit=std::min(s.scenario.channel.maximum_workspace_bytes,(available-reserved)/2);
+    if(!per_channel_limit)throw Limit("physical diagnostic has no admitted channel workspace");
+    reserve(2*per_channel_limit);
+    output=object({{"component_complete",false},{"slot_index",o.search_slot},
+        {"observation",range({aperture.first_sample,aperture.stop_sample})},{"observation_sha256",observation_digest},
+        {"truth_information_passed_to_search",false},{"receiver_executed",false},{"completion_evaluated",false},
+        {"capacity_qualified",false},{"is_theoretical_upper_bound",false},{"gain_prior_variance",1.},
+        {"scope","post-search finite known-physical-template diagnostic; full transmitted context and channel truth are private evaluator inputs; scores are not calibrated receiver decisions or a theoretical upper bound"},
+        {"physical_template_scope","two full native Message emissions from sample zero; only the selected wire bit differs; same transmitter profile/key, physical channel, seed and capture preroll; white noise disabled"},
+        {"public_cell_scope","one same-data-selected maximum sinusoidal cell; both public bits rerendered at that same timing/phase/CFO; unpenalized single-cell LR is not admitted search evidence"},
+        {"admission",object({{"process_baseline_bytes",baseline},{"total_memory_limit_bytes",s.resources.memory_limit_bytes},
+            {"future_reserved_bytes",reserved},{"source_and_constructor_reserved_bytes",source_bytes},
+            {"basis_workspace_bytes",basis_bytes},{"pair_workspace_bytes",pair_bytes},{"public_pair_owners",refined_available?2:1},
+            {"buffer_bytes",buffer_bytes},{"channel_instances",2},{"per_channel_limit_bytes",per_channel_limit},
+            {"clean_capture_buffers",0},{"retained_public_result_in_process_baseline",true}})}});
+    deadline.check();
+    std::array<std::unique_ptr<Emission>,2> twins;
+    std::array<EmittedSource,2> sources;
+    const auto preroll=checked_samples(s.profile.config().capture_lead_seconds,s.receiver.sample_rate_hz);
+    for(unsigned bit=0;bit<2;++bit) {
+        EmissionOptions options;options.mode=EmissionMode::Message;options.slot_count=s.truth.size();
+        options.stop=deadline.stop.get_token();
+        auto original_bits=s.draft.bit_source(0,[&](std::uint64_t i){return message_address(s.transmit_profile,i);});
+        options.bit_at=[original_bits,target=o.search_slot,bit](std::uint64_t i) {
+            return i==target?static_cast<std::uint8_t>(bit):original_bits(i);
+        };
+        twins[bit]=std::make_unique<Emission>(s.transmit_profile,s.tx_key,options);
+        sources[bit]=twins[bit]->source();
+        require(sources[bit].working_bytes==original_source_bytes,
+            "physical twin source differs from the pre-admitted native source geometry");
+        const auto native=sources[bit].sample_at;
+        sources[bit].sample_at=[native,preroll](std::uint64_t i){return i<preroll?Complex{}:native(i-preroll);};
+        sources[bit].geometry.source_samples=add(sources[bit].geometry.source_samples,preroll);
+        require(sources[bit].geometry.source_samples==s.source_stop,"physical twin source extent changed");
+    }
+    auto channel_config=s.scenario.channel;channel_config.noise.white_variance=0;
+    channel_config.maximum_workspace_bytes=per_channel_limit;
+    appraisal::Channel clean_zero(sources[0],channel_config,o.seed,aperture.stop_sample,deadline.stop.get_token());
+    appraisal::Channel clean_one(sources[1],channel_config,o.seed,aperture.stop_sample,deadline.stop.get_token());
+    const auto& c=coordinate;
+    const double scale=1+c.clock_ppm*1e-6;
+    const double arrival=static_cast<double>(aperture.window_capture_lead_seconds+c.arrival_seconds+aperture.source_start_seconds/scale);
+    const receiver_detail::MappedBasisRow row{c.epoch_offset_seconds,arrival,-s.receiver.data_if_hz*(scale-1),c.clock_ppm};
+    receiver_detail::MappedBasis basis(s.receiver,aperture,s.key,tile,1);
+    appraisal::HfPublicBasisPair pair(s.receiver,aperture,s.key,row);
+    std::unique_ptr<appraisal::HfPublicBasisPair> refined_pair;
+    if(refined_available) {
+        const auto& timing=searched.timing[refined_timing];
+        const double refined_scale=1+timing.clock_ppm*1e-6;
+        const double refined_arrival=static_cast<double>(aperture.window_capture_lead_seconds+
+            timing.arrival_seconds+aperture.source_start_seconds/refined_scale);
+        const receiver_detail::MappedBasisRow refined_row{timing.epoch_offset_seconds,refined_arrival,
+            -s.receiver.data_if_hz*(refined_scale-1),timing.clock_ppm};
+        refined_pair=std::make_unique<appraisal::HfPublicBasisPair>(s.receiver,aperture,s.key,refined_row);
+    }
+    const std::array<Tap,1> taps{{{0,0}}};
+    std::array<std::vector<Complex>,2> clean{std::vector<Complex>(tile),std::vector<Complex>(tile)};
+    std::vector<Complex> public_templates(2*tile);std::vector<double> offsets(tile);
+    for(std::size_t i=0;i<tile;++i)offsets[i]=static_cast<double>(i);
+    const appraisal::HfHistoryConfig history_config{s.receiver.sample_rate_hz,aperture.first_sample,aperture.stop_sample,
+        s.truth[o.search_slot],s.receiver.noise_variance,true,false};
+    appraisal::HfHistoryDiagnostic physical(history_config),effective(history_config);
+    std::unique_ptr<appraisal::HfHistoryDiagnostic> refined_effective;
+    if(refined_available)refined_effective=std::make_unique<appraisal::HfHistoryDiagnostic>(history_config);
+    std::array<Hash,2> clean_hash;
+    std::uint64_t first=0;std::size_t last_block=SIZE_MAX,last_refined_block=SIZE_MAX;
+    Complex rotation{},refined_rotation{};
+    while(first<aperture.stop_sample) {
+        deadline.check();const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(tile,aperture.stop_sample-first));
+        require(clean_zero.read(std::span(clean[0]).first(count),deadline.stop.get_token())==count&&
+            clean_one.read(std::span(clean[1]).first(count),deadline.stop.get_token())==count,
+            "physical twins returned incomplete prefix samples");
+        const auto begin=std::max(first,aperture.first_sample),end=std::min(first+count,aperture.stop_sample);
+        if(begin<end) {
+            const auto offset=static_cast<std::size_t>(begin-first),rows=static_cast<std::size_t>(end-begin);
+            const auto local=static_cast<std::size_t>(begin-aperture.first_sample);
+            const auto zero=std::span(clean[0]).subspan(offset,rows),one=std::span(clean[1]).subspan(offset,rows);
+            const auto wanted=history_config.wanted_bit?one:zero;
+            const auto noisy=observation.subspan(local,rows);
+            physical.append(begin,zero,one,wanted,noisy);
+            clean_hash[0].samples(zero,{});clean_hash[1].samples(one,{});
+            auto rendered=std::span(public_templates).first(2*rows);
+            pair.render(basis,taps,local,std::span(offsets).first(rows),rendered,deadline.stop.get_token());
+            for(std::size_t i=0;i<rows;++i) {
+                const auto block=(local+i)/searched.block_rows;
+                if(block!=last_block) {
+                    const long double center=static_cast<long double>(searched.plan.config.first_block_center_seconds)+
+                        static_cast<long double>(block)*searched.plan.config.block_seconds;
+                    const auto phase=appraisal::hf_public_phase_radians(searched.plan,model,center)+
+                        2*std::numbers::pi_v<long double>*winning_frequency*center;
+                    rotation=std::polar(1.,static_cast<double>(std::remainder(phase,2*std::numbers::pi_v<long double>)));
+                    last_block=block;
+                }
+                rendered[i]*=rotation;rendered[rows+i]*=rotation;
+            }
+            effective.append(begin,rendered.first(rows),rendered.subspan(rows,rows),wanted,noisy);
+            if(refined_available) {
+                refined_pair->render(basis,taps,local,std::span(offsets).first(rows),rendered,deadline.stop.get_token());
+                for(std::size_t i=0;i<rows;++i) {
+                    const auto block=(local+i)/searched.block_rows;
+                    if(block!=last_refined_block) {
+                        const long double center=static_cast<long double>(searched.plan.config.first_block_center_seconds)+
+                            static_cast<long double>(block)*searched.plan.config.block_seconds;
+                        const auto phase=appraisal::hf_refined_phase_radians(*searched.refinement_plan,refined_shape,center)+
+                            2*std::numbers::pi_v<long double>*refined_frequency*center;
+                        refined_rotation=std::polar(1.,static_cast<double>(std::remainder(phase,2*std::numbers::pi_v<long double>)));
+                        last_refined_block=block;
+                    }
+                    rendered[i]*=refined_rotation;rendered[rows+i]*=refined_rotation;
+                }
+                refined_effective->append(begin,rendered.first(rows),rendered.subspan(rows,rows),wanted,noisy);
+            }
+        }
+        first+=count;
+    }
+    const auto physical_report=physical.finish(),effective_report=effective.finish();
+    const auto full_json=[](const appraisal::HfHistoryReport& report) {
+        const auto& block=report.blocks.back();Json::Array hypotheses;
+        for(const auto& h:block.hypotheses)hypotheses.push_back(object({{"rank",h.rank},{"template_energy",h.reference_energy},
+            {"clean_projected_energy",h.projected_signal_energy},{"clean_residual_energy",h.residual_signal_energy},
+            {"clean_coherence_power",optional_number(h.retained_signal_fraction)},
+            {"noisy_log_likelihood_ratio",optional_number(h.noisy_log_likelihood_ratio)}}));
+        return object({{"block_count",block.block_count},{"samples",report.samples},
+            {"noise_free_energy",report.noise_free_energy},{"wanted_bit",report.config.wanted_bit},
+            {"gain_prior_variance",1.},{"hypotheses",std::move(hypotheses)}});
+    };
+    output["physical_templates"]=full_json(physical_report);
+    output["physical_templates"]["template_sha256"]=Json::Array{clean_hash[0].finish(),clean_hash[1].finish()};
+    output["winning_public_cell"]=object({{"timing_index",winning_timing},{"selected_bit",winning_bit},
+        {"epoch_offset_seconds",coordinate.epoch_offset_seconds},{"arrival_seconds",coordinate.arrival_seconds},
+        {"clock_ppm",coordinate.clock_ppm},{"frequency_hz",winning_frequency},{"model_index",winning_model},
+        {"model_amplitude_radians",model.amplitude_radians},{"model_period_seconds",model.period_seconds},
+        {"model_phase_radians",model.phase_radians},{"search_maximum_single_cell_log_lr",winning_log_lr},
+        {"block_rows",searched.block_rows},{"block_count",searched.plan.config.block_count},
+        {"first_block_center_seconds",searched.plan.config.first_block_center_seconds},
+        {"block_seconds",searched.plan.config.block_seconds},{"projection",full_json(effective_report)}});
+    const auto replay_lr=effective_report.blocks.back().hypotheses[winning_bit].noisy_log_likelihood_ratio;
+    require(replay_lr.has_value(),"physical diagnostic is missing the public-cell replay likelihood");
+    output["winning_public_cell"]["single_cell_log_lr_replay_difference"]=*replay_lr-winning_log_lr;
+    output["refinement_requested"]=o.hf_phase_refinement;
+    output["refinement_replay_available"]=refined_available;
+    if(refined_available) {
+        const auto refined_report=refined_effective->finish();
+        const auto& timing=searched.timing[refined_timing];
+        const auto& public_trace=searched.refinement_evidence[refined_trace_index].report;
+        const auto refined_lr=refined_report.blocks.back().hypotheses[refined_bit].noisy_log_likelihood_ratio;
+        require(refined_lr.has_value(),"physical diagnostic is missing refined public-cell replay likelihood");
+        output["refined_public_cell"]=object({{"timing_index",refined_timing},{"selected_bit",refined_bit},
+            {"epoch_offset_seconds",timing.epoch_offset_seconds},{"arrival_seconds",timing.arrival_seconds},
+            {"clock_ppm",timing.clock_ppm},{"frequency_hz",refined_frequency},
+            {"shape_id",object({{"a",refined_shape.a},{"b",refined_shape.b},{"nu",refined_shape.nu}})},
+            {"search_maximum_single_cell_log_lr",refined_log_lr},
+            {"single_cell_log_lr_replay_difference",*refined_lr-refined_log_lr},
+            {"projection",full_json(refined_report)},
+            {"scope","one winning snapped public new-family cell, selected entirely from noisy public search; clean physics is used only for this subsequent projection"}});
+        require(public_trace.proposal_count<=public_trace.proposals.size(),"public refinement proposal report exceeds its bound");
+        Json::Array proposals;
+        for(std::size_t i=0;i<public_trace.proposal_count;++i) {
+            const auto& proposal=public_trace.proposals[i];
+            proposals.push_back(object({{"bit",proposal.bit},{"a",proposal.a},{"b",proposal.b},
+                {"nu_hz",proposal.nu_hz},{"cfo_hz",proposal.cfo_hz},{"segment_score",proposal.segment_score},
+                {"initial_log_lr",proposal.initial_log_lr},{"continuous_log_lr",proposal.continuous_log_lr},
+                {"intermediate_used",proposal.intermediate_used},
+                {"intermediate_initial_log_lr",proposal.intermediate_initial_log_lr},
+                {"intermediate_final_log_lr",proposal.intermediate_final_log_lr},
+                {"intermediate_accepted_steps",proposal.intermediate_accepted_steps},
+                {"best_scored_neighbor_log_lr",proposal.best_scored_neighbor_log_lr},
+                {"snapped_loss_nats",proposal.snapped_loss_nats},{"accepted_steps",proposal.accepted_steps}}));
+        }
+        output["public_refinement_proposals"]=object({{"timing_index",refined_timing},
+            {"not_admitted_evidence",true},{"uses_physical_truth",false},
+            {"scope","unmodified noisy-public proposal traces at the winning timing; continuous scores and snapping losses are descriptive proposal diagnostics, not added likelihood evidence"},
+            {"proposals",std::move(proposals)}});
+    } else if(o.hf_phase_refinement) {
+        output["refinement_replay_reason"]=searched.refinement_executed?
+            "no finite retained new-family cell":searched.refinement_unavailable_reason;
+    }
+    output["prefix_samples_rendered_per_twin"]=first;
+    output["source_samples_per_twin"]=sources[0].geometry.source_samples;
+    output["channel_workspace_bytes"]=Json::Array{clean_zero.report().workspace_bytes,clean_one.report().workspace_bytes};
+    output["wall_seconds"]=std::chrono::duration<double>(Clock::now()-began).count();
+    output["component_complete"]=true;
+}
+
 void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     if(s.horizon>o.max_samples)throw Limit("canonical physical horizon exceeds predeclared sample budget; use plan or explicitly increase it");
     if(s.scenario.numerical_horizon_seconds>0&&static_cast<double>(s.horizon)/s.receiver.sample_rate_hz>s.scenario.numerical_horizon_seconds)
@@ -962,7 +1233,7 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     require(diagnostic_samples<=SIZE_MAX/sizeof(Complex),"diagnostic capture extent overflow");
     const auto diagnostic_bytes=static_cast<std::size_t>(diagnostic_samples)*sizeof(Complex);
     const auto future=source.working_bytes+o.chunk*(sizeof(Complex)+1)+
-        static_cast<std::size_t>(s.slot_horizon)*16384+65536;
+        static_cast<std::size_t>(s.slot_horizon)*(o.hf_phase_refinement?65536:16384)+65536;
     const auto baseline=execution::process_footprint_bytes();
     if(baseline>=s.resources.memory_limit_bytes||future>=s.resources.memory_limit_bytes-baseline||
        diagnostic_bytes>=s.resources.memory_limit_bytes-baseline-future)
@@ -977,13 +1248,14 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     const bool receive=o.mode=="receive"||o.mode=="slot";
     if(receive||o.mode=="diagnose")s.receiver.bulk_backend=backend(o);
     result["plan"]["outside_receiver_future_reserved_bytes"]=future;
+    result["plan"]["evaluator_reserved_bytes_per_public_slot"]=o.hf_phase_refinement?65536:16384;
     result["plan"]["renderer_resident_accounting"]="materialized state included in canonical process-footprint admission";
     result["plan"]["receiver_memory_limit_bytes"]=*s.stream.memory_limit_bytes;
     result["plan"]["diagnostic_capture_bytes"]=diagnostic_bytes;
     std::shared_ptr<appraisal::HfPublicPhaseReceiver> phase_receiver;
     std::unique_ptr<CompleteStreamReceiver> receiver;
     if(receive&&o.hf_public_phase_receiver) {
-        phase_receiver=std::make_shared<appraisal::HfPublicPhaseReceiver>(s.slot_horizon);
+        phase_receiver=std::make_shared<appraisal::HfPublicPhaseReceiver>(s.slot_horizon,o.hf_phase_refinement);
         const auto supplement=phase_receiver->supplement();
         const datapump::triad::v3::detail::StreamWorkspace workspace=[supplement](const auto& config,const auto& slot,unsigned workers) {
             return receiver_detail::receiver_slot_workspace_with_supplement(config,slot,workers,supplement,false);
@@ -1171,10 +1443,14 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
                 "selected search observation was not completely hashed");
             result["plan"]["search_observation_sha256"]=*selected_digest;
             const auto ctl=Clock::now();
+            appraisal::HfPublicSearchResult public_result;
             result["hf_public_search"]=appraisal::diagnose_hf_public_search(s.receiver,diagnostic_slot,s.key,
-                diagnostic_capture,s.resources.workers,*s.stream.memory_limit_bytes,o.search_timing=="full",deadline.stop.get_token());
+                diagnostic_capture,s.resources.workers,*s.stream.memory_limit_bytes,o.search_timing=="full",deadline.stop.get_token(),o.hf_physical_diagnostic?&public_result:nullptr,o.hf_phase_refinement);
             public_search_seconds=std::chrono::duration<double>(Clock::now()-ctl).count();
             public_search_executed=true;
+            if(o.hf_physical_diagnostic)
+                physical_hf_diagnostic(result["hf_physical_diagnostic"],s,o,diagnostic_slot,diagnostic_capture,
+                    public_result,source.working_bytes,*selected_digest,deadline);
             const bool active=o.search_slot<s.truth.size()&&o.control!="noise";
             result["hf_search_evaluation"]=object({{"slot_index",o.search_slot},{"transmitted_active",active},
                 {"expected_receiver_bit",active&&target?Json(s.truth[o.search_slot]):Json{}},
@@ -1296,7 +1572,7 @@ int main(int argc,char** argv) {
         const auto o=parse(argc,argv);
         if(o.help) {
             result["status"]="completed";result["mode"]="help";
-            result["usage"]="high_fidelity_appraisal --mode plan|channel|receive|slot|oracle|diagnose|hf-search --scenario NAME --waveform reference|smoke [--cn0 DBHZ] [--bit-seconds S] [--capture-lead-seconds S] [--pulse rrc|tapered-rrc] [--control wanted|noise|wrong-key|wrong-ordinal|interior-fade|capture-gap|eof] [--helper] [--seed N] [--workers N] [--owners N] [--memory-mib N] [--backend cpu|cuda|vulkan|gpu] [--max-samples N] [--max-wall-seconds S] [--duration-seconds S] [--chunk N] [--message TEXT] [--fec off|rs20|rs60] [--fade-slots 1|2] [--oracle-slot N] [--search-slot N] [--search-timing selected|full] [--capture-digest-slot N] [--history-reference-delay-seconds S] [--hf-phase-bank] [--hf-public-phase-receiver]; capture lead defaults to .25s and accepts .25..10s to retain more pre-signal noise history; interior-fade defaults to two consecutive complete observation apertures, with --fade-slots 1 selecting a single physical erasure opportunity; slot observes only the complete first public slot; diagnose measures canonical VLF acquisition and short persistent fine phases without bit/message decisions; capture-digest-slot incrementally hashes one complete public observation in receive/slot/hf-search without changing receiver geometry; hf-public-phase-receiver enables the experimental fixed-prior supplement inside the canonical receive/slot stream with raw white-noise one-path HF/AWGN and Helper-off CPU; hf-search runs a shadow public search on complete selected slot N (default 0), without receiver decisions or completion, using raw white-noise one-path HF/AWGN and Helper-off CPU; oracle requires linear Helper-off wanted AWGN, HF or EME with white noise and uses public slot N (default 0) within the prepared message; HF oracle additionally reports private clean-template history diagnostics; optional reference delay is independently declared within public arrival bounds (zero keeps the unshifted baseline), and --hf-phase-bank enables the fixed coherent phase-family evaluator";
+            result["usage"]="high_fidelity_appraisal --mode plan|channel|receive|slot|oracle|diagnose|hf-search --scenario NAME --waveform reference|smoke [--cn0 DBHZ] [--bit-seconds S] [--capture-lead-seconds S] [--pulse rrc|tapered-rrc] [--control wanted|noise|wrong-key|wrong-ordinal|interior-fade|capture-gap|eof] [--helper] [--seed N] [--workers N] [--owners N] [--memory-mib N] [--backend cpu|cuda|vulkan|gpu] [--max-samples N] [--max-wall-seconds S] [--duration-seconds S] [--chunk N] [--message TEXT] [--fec off|rs20|rs60] [--fade-slots 1|2] [--oracle-slot N] [--search-slot N] [--search-timing selected|full] [--capture-digest-slot N] [--history-reference-delay-seconds S] [--hf-phase-bank] [--hf-public-phase-receiver] [--hf-physical-diagnostic] [--hf-phase-refinement]; capture lead defaults to .25s and accepts .25..10s to retain more pre-signal noise history; interior-fade defaults to two consecutive complete observation apertures, with --fade-slots 1 selecting a single physical erasure opportunity; slot observes only the complete first public slot; diagnose measures canonical VLF acquisition and short persistent fine phases without bit/message decisions; capture-digest-slot incrementally hashes one complete public observation in receive/slot/hf-search without changing receiver geometry; hf-phase-refinement opts into bounded public phase refinement in hf-search or the experimental public phase receiver; refinement shadow omits affine comparison and uses the operational block geometry; hf-physical-diagnostic adds a post-search finite physical-template and winning-public-cell evaluator for wanted active hf-search slots; hf-public-phase-receiver enables the experimental fixed-prior supplement inside the canonical receive/slot stream with raw white-noise linear HF/AWGN with a single-public-tap model and Helper-off CPU; hf-search runs a shadow public search on complete selected slot N (default 0), without receiver decisions or completion, using raw white-noise linear HF/AWGN with a single-public-tap model and Helper-off CPU; oracle requires linear Helper-off wanted AWGN, HF or EME with white noise and uses public slot N (default 0) within the prepared message; HF oracle additionally reports private clean-template history diagnostics; optional reference delay is independently declared within public arrival bounds (zero keeps the unshifted baseline), and --hf-phase-bank enables the fixed coherent phase-family evaluator";
         } else if(o.list) {
             result["mode"]="list";result["status"]="completed";Json::Array entries;
             for(const auto& name:appraisal::scenario_names())entries.push_back(scenario_json(appraisal::make_scenario(name)));

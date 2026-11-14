@@ -16,6 +16,12 @@ Actual positive, negative and conditional outcomes are preserved in the
 The later [public phase-search continuation](hf-public-search.md) tests the
 private phase-history finding under full public acquisition priors and, through
 an explicit option, inside the same native complete receiver.
+The [bounded refinement continuation](hf-phase-refinement.md) adds an
+evaluator-only known-physical-template comparison and a predeclared,
+fixed-prior proposal/refinement candidate. Its native focused test initially
+failed the noiseless blind off-grid recovery assertion; no candidate campaign
+has run yet. That implementation counterexample is preserved in
+[HF validation](hf-validation.md), and is not evidence of ionospheric infeasibility.
 
 ## Mechanisms and independent checks
 
@@ -26,6 +32,9 @@ an explicit option, inside the same native complete receiver.
 | `hf-trough-static`, `hf-trough-phase` | Slow common phase on coherent and diffuse contributions | Matched source-conditioned sensitivity construction. The coherent contribution is not exempt from the changing phase; identical latent fading is retained in the pair. |
 | `hf-vertical-eikonal-static`, `hf-vertical-eikonal-motion` | A changing critical frequency in a vertical parabolic plasma layer | Phase, group delay and local dispersion derive from the same analytic eikonal. Independent refractive-index quadrature and frequency/time derivatives test the implementation. This unmagnetized model stays below cutoff and is not a full oblique magnetoionic ray solution. |
 | `hf-vertical-eikonal-holdout` | Critical-frequency variation of ±8.5 kHz, period 137 s and initial phase .37 rad | The same analytic physical model, with a trajectory absent from the frozen phase dictionary. It is a constructed mismatch control, not an independently measured disturbed day. The complete-message failure is retained in [HF validation](hf-validation.md). |
+| `hf-eikonal-holdout-a`, `hf-eikonal-holdout-b` | Independently seeded constructed layer trajectories: ±7 kHz/149 s/1.13 rad and ±8 kHz/107 s/−.61 rad | Same vertical parabolic eikonal; these expose unseen phase/period combinations. They are synthetic holdouts, not measured events or a day-frequency distribution. |
+| `hf-eikonal-compound` | Two unresolved equal-power arrivals: a 149 s layer trajectory plus a separate 75 ns geometric delay oscillation at 43 s | Per-ray continuous laws preserve their channel state; no received-energy renormalization. It tests single-tap public-model mismatch and possible vector cancellation, not recovery of all multipath. |
+| `hf-eikonal-cfo-edge` | Existing ±8.5 kHz/137 s/0.37 rad layer plus +0.98 Hz residual center offset | Keeps the public center-frequency prior at ±1 Hz; tests phase-model proposal behavior close to its CFO boundary. |
 | `hf-mode-transition` | Smooth loss, absence and recovery of a mode | Deliberately constructed control informed by observed mode changes. Its schedule is not relabeled as a measured sunrise, flare or storm. Latent path state advances while the mode is absent. |
 | `hf-ding-measured` | Deposited coupled complex envelope from a selected 12.7-MHz direct-skywave record | Exact 2,048 complex values, one full-record RMS normalization, bounded interpolation and no wrapping. Unknown instrument/filter calibration prevents interpreting it as an absolute channel gain or broadband impulse response. |
 | `hf-ding-amplitude`, `hf-ding-phase` | Remove either phase or amplitude variation from the same record | Explicit counterfactuals, not additional measurements. Their differences help identify the mechanism of a receiver failure. |

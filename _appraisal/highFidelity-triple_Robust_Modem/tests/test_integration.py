@@ -88,6 +88,43 @@ def main() -> None:
         assert family["passes_presence_reference"] and family["passes_bit_separation_reference"], search
         assert family["bit_log_separation"] >= 5.29, search
     assert search["channel"]["selected_observation_sha256"] == search["plan"]["search_observation_sha256"], search
+    physical_search = invoke("--mode", "hf-search", "--scenario", "awgn", "--waveform", "smoke",
+                             "--search-slot", "1", "--cn0", "40", "--max-wall-seconds", "25",
+                             "--hf-physical-diagnostic", "--chunk", "1021")
+    physical = physical_search["hf_physical_diagnostic"]
+    assert physical_search["channel"]["selected_observation_sha256"] == search["channel"]["selected_observation_sha256"], physical_search
+    assert [family["bit_log_e"] for family in physical_search["hf_public_search"]["families"]] == [family["bit_log_e"] for family in families], physical_search
+    assert physical["component_complete"] and not physical["truth_information_passed_to_search"], physical_search
+    assert not physical["is_theoretical_upper_bound"] and not physical["receiver_executed"], physical_search
+    assert physical["prefix_samples_rendered_per_twin"] == observation["stop"], physical_search
+    known = physical["physical_templates"]
+    assert known["block_count"] == 1 and known["noise_free_energy"] > 0, physical_search
+    assert math.isclose(known["hypotheses"][known["wanted_bit"]]["clean_coherence_power"], 1, abs_tol=1e-12), physical_search
+    winner = physical["winning_public_cell"]
+    assert abs(winner["single_cell_log_lr_replay_difference"]) <= 2e-9 * max(1, abs(winner["search_maximum_single_cell_log_lr"])), physical_search
+    refined_search = invoke("--mode", "hf-search", "--scenario", "awgn", "--waveform", "smoke",
+                            "--search-slot", "1", "--cn0", "40", "--max-wall-seconds", "25",
+                            "--hf-physical-diagnostic", "--hf-phase-refinement", "--chunk", "1021")
+    refined_diagnostic = refined_search["hf_public_search"]
+    assert refined_diagnostic["refinement_enabled"] and not refined_diagnostic["affine_comparison_evaluated"], refined_search
+    assert refined_search["channel"]["selected_observation_sha256"] == search["channel"]["selected_observation_sha256"], refined_search
+    refined_physical = refined_search["hf_physical_diagnostic"]
+    assert refined_physical["physical_templates"]["template_sha256"] == physical["physical_templates"]["template_sha256"], refined_search
+    assert refined_physical["refinement_replay_available"], refined_search
+    refined_cell = refined_physical["refined_public_cell"]
+    assert abs(refined_cell["single_cell_log_lr_replay_difference"]) <= 2e-9 * max(1, abs(refined_cell["search_maximum_single_cell_log_lr"])), refined_search
+    assert refined_physical["public_refinement_proposals"]["not_admitted_evidence"], refined_search
+    assert not refined_physical["public_refinement_proposals"]["uses_physical_truth"], refined_search
+    compound_search = invoke("--mode", "hf-search", "--scenario", "hf-eikonal-compound", "--waveform", "smoke",
+                             "--cn0", "20", "--max-wall-seconds", "25", "--hf-physical-diagnostic")
+    assert compound_search["plan"]["path_count"] == 2 and compound_search["plan"]["assumed_public_taps"] == 1, compound_search
+    compound_physical = compound_search["hf_physical_diagnostic"]["physical_templates"]
+    assert compound_physical["noise_free_energy"] > 0, compound_search
+    assert math.isclose(compound_physical["hypotheses"][compound_physical["wanted_bit"]]["clean_coherence_power"], 1, abs_tol=1e-12), compound_search
+    for arguments in (["--mode", "receive"], ["--control", "noise"], ["--search-slot", "3"]):
+        rejected = invoke("--mode", "hf-search", "--scenario", "awgn", "--waveform", "smoke",
+                          "--hf-physical-diagnostic", *arguments, code=2)
+        assert "physical diagnostic" in rejected["reason"], rejected
     for arguments, code in ((["--helper"], 2), (["--backend", "cuda"], 2),
             (["--control", "capture-gap"], 2), (["--search-slot", "5"], 2),
             (["--scenario", "hf-ox-split"], 5), (["--scenario", "noise-bursts"], 5),
@@ -95,6 +132,10 @@ def main() -> None:
             (["--search-slot", "1", "--capture-digest-slot", "0"], 2)):
         rejected = invoke("--mode", "hf-search", "--scenario", "awgn", "--waveform", "smoke", *arguments, code=code)
         assert rejected["status"] in ("error", "unavailable"), rejected
+    for mode in ("receive", "slot", "oracle", "plan"):
+        rejected = invoke("--mode", mode, "--scenario", "awgn", "--waveform", "smoke",
+                          "--hf-phase-refinement", code=2)
+        assert "phase refinement" in rejected["reason"], rejected
     for arguments, code in ((["--mode", "hf-search"], 2), (["--helper"], 2),
                             (["--backend", "cuda"], 2), (["--scenario", "hf-ox-split"], 5)):
         rejected = invoke("--mode", "receive", "--scenario", "awgn", "--waveform", "smoke",
@@ -176,6 +217,22 @@ def main() -> None:
     callbacks = {slot["slot_index"] for slot in phase_report["slots"] if slot["component_complete"]}
     assert {quiet_start, quiet_start + 1} <= callbacks, phase_receive
     assert phase_report["executed_slots"] == len(callbacks), phase_receive
+    refined_receive = invoke("--mode", "receive", *common, "--capture-digest-slot", "1",
+                             "--hf-public-phase-receiver", "--hf-phase-refinement")
+    refined_outcomes = refined_receive["outcomes"]
+    assert refined_outcomes["correct_complete"] and refined_outcomes["correct_decoded_complete"], refined_receive
+    assert refined_outcomes["false_data"] == refined_outcomes["wrong_bits"] == refined_outcomes["premature_completions"] == 0, refined_receive
+    assert refined_outcomes["physical_completions"] == 1 and not refined_outcomes["missed_completion"], refined_receive
+    refined_messages = [message for message in refined_receive["messages"] if message["decoded"]]
+    assert len(refined_messages) == 1 and refined_messages[0]["decoded_payload_bytes"] == list(wanted["plan"]["message"].encode("ascii")), refined_receive
+    assert refined_receive["channel"]["selected_observation_sha256"] == wanted["channel"]["selected_observation_sha256"], refined_receive
+    assert refined_receive["receiver"]["workers"] == wanted["receiver"]["workers"], refined_receive
+    assert refined_receive["plan"]["evaluator_reserved_bytes_per_public_slot"] == 65536, refined_receive
+    refined_report = refined_receive["hf_public_phase_receiver"]
+    assert refined_report["refinement_enabled"] and refined_report["fixed_weight"] == .25, refined_receive
+    refined_callbacks = {slot["slot_index"] for slot in refined_report["slots"] if slot["component_complete"]}
+    assert {quiet_start, quiet_start + 1} <= refined_callbacks, refined_receive
+    assert refined_report["executed_slots"] == len(refined_callbacks), refined_receive
     chunked = invoke("--mode", "receive", *common, "--chunk", "1021", "--capture-digest-slot", "1")
     assert chunked["channel"]["input_sha256"] == wanted["channel"]["input_sha256"], chunked
     assert chunked["channel"]["selected_observation_sha256"] == wanted["channel"]["selected_observation_sha256"], chunked
@@ -230,6 +287,20 @@ def main() -> None:
     runner = importlib.util.module_from_spec(runner_spec)
     sys.modules[runner_spec.name] = runner
     runner_spec.loader.exec_module(runner)
+    runner._validate_completed_receipt(refined_receive, {
+        "id": "refinement-native-integration", "scenario": "awgn", "mode": "receive", "waveform": "smoke",
+        "seed": 5489, "cn0_db_hz": 40, "capture_digest_slot": 1, "hf_public_phase_receiver": True,
+        "hf_phase_refinement": True})
+    runner._validate_completed_receipt(refined_search, {
+        "id": "refinement-integration", "scenario": "awgn", "mode": "hf-search", "waveform": "smoke",
+        "seed": 5489, "search_slot": 1, "cn0_db_hz": 40, "hf_physical_diagnostic": True,
+        "hf_phase_refinement": True, "chunk": 1021})
+    runner._validate_completed_receipt(compound_search, {
+        "id": "compound-integration", "scenario": "hf-eikonal-compound", "mode": "hf-search", "waveform": "smoke",
+        "seed": 5489, "cn0_db_hz": 20, "hf_physical_diagnostic": True})
+    runner._validate_completed_receipt(physical_search, {
+        "id": "physical-integration", "scenario": "awgn", "mode": "hf-search", "waveform": "smoke",
+        "seed": 5489, "search_slot": 1, "cn0_db_hz": 40, "hf_physical_diagnostic": True, "chunk": 1021})
     runner._validate_completed_receipt(repaired, {
         "id": "native-rs20-one-fade", "mode": "receive", "scenario": "awgn", "waveform": "smoke",
         "seed": 5489, "cn0_db_hz": 40, "fec": "rs20", "control": "interior-fade", "fade_slots": 1})

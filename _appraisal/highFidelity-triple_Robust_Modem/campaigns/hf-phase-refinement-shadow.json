@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "name": "hf-phase-refinement-shadow",
+  "purpose": "Frozen refined same-input shadow discriminator; full public priors and no message claim.",
+  "max_wall_seconds": 600,
+  "per_trial_wall_seconds": 300,
+  "max_trials": 2,
+  "max_samples": 8000000,
+  "episodes": [
+    {
+      "id": "offgrid-failed-slot2",
+      "scenario": "hf-vertical-eikonal-holdout",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 11001,
+      "bit_seconds": 128,
+      "cn0_db_hz": 0,
+      "control": "wanted",
+      "search_slot": 2,
+      "search_timing": "full",
+      "hf_phase_refinement": true,
+      "hf_physical_diagnostic": true
+    },
+    {
+      "id": "motion-weak-long-slot1",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 10201,
+      "bit_seconds": 512,
+      "cn0_db_hz": -6,
+      "control": "wanted",
+      "search_slot": 1,
+      "search_timing": "full",
+      "hf_phase_refinement": true
+    }
+  ]
+}

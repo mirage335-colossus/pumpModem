@@ -7,6 +7,7 @@ set(_hf_root "${CMAKE_CURRENT_LIST_DIR}")
 add_library(high_fidelity_channel STATIC "${_hf_root}/src/channel.cpp" "${_hf_root}/src/scenarios.cpp"
   "${_hf_root}/src/hf_scenarios.cpp" "${_hf_root}/src/hf_ionosphere.cpp"
   "${_hf_root}/src/hf_history.cpp" "${_hf_root}/src/hf_phase_bank.cpp" "${_hf_root}/src/hf_public_statistics.cpp"
+  "${_hf_root}/src/hf_phase_refinement.cpp"
   "${_hf_root}/src/hf_replay.cpp" "${_hf_root}/src/lunar_spectral.cpp")
 target_include_directories(high_fidelity_channel PUBLIC "${_hf_root}/include" PRIVATE "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(high_fidelity_channel PUBLIC datapump_triad)
@@ -48,7 +49,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 if(BUILD_TESTING)
-  foreach(_hf_test channel scenarios hf_scenarios hf_ionosphere hf_history hf_phase_bank hf_public_statistics hf_replay impairment_observables lunar_spectral)
+  foreach(_hf_test channel scenarios hf_scenarios hf_ionosphere hf_history hf_phase_bank hf_public_statistics hf_phase_refinement hf_replay impairment_observables lunar_spectral)
     add_executable(high_fidelity_test_${_hf_test} "${_hf_root}/tests/test_${_hf_test}.cpp")
     target_include_directories(high_fidelity_test_${_hf_test} PRIVATE "${PROJECT_SOURCE_DIR}/src" "${_hf_root}/src")
     target_link_libraries(high_fidelity_test_${_hf_test} PRIVATE high_fidelity_channel)
@@ -76,6 +77,7 @@ if(BUILD_TESTING)
     high_fidelity_test_channel high_fidelity_test_scenarios
     high_fidelity_test_hf_scenarios high_fidelity_test_hf_ionosphere high_fidelity_test_hf_history
     high_fidelity_test_hf_phase_bank high_fidelity_test_hf_public_statistics high_fidelity_test_hf_native_supplement
+    high_fidelity_test_hf_phase_refinement
     high_fidelity_test_hf_public_receiver high_fidelity_test_hf_replay
     high_fidelity_test_impairment_observables high_fidelity_test_lunar_spectral)
 endif()

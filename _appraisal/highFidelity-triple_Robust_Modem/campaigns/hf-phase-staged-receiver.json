@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "name": "hf-phase-staged-receiver",
+  "purpose": "Frozen conditional complete-message acceptance of grouped proposal remedy: matched original cases, fresh long holdout pair, and long negative controls.",
+  "max_wall_seconds": 1800,
+  "per_trial_wall_seconds": 300,
+  "max_trials": 6,
+  "max_samples": 8000000,
+  "episodes": [
+    {
+      "id": "motion-weak-long-staged",
+      "scenario": "hf-vertical-eikonal-motion",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 10201,
+      "bit_seconds": 512,
+      "cn0_db_hz": -6,
+      "control": "wanted",
+      "hf_public_phase_receiver": true,
+      "hf_phase_refinement": true,
+      "capture_digest_slot": 1
+    },
+    {
+      "id": "offgrid-weak-long-staged",
+      "scenario": "hf-vertical-eikonal-holdout",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 11001,
+      "bit_seconds": 512,
+      "cn0_db_hz": -6,
+      "control": "wanted",
+      "hf_public_phase_receiver": true,
+      "hf_phase_refinement": true,
+      "capture_digest_slot": 1
+    },
+    {
+      "id": "fresh-b-weak-long-baseline",
+      "scenario": "hf-eikonal-holdout-b",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 13001,
+      "bit_seconds": 512,
+      "cn0_db_hz": -6,
+      "control": "wanted",
+      "hf_public_phase_receiver": true,
+      "hf_phase_refinement": false,
+      "capture_digest_slot": 1
+    },
+    {
+      "id": "fresh-b-weak-long-staged",
+      "scenario": "hf-eikonal-holdout-b",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 13001,
+      "bit_seconds": 512,
+      "cn0_db_hz": -6,
+      "control": "wanted",
+      "hf_public_phase_receiver": true,
+      "hf_phase_refinement": true,
+      "capture_digest_slot": 1
+    },
+    {
+      "id": "long-noise-staged",
+      "scenario": "hf-vertical-eikonal-holdout",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 13002,
+      "bit_seconds": 512,
+      "cn0_db_hz": -6,
+      "control": "noise",
+      "hf_public_phase_receiver": true,
+      "hf_phase_refinement": true,
+      "capture_digest_slot": 1
+    },
+    {
+      "id": "long-wrong-key-staged",
+      "scenario": "hf-vertical-eikonal-holdout",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 13002,
+      "bit_seconds": 512,
+      "cn0_db_hz": -6,
+      "control": "wrong-key",
+      "hf_public_phase_receiver": true,
+      "hf_phase_refinement": true,
+      "capture_digest_slot": 1
+    }
+  ]
+}

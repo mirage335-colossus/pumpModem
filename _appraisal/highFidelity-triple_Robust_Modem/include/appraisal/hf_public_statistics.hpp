@@ -5,9 +5,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <span>
 #include <stop_token>
+
+namespace datapump::modem::detail::search_fft { struct DoublePlan; }
 
 namespace appraisal {
 
@@ -25,6 +28,7 @@ struct HfPublicStatisticsConfig {
     std::size_t maximum_fft_rows = 1U << 22;
     std::uint64_t maximum_fft_row_stages = 4'000'000'000ULL;
     std::size_t maximum_workspace_bytes = 256U * 1024 * 1024;
+    friend bool operator==(const HfPublicStatisticsConfig&, const HfPublicStatisticsConfig&) = default;
 };
 
 struct HfPublicStatisticsPlan {
@@ -46,6 +50,7 @@ struct HfPublicStatisticsPlan {
     // block sufficient statistics are excluded from all three quotes.
     std::size_t shared_workspace_bytes = 0, lane_workspace_bytes = 0;
     std::size_t workspace_bytes = 0;
+    friend bool operator==(const HfPublicStatisticsPlan&, const HfPublicStatisticsPlan&) = default;
 };
 
 struct HfPublicPhaseModel {
@@ -82,6 +87,18 @@ struct HfPublicStatisticsReport {
     static constexpr double gain_prior_variance = 1;
 };
 
+struct HfPublicFrequencyEvidence {
+    long double log_sum = -std::numeric_limits<long double>::infinity();
+    long double maximum = -std::numeric_limits<long double>::infinity();
+    double maximum_frequency = 0;
+};
+
+// Reduce the native DFT over the full public CFO lattice. The caller supplies
+// the fixed prior denominator.
+HfPublicFrequencyEvidence hf_public_frequency_evidence(const HfPublicStatisticsPlan&,
+    std::span<const datapump::triad::v3::Complex> spectrum, double template_energy,
+    std::stop_token);
+
 // All geometry and resource caps are checked before allocating FFT storage.
 // The symmetric CFO lattice is rounded OUTWARD: +/-ceil(F/df)*df, so its
 // actual fixed prior support can exceed configured F by less than one bin.
@@ -103,6 +120,7 @@ public:
     HfPreparedPublicStatistics(const HfPreparedPublicStatistics&) = delete;
     HfPreparedPublicStatistics& operator=(const HfPreparedPublicStatistics&) = delete;
     const HfPublicStatisticsPlan& plan() const;
+    const datapump::modem::detail::search_fft::DoublePlan& fft_plan() const;
     std::size_t shared_workspace_bytes() const;
     double preparation_wall_seconds() const;
     std::uint64_t prepared_phase_values() const;

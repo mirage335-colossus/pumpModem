@@ -196,7 +196,9 @@ std::vector<std::string> scenario_names() {
             "groundwave-1mhz-sea", "groundwave-1mhz-night", "groundwave-30mhz",
             "groundwave-30mhz-land", "hf-quiet", "hf-disturbed", "hf-transition", "hf-nvis-disturbed", "hf-drm6",
             "hf-watterson-i1", "hf-watterson-i3", "hf-ox-split", "hf-ox-cancellation", "hf-trough-static", "hf-trough-phase",
-            "hf-mode-transition", "hf-vertical-eikonal-static", "hf-vertical-eikonal-motion", "hf-ding-measured", "hf-ding-amplitude",
+            "hf-mode-transition", "hf-vertical-eikonal-static", "hf-vertical-eikonal-motion", "hf-vertical-eikonal-holdout",
+            "hf-eikonal-holdout-a", "hf-eikonal-holdout-b", "hf-eikonal-compound", "hf-eikonal-cfo-edge",
+            "hf-ding-measured", "hf-ding-amplitude",
             "hf-ding-phase", "hf-ding-measured-late", "hf-ding-clock41",
             "eme-disk-episode", "eme-patch-episode", "eme-severe-episode",
             "noise-bursts", "noise-white", "noise-white-ar1", "noise-white-shot", "frontend-overload"};

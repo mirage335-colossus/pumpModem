@@ -41,7 +41,7 @@ ROOT_KEYS = {"schema_version", "name", "purpose", "max_wall_seconds", "per_trial
 EPISODE_KEYS = {"id", "scenario", "mode", "waveform", "seed", "cn0_db_hz", "control",
                 "helper", "backend", "bit_seconds", "duration_seconds", "pulse", "stratum",
                 "oracle_slot", "search_slot", "search_timing", "capture_digest_slot", "chunk", "message", "max_wall_seconds", "max_samples",
-                "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "fec", "fade_slots", "capture_lead_seconds"}
+                "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "fec", "fade_slots", "capture_lead_seconds"}
 MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose", "hf-search"}
 CONTROLS = {"wanted", "noise", "wrong-key", "wrong-ordinal", "interior-fade", "capture-gap", "eof"}
 BACKENDS = {"cpu", "cuda", "vulkan", "gpu"}
@@ -108,7 +108,7 @@ def _read_campaign(path: Path) -> dict[str, Any]:
             raise CampaignError(f"stratum {name!r} must contain exactly {count} wanted receive episodes with distinct seeds")
         invariant_fields = ("scenario", "mode", "waveform", "cn0_db_hz", "control", "helper",
                             "backend", "bit_seconds", "duration_seconds", "pulse", "oracle_slot", "search_slot", "search_timing", "capture_digest_slot", "chunk",
-                            "message", "max_wall_seconds", "max_samples", "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "fec", "fade_slots", "capture_lead_seconds")
+                            "message", "max_wall_seconds", "max_samples", "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "fec", "fade_slots", "capture_lead_seconds")
         reference = matched[0]
         heterogeneous = [field for field in invariant_fields
                          if any(episode.get(field) != reference.get(field) for episode in matched[1:])]
@@ -178,7 +178,7 @@ def _validate_episode(item: Any, index: int, ids: set[str],
     if "history_reference_delay_seconds" in item:
         _bounded_number(item["history_reference_delay_seconds"],
                         f"episodes[{index}].history_reference_delay_seconds", 0, sys.float_info.max)
-    for field in ("hf_phase_bank", "hf_public_phase_receiver"):
+    for field in ("hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement"):
         if field in item and not isinstance(item[field], bool):
             raise CampaignError(f"episodes[{index}].{field} must be boolean")
     if "chunk" in item:
@@ -232,6 +232,11 @@ def _validate_episode(item: Any, index: int, ids: set[str],
             raise CampaignError(f"episodes[{index}]: hf-search requires wanted, noise, wrong-key or wrong-ordinal control")
         if item.get("helper", False) or item.get("backend", "cpu") != "cpu":
             raise CampaignError(f"episodes[{index}]: hf-search requires Helper-off CPU")
+    if item.get("hf_phase_refinement", False) and not (mode == "hf-search" or
+            (mode in {"receive", "slot"} and item.get("hf_public_phase_receiver", False))):
+        raise CampaignError(f"episodes[{index}]: phase refinement requires hf-search or the public phase receiver")
+    if item.get("hf_physical_diagnostic", False) and (mode != "hf-search" or control != "wanted"):
+        raise CampaignError(f"episodes[{index}]: physical diagnostic requires wanted hf-search mode")
     if item.get("hf_public_phase_receiver", False):
         if mode not in {"receive", "slot"} or item.get("helper", False) or item.get("backend", "cpu") != "cpu":
             raise CampaignError(f"episodes[{index}]: HF public phase receiver requires receive/slot with Helper-off CPU")
@@ -264,10 +269,12 @@ def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_se
                         ("capture_lead_seconds", "--capture-lead-seconds"),
                         ("history_reference_delay_seconds", "--history-reference-delay-seconds"),
                         ("hf_phase_bank", "--hf-phase-bank"),
-                        ("hf_public_phase_receiver", "--hf-public-phase-receiver")):
+                        ("hf_public_phase_receiver", "--hf-public-phase-receiver"),
+                        ("hf_physical_diagnostic", "--hf-physical-diagnostic"),
+                        ("hf_phase_refinement", "--hf-phase-refinement")):
         if key in episode:
             value = episode[key]
-            if key in {"helper", "hf_phase_bank", "hf_public_phase_receiver"}:
+            if key in {"helper", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement"}:
                 if value:
                     command.append(option)
             else:
@@ -301,6 +308,149 @@ def _is_finite_number(value: Any) -> bool:
 
 def _is_nonnegative_int(value: Any) -> bool:
     return not isinstance(value, bool) and isinstance(value, int) and value >= 0
+
+
+def _validate_refinement_trace(trace: Any, *, full: bool, timing_count: int,
+                               block_count: Any = None, block_rows: Any = None,
+                               sample_rate: Any = None, aperture_seconds: float | None = None) -> None:
+    """Check fixed-mixture provenance and the bounded public refinement receipt."""
+    if (not isinstance(trace, dict) or trace.get("enabled") is not True or
+            trace.get("old_family_weight") != .5 or trace.get("new_family_weight") != .5):
+        raise CampaignError("phase refinement is missing its enabled equal-prior public trace")
+    scores = []
+    for field in ("old_bit_log_e", "new_bit_log_e", "combined_bit_log_e"):
+        values = trace.get(field)
+        if (not isinstance(values, list) or len(values) != 2 or
+                any(value is not None and not _is_finite_number(value) for value in values)):
+            raise CampaignError("phase refinement requires finite or omitted-mass bit evidence")
+        scores.append(values)
+    for old, new, combined in zip(*scores):
+        available = [value for value in (old, new) if value is not None]
+        expected = None
+        if available:
+            peak = max(available)
+            expected = peak + math.log(sum(math.exp(value - peak) for value in available)) - math.log(2)
+        if ((expected is None) != (combined is None) or
+                (expected is not None and not math.isclose(expected, combined, rel_tol=1e-10, abs_tol=1e-9))):
+            raise CampaignError("phase refinement must preserve the equal old/new family prior")
+    availability_fields = ("requested", "executed", "unavailable_reason")
+    explicit_availability = any(field in trace for field in availability_fields)
+    executed = trace.get("executed", True)
+    if explicit_availability and (trace.get("requested") is not True or not isinstance(trace.get("executed"), bool) or
+            not isinstance(trace.get("unavailable_reason"), str) or
+            (executed and trace["unavailable_reason"] != "") or
+            (not executed and not trace["unavailable_reason"].strip())):
+        raise CampaignError("phase refinement must explicitly distinguish executed and unavailable requested work")
+    work_fields = ("fft_row_stages", "spectrum_cells", "table_lookups", "direct_sweeps", "direct_rows",
+                   "phase_rotations", "trigonometric_evaluations", "likelihood_cells")
+    if not executed:
+        if trace["unavailable_reason"] not in {"new_phase_planner_unsupported", "new_phase_work_count_overflow",
+                "new_phase_fft_work_cap", "new_phase_table_lookup_cap", "new_phase_direct_row_cap"}:
+            raise CampaignError("only public new-family planning limits permit the declared fixed-prior fallback")
+        if scores[1] != [None, None]:
+            raise CampaignError("unavailable new-family evidence must retain zero prior contribution")
+        empty_fields = ["old_top_timing_indices", "segmented_top_timing_indices", "selected_timing_indices", "timing_ranks"]
+        empty_fields.append("timing_results" if full else "selected_shape_counts")
+        if any(trace.get(field) != [] for field in empty_fields):
+            raise CampaignError("unavailable refinement must not retain selected timings, ranks, shapes or proposals")
+        for field in ("timing_results", "selected_shape_counts"):
+            if field in trace and trace[field] != []:
+                raise CampaignError("unavailable refinement must have empty optional result arrays")
+        if any(field in trace for field in ("shape_count", "nu_count", "nu_step_hz", "intermediate_group_rows",
+                "intermediate_group_count", "intermediate_iteration_limit", "coherent_iteration_limit")):
+            raise CampaignError("unavailable refinement must not claim an executed phase or stage plan")
+        work = trace.get("work")
+        if (not isinstance(work, dict) or any(not _is_nonnegative_int(work.get(field)) or work[field] != 0 for field in work_fields) or
+                not _is_nonnegative_int(trace.get("retained_statistics_workspace_bytes")) or
+                trace["retained_statistics_workspace_bytes"] != 0 or
+                not _is_finite_number(trace.get("retained_new_prior_mass")) or trace["retained_new_prior_mass"] != 0):
+            raise CampaignError("unavailable refinement must report zero actual new work, storage and retained mass")
+        if "work_bound" in trace:
+            bound = trace["work_bound"]
+            if (not isinstance(bound, dict) or any(not _is_nonnegative_int(bound.get(field)) for field in work_fields) or
+                    trace.get("work_bound_scope") != "full public timing preflight; unavailable family was not admitted or executed"):
+                raise CampaignError("unavailable refinement attempted work bound must remain a valid public quote")
+        return
+    groups = []
+    for field, limit in (("old_top_timing_indices", 3), ("segmented_top_timing_indices", 3), ("selected_timing_indices", 6)):
+        values = trace.get(field)
+        if (not isinstance(values, list) or len(values) > limit or
+                any(not _is_nonnegative_int(value) or value >= timing_count for value in values) or len(set(values)) != len(values)):
+            raise CampaignError("phase refinement timing frontier exceeds its fixed public bound")
+        groups.append(values)
+    if set(groups[2]) != set(groups[0]) | set(groups[1]):
+        raise CampaignError("phase refinement frontier must preserve both proposal rankings")
+    for field in ("shape_count", "nu_count"):
+        if not _is_nonnegative_int(trace.get(field)) or trace[field] == 0:
+            raise CampaignError("phase refinement requires the full fixed shape prior dimensions")
+    if not _is_finite_number(trace.get("nu_step_hz")) or trace["nu_step_hz"] < 0:
+        raise CampaignError("phase refinement requires its fixed nu lattice")
+    stage_fields = ("intermediate_group_rows", "intermediate_group_count",
+                    "intermediate_iteration_limit", "coherent_iteration_limit")
+    staged = any(field in trace for field in stage_fields)
+    grouped = False
+    if staged:
+        if any(not _is_nonnegative_int(trace.get(field)) for field in stage_fields):
+            raise CampaignError("staged phase refinement requires complete integer public plan dimensions")
+        if (not _is_nonnegative_int(block_count) or block_count == 0 or
+                not _is_nonnegative_int(block_rows) or block_rows == 0 or
+                not _is_finite_number(sample_rate) or sample_rate <= 0):
+            raise CampaignError("staged phase refinement requires the enclosing public block geometry")
+        group_rows, group_count = (trace[field] for field in stage_fields[:2])
+        grouped = group_count > 0
+        block_seconds = block_rows / sample_rate
+        if ((group_rows > 0) != grouped or
+                trace["intermediate_iteration_limit"] != (8 if grouped else 0) or
+                trace["coherent_iteration_limit"] != (8 if grouped else 16)):
+            raise CampaignError("staged phase refinement must preserve the bounded 8+8 or 0+16 proposal budget")
+        if grouped:
+            expected_rows = 4 * min(block_count, max(1, int(8 / block_seconds)))
+            if group_rows != expected_rows or group_count != 1 + (block_count - 1) // group_rows:
+                raise CampaignError("intermediate phase groups must partition the declared public blocks")
+        # A partial last block does not establish an exact duration. Only
+        # require the threshold when the public interval makes it certain.
+        if aperture_seconds is not None:
+            if not _is_finite_number(aperture_seconds) or grouped != (aperture_seconds >= 180):
+                raise CampaignError("staged phase refinement disagrees with the public aperture threshold")
+        elif ((block_count - 1) * block_seconds >= 180 and not grouped) or (block_count * block_seconds < 180 and grouped):
+            raise CampaignError("staged phase refinement disagrees with the public block-duration bound")
+    work, bound = trace.get("work"), trace.get("work_bound")
+    if (not isinstance(work, dict) or not isinstance(bound, dict) or
+            any(not _is_nonnegative_int(work.get(field)) or not _is_nonnegative_int(bound.get(field)) or
+                work[field] > bound[field] for field in work_fields)):
+        raise CampaignError("phase refinement work must obey every declared numerical bound")
+    if full:
+        rows = trace.get("timing_results")
+        if (not isinstance(rows, list) or len(rows) != len(groups[2]) or
+                any(not isinstance(row, dict) or not _is_nonnegative_int(row.get("timing_index")) for row in rows) or
+                sorted(row["timing_index"] for row in rows) != sorted(groups[2])):
+            raise CampaignError("shadow refinement must preserve all selected timing results")
+        intermediate_fields = ("intermediate_used", "intermediate_initial_log_lr",
+                               "intermediate_final_log_lr", "intermediate_accepted_steps")
+        for row in rows:
+            proposals = row.get("proposals")
+            if staged and (not isinstance(proposals, list) or not _is_nonnegative_int(row.get("proposal_count")) or
+                           row["proposal_count"] != len(proposals) or len(proposals) > 3):
+                raise CampaignError("staged shadow refinement requires its bounded proposal count")
+            for proposal in proposals if isinstance(proposals, list) else []:
+                present = isinstance(proposal, dict) and any(field in proposal for field in intermediate_fields)
+                if not staged:
+                    if present:
+                        raise CampaignError("intermediate proposal diagnostics require their public grouped plan")
+                    continue
+                if (not isinstance(proposal, dict) or proposal.get("intermediate_used") is not grouped or
+                        any(not _is_finite_number(proposal.get(field)) for field in
+                            ("intermediate_initial_log_lr", "intermediate_final_log_lr", "initial_log_lr", "continuous_log_lr")) or
+                        not _is_nonnegative_int(proposal.get("accepted_steps")) or
+                        proposal["accepted_steps"] > trace["coherent_iteration_limit"] or
+                        not _is_nonnegative_int(proposal.get("intermediate_accepted_steps")) or
+                        proposal["intermediate_accepted_steps"] > trace["intermediate_iteration_limit"]):
+                    raise CampaignError("staged proposal diagnostics must be finite and obey both iteration limits")
+                if (proposal["intermediate_final_log_lr"] < proposal["intermediate_initial_log_lr"] or
+                        proposal["continuous_log_lr"] < proposal["initial_log_lr"]):
+                    raise CampaignError("each proposal stage must preserve its own nondecreasing objective")
+                if not grouped and (proposal["intermediate_initial_log_lr"] != 0 or proposal["intermediate_final_log_lr"] != 0):
+                    raise CampaignError("unused intermediate proposal diagnostics must remain zero")
 
 
 def _communication_endpoint(episode: dict[str, Any]) -> str:
@@ -495,6 +645,14 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
             raise CampaignError("native channel duration does not match the frozen episode")
     if plan.get("helper_enabled") is not episode.get("helper", False):
         raise CampaignError("native plan Helper setting does not match the frozen episode")
+    refinement_requested = episode.get("hf_phase_refinement", False)
+    if plan.get("hf_phase_refinement_requested", False) is not refinement_requested:
+        raise CampaignError("native phase refinement request does not match the frozen episode")
+    physical_requested = episode.get("hf_physical_diagnostic", False)
+    if plan.get("hf_physical_diagnostic_requested", False) is not physical_requested:
+        raise CampaignError("native physical diagnostic request does not match the frozen episode")
+    if not physical_requested and "hf_physical_diagnostic" in receipt:
+        raise CampaignError("unrequested physical diagnostic in native receipt")
     phase_receiver_requested = episode.get("hf_public_phase_receiver", False)
     if plan.get("hf_public_phase_receiver_requested", False) is not phase_receiver_requested:
         raise CampaignError("native public phase receiver request does not match the frozen episode")
@@ -502,7 +660,8 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
         phase_receiver = receipt.get("hf_public_phase_receiver")
         if (not isinstance(phase_receiver, dict) or phase_receiver.get("experimental") is not True or
                 phase_receiver.get("truth_information_passed_to_search") is not False or
-                phase_receiver.get("model_family") != "sinusoidal_phase_97" or
+                phase_receiver.get("refinement_enabled", False) is not refinement_requested or
+                phase_receiver.get("model_family") != ("equal_prior_fixed97_and_cartesian_refinement" if refinement_requested else "sinusoidal_phase_97") or
                 not _is_finite_number(phase_receiver.get("fixed_weight")) or phase_receiver["fixed_weight"] != .25):
             raise CampaignError("experimental public phase receiver must report its fixed family/prior and no truth inputs")
         maximum = phase_receiver.get("maximum_slot_reports")
@@ -517,6 +676,16 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
             if (not isinstance(report, dict) or not _is_nonnegative_int(report.get("slot_index")) or
                     report["slot_index"] >= maximum or report.get("component_complete") is not True):
                 raise CampaignError("public phase receiver must report complete bounded supplement callbacks")
+            if refinement_requested:
+                count = report.get("evaluated_timing_atoms")
+                if not _is_nonnegative_int(count) or count == 0:
+                    raise CampaignError("operational refinement must report evaluated timing geometry")
+                _validate_refinement_trace(report.get("phase_refinement"), full=False, timing_count=count,
+                    block_count=report.get("blocks"), block_rows=report.get("block_rows"), sample_rate=plan.get("sample_rate_hz"))
+                if report.get("bit_log_e") != report["phase_refinement"]["combined_bit_log_e"]:
+                    raise CampaignError("operational refinement callback must use the reported combined evidence")
+            elif report.get("phase_refinement", {"enabled": False}) != {"enabled": False}:
+                raise CampaignError("unrequested operational phase refinement trace")
             indices.append(report["slot_index"])
         if len(set(indices)) != len(indices):
             raise CampaignError("public phase receiver must not duplicate slot callback reports")
@@ -662,6 +831,27 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
         if (not isinstance(diagnostic, dict) or diagnostic.get("component_complete") is not True or
                 not _is_nonnegative_int(diagnostic.get("slot_index")) or diagnostic["slot_index"] != selected):
             raise CampaignError("HF search requires a completed public-search diagnostic for the selected slot")
+        if diagnostic.get("refinement_enabled", False) is not refinement_requested:
+            raise CampaignError("shadow phase refinement does not match the frozen request")
+        if refinement_requested:
+            if diagnostic.get("affine_comparison_evaluated") is not False or diagnostic.get("selected_timing_renormalized") is not False:
+                raise CampaignError("refinement shadow must preserve operational geometry and full timing prior")
+            count = diagnostic.get("evaluated_timing_atoms")
+            if not _is_nonnegative_int(count) or count == 0:
+                raise CampaignError("refinement shadow requires its evaluated timing geometry")
+            sample_rate = plan.get("sample_rate_hz")
+            aperture_seconds = ((observation["stop"] - observation["first"]) / sample_rate
+                if _is_finite_number(sample_rate) and sample_rate > 0 else None)
+            _validate_refinement_trace(diagnostic.get("phase_refinement"), full=True, timing_count=count,
+                block_count=diagnostic.get("blocks"), block_rows=diagnostic.get("block_rows"),
+                sample_rate=sample_rate, aperture_seconds=aperture_seconds)
+            families = diagnostic.get("families")
+            if (not isinstance(families, list) or len(families) != 3 or
+                    not isinstance(families[2], dict) or
+                    families[2].get("bit_log_e") != diagnostic["phase_refinement"]["old_bit_log_e"]):
+                raise CampaignError("refinement must preserve the separately reported fixed97 evidence")
+        elif diagnostic.get("phase_refinement", {"enabled": False}) != {"enabled": False}:
+            raise CampaignError("unrequested shadow phase refinement trace")
         for field in ("receiver_executed", "completion_evaluated", "capacity_qualified", "truth_information_passed_to_search"):
             if diagnostic.get(field) is not False:
                 raise CampaignError("HF public search must preserve shadow-only scope without truth inputs")
@@ -690,6 +880,116 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
             raise CampaignError("negative-control HF search must not expect a wanted receiver bit")
         if not evaluation["transmitted_active"] and expected is not None:
             raise CampaignError("quiet HF search must not expect a wanted receiver bit")
+        if physical_requested:
+            physical = receipt.get("hf_physical_diagnostic")
+            if (not isinstance(physical, dict) or physical.get("component_complete") is not True or
+                    physical.get("slot_index") != selected or physical.get("observation") != observation or
+                    physical.get("observation_sha256") != digest or expected is None or
+                    physical.get("prefix_samples_rendered_per_twin") != observation["stop"]):
+                raise CampaignError("physical diagnostic must use the complete unchanged selected observation and full prefix")
+            for flag in ("truth_information_passed_to_search", "receiver_executed", "completion_evaluated",
+                         "capacity_qualified", "is_theoretical_upper_bound"):
+                if physical.get(flag) is not False:
+                    raise CampaignError("physical diagnostic must preserve finite evaluator-only scope")
+            if physical.get("gain_prior_variance") != 1:
+                raise CampaignError("physical diagnostic must use the fixed CN(0,1) gain prior")
+            winner = physical.get("winning_public_cell")
+            if not isinstance(winner, dict):
+                raise CampaignError("physical diagnostic requires the selected public-cell replay")
+            refined_available = physical.get("refinement_replay_available", False)
+            refinement_trace = diagnostic.get("phase_refinement", {})
+            refinement_executed = refinement_requested and refinement_trace.get("executed", True)
+            if (physical.get("refinement_requested", False) is not refinement_requested or
+                    not isinstance(refined_available, bool) or (refined_available and not refinement_executed)):
+                raise CampaignError("physical refinement replay must match the requested public search")
+            projection_groups = [physical.get("physical_templates"), winner.get("projection")]
+            replay_cells = [winner]
+            if refined_available:
+                refined = physical.get("refined_public_cell")
+                if not isinstance(refined, dict):
+                    raise CampaignError("physical refinement replay needs its selected snapped public cell")
+                shape = refined.get("shape_id")
+                if (not isinstance(shape, dict) or any(isinstance(shape.get(field), bool) or not isinstance(shape.get(field), int)
+                        for field in ("a", "b")) or not 0 < shape["a"]**2 + shape["b"]**2 <= 64**2 or
+                        not _is_nonnegative_int(shape.get("nu")) or shape["nu"] >= diagnostic["phase_refinement"]["nu_count"]):
+                    raise CampaignError("physical refinement must use a valid fixed-grid shape ID")
+                bit = refined.get("selected_bit")
+                timing_index = refined.get("timing_index")
+                trace_rows = diagnostic["phase_refinement"]["timing_results"]
+                matching = [row for row in trace_rows if row.get("timing_index") == timing_index]
+                if (not _is_nonnegative_int(bit) or bit > 1 or not _is_nonnegative_int(timing_index) or len(matching) != 1):
+                    raise CampaignError("physical refinement cell must identify an evaluated public timing and bit")
+                public_row = matching[0]
+                for field in ("maximum_shape", "maximum_log_lr", "maximum_frequency_hz"):
+                    if not isinstance(public_row.get(field), list) or len(public_row[field]) != 2:
+                        raise CampaignError("physical refinement needs the original public winning-cell trace")
+                if (shape != public_row["maximum_shape"][bit] or
+                        refined.get("frequency_hz") != public_row["maximum_frequency_hz"][bit] or
+                        refined.get("search_maximum_single_cell_log_lr") != public_row["maximum_log_lr"][bit]):
+                    raise CampaignError("physical refinement replay must preserve the public-selected snapped cell")
+                proposals = physical.get("public_refinement_proposals")
+                if (not isinstance(proposals, dict) or proposals.get("not_admitted_evidence") is not True or
+                        proposals.get("uses_physical_truth") is not False or not isinstance(proposals.get("proposals"), list) or
+                        len(proposals["proposals"]) > 3):
+                    raise CampaignError("continuous proposals must remain separate public-only diagnostics")
+                if proposals.get("timing_index") != timing_index or proposals["proposals"] != public_row.get("proposals"):
+                    raise CampaignError("physical proposal diagnostics must preserve the public search trace")
+                for proposal in proposals["proposals"]:
+                    if (not isinstance(proposal, dict) or any(not _is_finite_number(proposal.get(field)) for field in
+                            ("a", "b", "nu_hz", "cfo_hz", "initial_log_lr", "continuous_log_lr",
+                             "best_scored_neighbor_log_lr", "snapped_loss_nats"))):
+                        raise CampaignError("physical refinement proposal trace must be finite")
+                projection_groups.append(refined.get("projection"));replay_cells.append(refined)
+            elif refinement_requested:
+                if (not isinstance(physical.get("refinement_replay_reason"), str) or
+                        any(value is not None for value in diagnostic["phase_refinement"]["new_bit_log_e"])):
+                    raise CampaignError("unavailable physical refinement replay must preserve omitted public mass")
+                if ("refined_public_cell" in physical or "public_refinement_proposals" in physical or
+                        (not refinement_executed and physical["refinement_replay_reason"] != refinement_trace["unavailable_reason"])):
+                    raise CampaignError("unavailable physical refinement replay must preserve the public planning reason without invented cells")
+            for group in projection_groups:
+                if (not isinstance(group, dict) or group.get("block_count") != 1 or
+                        group.get("samples") != observation["stop"] - observation["first"] or
+                        group.get("wanted_bit") != expected or group.get("gain_prior_variance") != 1 or
+                        not _is_finite_number(group.get("noise_free_energy")) or group["noise_free_energy"] < 0):
+                    raise CampaignError("physical diagnostic must report one full-aperture projection")
+                hypotheses = group.get("hypotheses")
+                if not isinstance(hypotheses, list) or len(hypotheses) != 2:
+                    raise CampaignError("physical diagnostic needs both finite bit templates")
+                for hypothesis in hypotheses:
+                    if (not isinstance(hypothesis, dict) or not _is_nonnegative_int(hypothesis.get("rank")) or
+                            hypothesis["rank"] > 1 or any(not _is_finite_number(hypothesis.get(field)) for field in
+                            ("template_energy", "clean_projected_energy", "clean_residual_energy", "noisy_log_likelihood_ratio")) or
+                            any(hypothesis[field] < 0 for field in ("template_energy", "clean_projected_energy", "clean_residual_energy"))):
+                        raise CampaignError("physical diagnostic projection energies and LR must be finite")
+                    coherence = hypothesis.get("clean_coherence_power")
+                    if group["noise_free_energy"] > 0:
+                        if not _is_finite_number(coherence) or not 0 <= coherence <= 1 + 1e-10:
+                            raise CampaignError("physical diagnostic coherence must be normalized to clean signal energy")
+                    elif coherence is not None:
+                        raise CampaignError("zero-energy physical diagnostic coherence must be absent")
+            self_group = physical["physical_templates"]
+            if self_group["noise_free_energy"] > 0 and not math.isclose(
+                    self_group["hypotheses"][expected]["clean_coherence_power"], 1, rel_tol=1e-10, abs_tol=1e-10):
+                raise CampaignError("physical wanted template must have perfect clean self coherence")
+            hashes = self_group.get("template_sha256")
+            if not isinstance(hashes, list) or len(hashes) != 2 or any(
+                    not isinstance(value, str) or re.fullmatch(r"[0-9a-fA-F]{64}", value) is None for value in hashes):
+                raise CampaignError("physical diagnostic must bind both clean template hashes")
+            for cell in replay_cells:
+                reference = cell.get("search_maximum_single_cell_log_lr")
+                difference = cell.get("single_cell_log_lr_replay_difference")
+                if (not _is_finite_number(reference) or not _is_finite_number(difference) or
+                        abs(difference) > 2e-9 * max(1, abs(reference))):
+                    raise CampaignError("physical evaluator must reproduce the selected public-cell likelihood")
+            admission = physical.get("admission")
+            if (not isinstance(admission, dict) or admission.get("channel_instances") != 2 or
+                    admission.get("clean_capture_buffers") != 0 or
+                    admission.get("retained_public_result_in_process_baseline") is not True or
+                    any(not _is_nonnegative_int(admission.get(field)) for field in
+                        ("process_baseline_bytes", "total_memory_limit_bytes", "future_reserved_bytes")) or
+                    admission["process_baseline_bytes"] + admission["future_reserved_bytes"] > admission["total_memory_limit_bytes"]):
+                raise CampaignError("physical diagnostic must reserve bounded twin rendering and evaluator storage")
     elif episode["mode"] == "oracle":
         oracle = receipt.get("oracle")
         if not isinstance(oracle, dict) or not _is_finite_number(oracle.get("probability_error")):
