@@ -6,13 +6,16 @@ endif()
 set(_hf_root "${CMAKE_CURRENT_LIST_DIR}")
 add_library(high_fidelity_channel STATIC "${_hf_root}/src/channel.cpp" "${_hf_root}/src/scenarios.cpp"
   "${_hf_root}/src/hf_scenarios.cpp" "${_hf_root}/src/hf_ionosphere.cpp"
-  "${_hf_root}/src/hf_history.cpp" "${_hf_root}/src/hf_phase_bank.cpp"
+  "${_hf_root}/src/hf_history.cpp" "${_hf_root}/src/hf_phase_bank.cpp" "${_hf_root}/src/hf_public_statistics.cpp"
   "${_hf_root}/src/hf_replay.cpp" "${_hf_root}/src/lunar_spectral.cpp")
 target_include_directories(high_fidelity_channel PUBLIC "${_hf_root}/include" PRIVATE "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(high_fidelity_channel PUBLIC datapump_triad)
+add_library(high_fidelity_public_receiver STATIC "${_hf_root}/src/hf_public_diagnostic.cpp")
+target_include_directories(high_fidelity_public_receiver PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/tools")
+target_link_libraries(high_fidelity_public_receiver PUBLIC high_fidelity_channel datapump_triad_receiver)
 add_executable(high_fidelity_appraisal "${_hf_root}/src/main.cpp" "${_hf_root}/src/vlf_diagnostic.cpp")
 target_include_directories(high_fidelity_appraisal PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/tools")
-target_link_libraries(high_fidelity_appraisal PRIVATE high_fidelity_channel datapump_triad_receiver)
+target_link_libraries(high_fidelity_appraisal PRIVATE high_fidelity_public_receiver)
 get_target_property(_hf_identity triad_receiver_probe COMPILE_DEFINITIONS)
 target_compile_definitions(high_fidelity_appraisal PRIVATE ${_hf_identity})
 
@@ -40,17 +43,28 @@ set_target_properties(high_fidelity_appraisal PROPERTIES RUNTIME_OUTPUT_DIRECTOR
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(high_fidelity_channel PRIVATE -Wall -Wextra -Wpedantic)
+  target_compile_options(high_fidelity_public_receiver PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(high_fidelity_appraisal PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 if(BUILD_TESTING)
-  foreach(_hf_test channel scenarios hf_scenarios hf_ionosphere hf_history hf_phase_bank hf_replay impairment_observables lunar_spectral)
+  foreach(_hf_test channel scenarios hf_scenarios hf_ionosphere hf_history hf_phase_bank hf_public_statistics hf_replay impairment_observables lunar_spectral)
     add_executable(high_fidelity_test_${_hf_test} "${_hf_root}/tests/test_${_hf_test}.cpp")
     target_include_directories(high_fidelity_test_${_hf_test} PRIVATE "${PROJECT_SOURCE_DIR}/src" "${_hf_root}/src")
     target_link_libraries(high_fidelity_test_${_hf_test} PRIVATE high_fidelity_channel)
     add_test(NAME high_fidelity_${_hf_test} COMMAND high_fidelity_test_${_hf_test})
     set_tests_properties(high_fidelity_${_hf_test} PROPERTIES LABELS "appraisal" TIMEOUT 45)
   endforeach()
+  add_executable(high_fidelity_test_hf_native_supplement "${_hf_root}/tests/test_hf_native_supplement.cpp")
+  target_include_directories(high_fidelity_test_hf_native_supplement PRIVATE "${PROJECT_SOURCE_DIR}/src")
+  target_link_libraries(high_fidelity_test_hf_native_supplement PRIVATE datapump_triad_receiver)
+  add_test(NAME high_fidelity_hf_native_supplement COMMAND high_fidelity_test_hf_native_supplement)
+  set_tests_properties(high_fidelity_hf_native_supplement PROPERTIES LABELS "appraisal" TIMEOUT 45)
+  add_executable(high_fidelity_test_hf_public_receiver "${_hf_root}/tests/test_hf_public_receiver.cpp")
+  target_include_directories(high_fidelity_test_hf_public_receiver PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/tools")
+  target_link_libraries(high_fidelity_test_hf_public_receiver PRIVATE high_fidelity_public_receiver)
+  add_test(NAME high_fidelity_hf_public_receiver COMMAND high_fidelity_test_hf_public_receiver)
+  set_tests_properties(high_fidelity_hf_public_receiver PROPERTIES LABELS "appraisal" TIMEOUT 45)
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_test(NAME high_fidelity_integration COMMAND "${Python3_EXECUTABLE}"
     "${_hf_root}/tests/test_integration.py" "$<TARGET_FILE:high_fidelity_appraisal>")
@@ -61,7 +75,8 @@ if(BUILD_TESTING)
   add_custom_target(high_fidelity_checks DEPENDS high_fidelity_appraisal
     high_fidelity_test_channel high_fidelity_test_scenarios
     high_fidelity_test_hf_scenarios high_fidelity_test_hf_ionosphere high_fidelity_test_hf_history
-    high_fidelity_test_hf_phase_bank high_fidelity_test_hf_replay
+    high_fidelity_test_hf_phase_bank high_fidelity_test_hf_public_statistics high_fidelity_test_hf_native_supplement
+    high_fidelity_test_hf_public_receiver high_fidelity_test_hf_replay
     high_fidelity_test_impairment_observables high_fidelity_test_lunar_spectral)
 endif()
 

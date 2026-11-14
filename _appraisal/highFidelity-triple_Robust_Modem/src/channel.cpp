@@ -294,7 +294,8 @@ struct Channel::Impl {
                     require(spec.rf_hz + source_band < .99 * minimum_critical,
                             "HF source band approaches the parabolic turning-frequency cutoff");
                     maximum_slope = hf_parabolic_eikonal(layer, spec.rf_hz,
-                        .75L * layer.critical_period_seconds).group_delay_slope_seconds_per_hz;
+                        ( .75L - layer.critical_phase_radians / (2 * std::numbers::pi_v<long double>)) *
+                        layer.critical_period_seconds).group_delay_slope_seconds_per_hz;
                 }
                 require(source_band <= .20 * fs &&
                         std::abs(hf_residual_dispersion_phase_radians(maximum_slope, source_band)) <= .002,

@@ -26,6 +26,13 @@ rare-error probabilities or complete-receiver real-time capacity. The
 and [protocol](experiment-protocol.md) preserve those distinctions and the
 source limits in [`_ref`](../../_ref/highFidelity-triple_Robust_Modem).
 
+The current continuation adds [public phase-history search](hf-public-search.md):
+matched CFO/affine/nonlinear likelihoods with full acquisition priors, an
+off-grid physical holdout, and an opt-in experimental complete-receiver branch.
+The user approved a generic hook in two canonical internal receiver files; all
+experimental algorithms, fixtures and documentation remain here. Ordinary
+receiver defaults are unchanged.
+
 ## Build and quick correctness checks
 
 From the repository root:
@@ -35,32 +42,40 @@ From the repository root:
 ```
 
 This configures a separate ignored `.build/`, links the production C++ modem,
-and runs the native CTest groups. The latest full run passed all 13 CTest groups in 68.01 seconds; see
-[the final log](.build/hf-expansion-complete-checks.log). It includes the
-2-second Helper capture-lead and one-faded-slot RS20 integration assertions,
-40 runner checks, and the existing replay, history, and competitor checks. The former seven-group 35.25-second run is
-historical, not a result for the expanded suite:
+and runs the native CTest groups. The latest full run passed all 16 CTest groups
+in 76.71 seconds; see
+[the current log](.build/hf-paired-rendering-checks.log). It includes direct-sum
+phase-search, shared-preparation and native paired-rendering parity checks, native evidence-hook
+boundaries, matched observation hashes, a complete experimental receiver
+control, 44 runner cases, and the
+existing Helper, FEC, channel and competitor checks. The canonical `test triad`
+group also passed 32/32 in 62.22 seconds ([log](.build/hf-native-triad-checks.log)).
+Earlier 15-, 13- and seven-group runs remain historical evidence. Current
+group coverage is:
 
 | Group | Main coverage |
 | --- | --- |
 | `channel` | Continuous state, silence/tails, interpolation, phase wander, validation and resource limits |
 | `scenarios` | Physical/source tuples, normalization, reference observables and adverse numerical controls |
-| `hf_scenarios` | NVIS, DRM6 and 14 new HF profile tuples and chunk-invariant state |
+| `hf_scenarios` | NVIS, DRM6, extended HF profiles and an off-grid eikonal holdout |
 | `hf_ionosphere` | Eikonal phase/group-delay consistency, independent quadrature, and frequency/time derivatives |
 | `hf_history` | 175 matched public-aperture block-history, projection, nuisance-rank and conditional-oracle checks |
 | `hf_phase_bank` | Frozen phase dictionary, matched projection, uncertainty and boundary regression checks |
+| `hf_public_statistics` | Exact effective-template FFT/direct-sum agreement, shared phase/FFT preparation parity, full priors, phase bounds and resource guards |
+| `hf_native_supplement` | Disabled-path parity, reserved mass, shared executor, line/quiet policy and invalidity |
+| `hf_public_receiver` | Public arrival-grid closure, full prior mass, numerical support, telemetry isolation and memory admission |
 | `hf_replay` | 208 finite measured-record support, interpolation and full-record trace-integrity checks |
 | `impairment_observables` | Independent AR(1)/shot moments and covariance, resonator response, ADC and AGC recovery |
 | `lunar_spectral` | Joint delay–Doppler covariance through 360 s, independent refinement, long integration and waveform parity |
 | `integration` | Actual native source/receiver, physical completion, noise/EOF, recovery, HF history and numerical-admission boundaries |
-| `runner` | 40 checks for immutable identity, component scope, time/resource censoring and statistical reporting |
+| `runner` | 44 checks for immutable identity, component scope, time/resource censoring and statistical reporting |
 | `competitor_calibration` | Compiled calibration for the native channel bridge into upstream FLDigi/WSJT-X modes |
 | `competitor_runner` | Six external-comparison manifest and receipt parser cases |
 
 `build.sh configure` and `build.sh build` are also available. Compatible
 compiler-cache entries are read without writing outside this subtree. The
-canonical modem source remains unchanged; its separately recorded 32/32 Triad
-check remains historical evidence, not a freshly rerun measurement.
+approved generic native hook is covered by the fresh Triad check above;
+the experimental receiver is enabled only by an explicit appraisal option.
 
 ## Reference experiments
 
@@ -90,13 +105,57 @@ selected stratum, and full EME messages. Their heterogeneous outcomes are not
 pooled into a success probability. Consult each manifest's explicit per-episode
 and aggregate caps; different hardware can reach those caps.
 
+## Public phase-history continuation
+
+Run a matched CFO/affine/nonlinear shadow comparison on a complete public
+observation, without making receiver decisions:
+
+```sh
+_appraisal/highFidelity-triple_Robust_Modem/.build/bin/high_fidelity_appraisal \
+  --mode hf-search --scenario hf-vertical-eikonal-motion --waveform reference \
+  --bit-seconds 128 --cn0 0 --seed 10201 --search-slot 1 --search-timing full \
+  --max-wall-seconds 600
+```
+
+Enable the experimental branch inside the complete native receiver:
+
+```sh
+_appraisal/highFidelity-triple_Robust_Modem/.build/bin/high_fidelity_appraisal \
+  --mode receive --scenario hf-vertical-eikonal-motion --waveform reference \
+  --message e --bit-seconds 128 --cn0 0 --seed 10201 \
+  --hf-public-phase-receiver --capture-digest-slot 1 --max-wall-seconds 600
+```
+
+Replay the bounded ten-episode receiver campaign, including ordinary-receiver
+comparisons, weaker signals, the off-grid trajectory and negative controls:
+
+```sh
+python3 -B _appraisal/highFidelity-triple_Robust_Modem/run.py \
+  --probe _appraisal/highFidelity-triple_Robust_Modem/.build/bin/high_fidelity_appraisal \
+  --campaign _appraisal/highFidelity-triple_Robust_Modem/campaigns/hf-public-receiver.json
+```
+
+This stage uses a configured calendar, one tap and IID proper-complex white
+noise with known variance on Helper-off CPU. The fixed branch weight is 0.25;
+it shares one native acquisition and retains the native codec and two scored quiet slots.
+The original moving-ionosphere miss and the longer −6 dB-Hz case now recover
+`e`; the latter uses 522 s rather than 139.2 s per DATA bit, a 3.75× physical
+increase for the requested 4× duration. The off-grid case still loses its final
+bit, with premature physical completion and an integrity rejection. These
+observations do not establish a general sensitivity floor or an
+orders-of-magnitude advantage. Read the [fixed protocol and bounds](hf-public-search.md)
+and [source-bound outcomes and remaining gaps](hf-validation.md) before extending
+the experiment.
+
 ## Expanded HF adverse cases
 
-The native catalog adds 14 HF presets beyond the five original quiet,
+The original expansion added 14 HF presets beyond the five original quiet,
 disturbed, transition, NVIS and DRM6 scenarios. They cover fitted Watterson
 components; O/X splitting and single-antenna cancellation; coherent-trough
 phase evolution; static and moving vertical-ionosphere eikonals; mode loss and
 recovery; and five replays/ablations of one finite measured 12.7 MHz record.
+The current continuation adds `hf-vertical-eikonal-holdout`, a constructed
+trajectory whose 137 s period and phase origin are absent from the search bank.
 The literature assumptions, counterevidence and domain limits are in
 [hf-research.md](hf-research.md); case-specific observables and interpretation
 limits are in [hf-experiments.md](hf-experiments.md).
@@ -169,8 +228,8 @@ small holdouts do not establish a reliability rate.
 complete correctly despite a physical endpoint. Equal C/N0 does not imply equal
 energy or latency, and WSPR remains a separate structured service.
 
-All 112 frozen native HF campaign episodes completed uncensored. The added
-phase follow-up comprises 9 oracle diagnostics, 6 wanted full-message holdouts
+All 112 frozen native episodes of the original HF expansion completed uncensored.
+The added phase follow-up comprises 9 oracle diagnostics, 6 wanted full-message holdouts
 (4 correct, 2 failed/rejected), and 1 noise-only receive case (no DATA or
 physical completion). FEC, equal-energy, and Helper outcomes retain distinct
 raw-clean, decoded-message, and acquisition meanings; the detailed receipts,
@@ -181,9 +240,10 @@ pair demonstrated a narrowed Helper frequency proposal. The 2 s AWGN case
 passed coarse/onset support, then used final frequency fallback because its
 frequency prior has zero width. The O/X cases found no coarse pilot, and the
 longer O/X lead is not phase matched to the default. See the
-validation record for details. The final 13-group CTest run passed in 68.01 s,
+validation record for details. At that checkpoint, the 13-group CTest run passed in 68.01 s,
 including the one-faded-slot integration assertion and the new 2 s capture-lead
-regression. Runner unit checks: 40 passed. Competitor channel/capture (36) and
+regression, with 40 runner unit checks. Current software checks are listed above.
+Competitor channel/capture (36) and
 replay (15) results remain separate from native modem outcomes.
 
 ```sh

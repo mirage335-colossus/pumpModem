@@ -1,15 +1,268 @@
 # Adverse HF validation and findings
 
-This record covers the November 2026 HF expansion. The native modem source is
-unchanged. A completed experiment is not a successful communication, and these
+This record covers the November 2026 HF expansion and its public-search
+continuation. The original expansion left the modem unchanged; the continuation
+uses the explicitly approved internal evidence hook and an opt-in contained
+experimental scorer. Ordinary receiver defaults are unchanged. A completed
+experiment is not a successful communication, and these
 bounded, deliberately heterogeneous observations are not independent samples
 from a worldwide ionospheric population. See [models and scope](hf-experiments.md),
 [primary research reconciliation](hf-research.md), and the
 [actual upstream codec comparison](competitor/README.md).
 
-## Executed campaigns
+## Public search continuation: acquisition costs and counterexamples
 
-All **112 campaign episodes** completed without execution failures or
+The [frozen protocol](hf-public-search.md) separates shadow likelihoods from
+actual receiver decisions. Eleven declared shadow episodes completed in
+32.941 s, followed by three timing/level controls in 18.415 s; all completed
+uncensored. The extra holdout full-grid replay was an explicitly adaptive
+same-capture diagnosis, not another independent success trial.
+[Shadow receipts](local-evidence/hf-public-search/report.md),
+[timing controls](local-evidence/hf-public-timing-controls/report.md).
+
+These are **presence log-evidence values**, including equal bit prior and full
+public timing/CFO/model priors. Reference threshold: 21.4934. They do not include
+the operational supplement's weight or canonical line/quiet decision path.
+
+| Conditional observation | CFO only | Affine drift | Fixed nonlinear phase |
+| --- | ---: | ---: | ---: |
+| Original moving 139.2 s, 0 dB-Hz, selected timing | 6.644 | 12.650 | 93.233 |
+| Same exact input, full timing | 8.176 | 14.516 | 109.225 |
+| Static 139.2 s control, selected timing | 88.191 | 82.558 | 83.616 |
+| Moving 69.6 s, 0 dB-Hz, selected timing | 10.195 | 13.220 | 44.510 |
+| Moving 139.2 s, −6 dB-Hz, selected timing | −2.363 | −0.700 | 12.670 |
+| Measured complex +4 dB-Hz | 15.374 | 14.459 | 15.175 |
+| Measured amplitude-only +4 | 20.889 | 19.453 | 20.409 |
+| Measured phase-only +4 | 21.421 | 20.514 | 21.271 |
+| Measured complex +8 | 64.065 | 63.055 | 64.038 |
+| Fresh moving 139.2 s, 0 dB-Hz | 6.085 | 9.731 | 65.097 |
+| Off-grid physical trajectory, selected timing | −0.135 | 12.940 | 17.872 |
+| Same off-grid input, full timing | 4.334 | 19.608 | 22.528 |
+
+Wanted rows favor the evaluator's correct bit. Noise-only and wrong-key controls
+remain below −3 log-evidence in all three families; these few controls do not
+estimate a rare false-output rate. The measured complex record's former private
+phase-bank gain is explained by ordinary CFO compensation in this comparison;
+there is no measured nonlinear-history advantage here. This contradicts the
+stronger interpretation one might have drawn from its earlier zero-CFO control.
+
+The timing trace exposes a separate acquisition mismatch. Both eikonal cases
+had one coarse lag, 26 coarse workspaces and 13 retained timing atoms, all at
+1 ms; the public fine grid contains 39 atoms with 1/2/3 ms arrival cells.
+Coarse projection uses `floor(arrival_width * projected_Fs)+1` lag points, so a
+2 ms interval can collapse to its lower boundary despite the finer admission
+lattice. Full timing improves the original phase score by about 16 nats and the
+off-grid score by 4.66 nats. Selected/full IQ-and-validity SHA-256 values match
+exactly in both pairs. This is a proposal-resolution effect, not extra signal
+energy or permission to use the private path delay.
+
+The experimental receiver therefore closes every arrival cell at each retained
+public epoch/clock key when the public arrival grid has at most three cells.
+The full prior is unchanged; worst-case work and workspace are planned before
+observing data. Shadow `selected` mode retains the original selection for
+reproducible diagnosis. The off-grid full-timing score has only a small raw
+margin: it must not be advertised as an operational recovery. Shadow affine
+comparison changes block size/CFO spacing, so exact candidate evidence must come
+from the candidate's own receipt, not just subtracting a branch penalty here.
+
+For the original selected case, the diagnostic performs 5,337,579,520 logical
+FFT row-stages (not FLOPs) and takes 2.683 s including its 0.520 s coarse search;
+full timing takes 7.246 s. The diagnostic includes exhaustive affine comparison
+work, which the operational supplement omits. Arithmetic is native automatic
+coarse proposals, FP64 FFT/block products and long-double likelihood reduction.
+No GPU ran; these are bounded local appraisal timings, not qualified capacity.
+
+The 14 shadow receipts identify native source
+`1749313fcabbf16527ac687c5cf4947acde3d00dca6bcd364b87d453b6d79a16`,
+appraisal source `f9bb5a341f711b92d48e8c477028ee4c4f15e9b40f15a04fc7b4e4b05822b833`
+and binary `6aa8b05289b5911949c13e4ee703c30358f796aa839590abe70cb26145cfea1f`.
+They precede the subsequent telemetry/support edge fixes and operational arrival
+closure; the mathematical shadow scorer and its recorded outcomes remain as
+stated. GNU 14.2 Release, OpenSSL 3.5.7, local Ryzen 5 PRO 5650U, H=12/W=24.
+
+### Complete native receiver: recovery and the remaining failure
+
+The [ten-episode native campaign](local-evidence/hf-public-receiver/report.md)
+completed all declared episodes uncensored in **404.152 s**, with no execution
+failures and four wanted-message failures. The fixed-weight 0.25 supplement
+shares canonical acquisition, the bounded executor, codec and two scored
+physical quiet slots. It receives no realized path or evaluator bit. These
+tests use the configured calendar, one tap, IID proper-complex white noise with
+known variance, Helper off, CPU execution and the short uncoded payload `e`.
+
+| Episode | Actual DATA bit duration / C/N0 | Observed complete-receiver result | Native invocation wall, s |
+| --- | --- | --- | ---: |
+| Original moving, ordinary receiver | 139.2 s / 0 dB-Hz | Interior slot 1 quiet; one integrity rejection, no accepted message | 16.656 |
+| Original moving, supplement | 139.2 s / 0 | Exact `e`, three correct DATA bits and two quiet slots | 25.683 |
+| Static control, supplement | 139.2 s / 0 | Exact `e`, correct physical completion | 21.255 |
+| Fresh moving seed, supplement | 139.2 s / 0 | Exact `e`, correct physical completion | 25.764 |
+| Off-grid trajectory, supplement | 139.2 s / 0 | Final slot 2 quiet; premature physical completion and integrity rejection | 25.946 |
+| Weak short, supplement | 139.2 s / −6 | Two active slots quiet; premature physical completion and integrity rejection | 34.833 |
+| Weak long, ordinary receiver | 522 s / −6 | Two active slots quiet; integrity rejection | 72.906 |
+| Weak long, supplement | 522 s / −6 | Exact `e`, correct physical completion | 110.412 |
+| Noise-only, supplement | 139.2 s / 0 | All quiet; no DATA, accepted message or physical completion | 34.670 |
+| Wrong key, supplement | 139.2 s / 0 | All quiet; no DATA, accepted message or physical completion | 35.049 |
+
+Every episode has zero wrong DATA bits and zero false DATA. Successful wanted
+rows have no premature completion. The two ordinary/supplemented pairs match
+their full-input and selected-slot IQ/validity SHA-256 values exactly. Table
+times are native receipt `timing.wall_seconds`; the campaign report's per-trial
+times include process overhead. Neither is isolated receiver service.
+
+The weak long test requests 512 s instead of 128 s, but native geometry gives
+**522/139.2 = 3.75×** physical integration, not 4×. Its total clean transmitted
+energy divided by noise density is **394.601**, versus **419.117** for the
+original 0 dB-Hz case, about 6% lower rather than exactly equal energy. This is
+a useful conditional recovery at −6 dB-Hz, not a general time/energy scaling
+law. The original missed slot rises from native operational evidence 8.419 to
+107.036; its supplemental raw presence evidence is 109.115. The off-grid last
+slot instead has raw presence evidence 20.344 and native operational evidence
+18.265, below the 21.493 reference threshold. Integrity rejection prevents
+accepting that incomplete message; it does not repair the lost physical bit.
+
+### Adaptive discriminator on the failed final slot
+
+After that failure, one explicitly adaptive
+[slot-2 shadow diagnostic](local-evidence/hf-public-failed-slot/report.md)
+completed uncensored in 8.006 s. It reconstructs the same declared channel,
+seed, waveform and public slot, evaluates all 39 public timing atoms, and keeps
+the frozen phase family and full prior mass. Constant-CFO, affine and nonlinear
+presence log-evidence are respectively **4.196, 13.895 and 20.073**, all below
+21.493. All favor the correct bit, so this particular failed observation is
+not rescued by the exhaustive affine control or full timing under these models.
+
+This is a reconstructed same-configuration diagnostic, **not a directly
+hash-matched replay of the earlier failed slot 2**: the native campaign retained
+its selected hash for slot 1. The diagnostic records its own slot-2 hash. It
+also uses the shadow affine comparison's block/CFO geometry, which differs from
+the receiver supplement. Its 20.073 therefore must not replace the receiver's
+20.344 score or be treated as an independent confirmation trial. The result
+exposes a finite-family sensitivity gap; it does not prove that the received
+information is unrecoverable by a richer bounded phase-history model.
+
+### Shared preparation: exact functional parity, no measured speedup
+
+The [three fixed repeats](local-evidence/hf-public-shared-preparation/report.md)
+completed uncensored in 189.456 s after sharing immutable phase tables and the
+native FFT plan within each public slot. The
+[source-bound parity analysis](local-evidence/hf-public-shared-preparation/parity-analysis.json)
+compares three paired inputs, 15 native slots and 12 supplemental callbacks.
+Full input and selected-slot hashes, channel values, outcomes, non-timing native
+slot fields, message fields except service time, per-bit phase evidence and
+logical work match exactly. Original and weak long messages still recover;
+noise remains quiet. This is regression evidence, not three new independent
+sensitivity trials.
+
+| Repeated episode | Prior native wall, s | Shared-preparation wall, s | Change |
+| --- | ---: | ---: | ---: |
+| Original candidate | 25.6835 | 27.4105 | +6.72% |
+| Weak long candidate | 110.4120 | 122.9989 | +11.40% |
+| Noise control | 34.6702 | 38.7669 | +11.82% |
+
+There is **no demonstrated complete-episode speedup**. Both generations use
+H=12, W=24 and 24 configured owners; actual peak owners remain 4/5/5 and peak
+executor workers remain 24. Automatic memory caps vary with host availability,
+but admitted shapes and native full-owner quotes are unchanged. The short
+supplement workspace quote falls from 189,264,384 to 186,494,080 bytes; the long
+quote rises slightly from 206,257,152 to 206,369,120 bytes. The shared preparation
+removes duplicate preparation, but these single paired timing observations
+neither demonstrate throughput benefit nor qualify a CPU ceiling.
+Unchanged canonical stages also took longer: the long case's summed varying
+stage elapsed time rose from 50.70 to 61.68 s, and drift from 48.57 to 53.32 s.
+The timing difference therefore cannot be causally assigned to shared phase
+preparation. The retained implementation avoids repeated trigonometric work;
+it is not promoted as a measured speed improvement. Callback instrumentation
+instead identifies direct waveform rendering as the dominant remaining cost.
+Its summed worker elapsed intervals overlap and are not process CPU service.
+
+### Native paired rendering: bounded end-to-end improvement
+
+The subsequent contained adapter uses the existing native
+`PatternSource::render_bank` to share pulse/NCO work between both bit templates
+on each timing lane. It retains `MappedBasis` as fallback, checks exact sample
+coordinates and charges the private source/bank storage before execution. The
+[fixed protocol](hf-public-search.md#native-paired-rendering-discriminator)
+keeps the phase family, public priors and stage order unchanged.
+
+Both [paired-rendering episodes](local-evidence/hf-public-paired-rendering/report.md)
+completed uncensored in **120.463 s**, recovering exact `e` as DATA `0/0/1`
+followed by quiet slots 3/4, with no wrong bits, false DATA or premature
+completion. The [exact comparison](local-evidence/hf-public-paired-rendering/parity-analysis.json)
+confirms identical full channel/input and selected-aperture hashes, outcomes,
+inference fields, per-bit phase evidence and logical likelihood work relative
+to shared preparation. Message records differ only in service timing.
+
+| Episode | Shared-preparation native wall, s | Paired-rendering native wall, s | Change |
+| --- | ---: | ---: | ---: |
+| Original moving candidate | 27.4105 | 22.2929 | −18.67% |
+| Weak long candidate | 122.9989 | 97.9923 | −20.33% |
+
+The immediately preceding shared-preparation repeats were slower than the
+original candidate campaign. Relative to that original campaign's 25.6835 and
+110.4120 s, the final paired-rendering observations are **13.20% and 11.25% lower**,
+respectively; these remain single observations with different execution timing.
+
+The original missed slot's whole callback falls from **3.8938 to 1.3277 s**;
+its summed basis-worker elapsed intervals fall from 60.49 to 16.71 s. Across
+the long case's four callbacks, callback times fall from
+17.0156/14.4417/15.0082/11.0940 s to 5.4796/4.4367/4.6529/3.7261 s. All seven
+callbacks use the paired bank for every eligible call, with no bank or
+coordinate-guard fallbacks. Summed worker intervals overlap and remain distinct
+from CPU service time.
+
+H=12, W=24 and 24 stage workers are unchanged, but observed concurrency is
+**not identical**: actual peak owners rise from 4 to 5 for the original case
+and remain 5 for the long case. The short first-slot native workspace quote
+rises from 197,639,166 to 209,814,482 bytes; the long quote remains 659,880,702.
+The supplement admits an additional 778,880 bytes per lane, or 18,693,120 bytes
+per 24-lane owner. Automatic memory caps also vary with host availability.
+These paired observations support retaining the adapter's useful complete-run
+benefit, while leaving the exact share due to scheduling unisolated. They are
+single repeats, with no timing confidence interval or sustained capacity claim.
+
+### Continuation software checks and provenance
+
+The latest paired-rendering build passed **16/16 appraisal CTest groups in
+76.71 s** ([log](.build/hf-paired-rendering-checks.log)). Focused adapter checks
+passed 263 assertions, including coordinate, boundary, gain and fallback
+coverage; an 8,192-row deterministic rendering comparison measured 9.63 ms for
+the prior route and 2.49 ms for the paired route. This component timing is
+separate from the complete episodes above. Allocator-failure safety was
+source-reviewed, not tested by injected allocation failure.
+
+At the shared-preparation checkpoint, all **16/16 appraisal CTest groups passed
+in 78.14 s** ([log](.build/hf-shared-preparation-checks.log)), including exact
+effective-template/direct-sum and shared-preparation parity checks, hook
+boundaries, arrival-grid closure, telemetry isolation, matched observation
+hashes, complete native reception controls and 44 runner cases. A fresh
+`./build.sh test triad` passed **32/32 in 62.22 s**
+([log](.build/hf-native-triad-checks.log)). These checks are separate from the
+historical 13-group and 32-group records below. The paired-rendering adapter
+does not change canonical native source; that fresh 32/32 result remains
+applicable to its unchanged native hash and was not rerun for the adapter.
+
+All three complete-receiver generations use native source SHA-256
+`1749313fcabbf16527ac687c5cf4947acde3d00dca6bcd364b87d453b6d79a16`,
+GNU 14.2.0 Release, OpenSSL 3.5.7, source commit at configuration
+`2ffbb0f4e5ffe59bcb94191280d4c020c3b9f628`, and build-options SHA-256
+`3636f58f5e5803a48c78c56be3de84fce810a285a8b7c7222781040e596e6206`.
+
+| Executed generation | Appraisal source SHA-256 | Binary SHA-256 |
+| --- | --- | --- |
+| Ten native episodes | `7f53565889b7ebf086242936e7d3ceded6073fe645dffa3a3ef957081a92fb80` | `02bdbe7c7585d1bca3fd17c08420ab98d531be8b4a79fa87edc331f9ef1f1b54` |
+| Three shared-preparation repeats and adaptive failed-slot diagnostic | `cec9374083c77c0a4899b2e0803836772878f3944874d9856407ea1a3954e070` | `9e03feb317788baa463ea3edc120342330a7ad618253c91fb0dbd8541a85ce0c` |
+| Two paired-rendering repeats | `6849795b6a2100a876dd2cb51462acf6c9762c029ec23b89ace37ecf756f547e` | `7eae4336a26de5458febf68ec998d046606ea9565da43dea7c4508ce46ffacf1` |
+
+No GPU ran in this continuation. These finite cases establish neither an
+ionospheric occurrence probability, rare false-output rate, unknown-calendar
+acquisition, general multipath/noise robustness, real-time capacity nor an
+orders-of-magnitude advantage over other modes. The off-grid miss remains a
+concrete limit of the tested family, and the measured Ding comparison above
+still shows no nonlinear advantage over ordinary CFO compensation.
+
+## Original expansion campaigns
+
+All **112 original campaign episodes** completed without execution failures or
 resource censoring on the local Ryzen 5 PRO 5650U. The receiver used its normal
 12 effective logical threads / 24 software workers. These elapsed times include
 source/channel work and are not isolated receiver capacity measurements.
@@ -298,19 +551,20 @@ attributing every O/X loss to a special phase-processing weakness. FT8 and WSPR
 already use phase/coherent-block processing and FEC; they are not amplitude-only
 QRSS baselines. No orders-of-magnitude Robust advantage has been established.
 
-## Software assurance and evidence lifecycle
+## Original expansion software assurance and evidence lifecycle
 
-The final build passed **13/13 CTest groups in 68.01 s**
+The original expansion's final build passed **13/13 CTest groups in 68.01 s**
 ([log](.build/hf-expansion-complete-checks.log)), including 323 native phase-bank
 assertions, 40 strict runner cases, actual RS20 one-erasure recovery and the
 two-second Helper noise-support regression. The
-canonical modem source SHA remains
+canonical modem source SHA at that checkpoint remained
 `be47453d07fb27afe4cf4c168f76390de193cf57a403009a1078dccca6f01aa2`.
-The earlier canonical Triad 32/32 run remains applicable to that unchanged
-source and is not reported as freshly rerun. Raw receipts bind each campaign
+The earlier canonical Triad 32/32 run remained applicable to that unchanged
+source and was not reported as freshly rerun. The later continuation's approved
+hook, source identities and fresh checks are recorded above. Raw receipts bind each campaign
 to its exact appraisal source and binary; later fixes do not rewrite them.
 
-The final [build identity](local-evidence/hf-final-build-identity.json) has
+That checkpoint's final [build identity](local-evidence/hf-final-build-identity.json) has
 appraisal source SHA-256
 `f931308a0906e1719de56d7961598a47f25a44c1442c5e371851750c6418a4d4`
 and binary SHA-256

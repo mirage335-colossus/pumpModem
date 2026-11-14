@@ -6,7 +6,8 @@ single invocation of the canonical native appraisal executable. Slot episodes
 report one first public observation without message completion; diagnose
 episodes report bounded VLF acquisition and abbreviated fine components without
 bit decisions or complete receiver service. Oracle episodes report a separate
-known-waveform bound, not a receiver communication outcome.
+known-waveform bound, not a receiver communication outcome. HF-search episodes
+report a shadow detector with public acquisition priors and no receiver decisions.
 """
 from __future__ import annotations
 
@@ -39,9 +40,9 @@ ROOT_KEYS = {"schema_version", "name", "purpose", "max_wall_seconds", "per_trial
              "max_trials", "max_samples", "episodes", "confirmatory_strata"}
 EPISODE_KEYS = {"id", "scenario", "mode", "waveform", "seed", "cn0_db_hz", "control",
                 "helper", "backend", "bit_seconds", "duration_seconds", "pulse", "stratum",
-                "oracle_slot", "chunk", "message", "max_wall_seconds", "max_samples",
-                "history_reference_delay_seconds", "hf_phase_bank", "fec", "fade_slots", "capture_lead_seconds"}
-MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose"}
+                "oracle_slot", "search_slot", "search_timing", "capture_digest_slot", "chunk", "message", "max_wall_seconds", "max_samples",
+                "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "fec", "fade_slots", "capture_lead_seconds"}
+MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose", "hf-search"}
 CONTROLS = {"wanted", "noise", "wrong-key", "wrong-ordinal", "interior-fade", "capture-gap", "eof"}
 BACKENDS = {"cpu", "cuda", "vulkan", "gpu"}
 STATUSES = {"completed", "resource_limit", "time_limit", "unavailable", "error"}
@@ -106,8 +107,8 @@ def _read_campaign(path: Path) -> dict[str, Any]:
                 len({e["seed"] for e in matched}) != count):
             raise CampaignError(f"stratum {name!r} must contain exactly {count} wanted receive episodes with distinct seeds")
         invariant_fields = ("scenario", "mode", "waveform", "cn0_db_hz", "control", "helper",
-                            "backend", "bit_seconds", "duration_seconds", "pulse", "oracle_slot", "chunk",
-                            "message", "max_wall_seconds", "max_samples", "history_reference_delay_seconds", "hf_phase_bank", "fec", "fade_slots", "capture_lead_seconds")
+                            "backend", "bit_seconds", "duration_seconds", "pulse", "oracle_slot", "search_slot", "search_timing", "capture_digest_slot", "chunk",
+                            "message", "max_wall_seconds", "max_samples", "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "fec", "fade_slots", "capture_lead_seconds")
         reference = matched[0]
         heterogeneous = [field for field in invariant_fields
                          if any(episode.get(field) != reference.get(field) for episode in matched[1:])]
@@ -169,11 +170,17 @@ def _validate_episode(item: Any, index: int, ids: set[str],
     if "oracle_slot" in item:
         if isinstance(item["oracle_slot"], bool) or not isinstance(item["oracle_slot"], int) or not 0 <= item["oracle_slot"] < 2**64:
             raise CampaignError(f"episodes[{index}].oracle_slot must be a nonnegative unsigned 64-bit integer")
+    for field in ("search_slot", "capture_digest_slot"):
+        if field in item and (not _is_nonnegative_int(item[field]) or item[field] >= 2**64):
+            raise CampaignError(f"episodes[{index}].{field} must be a nonnegative unsigned 64-bit integer")
+    if "search_timing" in item and (not isinstance(item["search_timing"], str) or item["search_timing"] not in {"selected", "full"}):
+        raise CampaignError(f"episodes[{index}].search_timing must be selected or full")
     if "history_reference_delay_seconds" in item:
         _bounded_number(item["history_reference_delay_seconds"],
                         f"episodes[{index}].history_reference_delay_seconds", 0, sys.float_info.max)
-    if "hf_phase_bank" in item and not isinstance(item["hf_phase_bank"], bool):
-        raise CampaignError(f"episodes[{index}].hf_phase_bank must be boolean")
+    for field in ("hf_phase_bank", "hf_public_phase_receiver"):
+        if field in item and not isinstance(item[field], bool):
+            raise CampaignError(f"episodes[{index}].{field} must be boolean")
     if "chunk" in item:
         _bounded_number(item["chunk"], f"episodes[{index}].chunk", 1, 16384, integer=True)
     if "fade_slots" in item:
@@ -207,9 +214,9 @@ def _validate_episode(item: Any, index: int, ids: set[str],
     control = item.get("control", "wanted")
     if "fade_slots" in item and control != "interior-fade":
         raise CampaignError(f"episodes[{index}]: fade_slots is valid only for interior-fade control")
-    if mode not in {"receive", "slot", "diagnose"} and "control" in item:
+    if mode not in {"receive", "slot", "diagnose", "hf-search"} and "control" in item:
         raise CampaignError(f"episodes[{index}]: control is valid only for receiver or diagnostic mode")
-    if mode in {"receive", "slot", "diagnose"} and control not in CONTROLS:
+    if mode in {"receive", "slot", "diagnose", "hf-search"} and control not in CONTROLS:
         raise CampaignError(f"episodes[{index}]: invalid receiver control")
     if mode == "slot" and control not in {"wanted", "noise"}:
         raise CampaignError(f"episodes[{index}]: slot mode requires wanted or noise control")
@@ -220,6 +227,23 @@ def _validate_episode(item: Any, index: int, ids: set[str],
             raise CampaignError(f"episodes[{index}]: diagnose mode requires reference waveform")
         if item.get("helper", False):
             raise CampaignError(f"episodes[{index}]: diagnose mode requires Helper disabled")
+    if mode == "hf-search":
+        if control not in {"wanted", "noise", "wrong-key", "wrong-ordinal"}:
+            raise CampaignError(f"episodes[{index}]: hf-search requires wanted, noise, wrong-key or wrong-ordinal control")
+        if item.get("helper", False) or item.get("backend", "cpu") != "cpu":
+            raise CampaignError(f"episodes[{index}]: hf-search requires Helper-off CPU")
+    if item.get("hf_public_phase_receiver", False):
+        if mode not in {"receive", "slot"} or item.get("helper", False) or item.get("backend", "cpu") != "cpu":
+            raise CampaignError(f"episodes[{index}]: HF public phase receiver requires receive/slot with Helper-off CPU")
+    if "capture_digest_slot" in item:
+        if mode not in {"receive", "slot", "hf-search"}:
+            raise CampaignError(f"episodes[{index}]: capture_digest_slot requires receive, slot or hf-search mode")
+        if mode == "slot" and item["capture_digest_slot"] != 0:
+            raise CampaignError(f"episodes[{index}]: slot mode can hash only public slot 0")
+        if mode == "hf-search" and item["capture_digest_slot"] != item.get("search_slot", 0):
+            raise CampaignError(f"episodes[{index}]: hf-search capture_digest_slot must match search_slot")
+    if ({"search_slot", "search_timing"} & item.keys()) and mode != "hf-search":
+        raise CampaignError(f"episodes[{index}]: search options are valid only for hf-search mode")
     if "oracle_slot" in item and mode != "oracle":
         raise CampaignError(f"episodes[{index}]: oracle_slot is valid only for oracle mode")
     if ({"history_reference_delay_seconds", "hf_phase_bank"} & item.keys()) and mode != "oracle":
@@ -233,14 +257,17 @@ def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_se
     for key, option in (("cn0_db_hz", "--cn0"), ("control", "--control"), ("helper", "--helper"),
                         ("backend", "--backend"), ("bit_seconds", "--bit-seconds"),
                         ("duration_seconds", "--duration-seconds"), ("oracle_slot", "--oracle-slot"),
+                        ("search_slot", "--search-slot"), ("search_timing", "--search-timing"),
+                        ("capture_digest_slot", "--capture-digest-slot"),
                         ("chunk", "--chunk"), ("message", "--message"), ("pulse", "--pulse"),
                         ("fec", "--fec"), ("fade_slots", "--fade-slots"),
                         ("capture_lead_seconds", "--capture-lead-seconds"),
                         ("history_reference_delay_seconds", "--history-reference-delay-seconds"),
-                        ("hf_phase_bank", "--hf-phase-bank")):
+                        ("hf_phase_bank", "--hf-phase-bank"),
+                        ("hf_public_phase_receiver", "--hf-public-phase-receiver")):
         if key in episode:
             value = episode[key]
-            if key in {"helper", "hf_phase_bank"}:
+            if key in {"helper", "hf_phase_bank", "hf_public_phase_receiver"}:
                 if value:
                     command.append(option)
             else:
@@ -396,6 +423,26 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     plan = receipt.get("plan")
     if not isinstance(plan, dict):
         raise CampaignError("completed receipt is missing plan")
+    expected_digest_slot = episode.get("capture_digest_slot", episode.get("search_slot", 0) if episode["mode"] == "hf-search" else None)
+    if "capture_digest_slot" in plan or expected_digest_slot is not None:
+        actual_digest_slot = plan.get("capture_digest_slot")
+        if (actual_digest_slot != expected_digest_slot or
+                (actual_digest_slot is not None and not _is_nonnegative_int(actual_digest_slot)) or
+                plan.get("capture_digest_slot_override") is not ("capture_digest_slot" in episode)):
+            raise CampaignError("native capture digest slot does not match the frozen episode")
+        if expected_digest_slot is not None:
+            first, stop = plan.get("capture_digest_first_sample"), plan.get("capture_digest_stop_sample")
+            if (not _is_nonnegative_int(first) or not _is_nonnegative_int(stop) or stop <= first or
+                    not _is_nonnegative_int(plan.get("horizon_samples")) or stop > plan["horizon_samples"]):
+                raise CampaignError("capture digest requires a whole observation within the declared horizon")
+            channel = receipt.get("channel")
+            if (not isinstance(channel, dict) or channel.get("selected_observation_complete") is not True or
+                    not _is_nonnegative_int(channel.get("selected_observation_hashed_samples")) or
+                    channel["selected_observation_hashed_samples"] != stop - first):
+                raise CampaignError("capture digest must cover every selected IQ and validity sample")
+            digest = channel.get("selected_observation_sha256")
+            if not isinstance(digest, str) or re.fullmatch(r"[0-9a-fA-F]{64}", digest) is None:
+                raise CampaignError("capture digest requires a SHA-256 of the selected observation")
     for field in ("cn0_db_hz", "requested_bit_seconds"):
         if not _is_finite_number(plan.get(field)):
             raise CampaignError(f"completed receipt plan.{field} must be finite")
@@ -448,6 +495,33 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
             raise CampaignError("native channel duration does not match the frozen episode")
     if plan.get("helper_enabled") is not episode.get("helper", False):
         raise CampaignError("native plan Helper setting does not match the frozen episode")
+    phase_receiver_requested = episode.get("hf_public_phase_receiver", False)
+    if plan.get("hf_public_phase_receiver_requested", False) is not phase_receiver_requested:
+        raise CampaignError("native public phase receiver request does not match the frozen episode")
+    if phase_receiver_requested:
+        phase_receiver = receipt.get("hf_public_phase_receiver")
+        if (not isinstance(phase_receiver, dict) or phase_receiver.get("experimental") is not True or
+                phase_receiver.get("truth_information_passed_to_search") is not False or
+                phase_receiver.get("model_family") != "sinusoidal_phase_97" or
+                not _is_finite_number(phase_receiver.get("fixed_weight")) or phase_receiver["fixed_weight"] != .25):
+            raise CampaignError("experimental public phase receiver must report its fixed family/prior and no truth inputs")
+        maximum = phase_receiver.get("maximum_slot_reports")
+        executed = phase_receiver.get("executed_slots")
+        reports = phase_receiver.get("slots")
+        if (not _is_nonnegative_int(maximum) or maximum == 0 or maximum != plan.get("scored_slot_horizon") or
+                not _is_nonnegative_int(executed) or executed > maximum or
+                not isinstance(reports, list) or len(reports) != executed):
+            raise CampaignError("public phase receiver telemetry must obey the public report bound")
+        indices = []
+        for report in reports:
+            if (not isinstance(report, dict) or not _is_nonnegative_int(report.get("slot_index")) or
+                    report["slot_index"] >= maximum or report.get("component_complete") is not True):
+                raise CampaignError("public phase receiver must report complete bounded supplement callbacks")
+            indices.append(report["slot_index"])
+        if len(set(indices)) != len(indices):
+            raise CampaignError("public phase receiver must not duplicate slot callback reports")
+    elif "hf_public_phase_receiver" in receipt:
+        raise CampaignError("unrequested public phase receiver telemetry in native receipt")
 
     backend = receipt.get("backend")
     if not isinstance(backend, dict):
@@ -458,7 +532,7 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     device = backend.get("device")
     if not isinstance(backend.get("executed_gpu_work"), bool):
         raise CampaignError("completed receipt backend.executed_gpu_work must be boolean")
-    if episode["mode"] in {"receive", "slot", "channel", "diagnose"}:
+    if episode["mode"] in {"receive", "slot", "channel", "diagnose", "hf-search"}:
         if not isinstance(device, str) or not device:
             raise CampaignError("completed processing receipt backend.device must identify the actual device")
         if requested_backend == "cpu" and device != "cpu":
@@ -567,6 +641,55 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
             raise CampaignError("diagnose receipt must not evaluate message completion")
         if outcomes.get("correct_complete") is not False:
             raise CampaignError("diagnose receipt must never report complete-message success")
+    elif episode["mode"] == "hf-search":
+        selected = episode.get("search_slot", 0)
+        if (not _is_nonnegative_int(plan.get("search_slot")) or plan["search_slot"] != selected or
+                plan.get("search_timing") != episode.get("search_timing", "selected")):
+            raise CampaignError("HF search receipt does not match the frozen search slot or timing policy")
+        observation = plan.get("search_observation")
+        if (not isinstance(observation, dict) or
+                not all(_is_nonnegative_int(observation.get(field)) for field in ("first", "stop")) or
+                observation["stop"] <= observation["first"] or observation["stop"] != plan.get("horizon_samples")):
+            raise CampaignError("HF search requires the complete selected observation ending at the declared horizon")
+        digest = plan.get("search_observation_sha256")
+        if (plan.get("capture_digest_first_sample") != observation["first"] or
+                plan.get("capture_digest_stop_sample") != observation["stop"] or
+                receipt.get("channel", {}).get("selected_observation_sha256") != digest):
+            raise CampaignError("HF search observation must match its incremental capture digest")
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-fA-F]{64}", digest) is None:
+            raise CampaignError("HF search requires a hash of the complete selected observation")
+        diagnostic = receipt.get("hf_public_search")
+        if (not isinstance(diagnostic, dict) or diagnostic.get("component_complete") is not True or
+                not _is_nonnegative_int(diagnostic.get("slot_index")) or diagnostic["slot_index"] != selected):
+            raise CampaignError("HF search requires a completed public-search diagnostic for the selected slot")
+        for field in ("receiver_executed", "completion_evaluated", "capacity_qualified", "truth_information_passed_to_search"):
+            if diagnostic.get(field) is not False:
+                raise CampaignError("HF public search must preserve shadow-only scope without truth inputs")
+        outcomes = receipt.get("outcomes")
+        if not isinstance(outcomes, dict):
+            raise CampaignError("HF search receipt is missing outcomes")
+        for field, value in (("receiver_executed", False), ("component_only", True),
+                             ("public_search_executed", True), ("completion_evaluated", False),
+                             ("correct_complete", False), ("correct_decoded_complete", False)):
+            if outcomes.get(field) is not value:
+                raise CampaignError("HF search must not claim native decisions or message completion")
+        for field in ("actual_scored_slots", "physical_completions", "accepted_messages"):
+            if not _is_nonnegative_int(outcomes.get(field)) or outcomes[field] != 0:
+                raise CampaignError("HF search must not report operational receiver output")
+        if receipt.get("slots") != [] or receipt.get("messages") != []:
+            raise CampaignError("HF search must not publish operational slot or message receipts")
+        evaluation = receipt.get("hf_search_evaluation")
+        if (not isinstance(evaluation, dict) or not _is_nonnegative_int(evaluation.get("slot_index")) or
+                evaluation["slot_index"] != selected or evaluation.get("truth_information_passed_to_search") is not False or
+                not isinstance(evaluation.get("transmitted_active"), bool)):
+            raise CampaignError("HF search requires a separate post-search evaluator")
+        expected = evaluation.get("expected_receiver_bit")
+        if expected is not None and (not _is_nonnegative_int(expected) or expected not in (0, 1)):
+            raise CampaignError("HF search evaluator has an invalid expected bit")
+        if episode.get("control", "wanted") != "wanted" and expected is not None:
+            raise CampaignError("negative-control HF search must not expect a wanted receiver bit")
+        if not evaluation["transmitted_active"] and expected is not None:
+            raise CampaignError("quiet HF search must not expect a wanted receiver bit")
     elif episode["mode"] == "oracle":
         oracle = receipt.get("oracle")
         if not isinstance(oracle, dict) or not _is_finite_number(oracle.get("probability_error")):
@@ -814,6 +937,8 @@ def _markdown(campaign: dict[str, Any], run: dict[str, Any]) -> str:
             outcome = f"oracle P(error)={error_probability:.6g}" if isinstance(error_probability, (int, float)) else "oracle bound unavailable"
         elif episode["mode"] == "diagnose":
             outcome = "component complete; no slot decision"
+        elif episode["mode"] == "hf-search":
+            outcome = "public shadow search complete; no receiver decision"
         else:
             outcome = "plan only"
         rows.append(f"| {trial['episode']['id']} | {trial['episode']['scenario']} | {trial['episode']['mode']} | "

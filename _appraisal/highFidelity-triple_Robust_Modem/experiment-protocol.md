@@ -1,14 +1,17 @@
 # Native high-fidelity appraisal protocol
 
-Updated 13 November 2026. The contained appraisal has a native renderer,
-scenario catalog, executable, bounded campaign runner and 13 CTest groups.
-The latest full 13-group check passed in 68.01 seconds.
+Updated 14 November 2026. The contained appraisal has a native renderer,
+scenario catalog, executable, bounded campaign runner and 16 CTest groups.
+The latest full check passed in 76.71 seconds
+([log](.build/hf-paired-rendering-checks.log)).
 The [model inventory](models.md) records implemented equations and
 limits; the [research reconciliation](research-reconciliation.md) maps them to
 the literature. The added [HF research synthesis](hf-research.md) reconciles
 measured, fitted, analytic and contrary evidence; the [HF experiment map](hf-experiments.md)
-states its receiver questions and limits. This protocol governs runs and the
-claims that their results can support. Passing source tests verifies selected
+states its receiver questions and limits. The [public phase-search continuation](hf-public-search.md)
+defines its additional acquisition priors, branch policy and bounded campaigns.
+This protocol governs runs and the claims that their results can support.
+Passing source tests verifies selected
 software behavior only.
 
 ## Questions and evidence layers
@@ -46,7 +49,7 @@ uses shorter integration geometry for fast wiring checks.
 | Sub-9 kHz / 200 ft | `vlf-resonant`, `vlf-detuned`, `vlf-phase-wander` | Calculated high-Q antenna envelope, conditional magnetic-noise level, and a separate smooth phase-wander hypothesis | No LWPC/LMP solve; independent electric and magnetic planes; phase law is constructed, not a measured 8.27 kHz record |
 | 1 MHz groundwave | `groundwave-1mhz`, `-sea`, `-night` | Reference-reproduced NTIA LFMF homogeneous magnitude, plus separately synthetic phase and competing ray | No measured local path, terrain or complex phase; night ray is a sensitivity choice |
 | 30 MHz groundwave | `groundwave-30mhz`, `-land` | Fixed LFMF magnitude comparison at model endpoint | Formal model endpoint does not establish actual surface-wave dominance or exclude direct/reflected/sky/duct paths |
-| 1–30 MHz skywave | Original `hf-quiet`, `hf-disturbed`, `hf-transition`, `hf-nvis-disturbed`, `hf-drm6`; 14 additional Watterson, O/X, coherent-trough, vertical-eikonal, mode-transition and measured-replay presets | Continuous finite Gaussian-tap approximations, scalar fitted comparisons, vector mode projections, coupled analytic phase/group delay, constructed mode/fade schedules, and a finite deposited complex-envelope record | Not a worldwide or long-episode population; the NVIS fixture is skywave-only and omits the optional groundwave component; the measured record has no sample clock and cannot support a broadband impulse-response or full-message claim |
+| 1–30 MHz skywave | Original `hf-quiet`, `hf-disturbed`, `hf-transition`, `hf-nvis-disturbed`, `hf-drm6`; 14 expansion presets and the later off-grid vertical-eikonal holdout | Continuous finite Gaussian-tap approximations, scalar fitted comparisons, vector mode projections, coupled analytic phase/group delay, constructed mode/fade schedules, and a finite deposited complex-envelope record | Not a worldwide or long-episode population; the NVIS fixture is skywave-only and omits the optional groundwave component; the measured record has no sample clock and cannot support a broadband impulse-response or full-message claim |
 | EME at 5.76 GHz | `eme-disk-episode`, `eme-patch-episode`, `eme-severe-episode` | Joint spectral approximation of the frozen beam-weighted monostatic delay–Doppler kernel, numerically checked through 360 s | Helper-off 1,920 Hz source only; not full retarded bistatic DE440 geometry or measured whole-disk IQ; legacy finite-grid and first-slot cases retain their narrower limits |
 | Noise/equipment controls | `noise-bursts`, `frontend-overload` | Constructed colored/impulse and blocker/AGC/clipping/quantization paths | Not a site capture, lightning law or named radio's RF nonlinearity |
 
@@ -56,8 +59,8 @@ names the specified conditional model; it does not imply environmental
 probability. Do not combine maxima from unrelated references and call the
 result a measured natural episode.
 
-The 14 added HF preset identifiers, their independent observables and
-limits are listed in [hf-experiments.md](hf-experiments.md). The source review
+The original 14 added HF presets and the later off-grid holdout, with their
+independent observables and limits, are listed in [hf-experiments.md](hf-experiments.md). The source review
 in [hf-research.md](hf-research.md) distinguishes measured records, historical
 fits, analytic models, and deliberate counterexamples. The measured replay
 supports a complete first observation of 19.4375 s within its nominal 40.94 s
@@ -84,21 +87,24 @@ the appraisal subtree and reads any shared compiler cache in read-only mode:
 ./_appraisal/highFidelity-triple_Robust_Modem/build.sh test
 ```
 
-The latest full suite passed all 13 CTest groups in 68.01 seconds; see the
-[final log](.build/hf-expansion-complete-checks.log). The run includes the
-2-second Helper capture-lead and one-faded-slot RS20 integration assertions,
-40 runner checks, and the replay, history, and competitor checks. The former seven-group
-35.25-second run is historical, not a result for the expanded suite. The
-current groups cover renderer primitives and scenario models, HF
-profile/eikonal/history/phase-bank/replay checks, impairment observables, lunar spectral
-numerics, native receiver integration, the campaign runner, compiled competitor
-calibration, and competitor manifest parsing. A prior separate
-canonical Triad run passed 32/32 checks in 64.90 seconds. Its contained test harness
+The latest full suite passed all 16 CTest groups in 76.71 seconds; see the
+[current log](.build/hf-paired-rendering-checks.log). It includes public
+likelihood/direct-sum and shared phase/FFT preparation checks, native hook and
+complete experimental receiver controls, matched observation hashes, 44 runner
+checks, and the existing channel, Helper, FEC, replay and competitor checks.
+The canonical `./build.sh test triad` also passed 32/32 in 62.22 seconds
+([log](.build/hf-native-triad-checks.log)). The approved generic two-file native
+hook leaves ordinary receiver defaults unchanged; experimental algorithms remain
+contained here. See [HF validation](hf-validation.md) for current source identities.
+
+The preceding 13-group/68.01-second and seven-group/35.25-second checks remain
+historical evidence. A still earlier canonical Triad run passed 32/32 in
+64.90 seconds. Its contained test harness
 forced inclusion of a header missing from the pre-existing CPU-only canonical
 probe; the original setup failure is preserved. This was a test-harness
-workaround, not a modem source change. The canonical native source SHA is
-unchanged in this expansion; the prior result remains bound to its original
-build and is not a fresh run. Smoke, exploratory AWGN, weak-signal,
+workaround, not a modem source change at that checkpoint. The canonical native
+source SHA was unchanged in that expansion; the prior result remains bound to
+its original build. Smoke, exploratory AWGN, weak-signal,
 RunPod, EME-slot and VLF results are recorded in [validation](validation.md),
 with old three-quiet-opportunity outcomes separated from current
 two-quiet-slot evidence. None implies environmental qualification.
@@ -110,7 +116,10 @@ The executable's supported modes are:
   provenance. This is the required cheap preflight for long cases.
 - `--mode channel`: render/report a bounded source span without modem scoring.
 - `--mode receive`: run a continuous stream through the canonical native
-  receiver. Transport EOF does not create physical completion.
+  receiver. Transport EOF does not create physical completion. The explicit
+  `--hf-public-phase-receiver` option enables the fixed-weight experimental
+  supplement in this same receiver; it does not replace the native decision,
+  codec or physical-completion path.
 - `--mode slot`: receive only the complete first public DATA observation; it
   cannot establish message completion or scored quiet-slot behavior.
 - `--mode diagnose`: render the complete first static VLF reference observation,
@@ -122,6 +131,12 @@ The executable's supported modes are:
   presence probability at the receiver's design false-alarm target. Both
   calculations assume known signal/channel details and omit blind acquisition,
   realized false-alarm measurement and complete reception.
+- `--mode hf-search`: compare public CFO, affine and nonlinear likelihoods on
+  one complete public observation (`--search-slot N`, `--search-timing selected|full`).
+  This shadow mode makes no DATA/quiet or completion decision. It and the opt-in
+  receiver currently admit only configured-calendar, single-tap, Helper-off CPU
+  geometry with IID proper-complex white noise of known variance. See the
+  [public-search protocol](hf-public-search.md) and [quick commands](README.md#public-phase-history-continuation).
 
 Use `--list` to inspect the full scenario records and `--help` for the options
 on the compiled binary:
@@ -143,7 +158,7 @@ python3 -B _appraisal/highFidelity-triple_Robust_Modem/run.py \
   --campaign _appraisal/highFidelity-triple_Robust_Modem/campaigns/integration-smoke.json
 ```
 
-The manifest supports all six modes and explicit `pulse`, `oracle_slot`,
+The manifest supports all seven modes and explicit `pulse`, `oracle_slot`,
 `chunk`, and `message` fields. `oracle_slot` is an oracle-only public slot
 index; `duration_seconds` sets the channel-render span and does not shorten a
 receive episode. `--pulse rrc|tapered-rrc` selects an explicit canonical pulse;
@@ -157,7 +172,7 @@ Use these test tiers to keep future checks affordable:
 
 | Tier / manifest | Frozen cases | Purpose and maximum budget |
 | --- | ---: | --- |
-| `build.sh test` | 13 CTest groups | All groups passed in 68.01 s, including fade-option and 2 s Helper capture-lead integration assertions; no long VLF reception |
+| `build.sh test` | 16 CTest groups | All groups passed in 76.71 s, including public-search, shared preparation, native hook and receiver checks; no long VLF reception |
 | `integration-smoke.json` | 10 | Short geometry and wiring; 600 s aggregate |
 | `propagation-breadth.json` | 16 | Groundwave land/sea defaults, weak levels, HF profiles and recovery; 120 s per episode, 1,800 s aggregate, 8 million samples per episode |
 | `receiver-controls.json` | 12 | Noise, blockers, Helper, mismatched hypotheses, physical fade, marked gap and EOF; the same 120 s / 1,800 s / 8 million ceilings |
@@ -207,8 +222,15 @@ censoring. Do not retry a censored case automatically or expand the sample
 budget after observing its outcome. A repeated phase diagnostic remains a
 component measurement, not an independent communication trial.
 
-All 112 frozen native HF campaign episodes completed uncensored. The 16-case
-phase follow-up contains 9 oracle diagnostics, 6 wanted full-message holdouts
+The public-search, matched timing-control and opt-in complete-receiver campaigns
+are separate from the original HF tiers above. Their fixed budgets, selective
+follow-up rules and interpretation limits are in [hf-public-search.md](hf-public-search.md);
+their actual outcomes and original failures are in [hf-validation.md](hf-validation.md).
+Each ordinary/supplemented comparison binds full input and selected-slot
+IQ/validity hashes. A matching seed alone is not proof of matched observations.
+
+All 112 frozen native episodes of the original HF expansion completed uncensored.
+The 16-case phase follow-up contains 9 oracle diagnostics, 6 wanted full-message holdouts
 (4 correct and 2 failed/rejected), and 1 noise-only receive case with no DATA
 or physical completion. The three FEC cases include an RS20 rejection after
 seven erasures and an RS60 exact `HELLO` decode after repairing ten erasures,

@@ -1,6 +1,8 @@
 #include "appraisal/channel.hpp"
 #include "appraisal/hf_history.hpp"
 #include "appraisal/hf_phase_bank.hpp"
+#include "appraisal/hf_public_diagnostic.hpp"
+#include "appraisal/hf_public_receiver.hpp"
 #include "appraisal/hf_replay.hpp"
 #include "appraisal/lunar_spectral.hpp"
 #include "appraisal/vlf_diagnostic.hpp"
@@ -10,6 +12,7 @@
 #include "datapump/triad_stream_receiver.hpp"
 #include "datapump/execution_resources.hpp"
 #include "triad_receiver_bulk.hpp"
+#include "triad_stream_backend.hpp"
 #include "triad_probe_json.hpp"
 #include <openssl/evp.h>
 #include <openssl/crypto.h>
@@ -55,13 +58,15 @@ struct Timeout : Error { using Error::Error; };
 struct Unavailable : Error { using Error::Error; };
 struct Options {
     std::string mode="receive", scenario="awgn", waveform="reference", control="wanted", backend="cpu", message="e", pulse="rrc", fec="off";
-    std::uint64_t seed=5489, max_samples=20'000'000, oracle_slot=0;
+    std::uint64_t seed=5489, max_samples=20'000'000, oracle_slot=0, search_slot=0;
+    std::string search_timing="selected";
+    std::optional<std::uint64_t> capture_digest_slot;
     double max_wall_seconds=60, duration_seconds=10;
     std::optional<double> cn0, bit_seconds, history_reference_delay_seconds, capture_lead_seconds;
     std::optional<unsigned> workers, owners, fade_slots;
     std::optional<std::size_t> memory_bytes;
     std::size_t chunk=4096;
-    bool helper=false, list=false, help=false, hf_phase_bank=false;
+    bool helper=false, list=false, help=false, hf_phase_bank=false, search_options=false, hf_public_phase_receiver=false;
 };
 void require(bool value, const char* text) { if(!value) throw Error(text); }
 std::uint64_t integer(const std::string& text) {
@@ -79,6 +84,7 @@ Options parse(int argc,char** argv) {
     for(int i=1;i<argc;++i) {
         const std::string key=argv[i];
         if(key=="--helper") {o.helper=true;continue;}
+        if(key=="--hf-public-phase-receiver") {o.hf_public_phase_receiver=true;continue;}
         if(key=="--hf-phase-bank") {o.hf_phase_bank=true;continue;}
         if(key=="--list") {o.list=true;continue;}
         if(key=="--help") {o.help=true;continue;}
@@ -94,6 +100,9 @@ Options parse(int argc,char** argv) {
         else if(key=="--fade-slots") {auto n=integer(value);require(n==1||n==2,"fade slots must be 1 or 2");o.fade_slots=static_cast<unsigned>(n);}
         else if(key=="--seed") o.seed=integer(value);
         else if(key=="--oracle-slot") o.oracle_slot=integer(value);
+        else if(key=="--capture-digest-slot") o.capture_digest_slot=integer(value);
+        else if(key=="--search-slot") {o.search_slot=integer(value);o.search_options=true;}
+        else if(key=="--search-timing") {o.search_timing=value;o.search_options=true;}
         else if(key=="--max-samples") o.max_samples=integer(value);
         else if(key=="--chunk") { auto n=integer(value); require(n>0 && n<=16384,"chunk must be 1..16384");o.chunk=static_cast<std::size_t>(n); }
         else if(key=="--workers" || key=="--owners") { auto n=integer(value);require(n>0 && n<=65536,"worker/owner limit must be 1..65536");if(key=="--workers")o.workers=static_cast<unsigned>(n);else o.owners=static_cast<unsigned>(n); }
@@ -112,7 +121,18 @@ Options parse(int argc,char** argv) {
         else if(key=="--duration-seconds") o.duration_seconds=number(value);
         else throw Error("unknown option: "+key);
     }
-    require(o.mode=="plan"||o.mode=="channel"||o.mode=="receive"||o.mode=="slot"||o.mode=="oracle"||o.mode=="diagnose","unknown mode");
+    require(o.mode=="plan"||o.mode=="channel"||o.mode=="receive"||o.mode=="slot"||o.mode=="oracle"||o.mode=="diagnose"||o.mode=="hf-search","unknown mode");
+    require(o.search_timing=="selected"||o.search_timing=="full","search timing must be selected or full");
+    require(!o.search_options||o.mode=="hf-search","search options require hf-search mode");
+    require(!o.capture_digest_slot||o.mode=="receive"||o.mode=="slot"||o.mode=="hf-search",
+        "capture digest requires receive, slot or hf-search mode");
+    require(o.mode!="hf-search"||!o.capture_digest_slot||*o.capture_digest_slot==o.search_slot,
+        "hf-search capture digest must select its search slot");
+    require(o.mode!="hf-search"||(!o.helper&&o.backend=="cpu"&&
+        (o.control=="wanted"||o.control=="noise"||o.control=="wrong-key"||o.control=="wrong-ordinal")),
+        "hf-search requires Helper-off CPU wanted, noise, wrong-key or wrong-ordinal control");
+    require(!o.hf_public_phase_receiver||((o.mode=="receive"||o.mode=="slot")&&!o.helper&&o.backend=="cpu"),
+        "HF public phase receiver requires receive/slot mode with Helper-off CPU");
     require(o.waveform=="smoke"||o.waveform=="reference","unknown waveform");
     require(o.pulse=="rrc"||o.pulse=="tapered-rrc","unknown pulse");
     require(o.fec=="off"||o.fec=="rs20"||o.fec=="rs60","unknown FEC mode");
@@ -265,7 +285,13 @@ Json channel_parameters(const appraisal::ChannelSpec& c) {
     const auto hash_double=[&](double value){hash_u64(std::bit_cast<std::uint64_t>(value));};
     const auto hash_bool=[&](bool value){const unsigned char byte=value?1:0;hash_bytes(&byte,1);};
     const auto hash_string=[&](std::string_view value){hash_u64(value.size());hash_bytes(value.data(),value.size());};
-    if(extended) {constexpr char version[]="appraisal-paths-v2";hash_bytes(version,sizeof(version));}
+    const bool phased_layer=std::any_of(c.paths.begin(),c.paths.end(),[](const auto& p){
+        return p.hf&&p.hf->parabolic_layer&&p.hf->parabolic_layer->critical_phase_radians!=0;
+    });
+    if(extended) {
+        const char* version=phased_layer?"appraisal-paths-v3":"appraisal-paths-v2";
+        hash_bytes(version,19);
+    }
     for(const auto& p:c.paths) {
         const std::array<double,9> values{p.power,p.phase_radians,p.delay_seconds,p.delay_rate,
             p.residual_doppler_hz,p.residual_drift_hz_s,p.gaussian_width_2sigma_hz,
@@ -308,9 +334,10 @@ Json channel_parameters(const appraisal::ChannelSpec& c) {
                 const auto& layer=*h.parabolic_layer;
                 for(double value:{layer.bottom_height_m,layer.semi_thickness_m,layer.critical_frequency_hz,
                     layer.critical_amplitude_hz,layer.critical_period_seconds})hash_double(value);
+                if(phased_layer)hash_double(layer.critical_phase_radians);
                 parabolic=object({{"bottom_height_m",layer.bottom_height_m},{"semi_thickness_m",layer.semi_thickness_m},
                     {"critical_frequency_hz",layer.critical_frequency_hz},{"critical_amplitude_hz",layer.critical_amplitude_hz},
-                    {"critical_period_seconds",layer.critical_period_seconds}});
+                    {"critical_period_seconds",layer.critical_period_seconds},{"critical_phase_radians",layer.critical_phase_radians}});
             }
             hash_bool(static_cast<bool>(h.measured_envelope));
             hash_double(h.measured_offset_seconds);
@@ -356,8 +383,9 @@ Json channel_parameters(const appraisal::ChannelSpec& c) {
     const auto& t=c.transmitter; const auto& n=c.noise;const auto& f=c.frontend;
     auto result=object({{"rf_hz",c.rf_hz},{"paths",std::move(paths)},{"path_count",c.paths.size()},
         {"path_power_sum",power},{"path_parameters_sha256",path_hash.finish()},{"paths_omitted",c.paths.size()>128},
-        {"path_hash_version",extended?2:1},
-        {"path_hash_encoding",extended?
+        {"path_hash_version",phased_layer?3:extended?2:1},
+        {"path_hash_encoding",phased_layer?
+            "As v2 with NUL-terminated appraisal-paths-v3 prefix and critical_phase_radians binary64 after every parabolic critical_period field":extended?
             "NUL-terminated appraisal-paths-v2 prefix; each v1 record then uint8 hf_present; if present: motion amplitude,period,phase binary64; uint8 couple; uint64 transition_count; ordered start,stop,from,to binary64; K binary64; uint8 polarization_present; if present: basis_angle,ellipticity_phase,transmit_angle,receive_angle,rotation_amplitude,rotation_period binary64, uint8 extraordinary; dispersion_slope binary64; uint8 parabolic_present; if present: bottom_height,semi_thickness,critical_frequency,critical_amplitude,critical_period binary64; uint8 measured_present; measured_offset binary64; if present: sample_rate,raw_mean_power,normalization_gain binary64; part,source_sha,serialized_iq_sha strings (uint64 length then bytes); uint64 sample_count; ordered real,imag binary64 samples. All integers and binary64 little-endian":
             "ordered records: nine little-endian binary64 values power,phase,delay,delay_rate,residual_doppler,residual_drift,gaussian_width,phase_wander_amplitude,phase_wander_period, then uint8 frozen_gaussian"},
         {"path_regeneration","scenario ID and source identity define deterministic path parameters; seed defines stochastic realization"},
@@ -429,6 +457,16 @@ struct Setup {
 };
 Setup setup(const Options& o) {
     auto scenario=appraisal::make_scenario(o.scenario);
+    if(o.mode=="hf-search"||o.hf_public_phase_receiver) {
+        const auto& channel=scenario.channel;
+        const auto& noise=channel.noise;
+        const auto& frontend=channel.frontend;
+        if((scenario.family!="skywave-1-30MHz"&&scenario.id!="awgn")||channel.paths.size()!=1||
+           channel.lunar||channel.transmitter.enabled||noise.colored_variance!=0||
+           (noise.impulse_rate_hz!=0&&noise.impulse_rms!=0)||noise.tone_amplitude!=0||
+           frontend.lowpass_hz!=0||frontend.clip_magnitude!=0||frontend.agc_target!=0||frontend.adc_bits!=0)
+            throw Unavailable("HF public phase search supports one-path HF or AWGN with raw proper-complex white noise and no transmitter resonator or receiver frontend");
+    }
     if(o.history_reference_delay_seconds||o.hf_phase_bank) {
         require(scenario.family=="skywave-1-30MHz","HF history reference delay and phase bank require an HF oracle scenario");
         const double delay=o.history_reference_delay_seconds.value_or(0);
@@ -554,6 +592,13 @@ Setup setup(const Options& o) {
         s.slot_horizon=1;
         s.horizon=make_receiver_slot_plan(s.profile,s.receiver,0).stop_sample;
     }
+    if(o.mode=="hf-search") {
+        require(o.search_slot<s.truth.size()+2,"search-slot must be within the prepared message and its two following public slots");
+        s.slot_horizon=o.search_slot+1;
+        s.horizon=make_receiver_slot_plan(s.profile,s.receiver,o.search_slot).stop_sample;
+    }
+    if(o.capture_digest_slot)
+        require(*o.capture_digest_slot<s.slot_horizon,"capture-digest-slot must be within the evaluated public horizon");
     s.stream.workers=o.workers;s.stream.slot_owners=o.owners;s.stream.memory_limit_bytes=o.memory_bytes;
     s.stream.maximum_input_chunk_samples=o.chunk;s.stream.maximum_gap_samples=o.chunk;
     s.stream.record_commit_timing=true;s.stream.recent_slot_receipts=512;
@@ -562,6 +607,9 @@ Setup setup(const Options& o) {
 }
 Json plan_json(const Setup& s,const Options& o) {
     const auto& f=s.profile.config().format;const auto& g=s.profile.geometry();const auto& p=s.profile.config();
+    const auto digest_index=o.mode=="hf-search"?std::optional<std::uint64_t>(o.search_slot):o.capture_digest_slot;
+    std::optional<ReceiverSlotPlan> digest_plan;
+    if(digest_index)digest_plan=make_receiver_slot_plan(s.profile,s.receiver,*digest_index);
     Json::Array slots;
     for(std::uint64_t i=0;i<s.slot_horizon;++i) {
         const auto slot=s.profile.slot(i);const auto rx=make_receiver_slot_plan(s.profile,s.receiver,i);
@@ -581,8 +629,8 @@ Json plan_json(const Setup& s,const Options& o) {
         {"fade_slots",o.control=="interior-fade"?Json(o.fade_slots.value_or(2)):Json{}},
         {"content_limit_bytes",s.message_profile.content_limit},{"long_form",s.draft.long_form()},
         {"message",s.message},{"requested_message",o.message},{"source_stop_sample",s.source_stop},{"first_uncontaminated_quiet_slot",s.q0},
-        {"planned_uncontaminated_quiet_slots",o.control=="eof"||o.mode=="slot"||o.mode=="diagnose"?0:2},
-        {"observation_scope",o.mode=="diagnose"?"bounded_native_phases_from_complete_first_observation":o.mode=="slot"?"first_complete_public_observation":o.mode=="channel"?"bounded_channel_episode":"physical_message_completion"},
+        {"planned_uncontaminated_quiet_slots",o.control=="eof"||o.mode=="slot"||o.mode=="diagnose"||o.mode=="hf-search"?0:2},
+        {"observation_scope",o.mode=="hf-search"?"shadow_public_search_of_selected_complete_observation":o.mode=="diagnose"?"bounded_native_phases_from_complete_first_observation":o.mode=="slot"?"first_complete_public_observation":o.mode=="channel"?"bounded_channel_episode":"physical_message_completion"},
         {"first_data_support",range(s.transmit_profile.slot(0).data_support)},
         {"first_data_nominal_seconds",static_cast<double>(s.transmit_profile.calendar().relative_seconds(s.transmit_profile.origin(),s.transmit_profile.transmit_slot(0).pattern_begin))},
         {"first_data_nominal_capture_seconds",p.capture_lead_seconds+static_cast<double>(s.transmit_profile.calendar().relative_seconds(s.transmit_profile.origin(),s.transmit_profile.transmit_slot(0).pattern_begin))},
@@ -594,7 +642,14 @@ Json plan_json(const Setup& s,const Options& o) {
         {"path_sample_products",static_cast<double>(s.horizon)*static_cast<double>(s.scenario.channel.paths.size())},
         {"cn0_db_hz",s.cn0},{"noise_variance",s.receiver.noise_variance},
         {"history_reference_delay_seconds",o.history_reference_delay_seconds.value_or(0)},
-        {"hf_phase_bank_requested",o.hf_phase_bank},
+        {"hf_phase_bank_requested",o.hf_phase_bank},{"hf_public_phase_receiver_requested",o.hf_public_phase_receiver},
+        {"search_slot",o.search_slot},{"search_timing",o.search_timing},
+        {"capture_digest_slot",digest_index?Json(*digest_index):Json{}},
+        {"capture_digest_slot_override",o.capture_digest_slot.has_value()},
+        {"capture_digest_first_sample",digest_plan?Json(digest_plan->first_sample):Json{}},
+        {"capture_digest_stop_sample",digest_plan?Json(digest_plan->stop_sample):Json{}},
+        {"search_observation",o.mode=="hf-search"?range({make_receiver_slot_plan(s.profile,s.receiver,o.search_slot).first_sample,
+            make_receiver_slot_plan(s.profile,s.receiver,o.search_slot).stop_sample}):Json{}},
         {"cn0_reference_plane","fixed normalized DATA reference before time-varying propagation, TX response and RX frontend; white input density"},
         {"cn0_override",o.cn0.has_value()},{"physical_level_connected",s.scenario.physical_level_connected&&!o.cn0},
         {"public_bounds",object({{"arrival_low_seconds",p.arrival_low_seconds},{"arrival_high_seconds",p.arrival_high_seconds},
@@ -902,8 +957,8 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     const auto prepared=Clock::now();
     // Materialized renderer storage is charged by the controller's live RSS.
     // Reserve future source cache and bounded evaluator output separately.
-    const auto diagnostic_slot=make_receiver_slot_plan(s.profile,s.receiver,0);
-    const auto diagnostic_samples=o.mode=="diagnose"?diagnostic_slot.stop_sample-diagnostic_slot.first_sample:0;
+    const auto diagnostic_slot=make_receiver_slot_plan(s.profile,s.receiver,o.mode=="hf-search"?o.search_slot:0);
+    const auto diagnostic_samples=(o.mode=="diagnose"||o.mode=="hf-search")?diagnostic_slot.stop_sample-diagnostic_slot.first_sample:0;
     require(diagnostic_samples<=SIZE_MAX/sizeof(Complex),"diagnostic capture extent overflow");
     const auto diagnostic_bytes=static_cast<std::size_t>(diagnostic_samples)*sizeof(Complex);
     const auto future=source.working_bytes+o.chunk*(sizeof(Complex)+1)+
@@ -925,17 +980,41 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     result["plan"]["renderer_resident_accounting"]="materialized state included in canonical process-footprint admission";
     result["plan"]["receiver_memory_limit_bytes"]=*s.stream.memory_limit_bytes;
     result["plan"]["diagnostic_capture_bytes"]=diagnostic_bytes;
-    if(receive)
+    std::shared_ptr<appraisal::HfPublicPhaseReceiver> phase_receiver;
+    std::unique_ptr<CompleteStreamReceiver> receiver;
+    if(receive&&o.hf_public_phase_receiver) {
+        phase_receiver=std::make_shared<appraisal::HfPublicPhaseReceiver>(s.slot_horizon);
+        const auto supplement=phase_receiver->supplement();
+        const datapump::triad::v3::detail::StreamWorkspace workspace=[supplement](const auto& config,const auto& slot,unsigned workers) {
+            return receiver_detail::receiver_slot_workspace_with_supplement(config,slot,workers,supplement,false);
+        };
+        const datapump::triad::v3::detail::StreamWorkspace overlap_workspace=[supplement](const auto& config,const auto& slot,unsigned workers) {
+            return receiver_detail::receiver_slot_workspace_with_supplement(config,slot,workers,supplement,true);
+        };
+        const datapump::triad::v3::detail::StreamExecutorScorer scorer=[supplement](const auto& config,const auto& slot,const auto& key,
+                auto input,auto validity,unsigned workers,std::size_t bytes,std::stop_token stop,
+                receiver_detail::ReceiverExecutor* executor) {
+            return receiver_detail::score_slot_with_supplement(config,slot,key,input,validity,
+                workers,bytes,stop,executor,supplement);
+        };
+        result["plan"]["first_slot_workspace_bytes"]=workspace(s.receiver,
+            make_receiver_slot_plan(s.profile,s.receiver,0),s.resources.workers);
+        // Direct initialization elides the nonmovable stream controller; its
+        // scheduler, native codec and both admission quotes remain canonical.
+        receiver.reset(new CompleteStreamReceiver(datapump::triad::v3::detail::StreamReceiverFixture::make_with_executor(
+            s.profile,s.receiver,s.key,s.stream,workspace,scorer,message_decoder(s.message_profile.fec),
+            message_receiver_options(s.message_profile),datapump::triad::v3::detail::StreamFootprint{},overlap_workspace)));
+    } else if(receive) {
         result["plan"]["first_slot_workspace_bytes"]=receiver_slot_workspace(s.receiver,
             make_receiver_slot_plan(s.profile,s.receiver,0),s.resources.workers);
-    std::unique_ptr<CompleteStreamReceiver> receiver;
-    if(receive)receiver=std::make_unique<CompleteStreamReceiver>(s.profile,s.receiver,s.key,s.stream,s.message_profile);
+        receiver=std::make_unique<CompleteStreamReceiver>(s.profile,s.receiver,s.key,s.stream,s.message_profile);
+    }
     std::stop_callback interrupt(deadline.stop.get_token(),[&]{if(receiver)receiver->request_cancel();});
     Json::Array slots,messages;
     std::size_t wrong_bits=0,false_data=0,ambiguous=0,quiet_active=0,premature=0,physical=0,rejections=0,resumed=0;
     std::size_t backpressure=0,peak_backlog=0,safe_completions=0,accepted_messages=0;
     bool correct=false,correct_decoded_candidate=false,ended=false;
-    bool first_observation_complete=false,first_observation_correct_data=false;
+    bool first_observation_complete=false,first_observation_correct_data=false,public_search_executed=false;
     const auto first_observation=make_receiver_slot_plan(s.profile,s.receiver,0);
     const bool target=o.control!="noise"&&o.control!="wrong-key"&&o.control!="wrong-ordinal";
     const bool configured_mode_voltage_transitions=std::any_of(s.scenario.channel.paths.begin(),s.scenario.channel.paths.end(),
@@ -1022,7 +1101,16 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
         const auto r=receiver->report();peak_backlog=std::max(peak_backlog,r.uncommitted_slots);
     };
     std::vector<Complex> iq(o.chunk);std::vector<std::uint8_t> valid(o.chunk,1);
-    Hash hash;double render_seconds=0,control_seconds=0;std::uint64_t first=0,hashed_samples=0;
+    const auto digest_index=o.mode=="hf-search"?std::optional<std::uint64_t>(o.search_slot):o.capture_digest_slot;
+    std::optional<ReceiverSlotPlan> digest_plan;
+    std::optional<Hash> selected_hash;
+    if(digest_index) {
+        digest_plan=make_receiver_slot_plan(s.profile,s.receiver,*digest_index);
+        selected_hash.emplace();
+    }
+    std::uint64_t selected_hashed_samples=0;
+    std::optional<std::string> selected_digest;
+    Hash hash;double render_seconds=0,control_seconds=0,public_search_seconds=0;std::uint64_t first=0,hashed_samples=0;
     std::string run_status="completed",reason;
     try {
         while(first<s.horizon) {
@@ -1033,7 +1121,17 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
             for(std::size_t i=0;i<n;++i)valid[i]=(o.control!="capture-gap"||first+i<s.gap_first||first+i>=s.gap_stop)?1:0;
             hash.samples(std::span(iq).first(n),std::span(valid).first(n));
             hashed_samples+=n;
-            if(o.mode=="diagnose") {
+            if(digest_plan) {
+                const auto a=std::max(first,digest_plan->first_sample);
+                const auto b=std::min(first+n,digest_plan->stop_sample);
+                if(a<b) {
+                    const auto offset=static_cast<std::size_t>(a-first),count=static_cast<std::size_t>(b-a);
+                    selected_hash->samples(std::span(iq).subspan(offset,count),std::span(valid).subspan(offset,count));
+                    selected_hashed_samples+=count;
+                    if(b==digest_plan->stop_sample)selected_digest=selected_hash->finish();
+                }
+            }
+            if(o.mode=="diagnose"||o.mode=="hf-search") {
                 const auto a=std::max(first,diagnostic_slot.first_sample);
                 const auto b=std::min(first+n,diagnostic_slot.stop_sample);
                 if(a<b)std::copy_n(iq.begin()+static_cast<std::size_t>(a-first),static_cast<std::size_t>(b-a),
@@ -1065,6 +1163,23 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
             appraisal::diagnose_vlf_slot(result["vlf_diagnostic"],s.receiver,diagnostic_slot,s.key,
                 diagnostic_capture,s.resources.workers,*s.stream.memory_limit_bytes,deadline.stop.get_token());
             control_seconds+=std::chrono::duration<double>(Clock::now()-ctl).count();
+        }
+        if(o.mode=="hf-search") {
+            // The same incremental IQ/validity hash binds receive and shadow
+            // observations without retaining another sample buffer.
+            require(selected_digest.has_value()&&selected_hashed_samples==diagnostic_samples,
+                "selected search observation was not completely hashed");
+            result["plan"]["search_observation_sha256"]=*selected_digest;
+            const auto ctl=Clock::now();
+            result["hf_public_search"]=appraisal::diagnose_hf_public_search(s.receiver,diagnostic_slot,s.key,
+                diagnostic_capture,s.resources.workers,*s.stream.memory_limit_bytes,o.search_timing=="full",deadline.stop.get_token());
+            public_search_seconds=std::chrono::duration<double>(Clock::now()-ctl).count();
+            public_search_executed=true;
+            const bool active=o.search_slot<s.truth.size()&&o.control!="noise";
+            result["hf_search_evaluation"]=object({{"slot_index",o.search_slot},{"transmitted_active",active},
+                {"expected_receiver_bit",active&&target?Json(s.truth[o.search_slot]):Json{}},
+                {"truth_information_passed_to_search",false},
+                {"scope","post-search evaluator only; no native DATA/quiet decision, message completion or capacity claim"}});
         }
         if(receiver) {
             const auto ctl=Clock::now();final=receiver->finish_input();drain();
@@ -1104,6 +1219,12 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     result["channel"]=channel_json(channel.report(),s.receiver.sample_rate_hz);
     result["channel"]["input_sha256"]=hash.finish();
     result["channel"]["hashed_samples"]=hashed_samples;
+    if(digest_plan) {
+        result["channel"]["selected_observation_sha256"]=selected_digest?Json(*selected_digest):Json{};
+        result["channel"]["selected_observation_complete"]=selected_digest.has_value();
+        result["channel"]["selected_observation_hashed_samples"]=selected_hashed_samples;
+        result["channel"]["selected_observation_hash_format"]="same little-endian IEEE754 real,imag plus actual validity byte as input_sha256; evaluator-only, no receiver geometry change";
+    }
     result["channel"]["hash_format"]="little-endian IEEE754 real,imag plus validity byte per fully hashed sample; rendered samples may include an unhashed cancelled prefix of the next chunk; accepted_samples reported separately";
     result["channel"]["effective_maximum_workspace_bytes"]=s.scenario.channel.maximum_workspace_bytes;
     result["channel"]["parameters_location"]="scenario.channel";
@@ -1119,8 +1240,8 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
         {"source_preparation_seconds",std::chrono::duration<double>(prepared-begin).count()},
         {"channel_preparation_seconds",channel_preparation_seconds},
         {"source_and_channel_render_seconds",render_seconds},{"receiver_control_and_wait_seconds",control_seconds},
-        {"receiver_dsp_may_overlap_rendering",true},{"isolated_receiver_service_measured",false},{"capacity_qualified",false}});
-    result["outcomes"]=object({{"receiver_executed",bool(receiver)},{"correct_complete",o.mode!="slot"&&correct&&wrong_bits==0&&false_data==0&&
+        {"public_search_seconds",public_search_seconds},{"receiver_dsp_may_overlap_rendering",bool(receiver)},{"isolated_receiver_service_measured",false},{"capacity_qualified",false}});
+    result["outcomes"]=object({{"receiver_executed",bool(receiver)},{"public_search_executed",public_search_executed},{"correct_complete",o.mode!="slot"&&correct&&wrong_bits==0&&false_data==0&&
             ambiguous==0&&quiet_active==0&&physical==1&&accepted_messages==1&&run_status=="completed"},
         {"correct_decoded_complete",o.mode=="receive"&&correct_decoded_candidate&&false_data==0&&premature==0&&
             physical==1&&accepted_messages==1&&run_status=="completed"},
@@ -1133,15 +1254,16 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
         {"completion_evaluated",bool(receiver)&&o.mode=="receive"&&run_status=="completed"},
         {"missed_completion",run_status=="completed"&&bool(receiver)&&o.mode!="slot"&&target&&o.control!="eof"&&safe_completions==0},{"configured_outage",s.scenario.channel.fade.first_seconds>=0},
         {"configured_mode_voltage_transitions",configured_mode_voltage_transitions},
-        {"resumed_data_slots",resumed},{"actual_scored_slots",slots.size()},{"component_only",o.mode=="channel"||o.mode=="slot"||o.mode=="diagnose"},
+        {"resumed_data_slots",resumed},{"actual_scored_slots",slots.size()},{"component_only",o.mode=="channel"||o.mode=="slot"||o.mode=="diagnose"||o.mode=="hf-search"},
         {"resumed_data_boundary_sample",resumed_data_boundary_source=="none"?Json{}:Json(resumed_data_boundary_sample)},
         {"resumed_data_boundary_source",resumed_data_boundary_source},
         {"resumed_data_scope","evaluator counts complete all-valid DATA decisions within the transmitted message whose whole public observation starts at or after the selected boundary; a mode-transition boundary is the last scheduled voltage-change stop and does not guarantee recovery or correct DATA"},
-        {"observation_scope",o.mode=="diagnose"?"bounded_native_phases_from_complete_first_observation":o.mode=="slot"?"first_complete_public_observation":o.mode=="channel"?"bounded_channel_episode":"physical_message_completion"},
+        {"observation_scope",o.mode=="hf-search"?"shadow_public_search_of_selected_complete_observation":o.mode=="diagnose"?"bounded_native_phases_from_complete_first_observation":o.mode=="slot"?"first_complete_public_observation":o.mode=="channel"?"bounded_channel_episode":"physical_message_completion"},
         {"first_public_observation_complete",first_observation_complete},
         {"first_public_observation_correct_data",first_observation_correct_data},
         {"backpressure_count",backpressure},{"peak_uncommitted_slots",peak_backlog},{"accepted_samples",receiver?final.input_stop:0}});
     result["slots"]=std::move(slots);result["messages"]=std::move(messages);
+    if(phase_receiver)result["hf_public_phase_receiver"]=phase_receiver->report();
     result["backend"]=backend_json(o,s.receiver.bulk_backend);
     if((receiver||o.mode=="diagnose")&&o.backend!="cpu"&&run_status=="completed") {
         const auto receipt=s.receiver.bulk_backend->receipt();
@@ -1174,7 +1296,7 @@ int main(int argc,char** argv) {
         const auto o=parse(argc,argv);
         if(o.help) {
             result["status"]="completed";result["mode"]="help";
-            result["usage"]="high_fidelity_appraisal --mode plan|channel|receive|slot|oracle|diagnose --scenario NAME --waveform reference|smoke [--cn0 DBHZ] [--bit-seconds S] [--capture-lead-seconds S] [--pulse rrc|tapered-rrc] [--control wanted|noise|wrong-key|wrong-ordinal|interior-fade|capture-gap|eof] [--helper] [--seed N] [--workers N] [--owners N] [--memory-mib N] [--backend cpu|cuda|vulkan|gpu] [--max-samples N] [--max-wall-seconds S] [--duration-seconds S] [--chunk N] [--message TEXT] [--fec off|rs20|rs60] [--fade-slots 1|2] [--oracle-slot N] [--history-reference-delay-seconds S] [--hf-phase-bank]; capture lead defaults to .25s and accepts .25..10s to retain more pre-signal noise history; interior-fade defaults to two consecutive complete observation apertures, with --fade-slots 1 selecting a single physical erasure opportunity; slot observes only the complete first public slot; diagnose measures canonical VLF acquisition and short persistent fine phases without bit/message decisions; oracle requires linear Helper-off wanted AWGN, HF or EME with white noise and uses public slot N (default 0) within the prepared message; HF oracle additionally reports private clean-template history diagnostics; optional reference delay is independently declared within public arrival bounds (zero keeps the unshifted baseline), and --hf-phase-bank enables the fixed coherent phase-family evaluator";
+            result["usage"]="high_fidelity_appraisal --mode plan|channel|receive|slot|oracle|diagnose|hf-search --scenario NAME --waveform reference|smoke [--cn0 DBHZ] [--bit-seconds S] [--capture-lead-seconds S] [--pulse rrc|tapered-rrc] [--control wanted|noise|wrong-key|wrong-ordinal|interior-fade|capture-gap|eof] [--helper] [--seed N] [--workers N] [--owners N] [--memory-mib N] [--backend cpu|cuda|vulkan|gpu] [--max-samples N] [--max-wall-seconds S] [--duration-seconds S] [--chunk N] [--message TEXT] [--fec off|rs20|rs60] [--fade-slots 1|2] [--oracle-slot N] [--search-slot N] [--search-timing selected|full] [--capture-digest-slot N] [--history-reference-delay-seconds S] [--hf-phase-bank] [--hf-public-phase-receiver]; capture lead defaults to .25s and accepts .25..10s to retain more pre-signal noise history; interior-fade defaults to two consecutive complete observation apertures, with --fade-slots 1 selecting a single physical erasure opportunity; slot observes only the complete first public slot; diagnose measures canonical VLF acquisition and short persistent fine phases without bit/message decisions; capture-digest-slot incrementally hashes one complete public observation in receive/slot/hf-search without changing receiver geometry; hf-public-phase-receiver enables the experimental fixed-prior supplement inside the canonical receive/slot stream with raw white-noise one-path HF/AWGN and Helper-off CPU; hf-search runs a shadow public search on complete selected slot N (default 0), without receiver decisions or completion, using raw white-noise one-path HF/AWGN and Helper-off CPU; oracle requires linear Helper-off wanted AWGN, HF or EME with white noise and uses public slot N (default 0) within the prepared message; HF oracle additionally reports private clean-template history diagnostics; optional reference delay is independently declared within public arrival bounds (zero keeps the unshifted baseline), and --hf-phase-bank enables the fixed coherent phase-family evaluator";
         } else if(o.list) {
             result["mode"]="list";result["status"]="completed";Json::Array entries;
             for(const auto& name:appraisal::scenario_names())entries.push_back(scenario_json(appraisal::make_scenario(name)));

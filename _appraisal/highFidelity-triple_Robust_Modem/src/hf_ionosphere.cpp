@@ -72,7 +72,8 @@ double hf_residual_dispersion_phase_radians(double slope, double offset_hz) {
 
 HfEikonal hf_parabolic_eikonal(const HfParabolicLayer& layer, double rf_hz, long double seconds) {
     return eikonal_at_critical(layer, rf_hz, layer.critical_frequency_hz + layer.critical_amplitude_hz *
-                               periodic_sine(seconds, layer.critical_period_seconds));
+                               periodic_sine(seconds, layer.critical_period_seconds,
+                                             layer.critical_phase_radians));
 }
 
 namespace detail {
@@ -101,6 +102,7 @@ void validate_hf_mode(const HfModeProfile& p, const Path& path) {
                 finite(layer.critical_amplitude_hz) && layer.critical_amplitude_hz >= 0 &&
                 layer.critical_amplitude_hz <= .05 * layer.critical_frequency_hz &&
                 finite(layer.critical_period_seconds) && layer.critical_period_seconds >= 30 &&
+                finite(layer.critical_phase_radians) &&
                 motion.amplitude_seconds == 0 && p.group_delay_slope_seconds_per_hz == 0,
                 "parabolic eikonal must have a valid layer and exclusive delay/dispersion law");
     }
@@ -168,7 +170,7 @@ std::array<double, 2> hf_group_delay_motion_bounds(const HfModeProfile& p, doubl
         const double lo = layer.critical_frequency_hz - layer.critical_amplitude_hz;
         const double hi = layer.critical_frequency_hz + layer.critical_amplitude_hz;
         require(rf_hz > 0 && rf_hz < .99 * lo, "parabolic eikonal requires a propagating guarded band");
-        const auto initial = eikonal_at_critical(layer, rf_hz, layer.critical_frequency_hz);
+        const auto initial = hf_parabolic_eikonal(layer, rf_hz, 0);
         const auto earliest = eikonal_at_critical(layer, rf_hz, hi);
         const auto latest = eikonal_at_critical(layer, rf_hz, lo);
         return {earliest.group_delay_seconds - initial.group_delay_seconds,

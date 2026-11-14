@@ -61,6 +61,7 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
                  "capture_preroll_override": "--capture-lead-seconds" in command,
                  "history_reference_delay_seconds": float(argument("--history-reference-delay-seconds", "0")),
                  "hf_phase_bank_requested": "--hf-phase-bank" in command,
+                 "hf_public_phase_receiver_requested": "--hf-public-phase-receiver" in command,
                  "horizon_samples": 100, "pulse": argument("--pulse", "rrc"),
                  "requested_message": argument("--message", "e"),
                  "message": ("A" if argument("--control", "wanted") in {"interior-fade", "capture-gap"}
@@ -88,6 +89,21 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
             "correct_complete": False, "completion_evaluated": False,
         }
         receipt["slots"] = [{"index": 0, "decision": "data", "complete": True, "all_valid": True}]
+    elif mode == "hf-search":
+        selected = int(argument("--search-slot", "0"))
+        receipt["plan"].update({"search_slot": selected, "search_timing": argument("--search-timing", "selected"),
+            "search_observation": {"first": 20, "stop": 100}, "search_observation_sha256": "c" * 64})
+        receipt["hf_public_search"] = {"component_complete": True, "slot_index": selected,
+            "receiver_executed": False, "completion_evaluated": False, "capacity_qualified": False,
+            "truth_information_passed_to_search": False}
+        receipt["outcomes"] = {"receiver_executed": False, "public_search_executed": True,
+            "component_only": True, "completion_evaluated": False, "correct_complete": False,
+            "correct_decoded_complete": False, "actual_scored_slots": 0,
+            "physical_completions": 0, "accepted_messages": 0}
+        receipt["hf_search_evaluation"] = {"slot_index": selected, "truth_information_passed_to_search": False,
+            "transmitted_active": receipt["control"] != "noise",
+            "expected_receiver_bit": 1 if receipt["control"] == "wanted" else None}
+        receipt["slots"], receipt["messages"] = [], []
     elif mode == "diagnose":
         receipt["outcomes"] = {"component_only": True, "completion_evaluated": False,
                                 "correct_complete": False}
@@ -110,6 +126,20 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
                 "reference_delay_seconds": receipt["plan"]["history_reference_delay_seconds"],
                 "truth_information_passed_to_receiver": False, "truth_information_passed_to_phase_bank": False,
                 "receiver_executed": False, "completion_evaluated": False, "capacity_qualified": False}
+    if "--hf-public-phase-receiver" in command:
+        maximum = 1 if mode == "slot" else 5
+        receipt["plan"]["scored_slot_horizon"] = maximum
+        receipt["hf_public_phase_receiver"] = {"experimental": True, "fixed_weight": .25,
+            "model_family": "sinusoidal_phase_97", "truth_information_passed_to_search": False,
+            "maximum_slot_reports": maximum, "executed_slots": 1,
+            "slots": [{"slot_index": 0, "component_complete": True}]}
+    digest_slot = argument("--capture-digest-slot", argument("--search-slot", "0") if mode == "hf-search" else None)
+    if digest_slot is not None:
+        receipt["plan"].update({"capture_digest_slot": int(digest_slot),
+            "capture_digest_slot_override": "--capture-digest-slot" in command,
+            "capture_digest_first_sample": 20, "capture_digest_stop_sample": 100})
+        receipt.setdefault("channel", {}).update({"selected_observation_complete": True,
+            "selected_observation_hashed_samples": 80, "selected_observation_sha256": "c" * 64})
     if fec != "off":
         receipt["plan"].update({"wire_bits": 64 if fec == "rs20" else 80,
                                 "short_wire_bit_limit": 304 if fec == "rs20" else 400,
@@ -243,6 +273,74 @@ class CampaignValidationTests(unittest.TestCase):
             path.write_text(json.dumps(diagnostic_stratum))
             with self.assertRaisesRegex(runner.CampaignError, "wanted receive episodes"):
                 runner._read_campaign(path)
+
+    def test_hf_search_inputs_are_explicitly_scoped(self) -> None:
+        episode = {"id": "search", "scenario": "hf-vertical-eikonal-motion", "mode": "hf-search",
+                   "waveform": "reference", "seed": 1, "search_slot": 1, "search_timing": "full"}
+        runner._validate_episode(episode, 0, set(), 5, 1000)
+        command = runner._command(Path("/native/probe"), episode, 1000, 5)
+        self.assertEqual(command[command.index("--search-slot") + 1], "1")
+        self.assertEqual(command[command.index("--search-timing") + 1], "full")
+        for overrides in ({"search_slot": True}, {"search_slot": -1}, {"search_slot": 2**64},
+                          {"search_timing": []}, {"search_timing": "adapted"}, {"helper": True},
+                          {"backend": "cuda"}, {"control": "capture-gap"}, {"control": "interior-fade"},
+                          {"mode": "receive"}, {"oracle_slot": 0}, {"hf_phase_bank": True}):
+            with self.subTest(overrides=overrides), self.assertRaises(runner.CampaignError):
+                runner._validate_episode({**episode, **overrides}, 0, set(), 5, 1000)
+        for control in ("wanted", "noise", "wrong-key", "wrong-ordinal"):
+            runner._validate_episode({**episode, "control": control}, 0, set(), 5, 1000)
+
+    def test_operational_phase_flag_is_scoped_and_receipt_bound(self) -> None:
+        episode = {"id": "phase", "scenario": "awgn", "mode": "receive", "waveform": "smoke",
+                   "seed": 1, "hf_public_phase_receiver": True}
+        runner._validate_episode(episode, 0, set(), 5, 1000)
+        command = runner._command(Path("/native/probe"), episode, 1000, 5)
+        self.assertIn("--hf-public-phase-receiver", command)
+        runner._validate_completed_receipt(fake_completed_receipt(command), episode)
+        for control in ("wanted", "noise", "wrong-key", "wrong-ordinal", "interior-fade", "capture-gap"):
+            runner._validate_episode({**episode, "control": control}, 0, set(), 5, 1000)
+        for override in ({"hf_public_phase_receiver": 1}, {"mode": "hf-search"}, {"mode": "oracle"},
+                         {"helper": True}, {"backend": "cuda"}):
+            with self.subTest(override=override), self.assertRaises(runner.CampaignError):
+                runner._validate_episode({**episode, **override}, 0, set(), 5, 1000)
+        for section, field, value in (("plan", "hf_public_phase_receiver_requested", False),
+                ("hf_public_phase_receiver", "experimental", False),
+                ("hf_public_phase_receiver", "truth_information_passed_to_search", True),
+                ("hf_public_phase_receiver", "fixed_weight", .5),
+                ("hf_public_phase_receiver", "maximum_slot_reports", 6),
+                ("hf_public_phase_receiver", "executed_slots", 2),
+                ("hf_public_phase_receiver", "slots", [{"slot_index": 5, "component_complete": True}])):
+            with self.subTest(section=section, field=field):
+                bad = fake_completed_receipt(command)
+                bad[section][field] = value
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_completed_receipt(bad, episode)
+        no_callbacks = fake_completed_receipt(command)
+        no_callbacks["hf_public_phase_receiver"].update(executed_slots=0, slots=[])
+        runner._validate_completed_receipt(no_callbacks, episode)
+
+    def test_capture_digest_is_evaluator_only_and_binds_complete_observation(self) -> None:
+        episode = {"id": "digest", "scenario": "awgn", "mode": "receive", "waveform": "smoke",
+                   "seed": 1, "capture_digest_slot": 1}
+        runner._validate_episode(episode, 0, set(), 5, 1000)
+        command = runner._command(Path("/native/probe"), episode, 1000, 5)
+        self.assertEqual(command[command.index("--capture-digest-slot") + 1], "1")
+        runner._validate_completed_receipt(fake_completed_receipt(command), episode)
+        for override in ({"capture_digest_slot": True}, {"capture_digest_slot": -1},
+                         {"capture_digest_slot": 2**64}, {"mode": "oracle"}, {"mode": "slot"},
+                         {"mode": "hf-search", "search_slot": 0}):
+            with self.subTest(override=override), self.assertRaises(runner.CampaignError):
+                runner._validate_episode({**episode, **override}, 0, set(), 5, 1000)
+        for section, field, value in (("plan", "capture_digest_slot", 0),
+                ("plan", "capture_digest_slot_override", False), ("plan", "capture_digest_stop_sample", 101),
+                ("channel", "selected_observation_complete", False),
+                ("channel", "selected_observation_hashed_samples", 79),
+                ("channel", "selected_observation_sha256", None)):
+            with self.subTest(section=section, field=field):
+                bad = fake_completed_receipt(command)
+                bad[section][field] = value
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_completed_receipt(bad, episode)
 
     def test_command_passes_slot_and_episode_overrides_as_argv(self) -> None:
         episode = {"id": "oracle", "scenario": "awgn", "mode": "oracle", "waveform": "reference",
@@ -656,6 +754,37 @@ class CampaignValidationTests(unittest.TestCase):
                 invalid[section][field] = value
                 with self.assertRaises(runner.CampaignError):
                     runner._validate_completed_receipt(invalid, episode)
+
+    def test_hf_search_receipts_bind_public_inputs_and_do_not_claim_reception(self) -> None:
+        episode = {"id": "search", "scenario": "awgn", "mode": "hf-search", "waveform": "smoke",
+                   "seed": 9, "search_slot": 1, "search_timing": "full"}
+        command = runner._command(Path("/native/probe"), episode, 1000, 2)
+        runner._validate_completed_receipt(fake_completed_receipt(command), episode)
+        for section, field, value in (("plan", "search_slot", 0), ("plan", "search_timing", "selected"),
+                ("plan", "search_observation", {"first": 20, "stop": 99}),
+                ("plan", "search_observation_sha256", "missing"),
+                ("hf_public_search", "slot_index", 0), ("hf_public_search", "component_complete", False),
+                ("hf_public_search", "truth_information_passed_to_search", True),
+                ("hf_public_search", "capacity_qualified", True), ("hf_public_search", "receiver_executed", True),
+                ("outcomes", "receiver_executed", True), ("outcomes", "public_search_executed", False),
+                ("outcomes", "correct_complete", True), ("outcomes", "correct_decoded_complete", True),
+                ("outcomes", "completion_evaluated", True), ("outcomes", "actual_scored_slots", 1),
+                ("outcomes", "physical_completions", 1), ("outcomes", "accepted_messages", 1),
+                ("hf_search_evaluation", "truth_information_passed_to_search", True),
+                ("hf_search_evaluation", "expected_receiver_bit", True)):
+            with self.subTest(section=section, field=field):
+                invalid = fake_completed_receipt(command)
+                invalid[section][field] = value
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_completed_receipt(invalid, episode)
+        for control in ("noise", "wrong-key", "wrong-ordinal"):
+            negative = {**episode, "control": control}
+            negative_command = runner._command(Path("/native/probe"), negative, 1000, 2)
+            receipt = fake_completed_receipt(negative_command)
+            runner._validate_completed_receipt(receipt, negative)
+            receipt["hf_search_evaluation"]["expected_receiver_bit"] = 1
+            with self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(receipt, negative)
 
     def test_oracle_component_completion_flag_does_not_override_oracle_result(self) -> None:
         episode = {"id": "oracle", "scenario": "awgn", "mode": "oracle",

@@ -68,6 +68,38 @@ def main() -> None:
     assert not measured_noise["channel"]["contains_source_energy"] and not measured_noise["channel"]["contains_signal_energy"], measured_noise
     rejected_slot_control = invoke("--mode", "slot", "--control", "eof", code=2)
     assert "wanted or noise" in rejected_slot_control["reason"], rejected_slot_control
+    # Public-search shadow mode receives the selected aperture and receiver
+    # key only. Its evaluator must not manufacture native receiver decisions.
+    search = invoke("--mode", "hf-search", "--scenario", "awgn", "--waveform", "smoke",
+                    "--search-slot", "1", "--cn0", "40", "--max-wall-seconds", "25")
+    search_outcomes = search["outcomes"]
+    assert search["hf_public_search"]["component_complete"] and search_outcomes["public_search_executed"], search
+    assert not search_outcomes["receiver_executed"] and search_outcomes["component_only"], search
+    assert not search_outcomes["completion_evaluated"] and not search_outcomes["correct_complete"], search
+    assert search["slots"] == search["messages"] == [] and search_outcomes["actual_scored_slots"] == 0, search
+    assert search["plan"]["search_slot"] == search["hf_search_evaluation"]["slot_index"] == 1, search
+    observation = search["plan"]["search_observation"]
+    assert observation["first"] > 0 and observation["stop"] == search["plan"]["horizon_samples"], search
+    assert len(search["plan"]["search_observation_sha256"]) == 64, search
+    families = search["hf_public_search"]["families"]
+    assert {family["name"] for family in families} == {"constant_frequency", "linear_frequency_drift", "sinusoidal_phase"}, search
+    for family in families:
+        assert family["favored_bit"] == search["hf_search_evaluation"]["expected_receiver_bit"], search
+        assert family["passes_presence_reference"] and family["passes_bit_separation_reference"], search
+        assert family["bit_log_separation"] >= 5.29, search
+    assert search["channel"]["selected_observation_sha256"] == search["plan"]["search_observation_sha256"], search
+    for arguments, code in ((["--helper"], 2), (["--backend", "cuda"], 2),
+            (["--control", "capture-gap"], 2), (["--search-slot", "5"], 2),
+            (["--scenario", "hf-ox-split"], 5), (["--scenario", "noise-bursts"], 5),
+            (["--scenario", "frontend-overload"], 5), (["--history-reference-delay-seconds", "0"], 2),
+            (["--search-slot", "1", "--capture-digest-slot", "0"], 2)):
+        rejected = invoke("--mode", "hf-search", "--scenario", "awgn", "--waveform", "smoke", *arguments, code=code)
+        assert rejected["status"] in ("error", "unavailable"), rejected
+    for arguments, code in ((["--mode", "hf-search"], 2), (["--helper"], 2),
+                            (["--backend", "cuda"], 2), (["--scenario", "hf-ox-split"], 5)):
+        rejected = invoke("--mode", "receive", "--scenario", "awgn", "--waveform", "smoke",
+                          "--hf-public-phase-receiver", *arguments, code=code)
+        assert rejected["status"] in ("error", "unavailable"), rejected
     common = ["--scenario", "awgn", "--waveform", "smoke", "--seed", "5489",
               "--cn0", "40", "--max-wall-seconds", "25"]
     plan = invoke("--mode", "plan", *common)
@@ -111,7 +143,7 @@ def main() -> None:
         bad_fade = invoke("--mode", "plan", *common, *bad_args, code=2)
         assert "fade slots" in bad_fade["reason"] or "unsigned integer" in bad_fade["reason"], bad_fade
 
-    wanted = invoke("--mode", "receive", *common)
+    wanted = invoke("--mode", "receive", *common, "--capture-digest-slot", "1")
     assert wanted["status"] == "completed", wanted
     assert wanted["outcomes"]["correct_complete"], wanted
     assert wanted["outcomes"]["correct_decoded_complete"], wanted
@@ -121,8 +153,32 @@ def main() -> None:
     assert wanted["outcomes"]["premature_completions"] == 0, wanted
     assert wanted["outcomes"]["wrong_bits"] == 0, wanted
     assert wanted["outcomes"]["actual_scored_slots"] >= 5, wanted
-    chunked = invoke("--mode", "receive", *common, "--chunk", "1021")
+    assert wanted["channel"]["selected_observation_sha256"] == search["channel"]["selected_observation_sha256"], (wanted, search)
+    assert wanted["channel"]["selected_observation_complete"], wanted
+    assert wanted["channel"]["selected_observation_hashed_samples"] == observation["stop"] - observation["first"], wanted
+    phase_receive = invoke("--mode", "receive", *common, "--capture-digest-slot", "1", "--hf-public-phase-receiver")
+    phase_outcomes = phase_receive["outcomes"]
+    assert phase_outcomes["correct_complete"] and phase_outcomes["correct_decoded_complete"], phase_receive
+    assert phase_outcomes["completion_evaluated"] and phase_outcomes["physical_completions"] == 1, phase_receive
+    assert phase_outcomes["false_data"] == phase_outcomes["wrong_bits"] == phase_outcomes["premature_completions"] == 0, phase_receive
+    decoded = [message for message in phase_receive["messages"] if message["decoded"]]
+    assert len(decoded) == 1 and decoded[0]["physical_complete"], phase_receive
+    assert decoded[0]["decoded_payload_bytes"] == list(wanted["plan"]["message"].encode("ascii")), phase_receive
+    assert phase_receive["channel"]["selected_observation_sha256"] == wanted["channel"]["selected_observation_sha256"], phase_receive
+    assert phase_receive["receiver"]["workers"] == wanted["receiver"]["workers"] == 2 * wanted["receiver"]["hardware_threads"], phase_receive
+    assert phase_receive["plan"]["first_slot_workspace_bytes"] >= wanted["plan"]["first_slot_workspace_bytes"], phase_receive
+    phase_report = phase_receive["hf_public_phase_receiver"]
+    assert phase_report["experimental"] and phase_report["fixed_weight"] == .25, phase_receive
+    assert phase_report["model_family"] == "sinusoidal_phase_97" and not phase_report["truth_information_passed_to_search"], phase_receive
+    # Bright DATA can finish before the supplement. Physical quiet still
+    # exercises its callback within the actual complete native stream.
+    quiet_start = phase_receive["plan"]["first_uncontaminated_quiet_slot"]
+    callbacks = {slot["slot_index"] for slot in phase_report["slots"] if slot["component_complete"]}
+    assert {quiet_start, quiet_start + 1} <= callbacks, phase_receive
+    assert phase_report["executed_slots"] == len(callbacks), phase_receive
+    chunked = invoke("--mode", "receive", *common, "--chunk", "1021", "--capture-digest-slot", "1")
     assert chunked["channel"]["input_sha256"] == wanted["channel"]["input_sha256"], chunked
+    assert chunked["channel"]["selected_observation_sha256"] == wanted["channel"]["selected_observation_sha256"], chunked
     assert chunked["outcomes"]["correct_complete"], chunked
     first_slot = invoke("--mode", "slot", *common)
     assert first_slot["status"] == "completed", first_slot

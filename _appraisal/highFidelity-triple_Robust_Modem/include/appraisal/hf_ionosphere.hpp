@@ -31,6 +31,8 @@ struct HfParabolicLayer {
     // Cold, collisionless bottomside parabola at vertical incidence.
     double bottom_height_m, semi_thickness_m, critical_frequency_hz;
     double critical_amplitude_hz = 0, critical_period_seconds = 120;
+    // Physical phase of the critical-frequency variation at elapsed t=0.
+    double critical_phase_radians = 0;
 };
 
 struct HfEikonal {

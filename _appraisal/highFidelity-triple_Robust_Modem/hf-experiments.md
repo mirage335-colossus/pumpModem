@@ -13,6 +13,9 @@ statistical fits, analytic propagation models, and constructed sensitivity
 controls. None is a calibrated worldwide disturbed-day distribution.
 Actual positive, negative and conditional outcomes are preserved in the
 [HF validation record](hf-validation.md).
+The later [public phase-search continuation](hf-public-search.md) tests the
+private phase-history finding under full public acquisition priors and, through
+an explicit option, inside the same native complete receiver.
 
 ## Mechanisms and independent checks
 
@@ -22,6 +25,7 @@ Actual positive, negative and conditional outcomes are preserved in the
 | `hf-ox-split`, `hf-ox-cancellation` | Relative phase of characteristic modes after one transmit and one receive polarization projection | Constructed coherent Jones comparison with lossless vector closure and single-port cancellation checks. It is not an ionogram reconstruction or a critical-frequency ray solver. |
 | `hf-trough-static`, `hf-trough-phase` | Slow common phase on coherent and diffuse contributions | Matched source-conditioned sensitivity construction. The coherent contribution is not exempt from the changing phase; identical latent fading is retained in the pair. |
 | `hf-vertical-eikonal-static`, `hf-vertical-eikonal-motion` | A changing critical frequency in a vertical parabolic plasma layer | Phase, group delay and local dispersion derive from the same analytic eikonal. Independent refractive-index quadrature and frequency/time derivatives test the implementation. This unmagnetized model stays below cutoff and is not a full oblique magnetoionic ray solution. |
+| `hf-vertical-eikonal-holdout` | Critical-frequency variation of ±8.5 kHz, period 137 s and initial phase .37 rad | The same analytic physical model, with a trajectory absent from the frozen phase dictionary. It is a constructed mismatch control, not an independently measured disturbed day. The complete-message failure is retained in [HF validation](hf-validation.md). |
 | `hf-mode-transition` | Smooth loss, absence and recovery of a mode | Deliberately constructed control informed by observed mode changes. Its schedule is not relabeled as a measured sunrise, flare or storm. Latent path state advances while the mode is absent. |
 | `hf-ding-measured` | Deposited coupled complex envelope from a selected 12.7-MHz direct-skywave record | Exact 2,048 complex values, one full-record RMS normalization, bounded interpolation and no wrapping. Unknown instrument/filter calibration prevents interpreting it as an absolute channel gain or broadband impulse response. |
 | `hf-ding-amplitude`, `hf-ding-phase` | Remove either phase or amplitude variation from the same record | Explicit counterfactuals, not additional measurements. Their differences help identify the mechanism of a receiver failure. |
@@ -30,8 +34,8 @@ Actual positive, negative and conditional outcomes are preserved in the
 The dispersive operator respects the local transfer-phase derivative. At the
 chosen 3.4-MHz parabolic reference, group delay is about 2.099 ms and its slope
 about `5.21e-10 s/Hz`; the corresponding phase curvature across this narrow
-signal is small. The moving case instead produces about 12.6 radians of carrier
-phase excursion while group delay moves by only a few microseconds. Applying
+signal is small. The original moving case instead produces about 12.6 radians
+of carrier phase excursion while group delay moves by only a few microseconds. Applying
 the vacuum moving-path formula directly to that group-delay change would give
 the wrong Doppler. That distinction is part of the numerical tests.
 
@@ -106,6 +110,12 @@ heterogeneous rows into a success probability. Follow-up seeds may test a
 specific discovered contrast under a new frozen manifest, without changing
 receiver thresholds or discarding the initial observations.
 
+The later public-search, timing-control and complete-receiver manifests retain
+their own budgets and stopping rules in [hf-public-search.md](hf-public-search.md).
+Their receipts and any explicitly adaptive diagnostics are recorded separately
+in [HF validation](hf-validation.md), not counted as independent extensions of
+the original campaigns above.
+
 ## Separating available energy from receiver use
 
 HF `oracle` mode provides two complementary private diagnostics:
@@ -139,6 +149,20 @@ The same family is evaluated on signal-plus-noise and matched noise-only input.
 This bounded native diagnostic records work, workspace and elapsed cost. It
 conditions on supplied template timing/carrier and is not an operational
 acquisition implementation or proof of a general unknown-channel optimum.
+
+The newer `hf-search` mode evaluates that same frozen phase family alongside
+constant-CFO and affine controls, charging full public timing, clock, CFO and
+model priors. Shared immutable phase tables and a native FFT plan avoid repeated
+preparation without changing those priors. Eligible RRC timing atoms also use
+the existing native two-bit source bank, with exact coordinate checks and the
+canonical renderer retained as fallback; both memory bounds remain charged.
+The opt-in
+`--hf-public-phase-receiver` branch reserves weight 0.25 and shares the native
+coarse acquisition, executor, codec and physical-completion path. Its admitted
+scope is configured-calendar, single-tap, Helper-off CPU with IID proper-complex
+white noise of known variance. Shadow likelihoods remain distinct from native
+decisions; the off-grid last-bit failure prevents a broad graceful-degradation claim.
+See the [public protocol](hf-public-search.md) and [quick commands](README.md#public-phase-history-continuation).
 
 The time/energy campaign preserves actual native geometry. Increasing the
 requested bit duration does not imply the same multiple of transmitted energy

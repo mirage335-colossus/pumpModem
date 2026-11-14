@@ -12,7 +12,7 @@ holdouts each cap at 8,000,000 samples, 120 seconds per episode, and 1,800
 seconds aggregate; EME caps at 1,000,000 samples, 120 seconds per episode, and
 1,000 seconds aggregate; VLF caps at 70,000,000 samples, 1,200 seconds per
 episode, and 1,900 seconds aggregate. Episode overrides may impose stricter
-limits. There are no automatic retries or outcome-dependent stopping. Limits
+limits. These original campaigns used no automatic retries or outcome-dependent stopping. Limits
 censor work; they do not count as observed communication failures. Paired cases
 share seeds only where stated; matching seeds does not imply matched received
 energy when channel or C/N0 changes.
@@ -28,8 +28,8 @@ These are finite descriptive observations, not pooled success rates or
 reliability estimates. Their reports and source-bound receipts are under
 [`local-evidence/`](local-evidence/).
 
-The 112 frozen native HF campaign episodes all completed uncensored. The
-phase follow-up consists of 9 oracle diagnostics, 6 wanted full-message
+The original HF expansion's 112 frozen native campaign episodes all completed
+uncensored. The phase follow-up consists of 9 oracle diagnostics, 6 wanted full-message
 holdouts (4 correct, 2 failed/rejected), and 1 noise-only receive case with no
 DATA or physical completion. Helper campaigns send `e`; neither pair produced a
 narrowed frequency proposal. The 2 s AWGN case passed coarse/onset support but
@@ -39,6 +39,20 @@ validation](hf-validation.md) for detailed outcomes, original failures,
 receipts, and model limits. Results remain conditional descriptions, not
 reliability estimates, and are not pooled with the original 53 episodes.
 External competitor channel/capture (36) and replay (15) cases remain separate.
+
+The later [public phase-search continuation](hf-public-search.md) adds a
+constructed off-grid eikonal profile, public CFO/affine/nonlinear likelihoods,
+matched IQ/validity controls and an opt-in branch inside the complete native
+receiver. Software checks cover full prior mass, direct-sum likelihoods,
+shared phase/FFT preparation, native-hook boundaries, arrival-grid closure,
+physical completion and resource admission. The original moving miss and the
+longer weak case recover, but the off-grid complete message still fails on its
+last bit, with premature completion and integrity rejection. Current source-bound
+outcomes are in [HF validation](hf-validation.md). This continuation is limited
+to configured-calendar, single-tap, Helper-off CPU cases with IID proper-complex
+white noise of known variance; it does not establish smooth sensitivity or compute
+scaling on arbitrary ionospheric trajectories, multipath or unknown noise.
+Its diagnostic and receiver episodes are not pooled with the 112 earlier cases.
 
 | Source / mechanism | Observable | Receiver case IDs | Required outcome and evidence classification |
 | --- | --- | --- | --- |

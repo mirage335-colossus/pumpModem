@@ -6,6 +6,7 @@
 #include <cmath>
 #include <complex>
 #include <iostream>
+#include <limits>
 #include <numbers>
 #include <numeric>
 #include <stdexcept>
@@ -110,6 +111,7 @@ std::pair<double, double> integrate_vertical(const HfParabolicLayer& layer, doub
 void eikonal_derivatives() {
     const auto moving = make_scenario("hf-vertical-eikonal-motion");
     const auto fixed = make_scenario("hf-vertical-eikonal-static");
+    const auto holdout = make_scenario("hf-vertical-eikonal-holdout");
     const auto& layer = *moving.channel.paths.front().hf->parabolic_layer;
     const auto& fixed_layer = *fixed.channel.paths.front().hf->parabolic_layer;
     const auto initial = hf_parabolic_eikonal(layer, rf, 0);
@@ -140,9 +142,43 @@ void eikonal_derivatives() {
     require(doppler > 0 && doppler < moving.bounds.atmospheric_hz && std::abs(doppler - incorrect) > .3,
             "phase/group delay contrast or public frequency bound");
 
+    const auto& holdout_layer = *holdout.channel.paths.front().hf->parabolic_layer;
+    auto zero_phase_holdout_layer = holdout_layer;
+    zero_phase_holdout_layer.critical_phase_radians = 0;
+    const long double equivalent_shift = static_cast<long double>(holdout_layer.critical_phase_radians) *
+        holdout_layer.critical_period_seconds / (2 * std::numbers::pi_v<long double>);
+    for (const long double t : {0.L, .01L, 12.5L, 69.L, 200.L}) {
+        const auto phased = hf_parabolic_eikonal(holdout_layer, rf, t);
+        const auto shifted = hf_parabolic_eikonal(zero_phase_holdout_layer, rf, t + equivalent_shift);
+        near(phased.phase_delay_seconds, shifted.phase_delay_seconds, 2e-18,
+             "initial phase equals a physical shift along the same critical-frequency trajectory");
+        near(phased.group_delay_seconds, shifted.group_delay_seconds, 2e-18,
+             "initial phase preserves phase/group trajectory identity");
+        require(std::abs(phased.group_delay_seconds -
+                         hf_parabolic_eikonal(holdout_layer, rf, 0).group_delay_seconds) <=
+                    holdout.bounds.delay_excursion_seconds,
+                "off-grid holdout stays inside the declared delay excursion");
+    }
+    const long double holdout_time = 12.5L;
+    const auto holdout_at = hf_parabolic_eikonal(holdout_layer, rf, holdout_time);
+    const auto holdout_high = hf_parabolic_eikonal(holdout_layer, rf + delta, holdout_time);
+    const auto holdout_low = hf_parabolic_eikonal(holdout_layer, rf - delta, holdout_time);
+    near((holdout_high.phase_delay_seconds * (rf + delta) - holdout_low.phase_delay_seconds * (rf - delta)) /
+             (2 * delta), holdout_at.group_delay_seconds, 1e-11,
+         "off-grid phase retains the frequency derivative relation");
+    near((holdout_high.group_delay_seconds - holdout_low.group_delay_seconds) / (2 * delta),
+         holdout_at.group_delay_slope_seconds_per_hz, 1e-17,
+         "off-grid phase retains the group-delay slope relation");
+
     auto invalid = moving.channel;
     invalid.paths[0].hf->parabolic_layer->critical_frequency_hz = rf;
     rejected([&] { Channel channel(source(1000, 10), invalid, 0, 1000); }, "eikonal continued above cutoff");
+
+    invalid = holdout.channel;
+    invalid.paths[0].hf->parabolic_layer->critical_phase_radians =
+        std::numeric_limits<double>::infinity();
+    rejected([&] { Channel channel(source(1000, 10), invalid, 0, 1000); },
+             "nonfinite eikonal initial phase accepted");
 
     constexpr std::uint64_t n = 2400;
     for (const auto frequency : {-300., 50., 300.}) {

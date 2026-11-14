@@ -253,12 +253,37 @@ Scenario eikonal(const std::string& id) {
     s.evidence = "analytical collisionless vertical bottomside eikonal experiment";
     s.provenance = "Cold plasma n²=1−fo²(z)/f²; analytic bottomside parabolic-layer ray; Fable-5.2/31 §C and /33";
     s.assumptions = "At vertical incidence the 250km bottom and 50km semi-thickness parabolic "
-        "layer has 3.8MHz critical frequency with either static or sinusoidal ±7kHz/120s variation. "
+        "layer has 3.8MHz central critical frequency; this reference uses either no variation or "
+        "a ±7kHz/120s sinusoid at zero phase. "
         "Phase delay, group delay and group slope are jointly differentiated from one eikonal. "
         "Initial phase is a common reference and moving carrier phase is evaluated continuously. "
         "The whole native source band remains below cutoff. This selected scalar analytical "
         "ray has unit magnitude, no collisions or geomagnetic splitting, and no calibrated event "
         "trajectory. It isolates refractive phase without confusing it with geometric delay.";
+    return s;
+}
+
+Scenario eikonal_holdout() {
+    auto s = base_hf("hf-vertical-eikonal-holdout");
+    s.channel.rf_hz = 3.4e6;
+    s.channel.paths.resize(1);
+    auto& path = s.channel.paths.front();
+    auto& hf = path.hf.emplace();
+    hf.parabolic_layer = HfParabolicLayer{250000, 50000, 3.8e6, 8500., 137., .37};
+    path.delay_seconds = hf_parabolic_eikonal(*hf.parabolic_layer, s.channel.rf_hz, 0).group_delay_seconds;
+    s.bounds.arrival_low_seconds = .001;
+    s.bounds.arrival_high_seconds = .003;
+    s.bounds.atmospheric_hz = 1;
+    s.bounds.delay_excursion_seconds = 10e-6;
+    s.evidence = "constructed off-grid parameter holdout of the analytical vertical eikonal family";
+    s.provenance = "Cold plasma n²=1−fo²(z)/f²; analytic bottomside parabolic-layer ray; Fable-5.2/31 §C and /33";
+    s.assumptions = "This is a constructed, unfitted sensitivity holdout, not a measured ionospheric day. "
+        "It uses the existing collisionless vertical 250km/50km layer and 3.8MHz central critical "
+        "frequency, with an 8.5kHz sinusoidal critical-frequency amplitude, 137s period, and 0.37rad "
+        "initial phase. These values lie off the private 90/120/180s, π/4 phase evaluation grid. "
+        "The public receiver sees only its declared 1–3ms arrival and ±1Hz frequency bounds; it is "
+        "not given the holdout phase or trajectory. The scalar ray omits collisions, geomagnetic "
+        "splitting, and calibrated event histories.";
     return s;
 }
 
@@ -303,6 +328,7 @@ std::optional<Scenario> make_additional_hf_scenario(const std::string& id) {
     if (id == "hf-trough-static" || id == "hf-trough-phase") return trough(id);
     if (id == "hf-mode-transition") return mode_transition();
     if (id == "hf-vertical-eikonal-static" || id == "hf-vertical-eikonal-motion") return eikonal(id);
+    if (id == "hf-vertical-eikonal-holdout") return eikonal_holdout();
     if (id == "hf-ding-measured" || id == "hf-ding-amplitude" || id == "hf-ding-phase" ||
         id == "hf-ding-measured-late" || id == "hf-ding-clock41") return ding_measured(id);
     return std::nullopt;

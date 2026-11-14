@@ -1,14 +1,16 @@
 # Native appraisal validation record
 
-Updated 13 November 2026. This record retains actual checks, diagnostic outcomes,
+Updated 14 November 2026. This record retains actual checks, diagnostic outcomes,
 corrective history and the evidence limits for the contained appraisal. No
 scenario qualifies a real environment, universal receiver sensitivity floor,
 or complete-receiver CPU/GPU capacity.
 
 The subsequent [adverse HF expansion and comparison record](hf-validation.md)
 contains the current HF models, executed campaigns, phase-history and coding
-findings, and updated software checks. The source identities and seven-group
-checks below belong to the preceding broad five-environment appraisal; they
+findings, and updated software checks. It also records the later
+[public phase-search continuation](hf-public-search.md), the approved generic
+two-file native hook and fresh canonical/appraisal checks. The source identities
+and seven-group checks below belong to the preceding broad five-environment appraisal; they
 remain historical evidence with their original scope.
 
 **Legacy observation-horizon scope:** the integration smoke, exploratory
@@ -23,7 +25,8 @@ horizon. EME one-slot diagnostics do not exercise quiet completion.
 
 ## Pre-HF-expansion source and build identity
 
-The latest post-correction local Release app uses GCC 14.2.0, OpenSSL 3.5.7,
+At this pre-HF-expansion checkpoint, the post-correction local Release app used
+GCC 14.2.0, OpenSSL 3.5.7,
 the canonical `IndependentApskV2` stack, and source commit
 `2c648af11d64c55c71e1220b21298de3deaf89f5` plus the contained appraisal changes. Native source SHA-256 is
 `be47453d07fb27afe4cf4c168f76390de193cf57a403009a1078dccca6f01aa2`; appraisal
@@ -67,8 +70,10 @@ pre-existing CPU-only canonical probe; the original setup failure was retained.
 This was a test-harness workaround, not a production modem source change. These
 checks are software evidence, not empirical channel or capacity qualification.
 The final appraisal log is the ignored `.build/comprehensive-release-checks.log`.
-The production native source hash is unchanged, so the earlier canonical 32/32
-result remains applicable; it was not relabeled as a new run. Tests verify
+At that checkpoint the production native source hash was unchanged, so the earlier
+canonical 32/32 result remained applicable to it; it was not relabeled as a new run.
+The current continuation's source identities and fresh checks are recorded separately
+in [HF validation](hf-validation.md). These historical tests verify
 two scored quiet slots, keep censored episodes distinct from observed
 communication failures, require actual CUDA execution when retained, and reject
 generic GPU fallback.

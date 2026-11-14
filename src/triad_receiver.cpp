@@ -78,11 +78,28 @@ struct StageWorkspace {
     VaryingFinePlan line_varying;
     DriftPlan line_drift;
     VaryingFinePlan line_coherent_gain;
+    std::size_t evidence_supplement = 0;
 };
 
 StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers,
-                              bool quote_overlap) {
+                              bool quote_overlap, const SlotEvidenceSupplement* supplement = nullptr) {
     const auto rows = validate(config, slot, workers);
+    std::size_t evidence_supplement = 0;
+    if (supplement) {
+        require(std::isfinite(supplement->fixed_weight) && supplement->fixed_weight >= 0 &&
+            supplement->fixed_weight < 1, "invalid Robust evidence supplement weight");
+        if (supplement->fixed_weight > 0) {
+            require(static_cast<bool>(supplement->supported),
+                    "Robust evidence supplement requires a public support callback");
+            if (supplement->supported(config, slot)) {
+                require(supplement->workspace && supplement->score,
+                        "Robust evidence supplement requires workspace and score callbacks");
+                evidence_supplement = supplement->workspace(config, slot, workers);
+                require(evidence_supplement > 0,
+                        "Robust supported evidence supplement requires a positive workspace quote");
+            }
+        }
+    }
     const auto input = checked_multiply(rows, sizeof(Complex) + sizeof(std::uint8_t));
     const auto helper = helper_workspace(config, slot);
     const auto varying = varying_fine_plan(config, slot, workers);
@@ -100,7 +117,7 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
         varying_fine_plan(config, slot, workers, true, true) : VaryingFinePlan{};
     const auto supplemental = std::max({varying.workspace_bytes, drift.workspace_bytes,
         coherent_gain.workspace_bytes, varying_quiet, line, line_varying.workspace_bytes,
-        line_drift.workspace_bytes, line_coherent_gain.workspace_bytes});
+        line_drift.workspace_bytes, line_coherent_gain.workspace_bytes, evidence_supplement});
     const auto lease = [&](std::size_t stage) { return checked_add(checked_add(input, receipts_bytes), stage); };
     // One lane runs acquisition and preparation in turn: nothing coexists.
     const bool overlappable = quote_overlap && workers > 1 && helper && coarse_defers_frequency_grid(config, slot);
@@ -110,7 +127,8 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
             lease(std::max({helper, coarse, fine, supplemental})),
             overlappable, overlapped_coarse,
             lease(std::max({helper, overlapped_coarse, fine, supplemental})),
-            varying, drift, coherent_gain, line, line_varying, line_drift, line_coherent_gain};
+            varying, drift, coherent_gain, line, line_varying, line_drift, line_coherent_gain,
+            evidence_supplement};
 }
 
 double round_even(double value) {
@@ -320,14 +338,21 @@ std::size_t receiver_slot_overlap_workspace(const ReceiverConfig& config, const 
     return plan_workspace(config, slot, workers, true).overlapped_total;
 }
 
+std::size_t receiver_detail::receiver_slot_workspace_with_supplement(
+        const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers,
+        const SlotEvidenceSupplement& supplement, bool overlap) {
+    const auto workspace = plan_workspace(config, slot, workers, overlap, &supplement);
+    return overlap ? workspace.overlapped_total : workspace.total;
+}
+
 namespace {
 ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
                                const Crypto& key, std::span<const Complex> iq,
                                std::span<const std::uint8_t> valid, unsigned workers,
                                std::size_t memory_limit_bytes, std::stop_token stop, ReceiverExecutor* shared,
-                               bool may_overlap) {
+                               bool may_overlap, const SlotEvidenceSupplement* supplement = nullptr) {
     check_cancelled(stop);
-    const auto workspace = plan_workspace(config, slot, workers, may_overlap);
+    const auto workspace = plan_workspace(config, slot, workers, may_overlap, supplement);
     require(iq.size() == slot.stop_sample - slot.first_sample &&
         (valid.empty() || valid.size() == iq.size()), "Robust input differs from the full public observation");
     if (workspace.total > memory_limit_bytes)
@@ -423,12 +448,32 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
                                                             std::span(fine.varying_coordinates);
     const auto varying_prior = varying ? &varying_grid : nullptr;
     const auto coherent_gain_prior = workspace.coherent_gain.block_rows ? &varying_grid : nullptr;
+    const bool has_supplement = workspace.evidence_supplement != 0;
+    std::array<double, 2> supplement_evidence{
+        -std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()};
+    // The weight is reserved from the first classifier onward. Skipping a
+    // branch after a sufficient earlier result never restores that mass.
+    const auto ordinary_scores = [&](const ReceiverSlotScore& target) {
+        auto ordinary = varying_operational_scores(target, fine.grid, varying_prior, drift,
+                                                   true, coherent_gain_prior);
+        if (has_supplement) {
+            const auto old_weight = std::log1p(-supplement->fixed_weight);
+            const auto new_weight = std::log(supplement->fixed_weight);
+            for (std::size_t bit = 0; bit < 2; ++bit)
+                ordinary[bit] = log_add(ordinary[bit] + old_weight,
+                                       supplement_evidence[bit] + new_weight);
+        }
+        return ordinary;
+    };
     const auto add_line_branch = [&](ReceiverSlotScore& target, const ReceiverSlotScore& residual,
                                      double line_log_evidence) {
-        const auto ordinary = varying_operational_scores(target, fine.grid, varying_prior, drift,
-                                                          true, coherent_gain_prior);
-        const auto residual_score = varying_operational_scores(residual, fine.grid, varying_prior, drift,
-                                                                false, coherent_gain_prior);
+        const auto ordinary = ordinary_scores(target);
+        auto residual_score = varying_operational_scores(residual, fine.grid, varying_prior, drift,
+                                                          false, coherent_gain_prior);
+        // The extension is not qualified under a retained coherent-line
+        // nuisance. Its reserved mass stays absent, on both old branches.
+        if (has_supplement)
+            for (auto& bit : residual_score) bit += std::log1p(-supplement->fixed_weight);
         std::array<double, 2> combined{};
         // A predeclared equal mixture of ordinary and line-plus-DATA
         // likelihoods. Dividing by a quantity at least one preserves the
@@ -444,8 +489,8 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     };
     const auto classify_supplement = [&] {
         if (workspace.line) add_line_branch(score, score, -std::numeric_limits<double>::infinity());
-        else if (coherent_gain_prior) classify_operational_scores(score,
-            varying_operational_scores(score, fine.grid, varying_prior, drift, true, coherent_gain_prior), separation);
+        else if (has_supplement || coherent_gain_prior)
+            classify_operational_scores(score, ordinary_scores(score), separation);
         else classify_varying_slot(score, fine.grid, varying_prior, drift, separation);
     };
     const auto score_coherent_gain = [&](const VaryingFinePlan& plan, ReceiverSlotScore& target,
@@ -479,8 +524,26 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
                          workers, score, stop, *executor);
         classify_supplement();
     } else if (drift) score.drift_status = "earlier_evidence_sufficient";
+    if (has_supplement && score.decision != SlotDecision::data) {
+        check_cancelled(stop);
+        supplement_evidence = supplement->score(config, slot, key, iq, fine, workers,
+            workspace.evidence_supplement, stop, *executor);
+        check_cancelled(stop);
+        for (const auto value : supplement_evidence)
+            require(std::isfinite(value) || value == -std::numeric_limits<double>::infinity(),
+                    "Robust evidence supplement returned an invalid log e-value");
+        classify_supplement();
+        if (score.decision == SlotDecision::data)
+            score.reason = "bounded_supplemental_data_evidence";
+    }
+    // A supplemental threshold crossing takes the ordinary line gate.
+    // If a line is retained, discard the new likelihood permanently: its
+    // raw-IQ null model is not a line-conditioned model. Both canonical
+    // branches retain (1-weight), with no observation-dependent renormalizing.
     if (workspace.line && !coherent_admission && score.operational_passes_conditional_bound) {
         if (const auto line = find_varying_line(config, slot, iq, stop)) {
+            if (has_supplement)
+                supplement_evidence.fill(-std::numeric_limits<double>::infinity());
             ReceiverSlotScore residual;
             residual.fine_candidates = score.fine_candidates;
             if (workspace.line_varying.block_rows)
@@ -524,6 +587,15 @@ ReceiverSlotScore receiver_detail::score_slot(const ReceiverConfig& config, cons
         const Crypto& key, std::span<const Complex> iq, std::span<const std::uint8_t> valid, unsigned workers,
         std::size_t memory_limit_bytes, std::stop_token stop, ReceiverExecutor* shared) {
     return score_stages(config, slot, key, iq, valid, workers, memory_limit_bytes, stop, shared, true);
+}
+
+ReceiverSlotScore receiver_detail::score_slot_with_supplement(
+        const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
+        std::span<const Complex> iq, std::span<const std::uint8_t> valid, unsigned workers,
+        std::size_t memory_limit_bytes, std::stop_token stop, ReceiverExecutor* shared,
+        const SlotEvidenceSupplement& supplement) {
+    return score_stages(config, slot, key, iq, valid, workers, memory_limit_bytes, stop, shared,
+                        true, &supplement);
 }
 
 ReceiverSlotScore receiver_detail::score_slot_in_sequence(const ReceiverConfig& config,

@@ -150,6 +150,34 @@ void drm6() {
     check(rms(whole) > 0., "DRM-6 channel retains nonzero source response");
 }
 
+void eikonal_holdout() {
+    const auto scenario = make_additional_hf_scenario("hf-vertical-eikonal-holdout");
+    check(scenario.has_value(), "off-grid eikonal holdout is catalogued");
+    check(scenario->id == "hf-vertical-eikonal-holdout", "holdout ID is retained");
+    check(scenario->family == "skywave-1-30MHz", "holdout remains in HF skywave family");
+    check(scenario->channel.paths.size() == 1, "holdout remains one vertical scalar path");
+    const auto& path = scenario->channel.paths.front();
+    check(path.hf && path.hf->parabolic_layer, "holdout uses the analytic parabolic-layer transfer");
+    const auto& layer = *path.hf->parabolic_layer;
+    near(layer.critical_amplitude_hz, 8500., 0., "holdout amplitude is fixed off the reference value");
+    near(layer.critical_period_seconds, 137., 0., "holdout period is off the private bank");
+    near(layer.critical_phase_radians, .37, 0., "holdout phase is off the private bank");
+    near(path.delay_seconds,
+         hf_parabolic_eikonal(layer, scenario->channel.rf_hz, 0).group_delay_seconds, 0.,
+         "public delay matches the physical initial eikonal");
+    near(scenario->bounds.arrival_low_seconds, .001, 0., "holdout retains public arrival lower bound");
+    near(scenario->bounds.arrival_high_seconds, .003, 0., "holdout retains public arrival upper bound");
+    near(scenario->bounds.atmospheric_hz, 1., 0., "holdout retains public frequency bound");
+    check(scenario->assumptions.find("not a measured ionospheric day") != std::string::npos &&
+          scenario->assumptions.find("not given the holdout phase") != std::string::npos,
+          "holdout provenance separates truth parameters from receiver knowledge");
+    const auto original_motion = make_additional_hf_scenario("hf-vertical-eikonal-motion");
+    const auto& old = *original_motion->channel.paths.front().hf->parabolic_layer;
+    near(old.critical_amplitude_hz, 7000., 0., "reference motion preset is preserved");
+    near(old.critical_period_seconds, 120., 0., "reference motion period is preserved");
+    near(old.critical_phase_radians, 0., 0., "reference motion phase remains unchanged");
+}
+
 } // namespace
 
 int main() {
@@ -158,6 +186,7 @@ int main() {
               "provider leaves existing catalogue IDs to the owning factory");
         nvis();
         drm6();
+        eikonal_holdout();
         std::cout << "additional HF profile checks passed: " << checks << '\n';
         return 0;
     } catch (const std::exception& error) {
