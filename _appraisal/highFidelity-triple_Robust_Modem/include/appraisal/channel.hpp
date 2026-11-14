@@ -3,7 +3,9 @@
 #include "datapump/triad_modem_v3.hpp"
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
+#include <stdexcept>
 #include <stop_token>
 #include <string>
 #include <vector>
@@ -21,6 +23,10 @@ struct Path {
     double residual_doppler_hz = 0, residual_drift_hz_s = 0;
     double gaussian_width_2sigma_hz = 0;
     bool frozen_gaussian = false;
+    // Engineering phase-only sensitivity, not an inferred ionospheric law:
+    // amplitude*sin(2*pi*t/period), with t continuing through source silence.
+    double phase_wander_amplitude_radians = 0;
+    double phase_wander_period_seconds = 7200;
 };
 struct Fade {
     double first_seconds = -1, stop_seconds = -1, ramp_seconds = 0;
@@ -42,9 +48,13 @@ struct Frontend {
     double agc_target = 0, agc_attack_seconds = .01, agc_release_seconds = 1;
     unsigned adc_bits = 0;
 };
+struct LunarSpectralSpec {
+    double limb_width_hz = 88, dish_m = 3, bulk_delay_seconds = 2.4720213723;
+};
 struct ChannelSpec {
     double rf_hz = 1e6;
     std::vector<Path> paths{{}};
+    std::optional<LunarSpectralSpec> lunar;
     Resonator transmitter;
     Noise noise;
     Frontend frontend;
@@ -52,6 +62,7 @@ struct ChannelSpec {
     unsigned interpolation_half_width = 16;
     std::size_t maximum_workspace_bytes = 64u * 1024u * 1024u;
 };
+struct ChannelWorkspaceError : std::invalid_argument { using std::invalid_argument::invalid_argument; };
 struct ChannelReport {
     std::uint64_t samples = 0, source_samples = 0, impulse_events = 0, clipped_samples = 0;
     std::size_t workspace_bytes = 0;
@@ -62,7 +73,7 @@ struct ChannelReport {
 // canonical Emission. Horizon is an evaluator/resource bound, never RX truth.
 class Channel {
 public:
-    Channel(Source, ChannelSpec, std::uint64_t seed, std::uint64_t horizon_samples);
+    Channel(Source, ChannelSpec, std::uint64_t seed, std::uint64_t horizon_samples, std::stop_token = {});
     ~Channel();
     Channel(Channel&&) noexcept;
     Channel& operator=(Channel&&) noexcept;

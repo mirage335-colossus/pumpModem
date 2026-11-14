@@ -1,4 +1,5 @@
 #include "appraisal/channel.hpp"
+#include "lunar_spectral_internal.hpp"
 #include "triad_random_process.hpp"
 
 #include <algorithm>
@@ -71,6 +72,14 @@ void validate_resonator(const Resonator& r) {
 
 double maximum_delay(const ChannelSpec& spec, double horizon) {
     double maximum = 0;
+    if (spec.lunar) {
+        const auto& lunar = *spec.lunar;
+        require(spec.paths.empty(), "lunar spectral propagation and explicit paths are mutually exclusive");
+        require(finite(lunar.bulk_delay_seconds) && lunar.bulk_delay_seconds > 0 && finite(lunar.limb_width_hz) &&
+                lunar.limb_width_hz >= 0 && finite(spec.rf_hz) && spec.rf_hz > 0, "invalid lunar delay coordinates");
+        maximum = lunar.bulk_delay_seconds + 2 * detail::lunar_radius_m / detail::lunar_light_speed +
+            (.5 * lunar.limb_width_hz + .001) * horizon / spec.rf_hz;
+    }
     for (const auto& path : spec.paths) {
         require(finite(path.delay_seconds) && finite(path.delay_rate), "path delay must be finite");
         const double last = path.delay_seconds + path.delay_rate * horizon;
@@ -83,18 +92,7 @@ double maximum_delay(const ChannelSpec& spec, double horizon) {
 
 std::vector<double> interpolation_weights(unsigned half, double fraction) {
     std::vector<double> result(2 * half);
-    double sum = 0;
-    for (int k = 1 - static_cast<int>(half); k <= static_cast<int>(half); ++k) {
-        const double d = fraction - k;
-        const double sinc = d == 0 ? 1 : std::sin(pi * d) / (pi * d);
-        const double window = std::abs(d) >= half ? 0 :
-            .42 + .5 * std::cos(pi * d / half) + .08 * std::cos(2 * pi * d / half);
-        const double value = sinc * window;
-        result[static_cast<std::size_t>(k + static_cast<int>(half) - 1)] = value;
-        sum += value;
-    }
-    require(finite(sum) && std::abs(sum) > .5, "fractional-delay interpolation normalization failed");
-    for (auto& x : result) x /= sum;
+    detail::fractional_weights(half, fraction, result);
     return result;
 }
 
@@ -106,6 +104,36 @@ double fade_gain(const Fade& f, double t) {
         if (edge < f.ramp_seconds) depth = .5 * (1 - std::cos(pi * edge / f.ramp_seconds));
     }
     return 1 - depth * (1 - f.voltage_floor);
+}
+}
+
+namespace detail {
+void fractional_weights(unsigned half, double fraction, std::span<double> weights,
+                        std::span<double> derivatives) {
+    require(weights.size() == 2 * half && (derivatives.empty() || derivatives.size() == weights.size()),
+            "fractional-delay stencil size mismatch");
+    double sum = 0, slope_sum = 0;
+    for (int k = 1 - static_cast<int>(half); k <= static_cast<int>(half); ++k) {
+        const auto index = static_cast<std::size_t>(k + static_cast<int>(half) - 1);
+        const double d = fraction - k, arg = pi * d, edge = arg / half;
+        const double sinc = d == 0 ? 1 : std::sin(arg) / arg;
+        const double window = std::abs(d) >= half ? 0 : .42 + .5 * std::cos(edge) + .08 * std::cos(2 * edge);
+        weights[index] = sinc * window;
+        sum += weights[index];
+        if (!derivatives.empty()) {
+            const double dsinc = std::abs(d) < 1e-4 ?
+                -pi * arg * (1. / 3 - arg * arg / 30) : (std::cos(arg) - sinc) / d;
+            const double dwindow = std::abs(d) >= half ? 0 :
+                -(pi / half) * (.5 * std::sin(edge) + .16 * std::sin(2 * edge));
+            derivatives[index] = dsinc * window + sinc * dwindow;
+            slope_sum += derivatives[index];
+        }
+    }
+    require(finite(sum) && std::abs(sum) > .5, "fractional-delay interpolation normalization failed");
+    for (std::size_t j = 0; j < weights.size(); ++j) {
+        weights[j] /= sum;
+        if (!derivatives.empty()) derivatives[j] = (derivatives[j] - weights[j] * slope_sum) / sum;
+    }
 }
 }
 
@@ -164,6 +192,7 @@ struct Channel::Impl {
     std::vector<RuntimePath> paths;
     std::vector<double> interpolation_table;
     std::vector<DelayGroup> delay_groups;
+    std::unique_ptr<detail::LunarSpectral> lunar;
     Random white, colored, events, marks;
     Complex tx_state{}, colored_state{}, impulse_state{}, lowpass_state{};
     double colored_decay = 0, colored_innovation = 0, impulse_decay = 0;
@@ -171,7 +200,7 @@ struct Channel::Impl {
     double lowpass_decay = 0, gain = 1, attack_decay = 0, release_decay = 0;
     Complex stationary_tx_decay{1, 0}, stationary_tx_drive{};
 
-    Impl(Source input, ChannelSpec config, std::uint64_t seed, std::uint64_t count)
+    Impl(Source input, ChannelSpec config, std::uint64_t seed, std::uint64_t count, std::stop_token stop)
         : source(std::move(input)), spec(std::move(config)), horizon(count),
           white(seed, 2), colored(seed, 6), events(seed, 3), marks(seed, 4) {
         require(source.format.sample_rate > 0 && source.format.sample_rate_denominator > 0,
@@ -184,7 +213,8 @@ struct Channel::Impl {
         require(finite(spec.rf_hz) && spec.rf_hz > 0, "RF carrier must be positive and finite");
         require(spec.interpolation_half_width >= 4 && spec.interpolation_half_width <= 64,
                 "fractional-delay half width must be in [4,64]");
-        require(!spec.paths.empty() && spec.paths.size() <= 65536, "channel requires 1..65536 bounded paths");
+        require(spec.lunar ? spec.paths.empty() : (!spec.paths.empty() && spec.paths.size() <= 65536),
+                "channel requires lunar spectral propagation or 1..65536 explicit paths");
         require(finite(source.minimum_frequency_hz) && finite(source.maximum_frequency_hz) &&
                 source.minimum_frequency_hz <= source.maximum_frequency_hz, "invalid source spectral guard");
         const double seconds = static_cast<double>(horizon) / fs;
@@ -199,12 +229,22 @@ struct Channel::Impl {
         }
         const double source_band = std::max(std::abs(source.minimum_frequency_hz), std::abs(source.maximum_frequency_hz));
         require(source_band < fs / 2, "source spectral allowance reaches Nyquist");
-        bool any_fractional = false, any_moving = false;
+        std::optional<LunarSpectralPlan> lunar_plan;
+        if (spec.lunar) {
+            lunar_plan = lunar_spectral_plan(*spec.lunar, spec.rf_hz, fs, spec.interpolation_half_width, horizon);
+            require(source_band <= 362.5, "source spectral allowance exceeds the qualified lunar envelope band");
+        }
+        bool any_fractional = spec.lunar.has_value(), any_moving = false;
         std::size_t fading_count = 0;
         for (const auto& path : spec.paths) {
             nonnegative(path.power, "path power must be finite and nonnegative");
             require(finite(path.phase_radians) && finite(path.residual_doppler_hz) && finite(path.residual_drift_hz_s),
                     "path phase and residual Doppler must be finite");
+            nonnegative(path.phase_wander_amplitude_radians, "phase-wander amplitude must be finite and nonnegative");
+            require(finite(path.phase_wander_period_seconds) && path.phase_wander_period_seconds > 0,
+                    "phase-wander period must be finite and positive");
+            const double wander_guard = path.phase_wander_amplitude_radians == 0 ? 0 :
+                (path.phase_wander_amplitude_radians + 1) / path.phase_wander_period_seconds;
             nonnegative(path.gaussian_width_2sigma_hz, "Gaussian Doppler width must be finite and nonnegative");
             require(!(path.frozen_gaussian && path.gaussian_width_2sigma_hz > 0),
                     "frozen and time-varying Gaussian path laws are mutually exclusive");
@@ -212,8 +252,11 @@ struct Channel::Impl {
             const double shift1 = shift0 + path.residual_drift_hz_s * seconds;
             // Gaussian spectra are not compact: three 2-sigma widths on each
             // side is a declared six-sigma engineering allowance, not a theorem.
+            // Phase modulation adds maximum frequency excursion plus its
+            // modulation frequency (Carson-style allowance); its Bessel
+            // sidebands likewise do not have strictly compact support.
             const double guard = source_band * (1 + std::abs(path.delay_rate)) +
-                std::max(std::abs(shift0), std::abs(shift1)) + 3 * path.gaussian_width_2sigma_hz;
+                std::max(std::abs(shift0), std::abs(shift1)) + 3 * path.gaussian_width_2sigma_hz + wander_guard;
             require(finite(guard) && guard < fs / 2, "path spectral allowance reaches Nyquist");
             const double delay_samples = path.delay_seconds * fs;
             const bool fractional = path.delay_rate != 0 || delay_samples != std::floor(delay_samples);
@@ -269,6 +312,7 @@ struct Channel::Impl {
         const auto history_count = count_from_long_double(std::ceil(static_cast<long double>(report.maximum_delay_seconds) * fs) +
             2 * spec.interpolation_half_width + 4);
         std::size_t bytes = checked_add(sizeof(Impl), source.working_bytes);
+        if (lunar_plan) bytes = checked_add(bytes, lunar_plan->workspace_bytes);
         bytes = checked_add(bytes, checked_multiply(history_count, sizeof(Complex)));
         bytes = checked_add(bytes, checked_multiply(spec.paths.capacity(), sizeof(Path)));
         bytes = checked_add(bytes, checked_multiply(spec.paths.size(), sizeof(RuntimePath)));
@@ -282,7 +326,7 @@ struct Channel::Impl {
         // full moving envelope delay and carrier phase.
         const auto planning_bytes = checked_multiply(spec.paths.size(), 2 * sizeof(std::size_t));
         bytes = checked_add(bytes, planning_bytes);
-        require(bytes <= spec.maximum_workspace_bytes, "channel exceeds explicit workspace limit");
+        if (bytes > spec.maximum_workspace_bytes) throw ChannelWorkspaceError("channel exceeds explicit workspace limit");
         std::vector<std::size_t> order(spec.paths.size()), membership(spec.paths.size(), std::numeric_limits<std::size_t>::max());
         for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
         std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
@@ -312,6 +356,9 @@ struct Channel::Impl {
         delay_groups.resize(groups);
         for (auto& group : delay_groups) group.endpoints.resize(fractional_intervals + 1);
         history.resize(history_count);
+        if (lunar_plan)
+            lunar = std::make_unique<detail::LunarSpectral>(*spec.lunar, spec.rf_hz, fs,
+                spec.interpolation_half_width, *lunar_plan, seed, stop);
         if (any_moving) {
             interpolation_table.reserve(table_count);
             for (std::size_t i = 0; i <= fractional_intervals; ++i) {
@@ -480,7 +527,7 @@ struct Channel::Impl {
         const auto n = report.samples;
         const long double time = static_cast<long double>(n) / fs;
         ensure_source(n + spec.interpolation_half_width);
-        Complex wanted{};
+        Complex wanted = lunar ? lunar->wanted(n, history, source.geometry.source_samples, spec.transmitter.enabled) : Complex{};
         for (auto& path : paths) {
             if ((n & 4095) == 0) {
                 const long double cycles = path.spec.phase_radians / (2 * std::numbers::pi_v<long double>) +
@@ -493,7 +540,17 @@ struct Channel::Impl {
             }
             if (path.spec.power > 0) {
                 const Complex fading = path.gaussian ? path.gaussian->value(time) : Complex{1, 0};
-                wanted += path.fixed * path.phase * fading * delayed(path, n);
+                if (path.spec.phase_wander_amplitude_radians > 0) {
+                    const long double angle = 2 * std::numbers::pi_v<long double> *
+                        std::remainder(time / path.spec.phase_wander_period_seconds, 1.L);
+                    const double phase = path.spec.phase_wander_amplitude_radians * static_cast<double>(std::sin(angle));
+                    // Evaluate the separate residual phase at physical time.
+                    // Do not alter group delay or add a second Doppler law.
+                    wanted += path.fixed * path.phase * fading * std::polar(1., phase) * delayed(path, n);
+                } else {
+                    // Preserve the established OFF arithmetic exactly.
+                    wanted += path.fixed * path.phase * fading * delayed(path, n);
+                }
             }
             path.phase *= path.phase_step;
             path.phase_step *= path.step_change;
@@ -557,8 +614,8 @@ struct Channel::Impl {
     }
 };
 
-Channel::Channel(Source source, ChannelSpec spec, std::uint64_t seed, std::uint64_t horizon_samples)
-    : impl_(std::make_unique<Impl>(std::move(source), std::move(spec), seed, horizon_samples)) {}
+Channel::Channel(Source source, ChannelSpec spec, std::uint64_t seed, std::uint64_t horizon_samples, std::stop_token stop)
+    : impl_(std::make_unique<Impl>(std::move(source), std::move(spec), seed, horizon_samples, stop)) {}
 Channel::~Channel() = default;
 Channel::Channel(Channel&&) noexcept = default;
 Channel& Channel::operator=(Channel&&) noexcept = default;

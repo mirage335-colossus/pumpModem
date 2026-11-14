@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "name": "vlf-native-reference-2026-11",
+  "purpose": "One bounded pass over the uncompressed 8.27 kHz, 200 ft-class VLF reference. Record matched full-prior acquisition and six-second fine costs for the historical RRC pulse and the live shaping planner's tapered pulse. Evaluate a complete bright tapered message, one weak static and one paired weak phase-wander first observation, and the detuned circuit across the complete first-observation duration. Give the unchanged historical RRC first observation one informed 1200-second wall allowance. Observe outcomes without requiring successful decode in the stress cases. No automatic retry, interval, physical sensitivity floor, or receiver capacity inference.",
+  "max_wall_seconds": 1900,
+  "per_trial_wall_seconds": 1200,
+  "max_trials": 7,
+  "max_samples": 70000000,
+  "episodes": [
+    {"id":"vlf-rrc-phase-cost","scenario":"vlf-resonant","mode":"diagnose","waveform":"reference","pulse":"rrc","seed":5489,"cn0_db_hz":20,"max_samples":14000000,"max_wall_seconds":40},
+    {"id":"vlf-tapered-phase-cost","scenario":"vlf-resonant","mode":"diagnose","waveform":"reference","pulse":"tapered-rrc","seed":5489,"cn0_db_hz":20,"max_samples":14000000,"max_wall_seconds":40},
+    {"id":"vlf-tapered-bright-message","scenario":"vlf-resonant","mode":"receive","waveform":"reference","pulse":"tapered-rrc","seed":5489,"cn0_db_hz":20,"max_wall_seconds":240},
+    {"id":"vlf-tapered-weak-static-slot","scenario":"vlf-resonant","mode":"slot","waveform":"reference","pulse":"tapered-rrc","seed":9489,"max_samples":14000000,"max_wall_seconds":120},
+    {"id":"vlf-tapered-weak-wander-slot","scenario":"vlf-phase-wander","mode":"slot","waveform":"reference","pulse":"tapered-rrc","seed":9489,"max_samples":14000000,"max_wall_seconds":180},
+    {"id":"vlf-tapered-detuned-render","scenario":"vlf-detuned","mode":"channel","waveform":"reference","pulse":"tapered-rrc","seed":5489,"cn0_db_hz":20,"duration_seconds":6753.1609375,"max_samples":14000000,"max_wall_seconds":40},
+    {"id":"vlf-rrc-bright-slot","scenario":"vlf-resonant","mode":"slot","waveform":"reference","pulse":"rrc","seed":5489,"cn0_db_hz":20,"max_samples":14000000,"max_wall_seconds":1200}
+  ]
+}

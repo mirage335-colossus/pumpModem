@@ -19,15 +19,21 @@ horizon. EME one-slot diagnostics do not exercise quiet completion.
 
 The latest post-correction local Release app uses GCC 14.2.0, OpenSSL 3.5.7,
 the canonical `IndependentApskV2` stack, and source commit
-`5f2cc949e4adb9a185b3cc0a64ef49e2ec3f7e89`. Native source SHA-256 is
+`2c648af11d64c55c71e1220b21298de3deaf89f5` plus the contained appraisal changes. Native source SHA-256 is
 `be47453d07fb27afe4cf4c168f76390de193cf57a403009a1078dccca6f01aa2`; appraisal
 source SHA-256 is
-`409677cd1b9e4d06e12462a48cef88d9570b7dc7872cff988e1bbfc567902900`; build
+`391800b7f6e0480e01865ec80ca39fd971e25bffea94e775e58c4b2bad1ee477`; build
 options SHA-256 is
 `3636f58f5e5803a48c78c56be3de84fce810a285a8b7c7222781040e596e6206`; compiled
 app SHA-256 is
-`db1df62ca19f1d82da1fa02ad29f624ab337d795893043a22e9d7e563bd280d3`. These
-fingerprints bind the current check record, not environmental validity.
+`1b445caf59f6ed8a7c7635f399102c90101e3ae0546e97695aef54491ac075f2`. These
+fingerprints bind the final checks, noise ablations and lunar discriminators,
+not environmental validity. The preceding 48-episode reference campaign used
+appraisal SHA `81f62c53311b9aceec68a15af09e54dfe4cd508277ed18a58a5750dd1046e41c`
+and binary SHA `0ffda32b13786221bc62c831b8762069c89090bd61db1b519b0ebaa4b89861b8`.
+Its raw receipts were not rewritten after the recovery-counter correction,
+noise-ablation addition and retirement of obsolete lunar presets. Those changes
+do not alter the modeled source or receiver for the original 48 cases.
 
 ## Current local deterministic checks
 
@@ -37,24 +43,40 @@ The recorded command was:
 ./_appraisal/highFidelity-triple_Robust_Modem/build.sh test
 ```
 
-All four appraisal CTest groups passed in 9.35 seconds:
+All seven appraisal CTest groups passed in 35.25 seconds:
 
 | Test | Scope |
 | --- | --- |
 | `high_fidelity_channel` | Renderer state, deterministic transforms, stochastic checks, and exact interpolation-cache/fallback comparison |
 | `high_fidelity_scenarios` | Scenario parameters, units, rejection bounds, lunar-kernel moments and grid comparisons |
+| `high_fidelity_hf_scenarios` | NVIS and DRM6 source tuples, normalization, bounds, moments and continuous chunking |
+| `high_fidelity_impairment_observables` | AR(1) and shot-noise moments/covariance, independent resonator solution, ADC and AGC recovery |
+| `high_fidelity_lunar_spectral` | Whole-horizon joint covariance, independent reference convergence, coherent projection, sparse waveform parity, workspace and continuity |
 | `high_fidelity_integration` | Canonical native short-message source, receiver, quiet/EOF, noise, budget, and VLF geometry controls |
-| `high_fidelity_runner` | 20 runner unit cases covering manifest/receipt identity, backend retention, bounds, and fixed-sample reporting |
+| `high_fidelity_runner` | 33 runner unit cases covering manifest/receipt identity, message and component scope, backend retention, bounds, and fixed-sample reporting |
 
 The separate canonical Triad suite passed 32/32 checks in 64.90 seconds. Its
 contained CMake test harness forced inclusion of a header missing from the
 pre-existing CPU-only canonical probe; the original setup failure was retained.
 This was a test-harness workaround, not a production modem source change. These
 checks are software evidence, not empirical channel or capacity qualification.
-The final appraisal log is the ignored `.build/checks-final.log`. Tests verify
+The final appraisal log is the ignored `.build/comprehensive-release-checks.log`.
+The production native source hash is unchanged, so the earlier canonical 32/32
+result remains applicable; it was not relabeled as a new run. Tests verify
 two scored quiet slots, keep censored episodes distinct from observed
 communication failures, require actual CUDA execution when retained, and reject
 generic GPU fallback.
+
+The expanded check initially exposed a missing `<set>` include, a workspace
+exception-type mismatch, and two brittle HF prose assertions. Those were
+corrected without changing their physical conditions. More substantively, the
+first lunar conditional quadrature failed the original joint covariance gate
+at 725 Hz separation; increasing its nodes from 16 to 32 passed the unchanged
+limit. Independent review additionally bound the radial-reference convergence
+and clarified the real/symmetrized cross-window observable. Receipt mutations
+exposed acceptance of a substituted short message and impossible successful
+receive outcomes; the runner now rejects both. Original checks and repairs are
+software evidence, not additional independent reception trials.
 
 Channel cancellation is checked every 64 rendered samples, including after
 source exhaustion. A targeted 0.25-second deadline diagnostic
@@ -179,7 +201,9 @@ not qualify current receiver completion behavior as described above.
 
 ## Doppler-aligned EME single-slot diagnostics
 
-The new `eme-disk-slot` renderer uses a Doppler-aligned 65,536-cell quadrature.
+The historical, now retired `eme-disk-slot` renderer used a Doppler-aligned
+65,536-cell quadrature. The old operational IDs are not aliases for the new
+full-calendar spectral process.
 Its sampled projected-variance/covariance checks for the 88 Hz disk/patch
 profiles at 0 and ±5/±15 Hz are detailed in [models](models.md). The old
 164 Hz severe-width 4,096-cell grid remains a finite numerical control with
@@ -364,6 +388,202 @@ receiver investigation is bounded stage attribution and reuse of sufficient
 statistics within the same stream, preserving every public hypothesis and
 the full worker budget rather than rescanning long histories.
 
+### Full-geometry VLF cost attribution
+
+The [RRC diagnostic](local-evidence/comprehensive-vlf-diagnostic.json) and
+[tapered diagnostic](local-evidence/comprehensive-vlf-tapered-diagnostic.json)
+use the same native receiver source and 12-logical-CPU Ryzen 5 PRO 5650U with
+the default 24-worker budget. Both render all **12,966,069** samples of the
+first public observation (6,753.16094 physical seconds, including the
+5,760.4-second DATA bit) at seed 5489 and C/N0=+20 dB-Hz. The RRC capture's
+input SHA-256, `41526ec1d88be100bd66989098d728c41173f32c9a30985b40bdc44be27a23b8`,
+matches both earlier time-limited CPU/CUDA first-slot captures. The tapered
+waveform intentionally has different samples, and its source level uses the
+same deterministic normalization rule. Each receipt retains its own appraisal
+source hash and the common canonical native source hash.
+
+`--mode diagnose` uses the canonical coarse search over the complete public
+observation, then holds one canonical fine session across 2/3/4/6-second
+checkpoints aligned with the public segment calendar inside the DATA aperture.
+Fine candidates come only from complete native coarse selection. Both pulses
+score all 55 frequency points, three coarse arrival points and 26 keyed
+epoch/bit workspaces, with two declared receiver taps; both retain four fine
+coordinates. The 0.2 s tap separation is a public receiver allowance, not a
+second measured VLF propagation path. The fine crop retains 12 affine and 12
+adaptive states and one DC projection per 480-row block throughout. It neither
+admits a bit or null decision nor replaces a full public-slot evaluation.
+
+| Pulse | Source/channel render | Complete coarse acquisition | Six-second fine sample | Fine process CPU | Cache witness |
+| --- | ---: | ---: | ---: | ---: | --- |
+| RRC | 10.536 s | 1.723 s | 0.7740 s | 0.7832 s | No native cache fills; source inspection identifies direct basis fallback |
+| Tapered RRC | 9.313 s | 1.824 s | 0.01344 s | 0.04199 s | Two prefix fills, three final fills (49,152 rows), 2,304 interpolated and zero direct basis columns |
+
+Both samples do 1,105,920 logical basis rows and finish all four checkpoints
+with positive basis work. The roughly 58-fold wall contrast is scoped to this
+fine crop with the observed cache-fill history and stable state shape. The
+short continuation timings and changing cache work do not establish a whole
+slot service forecast, speedup, or sustainable backlog margin. The unchanged
+RRC branch falls back to direct mapped-source renders when the pulse is not
+tapered; the per-epoch source mutex then serializes candidates sharing an epoch.
+The historical CUDA `statistics_blocks=193216` proves that run also entered
+fine scoring. CUDA's small-projection native fallback only admits one tap in
+this branch, whereas this public VLF model retains two, so the old CUDA run
+incurred device statistics and per-block synchronous readback. No new CPU/GPU
+speed comparison follows from these receipts.
+
+The raw `Format` default is RRC. The current native GUI/live profile instead
+passes its format through `plan_shaping` and `plan_duration` before preparing
+the public waveform. A linked `plan_shaping` witness for this exact
+1,920 sample/s, 0.1 Hz, one-added-symbol, non-FHSS shape selects tapered RRC
+without fallback for both the minimum-duration request and the 16 s request.
+Both pulses retain 5,760.4 s DATA duration, 0.02 s ramp and 0.0625 Hz placement;
+the planner selects the taper on lower modeled far-outside energy. The appraiser
+therefore exposes an explicit `--pulse tapered-rrc` control and preserves the
+original RRC pulse for historical and unchanged-reference comparisons.
+
+The antenna circuit acts on DATA-centered complex samples: native `Emission`
+removes its digital IF after constructing the composite signal. In the matched
+RRC capture the normalized transmitted and received signal energies are
+5,757.389055 and 5,757.386916 seconds, inconsistent with mistakenly detuning the
+resonator by the metadata's 240 Hz IF. This is a reference-plane check within
+the calculated resonant circuit, not an absolute field or antenna measurement.
+
+The fixed [VLF campaign](campaigns/vlf-reference.json) preserves both cost
+diagnostics, a bright tapered five-slot message, matched weak static and
+two-hour phase-wander tapered observations at the declared magnetic C/N0,
+a full first-aperture detuned circuit render, and one unchanged RRC first
+observation with a 1,200-second budget informed by the measured direct-render
+cost. The phase-wander case adds a documented bounded atmospheric prior; its
+supplemental stages need their own actual result. The seven episodes have a
+1,900-second overall cap, execute once, and do not require a successful decode
+in an adverse case or pool unlike conditions into a probability.
+
+The phase-wander law is the [Fable A1 engineering control](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/81-scenarios-sub9.md#2-scenario-a--stationary-weak-signal-magnetic-controls).
+[Thomson et al. (2025)](https://doi.org/10.1029/2024JA033610) measured amplitude
+and phase changes around dawn and dusk on other paths, including the 20.27 kHz
+ICV–Cambridge path; one transmitter's unstable phase precluded a comparable
+phase record. [Ajakaiye et al. (2025)](https://doi.org/10.1029/2025JA033796)
+found path-dependent amplitude responses at 20.27–26.70 kHz during one storm.
+Ma et al. (2026) reduced the dominant diurnal propagation-delay error on six
+historical Alpha timing paths by predicting phase variation at the receiver.
+Their validation uses stable timing transmissions and a path-specific diurnal
+model. The 8.27 kHz, two-hour synthetic phase law remains an independent
+engineering control with uncalibrated magnitude, period and occurrence rate.
+[Ma et al.](https://doi.org/10.3390/s26113295)
+
+### Frozen full-duration VLF campaign
+
+The [frozen input](local-evidence/comprehensive-vlf-reference/frozen-input.json)
+identifies the campaign by SHA-256
+`f0266b291266517d1b12366888e635fe6a49acdd08435dc8773af8c5a9a06f91`
+and the executed CPU probe by
+`0ffda32b13786221bc62c831b8762069c89090bd61db1b519b0ebaa4b89861b8`.
+The repeat cost controls reproduce the respective capture hashes above.
+RRC records 2,304 direct basis columns and `unsupported-or-abrupt-pulse`.
+Tapered RRC records 2,304 interpolated columns, zero direct columns and three
+native fills. Fine checkpoint wall sums are 0.556 s and 0.01599 s, respectively.
+The shorter RRC timing than in the preflight shows why the crop contrast
+cannot serve as a portable receiver speed ratio.
+[RRC](local-evidence/comprehensive-vlf-reference/000-vlf-rrc-phase-cost.stdout.json)
+[Tapered RRC](local-evidence/comprehensive-vlf-reference/001-vlf-tapered-phase-cost.stdout.json)
+
+The bright tapered RRC episode at +20 dB-Hz accepts all **64,806,069** samples
+over **33,753.16094** physical seconds. Ordered decisions are `0, 0, 1, quiet,
+quiet`, with complete valid observations and exactly one correct physical
+completion after the second quiet slot. The decoded message is `e`. Elapsed
+wall time is 64.690 s, with 45.677 s of source/channel render and 17.198 s of
+receiver control and wait. The run uses 24 workers, three peak running owners
+and 2,306,061,401 peak reserved receiver bytes, with zero backpressure.
+Coarse work takes 1.72–2.17 s per slot and fine work 8.89–16.25 s per slot,
+including approximately 1.245 billion basis rows per slot. DSP can overlap
+rendering and other owners. These are complete functional episode timings.
+[Bright tapered receive](local-evidence/comprehensive-vlf-reference/002-vlf-tapered-bright-message.stdout.json)
+
+At −18.42995 dB-Hz the tapered static and phase-wander episodes share the
+source, white-noise seed, noise variance and 12,966,069-sample valid aperture.
+The wander changes the wanted phase and declares an additional public
+atmospheric frequency allowance of 0.436332 mHz. Both execute the complete
+first observation at `W=24`, with 55 coarse frequency points, three arrival
+points, 26 keyed workspaces and four retained fine coordinates.
+
+| Weak first observation | Native decision | Operational log-e, threshold 21.49338 | Bit log separation | Quiet energy, threshold 27,392.53 | Wall | Peak reserved receiver bytes |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Static resonant | DATA `0`, correct | 81.51996 | 88.69608 | 26,960.21 | 20.268 s | 990,577,109 |
+| Two-hour phase wander | Quiet while wanted | 16.85885 | 24.57779 | 26,924.67 | 64.577 s | 1,394,822,197 |
+
+The quiet-while-wanted result is a complete slot miss. The varying and
+coherent-gain stages both report `fine_cells_too_slow_for_short_block`.
+At one fine cell per 60 s, their two-cell minimum exceeds both fixed short
+block limits. Linear drift still runs across 104 slopes and 79 frequency
+bins, taking 43.381 s of the 51.809 s fine phase. Phase wander therefore
+lowers detection evidence and increases work on this matched input despite
+preserving wanted energy. A single linear drift of frequency describes
+quadratic phase. The imposed phase has curvature that changes sign within
+the observation. The result identifies a failure of the current admitted
+models on this episode, with no message-completion judgment from either slot.
+[Static receipt](local-evidence/comprehensive-vlf-reference/003-vlf-tapered-weak-static-slot.stdout.json)
+[Phase-wander receipt](local-evidence/comprehensive-vlf-reference/004-vlf-tapered-weak-wander-slot.stdout.json)
+
+The raw public-aperture known-signal presence comparison uses the rendered
+wanted-vector energy `E` before independent proper complex Gaussian noise.
+The complete rendered interval equals the public aperture in both receipts.
+The configured sequence, including any leading waveform from the following
+slot inside the aperture, is part of that wanted vector. Its normalized
+energy is 5,757.61996 s in each episode, so `rho=E/noise_variance=82.65097`.
+At the design false-alarm target `alpha=exp(−21.493378688)=4.62961e−10`, the
+known-vector Neyman–Pearson test has miss probability
+`Q(sqrt(2*rho) − Q^{-1}(alpha))=8.18e−12` in each case. This is an ideal
+presence probability with exact waveform, timing, phase and amplitude known.
+The native rule additionally faces search, prior penalties, projection and
+bit discrimination. Its false-alarm rate remains unmeasured by this pair.
+The result shows a substantial opportunity for receiver-side tracking under
+this channel prior, with the useful fraction of the gap still to be measured.
+
+A follow-up receiver candidate would share block statistics already produced
+for admitted public hypotheses and carry a bounded smooth phase/frequency
+state across long blocks. A 600 s centered local tangent to this imposed
+phase has at most `pi*(2*pi/7200)^2*600^2/8=0.10766` radian residual and spans
+ten fine cells. With exact local tangent parameters that gives a coherent
+power ratio of at least `cos(0.10766)^2` (0.0504 dB maximum loss within each
+block). The calculation demonstrates room for a slower block cadence. A
+practical receiver must infer the state at weak signal levels, retain bit
+discrimination and account for the added model mass in its false-alarm
+bound. Retaining static and faster models and using the same forward block
+statistics would keep this candidate applicable across different channel
+conditions without a new transmit exchange or an unbounded history rescan.
+
+The detuned circuit render completes the same first-aperture duration at
+seed 5489 and +20 dB-Hz in 9.717 s. Its normalized wanted energy drops from
+5,757.62209 s at TX input to 5,637.53386 s after the circuit and path, a
+0.09154 dB loss. Detuning increases from 4.135 to 4.20253 Hz. The frozen
+circuit's adiabatic one-pole response at those endpoints predicts losses
+of 0.09011 and 0.09305 dB, which bracket the observed in-aperture result.
+This row is a channel-only transfer measurement under the imposed circuit
+law. [Detuned render](local-evidence/comprehensive-vlf-reference/005-vlf-tapered-detuned-render.stdout.json)
+
+The unchanged RRC first-slot episode accepts all 12,966,069 samples with the
+same input hash as both earlier censored attempts. It scores a complete valid
+DATA `0` with operational log-e 573,805.13 in **567.458 s** against the
+predeclared 1,200 s wall budget. Source/channel rendering takes 9.014 s,
+receiver control and wait take 558.212 s, and native coarse and fine phases
+take 1.733 and 556.170 s, respectively. Peak receiver reservation is
+990,515,669 bytes with 24 workers, one running owner and zero backpressure.
+The bright tapered first slot has the same count of 1,244,742,624 basis
+rows and takes 8.893 s of fine work during its complete receive. Together with
+the matched crop and cache receipts, these timings identify the exact direct
+basis route as the practical cost problem for this RRC geometry. An RRC
+optimization could batch exact mapped source synthesis across both keyed
+patterns, sharing pulse weights and batching keyed chips with the native
+source bank. Qualification needs exact coordinate and edge handling, with
+the current direct route available for geometries outside the supported
+batch path. No complete RRC message was evaluated by this first-slot run.
+[Bright RRC slot](local-evidence/comprehensive-vlf-reference/006-vlf-rrc-bright-slot.stdout.json)
+
+All seven episodes execute once in 750.383 s with zero execution failures.
+The runner's zero `valid_communication_failures` counts complete-message
+receive episodes. The first-observation phase-wander miss remains an
+explicit adverse outcome. [Campaign summary](local-evidence/comprehensive-vlf-reference/run.json)
+
 ## Remaining qualification boundaries
 
 - There is no held-out field transfer/noise recording or calibrated antenna,
@@ -373,9 +593,10 @@ the full worker budget rather than rescanning long histories.
 - The smoke campaign used short `smoke` geometry and the AWGN trend used only
   two fixed seeds per receive cell; neither provides a complete high-fidelity
   sensitivity curve. All 12 `weak-signal-pilot` episodes executed, with two
-  censored time limits, so the campaign ended `incomplete_checks`. The separate
-  full VLF reference receive was incomplete at its declared wall limit, as
-  described above.
+  censored time limits, so the campaign ended `incomplete_checks`. The current
+  tapered VLF reference completes its bright five-slot message. The historical
+  full RRC receive remains censored, and the uncensored RRC follow-up covers
+  its first slot only.
 - No conditional success probability, rare-failure bound, independent channel
   episode population, or environmental availability is qualified.
 - The current tests assume configured public calendar and keyed ordinal;
@@ -391,8 +612,179 @@ the full worker budget rather than rescanning long histories.
   wall-time and host-resource provenance. This validation summary contains no
   account or billing identifiers and makes no claim about provider charges.
 
-Keep the smoke raw receipts and incomplete VLF receipt while their
-implementation-validation and diagnosis purposes are active. When those
-questions are resolved, preserve the concise outcomes and fingerprints above,
-then remove redundant ignored outputs. Do not rerun or overwrite the VLF
-receipt without a separately bounded, predeclared follow-up.
+Keep the smoke and VLF raw receipts while the implementation-validation and
+diagnosis purposes above remain active. When those questions are resolved,
+preserve the concise outcomes and fingerprints above, then remove redundant
+ignored outputs. Any new VLF measurement uses a separately bounded,
+predeclared follow-up.
+
+## Expanded propagation and receiver controls
+
+The frozen `propagation-breadth`, `receiver-controls` and `weak-holdouts`
+campaigns executed **16/16, 12/12 and 6/6** episodes in 226.042, 145.310
+and 34.551 seconds respectively, with zero execution failures or censoring.
+Their source/build identity is the `81f62c...` appraisal / `0ffda32...` binary
+identified above as the preceding campaign. Receipts are retained at
+[`comprehensive-propagation-breadth`](local-evidence/comprehensive-propagation-breadth/report.md),
+[`comprehensive-receiver-controls`](local-evidence/comprehensive-receiver-controls/report.md),
+and [`comprehensive-weak-holdouts`](local-evidence/comprehensive-weak-holdouts/report.md).
+These are fixed descriptive mechanism tests, not pooled success-probability
+samples. They ran serially on the Ryzen 5 PRO 5650U, 6 cores/12 logical CPUs,
+16,053,669,888 bytes system RAM, GNU 14.2 Release native CPU build, with the
+canonical automatic **24-worker** budget. The complete receiver admitted up
+to five concurrent ready owners in the five-slot MF case; its recorded peak
+reserved memory was 1,211,084,036 bytes. Wall times include source/channel and
+receiver work and are not a calibrated CPU-capacity result.
+
+Both default-level 1 MHz land/sea episodes and the separate competing night
+ray completed correctly. So did the 30 MHz sea/land cases and the C/N0=20
+quiet, disturbed, 7ms/1Hz NVIS, and DRM6 skywave cases. The six explicit weaker
+cases all completed their observation horizon without a correct message:
+MF land at −16 dB-Hz and 30MHz land plus the four skywave models at 0 dB-Hz.
+Keeping default groundwave levels matters: overriding both land and sea to
+one C/N0 would remove the magnitude difference this comparison tests.
+
+The 863.767-second HF transition message spans the entire 120–240 second
+fade and recovery. Slot 3 was quiet; slot 4 carried DATA as the fade ended,
+and slots 5–12 carried DATA with their whole observations after the fade.
+The receiver recorded one reacquisition and no premature completion. It
+physically completed at two final quiet slots but rejected the message for
+one missing slot; FEC is off in this fixture. The original generic
+`resumed_data_slots=0` counted only explicitly configured gap controls, not
+scenario-owned fades. The raw slot and message receipts establish recovery;
+a reporting correction and regression test are recorded separately below.
+
+The negative controls exposed material weaknesses, rather than merely lower
+wanted-message success:
+
+- At C/N0=32 dB-Hz, the compound colored/impulsive **noise-only** episode
+  classified all five slots as DATA (operational log evidence about 715–1263
+  against a 21.493 threshold). It did not physically complete. The wanted
+  companion produced two false DATA decisions in its quiet tail, preventing
+  completion. Native `noise_statistics_valid=true` is a receiver computation
+  flag, not proof that this non-white/non-Gaussian noise obeys its assumed law.
+- The paired C/N0=8 episode completed, but only one of three fresh weak-noise
+  holdouts completed. This is not evidence that lowering SNR helps reception:
+  the override changes only white noise, leaving the colored and shot terms
+  fixed, and it also changes the receiver's white-noise reference. It does
+  not uniformly scale the compound noise law or trace one AWGN ROC.
+- The Helper-on wrong-key case made two false DATA decisions and a physical
+  completion, but the codec rejected the resulting message for an erasure;
+  no message was accepted. Wrong ordinal and Helper noise-only produced no
+  false DATA or physical completion. A correct-key Helper reference completed.
+  These cases keep keyed waveform rejection, physical absence and message
+  integrity distinct; they do not establish semantic transmitter identity.
+- The continuous frontend blocker prevented wanted completion without false
+  DATA in its noise companion. Its catalog fixture does not remove the blocker;
+  recovery after removal is instead covered by the independent native AGC test.
+- Two interior physically quiet slots caused a premature completion, followed
+  by resumed DATA and a later completion. A marked capture gap at the same
+  interval resumed five DATA slots without physical completion, and EOF caused
+  none. Genuine silence can be indistinguishable from message end under the
+  two-quiet-slot contract; invalid capture samples are not physical silence.
+- All three independent disturbed-HF weak holdouts failed to complete. These
+  three seeds are failure-finding evidence, not a reliability confidence bound.
+
+The non-white false DATA and wrong-address cases are retained as reproducible
+improvement targets. Receiver-local noise-spectrum/covariance estimation,
+robust likelihoods or bounded impulse rejection merit evaluation against these
+same held-out controls, including quiet slots, without transmitter feedback.
+Such changes must preserve weak-signal energy, every public hypothesis and
+complete-service workspace/throughput; blindly increasing a universal threshold
+or clipping all large samples could hide the failure by sacrificing sensitivity.
+No production receiver change or unmeasured improvement is claimed here.
+
+## Full-calendar lunar outcomes and final discriminators
+
+The [EME campaign](local-evidence/comprehensive-eme-episodes/report.md)
+executed all seven full-calendar episodes in 123.972 seconds, with zero
+execution failures or censoring. Each received 517,375 samples over the
+269.466-second, five-slot calendar. The supported spectral model's whole-horizon
+numerical checks precede these receiver observations; no old finite-grid preset
+is used for them.
+
+| Model and conditional C/N0 | Actual receiver outcome |
+| --- | --- |
+| Disk, 30 dB-Hz, seed9501 | DATA `0,0,0`, then two quiet slots; third bit wrong; accepted a space instead of `e` |
+| Disk, 10 dB-Hz, same seed | Three ambiguous active slots; no physical completion |
+| Narrow patch, 30 dB-Hz, seed9502 | DATA `0,0,1`, two quiet slots; correct complete `e` |
+| Narrow patch, 10 dB-Hz, same seed | Three wanted slots called quiet; no physical completion |
+| Severe disk, 30 dB-Hz, seed9503 | Same wrong third bit and accepted space; physical completion without integrity rejection |
+| Severe disk, 10 dB-Hz, same seed | Two ambiguous and one quiet active slot; no physical completion |
+| Disk noise-only, 30 dB-Hz, seed9504 | Five quiet slots; no false DATA or physical completion |
+
+The beam cases use separate declared seeds; this table is not a matched estimate
+of beam improvement, a population rate or a universal severity ordering.
+
+Independent review requested two discriminators, frozen before execution in
+`eme-discriminator.json`. Both completed in 28.470 seconds total on the final
+binary. The seed9501 disk episode at **60 dB-Hz still accepted the wrong space**.
+Its public slot geometry, source gain, source/output sample counts and exact
+wanted-energy sum (141,399.05175878672 sample units) match the original 30 dB-Hz
+case; only white variance falls from 1.92 to 0.00192. This is a finite,
+conditional high-SNR counterexample, not proof of an asymptotic error floor.
+The known-channel selected-bit-2 calculation at the original 30 dB-Hz level
+uses public samples 235,107–286,975, squared waveform distance 17,867.85806827436,
+and hypothesis energies 24.70611045196691 / 24.6931240366793 seconds. Its ideal
+binary error rounds to zero below floating-point range. This does not mean zero
+physical error probability, nor does it pay unknown-channel estimation, timing,
+address search or message completion. It establishes that the simulated
+observation retains bit information when the channel is known; it does not by
+itself prove that the current error is avoidable at the same unknown-channel
+information and computational budget.
+[Discriminator receipts](local-evidence/comprehensive-eme-discriminator/report.md)
+
+A large affine-model evidence value can therefore coexist with a wrong accepted
+message in this modeled channel. A useful next receiver experiment would test
+model adequacy before letting large early evidence suppress broader
+changing-channel hypotheses, and compare a bounded likelihood retaining the
+joint delay–Doppler structure. It must include the wrong-bit, no-signal and
+quiet-completion cases and measure full receiver cost; simply spending more on
+the same mismatched score need not repair it. These are identified improvement
+targets, not implemented or performance-qualified receiver changes.
+
+The separate [noise ablation](local-evidence/comprehensive-noise-ablation/report.md)
+completed all three episodes in 6.290 seconds. The seed9301 public geometry,
+white variance, message/calendar, pulse and sample horizon match the original
+compound noise-only case. White-only produced five quiet slots. White plus
+AR(1) produced five ambiguous slots but no false DATA. White plus exponential
+shot noise produced five false DATA decisions, with log evidence about 533–989;
+none of these three completed a physical message. Thus the shot component alone
+reproduces the selected false-DATA failure, while the white baseline does not.
+This is a matched mechanism discriminator, not a calibrated atmospheric noise
+law or false-alarm-rate estimate. No receiver threshold was retuned.
+
+## Final verification and lifecycle
+
+The final seven-group test run passed in 35.25 seconds, including 33 runner
+cases and an actual reference HF-transition regression. That regression now
+counts eight complete, valid post-fade DATA observations using the explicit
+240-second recovery boundary and checks native reacquisition. The original
+campaign's incorrect zero recovery count remains visible in its immutable raw
+receipt and is corrected in the analysis above. The change affects reporting,
+not the production receiver or waveform.
+
+All **53 newly declared campaign episodes** executed without time or resource
+censoring: 48 reference/component episodes plus five review-requested mechanism
+diagnostics. Their actual communication failures remain failures. The updated
+smoke manifest's changed EME row was additionally executed alone: a native
+10-second reference channel capture with 19,200 samples, positive signal energy,
+and 5.993 seconds runtime. The other unchanged historical smoke rows were not
+relabeled as new runs.
+
+The five superseded operational lunar presets and the obsolete runnable
+weak-signal pilot manifest were removed. The pilot's frozen historical inputs
+remain with the explicit old-source failure record. The independent
+`lunar_paths` numerical reference and concise coarse-grid failure regression
+remain because they test the current spectral construction against a different
+quadrature. The temporary shaping witness executable was removed after its
+result was distilled. Current native build/cache and compact receipts serve
+reproducibility and the unresolved shot-noise, wrong-message and phase-wander
+failures; remove superseded receipts after replacement experiments resolve
+those same questions, preserving the findings and exact provenance.
+
+The follow-up RunPod allocation failed at provider container creation before
+source upload or execution. It was stopped and removed after user confirmation;
+no persistent volume was created or retained. It contributes no new GPU evidence.
+The previously observed native CUDA results remain bound to their earlier
+source/horizon and hardware. The current full-calendar results are CPU results.

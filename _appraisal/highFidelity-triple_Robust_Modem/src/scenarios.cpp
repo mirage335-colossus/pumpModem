@@ -1,4 +1,6 @@
 #include "appraisal/channel.hpp"
+#include "appraisal/hf_scenarios.hpp"
+#include "lunar_spectral_internal.hpp"
 
 #include <algorithm>
 #include <array>
@@ -6,7 +8,6 @@
 #include <limits>
 #include <numbers>
 #include <stdexcept>
-#include <string_view>
 #include <utility>
 
 namespace appraisal {
@@ -32,96 +33,47 @@ constexpr std::array<double, 11> db23{
     2.77, -1.53, -8.58, -12.58, -16.33, -17.73,
     -19.98, -22.58, -26.53, -29.43, -34.93};
 
-struct LunarKernel {
-    std::array<double, 13> theta{}, power{}, cumulative{};
-    double integral = 0;
-    explicit LunarKernel(double rf_hz) {
-        const double alpha = std::log((c / rf_hz) / .038) / std::log(.23 / .038);
-        for (std::size_t i = 0; i < theta.size(); ++i) theta[i] = theta_deg[i] * deg;
-        for (std::size_t i = 0; i < db38.size(); ++i)
-            power[i + 1] = std::pow(10., ((1 - alpha) * db38[i] + alpha * db23[i]) / 10.);
-        power[0] = power[1];
-        power.back() = 0;
-        for (std::size_t i = 0; i + 1 < theta.size(); ++i)
-            cumulative[i + 1] = cumulative[i] + interval_integral(i, theta[i + 1]);
-        integral = cumulative.back();
-    }
-    double interval_integral(std::size_t i, double x) const {
-        const double lo = theta[i], slope = (power[i + 1] - power[i]) / (theta[i + 1] - lo);
-        const auto antiderivative = [&](double t) {
-            return -(power[i] + slope * (t - lo)) * std::cos(t) + slope * std::sin(t);
-        };
-        return antiderivative(x) - antiderivative(lo);
-    }
-    double quantile(double probability) const {
-        const double target = probability * integral;
-        auto hi = std::upper_bound(cumulative.begin(), cumulative.end(), target);
-        const std::size_t i = static_cast<std::size_t>(hi - cumulative.begin() - 1);
-        double lo_theta = theta[i], hi_theta = theta[i + 1];
-        for (unsigned step = 0; step < 52; ++step) {
-            const double middle = .5 * (lo_theta + hi_theta);
-            if (cumulative[i] + interval_integral(i, middle) < target) lo_theta = middle;
-            else hi_theta = middle;
-        }
-        return .5 * (lo_theta + hi_theta);
-    }
-};
-
-// Deliberately fixed geometry:4096 Doppler coordinates and16 conditional
-// Gauss-Legendre nodes, exactly65536 paths. This alternative is qualified only
-// for the documented88-Hz, centred-beam, <=30-s experiment; no generic grid or
-// severe-width selection can silently exceed that horizon or renderer bound.
-std::vector<Path> lunar_doppler_slot_paths(double dish_m) {
-    constexpr unsigned frequency_nodes = 4096, conditional_nodes = 16;
-    static_assert(frequency_nodes * conditional_nodes <= 65536);
-    std::array<std::pair<double, double>, conditional_nodes> quadrature{};
-    for (unsigned i = 0; i < conditional_nodes; ++i) {
-        double node = std::cos(pi * (i + .75) / (conditional_nodes + .5)), derivative = 0;
-        for (unsigned iteration = 0; iteration < 30; ++iteration) {
-            double previous = 1, value = node;
-            for (unsigned order = 2; order <= conditional_nodes; ++order) {
-                const double next = ((2 * order - 1) * node * value - (order - 1) * previous) / order;
-                previous = value;
-                value = next;
-            }
-            derivative = conditional_nodes * (node * value - previous) / (node * node - 1);
-            const double correction = value / derivative;
-            node -= correction;
-            if (std::abs(correction) < 1e-15) break;
-        }
-        quadrature[i] = {node, 2 / ((1 - node * node) * derivative * derivative)};
-    }
-    const LunarKernel kernel(lunar_rf_hz);
-    const double range = lunar_bulk_delay_s * c / 2 + lunar_radius_m;
-    const double beam_width = 70 * deg * (c / lunar_rf_hz) / dish_m;
-    constexpr double dx = 2. / frequency_nodes;
-    std::vector<Path> paths;
-    paths.reserve(frequency_nodes * conditional_nodes);
-    for (unsigned ix = 0; ix < frequency_nodes; ++ix) {
-        const double x = -1 + (ix + .5) * dx, transverse = std::sqrt(1 - x * x);
-        for (const auto& [node, weight] : quadrature) {
-            const double psi = (node + 1) * pi / 4, mu = transverse * std::cos(psi);
-            const double theta = std::acos(std::clamp(mu, 0., 1.));
-            const auto upper = std::upper_bound(kernel.theta.begin(), kernel.theta.end(), theta);
-            const auto index = static_cast<std::size_t>(upper - kernel.theta.begin() - 1);
-            const double density = kernel.power[index] +
-                (kernel.power[index + 1] - kernel.power[index]) *
-                (theta - kernel.theta[index]) / (kernel.theta[index + 1] - kernel.theta[index]);
-            const double offset = std::asin(lunar_radius_m * std::sqrt(1 - mu * mu) / range);
-            const double beams = std::exp(-8 * std::log(2.) * std::pow(offset / beam_width, 2));
-            Path path;
-            // Surface measure dx*dpsi; the +/-psi mirror cells have identical
-            // delay and Doppler. Their independent Gaussian variances add.
-            // Divide by the original2*pi*T52 integral, never by sampled power.
-            path.power = density * beams * dx * weight / (4 * kernel.integral);
-            path.delay_seconds = lunar_bulk_delay_s + 2 * lunar_radius_m * (1 - mu) / c;
-            path.delay_rate = -.5 * lunar_limb_width_hz * x / lunar_rf_hz;
-            path.frozen_gaussian = true;
-            paths.push_back(path);
-        }
-    }
-    return paths;
 }
+namespace detail {
+LunarKernel::LunarKernel(double rf_hz) {
+    const double alpha = std::log((c / rf_hz) / .038) / std::log(.23 / .038);
+    for (std::size_t i = 0; i < theta.size(); ++i) theta[i] = theta_deg[i] * deg;
+    for (std::size_t i = 0; i < db38.size(); ++i)
+        power[i + 1] = std::pow(10., ((1 - alpha) * db38[i] + alpha * db23[i]) / 10.);
+    power[0] = power[1];
+    power.back() = 0;
+    for (std::size_t i = 0; i + 1 < theta.size(); ++i)
+        cumulative[i + 1] = cumulative[i] + interval_integral(i, theta[i + 1]);
+    integral = cumulative.back();
+}
+double LunarKernel::interval_integral(std::size_t i, double x) const {
+    const double lo = theta[i], slope = (power[i + 1] - power[i]) / (theta[i + 1] - lo);
+    const auto antiderivative = [&](double t) {
+        return -(power[i] + slope * (t - lo)) * std::cos(t) + slope * std::sin(t);
+    };
+    return antiderivative(x) - antiderivative(lo);
+}
+double LunarKernel::quantile(double probability) const {
+    const double target = probability * integral;
+    const auto hi = std::upper_bound(cumulative.begin(), cumulative.end(), target);
+    const auto i = static_cast<std::size_t>(hi - cumulative.begin() - 1);
+    double lo_theta = theta[i], hi_theta = theta[i + 1];
+    for (unsigned step = 0; step < 52; ++step) {
+        const double middle = .5 * (lo_theta + hi_theta);
+        if (cumulative[i] + interval_integral(i, middle) < target) lo_theta = middle;
+        else hi_theta = middle;
+    }
+    return .5 * (lo_theta + hi_theta);
+}
+double LunarKernel::density(double angle) const {
+    const auto upper = std::upper_bound(theta.begin(), theta.end(), angle);
+    const auto index = std::min(theta.size() - 2, static_cast<std::size_t>(upper - theta.begin() - 1));
+    return power[index] + (power[index + 1] - power[index]) *
+        (angle - theta[index]) / (theta[index + 1] - theta[index]);
+}
+}
+namespace {
+using detail::LunarKernel;
 
 Scenario base(std::string id, std::string family) {
     Scenario s;
@@ -240,14 +192,15 @@ std::vector<Path> lunar_paths(unsigned rings, unsigned azimuths, double limb_wid
 }
 
 std::vector<std::string> scenario_names() {
-    return {"awgn", "vlf-resonant", "vlf-detuned", "groundwave-1mhz",
+    return {"awgn", "vlf-resonant", "vlf-detuned", "vlf-phase-wander", "groundwave-1mhz",
             "groundwave-1mhz-sea", "groundwave-1mhz-night", "groundwave-30mhz",
-            "groundwave-30mhz-land", "hf-quiet", "hf-disturbed", "hf-transition",
-            "eme-disk", "eme-patch", "eme-severe", "eme-disk-slot", "eme-patch-slot",
-            "noise-bursts", "frontend-overload"};
+            "groundwave-30mhz-land", "hf-quiet", "hf-disturbed", "hf-transition", "hf-nvis-disturbed", "hf-drm6",
+            "eme-disk-episode", "eme-patch-episode", "eme-severe-episode",
+            "noise-bursts", "noise-white", "noise-white-ar1", "noise-white-shot", "frontend-overload"};
 }
 
 Scenario make_scenario(const std::string& id) {
+    if(auto additional=make_additional_hf_scenario(id))return std::move(*additional);
     if (id == "awgn") {
         auto s = base(id, "control");
         s.evidence = "analytic white-noise control";
@@ -256,7 +209,9 @@ Scenario make_scenario(const std::string& id) {
                         "no physical link-budget claim; source pulse and calendar remain canonical.";
         return s;
     }
-    if (id == "noise-bursts" || id == "frontend-overload") {
+    const bool noise_control = id == "noise-bursts" || id == "noise-white" ||
+        id == "noise-white-ar1" || id == "noise-white-shot";
+    if (noise_control || id == "frontend-overload") {
         auto s = base(id, "noise-equipment-control");
         s.reference_cn0_db_hz = 32.;
         const double reference_variance = 1920. / std::pow(10., 32. / 10.);
@@ -264,7 +219,7 @@ Scenario make_scenario(const std::string& id) {
         s.provenance = "Fable-5.2/85 C1/C2/C3 mechanism and reference-plane controls; "
                        "this catalog's reduced digital-baseband parameterization";
         s.evidence = "synthetic noise/equipment sensitivity, not a measured site or storm";
-        if (id == "noise-bursts") {
+        if (noise_control) {
             auto& noise = s.channel.noise;
             noise.colored_variance = .25 * reference_variance;
             noise.colored_corner_hz = 3.;
@@ -287,6 +242,17 @@ Scenario make_scenario(const std::string& id) {
                             "seed domains; none fades with DATA. A C/N0 override changes white "
                             "noise only; colored and pulse strengths remain at their fixed "
                             "32dB-Hz reference. No per-window power normalization.";
+            if (id != "noise-bursts") {
+                if (id != "noise-white-ar1") noise.colored_variance = 0;
+                if (id != "noise-white-shot") {
+                    noise.impulse_rate_hz = 0;
+                    noise.impulse_rms = 0;
+                }
+                s.assumptions += " Matched component ablation: this preset retains white noise and ";
+                s.assumptions += id == "noise-white-ar1" ? "only the AR(1) addition. " :
+                    id == "noise-white-shot" ? "only the shot-noise addition. " : "no colored or shot addition. ";
+                s.assumptions += "Disabled components have zero strength; the tuple above defines the parent compound fixture.";
+            }
         } else {
             s.channel.noise.tone_amplitude = 30.;
             s.channel.noise.tone_hz = -150.;
@@ -315,7 +281,7 @@ Scenario make_scenario(const std::string& id) {
         }
         return s;
     }
-    if (id == "vlf-resonant" || id == "vlf-detuned") {
+    if (id == "vlf-resonant" || id == "vlf-detuned" || id == "vlf-phase-wander") {
         auto s = base(id, "sub-9kHz-200ft");
         s.channel.rf_hz = 8270;
         s.channel.paths[0].delay_seconds = 1e6 / c;
@@ -352,6 +318,18 @@ Scenario make_scenario(const std::string& id) {
         if (id == "vlf-detuned")
             s.assumptions += " Added +4.135-Hz detuning and +1e-5-Hz/s drift are deterministic "
                              "sensitivity choices, not a weather population or time-varying C model.";
+        if (id == "vlf-phase-wander") {
+            s.channel.paths[0].phase_wander_amplitude_radians=pi;
+            s.channel.paths[0].phase_wander_period_seconds=7200;
+            s.bounds.varying=true;
+            s.bounds.atmospheric_hz=pi/7200;
+            s.provenance += "; Fable-5.2/81 section2 A1 smooth carrier-phase sensitivity";
+            s.assumptions += " Signal phase gains pi*sin(2*pi*t/7200), maximum residual frequency "
+                "pi/7200Hz, continuous through all public slots. This is a constructed two-hour "
+                "ionospheric phase sensitivity, not a measured waveguide law. No duplicate Doppler "
+                "or geometric group delay is added. The receiver retains its oscillator prior "
+                "and additionally declares time-varying atmospheric support pi/7200Hz.";
+        }
         return s;
     }
     if (id == "groundwave-1mhz" || id == "groundwave-1mhz-sea" || id == "groundwave-1mhz-night") {
@@ -390,16 +368,16 @@ Scenario make_scenario(const std::string& id) {
                          "is fixed engineering input, independent of decoder results or slot count.";
         return s;
     }
-    if (id == "eme-disk" || id == "eme-patch" || id == "eme-severe" ||
-        id == "eme-disk-slot" || id == "eme-patch-slot") {
+    if (id == "eme-disk-episode" || id == "eme-patch-episode" || id == "eme-severe-episode") {
         auto s = base(id, "earth-moon-earth-5.76GHz");
         s.channel.rf_hz = lunar_rf_hz;
-        const bool slot_grid = id == "eme-disk-slot" || id == "eme-patch-slot";
-        const double dish = id == "eme-patch" || id == "eme-patch-slot" ? 30. : 3.;
-        const double limb_width = id == "eme-severe" ? 164. : lunar_limb_width_hz;
-        s.channel.paths = slot_grid ? lunar_doppler_slot_paths(dish) :
-            lunar_paths(32, 128, limb_width, dish, lunar_rf_hz, lunar_bulk_delay_s);
-        if (slot_grid) s.numerical_horizon_seconds = 30.;
+        const bool severe = id == "eme-severe-episode";
+        const double dish = id == "eme-patch-episode" ? 30. : 3.;
+        const double limb_width = severe ? 164. : lunar_limb_width_hz;
+        s.channel.paths.clear();
+        s.channel.lunar = LunarSpectralSpec{limb_width, dish, lunar_bulk_delay_s};
+        s.channel.maximum_workspace_bytes = 384u * 1024u * 1024u;
+        s.numerical_horizon_seconds = detail::lunar_maximum_horizon;
         s.waveform = {.rate_hz = 360, .requested_bit_seconds = 26.4,
                       .sample_rate_hz = 1920, .added_symbols = 1, .fhss = true};
         s.bounds.arrival_low_seconds = 2.46;
@@ -412,58 +390,25 @@ Scenario make_scenario(const std::string& id) {
         s.bounds.doppler_width_hz = 0;
         s.bounds.varying = true;
         s.reference_cn0_db_hz = 10.;
-        s.evidence = "frozen monostatic T52 scattering hypothesis; bounded quadrature";
+        s.evidence = "frozen monostatic T52 joint delay–Doppler spectral synthesis";
         s.provenance = "Fable-5.2/84 frozen T52 kernel and lunar radius; "
                        "LL67 Table II selected 3.8/23-cm opposite-circular rows; "
                        "bulk-delay anchor2.4720213723s is from the documented DE440 calculation";
-        if (id == "eme-severe")
+        if (severe)
             s.provenance += "; Joe Taylor K1JT, Frequency-Dependent Characteristics of the EME Path, "
                             "15 June 2010, p5 table:5760MHz164Hz maximum/86Hz median for "
                             "latitude+/-40-degree self-echo geometry; https://wsjt.sourceforge.io/EME2010_K1JT.pdf";
-        s.assumptions = "5.760GHz, radius1737.4km; power-quantile rings32 by azimuths128; "
-                        "frozen proper-complex independent cell coefficients. Limb-to-limb "
-                        "width=" + std::to_string(static_cast<int>(limb_width)) +
-                        "Hz is a selected projection, not a measured universal width. "
-                        "Each excess delay2a(1-mu)/c and its Doppler=(limb_width/2)sqrt(1-mu^2)cos(phi) "
-                        "share geometry; delay_rate=-Doppler/RF. Bulk envelope delay is fixed; "
-                        "bulk carrier Doppler is assumed perfectly and continuously compensated. "
-                        "This is NOT a runtime DE440, retarded bistatic, or evolving lunar-orientation "
-                        "solution. T52 is a wavelength-interpolated shape, not calibrated5.76GHz. "
-                        "Centred Gaussian beams, fixed wide-beam normalization; no restored power "
-                        "after beam loss. Conditional wide-beam reference C/N0=10dB-Hz, with fixed "
-                        "boresight power reference for both beam experiments; changing beam width "
-                        "does not claim an actual aperture-gain change. Finite quadrature covariance "
-                        "is qualified only at documented tested lags. The32x128 disk grid "
-                        "underestimates26.4-s coherent-average variance by12.13dB at88Hz "
-                        "and14.26dB at164Hz relative to fine continuous-azimuth quadrature; "
-                        "long-integration sensitivity is numerically unresolved. Patch long-time "
-                        "recurrence/alias is also an explicit, separately unqualified limitation.";
-        s.assumptions += " Equivalent beam diameter=" + std::to_string(static_cast<int>(dish)) + "m.";
-        if (id == "eme-severe")
-            s.assumptions += " The164Hz severity adopts a published conditional self-echo geometry "
-                             "coordinate, not an observed5.76GHz spectrum or universal maximum; "
-                             "near-equatorial or other two-station geometry can differ. It does "
-                             "not claim the retained bulk-delay anchor and severity arose at "
-                             "the same ephemeris epoch. Power, T52 shape and C/N0 are unchanged "
-                             "so this isolates the more adverse libration rate.";
-        if (slot_grid) {
-            s.evidence = "frozen monostatic T52; Doppler-aligned numerical comparison bounded to30s";
-            s.assumptions = "5.760GHz, radius1737.4km, fixed bulk delay2.4720213723s and88Hz limb width; "
-                "4096 uniform Doppler coordinates x in[-1,1],16 Gauss-Legendre psi nodes in[0,pi/2]. "
-                "mu=sqrt(1-x*x)cos(psi), surface measure dx*dpsi, symmetric +/-psi variances combined. "
-                "Fixed original wide-beam T52 normalizer; no sampled or realized power normalization. "
-                "The same geometry supplies delay2a(1-mu)/c and Doppler44x; delay_rate=-Doppler/RF. "
-                "Frozen independent proper-complex coefficients. Numerical horizon30s from channel "
-                "time zero; tested projected averages.25/1/4/26.4s centred at0,+/-5,+/-15Hz and joint "
-                "covariance through30s. The46.54545s Doppler-lattice recurrence forbids extrapolation "
-                "to the current269.466s five-slot episode (historically329s with an extra quiet slot). Bulk carrier Doppler is perfectly compensated and "
-                "bulk envelope delay fixed; no runtime ephemeris or retarded bistatic geometry. "
-                "T52 wavelength interpolation is not calibrated5.76GHz scattering. Conditional "
-                "wide-beam C/N0=10dB-Hz; changing centred Gaussian beam width holds boresight "
-                "reference power fixed, without claiming aperture-gain improvement. "
-                "Finite numerical comparisons do not establish field sensitivity or receiver capacity. "
-                "Equivalent beam diameter=" + std::to_string(static_cast<int>(dish)) + "m.";
-        }
+        s.assumptions = "5.760GHz frozen monostatic geometry; bulk delay2.4720213723s and perfect bulk carrier "
+            "Doppler compensation. Limb width=" + std::to_string(static_cast<int>(limb_width)) +
+            "Hz, centred equivalent beam diameter=" + std::to_string(static_cast<int>(dish)) +
+            "m. Shared proper-complex spectral draws preserve the same delay and Doppler coupling across carrier "
+            "frequencies. The fixed Fourier lattice is longer than the 360-second declared observation support. "
+            "Envelope delay drift is retained to first order in the same native fractional-delay stencil. "
+            "Reference C/N0=10dB-Hz uses the original wide-beam power, without normalization after beam loss. "
+            "This frozen-sphere numerical experiment does not establish evolving ephemeris, 5.76GHz scattering "
+            "calibration, natural occurrence or receiver capacity.";
+        if (severe) s.assumptions += " 164Hz is Taylor's conditional maximum for the cited geometry and is "
+            "not contemporaneous with the frozen bulk-delay anchor.";
         return s;
     }
     throw std::invalid_argument("unknown appraisal scenario: " + id);

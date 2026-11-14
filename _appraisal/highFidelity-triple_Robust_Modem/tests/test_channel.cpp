@@ -415,6 +415,69 @@ void cancellation() {
     expect_cancelled([&] { short_read.read(final_samples, final_batch.get_token()); });
     check(short_read.report().samples == 8, "short-read cancellation lost fully rendered sample accounting");
 }
+
+void long_period_phase_wander() {
+    // Fable81 A1 is a deliberately chosen two-hour phase-only sensitivity,
+    // not a measured VLF Doppler distribution. Low Fs retains physical time
+    // while making this pure operator check cheap; no modem time is compressed.
+    constexpr unsigned fs = 2;
+    constexpr double period = 7200, amplitude = pi, offset = .0002;
+    constexpr std::size_t count = fs * 7200 + 1;
+    ChannelSpec spec;
+    spec.rf_hz = 8270;
+    spec.paths[0].phase_radians = .17;
+    spec.paths[0].residual_doppler_hz = offset;
+    spec.paths[0].phase_wander_amplitude_radians = amplitude;
+    spec.paths[0].phase_wander_period_seconds = period;
+    Channel one(tone(fs, count, 0), spec, 17, count);
+    Channel chunks(tone(fs, count, 0), spec, 17, count);
+    const auto a = run(one, count, 1);
+    const auto b = run(chunks, count, 257);
+    check(a == b, "long-period phase depends on read chunking");
+    double maximum_phase_error = 0, maximum_frequency_error = 0;
+    const double delta = pi / (fs * period);
+    const double finite_difference_factor = std::sin(delta) / delta;
+    for (std::size_t n = 0; n < count; ++n) {
+        const double t = static_cast<double>(n) / fs;
+        const double expected_phase = .17 + 2*pi*offset*t + amplitude*std::sin(2*pi*t/period);
+        maximum_phase_error = std::max(maximum_phase_error, std::abs(a[n] - std::polar(1., expected_phase)));
+        if (n) {
+            const double midpoint = (static_cast<double>(n) - .5) / fs;
+            const double expected_frequency = offset + amplitude/period *
+                std::cos(2*pi*midpoint/period) * finite_difference_factor;
+            const double frequency = std::arg(a[n] * std::conj(a[n-1])) * fs / (2*pi);
+            maximum_frequency_error = std::max(maximum_frequency_error, std::abs(frequency - expected_frequency));
+        }
+    }
+    check(maximum_phase_error < 3e-12, "two-hour residual phase differs from the declared analytic law");
+    check(maximum_frequency_error < 3e-12, "phase-wander derivative has the wrong Doppler sign, scale or continuity");
+
+    Channel gap(source(fs, count, [](std::uint64_t n) {
+        return n >= 2000 && n < 4000 ? Complex{} : Complex{1, 0};
+    }), spec, 17, count);
+    const auto g = run(gap, count, 509);
+    for (std::size_t n = 2000; n < 4000; ++n) check(g[n] == Complex{}, "phase law invented DATA during silence");
+    check(std::equal(g.begin() + 4000, g.end(), a.begin() + 4000), "phase law reset across source silence");
+
+    ChannelSpec off;
+    Channel baseline(tone(fs, count, 0), off, 17, count);
+    off.paths[0].phase_wander_period_seconds = 30;
+    Channel disabled(tone(fs, count, 0), off, 17, count);
+    check(run(baseline, count, 991) == run(disabled, count, 71), "zero phase amplitude changed the OFF samples");
+
+    spec.paths[0].phase_wander_amplitude_radians = -1;
+    rejects([&] { Channel c(tone(fs, 10, 0), spec, 1, 10); }, "negative phase amplitude accepted");
+    spec.paths[0].phase_wander_amplitude_radians = 1;
+    spec.paths[0].phase_wander_period_seconds = -1;
+    rejects([&] { Channel c(tone(fs, 10, 0), spec, 1, 10); }, "negative phase period accepted");
+    spec.paths[0].phase_wander_period_seconds = 0;
+    rejects([&] { Channel c(tone(fs, 10, 0), spec, 1, 10); }, "zero phase period accepted");
+    spec.paths[0].phase_wander_period_seconds = std::numeric_limits<double>::infinity();
+    rejects([&] { Channel c(tone(fs, 10, 0), spec, 1, 10); }, "nonfinite phase period accepted");
+    spec.paths[0].phase_wander_period_seconds = period;
+    spec.paths[0].phase_wander_amplitude_radians = std::numeric_limits<double>::quiet_NaN();
+    rejects([&] { Channel c(tone(fs, 10, 0), spec, 1, 10); }, "nonfinite phase amplitude accepted");
+}
 }
 
 int main() {
@@ -427,6 +490,7 @@ int main() {
         resonator_and_frontend();
         guards();
         cancellation();
+        long_period_phase_wander();
         std::cout << "channel checks passed: " << checks << "\n";
         return 0;
     } catch (const std::exception& error) {

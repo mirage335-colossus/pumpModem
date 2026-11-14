@@ -1,8 +1,8 @@
 # Native high-fidelity appraisal protocol
 
-Prepared 13 November 2026. The contained appraisal now has a native renderer,
-scenario catalog, executable, bounded campaign runner and four deterministic
-checks. The [model inventory](models.md) records implemented equations and
+Updated 13 November 2026. The contained appraisal has a native renderer,
+scenario catalog, executable, bounded campaign runner and seven CTest groups.
+The [model inventory](models.md) records implemented equations and
 limits; the [research reconciliation](research-reconciliation.md) maps them to
 the literature. This protocol governs runs and the claims that their results
 can support. Passing source tests verifies selected software behavior only.
@@ -30,7 +30,8 @@ the [Robust capacity policy](../../docs/robust-manual-capacity.md).
 
 ## Implemented model families and fidelity labels
 
-Scenarios are declared in [`src/scenarios.cpp`](src/scenarios.cpp); each native
+Scenarios are declared in [`src/scenarios.cpp`](src/scenarios.cpp) and
+[`src/hf_scenarios.cpp`](src/hf_scenarios.cpp); each native
 receipt includes scenario provenance, assumptions, public receiver bounds,
 source/build identity, actual geometry, and reported channel/receiver work.
 The `reference` waveform preserves the canonical physical duration; `smoke`
@@ -38,11 +39,11 @@ uses shorter integration geometry for fast wiring checks.
 
 | Family | Current reference case | Claim the current model can support | Critical limit |
 | --- | --- | --- | --- |
-| Sub-9 kHz / 200 ft | `vlf-resonant`, `vlf-detuned` | Calculated high-Q antenna-envelope and conditional magnetic-noise sensitivity | No LWPC/LMP solve; independent electric and magnetic planes; no installation range or efficiency claim |
+| Sub-9 kHz / 200 ft | `vlf-resonant`, `vlf-detuned`, `vlf-phase-wander` | Calculated high-Q antenna envelope, conditional magnetic-noise level, and a separate smooth phase-wander hypothesis | No LWPC/LMP solve; independent electric and magnetic planes; phase law is constructed, not a measured 8.27 kHz record |
 | 1 MHz groundwave | `groundwave-1mhz`, `-sea`, `-night` | Reference-reproduced NTIA LFMF homogeneous magnitude, plus separately synthetic phase and competing ray | No measured local path, terrain or complex phase; night ray is a sensitivity choice |
 | 30 MHz groundwave | `groundwave-30mhz`, `-land` | Fixed LFMF magnitude comparison at model endpoint | Formal model endpoint does not establish actual surface-wave dominance or exclude direct/reflected/sky/duct paths |
-| 1–30 MHz skywave | `hf-quiet`, `hf-disturbed`, `hf-transition` | Finite continuous Gaussian-tap approximation to selected F.1487 statistical profiles and a constructed signal-absorption transition | Not a worldwide or long-episode population; alternatives such as non-Gaussian, slant, measured residual and mode-transition laws remain |
-| EME at 5.76 GHz | `eme-disk`, `eme-patch` | Bounded, beam-weighted, frozen monostatic delay–Doppler kernel with stated finite quadrature | Not the full retarded bistatic DE440 geometry or measured whole-disk 5.8 GHz channel; long-lag quadrature discrepancy remains |
+| 1–30 MHz skywave | `hf-quiet`, `hf-disturbed`, `hf-transition`, `hf-nvis-disturbed`, `hf-drm6` | Continuous finite Gaussian-tap approximations to selected F.1487/DRM profiles and a constructed signal-absorption transition | Not a worldwide or long-episode population; the NVIS fixture is skywave-only and omits the optional groundwave component |
+| EME at 5.76 GHz | `eme-disk-episode`, `eme-patch-episode`, `eme-severe-episode` | Joint spectral approximation of the frozen beam-weighted monostatic delay–Doppler kernel, numerically checked through 360 s | Helper-off 1,920 Hz source only; not full retarded bistatic DE440 geometry or measured whole-disk IQ; legacy finite-grid and first-slot cases retain their narrower limits |
 | Noise/equipment controls | `noise-bursts`, `frontend-overload` | Constructed colored/impulse and blocker/AGC/clipping/quantization paths | Not a site capture, lightning law or named radio's RF nonlinearity |
 
 The detailed parameters, units, energy conventions and numerical acceptance
@@ -50,6 +51,15 @@ limits are in [models.md](models.md). An “adverse,” “weak,” or “outage
 names the specified conditional model; it does not imply environmental
 probability. Do not combine maxima from unrelated references and call the
 result a measured natural episode.
+
+The HF tuple review checked [F.1487 Annex 3 §3.4](https://www.itu.int/dms_pubrec/itu-r/rec/f/R-REC-F.1487-0-200005-I!!PDF-E.pdf)
+and the newer [ETSI ES 201 980 V4.3.1 Annex B.1](https://www.etsi.org/deliver/etsi_es/201900_201999/201980/04.03.01_60/es_201980v040301p.pdf):
+the selected DRM-6 tuple and Gaussian 2-sigma
+width convention remain unchanged from the fixed V4.2.1 fixture. This is a
+source cross-check, not evidence that these standard profiles bound every
+natural channel. The maintained [model notes](models.md#hf-standard-and-nonstationary-controls)
+and [Fable skywave synthesis](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/83-scenarios-skywave.md)
+retain the scope of the comparisons.
 
 ## Entry points and bounded campaign files
 
@@ -60,12 +70,17 @@ the appraisal subtree and reads any shared compiler cache in read-only mode:
 ./_appraisal/highFidelity-triple_Robust_Modem/build.sh test
 ```
 
-The final post-correction appraisal run passed all four CTest groups (4/4) in
-9.35 seconds; the runner group covers 20 unit cases. A separate canonical
-Triad run passed 32/32 checks in 64.90 seconds. Its contained test harness
+The expanded appraisal run passed all seven CTest groups (7/7) in 35.25
+seconds: channel primitives, scenario models, additional HF profiles,
+impairment observables, lunar spectral numerics, native receiver integration,
+and the campaign runner. The runner group covers 33 unit cases, including
+message identity and inconsistent-success receipt rejection. A prior separate
+canonical Triad run passed 32/32 checks in 64.90 seconds. Its contained test harness
 forced inclusion of a header missing from the pre-existing CPU-only canonical
 probe; the original setup failure is preserved. This was a test-harness
-workaround, not a modem source change. Smoke, exploratory AWGN, weak-signal,
+workaround, not a modem source change. The canonical native source SHA is
+unchanged in this expansion; the prior result remains bound to its original
+build and is not a fresh run. Smoke, exploratory AWGN, weak-signal,
 RunPod, EME-slot and VLF results are recorded in [validation](validation.md),
 with old three-quiet-opportunity outcomes separated from current
 two-quiet-slot evidence. None implies environmental qualification.
@@ -80,6 +95,10 @@ The executable's supported modes are:
   receiver. Transport EOF does not create physical completion.
 - `--mode slot`: receive only the complete first public DATA observation; it
   cannot establish message completion or scored quiet-slot behavior.
+- `--mode diagnose`: render the complete first static VLF reference observation,
+  run canonical acquisition over the full public hypotheses, and measure a
+  short persistent fine session. This component diagnostic makes no bit or
+  message decision and cannot qualify complete receiver service.
 - `--mode oracle`: compare known binary waveforms for eligible Helper-off AWGN
   or EME scenarios with white noise, and calculate an ideal known-signal
   presence probability at the receiver's design false-alarm target. Both
@@ -106,13 +125,44 @@ python3 -B _appraisal/highFidelity-triple_Robust_Modem/run.py \
   --campaign _appraisal/highFidelity-triple_Robust_Modem/campaigns/integration-smoke.json
 ```
 
+The manifest supports all six modes and explicit `pulse`, `oracle_slot`,
+`chunk`, and `message` fields. `oracle_slot` is an oracle-only public slot
+index; `duration_seconds` sets the channel-render span and does not shorten a
+receive episode. `--pulse rrc|tapered-rrc` selects an explicit canonical pulse;
+the default remains `rrc`. Receipts bind the requested and effective message,
+pulse and public geometry. The existing fade/gap control changes the default
+requested `e` to effective `A` so that the interruption is interior; that
+documented substitution is checked rather than silently accepted for other
+cases. Chunk changes must retain the channel's continuous state.
+
+Use these test tiers to keep future checks affordable:
+
+| Tier / manifest | Frozen cases | Purpose and maximum budget |
+| --- | ---: | --- |
+| `build.sh test` | 7 CTest groups | Default correctness and numerical consistency checks; no long VLF reception |
+| `integration-smoke.json` | 10 | Short geometry and wiring; 600 s aggregate |
+| `propagation-breadth.json` | 16 | Groundwave land/sea defaults, weak levels, HF profiles and recovery; 120 s per episode, 1,800 s aggregate, 8 million samples per episode |
+| `receiver-controls.json` | 12 | Noise, blockers, Helper, mismatched hypotheses, physical fade, marked gap and EOF; the same 120 s / 1,800 s / 8 million ceilings |
+| `weak-holdouts.json` | 6 | Three fresh seeds each for two fixed weak conditions; the same ceilings; descriptive only |
+| `eme-episodes.json` | 7 | Disk, patch and severe-width strong/weak full-message pairs plus noise-only; 120 s per episode, 1,000 s aggregate, 1 million samples per episode |
+| `vlf-reference.json` | 7 | Two phase-cost diagnostics, a bright tapered complete message, weak static/wander observations, detuned rendering and the original RRC observation; 1,900 s aggregate with explicit 40–1,200 s episode caps and at most 70 million samples |
+
+The broader reference and long VLF tiers are explicit experiments, not part of
+the default correctness command. These manifests are frozen before execution;
+their presence is not a passed result. Consult [coverage](coverage.md) and
+[validation](validation.md) for source-bound outcomes, incomplete work and
+censoring. Do not retry a censored case automatically or expand the sample
+budget after observing its outcome. A repeated phase diagnostic remains a
+component measurement, not an independent communication trial.
+
 The integration manifest has ten episodes and a ten-minute total budget. Five
 short `channel` episodes touch the five requested environment families; the
 remaining controls compare smoke AWGN, noise-only, input EOF and Helper-on
 reception. It is harness coverage. It cannot be used for reference-waveform
 sensitivity or physical-model calibration.
 
-The separate 12-episode `weak-signal-pilot.json` uses the reference waveform,
+The historical 12-episode `weak-signal-pilot.json` used the reference waveform
+(the superseded maintained manifest is retired; its frozen receipt remains),
 one wanted episode for each environment family, four selected interior
 fade/resume cases, a paired AWGN duration contrast and a capture-gap control.
 It declares a 15-minute aggregate budget, 180 seconds per trial, and
@@ -131,8 +181,8 @@ not a `CompleteStreamReceiver` algorithm change.
 The corrected VLF full-message plan is a material admission limit: at 1,920
 samples/s the three-bit `e` fixture occupies a **64,806,069-sample,
 five-public-slot complete horizon**, including two scored quiet slots. Its
-single DATA bit lasts 5,760.4 seconds. CPU and CUDA one-slot attempts at C/N0=20
-dB-Hz each accepted 12,966,069 samples but timed out before scoring any slot,
+single DATA bit lasts 5,760.4 seconds. Historical CPU and CUDA one-slot attempts
+at C/N0=20 dB-Hz each accepted 12,966,069 samples but timed out before scoring any slot,
 after 120 and 180 seconds respectively. CUDA executed 2,533 FFTs and
 331,415,552 FFT rows without scoring a DATA slot. These are censored compute
 observations, not sensitivity failures or a VLF floor. A previous
@@ -140,6 +190,14 @@ pre-correction CPU full-horizon attempt also timed out, with six slots and
 77,766,069 samples. Preserve old and corrected geometries separately; do not
 shorten the bit, omit silence/quiet slots, or speed up physical time to force a
 pass.
+
+The expanded VLF campaign preserves that RRC observation and adds an explicitly
+labeled tapered-RRC comparison, as used by the native live shaping planner for
+this configuration. The pulse choice leaves the bit and public observation
+durations unchanged. Short diagnostic continuation costs inform bounded run
+allowances only; a complete-message result still requires the complete
+five-slot horizon. The weak static and phase-wander cases are first-observation
+tests, not full-message sensitivity claims.
 
 Any explicit `cuda`, `vulkan` or `gpu` request reports execution/fallback. A
 compatible build flag is not device evidence, and CPU work cannot be called GPU
@@ -152,10 +210,38 @@ rent merely to run cheap deterministic tests.
 
 ## Channel validation before receiver interpretation
 
-The native tests currently exercise deterministic transfer and state behavior,
-scenario tuples, mathematical bounds, source identity, and a small complete
-receiver path. The lunar endpoint-dot-product cache reuses the exact two
-neighboring interpolation endpoints for cells sharing an initial delay; it
+The native tests exercise deterministic transfer and state behavior, scenario
+tuples, mathematical bounds, source identity, and a small complete receiver
+path. The impairment checks use independent AR(1) and shot-noise moment and
+covariance formulas, a Green-function resonator reference with quadrature
+refinement, ADC grid/saturation checks, and a scheduled blocker-removal AGC
+recovery fixture. The latter is distinct from the catalog's continuous blocker.
+The phase-wander checks retain chronology through silence and compare the
+constructed phase and Doppler analytically.
+
+The `eme-*-episode` model uses one joint delay–Doppler spectral realization
+throughout the captured calendar, with common draws across frequencies and
+time. Independent ring/Bessel covariance and off-lattice projected-average
+checks cover the declared 360 s horizon; a same-seed moving-facet reference
+also checks actual FFT/interpolation samples and envelope drift. The initial
+16-node conditional quadrature failed the original covariance gate at a wide
+frequency separation. Increasing it to 32 nodes passed that unchanged gate;
+the sampled covariance discrepancy is at most 0.000304 in normalized wide-beam
+power units and the projected-variance discrepancy is at most 0.00654 dB.
+Reference-refinement assertions remain part of the test. These are sampled
+numerical consistency limits, not arbitrary-window bounds, measured channel
+validation, or a receiver sensitivity allowance.
+
+The native spectral renderer supports the 1,920 Hz Helper-off DATA source only
+and rejects a horizon beyond 360 s. The default five-slot reference `e` calendar
+is about 269.47 s and fits; a longer message does not acquire support merely
+because a larger sample budget is available. The 360 s numerical limit is not
+an instruction to compress or extend the receiver's physical calendar. Helper
+requests for this model report unavailable. See the full
+[numerical construction and limits](models.md#joint-spectral-synthesis-over-a-complete-calendar).
+
+For the legacy finite-cell renderer, the lunar endpoint-dot-product cache
+reuses the exact two neighboring interpolation endpoints for cells sharing an initial delay; it
 retains each cell, delay trajectory and phase, differing from direct
 interpolation only by floating-point operation order. For a bounded 4-second,
 1,920-sample/s, 4,096-cell component case, direct rendering took 1.722 seconds
@@ -164,13 +250,13 @@ MiB. A 16-single-path comparison differed by less than `3e-14`. These timings
 exclude canonical source preparation and receiver work; they support this
 specific exact reuse optimization, not a complete-message or general EME
 performance claim. Extend validation only when a selected question needs it.
-At a minimum, a channel report should address the observable used to justify it:
 
-The current 65,536-cell Doppler-aligned `eme-disk-slot` and `eme-patch-slot`
+The retired 65,536-cell Doppler-aligned `eme-disk-slot` and `eme-patch-slot`
 also have tested sampled projected-variance/covariance comparisons at 0, ±5,
 and ±15 Hz for the 88 Hz profiles; numerical results and refinement limits are
-in [models](models.md). The 164 Hz severe case remains an inadequately converged
-old finite-grid control, with no qualified severe-width renderer. A bounded CPU episode at
+in [models](models.md). The legacy 164 Hz finite-grid control remains
+inadequately converged; it must not inherit the new spectral model's numerical
+checks. A historical bounded CPU episode at
 C/N0=30 dB-Hz received the first 26.4-second DATA observation as bit 0 at
 29.466 seconds physical time. Rendering 56,575 output samples took 301.462
 seconds; receiver control/wait took 2.196 seconds, for 303.713 seconds total.
@@ -186,6 +272,8 @@ slot oracle had squared distance 19,595.898, signal energies about 24.6 seconds
 and noise variance 1.92, yielding an ideal binary error below the floating-point
 representation's range. That oracle omits blind acquisition and receiver false-alarm
 constraints; it is not a complete-reception bound.
+
+At a minimum, a channel report should address the observable used to justify it:
 
 - Path models: gain/power, phase convention, delay/tail support, frequency
   response and delay–Doppler joint structure.
@@ -260,9 +348,11 @@ sensitivity.
 
 The current campaigns have fixed, intentionally diagnostic seeds. Their cases
 are paired comparisons, not an iid sample of nature. Bits, bursts, quiet slots
-and repeat timing runs within an episode are dependent. The smoke and weak-signal
-manifests define **no confirmatory stratum**, so the campaign runner emits no
-binomial confidence interval for them. If a conditional synthetic success
+and repeat timing runs within an episode are dependent. The smoke, weak-signal
+pilot and five expanded manifests define **no confirmatory stratum**, so the
+campaign runner emits no binomial confidence interval for them. In particular,
+the three-seed weak holdouts are descriptive failure-finding cases, not a
+reliability estimate. If a conditional synthetic success
 probability is needed later, predeclare a homogeneous stratum, independently
 sampled complete episodes and a fixed sample count with the source's exact
 Clopper–Pearson decision rule. Fable 86 describes a proposed fixed 41-episode
@@ -282,7 +372,10 @@ A long simulated episode can be compute-expensive, but its wall time includes
 source generation, propagation rendering and receiver work. It cannot by itself
 establish CPU service. A capacity claim needs identified local hardware and a
 bounded same-stream backlog measurement of complete receiver work, with
-renderer cost accounted separately. Keep `W=2*H`, full memory ownership,
+renderer cost accounted separately. Current receipts separate source
+preparation, channel preparation and sample rendering; receiver work can
+overlap rendering and must not be inferred by subtracting these costs from
+wall time. Keep `W=2*H`, full memory ownership,
 explicit user limits and the project's staged validation contract. Neither
 multiple independent episodes nor a GPU forecast is local CPU capacity.
 

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "name": "matched-noise-component-ablation-2026-11",
+  "purpose": "Three predeclared noise-only discriminators after compound noise produced false DATA. Preserve seed9301, reference waveform, C/N0=32 and geometry; remove AR1/shot components independently without retuning the receiver. This is a selected mechanism diagnosis, not independent confirmation or false-alarm-rate estimation.",
+  "max_wall_seconds": 75,
+  "per_trial_wall_seconds": 20,
+  "max_trials": 3,
+  "max_samples": 1000000,
+  "episodes": [
+    {"id": "noise-white-baseline", "scenario": "noise-white", "mode": "receive", "waveform": "reference", "seed": 9301, "control": "noise", "cn0_db_hz": 32},
+    {"id": "noise-white-ar1", "scenario": "noise-white-ar1", "mode": "receive", "waveform": "reference", "seed": 9301, "control": "noise", "cn0_db_hz": 32},
+    {"id": "noise-white-shot", "scenario": "noise-white-shot", "mode": "receive", "waveform": "reference", "seed": 9301, "control": "noise", "cn0_db_hz": 32}
+  ]
+}

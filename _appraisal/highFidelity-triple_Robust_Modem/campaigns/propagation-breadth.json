@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "name": "reference-propagation-breadth-2026-11",
+  "purpose": "Bounded, descriptive comparison across five requested channel families. Includes source-supported reference profiles, link-level weak cases, distinct HF delay/Doppler structures, and one long transition case. Episodes are deliberately not pooled into a natural-condition success probability.",
+  "max_wall_seconds": 1800,
+  "per_trial_wall_seconds": 120,
+  "max_trials": 16,
+  "max_samples": 8000000,
+  "episodes": [
+    {"id": "mf-land-reference", "scenario": "groundwave-1mhz", "mode": "receive", "waveform": "reference", "seed": 9201},
+    {"id": "mf-sea-reference", "scenario": "groundwave-1mhz-sea", "mode": "receive", "waveform": "reference", "seed": 9201},
+    {"id": "mf-land-weak", "scenario": "groundwave-1mhz", "mode": "receive", "waveform": "reference", "seed": 9202, "cn0_db_hz": -16},
+    {"id": "mf-night-competition", "scenario": "groundwave-1mhz-night", "mode": "receive", "waveform": "reference", "seed": 9203},
+    {"id": "hf30-sea-reference", "scenario": "groundwave-30mhz", "mode": "receive", "waveform": "reference", "seed": 9201},
+    {"id": "hf30-land-reference", "scenario": "groundwave-30mhz-land", "mode": "receive", "waveform": "reference", "seed": 9201},
+    {"id": "hf30-land-weak", "scenario": "groundwave-30mhz-land", "mode": "receive", "waveform": "reference", "seed": 9202, "cn0_db_hz": 0},
+    {"id": "hf-quiet-reference", "scenario": "hf-quiet", "mode": "receive", "waveform": "reference", "seed": 9201, "cn0_db_hz": 20},
+    {"id": "hf-quiet-weak", "scenario": "hf-quiet", "mode": "receive", "waveform": "reference", "seed": 9202, "cn0_db_hz": 0},
+    {"id": "hf-disturbed-reference", "scenario": "hf-disturbed", "mode": "receive", "waveform": "reference", "seed": 9201, "cn0_db_hz": 20},
+    {"id": "hf-disturbed-weak", "scenario": "hf-disturbed", "mode": "receive", "waveform": "reference", "seed": 9202, "cn0_db_hz": 0},
+    {"id": "hf-nvis-large-delay", "scenario": "hf-nvis-disturbed", "mode": "receive", "waveform": "reference", "seed": 9201, "cn0_db_hz": 20},
+    {"id": "hf-nvis-weak", "scenario": "hf-nvis-disturbed", "mode": "receive", "waveform": "reference", "seed": 9202, "cn0_db_hz": 0},
+    {"id": "hf-drm6-reference", "scenario": "hf-drm6", "mode": "receive", "waveform": "reference", "seed": 9201, "cn0_db_hz": 20},
+    {"id": "hf-drm6-weak", "scenario": "hf-drm6", "mode": "receive", "waveform": "reference", "seed": 9202, "cn0_db_hz": 0},
+    {"id": "hf-transition-reacquisition", "scenario": "hf-transition", "mode": "receive", "waveform": "reference", "seed": 9204, "cn0_db_hz": 20, "message": "A"}
+  ]
+}

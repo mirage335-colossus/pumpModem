@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "name": "predeclared-weak-channel-holdouts-2026-11",
+  "purpose": "Three independent deterministic seeds per selected synthetic weak stratum, selected before execution to test episode repeatability for disturbed HF and compound colored/impulsive noise. N=3 is descriptive failure-finding coverage, not a rare-event or natural-condition probability interval.",
+  "max_wall_seconds": 1800,
+  "per_trial_wall_seconds": 120,
+  "max_trials": 6,
+  "max_samples": 8000000,
+  "episodes": [
+    {"id": "hf-disturbed-weak-holdout-9601", "scenario": "hf-disturbed", "mode": "receive", "waveform": "reference", "seed": 9601, "cn0_db_hz": 0, "stratum": "hf-disturbed-weak-n3"},
+    {"id": "hf-disturbed-weak-holdout-9602", "scenario": "hf-disturbed", "mode": "receive", "waveform": "reference", "seed": 9602, "cn0_db_hz": 0, "stratum": "hf-disturbed-weak-n3"},
+    {"id": "hf-disturbed-weak-holdout-9603", "scenario": "hf-disturbed", "mode": "receive", "waveform": "reference", "seed": 9603, "cn0_db_hz": 0, "stratum": "hf-disturbed-weak-n3"},
+    {"id": "noise-bursts-weak-holdout-9701", "scenario": "noise-bursts", "mode": "receive", "waveform": "reference", "seed": 9701, "cn0_db_hz": 8, "stratum": "noise-bursts-weak-n3"},
+    {"id": "noise-bursts-weak-holdout-9702", "scenario": "noise-bursts", "mode": "receive", "waveform": "reference", "seed": 9702, "cn0_db_hz": 8, "stratum": "noise-bursts-weak-n3"},
+    {"id": "noise-bursts-weak-holdout-9703", "scenario": "noise-bursts", "mode": "receive", "waveform": "reference", "seed": 9703, "cn0_db_hz": 8, "stratum": "noise-bursts-weak-n3"}
+  ],
+  "confirmatory_strata": {}
+}

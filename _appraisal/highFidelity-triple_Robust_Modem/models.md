@@ -22,13 +22,12 @@ approximation and can be heavily suppressed by the antenna.
 | Scenario | Reference waveform | Implemented comparison |
 | --- | --- | --- |
 | `awgn` | Rate36, added10, requested16s | Identity propagation and explicitly declared complex white-noise level |
-| `vlf-resonant`, `vlf-detuned` | Rate0.1, added1, requested16s; native minimum gives about5760.4s active tile | Calculated high-Q antenna envelope; detuning is an independent sensitivity |
+| `vlf-resonant`, `vlf-detuned`, `vlf-phase-wander` | Rate0.1, added1, requested16s; native minimum gives about5760.4s active tile | Calculated high-Q antenna envelope; independent detuning and bounded two-hour phase-wander controls |
 | `groundwave-1mhz`, `groundwave-1mhz-sea`, `groundwave-1mhz-night` | Rate1, added1, requested16s | Fixed LFMF magnitude reference and synthetic vacuum phase; optional competing ray |
 | `groundwave-30mhz`, `groundwave-30mhz-land` | Rate36, added10, requested16s | Fixed LFMF magnitude at the upper model endpoint; synthetic phase |
-| `hf-quiet`, `hf-disturbed`, `hf-transition` | Rate36, added10, requested16s | Two standard Gaussian-spectrum Rayleigh taps; separate absorption episode |
-| `eme-disk`, `eme-patch`, `eme-severe` | Rate360, added1, FHSS, requested26.4s | Coupled frozen spherical delay–Doppler kernel; 3m/30m beams and separate164Hz severe self-echo geometry |
-| `eme-disk-slot`, `eme-patch-slot` | Same88Hz reference waveform and link level | Doppler-aligned65536-cell comparison, restricted to30s from channel time zero |
-| `noise-bursts`, `frontend-overload` | Rate36, added10, requested16s | Separate constructed colored/impulse-noise and swept-blocker/equipment controls |
+| `hf-quiet`, `hf-disturbed`, `hf-transition`, `hf-nvis-disturbed`, `hf-drm6` | Rate36, added10, requested16s | Standard Gaussian-spectrum taps with distinct delay/centroid/width tuples; separate absorption episode |
+| `eme-disk-episode`, `eme-patch-episode`, `eme-severe-episode` | Rate360, added1, FHSS, requested26.4s | Joint spectral synthesis for the 3m/30m beams and 164Hz adverse width, through 360s from channel time zero |
+| `noise-bursts`, `noise-white`, `noise-white-ar1`, `noise-white-shot`, `frontend-overload` | Rate36, added10, requested16s | Constructed noise, matched component ablations and swept-blocker/equipment controls |
 
 The source returns the actual geometry and calendar. Requested duration is not
 an instruction to override its minimum coefficients, shaping, halos, public
@@ -255,7 +254,7 @@ The implemented hypothesis is a **frozen monostatic rotating sphere at5.760GHz**
 not the full retarded bistatic DE440 calculation in the reference. It reuses
 lunar radius `a=1737.4km` and the recorded minimum-path delay anchor
 `tau_bulk=2.4720213723s`, while independently selecting a **limb-to-limb88Hz**
-residual spread for `eme-disk`/`eme-patch` or **164Hz** for `eme-severe`.
+residual spread for `eme-disk-episode`/`eme-patch-episode` or **164Hz** for `eme-severe-episode`.
 The severe coordinate comes from the5760MHz row in
 [Taylor's2010 EME analysis, p5](https://wsjt.sourceforge.io/EME2010_K1JT.pdf):
 86Hz median and164Hz maximum for its specified self-echo geometry at
@@ -395,9 +394,10 @@ realization, so no such preset or paired-decode claim is introduced.
 
 ### Doppler-aligned first-slot comparison
 
-`eme-disk-slot` and `eme-patch-slot` add a different bounded quadrature without
-replacing the original finite-grid controls or their failed long-integration
-evidence. They retain the 88 Hz width, 3 m/30 m centered beams, original T52
+**Historical, retired operational presets:** `eme-disk-slot` and
+`eme-patch-slot` used a separate bounded quadrature. Their failed/full-horizon
+and positive short-horizon findings are retained here; the executable now uses
+the full-calendar spectral presets below. The old comparison retained the 88 Hz width, 3 m/30 m centered beams, original T52
 power law, physical waveform, reference C/N0 and coupled moving delays.
 Their numerical horizon is **30 seconds from channel time zero**. The planned
 first DATA slot, including its approximately 2.47-second propagation delay,
@@ -419,7 +419,7 @@ There are 4096 uniform midpoint nodes in `x` and 16 Gauss–Legendre nodes in
 `psi` on `[0,pi/2]`. The mirror cells at opposite `psi` have identical delay,
 Doppler and centered-beam weight. Adding their independent proper-complex
 Gaussian variances combines them into one coefficient without changing the
-Gaussian process law. Thus the factory produces exactly **65,536 paths**,
+Gaussian process law. Thus that retired factory produced exactly **65,536 paths**,
 within the renderer limit. It deliberately exposes no arbitrary grid or
 severe-width option that could silently invalidate this bound.
 
@@ -475,8 +475,8 @@ near zero Doppler repaired that one projection but did not converge the tested
 joint covariances. Those methods are not adopted. For the severe width,
 8192×16 Doppler-aligned cells gave small tested projection/covariance errors,
 but need 131,072 paths and recur at 49.951 seconds. The 8192×8 alternative fits
-the path cap but failed the existing .002 beam-energy criterion. There is no
-qualified severe replacement or full-episode replacement in these results.
+the path cap but failed the existing .002 beam-energy criterion. Those
+literal path sums did not provide a severe or whole-episode replacement.
 
 This test takes no target-band measurement as calibration and has no field
 sensitivity acceptance threshold. Lunar scattering uncertainties and numerical
@@ -484,7 +484,101 @@ quadrature error are separate. A literal hundreds-of-thousands-cell waveform
 sum is not required merely because it is a convenient oracle for integrated
 moments.
 
+### Joint spectral synthesis over a complete calendar
+
+The episode presets retain the same frozen sphere, T52 power law, centred
+beam pattern, 5.760GHz RF and physical calendar as the controls. The 360s
+numerical support includes the complete three-bit `e` reference episode and
+its two physical quiet slots. Geometry and receiver search priors are
+unchanged. Model support and receiver success are separate observations.
+
+The renderer integrates the same Doppler-aligned coordinates described
+above on a fixed Fourier lattice at 240 latent samples/s with 262,144 bins.
+Each Doppler bin receives 32 Gauss–Legendre nodes over its conditional
+azimuth coordinate. The limb cells keep their clipped frequency-bin mass.
+The renderer draws independent unit proper complex Gaussian variables in
+signed Doppler-bin and node order using `mt19937_64` with a separate path
+seed domain. It multiplies each draw by the square root of its power cell.
+The uniform spacing is about .00091553Hz, and the fundamental carrier
+lattice period is 1,092.2667s. No process restarts at a read, slot, quiet
+interval or message. The requested observation length only determines
+how many inverse-FFT samples are retained. The 360s limit follows the
+tested observables below, rather than the period alone.
+
+For one cell with carrier Doppler `ν`, initial envelope delay `τ`, and
+coefficient `g`, the existing normalized Blackman-sinc interpolator
+represents `x(t−τ)` by weights `w_j` on adjacent native source samples.
+The reduced renderer adds `g w_j` to the spectrum of every affected
+integer-delay coefficient and `g (ν/ν_max) w′_j` to its derivative spectrum.
+The **same** Gaussian draw goes to every affected coefficient in both
+spectra. As a result, the transfer functions at distinct signal frequencies
+retain the same scatterers and correlated delay response. Independent
+same-spectrum tap draws would discard that coupling.
+
+The canonical native inverse FFT turns those spectra into correlated
+complex time series. At native sample `n`, reconstruct each coefficient
+with the same type of 32-point windowed sinc and combine its derivative
+with factor `ν_max n/RF`. This retains the first-order term in the
+geometric change `τ(t)=τ−νt/RF`, with no approximation of the carrier
+phase beyond the declared Doppler binning. At 360s and ±82Hz the maximum
+envelope movement is .00984 native samples. At the 362.5Hz source guard
+the ideal sinusoidal first-order Taylor remainder is at most about
+6.9×10⁻⁵ in voltage relative to a unit sinusoid. The actual renderer also
+has finite-stencil and binary32 latent FFT/interpolation error. The
+same-seed moving-facet check below includes those terms. The implementation
+uses binary64 for model geometry, weights and spectral accumulation before
+the FFT buffer conversion, and for the final sample accumulation.
+
+The full-horizon test compares the candidate to an independent 2,048/4,096
+power-ring calculation with analytic Bessel azimuth covariance. It includes
+lags 0–360s and frequency separations 0/75/225/725Hz. A separate
+off-lattice Doppler integral splits the original T52 angular knots and
+checks projected averages over .25/1/4/26.4/269.466/329.466/360s at
+0/±5/±15Hz. That integral refines both Doppler nodes and the smooth interval
+quadrature. The real (symmetrized) cross-slot covariance compares pairs of 26.4s windows with
+60/120/240s offsets. All checks preserve the original wide-beam power
+reference. The 16-node trial missed the .015 joint-covariance consistency
+limit at 725Hz, despite matching its low-frequency projections. Increasing
+the conditional quadrature to 32 nodes retained the test limit and reduced
+the worst sampled error from .03024 to .000304 in the disk case.
+
+| Sampled numerical observable | 3m disk, 88Hz | 30m patch, 88Hz | 3m disk, 164Hz |
+| --- | ---: | ---: | ---: |
+| Mean normalized power | .940553 | .237218 | .940553 |
+| Mean excess delay | 1.56292ms | .123270ms | 1.56292ms |
+| RMS excess delay | 2.06939ms | .144616ms | 2.06939ms |
+| RMS Doppler | 14.580Hz | 4.50789Hz | 27.1719Hz |
+| Maximum absolute joint covariance difference | .00030352 | .00009973 | .00026741 |
+| Maximum independent power-ring refinement change | .00029926 | .00027626 | .00071005 |
+| Maximum projected-variance difference | .006531dB | .003044dB | .006531dB |
+| Maximum continuum projection refinement change | .00000411dB | .00003633dB | .00000840dB |
+| Maximum cross-slot covariance difference divided by its projected variance | 2.53×10⁻⁹ | 4.68×10⁻⁹ | 8.83×10⁻¹⁰ |
+
+With the severe preset, six sparse native waveform probes used the same
+seed as a direct moving-facet sum, including ±362.5Hz source tones and
+timestamps through 329.467s. The maximum complex sample difference was
+3.35×10⁻⁵. This test includes both latent-grid and interpolated sample
+phases. These moment and waveform comparisons qualify the stated numerical
+probes. They do not establish calibration against 5.76GHz captures,
+evolving lunar orientation or bistatic geometry.
+
+At 360s the spectral workspace allowance is 303,333,216 bytes before
+the channel's source/history reservation. The construction FFTs 108
+delay/derivative rows, then releases the spectral buffer. It retains
+the requested prefix and its interpolation support. A severe reference
+channel preflight rendered 19,200 samples representing 10s at 10dB-Hz
+with seed 9101. It took 11.19s elapsed at 235,444KiB peak RSS, including
+about 11.09s of channel preparation and .043s of sample rendering. It
+exercised the native canonical source and channel. Its render timing does
+not measure native receiver throughput. The numerical and preflight
+receipts are in the appraisal's temporary `local-evidence/` directory.
+
 ## Reproduction and retention
+
+The five superseded operational lunar presets are removed, without aliases to
+the new physics/numerics. The independent `lunar_paths` construction and concise
+coarse-grid projection failure checks remain numerical references for the
+current model, not alternative operational receiver campaigns.
 
 The native scenario test is `tests/test_scenarios.cpp`, built through the
 appraisal's contained CMake target. It verifies the catalog/provenance, four

@@ -2,7 +2,11 @@
 """Bounded orchestration and reporting for the native high-fidelity appraisal.
 
 This module contains no waveform, channel, or receiver DSP. Every episode is a
-single invocation of the canonical native appraisal executable.
+single invocation of the canonical native appraisal executable. Slot episodes
+report one first public observation without message completion; diagnose
+episodes report bounded VLF acquisition and abbreviated fine components without
+bit decisions or complete receiver service. Oracle episodes report a separate
+known-waveform bound, not a receiver communication outcome.
 """
 from __future__ import annotations
 
@@ -34,8 +38,9 @@ MAX_CAMPAIGN_OUTPUT_BYTES = 256 * 1024 * 1024
 ROOT_KEYS = {"schema_version", "name", "purpose", "max_wall_seconds", "per_trial_wall_seconds",
              "max_trials", "max_samples", "episodes", "confirmatory_strata"}
 EPISODE_KEYS = {"id", "scenario", "mode", "waveform", "seed", "cn0_db_hz", "control",
-                "helper", "backend", "bit_seconds", "duration_seconds", "stratum"}
-MODES = {"plan", "channel", "receive", "oracle"}
+                "helper", "backend", "bit_seconds", "duration_seconds", "pulse", "stratum",
+                "oracle_slot", "chunk", "message", "max_wall_seconds", "max_samples"}
+MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose"}
 CONTROLS = {"wanted", "noise", "wrong-key", "wrong-ordinal", "interior-fade", "capture-gap", "eof"}
 BACKENDS = {"cpu", "cuda", "vulkan", "gpu"}
 STATUSES = {"completed", "resource_limit", "time_limit", "unavailable", "error"}
@@ -85,7 +90,8 @@ def _read_campaign(path: Path) -> dict[str, Any]:
         raise CampaignError("episode count exceeds max_trials")
     ids: set[str] = set()
     for index, episode in enumerate(episodes):
-        _validate_episode(episode, index, ids)
+        episode_wall_cap = min(value["per_trial_wall_seconds"], value["max_wall_seconds"])
+        _validate_episode(episode, index, ids, episode_wall_cap, value["max_samples"])
     confirmatory = value.get("confirmatory_strata", {})
     if not isinstance(confirmatory, dict):
         raise CampaignError("confirmatory_strata must be an object")
@@ -99,7 +105,8 @@ def _read_campaign(path: Path) -> dict[str, Any]:
                 len({e["seed"] for e in matched}) != count):
             raise CampaignError(f"stratum {name!r} must contain exactly {count} wanted receive episodes with distinct seeds")
         invariant_fields = ("scenario", "mode", "waveform", "cn0_db_hz", "control", "helper",
-                            "backend", "bit_seconds", "duration_seconds")
+                            "backend", "bit_seconds", "duration_seconds", "pulse", "oracle_slot", "chunk",
+                            "message", "max_wall_seconds", "max_samples")
         reference = matched[0]
         heterogeneous = [field for field in invariant_fields
                          if any(episode.get(field) != reference.get(field) for episode in matched[1:])]
@@ -123,7 +130,9 @@ def _bounded_number(value: Any, name: str, low: float, high: float, integer: boo
     return value
 
 
-def _validate_episode(item: Any, index: int, ids: set[str]) -> None:
+def _validate_episode(item: Any, index: int, ids: set[str],
+                      campaign_per_trial_wall_seconds: float,
+                      campaign_max_samples: int) -> None:
     if not isinstance(item, dict):
         raise CampaignError(f"episodes[{index}] must be an object")
     extra = set(item) - EPISODE_KEYS
@@ -139,6 +148,9 @@ def _validate_episode(item: Any, index: int, ids: set[str]) -> None:
         raise CampaignError(f"episodes[{index}].mode must be one of {sorted(MODES)}")
     if not isinstance(item["waveform"], str) or item["waveform"] not in {"smoke", "reference"}:
         raise CampaignError(f"episodes[{index}].waveform must be smoke or reference")
+    if "pulse" in item and (not isinstance(item["pulse"], str) or
+                             item["pulse"] not in {"rrc", "tapered-rrc"}):
+        raise CampaignError(f"episodes[{index}].pulse must be rrc or tapered-rrc")
     if isinstance(item["seed"], bool) or not isinstance(item["seed"], int) or not 0 <= item["seed"] < 2**64:
         raise CampaignError(f"episodes[{index}].seed must be an unsigned 64-bit integer")
     if "control" in item and (not isinstance(item["control"], str) or item["control"] not in CONTROLS):
@@ -151,6 +163,27 @@ def _validate_episode(item: Any, index: int, ids: set[str]) -> None:
     for key in ("bit_seconds", "duration_seconds"):
         if key in item:
             _bounded_number(item[key], f"episodes[{index}].{key}", .001, 10_000_000)
+    if "oracle_slot" in item:
+        if isinstance(item["oracle_slot"], bool) or not isinstance(item["oracle_slot"], int) or not 0 <= item["oracle_slot"] < 2**64:
+            raise CampaignError(f"episodes[{index}].oracle_slot must be a nonnegative unsigned 64-bit integer")
+    if "chunk" in item:
+        _bounded_number(item["chunk"], f"episodes[{index}].chunk", 1, 16384, integer=True)
+    if "message" in item:
+        message = item["message"]
+        if not isinstance(message, str):
+            raise CampaignError(f"episodes[{index}].message must be printable ASCII")
+        try:
+            encoded_message = message.encode("ascii")
+        except UnicodeEncodeError as exc:
+            raise CampaignError(f"episodes[{index}].message must be printable ASCII") from exc
+        if not 1 <= len(encoded_message) <= 16 or any(byte < 32 or byte >= 127 for byte in encoded_message):
+            raise CampaignError(f"episodes[{index}].message must contain 1..16 printable ASCII bytes")
+    if "max_wall_seconds" in item:
+        _bounded_number(item["max_wall_seconds"], f"episodes[{index}].max_wall_seconds", .001,
+                        campaign_per_trial_wall_seconds)
+    if "max_samples" in item:
+        _bounded_number(item["max_samples"], f"episodes[{index}].max_samples", 1,
+                        campaign_max_samples, integer=True)
     if "helper" in item and not isinstance(item["helper"], bool):
         raise CampaignError(f"episodes[{index}].helper must be boolean")
     if "stratum" in item:
@@ -160,10 +193,21 @@ def _validate_episode(item: Any, index: int, ids: set[str]) -> None:
             raise CampaignError(f"episodes[{index}].{field} must be a simple identifier")
     mode = item["mode"]
     control = item.get("control", "wanted")
-    if mode != "receive" and "control" in item:
-        raise CampaignError(f"episodes[{index}]: control is valid only for receive mode")
-    if mode == "receive" and control not in CONTROLS:
-        raise CampaignError(f"episodes[{index}]: invalid receive control")
+    if mode not in {"receive", "slot", "diagnose"} and "control" in item:
+        raise CampaignError(f"episodes[{index}]: control is valid only for receiver or diagnostic mode")
+    if mode in {"receive", "slot", "diagnose"} and control not in CONTROLS:
+        raise CampaignError(f"episodes[{index}]: invalid receiver control")
+    if mode == "slot" and control != "wanted":
+        raise CampaignError(f"episodes[{index}]: slot mode requires wanted control")
+    if mode == "diagnose":
+        if control != "wanted":
+            raise CampaignError(f"episodes[{index}]: diagnose mode requires wanted control")
+        if item["waveform"] != "reference":
+            raise CampaignError(f"episodes[{index}]: diagnose mode requires reference waveform")
+        if item.get("helper", False):
+            raise CampaignError(f"episodes[{index}]: diagnose mode requires Helper disabled")
+    if "oracle_slot" in item and mode != "oracle":
+        raise CampaignError(f"episodes[{index}]: oracle_slot is valid only for oracle mode")
 
 
 def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_seconds: float) -> list[str]:
@@ -172,7 +216,8 @@ def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_se
                "--max-samples", str(max_samples), "--max-wall-seconds", str(max_wall_seconds)]
     for key, option in (("cn0_db_hz", "--cn0"), ("control", "--control"), ("helper", "--helper"),
                         ("backend", "--backend"), ("bit_seconds", "--bit-seconds"),
-                        ("duration_seconds", "--duration-seconds")):
+                        ("duration_seconds", "--duration-seconds"), ("oracle_slot", "--oracle-slot"),
+                        ("chunk", "--chunk"), ("message", "--message"), ("pulse", "--pulse")):
         if key in episode:
             value = episode[key]
             if key == "helper":
@@ -241,12 +286,29 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
             raise CampaignError(f"completed receipt plan.{field} must be finite")
     if plan["requested_bit_seconds"] <= 0:
         raise CampaignError("completed receipt plan.requested_bit_seconds must be positive")
+    if plan.get("pulse") != episode.get("pulse", "rrc"):
+        raise CampaignError("native plan pulse does not match the frozen episode")
+    requested_message = episode.get("message", "e")
+    if plan.get("requested_message") != requested_message:
+        raise CampaignError("native requested message does not match the frozen episode")
+    effective_message = requested_message
+    if episode.get("control", "wanted") in {"interior-fade", "capture-gap"} and requested_message == "e":
+        effective_message = "A"
+    if plan.get("message") != effective_message:
+        raise CampaignError("native effective message does not match the frozen episode control")
     if "cn0_db_hz" in episode and not math.isclose(
             float(plan["cn0_db_hz"]), float(episode["cn0_db_hz"]), rel_tol=1e-9, abs_tol=1e-9):
         raise CampaignError("native plan C/N0 does not match the frozen episode")
     if "bit_seconds" in episode and not math.isclose(
             float(plan["requested_bit_seconds"]), float(episode["bit_seconds"]), rel_tol=1e-9, abs_tol=1e-9):
         raise CampaignError("native plan bit duration does not match the frozen episode")
+    if episode["mode"] == "channel" and "duration_seconds" in episode:
+        sample_rate = plan.get("sample_rate_hz")
+        represented = plan.get("represented_seconds")
+        if not _is_finite_number(sample_rate) or sample_rate <= 0 or not _is_finite_number(represented):
+            raise CampaignError("completed channel receipt is missing its requested duration geometry")
+        if abs(float(represented) - float(episode["duration_seconds"])) > 1 / float(sample_rate) + 1e-12:
+            raise CampaignError("native channel duration does not match the frozen episode")
     if plan.get("helper_enabled") is not episode.get("helper", False):
         raise CampaignError("native plan Helper setting does not match the frozen episode")
 
@@ -259,7 +321,7 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     device = backend.get("device")
     if not isinstance(backend.get("executed_gpu_work"), bool):
         raise CampaignError("completed receipt backend.executed_gpu_work must be boolean")
-    if episode["mode"] in {"receive", "channel"}:
+    if episode["mode"] in {"receive", "slot", "channel", "diagnose"}:
         if not isinstance(device, str) or not device:
             raise CampaignError("completed processing receipt backend.device must identify the actual device")
         if requested_backend == "cpu" and device != "cpu":
@@ -276,22 +338,98 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
         outcomes = receipt.get("outcomes")
         if not isinstance(outcomes, dict):
             raise CampaignError("completed receive receipt is missing outcomes")
+        if outcomes.get("receiver_executed") is not True:
+            raise CampaignError("completed receive receipt must report receiver_executed=true")
+        if outcomes.get("component_only") is not False:
+            raise CampaignError("completed receive receipt must report component_only=false")
+        if outcomes.get("completion_evaluated") is not True:
+            raise CampaignError("completed receive receipt must evaluate physical completion")
         if not isinstance(outcomes.get("correct_complete"), bool):
             raise CampaignError("completed receive receipt is missing boolean outcomes.correct_complete")
         if not _is_nonnegative_int(outcomes.get("physical_completions")):
             raise CampaignError("completed receive receipt is missing nonnegative physical_completions")
+        if not _is_nonnegative_int(outcomes.get("actual_scored_slots")) or outcomes["actual_scored_slots"] == 0:
+            raise CampaignError("completed receive receipt must score at least one public slot")
+        count_fields = ("premature_completions", "wrong_bits", "false_data",
+                        "ambiguous_active_slots", "quiet_active_slots")
+        for field in count_fields:
+            if not _is_nonnegative_int(outcomes.get(field)):
+                raise CampaignError(f"completed receive receipt is missing nonnegative outcomes.{field}")
+        if not isinstance(outcomes.get("missed_completion"), bool):
+            raise CampaignError("completed receive receipt is missing boolean outcomes.missed_completion")
+        if outcomes["correct_complete"] and (
+                outcomes["physical_completions"] != 1 or outcomes["premature_completions"] != 0 or
+                outcomes["wrong_bits"] != 0 or outcomes["false_data"] != 0 or
+                outcomes["ambiguous_active_slots"] != 0 or outcomes["quiet_active_slots"] != 0 or
+                outcomes["missed_completion"]):
+            raise CampaignError("successful receive outcome conflicts with its physical slot/completion counts")
     elif episode["mode"] == "channel":
         channel = receipt.get("channel")
         if not isinstance(channel, dict) or not isinstance(channel.get("contains_signal_energy"), bool):
             raise CampaignError("completed channel receipt is missing boolean channel energy result")
         if not _is_nonnegative_int(channel.get("samples")):
             raise CampaignError("completed channel receipt is missing nonnegative channel.samples")
+    elif episode["mode"] == "slot":
+        outcomes = receipt.get("outcomes")
+        if not isinstance(outcomes, dict):
+            raise CampaignError("completed slot receipt is missing outcomes")
+        if outcomes.get("receiver_executed") is not True:
+            raise CampaignError("completed slot receipt must report receiver_executed=true")
+        if outcomes.get("component_only") is not True:
+            raise CampaignError("completed slot receipt must report component_only=true")
+        if not _is_nonnegative_int(outcomes.get("actual_scored_slots")) or outcomes["actual_scored_slots"] != 1:
+            raise CampaignError("completed slot receipt must report exactly one scored slot")
+        if outcomes.get("first_public_observation_complete") is not True:
+            raise CampaignError("completed slot receipt must report a complete first public observation")
+        if not isinstance(outcomes.get("first_public_observation_correct_data"), bool):
+            raise CampaignError("completed slot receipt must report boolean first_public_observation_correct_data")
+        if outcomes.get("correct_complete") is not False:
+            raise CampaignError("slot receipt must never report complete-message success")
+        if outcomes.get("completion_evaluated") is not False:
+            raise CampaignError("slot receipt must not evaluate message completion")
+        slots = receipt.get("slots")
+        if not isinstance(slots, list) or len(slots) != 1 or not isinstance(slots[0], dict):
+            raise CampaignError("completed slot receipt must include exactly one slot score")
+        score = slots[0]
+        if (isinstance(score.get("index"), bool) or not isinstance(score.get("index"), int) or
+                score["index"] != 0 or score.get("decision") not in {"data", "quiet", "ambiguous"}):
+            raise CampaignError("completed slot receipt has an invalid first slot decision")
+        if score.get("complete") is not True or score.get("all_valid") is not True:
+            raise CampaignError("completed slot receipt score must be complete and valid")
+        if (outcomes["first_public_observation_correct_data"] and score["decision"] != "data"):
+            raise CampaignError("slot reports correct DATA without a DATA decision")
+    elif episode["mode"] == "diagnose":
+        diagnostic = receipt.get("vlf_diagnostic")
+        if not isinstance(diagnostic, dict):
+            raise CampaignError("completed diagnose receipt is missing vlf_diagnostic")
+        if diagnostic.get("component_complete") is not True or diagnostic.get("phase") != "completed":
+            raise CampaignError("diagnose component must report completed phase")
+        if diagnostic.get("capacity_qualified") is not False:
+            raise CampaignError("diagnose component must not claim capacity qualification")
+        if diagnostic.get("complete_receiver_service") is not False:
+            raise CampaignError("diagnose component must not claim complete receiver service")
+        outcomes = receipt.get("outcomes")
+        if not isinstance(outcomes, dict):
+            raise CampaignError("completed diagnose receipt is missing outcomes")
+        if outcomes.get("component_only") is not True:
+            raise CampaignError("diagnose receipt must report component_only=true")
+        if outcomes.get("completion_evaluated") is not False:
+            raise CampaignError("diagnose receipt must not evaluate message completion")
+        if outcomes.get("correct_complete") is not False:
+            raise CampaignError("diagnose receipt must never report complete-message success")
     elif episode["mode"] == "oracle":
         oracle = receipt.get("oracle")
         if not isinstance(oracle, dict) or not _is_finite_number(oracle.get("probability_error")):
             raise CampaignError("completed oracle receipt is missing finite probability_error")
         if not 0 <= oracle["probability_error"] <= 1:
             raise CampaignError("completed oracle probability_error must be in [0, 1]")
+        if "oracle_slot" in episode:
+            selected_slot = episode["oracle_slot"]
+            plan_slot = receipt["plan"].get("oracle_slot")
+            oracle_slot = oracle.get("slot_index")
+            if (isinstance(plan_slot, bool) or not isinstance(plan_slot, int) or plan_slot != selected_slot or
+                    isinstance(oracle_slot, bool) or not isinstance(oracle_slot, int) or oracle_slot != selected_slot):
+                raise CampaignError("oracle receipt does not match the selected oracle_slot")
 
 
 def _trial(probe: Path, episode: dict[str, Any], max_samples: int, timeout: float,
@@ -300,7 +438,7 @@ def _trial(probe: Path, episode: dict[str, Any], max_samples: int, timeout: floa
     stdout_path, stderr_path = directory / f"{prefix}.stdout.json", directory / f"{prefix}.stderr.txt"
     # Let the native deadline produce a receipt before the outer process limit
     # terminates the invocation. The outer bound remains authoritative.
-    native_budget = max(.001, timeout - min(.5, timeout / 4))
+    native_budget = max(timeout / 2, timeout - min(.5, timeout / 4))
     command = _command(probe, episode, max_samples, native_budget)
     started = time.monotonic()
     timed_out = False
@@ -455,14 +593,46 @@ def _markdown(campaign: dict[str, Any], run: dict[str, Any]) -> str:
             f"Run status: **{run['status']}**; stop reason: {run['stop_reason'] or 'all declared episodes completed'}", "",
             "Every native receipt is one declared finite episode. Different physical models and channel strata are not pooled.",
             "Communication failures are observations, not runner failures. An incomplete fixed sample has no confidence interval.", "",
-            "| Episode | Scenario | Mode | Control | Native status | Outcome | Wall (s) |", "|---|---|---|---|---|---|---:|"]
+            "| Episode | Scenario | Mode | Control | Trial status | Native status | Observation outcome | Slot decision | Correct DATA | Receive physical/premature/false/resumed | Wall (s) |",
+            "|---|---|---|---|---|---|---|---|---|---|---:|"]
     for trial in run["trials"]:
         receipt = trial.get("receipt", {})
         outcomes = receipt.get("outcomes", {})
-        outcome = ("complete" if outcomes.get("correct_complete") is True else
-                   "incomplete" if outcomes.get("correct_complete") is False else "not reported")
+        episode = trial["episode"]
+        native_status = receipt.get("status", "unavailable")
+        slot_decision = "—"
+        correct_data = "—"
+        receive_counts = "—"
+        if episode["mode"] == "receive" and isinstance(outcomes, dict):
+            count_fields = ("physical_completions", "premature_completions", "false_data", "resumed_data_slots")
+            if all(_is_nonnegative_int(outcomes.get(field)) for field in count_fields):
+                receive_counts = "/".join(str(outcomes[field]) for field in count_fields)
+        if trial.get("status") != "completed" or native_status != "completed":
+            censor_reason = (trial.get("status") if trial.get("status") != "completed" else native_status)
+            outcome = f"censored ({censor_reason})"
+            if episode["mode"] == "slot":
+                slot_decision = "censored"
+                correct_data = "censored"
+        elif episode["mode"] == "slot":
+            score = (receipt.get("slots") or [{}])[0]
+            slot_decision = score.get("decision", "unavailable")
+            correct_data = "yes" if outcomes.get("first_public_observation_correct_data") else "no"
+            outcome = "one public slot; message completion not evaluated"
+        elif episode["mode"] == "receive":
+            outcome = ("physical message complete" if outcomes.get("correct_complete") is True else
+                       "no correct physical message completion")
+        elif episode["mode"] == "channel":
+            outcome = "signal present" if receipt.get("channel", {}).get("contains_signal_energy") else "signal absent"
+        elif episode["mode"] == "oracle":
+            error_probability = receipt.get("oracle", {}).get("probability_error")
+            outcome = f"oracle P(error)={error_probability:.6g}" if isinstance(error_probability, (int, float)) else "oracle bound unavailable"
+        elif episode["mode"] == "diagnose":
+            outcome = "component complete; no slot decision"
+        else:
+            outcome = "plan only"
         rows.append(f"| {trial['episode']['id']} | {trial['episode']['scenario']} | {trial['episode']['mode']} | "
-                    f"{trial['episode'].get('control', '—')} | {trial.get('status')} | {outcome} | "
+                    f"{episode.get('control', '—')} | {trial.get('status')} | {native_status} | {outcome} | "
+                    f"{slot_decision} | {correct_data} | {receive_counts} | "
                     f"{trial.get('elapsed_seconds', 0):.3f} |")
     rows.extend(["", "## Fixed-sample estimates", ""])
     if run["statistics"]:
@@ -526,8 +696,10 @@ def run_campaign(probe: Path, campaign_path: Path, output_dir: Path) -> dict[str
             status = "incomplete_checks"
             stop_reason = "campaign_output_budget_exhausted"
             break
-        timeout = min(float(campaign["per_trial_wall_seconds"]), remaining)
-        result = _trial(probe, episode, campaign["max_samples"], timeout, output_dir, index)
+        timeout = min(float(campaign["per_trial_wall_seconds"]),
+                      float(episode.get("max_wall_seconds", campaign["per_trial_wall_seconds"])), remaining)
+        result = _trial(probe, episode, episode.get("max_samples", campaign["max_samples"]),
+                        timeout, output_dir, index)
         trials.append(result)
         try:
             current_probe_hash = _sha256(probe)

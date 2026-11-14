@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "name": "eme-high-energy-and-selected-bit-discriminator-2026-11",
+  "purpose": "Two predeclared diagnostics after the disk seed9501 C/N0=30 episode accepted a wrong third bit: same realization at C/N0=60 tests persistence with 30dB less white noise; the original level's known-waveform/channel oracle examines public bit2. Neither is an optimal unknown-channel bound or independent success-probability sample.",
+  "max_wall_seconds": 180,
+  "per_trial_wall_seconds": 75,
+  "max_trials": 2,
+  "max_samples": 1000000,
+  "episodes": [
+    {"id": "eme-disk-high-energy", "scenario": "eme-disk-episode", "mode": "receive", "waveform": "reference", "seed": 9501, "cn0_db_hz": 60, "message": "e"},
+    {"id": "eme-disk-wrong-bit-oracle", "scenario": "eme-disk-episode", "mode": "oracle", "waveform": "reference", "seed": 9501, "cn0_db_hz": 30, "message": "e", "oracle_slot": 2}
+  ]
+}

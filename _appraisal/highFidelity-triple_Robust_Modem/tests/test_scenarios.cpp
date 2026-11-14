@@ -2,14 +2,17 @@
 #include "triad_random_process.hpp"
 
 #include <algorithm>
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <complex>
 #include <iostream>
 #include <limits>
 #include <numbers>
+#include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -263,132 +266,25 @@ void coherent_average_diagnostics() {
     // post-outcome receiver-accuracy or sensitivity pass cutoff is invented.
 }
 
-constexpr std::array<double, 4> slot_projection_times{.25, 1, 4, 26.4};
-constexpr std::array<double, 3> slot_projection_centres{0, 5, 15};
-using SlotProjection = std::array<std::array<double, 3>, 4>;
-using BeamProjections = std::array<SlotProjection, 2>;
-
-// Independent original-coordinate integration: power-quantile theta rings,
-// continuous-azimuth trapezoid refinement, both beams sharing each angular
-// evaluation. N>=4*pi*fmax*T+64 resolves the maximum azimuthal phase rate.
-// The N/2 check and separate2048/4096 radial check retain their own errors.
-BeamProjections slot_projection_oracle(unsigned rings, bool half_azimuths) {
-    const std::array<std::vector<appraisal::Path>, 2> beams{
-        appraisal::lunar_paths(rings, 1, 88, 3, rf, bulk),
-        appraisal::lunar_paths(rings, 1, 88, 30, rf, bulk)};
-    BeamProjections out{};
-    for (unsigned i = 0; i < rings; ++i) {
-        const double maximum_shift = std::abs(rf * beams[0][i].delay_rate);
-        for (std::size_t t = 0; t < slot_projection_times.size(); ++t) {
-            const double time = slot_projection_times[t];
-            unsigned count = 64;
-            while (count < 4 * pi * maximum_shift * time + 64) count *= 2;
-            if (half_azimuths) count /= 2;
-            std::array<long double, 3> angular{};
-            for (unsigned j = 0; j < count / 4; ++j) {
-                const double f = maximum_shift * std::cos(2 * pi * (j + .5) / count);
-                for (std::size_t b = 0; b < slot_projection_centres.size(); ++b) {
-                    const double centre = slot_projection_centres[b];
-                    angular[b] += sinc_squared(pi * (f - centre) * time) +
-                                  sinc_squared(pi * (-f - centre) * time);
-                }
-            }
-            for (std::size_t beam = 0; beam < beams.size(); ++beam)
-                for (std::size_t b = 0; b < slot_projection_centres.size(); ++b)
-                    out[beam][t][b] += beams[beam][i].power * 2 / count * static_cast<double>(angular[b]);
-        }
-    }
-    return out;
-}
-
-void lunar_slot_checks() {
-    const auto reference = slot_projection_oracle(4096, false);
-    const auto angular_half = slot_projection_oracle(4096, true);
-    const auto radial_half = slot_projection_oracle(2048, false);
-    for (unsigned beam = 0; beam < 2; ++beam) {
-        const double dish = beam == 0 ? 3 : 30;
-        const auto scenario = appraisal::make_scenario(beam == 0 ? "eme-disk-slot" : "eme-patch-slot");
-        const auto& paths = scenario.channel.paths;
-        require(paths.size() == 65536, "Doppler-aligned grid exceeds or changes declared bound");
-        near(scenario.numerical_horizon_seconds, 30., 0., "missing lunar numerical horizon");
-        near(scenario.bounds.atmospheric_hz, 44., 0., "slot grid Doppler support changed");
-        near(scenario.bounds.doppler_width_hz, 0., 0., "slot grid falsely Gaussian");
-        lunar_convergence_checks(paths, dish); // Identical pre-existing moment/short-covariance criteria.
-        const auto rings = appraisal::lunar_paths(4096, 1, 88, dish, rf, bulk);
-        const auto half_rings = appraisal::lunar_paths(2048, 1, 88, dish, rf, bulk);
-        double maximum_covariance_error = 0, covariance_oracle_change = 0;
-        for (const double lag : {0., 1. / 60., .05, .1, .25, .5, 1., 2., 4., 8., 16., 26.4, 29.466, 30.})
-            for (const double separation : {0., 75., 150., 225.}) {
-                const auto exact_azimuth = axisymmetric_covariance(rings, lag, separation);
-                maximum_covariance_error = std::max(maximum_covariance_error,
-                    std::abs(covariance(paths, lag, separation) - exact_azimuth));
-                covariance_oracle_change = std::max(covariance_oracle_change,
-                    std::abs(exact_azimuth - axisymmetric_covariance(half_rings, lag, separation)));
-            }
-        double maximum_projection_db = 0, maximum_angular_change = 0, maximum_radial_change = 0;
-        for (std::size_t t = 0; t < slot_projection_times.size(); ++t)
-            for (std::size_t b = 0; b < slot_projection_centres.size(); ++b) {
-                long double value = 0, negative_centre = 0;
-                const double time = slot_projection_times[t], centre = slot_projection_centres[b];
-                for (const auto& p : paths) {
-                    const double f = -rf * p.delay_rate;
-                    value += p.power * sinc_squared(pi * (f - centre) * time);
-                    negative_centre += p.power * sinc_squared(pi * (f + centre) * time);
-                }
-                require(value > 0 && reference[beam][t][b] > 0, "invalid slot-grid projection");
-                near(static_cast<double>(value), static_cast<double>(negative_centre), 1e-12,
-                     "slot-grid positive/negative frequency asymmetry");
-                const double error_db = 10 * std::log10(static_cast<double>(value) / reference[beam][t][b]);
-                require(std::isfinite(error_db), "non-finite slot-grid projected variance");
-                maximum_projection_db = std::max(maximum_projection_db, std::abs(error_db));
-                maximum_angular_change = std::max(maximum_angular_change,
-                    std::abs(reference[beam][t][b] - angular_half[beam][t][b]));
-                maximum_radial_change = std::max(maximum_radial_change,
-                    std::abs(reference[beam][t][b] - radial_half[beam][t][b]));
-                std::cout << "slot-grid projection: dish=" << dish << " seconds=" << time
-                          << " centre_hz=+/-" << centre << " variance=" << static_cast<double>(value)
-                          << " original_coordinate_reference=" << reference[beam][t][b]
-                          << " error_db=" << error_db << '\n';
-            }
-        // A fixed frequency lattice has an exact recurrence. This explicitly
-        // proves why the first-slot qualification cannot cover a329-s episode.
-        const double recurrence = 4096. / 88.;
-        require(recurrence > scenario.numerical_horizon_seconds, "alias inside declared slot horizon");
-        const auto m = moments(paths);
-        require(std::abs(covariance(paths, recurrence, 0) + m.power) < 1e-8,
-                "declared Doppler-lattice recurrence changed");
-        for (const auto& p : paths) {
-            const double mu = 1 - (p.delay_seconds - bulk) * c / (2 * radius);
-            require(p.frozen_gaussian && p.residual_doppler_hz == 0 && p.power >= 0,
-                    "slot-grid coefficient or Doppler convention changed");
-            require(std::abs(-rf * p.delay_rate) <= 44 * std::sqrt(std::max(0., 1 - mu * mu)) + 1e-8,
-                    "slot-grid delay and Doppler uncoupled");
-        }
-        std::cout << "slot-grid summary: dish=" << dish << " horizon_s=30 max_joint_covariance_error="
-                  << maximum_covariance_error << " covariance_radial_refinement=" << covariance_oracle_change
-                  << " max_projected_variance_error_db=" << maximum_projection_db
-                  << " projection_angular_refinement=" << maximum_angular_change
-                  << " projection_radial_refinement=" << maximum_radial_change
-                  << " recurrence_s=" << recurrence << '\n';
-        // Projected and long-lag errors are reported; no new post-result
-        // universal sensitivity threshold or field-accuracy claim is invented.
-    }
-}
 }
 
 int main() {
     try {
         const auto names = appraisal::scenario_names();
-        require(names.size() == 18, "scenario inventory changed without coverage review");
+        require(names.size() >= 21 && std::set<std::string>(names.begin(), names.end()).size() == names.size(),
+                "scenario inventory missing required coverage or repeats an ID");
         for (const auto& id : names) {
             const auto s = appraisal::make_scenario(id);
             require(s.id == id && !s.family.empty() && !s.evidence.empty() &&
                     !s.provenance.empty() && !s.assumptions.empty(), "scenario provenance missing");
-            require(std::isfinite(s.reference_cn0_db_hz) && !s.channel.paths.empty(), "invalid scenario level/path");
+            require(std::isfinite(s.reference_cn0_db_hz) && (s.channel.lunar.has_value() == s.channel.paths.empty()),
+                    "invalid scenario level or propagation mode");
             require(s.waveform.sample_rate_hz == 1920, "reference numerical sample rate unexpected");
             require(std::isfinite(s.numerical_horizon_seconds) && s.numerical_horizon_seconds >= 0,
                     "invalid numerical horizon");
-            if (id != "eme-disk-slot" && id != "eme-patch-slot")
+            if (s.channel.lunar)
+                near(s.numerical_horizon_seconds, 360., 0., "spectral lunar horizon changed");
+            else
                 near(s.numerical_horizon_seconds, 0., 0., "unqualified finite-horizon flag changed");
             for (const auto& p : s.channel.paths)
                 require(p.power >= 0 && std::isfinite(p.power) && p.delay_seconds >= 0,
@@ -398,6 +294,13 @@ int main() {
         try { (void)appraisal::make_scenario("not-a-model"); }
         catch (const std::invalid_argument&) { rejected = true; }
         require(rejected, "unknown model accepted");
+        for (const auto* retired : {"eme-disk", "eme-patch", "eme-severe", "eme-disk-slot", "eme-patch-slot"}) {
+            require(std::find(names.begin(), names.end(), retired) == names.end(), "retired lunar preset is listed");
+            bool retired_rejected = false;
+            try { (void)appraisal::make_scenario(retired); }
+            catch (const std::invalid_argument&) { retired_rejected = true; }
+            require(retired_rejected, "retired lunar preset silently selects changed physics");
+        }
 
         const auto vlf = appraisal::make_scenario("vlf-resonant");
         near(vlf.channel.transmitter.inductance_h, .41060356, 1e-8, "VLF L reference");
@@ -453,6 +356,28 @@ int main() {
                 bursts.channel.noise.impulse_rate_hz > 0 &&
                 bursts.channel.noise.impulse_decay_seconds > 0,
                 "noise state is disabled or invalid");
+        for (const auto* id : {"noise-white", "noise-white-ar1", "noise-white-shot"}) {
+            const auto ablation = appraisal::make_scenario(id);
+            const auto& reference = bursts.channel.noise;
+            const auto& noise = ablation.channel.noise;
+            const bool ar = std::string_view(id) == "noise-white-ar1";
+            const bool shot = std::string_view(id) == "noise-white-shot";
+            near(ablation.reference_cn0_db_hz, bursts.reference_cn0_db_hz, 0., "ablation reference C/N0");
+            near(noise.white_variance, reference.white_variance, 0., "ablation changed white noise");
+            near(noise.colored_variance, ar ? reference.colored_variance : 0., 0., "ablation colored variance");
+            near(noise.colored_corner_hz, reference.colored_corner_hz, 0., "ablation colored corner");
+            near(noise.impulse_rate_hz, shot ? reference.impulse_rate_hz : 0., 0., "ablation impulse rate");
+            near(noise.impulse_rms, shot ? reference.impulse_rms : 0., 0., "ablation impulse marks");
+            near(noise.impulse_decay_seconds, reference.impulse_decay_seconds, 0., "ablation impulse decay");
+            require(ablation.waveform.rate_hz == bursts.waveform.rate_hz &&
+                    ablation.waveform.requested_bit_seconds == bursts.waveform.requested_bit_seconds &&
+                    ablation.waveform.sample_rate_hz == bursts.waveform.sample_rate_hz &&
+                    ablation.waveform.added_symbols == bursts.waveform.added_symbols &&
+                    ablation.waveform.fhss == bursts.waveform.fhss &&
+                    ablation.channel.paths.size() == 1 && ablation.channel.paths.front().power == 1 &&
+                    ablation.channel.paths.front().delay_seconds == 0,
+                    "ablation changed matched waveform or identity propagation");
+        }
         const auto overload = appraisal::make_scenario("frontend-overload");
         const auto& n = overload.channel.noise;
         const auto& f = overload.channel.frontend;
@@ -476,23 +401,29 @@ int main() {
         rejects(16, 16, 88, 3, 1e6, bulk);
         rejects(16, 16, 88, 3, rf, std::numeric_limits<double>::quiet_NaN());
         const auto wide = appraisal::lunar_paths(32, 128, 88, 0, rf, bulk);
-        const auto disk = appraisal::make_scenario("eme-disk").channel.paths;
-        const auto patch = appraisal::make_scenario("eme-patch").channel.paths;
-        const auto severe = appraisal::make_scenario("eme-severe");
-        near(appraisal::make_scenario("eme-disk").bounds.doppler_width_hz, 0., 0.,
+        const auto disk = appraisal::lunar_paths(32, 128, 88, 3, rf, bulk);
+        const auto patch = appraisal::lunar_paths(32, 128, 88, 30, rf, bulk);
+        const auto severe_rings = appraisal::lunar_paths(32, 128, 164, 3, rf, bulk);
+        const auto disk_episode = appraisal::make_scenario("eme-disk-episode");
+        const auto severe = appraisal::make_scenario("eme-severe-episode");
+        near(disk_episode.bounds.doppler_width_hz, 0., 0.,
              "lunar limb width mislabeled Gaussian2sigma");
-        near(appraisal::make_scenario("eme-disk").bounds.atmospheric_hz, 44., 0., "lunar public frequency bound");
+        near(disk_episode.bounds.atmospheric_hz, 44., 0., "lunar public frequency bound");
         near(severe.bounds.atmospheric_hz, 82., 0., "severe lunar public frequency bound");
         near(severe.bounds.doppler_width_hz, 0., 0., "severe lunar width mislabeled Gaussian");
-        near(severe.reference_cn0_db_hz, appraisal::make_scenario("eme-disk").reference_cn0_db_hz,
+        near(severe.reference_cn0_db_hz, disk_episode.reference_cn0_db_hz,
              0., "severe lunar level silently changed");
-        require(severe.channel.paths.size() == disk.size(), "severe lunar quadrature changed");
+        require(severe.channel.lunar && disk_episode.channel.lunar, "spectral lunar process unavailable");
+        near(severe.channel.lunar->bulk_delay_seconds, disk_episode.channel.lunar->bulk_delay_seconds,
+             0., "severe lunar anchor changed");
+        near(severe.channel.lunar->dish_m, disk_episode.channel.lunar->dish_m, 0., "severe lunar beam changed");
+        near(severe.channel.lunar->limb_width_hz, 164., 0., "severe spectral limb width changed");
         require(severe.provenance.find("Taylor") != std::string::npos &&
                 severe.provenance.find("164Hz") != std::string::npos &&
-                severe.assumptions.find("not an observed5.76GHz spectrum or universal maximum") != std::string::npos,
+                severe.assumptions.find("Taylor's conditional maximum") != std::string::npos,
                 "severe lunar conditional provenance missing");
         for (std::size_t i = 0; i < disk.size(); ++i) {
-            const auto& p = severe.channel.paths[i];
+            const auto& p = severe_rings[i];
             near(p.power, disk[i].power, 0., "lunar severity changes reference power");
             near(p.delay_seconds, disk[i].delay_seconds, 0., "lunar severity changes initial delay");
             near(p.delay_rate, disk[i].delay_rate * (164. / 88.), 1e-20,
@@ -520,8 +451,7 @@ int main() {
         lunar_convergence_checks(disk, 3.);
         lunar_convergence_checks(patch, 30.);
         coherent_average_diagnostics();
-        lunar_slot_checks();
-        std::cout << "scenario structural checks passed; Doppler-aligned EME comparison is bounded to30s; full-episode sensitivity remains unresolved\n";
+        std::cout << "scenario structural and finite-grid diagnostic checks passed\n";
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "scenario model check failed: " << e.what() << '\n';

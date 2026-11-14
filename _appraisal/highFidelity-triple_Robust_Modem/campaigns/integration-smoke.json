@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "name": "integration-smoke-2026-11",
-  "purpose": "Exercise all declared channel families at the short native smoke geometry and check one AWGN receive sensitivity contrast with selected physical-completion controls. This is harness/integration coverage, not high-fidelity or real-time qualification.",
+  "name": "integration-smoke-spectral-eme",
+  "purpose": "Exercise all five environment families with short native captures and check one AWGN receive sensitivity contrast with selected physical-completion controls. The lunar component uses the reference waveform for its 10-second capture. These episodes check harness integration.",
   "max_wall_seconds": 600,
   "per_trial_wall_seconds": 90,
   "max_trials": 12,
@@ -11,7 +11,7 @@
     {"id": "mf-render", "scenario": "groundwave-1mhz", "mode": "channel", "waveform": "smoke", "seed": 5490, "duration_seconds": 10},
     {"id": "hf30-render", "scenario": "groundwave-30mhz", "mode": "channel", "waveform": "smoke", "seed": 5491, "duration_seconds": 10},
     {"id": "skywave-render", "scenario": "hf-disturbed", "mode": "channel", "waveform": "smoke", "seed": 5492, "duration_seconds": 10},
-    {"id": "eme-render", "scenario": "eme-disk", "mode": "channel", "waveform": "smoke", "seed": 5493, "duration_seconds": 10},
+    {"id": "eme-render", "scenario": "eme-disk-episode", "mode": "channel", "waveform": "reference", "seed": 5493, "duration_seconds": 10},
     {"id": "awgn-reference", "scenario": "awgn", "mode": "receive", "waveform": "smoke", "seed": 5489, "cn0_db_hz": 32},
     {"id": "awgn-weak", "scenario": "awgn", "mode": "receive", "waveform": "smoke", "seed": 5489, "cn0_db_hz": 8},
     {"id": "awgn-noise-only", "scenario": "awgn", "mode": "receive", "waveform": "smoke", "seed": 5494, "control": "noise", "cn0_db_hz": 32},

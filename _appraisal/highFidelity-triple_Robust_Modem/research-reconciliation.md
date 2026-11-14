@@ -96,3 +96,37 @@ aggregate distribution score as fidelity proof.
 External sources were checked 13 November 2026. This file is a concise decision
 map, not an exhaustive literature review; detailed source passages, search
 limits, arithmetic and alternatives remain in the linked research chapters.
+
+## Expanded numerical and mechanism checks
+
+The full-calendar lunar implementation uses joint spectral draws and a bounded
+native FFT representation. FFT use alone does not guarantee the intended
+covariance. As a distinct alternative, Dietrich and Newsam's circulant embedding
+method gives exact Gaussian samples on a finite grid when the target Toeplitz
+covariance has an appropriate nonnegative definite circulant embedding. That
+condition was not established for this coupled lunar process; the current
+implementation instead reports an explicitly approximate spectral quadrature
+and tests it against independent ring/Bessel covariance and off-grid projection
+integrals through the whole supported episode. Increasing recurrence time alone
+would not repair an inadequately resolved joint delay–Doppler kernel.
+[Dietrich & Newsam (1997)](https://epubs.siam.org/doi/10.1137/S1064827592240555)
+
+The added NVIS and DRM6 fixtures retain source-defined gain, delay, centroid
+and Gaussian 2σ-width conventions. Independent checking of the newer ETSI
+V4.3.1 (November 2023) Annex B.1, equations B.3–B.4 and Table B.1 found the
+DRM6 tuple unchanged from the pinned older edition. F.1487 Annex 3 §3.4 is the
+NVIS source; it permits an added groundwave component where required, whereas
+this named fixture deliberately tests skywave taps only. Neither standard is
+a universal worst-case population.
+[ETSI ES 201 980 V4.3.1](https://www.etsi.org/deliver/etsi_es/201900_201999/201980/04.03.01_60/es_201980v040301p.pdf),
+[ITU-R F.1487](https://www.itu.int/dms_pubrec/itu-r/rec/f/R-REC-F.1487-0-200005-I!!PDF-E.pdf)
+
+The compound-noise failures justify matched component ablations, not arbitrary
+threshold tuning. The NBS atmospheric-noise study explicitly treats amplitude
+statistics as bandwidth dependent and discusses nonstationarity between
+measurements; NTIA's higher-order study also considers temporal correlations,
+pulse widths and spacing. Accordingly the native tests check AR(1) and shot
+covariance and moments as well as receiver decisions. Their synthetic laws
+remain separate from environmental observations.
+[NBS (1962)](https://nvlpubs.nist.gov/nistpubs/jres/66D/jresv66Dn6p713_A1b.pdf),
+[NTIA TR-93-293](https://its.ntia.gov/publications/details?pub=2319)

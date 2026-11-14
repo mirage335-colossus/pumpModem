@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "name": "reference-receiver-controls-2026-11",
+  "purpose": "Bounded receiver controls for generated impulsive/colored noise, blocker/front-end stress, Helper failures, wrong address hypotheses, physical fade/gap and transport EOF. Descriptive mechanism tests; no pooled success probability.",
+  "max_wall_seconds": 1800,
+  "per_trial_wall_seconds": 120,
+  "max_trials": 12,
+  "max_samples": 8000000,
+  "episodes": [
+    {"id": "bursts-wanted-reference", "scenario": "noise-bursts", "mode": "receive", "waveform": "reference", "seed": 9301, "cn0_db_hz": 32},
+    {"id": "bursts-wanted-weak", "scenario": "noise-bursts", "mode": "receive", "waveform": "reference", "seed": 9301, "cn0_db_hz": 8},
+    {"id": "bursts-noise-only", "scenario": "noise-bursts", "mode": "receive", "waveform": "reference", "seed": 9301, "control": "noise", "cn0_db_hz": 32},
+    {"id": "frontend-blocker-wanted", "scenario": "frontend-overload", "mode": "receive", "waveform": "reference", "seed": 9302, "cn0_db_hz": 32},
+    {"id": "frontend-blocker-noise", "scenario": "frontend-overload", "mode": "receive", "waveform": "reference", "seed": 9302, "control": "noise", "cn0_db_hz": 32},
+    {"id": "helper-reference", "scenario": "hf-quiet", "mode": "receive", "waveform": "reference", "seed": 9303, "helper": true, "cn0_db_hz": 20},
+    {"id": "helper-noise-only", "scenario": "hf-quiet", "mode": "receive", "waveform": "reference", "seed": 9303, "helper": true, "control": "noise", "cn0_db_hz": 20},
+    {"id": "helper-wrong-key", "scenario": "hf-quiet", "mode": "receive", "waveform": "reference", "seed": 9304, "helper": true, "control": "wrong-key", "cn0_db_hz": 20},
+    {"id": "reference-wrong-ordinal", "scenario": "hf-disturbed", "mode": "receive", "waveform": "reference", "seed": 9305, "helper": true, "control": "wrong-ordinal", "cn0_db_hz": 20},
+    {"id": "fade-interior-resume", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 9306, "message": "A", "control": "interior-fade", "cn0_db_hz": 20},
+    {"id": "marked-gap-interior-resume", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 9306, "message": "A", "control": "capture-gap", "cn0_db_hz": 20},
+    {"id": "transport-eof-no-completion", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 9307, "message": "A", "control": "eof", "cn0_db_hz": 20}
+  ]
+}

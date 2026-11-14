@@ -77,25 +77,73 @@ def main() -> None:
     assert not eof["outcomes"]["correct_complete"], eof
     assert eof["outcomes"]["physical_completions"] == 0, eof
 
+    transition = invoke("--mode", "receive", "--scenario", "hf-transition",
+                        "--waveform", "reference", "--seed", "9204", "--cn0", "20",
+                        "--message", "A", "--max-wall-seconds", "25")
+    assert transition["status"] == "completed", transition
+    transition_boundary = transition["outcomes"]["resumed_data_boundary_sample"]
+    assert transition_boundary == 240 * transition["plan"]["sample_rate_hz"], transition
+    assert transition["outcomes"]["resumed_data_boundary_source"] == "scenario_fade_stop", transition
+    expected_resumed = sum(
+        slot["index"] < transition["plan"]["wire_bits"] and
+        slot["first_sample"] >= transition_boundary and slot["decision"] == "data" and
+        slot["complete"] and slot["all_valid"]
+        for slot in transition["slots"])
+    assert expected_resumed > 0, transition
+    assert transition["outcomes"]["resumed_data_slots"] == expected_resumed, transition
+    assert any(message.get("reacquisition_count", 0) > 0 for message in transition["messages"]), transition
+
     # A plan must expose, rather than silently compress, the slow native bit.
     slow = invoke("--mode", "plan", "--scenario", "vlf-resonant",
                   "--waveform", "reference", "--max-samples", "1000")
     assert slow["plan"]["actual_bit_seconds"] >= 5760, slow
     assert not slow["plan"]["fits_sample_budget"], slow
+    slow_tapered = invoke("--mode", "plan", "--scenario", "vlf-resonant",
+                          "--waveform", "reference", "--max-samples", "1000",
+                          "--pulse", "tapered-rrc")
+    assert slow["plan"]["pulse"] == "rrc", slow
+    assert slow_tapered["plan"]["pulse"] == "tapered-rrc", slow_tapered
+    for field in ("sample_rate_hz", "requested_bit_seconds", "actual_bit_seconds",
+                  "first_data_nominal_seconds", "wire_bits"):
+        assert slow["plan"][field] == slow_tapered["plan"][field], (field, slow, slow_tapered)
+
+    for unsupported in (("--control", "noise"), ("--helper",), ("--scenario", "awgn"),
+                        ("--waveform", "smoke")):
+        diagnostic_args = ["--mode", "diagnose", "--scenario", "vlf-resonant",
+                           "--waveform", "reference", "--max-wall-seconds", "2", *unsupported]
+        diagnostic_rejected = invoke(*diagnostic_args, code=2)
+        assert diagnostic_rejected["status"] == "error", diagnostic_rejected
+
+    # The spectral EME episode model supports the default message within its
+    # declared 360-second numerical horizon. A selected later oracle bit can be
+    # represented by a cheap plan-only request without rendering the lunar path.
+    eme_common = ["--scenario", "eme-disk-episode", "--waveform", "reference",
+                  "--max-samples", "100000000", "--max-wall-seconds", "20"]
+    eme_default = invoke("--mode", "plan", *eme_common)
+    assert eme_default["status"] == "completed", eme_default
+    assert eme_default["plan"]["wire_bits"] == 3, eme_default
+    assert eme_default["plan"]["numerical_horizon_seconds"] == 360, eme_default
+    assert eme_default["plan"]["represented_seconds"] < 360, eme_default
+    assert eme_default["plan"]["fits_numerical_horizon"], eme_default
+    eme_selected_plan = invoke("--mode", "plan", *eme_common, "--oracle-slot", "1")
+    assert eme_selected_plan["plan"]["fits_numerical_horizon"], eme_selected_plan
+    assert eme_selected_plan["plan"]["public_slots"][1]["index"] == 1, eme_selected_plan
+    assert 1 < eme_selected_plan["plan"]["wire_bits"], eme_selected_plan
+    eme_long = invoke("--mode", "receive", *eme_common, "--message", "abcdefghijklmnop", code=5)
+    assert eme_long["status"] == "unavailable", eme_long
+    assert eme_long["plan"]["wire_bits"] > eme_default["plan"]["wire_bits"], eme_long
+    lunar_helper = invoke("--mode", "plan", *eme_common, "--helper", code=5)
+    assert lunar_helper["status"] == "unavailable", lunar_helper
+
     rejected = invoke("--mode", "receive", *common, "--max-samples", "1", code=3)
     assert rejected["status"] == "resource_limit", rejected
-    lunar = invoke("--mode", "plan", "--scenario", "eme-disk-slot", "--waveform", "reference")
-    assert not lunar["plan"]["fits_numerical_horizon"], lunar
-    assert lunar["scenario"]["channel"]["path_count"] == 65536, lunar
-    assert lunar["scenario"]["channel"]["paths_omitted"], lunar
-    assert len(lunar["scenario"]["channel"]["path_parameters_sha256"]) == 64, lunar
-    assert lunar["scenario"]["numerical_adequacy"]["sampled_projection_and_covariance_compared"], lunar
-    assert not lunar["scenario"]["numerical_adequacy"]["full_message_qualified"], lunar
-    limited = invoke("--mode", "receive", "--scenario", "eme-disk-slot", "--waveform", "reference", code=5)
-    assert limited["status"] == "unavailable", limited
-    late_oracle = invoke("--mode", "oracle", "--scenario", "eme-disk-slot", "--waveform", "reference",
-                         "--oracle-slot", "1", code=5)
+    late_slot = 6
+    late_oracle = invoke("--mode", "oracle", *eme_common, "--message", "abcdefghijklmnop",
+                         "--oracle-slot", str(late_slot), code=5)
     assert late_oracle["status"] == "unavailable", late_oracle
+    assert late_oracle["plan"]["oracle_slot"] == late_slot < late_oracle["plan"]["wire_bits"], late_oracle
+    assert late_oracle["plan"]["oracle_horizon_samples"] > 360 * late_oracle["plan"]["sample_rate_hz"], late_oracle
+    assert "numerical qualification" in late_oracle["reason"], late_oracle
     print("native source/channel/complete-message, noise, EOF, long-duration and budget controls passed")
 
 

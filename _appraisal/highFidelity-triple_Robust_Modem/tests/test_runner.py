@@ -54,16 +54,42 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
         "source_identity": {"appraisal_source_sha256": "a" * 64, "native_source_sha256": "b" * 64},
         "plan": {"cn0_db_hz": cn0, "requested_bit_seconds": requested_bit_seconds,
                  "helper_enabled": "--helper" in command, "sample_rate_hz": 1920,
-                 "horizon_samples": 100},
+                 "horizon_samples": 100, "pulse": argument("--pulse", "rrc"),
+                 "requested_message": argument("--message", "e"),
+                 "message": ("A" if argument("--control", "wanted") in {"interior-fade", "capture-gap"}
+                             and argument("--message", "e") == "e" else argument("--message", "e")),
+                 "represented_seconds": float(argument("--duration-seconds", "1"))},
         "backend": {"requested": backend, "device": backend if backend in {"cuda", "vulkan"} else "cpu",
                     "executed_gpu_work": backend in {"cuda", "vulkan"}},
     }
     if mode == "receive":
-        receipt["outcomes"] = outcomes or {"correct_complete": False, "physical_completions": 0}
+        receipt["outcomes"] = outcomes or {
+            "receiver_executed": True, "component_only": False, "completion_evaluated": True,
+            "correct_complete": False, "physical_completions": 0, "actual_scored_slots": 1,
+            "premature_completions": 0, "wrong_bits": 0, "false_data": 0,
+            "ambiguous_active_slots": 0, "quiet_active_slots": 0, "missed_completion": False,
+        }
+    elif mode == "slot":
+        receipt["outcomes"] = outcomes or {
+            "receiver_executed": True, "component_only": True, "actual_scored_slots": 1,
+            "first_public_observation_complete": True,
+            "first_public_observation_correct_data": True,
+            "correct_complete": False, "completion_evaluated": False,
+        }
+        receipt["slots"] = [{"index": 0, "decision": "data", "complete": True, "all_valid": True}]
+    elif mode == "diagnose":
+        receipt["outcomes"] = {"component_only": True, "completion_evaluated": False,
+                                "correct_complete": False}
+        receipt["vlf_diagnostic"] = {"component_complete": True, "phase": "completed",
+                                     "capacity_qualified": False, "complete_receiver_service": False}
     if mode == "channel" or channel is not None:
         receipt["channel"] = channel or {"contains_signal_energy": True, "samples": 100}
     if mode == "oracle":
-        receipt["oracle"] = {"probability_error": .5}
+        selected = argument("--oracle-slot")
+        if selected is not None:
+            receipt["plan"]["oracle_slot"] = int(selected)
+        receipt["oracle"] = {"probability_error": .5,
+                              **({"slot_index": int(selected)} if selected is not None else {})}
     return receipt
 
 
@@ -97,6 +123,85 @@ class CampaignValidationTests(unittest.TestCase):
             with self.assertRaisesRegex(runner.CampaignError, "mixes episode settings.*cn0_db_hz"):
                 runner._read_campaign(path)
 
+    def test_confirmatory_stratum_includes_added_episode_inputs(self) -> None:
+        for field, first, second in (("chunk", 256, 512), ("message", "A", "B"),
+                                     ("pulse", "rrc", "tapered-rrc"),
+                                     ("max_samples", 800, 900),
+                                     ("max_wall_seconds", .5, .6)):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                campaign = valid_campaign()
+                campaign["episodes"][0][field] = first
+                campaign["episodes"][1][field] = second
+                path = Path(directory) / "campaign.json"
+                path.write_text(json.dumps(campaign))
+                with self.assertRaisesRegex(runner.CampaignError, f"mixes episode settings.*{field}"):
+                    runner._read_campaign(path)
+
+    def test_slot_and_optional_episode_limits_validate_and_reject_bad_values(self) -> None:
+        campaign = valid_campaign()
+        campaign["confirmatory_strata"] = {}
+        campaign["episodes"] = [{"id": "slot", "scenario": "awgn", "mode": "slot",
+                                 "waveform": "reference", "seed": 1, "control": "wanted",
+                                 "chunk": 16384, "message": "ABCDEFGHIJKLMN",
+                                 "max_wall_seconds": .25, "max_samples": 1000}]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "campaign.json"
+            path.write_text(json.dumps(campaign))
+            self.assertEqual(runner._read_campaign(path)["episodes"][0]["mode"], "slot")
+            invalid_episodes = (
+                {"oracle_slot": -1, "mode": "oracle"},
+                {"oracle_slot": 1, "mode": "receive"},
+                {"oracle_slot": True, "mode": "oracle"},
+                {"chunk": 0}, {"chunk": 16385}, {"chunk": 1.5},
+                {"pulse": "unknown"}, {"pulse": []},
+                {"message": ""}, {"message": "x" * 17}, {"message": "a\n"}, {"message": "é"},
+                {"max_wall_seconds": 10.01}, {"max_wall_seconds": 3}, {"max_samples": 1001},
+                {"control": "noise", "mode": "slot"},
+            )
+            for overrides in invalid_episodes:
+                with self.subTest(overrides=overrides):
+                    bad = json.loads(json.dumps(campaign))
+                    bad["episodes"][0].update(overrides)
+                    path.write_text(json.dumps(bad))
+                    with self.assertRaises(runner.CampaignError):
+                        runner._read_campaign(path)
+
+    def test_diagnose_mode_inputs_are_generic_but_scoped(self) -> None:
+        campaign = {"schema_version": 1, "name": "diagnose", "max_wall_seconds": 2,
+                    "per_trial_wall_seconds": 2, "max_trials": 1, "max_samples": 1000,
+                    "episodes": [{"id": "vlf-diagnose", "scenario": "vlf-phase-wander",
+                                  "mode": "diagnose", "waveform": "reference", "seed": 1}]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "campaign.json"
+            path.write_text(json.dumps(campaign))
+            self.assertEqual(runner._read_campaign(path)["episodes"][0]["scenario"], "vlf-phase-wander")
+            for overrides in ({"control": "noise"}, {"helper": True}, {"waveform": "smoke"}):
+                with self.subTest(overrides=overrides):
+                    bad = json.loads(json.dumps(campaign))
+                    bad["episodes"][0].update(overrides)
+                    path.write_text(json.dumps(bad))
+                    with self.assertRaises(runner.CampaignError):
+                        runner._read_campaign(path)
+            diagnostic_stratum = json.loads(json.dumps(campaign))
+            diagnostic_stratum["episodes"][0]["stratum"] = "diagnostic"
+            diagnostic_stratum["confirmatory_strata"] = {"diagnostic": 1}
+            path.write_text(json.dumps(diagnostic_stratum))
+            with self.assertRaisesRegex(runner.CampaignError, "wanted receive episodes"):
+                runner._read_campaign(path)
+
+    def test_command_passes_slot_and_episode_overrides_as_argv(self) -> None:
+        episode = {"id": "oracle", "scenario": "awgn", "mode": "oracle", "waveform": "reference",
+                   "seed": 8, "oracle_slot": 3, "chunk": 4096, "message": "AB",
+                   "max_wall_seconds": 2, "max_samples": 700}
+        episode["pulse"] = "tapered-rrc"
+        command = runner._command(Path("/native/probe"), episode, episode["max_samples"],
+                                  episode["max_wall_seconds"])
+        for option, value in (("--oracle-slot", "3"), ("--chunk", "4096"), ("--message", "AB"),
+                              ("--pulse", "tapered-rrc"),
+                              ("--max-samples", "700"), ("--max-wall-seconds", "2")):
+            self.assertEqual(command[command.index(option) + 1], value)
+        runner._validate_completed_receipt(fake_completed_receipt(command), episode)
+
     def test_completed_receive_receipt_requires_identity_and_complete_outcome(self) -> None:
         episode = valid_campaign()["episodes"][0]
         command = runner._command(Path("/native/probe"), episode, 1000, 1)
@@ -117,6 +222,127 @@ class CampaignValidationTests(unittest.TestCase):
         receipt["plan"]["cn0_db_hz"] = 8
         with self.assertRaisesRegex(runner.CampaignError, "C/N0"):
             runner._validate_completed_receipt(receipt, episode)
+        receipt = fake_completed_receipt(command)
+        receipt["plan"]["pulse"] = "tapered-rrc"
+        with self.assertRaisesRegex(runner.CampaignError, "pulse"):
+            runner._validate_completed_receipt(receipt, episode)
+        receipt = fake_completed_receipt(command)
+        receipt["plan"]["requested_message"] = "wrong"
+        with self.assertRaisesRegex(runner.CampaignError, "requested message"):
+            runner._validate_completed_receipt(receipt, episode)
+
+    def test_receive_receipt_requires_real_execution_and_coherent_success(self) -> None:
+        episode = valid_campaign()["episodes"][0]
+        command = runner._command(Path("/native/probe"), episode, 1000, 1)
+        for field, value in (("receiver_executed", False), ("component_only", True),
+                             ("completion_evaluated", False), ("actual_scored_slots", 0)):
+            with self.subTest(field=field):
+                receipt = fake_completed_receipt(command)
+                receipt["outcomes"][field] = value
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_completed_receipt(receipt, episode)
+
+        for field, value in (("physical_completions", 0), ("wrong_bits", 1),
+                             ("false_data", 1), ("ambiguous_active_slots", 1),
+                             ("quiet_active_slots", 1), ("missed_completion", True)):
+            with self.subTest(success_mutant=field):
+                receipt = fake_completed_receipt(command)
+                receipt["outcomes"].update({"correct_complete": True,
+                                            "physical_completions": 1,
+                                            "missed_completion": False})
+                receipt["outcomes"][field] = value
+                with self.assertRaisesRegex(runner.CampaignError, "conflicts"):
+                    runner._validate_completed_receipt(receipt, episode)
+
+    def test_requested_and_effective_message_are_checked(self) -> None:
+        episode = {"id": "transition", "scenario": "hf-transition", "mode": "receive",
+                   "waveform": "reference", "seed": 9204, "message": "A"}
+        command = runner._command(Path("/native/probe"), episode, 1000, 1)
+        receipt = fake_completed_receipt(command)
+        runner._validate_completed_receipt(receipt, episode)
+        receipt["plan"]["requested_message"] = "e"
+        with self.assertRaisesRegex(runner.CampaignError, "requested message"):
+            runner._validate_completed_receipt(receipt, episode)
+
+        fade_episode = {"id": "fade", "scenario": "awgn", "mode": "receive",
+                        "waveform": "reference", "seed": 9205, "control": "interior-fade"}
+        fade_command = runner._command(Path("/native/probe"), fade_episode, 1000, 1)
+        fade_receipt = fake_completed_receipt(fade_command)
+        runner._validate_completed_receipt(fade_receipt, fade_episode)
+        fade_receipt["plan"]["message"] = "e"
+        with self.assertRaisesRegex(runner.CampaignError, "effective message"):
+            runner._validate_completed_receipt(fade_receipt, fade_episode)
+
+    def test_channel_requested_duration_matches_reported_geometry(self) -> None:
+        episode = {"id": "channel-duration", "scenario": "eme-disk-episode", "mode": "channel",
+                   "waveform": "smoke", "seed": 4, "duration_seconds": .25}
+        command = runner._command(Path("/native/probe"), episode, 1000, 1)
+        receipt = fake_completed_receipt(command)
+        receipt["channel"] = {"contains_signal_energy": True, "samples": 480}
+        runner._validate_completed_receipt(receipt, episode)
+        receipt["plan"]["represented_seconds"] = .5
+        with self.assertRaisesRegex(runner.CampaignError, "duration"):
+            runner._validate_completed_receipt(receipt, episode)
+
+    def test_slot_receipt_validates_single_observation_without_message_success(self) -> None:
+        episode = {"id": "slot", "scenario": "awgn", "mode": "slot", "waveform": "reference",
+                   "seed": 3, "control": "wanted"}
+        command = runner._command(Path("/native/probe"), episode, 1000, 2)
+        receipt = fake_completed_receipt(command)
+        runner._validate_completed_receipt(receipt, episode)
+        self.assertFalse(receipt["outcomes"]["correct_complete"])
+
+        for decision in ("quiet", "ambiguous"):
+            with self.subTest(decision=decision):
+                unresolved = fake_completed_receipt(command)
+                unresolved["outcomes"]["first_public_observation_correct_data"] = False
+                unresolved["slots"][0]["decision"] = decision
+                runner._validate_completed_receipt(unresolved, episode)
+
+        invalid_edits = (
+            ("receiver_executed", False), ("component_only", False), ("actual_scored_slots", 2),
+            ("first_public_observation_complete", False), ("first_public_observation_correct_data", None),
+            ("correct_complete", True), ("completion_evaluated", True),
+        )
+        for field, value in invalid_edits:
+            with self.subTest(field=field):
+                bad = fake_completed_receipt(command)
+                bad["outcomes"][field] = value
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_completed_receipt(bad, episode)
+        bad_score = fake_completed_receipt(command)
+        bad_score["slots"][0]["decision"] = "invalid"
+        with self.assertRaisesRegex(runner.CampaignError, "invalid first slot decision"):
+            runner._validate_completed_receipt(bad_score, episode)
+
+    def test_oracle_selected_slot_must_match_requested_index(self) -> None:
+        episode = {"id": "oracle-slot", "scenario": "awgn", "mode": "oracle",
+                   "waveform": "reference", "seed": 4, "oracle_slot": 2}
+        command = runner._command(Path("/native/probe"), episode, 1000, 2)
+        receipt = fake_completed_receipt(command)
+        runner._validate_completed_receipt(receipt, episode)
+        receipt["oracle"]["slot_index"] = 1
+        with self.assertRaisesRegex(runner.CampaignError, "selected oracle_slot"):
+            runner._validate_completed_receipt(receipt, episode)
+
+    def test_diagnose_receipt_is_component_only_and_not_complete_service(self) -> None:
+        episode = {"id": "diagnose", "scenario": "vlf-phase-wander", "mode": "diagnose",
+                   "waveform": "reference", "seed": 3}
+        command = runner._command(Path("/native/probe"), episode, 1000, 2)
+        receipt = fake_completed_receipt(command)
+        runner._validate_completed_receipt(receipt, episode)
+        for section, field, value in (("vlf_diagnostic", "component_complete", False),
+                                      ("vlf_diagnostic", "phase", "fine_prefix"),
+                                      ("vlf_diagnostic", "capacity_qualified", True),
+                                      ("vlf_diagnostic", "complete_receiver_service", True),
+                                      ("outcomes", "component_only", False),
+                                      ("outcomes", "completion_evaluated", True),
+                                      ("outcomes", "correct_complete", True)):
+            with self.subTest(section=section, field=field):
+                invalid = fake_completed_receipt(command)
+                invalid[section][field] = value
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_completed_receipt(invalid, episode)
 
     def test_oracle_component_completion_flag_does_not_override_oracle_result(self) -> None:
         episode = {"id": "oracle", "scenario": "awgn", "mode": "oracle",
@@ -147,6 +373,13 @@ class CampaignValidationTests(unittest.TestCase):
                 receipt["backend"].update({"device": actual, "executed_gpu_work": executed})
                 with self.assertRaisesRegex(runner.CampaignError, "executed GPU device work"):
                     runner._validate_completed_receipt(receipt, episode)
+
+        episode = {"id": "diagnose-gpu", "scenario": "vlf-resonant", "mode": "diagnose",
+                   "waveform": "reference", "seed": 9, "backend": "cuda"}
+        command = runner._command(Path("/native/probe"), episode, 1000, 1)
+        receipt = fake_completed_receipt(command)
+        receipt["backend"].update({"device": "cuda:0", "executed_gpu_work": True})
+        runner._validate_completed_receipt(receipt, episode)
 
     def test_command_arguments_remain_separate_and_allowlisted(self) -> None:
         injection = "awgn;touch /tmp/appraisal-runner-injection"
@@ -219,10 +452,76 @@ class CampaignExecutionTests(unittest.TestCase):
         self.assertEqual(run["execution_failures"], 0)
         self.assertEqual(run["valid_communication_failures"], 2)
 
+    def test_per_episode_wall_and_sample_caps_are_enforced(self) -> None:
+        campaign = {"schema_version": 1, "name": "episode-caps", "max_wall_seconds": 4,
+                    "per_trial_wall_seconds": 3, "max_trials": 1, "max_samples": 1000,
+                    "episodes": [{"id": "small", "scenario": "awgn", "mode": "receive",
+                                  "waveform": "smoke", "seed": 1, "max_wall_seconds": 1.25,
+                                  "max_samples": 500}]}
+        self.campaign_file.write_text(json.dumps(campaign))
+        with patch.object(runner.subprocess, "run", side_effect=self._fake_completed) as launch:
+            runner.run_campaign(self.probe, self.campaign_file, self.work / "episode-caps-output")
+        self.assertLessEqual(launch.call_args.kwargs["timeout"], 1.25)
+        command = launch.call_args.args[0]
+        self.assertEqual(command[command.index("--max-samples") + 1], "500")
+        self.assertLess(float(command[command.index("--max-wall-seconds") + 1]), 1.25)
+
+    def test_slot_report_separates_data_decision_and_censors_timeouts(self) -> None:
+        campaign = {"schema_version": 1, "name": "slot-summary", "max_wall_seconds": 8,
+                    "per_trial_wall_seconds": 2, "max_trials": 4, "max_samples": 1000,
+                    "episodes": [{"id": f"slot-{label}", "scenario": "awgn", "mode": "slot",
+                                  "waveform": "smoke", "seed": seed}
+                                 for label, seed in (("data", 1), ("quiet", 2),
+                                                     ("ambiguous", 3), ("censored", 4))]}
+        self.campaign_file.write_text(json.dumps(campaign))
+        calls = 0
+
+        def valid_then_censored(command, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 4:
+                raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+            if calls == 1:
+                return self._fake_completed(command, **kwargs)
+            decision = "quiet" if calls == 2 else "ambiguous"
+            receipt = fake_completed_receipt(command)
+            receipt["outcomes"]["first_public_observation_correct_data"] = False
+            receipt["slots"][0]["decision"] = decision
+            kwargs["stdout"].write((json.dumps(receipt) + "\n").encode())
+            kwargs["stderr"].write(b"")
+            return subprocess.CompletedProcess(command, 0)
+
+        output = self.work / "slot-summary-output"
+        with patch.object(runner.subprocess, "run", side_effect=valid_then_censored):
+            run = runner.run_campaign(self.probe, self.campaign_file, output)
+        report = (output / "report.md").read_text()
+        self.assertEqual(run["valid_communication_failures"], 0)
+        self.assertIn("one public slot; message completion not evaluated", report)
+        self.assertIn("| data | yes |", report)
+        self.assertIn("| quiet | no |", report)
+        self.assertIn("| ambiguous | no |", report)
+        self.assertIn("censored (timed_out)", report)
+        self.assertIn("| censored | censored |", report)
+
+    def test_diagnose_report_states_component_scope_without_communication_claim(self) -> None:
+        campaign = {"schema_version": 1, "name": "diagnose-report", "max_wall_seconds": 2,
+                    "per_trial_wall_seconds": 2, "max_trials": 1, "max_samples": 1000,
+                    "episodes": [{"id": "diagnose", "scenario": "vlf-phase-wander",
+                                  "mode": "diagnose", "waveform": "reference", "seed": 5}]}
+        self.campaign_file.write_text(json.dumps(campaign))
+        output = self.work / "diagnose-output"
+        with patch.object(runner.subprocess, "run", side_effect=self._fake_completed):
+            run = runner.run_campaign(self.probe, self.campaign_file, output)
+        report = (output / "report.md").read_text()
+        self.assertEqual(run["status"], "completed")
+        self.assertEqual(run["valid_communication_failures"], 0)
+        self.assertIn("component complete; no slot decision", report)
+        self.assertNotIn("physical message complete", report)
+
     def test_channel_episode_requires_nonempty_received_signal(self) -> None:
         campaign = {"schema_version": 1, "name": "channel", "max_wall_seconds": 2,
                     "per_trial_wall_seconds": 2, "max_trials": 1, "max_samples": 1000,
-                    "episodes": [{"id": "empty", "scenario": "eme-disk", "mode": "channel",
+                    "episodes": [{"id": "empty", "scenario": "eme-disk-episode", "mode": "channel",
                                   "waveform": "smoke", "seed": 1, "duration_seconds": .25}]}
         self.campaign_file.write_text(json.dumps(campaign))
 
@@ -241,7 +540,7 @@ class CampaignExecutionTests(unittest.TestCase):
     def test_channel_keeps_native_limits_and_errors_without_energy_report(self) -> None:
         campaign = {"schema_version": 1, "name": "channel-status", "max_wall_seconds": 8,
                     "per_trial_wall_seconds": 2, "max_trials": 4, "max_samples": 1000,
-                    "episodes": [{"id": f"case-{status}", "scenario": "eme-disk", "mode": "channel",
+                    "episodes": [{"id": f"case-{status}", "scenario": "eme-disk-episode", "mode": "channel",
                                   "waveform": "smoke", "seed": index}
                                  for index, status in enumerate(("resource_limit", "time_limit",
                                                                  "unavailable", "error"), 1)]}
@@ -273,8 +572,7 @@ class CampaignExecutionTests(unittest.TestCase):
         def fake_zero_noise(command, **kwargs):
             receipt = fake_completed_receipt(
                 command, control="noise", channel={"contains_signal_energy": False,
-                                                       "signal_energy_sample_sum": 0, "samples": 100},
-                outcomes={"correct_complete": False, "physical_completions": 0})
+                                                       "signal_energy_sample_sum": 0, "samples": 100})
             kwargs["stdout"].write((json.dumps(receipt) + "\n").encode())
             kwargs["stderr"].write(b"")
             return subprocess.CompletedProcess(command, 0)
@@ -353,15 +651,19 @@ class CampaignExecutionTests(unittest.TestCase):
         channels = [item for item in campaign["episodes"] if item["mode"] == "channel"]
         self.assertEqual(len(channels), 5)
         self.assertTrue(all(item["duration_seconds"] >= 10 for item in channels))
+        lunar = next(item for item in channels if item["id"] == "eme-render")
+        self.assertEqual(lunar["scenario"], "eme-disk-episode")
+        self.assertEqual(lunar["waveform"], "reference")
 
     def test_duration_contrast_uses_distinct_reference_geometries(self) -> None:
-        campaign = runner._read_campaign(RUNNER.parent / "campaigns" / "weak-signal-pilot.json")
-        short = next(item for item in campaign["episodes"] if item["id"] == "awgn-duration-short")
-        long = next(item for item in campaign["episodes"] if item["id"] == "awgn-duration-long")
+        campaign = runner._read_campaign(RUNNER.parent / "campaigns" / "awgn-trend.json")
+        short = next(item for item in campaign["episodes"] if item["id"] == "rx-b16-cn0m04-s6101")
+        long = next(item for item in campaign["episodes"] if item["id"] == "rx-b32-cn0m04-s6101")
         self.assertEqual(short["scenario"], long["scenario"])
         self.assertEqual(short["waveform"], long["waveform"])
         self.assertEqual(short["waveform"], "reference")
         self.assertEqual(short["seed"], long["seed"])
+        self.assertEqual(short["cn0_db_hz"], long["cn0_db_hz"])
         self.assertLess(short["bit_seconds"], long["bit_seconds"])
 
 if __name__ == "__main__":

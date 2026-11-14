@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "name": "eme-full-message-episodes-2026-11",
+  "purpose": "Seven predeclared descriptive full-message EME episodes across disk, patch, severe-width and disk noise-only mechanisms. Matched strong/weak levels share seed within each wanted mechanism; no confirmatory reliability estimate is intended.",
+  "max_wall_seconds": 1000,
+  "per_trial_wall_seconds": 120,
+  "max_trials": 7,
+  "max_samples": 1000000,
+  "confirmatory_strata": {},
+  "episodes": [
+    {"id": "eme-disk-strong-full-message", "scenario": "eme-disk-episode", "mode": "receive", "waveform": "reference", "seed": 9501, "cn0_db_hz": 30, "message": "e", "helper": false},
+    {"id": "eme-disk-weak-full-message", "scenario": "eme-disk-episode", "mode": "receive", "waveform": "reference", "seed": 9501, "cn0_db_hz": 10, "message": "e", "helper": false},
+    {"id": "eme-patch-strong-full-message", "scenario": "eme-patch-episode", "mode": "receive", "waveform": "reference", "seed": 9502, "cn0_db_hz": 30, "message": "e", "helper": false},
+    {"id": "eme-patch-weak-full-message", "scenario": "eme-patch-episode", "mode": "receive", "waveform": "reference", "seed": 9502, "cn0_db_hz": 10, "message": "e", "helper": false},
+    {"id": "eme-severe-strong-full-message", "scenario": "eme-severe-episode", "mode": "receive", "waveform": "reference", "seed": 9503, "cn0_db_hz": 30, "message": "e", "helper": false},
+    {"id": "eme-severe-weak-full-message", "scenario": "eme-severe-episode", "mode": "receive", "waveform": "reference", "seed": 9503, "cn0_db_hz": 10, "message": "e", "helper": false},
+    {"id": "eme-disk-noise-only", "scenario": "eme-disk-episode", "mode": "receive", "waveform": "reference", "seed": 9504, "cn0_db_hz": 30, "message": "e", "helper": false, "control": "noise"}
+  ]
+}
